@@ -160,7 +160,13 @@ def test_backends_round_trip_through_summary() -> None:
     assert any(e.kind == "DECL_CALLS_DECL" for e in restored.edges)
 
 
-# ── collect --kythe-entries / --codeql-results wiring ──────────────
+# ── engine wiring (was `collect --kythe-entries` / `--codeql-results`) ──────
+#
+# `collect` was deleted in the ADR-043 CLI reset, but the engine it drove is
+# unchanged: `cli_buildsource_helpers._collect_source_graph` is the exact
+# function the deleted Click command called to build the L5 graph and fold in
+# Kythe/CodeQL exports, so these exercise it directly against a `BuildEvidence`
+# built the same way (`_run_adapters` over a compile DB).
 
 
 def _cdb(tmp_path):
@@ -175,26 +181,53 @@ def _cdb(tmp_path):
     return cdb
 
 
+def _merged_from_compile_db(tmp_path):
+    from abicheck.buildsource.build_evidence import BuildEvidence
+    from abicheck.buildsource.model import ExtractorRecord
+    from abicheck.cli_buildsource_helpers import _run_adapters
+
+    merged = BuildEvidence()
+    extractors: list[ExtractorRecord] = []
+    _run_adapters(
+        merged,
+        extractors,
+        compile_db=_cdb(tmp_path),
+        build_dir=None,
+        cmake=False,
+        ninja=False,
+        ninja_compdb=None,
+        bazel_cquery=None,
+        bazel_aquery=None,
+        make_dry_run=None,
+        binary=None,
+        read_compiler_record=False,
+        build_system="generic",
+        record_bazel_inputs=False,
+        verbose=False,
+    )
+    return merged, extractors
+
+
 def test_collect_evidence_kythe_entries_folds_edges(tmp_path) -> None:
     import json
 
-    from click.testing import CliRunner
-
-    from abicheck.buildsource.pack import BuildSourcePack
-    from abicheck.cli import main
+    from abicheck.cli_buildsource_helpers import _collect_source_graph
 
     kythe = tmp_path / "kythe.json"
     kythe.write_text(json.dumps([
         {"edge_kind": "/kythe/edge/ref/call",
          "source": {"signature": "_Za"}, "target": {"signature": "_Zb"}},
     ]))
-    out = tmp_path / "ev"
-    res = CliRunner().invoke(main, [
-        "collect", "--compile-db", str(_cdb(tmp_path)),
-        "--kythe-entries", str(kythe), "-o", str(out),
-    ])
-    assert res.exit_code == 0, res.output
-    graph = BuildSourcePack.load(out).source_graph
+    merged, extractors = _merged_from_compile_db(tmp_path)
+    # --source-graph defaults to "off"; --kythe-entries alone implicitly
+    # promotes it to "summary" inside _collect_source_graph.
+    graph, _detail = _collect_source_graph(
+        merged, extractors,
+        source_graph="off", changed_paths=(),
+        kythe_entries=kythe, codeql_results=None,
+        codeql_extends_results=None,
+        surface=None, clang_bin="clang",
+    )
     assert graph is not None
     assert any(e.kind == "DECL_CALLS_DECL" for e in graph.edges)
     assert graph.external_graph_refs and graph.external_graph_refs[0]["backend"] == "kythe"
@@ -203,42 +236,40 @@ def test_collect_evidence_kythe_entries_folds_edges(tmp_path) -> None:
 def test_collect_evidence_codeql_results_folds_edges(tmp_path) -> None:
     import json
 
-    from click.testing import CliRunner
-
-    from abicheck.buildsource.pack import BuildSourcePack
-    from abicheck.cli import main
+    from abicheck.cli_buildsource_helpers import _collect_source_graph
 
     codeql = tmp_path / "codeql.json"
     codeql.write_text(json.dumps({"#select": {"tuples": [["_Za", "_Zb"]]}}))
-    out = tmp_path / "ev"
-    res = CliRunner().invoke(main, [
-        "collect", "--compile-db", str(_cdb(tmp_path)),
-        "--codeql-results", str(codeql), "-o", str(out),
-    ])
-    assert res.exit_code == 0, res.output
-    graph = BuildSourcePack.load(out).source_graph
+    merged, extractors = _merged_from_compile_db(tmp_path)
+    graph, _detail = _collect_source_graph(
+        merged, extractors,
+        source_graph="off", changed_paths=(),
+        kythe_entries=None, codeql_results=codeql,
+        codeql_extends_results=None,
+        surface=None, clang_bin="clang",
+    )
     assert graph is not None and any(e.kind == "DECL_CALLS_DECL" for e in graph.edges)
 
 
 def test_collect_evidence_codeql_extends_results_folds_edges(tmp_path) -> None:
     # ADR-041 P2 #4: a separate flag from --codeql-results since the raw
-    # tuple shape carries no self-describing relation kind.
+    # tuple shape carries no self-describing relation kind. ADR-043: `collect`
+    # is gone, so this drives the surviving library function directly instead
+    # of the deleted CLI command.
     import json
 
-    from click.testing import CliRunner
-
-    from abicheck.buildsource.pack import BuildSourcePack
-    from abicheck.cli import main
+    from abicheck.cli_buildsource_helpers import _collect_source_graph
 
     codeql = tmp_path / "codeql-extends.json"
     codeql.write_text(json.dumps({"#select": {"tuples": [["Derived", "Base"]]}}))
-    out = tmp_path / "ev"
-    res = CliRunner().invoke(main, [
-        "collect", "--compile-db", str(_cdb(tmp_path)),
-        "--codeql-extends-results", str(codeql), "-o", str(out),
-    ])
-    assert res.exit_code == 0, res.output
-    graph = BuildSourcePack.load(out).source_graph
+    merged, extractors = _merged_from_compile_db(tmp_path)
+    graph, _detail = _collect_source_graph(
+        merged, extractors,
+        source_graph="off", changed_paths=(),
+        kythe_entries=None, codeql_results=None,
+        codeql_extends_results=codeql,
+        surface=None, clang_bin="clang",
+    )
     assert graph is not None and any(e.kind == "TYPE_INHERITS" for e in graph.edges)
     assert graph.external_graph_refs and graph.external_graph_refs[0]["backend"] == "codeql"
 
@@ -251,42 +282,39 @@ def test_collect_evidence_codeql_extends_non_object_records_failed_extractor(
     # the requested backend was never ingested.
     import json
 
-    from click.testing import CliRunner
-
-    from abicheck.buildsource.pack import BuildSourcePack
-    from abicheck.cli import main
+    from abicheck.cli_buildsource_helpers import _collect_source_graph
 
     codeql = tmp_path / "codeql-extends.json"
     codeql.write_text(json.dumps(["not", "an", "object"]))
-    out = tmp_path / "ev"
-    res = CliRunner().invoke(main, [
-        "collect", "--compile-db", str(_cdb(tmp_path)),
-        "--codeql-extends-results", str(codeql), "-o", str(out),
-    ])
-    assert res.exit_code == 0, res.output
-    pack = BuildSourcePack.load(out)
+    merged, extractors = _merged_from_compile_db(tmp_path)
+    _collect_source_graph(
+        merged, extractors,
+        source_graph="off", changed_paths=(),
+        kythe_entries=None, codeql_results=None,
+        codeql_extends_results=codeql,
+        surface=None, clang_bin="clang",
+    )
     record = next(
-        e for e in pack.manifest.extractors if e.name == "graph_backend:codeql_extends"
+        e for e in extractors if e.name == "graph_backend:codeql_extends"
     )
     assert record.status == "failed"
 
 
 def test_collect_evidence_malformed_backend_export_degrades(tmp_path) -> None:
-    from click.testing import CliRunner
-
-    from abicheck.buildsource.pack import BuildSourcePack
-    from abicheck.cli import main
+    from abicheck.cli_buildsource_helpers import _collect_source_graph
 
     bad = tmp_path / "bad.json"
     bad.write_text("{not json")
-    out = tmp_path / "ev"
-    res = CliRunner().invoke(main, [
-        "collect", "--compile-db", str(_cdb(tmp_path)),
-        "--kythe-entries", str(bad), "-o", str(out),
-    ])
-    # Malformed export must not abort collection; the pack is still written.
-    assert res.exit_code == 0, res.output
-    assert BuildSourcePack.load(out).source_graph is not None
+    merged, extractors = _merged_from_compile_db(tmp_path)
+    # Malformed export must not abort collection; a graph is still produced.
+    graph, _detail = _collect_source_graph(
+        merged, extractors,
+        source_graph="off", changed_paths=(),
+        kythe_entries=bad, codeql_results=None,
+        codeql_extends_results=None,
+        surface=None, clang_bin="clang",
+    )
+    assert graph is not None
 
 
 def test_collect_evidence_kythe_implied_graph_still_records_bazel_inputs(
@@ -294,44 +322,63 @@ def test_collect_evidence_kythe_implied_graph_still_records_bazel_inputs(
 ) -> None:
     # Codex review: --kythe-entries/--codeql-results with the default
     # --source-graph off implicitly promotes to "summary" *inside*
-    # _collect_source_graph, after --from bazel-aquery has already run. The
-    # record_bazel_inputs decision (made before that promotion) must
-    # anticipate it — otherwise a Bazel/aquery build's include-graph fold
-    # (now automatic whenever --source-abi is given) finds no recorded
-    # inputs and falls back to a live `clang -M` pass that cannot run
-    # outside the execroot.
+    # _collect_source_graph, after a Bazel/aquery collection has already run.
+    # The record_bazel_inputs decision (made before that promotion, by the
+    # now-deleted collect_cmd) had to anticipate it — otherwise a Bazel/aquery
+    # build's include-graph fold (automatic whenever source-abi evidence is
+    # present) finds no recorded inputs and falls back to a live `clang -M`
+    # pass that cannot run outside the execroot. Reproduced directly: passing
+    # record_bazel_inputs=True to _run_adapters (as the deleted CLI would once
+    # --kythe-entries is truthy, regardless of --source-abi-scope) must still
+    # let the include-graph fold pick up the *recorded* inputs rather than
+    # attempting a live clang pass.
     import json
 
-    from click.testing import CliRunner
-
-    from abicheck.buildsource.pack import BuildSourcePack
-    from abicheck.cli import main
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+    from abicheck.cli_buildsource_helpers import _collect_source_graph, _run_adapters
     from tests.test_bazel_adapter import AQUERY
 
     aquery_file = tmp_path / "aquery.json"
     aquery_file.write_text(AQUERY)
     kythe = tmp_path / "kythe.json"
     kythe.write_text(json.dumps([]))
-    out = tmp_path / "ev"
-    res = CliRunner().invoke(
-        main,
-        [
-            "collect",
-            "--from",
-            f"bazel-aquery={aquery_file}",
-            "--source-abi",
-            "--source-abi-scope",
-            "off",
-            "--kythe-entries",
-            str(kythe),
-            "-o",
-            str(out),
-        ],
+
+    from abicheck.buildsource.build_evidence import BuildEvidence
+    from abicheck.buildsource.model import ExtractorRecord
+
+    merged = BuildEvidence()
+    extractors: list[ExtractorRecord] = []
+    _run_adapters(
+        merged,
+        extractors,
+        compile_db=None,
+        build_dir=None,
+        cmake=False,
+        ninja=False,
+        ninja_compdb=None,
+        bazel_cquery=None,
+        bazel_aquery=aquery_file,
+        make_dry_run=None,
+        binary=None,
+        read_compiler_record=False,
+        build_system="generic",
+        record_bazel_inputs=True,
+        verbose=False,
     )
-    assert res.exit_code == 0, res.output
-    pack = BuildSourcePack.load(out)
-    assert pack.source_graph is not None
+    # Stand-in for `--source-abi --source-abi-scope off`: a no-op replay scope
+    # still produces an (empty) SourceAbiSurface, which is what makes
+    # _collect_source_graph fold the include graph in below.
+    surface = SourceAbiSurface(library="", target_id="")
+
+    graph, _detail = _collect_source_graph(
+        merged, extractors,
+        source_graph="off", changed_paths=(),
+        kythe_entries=kythe, codeql_results=None,
+        codeql_extends_results=None,
+        surface=surface, clang_bin="clang",
+    )
+    assert graph is not None
     assert any(
         e.name == "include_graph:recorded_inputs" and e.status == "ok"
-        for e in pack.manifest.extractors
+        for e in extractors
     )

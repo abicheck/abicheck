@@ -200,6 +200,7 @@ nav:
       - "040: compare Surface Reduction": development/adr/040-compare-surface-reduction.md
       - "041: Compiler-Facts Semantic Impact Graph": development/adr/041-compiler-facts-semantic-impact-graph.md
       - "042: CompatibilityDecision/GateDecision Separation": development/adr/042-compatibility-and-gate-decision-separation.md
+      - "043: Pre-1.0 CLI Surface Reset": development/adr/043-cli-pre-1.0-surface-reset.md
 
 # Agent instructions are repo-internal context, not published documentation.
 exclude_docs: |

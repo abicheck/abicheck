@@ -112,6 +112,7 @@ def _scan_imports() -> tuple[Any, ...]:
         EvidenceDepth,
         ScanMode,
         SourceMethod,
+        SourceScope,
         level_to_collect_mode,
         parse_user_depth,
         resolve_level,
@@ -126,6 +127,7 @@ def _scan_imports() -> tuple[Any, ...]:
         level_to_collect_mode,
         resolve_level,
         parse_user_depth,
+        SourceScope,
     )
 
 
@@ -385,7 +387,7 @@ def _discover_compile_db(sources: Path | None, explicit: Path | None) -> Path | 
 
 
 def _count_pack_tus(path: Path) -> int | None:
-    """TU count of an ``abicheck collect`` pack dir, or ``None`` if not a pack.
+    """TU count of a build-source pack dir, or ``None`` if not a pack.
 
     The real scan loads a pack dir (``is_pack_dir``) and uses its embedded
     ``build_evidence``; the estimate mirrors that so a pack-only ``--build-info``
@@ -450,9 +452,11 @@ def _resolve_estimate_level(
         level_to_collect_mode,
         resolve_level,
         parse_user_depth,
+        SourceScope,
     ) = _scan_imports()
 
     mode = ScanMode(req.mode)
+    seeded = req.seeded or bool(req.changed_paths)
     if resolved_level is not None:
         # The caller (the CLI scan path) already resolved the concrete (method,
         # depth) level — including the auto/risk choice. Honor it verbatim so the
@@ -477,7 +481,14 @@ def _resolve_estimate_level(
         resolved, eff_depth = resolve_level(
             mode=mode, source_method=sm, depth=dp, auto_method=auto_method
         )
-    return resolved, eff_depth, level_to_collect_mode(resolved, eff_depth)
+    # ADR-043 D2/D3 zero-TU fix: pin the S5 replay scope to CHANGED only with a
+    # valid seed, else TARGET — an unseeded explicit-source estimate must not
+    # under-project to the "source-changed" default (no seed → no TUs).
+    collect_mode = level_to_collect_mode(
+        resolved, eff_depth,
+        source_scope=SourceScope.CHANGED if seeded else SourceScope.TARGET,
+    )
+    return resolved, eff_depth, collect_mode
 
 
 def _estimate_total_tus(req: ScanRequest) -> tuple[int, str]:
@@ -499,7 +510,7 @@ def _estimate_total_tus(req: ScanRequest) -> tuple[int, str]:
     if bazel_tus is not None:
         return bazel_tus, "Bazel aquery/cquery (build_evidence)"
     if pack_tus is not None:
-        return pack_tus, "abicheck collect pack (build_evidence)"
+        return pack_tus, "build-source pack (build_evidence)"
     if compile_db is not None:
         return _count_compile_db_tus(compile_db), f"compile DB: {compile_db.name}"
     if req.sources is not None:
@@ -585,8 +596,13 @@ def _source_layer_estimates(
     replay_tus: int,
 ) -> list[CostEstimate]:
     """The collect-mode-dependent L3/L4/L5 rows (source-evidence layers)."""
+    # "source-target" (ADR-043 D2/D3) is the unseeded sibling of "source-changed"
+    # — same L3/L4/L5 layers, just a broader (target-scoped, not changed-only)
+    # replay; it must price identically to source-changed everywhere below, else
+    # an unseeded explicit-source scan/estimate silently reports zero source
+    # layers (the same zero-TU defect the collect-mode fix addresses).
     estimates: list[CostEstimate] = []
-    if collect_mode in ("build", "graph-build", "source-changed", "graph-full"):
+    if collect_mode in ("build", "graph-build", "source-changed", "source-target", "graph-full"):
         estimates.append(
             CostEstimate(
                 "s1",
@@ -597,7 +613,7 @@ def _source_layer_estimates(
                 tu_note,
             )
         )
-    if collect_mode in ("source-changed", "graph-full"):
+    if collect_mode in ("source-changed", "source-target", "graph-full"):
         estimates.append(
             CostEstimate(
                 resolved.value,
@@ -609,7 +625,7 @@ def _source_layer_estimates(
             )
         )
     # L5 structural fold runs for every graph-building mode (cheap).
-    if collect_mode in ("graph-build", "graph-full", "source-changed"):
+    if collect_mode in ("graph-build", "graph-full", "source-changed", "source-target"):
         estimates.append(
             CostEstimate(
                 resolved.value,
@@ -624,7 +640,7 @@ def _source_layer_estimates(
     # call-graph pass (``inline._fold_call_graph``) over the replay scope — price
     # it so `scan --estimate` does not understate a source-changed/graph-full PR
     # scan (Codex review). Scope mirrors the L4 replay (changed-scoped vs full).
-    if collect_mode in ("source-changed", "graph-full"):
+    if collect_mode in ("source-changed", "source-target", "graph-full"):
         estimates.append(
             CostEstimate(
                 resolved.value,
@@ -744,6 +760,7 @@ def run_scan(req: ScanRequest) -> ScanResult:
         level_to_collect_mode,
         resolve_level,
         parse_user_depth,
+        SourceScope,
     ) = _scan_imports()
     from .buildsource.crosscheck import ALL_CHECKS
     from .cli_scan_baseline import _public_provenance_set
@@ -778,7 +795,14 @@ def run_scan(req: ScanRequest) -> ScanResult:
     resolved, eff_depth = resolve_level(
         mode=scan_mode, source_method=sm, depth=dp, auto_method=auto_method
     )
-    collect_mode = level_to_collect_mode(resolved, eff_depth)
+    # ADR-043 D2/D3 zero-TU fix: the S5 replay scope is command-aware — a valid
+    # change seed scopes to CHANGED, otherwise TARGET (the current library
+    # target), so an explicit/pinned source depth with no diff seed never
+    # silently collects zero translation units (parity with the CLI's scan).
+    collect_mode = level_to_collect_mode(
+        resolved, eff_depth,
+        source_scope=SourceScope.CHANGED if seeded else SourceScope.TARGET,
+    )
     # --depth binary is symbols-only (L0/L1): suppress the L2 header AST (and its
     # provenance) even when the caller passes headers, so the collected evidence
     # matches the reported depth — parity with the CLI's `scan --depth binary`.

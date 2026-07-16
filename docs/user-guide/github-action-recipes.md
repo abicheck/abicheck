@@ -493,27 +493,30 @@ build-id resolution:
 
 ## Application compatibility check
 
-Check whether your application binary is affected by a library update:
+There is no separate `appcompat` mode (ADR-043 folded it into `compare
+--used-by`). Check whether your application binary is affected by a library
+update by scoping a normal `compare` to it via `extra-args`:
 
 ```yaml
       - uses: abicheck/abicheck@v0.3.0
         with:
-          mode: appcompat
-          app-binary: build/myapp
           old-library: libfoo.so.1
           new-library: build/libfoo.so.2
           header: include/foo.h
+          extra-args: '--used-by build/myapp'
 ```
 
 ## Quick symbol availability check (weak mode)
 
-Verify a library provides all symbols an application needs — no old library required:
+Verify a library provides all symbols an application needs by comparing it
+against itself (no real ABI change) — the app-scoped verdict reports
+COMPATIBLE only if every symbol it uses resolves:
 
 ```yaml
       - uses: abicheck/abicheck@v0.3.0
         with:
-          mode: appcompat
-          app-binary: build/myapp
-          check-against: build/libfoo.so
+          old-library: build/libfoo.so
+          new-library: build/libfoo.so
           install-deps: false
+          extra-args: '--used-by build/myapp'
 ```

@@ -24,7 +24,7 @@ It catches removed or renamed symbols, changed function signatures, struct layou
 - **Cross-platform.** Linux (ELF), Windows (PE/COFF), and macOS (Mach-O) binaries, with debug-info cross-checks from DWARF, PDB, BTF, and CTF. See [Platform Support](https://abicheck.github.io/abicheck/reference/platforms/) for what's validated in CI per platform (native MSVC+PDB verdicts are experimental).
 - **Built for CI.** Deterministic [exit codes](https://abicheck.github.io/abicheck/reference/exit-codes/), SARIF/JSON/Markdown/HTML/JUnit output, snapshot-based [baselines](https://abicheck.github.io/abicheck/user-guide/baseline-management/), [policy profiles](https://abicheck.github.io/abicheck/user-guide/policies/) and [suppressions](https://abicheck.github.io/abicheck/user-guide/suppressions/), and a first-class [GitHub Action](https://abicheck.github.io/abicheck/user-guide/github-action/).
 - **Public-surface scoping.** Filters findings to the library's *public* ABI surface so internal-only changes don't fail your build — fewer false positives than symbol-only tools.
-- **More than one library at a time.** Compare co-versioned multi-library releases as a single bundle ([`compare` on directory/package inputs](https://abicheck.github.io/abicheck/user-guide/multi-binary/)), check whether a specific application still works ([`appcompat`](https://abicheck.github.io/abicheck/user-guide/appcompat/)), or validate a binary's full dependency stack across sysroots ([`deps compare`](https://abicheck.github.io/abicheck/user-guide/cli-usage/)).
+- **More than one library at a time.** Compare co-versioned multi-library releases as a single bundle ([`compare` on directory/package inputs](https://abicheck.github.io/abicheck/user-guide/multi-binary/)), check whether a specific application still works ([`compare --used-by`](https://abicheck.github.io/abicheck/user-guide/appcompat/)), or validate a binary's full dependency stack across sysroots ([`deps compare`](https://abicheck.github.io/abicheck/user-guide/cli-usage/)).
 - **Drop-in for existing tools.** A [`compat`](https://abicheck.github.io/abicheck/user-guide/from-abicc/) mode mirrors `abi-compliance-checker` flags, and migration guides cover [ABICC](https://abicheck.github.io/abicheck/user-guide/from-abicc/) and [libabigail](https://abicheck.github.io/abicheck/user-guide/from-libabigail/).
 - **Agent- and script-friendly.** Structured JSON, a [Python API](#python-api), and an [MCP server](https://abicheck.github.io/abicheck/user-guide/mcp-integration/) for AI-driven workflows. Pure Python (3.10+), no heavyweight native toolchain required for binary-only mode.
 
@@ -92,14 +92,18 @@ See [Getting Started](https://abicheck.github.io/abicheck/getting-started/) for 
 
 ## Which command do I need?
 
+abicheck's whole CLI is exactly 5 root commands: `dump`, `compare`, `scan`, `deps`, `compat`.
+
 | I want to… | Use |
 |------------|-----|
 | Check whether a library upgrade breaks existing consumers | [`abicheck compare`](https://abicheck.github.io/abicheck/user-guide/cli-usage/) |
 | Compare **a multi-library release** (a co-versioned bundle, e.g. oneDAL) as a single bundle | [`abicheck compare`](https://abicheck.github.io/abicheck/user-guide/multi-binary/) |
-| Check whether **my application** breaks with a new library version | [`abicheck appcompat`](https://abicheck.github.io/abicheck/user-guide/appcompat/) |
+| Check whether **my application** breaks with a new library version | [`abicheck compare --used-by APP`](https://abicheck.github.io/abicheck/user-guide/appcompat/) |
+| Check whether a **plugin** still satisfies its host's required entrypoints | [`abicheck compare --required-symbol SYM`](https://abicheck.github.io/abicheck/user-guide/plugin-systems/) |
+| Run a deterministic source-intelligence scan (classify → audit → optional compare) | [`abicheck scan ARTIFACT`](https://abicheck.github.io/abicheck/user-guide/scan-levels/) |
 | Validate a binary's full dependency stack across two sysroots | [`abicheck deps compare`](https://abicheck.github.io/abicheck/user-guide/cli-usage/) |
 | Drop-in replacement for `abi-compliance-checker` | [`abicheck compat`](https://abicheck.github.io/abicheck/user-guide/from-abicc/) |
-| Save a reusable ABI baseline snapshot | [`abicheck dump`](https://abicheck.github.io/abicheck/getting-started/) |
+| Save a reusable ABI snapshot | [`abicheck dump`](https://abicheck.github.io/abicheck/getting-started/) |
 
 ---
 
@@ -114,7 +118,7 @@ Use these to gate CI pipelines.
 | `4` | `BREAKING` | Binary ABI break (old binaries will crash or misbehave) |
 | `8` | `REMOVED_LIBRARY` | Library removed in new version (multi-library compare with `--fail-on-removed-library`) |
 
-Any active severity setting (a `--severity-*` flag or a severity value in `.abicheck.yml`) switches `compare` to a severity-based scheme where `1` means an error-level *finding* in the addition/quality categories (`0` still passes, `4` is still worst). `appcompat`, `deps compare`, and `compat` add per-mode codes. The canonical matrix is the [exit code reference](https://abicheck.github.io/abicheck/reference/exit-codes/); how baselines, policies, suppressions, and severity combine into the exit code is covered in [CI Gating](https://abicheck.github.io/abicheck/user-guide/ci-gating/).
+Any active severity setting (a `--severity-*` flag or a severity value in `.abicheck.yml`) switches `compare` to a severity-based scheme where `1` means an error-level *finding* in the addition/quality categories (`0` still passes, `4` is still worst). `scan`, `deps compare`, and `compat` add per-command codes (e.g. `scan` also has a `5` for `--budget` overflow). The canonical matrix is the [exit code reference](https://abicheck.github.io/abicheck/reference/exit-codes/); how snapshots, policies, suppressions, and severity combine into the exit code is covered in [CI Gating](https://abicheck.github.io/abicheck/user-guide/ci-gating/).
 
 ---
 

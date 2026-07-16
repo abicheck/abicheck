@@ -101,72 +101,19 @@ Suppression files solve an immediate problem — unblocking CI when a known chan
 intentional — but left unmanaged they become a liability. Rules accumulate, reasons
 are forgotten, and stale suppressions silently hide real regressions.
 
-The lifecycle flags below turn suppressions into a managed process: auto-generate
-candidate rules from diffs, require justification for each one, and force periodic
-review through expiry enforcement.
+The lifecycle flags below turn suppressions into a managed process: require
+justification for each rule, and force periodic review through expiry
+enforcement.
 
 ### Typical workflow
 
 ```
 1. Detect     abicheck compare old.so new.so --format json -o diff.json
-2. Generate   abicheck suggest-suppressions diff.json -o candidates.yml
-3. Review     Edit candidates.yml: fill in reason fields, adjust expiry dates
-4. Enforce    abicheck compare old.so new.so --suppress candidates.yml \
+2. Author     Write candidates.yml by hand from the diff (see File format above),
+              filling in reason fields and expiry dates
+3. Enforce    abicheck compare old.so new.so --suppress candidates.yml \
                 --strict-suppressions --require-justification
 ```
-
-### Auto-generating suppression candidates
-
-When a diff produces many changes that need suppression, hand-writing rules is
-tedious and error-prone. The `suggest-suppressions` command reads a JSON diff
-and generates a candidate YAML file:
-
-```bash
-# Step 1: produce a JSON diff
-abicheck compare old.so new.so -H include/ --format json -o diff.json
-
-# Step 2: generate candidate rules
-abicheck suggest-suppressions diff.json -o candidates.yml
-```
-
-The output includes `# TODO` comments on every `reason` field to flag rules that
-need human review:
-
-```yaml
-# Auto-generated suppression candidates from abicheck compare
-# Review each rule and add a justification before using
-version: 1
-suppressions:
-  - symbol: "_ZN3foo6legacyEv"
-    change_kind: "func_removed"
-    reason: ""  # TODO: add justification
-    expires: "2026-09-23"
-
-  - symbol: "_ZN3foo3bazEi"
-    change_kind: "func_param_type_changed"
-    reason: ""  # TODO: add justification
-    expires: "2026-09-23"
-
-  - type_pattern: "MyStruct"
-    change_kind: "type_size_changed"
-    reason: ""  # TODO: add justification
-    expires: "2026-09-23"
-```
-
-**Options:**
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `-o`, `--output` | stdout | Output file for generated YAML |
-| `--expiry-days N` | `180` | Days from today for the `expires` field |
-
-**Design choices:**
-
-- Symbol-level changes use exact `symbol` match (safer than patterns).
-- Type-level changes (`type_size_changed`, `enum_member_removed`, etc.) use
-  `type_pattern` so a single rule covers all member-level changes for that type.
-- The default expiry is 6 months — long enough to not be noisy, short enough
-  to force periodic review.
 
 ### Requiring justification (`--require-justification`)
 
@@ -186,8 +133,9 @@ Error: Invalid value for '--suppress': Suppression rule 3 has no 'reason' field.
 All suppression rules must include a justification when --require-justification is set.
 ```
 
-This pairs well with `suggest-suppressions`: the generated file has empty `reason`
-fields, so it will fail `--require-justification` until every rule is reviewed.
+This pairs well with a hand-authored candidate file that starts with empty
+`reason` fields: `--require-justification` will fail the run until every rule
+is reviewed and filled in.
 
 ### Failing on expired suppressions (`--strict-suppressions`)
 
@@ -219,15 +167,11 @@ Both `--strict-suppressions` and `--require-justification` work on `compare`
 
 ### Recommended CI configuration
 
-For CI pipelines, combine all three features:
+For CI pipelines, combine both features:
 
 ```bash
-# Generate candidates once during development
-abicheck suggest-suppressions diff.json \
-  --expiry-days 90 \
-  -o suppressions.yaml
-
-# Gate CI with strict lifecycle enforcement
+# Author suppressions.yaml by hand (see File format above), then
+# gate CI with strict lifecycle enforcement:
 abicheck compare old.so new.so -H include/ \
   --suppress suppressions.yaml \
   --strict-suppressions \

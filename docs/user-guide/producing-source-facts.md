@@ -14,14 +14,16 @@ For how a scan *consumes* it, see [Source-scan depth](scan-levels.md).
 
 Whichever producer you pick, the **output contract is identical** — an
 `abicheck_inputs/` pack (or an inline `--sources` collection) that
-[`abicheck merge`](baseline-management.md) folds onto the binary-side snapshot.
-The producer is an implementation choice; the ingest never changes.
+`abicheck dump --build-info ./abicheck_inputs/` folds onto the binary-side
+snapshot in one step (auto-detecting the pack; see
+[Then: fold the facts onto the binary](#then-fold-the-facts-onto-the-binary)
+below). The producer is an implementation choice; the ingest never changes.
 
 ## Which producer? (pick one)
 
 | | Full source scan — replay | Wrapper injection — `abicheck-cc` wrapper | Plugin injection — Clang plugin |
 |---|---|---|---|
-| **How** | `abicheck dump --sources` / `collect` re-parses each TU from `compile_commands.json` | wrap your compiler; it runs the extractor as a companion action | `-fplugin` reads the AST the compile already built |
+| **How** | `abicheck dump --sources` re-parses each TU from `compile_commands.json` inline | wrap your compiler; it runs the extractor as a companion action | `-fplugin` reads the AST the compile already built |
 | **Extra parse** | a full second parse (~5 s/TU on template-heavy C++) | a full second parse | **none** — zero-cost byproduct of the build |
 | **Needs** | a compile DB (auto-inferred for cmake/make/bazel) | to front your build with `abicheck-cc` | a plugin built against your exact Clang major |
 | **Portable?** | ✅ any toolchain | ✅ any compiler | ❌ ABI-locked to the loading Clang's LLVM major |
@@ -46,9 +48,11 @@ result.
 # Source-only: infer the compile DB, replay L4, fold the L5 graph, all inline.
 abicheck dump --sources . -H include/ --depth source -o libfoo.src.json
 
-# Or against a real binary in one shot (L0–L5 in one snapshot):
+# Or against a real binary in one shot (L0–L5 in one snapshot). Unseeded
+# `--depth source` already analyses the whole target (the old separate `full`
+# rung collapsed into `source` — ADR-043):
 abicheck dump libfoo.so -H include/ --sources . --compile-db build/compile_commands.json \
-  --depth full -o libfoo.full.json
+  --depth source -o libfoo.full.json
 ```
 
 With just `--sources`, abicheck infers and runs the build-system query itself
@@ -171,26 +175,25 @@ the portable defaults.
 
 ## Then: fold the facts onto the binary
 
-However you produced them, ingest is the same — dump the binary side, then merge:
+However you produced them, ingest is a single `dump` call — pass the
+`abicheck_inputs/` pack as `--build-info` (auto-detected, no separate merge
+step):
 
 ```bash
-abicheck dump libfoo.so -o libfoo.bin.json
-abicheck merge libfoo.bin.json ./abicheck_inputs/ -o libfoo.baseline.json
+abicheck dump libfoo.so --build-info ./abicheck_inputs/ -o libfoo.baseline.json
 ```
 
-`merge` links each source declaration to the binary's exported symbol (matching
+This links each source declaration to the binary's exported symbol (matching
 ctor/dtor ABI clone variants — `C1`/`C2`/`C3`, `D0`/`D1`/`D2` — so one source
 constructor claims all of its exported symbols). The result is a single
 self-contained `.baseline.json` carrying L0–L5, ready for
-[`compare`](cli-usage.md) or [`scan --baseline`](scan-levels.md).
+[`compare`](cli-usage.md) or [`scan --against`](scan-levels.md).
 
-### Reading the L4 coverage line
+### Reading the L4 coverage numbers
 
-`merge` prints an L4 coverage summary to stderr:
-
-```text
-  L4_source_abi: present (471/834 symbols matched, 834/834 accounted, 0 unmatched)
-```
+The snapshot carries an L4 coverage summary under
+`build_source.source_abi.coverage` (see below) — counters like
+`matched_symbols: 471`, `exported_symbols: 834`, `unmatched_symbols: 0`.
 
 Read it as **two different numbers**:
 
@@ -205,7 +208,7 @@ Read it as **two different numbers**:
   internal/private export). `unmatched` is what's genuinely unexplained — aim
   for **0**.
 
-The full breakdown lives in the merged snapshot under
+The full breakdown lives in the resulting snapshot under
 `build_source.source_abi.coverage` (and the per-symbol reasons under
 `…mappings.non_public_symbol_to_reason` / `…synthesized_symbol_to_owner`):
 

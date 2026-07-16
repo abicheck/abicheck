@@ -486,38 +486,33 @@ class TestExitSchemeExplicit:
         assert res.exit_code == 2
 
 
-# ── G22 Phase 7: config forward-compat (version + unknown-key warning) ────────
+# ── ADR-043 CLI reset: config strictness (version + unknown-key rejection) ────
 
 
-class TestConfigForwardCompat:
-    """ADR-037 §Backward compatibility: `.abicheck.yml` carries `version:`, and an
-    unknown key **warns** (never errors) so an older abicheck still loads a config
-    written for a newer schema."""
+class TestConfigStrictness:
+    """ADR-043 (pre-1.0 CLI reset): `.abicheck.yml` carries `version:`, and an
+    unknown key is now a hard ``ValueError`` (never a warning) — there is no
+    separate ``abicheck config validate`` command any more, so this strictness
+    has to live in ``BuildConfig.from_dict`` itself to ever be seen."""
 
     def test_version_round_trips(self) -> None:
         cfg = BuildConfig.from_dict({"version": 1})
         assert cfg.version == 1
         assert cfg.to_dict()["version"] == 1
-        # Round-trip is stable and emits no unknown-key warning.
+        # Round-trip is stable and raises nothing.
         assert BuildConfig.from_dict(cfg.to_dict()).version == 1
 
-    def test_unknown_top_key_warns_but_loads(self) -> None:
-        with pytest.warns(UserWarning, match="future_feature"):
-            cfg = BuildConfig.from_dict(
-                {"version": 2, "future_feature": {"enabled": True}}
-            )
-        # Load still succeeds: known keys parse, the unknown one is ignored.
-        assert cfg.version == 2
+    def test_unknown_top_key_rejected(self) -> None:
+        with pytest.raises(ValueError, match="future_feature"):
+            BuildConfig.from_dict({"version": 2, "future_feature": {"enabled": True}})
 
-    def test_unknown_block_key_warns_but_loads(self) -> None:
-        with pytest.warns(UserWarning, match=r"sources\.'?nonsense'?"):
-            cfg = BuildConfig.from_dict(
+    def test_unknown_block_key_rejected(self) -> None:
+        with pytest.raises(ValueError, match=r"sources\.'?nonsense'?"):
+            BuildConfig.from_dict(
                 {"sources": {"public_headers": ["api.h"], "nonsense": 1}}
             )
-        # The recognized sibling key still parsed.
-        assert cfg.public_headers == ["api.h"]
 
-    def test_known_config_does_not_warn(self, recwarn: pytest.WarningsRecorder) -> None:
+    def test_known_config_does_not_raise(self, recwarn: pytest.WarningsRecorder) -> None:
         BuildConfig.from_dict(
             {
                 "version": 1,
@@ -528,38 +523,15 @@ class TestConfigForwardCompat:
                 "suppression": {"strict": True},
                 "source": {"method": "s4"},
                 "exit_code_scheme": "severity",
-                # Keys parsed by sibling modules must not trip the warning.
+                # Keys parsed by sibling modules must not trip the check.
                 "risk_rules": {},
                 "crosschecks": {},
             }
         )
         assert [w for w in recwarn.list if issubclass(w.category, UserWarning)] == []
 
-    def test_load_build_config_unknown_key_warns(self, tmp_path: Path) -> None:
+    def test_load_build_config_unknown_key_raises(self, tmp_path: Path) -> None:
         cfg_path = tmp_path / ".abicheck.yml"
         cfg_path.write_text("version: 3\nbrand_new_block:\n  x: 1\n")
-        with pytest.warns(UserWarning, match="brand_new_block"):
-            cfg = load_build_config(cfg_path)
-        assert cfg.version == 3
-
-
-def test_collect_help_panels_cover_all_options() -> None:
-    """Every `collect` option (bar --help) is grouped into a rich-help panel, so
-    the messiest command never regresses to a flat option wall (G22 collect tidy)."""
-    import click
-
-    import abicheck.cli_buildsource  # noqa: F401  — registers `collect`
-    from abicheck.cli import main
-    from abicheck.cli_help import OPTION_GROUPS
-
-    grouped: set[str] = set()
-    for panel in OPTION_GROUPS["* collect"]:
-        grouped.update(panel["options"])  # type: ignore[arg-type]
-
-    cmd = main.commands["collect"]
-    for p in cmd.params:
-        if not isinstance(p, click.Option):
-            continue
-        if "--help" in p.opts:
-            continue
-        assert grouped & set(p.opts), f"collect option {p.opts} is not in any help panel"
+        with pytest.raises(ValueError, match="brand_new_block"):
+            load_build_config(cfg_path)

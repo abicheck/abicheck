@@ -103,13 +103,15 @@ def test_source_is_pack_detects_manifest(tmp_path: Path) -> None:
     (pack / "manifest.json").write_text('{"build_source_pack_version": 1}')
     assert _source_is_pack(pack)
 
-    # A Flow-2 inputs pack is NOT treated as a compare-sources pack: the evidence
-    # path only loads BuildSourcePack, so routing it here would mis-load it. Feed
-    # inputs packs through `merge` instead (Codex review).
+    # A Flow-2 inputs pack IS treated as a pack (ADR-043 Codex review): `merge`
+    # is gone, so an inputs pack routed as "raw" here would be dropped entirely
+    # at compare's default depth (--depth off collects nothing inline) instead
+    # of falling through to the out-of-band loader that already auto-detects
+    # it (_load_side_pack_input).
     inputs = tmp_path / "inputs"
     inputs.mkdir()
     (inputs / "manifest.json").write_text('{"kind": "abicheck_inputs"}')
-    assert not _source_is_pack(inputs)
+    assert _source_is_pack(inputs)
 
     # A raw checkout with a stray/sparse manifest.json is NOT a pack — it must
     # still be collected from (Codex review).
@@ -123,6 +125,34 @@ def test_source_is_pack_detects_manifest(tmp_path: Path) -> None:
     bad.mkdir()
     (bad / "manifest.json").write_text("not json{")
     assert _source_is_pack(bad)
+
+
+def test_inputs_pack_routes_to_out_of_band_loader_not_dropped(tmp_path: Path) -> None:
+    """ADR-043 Codex-review regression: an abicheck_inputs/ pack passed via
+    --old-build-info/--new-build-info must not be misclassified as "raw" evidence.
+    Before the fix, _source_is_pack() returned False for it, so
+    _embed_inline_source_side() treated it as a raw tree to collect inline — and
+    at compare's default depth (collect_mode "off" collects nothing inline) that
+    silently dropped the pack's facts entirely, with only a stderr warning and no
+    fallback to the out-of-band loader that already knows how to load it."""
+    from abicheck.cli_buildsource_helpers import _load_side_pack_input
+
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "source_facts").mkdir()
+    (inputs / "manifest.json").write_text(json.dumps({
+        "kind": "abicheck_inputs",
+        "abicheck_inputs_version": 1,
+        "library": "libfoo.so",
+        "version": "1.0",
+        "created_by": "test",
+    }))
+
+    from abicheck.cli import _source_is_pack
+
+    assert _source_is_pack(inputs)  # classified as a pack, not raw source to collect
+    pack = _load_side_pack_input(inputs)  # so the out-of-band loader accepts it
+    assert pack is not None
 
 
 def test_embed_inline_source_forwards_toolchain_and_collects(
@@ -732,7 +762,6 @@ class TestCompareDispatch:
     @pytest.mark.parametrize(
         "flag, value, is_path",
         [
-            ("--max", None, False),
             ("--depth", "source", False),
             ("--sources", "old=src", True),
             ("--build-info", "new=build", True),
@@ -765,13 +794,47 @@ class TestCompareDispatch:
         assert code != 0
         assert "not supported for directory/package" in (out + err)
 
+    def test_used_by_rejected_on_set_inputs(self, tmp_path: Path) -> None:
+        # The release fan-out has no per-app scoping; a directory/package
+        # compare with --used-by must reject loudly rather than silently run
+        # an unscoped release comparison (Codex review).
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        _write_snap(old_dir / "libfoo.json", _snap())
+        _write_snap(new_dir / "libfoo.json", _snap())
+        app = _make_pie_executable(tmp_path / "myapp")
+        code, out, err = _invoke(
+            "compare", str(old_dir), str(new_dir), "--used-by", str(app)
+        )
+        assert code != 0
+        msg = out + err
+        assert "not supported for directory/package" in msg
+        assert "--used-by" in msg
+
+    def test_required_symbol_rejected_on_set_inputs(self, tmp_path: Path) -> None:
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        _write_snap(old_dir / "libfoo.json", _snap())
+        _write_snap(new_dir / "libfoo.json", _snap())
+        code, out, err = _invoke(
+            "compare", str(old_dir), str(new_dir), "--required-symbol", "_Z3foov"
+        )
+        assert code != 0
+        msg = out + err
+        assert "not supported for directory/package" in msg
+        assert "--required-symbol" in msg
+
     def test_app_operand_rejected_with_hint(self, tmp_path: Path) -> None:
         app = _make_pie_executable(tmp_path / "myapp")
         new = _write_snap(tmp_path / "new.json", _snap())
         code, out, err = _invoke("compare", str(app), str(new))
         msg = out + err
         assert code != 0
-        assert "appcompat" in msg
+        assert "--used-by" in msg
 
     def test_set_only_flags_warn_on_single_file(self, tmp_path: Path) -> None:
         old, new = _breaking_pair()

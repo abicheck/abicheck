@@ -20,16 +20,18 @@ no compiled fixture is needed on the fast lane.
 """
 from __future__ import annotations
 
+import click
 import pytest
-from click.testing import CliRunner
 
 from abicheck.buildsource import compiler_record as cr
+from abicheck.buildsource.build_evidence import BuildEvidence
 from abicheck.buildsource.compiler_record import (
     extract_compiler_record,
     parse_gcc_command_line,
     parse_producer,
 )
-from abicheck.cli import main
+from abicheck.buildsource.model import ExtractorRecord
+from abicheck.cli_buildsource_helpers import _run_adapters
 
 # ── pure parsers ─────────────────────────────────────────────────────────────
 
@@ -195,34 +197,63 @@ def test_extract_compiler_record_missing_file(tmp_path):
     assert any("cannot read" in d for d in ev.diagnostics)
 
 
-# ── CLI wiring ───────────────────────────────────────────────────────────────
+# ── engine wiring (was `collect --read-compiler-record`) ────────────────────
+#
+# `collect` was deleted in the ADR-043 CLI reset, but the engine it drove is
+# unchanged: `cli_buildsource_helpers._run_adapters` is the exact function the
+# deleted Click command called for `--read-compiler-record`, so these
+# exercise it directly.
+
+
+def _run_compiler_record_adapter(
+    *, binary, read_compiler_record: bool = True
+) -> tuple[BuildEvidence, list[ExtractorRecord]]:
+    merged = BuildEvidence()
+    extractors: list[ExtractorRecord] = []
+    _run_adapters(
+        merged,
+        extractors,
+        compile_db=None,
+        build_dir=None,
+        cmake=False,
+        ninja=False,
+        ninja_compdb=None,
+        bazel_cquery=None,
+        bazel_aquery=None,
+        make_dry_run=None,
+        binary=binary,
+        read_compiler_record=read_compiler_record,
+        build_system="generic",
+        record_bazel_inputs=False,
+        verbose=False,
+    )
+    return merged, extractors
 
 
 def test_collect_evidence_read_compiler_record_requires_binary(tmp_path):
-    out = tmp_path / "e"
-    result = CliRunner().invoke(main, ["collect", "--read-compiler-record", "-o", str(out)])
-    assert result.exit_code != 0
-    assert "requires --binary" in result.output
+    with pytest.raises(click.UsageError, match="requires --binary"):
+        _run_compiler_record_adapter(binary=None)
 
 
 def test_collect_evidence_preserves_option_only_compiler_record(tmp_path, monkeypatch):
     # A stripped ELF whose only provenance is `.GCC.command.line` switches (no
     # source TU, no DWARF producer) yields build_options but no units/toolchains.
-    # The pack must still persist that build evidence rather than drop it.
-    from abicheck.buildsource.pack import BuildSourcePack
-
+    # This evidence must still count as "collected" rather than be dropped.
     binpath = tmp_path / "switches.so"
     binpath.write_bytes(b"\x7fELF")
     section = _FakeSection(b"GNU C11 13.3.0 -std=c11 -D_GLIBCXX_USE_CXX11_ABI=0 -O2\x00")
     monkeypatch.setattr(cr, "ELFFile", lambda _fh: _FakeELF(section=section, dwarf=None))
 
-    out = tmp_path / "e"
-    result = CliRunner().invoke(
-        main, ["collect", "--read-compiler-record", "--binary", str(binpath), "-o", str(out)]
+    merged, extractors = _run_compiler_record_adapter(binary=binpath)
+    has_build = bool(
+        merged.compile_units
+        or merged.targets
+        or merged.toolchains
+        or merged.link_units
+        or merged.build_options
     )
-    assert result.exit_code == 0, result.output
-    pack = BuildSourcePack.load(out)
-    assert pack.build_evidence is not None  # option-only evidence not dropped
-    assert not pack.build_evidence.compile_units and not pack.build_evidence.toolchains
-    opts = {(o.key, o.value) for o in pack.build_evidence.build_options}
+    assert has_build  # option-only evidence not dropped
+    assert not merged.compile_units and not merged.toolchains
+    opts = {(o.key, o.value) for o in merged.build_options}
     assert ("define:_GLIBCXX_USE_CXX11_ABI", "0") in opts
+    assert any(e.name == "compiler_record" for e in extractors)

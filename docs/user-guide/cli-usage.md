@@ -98,21 +98,22 @@ signature/type-level ABI breaks.
 > binary itself, and `-v`/`--verbose` are all on their own reference page:
 > [Evidence, Build-Context, and Debug Flags](dump-compare-flags.md).
 
-### Companion commands, filtering, and specialized integrations
+### Related flags and pages
 
 Beyond the core `compare`/`dump` flow:
 
 - [Evidence, Build-Context, and Debug Flags](dump-compare-flags.md) — language
   mode, cross-compilation, `compile_commands.json` (L3), evidence packs
-  (L3/L4), debug artifact resolution, `--show-data-sources`.
-- [Companion Commands](companion-commands.md) — `surface-report`,
-  `graph compare`, `graph explain`, `pr-comment`: single-library structural
-  reports that never produce a compare verdict.
+  (L3/L4), debug artifact resolution, `--dry-run`.
 - [Output Formats](output-formats.md) — `--show-only` filtering, `--stat`,
   `--report-mode leaf`, `--show-impact`, redundancy filtering, SARIF/JUnit
   output, evidence-tier confidence, JSON schema.
-- [Debian Symbols File Integration](debian-symbols.md) — generate/validate/diff
-  `dpkg-gensymbols`-style symbols files.
+- `--used-by`/`--required-symbol(s)` on `compare` scope the comparison to an
+  application's actual imports or a plugin host's required entrypoints — see
+  [Application Compatibility](appcompat.md) and [Plugin Systems](plugin-systems.md).
+- Generating/validating/diffing Debian `dpkg-gensymbols`-style symbols files is
+  a Python API only now (`abicheck.debian_symbols`), not a CLI subcommand — see
+  [Debian Symbols File Integration](debian-symbols.md).
 
 The `--profile` shortcut and severity configuration below are core to every
 `compare` invocation, so they stay on this page.
@@ -149,7 +150,7 @@ not a straitjacket.
 | Profile | Expands to | Use when |
 |---------|-----------|----------|
 | `ci-gate` | `--depth headers --format review --exit-code-scheme severity` | Blocking a PR in CI |
-| `release` | `--depth full --format markdown --recommend` | Deciding a version bump at release time |
+| `release` | `--depth source --format markdown --recommend` | Deciding a version bump at release time |
 | `quick` | `--depth binary --stat` | A fast "just tell me" look |
 
 Precedence is **explicit flag > profile > project config > default**: a
@@ -274,7 +275,7 @@ abicheck deps tree /usr/bin/python3 --format json
 
 # Compare a binary's full stack across two sysroots
 abicheck deps compare usr/bin/myapp \
-    --baseline /rootfs/v1 --candidate /rootfs/v2
+    --old-root /rootfs/v1 --new-root /rootfs/v2
 
 # Include dependency info in dump/compare
 abicheck dump libfoo.so -H foo.h --follow-deps -o snap.json

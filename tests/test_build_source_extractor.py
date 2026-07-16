@@ -815,61 +815,120 @@ def test_external_extractor_missing_input_is_failed_not_crash(tmp_path):
     assert any("build_dir" in d for d in record.diagnostics)
 
 
-# ── CLI integration: `collect --extractor-manifest` ──────────────────
+# ── `_run_external_extractors` integration (formerly the `collect
+# --extractor-manifest` CLI command, deleted in 308880c per ADR-043; the
+# library functions below are unchanged and still fully functional) ─────────
 
 
-def _cli(args):
-    from click.testing import CliRunner
+def _run_collect(
+    tmp_path,
+    *,
+    manifests,
+    output=None,
+    binary=None,
+    build_dir=None,
+    source_root=None,
+    compile_db=None,
+    allow_build_query=False,
+    collection_mode="permissive",
+    verbose=False,
+):
+    """Reproduce the extractor-manifest slice of the deleted `collect` command.
 
-    from abicheck.cli import main
+    Mirrors the body of the old Click command (see git show 308880c --
+    abicheck/cli_buildsource.py) for exactly the parts these tests exercise:
+    run the external extractors, fold their build evidence, write the
+    resulting BuildSourcePack, then enforce strict mode. Returns
+    ``(pack, merged, extractors)``; raises ``click.ClickException`` if strict
+    mode rejects the run (matching the original CLI's exit-code != 0 path).
+    """
+    import datetime as _dt
 
-    return CliRunner().invoke(main, args)
+    from abicheck import __version__ as _abicheck_version
+    from abicheck.buildsource.build_evidence import BuildEvidence
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.cli_buildsource_helpers import (
+        _enforce_strict_mode,
+        _run_external_extractors,
+    )
+
+    out = output if output is not None else tmp_path / "pack"
+    merged = BuildEvidence()
+    extractors: list[ExtractorRecord] = []
+    _run_external_extractors(
+        merged,
+        extractors,
+        manifests=manifests,
+        pack_root=out,
+        binary=binary,
+        build_dir=build_dir,
+        source_root=source_root,
+        compile_db=compile_db,
+        allow_build_query=allow_build_query,
+        collection_mode=collection_mode,
+        verbose=verbose,
+    )
+    pack = BuildSourcePack.empty(
+        out,
+        abicheck_version=_abicheck_version,
+        created_at=_dt.datetime.now(_dt.timezone.utc).isoformat(),
+    )
+    pack.manifest.extractors = extractors
+    has_build = bool(
+        merged.compile_units
+        or merged.targets
+        or merged.toolchains
+        or merged.link_units
+        or merged.build_options
+    )
+    if has_build:
+        pack.build_evidence = merged
+    pack.write()
+
+    _enforce_strict_mode(extractors, merged, collection_mode)
+    return pack, merged, extractors
 
 
 def test_cli_registers_external_extractor_and_folds_build_evidence(tmp_path):
     manifest = _dump(tmp_path, _tool_manifest_dict(name="cli-fake"), name="cli.yaml")
     out = tmp_path / "pack"
-    result = _cli(["collect", "--extractor-manifest", str(manifest), "-o", str(out)])
-    assert result.exit_code == 0, result.output
+    pack, merged, extractors = _run_collect(tmp_path, manifests=(manifest,), output=out)
+    rec = next(e for e in extractors if e.name == "cli-fake")
+    assert rec.status == "ok"
+    assert rec.command_hash.startswith("sha256:")
+    # Build evidence was folded into the L3 merge, both in-memory and on disk.
+    assert merged.compile_units
     data = json.loads((out / "manifest.json").read_text())
-    rec = next(e for e in data["extractors"] if e["name"] == "cli-fake")
-    assert rec["status"] == "ok"
-    assert rec["command_hash"].startswith("sha256:")
-    # Build evidence was folded into the L3 merge.
+    assert next(e for e in data["extractors"] if e["name"] == "cli-fake")["status"] == "ok"
     assert json.loads((out / "build" / "build_evidence.json").read_text())["compile_units"]
 
 
 def test_cli_action_ceiling_skips_in_permissive_mode(tmp_path):
     manifest = _dump(tmp_path, _tool_manifest_dict(name="cli-fake", action="query_build_system"), name="q.yaml")
     out = tmp_path / "pack"
-    result = _cli(["collect", "--extractor-manifest", str(manifest), "-o", str(out)])
-    assert result.exit_code == 0, result.output  # permissive: skipped, not fatal
-    data = json.loads((out / "manifest.json").read_text())
-    rec = next(e for e in data["extractors"] if e["name"] == "cli-fake")
-    assert rec["status"] == "skipped"
+    # permissive: skipped, not fatal (no exception raised)
+    _pack, _merged, extractors = _run_collect(tmp_path, manifests=(manifest,), output=out)
+    rec = next(e for e in extractors if e.name == "cli-fake")
+    assert rec.status == "skipped"
 
 
 def test_cli_action_ceiling_allowed_with_flag(tmp_path):
     manifest = _dump(tmp_path, _tool_manifest_dict(name="cli-fake", action="query_build_system"), name="q2.yaml")
     out = tmp_path / "pack"
-    result = _cli(
-        ["collect", "--extractor-manifest", str(manifest), "--allow-build-query", "-o", str(out)]
+    _pack, _merged, extractors = _run_collect(
+        tmp_path, manifests=(manifest,), output=out, allow_build_query=True
     )
-    assert result.exit_code == 0, result.output
-    data = json.loads((out / "manifest.json").read_text())
-    rec = next(e for e in data["extractors"] if e["name"] == "cli-fake")
-    assert rec["status"] == "ok"
+    rec = next(e for e in extractors if e.name == "cli-fake")
+    assert rec.status == "ok"
 
 
 def test_cli_bad_manifest_recorded_and_permissive_continues(tmp_path):
     bad = tmp_path / "bad.yaml"
     bad.write_text("- not a mapping\n")
     out = tmp_path / "pack"
-    result = _cli(["collect", "--extractor-manifest", str(bad), "-o", str(out)])
-    assert result.exit_code == 0, result.output
-    data = json.loads((out / "manifest.json").read_text())
-    rec = next(e for e in data["extractors"] if e["name"].startswith("external:"))
-    assert rec["status"] == "failed"
+    _pack, _merged, extractors = _run_collect(tmp_path, manifests=(bad,), output=out)
+    rec = next(e for e in extractors if e.name.startswith("external:"))
+    assert rec.status == "failed"
 
 
 def test_cli_permissive_continues_on_failed_extractor(tmp_path):
@@ -880,13 +939,10 @@ def test_cli_permissive_continues_on_failed_extractor(tmp_path):
     }
     manifest = _dump(tmp_path, data, name="fail.yaml")
     out = tmp_path / "pack"
-    result = _cli(["collect", "--extractor-manifest", str(manifest), "-o", str(out)])
-    assert result.exit_code == 0, result.output  # permissive: failure is non-fatal
-    rec = next(
-        e for e in json.loads((out / "manifest.json").read_text())["extractors"]
-        if e["name"] == "cli-fail"
-    )
-    assert rec["status"] == "failed"
+    # permissive: failure is non-fatal (no exception raised)
+    _pack, _merged, extractors = _run_collect(tmp_path, manifests=(manifest,), output=out)
+    rec = next(e for e in extractors if e.name == "cli-fail")
+    assert rec.status == "failed"
 
 
 def test_cli_malformed_build_evidence_is_failed_not_crash(tmp_path):
@@ -904,13 +960,9 @@ def test_cli_malformed_build_evidence_is_failed_not_crash(tmp_path):
     }
     manifest = _dump(tmp_path, data, name="malformed.yaml")
     out = tmp_path / "pack"
-    result = _cli(["collect", "--extractor-manifest", str(manifest), "-o", str(out)])
-    assert result.exit_code == 0, result.output
-    rec = next(
-        e for e in json.loads((out / "manifest.json").read_text())["extractors"]
-        if e["name"] == "cli-malformed"
-    )
-    assert rec["status"] == "failed"
+    _pack, _merged, extractors = _run_collect(tmp_path, manifests=(manifest,), output=out)
+    rec = next(e for e in extractors if e.name == "cli-malformed")
+    assert rec.status == "failed"
 
 
 def test_cli_malformed_later_output_merges_nothing(tmp_path):
@@ -942,14 +994,11 @@ def test_cli_malformed_later_output_merges_nothing(tmp_path):
     }
     manifest = _dump(tmp_path, data, name="multi.yaml")
     out = tmp_path / "pack"
-    result = _cli(["collect", "--extractor-manifest", str(manifest), "-o", str(out)])
-    assert result.exit_code == 0, result.output
-    rec = next(
-        e for e in json.loads((out / "manifest.json").read_text())["extractors"]
-        if e["name"] == "cli-multi"
-    )
-    assert rec["status"] == "failed"
+    _pack, merged, extractors = _run_collect(tmp_path, manifests=(manifest,), output=out)
+    rec = next(e for e in extractors if e.name == "cli-multi")
+    assert rec.status == "failed"
     # The good output's evidence must not have leaked into the merged L3 facts.
+    assert not merged.compile_units
     assert not (out / "build" / "build_evidence.json").exists()
 
 
@@ -968,17 +1017,13 @@ def test_cli_non_object_build_evidence_is_failed_not_crash(tmp_path):
     }
     manifest = _dump(tmp_path, data, name="nonobj.yaml")
     out = tmp_path / "pack"
-    result = _cli(["collect", "--extractor-manifest", str(manifest), "-o", str(out)])
-    assert result.exit_code == 0, result.output
-    rec = next(
-        e for e in json.loads((out / "manifest.json").read_text())["extractors"]
-        if e["name"] == "cli-nonobj"
-    )
-    assert rec["status"] == "failed"
+    _pack, _merged, extractors = _run_collect(tmp_path, manifests=(manifest,), output=out)
+    rec = next(e for e in extractors if e.name == "cli-nonobj")
+    assert rec.status == "failed"
 
 
 def test_cli_source_root_placeholder_supplied(tmp_path):
-    # A manifest using {source_root} works when --source-root is provided.
+    # A manifest using {source_root} works when source_root is provided.
     script = (
         "import json,sys,os;root=sys.argv[1];out=sys.argv[2];"
         "os.makedirs(os.path.dirname(out),exist_ok=True);"
@@ -999,15 +1044,11 @@ def test_cli_source_root_placeholder_supplied(tmp_path):
     src = tmp_path / "src"
     src.mkdir()
     out = tmp_path / "pack"
-    result = _cli(
-        ["collect", "--extractor-manifest", str(manifest), "--source-root", str(src), "-o", str(out)]
+    _pack, _merged, extractors = _run_collect(
+        tmp_path, manifests=(manifest,), output=out, source_root=src
     )
-    assert result.exit_code == 0, result.output
-    rec = next(
-        e for e in json.loads((out / "manifest.json").read_text())["extractors"]
-        if e["name"] == "cli-srcroot"
-    )
-    assert rec["status"] == "ok"
+    rec = next(e for e in extractors if e.name == "cli-srcroot")
+    assert rec.status == "ok"
 
 
 def test_cli_failed_extractor_does_not_pollute_pack_artifacts(tmp_path):
@@ -1028,8 +1069,7 @@ def test_cli_failed_extractor_does_not_pollute_pack_artifacts(tmp_path):
     }
     manifest = _dump(tmp_path, data, name="poll.yaml")
     out = tmp_path / "pack"
-    r1 = _cli(["collect", "--extractor-manifest", str(manifest), "-o", str(out)])
-    assert r1.exit_code == 0, r1.output
+    _run_collect(tmp_path, manifests=(manifest,), output=out)
     pack = BuildSourcePack.load(out)
     rec = next(e for e in pack.manifest.extractors if e.name == "polluter")
     assert rec.status == "failed"
@@ -1042,8 +1082,9 @@ def test_cli_failed_extractor_does_not_pollute_pack_artifacts(tmp_path):
 
 
 def test_cli_unsupported_output_kind_is_failed(tmp_path):
-    # A manifest declaring a source_abi/source_graph_summary output (which the
-    # CLI cannot fold yet) must be recorded failed, not silently dropped (Codex P2).
+    # A manifest declaring a source_abi/source_graph_summary output (which
+    # collection cannot fold yet) must be recorded failed, not silently dropped
+    # (Codex P2).
     script = (
         "import json,sys,os;p=sys.argv[1];os.makedirs(os.path.dirname(p),exist_ok=True);"
         "json.dump({'schema_version':1},open(p,'w'))"
@@ -1055,16 +1096,13 @@ def test_cli_unsupported_output_kind_is_failed(tmp_path):
     }
     manifest = _dump(tmp_path, data, name="l4.yaml")
     out = tmp_path / "pack"
-    result = _cli(["collect", "--extractor-manifest", str(manifest), "-o", str(out)])
-    assert result.exit_code == 0, result.output  # permissive: recorded, not fatal
-    rec = next(
-        e for e in json.loads((out / "manifest.json").read_text())["extractors"]
-        if e["name"] == "cli-l4"
-    )
-    assert rec["status"] == "failed"
-    assert "source_abi" in rec["detail"]
+    # permissive: recorded, not fatal (no exception raised)
+    _pack, _merged, extractors = _run_collect(tmp_path, manifests=(manifest,), output=out)
+    rec = next(e for e in extractors if e.name == "cli-l4")
+    assert rec.status == "failed"
+    assert "source_abi" in rec.detail
     # Its purged output must not linger in the ledger row's artifact list (Codex P2).
-    assert rec.get("artifacts", []) == []
+    assert rec.artifacts == []
 
 
 def test_ledger_command_covers_collect_and_normalize(tmp_path):
@@ -1092,18 +1130,25 @@ def test_ledger_command_covers_collect_and_normalize(tmp_path):
 def test_cli_strict_mode_fails_on_skipped_extractor(tmp_path):
     # A requested manifest gated out by the action ceiling is 'skipped'; under
     # strict mode the requested evidence is absent, so the run must fail (Codex P2).
+    import click
+
     manifest = _dump(tmp_path, _tool_manifest_dict(name="cli-gated", action="query_build_system"), name="gated.yaml")
     out = tmp_path / "pack"
-    result = _cli(
-        ["collect", "--extractor-manifest", str(manifest), "--collection-mode", "strict", "-o", str(out)]
-    )
-    assert result.exit_code != 0
-    assert "strict collection mode" in result.output
-    # Strict failure must not first print a contradictory success line.
-    assert "Evidence pack written" not in result.output
+    with pytest.raises(click.ClickException, match="strict collection mode") as excinfo:
+        _run_collect(tmp_path, manifests=(manifest,), output=out, collection_mode="strict")
+    # `_enforce_strict_mode` is only reached (and only raises) *after* the pack
+    # has already been written by `_run_collect` — the original CLI's ordering
+    # (`pack.write()` before `_enforce_strict_mode`) meant a strict failure never
+    # first echoed a contradictory "Evidence pack written" success line, because
+    # that message came from `_echo_collection_summary`, which the CLI called
+    # only *after* `_enforce_strict_mode` succeeded — i.e. never on this path.
+    assert (out / "manifest.json").is_file()
+    assert "cli-gated" in str(excinfo.value)
 
 
 def test_cli_strict_mode_fails_on_broken_extractor(tmp_path):
+    import click
+
     data = {
         "name": "cli-broken",
         "commands": {"collect": [sys.executable, "-c", "import sys; sys.exit(2)"]},
@@ -1111,8 +1156,7 @@ def test_cli_strict_mode_fails_on_broken_extractor(tmp_path):
     }
     manifest = _dump(tmp_path, data, name="broken-cli.yaml")
     out = tmp_path / "pack"
-    result = _cli(
-        ["collect", "--extractor-manifest", str(manifest), "--collection-mode", "strict", "-o", str(out)]
-    )
-    assert result.exit_code != 0
-    assert "strict collection mode" in result.output
+    with pytest.raises(click.ClickException, match="strict collection mode") as excinfo:
+        _run_collect(tmp_path, manifests=(manifest,), output=out, collection_mode="strict")
+    assert (out / "manifest.json").is_file()
+    assert "cli-broken" in str(excinfo.value)

@@ -2,7 +2,21 @@
 
 `abicheck` uses different exit codes for each command family.
 
-**Why they differ:** `compare` is the native interface — `0/2/4` by verdict (or `0/1/2/4` severity-aware), with invalid invocations exiting `64` so a usage error is never mistaken for an ABI verdict. `compat` mirrors `abi-compliance-checker` exit codes (0/1/2) so existing ABICC CI scripts work without changes.
+**Why they differ:** `compare` is the native interface — `0/2/4` by verdict (or `0/1/2/4` severity-aware), with invalid invocations exiting `64` so a usage error is never mistaken for an ABI verdict. `compat` mirrors `abi-compliance-checker` exit codes (0/1/2) so existing ABICC CI scripts work without changes. `scan` and `deps` have their own narrower contracts, documented below.
+
+## Commands removed in the ADR-043 CLI reset
+
+`appcompat` and `plugin-check` are gone as standalone commands; their scoping
+folded into `compare` itself — see
+[Application- and plugin-scoped comparisons](#application-and-plugin-scoped-comparisons-compare-used-by-required-symbol)
+below. `baseline` (the push/pull/list/delete registry), `debian-symbols`,
+`collect`, `merge`, `inputs validate`, and `inputs compact` were removed
+outright with no CLI replacement — validating a build-emitted
+`abicheck_inputs/` pack now happens automatically whenever the pack is
+consumed, and the `debian-symbols`/`collect`/`merge` library functions remain
+available for programmatic (Python API) use only. None of these have their
+own exit codes in the current CLI, so they no longer appear in the tables
+below.
 
 ---
 
@@ -124,35 +138,51 @@ scheme-independent CI behaviour.
 ## `abicheck scan`
 
 The one-shot source-intelligence scan has its own contract (it may compare
-against a `--baseline` and adds a budget guard):
+`ARTIFACT` against `--against` and adds a budget guard). `--against` is the
+only thing that selects the mode: omit it and `scan` runs a one-build
+audit/hygiene/source-consistency scan only; pass it and `scan` also compares
+`ARTIFACT` against it — there is no separate `--audit` flag:
 
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | Compatible (or advisory-only findings) |
 | `2` | Source-level / API break (incl. `API_BREAK` cross-source findings) |
-| `4` | ABI break (from the `--baseline` comparison) |
+| `4` | ABI break (from the `--against` comparison) |
 | `5` | `--budget` overflow — the time guard tripped (scope is never silently shrunk) |
+| `64` | Invalid invocation (bad arguments/options) |
 
 > Exit `5` is unique to `scan`: `--budget 15m` **fails** the run rather than
-> quietly dropping evidence. With `--estimate` (dry-run cost probe) `scan` always
-> exits `0`.
+> quietly dropping evidence. Use `--dry-run` to preview the audit checks and
+> (if `--against` is given) the comparison that would run, plus the projected
+> per-layer cost, without scanning — like every command's `--dry-run` it only
+> ever exits `0`/`1`/`64`, never a verdict code; see
+> [`--dry-run`](#-dry-run-dump-compare-scan-deps-tree-deps-compare) below.
 
 ---
 
-## `abicheck appcompat`
+## Application- and plugin-scoped comparisons (`compare --used-by`/`--required-symbol`)
 
-Uses the same exit codes as `compare`:
+The standalone `appcompat` and `plugin-check` commands are gone (ADR-043).
+Their scoping now folds into `compare` itself:
 
-| Exit code | Meaning |
-|-----------|---------|
-| `0` | `COMPATIBLE` or `NO_CHANGE` — application is safe with the new library |
-| `1` | Tool/runtime error (tool failure, invalid input, or unexpected exception) |
-| `2` | `API_BREAK` — source-level break affecting app's symbols |
-| `4` | `BREAKING` — binary ABI break or missing symbols |
+- **`compare --used-by APP`** (repeatable) — folds `appcompat`. `APP` is a
+  real application binary; its actual imports/required symbol versions scope
+  the comparison. `OLD`/`NEW` must be real library binaries (not JSON
+  snapshots). Mutually exclusive with `--required-symbol`/`--required-symbols`.
+- **`compare --required-symbol SYM`** (repeatable) / **`--required-symbols
+  FILE`** — folds `plugin-check`. Scopes the comparison to an explicit
+  dlopen/dlsym entrypoint contract instead of the full diff. Mutually
+  exclusive with `--used-by`.
 
-> **`BREAKING` (exit 4)** is also returned when the application requires symbols or
-> ELF version tags that are absent from the new library — even if the library
-> diff itself is compatible — because the application would fail to load.
+The full library comparison still runs once; **the worst app/plugin-scoped
+result becomes the primary verdict/exit code**, with the full verdict and
+unrelated changes kept as informational context. There is no separate
+exit-code scheme for this scoping — it uses exactly the `compare` codes
+documented above (legacy `0/2/4`, severity-aware `0/1/2/4`, `64` for a usage
+error). In particular, exit `4`/`BREAKING` is also the result when the
+application requires symbols or ELF version tags absent from the new
+library — even if the unscoped library diff is otherwise compatible —
+because the application would fail to load.
 
 ---
 
@@ -162,22 +192,35 @@ Uses the same exit codes as `compare`:
 |-----------|---------|
 | `0` | All dependencies resolved, all required symbols bound |
 | `1` | Missing dependencies or unresolved symbols (binary would fail to load) |
+| `64` | Invalid invocation (bad arguments/options) |
+
+`--dry-run` shows the resolved binary path and search order without
+resolving the dependency tree — see
+[`--dry-run`](#-dry-run-dump-compare-scan-deps-tree-deps-compare) below.
 
 ---
 
 ## `abicheck deps compare`
+
+Sysroot flags are **`--old-root`/`--new-root`** (default `/` for each —
+renamed from the old `--baseline`/`--candidate`).
 
 | Exit code | Verdict | Meaning |
 |-----------|---------|---------|
 | `0` | `PASS` | Binary loads and no harmful ABI changes |
 | `1` | `WARN` | Binary loads but ABI risk detected in dependencies |
 | `4` | `FAIL` | Load failure or binary ABI break in dependencies |
+| `64` | — | Invalid invocation (bad arguments/options) |
+
+`--dry-run` shows the old/new roots, resolved binary paths, and search order
+without running per-library ABI diffs — see
+[`--dry-run`](#-dry-run-dump-compare-scan-deps-tree-deps-compare) below.
 
 ### CI gate patterns
 
 ```bash
 # Full-stack check: fail on FAIL, warn on WARN
-abicheck deps compare usr/bin/myapp --baseline /old-root --candidate /new-root
+abicheck deps compare usr/bin/myapp --old-root /old-root --new-root /new-root
 ret=$?
 [ $ret -eq 4 ] && echo "FAIL — load failure or ABI break" && exit 1
 [ $ret -eq 1 ] && echo "WARN — ABI risk detected" && exit 1
@@ -185,91 +228,11 @@ ret=$?
 echo "PASS"
 
 # Permissive: only fail on load failure / ABI break
-abicheck deps compare usr/bin/myapp --baseline /old-root --candidate /new-root
+abicheck deps compare usr/bin/myapp --old-root /old-root --new-root /new-root
 ret=$?
 [ $ret -eq 4 ] && exit 1   # FAIL only; WARN (exit 1) treated as OK
 [ $ret -ne 0 ] && [ $ret -ne 1 ] && exit 1   # fail closed on non-verdict errors
 exit 0
-```
-
----
-
-## `abicheck inputs validate`
-
-Validates a Flow-2 `abicheck_inputs/` pack (ADR-038 C.8) before it is folded
-into an authoritative baseline.
-
-| Exit code | Meaning |
-|-----------|---------|
-| `0` | Clean — no issues found |
-| `1` | Warnings only (e.g. an incomplete mandatory fact family, no fact-set identity reported) |
-| `2` | Validation errors (e.g. a fact-set version mismatch, duplicate TU identities) |
-| `64` | `PACK` is not a readable Flow-2 pack (usage error) |
-
----
-
-## `abicheck inputs compact`
-
-Merges a Flow-2 `abicheck_inputs/` pack's many per-TU `source_facts/*.jsonl`
-files into one, optionally gzip-compressed (ADR-038 C.9). A post-build size/
-transfer optimization; never changes the decoded facts a later `merge`/
-`inputs validate` sees. A malformed or unreadable source-fact file anywhere
-in the pack skips compaction entirely (no partial merge published) rather
-than risk duplicating TUs on the next scan — the pack is left unchanged.
-
-| Exit code | Meaning |
-|-----------|---------|
-| `0` | Success |
-| `1` | Compaction skipped — a lossy read (see the printed notes); pack unchanged |
-| `64` | `PACK` is not a readable Flow-2 pack (usage error) |
-
----
-
-## `abicheck debian-symbols`
-
-### `debian-symbols generate`
-
-| Exit code | Meaning |
-|-----------|---------|
-| `0` | Symbols file generated successfully |
-| `1` | Error (binary not found, ELF parse error, I/O failure) |
-
-### `debian-symbols validate`
-
-| Exit code | Meaning |
-|-----------|---------|
-| `0` | Symbols file matches the binary (all required symbols present) |
-| `2` | Mismatch — one or more required symbols are missing from the binary |
-
-> Symbols tagged `(optional)` are not required — their absence does not cause
-> exit code `2`. This matches `dpkg-gensymbols` behaviour.
-
-New symbols found in the binary but not listed in the symbols file are reported
-in the output but do **not** change the exit code.
-
-### `debian-symbols diff`
-
-| Exit code | Meaning |
-|-----------|---------|
-| `0` | Diff computed successfully (regardless of whether changes were found) |
-| `1` | Error (file not found, parse error) |
-
-### CI gate patterns
-
-```bash
-# Update symbols file when library changes
-abicheck debian-symbols generate ./build/libfoo.so \
-    --package libfoo1 --version "$(dpkg-parsechangelog -SVersion)" \
-    -o debian/libfoo1.symbols
-
-# Validate symbols file in CI (fail on missing symbols)
-abicheck debian-symbols validate ./build/libfoo.so debian/libfoo1.symbols
-ret=$?
-[ $ret -eq 2 ] && echo "FAIL — symbols file needs updating" && exit 1
-echo "OK — symbols file matches binary"
-
-# Diff before/after to see what changed
-abicheck debian-symbols diff old.symbols new.symbols
 ```
 
 ---
@@ -306,31 +269,68 @@ In `abicheck compat`, non-verdict failures are further classified where possible
 
 > Note: classification is best-effort and context-dependent; `API_BREAK` remains `2`.
 
+---
+
+## `--dry-run` (`dump`, `compare`, `scan`, `deps tree`, `deps compare`)
+
+Every one of these five commands accepts `--dry-run`: it resolves and
+validates the invocation — classifies inputs, discovers config, and (per
+command) shows which data layers (L0–L5) are available, the audit checks and
+comparison that would run, or the resolved binary path/search order — and
+prints a report **without** doing the real work. It is cheap and read-only:
+no compiler invocation, no build-system query, no network access, and it
+writes nothing — passing `-o`/`--output` together with `--dry-run` is a
+usage error.
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | Resolved cleanly — ok to proceed |
+| `1` | Blocked — the invocation would fail once actually run |
+| `64` | Usage error (e.g. `-o`/`--output` passed together with `--dry-run`) |
+
+**`--dry-run` never returns a verdict code.** It exits `0`/`1`/`64` only —
+never `2`, `4`, `5`, or `8`, even on a command whose real run could produce
+one of those.
+
+---
+
 ## Summary table
 
-| Verdict / State | `compare` exit (legacy) | `compare` exit (severity) | `appcompat` exit | `deps tree` exit | `deps compare` exit | `debian-symbols validate` exit | `compat` exit |
-|-----------------|------------------------|--------------------------|-----------------|-------------|-------------------|-------------------------------|---------------|
-| `NO_CHANGE` / `PASS` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
-| `COMPATIBLE` | `0` | `0` | `0` | — | — | — | `0` |
-| `COMPATIBLE_WITH_RISK` | `0` | `0`–`2`* | `0` | — | — | — | `0` |
-| Additions only | `0` | `0`–`1`* | n/a | — | — | — | n/a |
-| Quality issues only | `0` | `0`–`1`* | n/a | — | — | — | n/a |
-| `WARN` (ABI risk) | — | — | — | — | `1` | — | — |
-| `API_BREAK` | `2` | `0`–`2`* | `2` | — | — | — | `2` |
-| `BREAKING` / `FAIL` | `4` | `4` | `4` | — | `4` | — | `1` |
-| Missing symbols | — | — | — | — | — | `2` | — |
-| Load failure | — | — | — | `1` | `4` | — | — |
-| Invalid invocation / tool error | `64`† | `64`† | `1` | — | — | `1` | `3/4/5/6/7/8/10/11` |
+| Verdict / State | `compare` exit (legacy) | `compare` exit (severity) | `scan` exit | `deps tree` exit | `deps compare` exit | `compat` exit |
+|-----------------|------------------------|--------------------------|-------------|-------------------|----------------------|---------------|
+| `NO_CHANGE` / `PASS` / compatible | `0` | `0` | `0` | `0` | `0` | `0` |
+| `COMPATIBLE` | `0` | `0` | `0`‡ | — | — | `0` |
+| `COMPATIBLE_WITH_RISK` | `0` | `0`–`2`* | `0`‡ | — | — | `0` |
+| Additions only | `0` | `0`–`1`* | `0`‡ | — | — | n/a |
+| Quality issues only | `0` | `0`–`1`* | `0`‡ | — | — | n/a |
+| `WARN` (ABI risk) | — | — | — | — | `1` | — |
+| `API_BREAK` | `2` | `0`–`2`* | `2` | — | — | `2` |
+| `BREAKING` / `FAIL` | `4` | `4` | `4` | — | `4` | `1` |
+| `--budget` overflow | — | — | `5` | — | — | — |
+| Missing dependencies/symbols | — | — | — | `1` | — | — |
+| Load failure | — | — | — | — | `4` | — |
+| Invalid invocation / tool error | `64`† | `64`† | `64`† | `64`† | `64`† | `3/4/5/6/7/8/10/11` |
+
+App/plugin-scoped comparisons (`compare --used-by`/`--required-symbol`) reuse
+the `compare` columns above — see
+[Application- and plugin-scoped comparisons](#application-and-plugin-scoped-comparisons-compare-used-by-required-symbol).
+`--dry-run` (on `dump`/`compare`/`scan`/`deps tree`/`deps compare`) reuses
+none of these rows — it always exits `0`/`1`/`64`; see
+[`--dry-run`](#-dry-run-dump-compare-scan-deps-tree-deps-compare) above.
 
 \* Severity exit codes depend on the configuration. For example, with
 `--severity-addition error`, additions exit `1`; with `--severity-preset
 info-only`, everything exits `0`.
 
-† `compare` (and `appcompat`) exit `64` for an invalid invocation — bad
-arguments/options or an unreadable/unrecognised input — deliberately outside the
-`0/2/4` verdict space so a usage error is never mistaken for an ABI verdict. To
+† Every command exits `64` for an invalid invocation — bad arguments/options
+or an unreadable/unrecognised input — deliberately outside the verdict/result
+space so a usage error is never mistaken for a compatibility result. To
 reliably distinguish verdicts from errors in a script, use `--format json` and
-read the `verdict` field.
+read the `verdict` field where available.
+
+‡ `scan`'s own scheme collapses every compatible/advisory-only state (no
+break, deployment risk, additions, quality signals) to exit `0` — read
+`--format json` if your pipeline needs to distinguish them.
 
 ---
 

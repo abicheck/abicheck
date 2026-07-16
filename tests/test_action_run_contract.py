@@ -46,7 +46,7 @@ _CMD_FLAG_RE = re.compile(r'CMD\+=\((--[a-z0-9-]+)')
 # compare) — capture one or two bare words (never a "$VAR" or a --flag).
 _CMD_SUBCMD_RE = re.compile(r'CMD\+=\(([a-z][a-z-]*(?:\s+[a-z][a-z-]*)?)\)')
 _KNOWN_SUBCOMMANDS = {
-    "dump", "compare", "appcompat", "deps tree", "deps compare", "scan", "merge",
+    "dump", "compare", "deps tree", "deps compare", "scan",
 }
 
 
@@ -95,7 +95,10 @@ def _valid_flags(subcommand: str) -> set[str]:
 def test_run_sh_parses_into_known_subcommands() -> None:
     by_sub = _flags_by_subcommand()
     # Sanity: we actually found the command branches (not a broken parse).
-    assert {"dump", "compare", "scan", "merge", "appcompat", "deps tree"} <= set(by_sub)
+    # `merge`/`appcompat` modes are gone (ADR-043: folded into compare
+    # --used-by / automatic dump/compare ingestion); `deps tree` covers the
+    # dump mode's stack-check/deps dispatch.
+    assert {"dump", "compare", "scan", "deps tree"} <= set(by_sub)
     assert by_sub["scan"], "no flags parsed for scan — parser drifted"
 
 

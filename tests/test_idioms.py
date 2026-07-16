@@ -420,20 +420,6 @@ def _opaque_snap() -> AbiSnapshot:
     )
 
 
-def test_surface_report_idioms_text(tmp_path) -> None:
-    from click.testing import CliRunner
-
-    from abicheck.cli import main
-    from abicheck.serialization import save_snapshot
-
-    p = tmp_path / "libctx.abi.json"
-    save_snapshot(_opaque_snap(), p)
-    result = CliRunner().invoke(main, ["surface-report", str(p), "--idioms"])
-    assert result.exit_code == 0, result.output
-    assert "idioms recognised:" in result.output
-    assert "opaque_pointer" in result.output
-
-
 def test_pimpl_rejects_complete_pointee() -> None:
     # Wrapper holding a pointer to a *complete* type is not PIMPL (no hidden impl).
     snap = AbiSnapshot(
@@ -627,55 +613,12 @@ def test_virtual_dtor_base_not_flagged() -> None:
     )
 
 
-def test_surface_report_idioms_json(tmp_path) -> None:
-    import json as _json
-
-    from click.testing import CliRunner
-
-    from abicheck.cli import main
-    from abicheck.serialization import save_snapshot
-
-    p = tmp_path / "libctx.abi.json"
-    save_snapshot(_opaque_snap(), p)
-    result = CliRunner().invoke(
-        main, ["surface-report", str(p), "--idioms", "--format", "json"]
-    )
-    assert result.exit_code == 0, result.output
-    data = _json.loads(result.output)
-    assert "Ctx" in data["idioms"]
-    assert data["idioms"]["Ctx"][0]["idiom"] == "opaque_pointer"
-    assert data["idioms"]["Ctx"][0]["definition_hidden"] is True
-
-
-def test_surface_report_antipatterns_json(tmp_path) -> None:
-    import json as _json
-
-    from click.testing import CliRunner
-
-    from abicheck.cli import main
-    from abicheck.serialization import save_snapshot
-
-    snap = AbiSnapshot(
-        library="l",
-        version="1",
-        from_headers=True,
-        functions=[
-            Function(
-                name="sink",
-                mangled="_Z4sinkNSt6stringE",
-                return_type="void",
-                params=[Param(name="s", type="std::string", pointer_depth=0)],
-                visibility=Visibility.PUBLIC,
-            )
-        ],
-    )
-    p = tmp_path / "lib.abi.json"
-    save_snapshot(snap, p)
-    result = CliRunner().invoke(
-        main, ["surface-report", str(p), "--anti-patterns", "--format", "json"]
-    )
-    assert result.exit_code == 0, result.output
-    data = _json.loads(result.output)
-    assert any(
-        a["kind"] == "public_api_exposes_stl_by_value" for a in data["anti_patterns"]
-    )
+# `surface-report --idioms/--anti-patterns --format json` (deleted CLI
+# command, ADR-043) built its JSON payload by hand-shaping
+# `recognise_idioms()`/`detect_antipatterns()` output — that shaping code is
+# gone with the command, but the underlying detection is unchanged and
+# already covered directly above (opaque_pointer/definition_hidden via
+# `_tags()` in `test_opaque_pointer_requires_hidden_definition`; the
+# std::string-by-value antipattern via `_antipatterns()` in
+# `test_detect_stl_by_value_parameter`), so no CLI-level replacement test is
+# needed here.

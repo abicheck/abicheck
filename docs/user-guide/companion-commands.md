@@ -1,130 +1,104 @@
-# Companion Commands: Surface, Source-Graph, and PR-Comment Reports
+# Companion Commands: What Happened to Them
 
-These commands report on a single library's public surface, the L5 source
-graph, or an existing report — they never produce a compare verdict or affect
-the `compare` exit code.
-
-> Split out of [CLI Usage](cli-usage.md), which covers the core `dump`/
-> `compare` flow.
-
-## `surface-report` — public-surface structural metrics
-
-Emits descriptive structural facts about **one** library's public ABI surface
-(no diff): header→symbol coverage, undocumented-export ratio, type fan-in, and
-per-header cohesion. Purely descriptive — it never computes a verdict.
+Before the pre-1.0 CLI reset, abicheck shipped a wide set of standalone
+companion commands (`appcompat`, `plugin-check`, `baseline`, `collect`,
+`merge`, `debian-symbols`, `doctor`, `config`, `init`, `surface-report`,
+`graph compare`/`graph explain`, `pr-comment`, `suggest-suppressions`,
+`probe`). The CLI surface has since been narrowed to exactly five top-level
+commands:
 
 ```
-abicheck surface-report [OPTIONS] LIBRARY
+compare  Compare two ABI surfaces and report changes.
+compat   ABICC-compatible commands (drop-in replacement for abi-compliance-checker).
+deps     Inspect a binary's shared-library dependency stack.
+dump     Dump ABI snapshot of a shared library to JSON.
+scan     Deterministic source-intelligence scan (classify → always-on tier → level).
 ```
 
-`LIBRARY` is a shared library (ELF/PE/Mach-O) or an `.abi.json` snapshot.
+Some of the old companion functionality survives as a **command** (`deps
+tree`, `deps compare`, `compat check`/`compat dump`); some folded into a
+**flag** on `compare`; the rest is **gone with no CLI replacement**. This
+page is the map.
 
-| Flag | Value | Default | Purpose |
-|------|-------|---------|---------|
-| `-H` / `--header` | path (repeatable) | none | Public header file or directory (repeatable). Enables header-aware coverage metrics. |
-| `-I` / `--include` | path (repeatable) | none | Additional include directory passed to the header parser. |
-| `--format` | `text` \| `json` | `text` | Output format. |
-| `--top` | integer ≥ 1 | `10` | How many highest-fan-in types to list. |
-| `--idioms` / `--no-idioms` | flag | `--no-idioms` | Recognise and report API idioms (opaque pointer, PIMPL, handle, factory, create/destroy, callback). |
-| `--anti-patterns` / `--no-anti-patterns` | flag | `--no-anti-patterns` | Detect and report ABI anti-patterns (`std::` types crossed by value, polymorphic types with no virtual destructor). |
-| `--audit` / `--no-audit` | flag | `--no-audit` | Run the single-release hygiene audit (intra-version cross-source checks: accidental ABI surface, private-header leaks, unversioned exports, RTTI for internal types, …). No baseline needed; advisory only. |
-| `-o` / `--output` | path | stdout | Write report to a file. |
+## Still commands today
+
+| Command | What it does |
+|---|---|
+| [`deps tree`](#deps-tree) | Resolve one binary's dependency closure and symbol bindings. |
+| [`deps compare`](#deps-compare) | Diff a binary's full dependency stack across two environments (was `stack-check`). |
+| `compat check` / `compat dump` | ABICC-compatible drop-in replacement commands — see [Migrating from ABICC](from-abicc.md) if you're moving from `abi-compliance-checker`. |
+
+### `deps tree`
 
 ```bash
-# Structural metrics + idiom/anti-pattern report for one library's public surface
-abicheck surface-report libfoo.so -H include/ --idioms --anti-patterns
-
-# JSON output to a file
-abicheck surface-report libfoo.so -H include/ --format json -o surface.json
-
-# Single-release hygiene lint (no baseline)
-abicheck surface-report libfoo.so -H include/ --audit
+abicheck deps tree ./build/libfoo.so
+abicheck deps tree /usr/bin/myapp --format json -o deps.json
+abicheck deps tree ./app --sysroot /path/to/container/rootfs
 ```
 
-See [API Surface Intelligence](api-surface-intelligence.md) for what
-the surface metrics, idiom recognizers, and anti-pattern checks mean.
+Exit codes: `0` all dependencies resolved, `1` missing dependencies/symbols.
 
-## `graph compare` — structural source-graph diff
-
-Compares two L5 source-graph summaries and reports which nodes/edges entered or
-left the graph. The diff *explains and prioritizes* impact; it never, on its
-own, decides or suppresses an artifact-proven ABI break.
-
-```
-abicheck graph compare [OPTIONS] OLD NEW
-```
-
-`OLD` and `NEW` may each be a `graph/source_graph_summary.json` file or an
-evidence-pack directory produced by `collect --source-graph summary`.
-
-| Flag | Value | Default | Purpose |
-|------|-------|---------|---------|
-| `--format` | `text` \| `json` | `text` | Output format for the structural graph diff. |
+### `deps compare`
 
 ```bash
-# Diff two L5 source-graph summaries (from `collect --source-graph`)
-abicheck graph compare old-pack/ new-pack/
+abicheck deps compare usr/bin/myapp --old-root /old-root --new-root /new-root
+abicheck deps compare usr/lib/libfoo.so.1 \
+  --old-root ./image-v1 --new-root ./image-v2 --format json
 ```
 
-## `graph explain` — localize a symbol through the source graph
+`--old-root`/`--new-root` (each default `/`) point at the two sysroots to
+compare `BINARY` across. Exit codes: `0` PASS, `1` WARN (loads but ABI risk),
+`4` FAIL (load failure or binary ABI break).
 
-Given an exported symbol (directly via `--symbol`, or resolved from a `compare`
-JSON report finding via `--finding-id`), walks the graph to show what produced
-and reaches it: exporting target, source declaration(s), declaring public
-header(s), ABI-relevant build option(s), and static callees. This explains and
-prioritizes; it is never an ABI verdict.
+## Folded into `compare` flags
 
-```
-abicheck graph explain [OPTIONS]
-```
+Two of the old standalone commands became scoping flags on `compare` instead
+of separate commands — the full library comparison still runs once, and the
+worst app/plugin-scoped result becomes the primary verdict/exit code, with
+the full verdict kept as informational context.
 
-| Flag | Value | Default | Purpose |
-|------|-------|---------|---------|
-| `--sources` | path (**required**) | — | Source/graph pack directory (or a `source_graph_summary.json`) to explain through. |
-| `--symbol` | text | empty | Exported (mangled) binary symbol to localize. |
-| `--report` | path | none | A `compare --format json` report; with `--finding-id`, resolves the symbol from it. |
-| `--finding-id` | text | empty | Index (or symbol) of a finding in `--report` to localize. |
-| `--format` | `text` \| `json` | `text` | Output format for the localization result. |
+| Old command | New flag | What it scopes to |
+|---|---|---|
+| `appcompat` | `compare --used-by APP` (repeatable) | An application binary's actual imports/required symbol versions. Mutually exclusive with `--required-symbol`/`--required-symbols`. |
+| `plugin-check` | `compare --required-symbol SYM` (repeatable) / `--required-symbols FILE` (one symbol per line, `#` comments ignored) | An explicit plugin-host entrypoint contract instead of the full diff. Mutually exclusive with `--used-by`. |
 
 ```bash
-# Localize a specific symbol
-abicheck graph explain --sources new-pack/ --symbol _ZN3foo3barEv
+# Was: abicheck appcompat --app myapp old.so new.so
+abicheck compare old.so new.so -H include/ --used-by build/myapp
 
-# Localize a compare finding by index (which TU/include chain produced it)
-abicheck graph explain --report report.json --finding-id 0 --sources new-pack/
+# Was: abicheck plugin-check --required-symbol foo_init old.so new.so
+abicheck compare old.so new.so -H include/ --required-symbol foo_init
 ```
 
-See [Build & Source Packs](../concepts/build-source-data.md) for producing the
-packs that `graph compare` / `graph explain` consume.
+See [Application Compatibility](appcompat.md) and [Plugin & Host
+Systems](plugin-systems.md) for the full guides — both are being updated in
+parallel to reflect this same reset; treat their command-line examples as
+the ones that matter, this page only summarizes the mapping.
 
-## `pr-comment` — render a sticky GitHub PR comment
+## Gone entirely — no CLI replacement
 
-Renders a sticky GitHub PR-comment body from a JSON report produced by
-`abicheck compare` or `abicheck appcompat` (`--format json`); `compare` also
-covers release/bundle comparisons on directory/package inputs. When `--on=never`,
-or `--on=changes` and the report has no changes, nothing is written (an empty
-`--output` file is produced) so the caller can skip posting.
+Running any of these now just fails with Click's normal "No such command"
+error. Where a library function survives for programmatic/Python API use,
+that's noted — none of these are documented as a public CLI path anymore.
 
-```
-abicheck pr-comment [OPTIONS] REPORT
-```
+| Deleted command | Status |
+|---|---|
+| `baseline` (registry group: push/pull/list/delete) | No replacement command. Use `scan --against OLD` for point-in-time comparisons, or keep JSON snapshots yourself (plain files, your own storage/naming convention). See [Baseline Management](baseline-management.md) (being updated in parallel). |
+| `collect`, `merge`, `recommend-collect-mode` | Gone from the CLI. `dump --sources`/`--build-info` auto-collects build/source evidence inline; `compare` auto-ingests each side's embedded build-source pack, or an out-of-band pack via `--build-info old=PATH`/`--build-info new=PATH` (auto-detects `abicheck_inputs/` packs too). Library functions survive for internal/programmatic use only. |
+| `debian-symbols` | No CLI replacement. Library functions still exist in `abicheck/debian_symbols.py` (`generate_symbols_file`, `validate_symbols`, `diff_symbols_files`, `parse_symbols_file`, etc.) for programmatic/Python API use only. See [Debian Symbols](debian-symbols.md) (being updated in parallel). |
+| `doctor` | No replacement command. |
+| `config` (scaffolding subcommand: `config validate`, `config show-effective`) | No replacement command. Config loading is strict now (unknown keys, wrong types, bad enum values are hard errors, exit `64`), so `validate` is less necessary; there is no `show-effective` equivalent. |
+| `init` | No replacement command — no more `.abicheck.yml` scaffolding generator. Write the file by hand; see [Config File Reference](../reference/config-file.md) for the schema/keys. |
+| `surface-report` | No replacement command. |
+| `graph compare` / `graph explain` | No replacement command. |
+| `pr-comment` | Moved off the public CLI. Now invoked only as `python -m abicheck.cli_pr_comment`, used internally by the GitHub Action — not a documented end-user command. |
+| `suggest-suppressions` | No replacement command. |
+| `probe` (`probe run`, etc.) | No replacement command. `compare --probe-matrix` still consumes a previously captured matrix snapshot file, but there's no CLI to *generate* one anymore. |
 
-`REPORT` is a JSON file from `abicheck compare` or `abicheck appcompat` run with
-`--format json` (release/bundle fan-out is handled by `compare` on directory/
-package inputs — there is no separate `compare-release` command).
+## Related pages
 
-| Flag | Value | Default | Purpose |
-|------|-------|---------|---------|
-| `--sha` | text | empty | Commit SHA being scanned (PR head). |
-| `--detail` | `summary` \| `standard` \| `full` | `standard` | How much per-change detail to include in the comment. |
-| `--on` | `always` \| `changes` \| `never` | `changes` | When to emit a comment body: always, only on changes, or never. |
-| `--run-label` | text | none | Run label shown in the footer, e.g. `run #128`. |
-| `--report-url` | text | none | URL of the full report/run, linked in the footer and used when the comment is condensed or truncated to fit GitHub's size limit. |
-| `--gate-api-break` | flag | off | Treat API/source breaks as breaking (mirror `fail-on-api-break`, which turns the check red on them). |
-| `-o` / `--output` | path | stdout | Write the comment markdown to a file. |
-
-```bash
-# Produce a JSON report, then render a PR-comment body from it
-abicheck compare old.json new.so -H include/ --format json -o report.json
-abicheck pr-comment report.json --sha "$GITHUB_SHA" -o comment.md
-```
+- [CLI Usage](cli-usage.md) — the core `dump`/`compare` flow
+- [Application Compatibility](appcompat.md) — `compare --used-by`
+- [Plugin & Host Systems](plugin-systems.md) — `compare --required-symbol(s)`
+- [Baseline Management](baseline-management.md) — storing/producing comparison baselines now that `baseline` is gone
+- [Debian Symbols](debian-symbols.md) — the surviving library-only API

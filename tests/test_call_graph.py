@@ -904,102 +904,76 @@ def _patch_extractor(monkeypatch, fake: _FakeExtractor) -> None:
     monkeypatch.setattr(cg, "ClangCallGraphExtractor", lambda **_k: fake)
 
 
-def test_collect_evidence_call_graph_automatic_with_source_abi_and_graph(
-    monkeypatch, tmp_path
-) -> None:
-    # No --call-graph flag: --source-abi + --source-graph summary together
-    # fold call edges in automatically (mirroring dump --sources).
+def _write_call_graph_source_tree(tmp_path):
     import json as _json
 
-    from click.testing import CliRunner
-
-    from abicheck.buildsource.pack import BuildSourcePack
-    from abicheck.cli import main
-
-    src = tmp_path / "foo.cpp"
-    src.write_text("int foo(){return 1;}\n")
-    cdb = tmp_path / "compile_commands.json"
-    cdb.write_text(
+    tree = tmp_path / "src"
+    tree.mkdir()
+    (tree / "foo.cpp").write_text("int foo(){return 1;}\n")
+    (tree / "compile_commands.json").write_text(
         _json.dumps(
             [
                 {
-                    "directory": str(tmp_path),
-                    "file": str(src),
-                    "command": f"c++ -c {src} -o foo.o",
+                    "directory": str(tree),
+                    "file": "foo.cpp",
+                    "arguments": ["c++", "-std=c++17", "-c", "foo.cpp"],
                 }
             ]
         )
     )
+    return tree
+
+
+def test_collect_evidence_call_graph_automatic_with_source_abi_and_graph(
+    monkeypatch, tmp_path
+) -> None:
+    # `collect --source-abi --source-graph summary` (no separate --call-graph
+    # flag existed even before the ADR-043 CLI reset deleted `collect`
+    # outright) folded call edges in automatically. The exact same automatic
+    # gate (inline.collect_inline_pack: with_call_graph = "L5" in layers and
+    # "L4" in layers) drives `dump --sources ... --depth source`, which is now
+    # the one public surface for L4+L5 collection — so this exercises that.
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+    from abicheck.serialization import load_snapshot
+
+    tree = _write_call_graph_source_tree(tmp_path)
     _patch_extractor(
         monkeypatch, _FakeExtractor(available=True, edges=[CallEdge("_Za", "_Zb")])
     )
 
-    out = tmp_path / "out.evidence"
+    out = tmp_path / "out.json"
     res = CliRunner().invoke(
         main,
-        [
-            "collect",
-            "--compile-db",
-            str(cdb),
-            "--source-abi",
-            "--source-graph",
-            "summary",
-            "-o",
-            str(out),
-        ],
+        ["dump", "--sources", str(tree), "--depth", "source", "-o", str(out)],
     )
     assert res.exit_code == 0, res.output
-    pack = BuildSourcePack.load(out)
-    assert pack.source_graph is not None
-    assert any(e.kind == "DECL_CALLS_DECL" for e in pack.source_graph.edges)
+    bs = load_snapshot(out).build_source
+    assert bs is not None and bs.source_graph is not None
+    assert any(e.kind == "DECL_CALLS_DECL" for e in bs.source_graph.edges)
 
 
 def test_collect_evidence_source_graph_alone_does_not_fold_call_graph(
     monkeypatch, tmp_path
 ) -> None:
-    # --source-graph summary WITHOUT --source-abi stays structural-only — the
-    # semantic passes are gated on L4 also being requested, exactly like
-    # dump --sources's own with_call_graph gate.
-    import json as _json
+    # An L5 graph collected WITHOUT L4 stays structural-only — the semantic
+    # passes are gated on L4 also being requested (with_call_graph = "L5" in
+    # layers and "L4" in layers, inline.collect_inline_pack). The public
+    # `--depth` ladder has no rung that requests L5 without L4 (that internal
+    # "graph-build" CI mode is not user-reachable per
+    # abicheck.buildsource.scan_levels.EvidenceDepth/USER_DEPTHS), so this
+    # drives collect_inline_pack directly with layers=("L3", "L5") instead of
+    # going through a CLI invocation that cannot express this state.
+    from abicheck.buildsource.inline import collect_inline_pack
 
-    from click.testing import CliRunner
-
-    from abicheck.buildsource.pack import BuildSourcePack
-    from abicheck.cli import main
-
-    src = tmp_path / "foo.cpp"
-    src.write_text("int foo(){return 1;}\n")
-    cdb = tmp_path / "compile_commands.json"
-    cdb.write_text(
-        _json.dumps(
-            [
-                {
-                    "directory": str(tmp_path),
-                    "file": str(src),
-                    "command": f"c++ -c {src} -o foo.o",
-                }
-            ]
-        )
-    )
+    tree = _write_call_graph_source_tree(tmp_path)
     _patch_extractor(
         monkeypatch, _FakeExtractor(available=True, edges=[CallEdge("_Za", "_Zb")])
     )
 
-    out = tmp_path / "out.evidence"
-    res = CliRunner().invoke(
-        main,
-        [
-            "collect",
-            "--compile-db",
-            str(cdb),
-            "--source-graph",
-            "summary",
-            "-o",
-            str(out),
-        ],
-    )
-    assert res.exit_code == 0, res.output
-    pack = BuildSourcePack.load(out)
+    pack = collect_inline_pack(sources=tree, build_info=None, layers=("L3", "L5"))
+    assert pack is not None
     assert pack.source_graph is not None
     assert not any(e.kind == "DECL_CALLS_DECL" for e in pack.source_graph.edges)
 

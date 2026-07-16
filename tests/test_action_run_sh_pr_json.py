@@ -25,7 +25,7 @@ the real file, don't hand-copy it" discipline as
 
 - If ``PR_JSON`` was already populated by the primary run (compare mode, a
   non-json primary format), it's used as-is — no copy, no rerun.
-- Otherwise (compare-release/appcompat, which don't build CMD with
+- Otherwise (compare-release, which doesn't build CMD with
   --secondary-format), the original reuse-if-json-else-rerun logic applies
   unchanged.
 """
@@ -133,7 +133,7 @@ CMD=(abicheck compare old.json new.json --format markdown -o "$TEST_OUTPUT_FILE"
         assert pr_json.read_text(encoding="utf-8") == '{"source": "secondary-format"}'
 
     def test_falls_back_to_reuse_when_pr_json_empty_and_format_json(self, tmp_path):
-        # Simulates compare-release/appcompat (which never populate PR_JSON
+        # Simulates compare-release (which never populates PR_JSON
         # up front): FORMAT is json, OUTPUT_FILE is a faithful unfiltered
         # report, and no --show-only/--stat is present, so the primary
         # output file is reused instead of rerunning.

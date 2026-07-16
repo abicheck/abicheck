@@ -36,7 +36,6 @@ except ImportError:  # pragma: no cover - rich-click is a declared dependency
 
 from .checker import DiffResult, LibraryMetadata
 from .cli_audit import echo_filtered_surface, echo_reconciled
-from .cli_datasources import print_data_sources as _print_data_sources
 from .cli_dump_helpers import (
     handle_non_elf_dump,
     perform_elf_dump,
@@ -481,11 +480,11 @@ def main() -> None:
               help="Force DWARF-only mode: use DWARF debug info as the primary "
                    "data source even when headers are available. Enables type-aware "
                    "artifact checks without requiring castxml.")
-@click.option("--show-data-sources", is_flag=True, default=False,
-              help="Preview only: print which data layers (L0-L5) are available "
-                   "for the binary and exit. No snapshot is written and no "
-                   "L3/L4/L5 facts are embedded — re-run without this flag "
-                   "(optionally with --build-info/--sources) to produce a snapshot.")
+@click.option("--dry-run", "dry_run", is_flag=True, default=False,
+              help="Resolve and validate the invocation -- classify inputs, discover "
+                   "config, show which data layers (L0-L5) are available -- and print "
+                   "a report without producing a snapshot. Writes nothing; incompatible "
+                   "with -o/--output.")
 @click.option("--debug-format", "debug_format_opt",
               type=click.Choice(["auto", "dwarf", "btf", "ctf"], case_sensitive=False), default=None,
               help="Force the ELF debug format (auto=pick best available). "
@@ -533,7 +532,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              gcc_option_tokens: tuple[str, ...],
              sysroot: Path | None, nostdinc: bool, pdb_path: Path | None,
              follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
-             dwarf_only: bool, show_data_sources: bool,
+             dwarf_only: bool, dry_run: bool,
              debug_format_opt: str | None,
              debug_format: str | None,
              compile_db_path: Path | None, compile_db_path_alt: Path | None,
@@ -545,8 +544,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              build_info: Path | None = None, sources: Path | None = None,
              build_config: Path | None = None, allow_build_query: bool = False,
              build_query: str | None = None, build_compile_db: str | None = None,
-             inputs_pack: Path | None = None,
-             depth: str | None = None, max_depth: bool = False,
+             depth: str | None = None,
              _resolved_compile_context: CompileContext | None = None,
              _resolved_collect_mode: str | None = None) -> None:
     """Dump ABI snapshot of a shared library to JSON.
@@ -556,46 +554,38 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
       abicheck dump libfoo.so.1 -H include/foo.h --version 1.2.3 -o snap.json
       abicheck dump --sources ./libfoo-src/ -o libfoo.src.json  # source-only (no binary)
     """
+    from .dry_run import emit_dry_run, reject_dry_run_with_output
+
+    reject_dry_run_with_output(dry_run, output)
     _setup_verbosity(verbose)
 
     # Resolve the evidence-depth preset into the collect mode, apply --depth binary
     # suppression, and warn on an explicitly-requested deep depth without sources.
-    # ``inputs_pack`` is threaded through so a bare ``--inputs`` (no --sources/
-    # --build-info) does not trigger the "no build/source facts" warning — the pack
-    # itself carries the L4 facts.
     collect_mode, headers, compile_db_path, compile_db_path_alt = resolve_dump_collect_context(
-        depth, max_depth, _resolved_collect_mode, sources, build_info,
-        headers, compile_db_path, compile_db_path_alt, inputs_pack=inputs_pack,
+        depth, _resolved_collect_mode, sources, build_info,
+        headers, compile_db_path, compile_db_path_alt,
     )
 
-    # Source-only dump (no binary) for the parallel-baseline / merge flow.
+    if dry_run:
+        from .cli_dump_helpers import render_dump_dry_run
+
+        emit_dry_run(
+            render_dump_dry_run(
+                so_path=so_path, headers=headers, sources=sources,
+                build_info=build_info, build_config=build_config,
+                depth=depth, collect_mode=collect_mode,
+                header_backend=header_backend, output=output,
+            )
+        )
+
+    # Source-only dump (no binary) for the parallel-baseline flow.
     if so_path is None:
-        if show_data_sources:
-            raise click.UsageError(
-                "--show-data-sources requires SO_PATH; source-only dump cannot "
-                "produce binary data-source diagnostics."
-            )
-        if inputs_pack is not None:
-            raise click.UsageError(
-                "--inputs folds a pack against a binary's exports, so it needs "
-                "SO_PATH. For a source-only baseline, use `abicheck merge` instead."
-            )
         from .cli_buildsource import dump_source_only
         dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db, extractor=header_backend)
         return
 
     effective_debug_format = resolve_dump_debug_format(debug_format_opt, debug_format)
     effective_compile_db = resolve_dump_compile_db(compile_db_path, compile_db_path_alt, headers)
-
-    # --show-data-sources: diagnostic output and exit
-    if show_data_sources:
-        _print_data_sources(
-            so_path,
-            bool(headers),
-            build_source_path=build_info,
-            sources_path=sources,
-        )
-        return
 
     # Auto-detect binary format — PE/Mach-O skip the ELF/castxml path. The
     # conventional ``libfoo.so`` dev symlink is often a GNU ld linker script;
@@ -632,7 +622,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             public_headers, public_header_dirs, build_info, sources, build_config,
             allow_build_query, collect_mode, build_query, build_compile_db,
             header_backend=header_backend, compile_context=_cc,
-            inputs_pack=inputs_pack,
         )
         return
 
@@ -694,7 +683,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         write_snapshot_output=_write_snapshot_output,
         build_query=build_query,
         build_compile_db=build_compile_db,
-        inputs_pack=inputs_pack,
     )
 
 
@@ -1008,9 +996,9 @@ def _reject_application_operand(
         f"'{which}' looks like an application/executable, not a shared library, "
         "so `compare` cannot pair it as a library ABI. To check whether an "
         "application is still satisfied by a library, use "
-        "`abicheck appcompat <app> <old-lib> <new-lib>`. If this file really is a "
-        "shared library with an unusual ET_DYN/PIE layout, dump it first with "
-        "`abicheck dump` and compare the resulting snapshots."
+        "`abicheck compare <old-lib> <new-lib> --used-by <app>`. If this file "
+        "really is a shared library with an unusual ET_DYN/PIE layout, dump it "
+        "first with `abicheck dump` and compare the resulting snapshots."
     )
 
 
@@ -1055,24 +1043,26 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
 
 
 def _source_is_pack(path: Path) -> bool:
-    """True if *path* is a real ``collect``-produced evidence pack rather than a
-    raw source checkout — lets ``compare``'s --sources accepts either.
+    """True if *path* is a pack directory rather than a raw source checkout —
+    lets ``compare``'s --sources/--build-info accept either.
 
     Validates the manifest *content*, not just its presence: a raw checkout that
     happens to contain a top-level ``manifest.json`` (which ``BuildSourcePack.load``
     would otherwise accept with sparse defaults) must still be collected from, so
     we require the ``BuildSourcePack`` marker (``build_source_pack_version`` /
-    legacy ``evidence_pack_version``). A Flow-2 ``kind: abicheck_inputs`` pack is
-    deliberately **not** treated as a pack here: the compare evidence path loads
-    only ``BuildSourcePack`` (via ``_resolve_side_pack``), not inputs packs, so
-    classifying one as a pack would route it to the wrong loader and silently drop
-    its facts — feed those through ``merge`` instead.
+    legacy ``evidence_pack_version``) — or a build-emitted Flow-2 ``abicheck_inputs/``
+    pack. Both pack kinds are auto-detected and routed to the out-of-band pack
+    loader (``_load_side_pack_input``/``prepare_embedded_build_source``), which
+    handles either kind; only a genuinely raw tree/build dir falls through to the
+    inline-collection path below (ADR-043: there is no separate ``merge`` command
+    to route an inputs pack through anymore).
     """
     # Single source of truth: the dump/collect side validates the same way via
     # inline.is_pack_dir (content, not filename), so the two never disagree.
     from .buildsource.inline import is_pack_dir
+    from .cli_buildsource_helpers import _is_inputs_pack_dir
 
-    return is_pack_dir(path)
+    return is_pack_dir(path) or _is_inputs_pack_dir(path)
 
 
 def _embed_inline_source_side(
@@ -1289,6 +1279,25 @@ def _embed_inline_source_side(
                    "sides; scope to one with an 'old='/'new=' prefix, repeating the flag "
                    "per side (e.g. --pdb-path old=a.pdb --pdb-path new=b.pdb). Overrides "
                    "automatic PDB discovery (ADR-040).")
+# ── Scoped comparison (ADR-043): app-usage and required-symbol contracts ─────
+@click.option("--used-by", "used_by_apps", multiple=True,
+              type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              help="Application binary whose actual imports/required symbol versions "
+                   "scope the comparison (repeatable; folds `appcompat`). The full "
+                   "library comparison still runs once; the worst app-scoped result "
+                   "becomes the primary verdict/exit code, with the full verdict and "
+                   "unrelated changes kept as informational context. OLD/NEW must be "
+                   "real library binaries (not JSON snapshots). Mutually exclusive "
+                   "with --required-symbol/--required-symbols.")
+@click.option("--required-symbol", "required_symbols_opt", multiple=True,
+              help="An exported linker symbol a plugin host resolves via dlopen/dlsym "
+                   "and requires (repeatable; folds `plugin-check`). Scopes the "
+                   "comparison to this explicit entrypoint contract instead of the "
+                   "full diff. Mutually exclusive with --used-by.")
+@click.option("--required-symbols", "required_symbols_file",
+              type=click.Path(exists=True, dir_okay=False, path_type=Path), default=None,
+              help="File of required symbols, one per line (blank lines and '#' "
+                   "comments ignored). Combined with any --required-symbol values.")
 # Severity preset + per-category overrides (ADR-037 D3 / D4).
 @severity_options
 # ── Project config & exit-code scheme (ADR-037 D4 / D12) ──────────────────────
@@ -1364,7 +1373,7 @@ def _embed_inline_source_side(
                    "private __pp_* kernel churn and other non-committed exports are demoted "
                    "to the filtered ledger (see --show-filtered).")
 @click.option("--probe-matrix", "probe_matrix", multiple=True, type=SIDED_EXISTING_PATH_PARAM,
-              help="Build-configuration matrix snapshot (from 'abicheck probe run'), "
+              help="Build-configuration matrix snapshot, "
                    "scoped per side with an 'old='/'new=' prefix (e.g. --probe-matrix "
                    "old=m1 --probe-matrix new=m2). With both sides given, build-config "
                    "findings (CXX_STANDARD_FLOOR_RAISED, API_DEPENDS_ON_CONSUMER_ENV, "
@@ -1403,7 +1412,7 @@ def _embed_inline_source_side(
 # --dwarf-only, --debug-root{,1,2}, --debuginfod[-url], --debug-format (+hidden
 # --btf/--ctf/--dwarf): the shared local-ELF debug-resolution family.
 @debug_resolution_options
-@evidence_options  # --depth/--max, --sources, --build-info
+@evidence_options  # --depth, --sources, --build-info
 @adr027_compare_options  # ADR-027: --pattern-verdicts/--explain-patterns/--surface-metrics
 @env_matrix_option  # ADR-020b: --env-matrix (runtime_floors contract)
 @profile_option  # ADR-040 Lever 3: --profile (workflow-default bundles)
@@ -1413,6 +1422,11 @@ def _embed_inline_source_side(
                    "add/remove/size change the build proves never happened is moved to an "
                    "audit bucket instead of the verdict. No-op unless snapshots carry "
                    "build_context_defines + per-field guards.")
+@click.option("--dry-run", "dry_run", is_flag=True, default=False,
+              help="Resolve and validate the invocation -- classify inputs, resolve "
+                   "depth/scope, show tool/config resolution -- and print a report "
+                   "without running the diff. Writes nothing; incompatible with "
+                   "-o/--output.")
 @verbose_option
 @click.pass_context
 def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
@@ -1486,21 +1500,6 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     run_compare(ctx, **kwargs)
 
 
-@main.command("recommend-collect-mode")
-@click.argument("paths", nargs=-1)
-def recommend_collect_mode_cmd(paths: tuple[str, ...]) -> None:
-    """Recommend an evidence collection scope from a PR's changed paths (ADR-033 D3).
-
-    Prints the internal collection mode a CI job should use: `build` for
-    build-system-only changes, `source-changed` when sources or headers changed,
-    else `off`. Use it to pick the `--depth` rung (build → `--depth build`,
-    source-changed → `--depth source`). The artifact compare stays authoritative —
-    this only scopes which optional evidence a CI job should collect.
-    """
-    from .buildsource.source_replay import recommend_collect_mode
-    click.echo(recommend_collect_mode(paths))
-
-
 # ── ABICC compat subcommands (implementation in abicheck.compat) ─────────────
 # NOTE: eagerly loads abicheck.compat.cli at import time — intentional so all
 # consumers get compat commands registered. Private helpers re-exported for
@@ -1552,8 +1551,8 @@ main.add_command(compat_group)
 # ``@main.command(...)`` decorator then attaches to that second group, not
 # the one actually running, so `python -m abicheck.cli --help` silently
 # listed only the handful of commands defined directly in this file (dump/
-# compare/compat) and omitted every sibling-registered one (config, doctor,
-# scan, appcompat, ...). Alias the already-running module under its real
+# compare/compat) and omitted every sibling-registered one (scan, deps,
+# ...). Alias the already-running module under its real
 # package name first, so the relative import below reuses it instead
 # (Codex review).
 # ---------------------------------------------------------------------------
@@ -1563,21 +1562,9 @@ if __name__ == "__main__":
     sys.modules.setdefault("abicheck.cli", sys.modules[__name__])
 
 from . import (  # noqa: E402  — must run after `main` and helpers are defined
-    cli_appcompat,  # noqa: F401  — registers appcompat
-    cli_baseline,  # noqa: F401  — registers baseline
-    cli_buildsource,  # noqa: F401  — registers collect
-    cli_config,  # noqa: F401  — registers init, config (validate, show-effective)
-    cli_debian_symbols,  # noqa: F401  — registers debian-symbols
-    cli_doctor,  # noqa: F401  — registers doctor
-    cli_graph,  # noqa: F401  — registers graph (compare, explain)
-    cli_inputs,  # noqa: F401  — registers inputs (validate)
-    cli_plugin,  # noqa: F401  — registers plugin-check
-    cli_pr_comment,  # noqa: F401  — registers pr-comment
-    cli_probe,  # noqa: F401  — registers probe (run, compare)
+    cli_buildsource,  # noqa: F401  — buildsource internals (no command of its own)
     cli_scan,  # noqa: F401  — registers scan
     cli_stack,  # noqa: F401  — registers deps (tree, compare)
-    cli_suggest,  # noqa: F401  — registers suggest-suppressions
-    cli_surface,  # noqa: F401  — registers surface-report
 )
 
 if __name__ == "__main__":

@@ -78,7 +78,6 @@ SUITES: dict[str, dict[str, object]] = {
             "tests/test_junit_report.py",
             "tests/test_policy_changekind_matrix.py",
             "tests/test_policy_file.py",
-            "tests/test_baseline.py",
             "tests/test_suppression_matrix.py",
         ],
     },

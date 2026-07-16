@@ -140,6 +140,61 @@ def test_compare_detail_text_renders_value_delta():
     assert "16 → 24" in size_change.detail
 
 
+def test_used_by_scoped_compatible_overrides_breaking_headline():
+    # ADR-043 `compare --used-by`: the full library still has breaking
+    # changes (unrelated to the app), but the scoped verdict is COMPATIBLE —
+    # the comment headline must follow the scoped verdict (what the exit
+    # code actually reflects), not the raw full-library bucket counts
+    # (Codex review).
+    report = _compare_report()
+    report["full_verdict"] = report["verdict"]
+    report["verdict"] = "COMPATIBLE"
+    report["used_by"] = [
+        {
+            "app": "/opt/app/bin/myapp",
+            "verdict": "COMPATIBLE",
+            "required_symbol_count": 3,
+            "missing_symbols": [],
+            "missing_versions": [],
+            "relevant_change_count": 0,
+            "symbol_coverage": 100.0,
+        }
+    ]
+    model = build_model(report)
+    assert model.scoped_verdict == "COMPATIBLE"
+    assert model.full_verdict == "BREAKING"
+    # Full-library buckets are still populated (informational context).
+    assert model.counts == (2, 1, 2)
+
+    body = render_comment(model, sha="abc1234")
+    assert "Compatible (scoped)" in body
+    assert "ABI BREAKING" not in body.split("\n")[2]  # headline line, not body
+    assert "Scoped verdict: COMPATIBLE" in body
+    assert "full library" in body
+    assert "/opt/app/bin/myapp" in body
+
+
+def test_required_symbol_scoped_breaking_overrides_compatible_headline():
+    report = _compare_report(changes=[])
+    report["full_verdict"] = "COMPATIBLE"
+    report["verdict"] = "BREAKING"
+    report["required_symbol_contract"] = {
+        "verdict": "BREAKING",
+        "required_entrypoints": ["plugin_init"],
+        "missing_entrypoints": ["plugin_init"],
+        "relevant_change_count": 1,
+        "coverage": 0.0,
+    }
+    model = build_model(report)
+    assert model.scoped_verdict == "BREAKING"
+    assert model.full_verdict == "COMPATIBLE"
+
+    body = render_comment(model, sha="abc1234")
+    assert "ABI BREAKING (scoped)" in body
+    assert "plugin_init" not in body.split("Scoped verdict")[0]  # sanity: appears in banner
+    assert "--required-symbol" in body
+
+
 def test_release_shape_detected_and_summed():
     model = build_model(_release_report())
     assert model.mode == "release"
@@ -815,22 +870,27 @@ def test_empty_model_renders_clean_verdict():
 
 # ---------------------------------------------------------------------------
 # CLI command
+#
+# `pr-comment` is Action/library-only (ADR-043 D1): not a registered `abicheck`
+# subcommand, invoked as `python -m abicheck.cli_pr_comment` (see
+# action/run.sh). Tests below drive the standalone Click command object
+# directly rather than through `abicheck.cli.main`.
 # ---------------------------------------------------------------------------
 
 
 def _run_cli(args):
     from click.testing import CliRunner
 
-    from abicheck.cli import main
+    from abicheck.cli_pr_comment import pr_comment_cmd
 
-    return CliRunner().invoke(main, args)
+    return CliRunner().invoke(pr_comment_cmd, args)
 
 
 def test_cli_pr_comment_writes_body(tmp_path):
     report = tmp_path / "report.json"
     report.write_text(json.dumps(_compare_report()), encoding="utf-8")
     out = tmp_path / "comment.md"
-    result = _run_cli(["pr-comment", str(report), "--sha", "abc1234", "-o", str(out)])
+    result = _run_cli([str(report), "--sha", "abc1234", "-o", str(out)])
     assert result.exit_code == 0
     body = out.read_text(encoding="utf-8")
     assert MARKER in body
@@ -841,7 +901,7 @@ def test_cli_pr_comment_skip_writes_empty_file(tmp_path):
     report = tmp_path / "report.json"
     report.write_text(json.dumps(_compare_report([])), encoding="utf-8")
     out = tmp_path / "comment.md"
-    result = _run_cli(["pr-comment", str(report), "--on", "changes", "-o", str(out)])
+    result = _run_cli([str(report), "--on", "changes", "-o", str(out)])
     assert result.exit_code == 0
     # nothing to post → empty file so the action's `-s` check skips
     assert out.read_text(encoding="utf-8") == ""
@@ -850,7 +910,7 @@ def test_cli_pr_comment_skip_writes_empty_file(tmp_path):
 def test_cli_pr_comment_invalid_json_errors(tmp_path):
     report = tmp_path / "bad.json"
     report.write_text("{not json", encoding="utf-8")
-    result = _run_cli(["pr-comment", str(report)])
+    result = _run_cli([str(report)])
     assert result.exit_code != 0
     assert "Cannot read JSON report" in result.output
 
@@ -858,6 +918,6 @@ def test_cli_pr_comment_invalid_json_errors(tmp_path):
 def test_cli_pr_comment_non_object_errors(tmp_path):
     report = tmp_path / "arr.json"
     report.write_text("[1, 2, 3]", encoding="utf-8")
-    result = _run_cli(["pr-comment", str(report)])
+    result = _run_cli([str(report)])
     assert result.exit_code != 0
     assert "must be an object" in result.output

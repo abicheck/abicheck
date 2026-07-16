@@ -233,35 +233,38 @@ def test_extractor_handles_subprocess_error(monkeypatch) -> None:
 
 
 def test_collect_evidence_include_graph_missing_clang_degrades(tmp_path, monkeypatch) -> None:
-    # Include-graph folding is automatic whenever --source-abi and
-    # --source-graph summary are both given (no separate --include-graph flag
-    # any more) — a missing clang records a failed extractor row but still
-    # writes the pack with the build graph.
+    # Include-graph folding is automatic whenever L4 source-abi replay and the
+    # L5 graph are both collected (`--depth source` on the current `dump
+    # --sources` public surface; the deleted `collect --source-abi
+    # --source-graph summary` combo used to exercise the identical
+    # cli_buildsource_helpers._collect_source_graph -> inline_graph_fold path).
+    # A missing clang records a failed extractor row but still writes the
+    # pack with the build graph.
     import json
 
     from click.testing import CliRunner
 
     import abicheck.buildsource.include_graph as ig
-    from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.cli import main
+    from abicheck.serialization import load_snapshot
 
     monkeypatch.setattr(ig.shutil, "which", lambda _b: None)
-    src = tmp_path / "foo.cpp"
-    src.write_text("int foo(){return 1;}\n")
-    cdb = tmp_path / "cc.json"
-    cdb.write_text(json.dumps([{
-        "directory": str(tmp_path), "file": str(src), "command": f"c++ -c {src} -o foo.o",
+    tree = tmp_path / "src"
+    tree.mkdir()
+    (tree / "foo.cpp").write_text("int foo(){return 1;}\n")
+    (tree / "compile_commands.json").write_text(json.dumps([{
+        "directory": str(tree), "file": "foo.cpp",
+        "arguments": ["c++", "-std=c++17", "-c", "foo.cpp"],
     }]))
-    out = tmp_path / "ev"
+    out = tmp_path / "ev.json"
     res = CliRunner().invoke(main, [
-        "collect", "--compile-db", str(cdb), "--source-abi",
-        "--source-graph", "summary", "-o", str(out),
+        "dump", "--sources", str(tree), "--depth", "source", "-o", str(out),
     ])
     assert res.exit_code == 0, res.output
-    pack = BuildSourcePack.load(out)
-    assert pack.source_graph is not None
+    bs = load_snapshot(out).build_source
+    assert bs is not None and bs.source_graph is not None
     assert any(e.name == "include_graph:clang" and e.status == "failed"
-               for e in pack.manifest.extractors)
+               for e in bs.manifest.extractors)
 
 
 def test_extract_from_build_unredacts_home(monkeypatch) -> None:

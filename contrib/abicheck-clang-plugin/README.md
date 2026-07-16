@@ -5,7 +5,7 @@
 > LLVM/Clang 16/17/18 (the C.6 differential-conformance test), but **never a
 > required gate in the main abicheck CI** — it is ABI-locked to the loading
 > clang's LLVM major (ADR-038 C.5). The supported portable producers remain
-> Full source scan (`abicheck dump --sources` / `collect` +
+> Full source scan (`abicheck dump --sources`/`--build-info` +
 > `compile_commands.json` replay) and Wrapper injection (the `abicheck-cc`
 > compiler wrapper, `abicheck/cc_wrapper.py`). See
 > `docs/development/adr/038-build-integrated-fact-collection-variants.md`.
@@ -63,16 +63,16 @@ the same AST walk/compile as every other family (a small `CallRefVisitor`
 sub-walk per function body, and `SourceManager::fileinfo_begin()/end()`
 respectively) — no second frontend pass.
 
-`abicheck merge` compares `fact_set`/`coverage` across the old/new baselines
-(`buildsource/fact_set.py`) and emits `SOURCE_FACT_COVERAGE_INCOMPLETE`
-(RISK) when the two sides' fact-set versions/producers are incompatible or a
-mandatory family was incomplete on either side — so a missing L4 finding is
-never silently read as "nothing changed there". Validate a pack's coverage
-*before* merging with:
-
-```bash
-abicheck inputs validate ./abicheck_inputs/
-```
+Ingesting a pack (`abicheck dump --build-info ./abicheck_inputs/`, or
+`compare --old/new-build-info` for an out-of-band side) compares
+`fact_set`/`coverage` across the old/new baselines (`buildsource/fact_set.py`)
+and emits `SOURCE_FACT_COVERAGE_INCOMPLETE` (RISK) when the two sides'
+fact-set versions/producers are incompatible or a mandatory family was
+incomplete on either side — so a missing L4 finding is never silently read as
+"nothing changed there". This coverage check runs automatically whenever the
+pack is consumed; there is no separate pre-validation command (the standalone
+`collect`/`merge`/`inputs validate`/`inputs compact` commands were all
+removed in the ADR-043 CLI reset with no replacement).
 
 See ADR-038 C.8 for the full design.
 
@@ -187,18 +187,17 @@ clang++ -std=c++17 -Iinclude \
   -Xclang -plugin-arg-abicheck-facts -Xclang public-roots=include \
   -c src/foo.cpp -o foo.o
 
-# then, exactly as with the wrapper — dump the binary side first, then fold:
-abicheck dump libfoo.so -o libfoo.so.json
-abicheck merge libfoo.so.json ./abicheck_inputs/ -o libfoo.baseline.json
+# then, exactly as with the wrapper — dump the binary with the pack folded in:
+abicheck dump libfoo.so --build-info ./abicheck_inputs/ -o libfoo.baseline.json
 ```
 
 Optional args: `library=<name>` (recorded in the manifest / `target_id`),
 `version=<v>`. `public-roots=` is repeatable.
 
-After `merge`, read stderr's L4 coverage line. A healthy pack should report
+After the dump, read stderr's L4 coverage line. A healthy pack should report
 non-zero public declarations and, when the binary exports symbols, non-zero
-symbol matches. `merge` now warns when a pack technically ingests but is unlikely
-to help matching, for example:
+symbol matches. Ingestion now warns when a pack technically ingests but is
+unlikely to help matching, for example:
 
 - public macros/types but no public function or variable declarations;
 - public declarations present, but `0/N` exported symbols matched.
@@ -236,7 +235,8 @@ Two ways to get it right:
 
   and records the same note in the pack's `diagnostics`. An empty pack is now a
   loud error, not a 20-minute debug. A non-empty-but-useless pack is also called
-  out later by `abicheck merge` when it has binary exports to match against.
+  out later at ingestion (`dump --build-info`/`compare --old/new-build-info`)
+  when it has binary exports to match against.
 
 ### Auto-derived public roots (when `public-roots=` is omitted)
 
@@ -301,4 +301,5 @@ A build that cannot load a Clang plugin can still feed the same
   emit `source_facts` from your own tooling.
 
 In every case the *output contract is identical* — the `abicheck_inputs/` pack —
-so the ingest (`abicheck merge`) is the same regardless of producer.
+so the ingest (`abicheck dump --build-info`/`compare --old/new-build-info`) is
+the same regardless of producer.

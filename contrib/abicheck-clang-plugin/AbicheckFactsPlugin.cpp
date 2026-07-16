@@ -3294,8 +3294,8 @@ private:
               << ". Two different targets must not share one "
                  "abicheck_inputs pack directory -- use a separate out= "
                  "directory per target/configuration/architecture, or "
-                 "downstream `abicheck inputs validate` will reject this "
-                 "pack.\n";
+                 "the pack will be rejected when a downstream `dump "
+                 "--build-info`/`compare --build-info` ingests it.\n";
     }
     if (!Version.empty()) {
       if (auto existing = obj->getString("version"))

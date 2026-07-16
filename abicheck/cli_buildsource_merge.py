@@ -311,12 +311,10 @@ def embed_inputs_pack(
 ) -> None:
     """Fold a Flow-2 ``abicheck_inputs/`` pack into a binary dump inline.
 
-    ``abicheck dump <binary> --inputs ./abicheck_inputs/`` performs, in one
-    command, exactly the fold that ``abicheck merge <binary>.json
-    ./abicheck_inputs/`` does: ingest the build-emitted pack (no frontend re-run),
-    combine its L3/L4/L5 facts into *snap*, and relink the source surface against
-    the binary's exports. This removes the separate ``merge`` step for the common
-    single-artifact plugin/wrapper flow (``merge`` remains for multi-input folds).
+    ``abicheck dump <binary> --build-info ./abicheck_inputs/`` (the pack is
+    auto-detected by its manifest) ingests the build-emitted pack in one
+    command, with no frontend re-run: combine its L3/L4/L5 facts into *snap*,
+    and relink the source surface against the binary's exports.
     """
     ingested = _ingest_inputs_pack_snapshot(inputs_path)
     combined = _combine_packs(snap.build_source, ingested.build_source)

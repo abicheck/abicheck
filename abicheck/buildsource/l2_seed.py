@@ -84,7 +84,13 @@ def derive_l2_include_dirs(
     # --config file is trusted for query execution; an auto-discovered
     # .abicheck.yml is loaded for its non-executable settings but never run).
     cfg_path = build_config or discover_build_config(sources)
-    cfg = load_build_config(cfg_path) if cfg_path is not None else BuildConfig()
+    try:
+        cfg = load_build_config(cfg_path) if cfg_path is not None else BuildConfig()
+    except ValueError:
+        # A malformed/invalid config surfaces loudly elsewhere (embed_build_source,
+        # the compile-context resolver); this is a best-effort L2 include-dir hint,
+        # so degrade to "no seeded dirs" rather than raising through it.
+        return [], []
     # Fold the CLI build-DB overrides into cfg exactly as embed_build_source does,
     # so the L2 seeding resolves the *same* DB L3 will (an explicit --build-compile-db
     # / --build-query wins over an auto-discovered one). compile_db_explicit mirrors

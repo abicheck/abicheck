@@ -15,7 +15,7 @@
 """Binary-tier oneAPI scan driver (validation/oneapi-scan-2026-06.md).
 
 For each planned ``(lib, pair)`` it downloads the **pinned** conda-forge / Intel
-artifacts, dumps the old side and runs ``abicheck scan --source-method s0``,
+artifacts, dumps the old side and runs ``abicheck scan --depth binary``,
 recording verdict / coverage / DWARF presence / SONAME / wall time to
 ``data/oneapi_scan_2026-06.json``. Network + ``abicheck`` on PATH required; this
 is a slow real-world lane, not a unit test.
@@ -249,12 +249,11 @@ def run() -> list[dict]:
                 [
                     "abicheck",
                     "scan",
-                    "--binary",
                     new_so,
-                    "--baseline",
+                    "--against",
                     str(base),
-                    "--source-method",
-                    "s0",
+                    "--depth",
+                    "binary",
                     "--format",
                     "json",
                     "-o",

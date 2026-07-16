@@ -356,152 +356,18 @@ class TestRequireJustificationCliFlag:
         assert "reason" in result.output.lower() or "reason" in str(result.exception or "").lower()
 
 
-class TestSuggestSuppressionsCliCommand:
+# The `suggest-suppressions` CLI command (cli_suggest.py) was deleted in the
+# pre-1.0 CLI reset; its JSON-file-reading/shape-validation wrapper (bad
+# JSON, non-object root, missing 'changes' key, non-dict change entries,
+# `--expiry-days` range check) was pure CLI plumbing and is gone with the
+# command. `suggest_suppressions()` itself (already-parsed `list[dict]` in,
+# YAML text out) is unchanged and already covered directly by
+# `TestSuggestSuppressions` above (including custom-expiry and empty-changes
+# cases) — no CLI-level replacement test is needed here.
 
-    def test_suggest_from_json(self, tmp_path: Path) -> None:
-        from click.testing import CliRunner
-
-        from abicheck.cli import main
-
-        diff_data = {
-            "changes": [
-                {"kind": "func_removed", "symbol": "_ZN3foo6legacyEv"},
-                {"kind": "func_param_type_changed", "symbol": "_ZN3foo3bazEi"},
-            ],
-        }
-        diff_path = tmp_path / "diff.json"
-        diff_path.write_text(json.dumps(diff_data), encoding="utf-8")
-
-        output_path = tmp_path / "candidates.yml"
-
-        runner = CliRunner()
-        result = runner.invoke(main, [
-            "suggest-suppressions", str(diff_path),
-            "-o", str(output_path),
-        ])
-        assert result.exit_code == 0
-        content = output_path.read_text(encoding="utf-8")
-        assert 'symbol: "_ZN3foo6legacyEv"' in content
-        assert 'symbol: "_ZN3foo3bazEi"' in content
-        assert "version: 1" in content
-
-    def test_suggest_with_custom_expiry(self, tmp_path: Path) -> None:
-        from click.testing import CliRunner
-
-        from abicheck.cli import main
-
-        diff_data = {
-            "changes": [
-                {"kind": "func_removed", "symbol": "_ZN3foo3barEv"},
-            ],
-        }
-        diff_path = tmp_path / "diff.json"
-        diff_path.write_text(json.dumps(diff_data), encoding="utf-8")
-
-        runner = CliRunner()
-        result = runner.invoke(main, [
-            "suggest-suppressions", str(diff_path),
-            "--expiry-days", "30",
-        ])
-        assert result.exit_code == 0
-        expected_date = (date.today() + timedelta(days=30)).isoformat()
-        assert expected_date in result.output
-
-    def test_suggest_invalid_json(self, tmp_path: Path) -> None:
-        from click.testing import CliRunner
-
-        from abicheck.cli import main
-
-        bad_path = tmp_path / "bad.json"
-        bad_path.write_text("not json", encoding="utf-8")
-
-        runner = CliRunner()
-        result = runner.invoke(main, [
-            "suggest-suppressions", str(bad_path),
-        ])
-        assert result.exit_code != 0
-
-    def test_suggest_to_stdout(self, tmp_path: Path) -> None:
-        from click.testing import CliRunner
-
-        from abicheck.cli import main
-
-        diff_data = {
-            "changes": [
-                {"kind": "func_removed", "symbol": "_ZN3foo3barEv"},
-            ],
-        }
-        diff_path = tmp_path / "diff.json"
-        diff_path.write_text(json.dumps(diff_data), encoding="utf-8")
-
-        runner = CliRunner()
-        result = runner.invoke(main, [
-            "suggest-suppressions", str(diff_path),
-        ])
-        assert result.exit_code == 0
-        assert "suppressions:" in result.output
-
-    def test_suggest_negative_expiry_rejected(self, tmp_path: Path) -> None:
-        from click.testing import CliRunner
-
-        from abicheck.cli import main
-
-        diff_data = {"changes": [{"kind": "func_removed", "symbol": "foo"}]}
-        diff_path = tmp_path / "diff.json"
-        diff_path.write_text(json.dumps(diff_data), encoding="utf-8")
-
-        runner = CliRunner()
-        result = runner.invoke(main, [
-            "suggest-suppressions", str(diff_path),
-            "--expiry-days", "-1",
-        ])
-        assert result.exit_code != 0
-
-    def test_suggest_rejects_non_dict_top_level(self, tmp_path: Path) -> None:
-        from click.testing import CliRunner
-
-        from abicheck.cli import main
-
-        diff_path = tmp_path / "diff.json"
-        diff_path.write_text("[1, 2, 3]", encoding="utf-8")
-
-        runner = CliRunner()
-        result = runner.invoke(main, [
-            "suggest-suppressions", str(diff_path),
-        ])
-        assert result.exit_code != 0
-        assert "object" in result.output.lower()
-
-    def test_suggest_rejects_missing_changes_key(self, tmp_path: Path) -> None:
-        from click.testing import CliRunner
-
-        from abicheck.cli import main
-
-        diff_path = tmp_path / "diff.json"
-        diff_path.write_text('{"summary": {}}', encoding="utf-8")
-
-        runner = CliRunner()
-        result = runner.invoke(main, [
-            "suggest-suppressions", str(diff_path),
-        ])
-        assert result.exit_code != 0
-        assert "changes" in result.output.lower()
-
-    def test_suggest_rejects_non_dict_change_entry(self, tmp_path: Path) -> None:
-        from click.testing import CliRunner
-
-        from abicheck.cli import main
-
-        diff_data = {"changes": ["not_a_dict"]}
-        diff_path = tmp_path / "diff.json"
-        diff_path.write_text(json.dumps(diff_data), encoding="utf-8")
-
-        runner = CliRunner()
-        result = runner.invoke(main, [
-            "suggest-suppressions", str(diff_path),
-        ])
-        assert result.exit_code != 0
-        assert "changes[0]" in result.output
+    def test_suggest_empty_changes(self) -> None:
+        text = suggest_suppressions([])
+        assert "suppressions:" in text
 
 
 class TestRequireJustificationErrorType:

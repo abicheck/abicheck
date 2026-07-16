@@ -62,34 +62,26 @@ POLICY_FILE_PARAM = PolicyFileParam()
 
 
 class DepthParam(click.ParamType):
-    """Click type for the unified ``--depth`` dial (ADR-037 D5/D6).
+    """Click type for the unified ``--depth`` dial (ADR-043 D2).
 
-    Accepts the user-facing ladder ``{binary,headers,build,source,full}`` and
-    resolves the remaining deprecated spelling (``symbols`` → ``binary``) to its
-    replacement, printing a one-line stderr deprecation note. The L5 graph is
-    built internally at ``--depth source`` (D6), so ``graph`` is not a user-facing
-    rung (it was removed outright as part of the pre-1.0 CLI clean-up).
+    Accepts exactly the user-facing ladder ``{binary,headers,build,source}``.
+    ``full``/``symbols``/``graph`` are hard errors, not aliases — the project
+    predates a compatibility-stable release, so there is no translation shim.
+    The L5 graph is built internally at ``--depth source`` (D6) and the old
+    ``full`` rung collapsed into ``source`` (replay *scope*, not a deeper
+    depth, distinguished them — see ``SourceScope``), so neither is a
+    user-facing rung.
     """
 
     name = "depth"
 
     def convert(self, value: Any, param: Any, ctx: Any) -> str:
-        from .buildsource.scan_levels import DEPRECATED_DEPTHS, USER_DEPTHS
+        from .buildsource.scan_levels import USER_DEPTHS
 
         v = str(value).lower()
         user_values = [d.value for d in USER_DEPTHS]
         if v in user_values:
             return v
-        if v in DEPRECATED_DEPTHS:
-            replacement = DEPRECATED_DEPTHS[v].value
-            # Note covering the remaining deprecated rung (symbols→binary, the
-            # evidence-named rung — G22 Phase 6).
-            click.echo(
-                f"warning: --depth {v} is deprecated (ADR-037 D5/D6); use "
-                f"--depth {replacement}.",
-                err=True,
-            )
-            return replacement
         choices = ", ".join(user_values)
         raise click.BadParameter(
             f"{value!r} is not one of {choices}.", ctx=ctx, param=param

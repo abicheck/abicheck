@@ -133,8 +133,7 @@ def test_service_compare_call_is_not_flagged(
 
 
 def _registered_commands() -> dict:
-    """Force every verdict-emitting command module to register on ``main``."""
-    import abicheck.cli_appcompat  # noqa: F401  — registers `appcompat`
+    """Return the registered top-level commands (dump/compare/scan/deps/compat)."""
     from abicheck.cli import main
 
     return main.commands
@@ -541,6 +540,7 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--demangle",
         "--depth",
         "--devel-pkg",
+        "--dry-run",
         "--dso-only",
         "--dwarf",
         "--dwarf-only",
@@ -564,7 +564,6 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--lang",
         "--ld-library-path",
         "--manifest",
-        "--max",
         "--new-ast-frontend",
         "--no-bundle-analysis",
         "--no-debuginfod",
@@ -592,6 +591,8 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--reconcile-build-context",
         "--report-mode",
         "--require-justification",
+        "--required-symbol",
+        "--required-symbols",
         "--scope-public-headers",
         "--search-path",
         "--secondary-format",
@@ -611,6 +612,7 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--suppress",
         "--surface-metrics",
         "--sysroot",
+        "--used-by",
         "--verbose",
         "--version",
         "-H",
@@ -619,32 +621,8 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "-o",
         "-v",
     ),
-    "appcompat": (
-        "--check-against",
-        "--format",
-        "--header",
-        "--include",
-        "--lang",
-        "--list-required-symbols",
-        "--no-scope-public-headers",
-        "--version",
-        "--output",
-        "--policy",
-        "--policy-file",
-        "--scope-public-headers",
-        "--severity-abi-breaking",
-        "--severity-addition",
-        "--severity-potential-breaking",
-        "--severity-preset",
-        "--severity-quality-issues",
-        "--show-irrelevant",
-        "--suppress",
-        "--verbose",
-        "-H",
-        "-I",
-        "-o",
-        "-v",
-    ),
+    # `appcompat` folded into `compare --used-by` (ADR-043); it no longer has
+    # its own registered command/option-set snapshot.
 }
 
 

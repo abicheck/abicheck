@@ -22,12 +22,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from click.testing import CliRunner
-
 from abicheck.buildsource.adapters import BazelAdapter
-from abicheck.buildsource.build_evidence import TargetKind
-from abicheck.buildsource.pack import BuildSourcePack
-from abicheck.cli import main
+from abicheck.buildsource.build_evidence import BuildEvidence, TargetKind
+from abicheck.buildsource.model import ExtractorRecord
+from abicheck.cli_buildsource_helpers import _run_adapters
 
 # A configured-target graph: a cc_library with public headers + a deps edge,
 # and a cc_binary with no attributes (exercises the minimal-rule path).
@@ -594,7 +592,38 @@ def test_bazel_live_query_nonzero_exit_diagnostic(monkeypatch, tmp_path):
     assert any("exited 1" in d for d in ev.diagnostics)
 
 
-# ── CLI wiring (collect --bazel-cquery/--bazel-aquery) ──────────────
+# ── engine wiring (was `collect --bazel-cquery/--bazel-aquery`) ──────────────
+#
+# `collect` (and its `--from bazel-cquery=/bazel-aquery=` adapter specs) was
+# deleted in the ADR-043 CLI reset, but the engine it drove is unchanged:
+# `cli_buildsource_helpers._run_adapters` is the exact function the deleted
+# Click command called, so these exercise it directly instead of going
+# through a CLI that no longer exists.
+
+
+def _run_bazel_adapters(
+    *, build_dir: Path | None = None, bazel_cquery=None, bazel_aquery=None
+) -> tuple[BuildEvidence, list[ExtractorRecord]]:
+    merged = BuildEvidence()
+    extractors: list[ExtractorRecord] = []
+    _run_adapters(
+        merged,
+        extractors,
+        compile_db=None,
+        build_dir=build_dir,
+        cmake=False,
+        ninja=False,
+        ninja_compdb=None,
+        bazel_cquery=bazel_cquery,
+        bazel_aquery=bazel_aquery,
+        make_dry_run=None,
+        binary=None,
+        read_compiler_record=False,
+        build_system="generic",
+        record_bazel_inputs=False,
+        verbose=False,
+    )
+    return merged, extractors
 
 
 def test_collect_evidence_bazel_files(tmp_path):
@@ -602,16 +631,9 @@ def test_collect_evidence_bazel_files(tmp_path):
     aq = tmp_path / "aquery.json"
     cq.write_text(CQUERY)
     aq.write_text(AQUERY)
-    out = tmp_path / "e"
-    result = CliRunner().invoke(
-        main,
-        ["collect", "--from", f"bazel-cquery={cq}", "--from", f"bazel-aquery={aq}", "-o", str(out)],
-    )
-    assert result.exit_code == 0, result.output
-    pack = BuildSourcePack.load(out)
-    assert pack.build_evidence is not None
-    assert any(t.build_system == "bazel" for t in pack.build_evidence.targets)
-    assert any(e.name == "bazel" and e.status == "ok" for e in pack.manifest.extractors)
+    merged, extractors = _run_bazel_adapters(bazel_cquery=cq, bazel_aquery=aq)
+    assert any(t.build_system == "bazel" for t in merged.targets)
+    assert any(e.name == "bazel" and e.status == "ok" for e in extractors)
 
 
 def test_collect_evidence_bazel_files_uses_build_dir_as_workspace(tmp_path):
@@ -619,25 +641,13 @@ def test_collect_evidence_bazel_files_uses_build_dir_as_workspace(tmp_path):
     aq.write_text(AQUERY)
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    out = tmp_path / "e"
-    result = CliRunner().invoke(
-        main,
-        [
-            "collect",
-            "--build-dir", str(workspace),
-            "--from", f"bazel-aquery={aq}",
-            "-o", str(out),
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    pack = BuildSourcePack.load(out)
-    assert pack.build_evidence is not None
-    assert Path(pack.build_evidence.compile_units[0].directory).expanduser() == workspace.resolve()
+    merged, _extractors = _run_bazel_adapters(build_dir=workspace, bazel_aquery=aq)
+    assert Path(merged.compile_units[0].directory).expanduser() == workspace.resolve()
 
 
 def test_collect_evidence_bazel_link_only_pack_preserved(tmp_path):
-    # An aquery with only a link action (no targets/compile units) must still be
-    # written to the pack — link_units count toward build-evidence presence.
+    # An aquery with only a link action (no targets/compile units) must still
+    # count toward build-evidence presence — link_units alone are enough.
     aq = tmp_path / "aquery.json"
     aq.write_text(json.dumps({
         "artifacts": [{"id": "1", "pathFragmentId": "10"}],
@@ -645,13 +655,9 @@ def test_collect_evidence_bazel_link_only_pack_preserved(tmp_path):
                      "primaryOutputId": "1"}],
         "pathFragments": [{"id": "10", "label": "libfoo.so"}],
     }))
-    out = tmp_path / "e"
-    result = CliRunner().invoke(main, ["collect", "--from", f"bazel-aquery={aq}", "-o", str(out)])
-    assert result.exit_code == 0, result.output
-    pack = BuildSourcePack.load(out)
-    assert pack.build_evidence is not None
-    assert len(pack.build_evidence.link_units) == 1
-    assert any(e.name == "bazel" and e.status == "ok" for e in pack.manifest.extractors)
+    merged, extractors = _run_bazel_adapters(bazel_aquery=aq)
+    assert len(merged.link_units) == 1
+    assert any(e.name == "bazel" and e.status == "ok" for e in extractors)
 
 
 # A real `bazel aquery --output=jsonproto` capture from a minimal cc_library
@@ -673,10 +679,6 @@ def test_bazel_real_aquery_export_yields_nonempty_l3():
 
 
 def test_collect_real_bazel_aquery_pack_has_l3(tmp_path):
-    out = tmp_path / "pack"
-    result = CliRunner().invoke(main, ["collect", "--from", f"bazel-aquery={_REAL_AQUERY}", "-o", str(out)])
-    assert result.exit_code == 0, result.output
-    pack = BuildSourcePack.load(out)
-    assert pack.build_evidence is not None
-    assert len(pack.build_evidence.compile_units) >= 1
-    assert any(e.name == "bazel" and e.status == "ok" for e in pack.manifest.extractors)
+    merged, extractors = _run_bazel_adapters(bazel_aquery=_REAL_AQUERY)
+    assert len(merged.compile_units) >= 1
+    assert any(e.name == "bazel" and e.status == "ok" for e in extractors)

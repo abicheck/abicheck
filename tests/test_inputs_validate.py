@@ -12,8 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for ``buildsource.inputs_validate`` and the ``abicheck inputs validate``
-CLI command (ADR-038 C.8, recommendation #28)."""
+"""Tests for ``buildsource.inputs_validate``: validating a build-emitted
+``abicheck_inputs/`` pack (ADR-038 C.8, recommendation #28).
+
+There is no standalone ``abicheck inputs validate`` CLI command (ADR-043 D1):
+validation happens automatically whenever ``dump``/``compare --build-info``/
+``--sources`` ingests such a pack -- see ``test_build_source_cli.py`` for the
+end-to-end CLI coverage of that automatic path.
+"""
 
 from __future__ import annotations
 
@@ -21,7 +27,6 @@ import json
 from pathlib import Path
 
 import pytest
-from click.testing import CliRunner
 
 from abicheck.buildsource import SourceAbiTu, SourceEntity, SourceLocation
 from abicheck.buildsource.inputs_pack import ABICHECK_INPUTS_VERSION, INPUTS_KIND
@@ -30,7 +35,6 @@ from abicheck.buildsource.inputs_validate import (
     validate_inputs_pack,
 )
 from abicheck.buildsource.source_abi import FACT_FAMILIES, default_fact_set
-from abicheck.cli import main
 
 
 def _tu(
@@ -432,54 +436,36 @@ def test_report_to_dict_round_trips_shape(tmp_path: Path) -> None:
     }
 
 
-# -- CLI: `abicheck inputs validate` ------------------------------------------
+# -- Automatic ingestion (ADR-043 D1): no standalone `inputs validate` command --
+# `dump --build-info`/`--sources` auto-detects an abicheck_inputs/ pack and
+# validates it on ingestion; an invalid pack fails the dump itself instead of
+# requiring a separate `abicheck inputs validate` step first.
 
 
-def test_cli_validate_clean_pack_exits_zero(tmp_path: Path) -> None:
+def test_dump_build_info_ingests_valid_inputs_pack(tmp_path: Path) -> None:
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
     fs = default_fact_set(producer="p", producer_version="1")
     pack = _write_pack(tmp_path, [_tu("a", fact_set=fs, coverage=_full_coverage())])
-    result = CliRunner().invoke(main, ["inputs", "validate", str(pack)])
+    out = tmp_path / "out.json"
+    result = CliRunner().invoke(
+        main, ["dump", "--build-info", str(pack), "--depth", "source", "-o", str(out)]
+    )
     assert result.exit_code == 0, result.output
-    assert "OK" in result.output
+    assert out.is_file()
 
 
-def test_cli_validate_warnings_exit_one(tmp_path: Path) -> None:
-    pack = _write_pack(tmp_path, [_tu("a")])  # no fact_set -> warning
-    result = CliRunner().invoke(main, ["inputs", "validate", str(pack)])
-    assert result.exit_code == 1, result.output
-    assert "WARNING" in result.output
+def test_dump_build_info_rejects_invalid_inputs_pack(tmp_path: Path) -> None:
+    from click.testing import CliRunner
 
+    from abicheck.cli import main
 
-def test_cli_validate_errors_exit_two(tmp_path: Path) -> None:
     bad_fs = default_fact_set(producer="p", producer_version="1")
     bad_fs["version"] = 999
     pack = _write_pack(tmp_path, [_tu("a", fact_set=bad_fs)])
-    result = CliRunner().invoke(main, ["inputs", "validate", str(pack)])
-    assert result.exit_code == 2, result.output
-    assert "ERROR" in result.output
-
-
-def test_cli_validate_bad_path_exits_usage_error(tmp_path: Path) -> None:
-    result = CliRunner().invoke(main, ["inputs", "validate", str(tmp_path / "nope")])
-    assert result.exit_code == 64, result.output
-
-
-def test_cli_validate_json_format(tmp_path: Path) -> None:
-    fs = default_fact_set(producer="p", producer_version="1")
-    pack = _write_pack(tmp_path, [_tu("a", fact_set=fs, coverage=_full_coverage())])
     result = CliRunner().invoke(
-        main, ["inputs", "validate", str(pack), "--format", "json"]
+        main, ["dump", "--build-info", str(pack), "--depth", "source"]
     )
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
-    assert payload["ok"] is True
-    assert payload["tu_count"] == 1
-
-
-def test_cli_validate_writes_to_output_file(tmp_path: Path) -> None:
-    fs = default_fact_set(producer="p", producer_version="1")
-    pack = _write_pack(tmp_path, [_tu("a", fact_set=fs, coverage=_full_coverage())])
-    out = tmp_path / "report.txt"
-    result = CliRunner().invoke(main, ["inputs", "validate", str(pack), "-o", str(out)])
-    assert result.exit_code == 0, result.output
-    assert "OK" in out.read_text(encoding="utf-8")
+    assert result.exit_code != 0, result.output

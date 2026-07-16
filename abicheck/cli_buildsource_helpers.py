@@ -78,14 +78,14 @@ def _resolve_side_pack(
     snapshot's embedded payload per layer; when neither flag is given the
     embedded ``snap.build_source`` is used as-is (single-artifact UX).
     """
-    bi_pack = _load_pack_or_raise(build_info) if build_info is not None else None
-    src_pack = _load_pack_or_raise(sources) if sources is not None else None
+    bi_pack = _load_side_pack_input(build_info)
+    src_pack = _load_side_pack_input(sources)
     embedded = snap.build_source if snap is not None else None
     if bi_pack is None and src_pack is None:
         return embedded
 
-    # Each flag's pack exposes *every* layer it carries (a pack collected by
-    # `abicheck collect` may hold build + source + graph). --build-info wins for
+    # Each flag's pack exposes *every* layer it carries (a pack directory may
+    # hold build + source + graph together). --build-info wins for
     # L3, --sources wins for L4/L5, the embedded payload backfills, and the
     # coverage manifest is rebuilt per-layer from the supplying pack.
     return _combine_packs(bi_pack, src_pack, embedded)
@@ -135,8 +135,8 @@ def diff_embedded_build_source(
                 f"Note: --depth collected evidence mode '{collect_mode}' was "
                 "requested but no build-info/source facts were embedded or "
                 "supplied; inline collection for this mode is not yet available. "
-                "Use `abicheck collect` then embed with `dump --build-info/"
-                "--sources` (or pass --old/new pack dirs).",
+                "Embed with `dump --build-info`/`--sources` (or pass "
+                "--old/new-build-info pack dirs to compare).",
                 err=True,
             )
         # require_evidence still fires with no packs at all: every required layer
@@ -332,6 +332,45 @@ def _load_pack_or_raise(evidence_dir: Path) -> BuildSourcePack:
         raise click.ClickException(
             f"Invalid evidence pack at {evidence_dir}: {exc}"
         ) from exc
+
+
+def _is_inputs_pack_dir(path: Path | None) -> bool:
+    """True when *path* is a build-emitted ``abicheck_inputs/`` directory (ADR-035 D5)."""
+    if path is None or not path.is_dir():
+        return False
+    from .buildsource.inputs_pack import is_inputs_pack
+
+    return is_inputs_pack(path)
+
+
+def _load_inputs_pack_or_raise(path: Path) -> BuildSourcePack:
+    """Validate and ingest an ``abicheck_inputs/`` directory into a BuildSourcePack.
+
+    Validation happens automatically whenever the pack is consumed -- there is
+    no separate ``inputs validate`` command to run first (ADR-043 D1). A
+    structurally invalid pack is a hard error; non-fatal findings are printed
+    as warnings.
+    """
+    from .buildsource.inputs_pack import ingest_inputs_pack
+    from .buildsource.inputs_validate import validate_inputs_pack
+
+    report = validate_inputs_pack(path)
+    if report.errors:
+        raise click.ClickException(
+            f"Invalid abicheck_inputs/ pack at {path}: " + "; ".join(report.errors)
+        )
+    for warning in report.warnings:
+        click.echo(f"warning: {path}: {warning}", err=True)
+    return ingest_inputs_pack(path).pack
+
+
+def _load_side_pack_input(path: Path | None) -> BuildSourcePack | None:
+    """Load a compare-side out-of-band pack, auto-detecting its pack kind."""
+    if path is None:
+        return None
+    if _is_inputs_pack_dir(path):
+        return _load_inputs_pack_or_raise(path)
+    return _load_pack_or_raise(path)
 
 
 def _intrinsic_coverage(snap: AbiSnapshot) -> list[LayerCoverage]:

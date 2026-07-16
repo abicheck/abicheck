@@ -202,15 +202,16 @@ change while it stays behind that boundary, and becomes contract the moment a
 public inline body references it or a public header exposes its type by value.
 
 ➡️ The full deep-dive — the safe/unsafe boundary shifts, the six-point
-private-change safety checklist, and how public-surface scoping and
-`scan --audit` check the boundary — is on its own page:
-**[What Is Part of Your ABI Surface?](abi-surface.md)**
+private-change safety checklist, and how public-surface scoping and `scan`'s
+baseline-free audit mode (just omit `--against`) check the boundary — is on
+its own page: **[What Is Part of Your ABI Surface?](abi-surface.md)**
 
 ### App-swap (ASW): the consumer-scoped runtime check
 
 The most realistic *consumer-level* test is **application software swap (ASW)** —
 build an app against the old library, drop in the new one, and run it. abicheck
-exposes this as [`appcompat`](../user-guide/appcompat.md). ASW is
+exposes this as [`compare --used-by APP`](../user-guide/appcompat.md) (folding
+the former standalone `appcompat` command). ASW is
 **consumer-scoped** compatibility; library `compare`/`scan` is
 **contract-scoped** — use both. What app mode can and cannot conclude, and how
 it compares to the other methods (libabigail, ABICC, bundle scan), is in
@@ -276,18 +277,20 @@ default-argument values, inline/template **bodies**, uninstantiated templates �
 abicheck can read the build's compile database (**L3**) and replay the sources
 (**L4**), and fold a source/build reachability graph (**L5**). The one-shot
 driver is `abicheck scan`. It has one evidence dial — `--depth`
-(`binary|headers|build|source|full`) — that selects how far down the `L0`–`L5`
+(`binary|headers|build|source`) — that selects how far down the `L0`–`L5`
 *evidence layers* (what it sees + authority) to collect; fully explained in
 [Evidence & Detectability](evidence-and-detectability.md#the-depth-dial-how-much-evidence-to-collect). The governing
 **authority rule**: source/build evidence (L3/L4/L5) explains, localizes, scopes,
 or raises its own source-/API-level findings, but **never deletes an
 artifact-proven break**.
 
-Orthogonal to depth, `scan --audit` is an **intra-version single-build hygiene
-lint that needs no previous version**: accidental exports, private-header
-leaks, unversioned symbols, exported RTTI for internal types, and cross-source
-mismatches. The worked cases (case143–151) with commands are in
-[Source-Scan Depth § single-build audit](../user-guide/scan-levels.md#single-build-audit-no-baseline);
+Orthogonal to depth, omitting `--against` runs `scan` in its **intra-version
+single-build hygiene lint that needs no previous version**: accidental exports,
+private-header leaks, unversioned symbols, exported RTTI for internal types,
+and cross-source mismatches (there is no separate `--audit` flag — `--against`
+alone selects between the two modes). The worked cases (case143–151) with
+commands are in
+[Source-Scan Depth § single-build audit](../user-guide/scan-levels.md#single-build-audit-no-against);
 their throughline is that a finding invisible or ambiguous to **any single
 source** resolves only by crosschecking two, and that a scan always states the
 depth it *actually reached*
@@ -301,7 +304,7 @@ project, the tool-track guides carry the exact commands, flags, and CI YAML:
 
 | You want to… | Go to |
 |--------------|-------|
-| Pick the right command for your situation (binary compare → full source scan → merge → plugin) | [Choose Your Workflow](../user-guide/choose-your-workflow.md) |
+| Pick the right command for your situation (binary compare → full source scan → combine evidence → plugin) | [Choose Your Workflow](../user-guide/choose-your-workflow.md) |
 | Run `abicheck scan` and pin a depth | [Source-Scan Depth](../user-guide/scan-levels.md) |
 | *Produce* the source facts — post-build replay (Full source scan), `abicheck-cc` wrapper (Wrapper injection), or the Clang plugin (Plugin injection) | [Producing Source Facts](../user-guide/producing-source-facts.md) |
 | Fold build/source evidence into a baseline snapshot | [Source & Build Data](build-source-data.md) |
@@ -313,7 +316,9 @@ The CI recipes there go beyond the binary-only compare: a minimal PR scan is
 four inputs (binary + headers + `sources: .` + `baseline`), and the same guide
 shows enabling each source layer independently — `depth: build` for cheap L3
 build-flag drift, `depth: source` for full L4 replay plus the change-scoped L5
-graph, and `mode: merge` for build-emitted (`abicheck-cc` / Clang plugin) packs.
+graph, and the `sources`/`build-info` inputs auto-detecting a build-emitted
+(`abicheck-cc` / Clang plugin) `abicheck_inputs/` pack directly — no separate
+merge step.
 
 ## Detection coverage and roadmap
 

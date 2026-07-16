@@ -85,7 +85,7 @@ the severity-aware scheme).
 | `--no-added-syms` | `--show-only removed,changed` | Display-only filter; verdict and exit code unchanged |
 | `--harmless` | *(default)* | Compatible changes are already reported; isolate them with `--show-only compatible` |
 | `--exported-interfaces-only` | *(default)* | abicheck always analyses the exported ABI surface |
-| `--fail-no-debug-info` | *(no direct flag)* | abicheck degrades gracefully and reports the evidence it had — check `abicheck dump LIB --show-data-sources` or the report's evidence tier |
+| `--fail-no-debug-info` | *(no direct flag)* | abicheck degrades gracefully and reports the evidence it had — check `abicheck dump LIB --dry-run` or the report's evidence tier |
 | `--verbose` | `-v` / `--verbose` | |
 
 Output formats: where `abidiff` emits its text report, `abicheck compare`
@@ -151,9 +151,7 @@ suppressions:
 ```
 
 The YAML schema also supports change-kind filters, expiry dates, and required
-justifications — see [Suppressions](suppressions.md) for the full schema, and
-run `abicheck suggest-suppressions` on a JSON report to generate candidate
-entries instead of writing them by hand.
+justifications — see [Suppressions](suppressions.md) for the full schema.
 
 ## Semantics to be aware of
 

@@ -75,7 +75,7 @@ shape differs by tool:
 | `abi_list_changes` | `{"count": ..., "change_kinds": [...]}` — no `status` field |
 | `abi_explain_change` | `{"kind": ..., "impact": ..., ...}` — no `status` field |
 | `abi_audit` | `{"status": "ok", "verdict": ..., "catalog": ..., "pattern_scan": ...}` |
-| `abi_estimate` | `{"status": "ok", "mode": ..., "estimate": [...], "total_est_seconds": ...}` |
+| `abi_estimate` | `{"status": "ok", "estimate": [...], "total_est_seconds": ...}` |
 | `abi_scan` | `{"status": "ok", "verdict": ..., "layers": [...], ...}` |
 
 The simplest client check is: `status == "error"` ⇒ failure; otherwise
@@ -109,6 +109,8 @@ ABICC Perl dump (`.pl` / `.dump`).
 | `report_mode` | string | no | `"full"` (default) or `"leaf"` (root-type-grouped view) |
 | `show_impact` | boolean | no | If `true`, append an impact summary table to the rendered report |
 | `stat` | boolean | no | If `true`, emit a one-line summary instead of the full report |
+| `used_by` | string[] | no | Application binary paths — scope the comparison to what each app actually imports/requires instead of the full library surface (folds the old `appcompat` command). `old_input`/`new_input` must be real library binaries, not JSON snapshots. Mutually exclusive with `required_symbols`. Adds a `used_by` list to the response and floors `exit_code` on the worst-scoped app's verdict |
+| `required_symbols` | string[] | no | An explicit plugin/host required-entrypoint contract — scope the comparison to only these exported symbols (folds the old `plugin-check` command). Mutually exclusive with `used_by`. Adds a `required_symbol_contract` object to the response and floors `exit_code` on its verdict |
 
 **Response fields:**
 
@@ -160,6 +162,12 @@ ABICC Perl dump (`.pl` / `.dump`).
 | `COMPATIBLE_WITH_RISK` | 0 |
 | `API_BREAK` | 2 |
 | `BREAKING` | 4 |
+
+When `used_by` or `required_symbols` is given, `exit_code_scheme` becomes
+`"scoped"` and `exit_code` instead floors on the worst app/contract-scoped
+verdict (`BREAKING` → 4, `API_BREAK` → 2, else 0), overriding the legacy or
+severity scheme above — mirroring the CLI's `compare --used-by`/
+`--required-symbol(s)` behavior.
 
 See [Exit Codes](../reference/exit-codes.md) for the full CLI matrix.
 
@@ -282,9 +290,10 @@ The `severity` field is either `"error"` (`BREAKING`) or `"warning"`
 
 ### `abi_audit` — Single-release ABI-hygiene audit
 
-The MCP counterpart of [`abicheck scan --audit`](scan-levels.md): runs the
-intra-version cross-source validation engine plus the compiler-free lexical
-pattern pre-scan over **one** build — no baseline or previous version needed.
+The MCP counterpart of a baseline-less [`abicheck scan`](scan-levels.md) (omit
+`--against`): runs the intra-version cross-source validation engine plus the
+compiler-free lexical pattern pre-scan over **one** build — no baseline or
+previous version needed.
 It returns a "bad ABI hygiene" catalog: accidental ABI surface
 (`exported_not_public`), public-but-not-exported declarations,
 header/build-context mismatch, and private-header leaks, plus advisory pattern
@@ -308,11 +317,11 @@ they are advisory (`RISK`/`API_BREAK`).
 
 ### `abi_estimate` — Dry-run scan cost estimate
 
-The MCP counterpart of [`abicheck scan --estimate`](scan-levels.md):
+The MCP counterpart of [`abicheck scan --dry-run`](scan-levels.md):
 probes the project (TU count from the compile DB or source tree, public-header
 fan-out) and returns the **projected per-layer cost** of the chosen scan level
 without running any compiler or parsing any binary. Use it to pick a
-`depth`/`mode` on measured cost before spending on `abi_scan`.
+`depth` on measured cost before spending on `abi_scan`.
 
 **Parameters:**
 
@@ -323,12 +332,10 @@ without running any compiler or parsing any binary. Use it to pick a
 | `include_dirs` | string[] | no | Extra include directories |
 | `sources` | string | no | Source tree (compile DB auto-discovered within it) |
 | `compile_db` | string | no | Explicit `compile_commands.json` (else discovered in `sources`) |
-| `depth` | string | no | The evidence dial: `binary`, `headers`, `build`, `source`, `full`; omit for `auto` |
-| `mode` | string | no | Preset (`"pr"` default, `"pr-deep"`, `"baseline"`, `"audit"`). Deprecated alias of `depth` on the CLI (ADR-037 D5) |
-| `source_method` | string | no | **Deprecated alias of `depth`** (ADR-037 D5): the `s0`…`s6` axis, or `auto` |
+| `depth` | string | no | The evidence dial: `binary`, `headers`, `build`, or `source`; omit to infer automatically (escalating with the changed-path risk score once `changed_paths` is given) |
 | `changed_paths` | string[] | no | Changed-path set for the focused replay-scope estimate |
 
-**Response fields:** `mode`, `estimate` (per-layer cost rows), and
+**Response fields:** `estimate` (per-layer cost rows) and
 `total_est_seconds`.
 
 ---
@@ -337,11 +344,12 @@ without running any compiler or parsing any binary. Use it to pick a
 
 The MCP counterpart of the [`scan` CLI](scan-levels.md): classify → always-on
 tier (compiler-free pattern pre-scan + intra-version cross-source checks) → the
-pinned evidence level — and, when `baseline` is given, a compare against it.
+pinned evidence level — and, when `against` is given, a compare against it.
 Returns one coverage-/confidence-annotated scan result. The authority rule is
 preserved: source/cross-source findings are `RISK`/`API_BREAK` only, never
 `BREAKING` on their own. See the [`--depth` dial](../concepts/evidence-and-detectability.md#the-depth-dial-how-much-evidence-to-collect)
-for the `depth` model (`mode`/`source_method` are deprecated aliases).
+for the `depth` model — `mode`/`source_method` are no longer accepted; depth
+is inferred automatically, or pinned explicitly via `depth`.
 
 **Parameters:**
 
@@ -353,10 +361,8 @@ for the `depth` model (`mode`/`source_method` are deprecated aliases).
 | `public_header_dirs` | string[] | no | Directories whose headers are public; establishes the public/internal boundary so the leakage/RTTI/exported-vs-public cross-checks run instead of skipping. Must be existing directories |
 | `sources` | string | no | Source tree (compile DB auto-discovered within it) |
 | `compile_db` | string | no | Explicit `compile_commands.json` (else discovered in `sources`) |
-| `baseline` | string | no | Previous build's dump/library to compare against. Omit for a single-release run; pass `mode="audit"` for the hygiene catalog (the MCP tool has no `--audit` switch of its own) |
-| `depth` | string | no | The evidence dial: `binary`, `headers`, `build`, `source`, `full`; omit for `auto` |
-| `mode` | string | no | Preset (`"pr"` default, `"pr-deep"`, `"baseline"`, `"audit"`). Deprecated alias of `depth` on the CLI (ADR-037 D5); still the way to select the audit lint via MCP |
-| `source_method` | string | no | **Deprecated alias of `depth`** (ADR-037 D5): the `s0`…`s6` axis, or `auto` |
+| `against` | string | no | Previous build's dump/library to compare `binary_path` against. Omit for a single-release run — the always-on hygiene catalog runs either way; there is no separate audit switch, omitting `against` alone selects it |
+| `depth` | string | no | The evidence dial: `binary`, `headers`, `build`, or `source`; omit to infer automatically (escalating with the changed-path risk score once `changed_paths` is given) |
 | `changed_paths` | string[] | no | Changed-path set focusing the scan |
 | `language` | string | no | `"c++"` (default) or `"c"` |
 
@@ -424,11 +430,11 @@ User: "Does this library leak anything it shouldn't?"
 ```text
 Agent: "Is a full source scan affordable here?"
 
-1. abi_estimate(binary_path="build/libfoo.so", sources=".", mode="pr")
+1. abi_estimate(binary_path="build/libfoo.so", sources=".")
    → total_est_seconds: 42.5, estimate: [per-layer rows]
 
 2. abi_scan(binary_path="build/libfoo.so", headers=["include/foo.h"],
-            sources=".", baseline="artifacts/libfoo-main.abi.json",
+            sources=".", against="artifacts/libfoo-main.abi.json",
             changed_paths=["src/foo.cpp"])
    → verdict + per-layer coverage rows (read them before trusting the verdict)
 ```
@@ -478,7 +484,7 @@ variables override defaults.
 | CLI flag | Environment variable | Default | Purpose |
 |---|---|---|---|
 | `--timeout <s>` | `ABICHECK_MCP_TIMEOUT` | `120` | Per-call timeout (seconds) for `abi_dump`, `abi_compare`, `abi_audit`, and `abi_scan`. On timeout the tool returns a structured error; the server stays up |
-| `--max-file-size <bytes>` | `ABICHECK_MCP_MAX_FILE_SIZE` | `524288000` (500 MB) | Maximum size of any input artifact — `library_path` (`abi_dump`/`abi_audit`), `old_input`/`new_input` (`abi_compare`), and `binary_path`/`compile_db`/`baseline` (`abi_scan`) |
+| `--max-file-size <bytes>` | `ABICHECK_MCP_MAX_FILE_SIZE` | `524288000` (500 MB) | Maximum size of any input artifact — `library_path` (`abi_dump`/`abi_audit`), `old_input`/`new_input` (`abi_compare`), and `binary_path`/`compile_db`/`against` (`abi_scan`) |
 | `--log-format text\|json` | — | `text` | Audit log format on stderr |
 
 Example invocation tuned for large libraries:
@@ -620,7 +626,7 @@ to keep one bad input from disabling the server:
 - **File-size cap**: input artifacts larger than `--max-file-size` (default
   500 MB) are rejected before any parsing begins — this covers
   `library_path` (`abi_dump`/`abi_audit`), `old_input`/`new_input`
-  (`abi_compare`), and `binary_path`/`compile_db`/`baseline` (`abi_scan`).
+  (`abi_compare`), and `binary_path`/`compile_db`/`against` (`abi_scan`).
 - **Per-call timeout**: `abi_dump`, `abi_compare`, and `abi_audit` run in a
   worker thread bounded by `--timeout` (default 120 s); `abi_scan` runs in a
   killable child process bounded by the same timeout (so a hung deep scan is

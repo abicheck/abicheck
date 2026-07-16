@@ -3,8 +3,14 @@
 abicheck does not only diff symbols one at a time — it also reasons about the
 *shape* of your public API as a typed declaration graph. This page describes the
 **idiom-aware** features introduced in [ADR-027](../development/adr/027-api-surface-intelligence.md):
-the single-snapshot `surface-report`, idiom & anti-pattern recognition, and
+single-snapshot surface metrics, idiom & anti-pattern recognition, and
 **pattern-aware verdicts** that modulate a diff using that knowledge.
+
+> **History note:** this used to be a standalone `abicheck surface-report`
+> command. The ADR-043 CLI reset removed it with no direct replacement command
+> (it was judged below the five-command bar) — the underlying functions below
+> remain directly callable from Python for anyone who needs a single-snapshot
+> report outside of a `compare`.
 
 These features are **opt-in** and **auditable**. The governing rule, inherited
 from the public-surface work in ADR-024, is:
@@ -15,13 +21,22 @@ from the public-surface work in ADR-024, is:
 Every modulation is recorded, attributed to the rule that made it, and
 reversible with a flag.
 
-## `surface-report` — describe one library's surface
+## Surface metrics — describe one library's surface
 
-```bash
-abicheck surface-report libfoo.so -H include/ --idioms --anti-patterns --format json
+```python
+from abicheck.serialization import load_snapshot
+from abicheck.surface_graph import build_surface_graph, compute_surface_metrics
+from abicheck.idioms import recognise_idioms, detect_antipatterns
+
+snap = load_snapshot("libfoo.so.abi.json")  # from `abicheck dump`
+graph = build_surface_graph(snap)
+metrics = compute_surface_metrics(snap)     # header coverage, fan-in, undocumented-export ratio
+idioms = recognise_idioms(graph)            # opaque pointer / PIMPL / handle / factory / callback ABI
+antipatterns = detect_antipatterns(graph)   # std:: by-value crossings, missing virtual dtor
 ```
 
-It reports, for a single library (no diff):
+Dump the library first (`abicheck dump libfoo.so -H include/ -o libfoo.so.abi.json`),
+then run the snippet above. It reports, for a single library (no diff):
 
 - header→symbol coverage and the undocumented-export ratio,
 - per-type fan-in (the "blast radius" if a type changes),
@@ -101,7 +116,7 @@ code honour it — the same demote-don't-delete contract as A4.
 
 `compare --surface-metrics` emits aggregate, informational `COMPATIBLE`
 roll-ups — `public_surface_grew` / `public_surface_shrank` and
-`undocumented_export_ratio_increased` — computed from the same metrics as
-`surface-report`. They never drive a verdict on their own (the individual
+`undocumented_export_ratio_increased` — computed from the same
+`compute_surface_metrics()` used above. They never drive a verdict on their own (the individual
 additions/removals are reported per-symbol); they are a trendable signal for CI
 dashboards and release notes.

@@ -77,7 +77,6 @@ def _scan(project, depth: str) -> dict:
         main,
         [
             "scan",
-            "--binary",
             str(project / "libfoo.so"),
             "-H",
             str(project / "include"),
@@ -135,7 +134,7 @@ def test_build_depth_runs_zero_config_cmake_and_preprocessor(cmake_cxx_project):
     )
 
 
-@pytest.mark.parametrize("depth", ["source", "full"])
+@pytest.mark.parametrize("depth", ["source"])
 def test_source_depths_add_l4_replay_and_l5_graph(cmake_cxx_project, depth):
     cov = _coverage(_scan(cmake_cxx_project, depth))
     assert cov["L3_build"] == "present"

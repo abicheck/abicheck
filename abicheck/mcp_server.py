@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from .policy_file import PolicyFile
     from .severity import SeverityConfig
 
 try:
@@ -98,6 +99,20 @@ MCP_MAX_FILE_SIZE: int = _env_int("ABICHECK_MCP_MAX_FILE_SIZE", str(500 * 1024 *
 
 #: Structured JSON log format flag (set via --log-format json).
 _structured_logging: bool = False
+
+#: The public depth ladder (ADR-043 D2): exactly the four user-facing rungs.
+#: ``full``/``symbols``/``graph`` are internal-only vocabulary and must not
+#: leak into the MCP tool surface, matching the public CLI's ``--depth``.
+_PUBLIC_DEPTHS = frozenset({"binary", "headers", "build", "source"})
+
+
+def _validate_public_depth(depth: str | None) -> str | None:
+    """Reject any depth spelling outside the public ladder, or ``None``."""
+    if depth is not None and depth not in _PUBLIC_DEPTHS:
+        raise ValueError(
+            f"Unknown depth: {depth!r}. Valid depths: {sorted(_PUBLIC_DEPTHS)}"
+        )
+    return depth
 
 
 def _check_file_size(path: Path, *, label: str = "input") -> None:
@@ -432,6 +447,17 @@ def _render_output(
     )
 
 
+def _scoped_verdict_exit_code(verdict: object) -> int:
+    """Map a scoped-comparison (--used-by/--required-symbols) Verdict to its
+    floor exit code (ADR-043): BREAKING -> 4, API_BREAK -> 2, else 0."""
+    value = getattr(verdict, "value", verdict)
+    if value == "BREAKING":
+        return 4
+    if value == "API_BREAK":
+        return 2
+    return 0
+
+
 def _impact_category(kind: ChangeKind, policy: str = "strict_abi") -> str:
     """Return the impact category string for a ChangeKind under the given policy.
 
@@ -575,6 +601,8 @@ def abi_compare(
     severity_potential_breaking: str | None = None,
     severity_quality_issues: str | None = None,
     severity_addition: str | None = None,
+    used_by: list[str] | None = None,
+    required_symbols: list[str] | None = None,
 ) -> str:
     """Compare two ABI surfaces and report breaking changes.
 
@@ -624,9 +652,26 @@ def abi_compare(
         severity_potential_breaking: Override severity for potential_breaking findings.
         severity_quality_issues: Override severity for quality_issues findings.
         severity_addition: Override severity for addition findings.
+        used_by: Application binary paths (ADR-043) — scope the comparison to
+            what each app actually imports/requires, instead of the full
+            library surface. OLD/NEW must be real library binaries (not JSON
+            snapshots). Mutually exclusive with required_symbols. Adds a
+            ``used_by`` list to the response and floors ``exit_code`` on the
+            worst-scoped app's verdict (BREAKING → 4, API_BREAK → 2).
+        required_symbols: An explicit plugin/host required-entrypoint contract
+            (ADR-043) — scope the comparison to only these exported symbols.
+            Mutually exclusive with used_by. Adds a ``required_symbol_contract``
+            object to the response and floors ``exit_code`` on its verdict.
     """
     t0 = _time.monotonic()
     try:
+        if used_by and required_symbols:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": "used_by and required_symbols are mutually exclusive",
+                }
+            )
         old_path = _safe_read_path(old_input, label="old_input")
         new_path = _safe_read_path(new_input, label="new_input")
         for p, label in [(old_path, "old_input"), (new_path, "new_input")]:
@@ -712,7 +757,7 @@ def abi_compare(
 
         # Resolve inputs, load suppression/policy, and compare — all under
         # a real timeout so we don't block the MCP stdio server.
-        def _do_compare() -> tuple[AbiSnapshot, AbiSnapshot, DiffResult]:
+        def _do_compare() -> tuple[AbiSnapshot, AbiSnapshot, DiffResult, PolicyFile | None]:
             old_snap = _resolve_input(
                 old_path, old_h, inc, "old", language, public_headers=old_h
             )
@@ -743,12 +788,13 @@ def abi_compare(
                     policy=policy,
                     policy_file=pf,
                 ),
+                pf,
             )
 
         with _futures.ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(_do_compare)
             try:
-                old_snap, new_snap, result = future.result(timeout=MCP_TIMEOUT)
+                old_snap, new_snap, result, pf = future.result(timeout=MCP_TIMEOUT)
             except _futures.TimeoutError:
                 elapsed = _time.monotonic() - t0
                 _audit_log(
@@ -789,12 +835,101 @@ def abi_compare(
             elif result.verdict == Verdict.API_BREAK:
                 exit_code = 2
 
-        # Build structured response
+        # Scope the comparison to --used-by apps or a --required-symbols
+        # contract (ADR-043): mirrors the CLI's `compare --used-by`/
+        # `--required-symbol` folding of the deleted appcompat/plugin-check
+        # commands. When given, the scoped verdict's exit code always wins
+        # over the severity/legacy scheme above (parity with the CLI).
+        exit_code_scheme = "severity" if severity_config is not None else "legacy"
+        scoped_key: str | None = None
+        scoped_payload: Any = None
+        scoped_verdict_value: str | None = None
+        if used_by:
+            from .appcompat import scope_diff_to_app
+            from .service import detect_binary_format
+
+            for p, label in ((old_path, "old_input"), (new_path, "new_input")):
+                if detect_binary_format(p) is None:
+                    return json.dumps(
+                        {
+                            "status": "error",
+                            "error": f"used_by requires old_input/new_input to be "
+                            f"real library binaries (not JSON snapshots); "
+                            f"{label} ({p}) is not a recognized binary format.",
+                        }
+                    )
+            summaries = []
+            worst_exit = 0
+            worst_verdict = None
+            for app in used_by:
+                app_path = _safe_read_path(app, label="used_by")
+                if not app_path.exists():
+                    return json.dumps(
+                        {"status": "error", "error": f"used_by app not found: {app}"}
+                    )
+                _check_file_size(app_path, label="used_by")
+                scoped = scope_diff_to_app(
+                    result, app_path, old_path, new_path,
+                    policy=active_policy, policy_file=pf,
+                )
+                summaries.append(
+                    {
+                        "app": scoped.app_path,
+                        "verdict": scoped.verdict.value,
+                        "required_symbol_count": scoped.required_symbol_count,
+                        "missing_symbols": scoped.missing_symbols,
+                        "missing_versions": scoped.missing_versions,
+                        "relevant_change_count": len(scoped.breaking_for_app),
+                        "symbol_coverage": round(scoped.symbol_coverage, 1),
+                    }
+                )
+                app_exit = _scoped_verdict_exit_code(scoped.verdict)
+                if worst_verdict is None or app_exit >= worst_exit:
+                    worst_exit = app_exit
+                    worst_verdict = scoped.verdict
+            scoped_key = "used_by"
+            scoped_payload = summaries
+            exit_code = worst_exit
+            exit_code_scheme = "scoped"
+            scoped_verdict_value = worst_verdict.value if worst_verdict is not None else None
+            # Mirror the CLI's result attributes (cli_compare_helpers._apply_used_by_scoping)
+            # so _fold_scoped_compat_into_text below can fold the same scoping into the
+            # rendered report, not just this response's top-level fields.
+            result.used_by = summaries  # type: ignore[attr-defined]
+            result.scoped_verdict = worst_verdict  # type: ignore[attr-defined]
+        elif required_symbols:
+            from .appcompat import scope_diff_to_required_symbols
+
+            scoped_host = scope_diff_to_required_symbols(
+                result, old_snap, new_snap, required_symbols,
+                policy=active_policy, policy_file=pf,
+            )
+            scoped_key = "required_symbol_contract"
+            scoped_payload = {
+                "verdict": scoped_host.verdict.value,
+                "required_entrypoints": sorted(scoped_host.required_entrypoints),
+                "missing_entrypoints": scoped_host.missing_entrypoints,
+                "relevant_change_count": len(scoped_host.breaking_for_host),
+                "coverage": round(scoped_host.coverage, 1),
+            }
+            exit_code = _scoped_verdict_exit_code(scoped_host.verdict)
+            exit_code_scheme = "scoped"
+            scoped_verdict_value = scoped_host.verdict.value
+            result.required_symbols = scoped_payload  # type: ignore[attr-defined]
+            result.scoped_verdict = scoped_host.verdict  # type: ignore[attr-defined]
+
+        # Build structured response. When a used_by/required_symbols scope is in
+        # effect, mirror the CLI JSON contract (`_fold_scoped_compat_into_text`):
+        # the scoped verdict becomes the primary `verdict` the exit code reflects,
+        # with the full-library verdict kept as `full_verdict` for context (Codex
+        # review — a caller that only reads `verdict` must not see the full
+        # library's BREAKING alongside a scoped-compatible exit_code: 0).
         response: dict[str, Any] = {
             "status": "ok",
-            "verdict": result.verdict.value,
+            "verdict": scoped_verdict_value if scoped_verdict_value is not None else result.verdict.value,
+            "full_verdict": result.verdict.value,
             "exit_code": exit_code,
-            "exit_code_scheme": "severity" if severity_config is not None else "legacy",
+            "exit_code_scheme": exit_code_scheme,
             "summary": {
                 "breaking": len(result.breaking),
                 "api_breaks": len(result.source_breaks),
@@ -816,6 +951,8 @@ def abi_compare(
             ],
             "suppressed_count": result.suppressed_count,
         }
+        if scoped_key is not None:
+            response[scoped_key] = scoped_payload
 
         # Include rendered report
         rendered = _render_output(
@@ -830,6 +967,15 @@ def abi_compare(
             severity_config=severity_config,
         )
         # When format is json, embed as nested object (not double-encoded string)
+        if scoped_key is not None:
+            from .cli_compare_helpers import _fold_scoped_compat_into_text
+
+            # Fold the same scoped-verdict swap/sections into the *rendered*
+            # report as the top-level fields above, mirroring the CLI's
+            # --secondary-format behavior — otherwise a client reading
+            # response["report"] sees the unscoped full-library verdict even
+            # though the top-level verdict/exit_code are scoped (Codex review).
+            rendered = _fold_scoped_compat_into_text(rendered, output_format, result)
         if output_format == "json":
             response["report"] = json.loads(rendered)
         else:
@@ -1072,12 +1218,10 @@ def abi_estimate(
     include_dirs: list[str] | None = None,
     sources: str | None = None,
     compile_db: str | None = None,
-    mode: str = "pr",
-    source_method: str | None = None,
     depth: str | None = None,
     changed_paths: list[str] | None = None,
 ) -> str:
-    """Dry-run scan cost estimate for a project (ADR-035 D10).
+    """Dry-run scan cost estimate for a project (ADR-035 D10 / ADR-043).
 
     Probes the project (TU count from the compile DB or source tree, public-header
     fan-out) and returns the projected per-layer cost of the chosen level WITHOUT
@@ -1090,9 +1234,9 @@ def abi_estimate(
         include_dirs: Extra include directories.
         sources: Source tree (compile DB auto-discovered within it).
         compile_db: Explicit compile_commands.json (else discovered in sources).
-        mode: Fixed (L,S) preset — "pr" (default), "pr-deep", "baseline", "audit".
-        source_method: Precise S-axis level (s0..s6 or auto); None = mode preset.
-        depth: Coarse L-axis selector (binary|headers|build|source|full).
+        depth: Coarse evidence-depth selector: "binary", "headers", "build", or
+            "source" (None = inferred from inputs, escalating with the
+            changed-path risk score once seeded).
         changed_paths: Changed-path set for the focused (D7) replay-scope estimate.
     """
     t0 = _time.monotonic()
@@ -1102,6 +1246,10 @@ def abi_estimate(
         bin_path = _safe_read_path(binary_path, label="binary_path")
         if not bin_path.exists():
             return json.dumps({"status": "error", "error": "Binary file not found"})
+        try:
+            depth = _validate_public_depth(depth)
+        except ValueError as exc:
+            return json.dumps({"status": "error", "error": str(exc)})
         hdr_paths = [_safe_read_path(h, label="header") for h in (headers or [])]
         inc_paths = [
             _safe_read_path(d, label="include_dir") for d in (include_dirs or [])
@@ -1117,8 +1265,7 @@ def abi_estimate(
             includes=inc_paths,
             sources=src_path,
             compile_db=cdb_path,
-            mode=mode,
-            source_method=source_method,
+            mode="pr",
             depth=depth,
             changed_paths=list(changed_paths or []),
             # Distinguish an *explicit* empty diff ([], a seeded no-op PR → s0
@@ -1134,7 +1281,6 @@ def abi_estimate(
         return json.dumps(
             {
                 "status": "ok",
-                "mode": mode,
                 "estimate": [e.to_dict() for e in estimates],
                 "total_est_seconds": round(total, 3),
             }
@@ -1156,22 +1302,20 @@ def abi_scan(
     public_header_dirs: list[str] | None = None,
     sources: str | None = None,
     compile_db: str | None = None,
-    baseline: str | None = None,
-    mode: str = "pr",
-    source_method: str | None = None,
+    against: str | None = None,
     depth: str | None = None,
     changed_paths: list[str] | None = None,
     language: str = "c++",
 ) -> str:
-    """Run a deterministic source-intelligence scan (ADR-035 D3/D10).
+    """Run a deterministic source-intelligence scan (ADR-035 D3/D10 / ADR-043).
 
     The typed engine behind the ``scan`` CLI: classify → always-on tier
     (compiler-free pattern pre-scan + intra-version cross-source checks) → the
-    pinned evidence level (the ``mode`` preset or an explicit
-    ``source_method``/``depth``), POI-focused — and, when ``baseline`` is given,
-    a ``compare`` against it. Returns one coverage-/confidence-annotated
-    :class:`ScanResult`. Authority rule preserved: source/cross-source findings
-    are RISK/API_BREAK only, never BREAKING on their own.
+    pinned evidence level (inferred from inputs, or pinned via ``depth``),
+    POI-focused — and, when ``against`` is given, a ``compare`` against it.
+    Returns one coverage-/confidence-annotated :class:`ScanResult`. Authority
+    rule preserved: source/cross-source findings are RISK/API_BREAK only,
+    never BREAKING on their own.
 
     Args:
         binary_path: Library/artifact (or JSON snapshot) to scan.
@@ -1183,11 +1327,11 @@ def abi_scan(
             also counts; a lone umbrella header file cannot establish a boundary.
         sources: Source tree (compile DB auto-discovered within it).
         compile_db: Explicit compile_commands.json (else discovered in sources).
-        baseline: Previous build's dump/library to compare against (omit for a
-            single-release run; use ``mode="audit"`` for the hygiene catalog).
-        mode: Fixed (L,S) preset — "pr" (default), "pr-deep", "baseline", "audit".
-        source_method: Precise S-axis level (s0..s6 or auto); None = mode preset.
-        depth: Coarse L-axis selector (binary|headers|build|source|full).
+        against: Previous build's dump/library to compare against (omit for a
+            single-release audit — the always-on hygiene catalog runs either way).
+        depth: Coarse evidence-depth selector: "binary", "headers", "build", or
+            "source" (None = inferred from inputs, escalating with the
+            changed-path risk score once seeded).
         changed_paths: Changed-path set focusing the scan (ADR-035 D7).
         language: Language mode — "c++" (default) or "c".
     """
@@ -1199,6 +1343,10 @@ def abi_scan(
         if not bin_path.exists():
             return json.dumps({"status": "error", "error": "Binary file not found"})
         _check_file_size(bin_path, label="binary_path")
+        try:
+            depth = _validate_public_depth(depth)
+        except ValueError as exc:
+            return json.dumps({"status": "error", "error": str(exc)})
         hdr_paths = [_safe_read_path(h, label="header") for h in (headers or [])]
         inc_paths = [
             _safe_read_path(d, label="include_dir") for d in (include_dirs or [])
@@ -1224,9 +1372,9 @@ def abi_scan(
         )
         if cdb_path is not None:
             _check_file_size(cdb_path, label="compile_db")
-        base_path = _safe_read_path(baseline, label="baseline") if baseline else None
+        base_path = _safe_read_path(against, label="against") if against else None
         if base_path is not None:
-            _check_file_size(base_path, label="baseline")
+            _check_file_size(base_path, label="against")
 
         req = ScanRequest(
             binaries=[bin_path],
@@ -1236,8 +1384,9 @@ def abi_scan(
             sources=src_path,
             compile_db=cdb_path,
             baseline=base_path,
-            mode=mode,
-            source_method=source_method,
+            # Absence of --against is a one-build audit; presence is compare-too
+            # (ADR-043) — neither is a separate mode argument on the MCP surface.
+            mode="audit" if base_path is None else "pr",
             depth=depth,
             changed_paths=list(changed_paths or []),
             seeded=changed_paths is not None,

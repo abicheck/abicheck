@@ -1344,9 +1344,10 @@ def _iter_cli_contract_sources() -> Iterable[Path]:
 # stays in lock-step with ``cli_options`` (the source of truth).
 
 #: verdict-emitting command module basename → the command's registered name.
+#: `appcompat` folded into `compare --used-by` (ADR-043) and no longer has its
+#: own registered command.
 _VERDICT_CMD_MODULES: dict[str, str] = {
     "cli.py": "compare",
-    "cli_appcompat.py": "appcompat",
 }
 
 #: decorator callables every verdict-emitting command must compose (ADR-037 D3).

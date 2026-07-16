@@ -237,11 +237,11 @@ Three consequences fall out of this shape, all by design:
 - The facts are **embedded in the snapshot**. `dump --build-info/--sources`
   folds the normalized build + source facts directly into the `.abi.json`, so a
   later `compare old.json new.json` carries them with **no out-of-band
-  directories** (single-artifact UX). The pack directory that `collect`
-  produces stays available as an explicit per-side override
-  (`--build-info`, `--sources`), and
-  raw provenance is never embedded — only the normalized facts that feed the
-  comparison.
+  directories** (single-artifact UX). A separately produced pack directory
+  (a raw source checkout or a build-emitted `abicheck_inputs/` pack) stays
+  available as an explicit per-side override (`--build-info`, `--sources`),
+  and raw provenance is never embedded — only the normalized facts that feed
+  the comparison.
 - Collection is **post-build and read-only**: it reads existing build outputs and
   build-system query interfaces; it never rebuilds your project or runs arbitrary
   commands.
@@ -281,21 +281,28 @@ replay (L4) still **requires clang** (or castxml for the declaration subset) and
 degrades to partial coverage when the front-end is absent — the artifact tiers
 stay authoritative (ADR-028 D3).
 
-### Parallel baselines with `merge`
+### Producing binary- and source-side facts separately
 
-Build-side and source-side facts can be produced independently — on different
-machines, at different times — and combined into one self-contained baseline:
+Build-side and source-side facts can still be produced independently — on
+different machines, at different times. There is no longer a `collect`/`merge`
+command to pre-combine them into one baseline file first (ADR-043 — the
+library functions survive internally, but are not a documented CLI path).
+Instead, feed `compare` (or a later `dump`) the out-of-band pack directly, per
+side, and it is ingested inline:
 
 ```bash
 abicheck dump libfoo.so -H include/   -o libfoo.bin.json   # L0/L1/L2 (+optional L3)
-abicheck dump --sources ./libfoo-src/ -o libfoo.src.json   # L3/L4/L5, no binary
-abicheck merge libfoo.bin.json libfoo.src.json -o libfoo.baseline.json
+# … built on another machine, at another time …
+abicheck compare libfoo.bin.old.json libfoo.bin.new.json \
+  --sources old=./libfoo-src-v1/ --sources new=./libfoo-src-v2/
 ```
 
-`merge` keeps the binary-bearing snapshot's ABI surface and folds every input's
-embedded `build_source` facts together per layer (each layer should come from
-exactly one input), so the result is a single `.abi.json` carrying all of
-L0–L5.
+`compare` auto-ingests each side's embedded `build_source` facts (from the
+binary-bearing snapshot) alongside whatever out-of-band pack `--build-info`/
+`--sources` supplies for that side (each layer should come from exactly one
+source), so the comparison still sees all of L0–L5 with no separate merge
+step. `--build-info`/`--sources` also auto-detect a build-emitted
+`abicheck_inputs/` Flow-2 pack directory (see below) the same way.
 
 ### Build-emitted facts — the `abicheck_inputs/` protocol (Flow 2)
 
@@ -316,12 +323,20 @@ abicheck_inputs/
   raw_ast/*.json.zst             # optional, forensic only — never ingested
 ```
 
-The pack rides the same `merge` flow — a directory input is auto-detected and
-folded just like a source-side dump:
+The pack directory is auto-detected wherever a build/source input is accepted
+— no separate combining step needed. Embed it directly on the same `dump`
+call as the artifact side:
 
 ```bash
-abicheck dump libfoo.so -H include/ -o libfoo.bin.json   # artifact side, L0/L1/L2
-abicheck merge libfoo.bin.json ./abicheck_inputs/ -o libfoo.baseline.json
+abicheck dump libfoo.so -H include/ --sources ./abicheck_inputs/ -o libfoo.full.json
+```
+
+or, if the binary was already dumped separately, hand `compare` the pack
+per side:
+
+```bash
+abicheck compare libfoo.bin.old.json libfoo.bin.new.json \
+  --sources old=./abicheck_inputs_v1/ --sources new=./abicheck_inputs_v2/
 ```
 
 Normalized `source_facts/*.jsonl` are the canonical comparison format; `raw_ast/`
@@ -337,24 +352,33 @@ covers the `abicheck-cc` wrapper and the Clang plugin producers in full.
 layers are collected from `--sources` / `--build-info`, trading cost for depth:
 
 ```bash
-abicheck dump --sources ./src/ --depth build    -o s.json  # L3 only
-abicheck dump --sources ./src/ --depth source   -o s.json  # L3+L4+L5
+abicheck dump --sources ./src/ --depth build    -o s.json  # +L3 only
+abicheck dump --sources ./src/ --depth source   -o s.json  # +L3+L4+L5
 abicheck dump --sources ./src/ --depth headers  -o s.json  # embed nothing (L2 only)
-abicheck dump --sources ./src/ --max            -o s.json  # deepest (== --depth full)
+abicheck dump --sources ./src/ --depth binary   -o s.json  # L0/L1 only
 ```
 
 | `--depth` | Layers collected | Replay scope |
 |-----------|------------------|--------------|
-| `binary` / `headers` | none (L0/L1, or +L2 AST) | — |
+| `binary` | L0 binary + L1 debug info only | — |
+| `headers` (default) | + L2 header AST | — |
 | `build` | + L3 build context | — |
-| `source` | + L4 + L5 | target |
-| `full` (`--max`) | + L4 + L5 | full |
+| `source` | + L4 source replay + L5 graph | target (the whole current library) |
+
+`binary`, `headers`, `build`, `source` are the **only** four public rungs,
+used identically by `dump`/`compare`/`scan --depth`. The old **`full` depth is
+gone completely** (no alias) — it collapsed into `source` (the two differed
+only in replay *scope*, not evidence kind, and `dump`/`compare` always use the
+whole-target scope for `--depth source` anyway). `--max`, `--source-method`,
+`--mode`, and the old `symbols`/`graph` depth spellings are all **rejected
+outright** — a plain "not one of binary, headers, build, source" usage error,
+not a deprecation warning.
 
 `build` is the cheap PR default (build-flag/toolchain drift, no source parse);
-the `source`/`full` rungs add the L4 source replay and the **L5 structural
-graph** (target → source → header → build-option nodes) at the matching replay
-scope. (The graph is an internal consequence of the `source` rung, never its own
-user-facing depth.)
+the `source` rung adds the L4 source replay and the **L5 structural graph**
+(target → source → header → build-option nodes) at target scope. (The graph
+is an internal consequence of the `source` rung, never its own user-facing
+depth.)
 
 ### Build-tool query configuration (`.abicheck.yml`)
 
@@ -395,16 +419,18 @@ sources:
   auto-discovered from `--sources` is still used for non-executing settings such
   as `build.compile_db`, but its `build.query` is **never** auto-run (it may be
   attacker-controlled) — pass it via an explicit `--config` to trust it. (The
-  separate `collect --extractor-manifest` plugin path keeps its explicit
-  `--allow-build-query` action-ceiling gate; see
-  [External CLI extractors](../user-guide/build-evidence-setup.md#external-cli-extractors-the-security-model-adr-032).)
+  external-CLI-extractor / manifest plugin path formerly run via the separate
+  `collect --extractor-manifest` command is gone from the CLI (ADR-043); its
+  action-ceiling gate survives as a library-level mechanism only — see
+  [External CLI extractors](../user-guide/build-evidence-setup.md#external-cli-extractors-the-security-model-adr-032)
+  for what remains documented.)
 - **`run_build` / `wrap_build` (denied):** abicheck never performs a full
   project build or compiler-wrapper interception. The inferred queries above are
   configure/dry-run/aquery only — they do not compile the project. Make dry-run
   can still execute recursive/`+` recipes on some Makefiles; this is now part of
   the default source-query trust boundary.
 
-For setting up build/source evidence collection — the `.abicheck.yml` project-contract block, the `collect` command and out-of-band packs, a full worked CMake example, and external CLI extractors — see [Build Evidence Setup](../user-guide/build-evidence-setup.md).
+For setting up build/source evidence collection — the `.abicheck.yml` project-contract block, out-of-band packs, a full worked CMake example, and external CLI extractors — see [Build Evidence Setup](../user-guide/build-evidence-setup.md).
 
 ## Build-evidence findings (L3)
 
@@ -661,7 +687,7 @@ old `--allow-build-query` gate is now a deprecated no-op — and it still never 
   - `--depth source` with a `--since`/`--changed-path` seed — replay only the TUs a PR touches;
   - `--depth build` — L3 + the L5 structural graph (build options +
     target/source/header nodes) with **no** L4 parse — feasible on LLVM in seconds;
-  - the content-addressed per-TU cache (`abicheck collect --build-cache-dir`) — unchanged TUs are skipped on re-runs.
+  - the content-addressed per-TU cache (internal, ADR-033 D5) — unchanged TUs are skipped on re-runs automatically.
 - **`compare`** — cost is driven less by raw symbol count than by the **fuzzy
   rename matcher** (≈ O(removed × added)). Naming schemes that churn the whole
   surface (ICU's `_NN` version suffix) are the worst case; the

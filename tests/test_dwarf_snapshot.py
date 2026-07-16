@@ -676,18 +676,15 @@ class TestCLIDwarfFlags:
         """dump --help should mention --dwarf-only."""
         assert "--dwarf-only" in _cli_help("dump")
 
-    def test_dump_help_shows_data_sources(self, _cli_help) -> None:
-        """dump --help should mention --show-data-sources."""
-        assert "--show-data-sources" in _cli_help("dump")
+    def test_dump_help_shows_dry_run(self, _cli_help) -> None:
+        """dump --help should mention --dry-run (the --show-data-sources successor)."""
+        assert "--dry-run" in _cli_help("dump")
 
-    def test_dump_help_flags_data_sources_preview_only(self, _cli_help) -> None:
-        """--show-data-sources help must make the preview-only contract clear
-        (B1): it writes no snapshot and embeds no L3/L4/L5 facts."""
-        # rich-click wraps option help across panel lines; strip box-drawing and
-        # collapse whitespace so word-wrapped phrases match.
+    def test_dump_help_flags_dry_run_writes_nothing(self, _cli_help) -> None:
+        """--dry-run help must make the no-side-effect contract clear (ADR-043
+        D4): it writes no snapshot."""
         norm = " ".join(_cli_help("dump").replace("│", "").split())
-        assert "Preview only" in norm
-        assert "No snapshot is written" in norm
+        assert "Writes nothing" in norm
 
     def test_compare_hides_dwarf_only(self, _cli_help) -> None:
         """compare --dwarf-only is demoted to the debug.dwarf_only config key and
@@ -696,8 +693,8 @@ class TestCLIDwarfFlags:
         assert "--dwarf-only" not in _cli_help("compare")
 
     @pytest.mark.skipif(not _HAS_GCC, reason="GCC not available")
-    def test_show_data_sources_output(self, tmp_path: Path) -> None:
-        """--show-data-sources should print diagnostic info and exit."""
+    def test_dry_run_shows_data_sources(self, tmp_path: Path) -> None:
+        """--dry-run should print available-data-layer diagnostics and exit."""
         c_src = tmp_path / "lib.c"
         c_src.write_text("int foo(void) { return 0; }\n")
         so_path = tmp_path / "libtest.so"
@@ -707,7 +704,7 @@ class TestCLIDwarfFlags:
         )
         result = subprocess.run(
             [sys.executable, "-c", "from abicheck.cli import main; main()", "dump", str(so_path),
-             "--show-data-sources"],
+             "--dry-run"],
             capture_output=True, text=True, timeout=10,
         )
         assert result.returncode == 0
@@ -1383,21 +1380,20 @@ class TestCLIInProcess:
         )
         return so_path
 
-    def test_show_data_sources_via_runner(self, _debug_lib: Path) -> None:
-        """--show-data-sources via CliRunner for in-process coverage."""
+    def test_dry_run_shows_data_sources_via_runner(self, _debug_lib: Path) -> None:
+        """--dry-run via CliRunner for in-process coverage."""
         from click.testing import CliRunner
 
         from abicheck.cli import main
 
         runner = CliRunner()
-        result = runner.invoke(main, ["dump", str(_debug_lib), "--show-data-sources"])
+        result = runner.invoke(main, ["dump", str(_debug_lib), "--dry-run"])
         assert result.exit_code == 0
         assert "Data sources for" in result.output
         assert "L0 Binary metadata" in result.output
         assert "L1 Debug info" in result.output
-        # B1: the preview-only contract is surfaced loudly, not silently.
-        assert "preview-only" in result.output
-        assert "no snapshot was written" in result.output
+        # ADR-043 D4: the no-side-effect contract is surfaced loudly, not silently.
+        assert "no analysis performed, nothing written" in result.output
 
     def test_dwarf_only_via_runner(self, _debug_lib: Path, tmp_path: Path) -> None:
         """--dwarf-only via CliRunner for in-process coverage."""
@@ -1446,7 +1442,7 @@ class TestCLIInProcess:
 class TestPrintDataSourcesDirect:
     """Direct call to _print_data_sources for coverage."""
 
-    def test_print_data_sources(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    def testprint_data_sources(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         c_src = tmp_path / "lib.c"
         c_src.write_text("int bar(void) { return 1; }\n")
         so_path = tmp_path / "libtest.so"
@@ -1455,9 +1451,9 @@ class TestPrintDataSourcesDirect:
             capture_output=True, check=True, timeout=30,
         )
 
-        from abicheck.cli import _print_data_sources
+        from abicheck.cli_datasources import print_data_sources
 
-        _print_data_sources(so_path, has_headers=False)
+        print_data_sources(so_path, has_headers=False)
         out = capsys.readouterr().out
         assert "Data sources for libtest.so" in out
         assert "L3 Build context:   not collected" in out
@@ -1471,9 +1467,9 @@ class TestPrintDataSourcesDirect:
             capture_output=True, check=True, timeout=30,
         )
 
-        from abicheck.cli import _print_data_sources
+        from abicheck.cli_datasources import print_data_sources
 
-        _print_data_sources(so_path, has_headers=True)
+        print_data_sources(so_path, has_headers=True)
         out = capsys.readouterr().out
         assert "L2 Header AST:      available" in out
         assert "Headers mode (artifact + public header evidence)" in out
@@ -1495,9 +1491,9 @@ class TestPrintDataSourcesDirect:
         )
         pack.write()
 
-        from abicheck.cli import _print_data_sources
+        from abicheck.cli_datasources import print_data_sources
 
-        _print_data_sources(so_path, has_headers=True, build_source_path=pack.root)
+        print_data_sources(so_path, has_headers=True, build_source_path=pack.root)
         out = capsys.readouterr().out
         assert "L3 Build context: present (1 compile units, 1 targets)" in out
 
@@ -1528,9 +1524,9 @@ class TestPrintDataSourcesDirect:
         )
         source_pack.write()
 
-        from abicheck.cli import _print_data_sources
+        from abicheck.cli_datasources import print_data_sources
 
-        _print_data_sources(
+        print_data_sources(
             so_path,
             has_headers=True,
             build_source_path=build_pack.root,
@@ -1565,9 +1561,9 @@ class TestPrintDataSourcesDirect:
         manifest_only = BuildSourcePack.empty(tmp_path / "manifest-only")
         manifest_only.write()
 
-        from abicheck.cli import _print_data_sources
+        from abicheck.cli_datasources import print_data_sources
 
-        _print_data_sources(
+        print_data_sources(
             so_path,
             has_headers=True,
             build_source_path=full_pack.root,
@@ -1587,9 +1583,9 @@ class TestPrintDataSourcesDirect:
             capture_output=True, check=True, timeout=30,
         )
 
-        from abicheck.cli import _print_data_sources
+        from abicheck.cli_datasources import print_data_sources
 
-        _print_data_sources(so_path, has_headers=True, build_source_path=tmp_path)
+        print_data_sources(so_path, has_headers=True, build_source_path=tmp_path)
         captured = capsys.readouterr()
         assert "L3 Build context:   not collected" in captured.out
         assert "not collected in --show-data-sources" in captured.err

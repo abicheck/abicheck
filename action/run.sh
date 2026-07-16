@@ -239,8 +239,8 @@ elif [[ "$MODE" == "compare" ]]; then
   # sticky PR comment (--secondary-format), instead of re-invoking abicheck a
   # second time just to get JSON. Only needed when the primary format isn't
   # already JSON — a json primary is reused as-is (see _can_reuse_primary_json
-  # below). compare-release/appcompat don't build CMD through this branch, so
-  # they keep using the rerun fallback. MODE=compare dispatches through the
+  # below). compare-release doesn't build CMD through this branch, so it
+  # keeps using the rerun fallback. MODE=compare dispatches through the
   # same release-fan-out engine internally when the operands are directories
   # or packages (regardless of the Action's MODE), and that engine rejects
   # --secondary-format — skip it there too, so a directory/package compare
@@ -270,56 +270,6 @@ elif [[ "$MODE" == "compare" ]]; then
   # dump-only flags. In compare mode abicheck performs the dump internally
   # when an input is a binary, but these cross-compilation flags are not
   # exposed on the compare CLI. They are only passed in dump mode.
-
-elif [[ "$MODE" == "appcompat" ]]; then
-  # ── Appcompat mode ─────────────────────────────────────────────────────
-  CMD+=(appcompat)
-  CMD+=("${INPUT_APP_BINARY:?app-binary is required for appcompat mode}")
-
-  CHECK_AGAINST="${INPUT_CHECK_AGAINST:-}"
-  if [[ -n "$CHECK_AGAINST" ]]; then
-    # Weak mode: symbol availability check only (no old library needed)
-    CMD+=(--check-against "$CHECK_AGAINST")
-  else
-    # Full mode: old + new library comparison
-    CMD+=("${INPUT_OLD_LIBRARY:?old-library is required for appcompat full mode (or use check-against for weak mode)}")
-    CMD+=("${INPUT_NEW_LIBRARY:?new-library is required for appcompat full mode}")
-  fi
-
-  add_flag "-H" "${INPUT_HEADER:-}"
-  add_sided_flag "--header" "old" "${INPUT_OLD_HEADER:-}"
-  add_sided_flag "--header" "new" "${INPUT_NEW_HEADER:-}"
-  add_flag "-I" "${INPUT_INCLUDE:-}"
-  add_sided_flag "--include" "old" "${INPUT_OLD_INCLUDE:-}"
-  add_sided_flag "--include" "new" "${INPUT_NEW_INCLUDE:-}"
-  add_sided_flag "--version" "old" "${INPUT_OLD_VERSION:-}"
-  add_sided_flag "--version" "new" "${INPUT_NEW_VERSION:-}"
-  add_single_flag "--lang" "${INPUT_LANG:-}"
-
-  # Format — appcompat only supports markdown and json
-  FORMAT="${INPUT_FORMAT:-markdown}"
-  if [[ "$FORMAT" != "markdown" && "$FORMAT" != "json" ]]; then
-    echo "::warning::appcompat mode only supports 'markdown' and 'json' formats. Falling back to 'markdown'."
-    FORMAT="markdown"
-  fi
-  CMD+=(--format "$FORMAT")
-
-  OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
-  if [[ -n "$OUTPUT_FILE" ]]; then
-    CMD+=(-o "$OUTPUT_FILE")
-  fi
-
-  add_single_flag "--policy" "${INPUT_POLICY:-}"
-  add_single_flag "--policy-file" "${INPUT_POLICY_FILE:-}"
-  add_single_flag "--suppress" "${INPUT_SUPPRESS:-}"
-
-  if [[ "${INPUT_SHOW_IRRELEVANT:-false}" == "true" ]]; then
-    CMD+=(--show-irrelevant)
-  fi
-
-  if [[ "${INPUT_LIST_REQUIRED_SYMBOLS:-false}" == "true" ]]; then
-    CMD+=(--list-required-symbols)
-  fi
 
 elif [[ "$MODE" == "compare-release" ]]; then
   # ── Compare-release mode (package-level comparison) → `compare` dirs/pkgs ──
@@ -403,8 +353,8 @@ elif [[ "$MODE" == "stack-check" ]]; then
   # ── Stack-check mode (Linux ELF) → `deps compare` ───────────────────────
   CMD+=(deps compare)
   CMD+=("${INPUT_NEW_LIBRARY:?new-library (binary path) is required for stack-check mode}")
-  CMD+=(--baseline "${INPUT_BASELINE:?baseline is required for stack-check mode}")
-  CMD+=(--candidate "${INPUT_CANDIDATE:?candidate is required for stack-check mode}")
+  CMD+=(--old-root "${INPUT_BASELINE:?baseline is required for stack-check mode}")
+  CMD+=(--new-root "${INPUT_CANDIDATE:?candidate is required for stack-check mode}")
 
   add_flag "--search-path" "${INPUT_SEARCH_PATH:-}"
   add_single_flag "--ld-library-path" "${INPUT_LD_LIBRARY_PATH:-}"
@@ -425,14 +375,24 @@ elif [[ "$MODE" == "stack-check" ]]; then
 elif [[ "$MODE" == "scan" ]]; then
   # ── Scan mode (source-intelligence orchestrator) ─────────────────────────
   # One front-end over dump/compare: always-on pattern + cross-source tier,
-  # then the pinned evidence level, optionally compared against --baseline.
+  # then the pinned evidence level, optionally compared against --against.
+  # ARTIFACT is a positional argument (not --binary); absence of --against is
+  # already a one-build audit, presence of --against is already audit+compare
+  # — there is no separate --audit/--mode/--source-method/--estimate flag any
+  # more (CLI simplification).
   CMD+=(scan)
-  CMD+=(--binary "${INPUT_NEW_LIBRARY:?new-library (the scanned binary or .abi.json) is required for scan mode}")
+  CMD+=("${INPUT_NEW_LIBRARY:?new-library (the scanned binary or .abi.json) is required for scan mode}")
 
+  # -H/-I are side-aware on scan: a bare value applies to both ARTIFACT and
+  # the --against side; old-header/old-include and new-header/new-include
+  # scope to one side only (ADR-040 L1) so a candidate-only header doesn't
+  # leak into the baseline side's parse (Codex review).
   add_flag "-H" "${INPUT_HEADER:-}"
-  add_flag "-H" "${INPUT_NEW_HEADER:-}"
+  add_sided_flag "-H" "old" "${INPUT_OLD_HEADER:-}"
+  add_sided_flag "-H" "new" "${INPUT_NEW_HEADER:-}"
   add_flag "-I" "${INPUT_INCLUDE:-}"
-  add_flag "-I" "${INPUT_NEW_INCLUDE:-}"
+  add_sided_flag "-I" "old" "${INPUT_OLD_INCLUDE:-}"
+  add_sided_flag "-I" "new" "${INPUT_NEW_INCLUDE:-}"
 
   # Build-source evidence inputs (L3/L4/L5)
   add_single_flag "--sources" "${INPUT_SOURCES:-}"
@@ -441,7 +401,13 @@ elif [[ "$MODE" == "scan" ]]; then
   # scan's config flag is --config (not --build-config, which does not exist on
   # scan and hard-fails with exit 64). dump uses --config for the same input.
   add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
-  add_single_flag "--baseline" "${INPUT_BASELINE:-}"
+  # audit=true forces a one-build audit even when a baseline is configured
+  # (e.g. via abi-baseline auto-fetch) — the old --audit flag ignored
+  # --baseline the same way; --against structurally cannot be combined with
+  # an audit-only run any more, so the emulation is to simply omit --against.
+  if [[ "${INPUT_AUDIT:-false}" != "true" ]]; then
+    add_single_flag "--against" "${INPUT_BASELINE:-}"
+  fi
   add_single_flag "--lang" "${INPUT_LANG:-}"
 
   # Level selection — the modern --depth dial (omit for 'auto'). The deprecated
@@ -455,12 +421,6 @@ elif [[ "$MODE" == "scan" ]]; then
   add_single_flag "--risk-rules" "${INPUT_RISK_RULES:-}"
   add_flag "--crosscheck" "${INPUT_CROSSCHECK:-}"
 
-  if [[ "${INPUT_AUDIT:-false}" == "true" ]]; then
-    CMD+=(--audit)
-  fi
-  if [[ "${INPUT_ESTIMATE:-false}" == "true" ]]; then
-    CMD+=(--estimate)
-  fi
   if [[ "${INPUT_ALLOW_BUILD_QUERY:-false}" == "true" ]]; then
     CMD+=(--allow-build-query)
   fi
@@ -473,25 +433,20 @@ elif [[ "$MODE" == "scan" ]]; then
   fi
   CMD+=(--format "$FORMAT")
 
-  OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
-  if [[ -n "$OUTPUT_FILE" ]]; then
-    CMD+=(-o "$OUTPUT_FILE")
+  # estimate=true now maps to --dry-run (the old --estimate's cost-projection
+  # folded into the general dry-run report). A dry run writes nothing, so skip
+  # -o/--output entirely when it's set (they are mutually exclusive on scan).
+  if [[ "${INPUT_ESTIMATE:-false}" == "true" ]]; then
+    CMD+=(--dry-run)
+  else
+    OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
+    if [[ -n "$OUTPUT_FILE" ]]; then
+      CMD+=(-o "$OUTPUT_FILE")
+    fi
   fi
 
-elif [[ "$MODE" == "merge" ]]; then
-  # ── Merge mode (combine dumps + a Flow-2 abicheck_inputs/ pack) ───────────
-  CMD+=(merge)
-  OUTPUT_FILE="${INPUT_OUTPUT_FILE:-merged-baseline.json}"
-  CMD+=(-o "$OUTPUT_FILE")
-  add_single_flag "--on-conflict" "${INPUT_ON_CONFLICT:-}"
-  # Positional inputs come last (Click: `merge [OPTIONS] INPUTS...`).
-  MERGE_INPUTS="${INPUT_MERGE_INPUTS:?merge-inputs is required for merge mode}"
-  for item in $MERGE_INPUTS; do
-    CMD+=("$item")
-  done
-
 else
-  echo "::error::Unknown mode '$MODE'. Use 'compare', 'compare-release', 'dump', 'scan', 'merge', 'appcompat', 'deps', or 'stack-check'."
+  echo "::error::Unknown mode '$MODE'. Use 'compare', 'compare-release', 'dump', 'scan', 'deps', or 'stack-check'."
   exit 1
 fi
 
@@ -586,27 +541,6 @@ elif [[ "$MODE" == "dump" ]]; then
     fi
   fi
 
-elif [[ "$MODE" == "appcompat" ]]; then
-  # appcompat exit codes: 0=compatible, 2=API_BREAK, 4=BREAKING
-  # No severity support — exit code 1 is always a CLI error.
-  if [[ $ABICHECK_EXIT -eq 2 ]] && echo "$STDERR_CONTENT" | grep -qE '(^Usage:|^Error:|^Try )'; then
-    VERDICT="ERROR"
-    echo "::error::abicheck appcompat failed due to a CLI argument or configuration error (exit code 2)."
-    echo "::error::Check the command and inputs above. This is NOT an API break — the check did not run."
-  else
-    case $ABICHECK_EXIT in
-      0) VERDICT="COMPATIBLE" ;;
-      2) VERDICT="API_BREAK" ;;
-      4) VERDICT="BREAKING" ;;
-      *)
-        VERDICT="ERROR"
-        if _is_cli_error; then
-          echo "::error::abicheck appcompat failed due to a CLI error (exit code $ABICHECK_EXIT)."
-        fi
-        ;;
-    esac
-  fi
-
 elif [[ "$MODE" == "compare-release" ]]; then
   # compare-release exit codes: 0=compatible, 2=API_BREAK, 4=BREAKING,
   # 8=REMOVED_LIBRARY. With --severity-* options (e.g. via extra-args) the CLI
@@ -661,16 +595,6 @@ elif [[ "$MODE" == "scan" ]]; then
     esac
   fi
 
-elif [[ "$MODE" == "merge" ]]; then
-  # merge exit codes: 0=combined baseline written; non-zero=error
-  # (e.g. --on-conflict error on differing layers, or a malformed input).
-  if [[ $ABICHECK_EXIT -eq 0 ]]; then
-    VERDICT="COMPATIBLE"
-  else
-    VERDICT="ERROR"
-    echo "::error::abicheck merge failed (exit code $ABICHECK_EXIT)."
-  fi
-
 else
   # compare exit codes: 0=compatible, 1=severity error, 2=API_BREAK, 4=BREAKING
   # Click also uses exit code 2 for usage/argument errors — detect via stderr.
@@ -716,11 +640,9 @@ echo "abicheck verdict: $VERDICT (exit code $ABICHECK_EXIT)"
 # ---------------------------------------------------------------------------
 # Job Summary
 # ---------------------------------------------------------------------------
-if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" && "$MODE" != "merge" ]]; then
+if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
   {
-    if [[ "$MODE" == "appcompat" ]]; then
-      echo "## abicheck Application Compatibility Report"
-    elif [[ "$MODE" == "scan" ]]; then
+    if [[ "$MODE" == "scan" ]]; then
       echo "## abicheck Source-Intelligence Scan Report"
     else
       echo "## abicheck ABI Compatibility Report"
@@ -729,28 +651,16 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" && "$MODE"
 
     case $VERDICT in
       COMPATIBLE)
-        if [[ "$MODE" == "appcompat" ]]; then
-          echo "> **Verdict: COMPATIBLE** — Application is safe with the new library."
-        else
-          echo "> **Verdict: COMPATIBLE** — No binary ABI break detected."
-        fi
+        echo "> **Verdict: COMPATIBLE** — No binary ABI break detected."
         ;;
       SEVERITY_ERROR)
         echo "> **Verdict: SEVERITY_ERROR** ⚠️ — Severity-level issue detected (see severity configuration)."
         ;;
       API_BREAK)
-        if [[ "$MODE" == "appcompat" ]]; then
-          echo "> **Verdict: API_BREAK** — Source-level break affecting application symbols."
-        else
-          echo "> **Verdict: API_BREAK** — Source-level API break detected. Recompilation required."
-        fi
+        echo "> **Verdict: API_BREAK** — Source-level API break detected. Recompilation required."
         ;;
       BREAKING)
-        if [[ "$MODE" == "appcompat" ]]; then
-          echo "> **Verdict: BREAKING** — Binary ABI break or missing symbols affecting the application."
-        else
-          echo "> **Verdict: BREAKING** — Binary ABI break detected. Existing binaries will fail at runtime."
-        fi
+        echo "> **Verdict: BREAKING** — Binary ABI break detected. Existing binaries will fail at runtime."
         ;;
       REMOVED_LIBRARY)
         echo "> **Verdict: REMOVED_LIBRARY** — A library present in the old package is missing from the new package."
@@ -775,16 +685,7 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" && "$MODE"
     echo ""
     echo "| Property | Value |"
     echo "|----------|-------|"
-    if [[ "$MODE" == "appcompat" ]]; then
-      echo "| Application | \`${INPUT_APP_BINARY:-}\` |"
-      if [[ -n "${INPUT_CHECK_AGAINST:-}" ]]; then
-        echo "| Check against | \`${INPUT_CHECK_AGAINST}\` |"
-      else
-        echo "| Old library | \`${INPUT_OLD_LIBRARY:-}\` (${INPUT_OLD_VERSION:-old}) |"
-        echo "| New library | \`${INPUT_NEW_LIBRARY:-}\` (${INPUT_NEW_VERSION:-new}) |"
-      fi
-      echo "| Policy | ${INPUT_POLICY:-strict_abi} |"
-    elif [[ "$MODE" == "compare" || "$MODE" == "compare-release" ]]; then
+    if [[ "$MODE" == "compare" || "$MODE" == "compare-release" ]]; then
       echo "| Old | \`${INPUT_OLD_LIBRARY:-}\` (${INPUT_OLD_VERSION:-old}) |"
       echo "| New | \`${INPUT_NEW_LIBRARY:-}\` (${INPUT_NEW_VERSION:-new}) |"
       echo "| Policy | ${INPUT_POLICY:-strict_abi} |"
@@ -888,7 +789,7 @@ _build_json_cmd() {
 _maybe_post_pr_comment() {
   [[ "${INPUT_PR_COMMENT:-true}" == "true" ]] || return 0
   case "$MODE" in
-    compare | compare-release | appcompat) ;;
+    compare | compare-release) ;;
     *) return 0 ;;
   esac
   [[ "${INPUT_PR_COMMENT_ON:-changes}" == "never" ]] && return 0
@@ -952,7 +853,7 @@ _maybe_post_pr_comment() {
     run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
   fi
 
-  abicheck pr-comment "$PR_JSON" \
+  python3 -m abicheck.cli_pr_comment "$PR_JSON" \
     --sha "${head_sha:-${GITHUB_SHA:-}}" \
     --detail "${INPUT_PR_COMMENT_DETAIL:-standard}" \
     --on "${INPUT_PR_COMMENT_ON:-changes}" \
@@ -1075,8 +976,8 @@ elif [[ "$MODE" == "stack-check" || "$MODE" == "deps" ]]; then
     FINAL_EXIT=1
   fi
 
-elif [[ "$MODE" == "dump" || "$MODE" == "merge" ]]; then
-  # dump/merge: producers — non-zero is always an error (already mapped above)
+elif [[ "$MODE" == "dump" ]]; then
+  # dump: a producer — non-zero is always an error (already mapped above)
   :
 
 elif [[ "$MODE" == "scan" ]]; then
@@ -1100,18 +1001,6 @@ elif [[ "$MODE" == "scan" ]]; then
 
   if [[ "$VERDICT" == "BUDGET_OVERFLOW" ]]; then
     echo "::error::Scan exceeded its budget. Pin a shallower level or raise the budget."
-    FINAL_EXIT=1
-  fi
-
-elif [[ "$MODE" == "appcompat" ]]; then
-  # appcompat: same failure flags as compare (fail-on-breaking, fail-on-api-break)
-  if [[ "$VERDICT" == "BREAKING" && "${INPUT_FAIL_ON_BREAKING:-true}" == "true" ]]; then
-    echo "::error::ABI break or missing symbols affecting application. Set fail-on-breaking: false to continue."
-    FINAL_EXIT=1
-  fi
-
-  if [[ "$VERDICT" == "API_BREAK" && "${INPUT_FAIL_ON_API_BREAK:-false}" == "true" ]]; then
-    echo "::error::API break affecting application. Set fail-on-api-break: false to ignore."
     FINAL_EXIT=1
   fi
 

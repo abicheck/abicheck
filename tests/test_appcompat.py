@@ -410,48 +410,6 @@ class TestAppCompatReporters:
 # CLI smoke test
 # ---------------------------------------------------------------------------
 
-class TestAppcompatCLI:
-    def test_appcompat_help(self):
-        from click.testing import CliRunner
-
-        from abicheck.cli import main
-
-        runner = CliRunner()
-        result = runner.invoke(main, ["appcompat", "--help"])
-        assert result.exit_code == 0
-        assert "Check if an application is compatible" in result.output
-
-    def test_appcompat_missing_args(self):
-        from click.testing import CliRunner
-
-        from abicheck.cli import main
-
-        runner = CliRunner()
-        # No arguments at all
-        result = runner.invoke(main, ["appcompat"])
-        assert result.exit_code != 0
-
-    def test_appcompat_weak_mode_with_positional_fails(self, tmp_path):
-        from click.testing import CliRunner
-
-        from abicheck.cli import main
-
-        app = tmp_path / "app"
-        app.write_bytes(b"\x7fELF" + b"\x00" * 100)
-        lib1 = tmp_path / "lib1.so"
-        lib1.write_bytes(b"\x7fELF" + b"\x00" * 100)
-        lib2 = tmp_path / "lib2.so"
-        lib2.write_bytes(b"\x7fELF" + b"\x00" * 100)
-
-        runner = CliRunner()
-        result = runner.invoke(main, [
-            "appcompat", str(app), str(lib1), str(lib2),
-            "--check-against", str(lib2),
-        ])
-        assert result.exit_code != 0
-        assert "cannot be used with" in result.output
-
-
 # ---------------------------------------------------------------------------
 # Integration-ish: _is_relevant_to_app with realistic change sets
 # ---------------------------------------------------------------------------

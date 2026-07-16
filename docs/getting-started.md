@@ -17,11 +17,11 @@ you're unsure, start with `abicheck compare` — it's the default workflow.
 | Your question | Command | See |
 |---------------|---------|-----|
 | **Did my library break?** — does upgrading it break existing consumers? | `abicheck compare` | [§2 below](#2-first-check-using-repo-examples) |
-| **Does my application still work** with the new library version? | `abicheck appcompat` | [§5 below](#5-application-compatibility-check) |
+| **Does my application still work** with the new library version? | `abicheck compare --used-by` | [§5 below](#5-application-compatibility-check) |
 | **Did my whole package / release break?** | `abicheck compare` | [Multi-Binary Releases](user-guide/multi-binary.md) |
 | **Gate a pull request** with the deepest evidence available (headers + build + sources)? | `abicheck scan` | [Source-Scan Depth](user-guide/scan-levels.md) |
 | Will this binary load and resolve correctly in this sysroot — and does its dependency tree have unresolved symbols? | `abicheck deps tree` (`--sysroot /rootfs` for a specific root) | [CLI Usage](user-guide/cli-usage.md) |
-| Did anything in the dependency stack change between two sysroots / images? | `abicheck deps compare --baseline … --candidate …` | [CLI Usage](user-guide/cli-usage.md) |
+| Did anything in the dependency stack change between two sysroots / images? | `abicheck deps compare --old-root … --new-root …` | [CLI Usage](user-guide/cli-usage.md) |
 | I'm migrating from `abi-compliance-checker` and want the same flags. | `abicheck compat` | [Migrating from ABICC](user-guide/from-abicc.md) |
 | Save a reusable ABI baseline for CI. | `abicheck dump` | [§4 below](#4-snapshot-workflow-for-ci-baselines) |
 
@@ -180,7 +180,7 @@ checking.
 > provide five sources (L0–L4); L5 is computed, never an input. See
 > [Evidence & Detectability](concepts/evidence-and-detectability.md).
 
-Run `abicheck dump libfoo.so --show-data-sources` to see which layers abicheck
+Run `abicheck dump libfoo.so --dry-run` to see which layers abicheck
 found for a binary. For the full picture see [Evidence &
 Detectability](concepts/evidence-and-detectability.md) and the per-layer
 [Tool Modes](user-guide/tool-modes.md#abicheck-native-modes-by-evidence-source-l0l4)
@@ -275,19 +275,13 @@ abicheck compare old.json new.json -v
 
 ## 5) Application compatibility check
 
-Check whether your **application** is affected by a library update — filtering out irrelevant changes:
+Check whether your **application** is affected by a library update — filtering out irrelevant changes — with `compare --used-by` (repeatable; OLD and NEW must be real library binaries, not JSON snapshots):
 
 ```bash
-abicheck appcompat ./myapp libfoo.so.1 libfoo.so.2 -H include/foo.h
+abicheck compare libfoo.so.1 libfoo.so.2 --used-by ./myapp -H include/foo.h
 ```
 
-This parses your application binary to find which library symbols it actually uses, then shows only the changes that matter. If the library removed a function your app never calls, it won't appear in the report.
-
-Quick symbol availability check (no old library needed):
-
-```bash
-abicheck appcompat ./myapp --check-against libfoo.so.2
-```
+This parses your application binary to find which library symbols it actually uses. The full library comparison still runs once, but the worst app-scoped result becomes the primary verdict/exit code, with the full verdict and unrelated changes kept as informational context — if the library removed a function your app never calls, it won't drive the verdict.
 
 See [Application Compatibility](user-guide/appcompat.md) for the full reference.
 

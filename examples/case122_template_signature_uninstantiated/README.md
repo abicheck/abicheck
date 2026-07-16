@@ -80,10 +80,27 @@ cat > v2.compile_commands.json <<EOF
 [{"directory": "$PWD", "command": "c++ -std=c++17 -c v2.cpp -o v2.o", "file": "$PWD/v2.cpp"}]
 EOF
 
-abicheck collect -H v1.h --compile-db v1.compile_commands.json \
-    --source-abi --source-abi-scope headers-only -o v1.evidence
-abicheck collect -H v2.h --compile-db v2.compile_commands.json \
-    --source-abi --source-abi-scope headers-only -o v2.evidence
+# The standalone `collect` command that used to write this pack directory was
+# removed in the ADR-043 CLI reset with no direct CLI replacement; `dump`'s own
+# `--sources`/`--build-info` inline collection doesn't currently thread a
+# hand-rolled single-header public surface through to the L4 replay the way
+# `collect -H` did, so the still-supported way to build the pack for a
+# from-scratch (non-CMake) compile DB like this one is the surviving library
+# function `collect_inline_pack()` directly:
+python3 <<'PYEOF'
+import dataclasses
+from pathlib import Path
+from abicheck.buildsource.inline import collect_inline_pack
+
+for v in ("v1", "v2"):
+    pack = collect_inline_pack(
+        sources=Path("."),
+        build_info=Path(f"{v}.compile_commands.json"),
+        public_header_roots=(f"{v}.h",),
+        extractor="clang",
+    )
+    dataclasses.replace(pack, root=Path(f"{v}.evidence")).write()
+PYEOF
 
 abicheck dump libtpl_v1.so -H v1.h -p v1.compile_commands.json --build-info v1.evidence --ast-frontend clang -o v1.abi.json
 abicheck dump libtpl_v2.so -H v2.h -p v2.compile_commands.json --build-info v2.evidence --ast-frontend clang -o v2.abi.json
@@ -95,7 +112,11 @@ abicheck compare v1.abi.json v2.abi.json --no-scope-public-headers
 castxml is installed. `-p`/`--compile-db` on `dump` matters too: without it,
 the L2 header AST is parsed without the build's flags and `compare` also
 reports an unrelated `header_parse_context_drift` risk finding alongside
-`template_body_changed`.)
+`template_body_changed`. A real project driving a full CMake/Bazel/Ninja
+build gets its L4 public-header roots from the build's own target metadata
+via plain `dump --sources <tree> --depth source` instead — no Python needed;
+this workaround is specific to a bare hand-written `compile_commands.json`
+with no build-system target to read a public-header set from.)
 
 ## How to mitigate
 For ABI-sensitive templates, ship **explicit instantiations**

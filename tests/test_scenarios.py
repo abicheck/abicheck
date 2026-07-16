@@ -350,6 +350,19 @@ def test_sc_offline_snapshot(tmp_path: Path) -> None:
     assert "BREAKING" in res.output
 
 
+def test_sc_baseline_pin(tmp_path: Path) -> None:
+    # No baseline registry (pre-1.0 CLI reset): a baseline is just an old
+    # snapshot file, pinned by keeping it around and passed straight to
+    # `scan --against`, which folds the always-on tier and the gating
+    # comparison into one CI-facing command.
+    v1 = _save(_lib("1", [_fn("a"), _fn("b")]), tmp_path / "v1.json")
+    v2 = _save(_lib("2", [_fn("a")]), tmp_path / "v2.json")
+    res = _cli("scan", v2, "--against", v1, "--format", "json")
+    assert res.exit_code == 4
+    payload = json.loads(res.output)
+    assert payload["verdict"] == "BREAKING"
+
+
 def test_sc_ci_severity_gate(tmp_path: Path) -> None:
     old, new = _lib("1", [_fn("a"), _fn("b")]), _lib("2", [_fn("a")])
     # Default gate fails on the ABI break …
@@ -517,38 +530,6 @@ def test_sc_scan_html(tmp_path: Path) -> None:
     assert "<!DOCTYPE html>" in res.output
 
 
-def test_sc_baseline_registry(tmp_path: Path) -> None:
-    reg = str(tmp_path / "registry")
-    v1 = _save(_lib("1", [_fn("a"), _fn("b")]), tmp_path / "v1.json")
-    v2 = _save(_lib("2", [_fn("a")]), tmp_path / "v2.json")
-    pinned = str(tmp_path / "pinned.json")
-
-    assert (
-        _cli(
-            "baseline",
-            "push",
-            "libfoo",
-            "--version",
-            "1",
-            "--platform",
-            "linux-x86_64",
-            "--snapshot",
-            v1,
-            "--registry",
-            reg,
-        ).exit_code
-        == 0
-    )
-    assert (
-        _cli(
-            "baseline", "pull", "libfoo:1:linux-x86_64", "-o", pinned, "--registry", reg
-        ).exit_code
-        == 0
-    )
-    # Gate a new build against the pinned baseline pulled from the registry.
-    assert _cli("compare", pinned, v2).exit_code == 4
-
-
 def test_sc_consume_json(tmp_path: Path) -> None:
     # The JSON report is the machine decision contract any non-trivial gate keys
     # off (exit 0 alone is lossy). It must be a stable, versioned document with a
@@ -603,9 +584,8 @@ def test_sc_scan_binary_depth_matrix_args(tmp_path: Path) -> None:
 
     res = _cli(
         "scan",
-        "--binary",
         new_path,
-        "--baseline",
+        "--against",
         old_path,
         "-H",
         str(include),

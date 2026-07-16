@@ -576,9 +576,9 @@ def merge_compile_config(
             # L2-only dump/scan (no --sources/--build-info) nothing reloads it
             # downstream, so a warn-and-fallback would silently drop the intended
             # compile.std/defines/sysroot/frontend and still exit 0 (Codex review).
-            raise click.ClickException(
-                f"cannot parse build config {cfg}: {exc}"
-            ) from exc
+            # UsageError (not plain ClickException) so it exits 64, not 1 — a bad
+            # .abicheck.yml is a usage error (ADR-043 CLI reset).
+            raise click.UsageError(f"cannot parse build config {cfg}: {exc}") from exc
         # An *auto-discovered* config stays best-effort: a malformed file found by
         # walking up from cwd / the --sources root shouldn't fail a run the user
         # didn't ask to bind to it. Warn so it isn't silently ignored; the real
@@ -1023,9 +1023,12 @@ def build_source_dump_options(func: F) -> F:
     Source-tree-centric inputs (ADR-028..033 amendment): ``--sources`` is a
     source checkout — L4 source ABI replay and the L5 graph are run inline and
     embedded; ``--build-info`` is an optional build dir / ``compile_commands.json``
-    / pre-captured pack supplying L3 (auto-discovered inside the source tree when
-    omitted). A path that is itself a pack directory from ``abicheck collect``
-    is loaded as that pack instead. Embedding makes the ``.abi.json``
+    / pre-built pack supplying L3 (auto-discovered inside the source tree when
+    omitted). Either flag also accepts, and auto-detects, a build-emitted
+    ``abicheck_inputs/`` Flow-2 pack directory or a pre-built ``BuildSourcePack``
+    directory (from an internal/producer-side collection step) — both are
+    ingested and validated automatically, no separate ``inputs validate``/
+    ``merge`` step needed (ADR-043 D1). Embedding makes the ``.abi.json``
     self-contained, so a later ``compare old.json new.json`` carries the facts
     with no out-of-band directories. Applied bottom-up, so listed in reverse of
     display.
@@ -1037,17 +1040,9 @@ def build_source_dump_options(func: F) -> F:
         "depth",
         type=DEPTH_PARAM,
         default=None,
-        help="Unified evidence-depth dial (ADR-037 D5; same vocabulary as "
-        "`compare`/`scan --depth`): symbols=L0/L1 only, headers=+L2 AST (default), "
-        "build=+L3 build context, source=+L4 replay & the L5 graph, full=deepest. "
-        "--max == --depth full.",
-    )(func)
-    func = click.option(
-        "--max",
-        "max_depth",
-        is_flag=True,
-        default=False,
-        help="Shorthand for --depth full (collect the deepest evidence available).",
+        help="Evidence-depth dial (same vocabulary as `compare`/`scan --depth`): "
+        "binary=L0/L1 only, headers=+L2 AST (default), build=+L3 build context, "
+        "source=+L4 replay & the L5 graph.",
     )(func)
     func = click.option(
         "--allow-build-query",
@@ -1097,8 +1092,9 @@ def build_source_dump_options(func: F) -> F:
         type=click.Path(exists=True, path_type=Path),
         default=None,
         help="Source checkout to run L4 source ABI replay + the L5 graph over "
-        "and embed inline. (A pack directory from `abicheck collect` is loaded "
-        "as that pack instead.)",
+        "and embed inline. (An existing pack directory — e.g. from the "
+        "abicheck-cc wrapper or Clang plugin — is auto-detected by its "
+        "manifest.json and loaded as that pack instead.)",
     )(func)
     func = click.option(
         "--build-info",
@@ -1109,17 +1105,6 @@ def build_source_dump_options(func: F) -> F:
         "or a pre-captured pack. Auto-discovered inside the --sources tree when "
         "omitted.",
     )(func)
-    func = click.option(
-        "--inputs",
-        "inputs_pack",
-        type=click.Path(exists=True, file_okay=False, path_type=Path),
-        default=None,
-        help="A Flow-2 `abicheck_inputs/` pack emitted by the build (abicheck-cc "
-        "wrapper or the Clang facts plugin). Its L3/L4/L5 facts are folded into "
-        "this dump inline and the source surface is linked against the binary's "
-        "exports — the same result as a follow-up `abicheck merge`, in one "
-        "command. No compiler frontend is re-run.",
-    )(func)
     return func
 
 
@@ -1127,7 +1112,7 @@ def evidence_options(func: F) -> F:
     """The shared two-sided evidence family (ADR-037 D3's ``@evidence_options``).
 
     The single source of truth for the depth/source/build-info surface a
-    *two-sided* verdict command exposes: ``--depth`` / ``--max`` plus the per-side
+    *two-sided* verdict command exposes: ``--depth`` plus the per-side
     ``--old/new-sources`` and ``--old/new-build-info`` packs. ``dump`` is
     single-sided (one artifact, plus the build-query knobs) so it composes the
     sibling :func:`build_source_dump_options` instead — they are deliberately not
@@ -1145,20 +1130,12 @@ def evidence_options(func: F) -> F:
     Applied bottom-up, so listed in reverse of displayed order.
     """
     func = click.option(
-        "--max",
-        "max_depth",
-        is_flag=True,
-        default=False,
-        help="Shorthand for --depth full (collect the deepest evidence available).",
-    )(func)
-    func = click.option(
         "--depth",
         "depth",
         type=DEPTH_PARAM,
         default=None,
-        help="Unified evidence-depth dial (ADR-037 D5): symbols=L0/L1 only, "
-        "headers=+L2 AST (default), build=+L3, source=+L4 replay & the L5 graph, "
-        "full=deepest. --max == --depth full. Deeper-than-headers needs "
+        help="Evidence-depth dial: binary=L0/L1 only, headers=+L2 AST (default), "
+        "build=+L3, source=+L4 replay & the L5 graph. Deeper-than-headers needs "
         "--sources or --build-info.",
     )(func)
     func = click.option(
@@ -1225,7 +1202,6 @@ FAMILY_FLAGS: dict[str, frozenset[str]] = {
     "evidence": frozenset(
         {
             "--depth",
-            "--max",
             "--sources",
             "--build-info",
         }
@@ -1274,9 +1250,10 @@ REQUIRED_FAMILIES: frozenset[str] = frozenset(
 )
 
 #: command name → module basename, for the gate to locate each command's source.
+#: `appcompat` folded into `compare --used-by` (ADR-043) and no longer has its
+#: own registered command.
 VERDICT_EMITTING_COMMANDS: dict[str, str] = {
     "compare": "cli.py",
-    "appcompat": "cli_appcompat.py",
 }
 
 #: (command, family) → reason. A deliberate, reviewed omission of a shared
@@ -1386,6 +1363,24 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "Companion to --secondary-format: the file path its output is written "
         "to. Always used together, like -o/--output for --format."
     ),
+    "--dry-run": (
+        "ADR-043: resolve and validate the invocation without running the diff. "
+        "A per-run preview toggle, not a stable project setting."
+    ),
+    "--used-by": (
+        "ADR-043: folds the removed `appcompat` command into compare -- scopes "
+        "the comparison to one or more applications' actual imports. Which "
+        "application(s) to check against varies per run, not a project setting."
+    ),
+    "--required-symbol": (
+        "ADR-043: folds the removed `plugin-check` command into compare -- an "
+        "explicit required-entrypoint contract for a plugin-host pairing. Varies "
+        "per run (which symbols a given host resolves), not a project setting."
+    ),
+    "--required-symbols": (
+        "ADR-043: file form of --required-symbol (one symbol per line). Same "
+        "per-run rationale."
+    ),
 }
 
 #: Derived ceiling — never hand-edit; add a ``COMPARE_FLAG_BUDGET_RAISES`` entry.
@@ -1424,7 +1419,7 @@ COMPARE_PROFILES: dict[str, dict[str, object]] = {
     # Release cut: deepest evidence, full Markdown report with a semver/SONAME
     # recommendation appended — the "should I bump?" flow.
     "release": {
-        "depth": "full",
+        "depth": "source",
         "fmt": "markdown",
         "recommend": True,
     },
@@ -1529,16 +1524,6 @@ def apply_compare_profile(ctx: object, kwargs: dict[str, object]) -> None:
         ParameterSource.ENVIRONMENT,
     }
     for dest, value in profile.items():
-        # ``--depth`` and ``--max`` are the same dial on two dests: an explicit
-        # ``--max`` (dest ``max_depth``) is the user's depth choice, so the
-        # profile's ``depth`` must yield to it — otherwise resolve_dump_depth
-        # sees "--max plus a different --depth" and exits 64 (Codex review).
-        if (
-            dest == "depth"
-            and get_source is not None
-            and get_source("max_depth") in explicit
-        ):
-            continue
         src = get_source(dest) if get_source is not None else None
         # Only fill a value the user did not set explicitly (DEFAULT / DEFAULT_MAP
         # / unknown). An explicit --flag or a mapped env var stays untouched.
@@ -1583,4 +1568,8 @@ MCP_CLI_NAME_MAP: dict[str, str | None] = {
     "severity_potential_breaking": "--severity-potential-breaking",
     "severity_quality_issues": "--severity-quality-issues",
     "severity_addition": "--severity-addition",
+    # ADR-043: generic scoped-comparison (folds the deleted appcompat/
+    # plugin-check commands into compare).
+    "used_by": "--used-by",
+    "required_symbols": "--required-symbol",
 }
