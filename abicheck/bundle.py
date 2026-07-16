@@ -773,6 +773,7 @@ def _detect_soname_skew(
     cohorts = [c.strip() for c in (cohorts or []) if c and c.strip()]
     if not cohorts:
         return []
+    from .binary_utils import strip_vendor_hash
     from .diff_cpp_patterns import BundleMember, _extract_soname_major
 
     def _members(snap: BundleSnapshot) -> list[BundleMember]:
@@ -785,8 +786,20 @@ def _detect_soname_skew(
                 major = _extract_soname_major(path.name)
             if major is None:
                 continue
+            # G9 (remaining half): DT_SONAME is read directly off the ELF
+            # here, unlike `.library` (the on-disk filename), which the
+            # cohort key normalizes via strip_vendor_hash downstream. An
+            # auditwheel/delocate-vendored library's SONAME carries the same
+            # content-hash suffix as its filename (e.g.
+            # `libfoo_core-a1b2c3d4.so.2`) — strip it so `BundleMember.soname`
+            # always carries the canonical logical SONAME its field docstring
+            # promises, matching `.library`'s normalization.
             members.append(
-                BundleMember(library=path.name, soname=soname, soname_major=major)
+                BundleMember(
+                    library=path.name,
+                    soname=strip_vendor_hash(soname),
+                    soname_major=major,
+                )
             )
         return members
 

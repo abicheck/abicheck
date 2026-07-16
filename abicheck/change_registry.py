@@ -1928,6 +1928,8 @@ REGISTRY = ChangeKindRegistry([
               "relink artifact; a new API symbol means the code now genuinely "
               "depends on the newer runtime.",
        description_template="Runtime floor raised for {detail}: {old} → {new} (required by: {name})"),
+    # platform_baseline_floor_raised (G10) lives in change_registry_coverage.py
+    # to keep this module under the AI-readiness 2000-line hard cap.
     _E("dt_relr_introduced", _R,
        impact="The linker enabled packed relative relocations (DT_RELR, "
               "`-z pack-relative-relocs`; default on some distros since "

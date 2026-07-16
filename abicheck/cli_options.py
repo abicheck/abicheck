@@ -770,6 +770,35 @@ def env_matrix_option(func: F) -> F:
     return func
 
 
+def glibc_floor_option(func: F) -> F:
+    """The ``--glibc-floor`` option: manylinux/platform-baseline GLIBC promise (G10).
+
+    Shorthand for ``--env-matrix``'s ``runtime_floors: {GLIBC: "X.Y"}`` when
+    all you have is a single dotted version (e.g. the glibc floor implied by
+    a manylinux tag such as ``manylinux_2_27`` -> ``2.27``). Folded into the
+    same ``runtime_floors`` contract in the Tier-2 loader
+    (:func:`abicheck.service.load_env_matrix`); an explicit ``--env-matrix``
+    GLIBC entry always wins if both are given. Unlike ``runtime_floors``'
+    existing reclassification of a version-*requirement-change* finding, this
+    also drives a standalone check of the new binary's own required floor
+    against the declared baseline, emitted as ``platform_baseline_floor_raised``.
+    """
+    func = click.option(
+        "--glibc-floor",
+        "glibc_floor",
+        type=str,
+        default=None,
+        metavar="X.Y",
+        help="Declared platform-baseline GLIBC floor (e.g. '2.27', the floor "
+        "implied by a manylinux_2_27 wheel tag). The new binary's own "
+        "maximum required GLIBC_X.Y is checked against it, independent of "
+        "any old/new delta: exceeding it emits platform_baseline_floor_raised "
+        "(deployment RISK). Shorthand for --env-matrix's "
+        "'runtime_floors: {GLIBC: \"X.Y\"}'.",
+    )(func)
+    return func
+
+
 def set_input_options(func: F) -> F:
     """Set-input fan-out knobs: ``-j/--jobs`` / ``--dso-only`` / ``--output-dir``.
 
@@ -1385,6 +1414,13 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
     "--secondary-output": (
         "Companion to --secondary-format: the file path its output is written "
         "to. Always used together, like -o/--output for --format."
+    ),
+    "--glibc-floor": (
+        "G10: a single-value shorthand for --env-matrix's "
+        "'runtime_floors: {GLIBC: \"X.Y\"}' (e.g. the floor implied by a "
+        "manylinux_2_27 wheel tag). Varies per artifact/deployment target "
+        "checked, exactly like --env-matrix itself — a per-run input, not a "
+        "stable project setting."
     ),
 }
 

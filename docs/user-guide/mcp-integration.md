@@ -224,7 +224,7 @@ from disk instead.
 
 ### `abi_list_changes` — List detectable change kinds
 
-Enumerates all 354 `ChangeKind` values with their impact classification. See
+Enumerates all 355 `ChangeKind` values with their impact classification. See
 the [Change Kinds Reference](../reference/change-kinds.md) for canonical
 documentation of each kind.
 
@@ -238,7 +238,7 @@ documentation of each kind.
 
 ```json
 {
-  "count": 354,
+  "count": 355,
   "change_kinds": [
     {
       "kind": "func_removed",

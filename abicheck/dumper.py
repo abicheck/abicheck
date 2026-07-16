@@ -85,7 +85,7 @@ from .dumper_sysinc import (
     _resolve_probe_compiler as _resolve_probe_compiler,
 )
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
-from .errors import SnapshotError, ValidationError
+from .errors import HeaderToolchainError, SnapshotError, ValidationError
 from .header_utils import iter_cache_header_files
 from .model import (
     AbiSnapshot,
@@ -1005,9 +1005,10 @@ def _validate_castxml_output(
             result.stderr, force_cpp=force_cpp, headers=headers,
             version_note=version_note,
         )
-        raise SnapshotError(
-            f"castxml failed (exit {result.returncode}):\n{result.stderr[:2000]}{hint}"
-        )
+        message = f"castxml failed (exit {result.returncode}):\n{result.stderr[:2000]}{hint}"
+        # A recognised signature (G16) raises HeaderToolchainError so callers can
+        # branch on "this carries an actionable remediation"; else plain SnapshotError.
+        raise (HeaderToolchainError if hint else SnapshotError)(message)
     if not out_xml.exists() or out_xml.stat().st_size == 0:
         stderr_snippet = result.stderr[:1000].strip()
         detail = f"\ncastxml stderr: {stderr_snippet}" if stderr_snippet else ""

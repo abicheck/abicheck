@@ -29,6 +29,7 @@ from abicheck.package import (
     detect_extractor,
     discover_shared_libraries,
     is_package,
+    parse_manylinux_glibc_floor,
     resolve_debug_info,
 )
 
@@ -768,6 +769,47 @@ class TestWheelExtractor:
 
 
 # ── CondaExtractor tests ────────────────────────────────────────────────────
+
+
+class TestParseManylinuxGlibcFloor:
+    """G10: derive a declared glibc floor from a manylinux wheel tag."""
+
+    def test_pep600_tag(self) -> None:
+        assert parse_manylinux_glibc_floor(
+            "scipy-1.18.0-cp312-cp312-manylinux_2_17_x86_64.whl"
+        ) == "2.17"
+
+    def test_manylinux1(self) -> None:
+        assert parse_manylinux_glibc_floor(
+            "numpy-1.26.0-cp311-cp311-manylinux1_x86_64.whl"
+        ) == "2.5"
+
+    def test_manylinux2010(self) -> None:
+        assert parse_manylinux_glibc_floor(
+            "pkg-1.0-cp311-cp311-manylinux2010_x86_64.whl"
+        ) == "2.12"
+
+    def test_manylinux2014(self) -> None:
+        assert parse_manylinux_glibc_floor(
+            "pkg-1.0-cp311-cp311-manylinux2014_aarch64.whl"
+        ) == "2.17"
+
+    def test_compressed_multi_tag_picks_strictest(self) -> None:
+        # A wheel claiming compatibility with both manylinux_2_17 and the
+        # (older/stricter) manylinux2014 alias is claiming to work on both —
+        # the actual binary must not exceed the lower (2.17) of the two.
+        assert parse_manylinux_glibc_floor(
+            "pkg-1.0-cp311-cp311-manylinux_2_28_x86_64.manylinux2014_x86_64.whl"
+        ) == "2.17"
+
+    def test_no_manylinux_tag_returns_none(self) -> None:
+        assert parse_manylinux_glibc_floor(
+            "pkg-1.0-cp311-cp311-macosx_11_0_arm64.whl"
+        ) is None
+        assert parse_manylinux_glibc_floor("pkg-1.0-py3-none-any.whl") is None
+
+    def test_bare_tag_without_arch_suffix(self) -> None:
+        assert parse_manylinux_glibc_floor("manylinux_2_27") == "2.27"
 
 
 class TestCondaExtractor:

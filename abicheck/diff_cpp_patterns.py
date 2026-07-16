@@ -1173,10 +1173,14 @@ def bundle_members_from_directory(directory: str) -> list[BundleMember]:
         major = _extract_soname_major(soname)
         if major is None:
             continue
+        # G9 (remaining half): normalize the DT_SONAME the same way `.library`
+        # (the filename) already is via _cohort_key, so BundleMember.soname
+        # always carries the canonical logical SONAME regardless of an
+        # auditwheel/delocate content-hash suffix.
         members.append(
             BundleMember(
                 library=name,
-                soname=soname,
+                soname=strip_vendor_hash(soname),
                 soname_major=major,
             )
         )

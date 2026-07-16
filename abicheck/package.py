@@ -482,6 +482,47 @@ class CondaExtractor:
 # ── Wheel (pip) extractor ────────────────────────────────────────────────────
 
 
+# manylinux platform-tag -> the glibc version it promises as a ceiling
+# (PEP 600's ``manylinux_<glibc_major>_<glibc_minor>`` plus the three frozen
+# legacy aliases PEP 600 defines as exact synonyms). G10: a wheel's filename
+# tag is a promise about the *maximum* glibc symbol version its binaries may
+# require — see docs/development/plans/g10-glibc-floor-check.md.
+_MANYLINUX_LEGACY_FLOORS: dict[str, tuple[int, int]] = {
+    "manylinux1": (2, 5),
+    "manylinux2010": (2, 12),
+    "manylinux2014": (2, 17),
+}
+_MANYLINUX_TAG_RE = re.compile(
+    r"manylinux(?:_(?P<major>\d+)_(?P<minor>\d+)|(?P<legacy>1|2010|2014))(?=_|$)"
+)
+
+
+def parse_manylinux_glibc_floor(name: str) -> str | None:
+    """Derive the strictest declared glibc floor from a manylinux tag string.
+
+    *name* is typically a wheel filename (or its platform-tag segment) such
+    as ``scipy-1.18.0-cp312-cp312-manylinux_2_17_x86_64.whl``, which may
+    carry a compressed multi-tag platform segment (PEP 600), e.g.
+    ``...manylinux_2_17_x86_64.manylinux2014_x86_64.whl`` when a wheel
+    declares compatibility with more than one baseline. A multi-tag wheel
+    is claiming to work on *every* listed baseline, so the strictest (lowest)
+    glibc version among them is the one an actual binary must not exceed.
+
+    Returns a dotted ``"X.Y"`` string suitable for
+    ``EnvironmentMatrix.runtime_floors["GLIBC"]`` / ``--glibc-floor``, or
+    ``None`` if *name* carries no recognizable manylinux tag.
+    """
+    best: tuple[int, int] | None = None
+    for m in _MANYLINUX_TAG_RE.finditer(name):
+        if m.group("legacy"):
+            version = _MANYLINUX_LEGACY_FLOORS[f"manylinux{m.group('legacy')}"]
+        else:
+            version = (int(m.group("major")), int(m.group("minor")))
+        if best is None or version < best:
+            best = version
+    return f"{best[0]}.{best[1]}" if best is not None else None
+
+
 class WheelExtractor:
     """Extract Python wheel (.whl) packages.
 

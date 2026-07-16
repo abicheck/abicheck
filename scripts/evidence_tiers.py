@@ -160,6 +160,7 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     # section-header reads; the time64/LFS flip needs typedef evidence
     # (DWARF at minimum) to see the underlying width change.
     "runtime_floor_raised": "L0",
+    "platform_baseline_floor_raised": "L0",
     "symbol_version_required_added": "L0",
     "symbol_version_defined_added": "L0",
     "dt_relr_introduced": "L0",

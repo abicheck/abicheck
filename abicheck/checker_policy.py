@@ -759,6 +759,12 @@ class ChangeKind(str, Enum):
     # one headline finding naming the old→new deployment floor (e.g.
     # GLIBC_2.28 → GLIBC_2.34) with the imported symbols that pulled it up.
     RUNTIME_FLOOR_RAISED = "runtime_floor_raised"  # max required version node per provider lib rose → binary no longer loads on older runtimes → RISK
+    # A single binary's own required floor checked against a declared
+    # platform-baseline promise (e.g. a manylinux wheel tag), independent of
+    # whether the floor moved between old and new — unlike RUNTIME_FLOOR_RAISED
+    # (a two-snapshot delta), this fires even on a static/unchanged floor that
+    # simply exceeds what the artifact's own tag promises (G10).
+    PLATFORM_BASELINE_FLOOR_RAISED = "platform_baseline_floor_raised"  # max required GLIBC_2.x exceeds the declared/derived platform-baseline floor → RISK
     # Packed relative relocations (DT_RELR, `-z pack-relative-relocs`,
     # binutils ≥ 2.38 default on some distros). A DT_RELR binary requires
     # glibc ≥ 2.36 (or an equivalent loader) — glibc marks this with the

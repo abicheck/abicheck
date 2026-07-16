@@ -48,7 +48,7 @@ from abicheck.dumper import (
     _is_toolchain_version_failure,
     _parse_castxml_version,
 )
-from abicheck.errors import SnapshotError
+from abicheck.errors import HeaderToolchainError, SnapshotError
 
 _FLOATN_STDERR = (
     "/usr/include/bits/floatn-common.h:214:14: error: unknown type name '_Float32'"
@@ -336,3 +336,47 @@ class TestLangCFallsBackToCpp:
         # No C++ retry: a header with no C++ constructs failing in C mode is a
         # real error, not a language-mode mismatch.
         assert modes == [True]
+
+
+class TestHeaderToolchainErrorClass:
+    """G16: a recognised host-toolchain signature raises the dedicated
+    ``HeaderToolchainError`` (still an ``except SnapshotError``-catchable
+    subclass) so a caller can branch on "this failure carries an actionable
+    remediation"; an unrecognised castxml failure stays a plain
+    ``SnapshotError``."""
+
+    def test_known_signature_raises_header_toolchain_error(
+        self, tmp_path: Path
+    ) -> None:
+        def fake_run(cmd, **kwargs):  # noqa: ANN001
+            return _completed(returncode=1, stderr=_FLOATN_STDERR)
+
+        header = tmp_path / "api.h"
+        header.write_text("int f(void);\n", encoding="utf-8")
+        with (
+            patch("abicheck.dumper._castxml_available", return_value=True),
+            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
+            pytest.raises(HeaderToolchainError) as exc,
+        ):
+            _castxml_dump([header], [], compiler="cc")
+        # It is still catchable as the base SnapshotError (back-compat).
+        assert isinstance(exc.value, SnapshotError)
+        assert "_Float32" in str(exc.value) or "sized-float" in str(exc.value)
+
+    def test_unrecognised_failure_stays_plain_snapshot_error(
+        self, tmp_path: Path
+    ) -> None:
+        def fake_run(cmd, **kwargs):  # noqa: ANN001
+            return _completed(returncode=1, stderr="internal compiler error: segfault")
+
+        header = tmp_path / "api.h"
+        header.write_text("int f(void);\n", encoding="utf-8")
+        with (
+            patch("abicheck.dumper._castxml_available", return_value=True),
+            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
+            pytest.raises(SnapshotError) as exc,
+        ):
+            _castxml_dump([header], [], compiler="cc")
+        assert not isinstance(exc.value, HeaderToolchainError)

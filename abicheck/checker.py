@@ -567,6 +567,25 @@ def compare(
             kept + verdict_redundant, env_matrix.runtime_floors
         )
 
+    # Platform-baseline floor check (G10, ADR-020b runtime_floors reused):
+    # unlike apply_runtime_floor_contract above (which only reclassifies an
+    # existing version-requirement *delta* finding), this is a standalone
+    # check of the new binary's own required floor against the declared
+    # baseline — it fires even when the floor never moved between old and
+    # new, which is exactly the manylinux-tag violation case (a binary that
+    # has always required a newer glibc than its wheel tag promises).
+    if env_matrix is not None and env_matrix.runtime_floors:
+        from .diff_versioning import check_platform_baseline_floor
+        from .elf_metadata import ElfMetadata as _ElfMetadataFloor
+
+        new_elf_for_floor = getattr(new, "elf", None) or _ElfMetadataFloor()
+        floor_changes = check_platform_baseline_floor(
+            new_elf_for_floor, env_matrix.runtime_floors
+        )
+        floor_changes = _filter_soname_changes(floor_changes, suppression, suppressed)
+        if floor_changes:
+            kept.extend(floor_changes)
+
     # Post-detector: SONAME bump policy check.  Runs after post-processing so
     # rename collapsing and other dedup is already settled before reading `kept`.
     kept = _apply_soname_policy(

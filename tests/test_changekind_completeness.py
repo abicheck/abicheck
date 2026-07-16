@@ -259,6 +259,7 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.PYTHON_ABI3_FLOOR_RAISED,
     # Toolchain / runtime environment drift (tests/test_environment_drift.py)
     ChangeKind.RUNTIME_FLOOR_RAISED,
+    ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED,
     ChangeKind.DT_RELR_INTRODUCED,
     ChangeKind.DT_RELR_REMOVED,
     ChangeKind.RPATH_TYPE_CHANGED,

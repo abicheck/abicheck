@@ -554,6 +554,7 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--gcc-options",
         "--gcc-path",
         "--gcc-prefix",
+        "--glibc-floor",
         "--header",
         "--header-graph",
         "--header-graph-includes",

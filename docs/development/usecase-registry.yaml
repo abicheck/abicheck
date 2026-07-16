@@ -29,7 +29,7 @@ use_cases:
   # ── change_class ──────────────────────────────────────────────────────────
   - id: UC-CHANGE-taxonomy
     axis: change_class
-    name: ABI/API change taxonomy (354 ChangeKinds, 5-tier policy)
+    name: ABI/API change taxonomy (355 ChangeKinds, 5-tier policy)
     status: complete
     evidence:
       modules: [abicheck/change_registry.py, abicheck/checker_policy.py]
@@ -435,23 +435,32 @@ use_cases:
   - id: UC-WF-wheel-vendored
     axis: workflow
     name: manylinux/auditwheel vendored-library pairing (hashed sonames)
-    status: partial
+    status: complete
     gap: G9
     plan: docs/development/plans/g9-wheel-vendored-matching.md
-    next_steps: >
-      Filename-based pairing landed: strip_vendor_hash() normalizes the
+    note: >
+      Filename-based pairing: strip_vendor_hash() normalizes the
       auditwheel/delocate content-hash suffix (-[0-9a-f]{6,16}) before
       compare-release's matching pass (_canonical_library_key), so a bundled
       libpng16-<hash>.so.16.x now pairs across rebuilds instead of showing as
       removed+added, while a real break in the paired dependency (e.g. a
-      pyzmq-style libsodium SONAME major bump) still surfaces. Remaining: the
-      plan's "AND soname" half — normalizing the embedded ELF SONAME/install-name
-      (not just the filename) for bundle.py's cohort-scoped SONAME-skew
-      detector, which reads DT_SONAME directly and is not yet covered by this
-      normalization.
+      pyzmq-style libsodium SONAME major bump) still surfaces. The plan's
+      "AND soname" half is done too: bundle.py's cohort-scoped SONAME-skew
+      detector (_members()) and diff_cpp_patterns.bundle_members_from_directory
+      now strip_vendor_hash() the DT_SONAME they read directly off the ELF
+      (not just the filename), so BundleMember.soname always carries the
+      canonical logical SONAME regardless of a hash-suffix rebuild.
     evidence:
-      modules: [abicheck/cli_helpers_compare.py]
-      tests: [tests/test_compare_release.py]
+      modules: [
+        abicheck/cli_helpers_compare.py,
+        abicheck/bundle.py,
+        abicheck/diff_cpp_patterns.py,
+      ]
+      tests: [
+        tests/test_compare_release.py,
+        tests/test_bundle.py,
+        tests/test_cov95_diff_cpp_patterns.py,
+      ]
 
   - id: UC-WF-stable-abi-subset
     axis: workflow
@@ -577,14 +586,33 @@ use_cases:
   - id: UC-TC-glibc-floor
     axis: toolchain
     name: Platform baseline floor (manylinux glibc requirement)
-    status: planned
+    status: complete
     gap: G10
     plan: docs/development/plans/g10-glibc-floor-check.md
-    next_steps: >
-      Compare the max GLIBC_2.x in elf.versions_required (already captured)
-      against a declared floor (--glibc-floor or the wheel's manylinux tag) and
-      emit a deployment-RISK finding when exceeded. New ChangeKind
-      (platform_baseline_floor_raised); composes with diff_versioning.py (F2).
+    evidence:
+      modules: [
+        abicheck/diff_versioning.py,
+        abicheck/checker_policy.py,
+        abicheck/change_registry_coverage.py,
+        abicheck/cli_options.py,
+        abicheck/service.py,
+        abicheck/package.py,
+      ]
+      tests: [tests/test_environment_drift.py, tests/test_package.py]
+    note: >
+      check_platform_baseline_floor() (diff_versioning.py) compares the max
+      GLIBC_2.x in elf.versions_required against a declared floor and emits
+      platform_baseline_floor_raised (new deployment-RISK ChangeKind) — fires
+      even with no old/new delta, unlike the existing runtime_floor_raised
+      contract. Declared via --env-matrix's runtime_floors (ADR-020b) or the
+      new --glibc-floor X.Y shorthand (compare command only; wired through
+      the Tier-2 service.load_env_matrix). package.parse_manylinux_glibc_floor()
+      derives the floor from a manylinux wheel tag (PEP 600 + legacy aliases)
+      for programmatic/future CLI auto-derivation use, though CLI
+      auto-derivation from a wheel filename is not yet wired end-to-end (the
+      explicit flag/env-matrix path is). compare-release (directory/package
+      release fan-out) does not support --glibc-floor/--env-matrix yet —
+      same restriction as --env-matrix already had.
 
   - id: UC-TC-numpy-capi-envelope
     axis: toolchain
@@ -643,13 +671,16 @@ use_cases:
   - id: UC-TC-header-scope-robustness
     axis: toolchain
     name: Header-scoped source-mode robustness on stock host toolchains
-    status: partial
+    status: complete
     gap: G16
     plan: docs/development/plans/g16-header-scope-toolchain-robustness.md
     evidence:
-      modules: [abicheck/dumper.py]
-      tests: [tests/test_castxml_toolchain_robustness.py]
-    next_steps: >
+      modules: [abicheck/dumper.py, abicheck/errors.py]
+      tests: [
+        tests/test_castxml_toolchain_robustness.py,
+        tests/test_header_scope_toolchain.py,
+      ]
+    note: >
       Header-scoped scans (the castxml source path) are how abicheck separates
       public source API from private/internal surface, but in the 2026-06
       real-world cron the scoped re-run aborted before any comparison in 21 issue
@@ -657,8 +688,8 @@ use_cases:
       logic bug: glibc sized-float types (`unknown type name '_Float32'`,
       `_Float64`/`_Float128`), a GCC 13 libstdc++ `__assume__` attribute, and
       `--lang c` rejecting `extern "C"` headers guarded by `#ifdef __cplusplus`.
-      DONE (this increment): `_castxml_failure_hint` classifies all three stderr
-      signatures into a single actionable remediation, and on a sized-float /
+      `_castxml_failure_hint` classifies all three stderr signatures into a
+      single actionable remediation, and on a sized-float /
       `__assume__` failure `_castxml_version_note` probes `castxml --version` and
       folds in the recommended Clang floor (`_RECOMMENDED_CLANG_MAJOR` = 18) so
       the user is told exactly what to upgrade — unit-tested in
@@ -666,15 +697,21 @@ use_cases:
       shim was prototyped and REJECTED: glibc's own `typedef float _Float32;`
       fallback would be rewritten into `typedef float float;` (PR review). The
       durable cure is a castxml built against a newer Clang, or the libclang
-      extractor (G4). ALSO DONE: per-side L2 backend selection
+      extractor (G4). Per-side L2 backend selection
       (`--old-ast-frontend`/`--new-ast-frontend` on `compare`,
       each inheriting `--ast-frontend`) so a release whose new headers need the
       host toolchain parses on clang while the old release keeps the castxml schema
       reference — the backend mirror of `--header old=`/`--header new=`
-      (tests/test_cli_new_features.py::TestPerSideHeaderBackend). REMAINING: an
-      integration-marked end-to-end check that `compare --headers` over a
-      `<math.h>`-including header succeeds on a real CI host, and a dedicated
-      `HeaderToolchainError` type.
+      (tests/test_cli_new_features.py::TestPerSideHeaderBackend). A recognised
+      host-toolchain signature now raises the dedicated `HeaderToolchainError`
+      (a `SnapshotError` subclass, so existing `except SnapshotError` handling
+      is unaffected) so callers can branch on "this failure carries an
+      actionable remediation" vs. an opaque castxml error.
+      `tests/test_header_scope_toolchain.py` (integration) runs
+      `_castxml_dump` over a real `<math.h>`-including header on the CI host
+      and asserts either outcome is handled cleanly: parse succeeds, or it
+      degrades to `HeaderToolchainError` with the hint — never a bare
+      unclassified `SnapshotError`.
 
   - id: UC-TC-cxx-standard-floor
     axis: toolchain

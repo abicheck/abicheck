@@ -334,6 +334,154 @@ class TestRuntimeFloorContract:
         assert floor.modulation_rule == "someone_else"
 
 
+class TestPlatformBaselineFloorRaised:
+    """G10: single-binary check of the new library's own GLIBC floor against
+    a declared platform-baseline promise (e.g. a manylinux tag), independent
+    of any old/new delta — the case ``apply_runtime_floor_contract`` above
+    cannot catch because it only reclassifies an *existing* version-
+    requirement-change finding.
+    """
+
+    def _unchanged_pair(self, tag: str) -> tuple[AbiSnapshot, AbiSnapshot]:
+        # Both sides require the SAME floor — no SYMBOL_VERSION_REQUIRED_ADDED
+        # / RUNTIME_FLOOR_RAISED finding exists for apply_runtime_floor_contract
+        # to modulate, yet the artifact's own floor may still violate a
+        # declared platform-baseline promise.
+        def _make() -> ElfMetadata:
+            return _elf(needed=["libc.so.6"], versions_required={"libc.so.6": [tag]})
+
+        return _snap(_make()), _snap(_make())
+
+    def test_exceeds_declared_floor_emits_risk_finding_with_no_delta(self) -> None:
+        old, new = self._unchanged_pair("GLIBC_2.34")
+        result = compare(
+            old, new, env_matrix=EnvironmentMatrix(runtime_floors={"GLIBC": "2.27"})
+        )
+        floor = next(
+            c for c in result.changes
+            if c.kind is ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED
+        )
+        assert floor.old_value == "GLIBC_2.27"
+        assert floor.new_value == "GLIBC_2.34"
+        assert result.verdict is Verdict.COMPATIBLE_WITH_RISK
+
+    def test_within_declared_floor_stays_clean(self) -> None:
+        old, new = self._unchanged_pair("GLIBC_2.17")
+        result = compare(
+            old, new, env_matrix=EnvironmentMatrix(runtime_floors={"GLIBC": "2.27"})
+        )
+        assert ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED not in _kinds(result.changes)
+        assert result.verdict is Verdict.NO_CHANGE
+
+    def test_no_declared_floor_no_finding(self) -> None:
+        old, new = self._unchanged_pair("GLIBC_2.34")
+        result = compare(old, new)
+        assert ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED not in _kinds(result.changes)
+
+    def test_no_glibc_entry_in_matrix_no_finding(self) -> None:
+        old, new = self._unchanged_pair("GLIBC_2.34")
+        result = compare(
+            old, new, env_matrix=EnvironmentMatrix(runtime_floors={"GLIBCXX": "3.4.30"})
+        )
+        assert ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED not in _kinds(result.changes)
+
+    def test_malformed_declared_floor_no_finding_not_crash(self) -> None:
+        old, new = self._unchanged_pair("GLIBC_2.34")
+        result = compare(
+            old, new, env_matrix=EnvironmentMatrix(runtime_floors={"GLIBC": "unknown"})
+        )
+        assert ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED not in _kinds(result.changes)
+
+    def test_unit_check_function_directly(self) -> None:
+        from abicheck.diff_versioning import check_platform_baseline_floor
+
+        elf = _elf(
+            needed=["libc.so.6"],
+            versions_required={"libc.so.6": ["GLIBC_2.17", "GLIBC_2.34"]},
+        )
+        assert check_platform_baseline_floor(elf, None) == []
+        assert check_platform_baseline_floor(elf, {}) == []
+        assert check_platform_baseline_floor(elf, {"GLIBC": "2.38"}) == []
+        changes = check_platform_baseline_floor(elf, {"GLIBC": "2.27"})
+        assert len(changes) == 1
+        assert changes[0].kind is ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED
+        assert changes[0].new_value == "GLIBC_2.34"
+
+    def test_glibc_private_tag_ignored_as_marker(self) -> None:
+        from abicheck.diff_versioning import check_platform_baseline_floor
+
+        elf = _elf(
+            needed=["libc.so.6"],
+            versions_required={"libc.so.6": ["GLIBC_2.17", "GLIBC_PRIVATE"]},
+        )
+        assert check_platform_baseline_floor(elf, {"GLIBC": "2.27"}) == []
+
+
+class TestGlibcFloorCliFlag:
+    """G10: ``compare --glibc-floor X.Y`` end-to-end over JSON snapshots."""
+
+    @staticmethod
+    def _write_snapshot(path, tag: str) -> None:
+        from abicheck.serialization import snapshot_to_json
+
+        elf = _elf(needed=["libc.so.6"], versions_required={"libc.so.6": [tag]})
+        path.write_text(snapshot_to_json(_snap(elf)), encoding="utf-8")
+
+    def test_exceeding_floor_reaches_exit_code_and_json(self, tmp_path) -> None:
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        self._write_snapshot(old_p, "GLIBC_2.34")
+        self._write_snapshot(new_p, "GLIBC_2.34")
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p),
+                "--glibc-floor", "2.27", "--format", "json",
+            ],
+        )
+        assert result.exit_code == 0, result.output  # COMPATIBLE_WITH_RISK
+        assert "platform_baseline_floor_raised" in result.output
+
+    def test_within_floor_stays_clean(self, tmp_path) -> None:
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        self._write_snapshot(old_p, "GLIBC_2.17")
+        self._write_snapshot(new_p, "GLIBC_2.17")
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p),
+                "--glibc-floor", "2.27", "--format", "json",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "platform_baseline_floor_raised" not in result.output
+
+    def test_malformed_glibc_floor_is_usage_error(self, tmp_path) -> None:
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        self._write_snapshot(old_p, "GLIBC_2.17")
+        self._write_snapshot(new_p, "GLIBC_2.17")
+        result = CliRunner().invoke(
+            main,
+            ["compare", str(old_p), str(new_p), "--glibc-floor", "nope"],
+        )
+        assert result.exit_code == 64
+        assert "dotted numeric" in result.output
+
+
 class TestEnvironmentMatrixRuntimeFloors:
     def test_from_dict_normalizes_keys_to_upper(self) -> None:
         m = EnvironmentMatrix.from_dict({"runtime_floors": {"glibc": "2.28"}})
@@ -430,6 +578,45 @@ class TestLoadEnvMatrix:
 
         with pytest.raises(ValidationError, match="Cannot read environment matrix"):
             load_env_matrix(tmp_path / "nope.yaml")
+
+    def test_glibc_floor_alone_builds_matrix(self) -> None:
+        from abicheck.service import load_env_matrix
+
+        matrix = load_env_matrix(None, glibc_floor="2.27")
+        assert matrix is not None
+        assert matrix.runtime_floors == {"GLIBC": "2.27"}
+
+    def test_no_path_no_glibc_floor_returns_none(self) -> None:
+        from abicheck.service import load_env_matrix
+
+        assert load_env_matrix(None, glibc_floor=None) is None
+
+    def test_glibc_floor_merges_into_loaded_matrix(self, tmp_path) -> None:
+        from abicheck.service import load_env_matrix
+
+        p = tmp_path / "env.yaml"
+        p.write_text('runtime_floors:\n  GLIBCXX: "3.4.30"\n')
+        matrix = load_env_matrix(p, glibc_floor="2.27")
+        assert matrix is not None
+        assert matrix.runtime_floors == {"GLIBCXX": "3.4.30", "GLIBC": "2.27"}
+
+    def test_explicit_env_matrix_glibc_entry_wins_over_shorthand(
+        self, tmp_path
+    ) -> None:
+        from abicheck.service import load_env_matrix
+
+        p = tmp_path / "env.yaml"
+        p.write_text('runtime_floors:\n  GLIBC: "2.28"\n')
+        matrix = load_env_matrix(p, glibc_floor="2.17")
+        assert matrix is not None
+        assert matrix.runtime_floors == {"GLIBC": "2.28"}
+
+    def test_malformed_glibc_floor_raises_validation_error(self) -> None:
+        from abicheck.errors import ValidationError
+        from abicheck.service import load_env_matrix
+
+        with pytest.raises(ValidationError, match="dotted numeric"):
+            load_env_matrix(None, glibc_floor="not-a-version")
 
     def test_compare_request_validates_path_exists(self, tmp_path) -> None:
         from abicheck.api_types import CompareRequest, InputSpec

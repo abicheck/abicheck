@@ -287,6 +287,67 @@ def apply_runtime_floor_contract(
     return changes
 
 
+def check_platform_baseline_floor(
+    elf: ElfMetadata, runtime_floors: dict[str, str] | None
+) -> list[Change]:
+    """Check a binary's own required GLIBC floor against a declared
+    platform-baseline promise (e.g. a manylinux wheel tag) (G10).
+
+    A manylinux tag (``manylinux_2_27``, …) is a promise about the *maximum*
+    glibc symbol version a wheel's binaries may require. Unlike
+    :func:`apply_runtime_floor_contract`, which only reclassifies a
+    version-*requirement-change* finding between two snapshots, this fires on
+    a single artifact's own requirement regardless of whether it moved
+    relative to an old snapshot — the case a manylinux tag actually needs
+    guarded against: a binary that has *always* required ``GLIBC_2.34`` while
+    shipped under a ``manylinux_2_27`` tag is broken on day one, with no
+    old→new delta for a diff to key on. This is the classic "works on my box,
+    `GLIBC_2.x not found` on the user's older system" failure going
+    undetected.
+
+    *runtime_floors* is the same ``{prefix: "X.Y"}`` mapping consumed by
+    :func:`apply_runtime_floor_contract` (ADR-020b ``EnvironmentMatrix`` /
+    ``--env-matrix``, or a ``--glibc-floor`` CLI flag folded into it) — only
+    the ``GLIBC`` entry is read here; other prefixes have no platform-tag
+    concept yet. Returns ``[]`` when no ``GLIBC`` floor is declared, the
+    floor is malformed, or the binary's own requirement is at or below it.
+    """
+    if not runtime_floors:
+        return []
+    floor_raw = runtime_floors.get("GLIBC")
+    if not floor_raw:
+        return []
+    floor_tuple = _parse_dotted_numeric_version(floor_raw)
+    if floor_tuple is None:
+        return []
+    best: tuple[int, ...] = (0,)
+    best_tag = ""
+    providers: set[str] = set()
+    for lib, tags in (getattr(elf, "versions_required", None) or {}).items():
+        for tag in tags:
+            if not tag.startswith("GLIBC_"):
+                continue
+            parsed = _parse_abi_version_tag(tag)
+            if parsed == _UNPARSEABLE_VERSION:
+                continue
+            if parsed > best:
+                best, best_tag = parsed, tag
+            if parsed > floor_tuple:
+                providers.add(lib)
+    if best == (0,) or best <= floor_tuple:
+        return []
+    return [
+        make_change(
+            ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED,
+            symbol="<platform-baseline>",
+            name=", ".join(sorted(providers)) or "(no provider evidence captured)",
+            detail="GLIBC",
+            old=f"GLIBC_{floor_raw}",
+            new=best_tag,
+        )
+    ]
+
+
 def _is_unattached_private_version_node(elf: ElfMetadata, version: str) -> bool:
     """Return True for private version-script marker nodes with no exports.
 

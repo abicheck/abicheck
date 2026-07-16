@@ -11,7 +11,11 @@ these are ready to pick up via the normal
 [gap-plan process](plans/index.md). The remaining seven items (§4–§10) are
 still vision-only; the "Relationship to existing work" section maps each to
 the closest existing gap/ADR, and turning one into real work still means
-adding a registry entry and a plan file first.
+adding a registry entry and a plan file first. Of §0's wheel-foundation
+prerequisites, **G9**, **G10**, and **G16** are now done; **G4** (the
+libclang header-AST extractor) is still planned — it is a separate, XL-effort,
+high-risk undertaking (a new heavy optional dependency and a second full
+parser backend), deliberately not bundled with the G9/G10/G16 work.
 **Origin:** external roadmap review (feedback captured verbatim below and
 lightly reformatted), 2026-07. Recorded here per the pattern in
 [`backlog.md` § "Other deferred roadmap items"](backlog.md#other-deferred-roadmap-items) —
@@ -628,7 +632,7 @@ problems faced by SciPy and compiled scientific Python.
 
 | Idea above | Closest existing plan/ADR | Relationship |
 |---|---|---|
-| §0 Wheel foundations | [G9](plans/g9-wheel-vendored-matching.md), [G10](plans/g10-glibc-floor-check.md), [G16](plans/g16-header-scope-toolchain-robustness.md)/[G4](plans/g4-header-ast-extractor.md) | Already planned; this doc just re-prioritizes them as prerequisites. |
+| §0 Wheel foundations | [G9](plans/g9-wheel-vendored-matching.md) ✅, [G10](plans/g10-glibc-floor-check.md) ✅, [G16](plans/g16-header-scope-toolchain-robustness.md) ✅ / [G4](plans/g4-header-ast-extractor.md) (still planned, XL) | G9, G10, and G16 are now done. G4 (the libclang frontend) remains the large, separate, high-risk piece — a new heavy optional dependency and a second full parser backend, deliberately not attempted alongside G9/G10/G16. |
 | §1 Cython API/ABI frontend | **[G25](plans/g25-cython-api-abi-frontend.md)** (`UC-ARCH-cython-api`, `planned`) | Gap-plan-ified. Same shape as G23's `.pyi` surface work; narrower than [ADR-034](adr/034-managed-runtime-and-non-c-abi-frontends.md)'s general non-native-language scope. |
 | §2 NumPy C-API envelope | **[G26](plans/g26-numpy-capi-envelope.md)** (`UC-TC-numpy-capi-envelope`, `planned`) | Gap-plan-ified. New provider; extends the existing CPython-extension recognition ([G14](plans/g14-stable-abi-subset.md)) to NumPy's own capsule-based API. |
 | §3 Wheel/deployment verification | **[G27](plans/g27-wheel-deployment-verification.md)** (`UC-TC-wheel-deployment-claims`, `planned`) | Gap-plan-ified. Generalizes [G10](plans/g10-glibc-floor-check.md) across platforms/toolchains; reuses [G13](plans/g13-arch-mismatch-guard.md)/[G12](plans/g12-security-hardening.md) machinery. |
