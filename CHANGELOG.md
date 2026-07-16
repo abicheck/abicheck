@@ -804,7 +804,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `func_contract_attribute_removed`, and `ctor_explicit_removed` are the
   removed-side counterpart — a trait *lost by* a persisting entity, which
   the plain `"_removed"` suffix rule alone misread as an entity
-  disappearing. All eight now classify as `"modified"` too.
+  disappearing. All eight now classify as `"modified"` too. A third audit
+  pass (Codex review, PR #557) found `func_virtual_removed` (the sibling of
+  `func_virtual_added`, an existing function losing its virtual-ness) and
+  `param_default_value_removed`/`python_api_default_removed` (an existing
+  parameter losing its default value) — the same pattern again; all three
+  now classify as `"modified"` too.
 
 - **Self-review polish on the `GateDecision`/`--secondary-format` work above
   (PR #557):** the native HTML report's "CI Gate" card computed pass/fail

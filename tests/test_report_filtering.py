@@ -427,6 +427,19 @@ class TestOperationForKind:
         assert operation_for_kind("func_contract_attribute_removed") == "modified"
         assert operation_for_kind("ctor_explicit_removed") == "modified"
 
+    def test_more_removed_suffix_trait_loss_on_persisting_entity_is_modified(self):
+        """A third audit pass (Codex review, PR #557): `func_virtual_removed`
+        (the sibling of `func_virtual_added`, an existing function losing
+        its virtual-ness) and `param_default_value_removed`/
+        `python_api_default_removed` (an existing parameter losing its
+        default value) are the same trait-lost-by-a-persisting-entity
+        pattern as the kinds above."""
+        from abicheck.reporter_markdown import operation_for_kind
+
+        assert operation_for_kind("func_virtual_removed") == "modified"
+        assert operation_for_kind("param_default_value_removed") == "modified"
+        assert operation_for_kind("python_api_default_removed") == "modified"
+
     @pytest.mark.parametrize("kind", list(ChangeKind), ids=lambda k: k.value)
     def test_no_remaining_add_remove_synonym_misses(self, kind):
         """Systematic sweep: every ChangeKind whose name contains an add/

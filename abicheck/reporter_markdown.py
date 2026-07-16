@@ -197,6 +197,17 @@ _OPERATION_OVERRIDES: dict[str, str] = {
     "func_variadic_removed": "modified",
     "func_contract_attribute_removed": "modified",
     "ctor_explicit_removed": "modified",
+    # A third audit pass turned up more of the same (Codex review, PR #557):
+    # `func_virtual_removed` ("Vtable entry removed" -- the sibling of
+    # `func_virtual_added` above, an existing function losing its
+    # virtual-ness) and `param_default_value_removed`/
+    # `python_api_default_removed` (an existing parameter of an existing
+    # function/method losing its default value, making a previously
+    # optional argument mandatory) all describe a trait lost by a
+    # persisting entity, not the entity itself disappearing.
+    "func_virtual_removed": "modified",
+    "param_default_value_removed": "modified",
+    "python_api_default_removed": "modified",
 }
 
 
