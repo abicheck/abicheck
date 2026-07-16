@@ -9,60 +9,63 @@ inputs:
   # ── Operation mode ──────────────────────────────────────────────────────────
   mode:
     description: >
-      Operation mode: "compare" (default) compares two ABI surfaces;
-      "compare-release" compares all libraries in two directories or packages;
-      "dump" generates a JSON baseline snapshot from a single library (now also
-      embeds optional L3/L4/L5 build-source evidence via source/build inputs);
-      "scan" runs the deterministic source-intelligence orchestrator (classify →
-      always-on pattern/cross-source tier → pinned evidence level, optionally
-      compared against a baseline) — the entry point for source scans;
-      "deps" resolves transitive dependencies and symbol bindings (Linux ELF);
-      "stack-check" compares a binary's full dependency stack across two
-      sysroots (Linux ELF).
+      Operation mode, mirroring abicheck's 5-command CLI surface (ADR-043):
+      "compare" (default) compares two ABI surfaces — old-library/new-library
+      may be single binaries/snapshots OR directories/packages, in which case
+      abicheck fans out to a per-library comparison automatically (no separate
+      mode); "dump" generates a JSON baseline snapshot from a single library
+      (now also embeds optional L3/L4/L5 build-source evidence via
+      source/build inputs); "scan" runs the deterministic source-intelligence
+      orchestrator (classify → always-on pattern/cross-source tier → pinned
+      evidence level, optionally compared against a baseline) — the entry
+      point for source scans; "deps-tree" resolves transitive dependencies
+      and symbol bindings for one binary (Linux ELF); "deps-compare" compares
+      a binary's full dependency stack across two sysroots (Linux ELF).
     required: false
     default: 'compare'
 
   # ── Library inputs ──────────────────────────────────────────────────────────
   old-library:
     description: >
-      Path to the old library, JSON snapshot, or ABICC Perl dump.
-      Required when mode=compare. For compare-release: old directory or package
-      (RPM, Deb, tar, conda, wheel).
+      Path to the old library, JSON snapshot, or ABICC Perl dump. Required
+      when mode=compare. May also be a directory or package (RPM, Deb, tar,
+      conda, wheel) — abicheck then fans out to a per-library comparison
+      automatically.
     required: false
   new-library:
     description: >
-      Path to the new (current) library or binary.
-      Required for compare and dump modes. For compare-release: new directory
-      or package (RPM, Deb, tar, conda, wheel).
+      Path to the new (current) library or binary. Required for compare and
+      dump modes. May also be a directory or package (RPM, Deb, tar, conda,
+      wheel), matching old-library.
     required: false
 
-  # ── Package inputs (compare-release mode) ────────────────────────────────────
+  # ── Package inputs (compare mode, directory/package operands only) ──────────
   debug-info1:
-    description: 'Debug info package for old side (RPM/Deb/tar). compare-release mode only.'
+    description: 'Debug info package for old side (RPM/Deb/tar). compare mode, directory/package operands only.'
     required: false
   debug-info2:
-    description: 'Debug info package for new side (RPM/Deb/tar). compare-release mode only.'
+    description: 'Debug info package for new side (RPM/Deb/tar). compare mode, directory/package operands only.'
     required: false
   devel-pkg1:
-    description: 'Development package with headers for old side. compare-release mode only.'
+    description: 'Development package with headers for old side. compare mode, directory/package operands only.'
     required: false
   devel-pkg2:
-    description: 'Development package with headers for new side. compare-release mode only.'
+    description: 'Development package with headers for new side. compare mode, directory/package operands only.'
     required: false
   dso-only:
-    description: 'Only compare shared objects, skip executables. compare-release mode only.'
+    description: 'Only compare shared objects, skip executables. compare mode, directory/package operands only.'
     required: false
     default: 'false'
   include-private-dso:
-    description: 'Include private (non-public) shared objects from non-standard paths. compare-release mode only.'
+    description: 'Include private (non-public) shared objects from non-standard paths. compare mode, directory/package operands only.'
     required: false
     default: 'false'
   keep-extracted:
-    description: 'Keep extracted temporary files for debugging. compare-release mode only.'
+    description: 'Keep extracted temporary files for debugging. compare mode, directory/package operands only.'
     required: false
     default: 'false'
   fail-on-removed-library:
-    description: 'Exit 8 when a library present in old is absent in new. compare-release mode only.'
+    description: 'Exit 8 when a library present in old is absent in new. compare mode, directory/package operands only.'
     required: false
     default: 'false'
 
@@ -124,7 +127,7 @@ inputs:
     description: 'Extra compiler flags passed through to castxml (dump mode only).'
     required: false
   sysroot:
-    description: 'Alternative system root directory for cross-compilation (dump and deps modes).'
+    description: 'Alternative system root directory for cross-compilation (dump and deps-tree modes).'
     required: false
   nostdinc:
     description: 'Do not search standard system include paths (dump mode only).'
@@ -138,26 +141,35 @@ inputs:
       compare output. ELF only. Applies to dump and compare modes.
     required: false
     default: 'false'
-  baseline:
+  old-root:
     description: >
-      Sysroot for the baseline environment. Required for mode=stack-check.
+      Sysroot for the old (baseline) environment. Required for
+      mode=deps-compare.
     required: false
-  candidate:
+  new-root:
     description: >
-      Sysroot for the candidate environment. Required for mode=stack-check.
+      Sysroot for the new (candidate) environment. Required for
+      mode=deps-compare.
     required: false
   search-path:
     description: >
       Additional directories to search for shared libraries (space-separated).
-      Used by deps, stack-check, and follow-deps modes.
+      Used by deps-tree, deps-compare, and follow-deps.
     required: false
   ld-library-path:
     description: >
-      Simulated LD_LIBRARY_PATH (colon-separated). Used by deps, stack-check,
-      and follow-deps modes.
+      Simulated LD_LIBRARY_PATH (colon-separated). Used by deps-tree,
+      deps-compare, and follow-deps.
     required: false
 
   # ── Source-scan & build-source evidence (scan / dump modes) ──────────────────
+  against:
+    description: >
+      scan mode only. Baseline artifact (a library binary or JSON snapshot) to
+      compare the scanned new-library against. Maps to scan --against; omit
+      for a one-build audit (see the audit input below). Overridden by
+      abi-baseline when set.
+    required: false
   sources:
     description: >
       Source checkout / tree for source-intelligence analysis. The compile
@@ -220,9 +232,9 @@ inputs:
   audit:
     description: >
       scan mode only. Force a single-build hygiene lint (intra-version
-      cross-source checks) even when a baseline is configured (e.g. via
-      abi-baseline auto-fetch), by omitting scan's --against — scan already
-      runs audit-only whenever no baseline/against is given. The old --audit
+      cross-source checks) even when an against baseline is configured (e.g.
+      via abi-baseline auto-fetch), by omitting scan's --against — scan
+      already runs audit-only whenever no against is given. The old --audit
       CLI flag was removed (absence of --against now means audit-only,
       presence means audit+compare — the two are no longer separate flags).
     required: false
@@ -255,7 +267,7 @@ inputs:
       Values: "latest-release" fetches *.abicheck.json from the latest GitHub Release;
       a tag name (e.g. "v2.0.0") fetches from that release; a file path uses the
       file directly. Requires GITHUB_TOKEN with contents:read permission.
-      Overrides old-library (compare) / baseline (scan) when set.
+      Overrides old-library (compare) / against (scan) when set.
     required: false
 
   # ── Output & policy ─────────────────────────────────────────────────────────
@@ -321,8 +333,9 @@ inputs:
     required: false
   jobs:
     description: >
-      Number of parallel library comparisons for compare-release mode.
-      0 = auto-detect (CPU count). Default: 0.
+      Number of parallel library comparisons for compare mode when
+      old-library/new-library are directories or packages. 0 = auto-detect
+      (CPU count). Default: 0.
     required: false
     default: '0'
   extra-args:
@@ -335,8 +348,8 @@ inputs:
     default: 'true'
   pr-comment:
     description: >
-      Post a sticky ABI report comment on the pull request (compare and
-      compare-release modes). The comment is a content channel
+      Post a sticky ABI report comment on the pull request (compare mode,
+      including directory/package operands). The comment is a content channel
       and never changes the check's red/green state — breaks still gate via
       fail-on-breaking / fail-on-api-break. Defaults to 'true', but is a no-op
       unless the workflow is triggered by a pull_request event and a token with
@@ -375,26 +388,24 @@ inputs:
 outputs:
   verdict:
     description: >
-      ABI verdict. For compare: COMPATIBLE, SEVERITY_ERROR, API_BREAK,
-      BREAKING, or ERROR. SEVERITY_ERROR is produced when
-      --severity-addition=error detects new public API additions
-      (compare mode only).
-      For compare-release: COMPATIBLE, SEVERITY_ERROR (with --severity-*
-      via extra-args), API_BREAK, BREAKING,
-      REMOVED_LIBRARY (when fail-on-removed-library is set), or ERROR.
+      ABI verdict. For compare (single-pair or directory/package operands):
+      COMPATIBLE, SEVERITY_ERROR (with --severity-* via extra-args, or when
+      --severity-addition=error detects new public API additions),
+      API_BREAK, BREAKING, REMOVED_LIBRARY (directory/package operands with
+      fail-on-removed-library set), or ERROR.
       For dump: COMPATIBLE or ERROR.
       For scan: COMPATIBLE, API_BREAK, BREAKING, BUDGET_OVERFLOW, or ERROR.
-      For stack-check: PASS, WARN, FAIL, or ERROR.
-      For deps: PASS, FAIL, or ERROR.
+      For deps-compare: PASS, WARN, FAIL, or ERROR.
+      For deps-tree: PASS, FAIL, or ERROR.
     value: ${{ steps.run-abicheck.outputs.verdict }}
   exit-code:
     description: >
       abicheck exit code. compare: 0 (compatible), 1 (severity error),
-      2 (API break), 4 (ABI break). compare-release: 0 (compatible),
-      2 (API break), 4 (ABI break), 8 (library removed).
+      2 (API break), 4 (ABI break), 8 (library removed; directory/package
+      operands with fail-on-removed-library set).
       scan: 0 (compatible/advisory), 2 (API break), 4 (ABI break),
-      5 (budget overflow). stack-check: 0 (pass), 1 (warn),
-      4 (fail). deps: 0 (ok), 1 (missing). Click CLI errors are mapped to
+      5 (budget overflow). deps-compare: 0 (pass), 1 (warn),
+      4 (fail). deps-tree: 0 (ok), 1 (missing). Click CLI errors are mapped to
       VERDICT=ERROR.
     value: ${{ steps.run-abicheck.outputs.exit-code }}
   report-path:
@@ -453,8 +464,9 @@ runs:
         INPUT_SUPPRESS: ${{ inputs.suppress }}
         INPUT_VERBOSE: ${{ inputs.verbose }}
         INPUT_FOLLOW_DEPS: ${{ inputs.follow-deps }}
-        INPUT_BASELINE: ${{ inputs.baseline }}
-        INPUT_CANDIDATE: ${{ inputs.candidate }}
+        INPUT_OLD_ROOT: ${{ inputs.old-root }}
+        INPUT_NEW_ROOT: ${{ inputs.new-root }}
+        INPUT_AGAINST: ${{ inputs.against }}
         INPUT_SEARCH_PATH: ${{ inputs.search-path }}
         INPUT_LD_LIBRARY_PATH: ${{ inputs.ld-library-path }}
         INPUT_FAIL_ON_BREAKING: ${{ inputs.fail-on-breaking }}

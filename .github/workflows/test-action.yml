@@ -386,7 +386,7 @@ jobs:
         with:
           mode: scan
           new-library: tests/fixtures/action/action_test_v2.json
-          baseline: tests/fixtures/action/action_test_v1.json
+          against: tests/fixtures/action/action_test_v1.json
           install-deps: false
           fail-on-breaking: false  # don't fail the test job
 

@@ -75,6 +75,32 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
     `--baseline-header`/`--baseline-include`, `--audit`/`--estimate`, the
     `collect`/`appcompat`/`explain` help panels), including a stale
     `--baseline-header` mention in a live `scan` warning message.
+  - `compare --used-by`/`--required-symbol` scoping across multiple
+    `--used-by` apps under a severity scheme now ranks the *reported* worst
+    verdict by severity, independent of the (separately correct) max
+    exit-code computation used for gating — previously a BREAKING app whose
+    severity-derived exit code happened to be `0` (e.g.
+    `--severity-preset info-only`) could be silently overwritten in
+    JSON/HTML/SARIF/JUnit by a later, merely-COMPATIBLE app that tied on
+    exit code. SARIF/JUnit/HTML's scoped-verdict blocks (above) now also
+    carry the actual computed exit code/scheme rather than implying a fixed
+    verdict→exit-code mapping, which doesn't hold under a severity scheme.
+  - **GitHub Action: applied the same pre-1.0 hard-cut policy to the
+    Action's own interface.** `mode: compare-release`/`mode: stack-check`
+    are removed outright (no alias): `mode: compare` already fans out to
+    directory/package operands automatically (no separate mode needed;
+    `debug-info1/2`, `devel-pkg1/2`, `dso-only`, `include-private-dso`,
+    `keep-extracted`, `fail-on-removed-library`, and `jobs` now live under
+    plain `compare` mode, forwarded only when the operands are actually
+    directories/packages), `deps` mode is renamed `deps-tree`, and
+    `stack-check` is renamed `deps-compare` with its `baseline`/`candidate`
+    inputs renamed `old-root`/`new-root` (matching the CLI's own
+    `deps compare --old-root/--new-root`, ADR-043 D11). Scan's overloaded
+    `baseline` input (distinct from `deps-compare`'s sysroots) is renamed
+    `against`, matching the CLI's `scan --against`. As a side effect of
+    unifying the compare/compare-release dispatch into one code path,
+    `severity-preset`/`severity-addition` now correctly gate directory/package
+    comparisons too (previously silently not forwarded on that path).
 
 ### Changed
 

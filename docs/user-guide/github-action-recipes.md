@@ -252,12 +252,12 @@ When comparing two JSON snapshots, no header-analysis toolchain is needed.
 ## Full-stack dependency check on container image update
 
 Validate that updating a base image doesn't break your application's dependency
-stack. This runs `stack-check` to compare the binary's full transitive
+stack. This runs `deps-compare` to compare the binary's full transitive
 dependency tree across old and new container root filesystems:
 
 ```yaml
 jobs:
-  stack-check:
+  deps-compare:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -275,15 +275,15 @@ jobs:
       - name: Full-stack ABI check
         uses: abicheck/abicheck@v0.3.0
         with:
-          mode: stack-check
+          mode: deps-compare
           new-library: usr/bin/myapp
-          baseline: /tmp/old-root
-          candidate: /tmp/new-root
+          old-root: /tmp/old-root
+          new-root: /tmp/new-root
           format: json
           output-file: stack-report.json
 ```
 
-Exit codes for `stack-check`: `0` = PASS, `1` = WARN (ABI risk), `4` = FAIL (load failure or ABI break).
+Exit codes for `deps-compare`: `0` = PASS, `1` = WARN (ABI risk), `4` = FAIL (load failure or ABI break).
 
 ## Dependency tree audit
 
@@ -295,7 +295,7 @@ missing dependencies before deployment:
       - name: Audit dependencies
         uses: abicheck/abicheck@v0.3.0
         with:
-          mode: deps
+          mode: deps-tree
           new-library: build/myapp
           sysroot: /path/to/target/rootfs
 ```
@@ -425,16 +425,16 @@ must be a deliberate, reviewed decision rather than an accidental side effect.
 
 ## Compare RPM packages
 
-Use `mode: compare-release` to compare all shared libraries inside two packages
-without manual extraction. Supported formats: RPM, Deb, tar (`.tar.gz`,
-`.tar.xz`, `.tar.bz2`, `.tgz`), conda (`.conda`, `.tar.bz2`), wheel (`.whl`),
-and plain directories.
+`old-library`/`new-library` may be directories or packages instead of a
+single library each — `compare` (the default mode) detects this and fans
+out to a per-library comparison automatically, no separate mode needed.
+Supported formats: RPM, Deb, tar (`.tar.gz`, `.tar.xz`, `.tar.bz2`, `.tgz`),
+conda (`.conda`, `.tar.bz2`), wheel (`.whl`), and plain directories.
 
 ```yaml
       - name: Compare RPM packages
         uses: abicheck/abicheck@v0.3.0
         with:
-          mode: compare-release
           old-library: libfoo-1.0-1.el9.x86_64.rpm
           new-library: libfoo-1.1-1.el9.x86_64.rpm
 ```
@@ -448,7 +448,6 @@ build-id resolution:
       - name: Compare with debug info
         uses: abicheck/abicheck@v0.3.0
         with:
-          mode: compare-release
           old-library: libfoo-1.0.rpm
           new-library: libfoo-1.1.rpm
           debug-info1: libfoo-debuginfo-1.0.rpm
@@ -461,7 +460,6 @@ build-id resolution:
       - name: Compare Deb packages
         uses: abicheck/abicheck@v0.3.0
         with:
-          mode: compare-release
           old-library: libfoo1_1.0-1_amd64.deb
           new-library: libfoo1_1.1-1_amd64.deb
           devel-pkg1: libfoo-dev_1.0-1_amd64.deb
@@ -474,7 +472,6 @@ build-id resolution:
       - name: Compare SDK tarballs
         uses: abicheck/abicheck@v0.3.0
         with:
-          mode: compare-release
           old-library: sdk-2.0.tar.gz
           new-library: sdk-2.1.tar.gz
           dso-only: true
@@ -486,7 +483,6 @@ build-id resolution:
       - name: Compare conda packages
         uses: abicheck/abicheck@v0.3.0
         with:
-          mode: compare-release
           old-library: pkg-v1.conda
           new-library: pkg-v2.conda
 ```

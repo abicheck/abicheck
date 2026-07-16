@@ -106,10 +106,11 @@ verdict=$(python3 -c "import json,sys; d=json.load(open('result.json')); print(d
 When `compare` is handed directory or package inputs (RPM/deb/tar/conda/wheel),
 it fans out to per-library pairs and aggregates the worst per-library verdict
 across the release — the behaviour formerly exposed as the standalone
-`compare-release` command (folded into `compare` per ADR-037 D7; still selectable
-as the GitHub Action's `mode: compare-release`). By default a set/release
-comparison uses the verdict-based scheme below, plus a dedicated code for
-removed libraries:
+`compare-release` command (folded into `compare` per ADR-037 D7; the GitHub
+Action's own `compare-release`/`stack-check` mode aliases were removed the
+same way, per ADR-043 — `mode: compare` handles directory/package operands
+directly). By default a set/release comparison uses the verdict-based scheme
+below, plus a dedicated code for removed libraries:
 
 | Exit code | Meaning |
 |-----------|---------|

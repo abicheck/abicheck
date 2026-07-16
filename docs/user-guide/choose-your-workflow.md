@@ -116,15 +116,12 @@ verdict or exit code.
 | Fail on accidental **API additions** too | `--severity-addition error` | `severity-addition: error` |
 | Everything is an error (strictest) | `--severity-preset strict` | `severity-preset: strict` |
 
-> **GitHub Action note:** the `severity-preset` / `severity-addition` inputs are
-> wired into **`compare` mode only**. The Action's `compare-release` branch does
-> **not** interpret the CLI's severity-aware exit codes — it only recognizes the
-> verdict codes (`0/2/4/8`) and treats anything else (including the severity exit
-> code `1`) as a tool error. So gate a release/bundle in the Action with
-> `fail-on-breaking` / `fail-on-api-break` (verdict-based; these apply to both
-> `compare` and `compare-release`). To gate `compare-release` on **severity**
-> (e.g. fail on additions), run the CLI directly in a shell step — where the
-> severity exit code is honored — rather than through the Action wrapper.
+> **GitHub Action note:** the `severity-preset` / `severity-addition` inputs
+> apply to `compare` mode's exit code regardless of whether `old-library`/
+> `new-library` are a single pair or directories/packages — the Action forwards
+> them and recognizes the resulting `SEVERITY_ERROR` verdict (exit code `1`)
+> either way, since the underlying `compare` CLI command's severity-aware exit
+> scheme already covers both.
 
 ```bash
 # Report everything, fail ONLY on binary ABI breaks
