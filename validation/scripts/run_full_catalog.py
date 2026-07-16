@@ -112,15 +112,38 @@ def _run_json(cmd: list[str]) -> dict[str, Any]:
 
 
 def _family_of(compiler_name: str) -> str:
-    return "clang" if "clang" in compiler_name else "gcc"
+    """Producer family of a compiler_c/compiler_cxx JSON value.
+
+    Matched on the basename, not a raw substring (Codex review): a bare
+    ``"clang" in compiler_name`` check correctly catches clang, but every
+    other producer -- notably MSVC's ``cl``/``cl.exe`` -- fell through to
+    "gcc", mislabeling ``toolchain_used`` and computing gcc/clang retry
+    alternates for a producer that is neither.
+    """
+    name = Path(compiler_name).name.lower()
+    if "clang" in name:
+        return "clang"
+    if name in ("cl", "cl.exe"):
+        return "msvc"
+    return "gcc"
 
 
 def _alternate(family: str) -> str:
-    return "gcc" if family == "clang" else "clang"
+    if family == "gcc":
+        return "clang"
+    if family == "clang":
+        return "gcc"
+    # MSVC (or any other producer) has no meaningful cross-family retry in
+    # this runner -- returning the family itself makes _has_compiler a safe
+    # "nothing to retry with" no-op instead of a KeyError on an
+    # _ALT_COMPILER_PROBE lookup that only ever defined gcc/clang.
+    return family
 
 
 def _has_compiler(family: str) -> bool:
-    return any(shutil.which(c) for c in _ALT_COMPILER_PROBE[family])
+    return family in _ALT_COMPILER_PROBE and any(
+        shutil.which(c) for c in _ALT_COMPILER_PROBE[family]
+    )
 
 
 def _case_family(name: str, family_c: str, family_cxx: str) -> str:

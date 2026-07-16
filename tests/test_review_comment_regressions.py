@@ -736,6 +736,24 @@ def test_full_catalog_has_compiler_finds_versioned_clang_only(monkeypatch) -> No
     assert catalog._has_compiler("clang") is True
 
 
+def test_full_catalog_family_of_recognizes_msvc(monkeypatch) -> None:
+    """Regression (Codex review): _family_of only ever checked for "clang" in
+    the compiler name, so cl/cl.exe (MSVC) fell through to "gcc" -- every
+    row on an MSVC run got toolchain_used="gcc", and the auto retry logic
+    computed a gcc/clang alternate for a producer that is neither. _alternate
+    and _has_compiler must also treat msvc as having no real cross-family
+    retry (there's no msvc entry in _ALT_COMPILER_PROBE) instead of
+    crashing with a KeyError."""
+    catalog = _load_script("validation/scripts/run_full_catalog.py")
+    assert catalog._family_of("cl") == "msvc"
+    assert catalog._family_of("cl.exe") == "msvc"
+    assert catalog._family_of("gcc") == "gcc"
+    assert catalog._family_of("clang++") == "clang"
+    assert catalog._alternate("msvc") == "msvc"
+    monkeypatch.setattr(catalog.shutil, "which", lambda _name: None)
+    assert catalog._has_compiler("msvc") is False
+
+
 def test_run_compiler_lane_surfaces_failed_and_missing_retries(
     monkeypatch, tmp_path: Path
 ) -> None:
