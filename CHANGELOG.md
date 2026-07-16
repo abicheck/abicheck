@@ -42,6 +42,40 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
     `python -m abicheck.cli_pr_comment`, used internally by the GitHub
     Action.
 
+### Fixed
+
+- **ADR-043 follow-up: P1 correctness gaps from the post-merge CLI-reset
+  review.**
+  - `compare --used-by`/`--required-symbol` scoping now respects
+    `--exit-code-scheme severity`/`--severity-*` — the scoped exit code
+    previously always used the legacy `BREAKING`→4/`API_BREAK`→2 floor
+    regardless of severity configuration. Fixed in both the CLI and the MCP
+    `abi_compare` tool.
+  - SARIF/JUnit/HTML reports now carry a non-gating scoped-verdict block
+    (SARIF `properties.scopedGate`, JUnit `<properties>`, an HTML banner)
+    when `--used-by`/`--required-symbol` scoping changes the gating verdict
+    — previously only JSON/Markdown/text surfaced the disagreement between
+    the scoped and full-library verdicts.
+  - `compare --used-by` now accepts a saved JSON snapshot for OLD/NEW when
+    it carries binary evidence (an `elf`/`pe`/`macho` field, i.e. a `dump`
+    of a real library) instead of requiring a real binary on both sides —
+    restoring the natural `dump` once + `compare ... --used-by` later
+    workflow. `--required-symbol` already worked with snapshots.
+  - `compare --dry-run` on a `--used-by`/`--required-symbol` +
+    directory/package combination, and `deps tree`/`deps compare --dry-run`
+    on a non-ELF binary, now apply the same validation the real run does
+    before reporting "ok" — previously the dry run could pass on an input
+    combination the real run immediately rejects.
+  - `scan --dry-run`'s displayed exit-code text now describes its own
+    shared `0`/`1`/`64` dry-run contract instead of the real scan's
+    `0`/`2`/`4`/`5` scheme (the actual dry-run exit code was already
+    correct — only the displayed text was misleading).
+  - Removed stale `--help`/README/docs references to options and rich-help
+    panels ADR-043 deleted (`--max`, `--show-data-sources`,
+    `--baseline-header`/`--baseline-include`, `--audit`/`--estimate`, the
+    `collect`/`appcompat`/`explain` help panels), including a stale
+    `--baseline-header` mention in a live `scan` warning message.
+
 ### Changed
 
 - **`scan` reshaped (ADR-043).** Positional `ARTIFACT` replaces repeated
