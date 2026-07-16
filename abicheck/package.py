@@ -587,6 +587,73 @@ def _python_full_version_from_wheel_filename(filename: str) -> str | None:
     return f"{version}.0" if version is not None else None
 
 
+#: Wheel Python-tag implementation abbreviation -> PEP 508 marker value, in
+#: each of the two marker spellings (``implementation_name`` uses
+#: ``sys.implementation.name``'s lowercase spelling;
+#: ``platform_python_implementation`` uses ``platform.python_implementation()``'s
+#: capitalized spelling). The generic ``py`` abbreviation is deliberately
+#: absent from both maps -- it's an implementation-agnostic tag (a
+#: pure-Python wheel meant to run under CPython, PyPy, or anything else),
+#: so it makes no implementation promise at all to derive.
+_WHEEL_IMPLEMENTATION_NAMES = {
+    "cp": "cpython",
+    "pp": "pypy",
+    "ip": "ironpython",
+    "jy": "jython",
+}
+_WHEEL_PYTHON_IMPLEMENTATIONS = {
+    "cp": "CPython",
+    "pp": "PyPy",
+    "ip": "IronPython",
+    "jy": "Jython",
+}
+
+
+def _implementation_name_from_wheel_filename(filename: str) -> str | None:
+    """Derive ``implementation_name`` (e.g. ``"cpython"``/``"pypy"``) from a
+    wheel filename's own Python tag, the same way as
+    :func:`_python_version_from_wheel_filename`.
+
+    A ``pp39``-tagged (PyPy) wheel scanned while abicheck itself runs under
+    CPython would otherwise have an ``implementation_name``-gated marker
+    evaluate against the wrong implementation (Codex review). Returns
+    ``None`` for a non-wheel filename, a Python tag that doesn't pin a
+    specific minor version, or the implementation-agnostic generic ``py``
+    tag (see :data:`_WHEEL_IMPLEMENTATION_NAMES`).
+    """
+    if not filename.lower().endswith(".whl"):
+        return None
+    parts = filename[: -len(".whl")].split("-")
+    if len(parts) < 5:
+        return None
+    tag = parts[-3]
+    if not _WHEEL_PYTHON_TAG_RE.match(tag):
+        return None
+    return _WHEEL_IMPLEMENTATION_NAMES.get(tag[:2])
+
+
+def _platform_python_implementation_from_wheel_filename(filename: str) -> str | None:
+    """Derive ``platform_python_implementation`` (e.g.
+    ``"CPython"``/``"PyPy"``) from a wheel filename's own Python tag.
+
+    A different, equally common PEP 508 marker spelling for the same
+    distinction as :func:`_implementation_name_from_wheel_filename`
+    (``platform_python_implementation == "PyPy"`` vs.
+    ``implementation_name == "pypy"``); deriving only one still leaves a
+    marker written in the other spelling falling back to the host running
+    abicheck (Codex review). Same scope caveats as that function.
+    """
+    if not filename.lower().endswith(".whl"):
+        return None
+    parts = filename[: -len(".whl")].split("-")
+    if len(parts) < 5:
+        return None
+    tag = parts[-3]
+    if not _WHEEL_PYTHON_TAG_RE.match(tag):
+        return None
+    return _WHEEL_PYTHON_IMPLEMENTATIONS.get(tag[:2])
+
+
 def _platform_system_from_wheel_filename(filename: str) -> str | None:
     """Derive ``platform_system`` (``"Linux"``/``"Darwin"``/``"Windows"``)
     from a wheel filename's own platform tag (the last ``-``-delimited
@@ -758,19 +825,22 @@ def parse_wheel_numpy_requirement(
     or an ordinary marker that doesn't hold for *environment*.
 
     When *environment* is omitted, ``python_version``, ``python_full_version``,
+    ``implementation_name``, ``platform_python_implementation``,
     ``platform_system``, ``sys_platform``, ``os_name``, and (for
     single-architecture Linux/macOS tags) ``platform_machine`` are derived
     from the wheel's *own* filename tags (e.g. ``cp39`` ->
-    ``python_version="3.9"``/``python_full_version="3.9.0"``, a
-    ``macosx_11_0_arm64`` platform tag -> ``platform_system="Darwin"``/
-    ``sys_platform="darwin"``/``os_name="posix"``/
-    ``platform_machine="arm64"``) rather than defaulting to the interpreter
-    running abicheck — evaluating a marker gated on any of these against the
-    wrong interpreter/OS/architecture could hide a real under-declared
-    floor on a wheel built for a different Python, platform, or CPU than
-    the one running the scan (Codex review; all three OS-marker spellings
-    are covered since real-world metadata uses any of them). Falls back to the
-    interpreter's own environment for whichever of these the filename
+    ``python_version="3.9"``/``python_full_version="3.9.0"``/
+    ``implementation_name="cpython"``/
+    ``platform_python_implementation="CPython"``, a ``macosx_11_0_arm64``
+    platform tag -> ``platform_system="Darwin"``/``sys_platform="darwin"``/
+    ``os_name="posix"``/``platform_machine="arm64"``) rather than defaulting
+    to the interpreter running abicheck — evaluating a marker gated on any
+    of these against the wrong interpreter/implementation/OS/architecture
+    could hide a real under-declared floor on a wheel built for a different
+    Python, implementation, platform, or CPU than the one running the scan
+    (Codex review; both implementation-marker and all three OS-marker
+    spellings are covered since real-world metadata uses any of them).
+    Falls back to the interpreter's own environment for whichever of these the filename
     doesn't pin down (e.g. a bare directory-derived METADATA path, the
     pure-Python ``any`` platform tag, a fat/universal macOS wheel, or a
     Windows tag, whose ``platform_machine`` isn't derived at all).
@@ -806,6 +876,11 @@ def parse_wheel_numpy_requirement(
         derivers = (
             ("python_version", _python_version_from_wheel_filename),
             ("python_full_version", _python_full_version_from_wheel_filename),
+            ("implementation_name", _implementation_name_from_wheel_filename),
+            (
+                "platform_python_implementation",
+                _platform_python_implementation_from_wheel_filename,
+            ),
             ("platform_system", _platform_system_from_wheel_filename),
             ("sys_platform", _sys_platform_from_wheel_filename),
             ("os_name", _os_name_from_wheel_filename),

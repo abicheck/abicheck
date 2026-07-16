@@ -21,9 +21,11 @@ from abicheck.package import (
     RpmExtractor,
     TarExtractor,
     WheelExtractor,
+    _implementation_name_from_wheel_filename,
     _is_elf_shared_object,
     _os_name_from_wheel_filename,
     _platform_machine_from_wheel_filename,
+    _platform_python_implementation_from_wheel_filename,
     _platform_system_from_wheel_filename,
     _python_full_version_from_wheel_filename,
     _python_version_from_wheel_filename,
@@ -1255,6 +1257,33 @@ class TestParseWheelNumpyRequirement:
             )
         assert parse_wheel_numpy_requirement(whl) == ">=2"
 
+    def test_implementation_markers_derived_from_wheel_filename(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review's exact scenario: a PyPy-tagged wheel scanned while
+        # abicheck itself runs under CPython must have implementation
+        # markers (both spellings) evaluated against ITS OWN "PyPy"/"pypy",
+        # not the host interpreter's "CPython"/"cpython".
+        whl = tmp_path / "pkg-1.0-pp39-pypy39_pp73-linux_x86_64.whl"
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr(
+                "pkg-1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\n"
+                'Requires-Dist: numpy>=1.23; platform_python_implementation == "CPython"\n'
+                'Requires-Dist: numpy>=2; platform_python_implementation == "PyPy"\n',
+            )
+        assert parse_wheel_numpy_requirement(whl) == ">=2"
+
+        whl2 = tmp_path / "pkg-2.0-pp39-pypy39_pp73-linux_x86_64.whl"
+        with zipfile.ZipFile(whl2, "w") as zf:
+            zf.writestr(
+                "pkg-1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\n"
+                'Requires-Dist: numpy>=1.23; implementation_name == "cpython"\n'
+                'Requires-Dist: numpy>=2; implementation_name == "pypy"\n',
+            )
+        assert parse_wheel_numpy_requirement(whl2) == ">=2"
+
     def test_platform_machine_derived_from_wheel_filename_for_single_arch(
         self, tmp_path: Path
     ) -> None:
@@ -1355,6 +1384,71 @@ class TestPythonFullVersionFromWheelFilename:
 
     def test_non_wheel_filename_returns_none(self) -> None:
         assert _python_full_version_from_wheel_filename("pkg-1.0.tar.gz") is None
+
+
+class TestImplementationNameFromWheelFilename:
+    def test_cp_tag(self) -> None:
+        assert (
+            _implementation_name_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-linux_x86_64.whl"
+            )
+            == "cpython"
+        )
+
+    def test_pypy_tag(self) -> None:
+        assert (
+            _implementation_name_from_wheel_filename(
+                "pkg-1.0-pp39-pypy39_pp73-linux_x86_64.whl"
+            )
+            == "pypy"
+        )
+
+    def test_generic_py_tag_makes_no_implementation_promise(self) -> None:
+        assert (
+            _implementation_name_from_wheel_filename("pkg-1.0-py3-none-any.whl")
+            is None
+        )
+
+    def test_non_wheel_filename_returns_none(self) -> None:
+        assert _implementation_name_from_wheel_filename("pkg-1.0.tar.gz") is None
+
+    def test_too_few_segments_returns_none(self) -> None:
+        assert _implementation_name_from_wheel_filename("weird.whl") is None
+
+
+class TestPlatformPythonImplementationFromWheelFilename:
+    def test_cp_tag(self) -> None:
+        assert (
+            _platform_python_implementation_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-linux_x86_64.whl"
+            )
+            == "CPython"
+        )
+
+    def test_pypy_tag(self) -> None:
+        assert (
+            _platform_python_implementation_from_wheel_filename(
+                "pkg-1.0-pp39-pypy39_pp73-linux_x86_64.whl"
+            )
+            == "PyPy"
+        )
+
+    def test_generic_py_tag_makes_no_implementation_promise(self) -> None:
+        assert (
+            _platform_python_implementation_from_wheel_filename(
+                "pkg-1.0-py3-none-any.whl"
+            )
+            is None
+        )
+
+    def test_non_wheel_filename_returns_none(self) -> None:
+        assert (
+            _platform_python_implementation_from_wheel_filename("pkg-1.0.tar.gz")
+            is None
+        )
+
+    def test_too_few_segments_returns_none(self) -> None:
+        assert _platform_python_implementation_from_wheel_filename("weird.whl") is None
 
 
 class TestPlatformSystemFromWheelFilename:
