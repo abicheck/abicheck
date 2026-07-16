@@ -1216,20 +1216,34 @@ there is no equivalent "should this be automatic" question for them.
    scans ("this PR touches `src/detail/cache.cpp`; only 3 public entries are
    reachable from it; replay only those") on top of the existing
    changed-path/`headers-only` scoping (ADR-035 D7).
-4. **Explicit per-edge confidence/provenance model.** `GraphEdge.confidence`
-   already exists (`CONF_HIGH`/`CONF_REDUCED`/`CONF_UNKNOWN`); extend the
-   *labels* (not the field) to the call graph's existing `call_kind`/
-   `resolution` pattern for every edge family — a `TYPE_INHERITS` edge from a
-   textual base-class match is not the same confidence as one resolved
-   through a linked type; make that explicit rather than implicit in "this
-   module always emits `CONF_HIGH`."
-5. **Stable cross-clang-version identity.** Today identity is
-   `mangled_name` else `qualified_name#signature_hash` (`SourceEntity.identity()`)
-   for decls, and a bare textual base-type spelling
-   (`type_graph._base_type_name()`) for AST-only type nodes — accepted
-   collision risk documented inline. A USR-based identity (clang already
-   computes USRs) would remove that collision risk without changing the
-   public schema.
+4. ~~**Explicit per-edge confidence/provenance model.**~~ — **done (partial),
+   this change.** `type_graph.py`'s `DECL_REFERENCES_DECL` edge (the one edge
+   family whose resolution was a same-confidence guess regardless of how the
+   reference was actually matched) now carries a dedicated
+   `RESOLUTION_REF_EXACT`/`RESOLUTION_REF_UNIQUE_CANDIDATE`/
+   `RESOLUTION_REF_UNRESOLVED` label — distinct from the pre-existing
+   `RESOLUTION_SCOPE`/`RESOLUTION_UNIQUE_CANDIDATE`/`RESOLUTION_UNRESOLVED`
+   vocabulary `TYPE_INHERITS`/`TYPE_HAS_FIELD_TYPE`/`DECL_HAS_TYPE` already
+   used, since a `DeclRefExpr` resolves by a different mechanism (an id-index
+   hit vs. a name-scope walk) — and `confidence` now downgrades from
+   `CONF_HIGH` to `CONF_REDUCED` whenever the match isn't exact, instead of
+   always emitting `CONF_HIGH`. `TYPE_INHERITS`/`TYPE_HAS_FIELD_TYPE`/
+   `DECL_HAS_TYPE` already had per-resolution confidence before this change;
+   the object/link provenance graph (P1 item 2 above) will need its own
+   labels once it lands, so this item stays open for that edge family.
+5. ~~**Stable cross-clang-version identity.**~~ — **done (partial), this
+   change.** `SourceEntity.identity()`'s fallback chain is unchanged (still
+   `mangled_name` → `qualified_name#signature_hash` → bare `qualified_name`,
+   since folding USR into the identity string itself would change every
+   caller that already keys on it across snapshot versions — too large a
+   blast radius for this increment). Instead, `source_link.py`'s linker now
+   *detects* (never silently eliminates) the accepted collision risk: when
+   two declarations route to the same `identity()` key but each carries a
+   distinct clang-computed USR (`SourceEntity.names["usr"]`), that's proof
+   the identity string collided two genuinely different entities, and the
+   pair is recorded in a new `SourceAbiSurface.identity_collisions` list
+   (`identity`/`qualified_name`/`usr_a`/`usr_b`) rather than silently merged.
+   USR-based identity replacing the fallback chain outright remains open.
 
 ### P2 — advanced / differentiating
 
@@ -1243,11 +1257,26 @@ there is no equivalent "should this be automatic" question for them.
    `preprocessor_scan.py` (ADR-035 D2) already captures macro facts at the S2
    tier; this would connect them into the same graph instead of a separate
    advisory channel.
-4. Kythe/CodeQL/clangd as an alternate P0/P1 edge source — `graph_backends.py`
-   already ingests both into the same edge vocabulary (`external_graph_refs`
-   records provenance); this ADR's edge kinds are exactly what a Kythe/CodeQL
-   export would also produce, so P1/P2 items apply equally whichever backend
-   fills them in.
+4. ~~Kythe/CodeQL/clangd as an alternate P0/P1 edge source~~ — **done
+   (partial), this change**, for the type-graph slice: `graph_backends.py`
+   already ingested `/kythe/edge/ref`/`/kythe/edge/ref/call` and raw CodeQL
+   call-result tuples into `DECL_REFERENCES_DECL`/`DECL_CALLS_DECL`; it now
+   also ingests Kythe's `/kythe/edge/extends` (and its access-qualified
+   `/public`/`/private`/`/protected` variants) and a new
+   `ingest_codeql_extends_results()` entry point (same raw-tuple shape as the
+   call-results ingester, but CodeQL's JSON carries no self-describing
+   relation kind, so a class-hierarchy query needs its own call site) into
+   `TYPE_INHERITS` edges — landed on the same `type://`/`record_type` node
+   scheme `type_graph.augment_graph_with_types()` uses (not `decl://`), so a
+   backend-sourced base/derived pair merges with a same-run compiler-facts
+   node instead of duplicating it. Wired through `collect` as a new
+   `--codeql-extends-results` flag alongside the existing `--kythe-entries`/
+   `--codeql-results`. Kythe's `/kythe/edge/typed` (declaration → type) is
+   deliberately still not mapped — it lacks the exact/candidate distinction
+   `DECL_HAS_TYPE`'s resolution vocabulary already encodes, and mapping it as
+   always-exact would misrepresent that. Virtual-dispatch/override edges (P2
+   item 1) and the template-instantiation graph (P2 item 2) remain open for
+   whichever backend.
 
 ## Consequences
 

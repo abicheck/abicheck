@@ -25,6 +25,9 @@ from abicheck.buildsource.source_graph import GraphEdge, GraphNode, SourceGraphS
 from abicheck.buildsource.type_graph import (
     CONF_HIGH,
     CONF_REDUCED,
+    RESOLUTION_REF_EXACT,
+    RESOLUTION_REF_UNIQUE_CANDIDATE,
+    RESOLUTION_REF_UNRESOLVED,
     ClangTypeGraphExtractor,
     TypeEdge,
     _base_type_name,
@@ -647,6 +650,10 @@ def test_incomplete_declrefexpr_stub_resolves_to_full_declaration() -> None:
             "src/detail/constants.h",
         )
     ]
+    # ADR-041 P1 #4: the bare-name-but-unique-candidate fallback is a genuine
+    # best-effort guess, so it stays CONF_REDUCED with a resolution label
+    # distinguishing it from an id-index/already-complete exact match.
+    assert refs[0].resolution == RESOLUTION_REF_UNIQUE_CANDIDATE
 
 
 def test_ambiguous_declrefexpr_stub_keeps_original_identity() -> None:
@@ -693,6 +700,7 @@ def test_ambiguous_declrefexpr_stub_keeps_original_identity() -> None:
     assert refs == [
         TypeEdge("_Z1fv", "k", "DECL_REFERENCES_DECL", CONF_REDUCED, "ref", "")
     ]
+    assert refs[0].resolution == RESOLUTION_REF_UNRESOLVED
 
 
 def test_compact_const_pointer_suffix_is_stripped() -> None:
@@ -843,9 +851,14 @@ def test_declrefexpr_stub_id_disambiguates_identity_not_only_file() -> None:
     )
     edges = parse_clang_ast_types(ast)
     refs = [e for e in edges if e.kind == "DECL_REFERENCES_DECL"]
+    # ADR-041 P1 #4: an id-index match is deterministic/unambiguous, so this
+    # now earns CONF_HIGH like an already-complete stub -- not the flat
+    # CONF_REDUCED every DECL_REFERENCES_DECL edge used to get regardless of
+    # how confidently its target was identified.
     assert refs == [
-        TypeEdge("_Z1fv", "_ZN1b1kE", "DECL_REFERENCES_DECL", CONF_REDUCED, "ref")
+        TypeEdge("_Z1fv", "_ZN1b1kE", "DECL_REFERENCES_DECL", CONF_HIGH, "ref")
     ]
+    assert refs[0].resolution == RESOLUTION_REF_EXACT
 
 
 def test_field_type_edge_excludes_builtins() -> None:

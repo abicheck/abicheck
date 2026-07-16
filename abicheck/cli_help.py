@@ -135,7 +135,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "name": "Source graph (L5)",
             "options": [
                 "--source-graph",
-                "--kythe-entries", "--codeql-results",
+                "--kythe-entries", "--codeql-results", "--codeql-extends-results",
             ],
         },
         {

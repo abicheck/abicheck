@@ -70,6 +70,7 @@ def _entity(
     body_hash: str = "",
     type_hash: str = "",
     api_relevant: bool = True,
+    usr: str = "",
 ) -> SourceEntity:
     return SourceEntity(
         id=f"decl://{name}",
@@ -83,6 +84,7 @@ def _entity(
         source_location=SourceLocation(path=f"include/{name}.h", line=1, origin=origin),
         visibility=visibility,
         api_relevant=api_relevant,
+        names={"usr": usr} if usr else {},
     )
 
 
@@ -307,6 +309,88 @@ def test_linker_folds_source_edges_across_tus() -> None:
     tus = [SourceAbiTu(source_edges=[dict(edge)]) for _ in range(3)]
     surface = link_source_abi(tus)
     assert surface.source_edges == [edge]
+
+
+def test_linker_detects_identity_collision_via_usr() -> None:
+    # ADR-041 P1 #5: two genuinely different declarations (different
+    # scopes/ids) sharing one bare qualified_name + signature_hash with no
+    # mangled_name collide onto the same SourceEntity.identity() key -- the
+    # accepted, documented risk. When the linked producer stamped a USR on
+    # both (the clang plugin does; castxml/plain-clang do not), that
+    # collision is now detected rather than silently letting the second
+    # entity's qualified_name overwrite the first's in state.identity_to_qname.
+    a = SourceEntity(
+        id="decl://a::Widget#sig1",
+        kind="function",
+        qualified_name="Widget",  # bare -- castxml-style, no namespace
+        signature_hash="sig1",
+        source_location=SourceLocation(path="a.h", line=1, origin="PUBLIC_HEADER"),
+        visibility="public_header",
+        names={"usr": "c:@N@a@F@Widget#I#"},
+    )
+    b = SourceEntity(
+        id="decl://b::Widget#sig1",
+        kind="function",
+        qualified_name="Widget",  # same bare name, same signature_hash
+        signature_hash="sig1",
+        source_location=SourceLocation(path="b.h", line=1, origin="PUBLIC_HEADER"),
+        visibility="public_header",
+        names={"usr": "c:@N@b@F@Widget#I#"},
+    )
+    assert a.identity() == b.identity()  # the collision precondition
+    surface = link_source_abi([SourceAbiTu(functions=[a]), SourceAbiTu(functions=[b])])
+    assert surface.identity_collisions == [
+        {
+            "identity": a.identity(),
+            "qualified_name": "Widget",
+            "usr_a": "c:@N@a@F@Widget#I#",
+            "usr_b": "c:@N@b@F@Widget#I#",
+        }
+    ]
+
+
+def test_linker_no_identity_collision_when_usr_absent_or_matching() -> None:
+    # No false positives: a genuine re-emission of the SAME declaration (same
+    # USR) across TUs, or either side missing a USR entirely (castxml/plain
+    # clang), must never be reported as a collision.
+    same_usr_a = SourceEntity(
+        id="decl://x#sig1a", kind="function", qualified_name="X", signature_hash="s",
+        source_location=SourceLocation(path="x.h", line=1, origin="PUBLIC_HEADER"),
+        visibility="public_header", names={"usr": "c:@F@X#I#"},
+    )
+    same_usr_b = SourceEntity(
+        id="decl://x#sig1b", kind="function", qualified_name="X", signature_hash="s",
+        source_location=SourceLocation(path="x.h", line=2, origin="PUBLIC_HEADER"),
+        visibility="public_header", names={"usr": "c:@F@X#I#"},
+    )
+    surface = link_source_abi(
+        [SourceAbiTu(functions=[same_usr_a]), SourceAbiTu(functions=[same_usr_b])]
+    )
+    assert surface.identity_collisions == []
+
+    no_usr_a = SourceEntity(
+        id="decl://y#sig1a", kind="function", qualified_name="Y", signature_hash="s",
+        source_location=SourceLocation(path="y1.h", line=1, origin="PUBLIC_HEADER"),
+        visibility="public_header",
+    )
+    no_usr_b = SourceEntity(
+        id="decl://y#sig1b", kind="function", qualified_name="Y", signature_hash="s",
+        source_location=SourceLocation(path="y2.h", line=1, origin="PUBLIC_HEADER"),
+        visibility="public_header", names={"usr": "c:@F@Y#I#"},
+    )
+    surface2 = link_source_abi(
+        [SourceAbiTu(functions=[no_usr_a]), SourceAbiTu(functions=[no_usr_b])]
+    )
+    assert surface2.identity_collisions == []
+
+
+def test_identity_collisions_round_trip_through_dict() -> None:
+    s = SourceAbiSurface(library="libfoo.so", target_id="target://libfoo")
+    s.identity_collisions = [
+        {"identity": "Widget", "qualified_name": "Widget", "usr_a": "u1", "usr_b": "u2"}
+    ]
+    restored = SourceAbiSurface.from_dict(s.to_dict())
+    assert restored.identity_collisions == s.identity_collisions
 
 
 def test_linker_keeps_distinct_source_edges_from_different_tus() -> None:

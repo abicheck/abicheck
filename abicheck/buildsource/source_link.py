@@ -1247,6 +1247,7 @@ def link_source_abi(
         sorted(state.decl_to_symbol.items())
     )
     surface.odr_conflicts = state.odr_conflicts
+    surface.identity_collisions = state.identity_collisions
 
     # Attribute compiler-synthesized exports (vtable/typeinfo/thunk/guard) to their
     # owning public type/function so they are not miscounted as "exported but no
@@ -1450,6 +1451,13 @@ class _LinkState:
     identity_to_qname: dict[str, str] = field(
         default_factory=dict
     )  # identity -> qualified_name
+    #: identity -> names["usr"], for detecting a genuine SourceEntity.identity()
+    #: collision (ADR-041 P1 #5) -- see SourceAbiSurface.identity_collisions'
+    #: docstring for why this only *detects*, never changes identity()/matching
+    #: itself. Only populated when the linked producer actually stamped a USR
+    #: (the clang plugin; castxml/plain-clang extractors never do).
+    identity_to_usr: dict[str, str] = field(default_factory=dict)
+    identity_collisions: list[dict[str, Any]] = field(default_factory=list)
     # (qualified_name, declaring header) -> type_hash, for ODR detection. The
     # declaring header is part of the key because castxml reports a bare type
     # name (namespace lives in the XML `context`), so a::Widget and b::Widget
@@ -1550,6 +1558,24 @@ def _route_declaration(
     key = entity.identity()
     if not key:
         return
+    # ADR-041 P1 #5: detect (never silently resolve) a genuine identity()
+    # collision using the plugin-stamped USR, when available on both sides
+    # of it -- see SourceAbiSurface.identity_collisions' docstring for why
+    # this is purely additive diagnostics, not a change to identity()/
+    # matching itself.
+    usr = entity.names.get("usr", "")
+    prev_usr = state.identity_to_usr.get(key, "")
+    if usr and prev_usr and usr != prev_usr:
+        state.identity_collisions.append(
+            {
+                "identity": key,
+                "qualified_name": entity.qualified_name,
+                "usr_a": prev_usr,
+                "usr_b": usr,
+            }
+        )
+    if usr:
+        state.identity_to_usr[key] = usr
     state.identity_to_qname[key] = entity.qualified_name or key
     export_sym = entity.mangled_name or entity.qualified_name
     primary, variants = _match_export(
