@@ -393,6 +393,21 @@ def test_identity_collisions_round_trip_through_dict() -> None:
     assert restored.identity_collisions == s.identity_collisions
 
 
+def test_identity_collisions_malformed_value_does_not_abort_loading() -> None:
+    # CodeRabbit review: unlike source_edges (already routed through the
+    # defensive _edge_list parser), identity_collisions used a bare
+    # list(d.get(...)), so a hand-edited/forward-versioned
+    # "identity_collisions": null raised TypeError (list(None)) and aborted
+    # the whole surface load instead of degrading gracefully.
+    d = {
+        "library": "libfoo.so",
+        "target_id": "target://libfoo",
+        "identity_collisions": None,
+    }
+    restored = SourceAbiSurface.from_dict(d)
+    assert restored.identity_collisions == []
+
+
 def test_linker_keeps_distinct_source_edges_from_different_tus() -> None:
     tu_a = SourceAbiTu(
         source_edges=[{"edge": "DECL_CALLS_DECL", "src": "a", "dst": "b"}]

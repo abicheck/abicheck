@@ -619,7 +619,7 @@ class SourceAbiSurface:
             source_edges=_edge_list(d.get("source_edges")),
             mappings=mappings,
             odr_conflicts=list(d.get("odr_conflicts", [])),
-            identity_collisions=list(d.get("identity_collisions", [])),
+            identity_collisions=_edge_list(d.get("identity_collisions")),
             unmatched=unmatched,
             coverage=dict(d.get("coverage", {})),
         )

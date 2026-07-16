@@ -863,6 +863,54 @@ def test_declrefexpr_stub_id_disambiguates_identity_not_only_file() -> None:
     assert refs[0].resolution == RESOLUTION_REF_EXACT
 
 
+def test_id_hit_wins_over_coincidental_bare_name_in_decl_file() -> None:
+    # CodeRabbit review: an unrelated global `k` with no mangled name at all
+    # indexes decl_file["k"] = "global.hpp" (its identity IS the bare name).
+    # A DIFFERENT DeclRefExpr stub (incomplete, no mangledName) also spells
+    # "k" but its `id` resolves via id_index to b::k's real mangled identity.
+    # The old code checked "ident not in decl_file" to decide whether the
+    # stub was already complete -- since "k" coincidentally already exists in
+    # decl_file (from the unrelated global), it skipped the id_index lookup
+    # entirely and kept the wrong bare "k" identity. id_hit must win first,
+    # regardless of what already happens to be in decl_file.
+    ast = _tu(
+        {"kind": "VarDecl", "name": "k"},  # global, no mangled name -> identity "k"
+        {
+            "kind": "NamespaceDecl",
+            "name": "b",
+            "inner": [
+                {"kind": "VarDecl", "name": "k", "mangledName": "_ZN1b1kE", "id": "0x2"}
+            ],
+        },
+        {
+            "kind": "FunctionDecl",
+            "name": "f",
+            "mangledName": "_Z1fv",
+            "inner": [
+                {
+                    "kind": "CompoundStmt",
+                    "inner": [
+                        {
+                            "kind": "DeclRefExpr",
+                            "referencedDecl": {
+                                "kind": "VarDecl",
+                                "name": "k",
+                                "id": "0x2",
+                            },
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    edges = parse_clang_ast_types(ast)
+    refs = [e for e in edges if e.kind == "DECL_REFERENCES_DECL"]
+    assert refs == [
+        TypeEdge("_Z1fv", "_ZN1b1kE", "DECL_REFERENCES_DECL", CONF_HIGH, "ref")
+    ]
+    assert refs[0].resolution == RESOLUTION_REF_EXACT
+
+
 def test_field_type_edge_excludes_builtins() -> None:
     # detail::Impl is declared elsewhere in the same TU (as any real clang AST
     # would have it, at least forward-declared) so it resolves confidently;

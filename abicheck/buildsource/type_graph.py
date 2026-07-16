@@ -900,18 +900,27 @@ def _resolve_ref_identity(
     ident = _decl_identity(ref)
     node_id = str(ref.get("id") or "")
     id_hit = id_index.get(node_id)
-    resolution = RESOLUTION_REF_EXACT
-    if ident not in decl_file:
-        if id_hit and id_hit[0]:
-            ident = id_hit[0]
+    # The id-index match must win over "ident already happens to be a key in
+    # decl_file" (Codex review): `decl_file` is keyed by bare identity across
+    # the whole TU, so a same-named declaration in an unrelated scope can make
+    # `ident in decl_file` true even though *this* stub names a different
+    # declaration — the id-index lookup is per-node and unambiguous by
+    # construction, so it must be tried first regardless.
+    if id_hit and id_hit[0]:
+        ident = id_hit[0]
+        resolution = RESOLUTION_REF_EXACT
+    elif ref.get("mangledName") and ident in decl_file:
+        # The stub was already complete (a real mangledName, not just a bare
+        # name that coincidentally matches another declaration) and resolves.
+        resolution = RESOLUTION_REF_EXACT
+    else:
+        name = str(ref.get("name") or "")
+        candidates = ref_name_index.get(name) if name else None
+        if candidates and len(candidates) == 1:
+            ident = candidates[0]
+            resolution = RESOLUTION_REF_UNIQUE_CANDIDATE
         else:
-            name = str(ref.get("name") or "")
-            candidates = ref_name_index.get(name) if name else None
-            if candidates and len(candidates) == 1:
-                ident = candidates[0]
-                resolution = RESOLUTION_REF_UNIQUE_CANDIDATE
-            else:
-                resolution = RESOLUTION_REF_UNRESOLVED
+            resolution = RESOLUTION_REF_UNRESOLVED
     file = (id_hit[1] if id_hit else "") or decl_file.get(ident, "")
     return ident, file, resolution
 

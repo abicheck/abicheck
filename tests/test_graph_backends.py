@@ -100,6 +100,17 @@ def test_kythe_extends_access_qualified_variant_also_maps() -> None:
     assert g.edges[0].kind == "TYPE_INHERITS"
 
 
+def test_kythe_edge_kind_merely_sharing_extends_prefix_is_not_matched() -> None:
+    # Codex review: a plain startswith("/kythe/edge/extends") also accepted an
+    # unrelated edge kind that merely shares the prefix textually.
+    g = SourceGraphSummary()
+    added = ingest_kythe_entries(g, [
+        {"edge_kind": "/kythe/edge/extendsFoo",
+         "source": {"signature": "Derived"}, "target": {"signature": "Base"}},
+    ])
+    assert added == 0
+
+
 def test_codeql_tuples_with_string_and_label_cells() -> None:
     g = SourceGraphSummary()
     added = ingest_codeql_call_results(g, {"#select": {"tuples": [
@@ -230,6 +241,34 @@ def test_collect_evidence_codeql_extends_results_folds_edges(tmp_path) -> None:
     graph = BuildSourcePack.load(out).source_graph
     assert graph is not None and any(e.kind == "TYPE_INHERITS" for e in graph.edges)
     assert graph.external_graph_refs and graph.external_graph_refs[0]["backend"] == "codeql"
+
+
+def test_collect_evidence_codeql_extends_non_object_records_failed_extractor(
+    tmp_path,
+) -> None:
+    # Codex review: valid JSON that isn't a top-level object (e.g. a bare
+    # array) used to leave no ExtractorRecord at all, silently hiding that
+    # the requested backend was never ingested.
+    import json
+
+    from click.testing import CliRunner
+
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.cli import main
+
+    codeql = tmp_path / "codeql-extends.json"
+    codeql.write_text(json.dumps(["not", "an", "object"]))
+    out = tmp_path / "ev"
+    res = CliRunner().invoke(main, [
+        "collect", "--compile-db", str(_cdb(tmp_path)),
+        "--codeql-extends-results", str(codeql), "-o", str(out),
+    ])
+    assert res.exit_code == 0, res.output
+    pack = BuildSourcePack.load(out)
+    record = next(
+        e for e in pack.manifest.extractors if e.name == "graph_backend:codeql_extends"
+    )
+    assert record.status == "failed"
 
 
 def test_collect_evidence_malformed_backend_export_degrades(tmp_path) -> None:

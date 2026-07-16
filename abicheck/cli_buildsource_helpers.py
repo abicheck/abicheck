@@ -1251,15 +1251,28 @@ def _ingest_graph_backends(
 
     if codeql_extends_results is not None:
         data = _load(codeql_extends_results, "graph_backend:codeql_extends")
-        if isinstance(data, dict):
-            added = ingest_codeql_extends_results(
-                graph, data, ref=DEFAULT_REDACTION.path(str(codeql_extends_results))
-            )
-            extractors.append(
-                ExtractorRecord(
-                    name="graph_backend:codeql_extends",
-                    status="ok" if added else "partial",
-                    inputs=[DEFAULT_REDACTION.path(str(codeql_extends_results))],
-                    detail=f"{added} edges ingested",
+        if data is not None:
+            if isinstance(data, dict):
+                added = ingest_codeql_extends_results(
+                    graph, data, ref=DEFAULT_REDACTION.path(str(codeql_extends_results))
                 )
-            )
+                extractors.append(
+                    ExtractorRecord(
+                        name="graph_backend:codeql_extends",
+                        status="ok" if added else "partial",
+                        inputs=[DEFAULT_REDACTION.path(str(codeql_extends_results))],
+                        detail=f"{added} edges ingested",
+                    )
+                )
+            else:
+                # Codex review: valid JSON that isn't an object (e.g. a bare
+                # array) used to leave no record at all, silently hiding that
+                # the requested backend was never ingested.
+                extractors.append(
+                    ExtractorRecord(
+                        name="graph_backend:codeql_extends",
+                        status="failed",
+                        inputs=[DEFAULT_REDACTION.path(str(codeql_extends_results))],
+                        detail="expected a JSON object with a top-level \"#select\"",
+                    )
+                )

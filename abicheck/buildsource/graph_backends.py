@@ -123,7 +123,12 @@ def ingest_kythe_entries(
             continue
         edge_kind = str(entry.get("edge_kind", ""))
         is_ref = edge_kind.startswith(_KYTHE_REF_PREFIX)
-        is_extends = edge_kind.startswith(_KYTHE_EXTENDS_PREFIX)
+        # Exact match or a "/"-delimited access-qualified variant only
+        # (Codex review) — a plain startswith() also accepted an unrelated
+        # edge kind merely sharing the prefix textually (e.g. "extendsFoo").
+        is_extends = edge_kind == _KYTHE_EXTENDS_PREFIX or edge_kind.startswith(
+            _KYTHE_EXTENDS_PREFIX + "/"
+        )
         if not is_ref and not is_extends:
             continue
         src = _kythe_identity(entry.get("source"))
