@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: temporary-l2-large-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   profile:
     name: Profile large L2 scans on current main
