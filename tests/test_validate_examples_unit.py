@@ -22,6 +22,7 @@ from tests.validate_examples import (  # noqa: E402
     ARTIFACT_VARIANTS,
     DEFAULT_ARTIFACT_VARIANT,
     CaseResult,
+    _build_compare_direct_cmd,
     _build_info_applies,
     _build_info_path,
     _build_with_cmake,
@@ -799,3 +800,51 @@ def test_case_work_dir_shortens_windows_cmake_path(tmp_path: Path) -> None:
     assert linux_path.name == f"{long_name}__build-source"
     assert windows_path.name.startswith("case-")
     assert len(windows_path.name) == 17
+
+
+class TestBuildCompareDirectCmd:
+    """Argv shape of the single-call fast path (the dump+dump+compare collapse)."""
+
+    def test_both_headers_present_use_sided_flags(self, tmp_path: Path) -> None:
+        v1_so, v2_so = tmp_path / "v1.so", tmp_path / "v2.so"
+        v1_hdr, v2_hdr = tmp_path / "v1.h", tmp_path / "v2.h"
+        v1_hdr.write_text("")
+        v2_hdr.write_text("")
+
+        cmd = _build_compare_direct_cmd(
+            v1_so, v2_so, v1_hdr, v2_hdr, scope_public_headers=True
+        )
+
+        assert cmd[:2] == [sys.executable, "-m"]
+        assert cmd[2:6] == ["abicheck.cli", "compare", str(v1_so), str(v2_so)]
+        assert "--format" in cmd and cmd[cmd.index("--format") + 1] == "json"
+        assert "-H" in cmd
+        h_values = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-H"]
+        assert h_values == [f"old={v1_hdr}", f"new={v2_hdr}"]
+        assert "--scope-public-headers" in cmd
+        assert "--no-scope-public-headers" not in cmd
+        assert "--pattern-verdicts" not in cmd
+
+    def test_missing_header_omits_its_flag(self, tmp_path: Path) -> None:
+        v1_so, v2_so = tmp_path / "v1.so", tmp_path / "v2.so"
+        v1_hdr = tmp_path / "v1.h"
+        v1_hdr.write_text("")
+        missing_hdr = tmp_path / "v2.h"  # never created
+
+        cmd = _build_compare_direct_cmd(
+            v1_so, v2_so, v1_hdr, missing_hdr, scope_public_headers=False
+        )
+
+        h_values = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-H"]
+        assert h_values == [f"old={v1_hdr}"]
+        assert "--no-scope-public-headers" in cmd
+
+    def test_pattern_verdicts_appends_flag(self, tmp_path: Path) -> None:
+        v1_so, v2_so = tmp_path / "v1.so", tmp_path / "v2.so"
+
+        cmd = _build_compare_direct_cmd(
+            v1_so, v2_so, None, None, scope_public_headers=False, pattern_verdicts=True
+        )
+
+        assert "--pattern-verdicts" in cmd
+        assert "-H" not in cmd
