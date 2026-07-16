@@ -3,8 +3,7 @@ name: Temporary large L2 and CastXML probe
 on:
   pull_request:
     paths:
-      - scripts/profile_large_l2_castxml.py
-      - scripts/profile_large_l2_castxml_runner.py
+      - scripts/profile_large_l2_castxml_v2.py
       - .github/workflows/l2-large-castxml-probe.yml
 
 permissions:
@@ -51,6 +50,7 @@ jobs:
           import abicheck, pathlib
           print("abicheck:", pathlib.Path(abicheck.__file__).resolve())
           PY
+          python -m py_compile scripts/profile_large_l2_castxml_v2.py
           castxml --version
           gcc --version | head -1
           clang --version | head -1
@@ -95,7 +95,7 @@ jobs:
           rm -rf results/l2-large-castxml
           mkdir -p results/l2-large-castxml
           set +e
-          python scripts/profile_large_l2_castxml_runner.py \
+          python scripts/profile_large_l2_castxml_v2.py \
             --main-sha "$ABICHECK_MAIN_SHA" \
             --out-dir results/l2-large-castxml \
             >results/l2-large-castxml/probe.log 2>&1
