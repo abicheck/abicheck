@@ -58,7 +58,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   only a warning, so `estimate: true` would otherwise silently run a real
   scan instead of the preview it used to produce, and `audit: true` would
   silently stop forcing a baseline-less hygiene lint once a baseline is
-  configured — both fail open rather than loud.
+  configured — both fail open rather than loud. The `estimate` alias is
+  scoped to scan mode only (matching its historical scope) — it has no
+  effect set on a `compare`/`dump`/`deps-tree`/`deps-compare` step, rather
+  than silently turning that step into a `--dry-run` no-op (Codex review
+  follow-up).
 
 ### Fixed
 
@@ -120,6 +124,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `--used-by --show-only ...` run no longer uploads a scoped-only finding
   the filter was supposed to exclude (JUnit already applied `--show-only`
   to these consistently; only SARIF had the gap).
+- `compare --format json`'s scoped-only changes had the identical
+  `--show-only` gap as SARIF — the JSON `changes` array's own filtering only
+  ever touched `result.changes`, so a `--used-by --show-only ...` run could
+  re-surface a scoped-only finding the filter excluded. Fixed the same way
+  (the `--secondary-format` render and the MCP top-level `changes` summary
+  are unaffected — both are deliberately always-unfiltered by design).
 
 ### Added
 
