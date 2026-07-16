@@ -2106,13 +2106,23 @@ class TestTryAttachNumpyCapiSurface:
         assert snap.numpy_capi is not_consuming
         assert "NumPy C-API consumption detected" not in caplog.text
 
-    def test_logs_when_consumption_detected(self, tmp_path, monkeypatch, caplog):
+    @pytest.mark.parametrize(
+        "consumes_array_api,consumes_ufunc_api",
+        [(True, False), (False, True)],
+    )
+    def test_logs_when_consumption_detected(
+        self, tmp_path, monkeypatch, caplog, consumes_array_api, consumes_ufunc_api
+    ):
+        # Parametrized over each side of the production OR condition, so
+        # removing either one from _try_attach_numpy_capi_surface's guard
+        # would fail this test (CodeRabbit review).
         from abicheck.numpy_capi import NumPyCapiSurface
         from abicheck.service import _try_attach_numpy_capi_surface
 
         snap = AbiSnapshot(library="lib.so", version="1.0")
         consuming = NumPyCapiSurface(
-            consumes_array_api=True, consumes_ufunc_api=False
+            consumes_array_api=consumes_array_api,
+            consumes_ufunc_api=consumes_ufunc_api,
         )
         monkeypatch.setattr(
             "abicheck.numpy_capi.extract_numpy_capi_surface", lambda _p: consuming

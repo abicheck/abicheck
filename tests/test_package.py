@@ -886,7 +886,9 @@ class TestParseNumpyRequirementFromMetadata:
 
         real_evaluate = Marker.evaluate
 
-        def strict_evaluate(self, environment=None):
+        def strict_evaluate(
+            self: Marker, environment: dict[str, str] | None = None
+        ) -> bool:
             assert environment is not None and "extra" in environment, (
                 "caller must seed 'extra' -- packaging>=21.0's evaluate() "
                 "has no auto-default and would raise UndefinedEnvironmentName"
@@ -1065,6 +1067,24 @@ class TestParseWheelNumpyRequirement:
             )
         assert parse_wheel_numpy_requirement(whl) == ">=1.23.5"
 
+    def test_oversized_metadata_member_rejected_not_decompressed(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        # An attacker-controlled wheel could declare a METADATA member that
+        # decompresses far beyond a real METADATA file's size (a zip bomb).
+        # Lower the cap to a few bytes so the test doesn't need to actually
+        # write megabytes of data (CodeRabbit review).
+        import abicheck.package as package_mod
+
+        monkeypatch.setattr(package_mod, "_MAX_METADATA_SIZE", 8)
+        whl = tmp_path / "pkg-1.0-cp311-cp311-linux_x86_64.whl"
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr(
+                "pkg-1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\nRequires-Dist: numpy>=1.23.5\n",
+            )
+        assert parse_wheel_numpy_requirement(whl) is None
+
     def test_no_dist_info_metadata_member(self, tmp_path: Path) -> None:
         whl = tmp_path / "pkg-1.0-cp311-cp311-linux_x86_64.whl"
         with zipfile.ZipFile(whl, "w") as zf:
@@ -1176,6 +1196,29 @@ class TestParseWheelNumpyRequirement:
                 'Requires-Dist: numpy>=2; platform_machine == "aarch64"\n',
             )
         assert parse_wheel_numpy_requirement(whl) == ">=2"
+
+    def test_compressed_multi_arch_macosx_wheel_falls_back_to_host(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review: a genuinely multi-architecture wheel (dotted
+        # macosx x86_64/arm64 tags) must NOT derive a platform_machine at
+        # all -- checking one arch's slice of it must not silently pick up
+        # the OTHER arch's marker evaluation.
+        whl = (
+            tmp_path
+            / "pkg-1.0-cp311-cp311-macosx_10_9_x86_64.macosx_11_0_arm64.whl"
+        )
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr(
+                "pkg-1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\nRequires-Dist: numpy>=1.23.5\n",
+            )
+        # No platform_machine-gated markers here, so this stays trivially
+        # correct either way -- the real assertion is in the unit test for
+        # _platform_machine_from_wheel_filename itself returning None for
+        # this tag. This just confirms end-to-end parsing doesn't crash on
+        # a compressed multi-arch tag.
+        assert parse_wheel_numpy_requirement(whl) == ">=1.23.5"
 
 
 class TestPythonVersionFromWheelFilename:
@@ -1348,6 +1391,32 @@ class TestPlatformMachineFromWheelFilename:
                 "pkg-1.0-cp311-cp311-macosx_11_0_universal2.whl"
             )
             is None
+        )
+
+    def test_compressed_multi_arch_macosx_tag_is_ambiguous_returns_none(
+        self,
+    ) -> None:
+        # PEP 600 compressed multi-tag platform segment covering two
+        # DIFFERENT architectures -- naively checking the whole segment's
+        # suffix would derive "arm64" just because that's the last
+        # dot-joined component, even though the wheel also covers x86_64
+        # (Codex review).
+        assert (
+            _platform_machine_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-macosx_10_9_x86_64.macosx_11_0_arm64.whl"
+            )
+            is None
+        )
+
+    def test_compressed_multi_tag_agreeing_on_one_arch_is_derived(self) -> None:
+        # Multiple manylinux baselines for the SAME architecture (a
+        # genuinely common case: a wheel built compatible with both an
+        # older and a newer glibc floor) still names exactly one arch.
+        assert (
+            _platform_machine_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"
+            )
+            == "x86_64"
         )
 
     def test_win_tag_not_derived(self) -> None:

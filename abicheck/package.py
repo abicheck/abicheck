@@ -645,7 +645,12 @@ def _platform_machine_from_wheel_filename(filename: str) -> str | None:
     this is worth deriving where it's safe (Codex review). Still returns
     ``None`` for anything that isn't safe to guess: a fat/universal macOS
     wheel (``macosx_11_0_universal2``/``_universal``/``_intel``, which
-    supports more than one architecture at once), Windows tags (``win32``/
+    supports more than one architecture at once), a PEP 600 compressed
+    multi-tag platform segment (``.``-joined, e.g.
+    ``macosx_10_9_x86_64.macosx_11_0_arm64``) whose components don't all
+    agree on the same single architecture (checking any one arch's slice
+    of such a wheel would otherwise silently pick up another arch's
+    marker evaluation — Codex review), Windows tags (``win32``/
     ``win_amd64``/``win_arm64`` don't map onto a single well-standardized
     ``platform.machine()`` string the way Linux/macOS tags do), the
     pure-Python ``any`` tag, or an unrecognized platform tag prefix.
@@ -655,17 +660,23 @@ def _platform_machine_from_wheel_filename(filename: str) -> str | None:
     parts = filename[: -len(".whl")].split("-")
     if len(parts) < 5:
         return None
-    tag = parts[-1].lower()
-    if tag.startswith(("manylinux", "musllinux", "linux")):
-        m = _WHEEL_LINUX_MACHINE_RE.search(tag)
-        return m.group(1) if m else None
-    if tag.startswith("macosx"):
-        if tag.endswith("_x86_64"):
-            return "x86_64"
-        if tag.endswith("_arm64"):
-            return "arm64"
-        return None  # universal2/universal/intel: more than one architecture
-    return None
+    machines: set[str] = set()
+    for component in parts[-1].lower().split("."):
+        if component.startswith(("manylinux", "musllinux", "linux")):
+            m = _WHEEL_LINUX_MACHINE_RE.search(component)
+            if m is None:
+                return None
+            machines.add(m.group(1))
+        elif component.startswith("macosx"):
+            if component.endswith("_x86_64"):
+                machines.add("x86_64")
+            elif component.endswith("_arm64"):
+                machines.add("arm64")
+            else:
+                return None  # universal2/universal/intel: more than one arch
+        else:
+            return None
+    return machines.pop() if len(machines) == 1 else None
 
 
 # G26: a wheel's *.dist-info/METADATA declares its runtime dependencies —
@@ -673,6 +684,15 @@ def _platform_machine_from_wheel_filename(filename: str) -> str | None:
 # binary-evidence "required" side comes from numpy_capi.py). Mirrors
 # parse_manylinux_glibc_floor's role for G10: a pure function callers wire
 # in programmatically (see diff_numpy_capi.check_numpy_metadata_contract).
+
+#: A real METADATA file is ordinarily a few KB even with a long dependency
+#: list; this bounds how much a single wheel's METADATA member is allowed
+#: to decompress to, so a malicious wheel can't zip-bomb this scan (a small
+#: compressed member declaring a tiny size that in fact decompresses to
+#: gigabytes) (CodeRabbit review).
+_MAX_METADATA_SIZE = 1_048_576
+
+
 def parse_wheel_numpy_requirement(
     wheel_path: Path, environment: dict[str, str] | None = None
 ) -> str | None:
@@ -706,13 +726,29 @@ def parse_wheel_numpy_requirement(
     """
     try:
         with zipfile.ZipFile(wheel_path) as zf:
-            metadata_name = next(
-                (n for n in zf.namelist() if n.endswith(".dist-info/METADATA")),
+            metadata_info = next(
+                (
+                    info
+                    for info in zf.infolist()
+                    if info.filename.endswith(".dist-info/METADATA")
+                ),
                 None,
             )
-            if metadata_name is None:
+            if metadata_info is None:
                 return None
-            text = zf.read(metadata_name).decode("utf-8", errors="replace")
+            # A METADATA file is ordinarily a few KB even with a long
+            # dependency list; an attacker-controlled wheel could otherwise
+            # declare a small compressed member that decompresses to
+            # gigabytes (a zip bomb). Reject an oversized declared size
+            # up front, then bound the actual read too rather than trusting
+            # the declared size alone (CodeRabbit review).
+            if metadata_info.file_size > _MAX_METADATA_SIZE:
+                return None
+            with zf.open(metadata_info) as f:
+                raw = f.read(_MAX_METADATA_SIZE + 1)
+            if len(raw) > _MAX_METADATA_SIZE:
+                return None
+            text = raw.decode("utf-8", errors="replace")
     except (OSError, zipfile.BadZipFile):
         return None
     if environment is None:
