@@ -60,6 +60,19 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Fixed two stale CLI warnings referencing removed `--depth full`/`--max`
   values, and a GitHub Action baseline-fetch error message pointing at a
   nonexistent `--output-name` flag.
+- `--used-by`/`--required-symbol`'s missing-contract SARIF/JUnit synthesis
+  no longer double-reports a missing symbol/entrypoint that is already
+  covered by a relevant `Change` (e.g. a removed symbol is both "missing"
+  and a `FUNC_REMOVED` finding), and now respects severity-config
+  demotion of `abi_breaking` instead of always emitting `level: "error"`/
+  a failing testcase.
+
+### Added
+
+- `dump -o` now prints the evidence depth a snapshot actually reached
+  (`binary`/`headers`/`build`/`source`, computed from what it carries
+  rather than the requested `--depth`); `compare`'s JSON report gains
+  matching `old_evidence_depth`/`new_evidence_depth` fields.
 
 ### Changed
 
