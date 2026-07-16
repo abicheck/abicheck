@@ -1223,9 +1223,25 @@ def link_source_abi(
                 entity.body_hash,
                 entity.value,
             )
-            if key in state.seen_entity_keys:
+            usr = entity.names.get("usr", "")
+            prev_usr = state.seen_entity_usr.get(key, "")
+            # A genuine identity_collision_detected pair (two distinct decls,
+            # proven distinct by a differing USR) can still share every field
+            # in `key` above -- none of them carry per-declaration provenance,
+            # so a bare, unmangled cross-scope name/signature collision hashes
+            # identically. Only treat this as the "byte-identical re-emission
+            # across TUs" case the dedup exists for when the USRs agree (or
+            # are unknown, e.g. castxml/plain-clang extractors that never
+            # stamp one) -- otherwise let the second entity through so
+            # `_route_declaration`'s USR-collision check actually sees it
+            # (Codex review; ADR-041 P1 #5).
+            if key in state.seen_entity_keys and (
+                not usr or not prev_usr or usr == prev_usr
+            ):
                 continue
             state.seen_entity_keys.add(key)
+            if usr and not prev_usr:
+                state.seen_entity_usr[key] = usr
             state.public_decl_ids.append(entity.id)
             _route_entity(entity, surface, state, exported)
 
@@ -1470,6 +1486,14 @@ class _LinkState:
     #: re-emits each public-header decl once per compile (a ~20x blow-up on
     #: template-heavy libraries), so byte-identical repeats are folded to one.
     seen_entity_keys: set[tuple[str, ...]] = field(default_factory=set)
+    #: dedup key -> the USR of the first entity routed under that key (ADR-041
+    #: P1 #5, Codex review). Two genuinely distinct declarations can share every
+    #: field in ``seen_entity_keys``' key tuple (a bare, unmangled cross-scope
+    #: name/signature collision — the exact identity_collision_detected shape)
+    #: while still carrying different USRs; without this, the second entity
+    #: would be dropped as a "duplicate re-emission" before it ever reaches
+    #: ``_route_declaration``'s USR-collision check, silently defeating it.
+    seen_entity_usr: dict[tuple[str, ...], str] = field(default_factory=dict)
     #: ctor/dtor canonical form -> exported clone symbols (see _build_export_index)
     export_index: dict[str, list[str]] = field(default_factory=dict)
     #: Mach-O-normalized exact key -> real exported spelling (see _build_exact_index)

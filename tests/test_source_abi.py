@@ -354,14 +354,22 @@ def test_linker_no_identity_collision_when_usr_absent_or_matching() -> None:
     # USR) across TUs, or either side missing a USR entirely (castxml/plain
     # clang), must never be reported as a collision.
     same_usr_a = SourceEntity(
-        id="decl://x#sig1a", kind="function", qualified_name="X", signature_hash="s",
+        id="decl://x#sig1a",
+        kind="function",
+        qualified_name="X",
+        signature_hash="s",
         source_location=SourceLocation(path="x.h", line=1, origin="PUBLIC_HEADER"),
-        visibility="public_header", names={"usr": "c:@F@X#I#"},
+        visibility="public_header",
+        names={"usr": "c:@F@X#I#"},
     )
     same_usr_b = SourceEntity(
-        id="decl://x#sig1b", kind="function", qualified_name="X", signature_hash="s",
+        id="decl://x#sig1b",
+        kind="function",
+        qualified_name="X",
+        signature_hash="s",
         source_location=SourceLocation(path="x.h", line=2, origin="PUBLIC_HEADER"),
-        visibility="public_header", names={"usr": "c:@F@X#I#"},
+        visibility="public_header",
+        names={"usr": "c:@F@X#I#"},
     )
     surface = link_source_abi(
         [SourceAbiTu(functions=[same_usr_a]), SourceAbiTu(functions=[same_usr_b])]
@@ -369,19 +377,69 @@ def test_linker_no_identity_collision_when_usr_absent_or_matching() -> None:
     assert surface.identity_collisions == []
 
     no_usr_a = SourceEntity(
-        id="decl://y#sig1a", kind="function", qualified_name="Y", signature_hash="s",
+        id="decl://y#sig1a",
+        kind="function",
+        qualified_name="Y",
+        signature_hash="s",
         source_location=SourceLocation(path="y1.h", line=1, origin="PUBLIC_HEADER"),
         visibility="public_header",
     )
     no_usr_b = SourceEntity(
-        id="decl://y#sig1b", kind="function", qualified_name="Y", signature_hash="s",
+        id="decl://y#sig1b",
+        kind="function",
+        qualified_name="Y",
+        signature_hash="s",
         source_location=SourceLocation(path="y2.h", line=1, origin="PUBLIC_HEADER"),
-        visibility="public_header", names={"usr": "c:@F@Y#I#"},
+        visibility="public_header",
+        names={"usr": "c:@F@Y#I#"},
     )
     surface2 = link_source_abi(
         [SourceAbiTu(functions=[no_usr_a]), SourceAbiTu(functions=[no_usr_b])]
     )
     assert surface2.identity_collisions == []
+
+
+def test_linker_detects_identity_collision_even_when_dedup_key_also_matches() -> None:
+    # Codex review: a genuine identity() collision (bare qualified_name +
+    # signature_hash, no mangled_name) can ALSO collide on the *dedup* key
+    # (kind, qualified_name, mangled_name, id, signature_hash, type_hash,
+    # body_hash, value) used to fold byte-identical re-emissions across TUs --
+    # none of those fields carry per-declaration provenance either, so two
+    # distinct decls sharing everything else hash identically on `id` too
+    # (unlike test_linker_detects_identity_collision_via_usr's hand-crafted
+    # distinct ids). Without checking USRs before the dedup skip, the second
+    # entity is dropped as a "duplicate re-emission" before ever reaching
+    # _route_declaration's USR-collision check, silently defeating it.
+    a = SourceEntity(
+        id="decl://widget#sig1",  # identical id -- unlike the distinct-id test above
+        kind="function",
+        qualified_name="Widget",
+        signature_hash="sig1",
+        source_location=SourceLocation(path="a.h", line=1, origin="PUBLIC_HEADER"),
+        visibility="public_header",
+        names={"usr": "c:@N@a@F@Widget#I#"},
+    )
+    b = SourceEntity(
+        id="decl://widget#sig1",  # same id, same everything except USR
+        kind="function",
+        qualified_name="Widget",
+        signature_hash="sig1",
+        source_location=SourceLocation(path="b.h", line=1, origin="PUBLIC_HEADER"),
+        visibility="public_header",
+        names={"usr": "c:@N@b@F@Widget#I#"},
+    )
+    assert a.identity() == b.identity()  # the collision precondition
+    surface = link_source_abi([SourceAbiTu(functions=[a]), SourceAbiTu(functions=[b])])
+    assert surface.identity_collisions == [
+        {
+            "identity": a.identity(),
+            "qualified_name": "Widget",
+            "usr_a": "c:@N@a@F@Widget#I#",
+            "usr_b": "c:@N@b@F@Widget#I#",
+        }
+    ]
+    # Both declarations still route (not folded away as a duplicate).
+    assert len(surface.reachable_declarations) == 2
 
 
 def test_identity_collisions_round_trip_through_dict() -> None:
