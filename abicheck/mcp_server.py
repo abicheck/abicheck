@@ -957,6 +957,9 @@ def abi_compare(
             # rendered report, not just this response's top-level fields.
             result.used_by = summaries  # type: ignore[attr-defined]
             result.scoped_verdict = worst_verdict  # type: ignore[attr-defined]
+            result.scoped_exit_code = worst_exit  # type: ignore[attr-defined]
+            scoped_scheme = "severity" if severity_config is not None else "legacy"
+            result.scoped_exit_code_scheme = scoped_scheme  # type: ignore[attr-defined]
         elif required_symbols:
             from .appcompat import scope_diff_to_required_symbols
 
@@ -980,6 +983,9 @@ def abi_compare(
             scoped_verdict_value = scoped_host.verdict.value
             result.required_symbols = scoped_payload  # type: ignore[attr-defined]
             result.scoped_verdict = scoped_host.verdict  # type: ignore[attr-defined]
+            result.scoped_exit_code = exit_code  # type: ignore[attr-defined]
+            scoped_scheme = "severity" if severity_config is not None else "legacy"
+            result.scoped_exit_code_scheme = scoped_scheme  # type: ignore[attr-defined]
 
         # Build structured response. When a used_by/required_symbols scope is in
         # effect, mirror the CLI JSON contract (`_fold_scoped_compat_into_text`):

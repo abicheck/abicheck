@@ -571,3 +571,22 @@ class TestScopedGate:
         doc = to_sarif(r)
         scoped_gate = doc["runs"][0]["properties"]["scopedGate"]
         assert scoped_gate["requiredSymbolContract"]["verdict"] == "BREAKING"
+
+    def test_scoped_gate_note_states_actual_exit_code_under_severity_scheme(
+        self,
+    ) -> None:
+        # Regression: the note used to claim "the CLI process exit code
+        # reflects scopedVerdict" unconditionally, which is wrong under a
+        # severity scheme -- e.g. --severity-preset info-only can floor the
+        # scoped exit code at 0 even for a BREAKING scopedVerdict (Codex
+        # review). The note must state the actual computed value/scheme.
+        r = _make_result([_breaking_change()], verdict=Verdict.BREAKING)
+        r.scoped_verdict = Verdict.BREAKING  # type: ignore[attr-defined]
+        r.scoped_exit_code = 0  # type: ignore[attr-defined]
+        r.scoped_exit_code_scheme = "severity"  # type: ignore[attr-defined]
+        doc = to_sarif(r)
+        scoped_gate = doc["runs"][0]["properties"]["scopedGate"]
+        assert scoped_gate["scopedExitCode"] == 0
+        assert scoped_gate["scopedExitCodeScheme"] == "severity"
+        assert "exits 0" in scoped_gate["note"]
+        assert "severity" in scoped_gate["note"]

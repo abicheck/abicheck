@@ -570,3 +570,17 @@ def test_scoped_verdict_box_present_and_can_disagree_with_full_verdict() -> None
     assert "Scoped verdict: COMPATIBLE" in out
     # The main verdict box stays the full-library one (unchanged).
     assert "Compatibility: BREAKING" in out
+
+
+def test_scoped_verdict_box_states_actual_exit_code_under_severity_scheme() -> None:
+    # Regression: the banner used to claim "this is what the CLI process
+    # exit code reflects" unconditionally, wrong under a severity scheme --
+    # e.g. --severity-preset info-only can floor the scoped exit code at 0
+    # even for a BREAKING scoped verdict (Codex review).
+    r = _result(verdict="BREAKING")
+    r.scoped_verdict = SimpleNamespace(value="BREAKING")
+    r.scoped_exit_code = 0
+    r.scoped_exit_code_scheme = "severity"
+    out = generate_html_report(r)
+    assert "exits 0" in out
+    assert "severity exit-code scheme" in out

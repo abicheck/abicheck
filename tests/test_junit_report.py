@@ -1369,3 +1369,23 @@ class TestScopedProperties:
             p.get("name"): p.get("value") for p in ts.find("properties")
         }
         assert props["abicheck.required_symbol_contract_verdict"] == "BREAKING"
+
+    def test_note_states_actual_exit_code_under_severity_scheme(self) -> None:
+        # Regression: the note used to claim "exit code reflects
+        # scoped_verdict" unconditionally, wrong under a severity scheme --
+        # e.g. --severity-preset info-only can floor the scoped exit code at
+        # 0 even for a BREAKING scoped_verdict (Codex review).
+        r = _make_result([], verdict=Verdict.BREAKING)
+        r.scoped_verdict = Verdict.BREAKING  # type: ignore[attr-defined]
+        r.scoped_exit_code = 0  # type: ignore[attr-defined]
+        r.scoped_exit_code_scheme = "severity"  # type: ignore[attr-defined]
+        xml_str = to_junit_xml(r)
+        root = _parse(xml_str)
+        ts = root.find("testsuite")
+        props = {
+            p.get("name"): p.get("value") for p in ts.find("properties")
+        }
+        assert props["abicheck.scoped_exit_code"] == "0"
+        assert props["abicheck.scoped_exit_code_scheme"] == "severity"
+        assert "exits 0" in props["abicheck.scoped_note"]
+        assert "severity" in props["abicheck.scoped_note"]

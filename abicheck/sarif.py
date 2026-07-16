@@ -310,15 +310,33 @@ def _scoped_gate_properties(result: DiffResult) -> dict[str, Any] | None:
         return None
     used_by = getattr(result, "used_by", None)
     required_symbols = getattr(result, "required_symbols", None)
+    scoped_exit_code = getattr(result, "scoped_exit_code", None)
+    scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
+    # Under a severity scheme the scoped exit code is NOT a fixed
+    # BREAKING->4/API_BREAK->2 mapping of scopedVerdict -- e.g.
+    # --severity-preset info-only can floor it at 0 even for a BREAKING
+    # scopedVerdict (Codex review) -- so state the actual computed value and
+    # scheme rather than implying a verdict->exit-code equivalence that only
+    # holds under the legacy scheme.
+    note = (
+        f"The CLI process exits {scoped_exit_code} under the "
+        f"{scoped_exit_code_scheme} exit-code scheme for this "
+        f"--used-by/--required-symbol run -- this may differ from both "
+        f"scopedVerdict's legacy-scheme mapping and this document's own "
+        f"exitCode/results (which stay computed from the full library)."
+        if scoped_exit_code is not None
+        else "The CLI process exit code for this --used-by/--required-symbol "
+        "run may differ from this document's own exitCode/results (which "
+        "stay computed from the full library)."
+    )
     block: dict[str, Any] = {
         "scopedVerdict": scoped_verdict.value,
         "fullLibraryVerdict": result.verdict.value,
-        "note": (
-            "The CLI process exit code reflects scopedVerdict, not "
-            "fullLibraryVerdict or this document's own exitCode/results "
-            "(both of which stay computed from the full library)."
-        ),
+        "note": note,
     }
+    if scoped_exit_code is not None:
+        block["scopedExitCode"] = scoped_exit_code
+        block["scopedExitCodeScheme"] = scoped_exit_code_scheme
     if used_by is not None:
         block["usedBy"] = used_by
     if required_symbols is not None:

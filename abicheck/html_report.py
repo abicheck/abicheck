@@ -817,14 +817,29 @@ def generate_html_report(
             scoped_verdict.value if hasattr(scoped_verdict, "value") else str(scoped_verdict)
         )
         scoped_fg, scoped_bg = _VERDICT_STYLE.get(scoped_value, ("#212121", "#f5f5f5"))
+        scoped_exit_code = getattr(result, "scoped_exit_code", None)
+        scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
+        # Under a severity scheme the scoped exit code is NOT a fixed
+        # BREAKING->4/API_BREAK->2 mapping of the scoped verdict -- e.g.
+        # --severity-preset info-only can floor it at 0 even for a BREAKING
+        # scoped verdict (Codex review) -- so state the actual computed
+        # value/scheme instead of implying a verdict->exit-code equivalence
+        # that only holds under the legacy scheme.
+        exit_note = (
+            f"The CLI process exits {scoped_exit_code} under the "
+            f"{scoped_exit_code_scheme} exit-code scheme for this "
+            f"--used-by/--required-symbol run"
+            if scoped_exit_code is not None
+            else "This is what the CLI process exit code reflects for this "
+            "--used-by/--required-symbol run"
+        )
         scoped_html = (
             f"<div class='verdict-box' "
             f"style='background:{scoped_bg}; color:{scoped_fg}; "
             f"border-left:6px solid {scoped_fg};'>"
             f"<h2>{_verdict_icon(scoped_value)} Scoped verdict: {h(scoped_value)}</h2>"
             f"<div class='bc-metric' style='font-size:0.85em; opacity:0.85;'>"
-            f"This is what the CLI process exit code reflects for this "
-            f"--used-by/--required-symbol run — it may differ from the "
+            f"{h(exit_note)} — it may differ from the "
             f"full-library Compatibility verdict above."
             f"</div></div>"
         )

@@ -424,12 +424,31 @@ def _add_scoped_properties(ts: ET.Element, result: DiffResult) -> None:
 
     _prop("abicheck.scoped_verdict", scoped_verdict.value)
     _prop("abicheck.full_library_verdict", result.verdict.value)
-    _prop(
-        "abicheck.scoped_note",
-        "The CLI process exit code reflects scoped_verdict, not "
-        "full_library_verdict or this testsuite's own failures count "
-        "(both of which stay computed from the full library).",
-    )
+    scoped_exit_code = getattr(result, "scoped_exit_code", None)
+    scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
+    # Under a severity scheme scoped_exit_code is NOT a fixed
+    # BREAKING->4/API_BREAK->2 mapping of scoped_verdict -- e.g.
+    # --severity-preset info-only can floor it at 0 even for a BREAKING
+    # scoped_verdict (Codex review) -- so state the actual computed value
+    # and scheme rather than implying a verdict->exit-code equivalence that
+    # only holds under the legacy scheme.
+    if scoped_exit_code is not None:
+        _prop("abicheck.scoped_exit_code", str(scoped_exit_code))
+        _prop("abicheck.scoped_exit_code_scheme", str(scoped_exit_code_scheme))
+        note = (
+            f"The CLI process exits {scoped_exit_code} under the "
+            f"{scoped_exit_code_scheme} exit-code scheme for this run -- "
+            f"this may differ from both scoped_verdict's legacy-scheme "
+            f"mapping and this testsuite's own failures count (which stays "
+            f"computed from the full library)."
+        )
+    else:
+        note = (
+            "The CLI process exit code for this run may differ from this "
+            "testsuite's own failures count (which stays computed from the "
+            "full library)."
+        )
+    _prop("abicheck.scoped_note", note)
     used_by = getattr(result, "used_by", None)
     if used_by is not None:
         _prop("abicheck.used_by_app_count", str(len(used_by)))

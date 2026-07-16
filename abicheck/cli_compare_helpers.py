@@ -581,6 +581,8 @@ def _apply_used_by_scoping(
             worst_verdict = scoped.verdict
     result.used_by = summaries  # type: ignore[attr-defined]
     result.scoped_verdict = worst_verdict  # type: ignore[attr-defined]
+    result.scoped_exit_code = worst_exit  # type: ignore[attr-defined]
+    result.scoped_exit_code_scheme = exit_code_scheme  # type: ignore[attr-defined]
     return worst_exit
 
 
@@ -599,10 +601,13 @@ def _apply_required_symbol_scoping(
     )
     result.required_symbols = _plugin_contract_summary(scoped)  # type: ignore[attr-defined]
     result.scoped_verdict = scoped.verdict  # type: ignore[attr-defined]
-    return _scoped_exit_code(
+    exit_code = _scoped_exit_code(
         scoped, scoped.breaking_for_host, result, exit_code_scheme, sev_config,
         policy, policy_file,
     )
+    result.scoped_exit_code = exit_code  # type: ignore[attr-defined]
+    result.scoped_exit_code_scheme = exit_code_scheme  # type: ignore[attr-defined]
+    return exit_code
 
 
 def _load_required_symbols(
