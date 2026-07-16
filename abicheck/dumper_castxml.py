@@ -1303,6 +1303,15 @@ class _CastxmlParser:
                 key = idx
             elif overrides_id:
                 key = self._vtable_slot_root.get(overrides_id, overrides_id)
+                if isinstance(key, int):
+                    # This override has no vtable_index of its own, but it
+                    # reuses an inherited *indexed* slot -- adopt that index so
+                    # _build_vtable's final _vt_sort_key sort places it at the
+                    # inherited position instead of the unindexed tail (which
+                    # would silently reorder it past any indexed sibling slot
+                    # declared after this one, an apparent "vtable reordered"
+                    # that never actually happened).
+                    idx = key
             else:
                 key = mid or mangled_name
             if mid:

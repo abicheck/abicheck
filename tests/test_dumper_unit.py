@@ -1143,6 +1143,28 @@ class TestCastxmlParserVtable:
         derived_t = next(t for t in types if t.name == "Derived")
         assert derived_t.vtable == ["_ZN7Derived3fooEv"]
 
+    def test_vtable_unindexed_override_of_indexed_slot_keeps_position(self):
+        """Base declares two indexed virtuals (slots 0 and 1). Derived
+        overrides slot 0 via ``overrides`` only, without its own
+        ``vtable_index``. The reused slot must sort at position 0 (ahead of
+        slot 1), not fall to the unindexed tail -- landing after slot 1 would
+        read as a spurious vtable reorder even though nothing moved.
+        """
+        base = Element("Class", id="c1", name="Base")
+        m1 = Element("Method", id="m1", name="foo", mangled="_ZN4Base3fooEv",
+                      virtual="1", vtable_index="0", context="c1")
+        m2 = Element("Method", id="m2", name="bar", mangled="_ZN4Base3barEv",
+                      virtual="1", vtable_index="1", context="c1")
+        derived = Element("Class", id="c2", name="Derived")
+        SubElement(derived, "Base", type="c1")
+        m3 = Element("Method", id="m3", name="foo", mangled="_ZN7Derived3fooEv",
+                      virtual="1", context="c2", overrides="m1")
+        root = _xml_root(base, derived, m1, m2, m3)
+        p = _CastxmlParser(root, set(), set())
+        types = p.parse_types()
+        derived_t = next(t for t in types if t.name == "Derived")
+        assert derived_t.vtable == ["_ZN7Derived3fooEv", "_ZN4Base3barEv"]
+
 
 class TestCastxmlParserEnums:
     def test_parse_enum(self):
