@@ -16,3 +16,4 @@ build/
 site/
 .hypothesis/
 .claude/worktrees/
+/results/

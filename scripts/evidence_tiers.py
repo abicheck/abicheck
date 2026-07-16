@@ -407,6 +407,14 @@ KINDLESS_CASE_TIER: dict[str, str] = {
     # field; the binary is blind (identical builds) and only build context (the
     # active -D defines) clears the phantom via --reconcile-build-context.
     "case164_preproc_conditional_field": "L3",
+    # An internal enum's value change is only visible via DWARF (L1), but
+    # proving it's confined to a private-header origin (so it can be scoped
+    # out instead of reported) needs the header AST (L2).
+    "case184_internal_enum_churn_scoped": "L2",
+    # The pointee-const suppression is a header-AST-level type comparison
+    # (cv_qualifiers_only_differ); DWARF alone doesn't carry the distinction
+    # abicheck relies on here.
+    "case186_c_api_pointee_const_abi_neutral": "L2",
 }
 
 

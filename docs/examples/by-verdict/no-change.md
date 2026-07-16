@@ -3,7 +3,7 @@
 
 Identical ABI/API — baseline control cases.
 
-_5 case(s)._ [← back to all examples](../index.md)
+_7 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -12,3 +12,5 @@ _5 case(s)._ [← back to all examples](../index.md)
 | [case119_internal_struct_field_removed_scoped](../case119_internal_struct_field_removed_scoped.md) | Internal struct loses a field (non-public, scoped) | ✅ NO_CHANGE | No Change |
 | [case120_internal_struct_reordered_scoped](../case120_internal_struct_reordered_scoped.md) | Internal struct fields reordered (non-public, scoped) | ✅ NO_CHANGE | No Change |
 | [case164_preproc_conditional_field](../case164_preproc_conditional_field.md) | Preprocessor-conditional field: a header false positive only build context clears | ✅ NO_CHANGE | No Change |
+| [case184_internal_enum_churn_scoped](../case184_internal_enum_churn_scoped.md) | Internal enum churn, scoped out by private-header origin | ✅ NO_CHANGE | No Change |
+| [case186_c_api_pointee_const_abi_neutral](../case186_c_api_pointee_const_abi_neutral.md) | C API pointee const-qualification is ABI-neutral | ✅ NO_CHANGE | No Change |
