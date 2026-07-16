@@ -55,7 +55,7 @@ if TYPE_CHECKING:
 from defusedxml import ElementTree as DefusedET
 
 from ._compiler_options import has_explicit_cpp_std, has_explicit_std
-from .dumper_cache import _cache_path
+from .dumper_cache import _atomic_write, _cache_path
 from .dumper_castxml import (
     _CastxmlParser as _CastxmlParser,
     _parse_vtable_index as _parse_vtable_index,
@@ -1125,7 +1125,7 @@ def _castxml_dump(
                 # matches what the user asked for.
                 raise primary from None
         try:
-            shutil.copy2(str(out_xml), str(cached))
+            _atomic_write(cached, out_xml.read_bytes())
         except OSError as exc:
             log.warning("Could not write castxml AST cache %s: %s", cached, exc)
         return root

@@ -32,6 +32,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from .dumper_cache import _atomic_write
 from .errors import SnapshotError
 
 if TYPE_CHECKING:
@@ -483,7 +484,7 @@ def _parse_clang_ast_result(
     except ValueError as exc:
         raise SnapshotError(f"clang AST output was not valid JSON: {exc}") from exc
     try:
-        cached.write_text(json.dumps(root), encoding="utf-8")
+        _atomic_write(cached, json.dumps(root).encode("utf-8"))
     except OSError:
         pass
     return cast("dict[str, Any]", root)

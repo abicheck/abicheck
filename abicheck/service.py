@@ -24,8 +24,10 @@ Provides framework-agnostic functions for the core abicheck operations:
 
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import logging
+import os
 import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -38,6 +40,7 @@ from .header_utils import deferred_token_dirs, resolve_inferred_header_roots
 from .model import AbiSnapshot, EnumType, Function, RecordType, Visibility
 from .reporter import to_json, to_markdown, to_stat, to_stat_json
 from .serialization import load_snapshot
+from .service_dump_cache import cached_run_dump
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -286,7 +289,8 @@ def resolve_input(
 
     # Fast path: caller already knows it's ELF
     if is_elf is True:
-        return run_dump(
+        return cached_run_dump(
+            run_dump,
             path,
             "elf",
             _headers,
@@ -312,7 +316,8 @@ def resolve_input(
     # Detect binary format from magic bytes
     binary_fmt = detect_binary_format(path) if is_elf is None else None
     if binary_fmt is not None:
-        return run_dump(
+        return cached_run_dump(
+            run_dump,
             path,
             binary_fmt,
             _headers,
@@ -1521,34 +1526,61 @@ def run_compare_request(
     # tagging — same rule as the single-pair CLI path (cli_resolve._resolve_compare_snapshots):
     # CompareRequest has no lower-level "parse only, don't classify" mode, so a
     # header supplied to compare is by definition the public contract.
-    old = resolve_input(
-        request.old.path,
-        list(request.old.headers),
-        list(request.old.includes),
-        request.old.version,
-        lang,
-        is_elf=True if old_fmt == "elf" else None,
-        pdb_path=request.old.pdb,
-        debug_roots=list(request.old.debug_roots) or None,
-        enable_debuginfod=request.enable_debuginfod,
-        debuginfod_url=request.debuginfod_url,
-        header_backend=header_backend,
-        public_headers=list(request.old.headers),
-    )
-    new = resolve_input(
-        request.new.path,
-        list(request.new.headers),
-        list(request.new.includes),
-        request.new.version,
-        lang,
-        is_elf=True if new_fmt == "elf" else None,
-        pdb_path=request.new.pdb,
-        debug_roots=list(request.new.debug_roots) or None,
-        enable_debuginfod=request.enable_debuginfod,
-        debuginfod_url=request.debuginfod_url,
-        header_backend=header_backend,
-        public_headers=list(request.new.headers),
-    )
+    def _resolve_old_side() -> AbiSnapshot:
+        return resolve_input(
+            request.old.path,
+            list(request.old.headers),
+            list(request.old.includes),
+            request.old.version,
+            lang,
+            is_elf=True if old_fmt == "elf" else None,
+            pdb_path=request.old.pdb,
+            debug_roots=list(request.old.debug_roots) or None,
+            enable_debuginfod=request.enable_debuginfod,
+            debuginfod_url=request.debuginfod_url,
+            header_backend=header_backend,
+            public_headers=list(request.old.headers),
+        )
+
+    def _resolve_new_side() -> AbiSnapshot:
+        return resolve_input(
+            request.new.path,
+            list(request.new.headers),
+            list(request.new.includes),
+            request.new.version,
+            lang,
+            is_elf=True if new_fmt == "elf" else None,
+            pdb_path=request.new.pdb,
+            debug_roots=list(request.new.debug_roots) or None,
+            enable_debuginfod=request.enable_debuginfod,
+            debuginfod_url=request.debuginfod_url,
+            header_backend=header_backend,
+            public_headers=list(request.new.headers),
+        )
+
+    # Old/new resolution has no data dependency on each other until they're
+    # both fed into compare_snapshots() below, so run them concurrently —
+    # they're each dominated by a castxml/DWARF subprocess call and XML/JSON
+    # parsing, not CPU held under the GIL the whole time. Threads (not
+    # processes) avoid pickling the request/callables across a process
+    # boundary. On a memory-constrained runner comparing two large ABI
+    # surfaces (e.g. oneDAL-scale headers), two concurrent header-AST
+    # frontends roughly double peak RSS versus one at a time — set
+    # ABICHECK_PARALLEL_EXTRACTION=0 to fall back to the old sequential
+    # behavior if that trade-off doesn't fit.
+    if os.environ.get("ABICHECK_PARALLEL_EXTRACTION", "1").strip().lower() in (
+        "0",
+        "false",
+        "no",
+    ):
+        old = _resolve_old_side()
+        new = _resolve_new_side()
+    else:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            old_future = pool.submit(_resolve_old_side)
+            new_future = pool.submit(_resolve_new_side)
+            old = old_future.result()
+            new = new_future.result()
 
     suppression, pf = load_suppression_and_policy(
         request.suppress, request.policy, request.policy_file_path

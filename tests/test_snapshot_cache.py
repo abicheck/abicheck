@@ -236,3 +236,59 @@ class TestStoreErrorPaths:
         store(snap, binary, [], [], "1.0", "c++")  # should not raise
         # mkdir failed, so nothing should have been written to the cache dir.
         assert not cache_dir.exists()
+
+    def test_store_serialization_error_does_not_raise(self, tmp_path, monkeypatch):
+        """A non-OSError failure while serializing (e.g. an unexpected
+        non-JSON-serializable field) must not propagate: caching sits on top
+        of a dump that already succeeded, so a write-time failure here can
+        only ever cost a cache miss next time, never break the caller."""
+        import abicheck.snapshot_cache as sc
+        cache_dir = tmp_path / "cache"
+        monkeypatch.setattr(sc, "_CACHE_DIR", cache_dir)
+
+        def _raise_type_error(*args, **kwargs):
+            raise TypeError("Object of type MagicMock is not JSON serializable")
+
+        monkeypatch.setattr("abicheck.serialization.snapshot_to_json", _raise_type_error)
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF content")
+        snap = _sample_snap()
+        store(snap, binary, [], [], "1.0", "c++")  # should not raise
+        # Serialization failed before the temp file could be renamed into
+        # place, so no (partial/corrupt) cache entry should be left behind.
+        assert list(cache_dir.glob("*.json")) == []
+
+
+class TestExtraKeyMaterial:
+    def test_different_extra_different_key(self, tmp_path):
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF content")
+
+        key1 = _cache_key(binary, [], [], "1.0", "c++", extra="elf|auto")
+        key2 = _cache_key(binary, [], [], "1.0", "c++", extra="pe|auto")
+        assert key1 != key2
+
+    def test_same_extra_same_key(self, tmp_path):
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF content")
+
+        key1 = _cache_key(binary, [], [], "1.0", "c++", extra="elf|auto")
+        key2 = _cache_key(binary, [], [], "1.0", "c++", extra="elf|auto")
+        assert key1 == key2
+
+    def test_store_lookup_roundtrip_with_extra(self, tmp_path, monkeypatch):
+        import abicheck.snapshot_cache as sc
+        cache_dir = tmp_path / "cache"
+        monkeypatch.setattr(sc, "_CACHE_DIR", cache_dir)
+
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF content")
+        snap = _sample_snap()
+
+        store(snap, binary, [], [], "1.0", "c++", extra="elf|auto")
+        # A lookup with different `extra` material is a distinct cache entry
+        # (e.g. a different header-AST backend or binary format) and misses.
+        assert lookup(binary, [], [], "1.0", "c++", extra="pe|auto") is None
+        result = lookup(binary, [], [], "1.0", "c++", extra="elf|auto")
+        assert result is not None
+        assert result.library == "libfoo.so.1"
