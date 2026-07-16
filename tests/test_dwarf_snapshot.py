@@ -661,7 +661,7 @@ def _cli_help():
         if command not in cache:
             result = subprocess.run(
                 [sys.executable, "-c", "from abicheck.cli import main; main()", command, "--help"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True, text=True, encoding="utf-8", timeout=10,
             )
             cache[command] = result.stdout
         return cache[command]

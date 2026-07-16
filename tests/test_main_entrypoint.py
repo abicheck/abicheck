@@ -33,6 +33,7 @@ def test_run_as_cli_module_registers_sibling_commands() -> None:
         [sys.executable, "-m", "abicheck.cli", "--help"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=True,
     )
     for cmd in ("config", "doctor", "scan", "appcompat"):
