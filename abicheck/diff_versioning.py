@@ -299,7 +299,7 @@ def apply_runtime_floor_contract(
             continue
         if required == _UNPARSEABLE_VERSION:
             continue
-        if required <= floor_tuple:
+        if _version_le(required, floor_tuple):
             change.effective_verdict = Verdict.COMPATIBLE
             change.modulation_reason = (
                 f"within declared runtime floor ({prefix} ≥ {floor}): every "

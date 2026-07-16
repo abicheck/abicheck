@@ -892,21 +892,29 @@ def parse_wheel_numpy_requirement(
     or a Windows tag, whose ``platform_machine`` isn't derived at all).
 
     Known residual gap: a wheel tag naming a *range* rather than one exact
-    Python version — either the ``abi3`` stable-ABI tag (``cp39-abi3-...``,
-    installable on Python 3.9 and every later 3.x minor) or a PEP 425
-    compressed multi-tag Python segment (``cp310.cp311-...``, installable on
-    either minor) — deliberately leaves ``python_version``/
-    ``python_full_version`` undetermined rather than pinning a single
-    (wrong) value (see :func:`_python_version_from_wheel_filename`), which
-    means those keys fall back to whatever interpreter is running abicheck
-    rather than being evaluated across the wheel's whole supported range —
-    a real metadata gap that only affects some Python versions the wheel
-    supports could go undetected depending on the scanning host (Codex
-    review). Correctly checking the full range would mean evaluating
-    markers at every version threshold a wheel's metadata references and
-    combining the results, which is meaningfully more than a wheel-tag-
-    derivation fix; left as a known limitation of this G26-partial feature
-    rather than attempted here.
+    value — either the Python-version axis (the ``abi3`` stable-ABI tag,
+    ``cp39-abi3-...``, installable on Python 3.9 and every later 3.x minor;
+    or a PEP 425 compressed multi-tag Python segment, ``cp310.cp311-...``,
+    installable on either minor) or the architecture axis (a fat/universal
+    macOS wheel, ``macosx_11_0_universal2``, or a PEP 600 compressed
+    multi-tag platform segment spanning more than one architecture) —
+    deliberately leaves the corresponding marker key(s)
+    (``python_version``/``python_full_version``, or ``platform_machine``)
+    undetermined rather than pinning a single (wrong) value (see
+    :func:`_python_version_from_wheel_filename` and
+    :func:`_platform_machine_from_wheel_filename`), which means those keys
+    fall back to whatever interpreter/host abicheck is running on rather
+    than being evaluated across the wheel's whole supported range — a real
+    metadata gap that only affects some Python versions, or only one
+    architecture slice, the wheel supports (e.g. a split requirement like
+    ``numpy>=1.23; platform_machine == "x86_64"`` /
+    ``numpy>=2; platform_machine == "arm64"``) could go undetected
+    depending on the scanning host (Codex review). Correctly checking the
+    full range/every architecture would mean evaluating markers at every
+    value a wheel's metadata references along that axis and combining the
+    results, which is meaningfully more than a wheel-tag-derivation fix;
+    left as a known limitation of this G26-partial feature rather than
+    attempted here.
     """
     try:
         with zipfile.ZipFile(wheel_path) as zf:

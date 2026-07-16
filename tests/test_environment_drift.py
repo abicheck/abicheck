@@ -323,6 +323,23 @@ class TestRuntimeFloorContract:
             old, new, env_matrix=EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
         ).verdict is Verdict.BREAKING
 
+    def test_bare_major_floor_matches_dotted_requirement(self) -> None:
+        # A bare-major floor ("GLIBC": "2") parses to (2,) while a real
+        # GLIBC_2.0 requirement parses to (2, 0) -- raw tuple comparison
+        # treats the longer, equal-value tuple as strictly greater
+        # ((2, 0) > (2,)), which would falsely escalate to BREAKING even
+        # though 2.0 == 2 (Codex review).
+        from abicheck.diff_helpers import make_change
+
+        change = make_change(
+            ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED,
+            symbol="GLIBC_2.0",
+            name="GLIBC_2.0",
+            detail="libc.so.6",
+        )
+        apply_runtime_floor_contract([change], {"GLIBC": "2"})
+        assert change.effective_verdict is Verdict.COMPATIBLE
+
     def test_existing_modulation_not_overridden(self) -> None:
         old, new = self._pair()
         result = compare(old, new)
