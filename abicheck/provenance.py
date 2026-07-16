@@ -219,14 +219,19 @@ def apply_provenance(
     header_segs, dir_segs, have_set = build_public_set(
         public_headers, public_header_dirs
     )
+    # A large surface has far fewer distinct declaring headers than
+    # declarations (e.g. thousands of oneDAL functions share a handful of
+    # umbrella headers) — reuse each header's classification across every
+    # declaration it produced instead of re-running classify_origin per decl.
+    origin_cache: dict[tuple[str | None, bool], ScopeOrigin] = {}
     for fn in snapshot.functions:
-        tag_provenance(fn, header_segs, dir_segs, have_set)
+        tag_provenance(fn, header_segs, dir_segs, have_set, origin_cache=origin_cache)
     for var in snapshot.variables:
-        tag_provenance(var, header_segs, dir_segs, have_set)
+        tag_provenance(var, header_segs, dir_segs, have_set, origin_cache=origin_cache)
     for rec in snapshot.types:
-        tag_provenance(rec, header_segs, dir_segs, have_set)
+        tag_provenance(rec, header_segs, dir_segs, have_set, origin_cache=origin_cache)
     for en in snapshot.enums:
-        tag_provenance(en, header_segs, dir_segs, have_set)
+        tag_provenance(en, header_segs, dir_segs, have_set, origin_cache=origin_cache)
     return snapshot
 
 
@@ -235,6 +240,8 @@ def tag_provenance(
     header_segs: list[tuple[str, ...]],
     dir_segs: list[tuple[str, ...]],
     have_set: bool,
+    *,
+    origin_cache: dict[tuple[str | None, bool], ScopeOrigin] | None = None,
 ) -> None:
     """Populate ``source_header`` and ``origin`` on a single declaration in place.
 
@@ -243,15 +250,33 @@ def tag_provenance(
     which parses headers directly — can classify origin against the same public
     set instead of leaving every declaration ``UNKNOWN``. ``header_segs`` /
     ``dir_segs`` come from :func:`build_public_set`.
+
+    ``origin_cache``, when supplied by the caller, memoizes ``classify_origin``
+    results by ``(source_header, export_only)`` across the whole batch of
+    declarations sharing one ``header_segs``/``dir_segs``/``have_set`` — safe
+    because those three inputs are fixed per caller and the classification is a
+    pure function of them plus the declaration's own header/export-only pair.
+    Omitted (the default) reproduces the previous uncached, per-call behaviour.
     """
     loc = getattr(decl, "source_location", None)
     sh = header_from_location(loc)
     export_only = getattr(decl, "visibility", None) == Visibility.ELF_ONLY
     decl.source_header = sh  # type: ignore[attr-defined]
-    decl.origin = classify_origin(  # type: ignore[attr-defined]
-        sh,
-        header_segs,
-        dir_segs,
-        have_public_set=have_set,
-        export_only=export_only,
-    )
+    if origin_cache is None:
+        origin = classify_origin(
+            sh, header_segs, dir_segs, have_public_set=have_set, export_only=export_only
+        )
+    else:
+        cache_key = (sh, export_only)
+        cached = origin_cache.get(cache_key)
+        if cached is None:
+            cached = classify_origin(
+                sh,
+                header_segs,
+                dir_segs,
+                have_public_set=have_set,
+                export_only=export_only,
+            )
+            origin_cache[cache_key] = cached
+        origin = cached
+    decl.origin = origin  # type: ignore[attr-defined]
