@@ -30,6 +30,7 @@ from abicheck.buildsource.crosscheck import (
     ALL_CHECKS,
     CHECK_EXPORTED_NOT_PUBLIC,
     CHECK_HEADER_BUILD_CONTEXT_MISMATCH,
+    CHECK_IDENTITY_COLLISION,
     CHECK_ODR_TYPE_VARIANT,
     CHECK_PRIVATE_HEADER_LEAK,
     CHECK_PUBLIC_NOT_EXPORTED,
@@ -1532,6 +1533,80 @@ def test_odr_type_variant_handles_anonymous_and_missing_header():
     hits = _findings_of(res, ChangeKind.ODR_TYPE_VARIANT)
     assert [c.symbol for c in hits] == ["<anonymous>"]
     assert hits[0].source_location is None
+
+
+# --------------------------------------------------------------------------- #
+# identity_collision_detected
+# --------------------------------------------------------------------------- #
+
+
+def _pack_with_identity_collisions(*collisions: dict) -> BuildSourcePack:
+    from abicheck.buildsource.source_abi import SourceEntity
+
+    surface = SourceAbiSurface(
+        identity_collisions=list(collisions),
+        # Any real L4 fact makes the surface non-empty so the check runs.
+        reachable_declarations=[
+            SourceEntity(id="d1", kind="function", qualified_name="f")
+        ],
+    )
+    return BuildSourcePack(root="", source_abi=surface)
+
+
+def test_identity_collision_flags_recorded_collision():
+    snap = _snap(
+        build_source=_pack_with_identity_collisions(
+            {
+                "identity": "f#sha256:abc",
+                "qualified_name": "f",
+                "usr_a": "c:@F@f#",
+                "usr_b": "c:@N@ns@F@f#",
+            }
+        )
+    )
+    res = run_crosschecks(snap)
+    hits = _findings_of(res, ChangeKind.IDENTITY_COLLISION_DETECTED)
+    assert [c.symbol for c in hits] == ["f"]
+    assert hits[0].new_value == "f#sha256:abc"
+    assert "c:@F@f#" in hits[0].description
+    assert "c:@N@ns@F@f#" in hits[0].description
+    # RISK partition (not API_BREAK), per ADR-041 P1 #5.
+    assert ChangeKind.IDENTITY_COLLISION_DETECTED not in _api_break_kinds()
+    assert res.providers[CHECK_IDENTITY_COLLISION] == [PROVIDER_SOURCE_INDEX]
+
+
+def test_identity_collision_clean_surface_present_no_findings():
+    snap = _snap(build_source=_pack_with_identity_collisions())
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.IDENTITY_COLLISION_DETECTED) == []
+    assert _coverage(res, CHECK_IDENTITY_COLLISION)["status"] == "present"
+
+
+def test_identity_collision_skipped_without_l4_surface():
+    snap = _snap()
+    res = run_crosschecks(snap)
+    assert _coverage(res, CHECK_IDENTITY_COLLISION)["status"] == "skipped"
+    assert _findings_of(res, ChangeKind.IDENTITY_COLLISION_DETECTED) == []
+
+
+def test_identity_collision_skipped_on_empty_surface_no_facts():
+    snap = _snap(build_source=_pack_with_surface())  # SourceAbiSurface(), no facts
+    res = run_crosschecks(snap)
+    row = _coverage(res, CHECK_IDENTITY_COLLISION)
+    assert row["status"] == "skipped"
+    assert "empty" in row["detail"]
+    assert _findings_of(res, ChangeKind.IDENTITY_COLLISION_DETECTED) == []
+
+
+def test_identity_collision_handles_missing_qualified_name():
+    snap = _snap(
+        build_source=_pack_with_identity_collisions(
+            {"identity": "anon#sha256:zzz", "usr_a": "u1", "usr_b": "u2"}
+        )
+    )
+    res = run_crosschecks(snap)
+    hits = _findings_of(res, ChangeKind.IDENTITY_COLLISION_DETECTED)
+    assert [c.symbol for c in hits] == ["anon#sha256:zzz"]
 
 
 # --------------------------------------------------------------------------- #

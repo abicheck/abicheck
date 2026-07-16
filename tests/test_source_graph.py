@@ -26,6 +26,7 @@ from abicheck.buildsource.build_evidence import (
     BuildEvidence,
     CompileUnit,
     Confidence,
+    LinkUnit,
     Target,
     TargetKind,
 )
@@ -134,6 +135,101 @@ def test_coverage_counts_populated() -> None:
     # No call/include extraction in Phase 2 — explicitly marked not-collected.
     assert g.coverage["call_edges"]["collected"] is False
     assert g.coverage["include_edges"]["collected"] is False
+
+
+def test_compile_unit_emits_object_edge() -> None:
+    # ADR-041 P1 #2: the object/link provenance graph.
+    g = build_source_graph(_sample_build())
+    assert "object_file" in {n.kind for n in g.nodes}
+    obj_edges = [e for e in g.edges if e.kind == "COMPILE_UNIT_EMITS_OBJECT"]
+    assert obj_edges == [
+        e for e in obj_edges if e.src == "cu://foo" and e.dst == "object://foo.o"
+    ]
+    assert len(obj_edges) == 1
+
+
+def _build_with_link_unit(**link_kwargs: object) -> BuildEvidence:
+    b = _sample_build()
+    b.link_units.append(
+        LinkUnit(
+            id="link://libfoo.so",
+            target_id="target://libfoo",
+            output="libfoo.so",
+            kind="shared_library",
+            inputs=["foo.o", "libbar.a"],
+            **link_kwargs,
+        )
+    )
+    return b
+
+
+def test_link_unit_node_and_target_edge() -> None:
+    g = build_source_graph(_build_with_link_unit())
+    link_node = next(n for n in g.nodes if n.id == "link://libfoo.so")
+    assert link_node.kind == "link_unit"
+    assert any(
+        e.kind == "TARGET_HAS_LINK_UNIT"
+        and e.src == "target://libfoo"
+        and e.dst == "link://libfoo.so"
+        for e in g.edges
+    )
+
+
+def test_link_unit_input_classified_object_vs_static_library() -> None:
+    g = build_source_graph(_build_with_link_unit())
+    node_by_id = {n.id: n for n in g.nodes}
+    input_edges = {
+        e.dst
+        for e in g.edges
+        if e.kind == "LINK_UNIT_HAS_INPUT" and e.src == "link://libfoo.so"
+    }
+    assert "object://foo.o" in input_edges
+    assert "static_library://libbar.a" in input_edges
+    assert node_by_id["object://foo.o"].kind == "object_file"
+    assert node_by_id["static_library://libbar.a"].kind == "static_library"
+
+
+def test_link_unit_input_object_merges_with_compile_unit_emitted_object() -> None:
+    # The same "foo.o" both a compile unit emits and a link unit consumes must
+    # land on the *same* node -- so a dependency traced to one object
+    # correlates across both slices, not a disconnected duplicate.
+    g = build_source_graph(_build_with_link_unit())
+    object_nodes = [n for n in g.nodes if n.id == "object://foo.o"]
+    assert len(object_nodes) == 1
+
+
+def test_link_unit_version_script_node_and_edge() -> None:
+    g = build_source_graph(_build_with_link_unit(version_script="exports.map"))
+    vnode = next(n for n in g.nodes if n.id == "version_script://exports.map")
+    assert vnode.kind == "version_script"
+    assert any(
+        e.kind == "LINK_UNIT_USES_VERSION_SCRIPT"
+        and e.src == "link://libfoo.so"
+        and e.dst == "version_script://exports.map"
+        for e in g.edges
+    )
+
+
+def test_link_unit_exports_symbol_via_source_abi() -> None:
+    # LINK_UNIT_EXPORTS_SYMBOL is added once a source_abi surface resolves
+    # which symbols the owning target exports (Phase 3-4), correlating the
+    # link unit _fold_link_provenance already created with those symbols.
+    surface = SourceAbiSurface(library="libfoo.so", target_id="target://libfoo")
+    surface.mappings["source_decl_to_binary_symbol"] = {"foo_api": "_Z7foo_apiv"}
+    surface.reachable_functions = [
+        SourceEntity(
+            id="foo_api",
+            kind="function",
+            qualified_name="foo_api",
+            visibility="public_header",
+        )
+    ]
+    g = build_source_graph(_build_with_link_unit(), surface)
+    link_exports = [e for e in g.edges if e.kind == "LINK_UNIT_EXPORTS_SYMBOL"]
+    assert any(
+        e.src == "link://libfoo.so" and e.dst == "binary_symbol://_Z7foo_apiv"
+        for e in link_exports
+    )
 
 
 def test_build_graph_is_deterministic() -> None:
@@ -414,6 +510,124 @@ def test_fold_source_edges_skips_malformed_rows() -> None:
     assert len(g.edges) == 1
 
 
+def test_fold_source_edges_rejects_kind_outside_dependency_edge_kinds() -> None:
+    # DEPENDENCY_EDGE_KINDS, not the broader EDGE_KINDS (CodeRabbit review):
+    # source_edges only ever carries the five decl/type-dependency kinds, so
+    # an unrelated/forward-incompatible kind must not silently fall through
+    # to the decl/decl default node mapping.
+    g = SourceGraphSummary()
+    added = fold_source_edges(
+        g, [{"edge": "TARGET_DEPENDS_ON", "src": "a", "dst": "b"}]
+    )
+    assert added == 0
+    assert g.nodes == []
+    assert g.edges == []
+
+
+def test_fold_source_edges_marks_dst_defined_in_project() -> None:
+    # The Codex-flagged gap (PR #555): without dst_file -> defined_in_project
+    # marking, a callee/reference/type that only ever appears as a
+    # source_edges endpoint has no project provenance, so
+    # is_internal_dependency_node can't recognize it.
+    g = SourceGraphSummary()
+    fold_source_edges(
+        g,
+        [
+            {
+                "edge": "DECL_CALLS_DECL",
+                "src": "_ZN3api8publicFnEv",
+                "dst": "_ZN6detail6helperEv",
+                "attrs": {"dst_file": "src/detail/helper.h"},
+            }
+        ],
+        frozenset({"src/detail/helper.h"}),
+    )
+    dst_node = next(n for n in g.nodes if n.id == "decl://_ZN6detail6helperEv")
+    assert dst_node.attrs.get("defined_in_project") is True
+    assert dst_node.attrs.get("def_file") == "src/detail/helper.h"
+    src_node = next(n for n in g.nodes if n.id == "decl://_ZN3api8publicFnEv")
+    assert not src_node.attrs.get("defined_in_project")
+
+
+def test_fold_source_edges_does_not_mark_when_dst_file_outside_project() -> None:
+    g = SourceGraphSummary()
+    fold_source_edges(
+        g,
+        [
+            {
+                "edge": "DECL_CALLS_DECL",
+                "src": "a",
+                "dst": "b",
+                "attrs": {"dst_file": "/usr/include/vector"},
+            }
+        ],
+        frozenset({"src/detail/helper.h"}),
+    )
+    dst_node = next(n for n in g.nodes if n.id == "decl://b")
+    assert not dst_node.attrs.get("defined_in_project")
+
+
+def test_fold_source_edges_backfills_existing_node_unless_visibility_set() -> None:
+    # Mirrors augment_graph_with_types's backfill behavior: a node already
+    # present without visibility gets defined_in_project backfilled; a node
+    # carrying real L4 visibility evidence is never overridden.
+    g = SourceGraphSummary()
+    g.add_node(GraphNode(id="decl://b", kind="source_decl", provenance="earlier"))
+    g.add_node(
+        GraphNode(
+            id="decl://c",
+            kind="source_decl",
+            provenance="source_abi",
+            attrs={"visibility": "public_header"},
+        )
+    )
+    fold_source_edges(
+        g,
+        [
+            {
+                "edge": "DECL_CALLS_DECL",
+                "src": "a",
+                "dst": "b",
+                "attrs": {"dst_file": "src/detail/helper.h"},
+            },
+            {
+                "edge": "DECL_CALLS_DECL",
+                "src": "a",
+                "dst": "c",
+                "attrs": {"dst_file": "src/detail/helper.h"},
+            },
+        ],
+        frozenset({"src/detail/helper.h"}),
+    )
+    assert next(n for n in g.nodes if n.id == "decl://b").attrs.get(
+        "defined_in_project"
+    )
+    assert not next(n for n in g.nodes if n.id == "decl://c").attrs.get(
+        "defined_in_project"
+    )
+
+
+def test_fold_source_edges_type_edge_dst_file_marks_project_node() -> None:
+    # Unlike the C++ plugin (which never resolves a type spelling to a
+    # file), the Python inline extractor resolves dst_file uniformly for
+    # every edge kind -- this must be honored regardless of kind.
+    g = SourceGraphSummary()
+    fold_source_edges(
+        g,
+        [
+            {
+                "edge": "TYPE_INHERITS",
+                "src": "ns::Derived",
+                "dst": "ns::Base",
+                "attrs": {"dst_file": "src/detail/base.h"},
+            }
+        ],
+        frozenset({"src/detail/base.h"}),
+    )
+    dst_node = next(n for n in g.nodes if n.id == "type://ns::Base")
+    assert dst_node.attrs.get("defined_in_project") is True
+
+
 def test_build_source_graph_folds_surface_source_edges() -> None:
     s = _sample_surface()
     s.source_edges = [
@@ -423,6 +637,36 @@ def test_build_source_graph_folds_surface_source_edges() -> None:
     assert any(e.kind == "DECL_CALLS_DECL" for e in g.edges)
 
 
+def test_build_source_graph_marks_source_edges_dst_defined_in_project() -> None:
+    build = BuildEvidence(
+        targets=[Target(id="target://libfoo", name="libfoo")],
+        compile_units=[
+            CompileUnit(
+                id="cu://src/detail/helper.cpp",
+                target_id="target://libfoo",
+                source="src/detail/helper.cpp",
+            )
+        ],
+    )
+    s = _sample_surface()
+    s.source_edges = [
+        {
+            "edge": "DECL_CALLS_DECL",
+            "src": "_ZN3foo3barEv",
+            "dst": "_ZN6detail6helperEv",
+            "attrs": {"dst_file": "src/detail/helper.cpp"},
+        }
+    ]
+    g = build_source_graph(build, source_abi=s)
+    dst_node = next(n for n in g.nodes if n.id == "decl://_ZN6detail6helperEv")
+    assert dst_node.attrs.get("defined_in_project") is True
+
+
+#: The one source_edges producer whose coverage genuinely matches a full,
+#: unfiltered call/type-graph replay (source_graph._FULL_WALK_SOURCE_EDGES_PRODUCER).
+_FULL_WALK_PRODUCER_FACT_SET = {"producer": "abicheck-cc-clang-extractor"}
+
+
 def test_mark_source_edges_extractor_coverage_when_complete() -> None:
     """A caller that folds source_edges but never runs a call/type-graph
     replay (e.g. Flow-2 pack ingestion) must still translate a
@@ -430,16 +674,43 @@ def test_mark_source_edges_extractor_coverage_when_complete() -> None:
     decl-dependency crosscheck reads the graph as "no pass ever ran"
     (Codex review)."""
     s = _sample_surface()
+    # "complete" requires entities_present (coverage_state_for_family) --
+    # non-empty source_edges backs that claim, else it's the legacy-drop
+    # scenario a sibling test guards against.
+    s.source_edges = [
+        {"edge": "DECL_CALLS_DECL", "src": "a", "dst": "b", "confidence": "high"},
+    ]
     s.coverage["fact_family_states"] = {"source_edges": "complete"}
+    s.coverage["fact_set"] = _FULL_WALK_PRODUCER_FACT_SET
     g = SourceGraphSummary()
     mark_source_edges_extractor_coverage(g, s)
     assert g.extractor_passes["call_graph"] is True
     assert g.extractor_passes["type_graph"] is True
 
 
+def test_mark_source_edges_extractor_coverage_legacy_complete_with_no_edges_not_trusted() -> (
+    None
+):
+    # Codex review, PR #555: coverage["fact_family_states"] predates
+    # SourceAbiSurface.source_edges (ADR-038 C.8 vs. C.9), so a pre-C.9
+    # source_abi.json can carry source_edges: "complete" while its
+    # serializer had nowhere to persist the actual edges -- from_dict()
+    # defaults the missing key to []. That must not read as confirmed-zero
+    # coverage: it's a schema-version gap, not an "empty-confirmed" run.
+    s = _sample_surface()
+    s.coverage["fact_family_states"] = {"source_edges": "complete"}
+    s.coverage["fact_set"] = _FULL_WALK_PRODUCER_FACT_SET
+    assert s.source_edges == []  # the legacy-drop scenario
+    g = SourceGraphSummary()
+    mark_source_edges_extractor_coverage(g, s)
+    assert "call_graph" not in g.extractor_passes
+    assert "type_graph" not in g.extractor_passes
+
+
 def test_mark_source_edges_extractor_coverage_empty_confirmed_also_counts() -> None:
     s = _sample_surface()
     s.coverage["fact_family_states"] = {"source_edges": "empty-confirmed"}
+    s.coverage["fact_set"] = _FULL_WALK_PRODUCER_FACT_SET
     g = SourceGraphSummary()
     mark_source_edges_extractor_coverage(g, s)
     assert g.extractor_passes["call_graph"] is True
@@ -448,6 +719,7 @@ def test_mark_source_edges_extractor_coverage_empty_confirmed_also_counts() -> N
 def test_mark_source_edges_extractor_coverage_skips_when_incomplete() -> None:
     s = _sample_surface()
     s.coverage["fact_family_states"] = {"source_edges": "partial"}
+    s.coverage["fact_set"] = _FULL_WALK_PRODUCER_FACT_SET
     g = SourceGraphSummary()
     mark_source_edges_extractor_coverage(g, s)
     assert "call_graph" not in g.extractor_passes
@@ -463,8 +735,104 @@ def test_mark_source_edges_extractor_coverage_handles_none_surface_and_malformed
 
     s = _sample_surface()
     s.coverage["fact_family_states"] = "not-a-dict"
+    s.coverage["fact_set"] = _FULL_WALK_PRODUCER_FACT_SET
     mark_source_edges_extractor_coverage(g, s)  # must not raise
     assert g.extractor_passes == {}
+
+
+def test_mark_source_edges_extractor_coverage_degrades_when_family_states_missing() -> (
+    None
+):
+    # Codex review, PR #555: a third-party/hand-edited surface (or a
+    # pre-C.8 schema) can carry source_edges with no/malformed
+    # fact_family_states at all. That must not read as "return unmarked" --
+    # the exact same raw-edge-presence-fallback gap a known non-full-walk
+    # producer has -- when source_edges actually folded real edges.
+    s = _sample_surface()
+    s.source_edges = [
+        {"edge": "DECL_CALLS_DECL", "src": "a", "dst": "b", "confidence": "high"},
+    ]
+    assert "fact_family_states" not in s.coverage
+    g = SourceGraphSummary()
+    mark_source_edges_extractor_coverage(g, s)
+    assert "call_graph" not in g.extractor_passes
+    assert "type_graph" not in g.extractor_passes
+    assert g.degraded_passes["call_graph"] is True
+    assert g.degraded_passes["type_graph"] is True
+
+    # Malformed (non-dict) fact_family_states behaves identically.
+    s2 = _sample_surface()
+    s2.source_edges = [
+        {"edge": "DECL_CALLS_DECL", "src": "a", "dst": "b", "confidence": "high"},
+    ]
+    s2.coverage["fact_family_states"] = "not-a-dict"
+    g2 = SourceGraphSummary()
+    mark_source_edges_extractor_coverage(g2, s2)
+    assert "call_graph" not in g2.extractor_passes
+    assert g2.degraded_passes["call_graph"] is True
+    assert g2.degraded_passes["type_graph"] is True
+
+
+def test_mark_source_edges_extractor_coverage_not_trusted_for_plugin_producer() -> None:
+    # Codex review, PR #555: the ADR-038 C.8 clang plugin's source_edges only
+    # walks call/reference bodies for classify()-accepted (public-header)
+    # functions and never emits DECL_HAS_TYPE for a typedef/variable's type --
+    # aliasing it to full call_graph/type_graph trust would hide a genuinely
+    # new dependency added inside a private helper's body.
+    s = _sample_surface()
+    s.source_edges = [
+        {"edge": "DECL_CALLS_DECL", "src": "a", "dst": "b", "confidence": "high"},
+    ]
+    s.coverage["fact_family_states"] = {"source_edges": "complete"}
+    s.coverage["fact_set"] = {"producer": "abicheck-clang-plugin"}
+    g = SourceGraphSummary()
+    mark_source_edges_extractor_coverage(g, s)
+    assert "call_graph" not in g.extractor_passes
+    assert "type_graph" not in g.extractor_passes
+    # Codex review: a non-full-walk producer that DID fold real edges must be
+    # stamped degraded, not left entirely unmarked -- an unmarked pass falls
+    # back to raw edge presence in _common_dependency_edge_kinds, which a
+    # scoped producer's edges cannot safely vouch for a project-wide zero.
+    assert g.degraded_passes["call_graph"] is True
+    assert g.degraded_passes["type_graph"] is True
+
+
+def test_mark_source_edges_extractor_coverage_not_trusted_when_producer_unknown() -> (
+    None
+):
+    # A missing/disagreeing rolled-up fact_set (pre-C.8 producer, mixed pack)
+    # must not be treated as "safe to assume the full-walk producer" -- the
+    # gate requires a positive, unambiguous signal.
+    s = _sample_surface()
+    s.source_edges = [
+        {"edge": "DECL_CALLS_DECL", "src": "a", "dst": "b", "confidence": "high"},
+    ]
+    s.coverage["fact_family_states"] = {"source_edges": "complete"}
+    assert "fact_set" not in s.coverage or not s.coverage.get("fact_set")
+    g = SourceGraphSummary()
+    mark_source_edges_extractor_coverage(g, s)
+    assert "call_graph" not in g.extractor_passes
+    assert "type_graph" not in g.extractor_passes
+    assert g.degraded_passes["call_graph"] is True
+    assert g.degraded_passes["type_graph"] is True
+
+
+def test_mark_source_edges_extractor_coverage_no_degraded_stamp_when_no_edges_folded() -> (
+    None
+):
+    # A non-full-walk producer whose source_edges folded NOTHING (empty list
+    # -- e.g. "partial"/"failed"/"unsupported" states, or a legacy-drop
+    # surface) must not gain a spurious degraded stamp either -- there is
+    # nothing here to distrust, and marking it would be noise.
+    s = _sample_surface()
+    s.coverage["fact_family_states"] = {"source_edges": "partial"}
+    s.coverage["fact_set"] = {"producer": "abicheck-clang-plugin"}
+    assert s.source_edges == []
+    g = SourceGraphSummary()
+    mark_source_edges_extractor_coverage(g, s)
+    assert "call_graph" not in g.extractor_passes
+    assert "call_graph" not in g.degraded_passes
+    assert "type_graph" not in g.degraded_passes
 
 
 def test_build_graph_without_surface_is_phase2_only() -> None:

@@ -70,7 +70,13 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
-from .source_graph import CONF_HIGH, CONF_REDUCED, GraphEdge, GraphNode
+from .source_graph import (
+    CONF_HIGH,
+    CONF_REDUCED,
+    GraphEdge,
+    GraphNode,
+    function_decl_identity,
+)
 
 if TYPE_CHECKING:
     from .build_evidence import BuildEvidence, CompileUnit as BuildEvidenceCompileUnit
@@ -517,25 +523,28 @@ class TypeEdge:
     #: review: without this, a private-header dst node carries no visibility
     #: and ``public_to_internal_dependency`` never fires on it).
     dst_file: str = ""
-    #: How *dst*'s name was resolved to its qualified form (:func:`_resolve_type_name`
-    #: — richer confidence/provenance, ADR-041 addendum): ``"scope"`` (matched
-    #: via the nearest-enclosing-scope walk — real C++ lookup order, the
-    #: confident case), ``"unique_candidate"`` (no scope matched, but exactly
-    #: one same-bare-name declaration exists anywhere in the TU — a
-    #: last-resort guess, weaker than a scope match even though both were
-    #: previously folded into the same flat ``CONF_HIGH`` tier),
-    #: ``"unresolved"`` (no candidate at all; the raw spelling is kept), or
-    #: ``""`` for an edge kind this labeling doesn't apply to (a
-    #: ``DECL_REFERENCES_DECL`` edge's target is resolved by
-    #: :func:`_resolve_ref_identity`, a different mechanism with its own
-    #: confidence — always ``CONF_REDUCED`` — not this field). Excluded from
-    #: equality/hash (``compare=False``): it's a purely informational
-    #: refinement of *why* ``confidence`` already came out ``CONF_REDUCED``
-    #: (``unique_candidate`` vs. ``unresolved``, both already REDUCED before
-    #: this field existed) — the many existing tests asserting exact
-    #: ``TypeEdge(...) ==`` equality against ``confidence``/``role``/
-    #: ``dst_file`` alone should not need updating for a field that adds
-    #: detail without changing what they already verify.
+    #: How *dst*'s name/identity was resolved (richer confidence/provenance,
+    #: ADR-041 addendum + P1 #4): for `TYPE_INHERITS`/`TYPE_HAS_FIELD_TYPE`/
+    #: `DECL_HAS_TYPE`, one of :func:`_resolve_type_name`'s
+    #: :data:`RESOLUTION_SCOPE` (matched via the nearest-enclosing-scope walk
+    #: — real C++ lookup order, the confident case), :data:`RESOLUTION_UNIQUE_CANDIDATE`
+    #: (no scope matched, but exactly one same-bare-name declaration exists
+    #: anywhere in the TU — a last-resort guess, weaker than a scope match
+    #: even though both were previously folded into the same flat
+    #: ``CONF_HIGH`` tier), or :data:`RESOLUTION_UNRESOLVED` (no candidate at
+    #: all; the raw spelling is kept). For `DECL_REFERENCES_DECL`, one of
+    #: :func:`_resolve_ref_identity`'s own :data:`RESOLUTION_REF_EXACT`/
+    #: :data:`RESOLUTION_REF_UNIQUE_CANDIDATE`/:data:`RESOLUTION_REF_UNRESOLVED`
+    #: — a distinct vocabulary (the underlying mechanism differs: stub
+    #: completeness/id-index lookup, not C++ scope-qualified name lookup),
+    #: but the same confidence pattern (only the "exact"-equivalent tier
+    #: earns ``CONF_HIGH``). Excluded from equality/hash (``compare=False``):
+    #: it's a purely informational refinement of *why* ``confidence`` (a
+    #: normally-compared field) already came out what it did — the many
+    #: existing tests asserting exact ``TypeEdge(...) ==`` equality against
+    #: ``confidence``/``role``/``dst_file`` alone should not need updating
+    #: for a field that adds detail without changing what they already
+    #: verify.
     resolution: str = field(default="", compare=False)
 
 
@@ -727,6 +736,17 @@ RESOLUTION_SCOPE = "scope"
 RESOLUTION_UNIQUE_CANDIDATE = "unique_candidate"
 RESOLUTION_UNRESOLVED = "unresolved"
 
+#: :func:`_resolve_ref_identity` resolution labels (ADR-041 P1 #4): a
+#: distinct vocabulary from the three above, since the underlying mechanism
+#: differs (a ``DeclRefExpr`` stub's own completeness / the id-index's
+#: unambiguous per-node match, vs. C++ scope-qualified name lookup) --
+#: `RESOLUTION_REF_EXACT` covers both "the stub was already complete" and
+#: "the id-index pinned an unambiguous match", since neither involves any
+#: guessing, unlike `RESOLUTION_SCOPE`'s single decisive path.
+RESOLUTION_REF_EXACT = "exact"
+RESOLUTION_REF_UNIQUE_CANDIDATE = "unique_candidate"
+RESOLUTION_REF_UNRESOLVED = "unresolved"
+
 
 def _resolve_type_name(
     raw: str, scope: list[str], name_index: dict[str, list[str]]
@@ -833,8 +853,14 @@ def _resolve_ref_identity(
     decl_file: dict[str, str],
     ref_name_index: dict[str, list[str]],
     id_index: dict[str, tuple[str, str]],
-) -> tuple[str, str]:
-    """Resolve a ``DeclRefExpr``'s ``referencedDecl`` to its full identity and file.
+) -> tuple[str, str, str]:
+    """Resolve a ``DeclRefExpr``'s ``referencedDecl`` to its full identity, file,
+    and resolution tier (:data:`RESOLUTION_REF_EXACT`/
+    :data:`RESOLUTION_REF_UNIQUE_CANDIDATE`/:data:`RESOLUTION_REF_UNRESOLVED`,
+    ADR-041 P1 #4 — this edge kind used to be flat ``CONF_REDUCED`` regardless
+    of how confidently its target was identified, the one edge kind the
+    scope/unique_candidate/unresolved confidence pattern the rest of this
+    module already uses hadn't reached).
 
     clang commonly emits an *incomplete* stub for ``referencedDecl`` — e.g.
     ``{"kind": "VarDecl", "name": "k"}`` with no ``mangledName``/``loc`` even
@@ -846,21 +872,25 @@ def _resolve_ref_identity(
     (``inline int f() { return detail::k; }``).
 
     *Identity* resolution order: the stub's own mangled-or-bare identity when
-    it already resolves (i.e. it *was* complete); else — before falling back
-    to the ambiguous bare-name candidate list — the stub's own ``id`` looked
-    up in *id_index*, which (like the file lookup below) is keyed by clang's
-    per-node id rather than the shared bare name two same-named declarations
-    in different scopes both collapse to (Codex review: this disambiguates
-    ``a::k`` from ``b::k`` for *identity*, not only for ``dst_file`` as the
-    id lookup previously did — a stub with no ``mangledName`` used to stay
-    ambiguous even though the id already pinned down exactly which
-    declaration it was). Only when neither resolves does this fall back to
+    it already resolves (i.e. it *was* complete) — :data:`RESOLUTION_REF_EXACT`;
+    else — before falling back to the ambiguous bare-name candidate list — the
+    stub's own ``id`` looked up in *id_index*, which (like the file lookup
+    below) is keyed by clang's per-node id rather than the shared bare name two
+    same-named declarations in different scopes both collapse to (Codex
+    review: this disambiguates ``a::k`` from ``b::k`` for *identity*, not only
+    for ``dst_file`` as the id lookup previously did — a stub with no
+    ``mangledName`` used to stay ambiguous even though the id already pinned
+    down exactly which declaration it was) — this is *also*
+    :data:`RESOLUTION_REF_EXACT`: a per-node id match is deterministic and
+    unambiguous by construction, no guessing involved, exactly like an
+    already-complete stub. Only when neither resolves does this fall back to
     the unique full declaration sharing the bare name, when unambiguous —
-    genuinely ambiguous bare names (no id match, more than one same-named
-    candidate) are left unresolved rather than guessed, a known, documented
-    limitation; a fully general fix needs a stable scope-qualified identity
-    for every declaration, not just ones an ``id`` happens to disambiguate,
-    tracked in ADR-041 P1.
+    :data:`RESOLUTION_REF_UNIQUE_CANDIDATE`, a genuine best-effort guess.
+    Genuinely ambiguous bare names (no id match, more than one same-named
+    candidate) are left unresolved (:data:`RESOLUTION_REF_UNRESOLVED`) rather
+    than guessed, a known, documented limitation; a fully general fix needs a
+    stable scope-qualified identity for every declaration, not just ones an
+    ``id`` happens to disambiguate, tracked in ADR-041 P1.
 
     *File* resolution prefers the same *id_index* lookup — present even on
     an otherwise-incomplete stub and shared with the node's full declaration
@@ -870,17 +900,29 @@ def _resolve_ref_identity(
     ident = _decl_identity(ref)
     node_id = str(ref.get("id") or "")
     id_hit = id_index.get(node_id)
-    if ident not in decl_file:
-        if id_hit and id_hit[0]:
-            ident = id_hit[0]
+    # The id-index match must win over "ident already happens to be a key in
+    # decl_file" (Codex review): `decl_file` is keyed by bare identity across
+    # the whole TU, so a same-named declaration in an unrelated scope can make
+    # `ident in decl_file` true even though *this* stub names a different
+    # declaration — the id-index lookup is per-node and unambiguous by
+    # construction, so it must be tried first regardless.
+    if id_hit and id_hit[0]:
+        ident = id_hit[0]
+        resolution = RESOLUTION_REF_EXACT
+    elif ref.get("mangledName") and ident in decl_file:
+        # The stub was already complete (a real mangledName, not just a bare
+        # name that coincidentally matches another declaration) and resolves.
+        resolution = RESOLUTION_REF_EXACT
+    else:
+        name = str(ref.get("name") or "")
+        candidates = ref_name_index.get(name) if name else None
+        if candidates and len(candidates) == 1:
+            ident = candidates[0]
+            resolution = RESOLUTION_REF_UNIQUE_CANDIDATE
         else:
-            name = str(ref.get("name") or "")
-            if name:
-                candidates = ref_name_index.get(name)
-                if candidates and len(candidates) == 1:
-                    ident = candidates[0]
+            resolution = RESOLUTION_REF_UNRESOLVED
     file = (id_hit[1] if id_hit else "") or decl_file.get(ident, "")
-    return ident, file
+    return ident, file, resolution
 
 
 def _walk_types(
@@ -1009,7 +1051,23 @@ def _walk_types(
         # `_index_declared_entities`'s `in_body` tracking excludes them from
         # provenance — `enclosing_func` is only truthy inside a function/
         # method body, never for a namespace- or class-scope declaration.
-        ident = _decl_identity(node)
+        #
+        # Identity must be scope-qualified when unmangled (Codex review): a
+        # public `extern "C"` variable inside a namespace (`namespace api {
+        # extern "C" detail::Impl *g; }`) reports mangledName == name (no
+        # real Itanium mangling), so SourceEntity.identity() falls back to
+        # the qualified name "api::g" -- but the bare _decl_identity(node)
+        # used here gives just "g", landing this edge's src on a different
+        # decl:// node than the public SOURCE_DECLARES node, breaking
+        # reachability from the public variable to its private pointee.
+        # function_decl_identity() with an empty type_qual falls through to
+        # the same bare-qualified-name case (a variable's SourceEntity never
+        # sets signature_hash, unlike a function's), so it doubles as the
+        # right fallback here too.
+        qualified_name = "::".join([*scope, name]) if scope else name
+        ident = function_decl_identity(
+            str(node.get("mangledName") or ""), name, qualified_name, ""
+        )
         if ident:
             raw_var = _decl_type_name(node)
             _emit_type_edges(
@@ -1024,7 +1082,18 @@ def _walk_types(
             )
 
     if kind in _FUNCTION_DECL_KINDS:
-        ident = _decl_identity(node)
+        qualified_name = "::".join([*scope, name]) if scope else name
+        type_obj = node.get("type")
+        type_qual = (
+            str(type_obj.get("qualType", "")) if isinstance(type_obj, dict) else ""
+        )
+        ident = (
+            function_decl_identity(
+                str(node.get("mangledName") or ""), name, qualified_name, type_qual
+            )
+            if name
+            else ""
+        )
         if ident:
             raw_return = _decl_return_type_name(node)
             if raw_return:
@@ -1100,7 +1169,7 @@ def _walk_types(
     if kind == "DeclRefExpr" and enclosing_func:
         ref = node.get("referencedDecl")
         if isinstance(ref, dict) and ref.get("kind") in _REFERENCE_DECL_KINDS:
-            ref_ident, ref_file = _resolve_ref_identity(
+            ref_ident, ref_file, ref_resolution = _resolve_ref_identity(
                 ref, decl_file, ref_name_index, id_index
             )
             if ref_ident and ref_ident != enclosing_func:
@@ -1109,9 +1178,12 @@ def _walk_types(
                         enclosing_func,
                         ref_ident,
                         EDGE_DECL_REFERENCES_DECL,
-                        CONF_REDUCED,
+                        CONF_HIGH
+                        if ref_resolution == RESOLUTION_REF_EXACT
+                        else CONF_REDUCED,
                         "ref",
                         ref_file,
+                        ref_resolution,
                     )
                 )
 

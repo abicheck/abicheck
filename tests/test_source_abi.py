@@ -70,6 +70,7 @@ def _entity(
     body_hash: str = "",
     type_hash: str = "",
     api_relevant: bool = True,
+    usr: str = "",
 ) -> SourceEntity:
     return SourceEntity(
         id=f"decl://{name}",
@@ -83,6 +84,7 @@ def _entity(
         source_location=SourceLocation(path=f"include/{name}.h", line=1, origin=origin),
         visibility=visibility,
         api_relevant=api_relevant,
+        names={"usr": usr} if usr else {},
     )
 
 
@@ -309,6 +311,161 @@ def test_linker_folds_source_edges_across_tus() -> None:
     assert surface.source_edges == [edge]
 
 
+def test_linker_detects_identity_collision_via_usr() -> None:
+    # ADR-041 P1 #5: two genuinely different declarations (different
+    # scopes/ids) sharing one bare qualified_name + signature_hash with no
+    # mangled_name collide onto the same SourceEntity.identity() key -- the
+    # accepted, documented risk. When the linked producer stamped a USR on
+    # both (the clang plugin does; castxml/plain-clang do not), that
+    # collision is now detected rather than silently letting the second
+    # entity's qualified_name overwrite the first's in state.identity_to_qname.
+    a = SourceEntity(
+        id="decl://a::Widget#sig1",
+        kind="function",
+        qualified_name="Widget",  # bare -- castxml-style, no namespace
+        signature_hash="sig1",
+        source_location=SourceLocation(path="a.h", line=1, origin="PUBLIC_HEADER"),
+        visibility="public_header",
+        names={"usr": "c:@N@a@F@Widget#I#"},
+    )
+    b = SourceEntity(
+        id="decl://b::Widget#sig1",
+        kind="function",
+        qualified_name="Widget",  # same bare name, same signature_hash
+        signature_hash="sig1",
+        source_location=SourceLocation(path="b.h", line=1, origin="PUBLIC_HEADER"),
+        visibility="public_header",
+        names={"usr": "c:@N@b@F@Widget#I#"},
+    )
+    assert a.identity() == b.identity()  # the collision precondition
+    surface = link_source_abi([SourceAbiTu(functions=[a]), SourceAbiTu(functions=[b])])
+    assert surface.identity_collisions == [
+        {
+            "identity": a.identity(),
+            "qualified_name": "Widget",
+            "usr_a": "c:@N@a@F@Widget#I#",
+            "usr_b": "c:@N@b@F@Widget#I#",
+        }
+    ]
+
+
+def test_linker_no_identity_collision_when_usr_absent_or_matching() -> None:
+    # No false positives: a genuine re-emission of the SAME declaration (same
+    # USR) across TUs, or either side missing a USR entirely (castxml/plain
+    # clang), must never be reported as a collision.
+    same_usr_a = SourceEntity(
+        id="decl://x#sig1a",
+        kind="function",
+        qualified_name="X",
+        signature_hash="s",
+        source_location=SourceLocation(path="x.h", line=1, origin="PUBLIC_HEADER"),
+        visibility="public_header",
+        names={"usr": "c:@F@X#I#"},
+    )
+    same_usr_b = SourceEntity(
+        id="decl://x#sig1b",
+        kind="function",
+        qualified_name="X",
+        signature_hash="s",
+        source_location=SourceLocation(path="x.h", line=2, origin="PUBLIC_HEADER"),
+        visibility="public_header",
+        names={"usr": "c:@F@X#I#"},
+    )
+    surface = link_source_abi(
+        [SourceAbiTu(functions=[same_usr_a]), SourceAbiTu(functions=[same_usr_b])]
+    )
+    assert surface.identity_collisions == []
+
+    no_usr_a = SourceEntity(
+        id="decl://y#sig1a",
+        kind="function",
+        qualified_name="Y",
+        signature_hash="s",
+        source_location=SourceLocation(path="y1.h", line=1, origin="PUBLIC_HEADER"),
+        visibility="public_header",
+    )
+    no_usr_b = SourceEntity(
+        id="decl://y#sig1b",
+        kind="function",
+        qualified_name="Y",
+        signature_hash="s",
+        source_location=SourceLocation(path="y2.h", line=1, origin="PUBLIC_HEADER"),
+        visibility="public_header",
+        names={"usr": "c:@F@Y#I#"},
+    )
+    surface2 = link_source_abi(
+        [SourceAbiTu(functions=[no_usr_a]), SourceAbiTu(functions=[no_usr_b])]
+    )
+    assert surface2.identity_collisions == []
+
+
+def test_linker_detects_identity_collision_even_when_dedup_key_also_matches() -> None:
+    # Codex review: a genuine identity() collision (bare qualified_name +
+    # signature_hash, no mangled_name) can ALSO collide on the *dedup* key
+    # (kind, qualified_name, mangled_name, id, signature_hash, type_hash,
+    # body_hash, value) used to fold byte-identical re-emissions across TUs --
+    # none of those fields carry per-declaration provenance either, so two
+    # distinct decls sharing everything else hash identically on `id` too
+    # (unlike test_linker_detects_identity_collision_via_usr's hand-crafted
+    # distinct ids). Without checking USRs before the dedup skip, the second
+    # entity is dropped as a "duplicate re-emission" before ever reaching
+    # _route_declaration's USR-collision check, silently defeating it.
+    a = SourceEntity(
+        id="decl://widget#sig1",  # identical id -- unlike the distinct-id test above
+        kind="function",
+        qualified_name="Widget",
+        signature_hash="sig1",
+        source_location=SourceLocation(path="a.h", line=1, origin="PUBLIC_HEADER"),
+        visibility="public_header",
+        names={"usr": "c:@N@a@F@Widget#I#"},
+    )
+    b = SourceEntity(
+        id="decl://widget#sig1",  # same id, same everything except USR
+        kind="function",
+        qualified_name="Widget",
+        signature_hash="sig1",
+        source_location=SourceLocation(path="b.h", line=1, origin="PUBLIC_HEADER"),
+        visibility="public_header",
+        names={"usr": "c:@N@b@F@Widget#I#"},
+    )
+    assert a.identity() == b.identity()  # the collision precondition
+    surface = link_source_abi([SourceAbiTu(functions=[a]), SourceAbiTu(functions=[b])])
+    assert surface.identity_collisions == [
+        {
+            "identity": a.identity(),
+            "qualified_name": "Widget",
+            "usr_a": "c:@N@a@F@Widget#I#",
+            "usr_b": "c:@N@b@F@Widget#I#",
+        }
+    ]
+    # Both declarations still route (not folded away as a duplicate).
+    assert len(surface.reachable_declarations) == 2
+
+
+def test_identity_collisions_round_trip_through_dict() -> None:
+    s = SourceAbiSurface(library="libfoo.so", target_id="target://libfoo")
+    s.identity_collisions = [
+        {"identity": "Widget", "qualified_name": "Widget", "usr_a": "u1", "usr_b": "u2"}
+    ]
+    restored = SourceAbiSurface.from_dict(s.to_dict())
+    assert restored.identity_collisions == s.identity_collisions
+
+
+def test_identity_collisions_malformed_value_does_not_abort_loading() -> None:
+    # CodeRabbit review: unlike source_edges (already routed through the
+    # defensive _edge_list parser), identity_collisions used a bare
+    # list(d.get(...)), so a hand-edited/forward-versioned
+    # "identity_collisions": null raised TypeError (list(None)) and aborted
+    # the whole surface load instead of degrading gracefully.
+    d = {
+        "library": "libfoo.so",
+        "target_id": "target://libfoo",
+        "identity_collisions": None,
+    }
+    restored = SourceAbiSurface.from_dict(d)
+    assert restored.identity_collisions == []
+
+
 def test_linker_keeps_distinct_source_edges_from_different_tus() -> None:
     tu_a = SourceAbiTu(
         source_edges=[{"edge": "DECL_CALLS_DECL", "src": "a", "dst": "b"}]
@@ -318,6 +475,60 @@ def test_linker_keeps_distinct_source_edges_from_different_tus() -> None:
     )
     surface = link_source_abi([tu_a, tu_b])
     assert len(surface.source_edges) == 2
+
+
+def test_linker_fills_missing_dst_file_from_later_duplicate_tu() -> None:
+    # Codex review, PR #555: dedup keeps only the first-seen (edge, src, dst)
+    # row across TUs. If that first copy's attrs lack dst_file (this TU
+    # couldn't resolve the callee/type's declaring file) but a later TU's
+    # copy of the SAME logical edge has it, the richer dst_file must be
+    # merged in -- otherwise fold_source_edges() can never mark that
+    # endpoint defined_in_project and PUBLIC_API_INTERNAL_DEPENDENCY_ADDED
+    # is skipped for a dependency the graph otherwise has full evidence for.
+    tu_a = SourceAbiTu(
+        source_edges=[
+            {
+                "edge": "DECL_CALLS_DECL",
+                "src": "a",
+                "dst": "b",
+                "attrs": {"call_kind": "direct"},
+            }
+        ]
+    )
+    tu_b = SourceAbiTu(
+        source_edges=[
+            {
+                "edge": "DECL_CALLS_DECL",
+                "src": "a",
+                "dst": "b",
+                "attrs": {"call_kind": "direct", "dst_file": "src/detail/impl.cc"},
+            }
+        ]
+    )
+    surface = link_source_abi([tu_a, tu_b])
+    assert len(surface.source_edges) == 1
+    assert surface.source_edges[0]["attrs"]["dst_file"] == "src/detail/impl.cc"
+
+
+def test_linker_keeps_first_dst_file_when_later_duplicate_has_none() -> None:
+    # The merge is additive only -- a later duplicate lacking dst_file must
+    # never clobber an already-resolved one.
+    tu_a = SourceAbiTu(
+        source_edges=[
+            {
+                "edge": "DECL_CALLS_DECL",
+                "src": "a",
+                "dst": "b",
+                "attrs": {"dst_file": "src/detail/impl.cc"},
+            }
+        ]
+    )
+    tu_b = SourceAbiTu(
+        source_edges=[{"edge": "DECL_CALLS_DECL", "src": "a", "dst": "b", "attrs": {}}]
+    )
+    surface = link_source_abi([tu_a, tu_b])
+    assert len(surface.source_edges) == 1
+    assert surface.source_edges[0]["attrs"]["dst_file"] == "src/detail/impl.cc"
 
 
 def test_linker_skips_malformed_source_edges_rows() -> None:

@@ -20,11 +20,16 @@ no compiler is required; the live subprocess path is integration-only."""
 
 from __future__ import annotations
 
+import hashlib
+
 from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 from abicheck.buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary
 from abicheck.buildsource.type_graph import (
     CONF_HIGH,
     CONF_REDUCED,
+    RESOLUTION_REF_EXACT,
+    RESOLUTION_REF_UNIQUE_CANDIDATE,
+    RESOLUTION_REF_UNRESOLVED,
     ClangTypeGraphExtractor,
     TypeEdge,
     _base_type_name,
@@ -647,6 +652,10 @@ def test_incomplete_declrefexpr_stub_resolves_to_full_declaration() -> None:
             "src/detail/constants.h",
         )
     ]
+    # ADR-041 P1 #4: the bare-name-but-unique-candidate fallback is a genuine
+    # best-effort guess, so it stays CONF_REDUCED with a resolution label
+    # distinguishing it from an id-index/already-complete exact match.
+    assert refs[0].resolution == RESOLUTION_REF_UNIQUE_CANDIDATE
 
 
 def test_ambiguous_declrefexpr_stub_keeps_original_identity() -> None:
@@ -693,6 +702,7 @@ def test_ambiguous_declrefexpr_stub_keeps_original_identity() -> None:
     assert refs == [
         TypeEdge("_Z1fv", "k", "DECL_REFERENCES_DECL", CONF_REDUCED, "ref", "")
     ]
+    assert refs[0].resolution == RESOLUTION_REF_UNRESOLVED
 
 
 def test_compact_const_pointer_suffix_is_stripped() -> None:
@@ -843,9 +853,62 @@ def test_declrefexpr_stub_id_disambiguates_identity_not_only_file() -> None:
     )
     edges = parse_clang_ast_types(ast)
     refs = [e for e in edges if e.kind == "DECL_REFERENCES_DECL"]
+    # ADR-041 P1 #4: an id-index match is deterministic/unambiguous, so this
+    # now earns CONF_HIGH like an already-complete stub -- not the flat
+    # CONF_REDUCED every DECL_REFERENCES_DECL edge used to get regardless of
+    # how confidently its target was identified.
     assert refs == [
-        TypeEdge("_Z1fv", "_ZN1b1kE", "DECL_REFERENCES_DECL", CONF_REDUCED, "ref")
+        TypeEdge("_Z1fv", "_ZN1b1kE", "DECL_REFERENCES_DECL", CONF_HIGH, "ref")
     ]
+    assert refs[0].resolution == RESOLUTION_REF_EXACT
+
+
+def test_id_hit_wins_over_coincidental_bare_name_in_decl_file() -> None:
+    # CodeRabbit review: an unrelated global `k` with no mangled name at all
+    # indexes decl_file["k"] = "global.hpp" (its identity IS the bare name).
+    # A DIFFERENT DeclRefExpr stub (incomplete, no mangledName) also spells
+    # "k" but its `id` resolves via id_index to b::k's real mangled identity.
+    # The old code checked "ident not in decl_file" to decide whether the
+    # stub was already complete -- since "k" coincidentally already exists in
+    # decl_file (from the unrelated global), it skipped the id_index lookup
+    # entirely and kept the wrong bare "k" identity. id_hit must win first,
+    # regardless of what already happens to be in decl_file.
+    ast = _tu(
+        {"kind": "VarDecl", "name": "k"},  # global, no mangled name -> identity "k"
+        {
+            "kind": "NamespaceDecl",
+            "name": "b",
+            "inner": [
+                {"kind": "VarDecl", "name": "k", "mangledName": "_ZN1b1kE", "id": "0x2"}
+            ],
+        },
+        {
+            "kind": "FunctionDecl",
+            "name": "f",
+            "mangledName": "_Z1fv",
+            "inner": [
+                {
+                    "kind": "CompoundStmt",
+                    "inner": [
+                        {
+                            "kind": "DeclRefExpr",
+                            "referencedDecl": {
+                                "kind": "VarDecl",
+                                "name": "k",
+                                "id": "0x2",
+                            },
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    edges = parse_clang_ast_types(ast)
+    refs = [e for e in edges if e.kind == "DECL_REFERENCES_DECL"]
+    assert refs == [
+        TypeEdge("_Z1fv", "_ZN1b1kE", "DECL_REFERENCES_DECL", CONF_HIGH, "ref")
+    ]
+    assert refs[0].resolution == RESOLUTION_REF_EXACT
 
 
 def test_field_type_edge_excludes_builtins() -> None:
@@ -1747,3 +1810,80 @@ def test_augment_graph_with_types_carries_resolution_into_edge_attrs() -> None:
     edge = next(e for e in graph.edges if e.kind == "TYPE_HAS_FIELD_TYPE")
     assert edge.attrs["resolution"] == "unique_candidate"
     assert edge.attrs["role"] == "field"
+
+
+def test_extern_c_function_identity_matches_source_entity_fallback() -> None:
+    # ADR-041 P1 #5 (Codex review): clang reports mangledName == name for an
+    # extern "C"/C-linkage function (no real Itanium mangling), and
+    # SourceEntity.identity() treats that as "no distinguishing mangled name"
+    # -- falling back to qualified_name#signature_hash. The AST-replay layer
+    # used to key this same function's DECL_HAS_TYPE src on the bare
+    # mangled-or-name (identical to the bare name here), landing on a
+    # different decl:// node than the L4 surface's own SOURCE_DECLARES node
+    # for the same declaration.
+    ast = _tu(
+        {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Config")]},
+        {
+            "kind": "FunctionDecl",
+            "name": "api",
+            "mangledName": "api",
+            "type": {"qualType": "int (detail::Config)"},
+            "inner": [_param("x", "detail::Config")],
+        },
+    )
+    edges = parse_clang_ast_types(ast)
+    param_edges = [e for e in edges if e.role == "param"]
+    assert len(param_edges) == 1
+    expected_hash = hashlib.sha256(b"sig\x00int (detail::Config)").hexdigest()
+    assert param_edges[0].src == f"api#sha256:{expected_hash}"
+
+
+def test_real_mangled_function_identity_stays_the_mangled_name() -> None:
+    # A genuinely mangled C++ function (mangledName != name) is unaffected --
+    # the mangled name alone already matches SourceEntity.identity()'s primary
+    # case, so no signature-hash suffix should be added.
+    ast = _tu(
+        {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Config")]},
+        _record(
+            "Widget",
+            inner=[
+                _method("bar", "_ZN6Widget3barE", [_param("x", "detail::Config")])
+            ],
+        ),
+    )
+    edges = parse_clang_ast_types(ast)
+    param_edges = [e for e in edges if e.role == "param"]
+    assert len(param_edges) == 1
+    assert param_edges[0].src == "_ZN6Widget3barE"
+
+
+def test_extern_c_variable_type_edge_source_is_scope_qualified() -> None:
+    # Codex review: namespace api { extern "C" detail::Impl *g; } -- clang
+    # reports mangledName == name for the extern "C" variable (no real
+    # Itanium mangling), and SourceEntity.identity() for a variable (which
+    # never sets signature_hash) falls back to the bare qualified name
+    # "api::g". The AST-replay layer used to key this VarDecl's own
+    # DECL_HAS_TYPE edge on the unqualified bare name "g", landing on a
+    # different decl:// node than the public SOURCE_DECLARES node for the
+    # same declaration -- so reachability from the public variable never
+    # reached the private pointee type.
+    ast = _tu(
+        {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Impl")]},
+        {
+            "kind": "NamespaceDecl",
+            "name": "api",
+            "inner": [
+                {
+                    "kind": "VarDecl",
+                    "name": "g",
+                    "mangledName": "g",
+                    "type": {"qualType": "detail::Impl *"},
+                }
+            ],
+        },
+    )
+    edges = parse_clang_ast_types(ast)
+    var_edges = [e for e in edges if e.role == "var"]
+    assert var_edges == [
+        TypeEdge("api::g", "detail::Impl", "DECL_HAS_TYPE", CONF_HIGH, "var")
+    ]

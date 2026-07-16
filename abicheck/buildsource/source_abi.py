@@ -489,6 +489,25 @@ class SourceAbiSurface:
         }
     )
     odr_conflicts: list[dict[str, Any]] = field(default_factory=list)
+    #: Two declarations that collapsed onto one ``SourceEntity.identity()``
+    #: key despite being genuinely different (ADR-041 P1 #5): the accepted
+    #: collision risk that docstring documents ("two unmangled, same-
+    #: signature declarations sharing a bare name in different scopes...
+    #: collapse onto one key") is *detected* here, never silently
+    #: eliminated -- ``identity()`` itself is deliberately unchanged (baking
+    #: a plugin-only USR into the primary identity would make matching
+    #: producer-dependent: an old baseline collected via castxml/plain
+    #: clang carries no USR at all, so every entity's identity would gain or
+    #: lose a USR suffix the moment collection switches producers, turning
+    #: unrelated collection changes into spurious add+remove pairs across
+    #: the whole surface). Populated only when the linked producer stamped
+    #: a ``names["usr"]`` on **both** colliding entities and the two USRs
+    #: disagree -- a `usr` is clang's own globally stable, scope-aware
+    #: identity, so two different USRs sharing one ``identity()`` can only
+    #: mean two different declarations collided; never fires from a mere
+    #: "one side has no USR", which proves nothing either way. Each entry:
+    #: ``{"identity": ..., "qualified_name": ..., "usr_a": ..., "usr_b": ...}``.
+    identity_collisions: list[dict[str, Any]] = field(default_factory=list)
     unmatched: dict[str, list[str]] = field(
         default_factory=lambda: {"symbols_without_decl": [], "decls_without_symbol": []}
     )
@@ -538,6 +557,7 @@ class SourceAbiSurface:
                 ),
             },
             "odr_conflicts": list(self.odr_conflicts),
+            "identity_collisions": list(self.identity_collisions),
             "unmatched": {k: list(v) for k, v in self.unmatched.items()},
             "coverage": dict(self.coverage),
         }
@@ -599,6 +619,7 @@ class SourceAbiSurface:
             source_edges=_edge_list(d.get("source_edges")),
             mappings=mappings,
             odr_conflicts=list(d.get("odr_conflicts", [])),
+            identity_collisions=_edge_list(d.get("identity_collisions")),
             unmatched=unmatched,
             coverage=dict(d.get("coverage", {})),
         )

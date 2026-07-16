@@ -134,8 +134,21 @@ def _diff_pe(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # metadata-only changes that function model may miss.
     old_ids = {(e.name if e.name else f"ordinal:{e.ordinal}") for e in o.exports}
     new_ids = {(e.name if e.name else f"ordinal:{e.ordinal}") for e in n.exports}
-    old_fn_names = {f.name for f in old.functions if f.name}
-    new_fn_names = {f.name for f in new.functions if f.name}
+    # A raw PE export id may match either the demangled display name (a plain
+    # ``extern "C"``/__cdecl export, e.g. ``_bar``) or the link-time mangled
+    # symbol (a real C++-mangled export, e.g. ``?bar@foo@@YAHXZ``) -- neither
+    # alone is enough: matching only ``name`` misses every mangled C++ symbol
+    # (a demangled bare name can never equal its own decorated export string),
+    # and matching only ``mangled`` misses the plain-C case some platforms
+    # decorate differently on ``name``/``mangled`` than on the export table.
+    # Union both so this "already represented by the function model" guard
+    # actually fires for either shape (Codex review, case83 investigation).
+    old_fn_names = {f.name for f in old.functions if f.name} | {
+        f.mangled for f in old.functions if f.mangled
+    }
+    new_fn_names = {f.name for f in new.functions if f.name} | {
+        f.mangled for f in new.functions if f.mangled
+    }
 
     removed_kind = (
         ChangeKind.FUNC_REMOVED_ELF_ONLY
@@ -247,9 +260,9 @@ def _diff_pe(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 #: counterpart of the ELF RELRO/PIE/canary/CET hardening family.
 _PE_HARDENING_BITS: tuple[tuple[int, str], ...] = (
     (0x0020, "HIGH_ENTROPY_VA"),
-    (0x0040, "DYNAMIC_BASE"),   # ASLR
-    (0x0100, "NX_COMPAT"),      # DEP
-    (0x4000, "GUARD_CF"),       # Control Flow Guard
+    (0x0040, "DYNAMIC_BASE"),  # ASLR
+    (0x0100, "NX_COMPAT"),  # DEP
+    (0x4000, "GUARD_CF"),  # Control Flow Guard
 )
 
 
@@ -268,8 +281,16 @@ def _diff_pe_hardening(o: Any, n: Any) -> list[Change]:
     new_bits = int(getattr(n, "dll_characteristics", 0))
     if old_bits == new_bits:
         return []
-    lost = [name for bit, name in _PE_HARDENING_BITS if old_bits & bit and not new_bits & bit]
-    gained = [name for bit, name in _PE_HARDENING_BITS if new_bits & bit and not old_bits & bit]
+    lost = [
+        name
+        for bit, name in _PE_HARDENING_BITS
+        if old_bits & bit and not new_bits & bit
+    ]
+    gained = [
+        name
+        for bit, name in _PE_HARDENING_BITS
+        if new_bits & bit and not old_bits & bit
+    ]
     changes: list[Change] = []
     if lost:
         changes.append(
@@ -346,7 +367,12 @@ def _diff_pe_import_load_mode(o: Any, n: Any) -> list[Change]:
     new_eager_imports: dict[str, list[str]] = getattr(n, "imports", None) or {}
 
     changes: list[Change] = []
-    dlls = set(old_eager_imports) | set(old_delay) | set(new_eager_imports) | set(new_delay)
+    dlls = (
+        set(old_eager_imports)
+        | set(old_delay)
+        | set(new_eager_imports)
+        | set(new_delay)
+    )
     for dll in sorted(dlls):
         old_eager = set(old_eager_imports.get(dll, []))
         old_lazy = set(old_delay.get(dll, []))
@@ -468,8 +494,15 @@ def _diff_macho_exports(
     changes: list[Change] = []
     old_names = {e.name for e in o.exports if e.name}
     new_names = {e.name for e in n.exports if e.name}
-    old_fn_names = {f.name for f in old.functions if f.name}
-    new_fn_names = {f.name for f in new.functions if f.name}
+    # See the matching comment in _diff_pe(): union both the demangled display
+    # name and the link-time mangled symbol so this guard matches a real
+    # Mach-O export string for either a plain-C or a name-mangled C++ symbol.
+    old_fn_names = {f.name for f in old.functions if f.name} | {
+        f.mangled for f in old.functions if f.mangled
+    }
+    new_fn_names = {f.name for f in new.functions if f.name} | {
+        f.mangled for f in new.functions if f.mangled
+    }
 
     removed_kind = (
         ChangeKind.FUNC_REMOVED_ELF_ONLY
@@ -1523,7 +1556,9 @@ def _diff_struct_layouts(o: object, n: object) -> list[Change]:
         for fn in added_names:
             if _RESERVED_FIELD_RE.match(fn):
                 continue
-            added_by_offset.setdefault(new_fields[fn].byte_offset, []).append(new_fields[fn])
+            added_by_offset.setdefault(new_fields[fn].byte_offset, []).append(
+                new_fields[fn]
+            )
         reserved_matched: set[str] = set()
         # Tracks candidates already consumed by a pure-rename match below, so
         # a second removed field at the same offset (e.g. two overlapping
@@ -1540,7 +1575,8 @@ def _diff_struct_layouts(o: object, n: object) -> list[Change]:
                     (
                         c
                         for c in added_by_offset.get(old_f.byte_offset, [])
-                        if c.name not in rename_matched and old_f.type_name == c.type_name
+                        if c.name not in rename_matched
+                        and old_f.type_name == c.type_name
                     ),
                     None,
                 )

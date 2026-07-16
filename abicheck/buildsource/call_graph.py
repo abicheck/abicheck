@@ -49,7 +49,26 @@ from typing import TYPE_CHECKING, Any
 
 from ..build_context import _extract_flags
 from .adapters.base import source_from_argv
-from .source_graph import CONF_HIGH, CONF_REDUCED, CONF_UNKNOWN, GraphEdge, GraphNode
+from .source_graph import (
+    CONF_HIGH,
+    CONF_REDUCED,
+    CONF_UNKNOWN,
+    GraphEdge,
+    GraphNode,
+    _file_in_project,
+    function_decl_identity,
+    project_source_files,
+)
+
+__all__ = ["_file_in_project", "project_source_files"]
+# _file_in_project/project_source_files are defined in source_graph.py (moved
+# there so source_graph.build_source_graph can call project_source_files(build)
+# without a source_graph -> call_graph -> source_graph import cycle — this
+# module already imports several names from source_graph at module level, so
+# importing these two from there instead of defining them here is a free
+# direction, not a new edge). Re-exported by name here for back-compat:
+# type_graph.py's function-local import and inline_graph_fold.py's
+# module-level import both still spell it `from .call_graph import ...`.
 
 if TYPE_CHECKING:
     from .build_evidence import BuildEvidence, CompileUnit as BuildEvidenceCompileUnit
@@ -83,6 +102,12 @@ _CALL_EXPR_KINDS = frozenset({"CallExpr", "CXXMemberCallExpr", "CXXOperatorCallE
 #: referenced-decl kinds that mean "called through a pointer/variable".
 _POINTER_DECL_KINDS = frozenset(
     {"VarDecl", "ParmVarDecl", "FieldDecl", "NonTypeTemplateParmDecl"}
+)
+#: clang AST decl kinds that open a named scope contributing to a qualified
+#: name — mirrors ``type_graph._SCOPE_DECL_KINDS`` (duplicated rather than
+#: imported: the two modules are siblings with no cross-dependency today).
+_SCOPE_DECL_KINDS = frozenset(
+    {"NamespaceDecl", "CXXRecordDecl", "RecordDecl", "ClassTemplateSpecializationDecl"}
 )
 
 #: ABI/API-affecting flags safe to replay into clang for AST parsing.  This is
@@ -152,6 +177,31 @@ def _identity(node: dict[str, Any]) -> str:
     """Stable callee/caller identity: the mangled name when clang emits one
     (encodes the full signature, keeps overloads distinct), else the name."""
     return str(node.get("mangledName") or node.get("name") or "")
+
+
+def _function_identity(node: dict[str, Any], scope: list[str]) -> str:
+    """Like :func:`_identity`, but falls back to
+    :func:`~abicheck.buildsource.source_graph.function_decl_identity` (ADR-041
+    P1 #5) instead of the bare name when clang's ``mangledName`` doesn't
+    distinguish the declaration (absent, or equal to ``name`` — the extern
+    "C"/C-linkage case) — matching ``SourceEntity.identity()``'s own
+    ``qualified_name#signature_hash`` fallback so this function's call-graph
+    node lands on the same ``decl://`` id as its L4 ``SOURCE_DECLARES`` node.
+    Used only where a node's *own* identity is recorded (the enclosing
+    function scope); a ``referencedDecl`` call-site stub carries no scope
+    to qualify with, so callee resolution still goes through the id-index
+    (:func:`_resolve_ref_callee_identity`), which looks up the value this
+    function already computed for the same declaration's full node.
+    """
+    name = str(node.get("name") or "")
+    if not name:
+        return _identity(node)
+    qualified_name = "::".join([*scope, name]) if scope else name
+    type_obj = node.get("type")
+    type_qual = str(type_obj.get("qualType", "")) if isinstance(type_obj, dict) else ""
+    return function_decl_identity(
+        str(node.get("mangledName") or ""), name, qualified_name, type_qual
+    )
 
 
 def _find_referenced_decl(node: dict[str, Any]) -> dict[str, Any] | None:
@@ -255,16 +305,28 @@ def _enter_function_scope(
     caller: str,
     caller_file: str,
     cur_file: str,
+    scope: list[str],
     decl_files: dict[str, str],
     id_index: dict[str, str],
 ) -> tuple[str, str]:
     """Return the ``(caller, caller_file)`` scope after a function-decl node, recording its definition file."""
-    ident = _identity(node) or caller
+    ident = _function_identity(node, scope) or caller
     if ident != caller:
         # Entering a new enclosing function: its body lives in cur_file.
         caller, caller_file = ident, cur_file
-    # Record the definition file so a callee-only leaf helper resolves it.
-    if ident and _has_function_body(node):
+    # Record a file so a callee-only leaf helper resolves it, preferring a
+    # body (the true definition) over a bare declaration but falling back to
+    # the declaration's own file when no body is ever seen in this TU (Codex
+    # review): a helper only *declared* here (e.g. a private header this TU
+    # includes) with its body compiled in a separate TU previously left
+    # callee_file empty, so a public function calling it through the Flow-2
+    # source_edges-only path could never be marked defined_in_project even
+    # though the declaration's own file is exactly the private-header
+    # provenance that marking needs. A body seen after an earlier
+    # declaration-only entry still upgrades it (the definition is the more
+    # authoritative location); a later declaration-only sighting never
+    # downgrades an already-recorded body.
+    if ident and (ident not in decl_files or _has_function_body(node)):
         decl_files[ident] = cur_file
     # Index this full declaration by clang's own per-node id so a later call
     # site's compact referencedDecl stub (which never carries mangledName,
@@ -273,7 +335,7 @@ def _enter_function_scope(
     # only ones with a body, so a pure prototype still resolves callers of
     # a not-yet-defined declaration.
     node_id = str(node.get("id") or "")
-    real_ident = _identity(node)
+    real_ident = _function_identity(node, scope)
     if node_id and real_ident:
         id_index.setdefault(node_id, real_ident)
     return caller, caller_file
@@ -298,31 +360,54 @@ def _walk_calls(
     caller: str,
     caller_file: str,
     cur_file: str,
+    scope: list[str],
     edges: list[CallEdge],
     decl_files: dict[str, str],
     id_index: dict[str, str],
-) -> None:
-    """Recursive AST walk tracking the nearest enclosing function as the *caller*."""
+) -> str:
+    """Recursive AST walk tracking the nearest enclosing function as the *caller*
+    and the qualified-name scope (ADR-041 P1 #5), mirroring
+    ``type_graph._walk_types``'s identical scope-tracking pattern. Returns the
+    sticky *cur_file* as last updated by this subtree, so the caller's loop
+    over sibling children can thread it forward (Codex review): clang emits a
+    node's ``file`` only when it *changes* from the previous node in the
+    pre-order dump, so a sibling with no ``loc``/``range`` of its own (a
+    second declaration from the same included header) must still see the
+    file the *previous* sibling discovered, not the stale value from before
+    that sibling ran.
+    """
     if not isinstance(node, dict):
-        return
+        return cur_file
     f = _node_file(node)
     if f:
         cur_file = f
     kind = str(node.get("kind", ""))
+    name = str(node.get("name") or "")
     if kind in _FUNCTION_DECL_KINDS:
         caller, caller_file = _enter_function_scope(
-            node, caller, caller_file, cur_file, decl_files, id_index
+            node, caller, caller_file, cur_file, scope, decl_files, id_index
         )
     if kind in _CALL_EXPR_KINDS and caller:
         _append_call_edge(node, caller, caller_file, edges, id_index)
+    child_scope = [*scope, name] if kind in _SCOPE_DECL_KINDS and name else scope
     for child in node.get("inner", []) or []:
-        _walk_calls(child, caller, caller_file, cur_file, edges, decl_files, id_index)
+        cur_file = _walk_calls(
+            child,
+            caller,
+            caller_file,
+            cur_file,
+            child_scope,
+            edges,
+            decl_files,
+            id_index,
+        )
+    return cur_file
 
 
 def _fill_callee_files(
     edges: list[CallEdge], decl_files: dict[str, str]
 ) -> list[CallEdge]:
-    """Fill ``callee_file`` from the definition-file map (the callee's own FunctionDecl)."""
+    """Fill ``callee_file`` from the callee's own FunctionDecl file (body preferred, declaration-only as fallback)."""
     if not decl_files:
         return edges
     return [
@@ -352,55 +437,22 @@ def parse_clang_ast_calls(ast: dict[str, Any]) -> list[CallEdge]:
     function (e.g. a global initializer) and unresolved callees are dropped.
     """
     edges: list[CallEdge] = []
-    # identity → file of its *definition* (a FunctionDecl with a body). Lets a leaf
-    # helper that only ever appears as a callee still resolve its source file: in
-    # clang JSON the call's ``referencedDecl`` usually carries no ``loc.file`` (the
-    # location sits on the sibling FunctionDecl), so ``callee_file`` is filled from
-    # this map after the walk, not from the reference node (Codex review).
+    # identity → file of its definition (preferred) or declaration (fallback,
+    # Codex review: a helper only *declared* in this TU -- e.g. a private
+    # header this TU includes, defined in a separately-compiled TU -- still
+    # needs a resolvable file). Lets a leaf helper that only ever appears as
+    # a callee still resolve its source file: in clang JSON the call's
+    # ``referencedDecl`` usually carries no ``loc.file`` (the location sits
+    # on the sibling FunctionDecl), so ``callee_file`` is filled from this
+    # map after the walk, not from the reference node (Codex review).
     decl_files: dict[str, str] = {}
     # clang AST node id -> mangled-or-bare identity, built from every full
     # FunctionDecl/CXXMethodDecl/... node seen, so a call site's compact
     # referencedDecl stub can resolve its real (mangled, overload-distinct)
     # identity instead of the stub's own name-only fallback (PR1b).
     id_index: dict[str, str] = {}
-    _walk_calls(ast, "", "", "", edges, decl_files, id_index)
+    _walk_calls(ast, "", "", "", [], edges, decl_files, id_index)
     return _dedupe_edges(_fill_callee_files(edges, decl_files))
-
-
-def _file_in_project(caller_file: str, project_files: frozenset[str]) -> bool:
-    """Whether *caller_file* is one of the project's own compile-unit sources.
-
-    Build-evidence sources are often repo-relative (``src/foo.cc``) while the
-    clang AST emits an absolute path (``/work/src/foo.cc``); match on a path
-    suffix either way (mirrors ``source_replay._path_matches``). A function whose
-    body is in one of these files is project-defined; one in a third-party/system
-    header (Boost/Abseil/libstdc++) is not.
-    """
-    if not caller_file:
-        return False
-    c = caller_file.replace("\\", "/").lstrip("./")
-    for pf in project_files:
-        n = pf.replace("\\", "/").lstrip("./")
-        if c == n or c.endswith("/" + n) or n.endswith("/" + c):
-            return True
-    return False
-
-
-def project_source_files(build: BuildEvidence) -> frozenset[str]:
-    """Project-internal source files for ``defined_in_project`` provenance.
-
-    Compile-unit sources **plus the targets' private headers** — a function whose
-    body is in a project ``.cc`` *or* a project private header is internal
-    implementation. Public headers are deliberately excluded: an inline function
-    in a public header is consumer-visible public surface, so marking it
-    ``defined_in_project`` (→ internal) would false-positive
-    ``public_to_internal_dependency``. Third-party/system headers (Boost, libc++)
-    are never in either list, so they stay external (Codex review).
-    """
-    files: set[str] = {cu.source for cu in build.compile_units if cu.source}
-    for tgt in build.targets:
-        files.update(h for h in tgt.private_headers if h)
-    return frozenset(files)
 
 
 def extractor_pass_fully_covered(

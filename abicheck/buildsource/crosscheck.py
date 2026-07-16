@@ -118,6 +118,7 @@ CHECK_ODR_TYPE_VARIANT = "odr_type_variant"
 CHECK_PUBLIC_TO_INTERNAL_DEPENDENCY = "public_to_internal_dependency"
 CHECK_UNVERSIONED_EXPORTED_SYMBOL = "unversioned_exported_symbol"
 CHECK_RTTI_FOR_INTERNAL_TYPE = "rtti_for_internal_type"
+CHECK_IDENTITY_COLLISION = "identity_collision_detected"
 
 #: Every check the engine knows, in cheapest-first order (ADR-035 D4 table).
 ALL_CHECKS: tuple[str, ...] = (
@@ -129,6 +130,7 @@ ALL_CHECKS: tuple[str, ...] = (
     CHECK_PUBLIC_TO_INTERNAL_DEPENDENCY,
     CHECK_UNVERSIONED_EXPORTED_SYMBOL,
     CHECK_RTTI_FOR_INTERNAL_TYPE,
+    CHECK_IDENTITY_COLLISION,
 )
 
 #: The §6.8 provider-agreement vocabulary (ADR-035 D4) — which evidence source
@@ -225,6 +227,7 @@ def run_crosschecks(
         CHECK_PUBLIC_TO_INTERNAL_DEPENDENCY: _check_public_to_internal_dependency,
         CHECK_UNVERSIONED_EXPORTED_SYMBOL: _check_unversioned_exported_symbol,
         CHECK_RTTI_FOR_INTERNAL_TYPE: _check_rtti_for_internal_type,
+        CHECK_IDENTITY_COLLISION: _check_identity_collision,
     }
     for name in ALL_CHECKS:
         if name not in cfg.enabled:
@@ -1212,6 +1215,79 @@ def _check_rtti_for_internal_type(
         f"for one of {n_private} private type(s)"
     )
     return _CheckOutput(findings, "present", detail, providers)
+
+
+# ---------------------------------------------------------------------------
+# identity_collision_detected — two distinct decls share one identity() key.
+# ---------------------------------------------------------------------------
+
+
+def _check_identity_collision(
+    snapshot: AbiSnapshot, cfg: CrosscheckConfig
+) -> _CheckOutput:
+    """Two distinct declarations linked onto the same L4 identity() key, RISK.
+
+    ``source_link._route_declaration`` detects (but never resolves) the rare
+    case where two *different* declarations — proven distinct because each
+    carries a different clang-computed USR — fold onto the same
+    ``SourceEntity.identity()`` key (the mangled name, else
+    ``qualified_name#signature_hash``, else the bare qualified name; see
+    ``SourceAbiSurface.identity_collisions``' docstring). This turns each
+    recorded collision into a finding so it is visible in reports rather than
+    silently merging two declarations' evidence under one name (ADR-041 P1
+    #5). Needs the L4 source-ABI surface; skips cleanly on a snapshot that
+    carries no source-replay evidence.
+    """
+    providers = [PROVIDER_SOURCE_INDEX]
+    surface = (
+        snapshot.build_source.source_abi if snapshot.build_source is not None else None
+    )
+    if surface is None:
+        return _CheckOutput(
+            [],
+            "skipped",
+            "no L4 source-ABI surface on the snapshot (run --depth source)",
+            providers,
+        )
+    if not _surface_has_l4_facts(surface):
+        facts, counters = _surface_boundary_counters(surface)
+        return _CheckOutput(
+            [],
+            "skipped",
+            "L4 source surface present but empty (no TUs parsed — clang/castxml "
+            "unavailable?); identity-collision audit not run",
+            providers,
+            facts,
+            counters,
+        )
+
+    findings: list[Change] = []
+    for collision in surface.identity_collisions:
+        identity = str(collision.get("identity", "")) or "<unknown>"
+        qname = str(collision.get("qualified_name", "")) or identity
+        usr_a = str(collision.get("usr_a", ""))
+        usr_b = str(collision.get("usr_b", ""))
+        findings.append(
+            _change(
+                ChangeKind.IDENTITY_COLLISION_DETECTED,
+                qname,
+                f"Two distinct declarations (USR {usr_a!r} and {usr_b!r}) were both "
+                f"linked onto the L4 identity key {identity!r}. The identity fallback "
+                "chain accepts this rare collision by design for unmangled "
+                "cross-scope declarations — any L4/L5 finding attributed to this "
+                "identity may actually describe either declaration; treat it as "
+                "ambiguous between the two USRs above.",
+                new_value=identity,
+                confidence=Confidence.MEDIUM,
+            )
+        )
+    findings.sort(key=lambda c: c.symbol)
+    facts, counters = _surface_boundary_counters(surface)
+    detail = (
+        f"L4 identity() collisions: {len(findings)} distinct-declaration "
+        "collision(s) detected"
+    )
+    return _CheckOutput(findings, "present", detail, providers, facts, counters)
 
 
 # ---------------------------------------------------------------------------

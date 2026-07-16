@@ -630,13 +630,6 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         frozenset({"cli", "cli_suggest"}),
         frozenset({"cli", "cli_surface"}),
         frozenset({"cli", "cli_doctor"}),
-        frozenset({"cli", "cli_config"}),
-        # `config show-effective` reuses `_cli_flag` from `cli_compare_helpers`
-        # (function-local import) to detect whether a flag came from the
-        # command line vs. a default, same provenance primitive `compare`
-        # itself uses; `cli_compare_helpers` imports `main`/helpers from cli;
-        # cli imports cli_config at its tail to register the command/group.
-        frozenset({"cli", "cli_config", "cli_compare_helpers"}),
         # `scan` (cli_scan) reuses `embed_build_source` from cli_buildsource to
         # collect L3/L4/L5 inline; cli_buildsource imports `main`/helpers from cli;
         # cli imports cli_scan at its tail to register the command. All three edges

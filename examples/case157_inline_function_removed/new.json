@@ -1,5 +1,6 @@
 {
   "coverage": {},
+  "identity_collisions": [],
   "library": "libdemo.so",
   "mappings": {
     "allocator_interposer_symbol_to_owner": {},

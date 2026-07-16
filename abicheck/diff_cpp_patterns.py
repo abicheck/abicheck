@@ -305,14 +305,22 @@ _ISA_TOKENS: tuple[str, ...] = (
 def _isa_token_in_symbol(symbol_name: str) -> str | None:
     """Find the most specific ISA token in *symbol_name*.
 
-    Looks for ``_<token>_`` or trailing ``_<token>``. Case-insensitive.
+    Looks for ``_<token>_``, trailing ``_<token>``, or ``_<token>@`` (the
+    identifier/signature boundary in a raw MSVC-decorated export string, e.g.
+    ``?kmeans_compute_avx512@mylib@@YAHH@Z`` — needed when matching directly
+    against a PE/Mach-O export table rather than a demangled ``Function.name``;
+    see :func:`_build_removed_by_isa_from_raw_exports`). Case-insensitive.
     Returns the canonical lowercase token or ``None``.
     """
     if not symbol_name:
         return None
     lowered = symbol_name.lower()
     for token in _ISA_TOKENS:
-        if f"_{token}_" in lowered or lowered.endswith(f"_{token}"):
+        if (
+            f"_{token}_" in lowered
+            or f"_{token}@" in lowered
+            or lowered.endswith(f"_{token}")
+        ):
             return token
     return None
 
@@ -320,9 +328,9 @@ def _isa_token_in_symbol(symbol_name: str) -> str | None:
 def _isa_strip_token(symbol_name: str, token: str) -> str:
     """Remove the ISA token from *symbol_name* to get the algorithm stem."""
     lowered = symbol_name
-    # Replace `_token_` first, then trailing `_token`.
+    # Replace `_token_`/`_token@` first, then trailing `_token`.
     lowered = re.sub(
-        rf"_{re.escape(token)}(?=(_|$))",
+        rf"_{re.escape(token)}(?=(_|@|$))",
         "",
         lowered,
         flags=re.IGNORECASE,
@@ -330,7 +338,9 @@ def _isa_strip_token(symbol_name: str, token: str) -> str:
     return lowered
 
 
-def _build_removed_by_isa(old_functions: Iterable[Function], new_mangled: set[str]) -> dict[str, list[tuple[str, str]]]:
+def _build_removed_by_isa(
+    old_functions: Iterable[Function], new_mangled: set[str]
+) -> dict[str, list[tuple[str, str]]]:
     """Build a mapping from ISA token → list of (stem, mangled) for functions removed in new."""
     removed_by_isa: dict[str, list[tuple[str, str]]] = defaultdict(list)
     for fn in old_functions:
@@ -352,7 +362,69 @@ def _build_all_surviving_stems(new_functions: Iterable[Function]) -> set[str]:
         if token is None:
             continue
         surviving_stems_by_isa[token].add(_isa_strip_token(fn.name, token))
-    return set().union(*surviving_stems_by_isa.values()) if surviving_stems_by_isa else set()
+    return (
+        set().union(*surviving_stems_by_isa.values())
+        if surviving_stems_by_isa
+        else set()
+    )
+
+
+def _raw_export_ids(snapshot: AbiSnapshot) -> set[str]:
+    """Return the raw PE/Mach-O export-table identifiers for *snapshot*.
+
+    Mirrors exactly how ``diff_platform._diff_pe``/``_diff_macho_exports``
+    compute the ``Change.symbol``/``eid`` they emit for a removed export, so a
+    stem/token clustered from this set lines up with the suppression keys
+    those two functions' findings are matched against.
+    """
+    ids: set[str] = set()
+    pe = getattr(snapshot, "pe", None)
+    if pe is not None:
+        ids.update(e.name if e.name else f"ordinal:{e.ordinal}" for e in pe.exports)
+    macho = getattr(snapshot, "macho", None)
+    if macho is not None:
+        ids.update(e.name for e in macho.exports if e.name)
+    return ids
+
+
+def _build_removed_by_isa_from_raw_exports(
+    old_ids: set[str], new_ids: set[str]
+) -> dict[str, list[tuple[str, str]]]:
+    """Cluster removed *raw* export ids by ISA token, independent of the Function model.
+
+    A header-declared C++ function's ``Visibility`` depends on castxml's guessed
+    mangled name exactly matching the real compiled export string; on Windows
+    this guess is Clang's *emulation* of the proprietary MSVC mangling scheme,
+    which is not guaranteed to match a real ``cl.exe`` build byte-for-byte. A
+    mismatch resolves every such function to ``HIDDEN``, emptying
+    :func:`_build_removed_by_isa`'s ``old_functions``/``new_mangled`` inputs and
+    silently disabling this detector — exactly the failure mode the raw-export
+    fallback below exists to route around, by clustering directly off the
+    binary's export table instead of the (possibly mismatched) Function model.
+    """
+    removed_by_isa: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    for eid in sorted(old_ids - new_ids):
+        token = _isa_token_in_symbol(eid)
+        if token is None:
+            continue
+        stem = _isa_strip_token(eid, token)
+        removed_by_isa[token].append((stem, eid))
+    return removed_by_isa
+
+
+def _build_all_surviving_stems_from_raw_exports(new_ids: set[str]) -> set[str]:
+    """Raw-export-table counterpart of :func:`_build_all_surviving_stems`."""
+    surviving_stems_by_isa: dict[str, set[str]] = defaultdict(set)
+    for eid in new_ids:
+        token = _isa_token_in_symbol(eid)
+        if token is None:
+            continue
+        surviving_stems_by_isa[token].add(_isa_strip_token(eid, token))
+    return (
+        set().union(*surviving_stems_by_isa.values())
+        if surviving_stems_by_isa
+        else set()
+    )
 
 
 def _suppress_demangled_names(
@@ -432,18 +504,52 @@ def detect_cpu_dispatch_isa_dropped(
     removed_by_isa = _build_removed_by_isa(old_funcs, new_mangled)
     all_surviving_stems = _build_all_surviving_stems(new_funcs)
     old_index: dict[str, Function] = {f.mangled: f for f in old_funcs}
+
+    # Raw-export-table fallback (case83 Windows/PE investigation): a header
+    # function's Visibility depends on castxml's guessed mangled name exactly
+    # matching the real compiled export, which is not guaranteed on Windows
+    # (Clang's MSVC-mangling *emulation* vs. a real ``cl.exe`` build). A
+    # mismatch resolves every such function to HIDDEN, silently emptying
+    # old_funcs/new_funcs above and disabling this detector -- so also cluster
+    # directly off the PE/Mach-O export table, independent of Function
+    # visibility. On ELF (no .pe/.macho) this is a no-op; on a platform where
+    # the Function model already resolved correctly it is a harmless,
+    # redundant superset (a token already grouped via the model isn't grouped
+    # a second time below).
+    old_raw_ids = _raw_export_ids(old)
+    new_raw_ids = _raw_export_ids(new)
+    removed_by_isa_raw = _build_removed_by_isa_from_raw_exports(
+        old_raw_ids, new_raw_ids
+    )
+    all_surviving_stems |= _build_all_surviving_stems_from_raw_exports(new_raw_ids)
+
     findings: list[Change] = []
     suppressed: set[str] = set()
-    for token, removed in removed_by_isa.items():
+    for token in set(removed_by_isa) | set(removed_by_isa_raw):
+        removed = list(removed_by_isa.get(token, ()))
+        already_suppressed = {mangled for _, mangled in removed}
+        # Don't re-cluster a raw export id that the Function model already
+        # accounted for under this token (the common case on a platform where
+        # visibility resolution works: guessed-mangled and raw-export strings
+        # usually differ, so this only trims the true accidental overlaps).
+        removed += [
+            (stem, eid)
+            for stem, eid in removed_by_isa_raw.get(token, ())
+            if eid not in already_suppressed
+        ]
         if len(removed) < min_removed:
             continue
         # Only group symbols whose algorithm stem still survives under some
         # other ISA. Fully-removed algorithms keep their per-symbol
         # ``func_removed`` finding so the user sees the real deletion.
-        overlapping = [(stem, mangled) for stem, mangled in removed if stem in all_surviving_stems]
+        overlapping = [
+            (stem, mangled) for stem, mangled in removed if stem in all_surviving_stems
+        ]
         if len(overlapping) < min_removed:
             continue
-        findings.append(_emit_isa_dropped_finding(token, overlapping, old_index, suppressed))
+        findings.append(
+            _emit_isa_dropped_finding(token, overlapping, old_index, suppressed)
+        )
     return findings, suppressed
 
 
@@ -493,9 +599,13 @@ def _find_tag_rename_for_removed(
     return None
 
 
-def _empty_records_only_in(types_a: dict[str, RecordType], types_b: dict[str, RecordType]) -> list[RecordType]:
+def _empty_records_only_in(
+    types_a: dict[str, RecordType], types_b: dict[str, RecordType]
+) -> list[RecordType]:
     """Return records that are empty and present in *types_a* but not *types_b*."""
-    return [t for name, t in types_a.items() if name not in types_b and _is_empty_record(t)]
+    return [
+        t for name, t in types_a.items() if name not in types_b and _is_empty_record(t)
+    ]
 
 
 def _group_by_namespace(types: list[RecordType]) -> dict[str, list[RecordType]]:
@@ -827,9 +937,13 @@ def _emit_inline_body_findings(
     findings: list[Change] = []
     seen: set[tuple[str, str, str]] = set()
     for internal_type, old_field, new_field in rename_candidates:
-        public_holders = _find_public_pimpl_holders(new_types.values(), internal_type, namespaces)
+        public_holders = _find_public_pimpl_holders(
+            new_types.values(), internal_type, namespaces
+        )
         if not public_holders:
-            public_holders = _find_public_pimpl_holders(old_types.values(), internal_type, namespaces)
+            public_holders = _find_public_pimpl_holders(
+                old_types.values(), internal_type, namespaces
+            )
         if not public_holders:
             continue
         inline_funcs = _inline_accessors_for(old_functions, public_holders)
@@ -840,14 +954,16 @@ def _emit_inline_body_findings(
             if key in seen:
                 continue
             seen.add(key)
-            findings.append(make_change(
-                ChangeKind.INLINE_BODY_REFERENCES_RENAMED_MEMBER,
-                symbol=holder,
-                name=holder,
-                detail=f"({len(inline_funcs)} found) reaching into '{internal_type}'",
-                old=old_field,
-                new=new_field,
-            ))
+            findings.append(
+                make_change(
+                    ChangeKind.INLINE_BODY_REFERENCES_RENAMED_MEMBER,
+                    symbol=holder,
+                    name=holder,
+                    detail=f"({len(inline_funcs)} found) reaching into '{internal_type}'",
+                    old=old_field,
+                    new=new_field,
+                )
+            )
     return findings
 
 
@@ -885,7 +1001,9 @@ def detect_inline_body_renamed_member(
     if not rename_candidates:
         return []
 
-    return _emit_inline_body_findings(rename_candidates, old_types, new_types, old.functions, namespaces)
+    return _emit_inline_body_findings(
+        rename_candidates, old_types, new_types, old.functions, namespaces
+    )
 
 
 def _find_public_pimpl_holders(
@@ -1030,7 +1148,8 @@ def _inline_accessors_for(
     inline_fns = [
         fn
         for fn in fns
-        if getattr(fn, "is_inline", False) and getattr(fn, "access", None) == AccessLevel.PUBLIC
+        if getattr(fn, "is_inline", False)
+        and getattr(fn, "access", None) == AccessLevel.PUBLIC
     ]
     if not inline_fns:
         return []

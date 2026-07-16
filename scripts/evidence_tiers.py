@@ -360,6 +360,9 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     # rtti_for_internal_type needs header provenance to know a type is internal.
     "unversioned_exported_symbol": "L0",
     "rtti_for_internal_type": "L2",
+    # identity_collision_detected reads the L4 surface's recorded USR collisions
+    # (ADR-041 P1 #5) — same evidence source as odr_type_variant.
+    "identity_collision_detected": "L4",
     # ── Coverage extension: dynamic-loader / platform metadata (all read from
     # the binary's headers, dynamic section, notes, or symbol tables alone). ──
     "imported_symbol_added": "L0",
