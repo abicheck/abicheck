@@ -1231,6 +1231,31 @@ class TestCastxmlParserVtable:
         derived_t = next(t for t in types if t.name == "Derived")
         assert derived_t.vtable == ["_ZN7Derived3fooEv"]
 
+    def test_vtable_multi_id_overrides_replaces_every_resolved_slot(self):
+        """Non-virtual multiple inheritance: Derived : Base1, Base2, each
+        declaring its own unrelated foo(). A single final overrider covers
+        both (``overrides="m1 m2"``, both already-resolvable slots). The
+        reconstructed vtable must collapse onto ONE entry for the override,
+        not leave the second base's slot behind as a stale phantom entry
+        that no longer reflects reality once the override materializes.
+        """
+        base1 = Element("Class", id="c1", name="Base1")
+        m1 = Element("Method", id="m1", name="foo", mangled="_ZN5Base13fooEv",
+                      virtual="1", context="c1")
+        base2 = Element("Class", id="c2", name="Base2")
+        m2 = Element("Method", id="m2", name="foo", mangled="_ZN5Base23fooEv",
+                      virtual="1", context="c2")
+        derived = Element("Class", id="c3", name="Derived")
+        SubElement(derived, "Base", type="c1")
+        SubElement(derived, "Base", type="c2")
+        m3 = Element("Method", id="m3", name="foo", mangled="_ZN7Derived3fooEv",
+                      virtual="1", context="c3", overrides="m1 m2")
+        root = _xml_root(base1, base2, derived, m1, m2, m3)
+        p = _CastxmlParser(root, set(), set())
+        types = p.parse_types()
+        derived_t = next(t for t in types if t.name == "Derived")
+        assert derived_t.vtable == ["_ZN7Derived3fooEv"]
+
     def test_vtable_diamond_inheritance_does_not_infinite_loop(self):
         """Diamond inheritance (Derived : Left, Right; both : Base) revisits
         Base through two paths. The `seen` guard must return {} on the

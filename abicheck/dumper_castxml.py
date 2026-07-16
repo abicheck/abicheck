@@ -1299,6 +1299,7 @@ class _CastxmlParser:
             mid = method_el.get("id", "")
             overrides_id = method_el.get("overrides")
             key: int | str
+            replaced_keys: list[int | str] = []
             if overrides_id:
                 # An override always reuses whatever slot its base declaration
                 # landed under -- checked BEFORE falling back to this
@@ -1311,18 +1312,25 @@ class _CastxmlParser:
                 #
                 # castxml can list more than one overridden declaration as a
                 # whitespace-separated id list when a single override
-                # simultaneously covers more than one base-class branch
-                # (multiple/diamond inheritance) -- an exact lookup of the raw
-                # composite string never matches _vtable_slot_root, so resolve
-                # each id and reuse whichever already-registered slot is found
-                # first, rather than opening a phantom extra slot no override
-                # chain ever pointed at.
+                # simultaneously covers more than one base-class branch (e.g.
+                # non-virtual multiple inheritance -- Derived : Base1, Base2 --
+                # where one final overrider satisfies both Base1::foo() and
+                # Base2::foo()). An exact lookup of the raw composite string
+                # never matches _vtable_slot_root, so resolve each id: the
+                # first resolved slot becomes this entry's key, and every
+                # OTHER resolved slot is collapsed into it below (via
+                # replaced_keys) rather than left behind as a stale phantom
+                # entry that no longer reflects reality once the override
+                # materializes.
                 key = overrides_id
                 for oid in overrides_id.split():
                     resolved = self._vtable_slot_root.get(oid)
-                    if resolved is not None:
+                    if resolved is None:
+                        continue
+                    if key == overrides_id:
                         key = resolved
-                        break
+                    elif resolved != key:
+                        replaced_keys.append(resolved)
                 if isinstance(key, int):
                     # Consistently-indexed lineage: adopt the resolved index
                     # for sorting when this declaration has none of its own,
@@ -1358,6 +1366,8 @@ class _CastxmlParser:
                 # Base's slot is keyed by, or it would append instead of replace.
                 self._vtable_slot_root[mid] = key
             slots[key] = (idx, mangled_name)
+            for other_key in replaced_keys:
+                slots.pop(other_key, None)
 
         return slots
 
