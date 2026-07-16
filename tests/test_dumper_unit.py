@@ -1117,6 +1117,32 @@ class TestCastxmlParserVtable:
         derived_t = next(t for t in types if t.name == "Derived")
         assert derived_t.vtable == ["_ZN7Derived3fooEv"]
 
+    def test_vtable_override_chain_mixed_indexed_and_unindexed(self):
+        """Base and Mid carry ``vtable_index`` (slot 0), but Mid's override
+        drops the index and Derived overrides Mid via ``overrides`` only.
+        Derived's unindexed override must still resolve back to Base/Mid's
+        int-keyed slot 0, not append a spurious extra entry -- a downstream
+        override in a mixed indexed/unindexed chain has no other signal
+        tying it to the base's slot once the index disappears partway
+        through the hierarchy.
+        """
+        base = Element("Class", id="c1", name="Base")
+        m1 = Element("Method", id="m1", name="foo", mangled="_ZN4Base3fooEv",
+                      virtual="1", vtable_index="0", context="c1")
+        mid = Element("Class", id="c2", name="Mid")
+        SubElement(mid, "Base", type="c1")
+        m2 = Element("Method", id="m2", name="foo", mangled="_ZN3Mid3fooEv",
+                      virtual="1", vtable_index="0", context="c2")
+        derived = Element("Class", id="c3", name="Derived")
+        SubElement(derived, "Base", type="c2")
+        m3 = Element("Method", id="m3", name="foo", mangled="_ZN7Derived3fooEv",
+                      virtual="1", context="c3", overrides="m2")
+        root = _xml_root(base, mid, derived, m1, m2, m3)
+        p = _CastxmlParser(root, set(), set())
+        types = p.parse_types()
+        derived_t = next(t for t in types if t.name == "Derived")
+        assert derived_t.vtable == ["_ZN7Derived3fooEv"]
+
 
 class TestCastxmlParserEnums:
     def test_parse_enum(self):

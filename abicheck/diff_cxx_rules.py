@@ -336,6 +336,10 @@ def vtable_slot_is_override_reuse(
     new_entry: str,
     old_funcs: dict[str, Function],
     new_funcs: dict[str, Function],
+    t_old: RecordType,
+    t_new: RecordType,
+    old_types: dict[str, RecordType],
+    new_types: dict[str, RecordType],
 ) -> bool:
     """True if a vtable slot's mangled entry changed only because a derived
     class overrode the inherited virtual that occupied it, reusing the same
@@ -351,6 +355,19 @@ def vtable_slot_is_override_reuse(
     are identical, and it would report ``TYPE_VTABLE_CHANGED`` for a change
     the other detector already deemed compatible. Mirroring the same
     signature-key comparison here keeps the two detectors in agreement.
+
+    A signature match alone is not sufficient: two *unrelated* classes could
+    each declare an unrelated virtual that happens to share a leaf name and
+    parameter list, and a class could switch which one occupies a slot
+    without genuinely overriding anything. ``virtual_method_addition()``
+    guards against that by requiring the old entry's owner to be a
+    transitive base of the class actually being diffed; this mirrors that
+    same guard via ``_transitive_bases`` — checked on *both* entries, since a
+    same-signature old owner outside ``name``'s hierarchy is just as
+    unrelated as a same-signature new owner outside it (checking only one
+    side would let a slot swap to a same-signature virtual from a wholly
+    unconnected class read as compatible, as long as the class being diffed
+    still happens to keep some unrelated base around).
     """
     if old_entry == new_entry:
         return True
@@ -358,7 +375,19 @@ def vtable_slot_is_override_reuse(
     f_new = new_funcs.get(new_entry)
     if f_old is None or f_new is None or not f_old.is_virtual or not f_new.is_virtual:
         return False
-    return virtual_signature_key(f_old) == virtual_signature_key(f_new)
+    if virtual_signature_key(f_old) != virtual_signature_key(f_new):
+        return False
+    old_owner = owner_class_of(f_old)
+    new_owner = owner_class_of(f_new)
+    if old_owner is None or new_owner is None:
+        return False
+    bases = _transitive_bases(t_new, new_types) | _transitive_bases(t_old, old_types)
+
+    def _in_hierarchy(owner: str) -> bool:
+        leaf = owner.rsplit("::", 1)[-1]
+        return owner in bases or leaf in bases or owner == t_new.name or leaf == t_new.name
+
+    return _in_hierarchy(old_owner) and _in_hierarchy(new_owner)
 
 
 def old_virtual_signatures(functions: Iterable[Function]) -> dict[str, set[str]]:

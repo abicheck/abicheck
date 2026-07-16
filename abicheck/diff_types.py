@@ -159,6 +159,12 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
     old_funcs = old.function_map
     new_funcs = new.function_map
+    # Unfiltered (unlike old_map/new_map above) so a private/internal base
+    # class still resolves when _transitive_bases walks the hierarchy for
+    # vtable_slot_is_override_reuse() -- mirrors diff_symbols._diff_functions'
+    # own old_types/new_types for the identical virtual_method_addition() walk.
+    old_types = {t.name: t for t in old.types}
+    new_types = {t.name: t for t in new.types}
 
     for name, t_old in old_map.items():
         t_new = new_map.get(name)
@@ -171,7 +177,9 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 description=f"Type removed: {name}",
             ))
             continue
-        changes.extend(_diff_type_pair(name, t_old, t_new, old_funcs, new_funcs))
+        changes.extend(
+            _diff_type_pair(name, t_old, t_new, old_funcs, new_funcs, old_types, new_types)
+        )
 
     for name in new_map:
         if name not in old_map:
@@ -266,6 +274,8 @@ def _diff_type_pair(
     t_new: RecordType,
     old_funcs: dict[str, Function],
     new_funcs: dict[str, Function],
+    old_types: dict[str, RecordType],
+    new_types: dict[str, RecordType],
 ) -> list[Change]:
     changes: list[Change] = []
 
@@ -284,7 +294,9 @@ def _diff_type_pair(
     if not t_old.is_union:
         changes.extend(_diff_type_fields(name, t_old, t_new))
     changes.extend(_diff_type_bases(name, t_old, t_new))
-    changes.extend(_diff_type_vtable(name, t_old, t_new, old_funcs, new_funcs))
+    changes.extend(
+        _diff_type_vtable(name, t_old, t_new, old_funcs, new_funcs, old_types, new_types)
+    )
     _append_type_finality_changes(changes, name, t_old, t_new)
     return changes
 
@@ -802,6 +814,8 @@ def _diff_type_vtable(
     t_new: RecordType,
     old_funcs: dict[str, Function],
     new_funcs: dict[str, Function],
+    old_types: dict[str, RecordType],
+    new_types: dict[str, RecordType],
 ) -> list[Change]:
     if t_old.vtable == t_new.vtable:
         return []
@@ -810,9 +824,13 @@ def _diff_type_vtable(
     # a slot's mangled owner renaming from base to derived; func_added (from
     # diff_symbols._diff_functions) already covers the newly-materialized
     # symbol. See vtable_slot_is_override_reuse() for why this must mirror
-    # virtual_method_addition()'s exemption.
+    # virtual_method_addition()'s exemption (including its owner/transitive-base
+    # guard, so two unrelated same-signature virtuals can't false-suppress a
+    # genuine slot replacement).
     if len(t_old.vtable) == len(t_new.vtable) and all(
-        vtable_slot_is_override_reuse(old_entry, new_entry, old_funcs, new_funcs)
+        vtable_slot_is_override_reuse(
+            old_entry, new_entry, old_funcs, new_funcs, t_old, t_new, old_types, new_types
+        )
         for old_entry, new_entry in zip(t_old.vtable, t_new.vtable)
     ):
         return []

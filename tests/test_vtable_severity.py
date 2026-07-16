@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.checker_policy import BREAKING_KINDS
+from abicheck.diff_cxx_rules import vtable_slot_is_override_reuse
 from abicheck.model import AbiSnapshot, Function, Param, RecordType
 
 
@@ -158,3 +159,36 @@ class TestVtableOverrideSlotReuse:
         result = compare(old, new)
         kinds = {c.kind for c in result.changes}
         assert ChangeKind.TYPE_VTABLE_CHANGED in kinds
+
+    def test_same_signature_unrelated_owner_not_treated_as_reuse(self) -> None:
+        """A signature match alone must not suppress the change: a vtable
+        entry swapping to a same-signature virtual from a class that is NOT
+        in Derived's hierarchy is a genuine, unrelated slot replacement, not
+        an override-reuse. Guards against a same-name/params collision
+        between two unrelated hierarchies falsely reading as compatible.
+
+        Verified at the helper level rather than via full compare(): this
+        scenario (one symbol removed, one added, nothing else) is also where
+        diff_filtering.py's unrelated add/remove-pair dedup independently
+        collapses the end-to-end output before a suppressed-or-not
+        TYPE_VTABLE_CHANGED would be observable either way, so a
+        compare()-level assertion wouldn't isolate this specific guard.
+        """
+        old_funcs = {"_ZN4Base5paintEi": Function(
+            name="Base::paint", mangled="_ZN4Base5paintEi",
+            return_type="int", params=[Param(name="x", type="int")], is_virtual=True,
+        )}
+        new_funcs = {"_ZN6Other5paintEi": Function(
+            name="Other::paint", mangled="_ZN6Other5paintEi",
+            return_type="int", params=[Param(name="x", type="int")], is_virtual=True,
+        )}
+        t_old = RecordType(
+            name="Derived", kind="class", bases=["Base"], vtable=["_ZN4Base5paintEi"],
+        )
+        t_new = RecordType(
+            name="Derived", kind="class", bases=["Base"], vtable=["_ZN6Other5paintEi"],
+        )
+        assert not vtable_slot_is_override_reuse(
+            "_ZN4Base5paintEi", "_ZN6Other5paintEi",
+            old_funcs, new_funcs, t_old, t_new, {}, {},
+        )

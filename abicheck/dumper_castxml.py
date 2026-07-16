@@ -214,7 +214,7 @@ class _CastxmlParser:
         # method element id -> canonical vtable-slot key, resolved through any
         # `overrides` chain. Populated lazily by _collect_virtual_methods(); see
         # its docstring for why this is needed alongside vtable_index.
-        self._vtable_slot_root: dict[str, str] = {}
+        self._vtable_slot_root: dict[str, int | str] = {}
         self._build_id_map()
 
     def _build_id_map(self) -> None:
@@ -1306,7 +1306,13 @@ class _CastxmlParser:
             else:
                 key = mid or mangled_name
             if mid:
-                self._vtable_slot_root[mid] = key if isinstance(key, str) else mid
+                # Record the *actual* slot key (int index or str id) this method
+                # landed under, not just a self-reference -- a downstream override
+                # in a mixed indexed/unindexed chain (e.g. Base has vtable_index,
+                # Mid overrides it losing the index, Derived overrides Mid via
+                # `overrides="Mid's id"`) must still resolve back to the int index
+                # Base's slot is keyed by, or it would append instead of replace.
+                self._vtable_slot_root[mid] = key
             slots[key] = (idx, mangled_name)
 
         return slots
