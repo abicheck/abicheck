@@ -789,6 +789,11 @@ def test_run_compiler_lane_surfaces_failed_and_missing_retries(
         ],
     }
     alt = {
+        # The alt run's own producer must actually be clang (matching the
+        # requested alt_family) so this test still exercises FAIL/missing
+        # handling rather than the (separately tested) fallback-mismatch
+        # path.
+        "compiler_cxx": "clang++",
         "results": [
             {"name": "caseA", "status": "FAIL", "message": "boom"},
             # caseB deliberately omitted from the alt run's own results.
@@ -858,7 +863,14 @@ def test_run_compiler_lane_derives_retries_from_split_cc_cxx(
         retry_calls.append(cmd)
         toolchain = cmd[cmd.index("--toolchain") + 1]
         name = cmd[-1]
-        return {"results": [{"name": name, "status": "PASS", "toolchain": toolchain}]}
+        compiler_c, compiler_cxx = (
+            ("clang", "clang++") if toolchain == "clang" else ("gcc", "g++")
+        )
+        return {
+            "compiler_c": compiler_c,
+            "compiler_cxx": compiler_cxx,
+            "results": [{"name": name, "status": "PASS", "toolchain": toolchain}],
+        }
 
     monkeypatch.setattr(catalog, "_run_json", fake_run_json)
 
@@ -905,10 +917,70 @@ def test_run_compiler_lane_forced_toolchain_reports_actual_fallback_compiler(
     by_case, desc, retry_failures = catalog._run_compiler_lane("clang")
 
     assert retry_failures == []
-    assert desc == "toolchain=clang (forced for every case)"
+    # desc must not claim clang was "forced" when the actual producer
+    # (reported below) fell back to gcc -- that would misrepresent how the
+    # results were actually produced (CodeRabbit review).
+    assert desc == "toolchain=clang (requested for every case; actual c=gcc/cxx=gcc)"
     # Both cases actually built with gcc regardless of source language --
     # not the requested "clang".
     assert by_case["case64_calling_convention_changed"]["toolchain_used"] == "gcc"
+    assert by_case["case34_access_level"]["toolchain_used"] == "gcc"
+
+
+def test_run_compiler_lane_rejects_retry_that_itself_fell_back(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Regression (CodeRabbit review): _has_compiler("clang") only checks
+    that *some* clang-family binary is on PATH, but tests/validate_examples.py
+    -._find_compiler resolves per-language and can itself fall back to a
+    third family for one case's actual source language (e.g. clang++ absent,
+    clang present -- a C++ case's retry silently builds with gcc instead). A
+    retry batch's own compiler_c/compiler_cxx must be checked before trusting
+    its PASS as real evidence for the *requested* alternate family, or a
+    fallback-produced PASS could wrongly promote a gcc-scoped known_gap under
+    a clang label the case never actually built under."""
+    catalog = _load_script("validation/scripts/run_full_catalog.py")
+    synthetic_gt = tmp_path / "ground_truth.json"
+    synthetic_gt.write_text(
+        json.dumps(
+            {"verdicts": {"case34_access_level": {"known_gap_toolchains": ["gcc"]}}}
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(catalog, "GROUND_TRUTH", synthetic_gt)
+    monkeypatch.setattr(catalog, "_has_compiler", lambda _family: True)
+
+    primary = {
+        "compiler_c": "gcc",
+        "compiler_cxx": "gcc",
+        "results": [
+            {"name": "case34_access_level", "status": "XFAIL", "message": "known_gap"}
+        ],
+    }
+
+    def fake_run_json(cmd):
+        if cmd[cmd.index("--toolchain") + 1] == "auto":
+            return primary
+        # Retry was requested with --toolchain clang, but the retry's own
+        # producer fell back to gcc anyway (e.g. clang++ absent even though
+        # a bare clang satisfied _has_compiler's coarser probe).
+        return {
+            "compiler_c": "gcc",
+            "compiler_cxx": "gcc",
+            "results": [{"name": "case34_access_level", "status": "PASS"}],
+        }
+
+    monkeypatch.setattr(catalog, "_run_json", fake_run_json)
+
+    by_case, _desc, retry_failures = catalog._run_compiler_lane("auto")
+
+    assert retry_failures == [
+        "case34_access_level: requested clang retry actually used gcc"
+    ]
+    # The primary's XFAIL must survive untouched -- the "PASS" was never
+    # actually produced by the requested alternate family, so it isn't real
+    # evidence that clang clears this case's known_gap.
+    assert by_case["case34_access_level"]["status"] == "XFAIL"
     assert by_case["case34_access_level"]["toolchain_used"] == "gcc"
 
 
@@ -948,7 +1020,15 @@ def test_run_compiler_lane_desc_counts_only_attempted_retries(monkeypatch) -> No
     def fake_run_json(cmd):
         if cmd[cmd.index("--toolchain") + 1] == "auto":
             return primary
-        return {"results": [{"name": "caseC", "status": "PASS"}]}
+        # caseC's retry is requested with clang -- the monkeypatched
+        # _case_family above returns family_c verbatim for "caseC", so
+        # compiler_c here must actually say clang for the new actual-vs-
+        # requested family check to accept this as a genuine clang retry.
+        return {
+            "compiler_c": "clang",
+            "compiler_cxx": "clang++",
+            "results": [{"name": "caseC", "status": "PASS"}],
+        }
 
     monkeypatch.setattr(catalog, "_run_json", fake_run_json)
 

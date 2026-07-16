@@ -222,7 +222,15 @@ def _run_compiler_lane(
             r["name"]: {**r, "toolchain_used": case_family[r["name"]]}
             for r in primary["results"]
         }
-        return by_case, f"toolchain={toolchain} (forced for every case)", []
+        # "forced for every case" overstates it when _find_compiler fell back
+        # (CodeRabbit review) -- state what was requested vs. what actually
+        # built the cases; toolchain_used above already carries the per-case
+        # truth for anything that disagrees with the request.
+        desc = (
+            f"toolchain={toolchain} (requested for every case; "
+            f"actual c={primary_family_c}/cxx={primary_family_cxx})"
+        )
+        return by_case, desc, []
 
     gt = json.loads(GROUND_TRUTH.read_text())["verdicts"]
     by_case = {
@@ -268,6 +276,14 @@ def _run_compiler_lane(
                 *names,
             ]
         )
+        # The retry itself doesn't fail closed either (CodeRabbit review):
+        # _find_compiler can fall back to a *third* family for this alt run
+        # too, so a PASS here doesn't necessarily mean alt_family actually
+        # built it -- checked per case below via the same _case_family
+        # helper the primary lane uses, since a split CC/CXX retry batch
+        # can (rarely) still mix languages.
+        alt_family_c = _family_of(alt_result.get("compiler_c", "gcc"))
+        alt_family_cxx = _family_of(alt_result.get("compiler_cxx", "gcc"))
         alt_by_case = {r["name"]: r for r in alt_result["results"]}
         for name in names:
             alt_r = alt_by_case.get(name)
@@ -276,8 +292,14 @@ def _run_compiler_lane(
                     f"{name}: {alt_family} retry produced no result row"
                 )
                 continue
+            actual_family = _case_family(name, alt_family_c, alt_family_cxx)
+            if actual_family != alt_family:
+                retry_failures.append(
+                    f"{name}: requested {alt_family} retry actually used {actual_family}"
+                )
+                continue
             if alt_r["status"] == "PASS" and by_case[name]["status"] != "PASS":
-                by_case[name] = {**alt_r, "toolchain_used": alt_family}
+                by_case[name] = {**alt_r, "toolchain_used": actual_family}
                 retried += 1
             elif alt_r["status"] in ("FAIL", "ERROR", "BUILD_ERROR"):
                 retry_failures.append(
