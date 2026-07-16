@@ -232,6 +232,18 @@ class TestCpoKindChanged:
         assert len(changes) == 1
         assert changes[0].new_value == "variable"
 
+    def test_thunk_prefix_not_treated_as_leaked_return_type(self) -> None:
+        # An ABI thunk marker ("non-virtual thunk to ...") is a demangled
+        # name that, like a genuine function-template leak, contains a
+        # top-level space before the qualified name — but it is not a
+        # template instantiation, so it must not be routed through the
+        # leaked-return-type stripper. Doing so would collapse it to
+        # "lib::sort" and wrongly collide with an unrelated same-named CPO
+        # variable (Codex review).
+        old = _snap(funcs=[_fn("non-virtual thunk to lib::sort()")])
+        new = _snap(vars_=[_var("sort", type_="lib::__sort_fn", mangled="_ZN3lib4sortE")])
+        assert detect_cpo_kind_changed(old, new) == []
+
 
 # ---------------------------------------------------------------------------
 # OVERLOAD_SET_REROUTED

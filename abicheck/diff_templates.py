@@ -161,6 +161,14 @@ def _strip_leading_return_type(sig: str) -> str:
     an ``operator`` name (itself spelled with a space, e.g. ``"operator
     new"``) — CPOs are never operators, and blindly splitting there would
     corrupt the operator's own name instead of stripping a return type.
+
+    Callers must only invoke this once :func:`_looks_like_template_instantiation`
+    has confirmed the *pre-strip* qualified name was actually a template
+    instantiation — a non-template demangling can still contain a top-level
+    space for an unrelated reason (an ABI thunk marker like ``"non-virtual
+    thunk to lib::sort()"``) and must never be routed through here, or the
+    thunk collapses to ``"lib::sort"`` and wrongly collides with an
+    unrelated same-named CPO variable (Codex review).
     """
     if " " not in sig or "operator" in sig:
         return sig
@@ -313,7 +321,18 @@ def detect_cpo_kind_changed(
             qname = _qualified_function_name(f.name, f.mangled)
             if qname:
                 stem = _strip_param_signature(_strip_template_args(qname))
-                out.add(_strip_leading_return_type(stem))
+                # Only a function *template* instantiation's demangling ever
+                # leaks a return type ahead of the qualified name (checked on
+                # the pre-strip qname, since the template args themselves are
+                # the tell). A non-template name that happens to contain a
+                # space for an unrelated reason — e.g. an ABI thunk marker
+                # like "non-virtual thunk to lib::sort()" — must not go
+                # through the stripper: it would take the text after the
+                # last space ("lib::sort") and wrongly collide with an
+                # unrelated same-named CPO variable (Codex review).
+                if _looks_like_template_instantiation(qname):
+                    stem = _strip_leading_return_type(stem)
+                out.add(stem)
         return out
 
     def _var_names(snap: AbiSnapshot) -> set[str]:
