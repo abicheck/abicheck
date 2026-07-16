@@ -141,6 +141,32 @@ def _strip_param_signature(qualified: str) -> str:
     return qualified
 
 
+def _strip_leading_return_type(sig: str) -> str:
+    """Strip a leaked leading return type from a demangled function
+    signature, once template args and the param signature are already gone.
+
+    Itanium demangling includes the return type for a function *template*
+    instantiation (needed to disambiguate an overload set that differs only
+    by return type) but never for a non-template function — so
+    ``lib::sort<int>(int*, int*)`` demangles to ``"int lib::sort<int>(int*,
+    int*)"``, and after :func:`_strip_template_args` + :func:`_strip_param_signature`
+    reduce that to ``"int lib::sort"``, the leaked ``"int "`` prefix must be
+    dropped so the function-template side of a CPO transition still matches
+    the variable side's plain ``"lib::sort"`` (case88's function-template
+    variant; Codex review).
+
+    By this point no ``<...>``/``(...)`` remain, so taking the text after
+    the *last* top-level space still isolates the qualified name even for a
+    multi-word return type (``"unsigned long lib::sort"``). Left alone for
+    an ``operator`` name (itself spelled with a space, e.g. ``"operator
+    new"``) — CPOs are never operators, and blindly splitting there would
+    corrupt the operator's own name instead of stripping a return type.
+    """
+    if " " not in sig or "operator" in sig:
+        return sig
+    return sig.rsplit(" ", 1)[-1]
+
+
 # ---------------------------------------------------------------------------
 # INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API
 # ---------------------------------------------------------------------------
@@ -286,7 +312,8 @@ def detect_cpo_kind_changed(
                 continue
             qname = _qualified_function_name(f.name, f.mangled)
             if qname:
-                out.add(_strip_param_signature(_strip_template_args(qname)))
+                stem = _strip_param_signature(_strip_template_args(qname))
+                out.add(_strip_leading_return_type(stem))
         return out
 
     def _var_names(snap: AbiSnapshot) -> set[str]:

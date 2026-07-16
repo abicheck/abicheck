@@ -1106,32 +1106,41 @@ def _check_variable_alignment(
 
 
 _TRAILING_CONST_RE = re.compile(r"\s*\bconst\b\s*$")
+_LEADING_CONST_TOKEN_RE = re.compile(r"^\s*\bconst\b\s*")
+_POINTER_OR_REF_RE = re.compile(r"[*&]")
 
 
 def _without_top_level_const(canonical_type: str) -> str:
-    """Strip only a *trailing* (top-level) ``const`` from an
-    already-canonicalized type name.
+    """Strip the *top-level* ``const`` from an already-canonicalized type name.
 
     ``canonicalize_type_name`` normalizes a leading ``const T`` to ``T
-    const`` (moving the qualifier immediately after what it qualifies), so
-    the qualifier that applies to the variable/pointer *itself* is always
-    the last token in the canonical string — ``"int const"`` for a plain
-    ``const int``, or ``"int * const"`` for a const pointer. A *pointee*-level
-    qualifier (``"int const *"`` for ``const int *``, which qualifies what
-    the pointer points to, not the pointer) is never trailing, so this
-    leaves it untouched.
+    const`` (moving the qualifier immediately after what it qualifies) —
+    but only when the base type has no template args (``"<...>"``); for a
+    templated base it deliberately leaves the spelling untouched, so a
+    top-level const on e.g. ``std::vector<int>`` stays leading
+    (``"const std::vector<int>"``), not trailing.
 
-    This lets :func:`_check_variable` compare *base* types independent of a
-    pure top-level const-only flip (e.g. ``int`` -> ``const int``, or
-    ``int *`` -> ``int * const``), classifying only those as
-    VAR_BECAME_CONST/VAR_LOST_CONST rather than the generic VAR_TYPE_CHANGED
-    — deliberately NOT stripping every ``const`` occurrence: doing so would
-    also collapse a pointee-const change (``int *`` -> ``const int *``) into
-    an apparent pure flip, hiding a real type change behind a misleading
-    "variable became const" (the pointer itself is still writable; only
-    what it points to changed) (Codex review).
+    So which end is "top-level" depends on whether a pointer/reference
+    sigil is present, not on template-ness:
+
+    - No ``*``/``&`` at all: the *whole object* is what's qualified, so a
+      const at *either* end (leading, for a templated base; trailing, the
+      east-const form for a non-template base) is the top-level qualifier
+      — strip whichever is present.
+    - A ``*``/``&`` present: the top-level (pointer-itself) qualifier is
+      always the trailing token (``"int * const"``, or ``"std::vector<int>
+      * const"``) regardless of template-ness. A *leading* const there
+      (``"int const *"``, ``"const std::vector<int> *"``) qualifies the
+      pointee, not the pointer, and must NOT be stripped — collapsing it
+      would hide a real type change (the pointer itself is still writable;
+      only what it points to changed) behind a misleading "variable became
+      const" (Codex review, x2: the original non-template pointee-const
+      case, and the templated-base variant of the same issue).
     """
-    return _TRAILING_CONST_RE.sub("", canonical_type)
+    if _POINTER_OR_REF_RE.search(canonical_type):
+        return _TRAILING_CONST_RE.sub("", canonical_type)
+    stripped = _LEADING_CONST_TOKEN_RE.sub("", canonical_type)
+    return _TRAILING_CONST_RE.sub("", stripped)
 
 
 def _check_variable(mangled: str, v_old: Variable, v_new: Variable) -> list[Change]:

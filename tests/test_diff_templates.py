@@ -215,6 +215,23 @@ class TestCpoKindChanged:
         new = _snap(vars_=[_var("sort", type_="ns2::__sort_fn", mangled="_ZN3ns24sortE")])
         assert detect_cpo_kind_changed(old, new) == []
 
+    def test_function_template_became_variable(self) -> None:
+        # A function TEMPLATE instantiation's demangled name includes a
+        # leading return type (Itanium demangling needs it to disambiguate
+        # return-type-only overloads) — real mangled name for
+        # `template<class T> T lib::sort(T*, T*)` instantiated as
+        # `sort<int>`, verified via c++filt to demangle to
+        # "int lib::sort<int>(int*, int*)". After template-arg and
+        # param-signature stripping that leaves a leaked "int " prefix,
+        # which must be stripped so this still matches the CPO variable
+        # side's plain "lib::sort" (Codex review: function-template variant
+        # of case88).
+        old = _snap(funcs=[_fn("sort", mangled="_ZN3lib4sortIiEET_PS1_S2_")])
+        new = _snap(vars_=[_var("sort", type_="lib::__sort_fn", mangled="_ZN3lib4sortE")])
+        changes = detect_cpo_kind_changed(old, new)
+        assert len(changes) == 1
+        assert changes[0].new_value == "variable"
+
 
 # ---------------------------------------------------------------------------
 # OVERLOAD_SET_REROUTED
