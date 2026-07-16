@@ -295,8 +295,11 @@ libabigail = "*"
 abi-compliance-checker = "*"
 
 [tool.pixi.feature.parity.tasks]
-test-libabigail = "pytest tests/test_abidiff_parity.py tests/test_abicompat_parity.py tests/test_abipkgdiff_parity.py -v -m libabigail --tb=short"
-test-abicc = "pytest tests/test_abicc_parity.py tests/test_xml_parity.py -v -m abicc --tb=short"
+# Marker-scoped across all of tests/ (not a hard-coded file list) so newly
+# added `libabigail`/`abicc`-marked files (e.g. the `_extended` parity
+# suites) are picked up automatically.
+test-libabigail = "pytest tests/ -v -m libabigail --tb=short"
+test-abicc = "pytest tests/ -v -m abicc --tb=short"
 
 # mkdocs site build (`docs/`), matching the `lint-and-types` CI job.
 [tool.pixi.feature.docs.pypi-dependencies]
