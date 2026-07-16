@@ -88,19 +88,22 @@ use_cases:
     status: complete
     note: >
       G5 closed: first-class host-contract check
-      (appcompat.check_plugin_host_contract) answers "does plugin v2 still
-      satisfy host H's required entrypoints?" — the plugin-load mirror of
-      appcompat, reusing its consumer-scoping. Exposed via the `plugin-check`
-      CLI (binary or JSON-snapshot inputs, --require / --host-contract manifest)
-      and the Python API, with the plugin_abi policy as the default. Validated
-      end-to-end through snapshot-driven scenario tests and CLI tests; the
+      (appcompat.check_plugin_host_contract / scope_diff_to_required_symbols)
+      answers "does plugin v2 still satisfy host H's required entrypoints?" —
+      the plugin-load mirror of appcompat, reusing its consumer-scoping.
+      ADR-043 folded the standalone `plugin-check` CLI into
+      `compare --required-symbol`/`--required-symbols` (repeatable flag or a
+      newline-delimited manifest file), scoping the comparison to an explicit
+      required-entrypoint contract instead of the full diff, with the
+      plugin_abi policy as the default. Validated end-to-end through
+      snapshot-driven scenario tests and CLI tests; the
       host-safe-vs-host-breaking distinction (a library-wide BREAKING drop the
       host never resolves stays COMPATIBLE for the host) is asserted. A compiled
       host/plugin binary demo in examples/ remains optional (needs the
       integration toolchain) and is not required for the capability.
     evidence:
-      modules: [abicheck/appcompat.py, abicheck/cli_plugin.py]
-      tests: [tests/test_workflow_scenarios.py, tests/test_cli_plugin.py]
+      modules: [abicheck/appcompat.py, abicheck/cli_compare_helpers.py]
+      tests: [tests/test_workflow_scenarios.py, tests/test_appcompat.py]
       docs: [docs/user-guide/plugin-systems.md]
 
   - id: UC-ARCH-header-only
@@ -323,9 +326,15 @@ use_cases:
     axis: workflow
     name: Baseline pinning / registry
     status: complete
+    note: >
+      ADR-043: the baseline registry (push/pull/list/delete) was removed
+      outright — a baseline is simply an old dump/library/directory/package
+      passed directly to `compare OLD NEW` or `scan ARTIFACT --against OLD`.
+      Pinning is the caller's own responsibility (a path, a URL-fetched file,
+      a release asset) rather than a managed registry.
     evidence:
-      modules: [abicheck/baseline.py]
-      tests: [tests/test_baseline.py]
+      modules: [abicheck/cli_scan.py, abicheck/cli_compare_helpers.py]
+      tests: [tests/test_cli_scan.py, tests/test_compare_dispatch.py]
 
   - id: UC-WF-debian-symbols
     axis: workflow

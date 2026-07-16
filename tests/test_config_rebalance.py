@@ -535,25 +535,3 @@ class TestConfigStrictness:
         cfg_path.write_text("version: 3\nbrand_new_block:\n  x: 1\n")
         with pytest.raises(ValueError, match="brand_new_block"):
             load_build_config(cfg_path)
-
-
-def test_collect_help_panels_cover_all_options() -> None:
-    """Every `collect` option (bar --help) is grouped into a rich-help panel, so
-    the messiest command never regresses to a flat option wall (G22 collect tidy)."""
-    import click
-
-    import abicheck.cli_buildsource  # noqa: F401  — registers `collect`
-    from abicheck.cli import main
-    from abicheck.cli_help import OPTION_GROUPS
-
-    grouped: set[str] = set()
-    for panel in OPTION_GROUPS["* collect"]:
-        grouped.update(panel["options"])  # type: ignore[arg-type]
-
-    cmd = main.commands["collect"]
-    for p in cmd.params:
-        if not isinstance(p, click.Option):
-            continue
-        if "--help" in p.opts:
-            continue
-        assert grouped & set(p.opts), f"collect option {p.opts} is not in any help panel"

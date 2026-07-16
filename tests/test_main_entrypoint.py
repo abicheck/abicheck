@@ -16,17 +16,18 @@ def test_run_as_cli_module_registers_sibling_commands() -> None:
     abicheck``, but a common thing to type) must register every
     sibling-module command, not just the ones defined directly in cli.py.
 
-    Every sibling module (cli_scan, cli_buildsource, ...) does ``from .cli
-    import main`` for its ``@main.command(...)`` decorators. When cli.py
-    itself runs as ``__main__``, that relative import used to re-execute
-    cli.py a SECOND time under the real ``abicheck.cli`` sys.modules key,
-    producing a second, empty Click group that every decorator attached to
-    instead of the one actually running — so ``--help`` silently omitted
-    scan/appcompat/... and only showed dump/compare/compat (defined directly
-    in cli.py). A real subprocess invocation is used (rather than sys.modules
-    manipulation in-process) because the bug is specifically about which
-    sys.modules key cli.py's own execution lands under, which an in-process
-    trick would not faithfully reproduce (Codex review).
+    Every sibling module (cli_scan, cli_stack, cli_buildsource, ...) does
+    ``from .cli import main`` for its ``@main.command(...)``/``@main.group(...)``
+    decorators. When cli.py itself runs as ``__main__``, that relative import
+    used to re-execute cli.py a SECOND time under the real ``abicheck.cli``
+    sys.modules key, producing a second, empty Click group that every
+    decorator attached to instead of the one actually running — so ``--help``
+    silently omitted scan/deps/... and only showed dump/compare/compat
+    (defined/registered directly in cli.py). A real subprocess invocation is
+    used (rather than sys.modules manipulation in-process) because the bug is
+    specifically about which sys.modules key cli.py's own execution lands
+    under, which an in-process trick would not faithfully reproduce (Codex
+    review).
     """
     result = subprocess.run(
         [sys.executable, "-m", "abicheck.cli", "--help"],
@@ -35,7 +36,7 @@ def test_run_as_cli_module_registers_sibling_commands() -> None:
         encoding="utf-8",
         check=True,
     )
-    for cmd in ("scan", "appcompat"):
+    for cmd in ("scan", "deps"):
         assert cmd in result.stdout, (
             f"'{cmd}' missing from `python -m abicheck.cli --help` output"
         )

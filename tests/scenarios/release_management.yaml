@@ -36,20 +36,21 @@ scenarios:
     automated: true
     test: test_sc_offline_snapshot
 
-  - id: SC-BASELINE-REGISTRY
-    title: Pin a release ABI in the baseline registry, then gate future builds
+  - id: SC-BASELINE-PIN
+    title: Pin a release ABI as a baseline file, then gate future builds with scan
     persona: Release engineer
     narrative: >
-      A team pushes each release's ABI snapshot to a versioned baseline registry
-      (`baseline push`), then later pulls it (`baseline pull`) and compares a new
-      build against it — pinning the approved ABI without re-dumping the old one.
+      A team keeps each release's ABI snapshot on disk as its pinned baseline —
+      there is no separate registry to push/pull from (pre-1.0 CLI reset): a
+      baseline is simply an old dump/library passed directly to `compare` or
+      `scan --against`. `scan --against` folds the always-on tier and the
+      gating comparison into one command for CI.
     flow:
-      - abicheck baseline push libfoo --version 1 --platform linux-x86_64 --snapshot v1.json --registry .abicheck/baselines
-      - abicheck baseline pull libfoo:1:linux-x86_64 -o pinned.json --registry .abicheck/baselines
-      - abicheck compare pinned.json v2.json
+      - abicheck dump libfoo.so -H include/ -o v1.json    # at release time, kept as the baseline
+      - abicheck scan v2.json --against v1.json --format json
     expected:
       exit_code: 4
       verdict: BREAKING
     validates: UC-WF-baseline
     automated: true
-    test: test_sc_baseline_registry
+    test: test_sc_baseline_pin

@@ -27,7 +27,6 @@ import json
 from pathlib import Path
 
 import pytest
-from click.testing import CliRunner
 
 from abicheck.buildsource import (
     ABICHECK_INPUTS_VERSION,
@@ -44,7 +43,6 @@ from abicheck.buildsource.inputs_pack import (
     load_inputs_manifest,
 )
 from abicheck.buildsource.model import CoverageStatus, DataLayer, LayerCoverage
-from abicheck.cli import main
 from abicheck.serialization import load_snapshot
 
 # -- fixtures ----------------------------------------------------------------
@@ -808,6 +806,34 @@ def _artifact_snapshot(tmp_path: Path) -> Path:
     return out
 
 
+def _run_merge(tmp_path: Path, inputs: list[Path], out: Path) -> object:
+    """Replicate the deleted `merge` CLI command's body (ADR-043) via the
+    still-live library functions it used to call (`_merge_load_snapshots` /
+    `_merge_pick_base` / `_merge_fold_packs` / `_merge_attach_combined`,
+    unchanged in `cli_buildsource_merge.py`/`cli_buildsource.py`). Writes the
+    combined baseline to *out* and returns the base snapshot, matching what
+    `load_snapshot(out)` would then read back."""
+    from abicheck.buildsource.merge_support import _detect_merge_layer_conflicts
+    from abicheck.cli_buildsource import (
+        _merge_attach_combined,
+        _merge_fold_packs,
+        _merge_handle_conflicts,
+        _merge_load_snapshots,
+        _merge_pick_base,
+    )
+    from abicheck.serialization import snapshot_to_json
+
+    snaps = _merge_load_snapshots(tuple(inputs))
+    base_path, base = _merge_pick_base(snaps)
+    conflicts = _detect_merge_layer_conflicts(snaps)
+    combined, _contributors = _merge_fold_packs(snaps)
+    _merge_handle_conflicts(conflicts, combined, "warn")
+    if combined is not None:
+        _merge_attach_combined(combined, base, out)
+    out.write_text(snapshot_to_json(base), encoding="utf-8")
+    return base
+
+
 def test_merge_ingests_flow2_pack(tmp_path: Path) -> None:
     bin_json = _artifact_snapshot(tmp_path)
     pack = _write_inputs_pack(
@@ -816,10 +842,7 @@ def test_merge_ingests_flow2_pack(tmp_path: Path) -> None:
         compile_db=_compile_db(tmp_path),
     )
     out = tmp_path / "baseline.json"
-    result = CliRunner().invoke(
-        main, ["merge", str(bin_json), str(pack), "-o", str(out)]
-    )
-    assert result.exit_code == 0, result.output
+    _run_merge(tmp_path, [bin_json, pack], out)
     baseline = load_snapshot(out)
     # Base ABI surface preserved.
     assert any(f.mangled == "_Z3foov" for f in baseline.functions)
@@ -835,27 +858,18 @@ def test_merge_relinks_surface_against_base_exports(tmp_path: Path) -> None:
     bin_json = _artifact_snapshot(tmp_path)
     pack = _write_inputs_pack(tmp_path, [_tu("foo", mangled="_Z3foov")])
     out = tmp_path / "baseline.json"
-    result = CliRunner().invoke(
-        main, ["merge", str(bin_json), str(pack), "-o", str(out)]
-    )
-    assert result.exit_code == 0, result.output
+    _run_merge(tmp_path, [bin_json, pack], out)
     surface = load_snapshot(out).build_source.source_abi
     assert "_Z3foov" in surface.roots["exported_symbols"]
 
 
-def test_merge_rebuilds_l4_coverage_after_relink(tmp_path: Path) -> None:
+def test_merge_rebuilds_l4_coverage_after_relink(tmp_path: Path, capsys) -> None:
     bin_json = _artifact_snapshot(tmp_path)
     pack = _write_inputs_pack(tmp_path, [_tu("bar", mangled="_Z3barv")])
     out = tmp_path / "baseline.json"
-    result = CliRunner().invoke(
-        main, ["merge", str(bin_json), str(pack), "-o", str(out)]
-    )
-    assert result.exit_code == 0, result.output
-    assert "matched 0/1 exported symbol" in result.output
-    assert (
-        "L4_source_abi: partial (0/1 symbols matched, 0/1 accounted, 1 unmatched)"
-        in result.output
-    )
+    _run_merge(tmp_path, [bin_json, pack], out)
+    stderr = capsys.readouterr().err
+    assert "matched 0/1 exported symbol" in stderr
     baseline = load_snapshot(out)
     surface = baseline.build_source.source_abi
     assert surface.coverage["exported_symbols"] == 1
@@ -885,29 +899,26 @@ def test_merge_relink_preserves_non_managed_coverage_rows(tmp_path: Path) -> Non
     assert kept.detail == "keep me"
 
 
-def test_merge_warns_for_macro_only_pack_with_exports(tmp_path: Path) -> None:
+def test_merge_warns_for_macro_only_pack_with_exports(tmp_path: Path, capsys) -> None:
     bin_json = _artifact_snapshot(tmp_path)
     pack = _write_inputs_pack(tmp_path, [_macro_tu()])
     out = tmp_path / "baseline.json"
-    result = CliRunner().invoke(
-        main, ["merge", str(bin_json), str(pack), "-o", str(out)]
-    )
-    assert result.exit_code == 0, result.output
-    assert (
-        "public macros/types but no public function/variable declarations"
-        in result.output
-    )
+    _run_merge(tmp_path, [bin_json, pack], out)
+    stderr = capsys.readouterr().err
+    assert "public macros/types but no public function/variable declarations" in stderr
 
 
 def test_merge_rejects_plain_directory(tmp_path: Path) -> None:
+    import click
+    import pytest
+
+    from abicheck.cli_buildsource import _merge_load_snapshots
+
     bin_json = _artifact_snapshot(tmp_path)
     plain = tmp_path / "not_a_pack"
     plain.mkdir()
-    result = CliRunner().invoke(
-        main, ["merge", str(bin_json), str(plain), "-o", str(tmp_path / "o.json")]
-    )
-    assert result.exit_code != 0
-    assert "abicheck_inputs" in result.output
+    with pytest.raises(click.ClickException, match="abicheck_inputs"):
+        _merge_load_snapshots((bin_json, plain))
 
 
 def test_load_inputs_manifest_round_trips_on_disk(tmp_path: Path) -> None:

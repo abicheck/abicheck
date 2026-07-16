@@ -47,6 +47,7 @@ from abicheck.buildsource.model import (
 from abicheck.buildsource.pack import BuildSourcePack
 from abicheck.checker_policy import ChangeKind
 from abicheck.cli import main
+from abicheck.cli_buildsource_helpers import _build_coverage, _run_adapters
 
 # ── BuildEvidence model round-trips (ADR-029 D1/D2) ──────────────────────────
 
@@ -395,41 +396,81 @@ def test_diff_multi_value_order_independent():
     assert diff_build_evidence(a, b) == []
 
 
-# ── collect CLI variants (ADR-028 D6) ───────────────────────────────
+# ── engine wiring (was `collect` CLI variants, ADR-028 D6) ──────────────────
+#
+# `collect` was deleted in the ADR-043 CLI reset, but the engine it drove is
+# unchanged: `cli_buildsource_helpers._run_adapters`/`_build_coverage` are the
+# exact functions the deleted Click command called, so these exercise them
+# directly instead of going through a CLI that no longer exists.
+
+
+def _run_default_adapters(**overrides):
+    """`_run_adapters` with every optional adapter off, overridable by kwarg."""
+    kwargs = dict(
+        compile_db=None,
+        build_dir=None,
+        cmake=False,
+        ninja=False,
+        ninja_compdb=None,
+        bazel_cquery=None,
+        bazel_aquery=None,
+        make_dry_run=None,
+        binary=None,
+        read_compiler_record=False,
+        build_system="generic",
+        record_bazel_inputs=False,
+        verbose=False,
+    )
+    kwargs.update(overrides)
+    merged = BuildEvidence()
+    extractors: list[ExtractorRecord] = []
+    _run_adapters(merged, extractors, **kwargs)
+    return merged, extractors
+
+
+def _write_pack_from_compile_db(path, cdb):
+    """Build and persist a BuildSourcePack from a compile_commands.json, the
+    same way the deleted `collect --compile-db` command did (via the
+    surviving `_run_adapters` engine), so `compare --build-info` end-to-end
+    tests still exercise a real on-disk pack."""
+    merged, extractors = _run_default_adapters(compile_db=cdb)
+    pack = BuildSourcePack.empty(path)
+    pack.build_evidence = merged if merged.compile_units or merged.build_options else None
+    pack.manifest.extractors = extractors
+    pack.write()
+    return pack
 
 
 def test_collect_evidence_empty_pack_when_no_adapters(tmp_path):
-    out = tmp_path / "e"
-    result = CliRunner().invoke(main, ["collect", "-o", str(out)])
-    assert result.exit_code == 0, result.output
-    assert "not collected" in result.output
-    pack = BuildSourcePack.load(out)
-    assert pack.build_evidence is None
-    cov = pack.manifest.coverage_for("L3_build")
-    assert cov is not None and cov.status is CoverageStatus.NOT_COLLECTED
+    merged, _extractors = _run_default_adapters()
+    has_build = bool(
+        merged.compile_units
+        or merged.targets
+        or merged.toolchains
+        or merged.link_units
+        or merged.build_options
+    )
+    assert not has_build
+    coverage = _build_coverage(merged, has_build)
+    l3 = next(c for c in coverage if c.layer == "L3_build")
+    assert l3.status is CoverageStatus.NOT_COLLECTED
 
 
 def test_collect_evidence_failed_compile_db_records_extractor(tmp_path):
     bad = tmp_path / "missing.json"
-    out = tmp_path / "e"
-    result = CliRunner().invoke(main, ["collect", "--compile-db", str(bad), "-o", str(out)])
+    _merged, extractors = _run_default_adapters(compile_db=bad)
     # The adapter failure is recorded as a diagnostic/extractor status, not a crash.
-    assert result.exit_code == 0, result.output
-    pack = BuildSourcePack.load(out)
     assert any(e.name == "compile_commands" and e.status == "failed"
-               for e in pack.manifest.extractors)
+               for e in extractors)
 
 
 def test_collect_evidence_ninja_compdb(tmp_path):
     compdb = tmp_path / "compdb.json"
     compdb.write_text(json.dumps([{"directory": str(tmp_path), "file": "a.cpp",
                                    "arguments": ["c++", "-std=c++20", "-c", "a.cpp"]}]))
-    out = tmp_path / "e"
-    result = CliRunner().invoke(main, ["collect", "--from", f"ninja-compdb={compdb}", "-o", str(out)])
-    assert result.exit_code == 0, result.output
-    pack = BuildSourcePack.load(out)
-    assert pack.build_evidence is not None
-    assert any(o.key == "std:CXX" for o in pack.build_evidence.build_options)
+    merged, _extractors = _run_default_adapters(ninja_compdb=compdb)
+    assert merged.compile_units or merged.build_options
+    assert any(o.key == "std:CXX" for o in merged.build_options)
 
 
 def test_compare_drift_fires_without_compile_db_context(tmp_path):
@@ -443,7 +484,7 @@ def test_compare_drift_fires_without_compile_db_context(tmp_path):
                                     "arguments": ["c++", "-std=c++20", "-c", "a.cpp"]}]))
     ev_new = tmp_path / "new.evidence"
     runner = CliRunner()
-    runner.invoke(main, ["collect", "--compile-db", str(new_cdb), "-o", str(ev_new)])
+    _write_pack_from_compile_db(ev_new, new_cdb)
 
     for v in ("old", "new"):
         save_snapshot(AbiSnapshot(library="libfoo.so", version=v, from_headers=True),
@@ -468,7 +509,7 @@ def test_compare_drift_suppressed_when_dumped_with_build_context(tmp_path):
                                     "arguments": ["c++", "-std=c++20", "-c", "a.cpp"]}]))
     ev_new = tmp_path / "new.evidence"
     runner = CliRunner()
-    runner.invoke(main, ["collect", "--compile-db", str(new_cdb), "-o", str(ev_new)])
+    _write_pack_from_compile_db(ev_new, new_cdb)
 
     # New side was dumped WITH the build's compile DB → no drift.
     save_snapshot(AbiSnapshot(library="libfoo.so", version="old", from_headers=True),
@@ -496,7 +537,7 @@ def test_compare_binary_only_skips_header_drift(tmp_path):
                                     "arguments": ["c++", "-std=c++20", "-c", "a.cpp"]}]))
     ev_new = tmp_path / "new.evidence"
     runner = CliRunner()
-    runner.invoke(main, ["collect", "--compile-db", str(new_cdb), "-o", str(ev_new)])
+    _write_pack_from_compile_db(ev_new, new_cdb)
 
     # Binary-only snapshots: from_headers is False, so there is no L2 AST.
     for v in ("old", "new"):
@@ -620,7 +661,7 @@ def test_compare_cli_reports_coverage_asymmetry(tmp_path):
                                      "arguments": ["c++", "-std=c++20", "-c", "a.cpp"]}]))
     ev_base = tmp_path / "base.evidence"
     runner = CliRunner()
-    runner.invoke(main, ["collect", "--compile-db", str(base_cdb), "-o", str(ev_base)])
+    _write_pack_from_compile_db(ev_base, base_cdb)
 
     # Base and target both header-aware; only the base carries build evidence.
     save_snapshot(AbiSnapshot(library="libfoo.so", version="old", from_headers=True),

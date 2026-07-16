@@ -12,12 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""CLI — ``pr-comment`` command.
+"""``pr-comment`` — GitHub Action-only PR-comment renderer (ADR-043 D1).
 
 Renders a sticky GitHub PR-comment body from a JSON report produced by
-``compare`` / ``compare-release`` / ``appcompat``. Split out of
-:mod:`abicheck.cli` and imported for side-effect at the bottom of that module
-so the ``@main.command("pr-comment")`` decorator runs.
+``compare`` (including its ``--used-by``/``--required-symbol(s)`` scoped
+output). This is deliberately NOT a public ``abicheck`` subcommand -- it is
+Action/library-only tooling, invoked as ``python -m abicheck.cli_pr_comment``
+(see ``action/run.sh``), never as ``abicheck pr-comment``. Kept as a Click
+command purely for its argument parsing/``--help``; it is never attached to
+the public ``main`` group.
 """
 
 from __future__ import annotations
@@ -27,10 +30,10 @@ from pathlib import Path
 
 import click
 
-from .cli import _write_or_echo, main
+from .cli import _write_or_echo
 
 
-@main.command("pr-comment")
+@click.command("pr-comment")
 @click.argument("report", type=click.Path(exists=True, path_type=Path))
 @click.option("--sha", default="", help="Commit SHA being scanned (PR head).")
 @click.option(
@@ -85,15 +88,18 @@ def pr_comment_cmd(
 ) -> None:
     """Render a sticky PR-comment body from a JSON REPORT.
 
-    REPORT is a JSON file from 'abicheck compare|compare-release|appcompat
-    --format json'. When --on=never, or --on=changes and the report has no
-    changes, nothing is written (an empty --output file is produced) so the
-    caller can skip posting.
+    REPORT is a JSON file from 'abicheck compare --format json' (directory/
+    package fan-out and --used-by/--required-symbol(s) scoped reports all
+    produce a compatible shape). When --on=never, or --on=changes and the
+    report has no changes, nothing is written (an empty --output file is
+    produced) so the caller can skip posting. Action/library-only: invoke as
+    `python -m abicheck.cli_pr_comment`, not `abicheck pr-comment` (this is
+    not a public abicheck subcommand).
 
     \b
     Example:
       abicheck compare old.json new.so -H include/ --format json -o report.json
-      abicheck pr-comment report.json --sha "$GITHUB_SHA" -o comment.md
+      python -m abicheck.cli_pr_comment report.json --sha "$GITHUB_SHA" -o comment.md
     """
     from .pr_comment import build_model, render_comment, should_post
 
@@ -116,3 +122,7 @@ def pr_comment_cmd(
         model, sha=sha, detail=detail, run_label=run_label, report_url=report_url
     )
     _write_or_echo(output, body)
+
+
+if __name__ == "__main__":  # pragma: no cover - exercised via subprocess in Action tests
+    pr_comment_cmd()

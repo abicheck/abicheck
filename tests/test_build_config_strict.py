@@ -130,7 +130,7 @@ class TestBuildConfigFromDictRejects:
     def test_known_good_config_does_not_raise(self) -> None:
         """A config using only known keys/blocks/types must still load cleanly
         (guards against the hardening becoming stricter than the real schema)."""
-        BuildConfig.from_dict(
+        cfg = BuildConfig.from_dict(
             {
                 "version": 1,
                 "build": {
@@ -178,6 +178,9 @@ class TestBuildConfigFromDictRejects:
                 "crosschecks": {},
             }
         )
+        assert cfg.version == 1
+        assert cfg.exit_code_scheme == "severity"
+        assert cfg.compile_frontend == "clang"
 
 
 # ── end-to-end: a bad .abicheck.yml exits 64 through a real command ─────────

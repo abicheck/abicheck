@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import click
 import pytest
@@ -266,13 +267,6 @@ class TestSmallHelpers:
         assert "Build/source evidence" in compare_help
         dump_help = runner.invoke(main, ["dump", "--help"]).output
         assert "Toolchain" in dump_help and "Provenance" in dump_help
-
-    def test_collect_header_alias(self) -> None:
-        # M5: collect gains a --header alias for cross-command vocab consistency
-        # (dump/compare use --header); --headers stays working.
-        opt = next(p for p in main.commands["collect"].params
-                   if getattr(p, "name", "") == "headers")
-        assert "--header" in opt.opts and "--headers" in opt.opts
 
     def test_missing_requested_evidence_layers(self) -> None:
         # G21.7: a requested layer that came back NOT_COLLECTED — or PARTIAL with
@@ -1074,147 +1068,54 @@ class TestCompareReleaseCommand:
         assert "Removed Libraries" in result.output
 
 
-# ── appcompat: arg validation, list-required-symbols, severity (cli_appcompat) ─
+# ── compare --used-by: app-scoped exit codes + output (ADR-043 folds appcompat) ─
+#
+# The standalone `appcompat` CLI (and `cli_appcompat.py` -- `_validate_appcompat_args`,
+# `_handle_list_required_symbols`, weak/`--check-against` mode, `--list-required-symbols`)
+# was deleted; its full-mode (old/new pair) scoping behavior folded into
+# `compare --used-by APP` (repeatable), which floors the exit code/verdict on the
+# worst app-scoped result while keeping the full diff as informational context
+# (`cli_compare_helpers._apply_used_by_scoping`, confirmed by direct CLI experiment).
+#
+# Dropped, no equivalent surface:
+# - `_validate_appcompat_args`/`_handle_list_required_symbols` -- functions are
+#   gone (same precedent as `tests/test_cli_split_modules_new.py`).
+# - weak mode (`--check-against`, a symbol-availability check with no old/new
+#   pair) -- `--used-by`/`--required-symbol` always scope a real old/new compare.
+# - `--list-required-symbols` (report-only, does not gate) -- `--used-by`'s
+#   `--dry-run` path reports a *count* of an app's required symbols/versions
+#   (`_render_compare_dry_run`), not the full listing the old flag printed, so
+#   it is not a real equivalent.
+#
+# Ported forward: the scoped exit codes (0/2/4), JSON/markdown/html output
+# shape, and -o/--output all still apply and are covered below. Note a real
+# behavior change from the deleted CLI: `cli_appcompat.py` had a bespoke
+# severity-aware exit path for full mode (recomputing from `breaking_for_app`
+# via a resolved severity config, only flooring missing-symbols at 4);
+# `compare --used-by`'s scoped exit has no such path at all -- it floors purely
+# on `scope_diff_to_app(...).verdict` (BREAKING -> 4, API_BREAK -> 2, else 0),
+# so `--severity-preset` has zero effect on the scoped exit code (verified
+# directly: an app-relevant BREAKING change still exits 4 under
+# `--severity-preset info-only`, where the old appcompat CLI would have exited
+# 0). `TestUsedByScoping.test_severity_missing_symbols_floors_at_4` and
+# `.test_severity_clean_exit_0` below cover what remains true post-fold (a
+# severity preset alongside `--used-by` does not change or break the scoped
+# exit); the old `--severity-preset info-only` *downgrading an app-relevant
+# break* case (`TestAppcompatSeverityExit` in test_config_review.py) has no
+# replacement and was deleted there -- flagged as a possible product gap
+# rather than patched here (test-file-only task).
 
 
-class TestAppcompatValidation:
-    def _elf(self, p: Path) -> Path:
-        p.write_bytes(b"\x7fELF" + b"\x00" * 200)
-        return p
+class TestUsedByScoping:
+    """`compare --used-by` full-mode scoping, via a stubbed
+    ``appcompat.scope_diff_to_app`` (mirroring the deleted CLI's wholesale
+    ``check_appcompat`` stub) so the JSON/markdown/html output and exit-code
+    branches run without a real compiler. ``dumper.dump`` is stubbed too since
+    -- unlike the deleted standalone command -- ``compare``'s own pipeline
+    always dumps OLD/NEW itself before scoping runs."""
 
-    def test_help(self) -> None:
-        result = _invoke("appcompat", "--help")
-        assert result.exit_code == 0
-        assert "Check if an application is compatible" in result.output
-
-    def test_no_lib_args_usage_error(self, tmp_path: Path) -> None:
-        app = self._elf(tmp_path / "app")
-        result = _invoke("appcompat", str(app))
-        assert result.exit_code != 0
-        assert "Provide OLD_LIB and NEW_LIB" in result.output
-
-    def test_per_side_flag_rejected_in_weak_mode(self, tmp_path: Path) -> None:
-        app = self._elf(tmp_path / "app")
-        lib = self._elf(tmp_path / "lib.so")
-        result = _invoke(
-            "appcompat",
-            str(app),
-            "--check-against",
-            str(lib),
-            "--header",
-            "old=" + str(tmp_path / "h.h"),
-        )
-        assert result.exit_code != 0
-        assert "cannot be used with" in result.output
-
-    def test_headers_ignored_warning_in_weak_mode(self, tmp_path: Path, capsys) -> None:
-        # -H is silently ignored in weak mode; it warns rather than fails.
-        from abicheck.cli_appcompat import _validate_appcompat_args
-
-        _validate_appcompat_args(
-            weak_mode=True,
-            old_lib=None,
-            new_lib=None,
-            list_symbols=False,
-            old_headers_only=(),
-            new_headers_only=(),
-            old_includes_only=(),
-            new_includes_only=(),
-            headers=(tmp_path / "h.h",),
-            includes=(),
-        )
-        assert "are ignored in weak" in capsys.readouterr().err
-
-
-class TestAppcompatListRequiredSymbols:
-    def test_list_required_symbols_text(self, tmp_path, monkeypatch) -> None:
-        from abicheck import appcompat as appcompat_mod
-        from abicheck.appcompat import AppRequirements
-
-        app = tmp_path / "app"
-        app.write_bytes(b"\x7fELF" + b"\x00" * 200)
-        lib = tmp_path / "lib.so"
-        lib.write_bytes(b"\x7fELF" + b"\x00" * 200)
-
-        monkeypatch.setattr(appcompat_mod, "_get_lib_soname", lambda p: "libfoo.so.1")
-        monkeypatch.setattr(
-            appcompat_mod,
-            "parse_app_requirements",
-            lambda app_path, lib_name: AppRequirements(
-                needed_libs=["libfoo.so.1"],
-                undefined_symbols={"foo_init", "foo_run"},
-                required_versions={"FOO_1.0": "libfoo.so.1"},
-            ),
-        )
-        result = _invoke(
-            "appcompat",
-            str(app),
-            "--check-against",
-            str(lib),
-            "--list-required-symbols",
-        )
-        assert result.exit_code == 0
-        assert "foo_init" in result.output
-        assert "FOO_1.0" in result.output
-
-    def test_list_required_symbols_json(self, tmp_path, monkeypatch) -> None:
-        from abicheck import appcompat as appcompat_mod
-        from abicheck.appcompat import AppRequirements
-
-        app = tmp_path / "app"
-        app.write_bytes(b"\x7fELF" + b"\x00" * 200)
-        lib = tmp_path / "lib.so"
-        lib.write_bytes(b"\x7fELF" + b"\x00" * 200)
-
-        monkeypatch.setattr(appcompat_mod, "_get_lib_soname", lambda p: "libfoo.so.1")
-        monkeypatch.setattr(
-            appcompat_mod,
-            "parse_app_requirements",
-            lambda app_path, lib_name: AppRequirements(
-                needed_libs=["libfoo.so.1"],
-                undefined_symbols={"foo_init"},
-                required_versions={},
-            ),
-        )
-        result = _invoke(
-            "appcompat",
-            str(app),
-            "--check-against",
-            str(lib),
-            "--list-required-symbols",
-            "--format",
-            "json",
-        )
-        assert result.exit_code == 0
-        data = json.loads(result.output)
-        assert data["library"] == "libfoo.so.1"
-        assert "foo_init" in data["required_symbols"]
-
-
-class TestAppcompatHandleListHelper:
-    def test_missing_target_lib_raises(self, tmp_path) -> None:
-        from abicheck.cli_appcompat import _handle_list_required_symbols
-
-        with pytest.raises(click.UsageError, match="requires a library path"):
-            _handle_list_required_symbols(
-                app_path=tmp_path / "app",
-                check_against_lib=None,
-                old_lib=None,
-                new_lib=None,
-                weak_mode=False,
-                fmt="json",
-                _get_lib_soname=lambda p: "x",
-                parse_app_requirements=lambda *a, **k: None,
-            )
-
-
-class TestAppcompatSeverityAndOutput:
-    """Drive the full-mode appcompat flow via monkeypatched check_appcompat so
-    the JSON/markdown output and severity-aware exit branches run without a
-    real compiler."""
-
-    def _setup(self, tmp_path, monkeypatch, *, result):
-        from abicheck import appcompat as appcompat_mod
+    def _setup(self, tmp_path, monkeypatch):
+        from abicheck import dumper as dumper_mod
 
         app = tmp_path / "app"
         app.write_bytes(b"\x7fELF" + b"\x00" * 200)
@@ -1222,16 +1123,19 @@ class TestAppcompatSeverityAndOutput:
         old.write_bytes(b"\x7fELF" + b"\x00" * 200)
         new = tmp_path / "new.so"
         new.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        old_snap = _snap("1.0", library="libfoo.so")
+        new_snap = _snap("2.0", library="libfoo.so")
         monkeypatch.setattr(
-            appcompat_mod,
-            "check_appcompat",
-            lambda *a, **k: result,
+            dumper_mod, "dump", MagicMock(side_effect=[old_snap, new_snap])
         )
         return app, old, new
 
-    def _result(
-        self, *, verdict=Verdict.COMPATIBLE, breaking=None, missing=None, full_diff=None
-    ):
+    def _patch_scope(self, monkeypatch, result):
+        import abicheck.appcompat as appcompat_mod
+
+        monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", lambda *a, **k: result)
+
+    def _result(self, *, verdict=Verdict.COMPATIBLE, missing=None):
         from abicheck.appcompat import AppCompatResult
 
         return AppCompatResult(
@@ -1240,177 +1144,84 @@ class TestAppcompatSeverityAndOutput:
             new_lib_path="new.so",
             required_symbols={"foo"},
             required_symbol_count=1,
-            breaking_for_app=breaking or [],
             missing_symbols=missing or [],
             missing_versions=[],
-            full_diff=full_diff,
             verdict=verdict,
             symbol_coverage=100.0,
         )
 
     def test_full_mode_json_output(self, tmp_path, monkeypatch) -> None:
         res = self._result()
-        app, old, new = self._setup(tmp_path, monkeypatch, result=res)
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "appcompat",
-            str(app),
-            str(old),
-            str(new),
-            "--format",
-            "json",
+            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
         )
         assert result.exit_code == 0
-        data = json.loads(result.output)
-        assert data["verdict"] == "COMPATIBLE"
+        # The mixed stdout+stderr `.output` may carry pre-JSON warnings (real
+        # dump path, unlike the deleted CLI's wholesale check_appcompat stub);
+        # `.stdout` is the pure JSON stream.
+        data = json.loads(result.stdout)
+        assert data["used_by"][0]["verdict"] == "COMPATIBLE"
 
     def test_full_mode_breaking_exit_4(self, tmp_path, monkeypatch) -> None:
         res = self._result(verdict=Verdict.BREAKING, missing=["foo"])
-        app, old, new = self._setup(tmp_path, monkeypatch, result=res)
-        result = _invoke("appcompat", str(app), str(old), str(new))
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke("compare", str(old), str(new), "--used-by", str(app))
         assert result.exit_code == 4
 
     def test_full_mode_api_break_exit_2(self, tmp_path, monkeypatch) -> None:
         res = self._result(verdict=Verdict.API_BREAK)
-        app, old, new = self._setup(tmp_path, monkeypatch, result=res)
-        result = _invoke("appcompat", str(app), str(old), str(new))
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke("compare", str(old), str(new), "--used-by", str(app))
         assert result.exit_code == 2
 
     def test_full_mode_output_to_file(self, tmp_path, monkeypatch) -> None:
         res = self._result()
-        app, old, new = self._setup(tmp_path, monkeypatch, result=res)
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
         out = tmp_path / "rep.md"
         result = _invoke(
-            "appcompat",
-            str(app),
-            str(old),
-            str(new),
-            "-o",
-            str(out),
+            "compare", str(old), str(new), "--used-by", str(app), "-o", str(out),
         )
         assert result.exit_code == 0
         assert out.exists()
         assert "Report written to" in result.output
 
     def test_severity_missing_symbols_floors_at_4(self, tmp_path, monkeypatch) -> None:
-        # info-only would normally downgrade, but missing symbols floor at 4.
-        full = DiffResult(old_version="1", new_version="2", library="libfoo")
-        res = self._result(
-            verdict=Verdict.BREAKING,
-            missing=["foo"],
-            full_diff=full,
-        )
-        app, old, new = self._setup(tmp_path, monkeypatch, result=res)
+        # A --severity-preset alongside --used-by has no effect on the scoped
+        # exit code (see the module-level note above) -- the missing-symbol
+        # BREAKING floor holds regardless of an info-only preset.
+        res = self._result(verdict=Verdict.BREAKING, missing=["foo"])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "appcompat",
-            str(app),
-            str(old),
-            str(new),
-            "--severity-preset",
-            "info-only",
+            "compare", str(old), str(new), "--used-by", str(app),
+            "--severity-preset", "info-only",
         )
         assert result.exit_code == 4
 
     def test_severity_clean_exit_0(self, tmp_path, monkeypatch) -> None:
-        full = DiffResult(old_version="1", new_version="2", library="libfoo")
-        res = self._result(verdict=Verdict.COMPATIBLE, full_diff=full)
-        app, old, new = self._setup(tmp_path, monkeypatch, result=res)
+        res = self._result(verdict=Verdict.COMPATIBLE)
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "appcompat",
-            str(app),
-            str(old),
-            str(new),
-            "--severity-preset",
-            "default",
+            "compare", str(old), str(new), "--used-by", str(app),
+            "--severity-preset", "default",
         )
         assert result.exit_code == 0
 
     def test_full_mode_html_output(self, tmp_path, monkeypatch) -> None:
-        # Drives the ``fmt == "html"`` branch (cli_appcompat:335).
         res = self._result()
-        app, old, new = self._setup(tmp_path, monkeypatch, result=res)
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
         result = _invoke(
-            "appcompat",
-            str(app),
-            str(old),
-            str(new),
-            "--format",
-            "html",
+            "compare", str(old), str(new), "--used-by", str(app), "--format", "html",
         )
         assert result.exit_code == 0
-        assert "<" in result.output  # HTML markup emitted
-
-
-class TestAppcompatWeakMode:
-    """Drive the weak-mode (--check-against) flow via monkeypatched
-    check_against so its result-rendering and exit branches run without a
-    real compiler (cli_appcompat:304-306)."""
-
-    def _setup(self, tmp_path, monkeypatch, *, result):
-        from abicheck import appcompat as appcompat_mod
-
-        app = tmp_path / "app"
-        app.write_bytes(b"\x7fELF" + b"\x00" * 200)
-        lib = tmp_path / "lib.so"
-        lib.write_bytes(b"\x7fELF" + b"\x00" * 200)
-        monkeypatch.setattr(
-            appcompat_mod,
-            "check_against",
-            lambda *a, **k: result,
-        )
-        return app, lib
-
-    def _result(self, *, verdict=Verdict.COMPATIBLE, missing=None):
-        from abicheck.appcompat import AppCompatResult
-
-        return AppCompatResult(
-            app_path="/app",
-            old_lib_path="",
-            new_lib_path="lib.so",
-            required_symbols={"foo"},
-            required_symbol_count=1,
-            breaking_for_app=[],
-            missing_symbols=missing or [],
-            missing_versions=[],
-            full_diff=None,
-            verdict=verdict,
-            symbol_coverage=100.0,
-        )
-
-    def test_weak_mode_compatible_exit_0(self, tmp_path, monkeypatch) -> None:
-        res = self._result()
-        app, lib = self._setup(tmp_path, monkeypatch, result=res)
-        result = _invoke(
-            "appcompat",
-            str(app),
-            "--check-against",
-            str(lib),
-            "--format",
-            "json",
-        )
-        assert result.exit_code == 0
-        data = json.loads(result.output)
-        assert data["verdict"] == "COMPATIBLE"
-
-    def test_weak_mode_breaking_exit_4(self, tmp_path, monkeypatch) -> None:
-        res = self._result(verdict=Verdict.BREAKING, missing=["foo"])
-        app, lib = self._setup(tmp_path, monkeypatch, result=res)
-        result = _invoke("appcompat", str(app), "--check-against", str(lib))
-        assert result.exit_code == 4
-
-    def test_weak_mode_ignores_severity_preset(self, tmp_path, monkeypatch) -> None:
-        # Weak mode keeps the verdict-based exit even when a severity preset is
-        # supplied (full_diff is None), so info-only cannot downgrade.
-        res = self._result(verdict=Verdict.BREAKING, missing=["foo"])
-        app, lib = self._setup(tmp_path, monkeypatch, result=res)
-        result = _invoke(
-            "appcompat",
-            str(app),
-            "--check-against",
-            str(lib),
-            "--severity-preset",
-            "info-only",
-        )
-        assert result.exit_code == 4
+        assert "<" in result.stdout  # HTML markup emitted
 
 
 # ── cli.py: _write_release_step_summary (1351-1372) ───────────────────────────

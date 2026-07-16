@@ -6,21 +6,12 @@ already covered when the code lived in the parent modules.
 from __future__ import annotations
 
 import errno
-import json
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
-import click
 import pytest
 from click.testing import CliRunner
 
-from abicheck import cli_appcompat as _cli_appcompat
 from abicheck.cli import main
-from abicheck.cli_appcompat import (
-    _handle_list_required_symbols,
-    _validate_appcompat_args,
-)
 from abicheck.compat._errors import _classify_compat_error_exit_code, _compat_fail
 from abicheck.diff_platform_templates import (
     _extract_template_args,
@@ -28,60 +19,24 @@ from abicheck.diff_platform_templates import (
     _template_outer,
 )
 
-# ── cli_suggest: suggest-suppressions ───────────────────────────────────────
+# ── suppression.suggest_suppressions: library-level coverage ───────────────
+# The `suggest-suppressions` CLI command (cli_suggest.py) was deleted in the
+# pre-1.0 CLI reset; the JSON-shape validation it used to perform (root must
+# be an object, must have a "changes" array of objects) was pure CLI-wrapper
+# behavior around reading a diff-report file and is gone with the command.
+# `suppression.suggest_suppressions()` itself takes already-parsed
+# `list[dict]` and is unchanged — exercise it directly.
 
 
-class TestSuggestSuppressionsCmd:
-    """Cover error paths and happy path of the suggest-suppressions command."""
+class TestSuggestSuppressions:
+    """Direct unit tests for suppression.suggest_suppressions()."""
 
-    def _runner(self) -> CliRunner:
-        return CliRunner()
+    def test_happy_path_empty_changes(self) -> None:
+        from abicheck.suppression import suggest_suppressions
 
-    def test_help(self) -> None:
-        result = self._runner().invoke(main, ["suggest-suppressions", "--help"])
-        assert result.exit_code == 0
-        assert "suggest-suppressions" in result.output.lower() or "DIFF_JSON" in result.output
-
-    def test_invalid_json(self, tmp_path: Path) -> None:
-        bad = tmp_path / "broken.json"
-        bad.write_text("not-valid-json", encoding="utf-8")
-        result = self._runner().invoke(main, ["suggest-suppressions", str(bad)])
-        assert result.exit_code != 0
-        assert "Cannot read JSON diff" in result.output
-
-    def test_non_object_root(self, tmp_path: Path) -> None:
-        f = tmp_path / "diff.json"
-        f.write_text(json.dumps(["not-an-object"]), encoding="utf-8")
-        result = self._runner().invoke(main, ["suggest-suppressions", str(f)])
-        assert result.exit_code != 0
-        assert "must be an object" in result.output
-
-    def test_missing_changes_key(self, tmp_path: Path) -> None:
-        f = tmp_path / "diff.json"
-        f.write_text(json.dumps({"verdict": "compatible"}), encoding="utf-8")
-        result = self._runner().invoke(main, ["suggest-suppressions", str(f)])
-        assert result.exit_code != 0
-        assert "missing required 'changes' key" in result.output
-
-    def test_changes_not_array(self, tmp_path: Path) -> None:
-        f = tmp_path / "diff.json"
-        f.write_text(json.dumps({"changes": "oops"}), encoding="utf-8")
-        result = self._runner().invoke(main, ["suggest-suppressions", str(f)])
-        assert result.exit_code != 0
-        assert "must be an array" in result.output
-
-    def test_change_entry_wrong_type(self, tmp_path: Path) -> None:
-        f = tmp_path / "diff.json"
-        f.write_text(json.dumps({"changes": ["scalar-entry"]}), encoding="utf-8")
-        result = self._runner().invoke(main, ["suggest-suppressions", str(f)])
-        assert result.exit_code != 0
-        assert "changes[0] must be an object" in result.output
-
-    def test_happy_path_empty_changes(self, tmp_path: Path) -> None:
-        f = tmp_path / "diff.json"
-        f.write_text(json.dumps({"changes": []}), encoding="utf-8")
-        result = self._runner().invoke(main, ["suggest-suppressions", str(f)])
-        assert result.exit_code == 0
+        text = suggest_suppressions([])
+        assert "version: 1" in text
+        assert "suppressions:" in text
 
 
 # ── compat/_errors: error classification ────────────────────────────────────
@@ -146,136 +101,6 @@ class TestCompatErrors:
             _compat_fail("loading descriptor", FileNotFoundError("missing"))
         # FileNotFoundError → 4 (cannot access input files) unless tool-missing
         assert exc_info.value.code == 4
-
-
-# ── cli_appcompat: validation helpers ───────────────────────────────────────
-
-
-class TestValidateAppcompatArgs:
-    """Direct unit tests for the appcompat argument validator."""
-
-    def _call(self, **kw: Any) -> None:
-        defaults: dict[str, Any] = {
-            "weak_mode": False,
-            "old_lib": Path("old.so"),
-            "new_lib": Path("new.so"),
-            "list_symbols": False,
-            "old_headers_only": (),
-            "new_headers_only": (),
-            "old_includes_only": (),
-            "new_includes_only": (),
-        }
-        defaults.update(kw)
-        _validate_appcompat_args(**defaults)
-
-    def test_full_mode_with_both_libs_passes(self) -> None:
-        self._call()  # should not raise
-
-    def test_weak_mode_with_no_libs_passes(self) -> None:
-        self._call(weak_mode=True, old_lib=None, new_lib=None)
-
-    def test_weak_mode_with_positional_lib_fails(self) -> None:
-        with pytest.raises(click.UsageError, match="cannot be used with positional"):
-            self._call(weak_mode=True, new_lib=None)
-
-    def test_full_mode_missing_old_fails(self) -> None:
-        with pytest.raises(click.UsageError, match="Provide OLD_LIB"):
-            self._call(old_lib=None)
-
-    def test_full_mode_missing_new_fails(self) -> None:
-        with pytest.raises(click.UsageError, match="Provide OLD_LIB"):
-            self._call(new_lib=None)
-
-    @pytest.mark.parametrize("kwarg,flag", [
-        ("old_headers_only", "--header old="),
-        ("new_headers_only", "--header new="),
-        ("old_includes_only", "--include old="),
-        ("new_includes_only", "--include new="),
-    ])
-    def test_weak_mode_rejects_per_side_flags(self, kwarg: str, flag: str) -> None:
-        with pytest.raises(click.UsageError, match=flag):
-            self._call(
-                weak_mode=True, old_lib=None, new_lib=None,
-                **{kwarg: (Path("h.h"),)},
-            )
-
-    def test_list_symbols_rejects_per_side_flags(self) -> None:
-        with pytest.raises(click.UsageError, match="--list-required-symbols"):
-            self._call(
-                list_symbols=True,
-                old_headers_only=(Path("h.h"),),
-            )
-
-
-@dataclass
-class _FakeReqs:
-    needed_libs: list[str]
-    undefined_symbols: set[str]
-    required_versions: dict[str, str]
-
-
-class TestHandleListRequiredSymbols:
-    """Direct unit tests for the list-required-symbols handler."""
-
-    def _call(self, fmt: str, *, weak_mode: bool = True) -> str:
-        captured: list[str] = []
-
-        def _fake_echo(msg: str = "", **_kw: Any) -> None:
-            captured.append(msg)
-
-        reqs = _FakeReqs(
-            needed_libs=["libfoo.so.1"],
-            undefined_symbols={"foo", "bar"},
-            required_versions={"GLIBC_2.17": "libc.so.6"},
-        )
-
-        def _fake_get_soname(p: Path) -> str:
-            return "libfoo.so.1"
-
-        def _fake_parse(_app: Path, _lib: str) -> _FakeReqs:
-            return reqs
-
-        orig = _cli_appcompat.click.echo
-        _cli_appcompat.click.echo = _fake_echo  # type: ignore[assignment]
-        try:
-            _handle_list_required_symbols(
-                Path("app"),
-                Path("lib") if weak_mode else None,
-                None if weak_mode else Path("old"),
-                None if weak_mode else Path("new"),
-                weak_mode=weak_mode, fmt=fmt,
-                _get_lib_soname=_fake_get_soname,
-                parse_app_requirements=_fake_parse,
-            )
-        finally:
-            _cli_appcompat.click.echo = orig  # type: ignore[assignment]
-        return "\n".join(captured)
-
-    def test_text_format(self) -> None:
-        out = self._call("markdown")
-        assert "libfoo.so.1" in out
-        assert "foo" in out and "bar" in out
-        assert "GLIBC_2.17" in out
-
-    def test_json_format(self) -> None:
-        out = self._call("json")
-        data = json.loads(out)
-        assert data["library"] == "libfoo.so.1"
-        assert sorted(data["required_symbols"]) == ["bar", "foo"]
-        assert data["required_versions"] == {"GLIBC_2.17": "libc.so.6"}
-
-    def test_missing_target_lib_raises(self) -> None:
-        def _never(p: Path) -> str:
-            raise AssertionError("should not be called")
-
-        with pytest.raises(click.UsageError, match="requires a library path"):
-            _handle_list_required_symbols(
-                Path("app"),
-                None, None, None,
-                weak_mode=False, fmt="markdown",
-                _get_lib_soname=_never,
-                parse_app_requirements=_never,  # type: ignore[arg-type]
-            )
 
 
 # ── cli_stack: command help / argument validation ───────────────────────────

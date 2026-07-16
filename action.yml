@@ -16,9 +16,6 @@ inputs:
       "scan" runs the deterministic source-intelligence orchestrator (classify →
       always-on pattern/cross-source tier → pinned evidence level, optionally
       compared against a baseline) — the entry point for source scans;
-      "merge" combines independently-produced dumps and/or a Flow-2
-      "abicheck_inputs/" pack into one self-contained baseline snapshot;
-      "appcompat" checks whether an application binary is affected by a library update;
       "deps" resolves transitive dependencies and symbol bindings (Linux ELF);
       "stack-check" compares a binary's full dependency stack across two
       sysroots (Linux ELF).
@@ -38,30 +35,6 @@ inputs:
       Required for compare and dump modes. For compare-release: new directory
       or package (RPM, Deb, tar, conda, wheel).
     required: false
-
-  # ── Application compatibility inputs ────────────────────────────────────
-  app-binary:
-    description: >
-      Path to the application binary (ELF, PE, or Mach-O).
-      Required when mode=appcompat.
-    required: false
-  check-against:
-    description: >
-      Path to a library for weak-mode symbol availability check (no old library needed).
-      Only used with mode=appcompat.
-    required: false
-  show-irrelevant:
-    description: >
-      Include library changes that do not affect the application.
-      Only used with mode=appcompat.
-    required: false
-    default: 'false'
-  list-required-symbols:
-    description: >
-      List symbols the application requires from the library and exit.
-      Only used with mode=appcompat.
-    required: false
-    default: 'false'
 
   # ── Package inputs (compare-release mode) ────────────────────────────────────
   debug-info1:
@@ -184,7 +157,7 @@ inputs:
       and follow-deps modes.
     required: false
 
-  # ── Source-scan & build-source evidence (scan / dump / merge modes) ──────────
+  # ── Source-scan & build-source evidence (scan / dump modes) ──────────────────
   sources:
     description: >
       Source checkout / tree for source-intelligence analysis. The compile
@@ -274,23 +247,6 @@ inputs:
       Maps to scan --risk-rules.
     required: false
 
-  # ── Baseline combination (merge mode) ────────────────────────────────────────
-  merge-inputs:
-    description: >
-      merge mode only. Space-separated list of inputs to combine: one or more
-      .abi.json dumps and/or a Flow-2 "abicheck_inputs/" pack directory the
-      product build emitted. The binary-bearing dump becomes the base; every
-      input's build_source facts are folded in per layer. Output goes to
-      output-file (default merged-baseline.json).
-    required: false
-  on-conflict:
-    description: >
-      merge mode only. What to do when two inputs supply the SAME layer
-      (L3/L4/L5) with differing facts: 'warn' (default, first-wins + diagnostic)
-      or 'error' (exit non-zero). Maps to merge --on-conflict.
-    required: false
-    default: 'warn'
-
   # ── Baseline auto-fetch (compare / scan modes) ───────────────────────────────
   abi-baseline:
     description: >
@@ -379,8 +335,8 @@ inputs:
     default: 'true'
   pr-comment:
     description: >
-      Post a sticky ABI report comment on the pull request (compare,
-      compare-release and appcompat modes). The comment is a content channel
+      Post a sticky ABI report comment on the pull request (compare and
+      compare-release modes). The comment is a content channel
       and never changes the check's red/green state — breaks still gate via
       fail-on-breaking / fail-on-api-break. Defaults to 'true', but is a no-op
       unless the workflow is triggered by a pull_request event and a token with
@@ -426,10 +382,8 @@ outputs:
       For compare-release: COMPATIBLE, SEVERITY_ERROR (with --severity-*
       via extra-args), API_BREAK, BREAKING,
       REMOVED_LIBRARY (when fail-on-removed-library is set), or ERROR.
-      For appcompat: COMPATIBLE, API_BREAK, BREAKING, or ERROR.
       For dump: COMPATIBLE or ERROR.
       For scan: COMPATIBLE, API_BREAK, BREAKING, BUDGET_OVERFLOW, or ERROR.
-      For merge: COMPATIBLE (combined baseline written) or ERROR.
       For stack-check: PASS, WARN, FAIL, or ERROR.
       For deps: PASS, FAIL, or ERROR.
     value: ${{ steps.run-abicheck.outputs.verdict }}
@@ -438,9 +392,8 @@ outputs:
       abicheck exit code. compare: 0 (compatible), 1 (severity error),
       2 (API break), 4 (ABI break). compare-release: 0 (compatible),
       2 (API break), 4 (ABI break), 8 (library removed).
-      appcompat: 0 (compatible), 2 (API break), 4 (ABI break).
       scan: 0 (compatible/advisory), 2 (API break), 4 (ABI break),
-      5 (budget overflow). merge: 0 (ok). stack-check: 0 (pass), 1 (warn),
+      5 (budget overflow). stack-check: 0 (pass), 1 (warn),
       4 (fail). deps: 0 (ok), 1 (missing). Click CLI errors are mapped to
       VERDICT=ERROR.
     value: ${{ steps.run-abicheck.outputs.exit-code }}
@@ -478,10 +431,6 @@ runs:
         INPUT_MODE: ${{ inputs.mode }}
         INPUT_OLD_LIBRARY: ${{ inputs.old-library }}
         INPUT_NEW_LIBRARY: ${{ inputs.new-library }}
-        INPUT_APP_BINARY: ${{ inputs.app-binary }}
-        INPUT_CHECK_AGAINST: ${{ inputs.check-against }}
-        INPUT_SHOW_IRRELEVANT: ${{ inputs.show-irrelevant }}
-        INPUT_LIST_REQUIRED_SYMBOLS: ${{ inputs.list-required-symbols }}
         INPUT_HEADER: ${{ inputs.header }}
         INPUT_OLD_HEADER: ${{ inputs.old-header }}
         INPUT_NEW_HEADER: ${{ inputs.new-header }}
@@ -541,8 +490,6 @@ runs:
         INPUT_ESTIMATE: ${{ inputs.estimate }}
         INPUT_CROSSCHECK: ${{ inputs.crosscheck }}
         INPUT_RISK_RULES: ${{ inputs.risk-rules }}
-        INPUT_MERGE_INPUTS: ${{ inputs.merge-inputs }}
-        INPUT_ON_CONFLICT: ${{ inputs.on-conflict }}
         GH_TOKEN: ${{ inputs.github-token }}
       run: bash "${{ github.action_path }}/action/run.sh"
 

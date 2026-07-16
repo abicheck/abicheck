@@ -486,57 +486,32 @@ def test_top_fan_in_sorted_desc() -> None:
     assert all(c > 0 for c in counts)
 
 
-def test_metrics_json_round_trips_through_snapshot(tmp_path) -> None:
-    import json as _json
-
-    from click.testing import CliRunner
-
-    from abicheck.cli import main
-    from abicheck.serialization import save_snapshot
-
-    snap_path = tmp_path / "libfoo.abi.json"
-    save_snapshot(_snap(), snap_path)
-
-    runner = CliRunner()
-    result = runner.invoke(main, ["surface-report", str(snap_path), "--format", "json"])
-    assert result.exit_code == 0, result.output
-    data = _json.loads(result.output)
+def test_metrics_json_round_trips_through_snapshot() -> None:
+    # `surface-report --format json` (deleted CLI command, ADR-043) was a thin
+    # `compute_surface_metrics(snap).to_dict()` wrapper — exercise that
+    # directly; the JSON shape is the dataclass's own `to_dict()`.
+    data = compute_surface_metrics(_snap()).to_dict()
     assert data["library"] == "libfoo.so.1"
     assert data["undocumented_exports"] == 1
     assert any(hc["header"] == "foo/api.h" for hc in data["header_coverage"])
 
 
-def test_surface_report_audit_lists_hygiene_findings(tmp_path) -> None:
-    # `surface-report --audit` runs the ADR-035 D8 single-release hygiene audit
-    # (cross-source checks) and lists the findings — exported_not_public fires for
-    # the EXPORT_ONLY symbol once an export table is present.
-    import json as _json
-
-    from click.testing import CliRunner
-
-    from abicheck.cli import main
+def test_surface_report_audit_lists_hygiene_findings() -> None:
+    # `surface-report --audit` (deleted CLI command) ran the ADR-035 D8
+    # single-release hygiene audit (cross-source checks) via
+    # `buildsource.crosscheck.run_crosschecks`, unchanged and still used by
+    # `scan`'s audit tier — exported_not_public fires for the EXPORT_ONLY
+    # symbol once an export table is present.
+    from abicheck.buildsource.crosscheck import run_crosschecks
     from abicheck.elf_metadata import ElfMetadata, ElfSymbol
-    from abicheck.serialization import save_snapshot
 
     snap = _snap()
     snap.elf = ElfMetadata(
         symbols=[ElfSymbol(name="foo_open"), ElfSymbol(name="foo_undocumented")]
     )
-    snap_path = tmp_path / "libfoo.abi.json"
-    save_snapshot(snap, snap_path)
-
-    result = CliRunner().invoke(
-        main, ["surface-report", str(snap_path), "--audit", "--format", "json"]
-    )
-    assert result.exit_code == 0, result.output
-    data = _json.loads(result.output)
-    assert "audit" in data
-    kinds = {f["kind"] for f in data["audit"]}
+    findings = run_crosschecks(snap).findings
+    kinds = {f.kind.value for f in findings}
     assert "exported_not_public" in kinds
-
-    text = CliRunner().invoke(main, ["surface-report", str(snap_path), "--audit"])
-    assert text.exit_code == 0, text.output
-    assert "single-release audit" in text.output
 
 
 def _bare_snap() -> AbiSnapshot:
@@ -578,20 +553,6 @@ def test_dwarf_tier_without_headers() -> None:
     assert compute_surface_metrics(snap).evidence_tier == "dwarf_aware"
 
 
-def test_surface_report_text_empty_surface(tmp_path) -> None:
-    from click.testing import CliRunner
-
-    from abicheck.cli import main
-    from abicheck.serialization import save_snapshot
-
-    snap_path = tmp_path / "libbare.abi.json"
-    save_snapshot(_bare_snap(), snap_path)
-    result = CliRunner().invoke(main, ["surface-report", str(snap_path)])
-    assert result.exit_code == 0, result.output
-    assert "highest fan-in" not in result.output  # no fan-in section
-    assert "header coverage" not in result.output  # no header section
-
-
 def test_closure_handles_namespaces_diamonds_typedefs_vbases() -> None:
     # ns::A -> B and C (diamond), both -> D; A has a virtual base VB; Alias->A.
     snap = AbiSnapshot(
@@ -630,48 +591,9 @@ def test_closure_handles_namespaces_diamonds_typedefs_vbases() -> None:
     assert "VB" in g.type_refs["ns::A"]  # virtual base recorded as a reference
 
 
-def test_metrics_json_empty_surface(tmp_path) -> None:
-    import json as _json
-
-    from click.testing import CliRunner
-
-    from abicheck.cli import main
-    from abicheck.serialization import save_snapshot
-
-    snap_path = tmp_path / "libbare.abi.json"
-    save_snapshot(_bare_snap(), snap_path)
-    result = CliRunner().invoke(
-        main, ["surface-report", str(snap_path), "--format", "json"]
-    )
-    assert result.exit_code == 0, result.output
-    data = _json.loads(result.output)
+def test_metrics_json_empty_surface() -> None:
+    # `surface-report --format json` (deleted CLI command) on an empty
+    # surface — exercise `compute_surface_metrics().to_dict()` directly.
+    data = compute_surface_metrics(_bare_snap()).to_dict()
     assert data["top_fan_in"] == []
     assert data["header_coverage"] == []
-
-
-def test_surface_report_rejects_garbage_input(tmp_path) -> None:
-    from click.testing import CliRunner
-
-    from abicheck.cli import main
-
-    junk = tmp_path / "not-a-library.bin"
-    junk.write_bytes(b"this is not an ELF, PE, Mach-O, JSON, or Perl dump\n")
-    result = CliRunner().invoke(main, ["surface-report", str(junk)])
-    assert result.exit_code != 0
-    assert "Cannot read" in result.output
-
-
-def test_surface_report_text_output(tmp_path) -> None:
-    from click.testing import CliRunner
-
-    from abicheck.cli import main
-    from abicheck.serialization import save_snapshot
-
-    snap_path = tmp_path / "libfoo.abi.json"
-    save_snapshot(_snap(), snap_path)
-
-    runner = CliRunner()
-    result = runner.invoke(main, ["surface-report", str(snap_path)])
-    assert result.exit_code == 0, result.output
-    assert "Surface report: libfoo.so.1" in result.output
-    assert "undocumented exports:" in result.output

@@ -815,22 +815,27 @@ def test_empty_model_renders_clean_verdict():
 
 # ---------------------------------------------------------------------------
 # CLI command
+#
+# `pr-comment` is Action/library-only (ADR-043 D1): not a registered `abicheck`
+# subcommand, invoked as `python -m abicheck.cli_pr_comment` (see
+# action/run.sh). Tests below drive the standalone Click command object
+# directly rather than through `abicheck.cli.main`.
 # ---------------------------------------------------------------------------
 
 
 def _run_cli(args):
     from click.testing import CliRunner
 
-    from abicheck.cli import main
+    from abicheck.cli_pr_comment import pr_comment_cmd
 
-    return CliRunner().invoke(main, args)
+    return CliRunner().invoke(pr_comment_cmd, args)
 
 
 def test_cli_pr_comment_writes_body(tmp_path):
     report = tmp_path / "report.json"
     report.write_text(json.dumps(_compare_report()), encoding="utf-8")
     out = tmp_path / "comment.md"
-    result = _run_cli(["pr-comment", str(report), "--sha", "abc1234", "-o", str(out)])
+    result = _run_cli([str(report), "--sha", "abc1234", "-o", str(out)])
     assert result.exit_code == 0
     body = out.read_text(encoding="utf-8")
     assert MARKER in body
@@ -841,7 +846,7 @@ def test_cli_pr_comment_skip_writes_empty_file(tmp_path):
     report = tmp_path / "report.json"
     report.write_text(json.dumps(_compare_report([])), encoding="utf-8")
     out = tmp_path / "comment.md"
-    result = _run_cli(["pr-comment", str(report), "--on", "changes", "-o", str(out)])
+    result = _run_cli([str(report), "--on", "changes", "-o", str(out)])
     assert result.exit_code == 0
     # nothing to post → empty file so the action's `-s` check skips
     assert out.read_text(encoding="utf-8") == ""
@@ -850,7 +855,7 @@ def test_cli_pr_comment_skip_writes_empty_file(tmp_path):
 def test_cli_pr_comment_invalid_json_errors(tmp_path):
     report = tmp_path / "bad.json"
     report.write_text("{not json", encoding="utf-8")
-    result = _run_cli(["pr-comment", str(report)])
+    result = _run_cli([str(report)])
     assert result.exit_code != 0
     assert "Cannot read JSON report" in result.output
 
@@ -858,6 +863,6 @@ def test_cli_pr_comment_invalid_json_errors(tmp_path):
 def test_cli_pr_comment_non_object_errors(tmp_path):
     report = tmp_path / "arr.json"
     report.write_text("[1, 2, 3]", encoding="utf-8")
-    result = _run_cli(["pr-comment", str(report)])
+    result = _run_cli([str(report)])
     assert result.exit_code != 0
     assert "must be an object" in result.output

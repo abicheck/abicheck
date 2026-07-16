@@ -13,7 +13,7 @@
 # limitations under the License.
 
 """Coverage-raising unit tests for bundle, mcp_server, checker_policy,
-baseline, and classify modules.
+and classify modules.
 
 Pure-Python only — no external tools. Uses tmp_path and unittest.mock for
 I/O-heavy paths. Every test asserts a meaningful invariant.
@@ -26,6 +26,8 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+from abicheck.model import AbiSnapshot, Function, Visibility
 
 # ---------------------------------------------------------------------------
 # Import mcp_server under a temporary `mcp` mock (mirrors the pattern in
@@ -252,194 +254,6 @@ class TestComputeVerdict:
     def test_risk_only_is_compatible_with_risk(self) -> None:
         kind = next(iter(RISK_KINDS))
         assert compute_verdict([_change(kind)]) == Verdict.COMPATIBLE_WITH_RISK
-
-
-# ===========================================================================
-# baseline.py
-# ===========================================================================
-
-from abicheck.baseline import (  # noqa: E402
-    BaselineKey,
-    FilesystemRegistry,
-    _atomic_write,
-    detect_platform_from_binary,
-)
-from abicheck.errors import ValidationError  # noqa: E402
-from abicheck.model import AbiSnapshot, Function, Visibility  # noqa: E402
-
-
-def _sample_snapshot() -> AbiSnapshot:
-    return AbiSnapshot(
-        library="libfoo.so",
-        version="1.0.0",
-        functions=[
-            Function(
-                name="foo",
-                mangled="foo",
-                return_type="void",
-                visibility=Visibility.PUBLIC,
-            ),
-        ],
-    )
-
-
-class TestKeyDirEscape:
-    def test_key_dir_escape_raises(self, tmp_path: Path) -> None:
-        """_key_dir raises when the resolved path escapes root (lines 294-295)."""
-        registry = FilesystemRegistry(tmp_path / "root")
-        key = BaselineKey(library="libfoo", version="1.0.0", platform="linux-x86_64")
-        # Force relative_to to fail by patching the resolved path containment check.
-        with patch.object(Path, "relative_to", side_effect=ValueError("escape")):
-            with pytest.raises(ValidationError, match="escapes registry root"):
-                registry._key_dir(key)
-
-
-class TestListSkipsNonDirs:
-    def test_list_skips_stray_files(self, tmp_path: Path) -> None:
-        """list() skips non-directory entries at each level (367, 373, 377)."""
-        root = tmp_path / "baselines"
-        registry = FilesystemRegistry(root)
-        key = BaselineKey(library="libfoo", version="1.0.0", platform="linux-x86_64")
-        registry.push(key, _sample_snapshot())
-        # Stray files at the library, version and platform levels.
-        (root / "stray_lib.txt").write_text("x")
-        (root / "libfoo" / "stray_ver.txt").write_text("x")
-        (root / "libfoo" / "1.0.0" / "stray_plat.txt").write_text("x")
-        keys = registry.list()
-        # Only the one real baseline survives the non-dir filtering.
-        assert len(keys) == 1
-        assert keys[0].library == "libfoo"
-
-    def test_list_platform_without_snapshot(self, tmp_path: Path) -> None:
-        """A platform dir lacking snapshot.json yields no key (line 380->387)."""
-        root = tmp_path / "baselines"
-        registry = FilesystemRegistry(root)
-        # Create the directory structure but no snapshot.json at the platform level.
-        (root / "libfoo" / "1.0.0" / "linux-x86_64").mkdir(parents=True)
-        assert registry.list() == []
-
-
-class TestDeleteParentCleanupError:
-    def test_delete_handles_rmdir_oserror(self, tmp_path: Path) -> None:
-        """delete() stops parent cleanup gracefully on OSError (lines 416-417)."""
-        root = tmp_path / "baselines"
-        registry = FilesystemRegistry(root)
-        key = BaselineKey(library="libfoo", version="1.0.0", platform="linux-x86_64")
-        registry.push(key, _sample_snapshot())
-
-        real_iterdir = Path.iterdir
-
-        def _boom_iterdir(self):  # noqa: ANN001
-            # Raise only while walking up empty parents during cleanup.
-            if self.name in ("1.0.0", "libfoo"):
-                raise OSError("cannot scan")
-            return real_iterdir(self)
-
-        with patch.object(Path, "iterdir", _boom_iterdir):
-            assert registry.delete(key) is True
-        # The leaf snapshot dir was removed even though parent cleanup aborted.
-        assert registry.pull(key) is None
-
-
-class TestAtomicWriteErrorCleanup:
-    def test_atomic_write_cleans_temp_on_error(self, tmp_path: Path) -> None:
-        """_atomic_write removes its temp file and re-raises on failure (435-440)."""
-        target = tmp_path / "out.txt"
-        before = set(tmp_path.iterdir())
-        with patch("abicheck.baseline.os.replace", side_effect=RuntimeError("nope")):
-            with pytest.raises(RuntimeError, match="nope"):
-                _atomic_write(target, "content")
-        after = set(tmp_path.iterdir())
-        # No leftover .tmp files: the temp file was cleaned up in the handler.
-        assert before == after
-
-
-class TestDetectPlatformArch:
-    def test_pe_arch_detection(self, tmp_path: Path) -> None:
-        """PE branch resolves arch via a mocked pefile module (499-506, 514)."""
-        binary = tmp_path / "foo.dll"
-        binary.write_bytes(b"MZ" + b"\x00" * 200)
-
-        class _FakeHeader:
-            Machine = 0x8664  # IMAGE_FILE_MACHINE_AMD64
-
-        class _FakePE:
-            def __init__(self, *_a, **_k) -> None:
-                self.FILE_HEADER = _FakeHeader()
-
-            def close(self) -> None:
-                pass
-
-        import types
-
-        with patch("abicheck.binary_utils.detect_binary_format", return_value="pe"):
-            with patch.dict(sys.modules, {"pefile": types.SimpleNamespace(PE=_FakePE)}):
-                result = detect_platform_from_binary(binary)
-        assert result == "windows-x86_64"
-
-    @pytest.mark.parametrize(
-        "machine,expected",
-        [
-            (0x14C, "windows-x86"),
-            (0xAA64, "windows-aarch64"),
-            (0x1234, "windows-unknown"),
-        ],
-    )
-    def test_pe_arch_variants(
-        self, tmp_path: Path, machine: int, expected: str
-    ) -> None:
-        """PE x86 / aarch64 / fallback machine codes (lines 502-505)."""
-        binary = tmp_path / "foo.dll"
-        binary.write_bytes(b"MZ" + b"\x00" * 200)
-
-        class _FakeHeader:
-            Machine = machine
-
-        class _FakePE:
-            def __init__(self, *_a, **_k) -> None:
-                self.FILE_HEADER = _FakeHeader()
-
-            def close(self) -> None:
-                pass
-
-        import types
-
-        with patch("abicheck.binary_utils.detect_binary_format", return_value="pe"):
-            with patch.dict(sys.modules, {"pefile": types.SimpleNamespace(PE=_FakePE)}):
-                result = detect_platform_from_binary(binary)
-        assert result == expected
-
-    def test_macho_arch_detection(self, tmp_path: Path) -> None:
-        """Mach-O branch resolves arch via a mocked macholib (520-525, 533)."""
-        binary = tmp_path / "libfoo.dylib"
-        binary.write_bytes(b"\xfe\xed\xfa\xce" + b"\x00" * 64)
-
-        class _Inner:
-            cputype = 16777223  # CPU_TYPE_X86_64
-
-        class _HeaderWrap:
-            header = _Inner()
-
-        class _FakeMachO:
-            def __init__(self, *_a, **_k) -> None:
-                self.headers = [_HeaderWrap()]
-
-        import types
-
-        with patch("abicheck.binary_utils.detect_binary_format", return_value="macho"):
-            with patch.dict(
-                sys.modules, {"macholib.MachO": types.SimpleNamespace(MachO=_FakeMachO)}
-            ):
-                result = detect_platform_from_binary(binary)
-        assert result == "macos-x86_64"
-
-    def test_unknown_format_default_arch(self, tmp_path: Path) -> None:
-        """An unrecognised-but-detected format hits the trailing return (line 535)."""
-        binary = tmp_path / "weird.bin"
-        binary.write_bytes(b"\x00" * 32)
-        with patch("abicheck.binary_utils.detect_binary_format", return_value="wasm"):
-            result = detect_platform_from_binary(binary)
-        assert result == "unknown-unknown"
 
 
 # ===========================================================================

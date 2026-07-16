@@ -294,53 +294,18 @@ class TestCompareReleaseSeverityExit:
 
 
 # ── §1 appcompat warnings + scope ───────────────────────────────────────────
-
-
-class TestAppcompatWarnings:
-    def test_scope_toggle_present(self):
-        out = CliRunner().invoke(main, ["appcompat", "--help"]).output
-        # The flag is documented (rich-click wraps the long toggle across panel
-        # lines, so assert the stable primary name) and is a boolean toggle.
-        assert "--scope-public-headers" in out
-        opt = next(p for p in main.commands["appcompat"].params
-                   if getattr(p, "name", "") == "scope_public_headers")
-        assert "--no-scope-public-headers" in opt.secondary_opts
-
-    def test_severity_options_present(self):
-        out = CliRunner().invoke(main, ["appcompat", "--help"]).output
-        assert "--severity-preset" in out
-
-
-class TestValidateAppcompatArgs:
-    def test_warns_on_ignored_headers_in_weak_mode(self):
-        from abicheck.cli_appcompat import _validate_appcompat_args
-
-        # Should not raise, but the warning is emitted via click.echo. We invoke
-        # within a Click context-free call; click.echo to stderr is fine here.
-        # The key behavior: headers in weak mode do NOT raise (only warn).
-        _validate_appcompat_args(
-            weak_mode=True,
-            old_lib=None, new_lib=None,
-            list_symbols=False,
-            old_headers_only=(), new_headers_only=(),
-            old_includes_only=(), new_includes_only=(),
-            headers=(Path("foo.h"),), includes=(),
-        )
-
-    def test_per_side_headers_still_rejected_in_weak_mode(self):
-        import pytest
-
-        from abicheck.cli_appcompat import _validate_appcompat_args
-
-        with pytest.raises(Exception):  # click.UsageError
-            _validate_appcompat_args(
-                weak_mode=True,
-                old_lib=None, new_lib=None,
-                list_symbols=False,
-                old_headers_only=(Path("foo.h"),), new_headers_only=(),
-                old_includes_only=(), new_includes_only=(),
-                headers=(), includes=(),
-            )
+#
+# The standalone `appcompat` CLI command (and `cli_appcompat.py`, including
+# `_validate_appcompat_args`) was deleted; its scoping behavior folded into
+# `compare --used-by`/`--required-symbol(s)` (ADR-043). The two `--help`-only
+# assertions here (`--scope-public-headers`/`--severity-preset` present) are
+# already covered on the surviving command by
+# `TestCompareReleaseDefaults.test_scope_toggle_present` /
+# `.test_severity_options_present` above, so they are not duplicated. The
+# `_validate_appcompat_args` unit tests have no replacement target (the
+# function is gone, matching the precedent already set for
+# `TestValidateAppcompatArgs`/`TestHandleListRequiredSymbols` in
+# `tests/test_cli_split_modules_new.py`).
 
 
 # ── §2.2 severity-exit floors (Codex P1 fixes) ──────────────────────────────
@@ -420,79 +385,6 @@ class TestComputeReleaseSeverityExitCode:
         # info-only downgrades everything below error -> exit 0.
         assert _compute_release_severity_exit_code(
             [entry], "info-only", None, None, None, None) == 0
-
-
-class TestAppcompatSeverityExit:
-    """Full-mode appcompat severity exit, via a stubbed check_appcompat."""
-
-    def _dummy_libs(self, tmp_path):
-        app = tmp_path / "app"
-        old = tmp_path / "old.so"
-        new = tmp_path / "new.so"
-        for p in (app, old, new):
-            p.write_bytes(b"\x7fELF")
-        return app, old, new
-
-    def _patch_result(self, monkeypatch, *, missing=None, app_break=False):
-        import abicheck.appcompat as _ac
-        from abicheck.appcompat import AppCompatResult
-        from abicheck.checker import Verdict
-
-        diff = _breaking_diff()
-        res = AppCompatResult(
-            app_path="app", old_lib_path="old.so", new_lib_path="new.so",
-            missing_symbols=list(missing or []),
-            # app_break -> the break is relevant to the app (breaking_for_app);
-            # otherwise the break is present in full_diff but NOT app-scoped, so
-            # it must not gate the app.
-            breaking_for_app=list(diff.changes) if app_break else [],
-            full_diff=diff,
-            verdict=Verdict.BREAKING if (missing or app_break) else Verdict.COMPATIBLE,
-        )
-        monkeypatch.setattr(_ac, "check_appcompat", lambda *a, **k: res)
-        return res
-
-    def test_info_only_downgrades_app_break(self, tmp_path, monkeypatch):
-        app, old, new = self._dummy_libs(tmp_path)
-        self._patch_result(monkeypatch, app_break=True)
-        result = CliRunner().invoke(
-            main, ["appcompat", str(app), str(old), str(new),
-                   "--severity-preset", "info-only"],
-        )
-        # An app-relevant break is governed by severity -> info-only exits 0.
-        assert result.exit_code == 0
-
-    def test_default_preset_exits_on_app_break(self, tmp_path, monkeypatch):
-        app, old, new = self._dummy_libs(tmp_path)
-        self._patch_result(monkeypatch, app_break=True)
-        result = CliRunner().invoke(
-            main, ["appcompat", str(app), str(old), str(new),
-                   "--severity-preset", "default"],
-        )
-        assert result.exit_code == 4
-
-    def test_unrelated_library_break_not_app_scoped(self, tmp_path, monkeypatch):
-        app, old, new = self._dummy_libs(tmp_path)
-        # full_diff has a break, but it is NOT relevant to the app
-        # (breaking_for_app empty). The severity exit must stay app-scoped -> 0,
-        # even under the default preset.
-        self._patch_result(monkeypatch, app_break=False)
-        result = CliRunner().invoke(
-            main, ["appcompat", str(app), str(old), str(new),
-                   "--severity-preset", "default"],
-        )
-        assert result.exit_code == 0
-
-    def test_missing_symbols_floor_not_downgraded(self, tmp_path, monkeypatch):
-        app, old, new = self._dummy_libs(tmp_path)
-        # No app-relevant changes, but the app is missing a required symbol:
-        # info-only must NOT downgrade this hard runtime break below 4.
-        self._patch_result(monkeypatch, missing=["_Z3barv"])
-        result = CliRunner().invoke(
-            main, ["appcompat", str(app), str(old), str(new),
-                   "--severity-preset", "info-only"],
-        )
-        assert result.exit_code == 4
 
 
 class TestReleaseSeverityPolicyAndGlobal:

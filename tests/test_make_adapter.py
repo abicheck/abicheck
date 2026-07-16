@@ -17,11 +17,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from click.testing import CliRunner
-
 from abicheck.buildsource.adapters import MakeAdapter
-from abicheck.buildsource.pack import BuildSourcePack
-from abicheck.cli import main
 
 DRY_RUN = """\
 make: Entering directory '/home/user/proj'
@@ -296,12 +292,34 @@ def test_make_compile_recipe_without_source_skipped():
 
 
 def test_collect_evidence_make_dry_run_cli(tmp_path):
+    # `collect --from make=<transcript>` is gone (ADR-043 CLI reset); this
+    # drives the exact same surviving engine call the deleted command used:
+    # abicheck.cli_buildsource_helpers._run_adapters folds the Make adapter's
+    # output into a BuildEvidence + records the extractor row.
+    from abicheck.buildsource.build_evidence import BuildEvidence
+    from abicheck.buildsource.model import ExtractorRecord
+    from abicheck.cli_buildsource_helpers import _run_adapters
+
     dr = tmp_path / "dry.txt"
     dr.write_text(DRY_RUN)
-    out = tmp_path / "e"
-    result = CliRunner().invoke(main, ["collect", "--from", f"make={dr}", "-o", str(out)])
-    assert result.exit_code == 0, result.output
-    pack = BuildSourcePack.load(out)
-    assert pack.build_evidence is not None
-    assert len(pack.build_evidence.compile_units) == 2
-    assert any(e.name == "make" and e.status == "ok" for e in pack.manifest.extractors)
+    merged = BuildEvidence()
+    extractors: list[ExtractorRecord] = []
+    _run_adapters(
+        merged,
+        extractors,
+        compile_db=None,
+        build_dir=None,
+        cmake=False,
+        ninja=False,
+        ninja_compdb=None,
+        bazel_cquery=None,
+        bazel_aquery=None,
+        make_dry_run=dr,
+        binary=None,
+        read_compiler_record=False,
+        build_system="generic",
+        record_bazel_inputs=False,
+        verbose=False,
+    )
+    assert len(merged.compile_units) == 2
+    assert any(e.name == "make" and e.status == "ok" for e in extractors)

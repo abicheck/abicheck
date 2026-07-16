@@ -1,0 +1,107 @@
+name: CLI Interface Check
+
+# Flags user-facing CLI-surface changes on a PR (new/removed commands,
+# new/removed/renamed options, changed defaults/types) so it is unmissable
+# when a change touches abicheck's user interaction surface. Dumps the CLI
+# surface (scripts/dump_cli_surface.py) for the PR's base and head refs, each
+# in its own venv (so one checkout's abicheck never shadows the other's),
+# diffs them (scripts/diff_cli_surface.py), and — when they differ — applies
+# the `cli-interface-change` label and posts/updates a sticky PR comment with
+# the exact diff. Removes the label again if a later push makes the surface
+# match base once more.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  cli-interface-diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Fetch PR base ref
+        run: git fetch --depth=1 origin "${{ github.event.pull_request.base.sha }}"
+
+      - name: Add worktree for PR base ref
+        run: git worktree add /tmp/cli-base "${{ github.event.pull_request.base.sha }}"
+
+      - name: Dump CLI surface for PR base
+        run: |
+          python -m venv /tmp/venv-base
+          /tmp/venv-base/bin/pip install -q /tmp/cli-base
+          /tmp/venv-base/bin/python scripts/dump_cli_surface.py /tmp/cli-surface-base.json
+
+      - name: Dump CLI surface for PR head
+        run: |
+          python -m venv /tmp/venv-head
+          /tmp/venv-head/bin/pip install -q .
+          /tmp/venv-head/bin/python scripts/dump_cli_surface.py /tmp/cli-surface-head.json
+
+      - name: Diff CLI surfaces
+        id: clidiff
+        run: |
+          set +e
+          python scripts/diff_cli_surface.py \
+            /tmp/cli-surface-base.json /tmp/cli-surface-head.json --markdown \
+            > /tmp/cli-surface-diff.md
+          echo "changed=$?" >> "$GITHUB_OUTPUT"
+          set -e
+          cat /tmp/cli-surface-diff.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Label and comment when the CLI surface changed
+        if: steps.clidiff.outputs.changed == '1'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const marker = '<!-- cli-interface-diff -->';
+            const diff = fs.readFileSync('/tmp/cli-surface-diff.md', 'utf8');
+            const note = '_This comment updates automatically as the PR changes; the ' +
+              '`cli-interface-change` label tracks whether the diff is currently non-empty._';
+            const body = `${marker}\n${diff}\n${note}`;
+
+            try {
+              await github.rest.issues.createLabel({
+                owner, repo, name: 'cli-interface-change',
+                color: 'B60205',
+                description: "This PR changes abicheck's user-facing CLI surface",
+              });
+            } catch (e) {
+              // Label already exists — fine.
+            }
+            await github.rest.issues.addLabels({ owner, repo, issue_number, labels: ['cli-interface-change'] });
+
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+      - name: Remove label when the CLI surface no longer differs
+        if: steps.clidiff.outputs.changed == '0'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            try {
+              await github.rest.issues.removeLabel({ owner, repo, issue_number, name: 'cli-interface-change' });
+            } catch (e) {
+              // Label was never applied — fine.
+            }

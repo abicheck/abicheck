@@ -20,8 +20,6 @@ from __future__ import annotations
 
 import json
 
-from click.testing import CliRunner
-
 from abicheck.buildsource.build_evidence import (
     BuildEvidence,
     CompileUnit,
@@ -52,7 +50,6 @@ from abicheck.buildsource.source_graph import (
     mark_source_edges_extractor_coverage,
 )
 from abicheck.checker_policy import RISK_KINDS, ChangeKind
-from abicheck.cli import main
 
 
 def _sample_build() -> BuildEvidence:
@@ -1156,7 +1153,11 @@ def test_findings_identical_graphs_yield_nothing() -> None:
     assert diff_source_graph_findings(g, g) == []
 
 
-def test_compare_graph_cli_surfaces_findings(tmp_path) -> None:
+def test_compare_graph_cli_surfaces_findings() -> None:
+    # `graph compare` (deleted CLI command, ADR-043) was a thin wrapper over
+    # `diff_source_graph`/`diff_source_graph_findings` — exercise those
+    # directly; the L5 graph is now an internal consequence of `--depth
+    # source` rather than a separate command.
     b = _build_with_public_header()
     old = build_source_graph(
         b, source_abi=_surface_with([("foo::b", "inc/foo.h")], {"foo::b": "_Zb"})
@@ -1164,20 +1165,9 @@ def test_compare_graph_cli_surfaces_findings(tmp_path) -> None:
     new = build_source_graph(
         b, source_abi=_surface_with([("foo::b", "inc/foo.h")], {"foo::b": "_Zb2"})
     )
-    op, np = tmp_path / "o.json", tmp_path / "n.json"
-    op.write_text(json.dumps(old.to_dict()))
-    np.write_text(json.dumps(new.to_dict()))
-
-    res = CliRunner().invoke(main, ["graph", "compare", str(op), str(np)])
-    assert res.exit_code == 0, res.output
-    assert "Graph-derived risk findings" in res.output
-    assert "source_to_binary_mapping_changed" in res.output
-
-    res_json = CliRunner().invoke(
-        main, ["graph", "compare", str(op), str(np), "--format", "json"]
-    )
-    payload = json.loads(res_json.output)
-    assert payload["findings"][0]["kind"] == "source_to_binary_mapping_changed"
+    findings = diff_source_graph_findings(old, new)
+    assert findings
+    assert findings[0].kind == ChangeKind.SOURCE_TO_BINARY_MAPPING_CHANGED
 
 
 # ── Finalize: build-option→symbol flow, include drift, localization ─────────
@@ -1430,7 +1420,12 @@ def test_localize_symbol_absent_returns_empty() -> None:
     assert result["exported_by_targets"] == []
 
 
-def test_explain_finding_cli(tmp_path) -> None:
+def test_explain_finding_cli() -> None:
+    # `graph explain` (deleted CLI command, ADR-043) was a thin wrapper over
+    # `localize_symbol` (+ `_resolve_symbol_from_report` for --finding-id) —
+    # exercise those directly.
+    from abicheck.buildsource.source_graph import localize_symbol
+
     b = BuildEvidence()
     b.targets.append(
         Target(
@@ -1440,83 +1435,28 @@ def test_explain_finding_cli(tmp_path) -> None:
         )
     )
     g = build_source_graph(b, source_abi=_sample_surface())
-    graph_json = tmp_path / "g.json"
-    graph_json.write_text(json.dumps(g.to_dict()))
 
-    res = CliRunner().invoke(
-        main,
-        [
-            "graph",
-            "explain",
-            "--sources",
-            str(graph_json),
-            "--symbol",
-            "_ZN3foo3barEv",
-        ],
-    )
-    assert res.exit_code == 0, res.output
-    assert "target://libfoo" in res.output
-    assert "foo::bar" in res.output
-
-    res_json = CliRunner().invoke(
-        main,
-        [
-            "graph",
-            "explain",
-            "--sources",
-            str(graph_json),
-            "--symbol",
-            "_ZN3foo3barEv",
-            "--format",
-            "json",
-        ],
-    )
-    payload = json.loads(res_json.output)
-    assert payload["found"] is True
-    assert "foo::bar" in payload["source_declarations"]
+    result = localize_symbol(g, "_ZN3foo3barEv")
+    assert result["found"] is True
+    assert "target://libfoo" in result["exported_by_targets"]
+    assert "foo::bar" in result["source_declarations"]
 
 
 def test_explain_finding_resolves_symbol_from_report(tmp_path) -> None:
-    b = BuildEvidence()
-    b.targets.append(
-        Target(
-            id="target://libfoo",
-            public_headers=["include/foo.h"],
-            confidence=Confidence.HIGH,
-        )
-    )
-    g = build_source_graph(b, source_abi=_sample_surface())
-    graph_json = tmp_path / "g.json"
-    graph_json.write_text(json.dumps(g.to_dict()))
+    from abicheck.cli_graph import _resolve_symbol_from_report
+
     report = tmp_path / "report.json"
     report.write_text(json.dumps({"changes": [{"symbol": "_ZN3foo3barEv"}]}))
 
-    res = CliRunner().invoke(
-        main,
-        [
-            "graph",
-            "explain",
-            "--sources",
-            str(graph_json),
-            "--report",
-            str(report),
-            "--finding-id",
-            "0",
-            "--format",
-            "json",
-        ],
-    )
-    assert res.exit_code == 0, res.output
-    assert json.loads(res.output)["symbol"] == "_ZN3foo3barEv"
+    assert _resolve_symbol_from_report(report, "0") == "_ZN3foo3barEv"
 
 
-def test_explain_finding_requires_a_symbol(tmp_path) -> None:
-    g = build_source_graph(BuildEvidence())
-    graph_json = tmp_path / "g.json"
-    graph_json.write_text(json.dumps(g.to_dict()))
-    res = CliRunner().invoke(main, ["graph", "explain", "--sources", str(graph_json)])
-    assert res.exit_code != 0
-    assert "No symbol to explain" in res.output
+# The deleted `graph explain` command's "no --symbol and no resolvable
+# --report/--finding-id" usage error (`test_explain_finding_requires_a_symbol`)
+# was pure CLI-argument plumbing with no surviving entry point —
+# `localize_symbol`/`_resolve_symbol_from_report` both already require a
+# symbol string to be passed in, so there's nothing left to call directly for
+# this scenario.
 
 
 def test_resolve_symbol_from_report_variants(tmp_path) -> None:
@@ -1575,18 +1515,15 @@ def test_resolve_symbol_from_report_non_list_changes(tmp_path) -> None:
     assert _resolve_symbol_from_report(report, "0") == ""
 
 
-def test_explain_finding_text_symbol_absent(tmp_path) -> None:
-    # Text-mode localization of a symbol absent from the graph reports the
-    # "not present" notice rather than failing.
-    g = build_source_graph(BuildEvidence())
-    graph_json = tmp_path / "g.json"
-    graph_json.write_text(json.dumps(g.to_dict()))
-    res = CliRunner().invoke(
-        main,
-        ["graph", "explain", "--sources", str(graph_json), "--symbol", "_Zmissing"],
-    )
-    assert res.exit_code == 0, res.output
-    assert "symbol not present in the source graph" in res.output
+def test_explain_finding_text_symbol_absent() -> None:
+    # `graph explain`'s text-mode "not present" notice was just a `found`-flag
+    # check on `localize_symbol`'s result — covered directly by
+    # `test_localize_symbol_absent_returns_empty` above (`result["found"] is
+    # False`); no CLI-level replacement needed.
+    from abicheck.buildsource.source_graph import localize_symbol
+
+    result = localize_symbol(build_source_graph(BuildEvidence()), "_Zmissing")
+    assert result["found"] is False
 
 
 def test_load_source_graph_invalid_pack_dir(tmp_path) -> None:
@@ -1792,83 +1729,24 @@ def test_pack_drops_stale_graph_when_recollected(tmp_path) -> None:
     assert BuildSourcePack.load(root).source_graph is None
 
 
-def test_collect_evidence_summary_writes_graph_and_coverage(tmp_path) -> None:
-    cdb = tmp_path / "compile_commands.json"
-    src = tmp_path / "foo.cpp"
-    src.write_text("int foo(){return 1;}\n")
-    cdb.write_text(
-        json.dumps(
-            [
-                {
-                    "directory": str(tmp_path),
-                    "file": str(src),
-                    "command": f"c++ -std=c++20 -fvisibility=hidden -c {src} -o foo.o",
-                }
-            ]
-        )
+def _collect_graph_pack(
+    tmp_path, name: str, *, two_units: bool = False, source_graph: str = "summary"
+):
+    """Build a BuildSourcePack the way the deleted `collect --compile-db ...
+    --source-graph summary -o <dir>` command used to, via the still-live
+    `_run_adapters`/`_collect_source_graph`/`_build_coverage` engine functions
+    (orphaned from any CLI command but otherwise unchanged, ADR-043)."""
+    import datetime as _dt
+
+    from abicheck import __version__ as _abicheck_version
+    from abicheck.buildsource.build_evidence import BuildEvidence
+    from abicheck.buildsource.model import ExtractorRecord
+    from abicheck.cli_buildsource_helpers import (
+        _build_coverage,
+        _collect_source_graph,
+        _run_adapters,
     )
-    out = tmp_path / "out.evidence"
-    res = CliRunner().invoke(
-        main,
-        [
-            "collect",
-            "--compile-db",
-            str(cdb),
-            "--source-graph",
-            "summary",
-            "-o",
-            str(out),
-        ],
-    )
-    assert res.exit_code == 0, res.output
-    assert (out / "graph" / "source_graph_summary.json").is_file()
-    pack = BuildSourcePack.load(out)
-    assert pack.source_graph is not None
-    l5 = pack.manifest.coverage_for(DataLayer.L5_SOURCE_GRAPH)
-    assert l5 is not None
-    assert l5.status == CoverageStatus.PRESENT
 
-
-def test_compare_graph_cli_reports_diff(tmp_path) -> None:
-    old = SourceGraphSummary()
-    old.add_node(GraphNode(id="target://a", kind="target", label="a"))
-    new = build_source_graph(_sample_build())
-    old_path = tmp_path / "old.json"
-    new_path = tmp_path / "new.json"
-    old_path.write_text(json.dumps(old.to_dict()))
-    new_path.write_text(json.dumps(new.to_dict()))
-
-    res = CliRunner().invoke(main, ["graph", "compare", str(old_path), str(new_path)])
-    assert res.exit_code == 0, res.output
-    assert "structural diff" in res.output
-
-    res_json = CliRunner().invoke(
-        main, ["graph", "compare", str(old_path), str(new_path), "--format", "json"]
-    )
-    assert res_json.exit_code == 0
-    counts = json.loads(res_json.output)["counts"]
-    assert counts["added_nodes"] >= 1
-
-
-def test_compare_graph_identical(tmp_path) -> None:
-    g = build_source_graph(_sample_build())
-    p = tmp_path / "g.json"
-    p.write_text(json.dumps(g.to_dict()))
-    res = CliRunner().invoke(main, ["graph", "compare", str(p), str(p)])
-    assert res.exit_code == 0
-    assert "structurally identical" in res.output
-
-
-def test_compare_graph_missing_graph_errors(tmp_path) -> None:
-    res = CliRunner().invoke(
-        main,
-        ["graph", "compare", str(tmp_path / "nope.json"), str(tmp_path / "nope.json")],
-    )
-    assert res.exit_code != 0
-
-
-def _collect_pack(tmp_path, name: str, *, two_units: bool = False) -> str:
-    """Run `collect --source-graph summary` and return the pack dir."""
     src = tmp_path / f"{name}.cpp"
     src.write_text("int x(){return 1;}\n")
     entries = [
@@ -1890,113 +1768,155 @@ def _collect_pack(tmp_path, name: str, *, two_units: bool = False) -> str:
         )
     cdb = tmp_path / f"{name}_cc.json"
     cdb.write_text(json.dumps(entries))
-    out = tmp_path / f"{name}.evidence"
-    res = CliRunner().invoke(
-        main,
-        [
-            "collect",
-            "--compile-db",
-            str(cdb),
-            "--source-graph",
-            "summary",
-            "-o",
-            str(out),
-        ],
+
+    merged = BuildEvidence()
+    extractors: list[ExtractorRecord] = []
+    _run_adapters(
+        merged, extractors,
+        compile_db=cdb, build_dir=None, cmake=False, ninja=False,
+        ninja_compdb=None, bazel_cquery=None, bazel_aquery=None,
+        make_dry_run=None, binary=None, read_compiler_record=False,
+        build_system="generic", record_bazel_inputs=False, verbose=False,
     )
-    assert res.exit_code == 0, res.output
-    return str(out)
+    has_build = bool(merged.compile_units or merged.targets)
+    graph, graph_detail = _collect_source_graph(
+        merged, extractors,
+        source_graph=source_graph, changed_paths=(),
+        kythe_entries=None, codeql_results=None, surface=None, clang_bin="clang",
+    )
+
+    out = tmp_path / f"{name}.evidence"
+    pack = BuildSourcePack.empty(
+        out, abicheck_version=_abicheck_version,
+        created_at=_dt.datetime.now(_dt.timezone.utc).isoformat(),
+    )
+    pack.manifest.extractors = extractors
+    if has_build:
+        pack.build_evidence = merged
+    if graph is not None:
+        pack.source_graph = graph
+    pack.manifest.coverage = _build_coverage(
+        merged, has_build, None, "", graph, graph_detail
+    )
+    pack.write()
+    return pack, out
+
+
+def test_collect_evidence_summary_writes_graph_and_coverage(tmp_path) -> None:
+    pack, out = _collect_graph_pack(tmp_path, "foo")
+    assert (out / "graph" / "source_graph_summary.json").is_file()
+    reloaded = BuildSourcePack.load(out)
+    assert reloaded.source_graph is not None
+    l5 = reloaded.manifest.coverage_for(DataLayer.L5_SOURCE_GRAPH)
+    assert l5 is not None
+    assert l5.status == CoverageStatus.PRESENT
+
+
+def test_compare_graph_cli_reports_diff() -> None:
+    # `graph compare` (deleted CLI command) was a thin wrapper over
+    # `diff_source_graph` — exercise it directly.
+    old = SourceGraphSummary()
+    old.add_node(GraphNode(id="target://a", kind="target", label="a"))
+    new = build_source_graph(_sample_build())
+
+    delta = diff_source_graph(old, new)
+    assert delta.changed
+    assert len(delta.added_nodes) >= 1
+
+
+def test_compare_graph_identical() -> None:
+    g = build_source_graph(_sample_build())
+    delta = diff_source_graph(g, g)
+    assert not delta.changed
+
+
+def test_compare_graph_missing_graph_errors(tmp_path) -> None:
+    import click
+    import pytest
+
+    from abicheck.cli_graph import _load_source_graph
+
+    with pytest.raises(click.ClickException):
+        _load_source_graph(tmp_path / "nope.json")
 
 
 def test_compare_graph_accepts_pack_directories_and_shows_removals(tmp_path) -> None:
     # The richer pack as OLD and the smaller as NEW exercises the removed-node /
-    # removed-edge rendering branches of the text output.
-    big = _collect_pack(tmp_path, "big", two_units=True)
-    small = _collect_pack(tmp_path, "small", two_units=False)
-    res = CliRunner().invoke(main, ["graph", "compare", big, small])
-    assert res.exit_code == 0, res.output
-    assert "- node" in res.output or "- edge" in res.output
+    # removed-edge branches of the structural diff.
+    from abicheck.cli_graph import _load_source_graph
+
+    big_pack, big_dir = _collect_graph_pack(tmp_path, "big", two_units=True)
+    small_pack, small_dir = _collect_graph_pack(tmp_path, "small", two_units=False)
+    old_graph = _load_source_graph(big_dir)
+    new_graph = _load_source_graph(small_dir)
+    delta = diff_source_graph(old_graph, new_graph)
+    assert delta.removed_nodes or delta.removed_edges
 
 
 def test_compare_graph_pack_without_graph_errors(tmp_path) -> None:
-    # A pack collected without --source-graph has no L5 graph → actionable error.
-    cdb = tmp_path / "cc.json"
-    src = tmp_path / "z.cpp"
-    src.write_text("int z(){return 0;}\n")
-    cdb.write_text(
-        json.dumps(
-            [
-                {
-                    "directory": str(tmp_path),
-                    "file": str(src),
-                    "command": f"c++ -c {src} -o z.o",
-                }
-            ]
-        )
-    )
-    out = tmp_path / "nograph.evidence"
-    assert (
-        CliRunner()
-        .invoke(
-            main,
-            [
-                "collect",
-                "--compile-db",
-                str(cdb),
-                "-o",
-                str(out),
-            ],
-        )
-        .exit_code
-        == 0
-    )
-    res = CliRunner().invoke(main, ["graph", "compare", str(out), str(out)])
-    assert res.exit_code != 0
-    assert "no L5 source graph" in res.output
+    # A pack collected without a source graph has no L5 graph → actionable error.
+    import click
+    import pytest
+
+    from abicheck.cli_graph import _load_source_graph
+
+    _pack, out = _collect_graph_pack(tmp_path, "nograph", source_graph="off")
+    with pytest.raises(click.ClickException, match="no L5 source graph"):
+        _load_source_graph(out)
 
 
 def test_compare_graph_malformed_json_errors(tmp_path) -> None:
+    import click
+    import pytest
+
+    from abicheck.cli_graph import _load_source_graph
+
     bad = tmp_path / "bad.json"
     bad.write_text("{not valid json")
-    res = CliRunner().invoke(main, ["graph", "compare", str(bad), str(bad)])
-    assert res.exit_code != 0
-    assert "Cannot read source graph" in res.output
+    with pytest.raises(click.ClickException, match="Cannot read source graph"):
+        _load_source_graph(bad)
 
 
 def test_compare_graph_non_object_json_errors(tmp_path) -> None:
+    import click
+    import pytest
+
+    from abicheck.cli_graph import _load_source_graph
+
     arr = tmp_path / "arr.json"
     arr.write_text("[1, 2, 3]")
-    res = CliRunner().invoke(main, ["graph", "compare", str(arr), str(arr)])
-    assert res.exit_code != 0
-    assert "must contain a JSON object" in res.output
+    with pytest.raises(click.ClickException, match="must contain a JSON object"):
+        _load_source_graph(arr)
 
 
 def test_compare_graph_rejects_non_graph_json_object(tmp_path) -> None:
     # An unrelated JSON object (e.g. a pack manifest) must fail with an
     # actionable error, not be read as an empty graph (CodeRabbit review).
+    import click
+    import pytest
+
+    from abicheck.cli_graph import _load_source_graph
+
     manifest = tmp_path / "manifest.json"
     manifest.write_text(json.dumps({"build_source_pack_version": 1, "coverage": []}))
-    res = CliRunner().invoke(main, ["graph", "compare", str(manifest), str(manifest)])
-    assert res.exit_code != 0
-    assert "not a source graph summary" in res.output
+    with pytest.raises(click.ClickException, match="not a source graph summary"):
+        _load_source_graph(manifest)
 
 
 def test_collect_evidence_summary_without_build_is_partial(tmp_path) -> None:
     # --source-graph summary with no build adapter inputs yields an empty graph;
     # the L5 coverage row must read PARTIAL (ran, produced nothing), not PRESENT.
-    out = tmp_path / "empty.evidence"
-    res = CliRunner().invoke(
-        main,
-        [
-            "collect",
-            "--source-graph",
-            "summary",
-            "-o",
-            str(out),
-        ],
+    from abicheck.buildsource.build_evidence import BuildEvidence
+    from abicheck.buildsource.model import ExtractorRecord
+    from abicheck.cli_buildsource_helpers import _build_coverage, _collect_source_graph
+
+    merged = BuildEvidence()
+    extractors: list[ExtractorRecord] = []
+    graph, graph_detail = _collect_source_graph(
+        merged, extractors,
+        source_graph="summary", changed_paths=(),
+        kythe_entries=None, codeql_results=None, surface=None, clang_bin="clang",
     )
-    assert res.exit_code == 0, res.output
-    pack = BuildSourcePack.load(out)
-    assert pack.source_graph is not None
-    l5 = pack.manifest.coverage_for(DataLayer.L5_SOURCE_GRAPH)
-    assert l5 is not None
+    coverage = _build_coverage(merged, False, None, "", graph, graph_detail)
+    l5 = next(c for c in coverage if c.layer == DataLayer.L5_SOURCE_GRAPH.value)
     assert l5.status == CoverageStatus.PARTIAL

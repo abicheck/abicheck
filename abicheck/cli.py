@@ -1561,7 +1561,6 @@ if __name__ == "__main__":
 
 from . import (  # noqa: E402  — must run after `main` and helpers are defined
     cli_buildsource,  # noqa: F401  — buildsource internals (no command of its own)
-    cli_pr_comment,  # noqa: F401  — registers pr-comment (Action-only; TODO(ADR-043))
     cli_scan,  # noqa: F401  — registers scan
     cli_stack,  # noqa: F401  — registers deps (tree, compare)
 )
