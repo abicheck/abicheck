@@ -146,6 +146,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   the identical relationship — the new `vtable_slot_is_override_reuse()`
   helper mirrors that same signature-key comparison so the two vtable-related
   detectors agree.
+- **case185 follow-up: remaining namespace-ambiguity gaps in the vtable
+  slot-reuse exemption.** `diff_cxx_rules._owner_descends_from()`'s
+  qualified-name corroboration (added alongside case185) had two more
+  bare-leaf-vs-namespaced-class ambiguities: an exact `ancestor in bases`
+  membership check could short-circuit past corroboration when `ancestor`
+  was itself a bare leaf, and its fallback trusted a bare ancestor
+  unconditionally since it had no qualified counterpart to check for a
+  competing record. A new `_leaf_has_qualified_alternative()` helper asks
+  the mirror question — does some *other*, differently-qualified record
+  share this leaf — so a `Base::foo()` → `ns::Base::foo()` (or `ns::Derived`
+  via a leaf-only `Base` base entry) slot replacement is no longer
+  misclassified as an override reuse.
 - **Vendored-library SONAME normalization, remaining half (G9).**
   `strip_vendor_hash()` now also normalizes the embedded ELF SONAME (not just
   the on-disk filename) in `bundle.py`'s cohort-scoped `BUNDLE_SONAME_SKEW`
