@@ -179,6 +179,14 @@ class TestCheckNumPyMetadataContract:
         assert ChangeKind.NUMPY_METADATA_UNDERSTATES_REQUIRED_VERSION in _kinds(changes)
         assert ChangeKind.NUMPY_ABI_MAJOR_INCOMPATIBLE not in _kinds(changes)
 
+    def test_upper_bound_only_specifier_declares_no_floor(self) -> None:
+        # A requirement like "numpy<3" constrains the ceiling but says
+        # nothing about a minimum -- the "<" operator must be skipped when
+        # scanning for a lower bound, not mistaken for one.
+        surf = NumPyCapiSurface(consumes_array_api=True, capi_target_version="2.1")
+        changes = check_numpy_metadata_contract(surf, "<3")
+        assert ChangeKind.NUMPY_METADATA_UNDERSTATES_REQUIRED_VERSION in _kinds(changes)
+
     def test_declared_floor_understates_target(self) -> None:
         surf = NumPyCapiSurface(consumes_array_api=True, capi_target_version="1.23")
         changes = check_numpy_metadata_contract(surf, ">=1.20")
