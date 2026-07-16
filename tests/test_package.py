@@ -1098,6 +1098,15 @@ class TestParseWheelNumpyRequirement:
                 "pkg-1.0.dist-info/METADATA",
                 "Metadata-Version: 2.1\nRequires-Dist: numpy>=1.23.5\n",
             )
+
+        # Prove rejection happens from the declared size alone, before any
+        # decompression -- a test that only checks the final return value
+        # would pass equally if the implementation opened and decompressed
+        # the oversized member first (CodeRabbit review).
+        def unexpected_open(*args, **kwargs):
+            raise AssertionError("oversized METADATA must not be opened")
+
+        monkeypatch.setattr(zipfile.ZipFile, "open", unexpected_open)
         assert parse_wheel_numpy_requirement(whl) is None
 
     def test_bounded_read_independently_rejects_an_oversized_result(
