@@ -438,6 +438,48 @@ class TestBackfillDwarfLayout:
         out = backfill_dwarf_layout([header], [unrelated])
         assert out[0].size_bits is None
 
+    def test_exact_name_match_with_populated_header_and_empty_dwarf_is_never_guessed(
+        self,
+    ) -> None:
+        """Regression (Codex review, fresh evidence): an *exact* name match
+        was previously trusted unconditionally on the reasoning that
+        `dwarf.name == header.name` implies a genuinely unscoped type with
+        no ambiguity — but the clang header parser never namespace-
+        qualifies RecordType.name at all regardless of the type's *real*
+        scope, so an exact match only shows the DWARF *candidate* itself
+        has no scope of its own, not that it is the header's actual
+        (possibly namespaced) counterpart. A public `api::Foo { int x; }`
+        with no DWARF emission of its own must not be backfilled from an
+        unrelated, genuinely global-scope, empty `Foo` reached only because
+        both stored names happen to be the bare string "Foo"."""
+        header = RecordType(
+            name="Foo", kind="struct", fields=[TypeField(name="x", type="int")],
+        )
+        unrelated = RecordType(name="Foo", kind="struct", size_bits=8, fields=[])
+        out = backfill_dwarf_layout([header], [unrelated])
+        assert out[0].size_bits is None
+
+    def test_exact_name_match_anonymous_aggregate_flag_does_not_trust_unrelated_polymorphic_type(
+        self,
+    ) -> None:
+        """The exact-match branch's anonymous-aggregate exception needs the
+        same `not dwarf.vtable` guard as the suffix-match branch, for the
+        identical reason (Codex review): an unrelated, fieldless but
+        polymorphic `Foo` must not hand its real vtable/size over to a
+        public anonymous-aggregate `Foo` just because both names are bare
+        and equal."""
+        header = RecordType(
+            name="Foo", kind="struct",
+            fields=[TypeField(name="i", type="int"), TypeField(name="f", type="float")],
+            has_anonymous_aggregate_fields=True,
+        )
+        unrelated = RecordType(
+            name="Foo", kind="class", size_bits=64, fields=[],
+            vtable=["_ZN3Foo1fEv"],
+        )
+        out = backfill_dwarf_layout([header], [unrelated])
+        assert out[0].size_bits is None
+
     def test_namespaced_anonymous_aggregate_suffix_match_is_trusted(self) -> None:
         """Regression (Codex review): a *namespaced* anonymous-aggregate
         record (`namespace api { struct Foo { union { int i; float f; }; };

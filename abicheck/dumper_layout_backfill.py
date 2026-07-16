@@ -287,18 +287,26 @@ def backfill_dwarf_layout(
     e.g. public ``struct Foo { int x; }`` next to an unrelated, genuinely
     empty ``impl::Foo {};`` reached only via the bare-suffix fallback. There
     is no remaining signal on the DWARF side to disagree with (no fields,
-    no bases), so name equality is the last signal left — and a *suffix*
-    match (``impl::Foo`` recovered only because it ends in "Foo") is
-    rejected here rather than trusted (CodeRabbit review): it already means
-    the header's bare name lacks the scope DWARF's qualified name carries,
-    so stacking that on top of zero field/base evidence would trust two
-    independently weak signals at once. An *exact* name match
-    (``dwarf.name == header.name``, e.g. a genuinely unscoped ``struct Foo
-    {};`` gaining a field later) carries no such scope ambiguity and is
-    still trusted even with nothing else to go on — and so does a suffix
-    match when ``has_anonymous_aggregate_fields`` is set, since that flag
-    is a structural fact about the header record, not a guess from field
-    non-emptiness (Codex review, see above).
+    no bases), so name equality is the last signal left — and neither an
+    *exact* nor a *suffix* name match is trusted on that alone (Codex
+    review, fresh evidence: an exact match was originally trusted
+    unconditionally here, on the reasoning that ``dwarf.name ==
+    header.name`` implies a genuinely unscoped type with no ambiguity — but
+    since the clang header parser never namespace-qualifies
+    ``RecordType.name`` at all regardless of the type's *real* scope, an
+    exact match only shows the DWARF *candidate* has no scope of its own,
+    not that it is the header's actual, possibly-namespaced counterpart;
+    a public ``api::Foo { int x; }`` with no DWARF emission of its own can
+    collide with an unrelated, genuinely global-scope, empty ``Foo`` in
+    DWARF exactly as easily via an exact match as via a suffix one). Only a
+    trivial fieldless header record (nothing on either side to disagree
+    with, regardless of which key resolved the match) or one whose fields
+    are known to come from an anonymous-aggregate flatten still gets
+    trusted here — and so does a suffix *or* exact match when
+    ``has_anonymous_aggregate_fields`` is set, since that flag is a
+    structural fact about the header record, not a guess from field
+    non-emptiness (Codex review, see above), gated by the same
+    ``not dwarf.vtable`` check either way.
     """
     if not dwarf_types:
         return header_types
@@ -341,10 +349,23 @@ def backfill_dwarf_layout(
         if header_bases or dwarf_bases:
             return bool(header_bases & dwarf_bases)
         if header.name == dwarf.name:
-            # Exact match: no scope ambiguity even with nothing else to
-            # disagree on — covers both a truly trivial tag type and an
-            # unnamespaced anonymous-aggregate record.
-            return True
+            # Exact match still needs the header's own fields to be real
+            # corroborating evidence, not just the match key itself (Codex
+            # review, fresh evidence): the clang header parser never
+            # namespace-qualifies RecordType.name at all (see above), so an
+            # exact match only shows this DWARF candidate has no scope of
+            # its own — not that it is the header's (possibly actually-
+            # namespaced) type. A *populated* header record (real,
+            # non-anonymous-aggregate fields) with an empty DWARF candidate
+            # reached only by that coincidence is exactly the unrelated-
+            # type risk the field-overlap check above exists to catch; a
+            # trivial fieldless match still carries no such risk (nothing
+            # on either side to disagree with), and an anonymous-aggregate
+            # flatten needs the same ``not dwarf.vtable`` guard the suffix
+            # branch below requires, for the identical reason.
+            return not header.fields or (
+                header.has_anonymous_aggregate_fields and not dwarf.vtable
+            )
         # Suffix-only match with no field/base overlap left to corroborate.
         # Trusting this on "header merely has some fields" would reopen the
         # exact risk just closed above: an ordinary struct with real fields,
