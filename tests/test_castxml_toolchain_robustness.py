@@ -380,3 +380,33 @@ class TestHeaderToolchainErrorClass:
         ):
             _castxml_dump([header], [], compiler="cc")
         assert not isinstance(exc.value, HeaderToolchainError)
+
+    def test_generic_header_hint_stays_plain_snapshot_error(
+        self, tmp_path: Path
+    ) -> None:
+        # A missing-include failure gets a generic diagnose_header_compile_
+        # failure() hint (case 4 of _castxml_failure_hint) — a non-empty hint,
+        # but an ordinary project header/input problem, not a G16
+        # host-toolchain-mismatch signature. Must NOT be classified as
+        # HeaderToolchainError: a caller branching on that class to retry
+        # with a different castxml/sysroot must not fire on this (Codex
+        # review).
+        def fake_run(cmd, **kwargs):  # noqa: ANN001
+            return _completed(
+                returncode=1,
+                stderr="foo.h:1:10: fatal error: missing_dep.h: No such file or directory",
+            )
+
+        header = tmp_path / "api.h"
+        header.write_text("int f(void);\n", encoding="utf-8")
+        with (
+            patch("abicheck.dumper._castxml_available", return_value=True),
+            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
+            pytest.raises(SnapshotError) as exc,
+        ):
+            _castxml_dump([header], [], compiler="cc")
+        assert not isinstance(exc.value, HeaderToolchainError)
+        # The generic hint text is still present in the message — only the
+        # exception *class* changes, not the diagnostic content.
+        assert "missing_dep.h" in str(exc.value)

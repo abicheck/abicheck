@@ -1006,9 +1006,10 @@ def _validate_castxml_output(
             version_note=version_note,
         )
         message = f"castxml failed (exit {result.returncode}):\n{result.stderr[:2000]}{hint}"
-        # A recognised signature (G16) raises HeaderToolchainError so callers can
-        # branch on "this carries an actionable remediation"; else plain SnapshotError.
-        raise (HeaderToolchainError if hint else SnapshotError)(message)
+        # Only cases 1-3 (not the generic case-4 fallback) raise HeaderToolchainError.
+        is_toolchain = _is_toolchain_version_failure(result.stderr) or (
+            not force_cpp and _detect_cpp_headers(headers))
+        raise (HeaderToolchainError if is_toolchain else SnapshotError)(message)
     if not out_xml.exists() or out_xml.stat().st_size == 0:
         stderr_snippet = result.stderr[:1000].strip()
         detail = f"\ncastxml stderr: {stderr_snippet}" if stderr_snippet else ""
