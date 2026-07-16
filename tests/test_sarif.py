@@ -746,3 +746,36 @@ class TestScopedGate:
         assert doc["runs"][0]["results"] == []
         rule_ids = {rule["id"] for rule in doc["runs"][0]["tool"]["driver"]["rules"]}
         assert "pe_ordinal_retargeted" not in rule_ids
+
+    def test_missing_contract_respects_show_only(self) -> None:
+        # Regression (Codex review): scoped_missing_labels bypassed
+        # --show-only entirely -- a missing required symbol has no backing
+        # Change/ChangeKind, so it can't run through apply_show_only, but a
+        # --show-only run that excludes breaking findings must still not
+        # upload the `error`-level synthetic missing-contract result.
+        r = _make_result([], verdict=Verdict.COMPATIBLE)
+        r.scoped_verdict = Verdict.BREAKING  # type: ignore[attr-defined]
+        r.scoped_exit_code = 4  # type: ignore[attr-defined]
+        r.scoped_exit_code_scheme = "legacy"  # type: ignore[attr-defined]
+        r.gate_scope = "used_by"  # type: ignore[attr-defined]
+        r.scoped_relevant_finding_ids = frozenset()  # type: ignore[attr-defined]
+        r.scoped_missing_labels = ("_Z6vanishv",)  # type: ignore[attr-defined]
+        doc = to_sarif(r, show_only="compatible")
+        assert doc["runs"][0]["results"] == []
+        rule_ids = {rule["id"] for rule in doc["runs"][0]["tool"]["driver"]["rules"]}
+        assert "used_by_missing_symbol" not in rule_ids
+
+    def test_missing_contract_shown_when_show_only_includes_breaking(self) -> None:
+        # A --show-only that includes "breaking" (the default missing-
+        # contract severity) must still render the synthetic result.
+        r = _make_result([], verdict=Verdict.COMPATIBLE)
+        r.scoped_verdict = Verdict.BREAKING  # type: ignore[attr-defined]
+        r.scoped_exit_code = 4  # type: ignore[attr-defined]
+        r.scoped_exit_code_scheme = "legacy"  # type: ignore[attr-defined]
+        r.gate_scope = "used_by"  # type: ignore[attr-defined]
+        r.scoped_relevant_finding_ids = frozenset()  # type: ignore[attr-defined]
+        r.scoped_missing_labels = ("_Z6vanishv",)  # type: ignore[attr-defined]
+        doc = to_sarif(r, show_only="breaking")
+        results = doc["runs"][0]["results"]
+        assert len(results) == 1
+        assert results[0]["ruleId"] == "used_by_missing_symbol"

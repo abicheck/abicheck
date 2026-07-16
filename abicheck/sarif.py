@@ -40,6 +40,7 @@ from abicheck.checker_policy import (
 )
 from abicheck.report_model import VERDICT_TO_SARIF_LEVEL as _VERDICT_TO_SARIF_LEVEL
 from abicheck.reporter import _finding_id, apply_show_only
+from abicheck.reporter_markdown import ShowOnlyFilter
 from abicheck.severity import missing_contract_exit_code
 
 if TYPE_CHECKING:
@@ -517,16 +518,34 @@ def to_sarif(
 
     gate_scope = getattr(result, "gate_scope", None)
     if gate_scope is not None:
-        for label in getattr(result, "scoped_missing_labels", ()) or ():
-            rule_id = (
-                "used_by_missing_symbol" if gate_scope == "used_by"
-                else "required_symbol_missing"
-            )
-            if rule_id not in rules_seen:
-                rules_seen[rule_id] = _missing_contract_rule(rule_id)
-            sarif_results.append(
-                _missing_contract_result(label, gate_scope, severity_config)
-            )
+        # A missing-contract label has no backing Change/ChangeKind, so it
+        # can't run through apply_show_only (which resolves severity via
+        # effective_verdict_for_change) -- but --show-only's severity
+        # dimension still applies: without this, a --show-only run that
+        # excludes breaking findings would still upload an `error`-level
+        # missing-contract result the filter was meant to exclude (Codex
+        # review follow-up to the scoped_only_changes show-only fix above).
+        # Element/action tokens don't cleanly apply to "a symbol is simply
+        # absent", so only the severity dimension is checked here.
+        missing_severity = (
+            "breaking"
+            if severity_config is None or missing_contract_exit_code(severity_config) != 0
+            else "compatible"
+        )
+        show_only_severities = (
+            ShowOnlyFilter.parse(show_only).severities if show_only else frozenset()
+        )
+        if not show_only_severities or missing_severity in show_only_severities:
+            for label in getattr(result, "scoped_missing_labels", ()) or ():
+                rule_id = (
+                    "used_by_missing_symbol" if gate_scope == "used_by"
+                    else "required_symbol_missing"
+                )
+                if rule_id not in rules_seen:
+                    rules_seen[rule_id] = _missing_contract_rule(rule_id)
+                sarif_results.append(
+                    _missing_contract_result(label, gate_scope, severity_config)
+                )
 
     severity_gate = (
         _severity_gate_properties(result, severity_config)

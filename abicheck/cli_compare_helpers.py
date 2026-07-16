@@ -1649,6 +1649,7 @@ def _fold_scoped_compat_into_text(
         changes_list = payload.get("changes")
         if isinstance(changes_list, list):
             from .reporter import _change_to_dict, _finding_id, apply_show_only
+            from .reporter_markdown import ShowOnlyFilter
             from .severity import missing_contract_exit_code
 
             existing_ids = {_finding_id(c) for c in result.changes}
@@ -1681,7 +1682,24 @@ def _fold_scoped_compat_into_text(
                 severity_config is None
                 or missing_contract_exit_code(severity_config) != 0
             )
-            for label in getattr(result, "scoped_missing_labels", ()) or ():
+            # A missing-contract label has no backing Change/ChangeKind, so
+            # it can't run through apply_show_only -- but --show-only's
+            # severity dimension still applies: without this, a --show-only
+            # run that excludes breaking findings would still include a
+            # blocking missing-contract entry the filter was meant to
+            # exclude (Codex review, mirrors the identical sarif.to_sarif
+            # fix). Element/action tokens don't cleanly apply to "a symbol is
+            # simply absent", so only the severity dimension is checked.
+            missing_severity_label = "breaking" if blocks else "compatible"
+            show_only_severities = (
+                ShowOnlyFilter.parse(show_only).severities if show_only else frozenset()
+            )
+            missing_labels = (
+                getattr(result, "scoped_missing_labels", ()) or ()
+                if not show_only_severities or missing_severity_label in show_only_severities
+                else ()
+            )
+            for label in missing_labels:
                 changes_list.append(
                     {
                         "kind": missing_kind,

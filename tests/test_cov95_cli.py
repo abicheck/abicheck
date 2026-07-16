@@ -1684,6 +1684,38 @@ class TestUsedByScoping:
         kinds = [c["kind"] for c in data["changes"]]
         assert "pe_ordinal_retargeted" not in kinds
 
+    def test_json_missing_symbol_respects_show_only(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Regression (Codex review): a missing-contract label has no backing
+        # Change/ChangeKind so it can't run through apply_show_only -- but a
+        # --show-only run that excludes breaking findings must still not
+        # include the (default-blocking) missing-contract entry.
+        res = self._result(verdict=Verdict.BREAKING, missing=["needed_symbol"])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
+            "--show-only", "compatible",
+        )
+        data = json.loads(result.stdout)
+        kinds = [c["kind"] for c in data["changes"]]
+        assert "used_by_missing_symbol" not in kinds
+
+    def test_json_missing_symbol_shown_when_show_only_includes_breaking(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        res = self._result(verdict=Verdict.BREAKING, missing=["needed_symbol"])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
+            "--show-only", "breaking",
+        )
+        data = json.loads(result.stdout)
+        kinds = [c["kind"] for c in data["changes"]]
+        assert "used_by_missing_symbol" in kinds
+
 
 class TestFoldEvidenceDepthOutOfBandPack:
     """``_fold_evidence_depth_into_json`` with an out-of-band pack directory.
