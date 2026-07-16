@@ -59,6 +59,7 @@ from abicheck.model import (
     RecordType,
     TypeField,
     Variable,
+    Visibility,
 )
 
 # ---------------------------------------------------------------------------
@@ -676,6 +677,68 @@ class TestCpuDispatchIsaDetector:
         assert len(findings) == 1
 
 
+class TestCpuDispatchIsaDetectorRawExportFallback:
+    """case83 on Windows/PE: a header function's Visibility depends on
+    castxml's guessed MSVC-mangled name exactly matching the real ``cl.exe``
+    export string. A mismatch resolves every such function to HIDDEN,
+    emptying the Function-model path entirely -- the raw PE/Mach-O export
+    fallback must still detect and suppress the ISA drop in that case.
+    """
+
+    def _pe_snap(self, name: str, exports: list[str]) -> AbiSnapshot:
+        from abicheck.pe_metadata import PeExport, PeMetadata
+
+        return AbiSnapshot(
+            library=name,
+            version="1.0",
+            # Every header-declared function resolves HIDDEN -- simulating
+            # castxml's MSVC-mangling guess not matching the real export.
+            functions=[
+                Function(
+                    name=f"mylib::{n}",
+                    mangled=f"?{n}@mylib@@YAHH@Z_GUESSED",
+                    return_type="int",
+                    visibility=Visibility.HIDDEN,
+                )
+                for n in exports
+            ],
+            pe=PeMetadata(
+                exports=[PeExport(name=f"?{n}@mylib@@YAHH@Z") for n in exports]
+            ),
+        )
+
+    def test_raw_export_fallback_detects_isa_drop_when_visibility_all_hidden(
+        self,
+    ) -> None:
+        algos = ("kmeans_compute", "knn_compute", "linreg_compute")
+        old_names = [
+            f"{a}_{isa}" for a in algos for isa in ("avx512", "avx2", "sse42")
+        ] + list(algos)
+        new_names = [f"{a}_{isa}" for a in algos for isa in ("avx2", "sse42")] + list(
+            algos
+        )
+        old = self._pe_snap("mylib.dll", old_names)
+        new = self._pe_snap("mylib.dll", new_names)
+        findings, suppressed = detect_cpu_dispatch_isa_dropped(old, new)
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.kind == ChangeKind.CPU_DISPATCH_ISA_DROPPED
+        assert "avx512" in f.description
+        # Suppressed set carries the raw PE-decorated export ids, matching
+        # exactly what diff_platform._diff_pe emits as Change.symbol.
+        for a in algos:
+            assert f"?{a}_avx512@mylib@@YAHH@Z" in suppressed
+
+    def test_raw_export_fallback_noop_without_pe_or_macho(self) -> None:
+        # No .pe/.macho at all (a plain ELF snapshot) -- _raw_export_ids must
+        # degrade to an empty set, never raise.
+        old = _snap("lib", functions=[])
+        new = _snap("lib", functions=[])
+        findings, suppressed = detect_cpu_dispatch_isa_dropped(old, new)
+        assert findings == []
+        assert suppressed == set()
+
+
 # ===========================================================================
 # case86 — tag struct renamed
 # ===========================================================================
@@ -1140,19 +1203,29 @@ class TestMatchesSuppressionKey:
         from abicheck.post_processing import _matches_suppression_key
 
         # Qualified key with ``::`` — safe.
-        assert _matches_suppression_key(
-            "?mylib::compute@xyz", "mylib::compute",
-        ) is True
+        assert (
+            _matches_suppression_key(
+                "?mylib::compute@xyz",
+                "mylib::compute",
+            )
+            is True
+        )
         # Key with ``_`` — safe.
-        assert _matches_suppression_key(
-            "?kmeans_compute_avx512@mylib@@YAHH@Z",
-            "kmeans_compute_avx512",
-        ) is True
+        assert (
+            _matches_suppression_key(
+                "?kmeans_compute_avx512@mylib@@YAHH@Z",
+                "kmeans_compute_avx512",
+            )
+            is True
+        )
         # Key ≥ 12 chars even without delimiters — safe.
-        assert _matches_suppression_key(
-            "long_haystack_with_longidentifier_inside",
-            "longidentifier",
-        ) is True
+        assert (
+            _matches_suppression_key(
+                "long_haystack_with_longidentifier_inside",
+                "longidentifier",
+            )
+            is True
+        )
 
     def test_empty_key_never_matches(self) -> None:
         from abicheck.post_processing import _matches_suppression_key
