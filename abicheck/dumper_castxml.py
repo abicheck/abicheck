@@ -1307,19 +1307,30 @@ class _CastxmlParser:
                 # that lacks vtable_index (so its slot is keyed by its own
                 # string id) but is overridden by a declaration that DOES
                 # carry an index would otherwise open a new int-keyed slot
-                # instead of collapsing onto the base's string-keyed one. A
-                # fresh idx here only refines this slot's sort position (see
-                # below); it never means "this is a new slot".
+                # instead of collapsing onto the base's string-keyed one.
                 key = self._vtable_slot_root.get(overrides_id, overrides_id)
-                if idx is None and isinstance(key, int):
-                    # This override has no vtable_index of its own, but it
-                    # reuses an inherited *indexed* slot -- adopt that index so
-                    # _build_vtable's final _vt_sort_key sort places it at the
-                    # inherited position instead of the unindexed tail (which
-                    # would silently reorder it past any indexed sibling slot
-                    # declared after this one, an apparent "vtable reordered"
-                    # that never actually happened).
-                    idx = key
+                if isinstance(key, int):
+                    # Consistently-indexed lineage: adopt the resolved index
+                    # for sorting when this declaration has none of its own,
+                    # so _build_vtable's final _vt_sort_key sort places it at
+                    # the inherited position instead of the unindexed tail
+                    # (which would silently reorder it past any indexed
+                    # sibling slot declared after this one, an apparent
+                    # "vtable reordered" that never actually happened).
+                    if idx is None:
+                        idx = key
+                else:
+                    # Unindexed lineage (key is a string): a fresh
+                    # vtable_index on THIS declaration has no verified
+                    # relationship to sibling unindexed slots' true positions
+                    # (e.g. Base has unindexed foo then bar; Derived overrides
+                    # bar with its own vtable_index="1" -- that "1" doesn't
+                    # mean "after foo", it's not comparable to foo's unknown
+                    # position at all), so it must not be trusted for
+                    # cross-slot ordering. Discard it and let _vt_sort_key
+                    # treat this slot as unindexed, preserving its original
+                    # discovery-order position.
+                    idx = None
             elif idx is not None:
                 key = idx
             else:

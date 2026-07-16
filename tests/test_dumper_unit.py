@@ -1184,6 +1184,30 @@ class TestCastxmlParserVtable:
         derived_t = next(t for t in types if t.name == "Derived")
         assert derived_t.vtable == ["_ZN7Derived3fooEv"]
 
+    def test_vtable_indexed_override_of_unindexed_sibling_preserves_order(self):
+        """Base has two UNINDEXED virtuals, foo then bar. Derived overrides
+        bar only, and that override happens to carry its own vtable_index
+        ("1"). That local index has no verified relationship to foo's
+        (unknown) true position, so it must not be trusted to sort Derived's
+        override ahead of foo -- the reconstructed vtable must preserve
+        discovery order (foo, then the overridden bar), not read as
+        ``[Derived::bar, Base::foo]`` (a spurious reorder).
+        """
+        base = Element("Class", id="c1", name="Base")
+        m1 = Element("Method", id="m1", name="foo", mangled="_ZN4Base3fooEv",
+                      virtual="1", context="c1")
+        m2 = Element("Method", id="m2", name="bar", mangled="_ZN4Base3barEv",
+                      virtual="1", context="c1")
+        derived = Element("Class", id="c2", name="Derived")
+        SubElement(derived, "Base", type="c1")
+        m3 = Element("Method", id="m3", name="bar", mangled="_ZN7Derived3barEv",
+                      virtual="1", vtable_index="1", context="c2", overrides="m2")
+        root = _xml_root(base, derived, m1, m2, m3)
+        p = _CastxmlParser(root, set(), set())
+        types = p.parse_types()
+        derived_t = next(t for t in types if t.name == "Derived")
+        assert derived_t.vtable == ["_ZN4Base3fooEv", "_ZN7Derived3barEv"]
+
     def test_vtable_diamond_inheritance_does_not_infinite_loop(self):
         """Diamond inheritance (Derived : Left, Right; both : Base) revisits
         Base through two paths. The `seen` guard must return {} on the
