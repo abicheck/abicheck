@@ -24,6 +24,7 @@ from abicheck.package import (
     _is_elf_shared_object,
     _platform_machine_from_wheel_filename,
     _platform_system_from_wheel_filename,
+    _python_full_version_from_wheel_filename,
     _python_version_from_wheel_filename,
     _read_build_id,
     _safe_zip_extract,
@@ -1017,6 +1018,17 @@ class TestParseNumpyRequirementFromMetadata:
         assert "2.5" in SpecifierSet(combined)
         assert "1.5" not in SpecifierSet(combined)
 
+    def test_malformed_requires_dist_line_is_skipped_not_raised(self) -> None:
+        # A malformed Requires-Dist value (unparseable as a PEP 508
+        # requirement) must not crash the scan -- just be ignored, same as
+        # any other package's Requires-Dist line would be.
+        text = (
+            "Metadata-Version: 2.1\n"
+            "Requires-Dist: not a valid requirement !!!\n"
+            "Requires-Dist: numpy>=1.23.5\n"
+        )
+        assert parse_numpy_requirement_from_metadata(text) == ">=1.23.5"
+
     def test_case_insensitive_package_name(self) -> None:
         text = "Metadata-Version: 2.1\nRequires-Dist: NumPy>=1.24\n"
         assert parse_numpy_requirement_from_metadata(text) == ">=1.24"
@@ -1085,6 +1097,32 @@ class TestParseWheelNumpyRequirement:
             )
         assert parse_wheel_numpy_requirement(whl) is None
 
+    def test_bounded_read_independently_rejects_an_oversized_result(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        # zipfile.ZipExtFile happens to truncate reads to a member's
+        # declared uncompressed size today, so the declared-size guard
+        # above already catches an honestly-labeled oversized member. This
+        # code doesn't want to depend on that as its only safety margin --
+        # the bounded f.read(cap + 1) call is meant to independently catch
+        # an oversized result even if the reader it's given doesn't
+        # truncate. Simulate that by monkeypatching ZipFile.open to return
+        # a reader that ignores the declared size entirely.
+        import io
+
+        import abicheck.package as package_mod
+
+        monkeypatch.setattr(package_mod, "_MAX_METADATA_SIZE", 8)
+        whl = tmp_path / "pkg-1.0-cp311-cp311-linux_x86_64.whl"
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr("pkg-1.0.dist-info/METADATA", "short")
+
+        def non_truncating_open(self, *args, **kwargs):
+            return io.BytesIO(b"x" * (package_mod._MAX_METADATA_SIZE + 100))
+
+        monkeypatch.setattr(zipfile.ZipFile, "open", non_truncating_open)
+        assert parse_wheel_numpy_requirement(whl) is None
+
     def test_no_dist_info_metadata_member(self, tmp_path: Path) -> None:
         whl = tmp_path / "pkg-1.0-cp311-cp311-linux_x86_64.whl"
         with zipfile.ZipFile(whl, "w") as zf:
@@ -1113,6 +1151,23 @@ class TestParseWheelNumpyRequirement:
                 "Metadata-Version: 2.1\n"
                 'Requires-Dist: numpy>=1.23; python_version < "3.12"\n'
                 'Requires-Dist: numpy>=2; python_version >= "3.12"\n',
+            )
+        assert parse_wheel_numpy_requirement(whl) == ">=1.23"
+
+    def test_python_full_version_spelling_also_derived_from_wheel_filename(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review: python_full_version ("3.11.0") is a different, less
+        # common PEP 508 marker spelling than python_version ("3.11") --
+        # deriving only the latter still leaves the former falling back to
+        # the host interpreter's actual full version.
+        whl = tmp_path / "pkg-1.0-cp311-cp311-linux_x86_64.whl"
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr(
+                "pkg-1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\n"
+                'Requires-Dist: numpy>=1.23; python_full_version < "3.12"\n'
+                'Requires-Dist: numpy>=2; python_full_version >= "3.12"\n',
             )
         assert parse_wheel_numpy_requirement(whl) == ">=1.23"
 
@@ -1264,6 +1319,25 @@ class TestPythonVersionFromWheelFilename:
         assert _python_version_from_wheel_filename("weird.whl") is None
 
 
+class TestPythonFullVersionFromWheelFilename:
+    def test_cp_tag_gets_synthetic_micro(self) -> None:
+        assert (
+            _python_full_version_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-linux_x86_64.whl"
+            )
+            == "3.11.0"
+        )
+
+    def test_generic_py3_tag_has_no_minor_returns_none(self) -> None:
+        assert (
+            _python_full_version_from_wheel_filename("pkg-1.0-py3-none-any.whl")
+            is None
+        )
+
+    def test_non_wheel_filename_returns_none(self) -> None:
+        assert _python_full_version_from_wheel_filename("pkg-1.0.tar.gz") is None
+
+
 class TestPlatformSystemFromWheelFilename:
     def test_manylinux_tag(self) -> None:
         assert (
@@ -1313,6 +1387,9 @@ class TestPlatformSystemFromWheelFilename:
     def test_non_wheel_filename_returns_none(self) -> None:
         assert _platform_system_from_wheel_filename("pkg-1.0.tar.gz") is None
 
+    def test_too_few_segments_returns_none(self) -> None:
+        assert _platform_system_from_wheel_filename("weird.whl") is None
+
 
 class TestSysPlatformFromWheelFilename:
     def test_manylinux_tag(self) -> None:
@@ -1342,6 +1419,9 @@ class TestSysPlatformFromWheelFilename:
 
     def test_non_wheel_filename_returns_none(self) -> None:
         assert _sys_platform_from_wheel_filename("pkg-1.0.tar.gz") is None
+
+    def test_too_few_segments_returns_none(self) -> None:
+        assert _sys_platform_from_wheel_filename("weird.whl") is None
 
 
 class TestPlatformMachineFromWheelFilename:
@@ -1434,6 +1514,17 @@ class TestPlatformMachineFromWheelFilename:
 
     def test_non_wheel_filename_returns_none(self) -> None:
         assert _platform_machine_from_wheel_filename("pkg-1.0.tar.gz") is None
+
+    def test_too_few_segments_returns_none(self) -> None:
+        assert _platform_machine_from_wheel_filename("weird.whl") is None
+
+    def test_unrecognized_linux_architecture_returns_none(self) -> None:
+        assert (
+            _platform_machine_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-manylinux_2_17_riscv64.whl"
+            )
+            is None
+        )
 
 
 class TestCondaExtractor:

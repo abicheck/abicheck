@@ -566,6 +566,27 @@ def _python_version_from_wheel_filename(filename: str) -> str | None:
     return f"{m.group(1)}.{m.group(2)}" if m else None
 
 
+def _python_full_version_from_wheel_filename(filename: str) -> str | None:
+    """Derive ``python_full_version`` from a wheel filename's Python tag.
+
+    A wheel tag only ever encodes major.minor (``cp311`` says nothing
+    about the micro/patch version), so this appends a synthetic ``.0`` to
+    :func:`_python_version_from_wheel_filename`'s result rather than
+    guessing a specific patch release. That's still correct for any marker
+    comparison written at the same minor-version granularity a wheel tag
+    itself uses (e.g. ``python_full_version < "3.12"``/``>= "3.12"``,
+    since PEP 440 version comparison places ``3.11.0`` on the correct side
+    either way) — leaving ``python_full_version`` to the host default
+    while ``python_version`` is correctly derived would otherwise let a
+    marker written in the ``_full_version`` spelling evaluate against the
+    wrong interpreter (Codex review). Only a marker checking an exact
+    micro/patch version a wheel tag can't express at all would see a
+    difference, which no derivation could fix.
+    """
+    version = _python_version_from_wheel_filename(filename)
+    return f"{version}.0" if version is not None else None
+
+
 def _platform_system_from_wheel_filename(filename: str) -> str | None:
     """Derive ``platform_system`` (``"Linux"``/``"Darwin"``/``"Windows"``)
     from a wheel filename's own platform tag (the last ``-``-delimited
@@ -708,10 +729,11 @@ def parse_wheel_numpy_requirement(
     installed via ``pip install pkg[test]``, not a real runtime requirement)
     or an ordinary marker that doesn't hold for *environment*.
 
-    When *environment* is omitted, ``python_version``, ``platform_system``,
-    ``sys_platform``, and (for single-architecture Linux/macOS tags)
-    ``platform_machine`` are derived from the wheel's *own* filename tags
-    (e.g. ``cp39`` -> ``"3.9"``, a ``macosx_11_0_arm64`` platform tag ->
+    When *environment* is omitted, ``python_version``, ``python_full_version``,
+    ``platform_system``, ``sys_platform``, and (for single-architecture
+    Linux/macOS tags) ``platform_machine`` are derived from the wheel's
+    *own* filename tags (e.g. ``cp39`` -> ``python_version="3.9"``/
+    ``python_full_version="3.9.0"``, a ``macosx_11_0_arm64`` platform tag ->
     ``platform_system="Darwin"``/``sys_platform="darwin"``/
     ``platform_machine="arm64"``) rather than defaulting to the interpreter
     running abicheck — evaluating a marker gated on any of these against the
@@ -754,6 +776,7 @@ def parse_wheel_numpy_requirement(
     if environment is None:
         derivers = (
             ("python_version", _python_version_from_wheel_filename),
+            ("python_full_version", _python_full_version_from_wheel_filename),
             ("platform_system", _platform_system_from_wheel_filename),
             ("sys_platform", _sys_platform_from_wheel_filename),
             ("platform_machine", _platform_machine_from_wheel_filename),
