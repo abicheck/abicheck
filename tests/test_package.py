@@ -774,61 +774,69 @@ class TestWheelExtractor:
 class TestParseManylinuxGlibcFloor:
     """G10: derive a declared glibc floor from a manylinux wheel tag."""
 
-    def test_pep600_tag(self) -> None:
-        assert parse_manylinux_glibc_floor(
-            "scipy-1.18.0-cp312-cp312-manylinux_2_17_x86_64.whl"
-        ) == "2.17"
-
-    def test_manylinux1(self) -> None:
-        assert parse_manylinux_glibc_floor(
-            "numpy-1.26.0-cp311-cp311-manylinux1_x86_64.whl"
-        ) == "2.5"
-
-    def test_manylinux2010(self) -> None:
-        assert parse_manylinux_glibc_floor(
-            "pkg-1.0-cp311-cp311-manylinux2010_x86_64.whl"
-        ) == "2.12"
-
-    def test_manylinux2014(self) -> None:
-        assert parse_manylinux_glibc_floor(
-            "pkg-1.0-cp311-cp311-manylinux2014_aarch64.whl"
-        ) == "2.17"
-
-    def test_compressed_multi_tag_picks_strictest(self) -> None:
-        # A wheel claiming compatibility with both manylinux_2_17 and the
-        # (older/stricter) manylinux2014 alias is claiming to work on both —
-        # the actual binary must not exceed the lower (2.17) of the two.
-        assert parse_manylinux_glibc_floor(
-            "pkg-1.0-cp311-cp311-manylinux_2_28_x86_64.manylinux2014_x86_64.whl"
-        ) == "2.17"
-
-    def test_no_manylinux_tag_returns_none(self) -> None:
-        assert parse_manylinux_glibc_floor(
-            "pkg-1.0-cp311-cp311-macosx_11_0_arm64.whl"
-        ) is None
-        assert parse_manylinux_glibc_floor("pkg-1.0-py3-none-any.whl") is None
-
-    def test_bare_tag_without_arch_suffix(self) -> None:
-        assert parse_manylinux_glibc_floor("manylinux_2_27") == "2.27"
-
-    def test_manylinux_prefixed_distribution_name_not_mistaken_for_tag(
-        self,
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [
+            pytest.param(
+                "scipy-1.18.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+                "2.17",
+                id="pep600_tag",
+            ),
+            pytest.param(
+                "numpy-1.26.0-cp311-cp311-manylinux1_x86_64.whl",
+                "2.5",
+                id="manylinux1",
+            ),
+            pytest.param(
+                "pkg-1.0-cp311-cp311-manylinux2010_x86_64.whl",
+                "2.12",
+                id="manylinux2010",
+            ),
+            pytest.param(
+                "pkg-1.0-cp311-cp311-manylinux2014_aarch64.whl",
+                "2.17",
+                id="manylinux2014",
+            ),
+            # A wheel claiming compatibility with both manylinux_2_17 and the
+            # (older/stricter) manylinux2014 alias is claiming to work on
+            # both — the actual binary must not exceed the lower (2.17).
+            pytest.param(
+                "pkg-1.0-cp311-cp311-manylinux_2_28_x86_64.manylinux2014_x86_64.whl",
+                "2.17",
+                id="compressed_multi_tag_picks_strictest",
+            ),
+            pytest.param(
+                "pkg-1.0-cp311-cp311-macosx_11_0_arm64.whl",
+                None,
+                id="no_manylinux_tag_macosx",
+            ),
+            pytest.param(
+                "pkg-1.0-py3-none-any.whl", None, id="no_manylinux_tag_any",
+            ),
+            pytest.param(
+                "manylinux_2_27", "2.27", id="bare_tag_without_arch_suffix",
+            ),
+            # A distribution named "manylinux_2_17_helper" makes no
+            # manylinux promise at all — only its platform-tag segment (the
+            # last -delimited component, "linux_x86_64") may be scanned.
+            pytest.param(
+                "manylinux_2_17_helper-1.0-cp312-cp312-linux_x86_64.whl",
+                None,
+                id="manylinux_prefixed_distribution_name_not_mistaken_for_tag",
+            ),
+            # Same trap, but this one's actual platform tag IS manylinux —
+            # must still be picked up from the platform-tag segment.
+            pytest.param(
+                "manylinux_2_17_helper-1.0-cp312-cp312-manylinux_2_28_x86_64.whl",
+                "2.28",
+                id="manylinux_prefixed_distribution_with_real_manylinux_platform",
+            ),
+        ],
+    )
+    def test_parse_manylinux_glibc_floor(
+        self, name: str, expected: str | None
     ) -> None:
-        # A distribution named "manylinux_2_17_helper" makes no manylinux
-        # promise at all — only its platform-tag segment (the last
-        # -delimited component, "linux_x86_64") may be scanned.
-        assert parse_manylinux_glibc_floor(
-            "manylinux_2_17_helper-1.0-cp312-cp312-linux_x86_64.whl"
-        ) is None
-
-    def test_manylinux_prefixed_distribution_with_real_manylinux_platform(
-        self,
-    ) -> None:
-        # Same trap, but this one's actual platform tag IS manylinux — must
-        # still be picked up from the platform-tag segment, not skipped.
-        assert parse_manylinux_glibc_floor(
-            "manylinux_2_17_helper-1.0-cp312-cp312-manylinux_2_28_x86_64.whl"
-        ) == "2.28"
+        assert parse_manylinux_glibc_floor(name) == expected
 
 
 class TestCondaExtractor:

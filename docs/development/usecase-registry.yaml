@@ -610,7 +610,14 @@ use_cases:
       manylinux wheel tag (PEP 600 + legacy aliases) for programmatic/future
       auto-derivation use — not yet wired into any CLI path.
       compare-release (directory/package release fan-out) does not support
-      --env-matrix yet, so this check does not run there either.
+      --env-matrix yet, so this check does not run there either. Both gaps
+      are deliberately out of scope for G10 (see its plan's acceptance
+      criteria, which this entry's evidence satisfies in full) and are
+      tracked as the multi-platform follow-up under G27
+      (UC-TC-wheel-deployment-claims): auto-deriving the floor from a
+      compared wheel's own tag and enforcing it end-to-end in a single
+      `compare old.whl new.whl` invocation, alongside the GLIBCXX/CXXABI/
+      musllinux/macOS/Windows extensions.
 
   - id: UC-TC-numpy-capi-envelope
     axis: toolchain

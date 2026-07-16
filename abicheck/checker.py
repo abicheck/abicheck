@@ -165,18 +165,18 @@ def _compute_verdict_for(
     return compute_verdict(all_unsuppressed, policy=policy)
 
 
-def _filter_soname_changes(
-    soname_changes: list[Change],
+def _filter_suppressed_changes(
+    changes: list[Change],
     suppression: SuppressionList | None,
     suppressed: list[Change],
 ) -> list[Change]:
-    """Remove suppressed SONAME advisories from *soname_changes*, appending
-    them to *suppressed* in-place.  Returns the visible (unsuppressed) subset.
+    """Remove suppressed advisories (SONAME/platform-floor) from *changes*,
+    appending them to *suppressed* in-place. Returns the visible subset.
     """
-    if suppression is None or not soname_changes:
-        return soname_changes
+    if suppression is None or not changes:
+        return changes
     visible: list[Change] = []
-    for c in soname_changes:
+    for c in changes:
         if suppression.is_suppressed(c):
             suppressed.append(c)
         else:
@@ -429,7 +429,7 @@ def _apply_soname_policy(
             c for c in soname_changes
             if c.kind is not ChangeKind.SONAME_BUMP_UNNECESSARY
         ]
-    soname_changes = _filter_soname_changes(soname_changes, suppression, suppressed)
+    soname_changes = _filter_suppressed_changes(soname_changes, suppression, suppressed)
     if soname_changes:
         kept.extend(soname_changes)
     return kept
@@ -582,7 +582,9 @@ def compare(
         floor_changes = check_platform_baseline_floor(
             new_elf_for_floor, env_matrix.runtime_floors
         )
-        floor_changes = _filter_soname_changes(floor_changes, suppression, suppressed)
+        floor_changes = _filter_suppressed_changes(
+            floor_changes, suppression, suppressed
+        )
         if floor_changes:
             kept.extend(floor_changes)
 
