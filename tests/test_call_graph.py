@@ -1034,6 +1034,38 @@ def test_parse_captures_caller_file() -> None:
     assert edge.caller_file == "/work/src/impl.cc"
 
 
+def test_parse_threads_sticky_file_across_top_level_siblings() -> None:
+    # Codex review: clang emits `loc.file` only when it *changes* between
+    # consecutive nodes in the pre-order dump. A second top-level sibling
+    # declaration with no loc/range of its own (declared in the same header
+    # as the previous sibling) must still see that previous sibling's file --
+    # the parent loop used to re-walk every child with the *stale* cur_file
+    # from before the first sibling ran, discarding what it discovered.
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            _func_in("helper1", "_Zhelper1", [], "/work/include/helper.hpp"),
+            {
+                "kind": "FunctionDecl",
+                "name": "helper2",
+                "mangledName": "_Zhelper2",
+                # No loc/range at all -- sticky, same file as helper1.
+                "inner": [
+                    {
+                        "kind": "CompoundStmt",
+                        "inner": [
+                            _direct_call(_ref("FunctionDecl", "callee", "_Zcallee"))
+                        ],
+                    }
+                ],
+            },
+        ],
+    }
+    edges = parse_clang_ast_calls(ast)
+    edge = next(e for e in edges if e.caller == "_Zhelper2")
+    assert edge.caller_file == "/work/include/helper.hpp"
+
+
 def test_augment_marks_defined_in_project_from_source_file() -> None:
     # A caller whose body is in a project compile-unit source is defined_in_project;
     # a callee that is never a project-file caller (extern / third-party) is not.

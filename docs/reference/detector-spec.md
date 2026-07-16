@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (354 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (355 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -132,6 +132,7 @@ One row per `ChangeKind` (354 total). Columns fuse the verdict partition (`check
 | `header_parse_context_drift` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `header_parse_context_drift` | — |
 | `hidden_friend_added` | addition | `COMPATIBLE` | `warning` | unspecified | `hidden_friend_added` | — |
 | `hidden_friend_removed` | api_break | `API_BREAK` | `warning` | L2 | `hidden_friend_removed` | [case96](../examples/case96_hidden_friend_removed.md) |
+| `identity_collision_detected` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L4 | `identity_collision_detected` | — |
 | `ifunc_introduced` | quality | `COMPATIBLE` | `warning` | L0 | `ifunc_introduced` | [case29](../examples/case29_ifunc_transition.md) |
 | `ifunc_removed` | quality | `COMPATIBLE` | `warning` | unspecified | `ifunc_removed` | — |
 | `imported_symbol_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `imported_symbol_added` | — |

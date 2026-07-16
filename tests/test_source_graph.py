@@ -26,6 +26,7 @@ from abicheck.buildsource.build_evidence import (
     BuildEvidence,
     CompileUnit,
     Confidence,
+    LinkUnit,
     Target,
     TargetKind,
 )
@@ -134,6 +135,101 @@ def test_coverage_counts_populated() -> None:
     # No call/include extraction in Phase 2 — explicitly marked not-collected.
     assert g.coverage["call_edges"]["collected"] is False
     assert g.coverage["include_edges"]["collected"] is False
+
+
+def test_compile_unit_emits_object_edge() -> None:
+    # ADR-041 P1 #2: the object/link provenance graph.
+    g = build_source_graph(_sample_build())
+    assert "object_file" in {n.kind for n in g.nodes}
+    obj_edges = [e for e in g.edges if e.kind == "COMPILE_UNIT_EMITS_OBJECT"]
+    assert obj_edges == [
+        e for e in obj_edges if e.src == "cu://foo" and e.dst == "object://foo.o"
+    ]
+    assert len(obj_edges) == 1
+
+
+def _build_with_link_unit(**link_kwargs: object) -> BuildEvidence:
+    b = _sample_build()
+    b.link_units.append(
+        LinkUnit(
+            id="link://libfoo.so",
+            target_id="target://libfoo",
+            output="libfoo.so",
+            kind="shared_library",
+            inputs=["foo.o", "libbar.a"],
+            **link_kwargs,
+        )
+    )
+    return b
+
+
+def test_link_unit_node_and_target_edge() -> None:
+    g = build_source_graph(_build_with_link_unit())
+    link_node = next(n for n in g.nodes if n.id == "link://libfoo.so")
+    assert link_node.kind == "link_unit"
+    assert any(
+        e.kind == "TARGET_HAS_LINK_UNIT"
+        and e.src == "target://libfoo"
+        and e.dst == "link://libfoo.so"
+        for e in g.edges
+    )
+
+
+def test_link_unit_input_classified_object_vs_static_library() -> None:
+    g = build_source_graph(_build_with_link_unit())
+    node_by_id = {n.id: n for n in g.nodes}
+    input_edges = {
+        e.dst
+        for e in g.edges
+        if e.kind == "LINK_UNIT_HAS_INPUT" and e.src == "link://libfoo.so"
+    }
+    assert "object://foo.o" in input_edges
+    assert "static_library://libbar.a" in input_edges
+    assert node_by_id["object://foo.o"].kind == "object_file"
+    assert node_by_id["static_library://libbar.a"].kind == "static_library"
+
+
+def test_link_unit_input_object_merges_with_compile_unit_emitted_object() -> None:
+    # The same "foo.o" both a compile unit emits and a link unit consumes must
+    # land on the *same* node -- so a dependency traced to one object
+    # correlates across both slices, not a disconnected duplicate.
+    g = build_source_graph(_build_with_link_unit())
+    object_nodes = [n for n in g.nodes if n.id == "object://foo.o"]
+    assert len(object_nodes) == 1
+
+
+def test_link_unit_version_script_node_and_edge() -> None:
+    g = build_source_graph(_build_with_link_unit(version_script="exports.map"))
+    vnode = next(n for n in g.nodes if n.id == "version_script://exports.map")
+    assert vnode.kind == "version_script"
+    assert any(
+        e.kind == "LINK_UNIT_USES_VERSION_SCRIPT"
+        and e.src == "link://libfoo.so"
+        and e.dst == "version_script://exports.map"
+        for e in g.edges
+    )
+
+
+def test_link_unit_exports_symbol_via_source_abi() -> None:
+    # LINK_UNIT_EXPORTS_SYMBOL is added once a source_abi surface resolves
+    # which symbols the owning target exports (Phase 3-4), correlating the
+    # link unit _fold_link_provenance already created with those symbols.
+    surface = SourceAbiSurface(library="libfoo.so", target_id="target://libfoo")
+    surface.mappings["source_decl_to_binary_symbol"] = {"foo_api": "_Z7foo_apiv"}
+    surface.reachable_functions = [
+        SourceEntity(
+            id="foo_api",
+            kind="function",
+            qualified_name="foo_api",
+            visibility="public_header",
+        )
+    ]
+    g = build_source_graph(_build_with_link_unit(), surface)
+    link_exports = [e for e in g.edges if e.kind == "LINK_UNIT_EXPORTS_SYMBOL"]
+    assert any(
+        e.src == "link://libfoo.so" and e.dst == "binary_symbol://_Z7foo_apiv"
+        for e in link_exports
+    )
 
 
 def test_build_graph_is_deterministic() -> None:

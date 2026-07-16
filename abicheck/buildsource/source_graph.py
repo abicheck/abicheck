@@ -81,6 +81,23 @@ NODE_KINDS: frozenset[str] = frozenset(
         "toolchain",
         "generated_file",
         "external_dependency",
+        # ADR-041 P1 #2: object/link provenance (a symbol change attributed
+        # to "which object/archive member/link step", not only "which
+        # target"). object_file/static_library/version_script are populated
+        # from BuildEvidence.compile_units/link_units below;
+        # archive_member/linker_script/export_map/comdat_group are reserved
+        # for a future archive/linker-artifact introspection extractor (no
+        # normalized data source yet — same "reserved, not yet populated"
+        # pattern this ADR's own P0 slice 1 used for the edge kinds it later
+        # filled in), so an inputs-pack/hand-built graph naming one is never
+        # rejected.
+        "object_file",
+        "archive_member",
+        "static_library",
+        "linker_script",
+        "version_script",
+        "export_map",
+        "comdat_group",
     }
 )
 
@@ -108,6 +125,18 @@ EDGE_KINDS: frozenset[str] = frozenset(
         "BUILD_OPTION_AFFECTS_SYMBOL",
         "FINDING_LOCALIZES_TO_DECL",
         "FINDING_CAUSED_BY_OPTION",
+        # ADR-041 P1 #2 (object/link provenance graph).
+        "TARGET_HAS_LINK_UNIT",
+        "COMPILE_UNIT_EMITS_OBJECT",
+        "LINK_UNIT_HAS_INPUT",
+        "LINK_UNIT_USES_VERSION_SCRIPT",
+        "LINK_UNIT_EXPORTS_SYMBOL",
+        # Reserved (no normalized data source yet — see the NODE_KINDS note
+        # above): a future archive/nm-style introspection extractor emits
+        # these against the object_file/static_library nodes this phase
+        # already creates.
+        "ARCHIVE_CONTAINS_OBJECT",
+        "OBJECT_DEFINES_SYMBOL",
     }
 )
 
@@ -594,6 +623,25 @@ def _debug_type_node_id(name: str) -> str:
     return f"debug_type://{name}"
 
 
+def _object_node_id(path: str) -> str:
+    return f"object://{path}"
+
+
+def _static_library_node_id(path: str) -> str:
+    return f"static_library://{path}"
+
+
+def _version_script_node_id(path: str) -> str:
+    return f"version_script://{path}"
+
+
+#: Suffixes that identify a static-library archive among a LinkUnit's inputs
+#: (ADR-041 P1 #2) — everything else is treated as an object file. Best-effort
+#: textual classification (no archive introspection), mirroring this module's
+#: existing approximate-by-design conventions elsewhere.
+_STATIC_LIBRARY_SUFFIXES = (".a", ".lib")
+
+
 #: SourceEntity.kind → graph type-node kind. Records/classes/unions all map to
 #: ``record_type``; enums and typedefs get their own node kind so reachability
 #: queries can distinguish them (ADR-031 D2).
@@ -950,6 +998,8 @@ def build_source_graph(
                 )
             )
 
+    _fold_link_provenance(graph, build)
+
     if source_abi is not None:
         _augment_with_source_abi(graph, source_abi, project_source_files(build))
         _link_options_to_symbols(graph)
@@ -988,6 +1038,141 @@ def _link_options_to_symbols(graph: SourceGraphSummary) -> None:
                     kind="BUILD_OPTION_AFFECTS_SYMBOL",
                     provenance="build_evidence+source_abi",
                     confidence=CONF_REDUCED,
+                )
+            )
+
+
+def _fold_link_provenance(graph: SourceGraphSummary, build: BuildEvidence) -> None:
+    """Fold object/link provenance from *build* into *graph* (ADR-041 P1 #2).
+
+    Lets a symbol change be attributed to "which object/archive member/link
+    step", not only "which target" — the gap the roadmap named:
+    ``TARGET_DEPENDENCY_ADDED``/``EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED``
+    currently cannot explain an accidental export from a static archive, a
+    COMDAT/weak-symbol resolution change, or a transitive ``DT_NEEDED`` traced
+    to a specific object.
+
+    - Every ``compile_unit`` with a known ``output`` gets an ``object_file``
+      node and a ``COMPILE_UNIT_EMITS_OBJECT`` edge — "this TU produced this
+      object."
+    - Every :class:`~abicheck.buildsource.build_evidence.LinkUnit` becomes a
+      ``link_unit`` node (``NODE_KINDS`` reserved this kind since ADR-031 D2
+      but nothing populated it before this), linked to its owning ``target``
+      (``TARGET_HAS_LINK_UNIT``) when the target is known. Each input path is
+      classified by suffix into an ``object_file`` or ``static_library`` node
+      (best-effort textual classification, no archive introspection) and
+      connected via ``LINK_UNIT_HAS_INPUT`` — an object a compile unit already
+      emitted (same path) lands on the *same* node instead of a disconnected
+      duplicate, so a change traced to one object correlates across both
+      slices. A non-empty ``version_script`` gets its own node
+      (``LINK_UNIT_USES_VERSION_SCRIPT``).
+    - ``archive_member``/``linker_script``/``export_map``/``comdat_group`` and
+      the ``ARCHIVE_CONTAINS_OBJECT``/``OBJECT_DEFINES_SYMBOL`` edges stay
+      reserved (schema-only): true archive-member/per-object-symbol
+      enumeration needs a real archive/object introspection extractor
+      (``ar``/``nm``-equivalent) this increment does not add, matching the
+      same "reserved, not yet populated" pattern this ADR's own P0 slice 1
+      used for the edge kinds it later filled in.
+
+    ``LINK_UNIT_EXPORTS_SYMBOL`` (a link unit's own exported symbols) is added
+    by :func:`_augment_with_source_abi` instead, once ``BINARY_EXPORTS_SYMBOL``
+    resolves which symbols the owning target actually exports — this function
+    runs first (build-evidence-only, no ``source_abi`` required) so the
+    ``link_unit`` node it creates is already there for that later step to
+    attach to.
+    """
+    for cu in build.compile_units:
+        if not cu.output:
+            continue
+        oid = _object_node_id(cu.output)
+        if not graph.has_node(oid):
+            graph.add_node(
+                GraphNode(
+                    id=oid,
+                    kind="object_file",
+                    label=cu.output,
+                    provenance="build_evidence",
+                    confidence=CONF_HIGH,
+                )
+            )
+        graph.add_edge(
+            GraphEdge(
+                src=cu.id,
+                dst=oid,
+                kind="COMPILE_UNIT_EMITS_OBJECT",
+                provenance="build_evidence",
+                confidence=CONF_HIGH,
+            )
+        )
+
+    known_targets = {t.id for t in build.targets}
+    for link in build.link_units:
+        graph.add_node(
+            GraphNode(
+                id=link.id,
+                kind="link_unit",
+                label=link.output or link.id,
+                provenance="build_evidence",
+                confidence=CONF_HIGH,
+                attrs={
+                    "kind": link.kind,
+                    "target_id": link.target_id,
+                    "soname": link.soname,
+                },
+            )
+        )
+        if link.target_id and link.target_id in known_targets:
+            graph.add_edge(
+                GraphEdge(
+                    src=link.target_id,
+                    dst=link.id,
+                    kind="TARGET_HAS_LINK_UNIT",
+                    provenance="build_evidence",
+                    confidence=CONF_HIGH,
+                )
+            )
+        for inp in link.inputs:
+            if not inp:
+                continue
+            is_archive = inp.endswith(_STATIC_LIBRARY_SUFFIXES)
+            iid = _static_library_node_id(inp) if is_archive else _object_node_id(inp)
+            if not graph.has_node(iid):
+                graph.add_node(
+                    GraphNode(
+                        id=iid,
+                        kind="static_library" if is_archive else "object_file",
+                        label=inp,
+                        provenance="build_evidence",
+                        confidence=CONF_REDUCED,
+                    )
+                )
+            graph.add_edge(
+                GraphEdge(
+                    src=link.id,
+                    dst=iid,
+                    kind="LINK_UNIT_HAS_INPUT",
+                    provenance="build_evidence",
+                    confidence=CONF_HIGH,
+                )
+            )
+        if link.version_script:
+            vid = _version_script_node_id(link.version_script)
+            graph.add_node(
+                GraphNode(
+                    id=vid,
+                    kind="version_script",
+                    label=link.version_script,
+                    provenance="build_evidence",
+                    confidence=CONF_HIGH,
+                )
+            )
+            graph.add_edge(
+                GraphEdge(
+                    src=link.id,
+                    dst=vid,
+                    kind="LINK_UNIT_USES_VERSION_SCRIPT",
+                    provenance="build_evidence",
+                    confidence=CONF_HIGH,
                 )
             )
 
@@ -1032,6 +1217,15 @@ def _augment_with_source_abi(
         "source_decl_to_binary_symbol", {}
     )
     type_to_dbg: dict[str, str] = surface.mappings.get("source_type_to_debug_type", {})
+    # ADR-041 P1 #2: the link unit(s) _fold_link_provenance already created for
+    # this target (build-evidence-only, before this function ran) — so an
+    # exported symbol can also be attributed to the specific link step that
+    # produced it, not only the target as a whole.
+    link_unit_ids = [
+        n.id
+        for n in graph.nodes
+        if n.kind == "link_unit" and target_id and n.attrs.get("target_id") == target_id
+    ]
 
     def export_symbol(symbol: str, confidence: str) -> str:
         sid = _symbol_node_id(symbol)
@@ -1050,6 +1244,16 @@ def _augment_with_source_abi(
                     src=target_id,
                     dst=sid,
                     kind="BINARY_EXPORTS_SYMBOL",
+                    provenance="source_abi",
+                    confidence=confidence,
+                )
+            )
+        for link_id in link_unit_ids:
+            graph.add_edge(
+                GraphEdge(
+                    src=link_id,
+                    dst=sid,
+                    kind="LINK_UNIT_EXPORTS_SYMBOL",
                     provenance="source_abi",
                     confidence=confidence,
                 )

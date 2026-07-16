@@ -1051,7 +1051,23 @@ def _walk_types(
         # `_index_declared_entities`'s `in_body` tracking excludes them from
         # provenance — `enclosing_func` is only truthy inside a function/
         # method body, never for a namespace- or class-scope declaration.
-        ident = _decl_identity(node)
+        #
+        # Identity must be scope-qualified when unmangled (Codex review): a
+        # public `extern "C"` variable inside a namespace (`namespace api {
+        # extern "C" detail::Impl *g; }`) reports mangledName == name (no
+        # real Itanium mangling), so SourceEntity.identity() falls back to
+        # the qualified name "api::g" -- but the bare _decl_identity(node)
+        # used here gives just "g", landing this edge's src on a different
+        # decl:// node than the public SOURCE_DECLARES node, breaking
+        # reachability from the public variable to its private pointee.
+        # function_decl_identity() with an empty type_qual falls through to
+        # the same bare-qualified-name case (a variable's SourceEntity never
+        # sets signature_hash, unlike a function's), so it doubles as the
+        # right fallback here too.
+        qualified_name = "::".join([*scope, name]) if scope else name
+        ident = function_decl_identity(
+            str(node.get("mangledName") or ""), name, qualified_name, ""
+        )
         if ident:
             raw_var = _decl_type_name(node)
             _emit_type_edges(

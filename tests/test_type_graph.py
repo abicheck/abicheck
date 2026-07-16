@@ -1855,3 +1855,35 @@ def test_real_mangled_function_identity_stays_the_mangled_name() -> None:
     param_edges = [e for e in edges if e.role == "param"]
     assert len(param_edges) == 1
     assert param_edges[0].src == "_ZN6Widget3barE"
+
+
+def test_extern_c_variable_type_edge_source_is_scope_qualified() -> None:
+    # Codex review: namespace api { extern "C" detail::Impl *g; } -- clang
+    # reports mangledName == name for the extern "C" variable (no real
+    # Itanium mangling), and SourceEntity.identity() for a variable (which
+    # never sets signature_hash) falls back to the bare qualified name
+    # "api::g". The AST-replay layer used to key this VarDecl's own
+    # DECL_HAS_TYPE edge on the unqualified bare name "g", landing on a
+    # different decl:// node than the public SOURCE_DECLARES node for the
+    # same declaration -- so reachability from the public variable never
+    # reached the private pointee type.
+    ast = _tu(
+        {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Impl")]},
+        {
+            "kind": "NamespaceDecl",
+            "name": "api",
+            "inner": [
+                {
+                    "kind": "VarDecl",
+                    "name": "g",
+                    "mangledName": "g",
+                    "type": {"qualType": "detail::Impl *"},
+                }
+            ],
+        },
+    )
+    edges = parse_clang_ast_types(ast)
+    var_edges = [e for e in edges if e.role == "var"]
+    assert var_edges == [
+        TypeEdge("api::g", "detail::Impl", "DECL_HAS_TYPE", CONF_HIGH, "var")
+    ]

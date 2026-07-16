@@ -3,10 +3,13 @@
 **Date:** 2026-07-12
 **Status:** Accepted — P0 slice 1 (`type_graph.py`), P0 slice 2 (semantic
 graph diff over the full dependency-edge family), P0 slice 3 (`graph
-explain` proof paths), P0 slice 4 (body/type-hash-change correlation), and the
-header-only-graph addendum (`header_graph.py`, no build integration required)
-implemented; the rest of this ADR is a roadmap, not a commitment to ship on
-any timeline.
+explain` proof paths), P0 slice 4 (body/type-hash-change correlation), the
+header-only-graph addendum (`header_graph.py`, no build integration required),
+and all five P1 items (object/link provenance graph, public-entry impact
+closure, per-edge confidence/provenance, and stable cross-clang-version
+identity — the last two landed partial in an earlier slice and are now
+complete) implemented; the rest of this ADR is a roadmap, not a commitment to
+ship on any timeline.
 **Decision maker:** Nikolay Petrov (@napetrov)
 
 ---
@@ -1200,24 +1203,42 @@ there is no equivalent "should this be automatic" question for them.
    as unknown coverage (`state` stays `None`, so the full-walk-trust branch
    never fires) and falls through to the same degraded stamp instead of
    returning early.
-2. **Object/link provenance graph.** New node kinds
-   (`object_file`/`archive_member`/`static_library`/`linker_script`/
+2. ~~**Object/link provenance graph.**~~ — **done, this change.** New node
+   kinds (`object_file`/`archive_member`/`static_library`/`linker_script`/
    `version_script`/`export_map`/`comdat_group`) and edges
-   (`COMPILE_UNIT_EMITS_OBJECT`, `OBJECT_DEFINES_SYMBOL`,
-   `ARCHIVE_CONTAINS_OBJECT`, `LINK_UNIT_EXPORTS_SYMBOL`, …) so a symbol
-   change can be attributed to "which object/archive member/link step" rather
-   than only "which target." Explains cases `TARGET_DEPENDENCY_ADDED` /
-   `EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED` currently can't: an accidental
-   export from a static archive, a COMDAT/weak-symbol resolution change, a
-   new transitive `DT_NEEDED` traced to a specific object.
-3. **Public-entry impact closure.** A changed-file → affected-public-API BFS
-   over the existing graph (`poi.py`'s `resolve_symbol_tus` already does the
-   reverse direction — export delta → declaring TU). Feeds PR-scoped deep
-   scans ("this PR touches `src/detail/cache.cpp`; only 3 public entries are
-   reachable from it; replay only those") on top of the existing
-   changed-path/`headers-only` scoping (ADR-035 D7).
-4. ~~**Explicit per-edge confidence/provenance model.**~~ — **done (partial),
-   this change.** `type_graph.py`'s `DECL_REFERENCES_DECL` edge (the one edge
+   (`COMPILE_UNIT_EMITS_OBJECT`, `TARGET_HAS_LINK_UNIT`, `LINK_UNIT_HAS_INPUT`,
+   `LINK_UNIT_USES_VERSION_SCRIPT`, `LINK_UNIT_EXPORTS_SYMBOL`) fold
+   `BuildEvidence.compile_units`/`link_units` into the graph
+   (`source_graph._fold_link_provenance`), so a symbol change can be
+   attributed to "which object/link step" rather than only "which target."
+   Every `compile_unit` with a known `output` gets an `object_file` node +
+   `COMPILE_UNIT_EMITS_OBJECT` edge; every `LinkUnit` becomes a `link_unit`
+   node (a kind `NODE_KINDS` reserved since ADR-031 D2 but never populated
+   before this) linked to its owning `target` when known, with each input path
+   classified by suffix into an `object_file` or `static_library` node
+   (`CONF_REDUCED` — best-effort textual classification, no archive
+   introspection) — an object a compile unit already emitted lands on the
+   *same* node instead of a disconnected duplicate, so a change traced to one
+   object correlates across both slices. `LINK_UNIT_EXPORTS_SYMBOL` is added
+   once `_augment_with_source_abi` resolves which symbols the owning target
+   actually exports. `archive_member`/`linker_script`/`export_map`/
+   `comdat_group` and the `ARCHIVE_CONTAINS_OBJECT`/`OBJECT_DEFINES_SYMBOL`
+   edges stay reserved (schema-only): true archive-member/per-object-symbol
+   enumeration needs a real `ar`/`nm`-equivalent introspection extractor this
+   increment does not add.
+3. ~~**Public-entry impact closure.**~~ — **done, this change.**
+   `poi.resolve_changed_paths_public_impact(changed_paths, graph)` is the
+   reverse of `resolve_symbol_tus` (export delta → declaring TU): given a set
+   of changed source paths, it resolves which declarations live in those
+   files (via `decl_declaring_files` plus a `def_file`/`source_location`
+   fallback) and returns every public entry that either declares directly in
+   a changed file or reaches one through `_dependency_reachability`'s forward
+   closure. Feeds PR-scoped deep scans ("this PR touches
+   `src/detail/cache.cpp`; only 3 public entries are reachable from it;
+   replay only those") on top of the existing changed-path/`headers-only`
+   scoping (ADR-035 D7).
+4. ~~**Explicit per-edge confidence/provenance model.**~~ — **done, this
+   change.** `type_graph.py`'s `DECL_REFERENCES_DECL` edge (the one edge
    family whose resolution was a same-confidence guess regardless of how the
    reference was actually matched) now carries a dedicated
    `RESOLUTION_REF_EXACT`/`RESOLUTION_REF_UNIQUE_CANDIDATE`/
@@ -1227,23 +1248,53 @@ there is no equivalent "should this be automatic" question for them.
    used, since a `DeclRefExpr` resolves by a different mechanism (an id-index
    hit vs. a name-scope walk) — and `confidence` now downgrades from
    `CONF_HIGH` to `CONF_REDUCED` whenever the match isn't exact, instead of
-   always emitting `CONF_HIGH`. `TYPE_INHERITS`/`TYPE_HAS_FIELD_TYPE`/
-   `DECL_HAS_TYPE` already had per-resolution confidence before this change;
-   the object/link provenance graph (P1 item 2 above) will need its own
-   labels once it lands, so this item stays open for that edge family.
-5. ~~**Stable cross-clang-version identity.**~~ — **done (partial), this
-   change.** `SourceEntity.identity()`'s fallback chain is unchanged (still
+   always emitting `CONF_HIGH`. The object/link provenance graph (P1 item 2
+   above) closes the item fully: its edges emit `CONF_HIGH` (build-evidence
+   direct) and its suffix-classified input nodes emit `CONF_REDUCED`
+   (textual guess), so every edge family this ADR introduces now carries a
+   confidence label reflecting how it was actually resolved.
+5. ~~**Stable cross-clang-version identity.**~~ — **done, this change.**
+   `SourceEntity.identity()`'s fallback chain is unchanged (still
    `mangled_name` → `qualified_name#signature_hash` → bare `qualified_name`,
    since folding USR into the identity string itself would change every
    caller that already keys on it across snapshot versions — too large a
-   blast radius for this increment). Instead, `source_link.py`'s linker now
+   blast radius for this increment). Instead, `source_link.py`'s linker
    *detects* (never silently eliminates) the accepted collision risk: when
    two declarations route to the same `identity()` key but each carries a
    distinct clang-computed USR (`SourceEntity.names["usr"]`), that's proof
    the identity string collided two genuinely different entities, and the
    pair is recorded in a new `SourceAbiSurface.identity_collisions` list
    (`identity`/`qualified_name`/`usr_a`/`usr_b`) rather than silently merged.
-   USR-based identity replacing the fallback chain outright remains open.
+   This change makes that detection *visible*: a new `identity_collision_detected`
+   `ChangeKind` (RISK, D8 single-release hygiene) and matching `crosscheck.py`
+   check (`_check_identity_collision`) turn each recorded collision into an
+   ordinary finding, following the same skip-cleanly/coverage-honesty
+   contract as `odr_type_variant`. USR-based identity replacing the fallback
+   chain outright remains open.
+
+   Landing P1 items 2/3/5 surfaced three identity-mismatch bugs between the
+   AST-replay layers and `SourceEntity.identity()` (each would have silently
+   broken graph-reachability BFS for the affected declarations, since a
+   `SOURCE_DECLARES` node keyed one way while a replay-produced edge pointed
+   at a different string for the same declaration): an `extern "C"` (or
+   otherwise unmangled) **function**'s identity in `call_graph.py`/
+   `type_graph.py` was the bare name instead of the scope-qualified
+   `qualified_name#signature_hash` fallback; the same gap existed for an
+   unmangled **variable**'s own `DECL_HAS_TYPE` edge in `type_graph.py` (no
+   `signature_hash` suffix, since variables never set one); and the C++ clang
+   plugin printed a pointer/reference-decorated type spelling
+   (`getAsString(PP)`) verbatim instead of applying the same textual
+   normalization Python's `_base_type_name()` does, so `int*`-shaped `dst`
+   values diverged between the two producers. All three are fixed (a shared
+   `function_decl_identity()` helper in `source_graph.py` now backs both
+   Python replay modules; the plugin gained `baseTypeName()`/
+   `topLevelParenIndex()` as a line-for-line port, verified byte-identical
+   against Python's output via a live Clang 18 compile). A fourth,
+   unrelated bug surfaced alongside: `call_graph.py`'s `_walk_calls` reused
+   one `cur_file` across AST siblings without threading a discovered file
+   back out of the recursion, so a later sibling's calls could be attributed
+   to an earlier sibling's file — fixed by having `_walk_calls` return the
+   updated `cur_file`.
 
 ### P2 — advanced / differentiating
 

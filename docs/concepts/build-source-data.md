@@ -512,6 +512,7 @@ a single build, no baseline required:
 | `public_to_internal_dependency` | risk | A public/exported declaration reaches an internal (private-header / source-file) entity through the L5 source graph, so a change to that hidden entity is an undeclared behavioral risk — elevated when the internal entity is among the revision's changed files |
 | `unversioned_exported_symbol` | risk | The library defines a symbol-versioning scheme (version script / `.gnu.version_d`) yet exports a symbol with no version node, so it can't be evolved compatibly later — add it to the version script or hide it (single-release hygiene, ADR-035 D8) |
 | `rtti_for_internal_type` | risk | The binary exports RTTI (`_ZTI`/`_ZTV`/`_ZTS`) for a polymorphic type declared only in a private header, leaking its run-time type info onto the ABI surface — hide the type or stop exporting its typeinfo (single-release hygiene, ADR-035 D8) |
+| `identity_collision_detected` | risk | Two distinct declarations (proven distinct by differing clang-computed USR) were linked onto the same L4 `SourceEntity.identity()` key — a rare fallback-chain collision for unmangled cross-scope declarations; any L4/L5 finding under that identity may describe either declaration (ADR-041 P1 #5) |
 
 Each finding records which evidence sources (`binary_exports`,
 `public_header_ast`, `build_config`, `source_index`) corroborate it, driving its

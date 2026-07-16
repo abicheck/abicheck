@@ -364,12 +364,20 @@ def _walk_calls(
     edges: list[CallEdge],
     decl_files: dict[str, str],
     id_index: dict[str, str],
-) -> None:
+) -> str:
     """Recursive AST walk tracking the nearest enclosing function as the *caller*
     and the qualified-name scope (ADR-041 P1 #5), mirroring
-    ``type_graph._walk_types``'s identical scope-tracking pattern."""
+    ``type_graph._walk_types``'s identical scope-tracking pattern. Returns the
+    sticky *cur_file* as last updated by this subtree, so the caller's loop
+    over sibling children can thread it forward (Codex review): clang emits a
+    node's ``file`` only when it *changes* from the previous node in the
+    pre-order dump, so a sibling with no ``loc``/``range`` of its own (a
+    second declaration from the same included header) must still see the
+    file the *previous* sibling discovered, not the stale value from before
+    that sibling ran.
+    """
     if not isinstance(node, dict):
-        return
+        return cur_file
     f = _node_file(node)
     if f:
         cur_file = f
@@ -383,7 +391,7 @@ def _walk_calls(
         _append_call_edge(node, caller, caller_file, edges, id_index)
     child_scope = [*scope, name] if kind in _SCOPE_DECL_KINDS and name else scope
     for child in node.get("inner", []) or []:
-        _walk_calls(
+        cur_file = _walk_calls(
             child,
             caller,
             caller_file,
@@ -393,6 +401,7 @@ def _walk_calls(
             decl_files,
             id_index,
         )
+    return cur_file
 
 
 def _fill_callee_files(

@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 354,
+  "count": 355,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -1135,6 +1135,15 @@
       "min_evidence": "L2",
       "doc_slug": "hidden_friend_removed",
       "examples": "case96_hidden_friend_removed"
+    },
+    {
+      "kind": "identity_collision_detected",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L4",
+      "doc_slug": "identity_collision_detected",
+      "examples": ""
     },
     {
       "kind": "ifunc_introduced",
