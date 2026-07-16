@@ -432,7 +432,7 @@ def test_header_ast_parser_falls_back_to_clang_on_toolchain_failure(tmp_path, mo
     sentinel = object()
     monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
     monkeypatch.setattr(dumper, "_castxml_dump", _boom)
-    monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang")
     monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: sentinel)
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
 
@@ -457,7 +457,7 @@ def test_header_ast_parser_falls_back_to_clang_on_guard_error(tmp_path, monkeypa
     sentinel = object()
     monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
     monkeypatch.setattr(dumper, "_castxml_dump", _boom)
-    monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang")
     monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: sentinel)
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
 
@@ -479,7 +479,7 @@ def test_header_ast_parser_no_fallback_when_castxml_explicit(tmp_path, monkeypat
 
     monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
     monkeypatch.setattr(dumper, "_castxml_dump", _boom)
-    monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang")
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
 
     with pytest.raises(SnapshotError):
@@ -498,7 +498,7 @@ def test_header_ast_parser_no_fallback_on_non_toolchain_failure(tmp_path, monkey
 
     monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
     monkeypatch.setattr(dumper, "_castxml_dump", _boom)
-    monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang")
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
 
     with pytest.raises(SnapshotError):

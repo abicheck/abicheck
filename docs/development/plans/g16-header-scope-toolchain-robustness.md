@@ -1,6 +1,6 @@
 # G16 — Header-scoped source-mode toolchain robustness & actionable diagnostics
 
-**Registry:** `UC-TC-header-scope-robustness` (`planned`)
+**Registry:** `UC-TC-header-scope-robustness` (`complete`)
 **Effort:** M · **Risk:** medium (host-toolchain matrix is large; castxml/clang quirks)
 
 ## Problem
@@ -74,14 +74,21 @@ cadence entirely.
       the detected version + the recommended Clang floor into the remediation.
       *Done:* `_parse_castxml_version` / `_castxml_version_note` +
       `_RECOMMENDED_CLANG_MAJOR`.
-- [ ] `abicheck compare --headers` over a tiny header that transitively includes
+- [x] `abicheck compare --headers` over a tiny header that transitively includes
       `<math.h>` succeeds (or degrades with the actionable hint) on the CI host,
-      asserted end-to-end. *Remaining* (needs the `integration` toolchain).
+      asserted end-to-end. *Done:* `tests/test_header_scope_toolchain.py`
+      (`integration`) — exercises `_castxml_dump` directly over a
+      `<math.h>`-including header and asserts either a clean parse or a
+      `HeaderToolchainError` with the hint, never a bare unclassified failure.
 - [x] The diagnostic text, the version parser, and the version note are
       unit-tested without a live compiler. *Done:*
       `tests/test_castxml_toolchain_robustness.py`.
-- [ ] Promote to a dedicated `HeaderToolchainError` so callers can branch on the
-      class. *Remaining.*
+- [x] Promote to a dedicated `HeaderToolchainError` so callers can branch on the
+      class. *Done:* `abicheck/errors.py::HeaderToolchainError` (a
+      `SnapshotError` subclass); `_validate_castxml_output` raises it whenever
+      `_castxml_failure_hint` recognises the signature, else the plain
+      `SnapshotError` — unit-tested in
+      `tests/test_castxml_toolchain_robustness.py::TestHeaderToolchainErrorClass`.
 - [~] A reliable host-side *workaround* (vs. diagnosis). The `-D_FloatN` shim was
       rejected (see above); the durable path is the Clang-floor recommendation
       plus the libclang extractor (**G4**).

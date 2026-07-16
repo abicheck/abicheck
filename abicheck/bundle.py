@@ -773,6 +773,7 @@ def _detect_soname_skew(
     cohorts = [c.strip() for c in (cohorts or []) if c and c.strip()]
     if not cohorts:
         return []
+    from .binary_utils import strip_vendor_hash
     from .diff_cpp_patterns import BundleMember, _extract_soname_major
 
     def _members(snap: BundleSnapshot) -> list[BundleMember]:
@@ -780,13 +781,29 @@ def _detect_soname_skew(
         for name, path in snap.libraries.items():
             meta = snap.metadata.get(name)
             soname = (meta.soname if meta and meta.soname else "") or path.name
-            major = _extract_soname_major(soname)
+            # G9 (remaining half): DT_SONAME is read directly off the ELF
+            # here, unlike `.library` (the on-disk filename), which the
+            # cohort key normalizes via strip_vendor_hash downstream. An
+            # auditwheel/delocate-vendored library's SONAME carries the same
+            # content-hash suffix as its filename (e.g.
+            # `libfoo_core-a1b2c3d4.so.2`) — strip it first so both the major
+            # extraction below and `BundleMember.soname` see the canonical
+            # logical SONAME, matching `.library`'s normalization. A hashed
+            # *versioned* dylib (`libfoo.2-a1b2c3.dylib`) has the hash
+            # between the major and the extension, so extracting the major
+            # from the raw string misses it entirely (Codex review).
+            stripped_soname = strip_vendor_hash(soname)
+            major = _extract_soname_major(stripped_soname)
             if major is None:
-                major = _extract_soname_major(path.name)
+                major = _extract_soname_major(strip_vendor_hash(path.name))
             if major is None:
                 continue
             members.append(
-                BundleMember(library=path.name, soname=soname, soname_major=major)
+                BundleMember(
+                    library=path.name,
+                    soname=stripped_soname,
+                    soname_major=major,
+                )
             )
         return members
 

@@ -13,11 +13,8 @@ scope**.
 | Gap | Plan | Registry use cases | Effort |
 |---|---|---|---|
 | **G4** | [libclang header-AST extractor](g4-header-ast-extractor.md) | `UC-ARCH-header-only` | XL |
-| **G9** | [manylinux/auditwheel vendored-library pairing](g9-wheel-vendored-matching.md) | `UC-WF-wheel-vendored` | M |
-| **G10** | [manylinux glibc-floor check](g10-glibc-floor-check.md) | `UC-TC-glibc-floor` | S |
 | **G11** | [Single-binary ABI audit / lint](g11-single-binary-audit.md) | `UC-WF-audit` | M |
 | **G15** | [Inline-namespace version-stamp normalization](g15-inline-namespace-version.md) | `UC-CHANGE-inline-ns-version` | M |
-| **G16** | [Header-scope toolchain robustness](g16-header-scope-toolchain-robustness.md) | `UC-TC-header-scope-robustness` | M |
 | **G17** | [Real-world validation corpus](g17-real-world-corpus.md) | `UC-WORKFLOW-real-world-corpus` | M |
 | **G18** | [Bazel build-evidence](g18-bazel-build-evidence.md) | `UC-TC-bazel-build-evidence` | M |
 | **G20** | [Source-scan & cross-source example corpus](g20-source-scan-example-catalog.md) | `UC-WORKFLOW-audit-example-corpus`, `UC-CHANGE-crosscheck-example-corpus`, `UC-WORKFLOW-focusing-example-corpus` | L |
@@ -43,6 +40,9 @@ Completed or decided plans are retained for implementation history:
 | **G5** | Done — `plugin-check` CLI and host↔plugin API | [g5](g5-plugin-bidirectional-contract.md) |
 | **G6** | Done — BTF/CTF and SYCL PI/UR workflows | [g6](g6-kernel-btf-and-accelerator.md) |
 | **G7** | Done — release recommendation | `abicheck/semver.py` |
+| **G9** | Done — auditwheel/delocate vendored-library pairing, filename and embedded DT_SONAME/install-name both normalized via `strip_vendor_hash` | [g9](g9-wheel-vendored-matching.md) |
+| **G10** | Done — manylinux glibc-floor / platform-baseline check (`platform_baseline_floor_raised`, declared via `--env-matrix`'s `runtime_floors`) | [g10](g10-glibc-floor-check.md) |
+| **G16** | Done — header-scope toolchain diagnostics, `HeaderToolchainError`, and a real-host `integration` end-to-end check | [g16](g16-header-scope-toolchain-robustness.md) |
 | **G8** | Decided — static/import archives are a by-design non-goal | [g8](g8-static-libraries.md) |
 | **G12** | Done — security-hardening drift surface and policy preset | [g12](g12-security-hardening.md) |
 | **G13** | Done — ELF snapshot captures `e_machine`/`EI_CLASS`/endianness; a mismatch is a dominating `BREAKING_KINDS` guard | [g13](g13-arch-mismatch-guard.md) |

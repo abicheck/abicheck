@@ -31,6 +31,7 @@ from __future__ import annotations
 from .change_registry_buildsource import BUILDSOURCE_EXTENSION_ENTRIES
 from .change_registry_composition import COMPOSITION_EXTENSION_ENTRIES
 from .change_registry_coverage import COVERAGE_EXTENSION_ENTRIES
+from .change_registry_numpy import NUMPY_EXTENSION_ENTRIES
 from .change_registry_types import (  # noqa: F401
     ChangeKindMeta as ChangeKindMeta,
     ChangeKindRegistry as ChangeKindRegistry,
@@ -1928,6 +1929,8 @@ REGISTRY = ChangeKindRegistry([
               "relink artifact; a new API symbol means the code now genuinely "
               "depends on the newer runtime.",
        description_template="Runtime floor raised for {detail}: {old} → {new} (required by: {name})"),
+    # platform_baseline_floor_raised (G10) lives in change_registry_coverage.py
+    # to keep this module under the AI-readiness 2000-line hard cap.
     _E("dt_relr_introduced", _R,
        impact="The linker enabled packed relative relocations (DT_RELR, "
               "`-z pack-relative-relocs`; default on some distros since "
@@ -1989,4 +1992,7 @@ REGISTRY = ChangeKindRegistry([
     # Build-source (L3/L4/L5) evidence-layer kinds live in
     # change_registry_buildsource.py for the same reason.
     *BUILDSOURCE_EXTENSION_ENTRIES,
+    # NumPy C-API compatibility-envelope kinds (G26) live in
+    # change_registry_numpy.py for the same reason.
+    *NUMPY_EXTENSION_ENTRIES,
 ])

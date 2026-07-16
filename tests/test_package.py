@@ -21,14 +21,26 @@ from abicheck.package import (
     RpmExtractor,
     TarExtractor,
     WheelExtractor,
+    _implementation_name_from_wheel_filename,
+    _implementation_version_from_wheel_filename,
     _is_elf_shared_object,
+    _os_name_from_wheel_filename,
+    _platform_machine_from_wheel_filename,
+    _platform_python_implementation_from_wheel_filename,
+    _platform_system_from_wheel_filename,
+    _python_full_version_from_wheel_filename,
+    _python_version_from_wheel_filename,
     _read_build_id,
     _safe_zip_extract,
+    _sys_platform_from_wheel_filename,
     _validate_member_path,
     _validate_symlink_target,
     detect_extractor,
     discover_shared_libraries,
     is_package,
+    parse_manylinux_glibc_floor,
+    parse_numpy_requirement_from_metadata,
+    parse_wheel_numpy_requirement,
     resolve_debug_info,
 )
 
@@ -768,6 +780,1042 @@ class TestWheelExtractor:
 
 
 # ── CondaExtractor tests ────────────────────────────────────────────────────
+
+
+class TestParseManylinuxGlibcFloor:
+    """G10: derive a declared glibc floor from a manylinux wheel tag."""
+
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [
+            pytest.param(
+                "scipy-1.18.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+                "2.17",
+                id="pep600_tag",
+            ),
+            pytest.param(
+                "numpy-1.26.0-cp311-cp311-manylinux1_x86_64.whl",
+                "2.5",
+                id="manylinux1",
+            ),
+            pytest.param(
+                "pkg-1.0-cp311-cp311-manylinux2010_x86_64.whl",
+                "2.12",
+                id="manylinux2010",
+            ),
+            pytest.param(
+                "pkg-1.0-cp311-cp311-manylinux2014_aarch64.whl",
+                "2.17",
+                id="manylinux2014",
+            ),
+            # A wheel claiming compatibility with both manylinux_2_17 and the
+            # (older/stricter) manylinux2014 alias is claiming to work on
+            # both — the actual binary must not exceed the lower (2.17).
+            pytest.param(
+                "pkg-1.0-cp311-cp311-manylinux_2_28_x86_64.manylinux2014_x86_64.whl",
+                "2.17",
+                id="compressed_multi_tag_picks_strictest",
+            ),
+            pytest.param(
+                "pkg-1.0-cp311-cp311-macosx_11_0_arm64.whl",
+                None,
+                id="no_manylinux_tag_macosx",
+            ),
+            pytest.param(
+                "pkg-1.0-py3-none-any.whl", None, id="no_manylinux_tag_any",
+            ),
+            pytest.param(
+                "manylinux_2_27", "2.27", id="bare_tag_without_arch_suffix",
+            ),
+            # A distribution named "manylinux_2_17_helper" makes no
+            # manylinux promise at all — only its platform-tag segment (the
+            # last -delimited component, "linux_x86_64") may be scanned.
+            pytest.param(
+                "manylinux_2_17_helper-1.0-cp312-cp312-linux_x86_64.whl",
+                None,
+                id="manylinux_prefixed_distribution_name_not_mistaken_for_tag",
+            ),
+            # Same trap, but this one's actual platform tag IS manylinux —
+            # must still be picked up from the platform-tag segment.
+            pytest.param(
+                "manylinux_2_17_helper-1.0-cp312-cp312-manylinux_2_28_x86_64.whl",
+                "2.28",
+                id="manylinux_prefixed_distribution_with_real_manylinux_platform",
+            ),
+        ],
+    )
+    def test_parse_manylinux_glibc_floor(
+        self, name: str, expected: str | None
+    ) -> None:
+        assert parse_manylinux_glibc_floor(name) == expected
+
+
+class TestParseNumpyRequirementFromMetadata:
+    """G26: declared numpy requirement from a wheel's *.dist-info/METADATA."""
+
+    def test_versioned_requirement(self) -> None:
+        text = (
+            "Metadata-Version: 2.1\nName: pkg\nVersion: 1.0\n"
+            "Requires-Dist: numpy>=1.23.5,<3\n"
+        )
+        assert parse_numpy_requirement_from_metadata(text) == "<3,>=1.23.5"
+
+    def test_no_requires_dist_at_all(self) -> None:
+        text = "Metadata-Version: 2.1\nName: pkg\nVersion: 1.0\n"
+        assert parse_numpy_requirement_from_metadata(text) is None
+
+    def test_requires_dist_for_other_packages_only(self) -> None:
+        text = "Metadata-Version: 2.1\nRequires-Dist: scipy>=1.10\n"
+        assert parse_numpy_requirement_from_metadata(text) is None
+
+    def test_bare_numpy_with_no_version_constraint(self) -> None:
+        text = "Metadata-Version: 2.1\nRequires-Dist: numpy\n"
+        assert parse_numpy_requirement_from_metadata(text) == ""
+
+    def test_marker_gated_numpy_is_not_a_real_requirement(self) -> None:
+        text = 'Metadata-Version: 2.1\nRequires-Dist: numpy>=1.20; extra == "test"\n'
+        assert parse_numpy_requirement_from_metadata(text) is None
+
+    def test_extra_seeded_even_on_packaging_without_auto_default(
+        self, monkeypatch
+    ) -> None:
+        # packaging>=22 auto-defaults "extra" to "" inside Marker.evaluate();
+        # this project's pinned floor is packaging>=21.0, whose evaluate()
+        # has no such default and raises UndefinedEnvironmentName on a bare
+        # `extra == "test"` marker if the caller doesn't seed it. Simulate
+        # that stricter contract by asserting "extra" is always present in
+        # the dict this module passes, regardless of installed packaging
+        # version (Codex review; verified for real against a packaging==21.0
+        # venv during development).
+        from packaging.markers import Marker
+
+        real_evaluate = Marker.evaluate
+
+        def strict_evaluate(
+            self: Marker, environment: dict[str, str] | None = None
+        ) -> bool:
+            assert environment is not None and "extra" in environment, (
+                "caller must seed 'extra' -- packaging>=21.0's evaluate() "
+                "has no auto-default and would raise UndefinedEnvironmentName"
+            )
+            return real_evaluate(self, environment)
+
+        monkeypatch.setattr(Marker, "evaluate", strict_evaluate)
+        text = 'Metadata-Version: 2.1\nRequires-Dist: numpy>=1.20; extra == "test"\n'
+        assert parse_numpy_requirement_from_metadata(text) is None
+
+    def test_extra_gated_combined_with_other_condition_is_still_skipped(self) -> None:
+        text = (
+            "Metadata-Version: 2.1\n"
+            'Requires-Dist: numpy>=1.20; extra == "test" and python_version >= "3.8"\n'
+        )
+        assert parse_numpy_requirement_from_metadata(text) is None
+
+    def test_extra_inequality_marker_is_a_real_base_requirement(self) -> None:
+        # `extra != "docs"` mentions "extra" but isn't an optional-extra
+        # gate -- it's true for a plain (no-extras) install, since the
+        # active extra is "". A blanket "marker text contains extra" skip
+        # would incorrectly discard this real requirement (CodeRabbit /
+        # Codex review).
+        text = 'Metadata-Version: 2.1\nRequires-Dist: numpy>=1.20; extra != "docs"\n'
+        assert parse_numpy_requirement_from_metadata(text) == ">=1.20"
+
+    def test_extra_disjunction_marker_is_a_real_base_requirement(self) -> None:
+        # `python_version >= "3.9" or extra == "test"` is true for a plain
+        # install on Python 3.9+ regardless of any extra -- same
+        # over-skip risk as the inequality case above.
+        text = (
+            "Metadata-Version: 2.1\n"
+            'Requires-Dist: numpy>=1.20; python_version >= "3.9" or extra == "test"\n'
+        )
+        assert (
+            parse_numpy_requirement_from_metadata(
+                text, environment={"python_version": "3.12"}
+            )
+            == ">=1.20"
+        )
+
+    def test_python_version_gated_numpy_is_a_real_requirement(self) -> None:
+        # A marker that isn't extra-gated (e.g. python_version) still makes
+        # this an unconditional *base install* requirement -- it's not an
+        # optional extra, just conditional on the interpreter version. A
+        # blanket "any marker at all" skip previously discarded this real
+        # requirement (Codex review).
+        text = (
+            'Metadata-Version: 2.1\nRequires-Dist: numpy>=1.23; python_version >= "3.9"\n'
+        )
+        assert parse_numpy_requirement_from_metadata(text) == ">=1.23"
+
+    def test_platform_gated_numpy_is_a_real_requirement(self) -> None:
+        # Explicit environment override -- must not depend on which OS
+        # actually runs the test suite (Linux/macOS/Windows CI lanes).
+        text = (
+            "Metadata-Version: 2.1\n"
+            'Requires-Dist: numpy>=1.23; platform_system == "Linux"\n'
+        )
+        assert (
+            parse_numpy_requirement_from_metadata(
+                text, environment={"platform_system": "Linux"}
+            )
+            == ">=1.23"
+        )
+
+    def test_inactive_marker_is_skipped_not_returned(self) -> None:
+        # A marker that IS a real (non-extra) base requirement but doesn't
+        # hold for the given environment must not be reported as the active
+        # promise (Codex review).
+        text = (
+            "Metadata-Version: 2.1\n"
+            'Requires-Dist: numpy>=1.23; platform_system == "Linux"\n'
+        )
+        assert (
+            parse_numpy_requirement_from_metadata(
+                text, environment={"platform_system": "Darwin"}
+            )
+            is None
+        )
+
+    def test_active_branch_wins_over_inactive_earlier_branch(self) -> None:
+        # Codex review's exact scenario: a wheel lists two base numpy
+        # requirements split by mutually exclusive python_version markers.
+        # Returning the first non-extra line regardless of applicability
+        # would report the inactive 1.23 floor for a cp312 wheel instead of
+        # the active 2.0 floor.
+        text = (
+            "Metadata-Version: 2.1\n"
+            'Requires-Dist: numpy>=1.23; python_version < "3.12"\n'
+            'Requires-Dist: numpy>=2; python_version >= "3.12"\n'
+        )
+        assert (
+            parse_numpy_requirement_from_metadata(
+                text, environment={"python_version": "3.12"}
+            )
+            == ">=2"
+        )
+        assert (
+            parse_numpy_requirement_from_metadata(
+                text, environment={"python_version": "3.11"}
+            )
+            == ">=1.23"
+        )
+
+    def test_simultaneously_active_requirements_are_combined_not_first_wins(
+        self,
+    ) -> None:
+        # Codex review: unlike the mutually-exclusive-markers case above,
+        # markers here aren't exclusive -- both "python_version >= 3.9" and
+        # the stricter "python_version >= 3.12" hold on Python 3.12. An
+        # installer enforces the intersection of every active constraint,
+        # so returning only the first active line (>=1.23) would understate
+        # the real (>=2) floor.
+        text = (
+            "Metadata-Version: 2.1\n"
+            'Requires-Dist: numpy>=1.23; python_version >= "3.9"\n'
+            'Requires-Dist: numpy>=2; python_version >= "3.12"\n'
+        )
+        combined = parse_numpy_requirement_from_metadata(
+            text, environment={"python_version": "3.12"}
+        )
+        from packaging.specifiers import SpecifierSet
+
+        assert SpecifierSet(combined) == SpecifierSet(">=1.23,>=2")
+        assert "2.5" in SpecifierSet(combined)
+        assert "1.5" not in SpecifierSet(combined)
+
+    def test_malformed_requires_dist_line_is_skipped_not_raised(self) -> None:
+        # A malformed Requires-Dist value (unparseable as a PEP 508
+        # requirement) must not crash the scan -- just be ignored, same as
+        # any other package's Requires-Dist line would be.
+        text = (
+            "Metadata-Version: 2.1\n"
+            "Requires-Dist: not a valid requirement !!!\n"
+            "Requires-Dist: numpy>=1.23.5\n"
+        )
+        assert parse_numpy_requirement_from_metadata(text) == ">=1.23.5"
+
+    def test_case_insensitive_package_name(self) -> None:
+        text = "Metadata-Version: 2.1\nRequires-Dist: NumPy>=1.24\n"
+        assert parse_numpy_requirement_from_metadata(text) == ">=1.24"
+
+    def test_first_unconditional_match_wins(self) -> None:
+        text = (
+            "Metadata-Version: 2.1\n"
+            'Requires-Dist: numpy>=1.20; extra == "test"\n'
+            "Requires-Dist: numpy>=1.23.5\n"
+        )
+        assert parse_numpy_requirement_from_metadata(text) == ">=1.23.5"
+
+    def test_folded_header_continuation_line_is_unfolded(self) -> None:
+        # Core Metadata is an RFC 5322-style header block; a long
+        # Requires-Dist value can be folded across physical lines with
+        # leading whitespace on the continuation. A plain
+        # line.startswith("Requires-Dist:") scan only sees the first
+        # physical line ("numpy") and mangles the folded specifier/marker
+        # (independent review finding, confirmed by Codex).
+        text = (
+            "Metadata-Version: 2.1\n"
+            "Name: pkg\n"
+            'Requires-Dist: numpy\n >=2; python_version >= "3.12"\n'
+        )
+        assert (
+            parse_numpy_requirement_from_metadata(
+                text, environment={"python_version": "3.12"}
+            )
+            == ">=2"
+        )
+        assert (
+            parse_numpy_requirement_from_metadata(
+                text, environment={"python_version": "3.11"}
+            )
+            is None
+        )
+
+
+class TestParseWheelNumpyRequirement:
+    """G26: reads *.dist-info/METADATA directly out of the wheel zip."""
+
+    def test_reads_metadata_from_wheel(self, tmp_path: Path) -> None:
+        whl = tmp_path / "pkg-1.0-cp311-cp311-linux_x86_64.whl"
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr(
+                "pkg-1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\nRequires-Dist: numpy>=1.23.5\n",
+            )
+        assert parse_wheel_numpy_requirement(whl) == ">=1.23.5"
+
+    def test_oversized_metadata_member_rejected_not_decompressed(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        # An attacker-controlled wheel could declare a METADATA member that
+        # decompresses far beyond a real METADATA file's size (a zip bomb).
+        # Lower the cap to a few bytes so the test doesn't need to actually
+        # write megabytes of data (CodeRabbit review).
+        import abicheck.package as package_mod
+
+        monkeypatch.setattr(package_mod, "_MAX_METADATA_SIZE", 8)
+        whl = tmp_path / "pkg-1.0-cp311-cp311-linux_x86_64.whl"
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr(
+                "pkg-1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\nRequires-Dist: numpy>=1.23.5\n",
+            )
+
+        # Prove rejection happens from the declared size alone, before any
+        # decompression -- a test that only checks the final return value
+        # would pass equally if the implementation opened and decompressed
+        # the oversized member first (CodeRabbit review).
+        def unexpected_open(*args, **kwargs):
+            raise AssertionError("oversized METADATA must not be opened")
+
+        monkeypatch.setattr(zipfile.ZipFile, "open", unexpected_open)
+        assert parse_wheel_numpy_requirement(whl) is None
+
+    def test_bounded_read_independently_rejects_an_oversized_result(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        # zipfile.ZipExtFile happens to truncate reads to a member's
+        # declared uncompressed size today, so the declared-size guard
+        # above already catches an honestly-labeled oversized member. This
+        # code doesn't want to depend on that as its only safety margin --
+        # the bounded f.read(cap + 1) call is meant to independently catch
+        # an oversized result even if the reader it's given doesn't
+        # truncate. Simulate that by monkeypatching ZipFile.open to return
+        # a reader that ignores the declared size entirely.
+        import io
+
+        import abicheck.package as package_mod
+
+        monkeypatch.setattr(package_mod, "_MAX_METADATA_SIZE", 8)
+        whl = tmp_path / "pkg-1.0-cp311-cp311-linux_x86_64.whl"
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr("pkg-1.0.dist-info/METADATA", "short")
+
+        def non_truncating_open(self, *args, **kwargs):
+            return io.BytesIO(b"x" * (package_mod._MAX_METADATA_SIZE + 100))
+
+        monkeypatch.setattr(zipfile.ZipFile, "open", non_truncating_open)
+        assert parse_wheel_numpy_requirement(whl) is None
+
+    def test_no_dist_info_metadata_member(self, tmp_path: Path) -> None:
+        whl = tmp_path / "pkg-1.0-cp311-cp311-linux_x86_64.whl"
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr("pkg/__init__.py", "")
+        assert parse_wheel_numpy_requirement(whl) is None
+
+    def test_not_a_zip_returns_none(self, tmp_path: Path) -> None:
+        whl = tmp_path / "not-a-wheel.whl"
+        whl.write_bytes(b"not a zip file")
+        assert parse_wheel_numpy_requirement(whl) is None
+
+    def test_nonexistent_wheel_returns_none(self, tmp_path: Path) -> None:
+        assert parse_wheel_numpy_requirement(tmp_path / "missing.whl") is None
+
+    def test_python_version_derived_from_wheel_filename_not_running_interpreter(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review: a cp311 wheel scanned by a different (e.g. 3.12)
+        # interpreter running abicheck must have its markers evaluated
+        # against ITS OWN cp311 tag, not the host interpreter -- otherwise a
+        # real under-declared floor on that wheel could go undetected.
+        whl = tmp_path / "pkg-1.0-cp311-cp311-linux_x86_64.whl"
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr(
+                "pkg-1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\n"
+                'Requires-Dist: numpy>=1.23; python_version < "3.12"\n'
+                'Requires-Dist: numpy>=2; python_version >= "3.12"\n',
+            )
+        assert parse_wheel_numpy_requirement(whl) == ">=1.23"
+
+    def test_abi3_wheel_python_version_marker_falls_back_to_running_interpreter(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review: a cp39-abi3 wheel genuinely installs on Python 3.9
+        # AND every later 3.x minor, so pinning python_version="3.9" would
+        # make a "later minor" marker wrongly evaluate inactive. This
+        # project requires Python 3.10+ to run at all (CLAUDE.md), so
+        # python_version >= "3.10" is guaranteed true on whatever host runs
+        # this test -- the old buggy derivation (pinning "3.9") would have
+        # made this assert ">=1.23" instead.
+        whl = tmp_path / "pkg-1.0-cp39-abi3-manylinux_2_17_x86_64.whl"
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr(
+                "pkg-1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\n"
+                'Requires-Dist: numpy>=1.23; python_version < "3.10"\n'
+                'Requires-Dist: numpy>=2; python_version >= "3.10"\n',
+            )
+        assert parse_wheel_numpy_requirement(whl) == ">=2"
+
+    def test_python_full_version_spelling_also_derived_from_wheel_filename(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review: python_full_version ("3.11.0") is a different, less
+        # common PEP 508 marker spelling than python_version ("3.11") --
+        # deriving only the latter still leaves the former falling back to
+        # the host interpreter's actual full version.
+        whl = tmp_path / "pkg-1.0-cp311-cp311-linux_x86_64.whl"
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr(
+                "pkg-1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\n"
+                'Requires-Dist: numpy>=1.23; python_full_version < "3.12"\n'
+                'Requires-Dist: numpy>=2; python_full_version >= "3.12"\n',
+            )
+        assert parse_wheel_numpy_requirement(whl) == ">=1.23"
+
+    def test_explicit_environment_overrides_wheel_filename_derivation(
+        self, tmp_path: Path
+    ) -> None:
+        whl = tmp_path / "pkg-1.0-cp311-cp311-linux_x86_64.whl"
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr(
+                "pkg-1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\n"
+                'Requires-Dist: numpy>=1.23; python_version < "3.12"\n'
+                'Requires-Dist: numpy>=2; python_version >= "3.12"\n',
+            )
+        assert (
+            parse_wheel_numpy_requirement(
+                whl, environment={"python_version": "3.12"}
+            )
+            == ">=2"
+        )
+
+    def test_generic_py3_tag_falls_back_to_running_interpreter(
+        self, tmp_path: Path
+    ) -> None:
+        # A "py3" tag doesn't pin a minor version -- nothing useful to
+        # derive, so this must not raise and must fall back cleanly.
+        whl = tmp_path / "pkg-1.0-py3-none-any.whl"
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr(
+                "pkg-1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\nRequires-Dist: numpy>=1.23.5\n",
+            )
+        assert parse_wheel_numpy_requirement(whl) == ">=1.23.5"
+
+    def test_platform_system_derived_from_wheel_filename_not_host_os(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review: a macosx wheel scanned by abicheck running on Linux
+        # (or any other host) must have its platform_system-gated markers
+        # evaluated against ITS OWN Darwin platform tag, not the host OS.
+        whl = tmp_path / "pkg-1.0-cp311-cp311-macosx_11_0_arm64.whl"
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr(
+                "pkg-1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\n"
+                'Requires-Dist: numpy>=1.23; platform_system == "Linux"\n'
+                'Requires-Dist: numpy>=2; platform_system == "Darwin"\n',
+            )
+        assert parse_wheel_numpy_requirement(whl) == ">=2"
+
+    def test_sys_platform_spelling_also_derived_from_wheel_filename(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review: sys_platform ("darwin"/"linux"/"win32") is a
+        # different, equally common PEP 508 marker spelling for the same OS
+        # distinction as platform_system ("Darwin"/"Linux"/"Windows") --
+        # deriving only one still leaves the other spelling falling back to
+        # the host OS.
+        whl = tmp_path / "pkg-1.0-cp311-cp311-macosx_11_0_arm64.whl"
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr(
+                "pkg-1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\n"
+                'Requires-Dist: numpy>=1.23; sys_platform == "linux"\n'
+                'Requires-Dist: numpy>=2; sys_platform == "darwin"\n',
+            )
+        assert parse_wheel_numpy_requirement(whl) == ">=2"
+
+    def test_os_name_spelling_also_derived_from_wheel_filename(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review's exact scenario: os_name ("posix"/"nt") is a third
+        # PEP 508 marker spelling for the same OS distinction as
+        # platform_system/sys_platform -- a win_amd64 wheel scanned on
+        # Linux must have an os_name-gated marker evaluated against ITS OWN
+        # "nt", not the host's "posix".
+        whl = tmp_path / "pkg-1.0-cp311-cp311-win_amd64.whl"
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr(
+                "pkg-1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\n"
+                'Requires-Dist: numpy>=1.23; os_name == "posix"\n'
+                'Requires-Dist: numpy>=2; os_name == "nt"\n',
+            )
+        assert parse_wheel_numpy_requirement(whl) == ">=2"
+
+    def test_implementation_markers_derived_from_wheel_filename(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review's exact scenario: a PyPy-tagged wheel scanned while
+        # abicheck itself runs under CPython must have implementation
+        # markers (both spellings) evaluated against ITS OWN "PyPy"/"pypy",
+        # not the host interpreter's "CPython"/"cpython".
+        whl = tmp_path / "pkg-1.0-pp39-pypy39_pp73-linux_x86_64.whl"
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr(
+                "pkg-1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\n"
+                'Requires-Dist: numpy>=1.23; platform_python_implementation == "CPython"\n'
+                'Requires-Dist: numpy>=2; platform_python_implementation == "PyPy"\n',
+            )
+        assert parse_wheel_numpy_requirement(whl) == ">=2"
+
+        whl2 = tmp_path / "pkg-2.0-pp39-pypy39_pp73-linux_x86_64.whl"
+        with zipfile.ZipFile(whl2, "w") as zf:
+            zf.writestr(
+                "pkg-1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\n"
+                'Requires-Dist: numpy>=1.23; implementation_name == "cpython"\n'
+                'Requires-Dist: numpy>=2; implementation_name == "pypy"\n',
+            )
+        assert parse_wheel_numpy_requirement(whl2) == ">=2"
+
+    def test_implementation_version_derived_from_cpython_wheel_filename(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review's exact scenario: a cp310 wheel scanned on a
+        # different (e.g. 3.12) host must have implementation_version
+        # evaluated against ITS OWN synthetic "3.10.0", not the host's
+        # actual implementation_version.
+        whl = tmp_path / "pkg-1.0-cp310-cp310-linux_x86_64.whl"
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr(
+                "pkg-1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\n"
+                'Requires-Dist: numpy>=1.23; implementation_version < "3.11"\n'
+                'Requires-Dist: numpy>=2; implementation_version >= "3.11"\n',
+            )
+        assert parse_wheel_numpy_requirement(whl) == ">=1.23"
+
+    def test_platform_machine_derived_from_wheel_filename_for_single_arch(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review's exact scenario: a manylinux aarch64 wheel scanned
+        # on an x86_64 host must have its platform_machine-gated markers
+        # evaluated against ITS OWN architecture, not the host's.
+        whl = tmp_path / "pkg-1.0-cp311-cp311-manylinux_2_17_aarch64.whl"
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr(
+                "pkg-1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\n"
+                'Requires-Dist: numpy>=1.23; platform_machine == "x86_64"\n'
+                'Requires-Dist: numpy>=2; platform_machine == "aarch64"\n',
+            )
+        assert parse_wheel_numpy_requirement(whl) == ">=2"
+
+    def test_compressed_multi_arch_macosx_wheel_falls_back_to_host(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review: a genuinely multi-architecture wheel (dotted
+        # macosx x86_64/arm64 tags) must NOT derive a platform_machine at
+        # all -- checking one arch's slice of it must not silently pick up
+        # the OTHER arch's marker evaluation.
+        whl = (
+            tmp_path
+            / "pkg-1.0-cp311-cp311-macosx_10_9_x86_64.macosx_11_0_arm64.whl"
+        )
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr(
+                "pkg-1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\nRequires-Dist: numpy>=1.23.5\n",
+            )
+        # No platform_machine-gated markers here, so this stays trivially
+        # correct either way -- the real assertion is in the unit test for
+        # _platform_machine_from_wheel_filename itself returning None for
+        # this tag. This just confirms end-to-end parsing doesn't crash on
+        # a compressed multi-arch tag.
+        assert parse_wheel_numpy_requirement(whl) == ">=1.23.5"
+
+
+class TestPythonVersionFromWheelFilename:
+    def test_cp_tag(self) -> None:
+        assert (
+            _python_version_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-linux_x86_64.whl"
+            )
+            == "3.11"
+        )
+
+    def test_cp_tag_single_digit_minor(self) -> None:
+        assert (
+            _python_version_from_wheel_filename("pkg-1.0-cp39-cp39-linux_x86_64.whl")
+            == "3.9"
+        )
+
+    def test_build_tag_does_not_shift_python_tag_position(self) -> None:
+        assert (
+            _python_version_from_wheel_filename(
+                "pkg-1.0-2-cp311-cp311-linux_x86_64.whl"
+            )
+            == "3.11"
+        )
+
+    def test_pypy_tag(self) -> None:
+        assert (
+            _python_version_from_wheel_filename(
+                "pkg-1.0-pp39-pypy39_pp73-linux_x86_64.whl"
+            )
+            == "3.9"
+        )
+
+    def test_generic_py3_tag_has_no_minor_returns_none(self) -> None:
+        assert (
+            _python_version_from_wheel_filename("pkg-1.0-py3-none-any.whl") is None
+        )
+
+    def test_non_wheel_filename_returns_none(self) -> None:
+        assert _python_version_from_wheel_filename("pkg-1.0.tar.gz") is None
+
+    def test_too_few_segments_returns_none(self) -> None:
+        assert _python_version_from_wheel_filename("weird.whl") is None
+
+    def test_abi3_tag_names_a_floor_not_one_minor_returns_none(self) -> None:
+        # Codex review: a cp39-abi3 wheel genuinely installs on Python 3.9
+        # AND every later 3.x minor (the stable/limited API's whole point),
+        # so pinning python_version="3.9" would be wrong -- confirmed
+        # against packaging.tags, which puts cp39-abi3 in the accepted tag
+        # set for a 3.12 interpreter too.
+        assert (
+            _python_version_from_wheel_filename(
+                "pkg-1.0-cp39-abi3-manylinux_2_17_x86_64.whl"
+            )
+            is None
+        )
+
+    def test_compressed_abi_tag_including_abi3_also_names_a_floor(self) -> None:
+        # Codex review: a PEP 425 compressed multi-tag ABI segment
+        # (cp39.abi3, dot-joined) is a different spelling of the same
+        # ambiguity -- packaging.utils.parse_wheel_filename expands
+        # "cp39-cp39.abi3-..." to BOTH an exact cp39-cp39 tag and a
+        # cp39-abi3 stable-ABI tag, so this wheel is just as installable
+        # on later 3.x minors as a plain cp39-abi3 wheel. An exact
+        # string-equality check against the whole ABI segment misses this.
+        assert (
+            _python_version_from_wheel_filename(
+                "pkg-1.0-cp39-cp39.abi3-manylinux_2_17_x86_64.whl"
+            )
+            is None
+        )
+
+    def test_compressed_python_tag_spanning_multiple_minors_returns_none(
+        self,
+    ) -> None:
+        # Codex review: a PEP 425 compressed multi-tag Python segment
+        # (cp310.cp311, dot-joined) is valid too -- packaging.utils.
+        # parse_wheel_filename expands "cp310.cp311-cp310.cp311-..." to
+        # tags for both 3.10 and 3.11, so this wheel genuinely installs on
+        # either. The single-version-anchored _WHEEL_PYTHON_TAG_RE already
+        # fails to match a dot-joined segment and safely returns None
+        # (same "can't pin one value -> fall back to host" contract as the
+        # abi3 case) with no code change needed -- this test locks that
+        # in.
+        assert (
+            _python_version_from_wheel_filename(
+                "pkg-1.0-cp310.cp311-cp310.cp311-linux_x86_64.whl"
+            )
+            is None
+        )
+
+
+class TestPythonFullVersionFromWheelFilename:
+    def test_cp_tag_gets_synthetic_micro(self) -> None:
+        assert (
+            _python_full_version_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-linux_x86_64.whl"
+            )
+            == "3.11.0"
+        )
+
+    def test_generic_py3_tag_has_no_minor_returns_none(self) -> None:
+        assert (
+            _python_full_version_from_wheel_filename("pkg-1.0-py3-none-any.whl")
+            is None
+        )
+
+    def test_non_wheel_filename_returns_none(self) -> None:
+        assert _python_full_version_from_wheel_filename("pkg-1.0.tar.gz") is None
+
+    def test_abi3_tag_names_a_floor_not_one_minor_returns_none(self) -> None:
+        assert (
+            _python_full_version_from_wheel_filename(
+                "pkg-1.0-cp39-abi3-manylinux_2_17_x86_64.whl"
+            )
+            is None
+        )
+
+
+class TestImplementationVersionFromWheelFilename:
+    def test_cp_tag_gets_synthetic_micro(self) -> None:
+        # implementation_version == python_full_version for CPython
+        # specifically (packaging.markers.default_environment() computes
+        # both from the same sys.implementation.version there).
+        assert (
+            _implementation_version_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-linux_x86_64.whl"
+            )
+            == "3.11.0"
+        )
+
+    def test_pypy_tag_returns_none(self) -> None:
+        # A pp39 tag's "39" is CPython-ABI-compatibility, not PyPy's own
+        # release number -- deriving "3.9.0" here would be actively wrong
+        # (PyPy's real implementation_version is its own X.Y.Z, e.g.
+        # 7.3.x), not just imprecise, so this must not guess (Codex
+        # review).
+        assert (
+            _implementation_version_from_wheel_filename(
+                "pkg-1.0-pp39-pypy39_pp73-linux_x86_64.whl"
+            )
+            is None
+        )
+
+    def test_abi3_tag_names_a_floor_not_one_minor_returns_none(self) -> None:
+        assert (
+            _implementation_version_from_wheel_filename(
+                "pkg-1.0-cp39-abi3-manylinux_2_17_x86_64.whl"
+            )
+            is None
+        )
+
+    def test_generic_py3_tag_has_no_minor_returns_none(self) -> None:
+        assert (
+            _implementation_version_from_wheel_filename("pkg-1.0-py3-none-any.whl")
+            is None
+        )
+
+    def test_non_wheel_filename_returns_none(self) -> None:
+        assert _implementation_version_from_wheel_filename("pkg-1.0.tar.gz") is None
+
+    def test_too_few_segments_returns_none(self) -> None:
+        assert _implementation_version_from_wheel_filename("weird.whl") is None
+
+
+class TestImplementationNameFromWheelFilename:
+    def test_cp_tag(self) -> None:
+        assert (
+            _implementation_name_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-linux_x86_64.whl"
+            )
+            == "cpython"
+        )
+
+    def test_pypy_tag(self) -> None:
+        assert (
+            _implementation_name_from_wheel_filename(
+                "pkg-1.0-pp39-pypy39_pp73-linux_x86_64.whl"
+            )
+            == "pypy"
+        )
+
+    def test_generic_py_tag_makes_no_implementation_promise(self) -> None:
+        assert (
+            _implementation_name_from_wheel_filename("pkg-1.0-py3-none-any.whl")
+            is None
+        )
+
+    def test_non_wheel_filename_returns_none(self) -> None:
+        assert _implementation_name_from_wheel_filename("pkg-1.0.tar.gz") is None
+
+    def test_too_few_segments_returns_none(self) -> None:
+        assert _implementation_name_from_wheel_filename("weird.whl") is None
+
+
+class TestPlatformPythonImplementationFromWheelFilename:
+    def test_cp_tag(self) -> None:
+        assert (
+            _platform_python_implementation_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-linux_x86_64.whl"
+            )
+            == "CPython"
+        )
+
+    def test_pypy_tag(self) -> None:
+        assert (
+            _platform_python_implementation_from_wheel_filename(
+                "pkg-1.0-pp39-pypy39_pp73-linux_x86_64.whl"
+            )
+            == "PyPy"
+        )
+
+    def test_generic_py_tag_makes_no_implementation_promise(self) -> None:
+        assert (
+            _platform_python_implementation_from_wheel_filename(
+                "pkg-1.0-py3-none-any.whl"
+            )
+            is None
+        )
+
+    def test_non_wheel_filename_returns_none(self) -> None:
+        assert (
+            _platform_python_implementation_from_wheel_filename("pkg-1.0.tar.gz")
+            is None
+        )
+
+    def test_too_few_segments_returns_none(self) -> None:
+        assert _platform_python_implementation_from_wheel_filename("weird.whl") is None
+
+
+class TestPlatformSystemFromWheelFilename:
+    def test_manylinux_tag(self) -> None:
+        assert (
+            _platform_system_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-manylinux_2_17_x86_64.whl"
+            )
+            == "Linux"
+        )
+
+    def test_musllinux_tag(self) -> None:
+        assert (
+            _platform_system_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-musllinux_1_1_x86_64.whl"
+            )
+            == "Linux"
+        )
+
+    def test_plain_linux_tag(self) -> None:
+        assert (
+            _platform_system_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-linux_x86_64.whl"
+            )
+            == "Linux"
+        )
+
+    def test_macosx_tag(self) -> None:
+        assert (
+            _platform_system_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-macosx_11_0_arm64.whl"
+            )
+            == "Darwin"
+        )
+
+    def test_win_tag(self) -> None:
+        assert (
+            _platform_system_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-win_amd64.whl"
+            )
+            == "Windows"
+        )
+
+    def test_any_tag_returns_none(self) -> None:
+        assert (
+            _platform_system_from_wheel_filename("pkg-1.0-py3-none-any.whl") is None
+        )
+
+    def test_non_wheel_filename_returns_none(self) -> None:
+        assert _platform_system_from_wheel_filename("pkg-1.0.tar.gz") is None
+
+    def test_too_few_segments_returns_none(self) -> None:
+        assert _platform_system_from_wheel_filename("weird.whl") is None
+
+
+class TestSysPlatformFromWheelFilename:
+    def test_manylinux_tag(self) -> None:
+        assert (
+            _sys_platform_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-manylinux_2_17_x86_64.whl"
+            )
+            == "linux"
+        )
+
+    def test_macosx_tag(self) -> None:
+        assert (
+            _sys_platform_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-macosx_11_0_arm64.whl"
+            )
+            == "darwin"
+        )
+
+    def test_win_tag(self) -> None:
+        assert (
+            _sys_platform_from_wheel_filename("pkg-1.0-cp311-cp311-win_amd64.whl")
+            == "win32"
+        )
+
+    def test_any_tag_returns_none(self) -> None:
+        assert _sys_platform_from_wheel_filename("pkg-1.0-py3-none-any.whl") is None
+
+    def test_non_wheel_filename_returns_none(self) -> None:
+        assert _sys_platform_from_wheel_filename("pkg-1.0.tar.gz") is None
+
+    def test_too_few_segments_returns_none(self) -> None:
+        assert _sys_platform_from_wheel_filename("weird.whl") is None
+
+
+class TestOsNameFromWheelFilename:
+    def test_manylinux_tag(self) -> None:
+        assert (
+            _os_name_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-manylinux_2_17_x86_64.whl"
+            )
+            == "posix"
+        )
+
+    def test_macosx_tag(self) -> None:
+        assert (
+            _os_name_from_wheel_filename("pkg-1.0-cp311-cp311-macosx_11_0_arm64.whl")
+            == "posix"
+        )
+
+    def test_win_tag(self) -> None:
+        assert (
+            _os_name_from_wheel_filename("pkg-1.0-cp311-cp311-win_amd64.whl") == "nt"
+        )
+
+    def test_any_tag_returns_none(self) -> None:
+        assert _os_name_from_wheel_filename("pkg-1.0-py3-none-any.whl") is None
+
+    def test_non_wheel_filename_returns_none(self) -> None:
+        assert _os_name_from_wheel_filename("pkg-1.0.tar.gz") is None
+
+    def test_too_few_segments_returns_none(self) -> None:
+        assert _os_name_from_wheel_filename("weird.whl") is None
+
+
+class TestPlatformMachineFromWheelFilename:
+    def test_manylinux_x86_64(self) -> None:
+        assert (
+            _platform_machine_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-manylinux_2_17_x86_64.whl"
+            )
+            == "x86_64"
+        )
+
+    def test_manylinux_aarch64(self) -> None:
+        assert (
+            _platform_machine_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-manylinux_2_17_aarch64.whl"
+            )
+            == "aarch64"
+        )
+
+    def test_manylinux_ppc64le_not_confused_with_ppc64(self) -> None:
+        assert (
+            _platform_machine_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-manylinux2014_ppc64le.whl"
+            )
+            == "ppc64le"
+        )
+
+    def test_macosx_x86_64(self) -> None:
+        assert (
+            _platform_machine_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-macosx_10_9_x86_64.whl"
+            )
+            == "x86_64"
+        )
+
+    def test_macosx_arm64(self) -> None:
+        assert (
+            _platform_machine_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-macosx_11_0_arm64.whl"
+            )
+            == "arm64"
+        )
+
+    def test_macosx_universal2_is_ambiguous_returns_none(self) -> None:
+        assert (
+            _platform_machine_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-macosx_11_0_universal2.whl"
+            )
+            is None
+        )
+
+    def test_compressed_multi_arch_macosx_tag_is_ambiguous_returns_none(
+        self,
+    ) -> None:
+        # PEP 600 compressed multi-tag platform segment covering two
+        # DIFFERENT architectures -- naively checking the whole segment's
+        # suffix would derive "arm64" just because that's the last
+        # dot-joined component, even though the wheel also covers x86_64
+        # (Codex review).
+        assert (
+            _platform_machine_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-macosx_10_9_x86_64.macosx_11_0_arm64.whl"
+            )
+            is None
+        )
+
+    def test_compressed_multi_tag_agreeing_on_one_arch_is_derived(self) -> None:
+        # Multiple manylinux baselines for the SAME architecture (a
+        # genuinely common case: a wheel built compatible with both an
+        # older and a newer glibc floor) still names exactly one arch.
+        assert (
+            _platform_machine_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"
+            )
+            == "x86_64"
+        )
+
+    def test_win_tag_not_derived(self) -> None:
+        # Windows arch-string conventions in platform.machine() are less
+        # standardized than Linux/macOS -- deliberately left undetermined.
+        assert (
+            _platform_machine_from_wheel_filename("pkg-1.0-cp311-cp311-win_amd64.whl")
+            is None
+        )
+
+    def test_any_tag_returns_none(self) -> None:
+        assert (
+            _platform_machine_from_wheel_filename("pkg-1.0-py3-none-any.whl") is None
+        )
+
+    def test_non_wheel_filename_returns_none(self) -> None:
+        assert _platform_machine_from_wheel_filename("pkg-1.0.tar.gz") is None
+
+    def test_too_few_segments_returns_none(self) -> None:
+        assert _platform_machine_from_wheel_filename("weird.whl") is None
+
+    def test_unrecognized_linux_architecture_returns_none(self) -> None:
+        assert (
+            _platform_machine_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-manylinux_2_17_riscv64.whl"
+            )
+            is None
+        )
 
 
 class TestCondaExtractor:

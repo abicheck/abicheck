@@ -27,7 +27,7 @@ from pathlib import Path
 
 import pytest
 
-from abicheck import dumper
+from abicheck import dumper, dumper_clang
 from abicheck.dumper import (
     _auto_system_includes_enabled,
     _build_clang_header_command,
@@ -665,7 +665,7 @@ def test_resolve_header_backend_auto_stays_castxml_without_env(
 ) -> None:
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
     monkeypatch.setattr("abicheck.dumper._castxml_available", lambda: True)
-    monkeypatch.setattr("abicheck.dumper._clang_available", lambda *a, **k: True)
+    monkeypatch.setattr("abicheck.dumper_clang._clang_available", lambda *a, **k: True)
     assert _resolve_header_backend("auto") == "castxml"
     # Do not silently fall back to clang: clang AST lacks computed layout
     # evidence, so auto must fail closed through the castxml path.
@@ -696,7 +696,7 @@ def test_clang_header_dump_missing_clang_raises(
     from abicheck.dumper import _clang_header_dump
     from abicheck.errors import SnapshotError
 
-    monkeypatch.setattr("abicheck.dumper._clang_available", lambda *a, **k: False)
+    monkeypatch.setattr("abicheck.dumper_clang._clang_available", lambda *a, **k: False)
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
     with pytest.raises(SnapshotError, match="not found in PATH"):
@@ -712,7 +712,7 @@ def _stub_clang_self_heal(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     import subprocess as _sp
 
-    monkeypatch.setattr("abicheck.dumper._clang_available", lambda *a, **k: True)
+    monkeypatch.setattr("abicheck.dumper_clang._clang_available", lambda *a, **k: True)
     monkeypatch.setattr(
         "abicheck.dumper._resolve_clang_system_includes", lambda *a, **k: ()
     )
@@ -1170,7 +1170,7 @@ def test_clang_header_dump_success_and_cache(
     cache = tmp_path / "cache.json"
     ast_json = '{"kind": "TranslationUnitDecl", "inner": []}'
 
-    monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
     monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
     # Isolate the single clang AST-dump call: disable the castxml↔clang
     # system-include probe (itself a separate, best-effort subprocess).
@@ -1197,7 +1197,7 @@ def test_clang_header_dump_no_output_raises(
 ) -> None:
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
-    monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
     monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
     # Exit 0 but empty stdout → the "no AST" path (a nonzero exit is the
     # earlier branch, covered by test_clang_header_dump_nonzero_exit_raises).
@@ -1214,7 +1214,7 @@ def test_clang_header_dump_bad_json_raises(
 ) -> None:
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
-    monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
     monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
     monkeypatch.setattr(
         dumper.subprocess, "run",
@@ -1262,7 +1262,7 @@ def test_clang_header_dump_retries_cpp_on_missing_cpp_stdlib_header(
     # (with -x c++ in the rebuilt command) rather than hard-failing.
     header = tmp_path / "umbrella.h"
     header.write_text('#include "detail/impl.h"\n')
-    monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
     monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
     monkeypatch.setattr(dumper, "_detect_cpp_headers", lambda *a, **k: False)
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
@@ -1289,7 +1289,7 @@ def test_clang_header_dump_no_retry_on_other_error(
     # A non-"missing C++ stdlib header" failure must NOT retry — it surfaces as-is.
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
-    monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
     monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
     monkeypatch.setattr(dumper, "_detect_cpp_headers", lambda *a, **k: False)
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
@@ -1310,7 +1310,7 @@ def test_resolve_header_backend_neither_tool_defaults_castxml(
 ) -> None:
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
     monkeypatch.setattr(dumper, "_castxml_available", lambda: False)
-    monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: False)
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: False)
     # Falls back to castxml so the existing "install castxml" error surfaces.
     assert _resolve_header_backend("auto") == "castxml"
 
@@ -1769,7 +1769,7 @@ def test_clang_header_dump_nonzero_exit_raises(
     # JSON — the L2 header AST must be complete to be authoritative.
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
-    monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
     monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
 
     class _P:
@@ -1794,7 +1794,7 @@ def test_clang_header_dump_gcc_path_not_used_as_clang(
         seen["bin"] = b
         return False  # force the missing-tool error so we can inspect the bin
 
-    monkeypatch.setattr(dumper, "_clang_available", _avail)
+    monkeypatch.setattr(dumper_clang, "_clang_available", _avail)
     with pytest.raises(SnapshotError):
         _clang_header_dump([header], [], gcc_path="/usr/bin/g++")
     # Fell back to a clang driver, NOT the supplied g++ binary.
@@ -1813,7 +1813,7 @@ def test_clang_header_dump_explicit_clang_path_honored(
         seen["bin"] = b
         return False
 
-    monkeypatch.setattr(dumper, "_clang_available", _avail)
+    monkeypatch.setattr(dumper_clang, "_clang_available", _avail)
     with pytest.raises(SnapshotError):
         _clang_header_dump([header], [], gcc_path="/opt/llvm/bin/clang-18")
     assert seen["bin"] == "/opt/llvm/bin/clang-18"
@@ -1830,7 +1830,7 @@ def test_clang_header_dump_gcc_prefix_maps_to_prefixed_clang(
         seen["bin"] = b
         return False
 
-    monkeypatch.setattr(dumper, "_clang_available", _avail)
+    monkeypatch.setattr(dumper_clang, "_clang_available", _avail)
     with pytest.raises(SnapshotError):
         _clang_header_dump(
             [header], [], gcc_prefix="aarch64-linux-gnu-", compiler="c++"
@@ -1916,7 +1916,7 @@ def test_clang_header_dump_timeout_raises(
 
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
-    monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
     monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
 
     def _boom(*a, **k):
@@ -1936,7 +1936,7 @@ def test_clang_header_dump_corrupt_cache_is_discarded(
     cache.write_text("{ this is not valid json")  # corrupt prior cache entry
     ast = '{"kind": "TranslationUnitDecl", "inner": []}'
 
-    monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
     monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
     monkeypatch.setattr(
         dumper.subprocess, "run",

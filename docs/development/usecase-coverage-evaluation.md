@@ -20,21 +20,17 @@ map across all three.
 ## Headline
 
 abicheck is **exceptionally deep on the change-taxonomy axis and comparatively
-thin on the breadth axes.** The "what changed" dimension — **355 `ChangeKind`s**
+thin on the breadth axes.** The "what changed" dimension — **361 `ChangeKind`s**
 in a 5-tier policy model, **181 calibrated example cases** (134 binary shared-library competitor lanes plus dedicated fixture/source lanes), ABICC + libabigail
 parity — is essentially complete and has diminishing returns.
 
 The remaining gaps are **not in detecting more change types**. They are the
-three `planned` breadth/workflow items tracked in `usecase-registry.yaml`:
-header-only/inline-only analysis (G4), manylinux glibc-floor checks (G10), and
-single-binary audit/lint mode (G11) —
-plus seven **partial**/`modeled` items with
-some shipped work already: auditwheel/delocate vendored-library filename
-pairing (G9, `strip_vendor_hash` normalization has shipped; the embedded-SONAME
-half for bundle cohort SONAME-skew detection has not), inline-namespace
+`planned` breadth/workflow items tracked in `usecase-registry.yaml`:
+header-only/inline-only analysis (G4) and single-binary audit/lint mode (G11) —
+plus five **partial**/`modeled` items with
+some shipped work already: inline-namespace
 version-stamp normalization (G15),
-header-scoped source-mode toolchain robustness (G16, diagnostics and the
-`castxml --version` floor probe have shipped), a real-world validation corpus
+a real-world validation corpus
 (G17), Bazel build-evidence (G18, `modeled` — code exists, not yet validated
 end-to-end in CI), the source-scan & cross-source example corpus (G20), and
 one-shot deep compare & CLI usability (G21, the `--depth` dial has shipped;
@@ -76,7 +72,7 @@ A real invocation is a point in this space:
 
 | Use case | Status | Notes |
 |---|---|---|
-| Change taxonomy | `complete` | 355 change kinds; 181 ground-truth entries; parity tests; fixture/source-only L2/L5/source cases are tracked separately from binary `.so` competitor lanes |
+| Change taxonomy | `complete` | 361 change kinds; 181 ground-truth entries; parity tests; fixture/source-only L2/L5/source cases are tracked separately from binary `.so` competitor lanes |
 | **Release recommendation (semver + SONAME)** | `complete` | semver bump + SONAME action emitted in reports |
 | C / C++ archetypes | `complete` | 35 C + 52 C++ example pairs |
 | Linux ELF platform | `complete` | the CI-validated baseline |
@@ -111,8 +107,8 @@ A real invocation is a point in this space:
 | **G6** | ✅ closed | BTF/CTF and SYCL PI/UR workflows run through `compare` and reports. |
 | **G7** | ✅ closed | Semver bump and SONAME action recommendations are emitted by the report layer. |
 | **G8** | by-design excluded | Static/import archives are rejected with guidance; archive member API checking is a non-goal. |
-| **G9** | partial | Filename-based vendored-library pairing shipped (`strip_vendor_hash` in `compare-release`'s matching pass) — a bundled `libpng16-<hash>.so.16.x` now pairs across rebuilds instead of removed+added noise, and a real break in the paired dependency still surfaces. Remaining: normalize the embedded ELF SONAME/install-name for `bundle.py`'s cohort-scoped SONAME-skew detector. |
-| **G10** | planned | manylinux glibc-floor / platform-baseline checks. |
+| **G9** | ✅ closed | Vendored-library pairing, both halves: `strip_vendor_hash` normalizes the auditwheel/delocate content-hash suffix in `compare-release`'s matching pass (filename) and in `bundle.py`'s cohort-scoped SONAME-skew detector (embedded DT_SONAME/install-name) — a bundled `libpng16-<hash>.so.16.x` pairs across rebuilds instead of removed+added noise, and a real break in the paired dependency (e.g. a SONAME major bump) still surfaces. |
+| **G10** | ✅ closed | manylinux glibc-floor / platform-baseline check. `check_platform_baseline_floor` (`diff_versioning.py`) compares a binary's own max required `GLIBC_2.x` (plus the implied floor from `DT_RELR`) against a declared floor (`--env-matrix`'s `runtime_floors` — no new flag) and emits `platform_baseline_floor_raised` — fires even with no old/new delta, unlike the pre-existing `runtime_floor_raised` reclassification. `package.parse_manylinux_glibc_floor` derives the floor from a manylinux wheel tag for programmatic use. |
 | **G11** | planned | Single-binary ABI audit/lint mode. |
 | **G12** | ✅ closed | Security-hardening drift captures and diffs RELRO, BIND_NOW, PIE, canaries, FORTIFY, and W^X metadata; the security policy is shipped. |
 | **G13** | ✅ closed | ELF snapshot captures `e_machine`/`EI_CLASS`/endianness; a mismatch is a hard guard (`ELF_MACHINE_CHANGED`/`ELF_CLASS_CHANGED`, `BREAKING_KINDS`) rather than a false-green `COMPATIBLE_WITH_RISK` verdict. |
@@ -124,9 +120,9 @@ A real invocation is a point in this space:
 | **G20** | partial | Source-scan & cross-source example corpus (ADR-035 demonstration): single-release audit cases, cross-source corroboration cases (combination beats any single source), and evidence-directed focusing scenarios. Grows the `examples/` catalog + test suites to demonstrate the G19 engine; no engine change. |
 | **G21** | partial | One-shot deep compare + CLI usability (oneDAL eval). **Shipped (PR #422):** the `--depth headers\|build\|graph\|source\|full` dial (`--max`=full, reusing the `scan --depth` vocabulary) on `dump`; rich-click option-group `--help` panels (collapse M1); and the strict-mode honesty fix (empty requested L4 → `skipped`). **Remaining:** the one-shot `compare` orchestrator (dump both sides with `--sources`, then compare) + header/source auto-discovery, a cross-platform list-threaded `--gcc-option`, `compile_commands.json` auto-synthesis, a fail-loud signal on an empty requested layer, and vocab unification (M5). |
 | **G22** | ✅ closed | CLI interface contract, config balance, and extension policy ([ADR-037](adr/037-cli-interface-contract.md)). Followed G21's depth dial with the structural cleanup the flag-divergence audit surfaced: three named tiers with `service.py` as the only compare chokepoint (fixes `compare-release` bypassing it with a different `scope_public` default), typed `CompareRequest` dataclasses, one decorator per shared option family (kills the severity/header/policy/debug copy-paste drift), a single `--depth` vocabulary (drops the "evidence" naming and the user-facing L5-graph rung), folding `compare-release`/`deep-compare` into `compare`, `--header-backend` → `--ast-frontend`, a CLI↔`.abicheck.yml` rebalance, an explicit `--exit-code-scheme`, and a `cli-contract` CI gate. Backward-compat mechanism designed, left advisory until 1.0. |
-| **G16** | partial | Header-scoped source-mode toolchain robustness. Surfaced by 21 real-world cron records. **Shipped**: actionable diagnostics for all three host-toolchain signatures (sized-float `_FloatN`, GCC `__assume__`, `--lang c` + `extern "C"`), plus a `castxml --version` probe that recommends the Clang floor (≥ 18) on a version-mismatch failure. A `-D_FloatN` shim was prototyped and **rejected** (it rewrites glibc's own `typedef float _Float32;` fallback); the durable cure is a newer-Clang castxml or the libclang extractor (G4). **Remaining**: real-host end-to-end check and a dedicated error type. |
+| **G16** | ✅ closed | Header-scoped source-mode toolchain robustness. Surfaced by 21 real-world cron records. Actionable diagnostics for all three host-toolchain signatures (sized-float `_FloatN`, GCC `__assume__`, `--lang c` + `extern "C"`), plus a `castxml --version` probe that recommends the Clang floor (≥ 18) on a version-mismatch failure; a dedicated `HeaderToolchainError` (a `SnapshotError` subclass) so callers can branch on "this failure carries an actionable remediation"; and a real-host `integration` end-to-end check (`tests/test_header_scope_toolchain.py`) over a `<math.h>`-including header. A `-D_FloatN` shim was prototyped and **rejected** (it rewrites glibc's own `typedef float _Float32;` fallback); the durable cure for a too-old host toolchain remains a newer-Clang castxml or the libclang extractor (G4). |
 | **G25** | planned | Cython API/ABI frontend (`.pxd` + `__pyx_capi__` capsule surface) — see the [SciPy/Scientific-Python Roadmap](scipy-scientific-python-roadmap.md#1-a-first-class-cython-apiabi-frontend). Neither the native C-ABI check (G14) nor the Python-level API check (G23) see a capsule signature change. |
-| **G26** | planned | NumPy C-API compatibility-envelope analysis (build/target facts vs. declared metadata range) — see the [SciPy/Scientific-Python Roadmap](scipy-scientific-python-roadmap.md#2-numpy-c-api-compatibility-envelope-analysis). NumPy's capsule-based C-API is invisible to ordinary symbol-table diffing. |
+| **G26** | partial | NumPy C-API compatibility-envelope analysis. `numpy_capi.extract_numpy_capi_surface()` recovers `_ARRAY_API`/`_UFUNC_API` consumption and the `NPY_TARGET_VERSION` build/target facts from binary evidence and cross-checks them against the declared metadata range; the raw `NPY_ABI_VERSION`/`NPY_API_VERSION` hex constants need disassembly to recover (out of scope, same reasoning as G4) — see the [SciPy/Scientific-Python Roadmap](scipy-scientific-python-roadmap.md#2-numpy-c-api-compatibility-envelope-analysis) and the plan's "Out of scope". NumPy's capsule-based C-API is invisible to ordinary symbol-table diffing. |
 | **G27** | planned | Wheel tag / deployment-claim verification across Linux (extends G10 to `GLIBCXX`/`CXXABI`/musllinux), macOS (deployment target), and Windows (UCRT/runtime) — see the [SciPy/Scientific-Python Roadmap](scipy-scientific-python-roadmap.md#3-wheel-tag-and-deployment-claim-verification). |
 
 ## Proposed next steps (tracked in the registry)
@@ -138,12 +134,9 @@ planned row from drifting away from its plan.
 
 | Priority | Gap | Plan |
 |---|---|---|
-| High | G9 — wheel vendored-library pairing | [g9](plans/g9-wheel-vendored-matching.md) |
 | Medium | G4 — header-only / inline-only analysis | [g4](plans/g4-header-ast-extractor.md) |
 | Medium | G11 — single-binary audit/lint | [g11](plans/g11-single-binary-audit.md) |
 | Medium | G15 — inline-namespace version stamp | [g15](plans/g15-inline-namespace-version.md) |
-| Small | G10 — glibc-floor check | [g10](plans/g10-glibc-floor-check.md) |
-| Medium | G16 — header-scope toolchain robustness | [g16](plans/g16-header-scope-toolchain-robustness.md) |
 | Medium | G17 — real-world validation corpus | [g17](plans/g17-real-world-corpus.md) |
 | Medium | G18 — Bazel build-evidence | [g18](plans/g18-bazel-build-evidence.md) |
 | Medium | G20 — source-scan & cross-source example corpus | [g20](plans/g20-source-scan-example-catalog.md) |

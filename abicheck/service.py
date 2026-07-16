@@ -525,6 +525,7 @@ def run_dump(
         _try_attach_sycl_metadata(snap, path)
         _try_attach_python_ext_metadata(snap)
         _try_attach_python_api_surface(snap)
+        _try_attach_numpy_capi_surface(snap, path)
         return _attach_header_graph(
             snap,
             header_graph,
@@ -550,6 +551,7 @@ def run_dump(
         snap = _apply_native_provenance(snap, public_headers, public_header_dirs)
         _try_attach_python_ext_metadata(snap)
         _try_attach_python_api_surface(snap)
+        _try_attach_numpy_capi_surface(snap, path)
         return _attach_header_graph(
             snap,
             header_graph,
@@ -574,6 +576,7 @@ def run_dump(
         snap = _apply_native_provenance(snap, public_headers, public_header_dirs)
         _try_attach_python_ext_metadata(snap)
         _try_attach_python_api_surface(snap)
+        _try_attach_numpy_capi_surface(snap, path)
         return _attach_header_graph(
             snap,
             header_graph,
@@ -845,6 +848,31 @@ def _try_attach_python_ext_metadata(snap: AbiSnapshot) -> None:
             python_ext.limited_api,
             len(python_ext.cpython_imports),
         )
+
+
+def _try_attach_numpy_capi_surface(snap: AbiSnapshot, lib_path: Path) -> None:
+    """Scan for NumPy C-API consumption evidence and attach it (G26).
+
+    Cheap: a bounded read of the binary plus a handful of substring/regex
+    scans. A library that doesn't consume the NumPy C-API at all leaves
+    ``numpy_capi`` at ``None`` — no finding, not a false positive.
+    """
+    from .numpy_capi import extract_numpy_capi_surface
+
+    try:
+        numpy_capi = extract_numpy_capi_surface(lib_path)
+    except Exception as exc:  # noqa: BLE001
+        _logger.debug("NumPy C-API surface extraction skipped: %s", exc)
+        return
+    if numpy_capi is not None:
+        snap.numpy_capi = numpy_capi
+        if numpy_capi.consumes_array_api or numpy_capi.consumes_ufunc_api:
+            _logger.info(
+                "NumPy C-API consumption detected: array_api=%s, ufunc_api=%s, target=%s",
+                numpy_capi.consumes_array_api,
+                numpy_capi.consumes_ufunc_api,
+                numpy_capi.capi_target_version,
+            )
 
 
 def _try_attach_python_api_surface(snap: AbiSnapshot) -> None:

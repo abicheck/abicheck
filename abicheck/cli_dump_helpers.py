@@ -660,6 +660,18 @@ def perform_elf_dump(
 
         snap.python_api = detect_python_api(snap)
 
+    # G26: attach NumPy C-API consumption evidence for the same reason as
+    # G14/G23 above — this ELF `dump` CLI path reaches `dumper.dump` directly,
+    # not `service.run_dump` (whose `_try_attach_numpy_capi_surface` only
+    # covers the in-process compare path), so without this a snapshot written
+    # via `abicheck dump` never carries `numpy_capi` and every G26 delta in a
+    # later `compare` on the written JSON stays silently disabled (Codex
+    # review).
+    if snap.numpy_capi is None:
+        from .numpy_capi import extract_numpy_capi_surface
+
+        snap.numpy_capi = extract_numpy_capi_surface(so_path)
+
     if follow_deps:
         populate_dependency_info(
             snap, so_path, list(search_paths), sysroot, ld_library_path

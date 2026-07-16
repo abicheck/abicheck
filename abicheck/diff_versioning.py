@@ -88,6 +88,34 @@ def _parse_abi_version_tag(ver: str) -> tuple[int, ...]:
     result = _parse_dotted_numeric_version(numeric)
     return result if result is not None else _UNPARSEABLE_VERSION
 
+
+def _padded_version_cmp(
+    a: tuple[int, ...], b: tuple[int, ...]
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """Zero-pad the shorter of two dotted-version tuples before comparing.
+
+    A bare-major floor like ``GLIBC: 2`` parses to ``(2,)``, while an actual
+    ``GLIBC_2.0`` requirement parses to ``(2, 0)``; Python's raw tuple
+    ordering treats the shorter, strict-prefix tuple as smaller, so ``(2,)``
+    would compare *less than* ``(2, 0)`` even though they name the same
+    version — falsely reporting the floor as exceeded (Codex review).
+    """
+    n = max(len(a), len(b))
+    return a + (0,) * (n - len(a)), b + (0,) * (n - len(b))
+
+
+def _version_gt(a: tuple[int, ...], b: tuple[int, ...]) -> bool:
+    """``a > b`` as dotted versions, padded via :func:`_padded_version_cmp`."""
+    pa, pb = _padded_version_cmp(a, b)
+    return pa > pb
+
+
+def _version_le(a: tuple[int, ...], b: tuple[int, ...]) -> bool:
+    """``a <= b`` as dotted versions, padded via :func:`_padded_version_cmp`."""
+    pa, pb = _padded_version_cmp(a, b)
+    return pa <= pb
+
+
 # Change kinds whose ``symbol`` field is itself a version-node name (not a
 # symbol name) — for these, the node-name marker test applies directly.
 _VERSION_NODE_NAME_KINDS = frozenset(
@@ -271,7 +299,7 @@ def apply_runtime_floor_contract(
             continue
         if required == _UNPARSEABLE_VERSION:
             continue
-        if required <= floor_tuple:
+        if _version_le(required, floor_tuple):
             change.effective_verdict = Verdict.COMPATIBLE
             change.modulation_reason = (
                 f"within declared runtime floor ({prefix} ≥ {floor}): every "
@@ -285,6 +313,93 @@ def apply_runtime_floor_contract(
             )
         change.modulation_rule = "runtime_floor_contract"
     return changes
+
+
+def check_platform_baseline_floor(
+    elf: ElfMetadata, runtime_floors: dict[str, str] | None
+) -> list[Change]:
+    """Check a binary's own required GLIBC floor against a declared
+    platform-baseline promise (e.g. a manylinux wheel tag) (G10).
+
+    A manylinux tag (``manylinux_2_27``, …) is a promise about the *maximum*
+    glibc symbol version a wheel's binaries may require. Unlike
+    :func:`apply_runtime_floor_contract`, which only reclassifies a
+    version-*requirement-change* finding between two snapshots, this fires on
+    a single artifact's own requirement regardless of whether it moved
+    relative to an old snapshot — the case a manylinux tag actually needs
+    guarded against: a binary that has *always* required ``GLIBC_2.34`` while
+    shipped under a ``manylinux_2_27`` tag is broken on day one, with no
+    old→new delta for a diff to key on. This is the classic "works on my box,
+    `GLIBC_2.x not found` on the user's older system" failure going
+    undetected.
+
+    *runtime_floors* is the same ``{prefix: "X.Y"}`` mapping consumed by
+    :func:`apply_runtime_floor_contract` (ADR-020b ``EnvironmentMatrix`` /
+    ``--env-matrix``) — keys are matched case-insensitively (normalized to
+    upper), same as that function, since a direct API caller can construct
+    ``EnvironmentMatrix(runtime_floors={"glibc": ...})`` bypassing
+    ``from_dict``'s uppercasing. Only the ``GLIBC`` entry is read here; other
+    prefixes have no platform-tag concept yet. Returns ``[]`` when no
+    ``GLIBC`` floor is declared, the floor is malformed, or the binary's own
+    requirement is at or below it.
+
+    A binary built with packed relative relocations (``DT_RELR``) implicitly
+    requires glibc >= 2.36 to load even when no ``GLIBC_ABI_DT_RELR``-tagged
+    symbol version happens to appear in ``versions_required`` — the same
+    implied floor :func:`apply_runtime_floor_contract` folds in for the delta
+    case via ``_DT_RELR_GLIBC_FLOOR_TAG``, so it is folded in here too.
+    """
+    if not runtime_floors:
+        return []
+    floor_raw = {k.upper(): v for k, v in runtime_floors.items()}.get("GLIBC")
+    if not floor_raw:
+        return []
+    floor_tuple = _parse_dotted_numeric_version(floor_raw)
+    if floor_tuple is None:
+        return []
+    best: tuple[int, ...] = (0,)
+    best_tag = ""
+    providers: set[str] = set()
+    relr_tuple = _parse_abi_version_tag(_DT_RELR_GLIBC_FLOOR_TAG)
+    for lib, tags in (getattr(elf, "versions_required", None) or {}).items():
+        for tag in tags:
+            if tag == "GLIBC_ABI_DT_RELR":
+                # Legacy snapshots predating the has_dt_relr field may still
+                # carry this synthetic verneed marker directly — treat it as
+                # implying the same floor the has_dt_relr fallback below
+                # applies, so an older snapshot isn't under-called just
+                # because the dedicated flag wasn't captured (Codex review).
+                if _version_gt(relr_tuple, best):
+                    best, best_tag = relr_tuple, _DT_RELR_GLIBC_FLOOR_TAG
+                if _version_gt(relr_tuple, floor_tuple):
+                    providers.add(lib)
+                continue
+            if not tag.startswith("GLIBC_"):
+                continue
+            parsed = _parse_abi_version_tag(tag)
+            if parsed == _UNPARSEABLE_VERSION:
+                continue
+            if _version_gt(parsed, best):
+                best, best_tag = parsed, tag
+            if _version_gt(parsed, floor_tuple):
+                providers.add(lib)
+    if getattr(elf, "has_dt_relr", False):
+        if _version_gt(relr_tuple, best):
+            best, best_tag = relr_tuple, _DT_RELR_GLIBC_FLOOR_TAG
+        if _version_gt(relr_tuple, floor_tuple):
+            providers.add(getattr(elf, "soname", "") or "<binary>")
+    if best == (0,) or _version_le(best, floor_tuple):
+        return []
+    return [
+        make_change(
+            ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED,
+            symbol="<platform-baseline>",
+            name=", ".join(sorted(providers)) or "(no provider evidence captured)",
+            detail="GLIBC",
+            old=f"GLIBC_{floor_raw}",
+            new=best_tag,
+        )
+    ]
 
 
 def _is_unattached_private_version_node(elf: ElfMetadata, version: str) -> bool:

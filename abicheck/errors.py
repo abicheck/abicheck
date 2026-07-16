@@ -43,6 +43,20 @@ class SnapshotError(AbicheckError, RuntimeError):
     """
 
 
+class HeaderToolchainError(SnapshotError):
+    """Raised when a header-scoped source-mode parse fails on a known,
+    diagnosable host-toolchain mismatch (plan G16).
+
+    A subclass of :class:`SnapshotError` — existing ``except SnapshotError``
+    handling still catches it unchanged — but a dedicated class so a caller
+    that wants to branch on "this failure carries an actionable, precise
+    remediation" (e.g. a sized-float/``__assume__``/``--lang c`` signature
+    :func:`abicheck.dumper._castxml_failure_hint` recognised) can do so,
+    instead of treating every castxml failure as equally opaque. The
+    remediation text is already folded into the exception message.
+    """
+
+
 class SuppressionError(AbicheckError, ValueError):
     """Raised for invalid suppression rules or patterns.
 

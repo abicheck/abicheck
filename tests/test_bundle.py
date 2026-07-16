@@ -2239,3 +2239,84 @@ class TestSonameSkewCohortScoping:
         assert _detect_soname_skew(old, new, None) == []
         findings = _detect_soname_skew(old, new, ["libonedal_"])
         assert [f.kind for f in findings] == [ChangeKind.BUNDLE_SONAME_SKEW]
+
+    def test_vendor_hashed_soname_and_filename_still_pairs_and_flags_skew(
+        self,
+    ) -> None:
+        # G9 remaining half: auditwheel/delocate rewrite BOTH the filename and
+        # the embedded DT_SONAME with a content-derived hash that changes on
+        # every rebuild — e.g. libonedal_core-a1b2c3d4.so.1 ->
+        # libonedal_core-e5f6a7b8.so.2. Cohort matching (keyed on the
+        # strip_vendor_hash-normalized filename) already tolerated the
+        # filename half; this proves the SONAME half is normalized too
+        # (BundleMember.soname carries the canonical, hash-free SONAME) and
+        # a real lagging-sibling skew still surfaces despite every hash in
+        # sight changing between old and new.
+        from abicheck.bundle import _detect_soname_skew
+
+        def _snap(core: str, thread: str) -> BundleSnapshot:
+            libs = {
+                "libonedal_core.so": Path("/rel/lib64") / core,
+                "libonedal_thread.so": Path("/rel/lib64") / thread,
+            }
+            meta = {
+                "libonedal_core.so": _meta(soname=core, exports=["c"]),
+                "libonedal_thread.so": _meta(soname=thread, exports=["t"]),
+            }
+            return BundleSnapshot(
+                root=Path("/rel/lib64"),
+                libraries=libs,
+                metadata=meta,
+                resolution=_compute_resolution_graph(libs, meta),
+            )
+
+        old = _snap(
+            "libonedal_core-a1b2c3d4.so.1", "libonedal_thread-1a1b2c2d.so.1"
+        )
+        new = _snap(
+            # core bumps major AND gets a fresh hash; thread lags but also
+            # gets a fresh hash (a hash-only rebuild, not a real SONAME change).
+            "libonedal_core-e5f6a7b8.so.2", "libonedal_thread-9e9f8a8b.so.1"
+        )
+        findings = _detect_soname_skew(old, new, ["libonedal_"])
+        assert [f.kind for f in findings] == [ChangeKind.BUNDLE_SONAME_SKEW]
+        assert "libonedal_thread" in findings[0].affected_libraries[0]
+
+    def test_hashed_versioned_dylib_major_extracted_after_stripping_hash(
+        self,
+    ) -> None:
+        # Codex review: a hashed *versioned* dylib install name has the
+        # content hash BETWEEN the major and the extension —
+        # libonedal_core.2-a1b2c3.dylib — unlike the .so case above where the
+        # hash sits before the trailing .so.N and never interferes with
+        # _extract_soname_major's end-anchored regex. Extracting the major
+        # from the raw (unstripped) string fails here, dropping the member
+        # from the cohort entirely instead of pairing and flagging skew.
+        from abicheck.bundle import _detect_soname_skew
+
+        def _snap(core: str, thread: str) -> BundleSnapshot:
+            libs = {
+                "libonedal_core.dylib": Path("/rel/lib") / core,
+                "libonedal_thread.dylib": Path("/rel/lib") / thread,
+            }
+            meta = {
+                "libonedal_core.dylib": _meta(soname=core, exports=["c"]),
+                "libonedal_thread.dylib": _meta(soname=thread, exports=["t"]),
+            }
+            return BundleSnapshot(
+                root=Path("/rel/lib"),
+                libraries=libs,
+                metadata=meta,
+                resolution=_compute_resolution_graph(libs, meta),
+            )
+
+        old = _snap("libonedal_core.1-a1b2c3.dylib", "libonedal_thread.1-1a1b2c.dylib")
+        new = _snap(
+            # core bumps major AND gets a fresh hash; thread lags but also
+            # gets a fresh hash (a hash-only rebuild, not a real SONAME change).
+            "libonedal_core.2-e5f6a7.dylib",
+            "libonedal_thread.1-9e9f8a.dylib",
+        )
+        findings = _detect_soname_skew(old, new, ["libonedal_"])
+        assert [f.kind for f in findings] == [ChangeKind.BUNDLE_SONAME_SKEW]
+        assert "libonedal_thread" in findings[0].affected_libraries[0]

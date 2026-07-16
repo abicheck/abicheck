@@ -61,7 +61,11 @@ from .dumper_castxml import (
     _parse_vtable_index as _parse_vtable_index,
     _vt_sort_key as _vt_sort_key,
 )
-from .dumper_clang import _ClangAstParser as _ClangAstParser
+from .dumper_clang import (
+    _clang_available as _clang_available,
+    _ClangAstParser as _ClangAstParser,
+    _resolve_clang_bin as _resolve_clang_bin,
+)
 from .dumper_clang_errors import (
     _is_direct_include_guard_failure,
     _is_missing_cpp_stdlib_header_error,
@@ -86,7 +90,7 @@ from .dumper_sysinc import (
     _resolve_probe_compiler as _resolve_probe_compiler,
 )
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
-from .errors import SnapshotError, ValidationError
+from .errors import HeaderToolchainError, SnapshotError, ValidationError
 from .header_utils import iter_cache_header_files
 from .model import (
     AbiSnapshot,
@@ -144,10 +148,6 @@ def _safe_size(path: Path) -> int | None:
 
 def _castxml_available() -> bool:
     return shutil.which("castxml") is not None
-
-
-def _clang_available(clang_bin: str = "clang") -> bool:
-    return shutil.which(clang_bin) is not None
 
 
 #: Header-AST backend identifiers (the L2 producers). castxml is the default and
@@ -248,35 +248,6 @@ def _build_clang_header_command(
         str(agg_path),
     ]
     return cmd
-
-
-def _resolve_clang_bin(
-    compiler: str, gcc_path: str | None, gcc_prefix: str | None,
-) -> str:
-    """Resolve the clang executable to run, raising if it is not on ``PATH``.
-
-    ``--gcc-path`` is honored only when it points at a clang (castxml emulates a
-    GCC/G++ binary, which can't take clang-only flags); ``--gcc-prefix`` maps to
-    the prefixed clang driver.
-    """
-    clang_bin: str | None = None
-    if gcc_path and "clang" in Path(gcc_path).name.lower():
-        clang_bin = gcc_path
-    elif gcc_prefix:
-        clang_bin = (
-            f"{gcc_prefix}clang++"
-            if compiler in ("c++", "g++", "clang++")
-            else f"{gcc_prefix}clang"
-        )
-    if not clang_bin:
-        clang_bin = "clang++" if compiler in ("c++", "g++", "clang++") else "clang"
-    if not _clang_available(clang_bin):
-        raise SnapshotError(
-            f"{clang_bin} not found in PATH. The clang header backend needs clang/clang++ "
-            "installed (apt install clang, brew install llvm, or conda install -c conda-forge "
-            "clang). Or use the castxml frontend (--ast-frontend castxml)."
-        )
-    return clang_bin
 
 
 def _resolve_clang_langmode(
@@ -525,9 +496,19 @@ def _header_ast_parser(
             extra_hash_dirs=extra_hash_dirs,
         )
     except SnapshotError as exc:
+        # Probe the driver _run_clang() would actually invoke (honors
+        # --gcc-path/--gcc-prefix), not just a bare "clang" on PATH (Codex
+        # review).
+        def _clang_fallback_ready() -> bool:
+            try:
+                _resolve_clang_bin(compiler, gcc_path, gcc_prefix)
+                return True
+            except SnapshotError:
+                return False
+
         if (
             auto_selected
-            and _clang_available()
+            and _clang_fallback_ready()
             and (
                 _is_toolchain_version_failure(str(exc))
                 or _is_direct_include_guard_failure(str(exc))
@@ -973,10 +954,10 @@ def _castxml_failure_hint(
             "matching the host GCC, or scan against an older/clang-parsable "
             f"libstdc++ via --gcc-path / --sysroot.{version_note}"
         )
-    # 3) Explicit --lang c on headers that need C++ (classes/namespaces) or that
-    #    guard extern "C" with #ifdef __cplusplus — castxml always parses in a
-    #    C++-ish mode, so forcing C rejects valid headers.
-    if not force_cpp and _detect_cpp_headers(headers):
+    # 3) Explicit --lang c on headers needing C++. _CPP_ONLY_PATTERNS (like the
+    # retry gate below) excludes extern "C" so a valid guarded-C header's real
+    # failure isn't misreported with this hint (Codex review).
+    if not force_cpp and _detect_cpp_headers(headers, _CPP_ONLY_PATTERNS):
         return (
             "\n\nHint: The header files appear to contain C++ syntax "
             "(class, namespace, template) but --lang c was specified. "
@@ -998,17 +979,17 @@ def _validate_castxml_output(
     if result.returncode != 0:
         # Only probe `castxml --version` when the failure is a frontend-too-old
         # signature — otherwise the upgrade note is irrelevant (and unused).
-        version_note = (
-            _castxml_version_note()
-            if _is_toolchain_version_failure(result.stderr) else ""
-        )
+        version_note = _castxml_version_note() if _is_toolchain_version_failure(result.stderr) else ""
         hint = _castxml_failure_hint(
             result.stderr, force_cpp=force_cpp, headers=headers,
             version_note=version_note,
         )
-        raise SnapshotError(
-            f"castxml failed (exit {result.returncode}):\n{result.stderr[:2000]}{hint}"
-        )
+        message = f"castxml failed (exit {result.returncode}):\n{result.stderr[:2000]}{hint}"
+        # Must mirror _castxml_failure_hint's case-3 predicate exactly
+        # (_CPP_ONLY_PATTERNS) or the class and hint text disagree.
+        is_toolchain = _is_toolchain_version_failure(result.stderr) or (
+            not force_cpp and _detect_cpp_headers(headers, _CPP_ONLY_PATTERNS))
+        raise (HeaderToolchainError if is_toolchain else SnapshotError)(message)
     if not out_xml.exists() or out_xml.stat().st_size == 0:
         stderr_snippet = result.stderr[:1000].strip()
         detail = f"\ncastxml stderr: {stderr_snippet}" if stderr_snippet else ""

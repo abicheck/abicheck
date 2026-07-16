@@ -716,6 +716,50 @@ class TestBundleMembersFromDirectory:
         assert members[0].soname == "libfoo.so.3"
         assert members[0].soname_major == 3
 
+    def test_vendor_hash_stripped_from_soname(self, tmp_path, monkeypatch) -> None:
+        # G9 remaining half: DT_SONAME is read directly here (unlike the
+        # already-normalized filename half); an auditwheel/delocate hash
+        # suffix on the SONAME itself must be stripped so BundleMember.soname
+        # carries the canonical logical SONAME its field docstring promises.
+        from abicheck import diff_cpp_patterns as mod
+
+        lib = tmp_path / "libfoo_core-a1b2c3d4.so.2"
+        lib.write_bytes(b"\x7fELF" + b"\x00" * 60)
+
+        def fake_reader(path: str) -> str | None:
+            return "libfoo_core-a1b2c3d4.so.2" if path.endswith(".so.2") else None
+
+        monkeypatch.setattr(mod, "_read_soname_best_effort", fake_reader)
+        members = bundle_members_from_directory(str(tmp_path))
+        assert len(members) == 1
+        assert members[0].soname == "libfoo_core.so.2"
+        assert members[0].soname_major == 2
+
+    def test_vendor_hash_stripped_before_major_extraction(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Codex review (fresh finding beyond the _members() fix covered by
+        # test_vendor_hash_stripped_from_soname above): a delocate-style
+        # install name puts the content hash *after* the version, e.g.
+        # ``libfoo.2-a1b2c3.dylib``. _extract_soname_major's raw-string regex
+        # requires the SONAME to end in ``.<digit>.dylib``, so on the
+        # unstripped string it returns None and the member used to be
+        # skipped entirely before strip_vendor_hash ever ran. The major must
+        # be extracted from the *stripped* SONAME.
+        from abicheck import diff_cpp_patterns as mod
+
+        lib = tmp_path / "libfoo.2-a1b2c3.dylib"
+        lib.write_bytes(b"\xcf\xfa\xed\xfe" + b"\x00" * 60)
+
+        def fake_reader(path: str) -> str | None:
+            return "libfoo.2-a1b2c3.dylib" if path.endswith(".dylib") else None
+
+        monkeypatch.setattr(mod, "_read_soname_best_effort", fake_reader)
+        members = bundle_members_from_directory(str(tmp_path))
+        assert len(members) == 1
+        assert members[0].soname == "libfoo.2.dylib"
+        assert members[0].soname_major == 2
+
     def test_soname_without_major_skipped(self, tmp_path, monkeypatch) -> None:
         # SONAME present but no extractable major → line 975-976 continue.
         from abicheck import diff_cpp_patterns as mod

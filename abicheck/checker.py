@@ -165,18 +165,18 @@ def _compute_verdict_for(
     return compute_verdict(all_unsuppressed, policy=policy)
 
 
-def _filter_soname_changes(
-    soname_changes: list[Change],
+def _filter_suppressed_changes(
+    changes: list[Change],
     suppression: SuppressionList | None,
     suppressed: list[Change],
 ) -> list[Change]:
-    """Remove suppressed SONAME advisories from *soname_changes*, appending
-    them to *suppressed* in-place.  Returns the visible (unsuppressed) subset.
+    """Remove suppressed advisories (SONAME/platform-floor) from *changes*,
+    appending them to *suppressed* in-place. Returns the visible subset.
     """
-    if suppression is None or not soname_changes:
-        return soname_changes
+    if suppression is None or not changes:
+        return changes
     visible: list[Change] = []
-    for c in soname_changes:
+    for c in changes:
         if suppression.is_suppressed(c):
             suppressed.append(c)
         else:
@@ -429,7 +429,7 @@ def _apply_soname_policy(
             c for c in soname_changes
             if c.kind is not ChangeKind.SONAME_BUMP_UNNECESSARY
         ]
-    soname_changes = _filter_soname_changes(soname_changes, suppression, suppressed)
+    soname_changes = _filter_suppressed_changes(soname_changes, suppression, suppressed)
     if soname_changes:
         kept.extend(soname_changes)
     return kept
@@ -566,6 +566,45 @@ def compare(
         apply_runtime_floor_contract(
             kept + verdict_redundant, env_matrix.runtime_floors
         )
+
+    # Platform-baseline floor check (G10, ADR-020b runtime_floors reused):
+    # unlike apply_runtime_floor_contract above (which only reclassifies an
+    # existing version-requirement *delta* finding), this is a standalone
+    # check of the new binary's own required floor against the declared
+    # baseline — it fires even when the floor never moved between old and
+    # new, which is exactly the manylinux-tag violation case (a binary that
+    # has always required a newer glibc than its wheel tag promises).
+    if env_matrix is not None and env_matrix.runtime_floors:
+        from .diff_versioning import check_platform_baseline_floor
+        from .elf_metadata import ElfMetadata as _ElfMetadataFloor
+
+        new_elf_for_floor = getattr(new, "elf", None) or _ElfMetadataFloor()
+        floor_changes = check_platform_baseline_floor(
+            new_elf_for_floor, env_matrix.runtime_floors
+        )
+        floor_changes = _filter_suppressed_changes(
+            floor_changes, suppression, suppressed
+        )
+        if floor_changes:
+            kept.extend(floor_changes)
+
+    # NumPy C-API compatibility-envelope delta (G26): needs only the two
+    # snapshots' own numpy_capi field (no external wheel metadata), so this
+    # runs unconditionally — unlike the wheel-metadata cross-check
+    # (check_numpy_metadata_contract), which needs a declared numpy
+    # requirement compare() has no access to and stays a standalone,
+    # programmatic-use function (same "not yet wired into the CLI path"
+    # precedent as G10's package.parse_manylinux_glibc_floor).
+    from .diff_numpy_capi import diff_numpy_capi_surfaces
+
+    numpy_capi_changes = diff_numpy_capi_surfaces(
+        getattr(old, "numpy_capi", None), getattr(new, "numpy_capi", None)
+    )
+    numpy_capi_changes = _filter_suppressed_changes(
+        numpy_capi_changes, suppression, suppressed
+    )
+    if numpy_capi_changes:
+        kept.extend(numpy_capi_changes)
 
     # Post-detector: SONAME bump policy check.  Runs after post-processing so
     # rename collapsing and other dedup is already settled before reading `kept`.

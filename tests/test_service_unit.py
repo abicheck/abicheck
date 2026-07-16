@@ -2080,3 +2080,54 @@ def test_run_scan_runs_deferred_build_dir_cleanup(monkeypatch):
     res = _ss.run_scan(req)
     assert res.exit_code == 5  # budget overflow surfaced
     assert ran["n"] == 1  # finally still ran the cleanup on the raise path
+
+
+# ── _try_attach_numpy_capi_surface() ────────────────────────────────────────
+
+
+class TestTryAttachNumpyCapiSurface:
+    def test_logs_only_when_consumption_detected(self, tmp_path, monkeypatch, caplog):
+        # extract_numpy_capi_surface returns a real (non-None) surface with
+        # False flags for an ordinary, successfully-scanned non-NumPy
+        # library -- the INFO log must not fire for every such library
+        # (CodeRabbit review).
+        from abicheck.numpy_capi import NumPyCapiSurface
+        from abicheck.service import _try_attach_numpy_capi_surface
+
+        snap = AbiSnapshot(library="lib.so", version="1.0")
+        not_consuming = NumPyCapiSurface(
+            consumes_array_api=False, consumes_ufunc_api=False
+        )
+        monkeypatch.setattr(
+            "abicheck.numpy_capi.extract_numpy_capi_surface", lambda _p: not_consuming
+        )
+        with caplog.at_level("INFO", logger="abicheck.service"):
+            _try_attach_numpy_capi_surface(snap, tmp_path / "lib.so")
+        assert snap.numpy_capi is not_consuming
+        assert "NumPy C-API consumption detected" not in caplog.text
+
+    @pytest.mark.parametrize(
+        "consumes_array_api,consumes_ufunc_api",
+        [(True, False), (False, True)],
+    )
+    def test_logs_when_consumption_detected(
+        self, tmp_path, monkeypatch, caplog, consumes_array_api, consumes_ufunc_api
+    ):
+        # Parametrized over each side of the production OR condition, so
+        # removing either one from _try_attach_numpy_capi_surface's guard
+        # would fail this test (CodeRabbit review).
+        from abicheck.numpy_capi import NumPyCapiSurface
+        from abicheck.service import _try_attach_numpy_capi_surface
+
+        snap = AbiSnapshot(library="lib.so", version="1.0")
+        consuming = NumPyCapiSurface(
+            consumes_array_api=consumes_array_api,
+            consumes_ufunc_api=consumes_ufunc_api,
+        )
+        monkeypatch.setattr(
+            "abicheck.numpy_capi.extract_numpy_capi_surface", lambda _p: consuming
+        )
+        with caplog.at_level("INFO", logger="abicheck.service"):
+            _try_attach_numpy_capi_surface(snap, tmp_path / "lib.so")
+        assert snap.numpy_capi is consuming
+        assert "NumPy C-API consumption detected" in caplog.text

@@ -90,6 +90,55 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **NumPy C-API compatibility-envelope analysis (G26, partial).** New
+  `abicheck.numpy_capi.extract_numpy_capi_surface()` scans a compiled
+  extension's binary evidence (no header/source needed) for NumPy C-API
+  consumption — `_ARRAY_API`/`_UFUNC_API` capsule-table usage (populated by
+  `import_array()`/`import_ufunc()`, invisible to ordinary symbol-table
+  diffing) and the `NPY_TARGET_VERSION` the module was compiled against,
+  recovered from NumPy's own generated failure-message string. Five new
+  `ChangeKind`s: `numpy_capi_consumption_added`/`_removed` (`RISK`/
+  `COMPATIBLE`), `numpy_target_floor_raised` (`RISK`, wired into `compare()`
+  unconditionally), `numpy_metadata_understates_required_version` (`RISK`)
+  and `numpy_abi_major_incompatible` (`BREAKING`, both via the standalone
+  `abicheck.diff_numpy_capi.check_numpy_metadata_contract` — mirrors G10's
+  `parse_manylinux_glibc_floor`, not auto-wired into the CLI compare path).
+  New `abicheck.package.parse_wheel_numpy_requirement()` extracts the
+  declared `numpy` range from a wheel's `*.dist-info/METADATA`. The raw
+  `NPY_ABI_VERSION`/`NPY_API_VERSION` hex constants are not recoverable
+  without disassembly (a new heavy dependency, out of scope) — see the
+  G26 plan's "Out of scope" for the full breakdown of what's deferred.
+- **manylinux/platform-baseline glibc check (G10).** New
+  `platform_baseline_floor_raised` deployment-`RISK` `ChangeKind`: checks a
+  binary's own maximum required `GLIBC_2.x` (including the implied floor from
+  packed relative relocations, `DT_RELR` -> glibc >= 2.36) against a declared
+  platform-baseline floor (e.g. the floor implied by a `manylinux_2_27` wheel
+  tag), independent of any old/new delta — unlike the existing
+  `runtime_floor_raised` reclassification, this catches a binary that has
+  *always* required a newer glibc than its wheel tag promises. Declared via
+  `--env-matrix`'s existing `runtime_floors: {GLIBC: "X.Y"}` (ADR-020b) — no
+  new flag. New `abicheck.package.parse_manylinux_glibc_floor()` derives the
+  floor from a manylinux wheel tag (PEP 600 plus the
+  `manylinux1`/`2010`/`2014` legacy aliases) for programmatic use.
+
+### Fixed
+
+- **Vendored-library SONAME normalization, remaining half (G9).**
+  `strip_vendor_hash()` now also normalizes the embedded ELF SONAME (not just
+  the on-disk filename) in `bundle.py`'s cohort-scoped `BUNDLE_SONAME_SKEW`
+  detector and `diff_cpp_patterns.bundle_members_from_directory`, so an
+  auditwheel/delocate content-hash rebuild of a cohort member no longer risks
+  an inconsistent `BundleMember.soname`.
+- **Header-scoped toolchain diagnostics: dedicated error type (G16).** A
+  recognised host-toolchain parse-failure signature (glibc sized-float types,
+  GCC `__assume__`, `--lang c` + `extern "C"`) now raises the new
+  `HeaderToolchainError` (a `SnapshotError` subclass) instead of a generic
+  `SnapshotError`, so callers can branch on "this failure carries an
+  actionable remediation". Added a real-toolchain `integration` end-to-end
+  test over a `<math.h>`-including header.
+
+### Added
+
 - **5 new `examples/` catalog cases (182–186) probing scoping/semantic-diff
   boundaries beyond struct-layout scoping.** `case182_accidental_export_removed_still_breaking`
   documents that an undeclared (accidental) exported function's removal stays

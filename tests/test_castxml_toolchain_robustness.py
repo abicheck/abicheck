@@ -48,7 +48,7 @@ from abicheck.dumper import (
     _is_toolchain_version_failure,
     _parse_castxml_version,
 )
-from abicheck.errors import SnapshotError
+from abicheck.errors import HeaderToolchainError, SnapshotError
 
 _FLOATN_STDERR = (
     "/usr/include/bits/floatn-common.h:214:14: error: unknown type name '_Float32'"
@@ -289,11 +289,20 @@ class TestLangCFallsBackToCpp:
             patch("abicheck.dumper._castxml_available", return_value=True),
             patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
-            pytest.raises(SnapshotError),
+            pytest.raises(SnapshotError) as exc,
         ):
             _castxml_dump([header], [], compiler="cc", lang="c")
 
         assert modes == [True]  # only C mode ran; no C++ retry
+        # The real failure (a missing C-only include) is an ordinary header/
+        # input problem, not a language-mode mismatch: it must not be
+        # misclassified as HeaderToolchainError with a "--lang c++" hint that
+        # wouldn't even fix it — _castxml_failure_hint's own C++-detection
+        # here must use _CPP_ONLY_PATTERNS (excluding the guarded extern "C"),
+        # the same predicate the retry gate above already uses (Codex review).
+        assert not isinstance(exc.value, HeaderToolchainError)
+        assert "--lang" not in str(exc.value)
+        assert "cfg.h" in str(exc.value)
 
     def test_both_modes_fail_surfaces_requested_c_error(self, tmp_path: Path) -> None:
         def fake_run(cmd, **kwargs):  # noqa: ANN001
@@ -336,3 +345,154 @@ class TestLangCFallsBackToCpp:
         # No C++ retry: a header with no C++ constructs failing in C mode is a
         # real error, not a language-mode mismatch.
         assert modes == [True]
+
+
+class TestHeaderToolchainErrorClass:
+    """G16: a recognised host-toolchain signature raises the dedicated
+    ``HeaderToolchainError`` (still an ``except SnapshotError``-catchable
+    subclass) so a caller can branch on "this failure carries an actionable
+    remediation"; an unrecognised castxml failure stays a plain
+    ``SnapshotError``."""
+
+    def test_known_signature_raises_header_toolchain_error(
+        self, tmp_path: Path
+    ) -> None:
+        def fake_run(cmd, **kwargs):  # noqa: ANN001
+            return _completed(returncode=1, stderr=_FLOATN_STDERR)
+
+        header = tmp_path / "api.h"
+        header.write_text("int f(void);\n", encoding="utf-8")
+        with (
+            patch("abicheck.dumper._castxml_available", return_value=True),
+            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
+            pytest.raises(HeaderToolchainError) as exc,
+        ):
+            _castxml_dump([header], [], compiler="cc")
+        # It is still catchable as the base SnapshotError (back-compat).
+        assert isinstance(exc.value, SnapshotError)
+        assert "_Float32" in str(exc.value) or "sized-float" in str(exc.value)
+
+    def test_unrecognised_failure_stays_plain_snapshot_error(
+        self, tmp_path: Path
+    ) -> None:
+        def fake_run(cmd, **kwargs):  # noqa: ANN001
+            return _completed(returncode=1, stderr="internal compiler error: segfault")
+
+        header = tmp_path / "api.h"
+        header.write_text("int f(void);\n", encoding="utf-8")
+        with (
+            patch("abicheck.dumper._castxml_available", return_value=True),
+            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
+            pytest.raises(SnapshotError) as exc,
+        ):
+            _castxml_dump([header], [], compiler="cc")
+        assert not isinstance(exc.value, HeaderToolchainError)
+
+    def test_generic_header_hint_stays_plain_snapshot_error(
+        self, tmp_path: Path
+    ) -> None:
+        # A missing-include failure gets a generic diagnose_header_compile_
+        # failure() hint (case 4 of _castxml_failure_hint) — a non-empty hint,
+        # but an ordinary project header/input problem, not a G16
+        # host-toolchain-mismatch signature. Must NOT be classified as
+        # HeaderToolchainError: a caller branching on that class to retry
+        # with a different castxml/sysroot must not fire on this (Codex
+        # review).
+        def fake_run(cmd, **kwargs):  # noqa: ANN001
+            return _completed(
+                returncode=1,
+                stderr="foo.h:1:10: fatal error: missing_dep.h: No such file or directory",
+            )
+
+        header = tmp_path / "api.h"
+        header.write_text("int f(void);\n", encoding="utf-8")
+        with (
+            patch("abicheck.dumper._castxml_available", return_value=True),
+            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
+            pytest.raises(SnapshotError) as exc,
+        ):
+            _castxml_dump([header], [], compiler="cc")
+        assert not isinstance(exc.value, HeaderToolchainError)
+        # The generic hint text is still present in the message — only the
+        # exception *class* changes, not the diagnostic content.
+        assert "missing_dep.h" in str(exc.value)
+
+
+class TestG16ClangFallbackRespectsConfiguredDriver:
+    """The G16 recoverable-fallback guard must probe the exact clang driver
+    _run_clang() would actually invoke (_resolve_clang_bin honors
+    --gcc-path/--gcc-prefix), not a bare "clang" on PATH -- a caller-
+    configured or prefixed clang may be available and should let the
+    fallback recover even when bare "clang" isn't on PATH at all (Codex
+    review). Fully mocked -- no castxml/clang needed."""
+
+    _KWARGS = dict(
+        backend="auto",
+        gcc_options=None,
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+    )
+
+    def test_fallback_recovers_with_configured_gcc_path(self, tmp_path: Path) -> None:
+        from abicheck.dumper import _header_ast_parser
+
+        header = tmp_path / "api.h"
+        header.write_text("int f(void);\n", encoding="utf-8")
+        configured = "/opt/llvm/bin/clang++"
+
+        def fake_which(name):  # noqa: ANN001
+            # Bare "clang"/"clang++" is NOT on PATH -- only the exact
+            # --gcc-path driver is.
+            return configured if name == configured else None
+
+        sentinel = MagicMock()
+        with (
+            patch(
+                "abicheck.dumper._castxml_dump",
+                side_effect=SnapshotError(_ASSUME_STDERR),
+            ),
+            patch("abicheck.dumper.shutil.which", side_effect=fake_which),
+            patch("abicheck.dumper._clang_header_dump", return_value=MagicMock()),
+            patch("abicheck.dumper._ClangAstParser", return_value=sentinel),
+        ):
+            result = _header_ast_parser(
+                [header],
+                [],
+                compiler="c++",
+                gcc_path=configured,
+                gcc_prefix=None,
+                **self._KWARGS,
+            )
+        assert result is sentinel
+
+    def test_no_fallback_when_no_clang_driver_is_available(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.dumper import _header_ast_parser
+
+        header = tmp_path / "api.h"
+        header.write_text("int f(void);\n", encoding="utf-8")
+        with (
+            patch(
+                "abicheck.dumper._castxml_dump",
+                side_effect=SnapshotError(_ASSUME_STDERR),
+            ),
+            patch("abicheck.dumper.shutil.which", return_value=None),
+            pytest.raises(SnapshotError),
+        ):
+            _header_ast_parser(
+                [header],
+                [],
+                compiler="c++",
+                gcc_path=None,
+                gcc_prefix=None,
+                **self._KWARGS,
+            )

@@ -260,6 +260,7 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.PYTHON_ABI3_FLOOR_RAISED,
     # Toolchain / runtime environment drift (tests/test_environment_drift.py)
     ChangeKind.RUNTIME_FLOOR_RAISED,
+    ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED,
     ChangeKind.DT_RELR_INTRODUCED,
     ChangeKind.DT_RELR_REMOVED,
     ChangeKind.RPATH_TYPE_CHANGED,
@@ -440,6 +441,12 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.FUNC_CONTRACT_ATTRIBUTE_REMOVED,
     ChangeKind.VAR_ALIGNMENT_CHANGED,
     ChangeKind.FUNC_EXCEPTION_SPEC_CHANGED,
+    # exercised by tests/test_diff_numpy_capi.py (G26)
+    ChangeKind.NUMPY_CAPI_CONSUMPTION_ADDED,
+    ChangeKind.NUMPY_CAPI_CONSUMPTION_REMOVED,
+    ChangeKind.NUMPY_TARGET_FLOOR_RAISED,
+    ChangeKind.NUMPY_METADATA_UNDERSTATES_REQUIRED_VERSION,
+    ChangeKind.NUMPY_ABI_MAJOR_INCOMPATIBLE,
 }
 
 
