@@ -1229,6 +1229,26 @@ class TestUsedByScoping:
         )
         assert result.exit_code == 4
 
+    def test_severity_missing_symbols_only_json_blocking_categories(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # The missing-contract-only case (no diff Change) must still surface
+        # "abi_breaking" in the scoped JSON severity block's
+        # blocking_categories -- otherwise a nonzero exit_code with an empty
+        # blocking_categories list would be an unexplained gate result.
+        res = self._result(verdict=Verdict.BREAKING, missing=["foo"])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app),
+            "--format", "json", "--severity-preset", "default",
+        )
+        assert result.exit_code == 4
+        data = json.loads(result.stdout)
+        assert data["severity"]["exit_code"] == 4
+        assert data["severity"]["blocking"] is True
+        assert data["severity"]["blocking_categories"] == ["abi_breaking"]
+
     def test_severity_info_only_preset_overrides_missing_symbols_exit(
         self, tmp_path, monkeypatch
     ) -> None:
@@ -1339,6 +1359,54 @@ class TestUsedByScoping:
         assert result.exit_code == 0  # the scoped verdict, not the full BREAKING
         assert "Scoped verdict: COMPATIBLE" in result.stdout
         assert "full library verdict above is BREAKING" in result.stdout
+
+    def test_json_severity_block_reflects_scoped_gate_not_full_library(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Regression (Codex P2): under --severity-preset, the JSON `severity`
+        # block used to always describe the *full-library* gate decision --
+        # here the full library has an error-level BREAKING removal but the
+        # app-scoped result is COMPATIBLE. The process exits 0 (the scoped
+        # gate), so `severity.exit_code`/`blocking` in the JSON body must
+        # agree with that, not silently claim `exit_code: 4`/`blocking: true`
+        # for a run that just exited 0.
+        old_snap = _snap(
+            "1.0", library="libfoo.so",
+            funcs=[Function(
+                name="removed", mangled="_Z7removedv", return_type="void",
+                visibility=Visibility.PUBLIC,
+            )],
+        )
+        new_snap = _snap("2.0", library="libfoo.so", funcs=[])
+        from abicheck import dumper as dumper_mod
+
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        old = tmp_path / "old.so"
+        old.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        new = tmp_path / "new.so"
+        new.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        monkeypatch.setattr(
+            dumper_mod, "dump", MagicMock(side_effect=[old_snap, new_snap])
+        )
+        self._patch_scope(monkeypatch, self._result(verdict=Verdict.COMPATIBLE))
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app),
+            "--format", "json", "--severity-preset", "default",
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["full_verdict"] == "BREAKING"
+        assert data["verdict"] == "COMPATIBLE"
+        # The scoped gate, not the full-library one that would exit 4.
+        assert data["severity"]["exit_code"] == 0
+        assert data["severity"]["blocking"] is False
+        assert data["severity"]["blocking_categories"] == []
+        # The full-library breakdown is preserved, just demoted to a
+        # secondary key -- it still shows the real BREAKING removal.
+        assert data["full_severity"]["exit_code"] == 4
+        assert data["full_severity"]["blocking"] is True
+        assert "abi_breaking" in data["full_severity"]["blocking_categories"]
 
 
 class TestUsedByScopingWithSnapshotInputs:

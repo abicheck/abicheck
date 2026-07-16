@@ -109,6 +109,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
     silently exited `0` under any `--severity-*`/`--exit-code-scheme
     severity` configuration. Fixed in both the CLI and the MCP `abi_compare`
     tool.
+  - `compare --used-by`/`--required-symbol --format json` (and the MCP
+    `abi_compare` nested `report`) now folds the *scoped* severity gate into
+    the `severity` block's `exit_code`/`blocking`/`blocking_categories`,
+    demoting the unscoped full-library breakdown to a new `full_severity`
+    key — previously `severity.exit_code`/`blocking` always described the
+    full-library gate even under `--used-by`/`--required-symbol` scoping, so
+    a scoped-compatible run that exited `0` could still carry
+    `severity.exit_code: 4`/`blocking: true` in its own JSON body, the
+    opposite of what the command that produced it just did.
 
 ### Changed
 

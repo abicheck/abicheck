@@ -491,6 +491,33 @@ def _scoped_exit_code(
     return _scoped_verdict_exit_code(verdict)
 
 
+def _scoped_blocking_categories(
+    relevant_changes: list[Any], has_missing_contract: bool,
+    result: Any, severity_config: SeverityConfig, policy: str, policy_file: object,
+) -> tuple[str, ...]:
+    """Severity-scheme blocking categories for one scoped result.
+
+    Mirrors ``cli_compare_helpers._scoped_blocking_categories``: a missing
+    contract symbol/version/entrypoint is the same failure class as
+    ``abi_breaking``, so when it is what pushes the scoped exit code above
+    zero it is folded into the reported blocking categories the same way.
+    """
+    from .severity import IssueCategory, SeverityLevel, compute_gate_decision
+
+    gate = compute_gate_decision(
+        relevant_changes, severity_config,
+        policy=policy, kind_sets=result._effective_kind_sets(), policy_file=policy_file,
+    )
+    categories = list(gate.blocking_categories)
+    if (
+        has_missing_contract
+        and severity_config.abi_breaking == SeverityLevel.ERROR
+        and IssueCategory.ABI_BREAKING.value not in categories
+    ):
+        categories.append(IssueCategory.ABI_BREAKING.value)
+    return tuple(categories)
+
+
 _VERDICT_SEVERITY_RANK = {
     "BREAKING": 3, "API_BREAK": 2, "COMPATIBLE_WITH_RISK": 1,
     "COMPATIBLE": 0, "NO_CHANGE": 0,
@@ -924,6 +951,7 @@ def abi_compare(
             worst_exit = 0
             worst_verdict = None
             worst_verdict_rank = -1
+            worst_categories: set[str] = set()
             for app in used_by:
                 app_path = _safe_read_path(app, label="used_by")
                 if not app_path.exists():
@@ -946,15 +974,23 @@ def abi_compare(
                         "symbol_coverage": round(scoped.symbol_coverage, 1),
                     }
                 )
+                has_missing = bool(scoped.missing_symbols or scoped.missing_versions)
                 app_exit = _scoped_exit_code(
                     scoped.verdict, scoped.breaking_for_app, result,
                     severity_config, active_policy, pf,
-                    has_missing_contract=bool(
-                        scoped.missing_symbols or scoped.missing_versions
-                    ),
+                    has_missing_contract=has_missing,
                 )
                 # exit code (gating) and verdict (reporting) are maxed/ranked
                 # independently -- see _verdict_severity_rank.
+                if severity_config is not None:
+                    categories = _scoped_blocking_categories(
+                        scoped.breaking_for_app, has_missing, result,
+                        severity_config, active_policy, pf,
+                    )
+                    if app_exit > worst_exit:
+                        worst_categories = set(categories)
+                    elif app_exit == worst_exit:
+                        worst_categories |= set(categories)
                 worst_exit = max(worst_exit, app_exit)
                 rank = _verdict_severity_rank(scoped.verdict)
                 if worst_verdict is None or rank >= worst_verdict_rank:
@@ -973,6 +1009,8 @@ def abi_compare(
             result.scoped_exit_code = worst_exit  # type: ignore[attr-defined]
             scoped_scheme = "severity" if severity_config is not None else "legacy"
             result.scoped_exit_code_scheme = scoped_scheme  # type: ignore[attr-defined]
+            if scoped_scheme == "severity":
+                result.scoped_blocking_categories = tuple(sorted(worst_categories))  # type: ignore[attr-defined]
         elif required_symbols:
             from .appcompat import scope_diff_to_required_symbols
 
@@ -988,10 +1026,11 @@ def abi_compare(
                 "relevant_change_count": len(scoped_host.breaking_for_host),
                 "coverage": round(scoped_host.coverage, 1),
             }
+            has_missing = bool(scoped_host.missing_entrypoints)
             exit_code = _scoped_exit_code(
                 scoped_host.verdict, scoped_host.breaking_for_host, result,
                 severity_config, active_policy, pf,
-                has_missing_contract=bool(scoped_host.missing_entrypoints),
+                has_missing_contract=has_missing,
             )
             exit_code_scheme = "scoped"
             scoped_verdict_value = scoped_host.verdict.value
@@ -1000,6 +1039,11 @@ def abi_compare(
             result.scoped_exit_code = exit_code  # type: ignore[attr-defined]
             scoped_scheme = "severity" if severity_config is not None else "legacy"
             result.scoped_exit_code_scheme = scoped_scheme  # type: ignore[attr-defined]
+            if severity_config is not None:
+                result.scoped_blocking_categories = _scoped_blocking_categories(  # type: ignore[attr-defined]
+                    scoped_host.breaking_for_host, has_missing,
+                    result, severity_config, active_policy, pf,
+                )
 
         # Build structured response. When a used_by/required_symbols scope is in
         # effect, mirror the CLI JSON contract (`_fold_scoped_compat_into_text`):

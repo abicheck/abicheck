@@ -525,6 +525,35 @@ def _scoped_exit_code(
     return _verdict_exit_code(scoped.verdict)
 
 
+def _scoped_blocking_categories(
+    relevant_changes: list[Any], has_missing_contract: bool,
+    result: Any, sev_config: Any, policy: str, policy_file: PolicyFile | None,
+) -> tuple[str, ...]:
+    """Severity-scheme blocking categories for one scoped result.
+
+    Mirrors ``_scoped_exit_code``'s missing-contract floor: a missing
+    symbol/version/entrypoint is the same failure class as ``abi_breaking``,
+    so when it is what pushes the scoped exit code above zero it is folded
+    into the reported blocking categories the same way -- otherwise a
+    missing-contract-only scoped BREAKING (no diff Change) would report an
+    empty ``blocking_categories`` alongside a nonzero exit code.
+    """
+    from .severity import IssueCategory, SeverityLevel, compute_gate_decision
+
+    gate = compute_gate_decision(
+        relevant_changes, sev_config,
+        policy=policy, kind_sets=result._effective_kind_sets(), policy_file=policy_file,
+    )
+    categories = list(gate.blocking_categories)
+    if (
+        has_missing_contract
+        and sev_config.abi_breaking == SeverityLevel.ERROR
+        and IssueCategory.ABI_BREAKING.value not in categories
+    ):
+        categories.append(IssueCategory.ABI_BREAKING.value)
+    return tuple(categories)
+
+
 def _apply_used_by_scoping(
     result: Any, used_by_apps: tuple[Path, ...],
     old_input: Path, new_input: Path,
@@ -568,16 +597,18 @@ def _apply_used_by_scoping(
     worst_exit = 0
     worst_verdict = None
     worst_verdict_rank = -1
+    worst_categories: set[str] = set()
     for app in used_by_apps:
         scoped = scope_diff_to_app(
             result, app, old_lib, new_lib,
             policy=policy, policy_file=policy_file,
         )
         summaries.append(_app_compat_summary(scoped))
+        has_missing = bool(scoped.missing_symbols or scoped.missing_versions)
         exit_code = _scoped_exit_code(
             scoped, scoped.breaking_for_app, result, exit_code_scheme, sev_config,
             policy, policy_file,
-            has_missing_contract=bool(scoped.missing_symbols or scoped.missing_versions),
+            has_missing_contract=has_missing,
         )
         # exit code (gating) and verdict (reporting) are maxed/ranked
         # independently: under a severity scheme the two can disagree (a
@@ -585,6 +616,14 @@ def _apply_used_by_scoping(
         # info-only`), so picking the reported scoped_verdict by exit code
         # could let a later, less-severe app overwrite an earlier BREAKING
         # one merely because their exit codes tied at 0 (Codex review).
+        if exit_code_scheme == "severity":
+            categories = _scoped_blocking_categories(
+                scoped.breaking_for_app, has_missing, result, sev_config, policy, policy_file,
+            )
+            if exit_code > worst_exit:
+                worst_categories = set(categories)
+            elif exit_code == worst_exit:
+                worst_categories |= set(categories)
         worst_exit = max(worst_exit, exit_code)
         rank = _verdict_severity_rank(scoped.verdict)
         if worst_verdict is None or rank >= worst_verdict_rank:
@@ -594,6 +633,8 @@ def _apply_used_by_scoping(
     result.scoped_verdict = worst_verdict  # type: ignore[attr-defined]
     result.scoped_exit_code = worst_exit  # type: ignore[attr-defined]
     result.scoped_exit_code_scheme = exit_code_scheme  # type: ignore[attr-defined]
+    if exit_code_scheme == "severity":
+        result.scoped_blocking_categories = tuple(sorted(worst_categories))  # type: ignore[attr-defined]
     return worst_exit
 
 
@@ -612,13 +653,18 @@ def _apply_required_symbol_scoping(
     )
     result.required_symbols = _plugin_contract_summary(scoped)  # type: ignore[attr-defined]
     result.scoped_verdict = scoped.verdict  # type: ignore[attr-defined]
+    has_missing = bool(scoped.missing_entrypoints)
     exit_code = _scoped_exit_code(
         scoped, scoped.breaking_for_host, result, exit_code_scheme, sev_config,
         policy, policy_file,
-        has_missing_contract=bool(scoped.missing_entrypoints),
+        has_missing_contract=has_missing,
     )
     result.scoped_exit_code = exit_code  # type: ignore[attr-defined]
     result.scoped_exit_code_scheme = exit_code_scheme  # type: ignore[attr-defined]
+    if exit_code_scheme == "severity":
+        result.scoped_blocking_categories = _scoped_blocking_categories(  # type: ignore[attr-defined]
+            scoped.breaking_for_host, has_missing, result, sev_config, policy, policy_file,
+        )
     return exit_code
 
 
@@ -1305,6 +1351,31 @@ def _fold_scoped_compat_into_text(text: str, fmt: str, result: Any) -> str:
             payload["used_by"] = used_by
         if required_symbols is not None:
             payload["required_symbol_contract"] = required_symbols
+        # Under a severity scheme, `severity.exit_code`/`blocking` describe
+        # the *full-library* gate decision -- but the process actually exits
+        # with the scoped exit code computed above (Codex review): without
+        # this, a scoped-compatible run that exits 0 could still carry
+        # `severity.exit_code: 4`/`blocking: true` in its own JSON body, the
+        # opposite of what the command that produced it just did. Mirrors the
+        # verdict/full_verdict swap above -- the full-library breakdown moves
+        # to `full_severity`, `severity` becomes the scoped gate.
+        scoped_exit_code = getattr(result, "scoped_exit_code", None)
+        scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
+        severity_block = payload.get("severity")
+        if (
+            scoped_exit_code is not None
+            and scoped_exit_code_scheme == "severity"
+            and isinstance(severity_block, dict)
+        ):
+            payload["full_severity"] = severity_block
+            payload["severity"] = {
+                **severity_block,
+                "exit_code": scoped_exit_code,
+                "blocking": scoped_exit_code != 0,
+                "blocking_categories": list(
+                    getattr(result, "scoped_blocking_categories", ()) or ()
+                ),
+            }
         return json.dumps(payload, indent=2)
 
     if fmt in ("markdown", "text", "review"):

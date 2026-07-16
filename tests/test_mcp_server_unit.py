@@ -1161,6 +1161,33 @@ class TestAbiCompare:
         assert report["full_verdict"] == "BREAKING"
         assert report["required_symbol_contract"]["verdict"] == "COMPATIBLE"
 
+    def test_required_symbols_nested_json_severity_reflects_scoped_gate(
+        self, tmp_path: Path
+    ):
+        # Regression (Codex P2): the nested response["report"]["severity"]
+        # block used to always describe the full-library gate decision, even
+        # when the contract itself is untouched by the removal -- the top
+        # -level exit_code is 0 (scoped-compatible), but report.severity used
+        # to still say exit_code: 4 for the unrelated full-library removal.
+        kept = _pub_func("kept_entry", "_Z10kept_entryv", "int")
+        removed = _pub_func("unrelated", "_Z9unrelatedv", "int")
+        old = _make_snapshot("1.0", functions=[kept, removed])
+        new = _make_snapshot("2.0", functions=[kept])
+        old_p, new_p = self._make_pair(tmp_path, old, new)
+
+        raw = abi_compare(
+            str(old_p), str(new_p),
+            required_symbols=["_Z10kept_entryv"], output_format="json",
+            severity_preset="default",
+        )
+        data = json.loads(raw)
+        assert data["exit_code"] == 0
+        report = data["report"]
+        assert report["severity"]["exit_code"] == 0
+        assert report["severity"]["blocking"] is False
+        assert report["full_severity"]["exit_code"] == 4
+        assert report["full_severity"]["blocking"] is True
+
     def test_required_symbols_missing_entrypoint_is_breaking(self, tmp_path: Path):
         kept = _pub_func("entry", "_Z5entryv", "int")
         old = _make_snapshot("1.0", functions=[kept])

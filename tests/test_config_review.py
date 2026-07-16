@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -361,6 +362,50 @@ class TestScopedExitRespectsSeverity:
              "--severity-preset", "info-only"],
         )
         assert result.exit_code == 0
+
+    def test_required_symbol_json_severity_block_reflects_scoped_gate(
+        self, tmp_path: Path,
+    ) -> None:
+        # Regression (Codex P2): the JSON `severity` block used to always
+        # describe the full-library gate, even for a --required-symbol scope
+        # whose contract (kept_entry) is untouched by the removal of an
+        # unrelated symbol -- the scoped gate here is COMPATIBLE/exit 0, but
+        # `severity.exit_code` used to still report the full library's 4.
+        old = AbiSnapshot(
+            library="libtest.so", version="1.0",
+            functions=[
+                Function(name="_Z10kept_entryv", mangled="_Z10kept_entryv",
+                          return_type="int", visibility=Visibility.PUBLIC),
+                Function(name="_Z9unrelatedv", mangled="_Z9unrelatedv",
+                          return_type="int", visibility=Visibility.PUBLIC),
+            ],
+        )
+        new = AbiSnapshot(
+            library="libtest.so", version="2.0",
+            functions=[
+                Function(name="_Z10kept_entryv", mangled="_Z10kept_entryv",
+                          return_type="int", visibility=Visibility.PUBLIC),
+            ],
+        )
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        old_p.write_text(snapshot_to_json(old), encoding="utf-8")
+        new_p.write_text(snapshot_to_json(new), encoding="utf-8")
+
+        result = CliRunner().invoke(
+            main,
+            ["compare", str(old_p), str(new_p),
+             "--required-symbol", "_Z10kept_entryv",
+             "--format", "json", "--severity-preset", "default"],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["full_verdict"] == "BREAKING"
+        assert data["verdict"] == "COMPATIBLE"
+        assert data["severity"]["exit_code"] == 0
+        assert data["severity"]["blocking"] is False
+        assert data["full_severity"]["exit_code"] == 4
+        assert data["full_severity"]["blocking"] is True
 
 
 # ── §1 appcompat warnings + scope ───────────────────────────────────────────
