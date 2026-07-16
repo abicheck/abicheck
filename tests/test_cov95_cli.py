@@ -1422,6 +1422,29 @@ class TestUsedByScoping:
         assert "Scoped verdict: COMPATIBLE" in result.stdout
         assert "full library verdict above is BREAKING" in result.stdout
 
+    def test_markdown_scoped_banner_states_actual_exit_under_severity_scheme(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Regression (Codex P2): under a severity scheme, the scoped exit
+        # code is NOT a fixed mapping of the scoped verdict -- e.g.
+        # --severity-preset info-only can floor it at 0 even for a BREAKING
+        # scoped verdict. The markdown banner used to unconditionally claim
+        # "this is what the exit code reflects" whenever the scoped and full
+        # verdicts disagreed, which is false here (BREAKING scoped verdict,
+        # exit code 0) -- it must state the actual computed exit code/scheme
+        # instead, mirroring the SARIF/JUnit/HTML wording.
+        res = self._result(verdict=Verdict.BREAKING, missing=["foo"])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app),
+            "--format", "markdown", "--severity-preset", "info-only",
+        )
+        assert result.exit_code == 0
+        assert "Scoped verdict: BREAKING" in result.stdout
+        assert "the CLI process exits 0 under the severity exit-code scheme" in result.stdout
+        assert "this is what the exit code reflects" not in result.stdout
+
     def test_json_severity_block_reflects_scoped_gate_not_full_library(
         self, tmp_path, monkeypatch
     ) -> None:

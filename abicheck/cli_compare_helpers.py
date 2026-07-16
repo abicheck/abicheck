@@ -1443,14 +1443,29 @@ def _fold_scoped_compat_into_text(text: str, fmt: str, result: Any) -> str:
             and full_verdict_value is not None
             and scoped_verdict_value != full_verdict_value
         ):
-            # The exit code reflects the *scoped* verdict (ADR-043 worst-wins),
-            # which can disagree with the full-library verdict this report's own
-            # headline already rendered above -- state which one is authoritative
-            # for CI instead of leaving the two to silently disagree (Codex review).
+            # The exit code is computed from the *scoped* result (ADR-043
+            # worst-wins), which can disagree with the full-library verdict
+            # this report's own headline already rendered above -- state
+            # which one is authoritative for CI instead of leaving the two to
+            # silently disagree (Codex review). Under a severity scheme the
+            # exit code is NOT a fixed BREAKING->4/API_BREAK->2 mapping of
+            # scoped_verdict -- e.g. --severity-preset info-only can floor it
+            # at 0 even for a BREAKING scoped verdict -- so state the actual
+            # computed value/scheme instead of asserting the exit code
+            # "reflects" the scoped verdict, which would be false in that
+            # case (Codex review follow-up).
+            scoped_exit_code = getattr(result, "scoped_exit_code", None)
+            scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
+            exit_note = (
+                f"the CLI process exits {scoped_exit_code} under the "
+                f"{scoped_exit_code_scheme} exit-code scheme for this run"
+                if scoped_exit_code is not None
+                else "this is what the exit code reflects"
+            )
             header = [
                 f"**Scoped verdict: {scoped_verdict_value}** "
-                f"(this is what the exit code reflects; the full library "
-                f"verdict above is {full_verdict_value}).",
+                f"({exit_note}; the full library verdict above is "
+                f"{full_verdict_value}).",
                 "",
             ]
         lines = [*header, text, ""]

@@ -154,6 +154,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
     exit-code mapping; it now describes the active legacy/severity-aware
     scheme (which can return `0` for a scoped `BREAKING` verdict under
     `severity_preset="info-only"`).
+  - `compare --used-by`/`--required-symbol`'s markdown/text/review scoped
+    -verdict banner no longer unconditionally asserts "this is what the
+    exit code reflects" when the scoped and full-library verdicts disagree
+    — under a severity scheme the exit code is not a fixed mapping of the
+    scoped verdict (e.g. `--severity-preset info-only` can floor it at `0`
+    for a `BREAKING` scoped verdict, making that claim false); it now states
+    the actual computed exit code/scheme, mirroring the SARIF/JUnit/HTML
+    wording.
   - `docs/user-guide/appcompat.md`'s options table no longer contradicts the
     snapshot-support text above it — a JSON snapshot works with `--used-by`
     when it carries binary evidence (an `elf`/`pe`/`macho` field), not only
