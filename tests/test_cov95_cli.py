@@ -1588,6 +1588,77 @@ class TestUsedByScoping:
         assert "abi_breaking" in data["full_severity"]["blocking_categories"]
         assert data["full_severity"]["categories"]["abi_breaking"]["count"] == 1
 
+    def test_json_scoped_only_change_is_included_in_changes(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Regression (Codex review): scope_diff_to_app can synthesize a fresh
+        # Change (e.g. PE_ORDINAL_RETARGETED) that is relevant to the gate but
+        # never lands in result.changes -- SARIF/JUnit already fold this into
+        # their own rendering (scoped_only_changes), but the JSON `changes`
+        # array (which the GitHub Action's `--on changes` PR-comment gate
+        # buckets off directly) did not, so a --used-by run whose only gated
+        # issue is one of these reported an empty `changes` array despite a
+        # nonzero scoped exit code.
+        scoped_only = Change(
+            kind=ChangeKind.PE_ORDINAL_RETARGETED,
+            symbol="ordinal:5",
+            description="ordinal 5 retargeted",
+            old_value="OldFunc", new_value="NewFunc",
+        )
+        res = self._result(verdict=Verdict.BREAKING, breaking_for_app=[scoped_only])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
+        )
+        assert result.exit_code == 4
+        data = json.loads(result.stdout)
+        assert data["full_verdict"] == "NO_CHANGE"
+        assert data["verdict"] == "BREAKING"
+        kinds = [c["kind"] for c in data["changes"]]
+        assert "pe_ordinal_retargeted" in kinds
+        entry = next(c for c in data["changes"] if c["kind"] == "pe_ordinal_retargeted")
+        assert entry["symbol"] == "ordinal:5"
+
+    def test_json_uncovered_missing_symbol_is_included_in_changes(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Same gap as above, for a missing required symbol/version with no
+        # backing Change at all (scoped_missing_labels, not scoped_only_changes).
+        res = self._result(verdict=Verdict.BREAKING, missing=["needed_symbol"])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
+        )
+        assert result.exit_code == 4
+        data = json.loads(result.stdout)
+        entry = next(
+            c for c in data["changes"] if c["kind"] == "used_by_missing_symbol"
+        )
+        assert entry["symbol"] == "needed_symbol"
+        assert entry["blocks_gate"] is True
+
+    def test_json_uncovered_missing_symbol_not_blocking_under_demoted_severity(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # A missing-contract entry must not claim blocks_gate=True when a
+        # severity config demotes abi_breaking below error (mirrors the
+        # SARIF/JUnit severity-aware missing-contract handling).
+        res = self._result(verdict=Verdict.BREAKING, missing=["needed_symbol"])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
+            "--severity-abi-breaking", "warning",
+        )
+        data = json.loads(result.stdout)
+        entry = next(
+            c for c in data["changes"] if c["kind"] == "used_by_missing_symbol"
+        )
+        assert entry["blocks_gate"] is False
+        assert entry["severity"] == "compatible"
+
 
 class TestUsedByScopingWithSnapshotInputs:
     """`compare --used-by` OLD/NEW as saved JSON snapshots (ADR-043 follow-up).

@@ -1178,6 +1178,57 @@ def abi_compare(
         }
         if scoped_key is not None:
             response[scoped_key] = scoped_payload
+            # Scoped-only changes/missing-contract labels are relevant to the
+            # scoped gate but never land in result.changes -- without folding
+            # them into the top-level "changes" array too, a --used-by/
+            # --required-symbol response whose only gated issue is one of
+            # these shows an empty "changes" list despite a scoped
+            # verdict/exit_code that blocks, leaving a caller that only reads
+            # this array with nothing to explain the failure (Codex review,
+            # mirrors the identical fold-in in
+            # cli_compare_helpers._fold_scoped_compat_into_text).
+            existing_ids = {_finding_id(c) for c in result.changes}
+            for c in getattr(result, "scoped_only_changes", ()) or ():
+                if _finding_id(c) not in existing_ids:
+                    response["changes"].append(
+                        {
+                            "kind": c.kind.value,
+                            "symbol": c.symbol,
+                            "description": c.description,
+                            "impact": _impact_category(c.kind, active_policy),
+                            "old_value": c.old_value,
+                            "new_value": c.new_value,
+                            "source_location": c.source_location,
+                        }
+                    )
+            from .severity import missing_contract_exit_code
+
+            missing_kind = (
+                "used_by_missing_symbol"
+                if getattr(result, "gate_scope", None) == "used_by"
+                else "required_symbol_missing"
+            )
+            blocks = (
+                severity_config is None
+                or missing_contract_exit_code(severity_config) != 0
+            )
+            for label in getattr(result, "scoped_missing_labels", ()) or ():
+                response["changes"].append(
+                    {
+                        "kind": missing_kind,
+                        "symbol": label,
+                        "description": (
+                            f"Required symbol/version '{label}' is missing "
+                            "from the new library."
+                        ),
+                        "impact": None,
+                        "old_value": None,
+                        "new_value": None,
+                        "source_location": None,
+                        "relevant_to_gate": True,
+                        "blocks_gate": blocks,
+                    }
+                )
 
         # Include rendered report
         rendered = _render_output(
@@ -1200,7 +1251,9 @@ def abi_compare(
             # --secondary-format behavior — otherwise a client reading
             # response["report"] sees the unscoped full-library verdict even
             # though the top-level verdict/exit_code are scoped (Codex review).
-            rendered = _fold_scoped_compat_into_text(rendered, output_format, result)
+            rendered = _fold_scoped_compat_into_text(
+                rendered, output_format, result, severity_config=severity_config,
+            )
         if output_format == "json":
             response["report"] = json.loads(rendered)
         else:

@@ -1443,6 +1443,56 @@ class TestAbiCompare:
         report = data["report"]
         assert report["severity"]["categories"]["abi_breaking"]["count"] == 1
 
+    def test_used_by_scoped_only_change_included_in_top_level_and_report_changes(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # Regression (Codex review): scope_diff_to_app can synthesize a Change
+        # (e.g. PE_ORDINAL_RETARGETED) relevant to the gate but never added to
+        # result.changes -- mirrors cli_compare_helpers's identical gap. Both
+        # the top-level response["changes"] and the embedded response["report"]
+        # (folded via _fold_scoped_compat_into_text) must carry it, not just
+        # SARIF/JUnit.
+        from abicheck.appcompat import AppCompatResult
+        from abicheck.checker import Change
+        from abicheck.checker_policy import ChangeKind
+
+        old = _make_snapshot("1.0")
+        new = _make_snapshot("2.0")
+        old_p, new_p = self._make_binary_pair(tmp_path)
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+        scoped_only = Change(
+            kind=ChangeKind.PE_ORDINAL_RETARGETED,
+            symbol="ordinal:5", description="ordinal 5 retargeted",
+            old_value="OldFunc", new_value="NewFunc",
+        )
+
+        def _scoped_for(*_args, **_kwargs):
+            return AppCompatResult(
+                app_path="/app", old_lib_path=str(old_p), new_lib_path=str(new_p),
+                required_symbols={"foo"}, required_symbol_count=1,
+                breaking_for_app=[scoped_only], verdict=Verdict.BREAKING,
+            )
+
+        from abicheck import mcp_server
+
+        monkeypatch.setattr(
+            mcp_server, "_resolve_input",
+            MagicMock(side_effect=[old, new]),
+        )
+        import abicheck.appcompat as appcompat_mod
+
+        monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", _scoped_for)
+
+        raw = abi_compare(str(old_p), str(new_p), used_by=[str(app)])
+        data = json.loads(raw)
+        assert data["exit_code"] == 4
+        top_kinds = [c["kind"] for c in data["changes"]]
+        assert "pe_ordinal_retargeted" in top_kinds
+        report_kinds = [c["kind"] for c in data["report"]["changes"]]
+        assert "pe_ordinal_retargeted" in report_kinds
+
     def test_used_by_rejects_non_binary_snapshot_input(self, tmp_path: Path):
         # --used-by needs real library binaries to parse app requirements
         # against; JSON snapshots must be rejected with a clear error rather

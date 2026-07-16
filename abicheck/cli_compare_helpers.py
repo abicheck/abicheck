@@ -1440,7 +1440,10 @@ def run_compare(
         show_recommendation=recommend,
         demangle=demangle,
     )
-    text = _fold_scoped_compat_into_text(text, fmt, result)
+    text = _fold_scoped_compat_into_text(
+        text, fmt, result,
+        severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
+    )
     text = _fold_evidence_depth_into_json(text, fmt, old, new)
 
     _write_or_echo(output, text)
@@ -1468,7 +1471,10 @@ def run_compare(
             show_recommendation=recommend,
             demangle=secondary_demangle,
         )
-        secondary_text = _fold_scoped_compat_into_text(secondary_text, secondary_fmt, result)
+        secondary_text = _fold_scoped_compat_into_text(
+            secondary_text, secondary_fmt, result,
+            severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
+        )
         secondary_text = _fold_evidence_depth_into_json(secondary_text, secondary_fmt, old, new)
         _write_or_echo(secondary_output, secondary_text)
 
@@ -1510,13 +1516,20 @@ def _fold_evidence_depth_into_json(text: str, fmt: str, old: Any, new: Any) -> s
     return json.dumps(payload, indent=2)
 
 
-def _fold_scoped_compat_into_text(text: str, fmt: str, result: Any) -> str:
+def _fold_scoped_compat_into_text(
+    text: str, fmt: str, result: Any, severity_config: Any = None,
+) -> str:
     """Fold ``--used-by``/``--required-symbol(s)`` summaries into the rendered text.
 
     JSON gets the summaries as real keys (round-tripped through the existing
     payload); other text-based formats get a small appended section. Binary/
     structured formats (sarif, junit, html) are left untouched -- the full
     verdict they already carry stays authoritative for those consumers.
+
+    *severity_config* (when the run used a severity scheme) decides whether a
+    synthesized missing-contract entry is itself blocking, mirroring
+    ``sarif._missing_contract_result``/``junit_report``'s severity-aware
+    missing-contract handling.
     """
     used_by = getattr(result, "used_by", None)
     required_symbols = getattr(result, "required_symbols", None)
@@ -1584,6 +1597,59 @@ def _fold_scoped_compat_into_text(text: str, fmt: str, result: Any) -> str:
                     getattr(result, "scoped_blocking_categories", ()) or ()
                 ),
             }
+        # Scoped-only changes (e.g. PE_ORDINAL_RETARGETED, synthesized fresh
+        # per app/host by scope_diff_to_app/scope_diff_to_required_symbols)
+        # and uncovered missing-contract labels are relevant to the scoped
+        # gate but never land in `result.changes` -- without folding them
+        # into `changes` here too, a --used-by/--required-symbol run whose
+        # only gated issue is one of these reports an empty `changes` array
+        # despite a nonzero scoped exit code/verdict, so a JSON consumer
+        # (e.g. the GitHub Action's `--on changes` PR-comment gate, which
+        # buckets purely off this array) sees nothing to explain the failure
+        # and silently skips posting (Codex review, mirrors
+        # sarif.to_sarif/junit_report._build_testsuite's identical fold-in).
+        changes_list = payload.get("changes")
+        if isinstance(changes_list, list):
+            from .reporter import _change_to_dict, _finding_id
+            from .severity import missing_contract_exit_code
+
+            existing_ids = {_finding_id(c) for c in result.changes}
+            eff_sets = result._effective_kind_sets()
+            for c in getattr(result, "scoped_only_changes", ()) or ():
+                if _finding_id(c) not in existing_ids:
+                    changes_list.append(
+                        _change_to_dict(
+                            c,
+                            policy=result.policy or "strict_abi",
+                            kind_sets=eff_sets,
+                            policy_file=result.policy_file,
+                        )
+                    )
+            gate_scope = getattr(result, "gate_scope", None)
+            missing_kind = (
+                "used_by_missing_symbol" if gate_scope == "used_by"
+                else "required_symbol_missing"
+            )
+            blocks = (
+                severity_config is None
+                or missing_contract_exit_code(severity_config) != 0
+            )
+            for label in getattr(result, "scoped_missing_labels", ()) or ():
+                changes_list.append(
+                    {
+                        "kind": missing_kind,
+                        "symbol": label,
+                        "description": (
+                            f"Required symbol/version '{label}' is missing "
+                            "from the new library."
+                        ),
+                        "old_value": None,
+                        "new_value": None,
+                        "severity": "breaking" if blocks else "compatible",
+                        "relevant_to_gate": True,
+                        "blocks_gate": blocks,
+                    }
+                )
         return json.dumps(payload, indent=2)
 
     if fmt in ("markdown", "text", "review"):
