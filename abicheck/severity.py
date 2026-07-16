@@ -503,6 +503,25 @@ def legacy_exit_code(verdict: Verdict) -> int:
     return _LEGACY_VERDICT_EXIT_CODE.get(verdict, 0)
 
 
+def missing_contract_exit_code(config: SeverityConfig) -> int:
+    """Severity-aware exit code floor for a scoped contract missing outright.
+
+    A ``--used-by``/``--required-symbol(s)`` scope can be BREAKING because a
+    required symbol/version/entrypoint is simply absent from the new
+    library -- there is no resolution to compare against, so nothing reaches
+    the diff and ``compute_exit_code`` never sees a ``Change`` to classify.
+    Left alone this makes a severity-scheme scoped compare silently exit 0
+    for a library that no longer satisfies the app/host's load-time contract
+    at all (Codex review). A missing contract symbol is the same failure
+    class as ``abi_breaking`` (the app's dependency can no longer be
+    resolved), so it is floored by that category's configured level, exactly
+    like a real ``BREAKING_KINDS`` finding would be.
+    """
+    if config.abi_breaking == SeverityLevel.ERROR:
+        return _CATEGORY_EXIT_CODES[IssueCategory.ABI_BREAKING]
+    return 0
+
+
 def compute_exit_code(
     changes: Sequence[HasKind],
     config: SeverityConfig,

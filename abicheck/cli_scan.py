@@ -428,7 +428,9 @@ def render_scan_dry_run(
     result.add(
         "Output and exit-code behavior",
         f"format: {fmt}",
-        "exit codes: 0 compatible, 2 API break, 4 ABI break, 5 budget overflow",
+        "dry-run exit codes: 0 valid, 1 requested depth not satisfiable, "
+        "64 usage error (a real scan run's exit codes are 0 compatible, "
+        "2 API break, 4 ABI break, 5 budget overflow)",
     )
     try:
         req = ScanRequest(

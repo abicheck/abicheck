@@ -1286,9 +1286,10 @@ def _embed_inline_source_side(
                    "scope the comparison (repeatable; folds `appcompat`). The full "
                    "library comparison still runs once; the worst app-scoped result "
                    "becomes the primary verdict/exit code, with the full verdict and "
-                   "unrelated changes kept as informational context. OLD/NEW must be "
-                   "real library binaries (not JSON snapshots). Mutually exclusive "
-                   "with --required-symbol/--required-symbols.")
+                   "unrelated changes kept as informational context. OLD/NEW may be "
+                   "real library binaries or JSON snapshots carrying binary evidence "
+                   "(a `dump` of a real library, not headers-only). Mutually "
+                   "exclusive with --required-symbol/--required-symbols.")
 @click.option("--required-symbol", "required_symbols_opt", multiple=True,
               help="An exported linker symbol a plugin host resolves via dlopen/dlsym "
                    "and requires (repeatable; folds `plugin-check`). Scopes the "

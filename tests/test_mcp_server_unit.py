@@ -1046,6 +1046,99 @@ class TestAbiCompare:
         assert data["exit_code"] == 0
         assert data["exit_code_scheme"] == "scoped"
 
+    def test_multi_app_scoped_verdict_ranked_independently_of_exit_code(
+        self, tmp_path: Path, monkeypatch,
+    ):
+        # Regression: under a severity config, a BREAKING app can carry exit
+        # code 0 (info-only preset). Picking the reported scoped verdict by
+        # exit code (both apps tie at 0) let a later, merely-COMPATIBLE app
+        # overwrite the first BREAKING app's verdict (Codex review).
+        from abicheck import mcp_server
+        from abicheck.appcompat import AppCompatResult
+
+        old = _make_snapshot("1.0", functions=[_pub_func("f", "_Zf")])
+        new = _make_snapshot("2.0", functions=[_pub_func("f", "_Zf")])
+        old_p, new_p = self._make_binary_pair(tmp_path)
+        app1 = tmp_path / "app1"
+        app1.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        app2 = tmp_path / "app2"
+        app2.write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+        monkeypatch.setattr(
+            mcp_server, "_resolve_input", MagicMock(side_effect=[old, new]),
+        )
+        breaking_scoped = AppCompatResult(
+            app_path=str(app1), old_lib_path=str(old_p), new_lib_path=str(new_p),
+            required_symbols={"_Zf"}, required_symbol_count=1,
+            missing_symbols=["_Zf"], verdict=Verdict.BREAKING,
+        )
+        compatible_scoped = AppCompatResult(
+            app_path=str(app2), old_lib_path=str(old_p), new_lib_path=str(new_p),
+            required_symbols=set(), required_symbol_count=0,
+            verdict=Verdict.COMPATIBLE,
+        )
+        import abicheck.appcompat as appcompat_mod
+        monkeypatch.setattr(
+            appcompat_mod, "scope_diff_to_app",
+            MagicMock(side_effect=[breaking_scoped, compatible_scoped]),
+        )
+
+        raw = abi_compare(
+            str(old_p), str(new_p), used_by=[str(app1), str(app2)],
+            severity_preset="info-only",
+        )
+        data = json.loads(raw)
+        assert data["exit_code"] == 0  # severity config still floors the gate
+        assert data["verdict"] == "BREAKING"  # but the reported verdict is not lost
+
+    def test_required_symbols_scoped_exit_respects_severity_config(
+        self, tmp_path: Path
+    ):
+        # Regression: the scoped exit code used to always use the legacy
+        # BREAKING->4/API_BREAK->2 floor even when a severity_* argument was
+        # given, silently ignoring it (post-merge PR #566 review). A required
+        # entrypoint being removed is still scoped-BREAKING, but
+        # severity_preset="info-only" must now floor exit_code at 0.
+        removed = _pub_func("entry", "_Z5entryv", "int")
+        old = _make_snapshot("1.0", functions=[removed])
+        new = _make_snapshot("2.0", functions=[])
+        old_p, new_p = self._make_pair(tmp_path, old, new)
+
+        raw = abi_compare(
+            str(old_p), str(new_p), required_symbols=["_Z5entryv"],
+            severity_preset="info-only",
+        )
+        data = json.loads(raw)
+        assert data["status"] == "ok"
+        assert data["required_symbol_contract"]["verdict"] == "BREAKING"
+        assert data["exit_code"] == 0
+
+    def test_required_symbols_never_present_floors_severity_at_4(
+        self, tmp_path: Path
+    ):
+        # Regression (Codex P1): a required symbol absent from *both* old and
+        # new is a missing contract with no corresponding diff Change (it was
+        # never removed -- it never existed), so `breaking_for_host` is empty
+        # even though the scoped verdict is BREAKING. `_scoped_exit_code`
+        # used to compute the severity-scheme exit purely from
+        # `breaking_for_host`, silently exiting 0.
+        kept = _pub_func("kept", "_Z4keptv", "int")
+        old = _make_snapshot("1.0", functions=[kept])
+        new = _make_snapshot("2.0", functions=[kept])
+        old_p, new_p = self._make_pair(tmp_path, old, new)
+
+        raw = abi_compare(
+            str(old_p), str(new_p), required_symbols=["never_existed"],
+            severity_preset="default",
+        )
+        data = json.loads(raw)
+        assert data["status"] == "ok"
+        assert data["required_symbol_contract"]["verdict"] == "BREAKING"
+        assert data["required_symbol_contract"]["missing_entrypoints"] == [
+            "never_existed"
+        ]
+        assert data["exit_code"] == 4
+
     def test_required_symbols_folds_scoped_verdict_into_nested_report(
         self, tmp_path: Path
     ):
@@ -1067,6 +1160,35 @@ class TestAbiCompare:
         assert report["verdict"] == "COMPATIBLE"
         assert report["full_verdict"] == "BREAKING"
         assert report["required_symbol_contract"]["verdict"] == "COMPATIBLE"
+
+    def test_required_symbols_nested_json_severity_reflects_scoped_gate(
+        self, tmp_path: Path
+    ):
+        # Regression (Codex P2): the nested response["report"]["severity"]
+        # block used to always describe the full-library gate decision, even
+        # when the contract itself is untouched by the removal -- the top
+        # -level exit_code is 0 (scoped-compatible), but report.severity used
+        # to still say exit_code: 4 for the unrelated full-library removal.
+        kept = _pub_func("kept_entry", "_Z10kept_entryv", "int")
+        removed = _pub_func("unrelated", "_Z9unrelatedv", "int")
+        old = _make_snapshot("1.0", functions=[kept, removed])
+        new = _make_snapshot("2.0", functions=[kept])
+        old_p, new_p = self._make_pair(tmp_path, old, new)
+
+        raw = abi_compare(
+            str(old_p), str(new_p),
+            required_symbols=["_Z10kept_entryv"], output_format="json",
+            severity_preset="default",
+        )
+        data = json.loads(raw)
+        assert data["exit_code"] == 0
+        report = data["report"]
+        assert report["severity"]["exit_code"] == 0
+        assert report["severity"]["blocking"] is False
+        assert report["severity"]["categories"]["abi_breaking"]["count"] == 0
+        assert report["full_severity"]["exit_code"] == 4
+        assert report["full_severity"]["blocking"] is True
+        assert report["full_severity"]["categories"]["abi_breaking"]["count"] == 1
 
     def test_required_symbols_missing_entrypoint_is_breaking(self, tmp_path: Path):
         kept = _pub_func("entry", "_Z5entryv", "int")
@@ -1158,6 +1280,117 @@ class TestAbiCompare:
         assert data["verdict"] == "BREAKING"
         assert data["exit_code"] == 4
         assert data["exit_code_scheme"] == "scoped"
+
+    def test_used_by_missing_symbol_only_floors_severity_at_4(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # Regression (Codex P1): a required symbol absent from both old and
+        # new is a missing contract with no corresponding diff Change --
+        # `breaking_for_app` stays empty even though the scoped verdict is
+        # BREAKING. `_scoped_exit_code` used to compute the severity-scheme
+        # exit purely from `breaking_for_app`, silently exiting 0 for an app
+        # that can never resolve the required symbol at all.
+        from abicheck.appcompat import AppCompatResult
+
+        kept = _pub_func("kept", "_Z4keptv", "int")
+        old = _make_snapshot("1.0", functions=[kept])
+        new = _make_snapshot("2.0", functions=[kept])
+        old_p, new_p = self._make_binary_pair(tmp_path)
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        scoped = AppCompatResult(
+            app_path=str(app), old_lib_path=str(old_p), new_lib_path=str(new_p),
+            required_symbols={"never_existed"}, required_symbol_count=1,
+            missing_symbols=["never_existed"], verdict=Verdict.BREAKING,
+        )
+        self._patch_used_by(monkeypatch, tmp_path, old, new, scoped)
+
+        raw = abi_compare(
+            str(old_p), str(new_p), used_by=[str(app)],
+            severity_preset="default",
+        )
+        data = json.loads(raw)
+        assert data["used_by"][0]["missing_symbols"] == ["never_existed"]
+        assert data["verdict"] == "BREAKING"
+        assert data["exit_code"] == 4
+        report = data["report"]
+        assert report["severity"]["exit_code"] == 4
+        assert report["severity"]["blocking_categories"] == ["abi_breaking"]
+        # The missing symbol itself (not a diff Change) still counts.
+        assert report["severity"]["categories"]["abi_breaking"]["count"] == 1
+
+    def test_used_by_missing_symbol_covered_by_change_not_double_counted(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # Regression (Codex P2 follow-up): "foo" is both a missing symbol
+        # (absent from the new exports) *and* the subject of a scoped
+        # FUNC_REMOVED Change -- one ABI break, not two.
+        from abicheck.appcompat import AppCompatResult
+        from abicheck.checker import Change
+        from abicheck.checker_policy import ChangeKind
+
+        old = _make_snapshot("1.0", functions=[_pub_func("foo", "foo", "int")])
+        new = _make_snapshot("2.0", functions=[])
+        old_p, new_p = self._make_binary_pair(tmp_path)
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        scoped = AppCompatResult(
+            app_path=str(app), old_lib_path=str(old_p), new_lib_path=str(new_p),
+            required_symbols={"foo"}, required_symbol_count=1,
+            missing_symbols=["foo"],
+            breaking_for_app=[
+                Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")
+            ],
+            verdict=Verdict.BREAKING,
+        )
+        self._patch_used_by(monkeypatch, tmp_path, old, new, scoped)
+
+        raw = abi_compare(
+            str(old_p), str(new_p), used_by=[str(app)],
+            severity_preset="default",
+        )
+        data = json.loads(raw)
+        assert data["exit_code"] == 4
+        report = data["report"]
+        assert report["severity"]["categories"]["abi_breaking"]["count"] == 1
+
+    def test_used_by_multi_app_shared_change_not_double_counted(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # Regression (Codex P2): when two --used-by apps tie on the worst
+        # exit code and both depend on the *same* removed symbol, the shared
+        # Change object must be counted once in
+        # severity.categories.abi_breaking.count, not once per app.
+        from abicheck.appcompat import AppCompatResult
+        from abicheck.checker import Change
+        from abicheck.checker_policy import ChangeKind
+
+        shared_change = Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")
+        old = _make_snapshot("1.0", functions=[_pub_func("foo", "foo", "int")])
+        new = _make_snapshot("2.0", functions=[])
+        old_p, new_p = self._make_binary_pair(tmp_path)
+        app1 = tmp_path / "app1"
+        app1.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        app2 = tmp_path / "app2"
+        app2.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        # `_patch_used_by` returns this same object for every app -- both
+        # apps therefore share the identical Change instance, exactly the
+        # scenario the dedup fix targets.
+        scoped = AppCompatResult(
+            app_path="/app", old_lib_path=str(old_p), new_lib_path=str(new_p),
+            required_symbols={"foo"}, required_symbol_count=1,
+            breaking_for_app=[shared_change], verdict=Verdict.BREAKING,
+        )
+        self._patch_used_by(monkeypatch, tmp_path, old, new, scoped)
+
+        raw = abi_compare(
+            str(old_p), str(new_p), used_by=[str(app1), str(app2)],
+            severity_preset="default",
+        )
+        data = json.loads(raw)
+        assert data["exit_code"] == 4
+        report = data["report"]
+        assert report["severity"]["categories"]["abi_breaking"]["count"] == 1
 
     def test_used_by_rejects_non_binary_snapshot_input(self, tmp_path: Path):
         # --used-by needs real library binaries to parse app requirements

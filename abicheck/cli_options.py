@@ -1468,7 +1468,7 @@ def profile_option(func: F) -> F:
         default=None,
         help="Run-profile preset bundling workflow defaults (ADR-040): "
         "'ci-gate' (headers depth, review digest, severity exit codes), "
-        "'release' (full depth, recommendation, Markdown), 'quick' "
+        "'release' (source depth, recommendation, Markdown), 'quick' "
         "(symbols-only, one-line summary). Explicit flags override the profile; "
         "single-pair compares only (configure release defaults in .abicheck.yml).",
     )(func)

@@ -288,15 +288,16 @@ def _run_baseline_compare(
     from .service import compare_snapshots, resolve_input
 
     # Each side is parsed with its *own* headers. `scan` has a single -H (built for
-    # the candidate); for a native --baseline library whose public headers differ,
-    # --baseline-header/-include select the old side's headers. Without them we
-    # reuse the candidate -H/-I — correct only when the headers did not change — so
-    # warn rather than silently read the old side through the new headers (Codex).
+    # the candidate); for a native --against library whose public headers differ,
+    # `-H old=PATH`/`-I old=PATH` (side-aware, ADR-043 D5) select the old side's
+    # headers. Without them we reuse the candidate -H/-I — correct only when the
+    # headers did not change — so warn rather than silently read the old side
+    # through the new headers (Codex).
     if baseline_headers:
         bl_headers = list(baseline_headers)
         bl_includes = list(baseline_includes) if baseline_includes else includes
         bl_public_headers = bl_headers
-        # The old-side public boundary comes ONLY from --baseline-header: dirs in
+        # The old-side public boundary comes ONLY from `-H old=`: dirs in
         # it are public-header dirs, files opt in just themselves. Do NOT fall back
         # to the new side's public dirs — a relative dir like `include/` would
         # (segment-based provenance) re-mark old private headers as PUBLIC and skew
@@ -307,10 +308,11 @@ def _run_baseline_compare(
         bl_public_headers, bl_public_dirs = public_headers, public_header_dirs
         if headers and _baseline_is_native_library(baseline):
             click.echo(
-                f"warning: --baseline {baseline.name} is a native library parsed "
+                f"warning: --against {baseline.name} is a native library parsed "
                 f"with the new build's headers (-H); if its public headers differ "
-                f"from the new version, pass --baseline-header (else the old side is "
-                f"read through the new headers and the diff may be wrong/noisy).",
+                f"from the new version, pass -H old=PATH/-I old=PATH (else the old "
+                f"side is read through the new headers and the diff may be "
+                f"wrong/noisy).",
                 err=True,
             )
 

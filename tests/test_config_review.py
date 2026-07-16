@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -291,6 +292,122 @@ class TestCompareReleaseSeverityExit:
         )
         # Removed C++ symbol == BREAKING == legacy exit 4.
         assert result.exit_code == 4
+
+
+# ── §2.3 --severity-* respected under --used-by/--required-symbol scoping ──
+#
+# Regression: `_apply_used_by_scoping`/`_apply_required_symbol_scoping`
+# returned straight to `sys.exit(scoped_exit_code)` before the general
+# severity-aware exit handler ever ran, so a scoped compare always used the
+# legacy 0/2/4 verdict floor and silently ignored any --severity-*/
+# --severity-preset flag the caller passed (post-merge PR #566 review).
+
+
+class TestScopedExitRespectsSeverity:
+    def test_required_symbol_legacy_scope_exits_breaking(self, tmp_path: Path) -> None:
+        old_p, new_p = _write_removed_cpp_symbol(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            ["compare", str(old_p), str(new_p), "--required-symbol", "_Z3foov"],
+        )
+        assert result.exit_code == 4
+
+    def test_required_symbol_severity_info_only_exits_zero(self, tmp_path: Path) -> None:
+        old_p, new_p = _write_removed_cpp_symbol(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            ["compare", str(old_p), str(new_p), "--required-symbol", "_Z3foov",
+             "--severity-preset", "info-only"],
+        )
+        # Before the fix this always exited 4 (the legacy scoped-verdict
+        # floor), ignoring --severity-preset entirely.
+        assert result.exit_code == 0
+
+    def test_required_symbol_severity_default_still_exits_breaking(
+        self, tmp_path: Path,
+    ) -> None:
+        old_p, new_p = _write_removed_cpp_symbol(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            ["compare", str(old_p), str(new_p), "--required-symbol", "_Z3foov",
+             "--severity-preset", "default"],
+        )
+        assert result.exit_code == 4
+
+    def test_required_symbol_never_present_floors_severity_at_4(
+        self, tmp_path: Path,
+    ) -> None:
+        # Regression (Codex P1): a required symbol absent from *both* old and
+        # new is a missing contract with no corresponding diff Change (the
+        # symbol was never removed -- it never existed), so
+        # `scoped.breaking_for_host` is empty even though `scoped.verdict` is
+        # BREAKING. `_scoped_exit_code` used to compute the severity-scheme
+        # exit purely from `breaking_for_host`, silently exiting 0 for a
+        # scoped compare that can never satisfy the contract at all.
+        old_p, new_p = _write_identical(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            ["compare", str(old_p), str(new_p), "--required-symbol", "never_existed",
+             "--severity-preset", "default"],
+        )
+        assert result.exit_code == 4
+
+    def test_required_symbol_never_present_severity_info_only_exits_zero(
+        self, tmp_path: Path,
+    ) -> None:
+        old_p, new_p = _write_identical(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            ["compare", str(old_p), str(new_p), "--required-symbol", "never_existed",
+             "--severity-preset", "info-only"],
+        )
+        assert result.exit_code == 0
+
+    def test_required_symbol_json_severity_block_reflects_scoped_gate(
+        self, tmp_path: Path,
+    ) -> None:
+        # Regression (Codex P2): the JSON `severity` block used to always
+        # describe the full-library gate, even for a --required-symbol scope
+        # whose contract (kept_entry) is untouched by the removal of an
+        # unrelated symbol -- the scoped gate here is COMPATIBLE/exit 0, but
+        # `severity.exit_code` used to still report the full library's 4.
+        old = AbiSnapshot(
+            library="libtest.so", version="1.0",
+            functions=[
+                Function(name="_Z10kept_entryv", mangled="_Z10kept_entryv",
+                          return_type="int", visibility=Visibility.PUBLIC),
+                Function(name="_Z9unrelatedv", mangled="_Z9unrelatedv",
+                          return_type="int", visibility=Visibility.PUBLIC),
+            ],
+        )
+        new = AbiSnapshot(
+            library="libtest.so", version="2.0",
+            functions=[
+                Function(name="_Z10kept_entryv", mangled="_Z10kept_entryv",
+                          return_type="int", visibility=Visibility.PUBLIC),
+            ],
+        )
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        old_p.write_text(snapshot_to_json(old), encoding="utf-8")
+        new_p.write_text(snapshot_to_json(new), encoding="utf-8")
+
+        result = CliRunner().invoke(
+            main,
+            ["compare", str(old_p), str(new_p),
+             "--required-symbol", "_Z10kept_entryv",
+             "--format", "json", "--severity-preset", "default"],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["full_verdict"] == "BREAKING"
+        assert data["verdict"] == "COMPATIBLE"
+        assert data["severity"]["exit_code"] == 0
+        assert data["severity"]["blocking"] is False
+        assert data["severity"]["categories"]["abi_breaking"]["count"] == 0
+        assert data["full_severity"]["exit_code"] == 4
+        assert data["full_severity"]["blocking"] is True
+        assert data["full_severity"]["categories"]["abi_breaking"]["count"] == 1
 
 
 # ── §1 appcompat warnings + scope ───────────────────────────────────────────

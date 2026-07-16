@@ -775,28 +775,99 @@ def generate_html_report(
         from .severity import compute_gate_decision
 
         _eff_kind_sets_fn2 = getattr(result, "_effective_kind_sets", None)
-        gate = compute_gate_decision(
+        full_gate = compute_gate_decision(
             cast(list[HasKind], all_changes),
             severity_config,
             policy=getattr(result, "policy", None),
             kind_sets=_eff_kind_sets_fn2() if callable(_eff_kind_sets_fn2) else None,
             policy_file=getattr(result, "policy_file", None),
         )
-        gate_passed = not gate.blocking
+        # `--used-by`/`--required-symbol(s)` scoping (ADR-043): the CLI
+        # process actually exits on the *scoped* gate, not this full-library
+        # one -- without this, the card could say "CI Gate: FAIL (exit 4)"
+        # for a run that just exited 0 because the scoped contract was
+        # compatible (CodeRabbit review). Mirrors the JSON severity block's
+        # full_severity/severity split.
+        scoped_exit_code = getattr(result, "scoped_exit_code", None)
+        scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
+        gate_exit_code: int
+        if scoped_exit_code is not None and scoped_exit_code_scheme == "severity":
+            gate_passed = scoped_exit_code == 0
+            gate_exit_code = scoped_exit_code
+            gate_title = "CI Gate (scoped)"
+            full_gate_label = (
+                "PASS" if not full_gate.blocking else f"FAIL (exit {full_gate.exit_code})"
+            )
+            gate_note = (
+                f"Reflects the scoped --used-by/--required-symbol severity gate "
+                f"the CLI process actually exits on (full-library gate: "
+                f"{h(full_gate_label)})."
+            )
+        else:
+            gate_passed = not full_gate.blocking
+            gate_exit_code = full_gate.exit_code
+            gate_title = "CI Gate"
+            gate_note = (
+                "Reflects the configured severity gate — may differ from the "
+                "Compatibility verdict above (e.g. an addition promoted to "
+                "<code>error</code> still fails CI)."
+            )
         gate_fg, gate_bg = (
             ("#1b5e20", "#e8f5e9") if gate_passed else ("#b71c1c", "#ffebee")
         )
-        gate_label = "PASS" if gate_passed else f"FAIL (exit {gate.exit_code})"
+        gate_label = "PASS" if gate_passed else f"FAIL (exit {gate_exit_code})"
         gate_icon = "✅" if gate_passed else "🛑"
         gate_html = (
             f"<div class='verdict-box' "
             f"style='background:{gate_bg}; color:{gate_fg}; "
             f"border-left:6px solid {gate_fg};'>"
-            f"<h2>{gate_icon} CI Gate: {h(gate_label)}</h2>"
+            f"<h2>{gate_icon} {h(gate_title)}: {h(gate_label)}</h2>"
             f"<div class='bc-metric' style='font-size:0.85em; opacity:0.85;'>"
-            f"Reflects the configured severity gate — may differ from the "
-            f"Compatibility verdict above (e.g. an addition promoted to "
-            f"<code>error</code> still fails CI)."
+            f"{gate_note}"
+            f"</div></div>"
+        )
+
+    scoped_verdict = getattr(result, "scoped_verdict", None)
+    scoped_html = ""
+    if scoped_verdict is not None:
+        # `--used-by`/`--required-symbol(s)` scoping (ADR-043): the
+        # Compatibility verdict box above stays computed from the full,
+        # unscoped library diff -- this format's own gate/verdict rendering
+        # intentionally keeps that authoritative. But the actual CLI process
+        # exits on the *scoped* verdict floor when scoping is requested,
+        # which can legitimately disagree with the verdict shown above.
+        # Surfaced here so a reader of the HTML report can't miss that
+        # disagreement, mirroring the human-format banner
+        # (`_fold_scoped_compat_into_text`) without changing this report's
+        # own verdict-box semantics.
+        scoped_value = (
+            scoped_verdict.value if hasattr(scoped_verdict, "value") else str(scoped_verdict)
+        )
+        scoped_fg, scoped_bg = _VERDICT_STYLE.get(scoped_value, ("#212121", "#f5f5f5"))
+        scoped_exit_code = getattr(result, "scoped_exit_code", None)
+        scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
+        # Under a severity scheme the scoped exit code is NOT a fixed
+        # BREAKING->4/API_BREAK->2 mapping of the scoped verdict -- e.g.
+        # --severity-preset info-only can floor it at 0 even for a BREAKING
+        # scoped verdict (Codex review) -- so state the actual computed
+        # value/scheme instead of implying a verdict->exit-code equivalence
+        # that only holds under the legacy scheme.
+        exit_note = (
+            f"The CLI process exits {scoped_exit_code} under the "
+            f"{scoped_exit_code_scheme} exit-code scheme for this "
+            f"--used-by/--required-symbol run"
+            if scoped_exit_code is not None
+            else "This is what the CLI process exit code reflects for this "
+            "--used-by/--required-symbol run"
+        )
+        scoped_html = (
+            f"<div class='verdict-box' "
+            f"style='background:{scoped_bg}; color:{scoped_fg}; "
+            f"border-left:6px solid {scoped_fg};'>"
+            f"<h2>{_verdict_icon(scoped_value)} Scoped verdict: {h(scoped_value)}</h2>"
+            f"<div class='bc-metric' style='font-size:0.85em; opacity:0.85;'>"
+            f"{h(exit_note)} — it may differ from the "
+            f"full-library Compatibility verdict above."
             f"</div></div>"
         )
 
@@ -886,6 +957,7 @@ def generate_html_report(
 </div>
 
 {gate_html}
+{scoped_html}
 {_confidence_html(result)}
 {nav_html}
 {summary_html}

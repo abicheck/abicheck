@@ -535,6 +535,31 @@ def test_gate_card_passes_when_no_error_level_findings() -> None:
     assert "PASS" in out
 
 
+def test_gate_card_reflects_scoped_gate_not_full_library() -> None:
+    """Regression (CodeRabbit review): the CI Gate card used to always be
+    computed from the full-library diff, even under --used-by/--required
+    -symbol scoping. Here the full library has an error-level BREAKING
+    removal, but the scoped result (set on `result` the way
+    `_apply_used_by_scoping` does) is compatible -- the CLI process exits 0,
+    so the card must say PASS, not FAIL, and must not just silently ignore
+    the scoping."""
+    from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
+    from abicheck.severity import resolve_severity_config
+
+    c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+    result = DiffResult(
+        old_version="1.0", new_version="2.0", library="libtest.so",
+        changes=[c], verdict=Verdict.BREAKING,
+    )
+    result.scoped_verdict = Verdict.COMPATIBLE  # type: ignore[attr-defined]
+    result.scoped_exit_code = 0  # type: ignore[attr-defined]
+    result.scoped_exit_code_scheme = "severity"  # type: ignore[attr-defined]
+    cfg = resolve_severity_config("default")
+    out = generate_html_report(result, severity_config=cfg)
+    assert "CI Gate (scoped): PASS" in out
+    assert "full-library gate: FAIL (exit 4)" in out
+
+
 def test_gate_card_absent_from_abicc_compatible_layout() -> None:
     """The ABICC-compatible layout (compat_html=True) is left unchanged even
     when severity_config is supplied."""
@@ -549,3 +574,38 @@ def test_gate_card_absent_from_abicc_compatible_layout() -> None:
     cfg = resolve_severity_config("default", addition="error")
     out = generate_html_report(result, severity_config=cfg, compat_html=True)
     assert "CI Gate" not in out
+
+
+def test_scoped_verdict_box_absent_when_no_scoping() -> None:
+    r = _result(verdict="BREAKING")
+    out = generate_html_report(r)
+    assert "Scoped verdict" not in out
+
+
+def test_scoped_verdict_box_present_and_can_disagree_with_full_verdict() -> None:
+    # `--used-by`/`--required-symbol(s)` scoping (ADR-043): the CLI process
+    # exits on the scoped verdict floor, which can disagree with the full
+    # library's Compatibility verdict box above -- the report must surface
+    # that instead of only showing the (possibly misleading) full verdict
+    # (post-merge PR #566 review).
+    r = _result(verdict="BREAKING")
+    r.scoped_verdict = SimpleNamespace(value="COMPATIBLE")
+    r.used_by = [{"app": "/bin/myapp", "verdict": "COMPATIBLE"}]
+    out = generate_html_report(r)
+    assert "Scoped verdict: COMPATIBLE" in out
+    # The main verdict box stays the full-library one (unchanged).
+    assert "Compatibility: BREAKING" in out
+
+
+def test_scoped_verdict_box_states_actual_exit_code_under_severity_scheme() -> None:
+    # Regression: the banner used to claim "this is what the CLI process
+    # exit code reflects" unconditionally, wrong under a severity scheme --
+    # e.g. --severity-preset info-only can floor the scoped exit code at 0
+    # even for a BREAKING scoped verdict (Codex review).
+    r = _result(verdict="BREAKING")
+    r.scoped_verdict = SimpleNamespace(value="BREAKING")
+    r.scoped_exit_code = 0
+    r.scoped_exit_code_scheme = "severity"
+    out = generate_html_report(r)
+    assert "exits 0" in out
+    assert "severity exit-code scheme" in out

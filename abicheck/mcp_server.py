@@ -32,6 +32,7 @@ import os as _os
 import platform
 import sys
 import time as _time
+from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -458,6 +459,107 @@ def _scoped_verdict_exit_code(verdict: object) -> int:
     return 0
 
 
+def _scoped_exit_code(
+    verdict: object, relevant_changes: list[Any], result: Any,
+    severity_config: SeverityConfig | None, policy: str, policy_file: object,
+    *, has_missing_contract: bool = False,
+) -> int:
+    """Scoped-verdict exit code, respecting a severity config when given.
+
+    Mirrors ``cli_compare_helpers._scoped_exit_code``: without this, a
+    used_by/required_symbols scope always fell back to the legacy 0/2/4
+    verdict floor, silently ignoring any severity_* argument the caller
+    passed (parity bug with the severity-aware unscoped path above).
+
+    *has_missing_contract* (a required symbol/version/entrypoint absent from
+    the new library) floors the severity-scheme exit code separately from
+    *relevant_changes*: a missing contract symbol is BREAKING but is not a
+    diff Change, so ``compute_exit_code`` never sees it and would otherwise
+    return 0 (Codex review).
+    """
+    if severity_config is not None:
+        from .severity import compute_exit_code, missing_contract_exit_code
+
+        code = compute_exit_code(
+            relevant_changes, severity_config,
+            policy=policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=policy_file,
+        )
+        if has_missing_contract:
+            code = max(code, missing_contract_exit_code(severity_config))
+        return code
+    return _scoped_verdict_exit_code(verdict)
+
+
+def _scoped_severity_summary(
+    relevant_changes: list[Any], missing: Iterable[str],
+    result: Any, severity_config: SeverityConfig, policy: str, policy_file: object,
+) -> tuple[tuple[str, ...], dict[str, int]]:
+    """(blocking_categories, per-category counts) for one scoped result.
+
+    Mirrors ``cli_compare_helpers._scoped_severity_summary``: a missing
+    contract symbol/version/entrypoint with no matching diff Change is
+    folded into ``abi_breaking`` directly here -- into the blocking
+    -categories set (when abi_breaking is severity-configured as error,
+    matching the exit-code floor) and into the count (always, since a count
+    is a factual tally, not a gate decision). A *missing* entry that already
+    has a matching Change in *relevant_changes* is excluded via
+    ``uncovered_missing_symbols`` so it isn't counted twice.
+    """
+    from .appcompat import uncovered_missing_symbols
+    from .severity import (
+        IssueCategory,
+        SeverityLevel,
+        categorize_changes,
+        compute_gate_decision,
+    )
+
+    categorized = categorize_changes(
+        relevant_changes, policy=policy,
+        kind_sets=result._effective_kind_sets(), policy_file=policy_file,
+    )
+    counts = {
+        "abi_breaking": len(categorized.abi_breaking),
+        "potential_breaking": len(categorized.potential_breaking),
+        "quality_issues": len(categorized.quality_issues),
+        "addition": len(categorized.addition),
+    }
+    gate = compute_gate_decision(
+        relevant_changes, severity_config,
+        policy=policy, kind_sets=result._effective_kind_sets(), policy_file=policy_file,
+    )
+    categories = list(gate.blocking_categories)
+    uncovered = uncovered_missing_symbols(missing, relevant_changes)
+    if uncovered:
+        counts["abi_breaking"] += len(uncovered)
+        if (
+            severity_config.abi_breaking == SeverityLevel.ERROR
+            and IssueCategory.ABI_BREAKING.value not in categories
+        ):
+            categories.append(IssueCategory.ABI_BREAKING.value)
+    return tuple(categories), counts
+
+
+_VERDICT_SEVERITY_RANK = {
+    "BREAKING": 3, "API_BREAK": 2, "COMPATIBLE_WITH_RISK": 1,
+    "COMPATIBLE": 0, "NO_CHANGE": 0,
+}
+
+
+def _verdict_severity_rank(verdict: object) -> int:
+    """Rank a Verdict by severity, independent of any exit-code scheme.
+
+    Mirrors ``cli_compare_helpers._verdict_severity_rank``: under a severity
+    scheme a BREAKING app can carry exit code 0 (e.g. an info-only preset),
+    so picking the reported scoped verdict by exit code could let a later,
+    less-severe app overwrite an earlier BREAKING one merely because their
+    exit codes tied at 0 (Codex review).
+    """
+    value = getattr(verdict, "value", verdict)
+    return _VERDICT_SEVERITY_RANK.get(value, 0) if isinstance(value, str) else 0
+
+
 def _impact_category(kind: ChangeKind, policy: str = "strict_abi") -> str:
     """Return the impact category string for a ChangeKind under the given policy.
 
@@ -654,14 +756,20 @@ def abi_compare(
         severity_addition: Override severity for addition findings.
         used_by: Application binary paths (ADR-043) — scope the comparison to
             what each app actually imports/requires, instead of the full
-            library surface. OLD/NEW must be real library binaries (not JSON
-            snapshots). Mutually exclusive with required_symbols. Adds a
-            ``used_by`` list to the response and floors ``exit_code`` on the
-            worst-scoped app's verdict (BREAKING → 4, API_BREAK → 2).
+            library surface. old_input/new_input may be real library binaries
+            or JSON snapshots carrying binary evidence (a dump of a real
+            library, not headers-only). Mutually exclusive with
+            required_symbols. Adds a ``used_by`` list to the response and
+            computes ``exit_code`` from the worst-scoped app: the legacy
+            BREAKING → 4 / API_BREAK → 2 floor, or — when any ``severity_*``
+            argument is given — the severity-aware scheme (which can return
+            ``0`` for a scoped BREAKING verdict under ``severity_preset=
+            "info-only"``).
         required_symbols: An explicit plugin/host required-entrypoint contract
             (ADR-043) — scope the comparison to only these exported symbols.
             Mutually exclusive with used_by. Adds a ``required_symbol_contract``
-            object to the response and floors ``exit_code`` on its verdict.
+            object to the response and computes ``exit_code`` from its verdict
+            under the same legacy/severity-aware scheme as ``used_by`` above.
     """
     t0 = _time.monotonic()
     try:
@@ -848,19 +956,36 @@ def abi_compare(
             from .appcompat import scope_diff_to_app
             from .service import detect_binary_format
 
-            for p, label in ((old_path, "old_input"), (new_path, "new_input")):
-                if detect_binary_format(p) is None:
+            old_lib: Any = old_path if detect_binary_format(old_path) is not None else old_snap
+            new_lib: Any = new_path if detect_binary_format(new_path) is not None else new_snap
+            for lib, p, label in (
+                (old_lib, old_path, "old_input"), (new_lib, new_path, "new_input"),
+            ):
+                has_binary_evidence = isinstance(lib, Path) or any(
+                    getattr(lib, field, None) is not None for field in ("elf", "pe", "macho")
+                )
+                if not has_binary_evidence:
                     return json.dumps(
                         {
                             "status": "error",
                             "error": f"used_by requires old_input/new_input to be "
-                            f"real library binaries (not JSON snapshots); "
-                            f"{label} ({p}) is not a recognized binary format.",
+                            f"real library binaries, or JSON snapshots carrying "
+                            f"binary evidence (a dump of a real library, not "
+                            f"headers-only); {label} ({p}) is neither.",
                         }
                     )
             summaries = []
             worst_exit = 0
             worst_verdict = None
+            worst_verdict_rank = -1
+            # Keyed by id(change)/the missing string itself so a Change or
+            # missing symbol shared by two tied apps (e.g. both import the
+            # same removed symbol) collapses to one entry instead of being
+            # tallied once per app (Codex review) -- `_scoped_severity_summary`
+            # runs once at the end over this deduplicated union, not per app
+            # summed together.
+            worst_changes: dict[int, Any] = {}
+            worst_missing: set[str] = set()
             for app in used_by:
                 app_path = _safe_read_path(app, label="used_by")
                 if not app_path.exists():
@@ -869,7 +994,7 @@ def abi_compare(
                     )
                 _check_file_size(app_path, label="used_by")
                 scoped = scope_diff_to_app(
-                    result, app_path, old_path, new_path,
+                    result, app_path, old_lib, new_lib,
                     policy=active_policy, policy_file=pf,
                 )
                 summaries.append(
@@ -883,9 +1008,26 @@ def abi_compare(
                         "symbol_coverage": round(scoped.symbol_coverage, 1),
                     }
                 )
-                app_exit = _scoped_verdict_exit_code(scoped.verdict)
-                if worst_verdict is None or app_exit >= worst_exit:
-                    worst_exit = app_exit
+                app_exit = _scoped_exit_code(
+                    scoped.verdict, scoped.breaking_for_app, result,
+                    severity_config, active_policy, pf,
+                    has_missing_contract=bool(
+                        scoped.missing_symbols or scoped.missing_versions
+                    ),
+                )
+                # exit code (gating) and verdict (reporting) are maxed/ranked
+                # independently -- see _verdict_severity_rank.
+                if severity_config is not None:
+                    if app_exit > worst_exit:
+                        worst_changes = {id(c): c for c in scoped.breaking_for_app}
+                        worst_missing = set(scoped.missing_symbols) | set(scoped.missing_versions)
+                    elif app_exit == worst_exit:
+                        worst_changes.update({id(c): c for c in scoped.breaking_for_app})
+                        worst_missing |= set(scoped.missing_symbols) | set(scoped.missing_versions)
+                worst_exit = max(worst_exit, app_exit)
+                rank = _verdict_severity_rank(scoped.verdict)
+                if worst_verdict is None or rank >= worst_verdict_rank:
+                    worst_verdict_rank = rank
                     worst_verdict = scoped.verdict
             scoped_key = "used_by"
             scoped_payload = summaries
@@ -897,6 +1039,16 @@ def abi_compare(
             # rendered report, not just this response's top-level fields.
             result.used_by = summaries  # type: ignore[attr-defined]
             result.scoped_verdict = worst_verdict  # type: ignore[attr-defined]
+            result.scoped_exit_code = worst_exit  # type: ignore[attr-defined]
+            scoped_scheme = "severity" if severity_config is not None else "legacy"
+            result.scoped_exit_code_scheme = scoped_scheme  # type: ignore[attr-defined]
+            if severity_config is not None:
+                categories, counts = _scoped_severity_summary(
+                    list(worst_changes.values()), worst_missing,
+                    result, severity_config, active_policy, pf,
+                )
+                result.scoped_blocking_categories = categories  # type: ignore[attr-defined]
+                result.scoped_severity_counts = counts  # type: ignore[attr-defined]
         elif required_symbols:
             from .appcompat import scope_diff_to_required_symbols
 
@@ -912,11 +1064,25 @@ def abi_compare(
                 "relevant_change_count": len(scoped_host.breaking_for_host),
                 "coverage": round(scoped_host.coverage, 1),
             }
-            exit_code = _scoped_verdict_exit_code(scoped_host.verdict)
+            exit_code = _scoped_exit_code(
+                scoped_host.verdict, scoped_host.breaking_for_host, result,
+                severity_config, active_policy, pf,
+                has_missing_contract=bool(scoped_host.missing_entrypoints),
+            )
             exit_code_scheme = "scoped"
             scoped_verdict_value = scoped_host.verdict.value
             result.required_symbols = scoped_payload  # type: ignore[attr-defined]
             result.scoped_verdict = scoped_host.verdict  # type: ignore[attr-defined]
+            result.scoped_exit_code = exit_code  # type: ignore[attr-defined]
+            scoped_scheme = "severity" if severity_config is not None else "legacy"
+            result.scoped_exit_code_scheme = scoped_scheme  # type: ignore[attr-defined]
+            if severity_config is not None:
+                categories, counts = _scoped_severity_summary(
+                    scoped_host.breaking_for_host, scoped_host.missing_entrypoints,
+                    result, severity_config, active_policy, pf,
+                )
+                result.scoped_blocking_categories = categories  # type: ignore[attr-defined]
+                result.scoped_severity_counts = counts  # type: ignore[attr-defined]
 
         # Build structured response. When a used_by/required_symbols scope is in
         # effect, mirror the CLI JSON contract (`_fold_scoped_compat_into_text`):

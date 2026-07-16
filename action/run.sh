@@ -146,9 +146,9 @@ if [[ -n "$ABI_BASELINE" && ( "$MODE" == "compare" || "$MODE" == "scan" ) ]]; th
     fi
   fi
   echo "Using ABI baseline: $BASELINE_FILE"
-  # compare consumes the baseline as old-library; scan consumes it as --baseline.
+  # compare consumes the baseline as old-library; scan consumes it as --against.
   if [[ "$MODE" == "scan" ]]; then
-    INPUT_BASELINE="$BASELINE_FILE"
+    INPUT_AGAINST="$BASELINE_FILE"
   else
     INPUT_OLD_LIBRARY="$BASELINE_FILE"
   fi
@@ -207,7 +207,12 @@ if [[ "$MODE" == "dump" ]]; then
   CMD+=(-o "$OUTPUT_FILE")
 
 elif [[ "$MODE" == "compare" ]]; then
-  # ── Compare mode ────────────────────────────────────────────────────────
+  # ── Compare mode ─────────────────────────────────────────────────────────
+  # old-library/new-library may be single binaries/snapshots, or directories/
+  # packages — the `compare` CLI command fans out to a per-library comparison
+  # automatically in the latter case (ADR-037 D7), so this one branch covers
+  # both; the package-specific options below are simply ignored (with a
+  # stderr warning from the CLI) when the operands are a single pair.
   CMD+=(compare)
   CMD+=("${INPUT_OLD_LIBRARY:?old-library is required for compare mode}")
   CMD+=("${INPUT_NEW_LIBRARY:?new-library is required}")
@@ -223,7 +228,10 @@ elif [[ "$MODE" == "compare" ]]; then
   add_single_flag "--lang" "${INPUT_LANG:-}"
   add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
 
-  # Format — for SARIF, always write to a file so upload-sarif can find it
+  # Format — for SARIF, always write to a file so upload-sarif can find it.
+  # sarif/html are rejected by the CLI itself (a clear UsageError, exit 64)
+  # when the operands are directories/packages — surfaced as VERDICT=ERROR
+  # below via the generic CLI-error detection, no separate fallback needed.
   FORMAT="${INPUT_FORMAT:-markdown}"
   CMD+=(--format "$FORMAT")
 
@@ -239,12 +247,9 @@ elif [[ "$MODE" == "compare" ]]; then
   # sticky PR comment (--secondary-format), instead of re-invoking abicheck a
   # second time just to get JSON. Only needed when the primary format isn't
   # already JSON — a json primary is reused as-is (see _can_reuse_primary_json
-  # below). compare-release doesn't build CMD through this branch, so it
-  # keeps using the rerun fallback. MODE=compare dispatches through the
-  # same release-fan-out engine internally when the operands are directories
-  # or packages (regardless of the Action's MODE), and that engine rejects
-  # --secondary-format — skip it there too, so a directory/package compare
-  # under MODE=compare keeps working instead of hard-failing (Codex review).
+  # below). The per-library release fan-out (directory/package operands)
+  # rejects --secondary-format, so it's skipped there too, falling back to
+  # the rerun path in _maybe_post_pr_comment (Codex review).
   if [[ "$FORMAT" != "json" ]] \
      && ! _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
      && ! _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
@@ -271,75 +276,46 @@ elif [[ "$MODE" == "compare" ]]; then
   # when an input is a binary, but these cross-compilation flags are not
   # exposed on the compare CLI. They are only passed in dump mode.
 
-elif [[ "$MODE" == "compare-release" ]]; then
-  # ── Compare-release mode (package-level comparison) → `compare` dirs/pkgs ──
-  # The standalone compare-release command was removed (ADR-037 D7); `compare`
-  # accepts directories/packages and fans out to the same per-library engine.
-  # The Action mode name is kept for back-compat.
-  CMD+=(compare)
-  CMD+=("${INPUT_OLD_LIBRARY:?old-library is required for compare-release mode}")
-  CMD+=("${INPUT_NEW_LIBRARY:?new-library is required}")
+  # Package-specific options — only meaningful (and only forwarded) when
+  # old-library/new-library are directories or packages; gated here rather
+  # than left to the CLI's own single-file warning so a plain single-pair
+  # compare doesn't get a spurious "-j/--jobs ignored" warning on every run
+  # just because jobs defaults to '0'.
+  if _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
+     || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
+    add_sided_flag "--debug-info" "old" "${INPUT_DEBUG_INFO1:-}"
+    add_sided_flag "--debug-info" "new" "${INPUT_DEBUG_INFO2:-}"
+    add_sided_flag "--devel-pkg" "old" "${INPUT_DEVEL_PKG1:-}"
+    add_sided_flag "--devel-pkg" "new" "${INPUT_DEVEL_PKG2:-}"
 
-  add_flag "-H" "${INPUT_HEADER:-}"
-  add_sided_flag "--header" "old" "${INPUT_OLD_HEADER:-}"
-  add_sided_flag "--header" "new" "${INPUT_NEW_HEADER:-}"
-  add_flag "-I" "${INPUT_INCLUDE:-}"
-  add_sided_flag "--include" "old" "${INPUT_OLD_INCLUDE:-}"
-  add_sided_flag "--include" "new" "${INPUT_NEW_INCLUDE:-}"
-  add_sided_flag "--version" "old" "${INPUT_OLD_VERSION:-}"
-  add_sided_flag "--version" "new" "${INPUT_NEW_VERSION:-}"
-  add_single_flag "--lang" "${INPUT_LANG:-}"
-
-  # Format — compare-release only supports markdown and json
-  FORMAT="${INPUT_FORMAT:-markdown}"
-  if [[ "$FORMAT" != "markdown" && "$FORMAT" != "json" ]]; then
-    echo "::warning::compare-release mode only supports 'markdown' and 'json' formats. Falling back to 'markdown'."
-    FORMAT="markdown"
-  fi
-  CMD+=(--format "$FORMAT")
-
-  OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
-  if [[ -n "$OUTPUT_FILE" ]]; then
-    CMD+=(-o "$OUTPUT_FILE")
+    if [[ "${INPUT_DSO_ONLY:-false}" == "true" ]]; then
+      CMD+=(--dso-only)
+    fi
+    if [[ "${INPUT_INCLUDE_PRIVATE_DSO:-false}" == "true" ]]; then
+      CMD+=(--include-private-dso)
+    fi
+    if [[ "${INPUT_KEEP_EXTRACTED:-false}" == "true" ]]; then
+      CMD+=(--keep-extracted)
+    fi
+    if [[ "${INPUT_FAIL_ON_REMOVED_LIBRARY:-false}" == "true" ]]; then
+      CMD+=(--fail-on-removed-library)
+    fi
+    add_single_flag "--jobs" "${INPUT_JOBS:-0}"
   fi
 
-  add_single_flag "--policy" "${INPUT_POLICY:-}"
-  add_single_flag "--policy-file" "${INPUT_POLICY_FILE:-}"
-  add_single_flag "--suppress" "${INPUT_SUPPRESS:-}"
-
-  # Package-specific options
-  add_sided_flag "--debug-info" "old" "${INPUT_DEBUG_INFO1:-}"
-  add_sided_flag "--debug-info" "new" "${INPUT_DEBUG_INFO2:-}"
-  add_sided_flag "--devel-pkg" "old" "${INPUT_DEVEL_PKG1:-}"
-  add_sided_flag "--devel-pkg" "new" "${INPUT_DEVEL_PKG2:-}"
-
-  if [[ "${INPUT_DSO_ONLY:-false}" == "true" ]]; then
-    CMD+=(--dso-only)
-  fi
-  if [[ "${INPUT_INCLUDE_PRIVATE_DSO:-false}" == "true" ]]; then
-    CMD+=(--include-private-dso)
-  fi
-  if [[ "${INPUT_KEEP_EXTRACTED:-false}" == "true" ]]; then
-    CMD+=(--keep-extracted)
-  fi
-  if [[ "${INPUT_FAIL_ON_REMOVED_LIBRARY:-false}" == "true" ]]; then
-    CMD+=(--fail-on-removed-library)
-  fi
-  add_single_flag "--jobs" "${INPUT_JOBS:-0}"
-
-elif [[ "$MODE" == "deps" ]]; then
-  # ── Deps mode (Linux ELF) ───────────────────────────────────────────────
+elif [[ "$MODE" == "deps-tree" ]]; then
+  # ── deps-tree mode (Linux ELF) ───────────────────────────────────────────
   CMD+=(deps tree)
-  CMD+=("${INPUT_NEW_LIBRARY:?new-library is required for deps mode}")
+  CMD+=("${INPUT_NEW_LIBRARY:?new-library is required for deps-tree mode}")
 
   add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
   add_flag "--search-path" "${INPUT_SEARCH_PATH:-}"
   add_single_flag "--ld-library-path" "${INPUT_LD_LIBRARY_PATH:-}"
 
-  # Format — deps only supports markdown and json
+  # Format — deps-tree only supports markdown and json
   FORMAT="${INPUT_FORMAT:-markdown}"
   if [[ "$FORMAT" != "markdown" && "$FORMAT" != "json" ]]; then
-    echo "::warning::deps mode only supports 'markdown' and 'json' formats. Falling back to 'markdown'."
+    echo "::warning::deps-tree mode only supports 'markdown' and 'json' formats. Falling back to 'markdown'."
     FORMAT="markdown"
   fi
   CMD+=(--format "$FORMAT")
@@ -349,20 +325,20 @@ elif [[ "$MODE" == "deps" ]]; then
     CMD+=(-o "$OUTPUT_FILE")
   fi
 
-elif [[ "$MODE" == "stack-check" ]]; then
-  # ── Stack-check mode (Linux ELF) → `deps compare` ───────────────────────
+elif [[ "$MODE" == "deps-compare" ]]; then
+  # ── deps-compare mode (Linux ELF) → `deps compare` ──────────────────────
   CMD+=(deps compare)
-  CMD+=("${INPUT_NEW_LIBRARY:?new-library (binary path) is required for stack-check mode}")
-  CMD+=(--old-root "${INPUT_BASELINE:?baseline is required for stack-check mode}")
-  CMD+=(--new-root "${INPUT_CANDIDATE:?candidate is required for stack-check mode}")
+  CMD+=("${INPUT_NEW_LIBRARY:?new-library (binary path) is required for deps-compare mode}")
+  CMD+=(--old-root "${INPUT_OLD_ROOT:?old-root is required for deps-compare mode}")
+  CMD+=(--new-root "${INPUT_NEW_ROOT:?new-root is required for deps-compare mode}")
 
   add_flag "--search-path" "${INPUT_SEARCH_PATH:-}"
   add_single_flag "--ld-library-path" "${INPUT_LD_LIBRARY_PATH:-}"
 
-  # Format — stack-check only supports markdown and json
+  # Format — deps-compare only supports markdown and json
   FORMAT="${INPUT_FORMAT:-markdown}"
   if [[ "$FORMAT" != "markdown" && "$FORMAT" != "json" ]]; then
-    echo "::warning::stack-check mode only supports 'markdown' and 'json' formats. Falling back to 'markdown'."
+    echo "::warning::deps-compare mode only supports 'markdown' and 'json' formats. Falling back to 'markdown'."
     FORMAT="markdown"
   fi
   CMD+=(--format "$FORMAT")
@@ -401,12 +377,13 @@ elif [[ "$MODE" == "scan" ]]; then
   # scan's config flag is --config (not --build-config, which does not exist on
   # scan and hard-fails with exit 64). dump uses --config for the same input.
   add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
-  # audit=true forces a one-build audit even when a baseline is configured
-  # (e.g. via abi-baseline auto-fetch) — the old --audit flag ignored
-  # --baseline the same way; --against structurally cannot be combined with
-  # an audit-only run any more, so the emulation is to simply omit --against.
+  # audit=true forces a one-build audit even when an against baseline is
+  # configured (e.g. via abi-baseline auto-fetch) — the old --audit flag
+  # ignored --baseline the same way; --against structurally cannot be
+  # combined with an audit-only run any more, so the emulation is to simply
+  # omit --against.
   if [[ "${INPUT_AUDIT:-false}" != "true" ]]; then
-    add_single_flag "--against" "${INPUT_BASELINE:-}"
+    add_single_flag "--against" "${INPUT_AGAINST:-}"
   fi
   add_single_flag "--lang" "${INPUT_LANG:-}"
 
@@ -446,7 +423,7 @@ elif [[ "$MODE" == "scan" ]]; then
   fi
 
 else
-  echo "::error::Unknown mode '$MODE'. Use 'compare', 'compare-release', 'dump', 'scan', 'deps', or 'stack-check'."
+  echo "::error::Unknown mode '$MODE'. Use 'compare', 'dump', 'scan', 'deps-tree', or 'deps-compare'."
   exit 1
 fi
 
@@ -500,11 +477,11 @@ _is_cli_error() {
   echo "$STDERR_CONTENT" | grep -qE '(^Usage:|^Error:|^Try |Traceback|click\.)'
 }
 
-if [[ "$MODE" == "stack-check" ]]; then
-  # stack-check exit codes: 0=PASS, 1=WARN, 4=FAIL
+if [[ "$MODE" == "deps-compare" ]]; then
+  # deps-compare exit codes: 0=PASS, 1=WARN, 4=FAIL
   if _is_cli_error; then
     VERDICT="ERROR"
-    echo "::error::abicheck stack-check failed due to a CLI error (exit code $ABICHECK_EXIT)."
+    echo "::error::abicheck deps-compare failed due to a CLI error (exit code $ABICHECK_EXIT)."
   else
     case $ABICHECK_EXIT in
       0) VERDICT="PASS" ;;
@@ -514,11 +491,11 @@ if [[ "$MODE" == "stack-check" ]]; then
     esac
   fi
 
-elif [[ "$MODE" == "deps" ]]; then
-  # deps exit codes: 0=OK, 1=missing deps/symbols
+elif [[ "$MODE" == "deps-tree" ]]; then
+  # deps-tree exit codes: 0=OK, 1=missing deps/symbols
   if _is_cli_error; then
     VERDICT="ERROR"
-    echo "::error::abicheck deps failed due to a CLI error (exit code $ABICHECK_EXIT)."
+    echo "::error::abicheck deps-tree failed due to a CLI error (exit code $ABICHECK_EXIT)."
   else
     case $ABICHECK_EXIT in
       0) VERDICT="PASS" ;;
@@ -539,38 +516,6 @@ elif [[ "$MODE" == "dump" ]]; then
     else
       echo "::error::abicheck dump failed (exit code $ABICHECK_EXIT)."
     fi
-  fi
-
-elif [[ "$MODE" == "compare-release" ]]; then
-  # compare-release exit codes: 0=compatible, 2=API_BREAK, 4=BREAKING,
-  # 8=REMOVED_LIBRARY. With --severity-* options (e.g. via extra-args) the CLI
-  # follows the severity-aware scheme, where exit 1 is a severity error (not a
-  # CLI failure) — distinguish the two via stderr.
-  if [[ $ABICHECK_EXIT -eq 2 ]] && echo "$STDERR_CONTENT" | grep -qE '(^Usage:|^Error:|^Try )'; then
-    VERDICT="ERROR"
-    echo "::error::abicheck compare-release failed due to a CLI argument or configuration error (exit code 2)."
-    echo "::error::Check the command and inputs above. This is NOT an API break — the check did not run."
-  else
-    case $ABICHECK_EXIT in
-      0) VERDICT="COMPATIBLE" ;;
-      1)
-        if _is_cli_error; then
-          VERDICT="ERROR"
-          echo "::error::abicheck compare-release failed due to a CLI error (exit code 1)."
-        else
-          VERDICT="SEVERITY_ERROR"
-        fi
-        ;;
-      2) VERDICT="API_BREAK" ;;
-      4) VERDICT="BREAKING" ;;
-      8) VERDICT="REMOVED_LIBRARY" ;;
-      *)
-        VERDICT="ERROR"
-        if _is_cli_error; then
-          echo "::error::abicheck compare-release failed due to a CLI error (exit code $ABICHECK_EXIT)."
-        fi
-        ;;
-    esac
   fi
 
 elif [[ "$MODE" == "scan" ]]; then
@@ -596,8 +541,10 @@ elif [[ "$MODE" == "scan" ]]; then
   fi
 
 else
-  # compare exit codes: 0=compatible, 1=severity error, 2=API_BREAK, 4=BREAKING
-  # Click also uses exit code 2 for usage/argument errors — detect via stderr.
+  # compare exit codes: 0=compatible, 1=severity error, 2=API_BREAK,
+  # 4=BREAKING, 8=REMOVED_LIBRARY (directory/package operands with
+  # fail-on-removed-library set). Click also uses exit code 2 for
+  # usage/argument errors — detect via stderr.
   if [[ $ABICHECK_EXIT -eq 2 ]] && echo "$STDERR_CONTENT" | grep -qE '(^Usage:|^Error:|^Try )'; then
     VERDICT="ERROR"
     echo "::error::abicheck failed due to a CLI argument or configuration error (exit code 2)."
@@ -616,6 +563,7 @@ else
         ;;
       2) VERDICT="API_BREAK" ;;
       4) VERDICT="BREAKING" ;;
+      8) VERDICT="REMOVED_LIBRARY" ;;
       *) VERDICT="ERROR" ;;
     esac
   fi
@@ -685,24 +633,24 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
     echo ""
     echo "| Property | Value |"
     echo "|----------|-------|"
-    if [[ "$MODE" == "compare" || "$MODE" == "compare-release" ]]; then
+    if [[ "$MODE" == "compare" ]]; then
       echo "| Old | \`${INPUT_OLD_LIBRARY:-}\` (${INPUT_OLD_VERSION:-old}) |"
       echo "| New | \`${INPUT_NEW_LIBRARY:-}\` (${INPUT_NEW_VERSION:-new}) |"
       echo "| Policy | ${INPUT_POLICY:-strict_abi} |"
-    elif [[ "$MODE" == "stack-check" ]]; then
+    elif [[ "$MODE" == "deps-compare" ]]; then
       echo "| Binary | \`${INPUT_NEW_LIBRARY:-}\` |"
-      echo "| Baseline | \`${INPUT_BASELINE:-}\` |"
-      echo "| Candidate | \`${INPUT_CANDIDATE:-}\` |"
+      echo "| Old root | \`${INPUT_OLD_ROOT:-}\` |"
+      echo "| New root | \`${INPUT_NEW_ROOT:-}\` |"
     elif [[ "$MODE" == "scan" ]]; then
       echo "| Binary | \`${INPUT_NEW_LIBRARY:-}\` |"
-      if [[ -n "${INPUT_BASELINE:-}" ]]; then
-        echo "| Baseline | \`${INPUT_BASELINE}\` |"
+      if [[ -n "${INPUT_AGAINST:-}" ]]; then
+        echo "| Against | \`${INPUT_AGAINST}\` |"
       fi
       if [[ -n "${INPUT_SOURCES:-}" ]]; then
         echo "| Sources | \`${INPUT_SOURCES}\` |"
       fi
       echo "| Depth | ${INPUT_DEPTH:-auto} |"
-    elif [[ "$MODE" == "deps" ]]; then
+    elif [[ "$MODE" == "deps-tree" ]]; then
       echo "| Binary | \`${INPUT_NEW_LIBRARY:-}\` |"
     fi
     echo "| Mode | $MODE |"
@@ -789,7 +737,7 @@ _build_json_cmd() {
 _maybe_post_pr_comment() {
   [[ "${INPUT_PR_COMMENT:-true}" == "true" ]] || return 0
   case "$MODE" in
-    compare | compare-release) ;;
+    compare) ;;
     *) return 0 ;;
   esac
   [[ "${INPUT_PR_COMMENT_ON:-changes}" == "never" ]] && return 0
@@ -965,9 +913,9 @@ if [[ "$VERDICT" == "ERROR" ]]; then
   echo "::error::abicheck failed with exit code $ABICHECK_EXIT"
   FINAL_EXIT=1
 
-elif [[ "$MODE" == "stack-check" || "$MODE" == "deps" ]]; then
-  # stack-check: FAIL always fails; WARN fails when fail-on-breaking is true
-  # deps: FAIL always fails the step
+elif [[ "$MODE" == "deps-compare" || "$MODE" == "deps-tree" ]]; then
+  # deps-compare: FAIL always fails; WARN fails when fail-on-breaking is true
+  # deps-tree: FAIL always fails the step
   if [[ "$VERDICT" == "FAIL" ]]; then
     echo "::error::Full-stack check failed (load failure or ABI break)."
     FINAL_EXIT=1
@@ -1004,9 +952,10 @@ elif [[ "$MODE" == "scan" ]]; then
     FINAL_EXIT=1
   fi
 
-elif [[ "$MODE" == "compare-release" ]]; then
-  # compare-release: BREAKING/API_BREAK follow fail-on flags; REMOVED_LIBRARY
-  # only appears when --fail-on-removed-library was passed to the CLI.
+else
+  # compare mode: BREAKING/API_BREAK follow fail-on flags; REMOVED_LIBRARY
+  # only appears when --fail-on-removed-library was passed to the CLI
+  # (directory/package operands only).
   if [[ "$VERDICT" == "BREAKING" && "${INPUT_FAIL_ON_BREAKING:-true}" == "true" ]]; then
     echo "::error::ABI break detected. Set fail-on-breaking: false to continue despite breaks."
     FINAL_EXIT=1
@@ -1019,24 +968,6 @@ elif [[ "$MODE" == "compare-release" ]]; then
 
   if [[ "$VERDICT" == "REMOVED_LIBRARY" ]]; then
     echo "::error::Library removed between old and new package. Set fail-on-removed-library: false to allow."
-    FINAL_EXIT=1
-  fi
-
-  # Severity-aware exit 1 (from --severity-* via extra-args), as in compare mode.
-  if [[ "$VERDICT" == "SEVERITY_ERROR" ]]; then
-    echo "::error::Severity-level error detected by abicheck."
-    FINAL_EXIT=1
-  fi
-
-else
-  # compare mode
-  if [[ "$VERDICT" == "BREAKING" && "${INPUT_FAIL_ON_BREAKING:-true}" == "true" ]]; then
-    echo "::error::ABI break detected. Set fail-on-breaking: false to continue despite breaks."
-    FINAL_EXIT=1
-  fi
-
-  if [[ "$VERDICT" == "API_BREAK" && "${INPUT_FAIL_ON_API_BREAK:-false}" == "true" ]]; then
-    echo "::error::API break detected. Set fail-on-api-break: false to ignore API-level breaks."
     FINAL_EXIT=1
   fi
 

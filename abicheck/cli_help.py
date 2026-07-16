@@ -109,7 +109,6 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
                 "--build-info",
                 "--sources",
                 "--depth",
-                "--max",
             ],
         },
         {
@@ -150,58 +149,6 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             ],
         },
     ],
-    "* collect": [
-        {
-            "name": "Inputs",
-            "options": [
-                "--binary",
-                "--header",
-                "--source-root",
-                "--build-dir",
-                "--compile-db",
-                "-p",
-            ],
-        },
-        {
-            "name": "Build-system adapters",
-            "options": [
-                "--from",
-                "--build-system",
-                "--read-compiler-record",
-            ],
-        },
-        {
-            "name": "Source-ABI (L4)",
-            "options": [
-                "--source-abi",
-                "--source-abi-extractor",
-                "--source-abi-scope",
-                "--source-abi-target",
-                "--source-abi-cache",
-                "--clang-bin",
-                "--android-dump",
-            ],
-        },
-        {
-            "name": "Source graph (L5)",
-            "options": [
-                "--source-graph",
-                "--kythe-entries",
-                "--codeql-results",
-                "--codeql-extends-results",
-            ],
-        },
-        {
-            "name": "Extractors & collection",
-            "options": [
-                "--extractor-manifest",
-                "--collection-mode",
-                "--allow-build-query",
-                "--changed-path",
-            ],
-        },
-        {"name": "Output", "options": ["--output", "--verbose"]},
-    ],
     "* dump": [
         {
             "name": "Inputs",
@@ -214,7 +161,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
                 "--lang",
             ],
         },
-        {"name": "Output", "options": ["--output", "--show-data-sources", "--verbose"]},
+        {"name": "Output", "options": ["--output", "--dry-run", "--verbose"]},
         {
             "name": "Toolchain",
             "options": [
@@ -242,7 +189,6 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "name": "Build/source evidence (L3–L5)",
             "options": [
                 "--depth",
-                "--max",
                 "--build-info",
                 "--sources",
                 "--build-dir",
@@ -262,17 +208,6 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "options": ["--git-tag", "--build-id", "--no-git"],
         },
     ],
-    # `graph explain` (cli_graph). `graph compare` carries only --format, which
-    # the "* compare" key above already groups under "Output & reporting" (the
-    # fnmatch key matches the sub-command name) — so only `explain` needs an
-    # explicit entry to keep its inputs ahead of the output flag.
-    "* explain": [
-        {
-            "name": "Inputs",
-            "options": ["--sources", "--symbol", "--report", "--finding-id"],
-        },
-        {"name": "Output", "options": ["--format"]},
-    ],
     "* scan": [
         {
             "name": "Inputs",
@@ -290,9 +225,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         {
             "name": "Baseline & scope",
             "options": [
-                "--baseline",
-                "--baseline-header",
-                "--baseline-include",
+                "--against",
                 "--depth",
                 "--since",
                 "--changed-path",
@@ -301,7 +234,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         },
         {
             "name": "Modes",
-            "options": ["--audit", "--estimate", "--crosscheck", "--risk-rules"],
+            "options": ["--crosscheck", "--risk-rules"],
         },
         {
             "name": "Toolchain (L2 header AST)",
@@ -317,39 +250,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
                 "--allow-build-query",
             ],
         },
-        {"name": "Output", "options": ["--format", "--output", "--verbose"]},
-    ],
-    "* appcompat": [
-        {
-            "name": "Inputs",
-            "options": ["--check-against", "--header", "--include", "--lang"],
-        },
-        {
-            "name": "Per-side overrides",
-            "options": [
-                "--version",
-            ],
-        },
-        {
-            "name": "Policy & severity",
-            "options": [
-                "--policy",
-                "--policy-file",
-                "--suppress",
-                "--severity-preset",
-                "--scope-public-headers",
-            ],
-        },
-        {
-            "name": "Output & reporting",
-            "options": [
-                "--format",
-                "--output",
-                "--show-irrelevant",
-                "--list-required-symbols",
-                "--verbose",
-            ],
-        },
+        {"name": "Output", "options": ["--format", "--output", "--dry-run", "--verbose"]},
     ],
     # NB: the ABICC drop-in `compat check` (53 single-dash flags) renders with
     # plain Click help — its group is not under the rich-click `main`, so panel

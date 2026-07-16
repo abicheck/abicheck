@@ -127,6 +127,18 @@ class TestDepsTreeDryRun:
         assert _CONTRACT_FOOTER in first.output
         assert "Command: deps tree" in first.output
 
+    def test_non_elf_binary_rejected_even_under_dry_run(self, tmp_path: Path) -> None:
+        # Regression: the ELF-format check used to run *after* the dry-run
+        # emit, so `deps tree --dry-run` on a non-ELF file reported "ok" for
+        # an input the real run immediately rejects (post-merge PR #566
+        # review). The dry run must agree with the real run.
+        not_elf = tmp_path / "not-a-lib.so"
+        not_elf.write_bytes(b"not an elf at all")
+        result = CliRunner().invoke(main, ["deps", "tree", str(not_elf), "--dry-run"])
+        assert result.exit_code != 0
+        assert "requires an ELF binary" in result.output
+        assert _CONTRACT_FOOTER not in result.output
+
 
 class TestDepsCompareDryRun:
     def test_writes_nothing_and_rejects_output(self, tmp_path: Path) -> None:
@@ -177,3 +189,54 @@ class TestDepsCompareDryRun:
             ],
         )
         assert result.exit_code == 64
+
+    def test_non_elf_binary_rejected_even_under_dry_run(self, tmp_path: Path) -> None:
+        # Regression: the per-root ELF-format check used to run *after* the
+        # dry-run emit, so `deps compare --dry-run` could report "ok" for a
+        # binary that isn't ELF in either root even though the real run
+        # immediately rejects it (post-merge PR #566 review).
+        old_root = tmp_path / "old-root"
+        new_root = tmp_path / "new-root"
+        old_root.mkdir()
+        new_root.mkdir()
+        rel = Path("usr/bin/myapp")
+        (old_root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (old_root / rel).write_bytes(b"not an elf at all")
+        result = CliRunner().invoke(
+            main,
+            [
+                "deps", "compare", str(rel),
+                "--old-root", str(old_root), "--new-root", str(new_root),
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code != 0
+        assert "requires an ELF binary" in result.output
+        assert _CONTRACT_FOOTER not in result.output
+
+    def test_absolute_binary_resolved_under_sysroot_not_host(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (CodeRabbit review): `root / binary` (pathlib) drops
+        # `root` entirely when `binary` is absolute, so an absolute BINARY
+        # argument used to silently escape old-root/new-root and resolve
+        # against the host filesystem instead. The dry-run's displayed
+        # resolved paths must stay under the sysroots.
+        old_root = tmp_path / "old-root"
+        new_root = tmp_path / "new-root"
+        old_root.mkdir()
+        new_root.mkdir()
+        result = CliRunner().invoke(
+            main,
+            [
+                "deps", "compare", "/usr/bin/myapp",
+                "--old-root", str(old_root), "--new-root", str(new_root),
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert f"old resolved path: {old_root / 'usr/bin/myapp'}" in result.output
+        assert f"new resolved path: {new_root / 'usr/bin/myapp'}" in result.output
+        # The raw argument is echoed under "Inputs" -- only the *resolved*
+        # paths must stay confined to the sysroots.
+        assert "resolved path: /usr/bin/myapp" not in result.output

@@ -37,6 +37,9 @@ from .model import AbiSnapshot, Visibility
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    from .elf_metadata import ElfMetadata
+    from .macho_metadata import MachoMetadata
+    from .pe_metadata import PeMetadata
     from .policy_file import PolicyFile
     from .suppression import SuppressionList
 
@@ -519,25 +522,118 @@ def _is_relevant_to_app(change: Change, app: AppRequirements) -> bool:
     return False
 
 
+def _change_covers_symbol(change: Change, symbol: str) -> bool:
+    """Does *change* already account for *symbol* (exact, demangled, or via
+    ``affected_symbols``)? Mirrors :func:`_is_relevant_to_app`'s matching in
+    reverse -- symbol-name lookup, not app-requirements lookup."""
+    if change.symbol == symbol:
+        return True
+    from .demangle import demangle as _demangle_symbol
+
+    plain = _demangle_symbol(change.symbol)
+    if plain and plain == symbol:
+        return True
+    return bool(change.affected_symbols and symbol in change.affected_symbols)
+
+
+def uncovered_missing_symbols(
+    missing: Iterable[str], relevant_changes: Iterable[Change],
+) -> list[str]:
+    """*missing* entries not already represented by a *relevant_changes* Change.
+
+    A required symbol that was removed shows up twice in a scoped result:
+    once in ``missing_symbols``/``missing_entrypoints`` (absent from the new
+    export table) and once as the diff Change that actually removed it (e.g.
+    ``FUNC_REMOVED``) in ``breaking_for_app``/``breaking_for_host``. Callers
+    that derive a severity-scheme finding count from both must not count
+    that as two ABI breaks — this is the missing-symbol side of that dedup
+    (Codex review): only symbols with no matching Change are genuinely
+    "extra" (e.g. a symbol dropped for a reason the diff itself never
+    surfaced as a Change, such as a versioned-symbol default retarget).
+    """
+    changes = list(relevant_changes)
+    return [
+        m for m in missing
+        if not any(_change_covers_symbol(c, m) for c in changes)
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Get new library exported symbols
 # ---------------------------------------------------------------------------
 
-def _get_new_lib_exports(new_lib_path: Path) -> set[str]:
+# ---------------------------------------------------------------------------
+# OLD/NEW library data access: a saved JSON snapshot (AbiSnapshot) already
+# carries the SONAME/exports/versions/PE-ordinal-table data below, so
+# --used-by need not re-parse a real binary for these lookups when a
+# snapshot is what the caller has (ADR-043 follow-up: dump-then-compare-later
+# workflows previously required a real OLD/NEW binary purely for this). A raw
+# Path is still parsed directly. The app binary itself is untouched by this —
+# it always needs a real ELF/PE/Mach-O file to read DT_NEEDED/import tables.
+# ---------------------------------------------------------------------------
+
+
+def _lib_fmt(lib: Path | AbiSnapshot) -> str | None:
+    """Detect *lib*'s binary format, from a snapshot's populated field or a raw file."""
+    if isinstance(lib, AbiSnapshot):
+        if lib.elf is not None:
+            return "elf"
+        if lib.pe is not None:
+            return "pe"
+        if lib.macho is not None:
+            return "macho"
+        return None
+    return _detect_app_format(lib)
+
+
+def _lib_name(lib: Path | AbiSnapshot) -> str:
+    """A display name for *lib* -- the snapshot's library field, or the file name."""
+    return lib.library if isinstance(lib, AbiSnapshot) else lib.name
+
+
+def _lib_elf_meta(lib: Path | AbiSnapshot) -> ElfMetadata | None:
+    if isinstance(lib, AbiSnapshot):
+        return lib.elf
+    if _detect_app_format(lib) != "elf":
+        return None
+    from .elf_metadata import parse_elf_metadata
+    return parse_elf_metadata(lib)
+
+
+def _lib_pe_meta(lib: Path | AbiSnapshot) -> PeMetadata | None:
+    if isinstance(lib, AbiSnapshot):
+        return lib.pe
+    if _detect_app_format(lib) != "pe":
+        return None
+    from .pe_metadata import parse_pe_metadata
+    return parse_pe_metadata(lib)
+
+
+def _lib_macho_meta(lib: Path | AbiSnapshot) -> MachoMetadata | None:
+    if isinstance(lib, AbiSnapshot):
+        return lib.macho
+    if _detect_app_format(lib) != "macho":
+        return None
+    from .macho_metadata import parse_macho_metadata
+    return parse_macho_metadata(lib)
+
+
+def _get_new_lib_exports(new_lib: Path | AbiSnapshot) -> set[str]:
     """Get the set of exported symbol names from the new library."""
-    fmt = _detect_app_format(new_lib_path)
+    fmt = _lib_fmt(new_lib)
     if fmt == "elf":
-        from .elf_metadata import parse_elf_metadata
-        elf_meta = parse_elf_metadata(new_lib_path)
-        return {s.name for s in elf_meta.symbols}
+        elf_meta = _lib_elf_meta(new_lib)
+        return {s.name for s in elf_meta.symbols} if elf_meta is not None else set()
     if fmt == "pe":
-        from .pe_metadata import parse_pe_metadata
-        pe_meta = parse_pe_metadata(new_lib_path)
-        return {e.name for e in pe_meta.exports if e.name}
+        pe_meta = _lib_pe_meta(new_lib)
+        return {e.name for e in pe_meta.exports if e.name} if pe_meta is not None else set()
     if fmt == "macho":
-        from .macho_metadata import parse_macho_metadata
-        macho_meta = parse_macho_metadata(new_lib_path)
-        return {e.name for e in macho_meta.exports if e.name}
+        macho_meta = _lib_macho_meta(new_lib)
+        return (
+            {e.name for e in macho_meta.exports if e.name}
+            if macho_meta is not None
+            else set()
+        )
     return set()
 
 
@@ -551,38 +647,33 @@ def _normalize_elf_symbol_name(name: str) -> str:
     return name.split("@", 1)[0]
 
 
-def _get_old_lib_exports_for_scoping(old_lib_path: Path) -> set[str]:
+def _get_old_lib_exports_for_scoping(old_lib: Path | AbiSnapshot) -> set[str]:
     """Best-effort export set for the old library (ELF-only).
 
     Used to scope app-required symbols to the target DSO and avoid false
     positives from unrelated dependencies in large consumer binaries.
     """
-    if _detect_app_format(old_lib_path) != "elf":
-        return set()
     try:
-        from .elf_metadata import parse_elf_metadata
-
-        old_meta = parse_elf_metadata(old_lib_path)
-        return {_normalize_elf_symbol_name(s.name) for s in old_meta.symbols}
+        elf_meta = _lib_elf_meta(old_lib)
     except Exception as exc:  # noqa: BLE001
         log.debug("Failed to read old-lib exports for appcompat scoping: %s", exc)
         return set()
+    if elf_meta is None:
+        return set()
+    return {_normalize_elf_symbol_name(s.name) for s in elf_meta.symbols}
 
 
-def _get_lib_soname(lib_path: Path) -> str:
+def _get_lib_soname(lib: Path | AbiSnapshot) -> str:
     """Get the SONAME/install_name/DLL name from a library."""
-    fmt = _detect_app_format(lib_path)
+    fmt = _lib_fmt(lib)
+    name = _lib_name(lib)
     if fmt == "elf":
-        from .elf_metadata import parse_elf_metadata
-        elf_meta = parse_elf_metadata(lib_path)
-        return elf_meta.soname or lib_path.name
-    if fmt == "pe":
-        return lib_path.name
+        elf_meta = _lib_elf_meta(lib)
+        return (elf_meta.soname if elf_meta is not None else None) or name
     if fmt == "macho":
-        from .macho_metadata import parse_macho_metadata
-        macho_meta = parse_macho_metadata(lib_path)
-        return macho_meta.install_name or lib_path.name
-    return lib_path.name
+        macho_meta = _lib_macho_meta(lib)
+        return (macho_meta.install_name if macho_meta is not None else None) or name
+    return name
 
 
 # ---------------------------------------------------------------------------
@@ -590,7 +681,7 @@ def _get_lib_soname(lib_path: Path) -> str:
 # ---------------------------------------------------------------------------
 
 def _scope_app_symbols_to_library(
-    app_reqs: AppRequirements, old_lib_path: Path, app_path: Path,
+    app_reqs: AppRequirements, old_lib: Path | AbiSnapshot, app_path: Path,
 ) -> None:
     """Scope app-required symbols to those actually exported by the target library.
 
@@ -598,7 +689,7 @@ def _scope_app_symbols_to_library(
     library's exports to avoid false positives from unrelated dependencies.
     Modifies ``app_reqs.undefined_symbols`` in place.
     """
-    if _detect_app_format(app_path) != "elf" or _detect_app_format(old_lib_path) != "elf":
+    if _detect_app_format(app_path) != "elf" or _lib_fmt(old_lib) != "elf":
         return
 
     # Normalize app symbols to keep matching robust when version suffixes
@@ -607,7 +698,8 @@ def _scope_app_symbols_to_library(
         _normalize_elf_symbol_name(s) for s in app_reqs.undefined_symbols
     }
 
-    old_exports = _get_old_lib_exports_for_scoping(old_lib_path)
+    old_exports = _get_old_lib_exports_for_scoping(old_lib)
+    old_label = old_lib if isinstance(old_lib, Path) else old_lib.library
     if old_exports:
         before = len(app_reqs.undefined_symbols)
         app_reqs.undefined_symbols = {
@@ -618,12 +710,12 @@ def _scope_app_symbols_to_library(
             log.debug(
                 "appcompat scoped %d symbols to target library exports (%s)",
                 dropped,
-                old_lib_path,
+                old_label,
             )
     else:
         log.debug(
             "appcompat scoping skipped: no exports parsed for target library (%s)",
-            old_lib_path,
+            old_label,
         )
 
 
@@ -645,13 +737,14 @@ def _compute_appcompat_verdict(
     return Verdict.COMPATIBLE if required_count > 0 else Verdict.NO_CHANGE
 
 
-def _missing_app_versions(new_lib_path: Path, app_reqs: AppRequirements) -> list[str]:
+def _missing_app_versions(
+    new_lib: Path | AbiSnapshot, app_reqs: AppRequirements,
+) -> list[str]:
     """Return ELF version tags required by the app but absent from the new library."""
-    if _detect_app_format(new_lib_path) != "elf":
+    elf_meta = _lib_elf_meta(new_lib)
+    if elf_meta is None:
         return []
-    from .elf_metadata import parse_elf_metadata
-
-    new_defined_versions = set(parse_elf_metadata(new_lib_path).versions_defined)
+    new_defined_versions = set(elf_meta.versions_defined)
     return [
         ver_tag
         for ver_tag in app_reqs.required_versions
@@ -660,7 +753,7 @@ def _missing_app_versions(new_lib_path: Path, app_reqs: AppRequirements) -> list
 
 
 def _check_pe_ordinal_imports(
-    old_lib_path: Path, new_lib_path: Path, app_reqs: AppRequirements,
+    old_lib: Path | AbiSnapshot, new_lib: Path | AbiSnapshot, app_reqs: AppRequirements,
 ) -> tuple[set[str], list[Change], set[str]]:
     """Resolve the app's ordinal-only PE imports against old/new export tables.
 
@@ -691,14 +784,16 @@ def _check_pe_ordinal_imports(
     be misclassified as ``irrelevant_for_app``.
     """
     ordinal_reqs = {s for s in app_reqs.undefined_symbols if s.startswith("ordinal:")}
-    if not ordinal_reqs or _detect_app_format(old_lib_path) != "pe":
+    if not ordinal_reqs or _lib_fmt(old_lib) != "pe":
         return set(), [], set()
 
-    from .pe_metadata import parse_pe_metadata
-
     try:
-        old_by_ordinal = {e.ordinal: e.name for e in parse_pe_metadata(old_lib_path).exports}
-        new_by_ordinal = {e.ordinal: e.name for e in parse_pe_metadata(new_lib_path).exports}
+        old_pe = _lib_pe_meta(old_lib)
+        new_pe = _lib_pe_meta(new_lib)
+        if old_pe is None or new_pe is None:
+            return set(), [], set()
+        old_by_ordinal = {e.ordinal: e.name for e in old_pe.exports}
+        new_by_ordinal = {e.ordinal: e.name for e in new_pe.exports}
     except Exception as exc:  # noqa: BLE001
         log.debug("Failed to resolve PE ordinal exports for appcompat: %s", exc)
         return set(), [], set()
@@ -759,8 +854,8 @@ def _compute_symbol_coverage(
 def scope_diff_to_app(
     diff: DiffResult,
     app_path: Path,
-    old_lib_path: Path,
-    new_lib_path: Path,
+    old_lib: Path | AbiSnapshot,
+    new_lib: Path | AbiSnapshot,
     *,
     policy: str = "strict_abi",
     policy_file: PolicyFile | None = None,
@@ -773,22 +868,30 @@ def scope_diff_to_app(
     the application's requirements and intersects them with that diff. It does
     NOT re-dump or re-compare the libraries — see :func:`check_appcompat` for
     the standalone (single-app, no pre-existing diff) convenience wrapper.
+
+    *old_lib*/*new_lib* may be a real library binary path, or an already-
+    loaded :class:`~abicheck.model.AbiSnapshot` (e.g. from a saved JSON dump)
+    -- a snapshot's ``elf``/``pe``/``macho`` fields already carry the SONAME,
+    export table, ELF version list, and PE ordinal table this function needs,
+    so no re-parse of a real binary is required for those lookups. *app_path*
+    is unaffected: the application itself always needs a real binary to read
+    its DT_NEEDED/import table from.
     """
-    library_soname = _get_lib_soname(old_lib_path)
+    library_soname = _get_lib_soname(old_lib)
     app_reqs = parse_app_requirements(app_path, library_soname)
 
     # Guard against over-collection in ELF consumers with many dependencies:
     # keep only symbols that are actually exported by the target old library.
-    _scope_app_symbols_to_library(app_reqs, old_lib_path, app_path)
+    _scope_app_symbols_to_library(app_reqs, old_lib, app_path)
 
     # Check symbol availability in new library
-    new_exports = _get_new_lib_exports(new_lib_path)
+    new_exports = _get_new_lib_exports(new_lib)
     # Ordinal-only PE imports never match a name in new_exports; resolve them
     # against both DLLs' export directories so they aren't reported as
     # generically "missing" when the ordinal still (possibly differently)
     # resolves.
     resolved_ordinals, ordinal_retargets, resolved_export_names = _check_pe_ordinal_imports(
-        old_lib_path, new_lib_path, app_reqs
+        old_lib, new_lib, app_reqs
     )
     missing_symbols = sorted(
         sym for sym in app_reqs.undefined_symbols
@@ -796,7 +899,7 @@ def scope_diff_to_app(
     )
 
     # Check version availability
-    missing_versions = _missing_app_versions(new_lib_path, app_reqs)
+    missing_versions = _missing_app_versions(new_lib, app_reqs)
 
     # Filter diff by app usage. An ordinal-only import carries no name of its
     # own in app_reqs.undefined_symbols, so a diff finding for the named export
@@ -824,8 +927,8 @@ def scope_diff_to_app(
 
     return AppCompatResult(
         app_path=str(app_path),
-        old_lib_path=str(old_lib_path),
-        new_lib_path=str(new_lib_path),
+        old_lib_path=str(old_lib) if isinstance(old_lib, Path) else old_lib.library,
+        new_lib_path=str(new_lib) if isinstance(new_lib, Path) else new_lib.library,
         required_symbols=app_reqs.undefined_symbols,
         required_symbol_count=required_count,
         breaking_for_app=breaking_for_app,

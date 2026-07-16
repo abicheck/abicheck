@@ -24,11 +24,15 @@ import pytest
 from abicheck.appcompat import (
     AppCompatResult,
     AppRequirements,
+    _check_pe_ordinal_imports,
     _detect_app_format,
     _get_lib_soname,
     _get_new_lib_exports,
     _get_old_lib_exports_for_scoping,
     _is_relevant_to_app,
+    _lib_fmt,
+    _lib_macho_meta,
+    _lib_pe_meta,
     _normalize_elf_symbol_name,
     _parse_elf_app_requirements,
     _parse_macho_app_requirements,
@@ -36,9 +40,15 @@ from abicheck.appcompat import (
     check_against,
     check_appcompat,
     parse_app_requirements,
+    scope_diff_to_app,
+    uncovered_missing_symbols,
 )
 from abicheck.checker import Change, DiffResult
 from abicheck.checker_policy import ChangeKind, Verdict
+from abicheck.elf_metadata import ElfMetadata, ElfSymbol
+from abicheck.macho_metadata import MachoExport, MachoMetadata
+from abicheck.model import AbiSnapshot
+from abicheck.pe_metadata import PeExport, PeMetadata
 from abicheck.reporter import appcompat_to_json, appcompat_to_markdown
 
 # ---------------------------------------------------------------------------
@@ -183,6 +193,64 @@ class TestIsRelevantToApp:
             old_value="FOO_2.0",
         )
         assert _is_relevant_to_app(change, app) is False
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: uncovered_missing_symbols
+# ---------------------------------------------------------------------------
+
+class TestUncoveredMissingSymbols:
+    """A missing symbol/version/entrypoint that already has a matching
+    scoped Change must not be counted as a second, separate ABI break
+    (Codex review)."""
+
+    def test_missing_symbol_covered_by_matching_change_is_excluded(self):
+        change = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol="foo",
+            description="Function removed: foo",
+        )
+        assert uncovered_missing_symbols(["foo"], [change]) == []
+
+    def test_missing_symbol_with_no_matching_change_is_uncovered(self):
+        change = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol="bar",
+            description="Function removed: bar",
+        )
+        assert uncovered_missing_symbols(["foo"], [change]) == ["foo"]
+
+    def test_missing_symbol_covered_via_demangled_name(self, monkeypatch):
+        # The "missing" name (e.g. from a header-level requirement) can be
+        # the plain/demangled spelling while the Change carries the mangled
+        # linker symbol -- stub the demangler so this doesn't depend on a
+        # working platform demangler (cxxfilt/c++filt) being installed.
+        import abicheck.demangle as demangle_mod
+
+        monkeypatch.setattr(
+            demangle_mod, "demangle", lambda s: "foo()" if s == "_Z3foov" else s,
+        )
+        change = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov",
+            description="Function removed: _Z3foov",
+        )
+        assert uncovered_missing_symbols(["foo()"], [change]) == []
+
+    def test_missing_symbol_covered_via_affected_symbols(self):
+        change = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Config",
+            description="Type size changed: Config",
+            affected_symbols=["foo_init"],
+        )
+        assert uncovered_missing_symbols(["foo_init"], [change]) == []
+
+    def test_no_relevant_changes_all_missing_are_uncovered(self):
+        assert uncovered_missing_symbols(["foo", "bar"], []) == ["foo", "bar"]
+
+    def test_empty_missing_returns_empty(self):
+        change = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol="foo",
+            description="Function removed: foo",
+        )
+        assert uncovered_missing_symbols([], [change]) == []
 
 
 # ---------------------------------------------------------------------------
@@ -1144,6 +1212,15 @@ class TestGetNewLibExports:
         f.write_bytes(b"MZ" + b"\x00" * 100)
         assert _get_old_lib_exports_for_scoping(f) == set()
 
+    def test_old_exports_for_scoping_parse_failure_returns_empty_set(self, tmp_path):
+        f = tmp_path / "libold.so"
+        f.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        with patch(
+            "abicheck.elf_metadata.parse_elf_metadata",
+            side_effect=OSError("truncated ELF"),
+        ):
+            assert _get_old_lib_exports_for_scoping(f) == set()
+
     def test_normalize_elf_symbol_name(self):
         assert _normalize_elf_symbol_name("inflate") == "inflate"
         assert _normalize_elf_symbol_name("inflate@ZLIB_1.2.0") == "inflate"
@@ -1698,3 +1775,210 @@ class TestReporterEdgeCases:
         md = appcompat_to_markdown(result)
         assert "0 of 1 total" in md
         assert "do NOT affect" in md
+
+
+# ---------------------------------------------------------------------------
+# scope_diff_to_app: OLD/NEW as a saved JSON snapshot (ADR-043 follow-up)
+# ---------------------------------------------------------------------------
+#
+# --used-by used to require OLD/NEW to be real library binaries even though
+# an AbiSnapshot's elf/pe/macho field already carries the SONAME/export
+# table/version list a scoped comparison needs -- breaking the natural
+# dump-then-compare-later workflow (post-merge PR #566 review). These drive
+# the real scope_diff_to_app implementation end to end with AbiSnapshot
+# inputs (no real binaries at all) to prove the snapshot path behaves the
+# same as the native-binary path.
+
+
+class TestScopeDiffToAppWithSnapshots:
+    def _snap(self, version: str, soname: str, symbol_names: list[str]) -> AbiSnapshot:
+        return AbiSnapshot(
+            library="libfoo.so.1",
+            version=version,
+            elf=ElfMetadata(
+                soname=soname,
+                symbols=[ElfSymbol(name=n) for n in symbol_names],
+            ),
+        )
+
+    def test_both_sides_are_snapshots_detects_missing_symbol(self, tmp_path):
+        old_snap = self._snap("1.0", "libfoo.so.1", ["foo_init", "foo_process"])
+        new_snap = self._snap("2.0", "libfoo.so.1", ["foo_init"])
+        diff = DiffResult(
+            old_version="1.0", new_version="2.0", library="libfoo.so.1",
+            changes=[Change(ChangeKind.FUNC_REMOVED, "foo_process", "removed")],
+            verdict=Verdict.BREAKING,
+        )
+        app_reqs = AppRequirements(undefined_symbols={"foo_init", "foo_process"})
+        with patch(
+            "abicheck.appcompat.parse_app_requirements", return_value=app_reqs
+        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+            result = scope_diff_to_app(
+                diff, tmp_path / "app", old_snap, new_snap,
+            )
+        assert result.verdict == Verdict.BREAKING
+        assert result.missing_symbols == ["foo_process"]
+        assert [c.symbol for c in result.breaking_for_app] == ["foo_process"]
+        assert result.old_lib_path == "libfoo.so.1"
+        assert result.new_lib_path == "libfoo.so.1"
+
+    def test_old_snapshot_new_native_binary_mixed_sources(self, tmp_path):
+        # Old comes from a saved dump (snapshot), new is a real binary path --
+        # the two data sources must combine correctly.
+        old_snap = self._snap("1.0", "libfoo.so.1", ["foo_init", "foo_process"])
+        new_lib = tmp_path / "new.so"
+        new_lib.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        diff = DiffResult(
+            old_version="1.0", new_version="2.0", library="libfoo.so.1",
+            changes=[], verdict=Verdict.COMPATIBLE,
+        )
+        app_reqs = AppRequirements(undefined_symbols={"foo_init"})
+        with patch(
+            "abicheck.appcompat.parse_app_requirements", return_value=app_reqs
+        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"), patch(
+            "abicheck.appcompat._get_new_lib_exports", return_value={"foo_init"}
+        ):
+            result = scope_diff_to_app(diff, tmp_path / "app", old_snap, new_lib)
+        assert result.verdict == Verdict.COMPATIBLE
+        assert result.missing_symbols == []
+        assert result.old_lib_path == "libfoo.so.1"
+        assert result.new_lib_path == str(new_lib)
+
+    def test_snapshot_missing_binary_evidence_yields_no_exports(self, tmp_path):
+        # A headers-only snapshot (no elf/pe/macho) has nothing to scope
+        # against -- every required symbol reads as missing, same as the
+        # native-binary path would if parsing failed outright.
+        old_snap = AbiSnapshot(library="libfoo.so.1", version="1.0")
+        new_snap = AbiSnapshot(library="libfoo.so.1", version="2.0")
+        diff = DiffResult(
+            old_version="1.0", new_version="2.0", library="libfoo.so.1",
+            changes=[], verdict=Verdict.COMPATIBLE,
+        )
+        app_reqs = AppRequirements(undefined_symbols={"foo_init"})
+        with patch(
+            "abicheck.appcompat.parse_app_requirements", return_value=app_reqs
+        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+            result = scope_diff_to_app(diff, tmp_path / "app", old_snap, new_snap)
+        assert result.missing_symbols == ["foo_init"]
+
+
+# ---------------------------------------------------------------------------
+# _lib_fmt / _lib_pe_meta / _lib_macho_meta: PE/Mach-O snapshot + Path branches
+# ---------------------------------------------------------------------------
+
+
+class TestLibFmtAndMetaAccessors:
+    def test_lib_fmt_pe_snapshot(self):
+        snap = AbiSnapshot(library="foo.dll", version="1.0", pe=PeMetadata())
+        assert _lib_fmt(snap) == "pe"
+
+    def test_lib_fmt_macho_snapshot(self):
+        snap = AbiSnapshot(library="libfoo.dylib", version="1.0", macho=MachoMetadata())
+        assert _lib_fmt(snap) == "macho"
+
+    def test_lib_pe_meta_from_snapshot(self):
+        pe = PeMetadata(exports=[PeExport(name="Foo", ordinal=1)])
+        snap = AbiSnapshot(library="foo.dll", version="1.0", pe=pe)
+        assert _lib_pe_meta(snap) is pe
+
+    def test_lib_pe_meta_none_for_non_pe_path(self, tmp_path):
+        f = tmp_path / "lib.so"
+        f.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        assert _lib_pe_meta(f) is None
+
+    def test_lib_macho_meta_from_snapshot(self):
+        macho = MachoMetadata(exports=[MachoExport(name="_foo")])
+        snap = AbiSnapshot(library="libfoo.dylib", version="1.0", macho=macho)
+        assert _lib_macho_meta(snap) is macho
+
+    def test_lib_macho_meta_none_for_non_macho_path(self, tmp_path):
+        f = tmp_path / "lib.so"
+        f.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        assert _lib_macho_meta(f) is None
+
+
+# ---------------------------------------------------------------------------
+# _check_pe_ordinal_imports with snapshot inputs
+# ---------------------------------------------------------------------------
+
+
+class TestCheckPeOrdinalImportsWithSnapshots:
+    def _snap(self, exports: list[PeExport]) -> AbiSnapshot:
+        return AbiSnapshot(
+            library="foo.dll", version="1.0", pe=PeMetadata(exports=exports),
+        )
+
+    def test_no_ordinal_requirements_short_circuits(self):
+        old_snap = self._snap([PeExport(name="Foo", ordinal=1)])
+        new_snap = self._snap([PeExport(name="Foo", ordinal=1)])
+        app_reqs = AppRequirements(undefined_symbols={"Foo"})
+        resolved, retargeted, names = _check_pe_ordinal_imports(
+            old_snap, new_snap, app_reqs,
+        )
+        assert (resolved, retargeted, names) == (set(), [], set())
+
+    def test_new_side_missing_pe_evidence_returns_empty(self):
+        old_snap = self._snap([PeExport(name="Foo", ordinal=1)])
+        new_snap = AbiSnapshot(library="foo.dll", version="2.0")  # no .pe field
+        app_reqs = AppRequirements(undefined_symbols={"ordinal:1"})
+        resolved, retargeted, names = _check_pe_ordinal_imports(
+            old_snap, new_snap, app_reqs,
+        )
+        assert (resolved, retargeted, names) == (set(), [], set())
+
+    def test_ordinal_resolves_to_same_name_not_retargeted(self):
+        old_snap = self._snap([PeExport(name="Foo", ordinal=1)])
+        new_snap = self._snap([PeExport(name="Foo", ordinal=1)])
+        app_reqs = AppRequirements(undefined_symbols={"ordinal:1"})
+        resolved, retargeted, names = _check_pe_ordinal_imports(
+            old_snap, new_snap, app_reqs,
+        )
+        assert resolved == {"ordinal:1"}
+        assert retargeted == []
+        assert names == {"Foo"}
+
+    def test_ordinal_retargeted_to_different_name(self):
+        old_snap = self._snap([PeExport(name="Foo", ordinal=1)])
+        new_snap = self._snap([PeExport(name="Bar", ordinal=1)])
+        app_reqs = AppRequirements(undefined_symbols={"ordinal:1"})
+        resolved, retargeted, names = _check_pe_ordinal_imports(
+            old_snap, new_snap, app_reqs,
+        )
+        assert resolved == {"ordinal:1"}
+        assert len(retargeted) == 1
+        assert retargeted[0].kind == ChangeKind.PE_ORDINAL_RETARGETED
+        assert names == {"Foo", "Bar"}
+
+    def test_malformed_ordinal_requirement_is_skipped(self):
+        # "ordinal:abc" fails int() -- must be skipped, not raise.
+        old_snap = self._snap([PeExport(name="Foo", ordinal=1)])
+        new_snap = self._snap([PeExport(name="Foo", ordinal=1)])
+        app_reqs = AppRequirements(undefined_symbols={"ordinal:abc"})
+        resolved, retargeted, names = _check_pe_ordinal_imports(
+            old_snap, new_snap, app_reqs,
+        )
+        assert (resolved, retargeted, names) == (set(), [], set())
+
+    def test_empty_export_names_are_not_added(self):
+        # An unnamed export (name="") resolves the ordinal but must not
+        # populate export_names with a falsy/empty name.
+        old_snap = self._snap([PeExport(name="", ordinal=1)])
+        new_snap = self._snap([PeExport(name="", ordinal=1)])
+        app_reqs = AppRequirements(undefined_symbols={"ordinal:1"})
+        resolved, retargeted, names = _check_pe_ordinal_imports(
+            old_snap, new_snap, app_reqs,
+        )
+        assert resolved == {"ordinal:1"}
+        assert names == set()
+
+    def test_pe_meta_access_failure_returns_empty(self):
+        old_snap = self._snap([PeExport(name="Foo", ordinal=1)])
+        new_snap = self._snap([PeExport(name="Foo", ordinal=1)])
+        app_reqs = AppRequirements(undefined_symbols={"ordinal:1"})
+        with patch(
+            "abicheck.appcompat._lib_pe_meta", side_effect=RuntimeError("boom"),
+        ):
+            resolved, retargeted, names = _check_pe_ordinal_imports(
+                old_snap, new_snap, app_reqs,
+            )
+        assert (resolved, retargeted, names) == (set(), [], set())

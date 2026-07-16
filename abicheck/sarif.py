@@ -290,6 +290,60 @@ def _severity_gate_properties(
     }
 
 
+def _scoped_gate_properties(result: DiffResult) -> dict[str, Any] | None:
+    """Build a ``scopedGate`` block when ``--used-by``/``--required-symbol(s)``
+    scoping was requested (ADR-043).
+
+    The invocation's ``exitCode``/results above stay computed from the full,
+    unscoped library verdict (``result.verdict``) -- SARIF's binary/structured
+    contract intentionally keeps that authoritative for tooling that only
+    reads this format. But the actual CLI process exits on the *scoped*
+    verdict floor when scoping is requested, which can legitimately disagree
+    with the full-library verdict this document reports. Without this block a
+    SARIF consumer had no way to discover that disagreement -- this makes it
+    auditable in the document itself, mirroring the human-format banner
+    (``_fold_scoped_compat_into_text``) without changing SARIF's own gating
+    semantics.
+    """
+    scoped_verdict = getattr(result, "scoped_verdict", None)
+    if scoped_verdict is None:
+        return None
+    used_by = getattr(result, "used_by", None)
+    required_symbols = getattr(result, "required_symbols", None)
+    scoped_exit_code = getattr(result, "scoped_exit_code", None)
+    scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
+    # Under a severity scheme the scoped exit code is NOT a fixed
+    # BREAKING->4/API_BREAK->2 mapping of scopedVerdict -- e.g.
+    # --severity-preset info-only can floor it at 0 even for a BREAKING
+    # scopedVerdict (Codex review) -- so state the actual computed value and
+    # scheme rather than implying a verdict->exit-code equivalence that only
+    # holds under the legacy scheme.
+    note = (
+        f"The CLI process exits {scoped_exit_code} under the "
+        f"{scoped_exit_code_scheme} exit-code scheme for this "
+        f"--used-by/--required-symbol run -- this may differ from both "
+        f"scopedVerdict's legacy-scheme mapping and this document's own "
+        f"exitCode/results (which stay computed from the full library)."
+        if scoped_exit_code is not None
+        else "The CLI process exit code for this --used-by/--required-symbol "
+        "run may differ from this document's own exitCode/results (which "
+        "stay computed from the full library)."
+    )
+    block: dict[str, Any] = {
+        "scopedVerdict": scoped_verdict.value,
+        "fullLibraryVerdict": result.verdict.value,
+        "note": note,
+    }
+    if scoped_exit_code is not None:
+        block["scopedExitCode"] = scoped_exit_code
+        block["scopedExitCodeScheme"] = scoped_exit_code_scheme
+    if used_by is not None:
+        block["usedBy"] = used_by
+    if required_symbols is not None:
+        block["requiredSymbolContract"] = required_symbols
+    return block
+
+
 def to_sarif(
     result: DiffResult,
     *,
@@ -342,6 +396,7 @@ def to_sarif(
         if severity_config is not None
         else None
     )
+    scoped_gate = _scoped_gate_properties(result)
 
     return {
         "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
@@ -408,6 +463,11 @@ def to_sarif(
                     **(
                         {"severityGate": severity_gate}
                         if severity_gate is not None
+                        else {}
+                    ),
+                    **(
+                        {"scopedGate": scoped_gate}
+                        if scoped_gate is not None
                         else {}
                     ),
                     **(

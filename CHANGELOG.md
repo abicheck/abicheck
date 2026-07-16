@@ -42,6 +42,131 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
     `python -m abicheck.cli_pr_comment`, used internally by the GitHub
     Action.
 
+### Fixed
+
+- **ADR-043 follow-up: P1 correctness gaps from the post-merge CLI-reset
+  review.**
+  - `compare --used-by`/`--required-symbol` scoping now respects
+    `--exit-code-scheme severity`/`--severity-*` — the scoped exit code
+    previously always used the legacy `BREAKING`→4/`API_BREAK`→2 floor
+    regardless of severity configuration. Fixed in both the CLI and the MCP
+    `abi_compare` tool.
+  - SARIF/JUnit/HTML reports now carry a non-gating scoped-verdict block
+    (SARIF `properties.scopedGate`, JUnit `<properties>`, an HTML banner)
+    when `--used-by`/`--required-symbol` scoping changes the gating verdict
+    — previously only JSON/Markdown/text surfaced the disagreement between
+    the scoped and full-library verdicts.
+  - `compare --used-by` now accepts a saved JSON snapshot for OLD/NEW when
+    it carries binary evidence (an `elf`/`pe`/`macho` field, i.e. a `dump`
+    of a real library) instead of requiring a real binary on both sides —
+    restoring the natural `dump` once + `compare ... --used-by` later
+    workflow. `--required-symbol` already worked with snapshots.
+  - `compare --dry-run` on a `--used-by`/`--required-symbol` +
+    directory/package combination, and `deps tree`/`deps compare --dry-run`
+    on a non-ELF binary, now apply the same validation the real run does
+    before reporting "ok" — previously the dry run could pass on an input
+    combination the real run immediately rejects.
+  - `scan --dry-run`'s displayed exit-code text now describes its own
+    shared `0`/`1`/`64` dry-run contract instead of the real scan's
+    `0`/`2`/`4`/`5` scheme (the actual dry-run exit code was already
+    correct — only the displayed text was misleading).
+  - Removed stale `--help`/README/docs references to options and rich-help
+    panels ADR-043 deleted (`--max`, `--show-data-sources`,
+    `--baseline-header`/`--baseline-include`, `--audit`/`--estimate`, the
+    `collect`/`appcompat`/`explain` help panels), including a stale
+    `--baseline-header` mention in a live `scan` warning message.
+  - `compare --used-by`/`--required-symbol` scoping across multiple
+    `--used-by` apps under a severity scheme now ranks the *reported* worst
+    verdict by severity, independent of the (separately correct) max
+    exit-code computation used for gating — previously a BREAKING app whose
+    severity-derived exit code happened to be `0` (e.g.
+    `--severity-preset info-only`) could be silently overwritten in
+    JSON/HTML/SARIF/JUnit by a later, merely-COMPATIBLE app that tied on
+    exit code. SARIF/JUnit/HTML's scoped-verdict blocks (above) now also
+    carry the actual computed exit code/scheme rather than implying a fixed
+    verdict→exit-code mapping, which doesn't hold under a severity scheme.
+  - **GitHub Action: applied the same pre-1.0 hard-cut policy to the
+    Action's own interface.** `mode: compare-release`/`mode: stack-check`
+    are removed outright (no alias): `mode: compare` already fans out to
+    directory/package operands automatically (no separate mode needed;
+    `debug-info1/2`, `devel-pkg1/2`, `dso-only`, `include-private-dso`,
+    `keep-extracted`, `fail-on-removed-library`, and `jobs` now live under
+    plain `compare` mode, forwarded only when the operands are actually
+    directories/packages), `deps` mode is renamed `deps-tree`, and
+    `stack-check` is renamed `deps-compare` with its `baseline`/`candidate`
+    inputs renamed `old-root`/`new-root` (matching the CLI's own
+    `deps compare --old-root/--new-root`, ADR-043 D11). Scan's overloaded
+    `baseline` input (distinct from `deps-compare`'s sysroots) is renamed
+    `against`, matching the CLI's `scan --against`. As a side effect of
+    unifying the compare/compare-release dispatch into one code path,
+    `severity-preset`/`severity-addition` now correctly gate directory/package
+    comparisons too (previously silently not forwarded on that path).
+  - `compare --used-by`/`--required-symbol` scoping under a severity scheme
+    now floors the exit code correctly when the scoped verdict is BREAKING
+    solely because a required symbol/version/entrypoint is missing outright
+    (not a diff change) — the scoped exit code previously derived only from
+    `relevant_changes`, which is empty in this case, so a missing contract
+    silently exited `0` under any `--severity-*`/`--exit-code-scheme
+    severity` configuration. Fixed in both the CLI and the MCP `abi_compare`
+    tool.
+  - `compare --used-by`/`--required-symbol --format json` (and the MCP
+    `abi_compare` nested `report`) now folds the *scoped* severity gate into
+    the `severity` block's `exit_code`/`blocking`/`blocking_categories`,
+    demoting the unscoped full-library breakdown to a new `full_severity`
+    key — previously `severity.exit_code`/`blocking` always described the
+    full-library gate even under `--used-by`/`--required-symbol` scoping, so
+    a scoped-compatible run that exited `0` could still carry
+    `severity.exit_code: 4`/`blocking: true` in its own JSON body, the
+    opposite of what the command that produced it just did. The scoped
+    `severity.categories.*.count` values are recomputed to match — a scoped
+    -compatible `severity.exit_code: 0` no longer keeps a stale error-level
+    `categories.abi_breaking.count` left over from the full-library
+    breakdown alongside it. When two `--used-by` apps tie on the worst exit
+    code and both depend on the same removed symbol, that shared finding is
+    now counted once (deduplicated by identity across the tied apps) instead
+    of once per app inflating `severity.categories.*.count`.
+  - `compare --used-by`/`--required-symbol --format html`'s "CI Gate" card
+    now reflects the scoped gate (title "CI Gate (scoped)", with the
+    full-library gate noted alongside) when scoping and a severity scheme
+    are both active — previously it was always computed from the full
+    -library diff, so the card could say "FAIL (exit 4)" for a run whose
+    scoped contract was compatible and that actually exited `0`.
+  - `deps compare BINARY` (and the underlying `stack_checker.check_stack`)
+    now resolves an anchored `BINARY` argument as relative to each sysroot
+    (chroot semantics), matching `resolver._seed_root`'s existing handling
+    for the single-env `deps stack` command — previously a plain `root /
+    binary` join silently dropped `root`'s directory for an anchored
+    `BINARY` (pathlib semantics), so the ELF-format check and stack walk
+    targeted the host filesystem path instead of the confined `--old-root`/
+    `--new-root` environments. The new `under_sysroot()` helper checks
+    `binary.anchor` rather than `binary.is_absolute()` — Windows considers a
+    drive-less rooted path like `/usr/bin/x` non-absolute, but pathlib's
+    join still resets to the sysroot's own drive and drops its directory
+    for such a path, so `is_absolute()` alone missed that case.
+  - `--used-by`/`--required-symbol`'s severity-scheme
+    `severity.categories.abi_breaking.count` no longer double-counts a
+    missing symbol/version/entrypoint that already has a matching scoped
+    `Change` (e.g. a removed function is both "missing" from the new
+    export table and its own `FUNC_REMOVED` finding) — one ABI break is
+    now counted once, via the new `appcompat.uncovered_missing_symbols()`.
+  - Fixed a stale docstring on `abi_compare`'s `used_by`/`required_symbols`
+    MCP parameters that promised a fixed `BREAKING → 4`/`API_BREAK → 2`
+    exit-code mapping; it now describes the active legacy/severity-aware
+    scheme (which can return `0` for a scoped `BREAKING` verdict under
+    `severity_preset="info-only"`).
+  - `compare --used-by`/`--required-symbol`'s markdown/text/review scoped
+    -verdict banner no longer unconditionally asserts "this is what the
+    exit code reflects" when the scoped and full-library verdicts disagree
+    — under a severity scheme the exit code is not a fixed mapping of the
+    scoped verdict (e.g. `--severity-preset info-only` can floor it at `0`
+    for a `BREAKING` scoped verdict, making that claim false); it now states
+    the actual computed exit code/scheme, mirroring the SARIF/JUnit/HTML
+    wording.
+  - `docs/user-guide/appcompat.md`'s options table no longer contradicts the
+    snapshot-support text above it — a JSON snapshot works with `--used-by`
+    when it carries binary evidence (an `elf`/`pe`/`macho` field), not only
+    real library binaries.
+
 ### Changed
 
 - **`scan` reshaped (ADR-043).** Positional `ARTIFACT` replaces repeated

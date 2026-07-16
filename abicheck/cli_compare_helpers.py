@@ -29,6 +29,7 @@ in ``check_ai_readiness``). Verdict routing stays through the Tier-2 service
 from __future__ import annotations
 
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -467,50 +468,208 @@ def _verdict_exit_code(verdict: object) -> int:
     return 0
 
 
+_VERDICT_SEVERITY_RANK = {
+    "BREAKING": 3, "API_BREAK": 2, "COMPATIBLE_WITH_RISK": 1,
+    "COMPATIBLE": 0, "NO_CHANGE": 0,
+}
+
+
+def _verdict_severity_rank(verdict: object) -> int:
+    """Rank a Verdict by severity, independent of any exit-code scheme.
+
+    Under a severity scheme, a BREAKING app can carry exit code 0 (e.g.
+    ``--severity-preset info-only``) -- ranking "worst app" by exit code
+    would then let a later COMPATIBLE app (also exit code 0) overwrite the
+    reported scoped verdict, so JSON/HTML/SARIF could claim COMPATIBLE while
+    an earlier --used-by summary is still BREAKING (Codex review). Verdict
+    selection for reporting must stay keyed on verdict severity, not on the
+    (independently correct) max-exit-code computation used for gating.
+    """
+    value = getattr(verdict, "value", verdict)
+    return _VERDICT_SEVERITY_RANK.get(value, 0) if isinstance(value, str) else 0
+
+
+def _scoped_exit_code(
+    scoped: Any, relevant_changes: list[Any],
+    result: Any, exit_code_scheme: str, sev_config: Any,
+    policy: str, policy_file: PolicyFile | None,
+    *, has_missing_contract: bool = False,
+) -> int:
+    """Compute a scoped result's exit code under the active exit-code scheme.
+
+    ADR-043's --used-by/--required-symbol(s) floor the exit code on the
+    *scoped* verdict rather than the full library's -- but that floor must
+    still respect ``--exit-code-scheme severity``/``--severity-*``: without
+    this, a scoped compare silently reverted to the legacy 0/2/4 mapping no
+    matter what severity configuration the caller passed, because the scoped
+    branch returned straight to ``sys.exit`` before the severity-aware exit
+    handler ever ran.
+
+    *has_missing_contract* (a required symbol/version/entrypoint absent from
+    the new library) floors the severity-scheme exit code separately from
+    *relevant_changes*: a missing contract symbol is BREAKING but is not a
+    diff ``Change``, so ``compute_exit_code`` never sees it and would
+    otherwise return 0 (Codex review).
+    """
+    if exit_code_scheme == "severity":
+        from .severity import compute_exit_code, missing_contract_exit_code
+
+        code = compute_exit_code(
+            relevant_changes, sev_config,
+            policy=policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=policy_file,
+        )
+        if has_missing_contract:
+            code = max(code, missing_contract_exit_code(sev_config))
+        return code
+    return _verdict_exit_code(scoped.verdict)
+
+
+def _scoped_severity_summary(
+    relevant_changes: list[Any], missing: Iterable[str],
+    result: Any, sev_config: Any, policy: str, policy_file: PolicyFile | None,
+) -> tuple[tuple[str, ...], dict[str, int]]:
+    """(blocking_categories, per-category counts) for one scoped result.
+
+    Mirrors ``_scoped_exit_code``'s missing-contract floor: a missing
+    symbol/version/entrypoint with no matching diff Change is folded into
+    ``abi_breaking`` directly here -- both into the blocking-categories set
+    (when abi_breaking is severity-configured as error, matching the exit
+    -code floor) and into the count (always, since a count is a factual
+    tally, not a gate decision) -- otherwise a missing-contract-only scoped
+    BREAKING would report an empty ``blocking_categories`` alongside a
+    nonzero exit code, or a ``categories.abi_breaking.count`` of 0 alongside
+    a blocking ``abi_breaking`` category (Codex review). A *missing* entry
+    that already has a matching Change in *relevant_changes* (e.g. a removed
+    symbol is both "missing" from the new export table and a ``FUNC_REMOVED``
+    Change) is excluded via ``uncovered_missing_symbols`` -- otherwise that
+    single ABI break would be counted twice (Codex review follow-up).
+    """
+    from .appcompat import uncovered_missing_symbols
+    from .severity import (
+        IssueCategory,
+        SeverityLevel,
+        categorize_changes,
+        compute_gate_decision,
+    )
+
+    categorized = categorize_changes(
+        relevant_changes, policy=policy,
+        kind_sets=result._effective_kind_sets(), policy_file=policy_file,
+    )
+    counts = {
+        "abi_breaking": len(categorized.abi_breaking),
+        "potential_breaking": len(categorized.potential_breaking),
+        "quality_issues": len(categorized.quality_issues),
+        "addition": len(categorized.addition),
+    }
+    gate = compute_gate_decision(
+        relevant_changes, sev_config,
+        policy=policy, kind_sets=result._effective_kind_sets(), policy_file=policy_file,
+    )
+    categories = list(gate.blocking_categories)
+    uncovered = uncovered_missing_symbols(missing, relevant_changes)
+    if uncovered:
+        counts["abi_breaking"] += len(uncovered)
+        if (
+            sev_config.abi_breaking == SeverityLevel.ERROR
+            and IssueCategory.ABI_BREAKING.value not in categories
+        ):
+            categories.append(IssueCategory.ABI_BREAKING.value)
+    return tuple(categories), counts
+
+
 def _apply_used_by_scoping(
     result: Any, used_by_apps: tuple[Path, ...],
     old_input: Path, new_input: Path,
+    old_snapshot: Any, new_snapshot: Any,
     policy: str, policy_file: PolicyFile | None,
+    exit_code_scheme: str = "legacy", sev_config: Any = None,
 ) -> int:
     """Scope *result* to each ``--used-by`` app; worst-wins (ADR-043).
 
-    Requires OLD/NEW to be real library binaries (not JSON snapshots) since an
-    application's actual imports/required symbol versions can only be checked
-    against a real export table. Attaches a JSON-safe summary to
-    ``result.used_by`` for the renderer and returns the worst app's exit code.
+    OLD/NEW may be real library binaries or JSON snapshots (e.g. a saved
+    ``dump`` output): a recognized binary is parsed directly; otherwise the
+    already-loaded snapshot (``old_snapshot``/``new_snapshot``, from
+    ``compare``'s own pipeline) is used instead, since a snapshot's
+    ``elf``/``pe``/``macho`` fields already carry the SONAME/export table/
+    version list/PE ordinal table :func:`~abicheck.appcompat.scope_diff_to_app`
+    needs. Attaches a JSON-safe summary to ``result.used_by`` for the
+    renderer and returns the worst app's exit code, computed under
+    *exit_code_scheme* (legacy verdict floor, or severity-aware over each
+    app's relevant changes when the caller passed --severity-*).
     """
     from .appcompat import scope_diff_to_app
     from .service import detect_binary_format
 
-    for path, label in ((old_input, "OLD"), (new_input, "NEW")):
-        if detect_binary_format(path) is None:
+    old_lib = old_input if detect_binary_format(old_input) is not None else old_snapshot
+    new_lib = new_input if detect_binary_format(new_input) is not None else new_snapshot
+
+    for lib, path, label in (
+        (old_lib, old_input, "OLD"), (new_lib, new_input, "NEW"),
+    ):
+        has_binary_evidence = isinstance(lib, Path) or any(
+            getattr(lib, field, None) is not None for field in ("elf", "pe", "macho")
+        )
+        if not has_binary_evidence:
             raise click.UsageError(
-                f"--used-by requires OLD/NEW to be real library binaries "
-                f"(not JSON snapshots); {label} ({path}) is not a recognized "
-                f"binary format."
+                f"--used-by requires OLD/NEW to be real library binaries, or "
+                f"JSON snapshots carrying binary evidence (a `dump` of a real "
+                f"library, not headers-only); {label} ({path}) is neither."
             )
 
     summaries = []
     worst_exit = 0
     worst_verdict = None
+    worst_verdict_rank = -1
+    # Keyed by id(change)/the missing string itself so a Change or missing
+    # symbol shared by two tied apps (e.g. both import the same removed
+    # symbol) collapses to one entry instead of being tallied once per app
+    # (Codex review) -- `_scoped_severity_summary` runs once at the end over
+    # this deduplicated union, not per app summed together.
+    worst_changes: dict[int, Any] = {}
+    worst_missing: set[str] = set()
     for app in used_by_apps:
         scoped = scope_diff_to_app(
-            result, app, old_input, new_input,
+            result, app, old_lib, new_lib,
             policy=policy, policy_file=policy_file,
         )
         summaries.append(_app_compat_summary(scoped))
-        exit_code = _verdict_exit_code(scoped.verdict)
-        # `>=` (not `>`): the first app must always seed worst_verdict, even
-        # when its exit code is 0 (COMPATIBLE) -- a strict `>` against the 0
-        # starting point meant an all-COMPATIBLE --used-by set left
-        # scoped_verdict unset (None) forever, so the JSON verdict swap and
-        # the scoped-vs-full-verdict text banner both silently no-op'd for
-        # the (very common) fully-compatible case (Codex review).
-        if worst_verdict is None or exit_code >= worst_exit:
-            worst_exit = exit_code
+        exit_code = _scoped_exit_code(
+            scoped, scoped.breaking_for_app, result, exit_code_scheme, sev_config,
+            policy, policy_file,
+            has_missing_contract=bool(scoped.missing_symbols or scoped.missing_versions),
+        )
+        # exit code (gating) and verdict (reporting) are maxed/ranked
+        # independently: under a severity scheme the two can disagree (a
+        # BREAKING app can carry exit code 0 under e.g. `--severity-preset
+        # info-only`), so picking the reported scoped_verdict by exit code
+        # could let a later, less-severe app overwrite an earlier BREAKING
+        # one merely because their exit codes tied at 0 (Codex review).
+        if exit_code_scheme == "severity":
+            if exit_code > worst_exit:
+                worst_changes = {id(c): c for c in scoped.breaking_for_app}
+                worst_missing = set(scoped.missing_symbols) | set(scoped.missing_versions)
+            elif exit_code == worst_exit:
+                worst_changes.update({id(c): c for c in scoped.breaking_for_app})
+                worst_missing |= set(scoped.missing_symbols) | set(scoped.missing_versions)
+        worst_exit = max(worst_exit, exit_code)
+        rank = _verdict_severity_rank(scoped.verdict)
+        if worst_verdict is None or rank >= worst_verdict_rank:
+            worst_verdict_rank = rank
             worst_verdict = scoped.verdict
     result.used_by = summaries  # type: ignore[attr-defined]
     result.scoped_verdict = worst_verdict  # type: ignore[attr-defined]
+    result.scoped_exit_code = worst_exit  # type: ignore[attr-defined]
+    result.scoped_exit_code_scheme = exit_code_scheme  # type: ignore[attr-defined]
+    if exit_code_scheme == "severity":
+        categories, counts = _scoped_severity_summary(
+            list(worst_changes.values()), worst_missing,
+            result, sev_config, policy, policy_file,
+        )
+        result.scoped_blocking_categories = categories  # type: ignore[attr-defined]
+        result.scoped_severity_counts = counts  # type: ignore[attr-defined]
     return worst_exit
 
 
@@ -518,6 +677,7 @@ def _apply_required_symbol_scoping(
     result: Any, required_symbols: tuple[str, ...],
     old: Any, new: Any,
     policy: str, policy_file: PolicyFile | None,
+    exit_code_scheme: str = "legacy", sev_config: Any = None,
 ) -> int:
     """Scope *result* to an explicit ``--required-symbol(s)`` contract (ADR-043)."""
     from .appcompat import scope_diff_to_required_symbols
@@ -528,7 +688,21 @@ def _apply_required_symbol_scoping(
     )
     result.required_symbols = _plugin_contract_summary(scoped)  # type: ignore[attr-defined]
     result.scoped_verdict = scoped.verdict  # type: ignore[attr-defined]
-    return _verdict_exit_code(scoped.verdict)
+    exit_code = _scoped_exit_code(
+        scoped, scoped.breaking_for_host, result, exit_code_scheme, sev_config,
+        policy, policy_file,
+        has_missing_contract=bool(scoped.missing_entrypoints),
+    )
+    result.scoped_exit_code = exit_code  # type: ignore[attr-defined]
+    result.scoped_exit_code_scheme = exit_code_scheme  # type: ignore[attr-defined]
+    if exit_code_scheme == "severity":
+        categories, counts = _scoped_severity_summary(
+            scoped.breaking_for_host, scoped.missing_entrypoints,
+            result, sev_config, policy, policy_file,
+        )
+        result.scoped_blocking_categories = categories  # type: ignore[attr-defined]
+        result.scoped_severity_counts = counts  # type: ignore[attr-defined]
+    return exit_code
 
 
 def _load_required_symbols(
@@ -782,6 +956,20 @@ def run_compare(
     # single-pair one would (ADR-037 D4).
     old_kind, new_kind = _classify_and_reject_operands(old_input, new_input)
 
+    if {old_kind, new_kind} & {"directory", "package"}:
+        # The per-library fan-out (`compare-release` backend) consumes the
+        # resolved scheme from config but has no public CLI support for these
+        # single-pair-only flags on set inputs — reject them loudly (ADR-037 D12).
+        # Validated ahead of the --dry-run emit below (not just before the real
+        # dispatch) so a dry run can't report "ok" for a flag combination the
+        # real run would then reject (Codex review).
+        _reject_set_input_flags(
+            exit_code_scheme, reconcile_build_context, env_matrix_path, secondary_fmt,
+            used_by_apps=used_by_apps, required_symbols=required_symbols,
+        )
+        _reject_compile_context_for_set_inputs(ctx, project_cfg)
+        _reject_evidence_flags_for_set_inputs(ctx)
+
     if dry_run:
         from .dry_run import emit_dry_run
 
@@ -798,15 +986,6 @@ def run_compare(
         ))
 
     if {old_kind, new_kind} & {"directory", "package"}:
-        # The per-library fan-out (`compare-release` backend) consumes the
-        # resolved scheme from config but has no public CLI support for these
-        # single-pair-only flags on set inputs — reject them loudly (ADR-037 D12).
-        _reject_set_input_flags(
-            exit_code_scheme, reconcile_build_context, env_matrix_path, secondary_fmt,
-            used_by_apps=used_by_apps, required_symbols=required_symbols,
-        )
-        _reject_compile_context_for_set_inputs(ctx, project_cfg)
-        _reject_evidence_flags_for_set_inputs(ctx)
         # Resolved through the ``cli`` module (not a by-name import) so a test that
         # monkeypatches ``abicheck.cli._dispatch_release_compare`` before invoking
         # ``compare`` is honoured — matching the pre-split resolution semantics.
@@ -1119,11 +1298,14 @@ def run_compare(
     scoped_exit_code: int | None = None
     if used_by_apps:
         scoped_exit_code = _apply_used_by_scoping(
-            result, used_by_apps, used_by_old_input, used_by_new_input, policy, pf,
+            result, used_by_apps, used_by_old_input, used_by_new_input, old, new,
+            policy, pf,
+            exit_code_scheme=resolved_cfg.exit_code_scheme, sev_config=sev_config,
         )
     elif required_symbols:
         scoped_exit_code = _apply_required_symbol_scoping(
             result, required_symbols, old, new, policy, pf,
+            exit_code_scheme=resolved_cfg.exit_code_scheme, sev_config=sev_config,
         )
 
     text = _render_output(
@@ -1206,6 +1388,51 @@ def _fold_scoped_compat_into_text(text: str, fmt: str, result: Any) -> str:
             payload["used_by"] = used_by
         if required_symbols is not None:
             payload["required_symbol_contract"] = required_symbols
+        # Under a severity scheme, `severity.exit_code`/`blocking` describe
+        # the *full-library* gate decision -- but the process actually exits
+        # with the scoped exit code computed above (Codex review): without
+        # this, a scoped-compatible run that exits 0 could still carry
+        # `severity.exit_code: 4`/`blocking: true` in its own JSON body, the
+        # opposite of what the command that produced it just did. Mirrors the
+        # verdict/full_verdict swap above -- the full-library breakdown moves
+        # to `full_severity`, `severity` becomes the scoped gate.
+        scoped_exit_code = getattr(result, "scoped_exit_code", None)
+        scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
+        severity_block = payload.get("severity")
+        if (
+            scoped_exit_code is not None
+            and scoped_exit_code_scheme == "severity"
+            and isinstance(severity_block, dict)
+        ):
+            payload["full_severity"] = severity_block
+            # `categories.*.count` must also move to the scoped tally --
+            # otherwise a scoped-compatible `exit_code: 0` could still show
+            # an error-level `categories.abi_breaking.count > 0` left over
+            # from the full-library breakdown, contradicting the now-scoped
+            # `blocking`/`blocking_categories` fields above (Codex review).
+            scoped_counts = getattr(result, "scoped_severity_counts", None) or {}
+            full_categories = severity_block.get("categories")
+            scoped_categories = (
+                {
+                    cat: (
+                        {**info, "count": scoped_counts.get(cat, 0)}
+                        if isinstance(info, dict)
+                        else info
+                    )
+                    for cat, info in full_categories.items()
+                }
+                if isinstance(full_categories, dict)
+                else full_categories
+            )
+            payload["severity"] = {
+                **severity_block,
+                "categories": scoped_categories,
+                "exit_code": scoped_exit_code,
+                "blocking": scoped_exit_code != 0,
+                "blocking_categories": list(
+                    getattr(result, "scoped_blocking_categories", ()) or ()
+                ),
+            }
         return json.dumps(payload, indent=2)
 
     if fmt in ("markdown", "text", "review"):
@@ -1216,14 +1443,29 @@ def _fold_scoped_compat_into_text(text: str, fmt: str, result: Any) -> str:
             and full_verdict_value is not None
             and scoped_verdict_value != full_verdict_value
         ):
-            # The exit code reflects the *scoped* verdict (ADR-043 worst-wins),
-            # which can disagree with the full-library verdict this report's own
-            # headline already rendered above -- state which one is authoritative
-            # for CI instead of leaving the two to silently disagree (Codex review).
+            # The exit code is computed from the *scoped* result (ADR-043
+            # worst-wins), which can disagree with the full-library verdict
+            # this report's own headline already rendered above -- state
+            # which one is authoritative for CI instead of leaving the two to
+            # silently disagree (Codex review). Under a severity scheme the
+            # exit code is NOT a fixed BREAKING->4/API_BREAK->2 mapping of
+            # scoped_verdict -- e.g. --severity-preset info-only can floor it
+            # at 0 even for a BREAKING scoped verdict -- so state the actual
+            # computed value/scheme instead of asserting the exit code
+            # "reflects" the scoped verdict, which would be false in that
+            # case (Codex review follow-up).
+            scoped_exit_code = getattr(result, "scoped_exit_code", None)
+            scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
+            exit_note = (
+                f"the CLI process exits {scoped_exit_code} under the "
+                f"{scoped_exit_code_scheme} exit-code scheme for this run"
+                if scoped_exit_code is not None
+                else "this is what the exit code reflects"
+            )
             header = [
                 f"**Scoped verdict: {scoped_verdict_value}** "
-                f"(this is what the exit code reflects; the full library "
-                f"verdict above is {full_verdict_value}).",
+                f"({exit_note}; the full library verdict above is "
+                f"{full_verdict_value}).",
                 "",
             ]
         lines = [*header, text, ""]

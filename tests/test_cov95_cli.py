@@ -61,6 +61,7 @@ from abicheck.cli_compare_release import (
     _resolve_release_headers,
     _resolve_release_severity_config,
 )
+from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.serialization import snapshot_to_json
 
@@ -1135,7 +1136,7 @@ class TestUsedByScoping:
 
         monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", lambda *a, **k: result)
 
-    def _result(self, *, verdict=Verdict.COMPATIBLE, missing=None):
+    def _result(self, *, verdict=Verdict.COMPATIBLE, missing=None, breaking_for_app=None):
         from abicheck.appcompat import AppCompatResult
 
         return AppCompatResult(
@@ -1144,6 +1145,7 @@ class TestUsedByScoping:
             new_lib_path="new.so",
             required_symbols={"foo"},
             required_symbol_count=1,
+            breaking_for_app=breaking_for_app or [],
             missing_symbols=missing or [],
             missing_versions=[],
             verdict=verdict,
@@ -1190,18 +1192,180 @@ class TestUsedByScoping:
         assert out.exists()
         assert "Report written to" in result.output
 
-    def test_severity_missing_symbols_floors_at_4(self, tmp_path, monkeypatch) -> None:
-        # A --severity-preset alongside --used-by has no effect on the scoped
-        # exit code (see the module-level note above) -- the missing-symbol
-        # BREAKING floor holds regardless of an info-only preset.
+    def test_severity_missing_symbols_default_preset_floors_at_4(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # A required symbol's removal is a real Change in breaking_for_app
+        # (as scope_diff_to_app would report it) -- abi_breaking defaults to
+        # error, so the scoped exit code still floors at 4.
+        res = self._result(
+            verdict=Verdict.BREAKING, missing=["foo"],
+            breaking_for_app=[Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")],
+        )
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app),
+            "--severity-preset", "default",
+        )
+        assert result.exit_code == 4
+
+    def test_severity_missing_symbol_covered_by_change_not_double_counted(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Regression (Codex P2 follow-up): "foo" is both a missing symbol
+        # (absent from the new exports) *and* the subject of a scoped
+        # FUNC_REMOVED Change -- that's one ABI break, not two. Before the
+        # fix, the missing-contract count was added on top of the
+        # categorized Change count unconditionally.
+        res = self._result(
+            verdict=Verdict.BREAKING, missing=["foo"],
+            breaking_for_app=[Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")],
+        )
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app),
+            "--format", "json", "--severity-preset", "default",
+        )
+        assert result.exit_code == 4
+        data = json.loads(result.stdout)
+        assert data["severity"]["categories"]["abi_breaking"]["count"] == 1
+
+    def test_severity_missing_symbols_only_floors_at_4(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Regression (Codex P1): a required symbol absent from both old and
+        # new libraries is a missing contract with no corresponding diff
+        # Change -- `scope_diff_to_app` reports it purely via
+        # `missing_symbols`, leaving `breaking_for_app` empty. Before the
+        # fix, `_scoped_exit_code` computed the severity-scheme exit solely
+        # from `breaking_for_app`, silently exiting 0 for an app that can
+        # never resolve the required symbol at all.
         res = self._result(verdict=Verdict.BREAKING, missing=["foo"])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app),
+            "--severity-preset", "default",
+        )
+        assert result.exit_code == 4
+
+    def test_severity_missing_symbols_only_json_blocking_categories(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # The missing-contract-only case (no diff Change) must still surface
+        # "abi_breaking" in the scoped JSON severity block's
+        # blocking_categories -- otherwise a nonzero exit_code with an empty
+        # blocking_categories list would be an unexplained gate result.
+        res = self._result(verdict=Verdict.BREAKING, missing=["foo"])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app),
+            "--format", "json", "--severity-preset", "default",
+        )
+        assert result.exit_code == 4
+        data = json.loads(result.stdout)
+        assert data["severity"]["exit_code"] == 4
+        assert data["severity"]["blocking"] is True
+        assert data["severity"]["blocking_categories"] == ["abi_breaking"]
+        # The missing symbol itself (not a diff Change) still counts.
+        assert data["severity"]["categories"]["abi_breaking"]["count"] == 1
+
+    def test_severity_info_only_preset_overrides_missing_symbols_exit(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Regression: --severity-preset used to have NO effect on the scoped
+        # exit code at all -- an info-only preset must now floor exit_code at
+        # 0 despite the scoped verdict staying BREAKING (post-merge PR #566
+        # review).
+        res = self._result(
+            verdict=Verdict.BREAKING, missing=["foo"],
+            breaking_for_app=[Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")],
+        )
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke(
             "compare", str(old), str(new), "--used-by", str(app),
             "--severity-preset", "info-only",
         )
+        assert result.exit_code == 0
+
+    def test_multi_app_scoped_verdict_ranked_independently_of_exit_code(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Regression: under a severity scheme, a BREAKING app can carry exit
+        # code 0 (info-only preset). Picking the reported scoped_verdict by
+        # exit code (both apps tie at 0) let the second, merely-COMPATIBLE
+        # app overwrite the first BREAKING app's verdict -- the JSON/report
+        # verdict must stay BREAKING even though the gated exit code is
+        # floored at 0 by the severity config (Codex review).
+        import abicheck.appcompat as appcompat_mod
+        from abicheck.appcompat import AppCompatResult
+
+        breaking_res = self._result(
+            verdict=Verdict.BREAKING, missing=["foo"],
+            breaking_for_app=[Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")],
+        )
+        compatible_res = AppCompatResult(
+            app_path="/app2", old_lib_path="old.so", new_lib_path="new.so",
+            required_symbols=set(), required_symbol_count=0,
+            verdict=Verdict.COMPATIBLE, symbol_coverage=100.0,
+        )
+        app1, old, new = self._setup(tmp_path, monkeypatch)
+        app2 = tmp_path / "app2"
+        app2.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        monkeypatch.setattr(
+            appcompat_mod, "scope_diff_to_app",
+            MagicMock(side_effect=[breaking_res, compatible_res]),
+        )
+        result = _invoke(
+            "compare", str(old), str(new),
+            "--used-by", str(app1), "--used-by", str(app2),
+            "--severity-preset", "info-only", "--format", "json",
+        )
+        data = json.loads(result.stdout)
+        assert result.exit_code == 0  # severity config still floors the gate
+        assert data["verdict"] == "BREAKING"  # but the reported verdict is not lost
+
+    def test_multi_app_shared_change_not_double_counted(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Regression (Codex P2): when two --used-by apps tie on the worst
+        # exit code and both depend on the *same* removed symbol, the shared
+        # Change object must be counted once in
+        # severity.categories.abi_breaking.count, not once per app -- the
+        # library only has one ABI finding, not two.
+        import abicheck.appcompat as appcompat_mod
+        from abicheck.appcompat import AppCompatResult
+
+        shared_change = Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")
+        res1 = AppCompatResult(
+            app_path="/app1", old_lib_path="old.so", new_lib_path="new.so",
+            required_symbols={"foo"}, required_symbol_count=1,
+            breaking_for_app=[shared_change], verdict=Verdict.BREAKING,
+        )
+        res2 = AppCompatResult(
+            app_path="/app2", old_lib_path="old.so", new_lib_path="new.so",
+            required_symbols={"foo"}, required_symbol_count=1,
+            breaking_for_app=[shared_change], verdict=Verdict.BREAKING,
+        )
+        app1, old, new = self._setup(tmp_path, monkeypatch)
+        app2 = tmp_path / "app2"
+        app2.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        monkeypatch.setattr(
+            appcompat_mod, "scope_diff_to_app",
+            MagicMock(side_effect=[res1, res2]),
+        )
+        result = _invoke(
+            "compare", str(old), str(new),
+            "--used-by", str(app1), "--used-by", str(app2),
+            "--severity-preset", "default", "--format", "json",
+        )
+        data = json.loads(result.stdout)
         assert result.exit_code == 4
+        assert data["severity"]["categories"]["abi_breaking"]["count"] == 1
 
     def test_severity_clean_exit_0(self, tmp_path, monkeypatch) -> None:
         res = self._result(verdict=Verdict.COMPATIBLE)
@@ -1257,6 +1421,142 @@ class TestUsedByScoping:
         assert result.exit_code == 0  # the scoped verdict, not the full BREAKING
         assert "Scoped verdict: COMPATIBLE" in result.stdout
         assert "full library verdict above is BREAKING" in result.stdout
+
+    def test_markdown_scoped_banner_states_actual_exit_under_severity_scheme(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Regression (Codex P2): under a severity scheme, the scoped exit
+        # code is NOT a fixed mapping of the scoped verdict -- e.g.
+        # --severity-preset info-only can floor it at 0 even for a BREAKING
+        # scoped verdict. The markdown banner used to unconditionally claim
+        # "this is what the exit code reflects" whenever the scoped and full
+        # verdicts disagreed, which is false here (BREAKING scoped verdict,
+        # exit code 0) -- it must state the actual computed exit code/scheme
+        # instead, mirroring the SARIF/JUnit/HTML wording.
+        res = self._result(verdict=Verdict.BREAKING, missing=["foo"])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app),
+            "--format", "markdown", "--severity-preset", "info-only",
+        )
+        assert result.exit_code == 0
+        assert "Scoped verdict: BREAKING" in result.stdout
+        assert "the CLI process exits 0 under the severity exit-code scheme" in result.stdout
+        assert "this is what the exit code reflects" not in result.stdout
+
+    def test_json_severity_block_reflects_scoped_gate_not_full_library(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Regression (Codex P2): under --severity-preset, the JSON `severity`
+        # block used to always describe the *full-library* gate decision --
+        # here the full library has an error-level BREAKING removal but the
+        # app-scoped result is COMPATIBLE. The process exits 0 (the scoped
+        # gate), so `severity.exit_code`/`blocking` in the JSON body must
+        # agree with that, not silently claim `exit_code: 4`/`blocking: true`
+        # for a run that just exited 0.
+        old_snap = _snap(
+            "1.0", library="libfoo.so",
+            funcs=[Function(
+                name="removed", mangled="_Z7removedv", return_type="void",
+                visibility=Visibility.PUBLIC,
+            )],
+        )
+        new_snap = _snap("2.0", library="libfoo.so", funcs=[])
+        from abicheck import dumper as dumper_mod
+
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        old = tmp_path / "old.so"
+        old.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        new = tmp_path / "new.so"
+        new.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        monkeypatch.setattr(
+            dumper_mod, "dump", MagicMock(side_effect=[old_snap, new_snap])
+        )
+        self._patch_scope(monkeypatch, self._result(verdict=Verdict.COMPATIBLE))
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app),
+            "--format", "json", "--severity-preset", "default",
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["full_verdict"] == "BREAKING"
+        assert data["verdict"] == "COMPATIBLE"
+        # The scoped gate, not the full-library one that would exit 4.
+        assert data["severity"]["exit_code"] == 0
+        assert data["severity"]["blocking"] is False
+        assert data["severity"]["blocking_categories"] == []
+        # Category counts also move to the scoped tally -- not left over
+        # from the full-library breakdown alongside a non-blocking gate.
+        assert data["severity"]["categories"]["abi_breaking"]["count"] == 0
+        # The full-library breakdown is preserved, just demoted to a
+        # secondary key -- it still shows the real BREAKING removal.
+        assert data["full_severity"]["exit_code"] == 4
+        assert data["full_severity"]["blocking"] is True
+        assert "abi_breaking" in data["full_severity"]["blocking_categories"]
+        assert data["full_severity"]["categories"]["abi_breaking"]["count"] == 1
+
+
+class TestUsedByScopingWithSnapshotInputs:
+    """`compare --used-by` OLD/NEW as saved JSON snapshots (ADR-043 follow-up).
+
+    Regression: --used-by used to hard-require OLD/NEW to be real library
+    binaries, breaking the natural `dump` once + `compare ... --used-by`
+    later workflow (post-merge PR #566 review) -- a snapshot carrying binary
+    evidence (its `elf`/`pe`/`macho` field) must now work.
+    """
+
+    def _snap_with_elf(self, version: str, symbol_names: list[str]) -> AbiSnapshot:
+        return AbiSnapshot(
+            library="libfoo.so.1", version=version,
+            elf=ElfMetadata(
+                soname="libfoo.so.1",
+                symbols=[ElfSymbol(name=n) for n in symbol_names],
+            ),
+        )
+
+    def _write(self, path: Path, snap: AbiSnapshot) -> Path:
+        from abicheck.serialization import snapshot_to_json
+        path.write_text(snapshot_to_json(snap), encoding="utf-8")
+        return path
+
+    def _patch_scope(self, monkeypatch, result):
+        import abicheck.appcompat as appcompat_mod
+        monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", lambda *a, **k: result)
+
+    def test_both_sides_json_snapshots_with_elf_evidence_succeed(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        old = self._write(tmp_path / "old.json", self._snap_with_elf("1.0", ["foo"]))
+        new = self._write(tmp_path / "new.json", self._snap_with_elf("2.0", ["foo"]))
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 200)
+
+        from abicheck.appcompat import AppCompatResult
+        self._patch_scope(monkeypatch, AppCompatResult(
+            app_path=str(app), old_lib_path="libfoo.so.1", new_lib_path="libfoo.so.1",
+            required_symbols={"foo"}, required_symbol_count=1,
+            verdict=Verdict.COMPATIBLE, symbol_coverage=100.0,
+        ))
+        result = _invoke("compare", str(old), str(new), "--used-by", str(app))
+        assert result.exit_code == 0
+        assert "requires OLD/NEW to be real library binaries" not in (result.output or "")
+
+    def test_headers_only_json_snapshots_still_rejected(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # No `elf`/`pe`/`macho` field at all -- no binary evidence to scope
+        # against, so this must still fail loudly rather than silently
+        # mis-scope (unlike a snapshot from a real library dump).
+        old = self._write(tmp_path / "old.json", _snap("1.0"))
+        new = self._write(tmp_path / "new.json", _snap("2.0"))
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 200)
+
+        result = _invoke("compare", str(old), str(new), "--used-by", str(app))
+        assert result.exit_code == 64
+        assert "requires OLD/NEW to be real library binaries" in (result.output or "")
 
 
 # ── cli.py: _write_release_step_summary (1351-1372) ───────────────────────────

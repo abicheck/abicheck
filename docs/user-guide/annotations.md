@@ -130,7 +130,6 @@ jobs:
       - name: Compare RPM packages
         uses: abicheck/abicheck@v0.3.0
         with:
-          mode: compare-release
           old-library: libfoo-1.0-1.el9.x86_64.rpm
           new-library: libfoo-1.1-1.el9.x86_64.rpm
           extra-args: --annotate
