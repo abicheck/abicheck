@@ -996,9 +996,9 @@ def _reject_application_operand(
         f"'{which}' looks like an application/executable, not a shared library, "
         "so `compare` cannot pair it as a library ABI. To check whether an "
         "application is still satisfied by a library, use "
-        "`abicheck appcompat <app> <old-lib> <new-lib>`. If this file really is a "
-        "shared library with an unusual ET_DYN/PIE layout, dump it first with "
-        "`abicheck dump` and compare the resulting snapshots."
+        "`abicheck compare <old-lib> <new-lib> --used-by <app>`. If this file "
+        "really is a shared library with an unusual ET_DYN/PIE layout, dump it "
+        "first with `abicheck dump` and compare the resulting snapshots."
     )
 
 
@@ -1371,7 +1371,7 @@ def _embed_inline_source_side(
                    "private __pp_* kernel churn and other non-committed exports are demoted "
                    "to the filtered ledger (see --show-filtered).")
 @click.option("--probe-matrix", "probe_matrix", multiple=True, type=SIDED_EXISTING_PATH_PARAM,
-              help="Build-configuration matrix snapshot (from 'abicheck probe run'), "
+              help="Build-configuration matrix snapshot, "
                    "scoped per side with an 'old='/'new=' prefix (e.g. --probe-matrix "
                    "old=m1 --probe-matrix new=m2). With both sides given, build-config "
                    "findings (CXX_STANDARD_FLOOR_RAISED, API_DEPENDS_ON_CONSUMER_ENV, "

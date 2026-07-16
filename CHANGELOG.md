@@ -9,6 +9,85 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Removed
+
+- **Pre-1.0 CLI reset (ADR-043): the root command tree is now exactly 5
+  commands — `dump`, `compare`, `scan`, `deps`, `compat`.** Nine commands are
+  deleted outright, with no aliases and no deprecation shims — running any of
+  them now produces a normal Click "No such command" error:
+  - `appcompat` → folded into `compare --used-by APP` (repeatable). The full
+    library comparison still runs once; the worst app-scoped result becomes
+    the primary verdict/exit code, with the full verdict kept as
+    informational context. See `cli_compare_helpers._apply_used_by_scoping`
+    and `appcompat.scope_diff_to_app`.
+  - `plugin-check` → folded into `compare --required-symbol SYM` (repeatable)
+    / `--required-symbols FILE` (one symbol per line). See
+    `_apply_required_symbol_scoping` / `scope_diff_to_required_symbols`.
+    Mutually exclusive with `--used-by`.
+  - `baseline` (the whole registry group: push/pull/list/delete) → no
+    replacement command. Use `scan --against OLD` for point-in-time
+    comparisons, or keep JSON snapshots yourself.
+  - `collect`, `merge`, `recommend-collect-mode` → removed from the CLI; the
+    underlying library functions survive for internal/programmatic use only.
+    `dump --sources`/`--build-info` auto-collects inline; `compare`
+    auto-ingests each side's embedded build-source pack, or an out-of-band
+    `--build-info`/`--sources` pack (auto-detects `abicheck_inputs/` Flow-2
+    packs too).
+  - `debian-symbols`, `doctor`, `config` (the scaffolding subcommand),
+    `init`, `surface-report`, `suggest-suppressions`, `probe` → no CLI
+    replacement. `debian_symbols.py`'s functions (`generate_symbols_file`,
+    `validate_symbols`, `diff_symbols_files`, …) still exist for
+    programmatic/Python API use.
+  - `pr-comment` → moved off the public CLI entirely; now invoked only as
+    `python -m abicheck.cli_pr_comment`, used internally by the GitHub
+    Action.
+
+### Changed
+
+- **`scan` reshaped (ADR-043).** Positional `ARTIFACT` replaces repeated
+  `--binary`. `--against OLD` replaces `--baseline`. `-H/--header` and
+  `-I/--include` are now side-aware — a bare value applies to both `ARTIFACT`
+  and the `--against` side, an `old=PATH`/`new=PATH` prefix scopes to one side
+  — replacing the old `--baseline-header`/`--baseline-include`. `--mode`,
+  `--source-method`, `--audit`, and `--estimate` are gone entirely (not just
+  hidden): depth is now inferred automatically (risk-driven once a
+  `--since`/`--changed-path` diff seed exists) or pinned with `--depth`;
+  omitting `--against` is automatically a one-build audit, giving `--against`
+  is automatically audit+compare — there is no separate audit toggle, and
+  `--estimate` is subsumed into the new `--dry-run`.
+- **`--dry-run` added to `dump`, `compare`, `scan`, `deps tree`, `deps
+  compare`** — a shared renderer (`abicheck/dry_run.py`,
+  `DryRunResult`/`emit_dry_run`). Cheap read-only resolution only: no
+  compiler invocation, no build-system query, no network, no writes. Rejects
+  `-o`/`--output`. Exit codes only 0 (ok), 1 (blocked), or 64 (usage error) —
+  never the verdict codes 2/4.
+- **`deps compare --baseline`/`--candidate` renamed to `--old-root`/
+  `--new-root`.**
+- **Depth ladder narrowed to exactly 4 public rungs: `binary`, `headers`,
+  `build`, `source`** (`--depth` on `dump`/`compare`/`scan`). The old `full`
+  depth is gone completely (no alias) — it collapsed into `source` (they
+  differed only in replay *scope*, not evidence kind). `--max`,
+  `--source-method`, `--mode`, and the old `symbols`/`graph` depth spellings
+  are all rejected outright (a plain Click "not one of …" error), not
+  deprecated. Scope rule, tightened as a deliberate bug fix: `dump`/`compare`
+  always use TARGET scope for `--depth source`; `scan` uses CHANGED scope
+  only when a valid `--since`/`--changed-path` seed exists, otherwise TARGET
+  scope — previously an explicit `--depth source` scan with no seed could
+  silently collect zero translation units, which is no longer possible.
+- **`.abicheck.yml` loading is now strict.** Unknown keys, wrong value
+  types, and bad enum values are hard errors (exit 64), not warnings. There
+  is no more `init`/`config` scaffolding command to generate a starter file.
+- **MCP server (`abicheck/mcp_server.py`) tools updated to match.**
+  `abi_scan`'s `baseline` param is renamed to `against`; `mode`/
+  `source_method` params are removed entirely from `abi_scan`/`abi_estimate`
+  (depth is now inferred, or pinned via `depth`, restricted to the 4 public
+  values); `abi_compare` gained `used_by`/`required_symbols` params
+  mirroring the CLI's new scoping flags.
+- **New CI gate: `.github/workflows/cli-interface-check.yml`.** Diffs the
+  CLI surface (`scripts/dump_cli_surface.py`/`scripts/diff_cli_surface.py`)
+  between a PR's base and head, and labels+comments the PR whenever a
+  user-facing CLI flag/command changed.
+
 ### Added
 
 - **5 new `examples/` catalog cases (182–186) probing scoping/semantic-diff

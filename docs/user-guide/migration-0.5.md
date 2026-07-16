@@ -1,6 +1,23 @@
 # Migrating to 0.5.0 — `compare` flag changes
 
-0.5.0 reshapes the `compare` (and `appcompat`) command line under
+> **Superseded by a later, larger reset.** A subsequent pre-1.0 CLI reset
+> (ADR-043) went further than this page describes: `appcompat` and
+> `plugin-check` (mentioned below as still-current commands) were removed
+> entirely and folded into `compare --used-by`/`compare --required-symbol(s)`;
+> `scan --baseline` was renamed to `scan --against`; `deps compare
+> --baseline`/`--candidate` was renamed to `--old-root`/`--new-root`; the
+> `--depth`/evidence-collection surface was narrowed to exactly `binary`,
+> `headers`, `build`, `source` (no more `full`, `--mode`, `--source-method`);
+> and several standalone commands (`baseline`, `collect`, `merge`,
+> `debian-symbols`, `doctor`, `config`, `init`, `surface-report`,
+> `pr-comment`, `suggest-suppressions`, `probe`) were removed from the CLI
+> with no replacement command. See [CLI Usage](cli-usage.md),
+> [Companion Commands](companion-commands.md), and
+> [Source-Scan Depth](scan-levels.md) for the current surface. This page is
+> kept as the historical record of the 0.5.0 side-aware-flags change, which
+> is otherwise still accurate for the flags it covers.
+
+0.5.0 reshapes the `compare` (and, at the time, `appcompat`) command line under
 [ADR-040](../development/adr/040-compare-surface-reduction.md). Two kinds of
 change affect existing invocations and CI scripts:
 

@@ -170,9 +170,12 @@ covers `BREAKING`; `potential_breaking` covers both `API_BREAK` and
 > unreadable or unrecognised input — exits `64`, deliberately outside the
 > `0/2/4` space, so a usage error is never mistaken for a compatibility result.
 
-For every other command (`compat`, `appcompat`, `scan`, `deps`,
-`debian-symbols`, multi-library/release inputs) and the full summary matrix,
-see the authoritative [Exit Codes](../reference/exit-codes.md) reference.
+For every other command (`compat`, `scan`, `deps`, multi-library/release
+inputs) and the full summary matrix, see the authoritative
+[Exit Codes](../reference/exit-codes.md) reference. App- and plugin-scoped
+comparisons (`compare --used-by APP` / `compare --required-symbol SYM`) fold
+into `compare`'s own exit-code scheme above — the worst app/plugin-scoped
+result becomes the primary verdict/exit code.
 Worked gate patterns beyond the templates below — strict production gates,
 permissive binary-only gates, and severity-driven gates — live in the
 [CI Gating](../user-guide/ci-gating.md) guide.

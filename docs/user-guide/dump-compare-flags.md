@@ -126,19 +126,21 @@ arbitrary commands; it reads existing build outputs and build-system query
 interfaces only. See [Source & Build Evidence
 Packs](../concepts/build-source-data.md) for the full model and
 [Build Evidence Setup](build-evidence-setup.md) for producing a pack
-(`abicheck-cc`, the Clang plugin, `collect`, and a full worked CMake example).
+(`abicheck-cc`, the Clang plugin, and a full worked CMake example).
 
 ```bash
-# 1. Collect a pack from an existing build tree (no rebuild).
-abicheck collect \
-    --compile-db build/compile_commands.json \
-    --build-dir build --from cmake --source-abi \
-    --output libfoo.bs/
-
-# 2. Embed the build + source facts inline in the snapshot. The resulting
-#    .abi.json is self-contained.
+# 1. Point dump straight at a raw source checkout — it collects L3/L4/L5
+#    evidence inline itself (compile DB auto-inferred for cmake/make/bazel),
+#    no separate collection step needed. The resulting .abi.json is
+#    self-contained.
 abicheck dump build/libfoo.so -H include/ \
-    --build-info libfoo.bs/ --sources libfoo.bs/ -o libfoo.abi.json
+    --sources . -o libfoo.abi.json
+
+# 2. Or feed in an out-of-band pack produced by the abicheck-cc wrapper or the
+#    Clang plugin (abicheck also auto-detects an abicheck_inputs/ pack
+#    alongside the binary with no flag at all).
+abicheck dump build/libfoo.so -H include/ \
+    --build-info abicheck_inputs/ --sources abicheck_inputs/ -o libfoo.abi.json
 
 # 3. Compare two snapshots — the embedded facts diff automatically, with no
 #    pack directories to carry around.
@@ -160,11 +162,13 @@ abicheck compare old.abi.json new.abi.json
 | `--sources <dir>` | `dump` | Embed a pack's L4/L5 source facts (source ABI replay + graph) inline in the snapshot |
 | `--build-info old=<dir>` / `--build-info new=<dir>` | `compare` | Out-of-band L3 build-info pack per side (overrides embedded) |
 | `--sources old=<dir>` / `--sources new=<dir>` | `compare` | Out-of-band L4/L5 source pack per side (overrides embedded) |
-| `--depth <rung>` | `compare`, `dump` | Evidence-depth dial (`binary`/`headers`/`build`/`source`/`full`; `--max` == `--depth full`). On `compare`, depths past `headers` collect from an `--sources` tree (or read embedded facts); without a source tree the requested mode is reported in the coverage table only — run `abicheck collect` separately instead. |
+| `--depth <rung>` | `compare`, `dump` | Evidence-depth dial: `binary` (L0/L1 only), `headers` (+L2 AST, default), `build` (+L3 build context), `source` (+L4 replay & the L5 graph). On `compare`, depths past `headers` collect from an `--sources` tree (or read embedded facts); without a source tree the requested mode is reported in the coverage table only. |
 
 To additionally capture **L4 source ABI replay** (macro/`constexpr` values,
-default-argument values, uninstantiated templates), add `--source-abi` to
-`collect`. L4 requires `clang` (or castxml for the declaration subset);
+default-argument values, uninstantiated templates), pass `--sources` at
+`--depth source` on `dump`/`compare` (a raw source checkout is replayed
+inline; a pre-built pack from the `abicheck-cc` wrapper or Clang plugin is
+loaded as-is). L4 requires `clang` (or castxml for the declaration subset);
 if it is missing, abicheck **degrades gracefully** — L4 is marked partial and
 the artifact-backed tiers (L0–L2) remain fully authoritative. Build/source
 evidence (L3/L4) *explains, localizes, and scopes* findings or raises its own
@@ -172,10 +176,28 @@ source-level findings, but it **never silently deletes an artifact-proven
 break** (the *authority rule*, ADR-028 D3).
 
 !!! tip "Diagnosing which layers you have"
-    Run `abicheck dump libfoo.so --show-data-sources` to print which evidence
-    layers (L0 binary metadata, L1 debug info, L2 header AST) abicheck found for
-    a binary, then exit — useful for confirming a stripped build really is
-    missing its debug info before you trust a symbols-only verdict.
+    Run `abicheck dump libfoo.so --dry-run` to classify the inputs and print
+    which data layers (L0–L5) are available, without producing a snapshot —
+    useful for confirming a stripped build really is missing its debug info
+    before you trust a symbols-only verdict.
+
+## Dry-run validation
+
+Both `dump` and `compare` accept `--dry-run`: it resolves and validates the
+invocation — classifying inputs, resolving depth/scope, discovering config,
+and (on `dump`) reporting which data layers (L0–L5) are available — then
+prints a report without producing a snapshot or running the diff. It writes
+nothing, so it's incompatible with `-o`/`--output`, and its exit codes are
+only `0` (ok) or `1` (blocked) or `64` (usage error) — never the verdict codes
+`2`/`4`.
+
+```bash
+# Check what dump would see before spending time on a full extraction
+abicheck dump libfoo.so -H include/ --sources . --dry-run
+
+# Check what compare would resolve/collect before running the diff
+abicheck compare old.so new.so -H include/ --depth source --sources . --dry-run
+```
 
 ## Debug artifact resolution
 

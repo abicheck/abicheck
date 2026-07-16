@@ -387,7 +387,7 @@ def _discover_compile_db(sources: Path | None, explicit: Path | None) -> Path | 
 
 
 def _count_pack_tus(path: Path) -> int | None:
-    """TU count of an ``abicheck collect`` pack dir, or ``None`` if not a pack.
+    """TU count of a build-source pack dir, or ``None`` if not a pack.
 
     The real scan loads a pack dir (``is_pack_dir``) and uses its embedded
     ``build_evidence``; the estimate mirrors that so a pack-only ``--build-info``
@@ -510,7 +510,7 @@ def _estimate_total_tus(req: ScanRequest) -> tuple[int, str]:
     if bazel_tus is not None:
         return bazel_tus, "Bazel aquery/cquery (build_evidence)"
     if pack_tus is not None:
-        return pack_tus, "abicheck collect pack (build_evidence)"
+        return pack_tus, "build-source pack (build_evidence)"
     if compile_db is not None:
         return _count_compile_db_tus(compile_db), f"compile DB: {compile_db.name}"
     if req.sources is not None:

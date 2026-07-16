@@ -17,8 +17,8 @@
 The inverse of :mod:`inputs_pack` (which *ingests*): these helpers let a build
 (the ``abicheck-cc`` wrapper, a Clang plugin, or any tooling that can produce a
 :class:`SourceAbiTu`) **emit** a conformant Flow-2 pack — manifest +
-``source_facts/*.jsonl`` — that ``abicheck merge`` later ingests with no second
-frontend (ADR-035 D5, G19.4).
+``source_facts/*.jsonl`` — that ``dump --build-info``/``--sources`` later
+ingests with no second frontend (ADR-035 D5, G19.4).
 
 Two usage shapes:
 

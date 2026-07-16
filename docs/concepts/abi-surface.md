@@ -96,7 +96,7 @@ Two abicheck features map directly onto this page:
   ([case145](../examples/case145_audit_unversioned_export.md)), and exported
   RTTI for internal types
   ([case146](../examples/case146_audit_rtti_for_internal.md)). See
-  [Source-Scan Depth § single-build audit](../user-guide/scan-levels.md#single-build-audit-no-baseline).
+  [Source-Scan Depth § single-build audit](../user-guide/scan-levels.md#single-build-audit-no-against).
 
 The design patterns that keep the surface small — opaque handles, Pimpl,
 version scripts, `-fvisibility=hidden` + explicit exports — are the subject of

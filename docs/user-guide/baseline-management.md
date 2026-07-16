@@ -8,6 +8,18 @@ breaking changes before they ship.
 > severity → exit code) — see [CI Gating](ci-gating.md) for how it combines
 > with policies, suppressions, and severity.
 
+> **The built-in baseline registry command is gone.** The pre-1.0 CLI reset
+> (ADR-043) removed the whole `abicheck baseline` subcommand group
+> (`push`/`pull`/`list`/`delete`) with no replacement command — abicheck's
+> CLI has no opinion on *where* you store a snapshot. This page's storage
+> recipes below (GitHub Releases, git-committed files, Actions cache,
+> external artifact stores) all just move a plain JSON file around and
+> continue to work unchanged; only the registry's own addressing/integrity
+> layer (`library:version:platform` keys, checksum-on-pull) has no direct
+> equivalent. For a one-off "compare against a previous build" without
+> managing a baseline file yourself, see
+> [`scan --against`](scan-levels.md) below.
+
 ## Creating a Baseline
 
 ```bash
@@ -207,115 +219,6 @@ Best for: large binaries, private repos, retention policies.
           new-header: include/foo.h
 ```
 
-## Baseline Registry
-
-For structured baseline management with version/platform addressing and integrity
-verification, use the built-in baseline registry:
-
-```bash
-# Push a baseline after a release build
-abicheck dump build/libfoo.so -H include/ -o snapshot.json
-abicheck baseline push libfoo \
-    --version 1.0.0 \
-    --platform linux-x86_64 \
-    --snapshot snapshot.json
-
-# Pull a baseline by key and compare
-abicheck baseline pull libfoo:1.0.0:linux-x86_64 -o baseline.json
-abicheck compare baseline.json build/libfoo.so -H include/
-
-# List all baselines
-abicheck baseline list
-
-# Delete an old baseline
-abicheck baseline delete libfoo:0.9.0:linux-x86_64
-```
-
-### Registry commands
-
-| Command | Description |
-|---------|-------------|
-| `abicheck baseline push <library>` | Store a baseline snapshot |
-| `abicheck baseline pull <spec>` | Retrieve a baseline by key |
-| `abicheck baseline list [prefix]` | List available baselines |
-| `abicheck baseline delete <spec>` | Delete a baseline |
-
-The spec format is `library:version:platform[:variant]`.
-
-### Registry options
-
-| Flag | Description |
-|------|-------------|
-| `--version` | Version string (e.g., `1.0.0`, `main`) |
-| `--platform` | Target platform (e.g., `linux-x86_64`, `macos-arm64`) |
-| `--variant` | Build variant (e.g., `ssl-enabled`, `debug`) |
-| `--snapshot` | Path to the ABI snapshot JSON file |
-| `--registry` | Registry directory (default: `.abicheck/baselines/`) |
-| `--auto-platform` | Auto-detect platform from the snapshot's binary |
-| `--git-commit` | Source commit SHA to record in metadata |
-
-### Storage layout
-
-Baselines are stored as plain files in a directory tree:
-
-```text
-.abicheck/baselines/
-├── libfoo/
-│   ├── 1.0.0/
-│   │   └── linux-x86_64/
-│   │       ├── snapshot.json    # ABI snapshot
-│   │       └── metadata.json    # Provenance + checksum
-│   └── 2.0.0/
-│       └── linux-x86_64/
-│           ├── snapshot.json
-│           └── metadata.json
-└── libbar/
-    └── 1.0.0/
-        └── linux-x86_64/
-            ├── snapshot.json
-            └── metadata.json
-```
-
-### Integrity verification
-
-Each pushed baseline includes a SHA-256 checksum in `metadata.json`. On pull,
-the checksum is verified and a `BaselineIntegrityError` is raised if the
-snapshot has been modified. Metadata also records:
-
-- abicheck version that produced the snapshot
-- Timestamp of creation
-- Optional git commit SHA
-- Optional build-context hash (when `-p` was used)
-
-### Example: CI workflow with the registry
-
-```yaml
-jobs:
-  abi-check:
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build
-        run: cmake --build build/
-
-      - name: Dump ABI snapshot
-        run: abicheck dump build/libfoo.so -H include/ -o snapshot.json
-
-      - name: Pull baseline and compare
-        run: |
-          abicheck baseline pull libfoo:latest:linux-x86_64 -o baseline.json \
-              --registry .abicheck/baselines
-          abicheck compare baseline.json snapshot.json --format sarif -o abi.sarif
-
-      - name: Update baseline (on release tag)
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          abicheck baseline push libfoo \
-            --version ${{ github.ref_name }} \
-            --platform linux-x86_64 \
-            --snapshot snapshot.json \
-            --git-commit ${{ github.sha }}
-```
-
 ## Comparing Against a Baseline
 
 Once you have a baseline, comparison is the same regardless of storage:
@@ -342,20 +245,34 @@ abicheck compare libfoo-1.0.rpm libfoo-1.1.rpm
 See [Multi-Binary Releases](multi-binary.md) for the bundle/package flags and the
 [GitHub Action](github-action.md) guide for CI examples with packages.
 
-### `scan --baseline` against a native library
+### `scan --against` for a one-off comparison
 
-`abicheck scan` takes a single `-H` (built for the *new* binary). When the
-`--baseline` is a **native library** (not a snapshot) and its public headers
-differ from the new version, parse the old side with **its own** headers:
+`abicheck scan ARTIFACT` doesn't require a stored baseline at all — pass
+`--against` with any previous dump, library, directory, or package to compare
+against, and `scan` runs its always-on audit checks plus that comparison in
+one pass:
 
 ```bash
-abicheck scan --binary new/libfoo.so -H new/include \
-  --baseline old/libfoo.so --baseline-header old/include
+abicheck scan new/libfoo.so --header new/include --against old/libfoo.so
 ```
 
-- `--baseline-header` / `--baseline-include` — the old side's public headers and
-  include roots. Without them, a native baseline is parsed with the *new* `-H`
-  (correct only when the headers didn't change), and `scan` prints a warning.
-- A **JSON-snapshot baseline** already has its headers baked in, so these flags
-  are unnecessary there. Prefer a pre-dumped snapshot baseline when you can —
-  it's unambiguous and needs no toolchain at compare time.
+`-H`/`--header` and `-I`/`--include` are side-aware: a bare value applies to
+both `ARTIFACT` and the `--against` side, and an `old=`/`new=` prefix scopes
+to one side. When `--against` is a **native library** (not a snapshot) and
+its public headers differ from the new version, parse the old side with
+**its own** headers using the `old=` prefix:
+
+```bash
+abicheck scan new/libfoo.so --against old/libfoo.so \
+  --header new=new/include --header old=old/include
+```
+
+- Without an `old=`-scoped header, a native `--against` library is parsed
+  with the same headers as `ARTIFACT` (correct only when the headers didn't
+  change).
+- A **JSON-snapshot** `--against` target already has its headers baked in, so
+  side-scoped headers are unnecessary there. Prefer a pre-dumped snapshot
+  baseline when you can — it's unambiguous and needs no toolchain at compare
+  time.
+
+See [Source-Scan Depth](scan-levels.md) for the full `scan` flag reference.

@@ -30,12 +30,24 @@ turn overrides the built-in defaults (`CLI > config > default`).
 > `--config` (which marks it trusted for subprocess execution).
 > `--allow-build-query` is a deprecated no-op and is **not** required.
 
-### Forward compatibility
+### Strict loading (ADR-043)
 
-Unknown top-level keys, and unknown sub-keys inside a recognized block, **warn
-but never error** — an older abicheck reading a newer config keeps working. Set
-the top-level `version:` once a future key ships to silence the warning. A
-malformed YAML file is a hard error.
+Config loading is **strict**: an unknown top-level key, an unknown sub-key
+inside a recognized block, a value of the wrong type, or a bad enum value are
+all **hard errors** — not warnings. This is a behavior change from earlier
+abicheck versions, which warned on unknown keys and kept going. A malformed
+YAML file is also a hard error. On the CLI, any of these surfaces as a usage
+error (exit `64`; see [Exit Codes](exit-codes.md)) — the run never proceeds
+on a config abicheck could not fully validate.
+
+There is no longer an `init`/`config` scaffolding or diagnostic command
+(`abicheck init`, `config validate`, `config show-effective` are all gone —
+ADR-043) — write `.abicheck.yml` by hand, using this page as the schema/key
+reference. Since unknown keys are now a hard error rather than a silent
+warning, a typo or a key from a newer abicheck release will fail loudly
+instead of being ignored — set the top-level `version:` if you need to
+signal a schema generation to tooling, though it does not by itself suppress
+an unknown-key error.
 
 ---
 
@@ -54,7 +66,7 @@ malformed YAML file is a hard error.
 | [`exit_code_scheme:`](#exit_code_scheme) | string | `auto` | Which exit-code scheme `compare` uses |
 | [`version:`](#version) | integer | `0` | Config schema version (forward-compat) |
 | [`risk_rules:`](#risk_rules-and-crosschecks) | mapping | — | Path-glob risk profile (loaded via `--risk-rules`) |
-| [`crosschecks:`](#risk_rules-and-crosschecks) | mapping | — | Reserved (recognized so it does not warn) |
+| [`crosschecks:`](#risk_rules-and-crosschecks) | mapping | — | Reserved (recognized so it does not trip the unknown-key error) |
 
 Recognized keys and defaults live in `BuildConfig` (`buildsource/inline.py`).
 
@@ -137,10 +149,11 @@ Suppression **hygiene policy** (a project rule, distinct from the suppression
 | `method` | `s0`..`s6` | unset | Pins the precise S-axis (evidence method) for power users. |
 
 > **Use a concrete `s0`..`s6`, not `auto`.** When `compare` reads `source.method`
-> from the config (i.e. no `--depth`/`--max` on the command line), the value must
+> from the config (i.e. no `--depth` on the command line), the value must
 > resolve to a concrete method — `compare` rejects `auto` with a usage error. Pin
-> a specific level here, or leave the key unset and let `--depth`/`--max` drive
-> the collection depth per run.
+> a specific level here, or leave the key unset and let `--depth`
+> (`binary`/`headers`/`build`/`source` — `--max` and the old `full` depth no
+> longer exist) drive the collection depth per run.
 
 See [Scan levels](../user-guide/scan-levels.md) and the
 [`--depth` dial](../concepts/evidence-and-detectability.md#the-depth-dial-how-much-evidence-to-collect). (A `graph`
@@ -207,7 +220,7 @@ forward compatibility.
 ### `risk_rules:` and `crosschecks:`
 
 Both are recognized top-level keys (so they do not trigger the unknown-key
-warning), but they are handled outside the `compare` config merge:
+error), but they are handled outside the `compare` config merge:
 
 - **`risk_rules:`** — a mapping of rule-name → `{ paths: [...], weight: <int> }`
   path-glob risk profile. It is loaded by `scan`'s `--risk-rules <file>` option

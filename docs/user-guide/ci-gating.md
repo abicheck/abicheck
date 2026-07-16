@@ -8,7 +8,7 @@ order, and how the knobs interact.
 
 ```mermaid
 flowchart LR
-    B["Baseline<br/>(snapshot / registry)"] --> D["Detect changes<br/>(compare)"]
+    B["Baseline<br/>(snapshot / library)"] --> D["Detect changes<br/>(compare)"]
     N["New build"] --> D
     D --> P["1 · Policy classifies<br/>each change"]
     P --> S["2 · Suppressions<br/>waive changes"]
@@ -20,10 +20,11 @@ flowchart LR
 ## The order of operations
 
 It starts with detection: `abicheck compare BASELINE NEW` diffs the two ABI
-surfaces and produces raw changes. The baseline side is a snapshot, library,
-or registry entry — see [Baseline Management](baseline-management.md). The
-detected changes then flow through four stages (the numbers match the diagram
-above):
+surfaces and produces raw changes. The baseline side is a snapshot or a
+library (there is no CLI baseline registry anymore — keep JSON snapshots
+yourself, plain files, your own storage/naming convention) — see [Baseline
+Management](baseline-management.md). The detected changes then flow through
+four stages (the numbers match the diagram above):
 
 1. **Classify (policy).** The active [policy profile](policies.md)
    (`--policy strict_abi|sdk_vendor|plugin_abi` or a custom
@@ -70,7 +71,8 @@ exit `1` means an error-level *finding*, whereas under the legacy scheme `1`
 is a tool/runtime error, never a verdict (usage errors exit `64`). Pin the
 regime explicitly with `--exit-code-scheme legacy|severity` (or the
 `exit_code_scheme` config key) so a later flag change can't silently flip it.
-Full matrix, including `appcompat`/`deps`/`compat` and multi-library codes:
+Full matrix, including app/plugin-scoped comparisons (`compare --used-by`/
+`--required-symbol`), `deps`, `compat`, and multi-library codes:
 [Exit Codes](../reference/exit-codes.md).
 
 ## How the knobs interact
@@ -93,8 +95,7 @@ Full matrix, including `appcompat`/`deps`/`compat` and multi-library codes:
 - **Baselines → everything.** All of the above only gates what changed
   *relative to the baseline you chose*. Compare against the last release (not
   the previous commit) to catch cumulative drift; see
-  [Baseline Management](baseline-management.md) for storage and registry
-  workflows.
+  [Baseline Management](baseline-management.md) for storage workflows.
 
 ## Recipes
 
@@ -135,6 +136,13 @@ abicheck compare baseline.json build/libfoo.so --header new=include/ \
 
 More recipes: [Choose Your Workflow → How should CI behave](choose-your-workflow.md)
 and the policy recipes in [Getting Started](../getting-started.md).
+
+!!! note "abicheck's own CI also gates its CLI surface"
+    Separately from anything on this page, abicheck's own repo runs
+    `.github/workflows/cli-interface-check.yml`, which diffs the CLI surface
+    between a PR's base and head and labels/comments the PR whenever a
+    user-facing flag or command changes — a repo-internal mechanic for
+    abicheck contributors, not something you configure for your own project.
 
 ## Related pages
 

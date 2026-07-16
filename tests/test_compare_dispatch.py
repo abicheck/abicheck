@@ -770,7 +770,7 @@ class TestCompareDispatch:
         code, out, err = _invoke("compare", str(app), str(new))
         msg = out + err
         assert code != 0
-        assert "appcompat" in msg
+        assert "--used-by" in msg
 
     def test_set_only_flags_warn_on_single_file(self, tmp_path: Path) -> None:
         old, new = _breaking_pair()

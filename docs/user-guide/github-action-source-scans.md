@@ -79,16 +79,19 @@ for `auto` (risk-driven, best paired with `since:`):
 |-------|-----|
 | Cheap build-flag drift only (L3) | `depth: build` |
 | Source semantics on changed TUs (+ L5 graph) | `depth: source` + `since:` |
-| Full source-ABI replay of the whole library | `depth: full` |
+| Full source-ABI replay of the whole library | `depth: source` with no `since:`/`changed-path` (an unseeded `depth: source` already analyses the whole current target — ADR-043) |
 | Risk-driven (dev/local, opt-in) | omit `depth` (→ `auto`) + `since:` |
 
-!!! note "The deprecated `scan-mode`/`source-method` inputs were removed"
+!!! note "The old `scan-mode`/`source-method` inputs and the `full` depth are gone"
     Earlier releases exposed `scan-mode` (`pr`/`pr-deep`/`baseline`/`audit`) and
-    `source-method` (`s0…s6`) Action inputs that mapped onto `depth` and emitted a
-    deprecation warning (`scan-mode` even defaulted to `pr`). They have been
-    removed — use `depth` (or `audit: 'true'`). The CLI's own `--depth` dial and
-    the mapping from the old axes are in the
-    [Deprecated axes appendix](../concepts/evidence-and-detectability.md#appendix-deprecated-scan-axes-s0s6-and-mode).
+    `source-method` (`s0…s6`) Action inputs, plus a fifth `depth: full` rung.
+    As of the ADR-043 pre-1.0 CLI reset all three are removed outright, not
+    deprecated — the CLI's `--depth` no longer accepts `full`/`--mode`/
+    `--source-method`/`--max` at all (a plain usage error). Use `depth`
+    (or `audit: 'true'`); `full` collapsed into `source`, since the two only
+    ever differed in replay *scope*, and an unseeded `depth: source` already
+    resolves to the whole target. The mapping from the old axes is in the
+    [Removed scan axes appendix](../concepts/evidence-and-detectability.md#appendix-removed-scan-axes-s0s6-mode-source-method-max).
 
 ### Single-release audit (no baseline)
 
@@ -163,56 +166,28 @@ such snapshots) carries the L3/L4/L5 findings — no out-of-band directories:
           new-library: build/libfoo.so
           header: include/
           sources: .
-          depth: full                   # whole-library L3+L4+L5 for a baseline (unseeded `source` falls back to a headers-only replay)
+          depth: source                 # whole-library L3+L4+L5 for a baseline (unseeded `source` already analyses the whole target — ADR-043)
           output-file: abi-baseline.json
 ```
 
 Compare two such snapshots later with the default `compare` mode — the embedded
 evidence diffs automatically.
 
-### B. Combine independently-produced dumps with `merge`
+### B. Independently-produced dumps or a build-emitted facts pack
 
-When the binary side and source side are produced in parallel (e.g. on
-different runners), `mode: merge` folds them into one self-contained baseline:
+The `collect`/`merge` commands that used to combine a binary-side dump with a
+separately-produced source-side dump (or an `abicheck-cc`-emitted
+`abicheck_inputs/` Flow-2 pack) were removed from the public CLI in the
+ADR-043 reset with no replacement command, and the Action's `mode: merge`
+dispatch went with them. Section A (inline embedding) above is the only
+Action-supported flow today.
 
-```yaml
-      # one job produces the artifact-side dump (L0/L1/L2)…
-      - uses: abicheck/abicheck@v0.3.0
-        with:
-          mode: dump
-          new-library: build/libfoo.so
-          header: include/
-          output-file: libfoo.bin.json
-
-      # …another produces the source-side dump (L3/L4/L5)…
-      - uses: abicheck/abicheck@v0.3.0
-        with:
-          mode: dump
-          sources: ./libfoo-src/
-          output-file: libfoo.src.json
-
-      # …then merge them into one baseline:
-      - uses: abicheck/abicheck@v0.3.0
-        with:
-          mode: merge
-          merge-inputs: 'libfoo.bin.json libfoo.src.json'
-          on-conflict: error            # good for baseline generation
-          output-file: libfoo.baseline.json
-```
-
-### C. Build-emitted facts (Flow-2 `abicheck_inputs/` pack)
-
-A product build that emits a self-describing `abicheck_inputs/` pack (via
-`abicheck-cc` — see [Build Info & Sources](../concepts/build-source-data.md))
-needs no source replay in CI. `mode: merge` ingests the pack directly:
-
-```yaml
-      - uses: abicheck/abicheck@v0.3.0
-        with:
-          mode: merge
-          merge-inputs: 'libfoo.bin.json ./abicheck_inputs/'
-          output-file: libfoo.baseline.json
-```
-
-The resulting `libfoo.baseline.json` is a normal snapshot — pass it as
-`old-library`/`baseline` to any later `compare` or `scan`.
+For a build that genuinely produces the binary and source sides on separate
+runners (or emits a Flow-2 pack), `compare`'s own out-of-band
+`--old-build-info`/`--new-build-info` flags accept a pack directory per side —
+including auto-detecting an `abicheck_inputs/` pack — but the Action does not
+currently expose per-side build-info inputs for `mode: compare`. Run that step
+directly with the CLI (`pip install abicheck`) instead of through this Action,
+or embed inline at dump time as in Section A. See
+[Build Info & Sources](../concepts/build-source-data.md) for the underlying
+CLI-level flows.

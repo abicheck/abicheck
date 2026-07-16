@@ -87,7 +87,9 @@ class BuildSourcePack:
         if not manifest_path.is_file():
             raise FileNotFoundError(
                 f"No build-source pack manifest at {manifest_path}. "
-                f"Expected a directory produced by `abicheck collect`."
+                f"Expected a build-source pack directory (a legacy on-disk pack "
+                f"from a prior collection run) or a build-emitted "
+                f"`abicheck_inputs/` pack."
             )
         manifest = BuildSourceManifest.from_dict(_read_json(manifest_path))
         build_evidence: BuildEvidence | None = None

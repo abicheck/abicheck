@@ -106,9 +106,10 @@ def embed_build_source(
     / pre-captured pack supplying L3. A ``compile_commands.json`` inside the
     source tree is auto-discovered when ``build_info`` is omitted.
 
-    For back-compatibility a path that is itself a pack directory produced by
-    ``abicheck collect`` (it has a ``manifest.json``) is loaded as that pack
-    instead of being collected inline.
+    For back-compatibility a path that is itself a pack directory (it has a
+    ``manifest.json`` — e.g. from the ``abicheck-cc`` wrapper, the Clang
+    plugin, or a build-emitted ``abicheck_inputs/`` pack) is loaded as that
+    pack instead of being collected inline.
 
     The combined facts ride inside the ``.abi.json`` so a later
     ``compare old.json new.json`` works with no out-of-band directories. Also

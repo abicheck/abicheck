@@ -130,8 +130,9 @@ scan degrades gracefully and L0–L2 stay authoritative.
     schema) — the Action ingests it with **`mode: merge`**: pass the binary dump
     plus the pack directory in `merge-inputs`. The Action does not run the
     wrapper/plugin itself (that happens in your build); it folds the resulting
-    pack into a baseline with no re-parse, exactly like the local
-    `abicheck merge` flow.
+    pack into a baseline with no re-parse, using the same merge logic
+    previously exposed as a standalone `merge` CLI command (now internal-only
+    — see [Companion Commands](companion-commands.md)).
 
 ### Output and policy
 

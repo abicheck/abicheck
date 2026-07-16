@@ -123,7 +123,8 @@ whole lesson.
     **Authority:** authoritative. &nbsp;·&nbsp; **Proves here:** nothing — all
     four changes keep every symbol name.
 
-**What abicheck extracts** (`abicheck dump libcart.so --show-data-sources`):
+**What abicheck extracts** (`abicheck dump libcart.so --dry-run`, in its
+"Available data layers" section):
 
 ```text
 L0 binary metadata   present  (ELF, SONAME=libcart.so.1, 4 exported symbols)
@@ -350,13 +351,17 @@ delta fires. The dedicated L5 risk findings are emitted only when those
 relationships actually change: `public_reachability_changed` when a declaration
 *enters or leaves* the public closure, and `source_to_binary_mapping_changed`
 when a declaration now maps to a *different* exported symbol. Like L4 they never
-override the artifact verdict. (`abicheck graph explain --symbol
-_ZNK4cart4Cart5totalEb` prints exactly this closure to localize the L1 break.)
+override the artifact verdict. (This closure is reported inline as part of the
+`--depth source` report that localizes the L1 break on `_ZNK4cart4Cart5totalEb`
+— there is no separate `graph` command; the L5 graph is an internal
+consequence of `--depth source`, not its own CLI surface.)
 
 !!! warning "The L5 blind spot"
-    It is a *structural* graph. The cheap `s4` form has no call edges, so "what
-    does this internal helper's change reach through the call graph" needs the L4
-    pass (`s5`/`pr-deep`). And a graph never proves a break — it prioritizes one.
+    It is a *structural* graph. The cheap include/declares/maps-to closure has
+    no call edges, so "what does this internal helper's change reach through
+    the call graph" needs the full L4 replay pass (`--depth source`) — there
+    is no cheaper, call-edge-aware depth. And a graph never proves a break —
+    it prioritizes one.
 
 ---
 
@@ -365,12 +370,12 @@ _ZNK4cart4Cart5totalEb` prints exactly this closure to localize the L1 break.)
 The L-staircase is not the only evidence axis. Two *orthogonal* checks answer
 different questions and see different things:
 
-- **App-swap (`appcompat`)** — build a real consumer against v1, drop in v2, run
-  it. It **proves** actual loader/linker behavior for *that* app ("this app does
-  not import the removed symbol") but **cannot** speak for the whole contract:
-  untested API, future consumers, and silent layout corruption a test never
-  exercises stay invisible. It is *consumer-scoped*; library `compare` is
-  *contract-scoped*.
+- **App-swap (`compare --used-by`)** — build a real consumer against v1, drop
+  in v2, run it. It **proves** actual loader/linker behavior for *that* app
+  ("this app does not import the removed symbol") but **cannot** speak for the
+  whole contract: untested API, future consumers, and silent layout corruption
+  a test never exercises stay invisible. It is *consumer-scoped*; library
+  `compare` (without `--used-by`) is *contract-scoped*.
 - **Bundle scan** — many libraries at once, cross-DSO. It catches provider/
   dependency/entry-point problems *between* binaries that a single-library
   compare cannot, and is blind to pure source compatibility.
@@ -482,7 +487,7 @@ rule](build-source-data.md#the-authority-rule-the-one-rule-that-matters)):
 | Inline / template **body** change (signature unchanged) | ❌ | ✅ | ✅ | 🟡 risk | body never becomes a symbol; only L4 replay fingerprints it — an *uninstantiated template signature* change ([case122](../examples/case122_template_signature_uninstantiated.md)) is a documented `NO_CHANGE` gap even at L4 |
 | Intra-version hygiene: accidental export, private-header leak, unversioned export, RTTI-for-internal | ⚠️ partial | ❌ | ✅ localizes | 🟡 risk | resolves at L0+L2 (binary exports **and** the header AST); the scan's cross-source pass computes it — no L4 replay needed |
 | Cross-source disagreement — *minimum evidence varies by check* | ⚠️ header↔build | ⚠️ ODR only | ✅ | 🟠 API_BREAK / 🟡 risk | evidence on only one side → the check is *skipped*, never faked green. Export↔decl & provider checks need only L0+L2; header↔build needs L3; ODR variant needs L4 |
-| Cross-symbol impact / reachability (what a changed internal reaches) | ⚠️ structural | ✅ | ✅ | 🟡 risk | `s4` graph has no call edges — call-impact needs the L4 pass (`s5`/`pr-deep`) |
+| Cross-symbol impact / reachability (what a changed internal reaches) | ⚠️ structural | ✅ | ✅ | 🟡 risk | the structural graph alone has no call edges — call-impact needs the full L4 replay (`--depth source`) |
 
 The source scan reaches a *different* set of changes — macros, bodies, build
 flags, hygiene, cross-source conflicts — not a "better" version of the artifact

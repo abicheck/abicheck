@@ -16,7 +16,7 @@
 """Inline build/source collection for ``dump --build-info``/``--sources``.
 
 The source-tree-centric model (ADR-028..033 amendment, 2026-06-12): instead of
-attaching a prebuilt pack produced by ``abicheck collect``, ``dump`` collects
+attaching a prebuilt pack directory, ``dump`` collects
 the normalized L3/L4/L5 facts *inline* from raw inputs and embeds them in the
 ``.abi.json``:
 
@@ -660,7 +660,7 @@ def discover_build_config(source_tree: Path | None) -> Path | None:
 
 
 def is_pack_dir(path: Path | None) -> bool:
-    """True when *path* is a real ``BuildSourcePack`` directory (``abicheck collect``).
+    """True when *path* is a real ``BuildSourcePack`` directory.
 
     Validates the manifest *content*, not just its presence: a raw source checkout
     or build dir that merely contains a top-level ``manifest.json`` must not be

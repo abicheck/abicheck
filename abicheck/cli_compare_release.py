@@ -1056,7 +1056,7 @@ def _strip_diff_results_and_adjust_verdict(
     "probe_matrix_old",
     type=click.Path(exists=True, path_type=Path),
     default=None,
-    help="Old build-configuration matrix snapshot (from 'abicheck probe run'). "
+    help="Old build-configuration matrix snapshot. "
     "When given with --probe-matrix-new, build-config findings "
     "(CXX_STANDARD_FLOOR_RAISED, API_DEPENDS_ON_CONSUMER_ENV, "
     "BEHAVIOURAL_DEFAULT_CHANGED) are folded into this release's "

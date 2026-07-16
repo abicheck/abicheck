@@ -21,8 +21,8 @@ source ABI **during the real build**, with that TU's exact flags/macros::
 
 It runs the real compile (pass-through, preserving the compiler's exit code),
 then **best-effort** extracts a normalized :class:`SourceAbiTu` for the TU and
-appends it to an ``abicheck_inputs/`` pack. A later ``abicheck merge
-libfoo.bin.json ./abicheck_inputs/`` ingests those exact-build-context facts with
+appends it to an ``abicheck_inputs/`` pack. A later ``abicheck dump libfoo.so
+--build-info ./abicheck_inputs/`` ingests those exact-build-context facts with
 no second frontend (Flow 2). Fact extraction never fails the build (authority
 rule, ADR-028 D3): a missing front-end or a parse error degrades to a warning.
 

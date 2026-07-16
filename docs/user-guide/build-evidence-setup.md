@@ -2,8 +2,8 @@
 
 This page is the operational reference for *setting up* build/source evidence
 collection — the pack producers (`abicheck-cc` wrapper, Clang plugin), the
-`.abicheck.yml` project-contract block, the `collect` command and out-of-band
-packs, a full worked CMake example, and external CLI extractors. For the concept
+`.abicheck.yml` project-contract block, out-of-band packs, a full worked CMake
+example, and external CLI extractors. For the concept
 and the [authority rule](../concepts/build-source-data.md#the-authority-rule-the-one-rule-that-matters),
 see [Build Info & Sources](../concepts/build-source-data.md).
 
@@ -18,7 +18,8 @@ export ABICHECK_CC_LIBRARY=libfoo.so
 export ABICHECK_CC_HEADERS=include            # public-header roots (ADR-015)
 
 abicheck-cc c++ -std=c++17 -Iinclude -c src/foo.cpp -o foo.o   # …per TU
-abicheck merge libfoo.bin.json ./abicheck_inputs/ -o libfoo.baseline.json
+abicheck dump libfoo.so -H include/ --build-info ./abicheck_inputs/ \
+  -o libfoo.baseline.json
 ```
 
 `abicheck-cc` runs the real compile (pass-through, preserving the exit code),
@@ -54,12 +55,13 @@ clang++ -std=c++17 -Iinclude \
   -Xclang -plugin-arg-abicheck-facts -Xclang public-roots=include \
   -c src/foo.cpp -o foo.o
 
-# 3. Fold the emitted pack in, exactly like the wrapper (no re-parse).
-abicheck dump libfoo.so -H include/ -o libfoo.bin.json
-abicheck merge libfoo.bin.json ./abicheck_inputs/ -o libfoo.baseline.json
+# 3. Fold the emitted pack in — one step, no re-parse (the pack is
+#    auto-detected from its manifest.json, no separate merge command).
+abicheck dump libfoo.so -H include/ --build-info ./abicheck_inputs/ \
+  -o libfoo.baseline.json
 ```
 
-Treat `merge` warnings about zero public declarations or `0/N` matched exported
+Treat warnings about zero public declarations or `0/N` matched exported
 symbols as a pack-quality problem, not as a clean success: choose a compile unit
 that includes the public API for the library target, and point `public-roots=` at
 the physical header path printed by `clang -H`.
@@ -69,16 +71,19 @@ conformance gate (ADR-038 C.6) that runs across LLVM/Clang 16, 17, and 18; its
 full contract, coverage, and limitations live in
 `contrib/abicheck-clang-plugin/README.md`. GCC (`-fdump-lang-class`) and MSVC
 have documented wrapper fallbacks. In every case the output contract is
-identical, so `abicheck merge` ingests them the same way; the portable default
-remains `compile_commands.json` replay (`dump --sources`).
+identical, so `dump --build-info` folds them in the same way, with no separate
+merge step; the portable default remains `compile_commands.json` replay
+(`dump --sources`).
 
 ## Project-contract blocks (ADR-037 D4)
 
 `.abicheck.yml` is also the home for the project's stable comparison contract —
 the settings that are version-controlled and reviewed in a PR rather than typed
 per run. `compare` auto-discovers the nearest config and merges CLI flags over
-it (precedence **CLI > config > built-in default**). Unknown keys **warn, never
-error** (forward-compat), and a top-level `version:` records the schema version.
+it (precedence **CLI > config > built-in default**). Loading is **strict**
+(ADR-043): an unknown top-level or block key, a wrong-typed value, or a bad
+enum is a hard error (exit 64), not a warning. A top-level `version:` records
+the schema version.
 
 ```yaml
 version: 1

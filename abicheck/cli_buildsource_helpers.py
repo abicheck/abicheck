@@ -84,8 +84,8 @@ def _resolve_side_pack(
     if bi_pack is None and src_pack is None:
         return embedded
 
-    # Each flag's pack exposes *every* layer it carries (a pack collected by
-    # `abicheck collect` may hold build + source + graph). --build-info wins for
+    # Each flag's pack exposes *every* layer it carries (a pack directory may
+    # hold build + source + graph together). --build-info wins for
     # L3, --sources wins for L4/L5, the embedded payload backfills, and the
     # coverage manifest is rebuilt per-layer from the supplying pack.
     return _combine_packs(bi_pack, src_pack, embedded)
@@ -135,8 +135,8 @@ def diff_embedded_build_source(
                 f"Note: --depth collected evidence mode '{collect_mode}' was "
                 "requested but no build-info/source facts were embedded or "
                 "supplied; inline collection for this mode is not yet available. "
-                "Use `abicheck collect` then embed with `dump --build-info/"
-                "--sources` (or pass --old/new pack dirs).",
+                "Embed with `dump --build-info`/`--sources` (or pass "
+                "--old/new-build-info pack dirs to compare).",
                 err=True,
             )
         # require_evidence still fires with no packs at all: every required layer

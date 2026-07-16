@@ -52,71 +52,57 @@ defaults:
 The `-std=c++NN` flag is parsed automatically to populate each
 configuration's C++ standard floor.
 
-## `abicheck probe run`
+> **History note:** running probes and diffing matrices used to be two
+> standalone commands, `abicheck probe run` and `abicheck probe compare`.
+> The ADR-043 CLI reset removed both with no replacement command — the
+> underlying Python functions are unchanged and still directly callable
+> (below), and `compare --probe-matrix old=<file> --probe-matrix new=<file>`
+> still folds a pair of pre-built `MatrixSnapshot` files into a comparison's
+> verdict and report.
 
-Compile every (configuration × probe) pair and emit a `MatrixSnapshot`:
-
-```bash
-abicheck probe run examples/probes/onedpl.yaml \
-    --library onedpl --version 2022.0 --out onedpl-2022.json
-```
-
-| Option | Purpose |
-|---|---|
-| `--library` | Library name stamped into the snapshot (required). |
-| `--version` | Version label stamped into the snapshot (required). |
-| `-o, --out` | Write the JSON here (default: stdout). |
-| `--work-dir` | Keep generated `.cpp`/`.o` files here (default: temp dir). |
-| `--no-snapshot` | Compile only; skip the dumper (routing check). |
-
-Per-configuration compile failures (e.g. a compiler missing from `PATH`)
-are captured in the snapshot as per-result errors and summarised on
-stderr — the run does not abort.
-
-## `abicheck probe compare`
-
-Diff two matrix snapshots and report the findings through the standard
-reporter / SARIF / JUnit paths:
-
-```bash
-abicheck probe compare onedpl-2022.json onedpl-2023.json -f markdown
-```
-
-| Option | Purpose |
-|---|---|
-| `-f, --format` | `json` (default), `markdown`, `sarif`, or `junit`. |
-| `-o, --output` | Write the report here (default: stdout). |
-| `--policy` | Built-in policy profile for verdict classification. |
-| `--allow-failures` | Diff even when an input matrix has failed probe results. |
-
-The exit code follows the legacy `compare` mapping: `0` = compatible,
-`2` = source break, `4` = ABI break.
-
-### Incomplete matrices
-
-The `API_DEPENDS_ON_CONSUMER_ENV` detector only inspects probes that
-compiled successfully. If a `probe run` produced failures — most commonly
-a compiler missing from `PATH` — every result for that configuration
-carries an error and no snapshot. Diffing two such matrices would skip
-the failed results and could report `NO_CHANGE` / exit `0`, silently
-marking an *untested* matrix as compatible.
-
-To avoid that false-negative, `probe compare` **rejects** an input matrix
-that contains failed results, printing the failures and exiting with code
-`3`. Pass `--allow-failures` to diff the successful subset anyway; the
-report is then marked low-confidence with a coverage warning naming how
-many results were skipped.
-
-## Python API
-
-The same capability is available programmatically:
+## Producing and diffing a matrix (Python API)
 
 ```python
 from abicheck.probe_harness import load_probe_spec, run_probe_matrix
 from abicheck.diff_build_config import diff_matrix
 
 spec = load_probe_spec("examples/probes/onedpl.yaml")
+
+# Compile every (configuration × probe) pair for each release.
 old = run_probe_matrix(spec, library_name="onedpl", version="2022.0")
 new = run_probe_matrix(spec, library_name="onedpl", version="2023.0")
-findings = diff_matrix(old, new)
+
+# Per-configuration compile failures (e.g. a compiler missing from PATH)
+# are captured in the matrix as per-result errors; run_probe_matrix does
+# not abort on them.
+
+findings = diff_matrix(old, new)   # list[Change]: the three kinds above
 ```
+
+```python
+Path("onedpl-2022.json").write_text(old.to_json())
+Path("onedpl-2023.json").write_text(new.to_json())
+```
+
+Save each `MatrixSnapshot` this way to feed `compare --probe-matrix
+old=onedpl-2022.json --probe-matrix new=onedpl-2023.json` instead, so the
+findings fold into that comparison's own verdict/report rather than a
+standalone diff.
+
+### Incomplete matrices — a known gap since the CLI removal
+
+The `API_DEPENDS_ON_CONSUMER_ENV` detector only inspects probes that
+compiled successfully. If `run_probe_matrix` produced failures — most
+commonly a compiler missing from `PATH` — every result for that
+configuration carries an error and no snapshot; diffing two such matrices
+skips the failed results and could report no findings, silently treating
+an *untested* configuration as compatible.
+
+The deleted `probe compare` command used to guard against exactly this,
+rejecting an input matrix with failed results (exit `3`) unless
+`--allow-failures` was passed. That guard lived only in the CLI layer and
+was not preserved as a library function — `diff_matrix` itself does not
+check for failed results. Until a future pass adds an equivalent check,
+inspect `old.results`/`new.results` (or the compare report's coverage
+warnings) for per-result errors yourself before trusting a `NO_CHANGE`-looking
+diff from an incomplete matrix.

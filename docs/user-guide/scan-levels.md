@@ -49,6 +49,27 @@ selects the mode).
     a plain usage error, exit 64) — use `--depth`. (`--depth symbols` was
     likewise renamed to `--depth binary`, with no alias kept.)
 
+## Headers and includes — ARTIFACT side vs. `--against` side
+
+`-H/--header [old=|new=]PATH` and `-I/--include [old=|new=]PATH` are
+repeatable and side-aware. A bare path applies to the current ARTIFACT;
+prefix it with `old=` to scope it to the `--against` side instead (`new=` is
+the explicit, symmetric spelling of the default), e.g.
+`--header old=old/include --header new=new/include`. This replaces the old,
+separate `--baseline-header`/`--baseline-include` flags — there is no longer
+a distinct flag name for the `--against` side, only a prefix on the same flag
+(the same `old=`/`new=` convention `dump`/`compare` already use).
+
+```bash
+# Same header layout works for both ARTIFACT and the --against side
+abicheck scan new/libfoo.so -H include/ --against old/libfoo.abi.json
+
+# The header layout moved between the old release and the new build
+abicheck scan new/libfoo.so \
+  --header old=old/include --header new=new/include \
+  --against old/libfoo.so
+```
+
 ## What each depth reaches
 
 | `--depth` | Reaches | Needs |
@@ -94,13 +115,12 @@ catches, the cost/implication column is what it asks of you in return.
 | `binary` | removed/changed exports, SONAME, dependency & version changes, no-DWARF vtable/RTTI size shifts | cheapest, flat with project size; **no** source-only API changes, and every exported symbol is treated as ABI (public/internal churn not separated) | you only have the two binaries, or want a fast pre-check |
 | `headers` | the **public/internal boundary** → separates real API breaks from internal churn; signature / type-layout / enum / `noexcept` changes | still cheap; needs public headers **and** a C/C++ frontend on `PATH`, else it falls back to binary-strict scope and over-reports | you have the public headers — this is the floor for a *trustworthy* verdict |
 | `build` | build-flag / toolchain / `-std` / visibility **drift**; macro-value & include-graph divergence | cheap (~0.3–0.5s more); needs a compile DB / build dir — without one L3 is `not_collected` (reported, not a pass) | the two builds may differ in flags, standard, or visibility |
-| `source` | inline / template / macro / default-argument / `constexpr` **body** changes, **plus** the L5 reachability graph that localizes and scopes findings | **the one cost cliff (L4)** — scales with C++ template depth; needs `--sources` + `clang` + a `--since` seed to stay cheap (unseeded, it replays every TU = `full` cost) | a per-PR gate that must catch source-body changes or wants per-symbol impact |
-| `full` | the same as `source`, but over the **whole** library rather than the changed TUs | most expensive (no seed scoping) | producing an amortized release baseline |
+| `source` | inline / template / macro / default-argument / `constexpr` **body** changes, **plus** the L5 reachability graph that localizes and scopes findings | **the one cost cliff (L4)** — scales with C++ template depth; needs `--sources` + `clang` + a `--since` seed to stay cheap (unseeded, it replays every TU — the same cost as an amortized whole-library replay) | a per-PR gate that must catch source-body changes or wants per-symbol impact; unseeded, the same rung also serves as the whole-library replay for producing an amortized release baseline |
 
 **The one rule that ties it together:** the binary diff (`binary`/`headers`) sets
-the pass/fail **gate**; `build`/`source`/`full` mostly *localize and explain* and
+the pass/fail **gate**; `build`/`source` mostly *localize and explain* and
 add their own source-/API-level findings — they rarely flip the verdict. So spend
-on L4 (`source`/`full`) for humans reviewing a PR or a release, and stay in the
+on L4 (`source`) for humans reviewing a PR or a release, and stay in the
 cheap tier for a fast CI gate.
 
 ### Example-catalog status
@@ -118,8 +138,7 @@ component results are structural diagnostics, never separate ground truths.
 | `binary` | 141 | 141 | 79 | 56.0% | 1 | 61 | Fast artifact gate; intentionally misses header/source-only breaks. |
 | `headers` | 141 | 141 | 115 | 81.6% | 0 | 26 | Best low-cost CI gate when public headers are available. |
 | `build` | 141 | 141 | 115 | 81.6% | 0 | 26 | Adds build context; no false positives in this matrix after advisory-crosscheck fix. |
-| `source` | 141 | 141 | 141 | 100.0% | 0 | 0 | Highest recall in this matrix; source-smoke proofs cover consumer-only API hazards. |
-| `full` | 141 | 141 | 141 | 100.0% | 0 | 0 | Whole-library replay for the same comparable targets; same verdict signal as `source` here. |
+| `source` | 141 | 141 | 141 | 100.0% | 0 | 0 | Highest recall in this matrix; source-smoke proofs cover consumer-only API hazards. Figures are for the diff-seeded rung; an unseeded whole-library replay reaches the same verdict signal at higher cost. |
 
 False positives and false negatives are listed directly. Bundle-component rows
 remain structural diagnostics in the 141-target matrix; only the dedicated
@@ -289,8 +308,8 @@ the verdict (see [Reading the coverage block](#reading-the-coverage-block)).
 
 The common CI case: gate a PR by comparing the just-built library against the
 baseline from `main`, scoping the expensive L4 replay to the files the PR
-touched. The `--since` seed is what keeps this cheaper than a full `full` scan —
-without it, `source` replays every TU.
+touched. The `--since` seed is what keeps this cheaper than an unseeded,
+whole-library `source` scan — without it, `source` replays every TU.
 
 ```bash
 abicheck scan build/libfoo.so \
@@ -387,7 +406,7 @@ abicheck scan libfoo.so --sources . --depth source --dry-run
 The reusable `--against` target that PR scans compare against is a
 **`dump`-produced snapshot**, not a scan report. `scan -o` writes the rendered
 scan report (text or JSON), so it cannot be fed back as `--against`; produce the
-baseline with `abicheck dump` instead. Pass `--sources` to embed the full-depth
+baseline with `abicheck dump` instead. Pass `--sources` to embed all of the
 L3/L4/L5 facts so the later PR compare carries them:
 
 ```bash

@@ -1092,8 +1092,9 @@ def build_source_dump_options(func: F) -> F:
         type=click.Path(exists=True, path_type=Path),
         default=None,
         help="Source checkout to run L4 source ABI replay + the L5 graph over "
-        "and embed inline. (A pack directory from `abicheck collect` is loaded "
-        "as that pack instead.)",
+        "and embed inline. (An existing pack directory — e.g. from the "
+        "abicheck-cc wrapper or Clang plugin — is auto-detected by its "
+        "manifest.json and loaded as that pack instead.)",
     )(func)
     func = click.option(
         "--build-info",

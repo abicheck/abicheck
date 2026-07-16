@@ -50,8 +50,9 @@ are inputs you provide** and `L5` is derived. This section covers the five you
 provide; the derived `L5` layer is detailed below and in
 [Build Info & Sources](build-source-data.md). You can see which **artifact**
 layers (`L0`–`L2`) a given input exposes
-with `abicheck dump --show-data-sources`; the build/source layers (`L3`/`L4`)
-are not reported there — they surface in the pack-aware `compare`
+with `abicheck dump --dry-run` (its "Available data layers" section reports
+L0–L5 presence/absence without writing a snapshot); the build/source layers
+(`L3`/`L4`) are not reported there — they surface in the pack-aware `compare`
 `layer_coverage` table once you supply a build/source pack:
 
 | # | Source you provide | Layer | abicheck input | What it newly reveals | Authority |
@@ -83,10 +84,13 @@ diagnostics only; the catalog keeps one canonical case-level verdict.
 | `headers` | 141 | 115 | 81.6% | 0 | 26 | Best low-cost gate: public-header evidence removes many misses without FP. |
 | `build` | 141 | 115 | 81.6% | 0 | 26 | Adds build context; no advisory-crosscheck false positives after policy fix. |
 | `source` | 141 | 141 | 100.0% | 0 | 0 | Highest recall; source-smoke proofs cover consumer-only API hazards. |
-| `full` | 141 | 141 | 100.0% | 0 | 0 | Whole-library replay for the same comparable targets; same verdict signal as `source` here. |
 
 The full example catalog is covered by multiple proof lanes. This table is only
 the compare-style scan-depth lane, so its compare-style scope is complete at 141/141.
+(An earlier `full` rung — whole-library replay, as opposed to `source`'s
+changed-TU replay — scored identically on this comparable-target set, which is
+why the two were collapsed into one public `source` rung; see the appendix
+below.)
 
 Across the full staircase, adding evidence drives **both** error axes down — it
 is not a trade-off where you must choose between missing breaks and crying wolf.
@@ -156,10 +160,11 @@ every run, so each layer's contribution is a tracked number, not a claim.
 > **Layers (`L`) vs. the depth dial.** The `L0`–`L5` codes name *evidence
 > layers* — *what* abicheck sees and how much that evidence is trusted. The
 > `abicheck scan` command has one knob, `--depth`
-> (`binary|headers|build|source|full`), that selects **how far down** these
-> layers to collect. The [`--depth` dial section
+> (`binary|headers|build|source` — exactly four public rungs), that selects
+> **how far down** these layers to collect. The [`--depth` dial section
 > below](#the-depth-dial-how-much-evidence-to-collect) explains the mapping
-> (and the deprecated `s0`–`s6`/`--mode` axes it replaced).
+> (and the removed `s0`–`s6`/`--mode`/`--source-method` axes it replaced —
+> see the [appendix](#appendix-removed-scan-axes-s0s6-mode-source-method-max)).
 
 ### How they combine
 
@@ -184,7 +189,7 @@ the per-case evidence each example needs is benchmarked in
 > **Best input you can give abicheck:** old + new library, **matching public
 > headers**, **debug info**, and the **build's compile database** — L0+L1+L2+L3
 > together. With less, abicheck degrades *down the staircase* and tells you
-> exactly which layers it had via the `--show-data-sources` / `layer_coverage`
+> exactly which layers it had via the `dump --dry-run` / `layer_coverage`
 > report.
 
 ### Why call it "evidence"?
@@ -233,31 +238,55 @@ finding's `evidence_status` field spells out in machine-readable form — see
 
 ## The `--depth` dial: how much evidence to collect
 
-The layers above describe *what* abicheck can see. `abicheck scan` has **one**
-knob that decides how much of it to gather — `--depth`, each rung **named by
-the evidence you get** (ADR-037 D5) and additive over the one below it:
+The layers above describe *what* abicheck can see. `dump`, `compare`, and
+`scan` share **one** knob that decides how much of it to gather — `--depth`,
+each rung **named by the evidence you get** (ADR-037 D5) and additive over the
+one below it. As of the pre-1.0 CLI reset, the ladder has **exactly four
+public rungs — no more, no fewer:**
 
 | `--depth` | Reaches | Needs |
 |-----------|---------|-------|
 | `binary` | L0/L1 exported symbols + binary metadata + debug-info *presence* (no deep DWARF type walk, no L2 AST) + the always-on pattern scan | just the artifact(s) |
 | `headers` | + **L2** header AST (the public/internal boundary) | a public-header directory + a C/C++ frontend |
 | `build` | + **L3** build context (flag/toolchain drift) | a compile DB / build dir |
-| `source` | + **L4** source-ABI replay of changed TUs + the **L5** graph | sources **and** `clang` (+ a diff seed for scoping) |
-| `full` | **L4** over the whole library | sources **and** `clang` |
+| `source` | + **L4** source-ABI replay + the **L5** graph | sources **and** `clang` |
 
-**Omit `--depth` for `auto`** — the default. `auto` is risk-driven when a
-`--since`/`--changed-path` diff seed is present (it reads the numeric risk of the
-changed paths and picks a rung), and falls back to a sensible preset otherwise.
-`auto` **never** fires for a pinned depth — a rung you pin always produces the
-same scan for the same inputs, which is what CI wants. `--audit` is
-**orthogonal** to `--depth`: a single-build, no-baseline hygiene lint you can
-combine with any depth.
+There is no fifth `full` rung. The old `full` depth (whole-library L4 replay,
+as opposed to `source`'s changed-TU replay) has been **collapsed into
+`source`** — the two rungs only ever differed in replay *scope*, never in
+which evidence layer they reached, so keeping both as separate public options
+was pure surface area. See the [appendix](#appendix-removed-scan-axes-s0s6-mode-source-method-max)
+for the full removal list and migration mapping.
+
+**Scope rule — which translation units `--depth source` actually replays:**
+
+- On `dump` and `compare`, `--depth source` always uses **TARGET scope** — it
+  replays the whole current library target. There is no seed-driven narrowing
+  on these two commands.
+- On `scan`, `--depth source` uses **CHANGED scope** (just the TUs touched by
+  a `--since`/`--changed-path` seed) **only when a valid seed is present**;
+  otherwise it falls back to **TARGET scope** (the whole current library),
+  never an empty replay. This is a deliberate bug fix: previously, pinning
+  `scan --depth source` with no seed could silently collect **zero**
+  translation units and report clean by omission. That gap is closed — an
+  unseeded `--depth source` scan now always replays *something*.
+
+**Omit `--depth` for `auto`** (on `scan`) — the default. `auto` is risk-driven
+when a `--since`/`--changed-path` diff seed is present (it reads the numeric
+risk of the changed paths and picks a rung), and falls back to a sensible
+preset otherwise. `auto` **never** fires for a pinned depth — a rung you pin
+always produces the same scan for the same inputs, which is what CI wants.
+`scan` without `--against` is already a one-build audit/hygiene/source
+consistency scan — that's not a separate `--audit` flag (there isn't one
+anymore), it's simply what omitting `--against` means; passing `--against`
+additionally compares `ARTIFACT` against it.
 
 !!! warning "A pinned deep depth is a contract (fail-loud)"
-    Pinning `--depth build|source|full` with **no source input**
+    Pinning `--depth build|source` with **no source input**
     (`--sources`/`--build-info`) is an error, not a silent shallow scan: there
     is nothing to collect L3/L4/L5 from. Pass the evidence, or use the default
-    `auto` for a best-effort binary scan.
+    `auto` for a best-effort binary scan (on `scan`; `dump`/`compare` degrade
+    the same way without erroring, since they have no `auto`).
 
 `scan` is a front-end over `dump`/`compare`: the resolved depth selects an
 internal collection mode, which decides which L-layers get collected and at
@@ -270,7 +299,6 @@ flowchart LR
       d1["headers"]:::cheap
       d2["build"]:::cheap
       d3["source"]:::exp
-      d4["full"]:::exp
     end
     subgraph L["L-axis · evidence (what)"]
       L01["L0/L1 artifact (authoritative)"]
@@ -282,7 +310,6 @@ flowchart LR
     d1 --> L2e
     d2 --> L3e
     d3 --> L45
-    d4 --> L45
     classDef cheap fill:#e6f4ea,stroke:#34a853;
     classDef exp fill:#fce8e6,stroke:#ea4335;
 ```
@@ -290,12 +317,14 @@ flowchart LR
 Three properties of the dial worth internalizing:
 
 - **There is no `graph` rung.** The L5 reachability graph is an internal
-  consequence of `--depth source`/`full`, never its own user-facing rung
-  (ADR-037 D6) — you do not select the graph directly.
+  consequence of `--depth source`, never its own user-facing rung (ADR-037
+  D6) — you do not select the graph directly.
 - **Cost has exactly one cliff, at L4.** `binary`/`headers`/`build` are one
-  cheap price; `source`/`full` pay for clang per-TU AST replay, and the cliff
-  height tracks C++ template/STL instantiation depth, not TU count. `source`
-  only beats `full` with a `--since`/`--changed-path` seed. Flag-level detail:
+  cheap price; `source` pays for clang per-TU AST replay, and the cliff
+  height tracks C++ template/STL instantiation depth, not TU count. On
+  `scan`, a `--since`/`--changed-path` seed keeps that replay to the changed
+  TUs (CHANGED scope); without one, `scan` (and always, on `dump`/`compare`)
+  pays the cliff for the whole target (TARGET scope). Flag-level detail:
   [Source-Scan Depth](../user-guide/scan-levels.md); measured numbers:
   [Performance § scan-level cost model](../development/performance.md#scan-level-cost-model-one-cliff-at-l4).
 - **Coverage is honest.** A scan can request a deep level and only reach a
@@ -312,8 +341,9 @@ crosschecks L2 header macros against L3 build flags;
 layouts; [case150](../examples/case150_xcheck_export_public_pair.md) crosschecks
 the L0 export table against L2 declarations in both directions.
 
-Migrating an old command line? The deprecated `s0…s6`/`--mode` axes map onto
-`--depth` in the [appendix at the end of this page](#appendix-deprecated-scan-axes-s0s6-and-mode).
+Migrating an old command line? The removed `s0…s6`/`--mode`/`--source-method`/
+`--max` axes map onto `--depth` in the
+[appendix at the end of this page](#appendix-removed-scan-axes-s0s6-mode-source-method-max).
 
 ---
 
@@ -383,9 +413,10 @@ check. It only exercises what one app imports and runs.
 | Future consumers | One app is not the whole public contract |
 | Header-only / source-only breaks | Existing binary doesn't exercise changed source |
 
-This maps to abicheck's [`appcompat`](../user-guide/appcompat.md) command. See
-[§4](#4-app-mode-consumer-scoped-vs-library-compare-contract-scoped) for its
-exact scope.
+This maps to abicheck's [`compare --used-by`](../user-guide/appcompat.md)
+scoping (an application-scoped view folded into `compare`, not a separate
+command). See [§4](#4-app-mode-consumer-scoped-vs-library-compare-contract-scoped)
+for its exact scope.
 
 ### b. libabigail (`abidiff`)
 
@@ -479,7 +510,7 @@ abicheck can still help in *some* cases:
 | Header-only API also gates a shared-library boundary | Header-AST comparison catches some API changes |
 | Explicit template instantiations shipped in a `.so` | The emitted instantiations can be checked |
 | Header constants / default args / source signatures in the AST | Some source-level API breaks are found |
-| App links a runtime helper library | [App mode](../user-guide/appcompat.md) checks the app's imported symbols |
+| App links a runtime helper library | [App mode](../user-guide/appcompat.md) (`compare --used-by`) checks the app's imported symbols |
 
 But it **cannot fully validate a pure header-only library**: implicit
 header-only template instantiations are not in any shipped artifact (the
@@ -496,10 +527,13 @@ part of the ABI — see [Template Instantiation](limitations.md#template-instant
 
 ## 4. App mode: consumer-scoped vs library-compare: contract-scoped
 
-[`appcompat`](../user-guide/appcompat.md) answers a deliberately narrow question:
-*will **this** application still work with the new library?* It parses the app's
-required symbols, compares old/new libraries in full mode, checks new-symbol
-availability, and **filters** findings to changes that matter to that app.
+[`compare --used-by`](../user-guide/appcompat.md) (repeatable; folds the old
+`appcompat` command) answers a deliberately narrow question: *will **this**
+application still work with the new library?* It parses the app's required
+symbols, runs the full library comparison once, checks new-symbol
+availability, and lets the worst app-scoped result **become the primary
+verdict**, keeping the full-library verdict and unrelated changes as
+informational context.
 
 That scope cuts both ways:
 
@@ -511,8 +545,9 @@ That scope cuts both ways:
 | "This deployment path is OK for this app." | "No *semantic* behavior changed." |
 
 > **App mode is consumer-scoped compatibility. Library `compare` is
-> product-contract compatibility.** Use both: `compare` protects the library
-> contract; `appcompat` protects a specific consumer deployment.
+> product-contract compatibility.** Use both: a plain `compare` protects the
+> library contract; `compare --used-by` protects a specific consumer
+> deployment.
 
 For header-only libraries, app mode is less central unless there's a companion
 runtime library — an existing app binary already contains the header-only code
@@ -549,32 +584,39 @@ your tests and your specification.
 
 ---
 
-## Appendix — deprecated scan axes (`s0…s6` and `--mode`)
+## Appendix — removed scan axes (`s0…s6`, `--mode`, `--source-method`, `--max`)
 
-Earlier releases had you pick evidence in two other ways. Both still parse but
-are **deprecated (ADR-037 D5)** — they print a warning and map onto `--depth`.
-Prefer `--depth`; this table is here only for anyone migrating an old command
-line.
+Earlier releases let you pick evidence in two other ways. As of the ADR-043
+pre-1.0 CLI reset, both are **removed outright, not deprecated** — `scan`
+no longer accepts `--mode`/`--source-method`/`--max` at all; passing any of
+them is a plain "no such option" usage error (exit 64), same as any other
+unrecognized flag. There is no warn-and-map compatibility shim: this table is
+here only for anyone migrating an old command line, not as a live alias list.
+The internal `s0`…`s6` / `ScanMode` vocabulary still exists inside the engine
+(`buildsource/scan_levels.py`) — the internal Python service API
+(`ScanRequest`, used by MCP-adjacent programmatic callers) still accepts it —
+but it must never leak into the public CLI, `--help`, reports, the config
+schema, MCP tool parameters, or GitHub Action inputs. Prefer `--depth`.
 
 **`--source-method s0…s6`** (the old "how it gathers evidence" axis):
 
-| Deprecated | Was | Use instead |
+| Removed | Was | Use instead |
 |------------|-----|-------------|
 | `s0` / `s3` | diff classifier / lexical pattern scan (compiler-free) | `--depth binary` (or `headers` for +L2) |
 | `s1` | compile-DB / build-flag scan (L3) | `--depth build` |
 | `s2` | preprocessor macro/include capture | folded into `--depth build` (runs when `clang -E` + a compile DB are present) |
-| `s4` | symbol/reference index → the *cheap* L5 structural graph (no L4 replay, no call edges) | **no user-facing `--depth` rung** (D6): the graph-only level is internal. `--depth source` gives L5 edges but pays for the L4 replay; there is no cheap graph-only depth |
+| `s4` | symbol/reference index → the *cheap* L5 structural graph (no L4 replay, no call edges) | **no user-facing `--depth` rung**: the graph-only level is internal. `--depth source` gives L5 edges but pays for the L4 replay; there is no cheap graph-only depth |
 | `s5` | semantic AST replay of changed TUs (L4) | `--depth source` |
-| `s6` | full AST replay of all TUs (L4) | `--depth full` |
+| `s6` | full AST replay of all TUs (L4) | `--depth source` — the old `full` rung collapsed into `source` (ADR-043 D6); they only ever differed in replay *scope*, and `scan --depth source` with no `--since`/`--changed-path` seed already analyses the whole target, matching what `s6`/`full` used to give |
 
 **`--mode`** presets:
 
-| Deprecated | Was | Use instead |
+| Removed | Was | Use instead |
 |------------|-----|-------------|
 | `pr` | diff-seeded L4 replay (per-PR gate) | `--depth source --since <ref>` (or just `auto` with a seed) |
-| `pr-deep` | `pr` + the *whole-library* L5 reachability graph (`GRAPH`) | no exact `--depth` equivalent — the full graph is internal-only (D6). `--depth source` gives the change-scoped edges; keep `--mode pr-deep` if you need the full graph |
-| `baseline` | whole-library replay of a release | `--depth full` |
-| `audit` | intra-version hygiene lint, no baseline | the `--audit` switch |
+| `pr-deep` | `pr` + the *whole-library* L5 reachability graph (`GRAPH`) | no exact `--depth` equivalent — the full graph is internal-only. `--depth source` gives the change-scoped edges; the full-graph preset is reachable only via the internal Python service API now |
+| `baseline` | whole-library replay of a release | `--depth source` with no `--since`/`--changed-path` seed (resolves to TARGET scope — the whole current library target, ADR-043 D7) |
+| `audit` | intra-version hygiene lint, no baseline | omit `--against` — the always-on hygiene/cross-source checks run on every scan regardless, and omitting `--against` is already a one-build audit (the old standalone `--audit` flag was itself removed as redundant, ADR-043 D5) |
 
 `--source-method auto` (risk-driven escalation) is now simply the default when
 you **omit** `--depth`.
