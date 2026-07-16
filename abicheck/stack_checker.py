@@ -185,6 +185,24 @@ def _compute_risk_score(loadability: StackVerdict, abi_risk: StackVerdict) -> st
     return "low"
 
 
+def under_sysroot(root: Path, binary: Path) -> Path:
+    """Join *binary* under *root*, treating an absolute BINARY as sysroot
+    -relative (chroot semantics).
+
+    ``Path.__truediv__`` discards its left operand entirely when the right
+    operand is absolute (``root / "/usr/bin/x"`` == ``Path("/usr/bin/x")``),
+    so a plain ``root / binary`` join silently escapes the sysroot for a
+    user-supplied absolute BINARY -- the ELF check and stack walk would then
+    target the host filesystem instead of the confined environment this
+    command is scoped to. Mirrors ``resolver._seed_root``'s sysroot
+    -prefixing for the single-env ``deps stack`` command, so the dual
+    -sysroot ``deps compare`` command applies the same normalization.
+    """
+    if binary.is_absolute():
+        return root / str(binary).lstrip("/")
+    return root / binary
+
+
 def check_stack(
     binary: Path,
     baseline_root: Path,
@@ -204,8 +222,8 @@ def check_stack(
     Returns:
         A StackCheckResult with loadability/ABI verdicts and per-library changes.
     """
-    baseline_binary = baseline_root / binary
-    candidate_binary = candidate_root / binary
+    baseline_binary = under_sysroot(baseline_root, binary)
+    candidate_binary = under_sysroot(candidate_root, binary)
 
     # Resolve dependency graphs in both environments.
     baseline_graph = resolve_dependencies(

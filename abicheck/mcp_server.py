@@ -755,12 +755,16 @@ def abi_compare(
             or JSON snapshots carrying binary evidence (a dump of a real
             library, not headers-only). Mutually exclusive with
             required_symbols. Adds a ``used_by`` list to the response and
-            floors ``exit_code`` on the worst-scoped app's verdict
-            (BREAKING → 4, API_BREAK → 2).
+            computes ``exit_code`` from the worst-scoped app: the legacy
+            BREAKING → 4 / API_BREAK → 2 floor, or — when any ``severity_*``
+            argument is given — the severity-aware scheme (which can return
+            ``0`` for a scoped BREAKING verdict under ``severity_preset=
+            "info-only"``).
         required_symbols: An explicit plugin/host required-entrypoint contract
             (ADR-043) — scope the comparison to only these exported symbols.
             Mutually exclusive with used_by. Adds a ``required_symbol_contract``
-            object to the response and floors ``exit_code`` on its verdict.
+            object to the response and computes ``exit_code`` from its verdict
+            under the same legacy/severity-aware scheme as ``used_by`` above.
     """
     t0 = _time.monotonic()
     try:
@@ -969,8 +973,14 @@ def abi_compare(
             worst_exit = 0
             worst_verdict = None
             worst_verdict_rank = -1
-            worst_categories: set[str] = set()
-            worst_counts: dict[str, int] = {}
+            # Keyed by id(change)/the missing string itself so a Change or
+            # missing symbol shared by two tied apps (e.g. both import the
+            # same removed symbol) collapses to one entry instead of being
+            # tallied once per app (Codex review) -- `_scoped_severity_summary`
+            # runs once at the end over this deduplicated union, not per app
+            # summed together.
+            worst_changes: dict[int, Any] = {}
+            worst_missing: set[str] = set()
             for app in used_by:
                 app_path = _safe_read_path(app, label="used_by")
                 if not app_path.exists():
@@ -1002,17 +1012,12 @@ def abi_compare(
                 # exit code (gating) and verdict (reporting) are maxed/ranked
                 # independently -- see _verdict_severity_rank.
                 if severity_config is not None:
-                    categories, counts = _scoped_severity_summary(
-                        scoped.breaking_for_app, missing_count, result,
-                        severity_config, active_policy, pf,
-                    )
                     if app_exit > worst_exit:
-                        worst_categories = set(categories)
-                        worst_counts = dict(counts)
+                        worst_changes = {id(c): c for c in scoped.breaking_for_app}
+                        worst_missing = set(scoped.missing_symbols) | set(scoped.missing_versions)
                     elif app_exit == worst_exit:
-                        worst_categories |= set(categories)
-                        for cat, count in counts.items():
-                            worst_counts[cat] = worst_counts.get(cat, 0) + count
+                        worst_changes.update({id(c): c for c in scoped.breaking_for_app})
+                        worst_missing |= set(scoped.missing_symbols) | set(scoped.missing_versions)
                 worst_exit = max(worst_exit, app_exit)
                 rank = _verdict_severity_rank(scoped.verdict)
                 if worst_verdict is None or rank >= worst_verdict_rank:
@@ -1032,10 +1037,12 @@ def abi_compare(
             scoped_scheme = "severity" if severity_config is not None else "legacy"
             result.scoped_exit_code_scheme = scoped_scheme  # type: ignore[attr-defined]
             if severity_config is not None:
-                result.scoped_blocking_categories = tuple(sorted(worst_categories))  # type: ignore[attr-defined]
-                result.scoped_severity_counts = worst_counts  # type: ignore[attr-defined]
-            if scoped_scheme == "severity":
-                result.scoped_blocking_categories = tuple(sorted(worst_categories))  # type: ignore[attr-defined]
+                categories, counts = _scoped_severity_summary(
+                    list(worst_changes.values()), len(worst_missing),
+                    result, severity_config, active_policy, pf,
+                )
+                result.scoped_blocking_categories = categories  # type: ignore[attr-defined]
+                result.scoped_severity_counts = counts  # type: ignore[attr-defined]
         elif required_symbols:
             from .appcompat import scope_diff_to_required_symbols
 

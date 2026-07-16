@@ -775,28 +775,55 @@ def generate_html_report(
         from .severity import compute_gate_decision
 
         _eff_kind_sets_fn2 = getattr(result, "_effective_kind_sets", None)
-        gate = compute_gate_decision(
+        full_gate = compute_gate_decision(
             cast(list[HasKind], all_changes),
             severity_config,
             policy=getattr(result, "policy", None),
             kind_sets=_eff_kind_sets_fn2() if callable(_eff_kind_sets_fn2) else None,
             policy_file=getattr(result, "policy_file", None),
         )
-        gate_passed = not gate.blocking
+        # `--used-by`/`--required-symbol(s)` scoping (ADR-043): the CLI
+        # process actually exits on the *scoped* gate, not this full-library
+        # one -- without this, the card could say "CI Gate: FAIL (exit 4)"
+        # for a run that just exited 0 because the scoped contract was
+        # compatible (CodeRabbit review). Mirrors the JSON severity block's
+        # full_severity/severity split.
+        scoped_exit_code = getattr(result, "scoped_exit_code", None)
+        scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
+        gate_exit_code: int
+        if scoped_exit_code is not None and scoped_exit_code_scheme == "severity":
+            gate_passed = scoped_exit_code == 0
+            gate_exit_code = scoped_exit_code
+            gate_title = "CI Gate (scoped)"
+            full_gate_label = (
+                "PASS" if not full_gate.blocking else f"FAIL (exit {full_gate.exit_code})"
+            )
+            gate_note = (
+                f"Reflects the scoped --used-by/--required-symbol severity gate "
+                f"the CLI process actually exits on (full-library gate: "
+                f"{h(full_gate_label)})."
+            )
+        else:
+            gate_passed = not full_gate.blocking
+            gate_exit_code = full_gate.exit_code
+            gate_title = "CI Gate"
+            gate_note = (
+                "Reflects the configured severity gate — may differ from the "
+                "Compatibility verdict above (e.g. an addition promoted to "
+                "<code>error</code> still fails CI)."
+            )
         gate_fg, gate_bg = (
             ("#1b5e20", "#e8f5e9") if gate_passed else ("#b71c1c", "#ffebee")
         )
-        gate_label = "PASS" if gate_passed else f"FAIL (exit {gate.exit_code})"
+        gate_label = "PASS" if gate_passed else f"FAIL (exit {gate_exit_code})"
         gate_icon = "✅" if gate_passed else "🛑"
         gate_html = (
             f"<div class='verdict-box' "
             f"style='background:{gate_bg}; color:{gate_fg}; "
             f"border-left:6px solid {gate_fg};'>"
-            f"<h2>{gate_icon} CI Gate: {h(gate_label)}</h2>"
+            f"<h2>{gate_icon} {h(gate_title)}: {h(gate_label)}</h2>"
             f"<div class='bc-metric' style='font-size:0.85em; opacity:0.85;'>"
-            f"Reflects the configured severity gate — may differ from the "
-            f"Compatibility verdict above (e.g. an addition promoted to "
-            f"<code>error</code> still fails CI)."
+            f"{gate_note}"
             f"</div></div>"
         )
 

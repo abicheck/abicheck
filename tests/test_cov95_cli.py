@@ -1307,6 +1307,44 @@ class TestUsedByScoping:
         assert result.exit_code == 0  # severity config still floors the gate
         assert data["verdict"] == "BREAKING"  # but the reported verdict is not lost
 
+    def test_multi_app_shared_change_not_double_counted(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Regression (Codex P2): when two --used-by apps tie on the worst
+        # exit code and both depend on the *same* removed symbol, the shared
+        # Change object must be counted once in
+        # severity.categories.abi_breaking.count, not once per app -- the
+        # library only has one ABI finding, not two.
+        import abicheck.appcompat as appcompat_mod
+        from abicheck.appcompat import AppCompatResult
+
+        shared_change = Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")
+        res1 = AppCompatResult(
+            app_path="/app1", old_lib_path="old.so", new_lib_path="new.so",
+            required_symbols={"foo"}, required_symbol_count=1,
+            breaking_for_app=[shared_change], verdict=Verdict.BREAKING,
+        )
+        res2 = AppCompatResult(
+            app_path="/app2", old_lib_path="old.so", new_lib_path="new.so",
+            required_symbols={"foo"}, required_symbol_count=1,
+            breaking_for_app=[shared_change], verdict=Verdict.BREAKING,
+        )
+        app1, old, new = self._setup(tmp_path, monkeypatch)
+        app2 = tmp_path / "app2"
+        app2.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        monkeypatch.setattr(
+            appcompat_mod, "scope_diff_to_app",
+            MagicMock(side_effect=[res1, res2]),
+        )
+        result = _invoke(
+            "compare", str(old), str(new),
+            "--used-by", str(app1), "--used-by", str(app2),
+            "--severity-preset", "default", "--format", "json",
+        )
+        data = json.loads(result.stdout)
+        assert result.exit_code == 4
+        assert data["severity"]["categories"]["abi_breaking"]["count"] == 1
+
     def test_severity_clean_exit_0(self, tmp_path, monkeypatch) -> None:
         res = self._result(verdict=Verdict.COMPATIBLE)
         app, old, new = self._setup(tmp_path, monkeypatch)

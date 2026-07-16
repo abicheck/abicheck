@@ -213,3 +213,30 @@ class TestDepsCompareDryRun:
         assert result.exit_code != 0
         assert "requires an ELF binary" in result.output
         assert _CONTRACT_FOOTER not in result.output
+
+    def test_absolute_binary_resolved_under_sysroot_not_host(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (CodeRabbit review): `root / binary` (pathlib) drops
+        # `root` entirely when `binary` is absolute, so an absolute BINARY
+        # argument used to silently escape old-root/new-root and resolve
+        # against the host filesystem instead. The dry-run's displayed
+        # resolved paths must stay under the sysroots.
+        old_root = tmp_path / "old-root"
+        new_root = tmp_path / "new-root"
+        old_root.mkdir()
+        new_root.mkdir()
+        result = CliRunner().invoke(
+            main,
+            [
+                "deps", "compare", "/usr/bin/myapp",
+                "--old-root", str(old_root), "--new-root", str(new_root),
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert f"old resolved path: {old_root / 'usr/bin/myapp'}" in result.output
+        assert f"new resolved path: {new_root / 'usr/bin/myapp'}" in result.output
+        # The raw argument is echoed under "Inputs" -- only the *resolved*
+        # paths must stay confined to the sysroots.
+        assert "resolved path: /usr/bin/myapp" not in result.output

@@ -129,7 +129,7 @@ problem in CI.
 
 | Option | Description |
 |--------|-------------|
-| `OLD_INPUT` / `NEW_INPUT` | Old and new library (`.so`/`.dll`/`.dylib`, JSON snapshot, or ABICC dump) — same as plain `compare`. Must be real library binaries, not snapshots, when `--used-by` is given. |
+| `OLD_INPUT` / `NEW_INPUT` | Old and new library (`.so`/`.dll`/`.dylib`, JSON snapshot, or ABICC dump) — same as plain `compare`. With `--used-by`, a JSON snapshot works only if it carries binary evidence (a `dump` of a real library, not headers-only) — its `elf`/`pe`/`macho` field is what the app's imports resolve against. |
 | `--used-by FILE` | Application binary whose imports/required symbol versions scope the comparison (repeatable). Mutually exclusive with `--required-symbol`/`--required-symbols`. |
 | `-H` / `--header` | Public header file or directory (repeatable, side-aware with `old=`/`new=`) |
 | `-I` / `--include` | Extra include directory for castxml (repeatable, side-aware) |

@@ -21,6 +21,7 @@ from abicheck.stack_checker import (
     _file_hash,
     check_single_env,
     check_stack,
+    under_sysroot,
 )
 
 # ---------------------------------------------------------------------------
@@ -342,6 +343,31 @@ class TestDiffStacks:
 
 
 # ---------------------------------------------------------------------------
+# under_sysroot
+# ---------------------------------------------------------------------------
+
+
+class TestUnderSysroot:
+    def test_relative_binary_joins_normally(self):
+        assert under_sysroot(Path("/old-root"), Path("usr/bin/myapp")) == Path(
+            "/old-root/usr/bin/myapp"
+        )
+
+    def test_absolute_binary_is_treated_as_sysroot_relative(self):
+        # Regression (CodeRabbit review): plain `root / binary` drops `root`
+        # entirely when `binary` is absolute (pathlib semantics), silently
+        # escaping the sysroot the ELF check / stack walk is supposed to be
+        # confined to.
+        assert under_sysroot(Path("/old-root"), Path("/usr/bin/myapp")) == Path(
+            "/old-root/usr/bin/myapp"
+        )
+
+    def test_plain_join_would_have_escaped(self):
+        # Documents the pathlib behavior under_sysroot exists to avoid.
+        assert Path("/old-root") / Path("/usr/bin/myapp") == Path("/usr/bin/myapp")
+
+
+# ---------------------------------------------------------------------------
 # check_stack (integration with mocks)
 # ---------------------------------------------------------------------------
 
@@ -384,6 +410,28 @@ class TestCheckStack:
         assert result.risk_score == "low"
         assert mock_resolve.call_count == 2
         assert mock_bindings.call_count == 2
+
+    @patch("abicheck.stack_checker.compute_bindings")
+    @patch("abicheck.stack_checker.resolve_dependencies")
+    def test_absolute_binary_resolved_under_each_sysroot(
+        self, mock_resolve, mock_bindings, tmp_path,
+    ):
+        # Regression (CodeRabbit review): an absolute BINARY must resolve
+        # under each sysroot (chroot semantics), not escape to the host
+        # filesystem path a plain `root / binary` join would produce.
+        baseline_root = tmp_path / "baseline"
+        candidate_root = tmp_path / "candidate"
+        binary = Path("/usr/bin/myapp")
+
+        mock_resolve.return_value = _make_graph()
+        mock_bindings.return_value = []
+
+        check_stack(binary, baseline_root, candidate_root)
+
+        called_binaries = [call.args[0] for call in mock_resolve.call_args_list]
+        assert baseline_root / "usr/bin/myapp" in called_binaries
+        assert candidate_root / "usr/bin/myapp" in called_binaries
+        assert Path("/usr/bin/myapp") not in called_binaries
 
 
 # ---------------------------------------------------------------------------

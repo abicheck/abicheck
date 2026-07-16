@@ -535,6 +535,31 @@ def test_gate_card_passes_when_no_error_level_findings() -> None:
     assert "PASS" in out
 
 
+def test_gate_card_reflects_scoped_gate_not_full_library() -> None:
+    """Regression (CodeRabbit review): the CI Gate card used to always be
+    computed from the full-library diff, even under --used-by/--required
+    -symbol scoping. Here the full library has an error-level BREAKING
+    removal, but the scoped result (set on `result` the way
+    `_apply_used_by_scoping` does) is compatible -- the CLI process exits 0,
+    so the card must say PASS, not FAIL, and must not just silently ignore
+    the scoping."""
+    from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
+    from abicheck.severity import resolve_severity_config
+
+    c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+    result = DiffResult(
+        old_version="1.0", new_version="2.0", library="libtest.so",
+        changes=[c], verdict=Verdict.BREAKING,
+    )
+    result.scoped_verdict = Verdict.COMPATIBLE  # type: ignore[attr-defined]
+    result.scoped_exit_code = 0  # type: ignore[attr-defined]
+    result.scoped_exit_code_scheme = "severity"  # type: ignore[attr-defined]
+    cfg = resolve_severity_config("default")
+    out = generate_html_report(result, severity_config=cfg)
+    assert "CI Gate (scoped): PASS" in out
+    assert "full-library gate: FAIL (exit 4)" in out
+
+
 def test_gate_card_absent_from_abicc_compatible_layout() -> None:
     """The ABICC-compatible layout (compat_html=True) is left unchanged even
     when severity_config is supplied."""

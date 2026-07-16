@@ -1319,6 +1319,44 @@ class TestAbiCompare:
         # The missing symbol itself (not a diff Change) still counts.
         assert report["severity"]["categories"]["abi_breaking"]["count"] == 1
 
+    def test_used_by_multi_app_shared_change_not_double_counted(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # Regression (Codex P2): when two --used-by apps tie on the worst
+        # exit code and both depend on the *same* removed symbol, the shared
+        # Change object must be counted once in
+        # severity.categories.abi_breaking.count, not once per app.
+        from abicheck.appcompat import AppCompatResult
+        from abicheck.checker import Change
+        from abicheck.checker_policy import ChangeKind
+
+        shared_change = Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")
+        old = _make_snapshot("1.0", functions=[_pub_func("foo", "foo", "int")])
+        new = _make_snapshot("2.0", functions=[])
+        old_p, new_p = self._make_binary_pair(tmp_path)
+        app1 = tmp_path / "app1"
+        app1.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        app2 = tmp_path / "app2"
+        app2.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        # `_patch_used_by` returns this same object for every app -- both
+        # apps therefore share the identical Change instance, exactly the
+        # scenario the dedup fix targets.
+        scoped = AppCompatResult(
+            app_path="/app", old_lib_path=str(old_p), new_lib_path=str(new_p),
+            required_symbols={"foo"}, required_symbol_count=1,
+            breaking_for_app=[shared_change], verdict=Verdict.BREAKING,
+        )
+        self._patch_used_by(monkeypatch, tmp_path, old, new, scoped)
+
+        raw = abi_compare(
+            str(old_p), str(new_p), used_by=[str(app1), str(app2)],
+            severity_preset="default",
+        )
+        data = json.loads(raw)
+        assert data["exit_code"] == 4
+        report = data["report"]
+        assert report["severity"]["categories"]["abi_breaking"]["count"] == 1
+
     def test_used_by_rejects_non_binary_snapshot_input(self, tmp_path: Path):
         # --used-by needs real library binaries to parse app requirements
         # against; JSON snapshots must be rejected with a clear error rather

@@ -31,6 +31,7 @@ import click
 
 from .cli import _detect_binary_format, _safe_write_output, _setup_verbosity, main
 from .cli_options import verbose_option
+from .stack_checker import under_sysroot
 
 
 @main.group("deps")
@@ -217,7 +218,7 @@ def deps_compare_cmd(
     # dry run must agree with the real run instead of reporting "ok" for a
     # non-ELF binary the real run immediately rejects (Codex review).
     for label, root in [("old", old_root), ("new", new_root)]:
-        resolved = root / binary
+        resolved = under_sysroot(root, binary)
         if resolved.exists():
             fmt_detected = _detect_binary_format(resolved)
             if fmt_detected != "elf":
@@ -236,8 +237,8 @@ def deps_compare_cmd(
         )
         dry_result.add(
             "Build/source inputs",
-            f"old resolved path: {old_root / binary}",
-            f"new resolved path: {new_root / binary}",
+            f"old resolved path: {under_sysroot(old_root, binary)}",
+            f"new resolved path: {under_sysroot(new_root, binary)}",
             f"search path: {', '.join(str(p) for p in search_paths)}" if search_paths else None,
         )
         dry_result.add(

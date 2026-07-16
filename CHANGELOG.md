@@ -121,7 +121,33 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
     `severity.categories.*.count` values are recomputed to match — a scoped
     -compatible `severity.exit_code: 0` no longer keeps a stale error-level
     `categories.abi_breaking.count` left over from the full-library
-    breakdown alongside it.
+    breakdown alongside it. When two `--used-by` apps tie on the worst exit
+    code and both depend on the same removed symbol, that shared finding is
+    now counted once (deduplicated by identity across the tied apps) instead
+    of once per app inflating `severity.categories.*.count`.
+  - `compare --used-by`/`--required-symbol --format html`'s "CI Gate" card
+    now reflects the scoped gate (title "CI Gate (scoped)", with the
+    full-library gate noted alongside) when scoping and a severity scheme
+    are both active — previously it was always computed from the full
+    -library diff, so the card could say "FAIL (exit 4)" for a run whose
+    scoped contract was compatible and that actually exited `0`.
+  - `deps compare BINARY` (and the underlying `stack_checker.check_stack`)
+    now resolves an absolute `BINARY` argument as relative to each sysroot
+    (chroot semantics), matching `resolver._seed_root`'s existing handling
+    for the single-env `deps stack` command — previously a plain `root /
+    binary` join silently dropped `root` for an absolute `BINARY` (pathlib
+    semantics), so the ELF-format check and stack walk targeted the host
+    filesystem path instead of the confined `--old-root`/`--new-root`
+    environments.
+  - Fixed a stale docstring on `abi_compare`'s `used_by`/`required_symbols`
+    MCP parameters that promised a fixed `BREAKING → 4`/`API_BREAK → 2`
+    exit-code mapping; it now describes the active legacy/severity-aware
+    scheme (which can return `0` for a scoped `BREAKING` verdict under
+    `severity_preset="info-only"`).
+  - `docs/user-guide/appcompat.md`'s options table no longer contradicts the
+    snapshot-support text above it — a JSON snapshot works with `--used-by`
+    when it carries binary evidence (an `elf`/`pe`/`macho` field), not only
+    real library binaries.
 
 ### Changed
 
