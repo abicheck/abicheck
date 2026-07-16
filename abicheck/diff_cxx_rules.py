@@ -337,17 +337,26 @@ def _owner_descends_from(owner: str, ancestor: str, types: dict[str, RecordType]
     Tolerant of qualified-vs-leaf naming the same way ``_transitive_bases``
     resolves base names (CastXML base lists are leaf-only project-wide; DWARF
     records the qualified form) — but only when at least one side IS a bare
-    leaf, the genuine source of that ambiguity. Two *fully-qualified* names
+    leaf, the genuine source of that ambiguity, AND the qualified side has no
+    separately-resolvable type record of its own. Two *fully-qualified* names
     that merely share a leaf component (``ns1::Base`` vs ``ns2::Base``) are
     unrelated classes in different namespaces, not the same class recorded
-    two ways, and must not be treated as equal.
+    two ways, and must not be treated as equal; the same is true of a bare
+    global name (``Base``) against a namespaced one (``ns::Base``) when
+    ``ns::Base`` resolves to its own record in *types* -- that record's very
+    presence proves this snapshot retains namespace fidelity, so the bare
+    name can no longer be assumed to mean the same class.
     """
     if owner == ancestor:
         return True
     leaf_owner = owner.rsplit("::", 1)[-1]
     leaf_ancestor = ancestor.rsplit("::", 1)[-1]
-    if leaf_owner == leaf_ancestor and (leaf_owner == owner or leaf_ancestor == ancestor):
-        return True
+    owner_is_leaf = leaf_owner == owner
+    ancestor_is_leaf = leaf_ancestor == ancestor
+    if leaf_owner == leaf_ancestor and (owner_is_leaf or ancestor_is_leaf):
+        qualified = ancestor if not ancestor_is_leaf else (owner if not owner_is_leaf else None)
+        if qualified is None or qualified not in types:
+            return True
     t = types.get(owner) or (types.get(leaf_owner) if leaf_owner != owner else None)
     if t is None:
         return False

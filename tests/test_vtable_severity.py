@@ -276,3 +276,13 @@ class TestOwnerDescendsFrom:
         this is not the castxml-leaf-only ambiguity the leaf fallback exists
         for, and must not be treated as the same class."""
         assert not _owner_descends_from("ns2::Base", "ns1::Base", {})
+
+    def test_bare_leaf_not_trusted_when_qualified_side_has_own_record(self) -> None:
+        """A bare global name (``Base``) and a namespaced one (``ns::Base``)
+        share a leaf, but if ``ns::Base`` resolves to its own type record,
+        that proves this snapshot retains namespace fidelity -- the bare
+        name is then provably a different, unrelated class (it isn't
+        ``ns::Base``'s own base either), not the same class recorded two
+        ways, and must not be treated as equal."""
+        types = {"ns::Base": RecordType(name="ns::Base", kind="class")}
+        assert not _owner_descends_from("ns::Base", "Base", types)
