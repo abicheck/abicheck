@@ -97,13 +97,24 @@ class TestEstimateAliasesDryRun:
         )
         return out.stdout
 
-    def test_estimate_true_forces_dry_run(self) -> None:
-        out = self._run({"INPUT_ESTIMATE": "true"})
+    def test_estimate_true_forces_dry_run_in_scan_mode(self) -> None:
+        out = self._run({"INPUT_MODE": "scan", "INPUT_ESTIMATE": "true"})
         assert "DRY_RUN=true" in out
 
     def test_no_estimate_leaves_dry_run_unset(self) -> None:
-        out = self._run({})
+        out = self._run({"INPUT_MODE": "scan"})
         assert "DRY_RUN=" in out and "DRY_RUN=true" not in out
+
+    def test_estimate_true_ignored_outside_scan_mode(self) -> None:
+        # Regression (Codex review): `estimate` was always scan-mode-only
+        # (its action.yml description and the pre-dry-run run.sh only ever
+        # consumed it inside the scan branch) -- a global normalization
+        # would silently turn `abicheck compare ...` into a --dry-run no-op
+        # for a workflow that (mistakenly or not) sets `estimate: true` on a
+        # compare/dump/deps-tree/deps-compare step, exiting green without
+        # running the actual ABI gate.
+        out = self._run({"INPUT_MODE": "compare", "INPUT_ESTIMATE": "true"})
+        assert "DRY_RUN=true" not in out
 
     def test_explicit_dry_run_survives_without_estimate(self) -> None:
         out = self._run({"INPUT_DRY_RUN": "true"})

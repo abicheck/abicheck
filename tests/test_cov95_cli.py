@@ -1659,6 +1659,31 @@ class TestUsedByScoping:
         assert entry["blocks_gate"] is False
         assert entry["severity"] == "compatible"
 
+    def test_json_scoped_only_change_respects_show_only(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Regression (Codex review): to_json's own --show-only filtering
+        # only ever touched result.changes -- scoped_only_changes were
+        # appended to the JSON `changes` array unconditionally afterward, so
+        # a --used-by --show-only run could re-surface a finding the filter
+        # was supposed to exclude (mirrors the identical sarif.to_sarif fix).
+        scoped_only = Change(
+            kind=ChangeKind.PE_ORDINAL_RETARGETED,
+            symbol="ordinal:5",
+            description="ordinal 5 retargeted",
+            old_value="OldFunc", new_value="NewFunc",
+        )
+        res = self._result(verdict=Verdict.BREAKING, breaking_for_app=[scoped_only])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
+            "--show-only", "compatible",
+        )
+        data = json.loads(result.stdout)
+        kinds = [c["kind"] for c in data["changes"]]
+        assert "pe_ordinal_retargeted" not in kinds
+
 
 class TestFoldEvidenceDepthOutOfBandPack:
     """``_fold_evidence_depth_into_json`` with an out-of-band pack directory.

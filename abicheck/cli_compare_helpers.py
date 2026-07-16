@@ -1443,6 +1443,7 @@ def run_compare(
     text = _fold_scoped_compat_into_text(
         text, fmt, result,
         severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
+        show_only=show_only,
     )
     text = _fold_evidence_depth_into_json(
         text, fmt, old, new,
@@ -1545,6 +1546,7 @@ def _fold_evidence_depth_into_json(
 
 def _fold_scoped_compat_into_text(
     text: str, fmt: str, result: Any, severity_config: Any = None,
+    show_only: str | None = None,
 ) -> str:
     """Fold ``--used-by``/``--required-symbol(s)`` summaries into the rendered text.
 
@@ -1557,6 +1559,15 @@ def _fold_scoped_compat_into_text(
     synthesized missing-contract entry is itself blocking, mirroring
     ``sarif._missing_contract_result``/``junit_report``'s severity-aware
     missing-contract handling.
+
+    *show_only*, when given, filters ``scoped_only_changes`` before they are
+    folded into the JSON ``changes`` array -- ``to_json`` already filtered
+    ``result.changes`` by the same tokens upstream, so leaving the
+    scoped-only fold-in unfiltered would let a `--show-only` run re-surface a
+    finding it explicitly excluded (Codex review, mirrors the identical
+    ``sarif.to_sarif`` fix). Pass ``None`` (the default) for a render that is
+    deliberately always-unfiltered, e.g. the ``--secondary-format`` render,
+    which ignores the primary format's own ``--show-only``.
     """
     used_by = getattr(result, "used_by", None)
     required_symbols = getattr(result, "required_symbols", None)
@@ -1637,12 +1648,21 @@ def _fold_scoped_compat_into_text(
         # sarif.to_sarif/junit_report._build_testsuite's identical fold-in).
         changes_list = payload.get("changes")
         if isinstance(changes_list, list):
-            from .reporter import _change_to_dict, _finding_id
+            from .reporter import _change_to_dict, _finding_id, apply_show_only
             from .severity import missing_contract_exit_code
 
             existing_ids = {_finding_id(c) for c in result.changes}
             eff_sets = result._effective_kind_sets()
-            for c in getattr(result, "scoped_only_changes", ()) or ():
+            scoped_only = list(getattr(result, "scoped_only_changes", ()) or ())
+            if show_only and scoped_only:
+                scoped_only = apply_show_only(
+                    scoped_only,
+                    show_only,
+                    policy=result.policy,
+                    kind_sets=eff_sets,
+                    policy_file=result.policy_file,
+                )
+            for c in scoped_only:
                 if _finding_id(c) not in existing_ids:
                     changes_list.append(
                         _change_to_dict(

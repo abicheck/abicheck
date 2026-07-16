@@ -1253,6 +1253,7 @@ def abi_compare(
             # though the top-level verdict/exit_code are scoped (Codex review).
             rendered = _fold_scoped_compat_into_text(
                 rendered, output_format, result, severity_config=severity_config,
+                show_only=show_only,
             )
         if output_format == "json":
             response["report"] = json.loads(rendered)

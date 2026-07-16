@@ -121,7 +121,7 @@ MODE="${INPUT_MODE:-compare}"
 # hard error, since nothing signals that the step is no longer doing what
 # the workflow author intended.
 # ---------------------------------------------------------------------------
-if [[ "${INPUT_ESTIMATE:-false}" == "true" ]]; then
+if [[ "$MODE" == "scan" && "${INPUT_ESTIMATE:-false}" == "true" ]]; then
   INPUT_DRY_RUN="true"
 fi
 FORCE_AUDIT_ONLY="${INPUT_AUDIT:-false}"
