@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - scripts/profile_large_l2_castxml.py
+      - scripts/profile_large_l2_castxml_runner.py
       - .github/workflows/l2-large-castxml-probe.yml
 
 permissions:
@@ -92,7 +93,7 @@ jobs:
       - name: Run large L2 and CastXML benchmark
         run: |
           rm -rf results/l2-large-castxml
-          python scripts/profile_large_l2_castxml.py \
+          python scripts/profile_large_l2_castxml_runner.py \
             --main-sha "$ABICHECK_MAIN_SHA" \
             --out-dir results/l2-large-castxml
 
