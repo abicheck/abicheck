@@ -9,7 +9,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
-No changes yet.
+### Performance
+
+- **Faster L2 header-tier parsing on large public surfaces** (e.g. Intel
+  oneDAL's ~20k–25k function umbrella headers): the CastXML parser now
+  builds one tag-grouped element index per dump instead of re-scanning the
+  whole XML tree separately for functions/types/enums/typedefs/constants,
+  and memoizes its recursive type-name/pointer-depth resolution per XML id
+  so a commonly shared parameter/return type is resolved once instead of
+  once per occurrence. Provenance classification (`apply_provenance`) now
+  reuses each declaring header's public/private/system classification
+  across every declaration it produced instead of reclassifying per
+  declaration. No output/behavior change — same `AbiSnapshot` content.
 
 ---
 
