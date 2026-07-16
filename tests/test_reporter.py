@@ -167,9 +167,169 @@ class TestEvidenceStatusInJson:
         d = json.loads(to_json(r))
         assert d["changes"][0]["evidence_status"] == "not_checkable"
 
-    def test_report_schema_version_is_2_2(self):
+    def test_report_schema_version_is_2_4(self):
         d = json.loads(to_json(_result(Verdict.NO_CHANGE)))
-        assert d["report_schema_version"] == "2.2"
+        assert d["report_schema_version"] == "2.4"
+
+    def test_change_operation_field(self):
+        added = Change(ChangeKind.FUNC_ADDED, "s1", "added")
+        removed = Change(ChangeKind.FUNC_REMOVED, "s2", "removed")
+        modified = Change(ChangeKind.FUNC_PARAMS_CHANGED, "s3", "params changed")
+        r = _result(Verdict.BREAKING, changes=[added, removed, modified])
+        d = json.loads(to_json(r))
+        by_symbol = {c["symbol"]: c["operation"] for c in d["changes"]}
+        assert by_symbol == {"s1": "added", "s2": "removed", "s3": "modified"}
+
+    def test_change_operation_field_experimental_graduated(self):
+        """Codex review on #557: experimental_graduated (ADDITION_KINDS) was
+        misclassified as operation="modified" since its kind name contains
+        no "_added" suffix."""
+        c = Change(ChangeKind.EXPERIMENTAL_GRADUATED, "lib::sort", "graduated to stable")
+        r = _result(Verdict.COMPATIBLE, changes=[c])
+        d = json.loads(to_json(r))
+        assert d["changes"][0]["operation"] == "added"
+
+    def test_change_recommended_action_field(self):
+        breaking = Change(ChangeKind.FUNC_REMOVED, "s1", "removed")
+        api_break = Change(ChangeKind.FIELD_RENAMED, "s2", "renamed")
+        risk = Change(ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED, "s3", "version req added")
+        quality = Change(ChangeKind.VISIBILITY_LEAK, "s4", "visibility leak")
+        addition = Change(ChangeKind.FUNC_ADDED, "s5", "added")
+        r = _result(
+            Verdict.BREAKING,
+            changes=[breaking, api_break, risk, quality, addition],
+        )
+        d = json.loads(to_json(r))
+        by_symbol = {c["symbol"]: c["recommended_action"] for c in d["changes"]}
+        assert by_symbol == {
+            "s1": "recompile_and_relink_required",
+            "s2": "recompile_required",
+            "s3": "verify_deployment_compatibility",
+            "s4": "review_recommended",
+            "s5": "no_action_required",
+        }
+
+    def test_recommended_action_honours_policy_file_override(self):
+        """recommended_action must reflect the *effective* verdict (honouring
+        a PolicyFile override), not the kind's raw default verdict — same
+        resolver `severity`/`operation`/`finding_id` already use."""
+        from abicheck.policy_file import PolicyFile
+
+        c = Change(ChangeKind.FUNC_REMOVED, "s", "removed")
+        pf = PolicyFile(overrides={ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE})
+        r = DiffResult(
+            old_version="1.0", new_version="2.0", library="libtest.so",
+            changes=[c], verdict=Verdict.COMPATIBLE, policy_file=pf,
+        )
+        d = json.loads(to_json(r))
+        # func_removed is not itself an addition kind -> quality issue, not
+        # "no action required".
+        assert d["changes"][0]["recommended_action"] == "review_recommended"
+
+    def test_finding_id_is_stable_and_deterministic(self):
+        """Same underlying finding -> same finding_id across independent runs."""
+        c1 = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        c2 = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        r1 = _result(Verdict.BREAKING, changes=[c1])
+        r2 = _result(Verdict.BREAKING, changes=[c2])
+        d1 = json.loads(to_json(r1))
+        d2 = json.loads(to_json(r2))
+        fid1 = d1["changes"][0]["finding_id"]
+        fid2 = d2["changes"][0]["finding_id"]
+        assert fid1 == fid2
+        assert isinstance(fid1, str) and len(fid1) == 16
+
+    def test_finding_id_differs_for_different_findings(self):
+        c1 = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        c2 = Change(ChangeKind.FUNC_REMOVED, "_Z3barv", "removed: bar")
+        r = _result(Verdict.BREAKING, changes=[c1, c2])
+        d = json.loads(to_json(r))
+        assert d["changes"][0]["finding_id"] != d["changes"][1]["finding_id"]
+
+    def test_finding_id_unaffected_by_policy(self):
+        """finding_id excludes policy-derived fields — the same underlying
+        finding must hash identically regardless of --policy."""
+        from abicheck.policy_file import PolicyFile
+
+        c1 = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        c2 = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        pf = PolicyFile(overrides={ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE})
+        r1 = _result(Verdict.BREAKING, changes=[c1])
+        r2 = DiffResult(
+            old_version="1.0", new_version="2.0", library="libtest.so",
+            changes=[c2], verdict=Verdict.COMPATIBLE, policy_file=pf,
+        )
+        d1 = json.loads(to_json(r1))
+        d2 = json.loads(to_json(r2))
+        assert d1["changes"][0]["finding_id"] == d2["changes"][0]["finding_id"]
+        # Confirm the policy override really did take effect (different
+        # severity), so this is a meaningful same-ID-despite-different-
+        # policy check, not a vacuous one.
+        assert d1["changes"][0]["severity"] != d2["changes"][0]["severity"]
+
+    def test_finding_id_differs_for_same_kind_symbol_and_values(self):
+        """Two findings on the same symbol, same kind, same old/new value,
+        and no distinct source location (e.g. the same pointer-depth
+        transition on two different parameters of one function) must not
+        collide on finding_id — description carries the per-finding detail
+        (parameter name/index here) that disambiguates them (Codex review,
+        PR #557)."""
+        c1 = Change(
+            ChangeKind.PARAM_POINTER_LEVEL_CHANGED, "_Z3foov",
+            "Parameter 'x' pointer level changed from 1 to 2",
+            old_value="1", new_value="2",
+        )
+        c2 = Change(
+            ChangeKind.PARAM_POINTER_LEVEL_CHANGED, "_Z3foov",
+            "Parameter 'y' pointer level changed from 1 to 2",
+            old_value="1", new_value="2",
+        )
+        r = _result(Verdict.BREAKING, changes=[c1, c2])
+        d = json.loads(to_json(r))
+        assert d["changes"][0]["finding_id"] != d["changes"][1]["finding_id"]
+
+    def test_severity_blocking_fields_present_when_configured(self):
+        from abicheck.severity import resolve_severity_config
+
+        c = Change(ChangeKind.FUNC_ADDED, "s", "added")
+        r = _result(Verdict.COMPATIBLE, changes=[c])
+        cfg = resolve_severity_config("default", addition="error")
+        d = json.loads(to_json(r, severity_config=cfg))
+        assert d["severity"]["blocking"] is True
+        assert d["severity"]["blocking_categories"] == ["addition"]
+
+    def test_severity_blocking_false_when_no_error_level_findings(self):
+        from abicheck.severity import resolve_severity_config
+
+        c = Change(ChangeKind.FUNC_ADDED, "s", "added")
+        r = _result(Verdict.COMPATIBLE, changes=[c])
+        cfg = resolve_severity_config("default")
+        d = json.loads(to_json(r, severity_config=cfg))
+        assert d["severity"]["blocking"] is False
+        assert d["severity"]["blocking_categories"] == []
+
+    def test_blocking_categories_survives_show_only_hiding_the_blocker(self):
+        """Verified defect (Codex review on #557): blocking_categories was
+        derived from the *display* changes (post-show_only), while exit_code
+        already correctly used the unfiltered set. Hiding the one finding
+        that's actually blocking the build via --show-only must not make
+        blocking_categories silently empty out from under a still-nonzero
+        exit_code/blocking=true."""
+        from abicheck.severity import resolve_severity_config
+
+        addition = Change(ChangeKind.FUNC_ADDED, "s1", "added")
+        breaking = Change(ChangeKind.FUNC_REMOVED, "s2", "removed")
+        r = _result(Verdict.BREAKING, changes=[addition, breaking])
+        cfg = resolve_severity_config("default", addition="error")
+        # --show-only=breaking hides the ADDITION finding from `changes[]`,
+        # but it must not hide it from the gate summary: the addition is
+        # still what's configured to fail the build.
+        d = json.loads(to_json(r, show_only="breaking", severity_config=cfg))
+        assert d["severity"]["blocking"] is True
+        assert set(d["severity"]["blocking_categories"]) == {"abi_breaking", "addition"}
+        # The addition finding itself is correctly hidden from the display
+        # `changes[]` by --show-only — only the gate summary must see it.
+        assert len(d["changes"]) == 1
 
     def test_leaf_mode_root_type_change_carries_evidence_status(self):
         # Regression (Codex review): --report-mode leaf serializes root type
@@ -182,6 +342,33 @@ class TestEvidenceStatusInJson:
         # And the top-level `changes` union (leaf_changes + non_type_changes,
         # kept for backward-compat consumers) carries it too.
         assert d["changes"][0]["evidence_status"] == "artifact_proven"
+
+    def test_leaf_mode_root_type_change_carries_schema_2_3_fields(self):
+        """Codex review on #557: _leaf_entry() builds its own dict rather
+        than routing through _change_to_dict(), so root type changes in
+        leaf_changes[]/changes[] were missing the schema 2.3 `operation`/
+        `finding_id` fields present on non-type leaf entries and full-mode
+        entries — breaking finding_id correlation for leaf-mode reports."""
+        c = Change(ChangeKind.TYPE_SIZE_CHANGED, "Cfg", "struct Cfg grew")
+        r = _result(Verdict.BREAKING, changes=[c])
+        d = json.loads(to_json(r, report_mode="leaf"))
+        assert d["leaf_changes"][0]["operation"] == "modified"
+        assert isinstance(d["leaf_changes"][0]["finding_id"], str)
+        assert len(d["leaf_changes"][0]["finding_id"]) == 16
+        assert d["changes"][0]["operation"] == "modified"
+        assert d["changes"][0]["finding_id"] == d["leaf_changes"][0]["finding_id"]
+
+        # Same finding_id as full (non-leaf) mode for the identical change —
+        # the fingerprint must not depend on which report mode built it.
+        full_d = json.loads(to_json(_result(Verdict.BREAKING, changes=[c])))
+        assert full_d["changes"][0]["finding_id"] == d["leaf_changes"][0]["finding_id"]
+
+    def test_leaf_mode_root_type_change_carries_recommended_action(self):
+        c = Change(ChangeKind.TYPE_SIZE_CHANGED, "Cfg", "struct Cfg grew")
+        r = _result(Verdict.BREAKING, changes=[c])
+        d = json.loads(to_json(r, report_mode="leaf"))
+        assert d["leaf_changes"][0]["recommended_action"] == "recompile_and_relink_required"
+        assert d["changes"][0]["recommended_action"] == "recompile_and_relink_required"
 
     def test_leaf_mode_root_type_change_honours_frozen_namespace_floor(self):
         """Codex review on #549: a policy-file override that demotes a root

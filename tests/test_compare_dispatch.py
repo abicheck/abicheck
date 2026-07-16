@@ -644,6 +644,22 @@ class TestCompareDispatch:
         assert code != 0
         assert "--exit-code-scheme is not supported" in (out + err)
 
+    def test_secondary_format_rejected_on_set_inputs(self, tmp_path: Path) -> None:
+        # --secondary-format reuses the single comparison's DiffResult, which
+        # doesn't exist as a single object across the release fan-out.
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        _write_snap(old_dir / "libfoo.json", _snap())
+        _write_snap(new_dir / "libfoo.json", _snap())
+        code, out, err = _invoke(
+            "compare", str(old_dir), str(new_dir),
+            "--secondary-format", "json", "--secondary-output", str(tmp_path / "sec.json"),
+        )
+        assert code != 0
+        assert "--secondary-format is not supported" in (out + err)
+
     def test_config_legacy_exit_scheme_applies_to_set_inputs(self, tmp_path: Path) -> None:
         # A project config may demote ABI-breaking findings to warnings for
         # reporting, while still pinning the process exit to the legacy verdict

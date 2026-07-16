@@ -206,6 +206,34 @@ interfaces each affects. Available in Markdown and HTML formats.
 abicheck compare old.json new.json --show-impact
 ```
 
+## A second output format from the same run (`--secondary-format`)
+
+`compare` computes its comparison once; `--secondary-format` renders that
+same result into a second format/file, instead of requiring a second
+`abicheck compare` invocation to get a different format:
+
+```bash
+# A markdown report for humans, plus a JSON artifact for tooling —
+# one comparison, two outputs.
+abicheck compare old.json new.json \
+  --format markdown \
+  --secondary-format json --secondary-output report.json
+```
+
+- `--secondary-format` and `--secondary-output` require each other — either
+  alone is rejected (passing just `--secondary-output` would otherwise
+  silently produce no secondary artifact at all).
+- `--secondary-output` must point at a different file than `--output`/`-o` —
+  otherwise the secondary render would silently overwrite the primary report.
+- The secondary render always emits the full, unfiltered report: it ignores
+  `--show-only`/`--stat`, which describe only the primary format's display.
+- Not supported for directory/package (release) comparisons — the release
+  fan-out doesn't produce a single `DiffResult` to render twice. Compare the
+  libraries individually to use it.
+
+The bundled GitHub Action uses this to get JSON for its sticky PR comment
+without re-running the whole comparison a second time.
+
 ---
 
 ## Analysis confidence and evidence tier
@@ -307,6 +335,88 @@ stop?" — the two fields *can* disagree, and that's by design.
   "symbol": "_Z3foov",
   "severity": "breaking",
   "evidence_status": "artifact_proven"
+}
+```
+
+### Stable finding IDs and structured operation (`finding_id`, `operation`)
+
+Each finding in `changes[]` also carries:
+
+- **`operation`** — a structured `"added"` / `"removed"` / `"modified"`
+  classification, derived from the same kind-suffix rule `--show-only`'s
+  `added`/`removed`/`changed` tokens already use. Lets a consumer group or
+  filter findings by operation without hand-maintaining its own list of
+  `_added`/`_removed` kind-name suffixes.
+- **`finding_id`** — a stable, deterministic fingerprint (a truncated SHA-256
+  hash of `kind`/`symbol`/`old_value`/`new_value`/`source_location`/
+  `description`) that identifies *this finding* independent of its position
+  in the `changes[]` array. Two `compare` runs over the same underlying
+  change produce the same `finding_id`, so a consumer can correlate a
+  finding across two report runs (e.g. tracking a waiver, or diffing which
+  findings are new between two CI runs) without relying on array order or
+  index, neither of which abicheck guarantees stays stable release to
+  release. `description` is included specifically to disambiguate two
+  otherwise-identical findings on the same symbol (e.g. the same
+  pointer-depth change reported on two different parameters of one
+  function). `finding_id` deliberately excludes policy-derived fields
+  (`severity`, `evidence_status`) — the same underlying finding hashes
+  identically regardless of the active `--policy`.
+
+```json
+{
+  "kind": "func_removed",
+  "symbol": "_Z3foov",
+  "operation": "removed",
+  "finding_id": "3f2a9c8b1d4e5f60"
+}
+```
+
+### Recommended action per finding (`recommended_action`)
+
+Each finding also carries a structured, machine-readable next step, derived
+from the same effective verdict/category resolution `severity`/`operation`
+already use — so it can never disagree with them for the same finding:
+
+| `recommended_action` | When | Meaning |
+|---|---|---|
+| `recompile_and_relink_required` | verdict `BREAKING` | Binary ABI break — existing compiled consumers must be recompiled *and* relinked against the new library. |
+| `recompile_required` | verdict `API_BREAK` | Source-level break only — existing compiled binaries keep working, but source recompiling against the new headers will fail. |
+| `verify_deployment_compatibility` | verdict `COMPATIBLE_WITH_RISK` | Binary-compatible, but may fail to load in some deployment environments — needs manual verification, not a recompile. |
+| `review_recommended` | verdict `COMPATIBLE`, not an addition | A quality issue (e.g. an STL type exposed by value, missing SONAME) — compatible, but worth a look. |
+| `no_action_required` | verdict `COMPATIBLE`, an addition | New public API surface — purely additive, nothing to do. |
+
+```json
+{
+  "kind": "func_removed",
+  "symbol": "_Z3foov",
+  "severity": "breaking",
+  "recommended_action": "recompile_and_relink_required"
+}
+```
+
+### Typed gate summary (`severity.blocking`, `severity.blocking_categories`)
+
+When `--severity-*` configuration is active, the top-level `severity` object
+gets two additional fields alongside the existing `config`/`categories`/
+`exit_code`:
+
+- **`blocking`** — `true` when the severity-aware exit code is non-zero
+  (equivalent to `exit_code != 0`, provided as a named boolean so a consumer
+  doesn't have to know the exit-code convention).
+- **`blocking_categories`** — the list of category names (`abi_breaking`,
+  `potential_breaking`, `quality_issues`, `addition`) that both have findings
+  *and* are configured `error` — i.e. the categories actually responsible for
+  the non-zero exit code, mirroring SARIF's `properties.severityGate` block.
+
+```json
+{
+  "severity": {
+    "config": {"abi_breaking": "error", "potential_breaking": "warning", "quality_issues": "warning", "addition": "error"},
+    "categories": {"addition": {"severity": "error", "count": 1}},
+    "exit_code": 1,
+    "blocking": true,
+    "blocking_categories": ["addition"]
+  }
 }
 ```
 

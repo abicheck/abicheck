@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import main
@@ -186,6 +187,134 @@ class TestCompareHtml:
         ])
         assert result.exit_code == 0
         assert "<html" in result.output.lower()
+
+
+# ── _resolve_demangle (shared by primary and --secondary-format renders) ──
+
+class TestResolveDemangle:
+    def test_defaults_on_for_markdown_and_review(self):
+        from abicheck.cli_compare_helpers import _resolve_demangle
+
+        assert _resolve_demangle("markdown", None) is True
+        assert _resolve_demangle("review", None) is True
+
+    @pytest.mark.parametrize("fmt", ["json", "sarif", "junit", "html"])
+    def test_defaults_off_for_machine_formats_and_html(self, fmt):
+        from abicheck.cli_compare_helpers import _resolve_demangle
+
+        assert _resolve_demangle(fmt, None) is False
+
+    def test_explicit_flag_always_wins(self):
+        from abicheck.cli_compare_helpers import _resolve_demangle
+
+        assert _resolve_demangle("json", True) is True
+        assert _resolve_demangle("markdown", False) is False
+
+
+# ── compare --secondary-format/--secondary-output ───────────────────────
+
+class TestCompareSecondaryFormat:
+    def test_writes_second_format_from_same_run(self, tmp_path):
+        old_p, new_p = _breaking_snapshots(tmp_path)
+        secondary_out = tmp_path / "secondary.json"
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "compare", str(old_p), str(new_p), "--format", "markdown",
+            "--secondary-format", "json", "--secondary-output", str(secondary_out),
+        ])
+        assert result.exit_code == 4
+        assert "# ABI Report" in result.output
+        parsed = json.loads(secondary_out.read_text(encoding="utf-8"))
+        assert parsed["verdict"] == "BREAKING"
+
+    def test_secondary_format_ignores_show_only_filter(self, tmp_path):
+        # The secondary render always emits the full, unfiltered report even
+        # when the primary format's --show-only narrows the display.
+        old_p, new_p = _breaking_snapshots(tmp_path)
+        secondary_out = tmp_path / "secondary.json"
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "compare", str(old_p), str(new_p), "--format", "markdown",
+            "--show-only", "added",
+            "--secondary-format", "json", "--secondary-output", str(secondary_out),
+        ])
+        assert result.exit_code == 4
+        parsed = json.loads(secondary_out.read_text(encoding="utf-8"))
+        assert parsed["changes"]
+
+    def test_secondary_format_ignores_primary_report_mode(self, tmp_path):
+        # The secondary render always uses report_mode="full", not the
+        # primary's --report-mode leaf — a --secondary-format consumer
+        # expects the same full shape regardless of how the primary format
+        # groups its own display (Codex review, PR #557).
+        old_p, new_p = _breaking_snapshots(tmp_path)
+        secondary_out = tmp_path / "secondary.json"
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "compare", str(old_p), str(new_p), "--format", "markdown",
+            "--report-mode", "leaf",
+            "--secondary-format", "json", "--secondary-output", str(secondary_out),
+        ])
+        assert result.exit_code == 4
+        parsed = json.loads(secondary_out.read_text(encoding="utf-8"))
+        assert "leaf_changes" not in parsed
+        assert parsed["changes"]
+
+    def test_secondary_format_resolves_own_demangle_default(self, tmp_path):
+        # demangle is resolved per-format (markdown/review default ON, json/
+        # sarif/html/junit default OFF) — a machine primary format (json)
+        # must not force demangle=False onto a markdown/review secondary
+        # render just because that's the primary's own default
+        # (Codex review, PR #557).
+        old_p, new_p = _breaking_snapshots(tmp_path)
+        secondary_out = tmp_path / "secondary.md"
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "compare", str(old_p), str(new_p), "--format", "json",
+            "--secondary-format", "markdown", "--secondary-output", str(secondary_out),
+        ])
+        assert result.exit_code == 4
+        secondary_text = secondary_out.read_text(encoding="utf-8")
+        assert "_Z3barv" not in secondary_text
+        assert "bar" in secondary_text
+
+    def test_secondary_format_requires_secondary_output(self, tmp_path):
+        old_p, new_p = _write_snapshots(tmp_path)
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "compare", str(old_p), str(new_p), "--format", "markdown",
+            "--secondary-format", "json",
+        ])
+        assert result.exit_code == 64
+        assert "--secondary-format requires --secondary-output" in result.output
+
+    def test_secondary_output_requires_secondary_format(self, tmp_path):
+        # Passing --secondary-output alone would otherwise be silently
+        # ignored — no secondary artifact, no error (Codex review, PR #557).
+        old_p, new_p = _write_snapshots(tmp_path)
+        secondary_out = tmp_path / "secondary.json"
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "compare", str(old_p), str(new_p), "--format", "markdown",
+            "--secondary-output", str(secondary_out),
+        ])
+        assert result.exit_code == 64
+        assert "--secondary-output requires --secondary-format" in result.output
+        assert not secondary_out.exists()
+
+    def test_secondary_output_rejects_same_path_as_primary(self, tmp_path):
+        # Writing both formats to the same file would silently overwrite the
+        # primary report with the secondary one (Codex review, PR #557).
+        old_p, new_p = _write_snapshots(tmp_path)
+        same_path = tmp_path / "report"
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "compare", str(old_p), str(new_p), "--format", "markdown",
+            "-o", str(same_path),
+            "--secondary-format", "json", "--secondary-output", str(same_path),
+        ])
+        assert result.exit_code == 64
+        assert "--secondary-output must differ from --output/-o" in result.output
 
 
 # ── compare with suppression ────────────────────────────────────────────

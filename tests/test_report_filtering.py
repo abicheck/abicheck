@@ -300,6 +300,204 @@ class TestApplyShowOnly:
         assert len(result) == 2
         assert all(c.kind.value.startswith("func_") for c in result)
 
+    def test_kind_level_policy_override_respected_without_policy_file(self):
+        """Without policy_file/kind_sets, a kind-level PolicyFile override is
+        invisible to the severity dimension — verified defect (P0 finding 1):
+        a func_removed demoted to COMPATIBLE by policy still counted as
+        'breaking' for --show-only purposes."""
+        from abicheck.policy_file import PolicyFile
+
+        c = Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")
+        pf = PolicyFile(overrides={ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE})
+        result = DiffResult(
+            old_version="1.0", new_version="2.0", library="libtest.so",
+            changes=[c], verdict=Verdict.COMPATIBLE, policy_file=pf,
+        )
+
+        # Without threading kind_sets/policy_file, the override is invisible.
+        assert apply_show_only([c], "breaking") == [c]
+        assert apply_show_only([c], "compatible") == []
+
+        # Threading the effective kind_sets/policy_file (as every report
+        # renderer now does) makes --show-only agree with the effective
+        # verdict the rest of the report uses.
+        kind_sets = result._effective_kind_sets()
+        assert apply_show_only(
+            [c], "breaking", kind_sets=kind_sets, policy_file=pf,
+        ) == []
+        assert apply_show_only(
+            [c], "compatible", kind_sets=kind_sets, policy_file=pf,
+        ) == [c]
+
+    def test_per_finding_effective_verdict_still_respected(self):
+        """A per-change effective_verdict override (A4 modulation / frozen
+        namespace) keeps working once kind_sets/policy_file are threaded
+        through, since severity.effective_verdict_for_change checks it
+        before falling back to kind-level classification."""
+        c = Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")
+        c.effective_verdict = Verdict.COMPATIBLE
+        assert apply_show_only([c], "breaking") == []
+        assert apply_show_only([c], "compatible") == [c]
+
+
+class TestOperationForKind:
+    """Codex review on #557: operation_for_kind() (shared by --show-only's
+    added/removed/changed tokens and the JSON `operation` field, schema 2.3)
+    only matched a fixed suffix list, misclassifying kinds that are still
+    semantically an addition/removal but spelled differently."""
+
+    def test_ordinary_added_removed_modified(self):
+        from abicheck.reporter_markdown import operation_for_kind
+
+        assert operation_for_kind("func_added") == "added"
+        assert operation_for_kind("func_removed") == "removed"
+        assert operation_for_kind("func_params_changed") == "modified"
+
+    def test_non_suffix_addition_kind(self):
+        from abicheck.reporter_markdown import operation_for_kind
+
+        assert operation_for_kind("symbol_version_required_added_compat") == "added"
+
+    def test_non_suffix_removal_kinds(self):
+        from abicheck.reporter_markdown import operation_for_kind
+
+        assert operation_for_kind("experimental_removed_without_replacement") == "removed"
+        assert operation_for_kind("func_deleted_dwarf") == "removed"
+        assert operation_for_kind("cpu_dispatch_isa_dropped") == "removed"
+
+    def test_trait_change_on_persisting_entity_is_modified_not_removed(self):
+        """A '_lost_*'/'_introduced' kind describes a property gained/lost on
+        an entity that still exists — that's "modified", not "added"/
+        "removed" (which name the entity itself appearing/disappearing)."""
+        from abicheck.reporter_markdown import operation_for_kind
+
+        assert operation_for_kind("field_lost_const") == "modified"
+        assert operation_for_kind("func_lost_inline") == "modified"
+        assert operation_for_kind("vptr_introduced") == "modified"
+        assert operation_for_kind("static_tls_introduced") == "modified"
+
+    def test_added_suffix_trait_change_on_persisting_entity_is_modified(self):
+        """The same trait-change-on-a-persisting-entity pattern as above, but
+        spelled with an "_added" suffix instead of "_lost_"/"_introduced" —
+        the plain suffix rule alone would misclassify these as "added" even
+        though no new function/type appears; each names a trait gained by an
+        already-existing entity ("Function became virtual: {name}", "noexcept
+        specifier added: {name}", ...) and none is in ADDITION_KINDS
+        (Codex review, PR #557)."""
+        from abicheck.reporter_markdown import operation_for_kind
+
+        assert operation_for_kind("func_noexcept_added") == "modified"
+        assert operation_for_kind("func_virtual_added") == "modified"
+        assert operation_for_kind("func_variadic_added") == "modified"
+        assert operation_for_kind("func_pure_virtual_added") == "modified"
+
+    def test_field_added_mid_struct_is_modified_not_added(self):
+        """`type_field_added` (a field inserted into an existing struct,
+        shifting every subsequent field's offset) modifies the type's
+        existing layout — the safe append-at-end case has its own dedicated
+        addition kind, `type_field_added_compatible`, which is unaffected
+        (Codex review, PR #557)."""
+        from abicheck.reporter_markdown import operation_for_kind
+
+        assert operation_for_kind("type_field_added") == "modified"
+        assert operation_for_kind("type_field_added_compatible") == "added"
+
+    def test_virtual_method_added_is_modified_not_added(self):
+        """`virtual_method_added` is the identical layout-modification
+        pattern as `type_field_added` applied to virtual methods instead of
+        fields: a new virtual method on an already-existing class
+        grows/relayouts the vtable, breaking derived classes compiled
+        against the old layout — not a compatible added API surface
+        (Codex review, PR #557)."""
+        from abicheck.reporter_markdown import operation_for_kind
+
+        assert operation_for_kind("virtual_method_added") == "modified"
+
+    def test_added_suffix_signature_or_contract_change_is_modified(self):
+        """A second audit pass (Codex review, PR #557): a constructor gaining
+        `explicit`, a template parameter becoming mandatory, a Python
+        function gaining a required parameter, and a function gaining a
+        contract attribute all describe an already-existing callable/
+        template's signature or contract changing — not a new one
+        appearing. None is in ADDITION_KINDS."""
+        from abicheck.reporter_markdown import operation_for_kind
+
+        assert operation_for_kind("ctor_explicit_added") == "modified"
+        assert operation_for_kind("mandatory_template_param_added") == "modified"
+        assert operation_for_kind("python_api_parameter_added") == "modified"
+        assert operation_for_kind("func_contract_attribute_added") == "modified"
+
+    def test_removed_suffix_trait_loss_on_persisting_entity_is_modified(self):
+        """The removed-side counterpart: these end in plain "_removed" (so
+        the suffix rule alone reports "removed"), but each names a trait
+        *lost by* an entity that still exists (Codex review, PR #557)."""
+        from abicheck.reporter_markdown import operation_for_kind
+
+        assert operation_for_kind("func_noexcept_removed") == "modified"
+        assert operation_for_kind("func_variadic_removed") == "modified"
+        assert operation_for_kind("func_contract_attribute_removed") == "modified"
+        assert operation_for_kind("ctor_explicit_removed") == "modified"
+
+    def test_more_removed_suffix_trait_loss_on_persisting_entity_is_modified(self):
+        """A third audit pass (Codex review, PR #557): `func_virtual_removed`
+        (the sibling of `func_virtual_added`, an existing function losing
+        its virtual-ness) and `param_default_value_removed`/
+        `python_api_default_removed` (an existing parameter losing its
+        default value) are the same trait-lost-by-a-persisting-entity
+        pattern as the kinds above."""
+        from abicheck.reporter_markdown import operation_for_kind
+
+        assert operation_for_kind("func_virtual_removed") == "modified"
+        assert operation_for_kind("param_default_value_removed") == "modified"
+        assert operation_for_kind("python_api_default_removed") == "modified"
+
+    @pytest.mark.parametrize("kind", list(ChangeKind), ids=lambda k: k.value)
+    def test_no_remaining_add_remove_synonym_misses(self, kind):
+        """Systematic sweep: every ChangeKind whose name contains an add/
+        remove synonym must classify as "added"/"removed", unless it is a
+        known trait-change-on-persisting-entity exception (see the
+        docstring on _OPERATION_OVERRIDES). Parametrized (CodeRabbit review,
+        PR #557) so pytest reports each kind's failure independently instead
+        of aborting the whole sweep at the first miss."""
+        import re
+
+        from abicheck.reporter_markdown import operation_for_kind
+
+        trait_change_exceptions = {"python_abi3_dropped"}
+        synonym = re.compile(
+            r"drop|excis|eliminat|vanish|disappear|revok|discontinu"
+            r"|withdraw|retract|purge|delet|remov"
+            r"|gain|introduc|new_|appear|creat"
+        )
+        v = kind.value
+        # "_lost_*"/"_introduced" name a trait gained/lost on an entity
+        # that still exists, not the entity itself appearing/
+        # disappearing — see the docstring on _OPERATION_OVERRIDES.
+        if v in trait_change_exceptions or "_lost_" in v or v.endswith("_introduced"):
+            return
+        if synonym.search(v) and "_added" not in v and "_removed" not in v:
+            # Not already covered by the plain suffix rule — must be a
+            # deliberate override, not a silent "modified" miss.
+            op = operation_for_kind(v)
+            assert op in ("added", "removed"), (
+                f"{v!r} looks like an add/remove kind but "
+                f"operation_for_kind() returned {op!r}"
+            )
+
+    def test_addition_kinds_all_classify_as_added(self):
+        """Authoritative cross-check against the canonical ADDITION_KINDS
+        registry set: every member must classify as operation "added".
+        Catches misses the word-matching sweep above cannot (e.g.
+        experimental_graduated, whose name contains no add/remove synonym
+        at all but is unambiguously an addition — case99: "without the
+        dedicated detector the diff is just a func_added" — Codex review
+        on #557)."""
+        from abicheck.checker_policy import ADDITION_KINDS
+        from abicheck.reporter_markdown import operation_for_kind
+
+        misses = [k.value for k in ADDITION_KINDS if operation_for_kind(k.value) != "added"]
+        assert not misses, f"ADDITION_KINDS members not classified as 'added': {misses}"
+
 
 # ---------------------------------------------------------------------------
 # Stat mode tests

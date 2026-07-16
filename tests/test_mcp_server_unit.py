@@ -474,6 +474,25 @@ class TestRenderOutput:
         output = _render_output("html", result, old, new)
         assert "<html" in output.lower() or "<!doctype" in output.lower()
 
+    def test_html_format_forwards_severity_config(self):
+        """The MCP HTML branch must forward severity_config so the CI Gate
+        card renders — otherwise an MCP abi_compare call configured with
+        severity_* options reports a failing exit_code in the JSON wrapper
+        while the embedded HTML shows no gate at all."""
+        from abicheck.checker import Change, ChangeKind
+        from abicheck.severity import resolve_severity_config
+
+        c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+        result, old, new = self._make_diff_result(
+            verdict=Verdict.COMPATIBLE, changes=[c],
+        )
+        cfg = resolve_severity_config("default", addition="error")
+        output = _render_output(
+            "html", result, old, new, severity_config=cfg,
+        )
+        assert "CI Gate" in output
+        assert "FAIL" in output
+
     def test_invalid_format_raises(self):
         result, old, new = self._make_diff_result()
         with pytest.raises(ValueError, match="Unknown output format"):

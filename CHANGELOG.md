@@ -271,6 +271,62 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **`GateDecision` / `CompatibilityDecision` — formal separation of "is this
+  compatible?" from "does this block CI?" (ADR-042).**
+  `abicheck.severity.compute_gate_decision()` is now the single canonical
+  computation for a report's gate summary (exit code, `blocking`,
+  `blocking_categories`), replacing three independent hand-rolled
+  categorize-then-filter-to-`error` implementations
+  (`reporter._build_severity_json`, `sarif._severity_gate_properties`,
+  `cli_compare_release._release_gating_buckets`) that had drifted apart from
+  each other — the root cause of two bugs fixed earlier in this cycle
+  (JSON's `blocking_categories` disagreeing with `exit_code` under
+  `--show-only`; release JSON's per-library `findings` missing
+  severity-gated additions). `CompatibilityDecision` is a plain alias for
+  the existing `Verdict` enum — purely additive, no behavior or public-API
+  change to either type; JSON/SARIF output shapes are byte-for-byte
+  unchanged.
+
+- **Per-finding `recommended_action` in the `compare` JSON schema (2.3 → 2.4,
+  additive).** Each finding now carries a structured, machine-readable next
+  step derived from the same effective verdict/category resolution
+  `severity`/`operation`/`finding_id` already use:
+  `recompile_and_relink_required` (BREAKING), `recompile_required`
+  (API_BREAK), `verify_deployment_compatibility` (COMPATIBLE_WITH_RISK),
+  `review_recommended` (a COMPATIBLE quality issue), or `no_action_required`
+  (a COMPATIBLE addition) — closing the last remaining gap from the
+  post-#549/#551 reporting review's schema-2.3 ask ("structured operation
+  and recommended-action fields"). Set in both `_change_to_dict` and
+  `_leaf_entry` (the latter learned this the same way it learned
+  `operation`/`finding_id` — see the entry above from earlier this cycle).
+
+- **`compare --secondary-format`/`--secondary-output` — a second output
+  format from the same comparison run.** `compare` now computes its
+  `DiffResult` once and can render it into two formats/files in one
+  invocation (e.g. `--format markdown` for a human report alongside
+  `--secondary-format json --secondary-output report.json` for tooling),
+  instead of requiring a second full `abicheck compare` invocation just to
+  get a different format. `--secondary-format` and `--secondary-output`
+  require each other (either alone is rejected — passing just
+  `--secondary-output` would otherwise silently produce no secondary
+  artifact at all), `--secondary-output` must point at a different file than
+  `--output`/`-o` (else the secondary render would silently overwrite the
+  primary report), and the secondary render always renders the full,
+  unfiltered report — it ignores `--show-only`/`--stat`, which describe only
+  the primary format's display.
+  Not supported for directory/package (release) comparisons yet (rejected
+  with a `UsageError`, same as `--exit-code-scheme`/
+  `--reconcile-build-context`/`--env-matrix`). The bundled GitHub Action
+  (`action/run.sh`) now uses this instead of re-running the whole comparison
+  a second time to get JSON for its sticky PR comment, halving the work for
+  a `compare` step that posts a PR comment with a non-json primary format —
+  a new `_is_release_style_operand` check skips the optimization when the
+  `old-library`/`new-library` inputs are directories or package archives
+  (`compare` fans those out through the same release engine internally
+  regardless of the Action's `mode` input, and that engine rejects
+  `--secondary-format`), so a directory/package comparison under
+  `mode: compare` keeps working instead of hard-failing (Codex review).
+
 - **Canonical fact-set versioning and per-family coverage honesty for the
   Clang facts plugin (ADR-038 C.8).** Every `SourceAbiTu` record produced by
   the Clang facts plugin and the reference `clang.py` wrapper now carries a
@@ -646,6 +702,134 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- **`finding_id` could collide for two distinct findings on the same symbol
+  (Codex review, PR #557).** Two findings of the same kind on the same
+  symbol with the same old/new value and no distinct source location (e.g.
+  `param_pointer_level_changed` on two different parameters of one
+  function, both going from pointer-depth 1 to 2) hashed to an identical
+  `finding_id`, defeating the correlation/waiver use case the field exists
+  for. `reporter._finding_id()` now also folds in `description` (which
+  embeds the per-finding detail — parameter name/index, member name, … —
+  that disambiguates them).
+
+- **`compare --secondary-format`/`--secondary-output` follow-ups (CodeRabbit
+  and Codex review, PR #557):**
+  - The secondary render forwarded the primary format's `--report-mode`
+    (e.g. `leaf`) instead of always using `full` as documented — a
+    `--secondary-format json` consumer combined with `--report-mode leaf`
+    got leaf-shaped JSON, not the full report the option promises. Now
+    hard-coded to `report_mode="full"` alongside the existing
+    `show_only=None, stat=False`.
+  - `--secondary-format` requiring `--secondary-output` was validated only
+    after `compare_snapshots()` and the primary report had already run — a
+    typo'd invocation burned the full comparison before failing with a
+    usage error. Moved next to its companion `--secondary-output`-requires-
+    `--secondary-format` check at the top of `run_compare()`.
+  - `--secondary-output` without `--secondary-format` was silently ignored
+    (no artifact, no error) — now rejected with the same fail-fast
+    `UsageError`.
+  - `--secondary-output` equal to `--output`/`-o` silently overwrote the
+    primary report with the secondary render — now rejected up front.
+  - The bundled GitHub Action's `mode: compare` unconditionally added
+    `--secondary-format json`, which the release fan-out engine rejects —
+    hard-failing a directory/package comparison that previously worked
+    under `mode: compare` regardless of the `mode` input. A new
+    `_is_release_style_operand` check (directory, a recognized package
+    extension, or an extensionless RPM/Deb detected by magic bytes —
+    mirroring `package.py`'s own `is_package()` fallback, since
+    `classify_compare_operand()` uses it regardless of filename) skips the
+    optimization for those operands.
+  - The secondary render reused the *primary* format's resolved `--demangle`
+    default instead of resolving its own: pairing a machine primary format
+    (e.g. `--format json`) with a text `--secondary-format markdown`/`review`
+    got raw mangled C++ names in the secondary report even though
+    markdown/review default to demangling ON. `demangle` is now resolved
+    against `secondary_fmt` independently (honouring an explicit
+    `--demangle`/`--no-demangle` either way).
+  - The `finding_id` schema/docs contract still described the fingerprint as
+    a hash of `kind`/`symbol`/`old_value`/`new_value`/`source_location` only,
+    omitting `description` (added earlier in this same list to fix
+    same-symbol collisions) — a waiver/correlation tool following the
+    documented contract would compute different IDs than abicheck actually
+    emits. Docs and schema description updated to match.
+
+- **SARIF `_parse_source_location` still mishandled a path containing a
+  colon before the line separator** (e.g. a synthetic scheme like
+  `generated:headers/foo.h:42`), reading the whole string as the file with
+  no region — the earlier P0 fix only handled the Windows-drive-letter
+  special case (CodeRabbit review, PR #557). Rewritten to parse from the
+  right (`rsplit(":", 2)`): the file is whatever remains once a trailing
+  numeric `line[:column]` is peeled off, not a fixed prefix before the first
+  colon — this also subsumes the Windows drive-letter case without a
+  special branch.
+
+- **JUnit `type=` and GitHub annotation titles could mislabel a
+  POTENTIAL_BREAKING finding's API-Break-vs-Deployment-Risk subtype**
+  (CodeRabbit review, PR #557). Both recovered the subtype from raw
+  kind-set membership rather than the finding's actual effective verdict —
+  a per-finding `effective_verdict` override/modulation (A4 pattern-verdict,
+  PolicyFile) can move a finding between the two without changing which
+  kind-set its raw kind belongs to, so the label could contradict the
+  override's own intent. `junit_report._failure_type()` and
+  `annotations._title_for_change()` now derive the subtype from
+  `severity.effective_verdict_for_change()` instead.
+
+- **`compare_report.schema.json`'s `severity` object accepted an empty or
+  partial gate summary** — `config`/`categories`/`exit_code`/`blocking`/
+  `blocking_categories` were all optional, so a malformed report could pass
+  schema validation despite consumers expecting the complete gate summary
+  (CodeRabbit review, PR #557). All five are now `required` (the emitter
+  already always populates them; this only tightens the contract).
+
+- **`operation_for_kind()` misclassified five trait changes on an
+  already-existing entity as `"added"`** (Codex review, PR #557):
+  `func_noexcept_added`, `func_virtual_added`, `func_variadic_added`, and
+  `func_pure_virtual_added` each name a property *gained by an existing
+  function* ("Function became virtual: {name}", "noexcept specifier added:
+  {name}", …) — the same trait-change-on-a-persisting-entity pattern as the
+  existing `"*_lost_*"`/`"*_introduced"` overrides, just spelled with
+  `"_added"` — and `type_field_added` (a field inserted mid-struct, which
+  shifts every subsequent field's offset) modifies the type's existing
+  layout rather than merely adding something in isolation; the dedicated
+  append-at-end addition kind, `type_field_added_compatible`, is unaffected.
+  None of these five is in `ADDITION_KINDS`. All five now classify as
+  `"modified"` via `_OPERATION_OVERRIDES`, affecting both the JSON
+  `operation` field and `--show-only=added`/`--show-only=changed` (the two
+  share the same classifier by design). A follow-up audit pass (Codex
+  review, PR #557) found eight more: `ctor_explicit_added`,
+  `mandatory_template_param_added`, `python_api_parameter_added`, and
+  `func_contract_attribute_added` describe an existing constructor/
+  template/function's signature or contract changing, not a new one
+  appearing; `func_noexcept_removed`, `func_variadic_removed`,
+  `func_contract_attribute_removed`, and `ctor_explicit_removed` are the
+  removed-side counterpart — a trait *lost by* a persisting entity, which
+  the plain `"_removed"` suffix rule alone misread as an entity
+  disappearing. All eight now classify as `"modified"` too. A third audit
+  pass (Codex review, PR #557) found `func_virtual_removed` (the sibling of
+  `func_virtual_added`, an existing function losing its virtual-ness) and
+  `param_default_value_removed`/`python_api_default_removed` (an existing
+  parameter losing its default value) — the same pattern again; all three
+  now classify as `"modified"` too. A fourth pass (Codex review, PR #557)
+  found `virtual_method_added` itself — the identical layout-modification
+  pattern as `type_field_added` applied to virtual methods instead of
+  fields (a new virtual method on an already-existing class grows/relayouts
+  the vtable and breaks derived classes) — also reclassified.
+
+- **Self-review polish on the `GateDecision`/`--secondary-format` work above
+  (PR #557):** the native HTML report's "CI Gate" card computed pass/fail
+  via `severity.compute_exit_code()` directly instead of the canonical
+  `compute_gate_decision()` that `reporter.py`/`sarif.py`/
+  `cli_compare_release.py` were all migrated to — now routed through it too,
+  so all four gate-status call sites share one computation. The primary and
+  `--secondary-format` render paths each independently resolved the
+  tri-state `--demangle` flag with a duplicated one-line rule; factored into
+  a single `cli_compare_helpers._resolve_demangle()` that both call.
+  `compute_gate_decision`'s legacy (no `SeverityConfig`) branch was found to
+  be unreachable from any of its three production call sites (each already
+  special-cases `severity_config is None` itself, since their legacy-scheme
+  needs differ from an empty `blocking_categories`) — documented explicitly
+  in its docstring rather than silently left as untested-in-practice code.
+
 - **Clang plugin: `source_edges` collected but never reached the L5 graph,
   plus four related correctness gaps from an independent review of the
   ADR-038 C.8 canonical fact-set work (ADR-038 C.10-C.12).**
@@ -744,6 +928,196 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   and `operator new`/`operator delete` (whose own name contains a space
   that isn't a return-type separator) — both are now handled by a shared
   `_holder_of` helper.
+
+- **`--show-only` disagreed with the effective verdict for a kind-level
+  `PolicyFile` override.** `ShowOnlyFilter._check_severity` already honoured a
+  per-change `effective_verdict` (A4 modulation), but fell back to bare
+  `policy_kind_sets(policy)` for everything else — never consulting
+  `PolicyFile.overrides` — so a kind moved to another verdict bucket by policy
+  (e.g. `func_removed` demoted to `COMPATIBLE`) was still filtered by its raw
+  kind, disagreeing with the JSON severity field and every other renderer.
+  `apply_show_only`/`ShowOnlyFilter.matches` now accept `kind_sets`/
+  `policy_file` and resolve through the same
+  `severity.effective_verdict_for_change` used by
+  `DiffResult._effective_verdict_for_change`; all six call sites (Markdown,
+  leaf, JSON's Markdown path, SARIF, JUnit, HTML) thread
+  `result._effective_kind_sets()`/`result.policy_file` through.
+
+- **GitHub annotations without `severity_config` classified by raw kind, not
+  effective verdict.** The severity-aware path (`_category_for_change_severity`)
+  already honoured per-change `effective_verdict` overrides; the legacy/default
+  path (no `SeverityConfig` configured) called `_classify_change(change.kind,
+  ...)` directly, so a finding demoted by a frozen-namespace guard or A4
+  pattern-verdict modulation could still emit `::error` at its raw severity —
+  contradicting `DiffResult.breaking`/`.compatible` and every other renderer.
+  `collect_annotations()` now always resolves each change's effective category
+  first (`_category_for_change_severity`) and dispatches the fixed
+  BREAKING→error/API_BREAK,RISK→warning/COMPATIBLE→notice mapping
+  (`_legacy_level_for_category`) from that, so both the annotation level and
+  title agree with the per-change override in either code path.
+
+- **SARIF `executionSuccessful` conflated "the tool ran" with "the ABI/severity
+  gate passed."** Per the SARIF spec, `executionSuccessful` reports whether
+  analysis *completed*, not whether it found blocking issues — the spec's own
+  example shows a successful run with `exitCode: 1` and warnings. `to_sarif()`
+  previously derived it from `result.verdict`/the severity gate's exit code,
+  so a completed `BREAKING` comparison reported `executionSuccessful: false`.
+  It is now unconditionally `true`; gate/verdict outcome is conveyed solely via
+  `exitCode`, `exitCodeDescription`, result `level`s, and
+  `properties.severityGate`, as it already was. While in the same function,
+  also fixed `_result_for`'s location parsing (a single `rsplit(":", 1)`
+  mishandled `file:line:column`, leaving `:line` stuck in the artifact URI and
+  never setting `startColumn`) and `_rule_for`'s `helpUri`, which pointed at a
+  nonexistent `docs/abi_breaking_cases_catalog.md` — now
+  `docs/reference/change-kinds.md`, which exists.
+
+- **Native HTML report had no way to show a configured severity gate.**
+  `generate_html_report`/`service.render_output`'s `html` branch never
+  accepted or forwarded `severity_config`, so a compatible addition configured
+  `error` rendered a green `Compatibility: COMPATIBLE` banner with no
+  indication the run still exits non-zero. `generate_html_report` now accepts
+  `severity_config` and renders a separate "CI Gate: PASS/FAIL (exit N)" card
+  alongside the renamed "Compatibility" banner (native report only — the
+  ABICC-compatible `compat_html` layout is unchanged); `service.render_output`
+  and the MCP server's `_render_output` (caught in review on this same PR —
+  its HTML branch had the identical gap) both forward it through. The
+  `test_html_template_golden.py` byte-identical goldens are regenerated for
+  the "Verdict" → "Compatibility" rename; the diff is exactly that label plus
+  one blank line for the (empty, since that fixture passes no
+  `severity_config`) gate-card slot.
+
+- **JUnit's `<failure type=...>` could say `"COMPATIBLE"` for a failure
+  `severity_config` itself caused.** `_is_failure` correctly decides pass/
+  fail from a finding's effective severity *category*, but `_failure_type`
+  still derived `type=` from the raw effective *verdict*
+  (`_VERDICT_TO_JUNIT_TYPE`, which has no `COMPATIBLE` entry and falls back
+  to the string `"COMPATIBLE"`) — so a `COMPATIBLE` addition promoted to
+  `error` both failed and reported `type="COMPATIBLE"`, contradicting the
+  very reason it failed. `_failure_type` (and `_add_failure`) now accept
+  `severity_config` and, when given, derive `type=` from the same effective
+  category `_is_failure` used (`ADDITION`/`QUALITY_ISSUE`/`BREAKING`, or
+  `API_BREAK`/`COMPATIBLE_WITH_RISK` recovered from kind-set membership for
+  the `POTENTIAL_BREAKING` category, which doesn't itself distinguish them).
+
+- **Review digest's "Top impacted symbols" used raw kind-set membership,
+  not each finding's effective verdict.** Every other part of
+  `to_review_digest` (the merge-effect phrase, the counts table) already
+  routes through `DiffResult._effective_verdict_for_change`/the `.breaking`/
+  `.source_breaks` properties; "Top impacted symbols" alone filtered by
+  `c.kind in breaking_set or c.kind in api_break_set` — kind-set membership,
+  which misses a per-finding override (A4 pattern-verdict modulation,
+  frozen-namespace guard) that moves a specific finding's verdict away from
+  (or into) BREAKING/API_BREAK independent of its raw kind. Fixed to filter
+  by `result._effective_verdict_for_change(c)` instead, so the section can
+  no longer list a finding the rest of the same digest reports as
+  compatible, or omit one it reports as breaking.
+
+- **Appcompat JSON's `relevant_changes[].severity` ignored the full
+  diff's `PolicyFile`/effective kind-sets.** `appcompat_to_json` read only
+  `full_diff.policy` (a bare string) and never threaded
+  `full_diff._effective_kind_sets()`/`full_diff.policy_file` into
+  `_change_to_dict`, so a per-finding severity there fell back to raw-kind
+  classification — able to contradict `full_library_verdict` on the very
+  same JSON document, which already honours the `PolicyFile` via
+  `full_diff.verdict`. Now threads both through, matching `to_json`'s own
+  `_change_to_dict` calls (fixed for the same reason in #549).
+
+- **The GitHub Action's job summary always wrapped the report in a code
+  fence, even for the (default) `format: markdown`.** `run.sh` unconditionally
+  wrapped `$ABICHECK_OUTPUT` in a ```` ``` ```` fence for the "Full report"
+  step-summary section, so GitHub rendered a markdown report as literal
+  code instead of formatted headings/tables/bold text. Now only non-markdown
+  formats (json/sarif/text/etc. — genuinely verbatim output) keep the fence.
+  (The action's PR-comment path re-running the comparison with `--format
+  json` when the primary run isn't already unfiltered JSON is unchanged —
+  eliminating that would need a CLI feature to emit multiple formats from
+  one invocation, which is out of scope here; the existing reuse-when-
+  possible check and the guards that skip the rerun entirely when no
+  comment will be posted are confirmed already working correctly.)
+
+- **Stack-check and release JSON were count-centric at the per-library
+  level**, e.g. `"abi_breaking": 3` / `"breaking": 3`, with no way to
+  identify *which* symbols broke without a separate `compare` run or (for
+  releases) the optional `--output-dir` per-library report file —
+  unlike `scan --baseline`'s JSON, already fixed the same way in #549.
+  `stack_report.stack_to_json` and `cli_compare_release`'s per-library
+  entries now embed a capped (10 per library), bucketed `findings` list
+  (kind/symbol/description/source_location) drawn from each library's
+  breaking/source-break/risk changes, with `findings_truncated: true` when
+  a library has more gating findings than the cap.
+
+- **The `compare` JSON schema (bumped 2.2 → 2.3, additive) gained a typed
+  gate summary and stable per-finding identity**, closing the remaining
+  reporting-review gaps that fit the project's own additive-schema
+  convention: each finding now carries `operation` (`added`/`removed`/
+  `modified`, derived from the same kind-suffix rule `--show-only` already
+  uses — extracted to a shared `operation_for_kind` so the two can't drift)
+  and `finding_id` (a stable SHA-256-derived fingerprint of
+  kind/symbol/old_value/new_value/source_location, letting a consumer
+  correlate the same finding across two report runs without relying on
+  array order; deliberately excludes policy-derived fields so it's stable
+  across `--policy`). The top-level `severity` object (present only when
+  `--severity-*` is active) gains `blocking`/`blocking_categories`, mirroring
+  SARIF's `severityGate` block. Not implemented: a per-finding "recommended
+  action" field — the report-level `release_recommendation` already covers
+  this at the release granularity, and a per-finding equivalent has no
+  clear-cut shape yet.
+
+- **Two Codex-review findings on the schema 2.3 additions above.**
+  `operation_for_kind()` classified purely by kind-name suffix, missing
+  several kinds that are semantically an addition/removal but spelled
+  differently (`symbol_version_required_added_compat` ends in
+  `_added_compat`, not `_added`; `experimental_removed_without_replacement`
+  and `func_deleted_dwarf` don't end in `_removed`/`_deleted`;
+  `cpu_dispatch_isa_dropped` — a whole ISA-dispatch family's concrete
+  symbols vanishing, case83 — ends in `_dropped`) — these now resolve via
+  an explicit `_OPERATION_OVERRIDES` table, checked before the suffix rule.
+  Deliberately excludes the `"*_lost_*"`/`"*_introduced"` families
+  (`field_lost_const`, `vptr_introduced`, ...): those name a trait
+  gained/lost on a persisting entity, which is "modified", not the entity
+  itself appearing/disappearing. Separately, JSON's `blocking_categories`
+  was derived from the possibly `--show-only`-filtered *display* `changes`
+  rather than the unfiltered gate set `exit_code` already uses — hiding the
+  one category actually responsible for a nonzero exit code (e.g.
+  `--show-only=breaking` while an addition promoted to `error` is what's
+  blocking) reported `blocking: true` alongside `blocking_categories: []`.
+  Now derived from the same unfiltered set as `exit_code`, matching how
+  SARIF's own `_severity_gate_properties` was already doing it correctly.
+
+- **`--report-mode leaf`'s root-type-change entries were missing the schema
+  2.3 `operation`/`finding_id` fields.** `_to_json_leaf`'s `_leaf_entry`
+  builds its own dict for root type changes rather than routing through
+  `_change_to_dict`, so those entries in `leaf_changes[]` (and the
+  backward-compat `changes[]` union) lacked `operation`/`finding_id` even
+  though non-type leaf entries and full-mode entries both have them —
+  breaking `finding_id` correlation for leaf-mode reports specifically.
+  `_leaf_entry` now sets both fields the same way `_change_to_dict` does.
+
+- **`compare-release --format json`'s per-library `findings` list ignored
+  severity-gated additions/quality issues.** It only ever walked the three
+  legacy verdict buckets (breaking/api_break/risk), so
+  `--severity-addition error` (or `--severity-quality-issues error`)
+  promoting a library's only findings to `error` produced
+  `severity.exit_code != 0` on that library with an empty `findings` list —
+  no way to tell which addition/quality-issue actually blocked the release.
+  `_release_finding_dicts` (via a new shared `_release_gating_buckets`
+  helper, also used for the truncation-cap count) now walks the four
+  severity categories instead, whenever a severity-aware exit-code scheme
+  is active, matching whichever categories are actually configured `error`.
+
+- **`experimental_graduated` (schema `operation` field) misclassified as
+  `"modified"`.** Unlike the earlier `_OPERATION_OVERRIDES` misses (which
+  all had *some* add/remove synonym in their name), `experimental_graduated`
+  contains none — it's the dedicated case99 detector for "a stable name is
+  added alongside the still-present experimental alias" ("without the
+  dedicated detector the diff is just a `func_added`"), and is correctly in
+  the canonical `ADDITION_KINDS` registry set, but `operation_for_kind`'s
+  suffix rule had nothing to match on (Codex review on #557). Added to the
+  override table; also added a permanent regression test that cross-checks
+  every `ADDITION_KINDS` member classifies as `"added"`, catching this class
+  of miss for any future addition-kind whose name doesn't contain an
+  add/remove synonym (the word-matching sweep test added earlier this cycle
+  cannot catch these by construction).
 
 ### Documentation
 

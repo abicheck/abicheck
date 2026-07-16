@@ -54,7 +54,28 @@ from typing import Any
 #:       epistemic status (derived from its kind's intrinsic category, not
 #:       the policy-resolved verdict), or set explicitly for appcompat/
 #:       plugin-check consumer-proven findings. Additive optional key.
-REPORT_SCHEMA_VERSION = "2.2"
+#: 2.3 — three additive optional keys: per-finding ``finding_id`` (a stable,
+#:       deterministic fingerprint hashed from kind/symbol/old_value/
+#:       new_value/source_location — lets a consumer correlate the same
+#:       finding across two report runs without relying on array order) and
+#:       ``operation`` ("added"/"removed"/"modified", derived from the
+#:       kind's own suffix classification — the same one --show-only's
+#:       added/removed/changed tokens already use); and, on the top-level
+#:       ``severity`` object (only present when severity_config is active),
+#:       ``blocking`` (bool) and ``blocking_categories`` (list of category
+#:       names actually gating the exit code) — a typed gate summary
+#:       mirroring SARIF's ``severityGate`` block, so a consumer no longer
+#:       has to independently recompute "what's actually failing the build"
+#:       from ``config``/``categories``.
+#: 2.4 — added the optional per-finding ``recommended_action`` key: a
+#:       structured, machine-readable next step derived from the same
+#:       effective verdict/category resolution ``severity``/``operation``
+#:       already use — ``recompile_and_relink_required`` (BREAKING),
+#:       ``recompile_required`` (API_BREAK), ``verify_deployment_compatibility``
+#:       (COMPATIBLE_WITH_RISK), ``review_recommended`` (COMPATIBLE quality
+#:       issue), or ``no_action_required`` (COMPATIBLE addition). Additive
+#:       optional key.
+REPORT_SCHEMA_VERSION = "2.4"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

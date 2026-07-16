@@ -163,7 +163,7 @@ def test_policy_demoted_removal_does_not_contradict_compatible_verdict() -> None
         changes=[c], verdict=Verdict.COMPATIBLE, policy_file=pf,
     )
     out = generate_html_report(result)
-    assert "Verdict: COMPATIBLE" in out
+    assert "Compatibility: COMPATIBLE" in out
     assert "Binary Compatibility: <strong>100.0%</strong>" in out
     assert "Binary Compatibility: <strong>0.0%</strong>" not in out
     assert "(0 breaking change(s))" in out
@@ -482,3 +482,70 @@ def test_confidence_absent_without_attribute() -> None:
     out = generate_html_report(r)
     assert "<!DOCTYPE html>" in out
     # Should NOT crash — just skip the section
+
+
+# ---------------------------------------------------------------------------
+# severity_config-aware CI Gate card
+# ---------------------------------------------------------------------------
+
+def test_no_gate_card_without_severity_config() -> None:
+    """Without severity_config, the native report has no CI Gate card at all."""
+    from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
+
+    c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+    result = DiffResult(
+        old_version="1.0", new_version="2.0", library="libtest.so",
+        changes=[c], verdict=Verdict.COMPATIBLE,
+    )
+    out = generate_html_report(result)
+    assert "CI Gate" not in out
+
+
+def test_gate_card_fails_for_addition_promoted_to_error() -> None:
+    """An addition promoted to `error` fails CI even though Compatibility
+    reads COMPATIBLE — the CI Gate card must surface that, unlike the
+    Compatibility banner alone (verified defect: P0 finding 4)."""
+    from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
+    from abicheck.severity import resolve_severity_config
+
+    c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+    result = DiffResult(
+        old_version="1.0", new_version="2.0", library="libtest.so",
+        changes=[c], verdict=Verdict.COMPATIBLE,
+    )
+    cfg = resolve_severity_config("default", addition="error")
+    out = generate_html_report(result, severity_config=cfg)
+    assert "Compatibility: COMPATIBLE" in out
+    assert "CI Gate" in out
+    assert "FAIL (exit 1)" in out
+
+
+def test_gate_card_passes_when_no_error_level_findings() -> None:
+    from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
+    from abicheck.severity import resolve_severity_config
+
+    c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+    result = DiffResult(
+        old_version="1.0", new_version="2.0", library="libtest.so",
+        changes=[c], verdict=Verdict.COMPATIBLE,
+    )
+    cfg = resolve_severity_config("default")
+    out = generate_html_report(result, severity_config=cfg)
+    assert "CI Gate" in out
+    assert "PASS" in out
+
+
+def test_gate_card_absent_from_abicc_compatible_layout() -> None:
+    """The ABICC-compatible layout (compat_html=True) is left unchanged even
+    when severity_config is supplied."""
+    from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
+    from abicheck.severity import resolve_severity_config
+
+    c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+    result = DiffResult(
+        old_version="1.0", new_version="2.0", library="libtest.so",
+        changes=[c], verdict=Verdict.COMPATIBLE,
+    )
+    cfg = resolve_severity_config("default", addition="error")
+    out = generate_html_report(result, severity_config=cfg, compat_html=True)
+    assert "CI Gate" not in out

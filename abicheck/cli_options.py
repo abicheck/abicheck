@@ -1375,6 +1375,17 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "top-level header) — opt-in separately since it costs more than "
         "--header-graph alone. Same per-run analysis-depth rationale."
     ),
+    "--secondary-format": (
+        "Emits a second output format from the same comparison run (e.g. a "
+        "--secondary-format json artifact alongside a --format markdown report), "
+        "so a CI caller (the GitHub Action's PR-comment JSON) no longer has to "
+        "re-invoke abicheck a second time. A per-run rendering choice, not a "
+        "stable project setting."
+    ),
+    "--secondary-output": (
+        "Companion to --secondary-format: the file path its output is written "
+        "to. Always used together, like -o/--output for --format."
+    ),
 }
 
 #: Derived ceiling — never hand-edit; add a ``COMPARE_FLAG_BUDGET_RAISES`` entry.

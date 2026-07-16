@@ -382,7 +382,7 @@ def _render_output(
     """Render comparison result in the requested output format.
 
     *severity_config*, when given, is forwarded to every format that
-    supports it (json, sarif, markdown, stat) so an MCP caller passing
+    supports it (json, sarif, markdown, stat, html) so an MCP caller passing
     ``severity_*`` arguments to :func:`abi_compare` gets the same
     severity-aware report content the CLI's ``--severity-*`` flags produce —
     without it, the MCP surface had no severity configuration at all.
@@ -421,6 +421,7 @@ def _render_output(
             old_symbol_count=result.old_symbol_count,
             show_only=show_only,
             show_impact=show_impact,
+            severity_config=severity_config,
         )
     return to_markdown(
         result,

@@ -182,6 +182,7 @@ def _reject_set_input_flags(
     exit_code_scheme: str | None,
     reconcile_build_context: bool,
     env_matrix_path: Path | None,
+    secondary_fmt: str | None = None,
 ) -> None:
     """Reject single-pair-only flags on a directory/package (release) compare.
 
@@ -208,6 +209,12 @@ def _reject_set_input_flags(
             "comparisons yet; it applies to single-file / snapshot inputs. "
             "Compare the libraries individually to use it."
         )
+    if secondary_fmt is not None:
+        raise click.UsageError(
+            "--secondary-format is not supported for directory/package "
+            "(release) comparisons yet; it applies to single-file / snapshot "
+            "inputs. Compare the libraries individually to use it."
+        )
 
 
 class _NormalizedCompareOptions(NamedTuple):
@@ -219,6 +226,24 @@ class _NormalizedCompareOptions(NamedTuple):
     demangle: bool
     report_mode: str
     show_impact: bool
+
+
+def _resolve_demangle(fmt: str, demangle: bool | None) -> bool:
+    """Resolve the tri-state ``--demangle`` flag against a specific format.
+
+    Default ON for the text formats whose renderer post-processes symbols
+    through ``demangle_text`` (markdown/review), OFF for machine formats
+    (json/sarif/junit) and HTML — the HTML renderer emits symbols
+    structurally and demangling its string would inject unescaped
+    ``<``/``>``/``&`` from C++ names and corrupt the markup. An explicit
+    flag always wins over the per-format default.
+
+    Shared by the primary render (:func:`_normalize_compare_options`) and
+    the ``--secondary-format`` render in :func:`run_compare`, each resolved
+    against its own format — a machine primary format paired with a text
+    secondary format (or vice versa) must not inherit the other's default.
+    """
+    return fmt in {"markdown", "review"} if demangle is None else demangle
 
 
 def _normalize_compare_options(
@@ -260,12 +285,7 @@ def _normalize_compare_options(
     else:
         effective_debug_format = debug_format
 
-    # Tri-state --demangle: default ON for the text formats whose renderer
-    # post-processes symbols through demangle_text (markdown/review), OFF for
-    # machine formats (json/sarif/junit) and HTML — the HTML renderer emits
-    # symbols structurally and demangling its string would inject unescaped
-    # '<'/'>'/'&' from C++ names and corrupt the markup. Explicit flag wins.
-    demangle_resolved = fmt in {"markdown", "review"} if demangle is None else demangle
+    demangle_resolved = _resolve_demangle(fmt, demangle)
 
     # --report-mode impact is sugar for "full" report with the impact table on.
     if report_mode == "impact":
@@ -457,9 +477,33 @@ def run_compare(
     probe_matrix_new: Path | None = None,
     header_graph: bool = False,
     header_graph_includes: bool = False,
+    secondary_fmt: str | None = None,
+    secondary_output: Path | None = None,
 ) -> None:
     """Run the single-pair (or set fan-out) ``compare`` flow and exit accordingly."""
     _setup_verbosity(verbose)
+
+    if secondary_fmt is not None and secondary_output is None:
+        raise click.UsageError(
+            "--secondary-format requires --secondary-output: writing two "
+            "output formats to the same stream would be ambiguous."
+        )
+    if secondary_output is not None and secondary_fmt is None:
+        raise click.UsageError(
+            "--secondary-output requires --secondary-format: with no format "
+            "given there is nothing to render, and the path would be silently "
+            "ignored."
+        )
+    if (
+        secondary_output is not None
+        and output is not None
+        and secondary_output.resolve() == output.resolve()
+    ):
+        raise click.UsageError(
+            "--secondary-output must differ from --output/-o: writing both "
+            "formats to the same file would silently overwrite the primary "
+            "report with the secondary one."
+        )
 
     # ADR-037 D4: load the project config and merge CLI flags over it
     # (precedence CLI > config > built-in default) *before* dispatch, so both the
@@ -516,7 +560,7 @@ def run_compare(
         # resolved scheme from config but has no public CLI support for these
         # single-pair-only flags on set inputs — reject them loudly (ADR-037 D12).
         _reject_set_input_flags(
-            exit_code_scheme, reconcile_build_context, env_matrix_path
+            exit_code_scheme, reconcile_build_context, env_matrix_path, secondary_fmt,
         )
         _reject_compile_context_for_set_inputs(ctx, project_cfg)
         _reject_evidence_flags_for_set_inputs(ctx)
@@ -561,6 +605,11 @@ def run_compare(
     _warn_unused_set_flags(
         jobs_explicit=jobs_explicit, dso_only=dso_only, output_dir=output_dir
     )
+
+    # Preserved before _normalize_compare_options resolves `demangle` against
+    # the *primary* fmt below — the secondary render needs the same tri-state
+    # input resolved against `secondary_fmt` instead (see its call site).
+    demangle_explicit = demangle
 
     (
         collect_mode, headers, old_headers_only, new_headers_only,
@@ -822,6 +871,31 @@ def run_compare(
     )
 
     _write_or_echo(output, text)
+
+    if secondary_fmt is not None:
+        # Always the full, unfiltered report — ignores --show-only/--stat
+        # (which describe the *primary* format's display) and forces
+        # report_mode="full" (not the primary's --report-mode leaf) so a
+        # --secondary-* consumer (e.g. a CI action rendering a PR-comment
+        # JSON from a markdown-format primary run) sees the complete change
+        # set the gate actually acted on, not whatever the primary format
+        # chose to filter or group down to. Reuses the same already-computed
+        # `result` — no second comparison run.
+        # Resolve demangle against secondary_fmt, not the primary-resolved
+        # value above — otherwise a machine primary format (e.g. json) paired
+        # with a markdown/review secondary format would wrongly inherit
+        # demangle=False into the secondary render (Codex review, PR #557).
+        secondary_demangle = _resolve_demangle(secondary_fmt, demangle_explicit)
+        secondary_text = _render_output(
+            secondary_fmt, result, old, new,
+            follow_deps=follow_deps,
+            show_only=None, report_mode="full",
+            show_impact=show_impact, stat=False,
+            severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
+            show_recommendation=recommend,
+            demangle=secondary_demangle,
+        )
+        _write_or_echo(secondary_output, secondary_text)
 
     _announce_exit_scheme(resolved_cfg.exit_code_scheme, fmt=fmt, stat=stat)
     _exit_with_severity_or_verdict(result, sev_config, resolved_cfg.exit_code_scheme)

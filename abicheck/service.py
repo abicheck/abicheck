@@ -1694,6 +1694,7 @@ def render_output(
             old_symbol_count=result.old_symbol_count,
             show_only=show_only,
             show_impact=show_impact,
+            severity_config=severity_config,
         )
 
     if fmt == "junit":

@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import TYPE_CHECKING, cast
 
@@ -71,6 +72,7 @@ from .reporter_markdown import (
     _section_severity_label as _section_severity_label,
     _to_markdown_leaf as _to_markdown_leaf,
     apply_show_only as apply_show_only,
+    operation_for_kind as operation_for_kind,
     to_markdown as to_markdown,
     to_review_digest as to_review_digest,
     to_stat as to_stat,
@@ -255,7 +257,13 @@ def _to_json_leaf(
     summary = build_summary(result)
     changes = list(result.changes)
     if show_only:
-        changes = apply_show_only(changes, show_only, policy=result.policy)
+        changes = apply_show_only(
+            changes,
+            show_only,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
     type_changes = [c for c in changes if c.kind in _ROOT_TYPE_CHANGE_KINDS]
     non_type_changes = [c for c in changes if c.kind not in _ROOT_TYPE_CHANGE_KINDS]
 
@@ -269,6 +277,18 @@ def _to_json_leaf(
             "description": c.description,
             "severity": _effective_severity_label(
                 c, eff_sets, policy=result.policy, policy_file=result.policy_file,
+            ),
+            # Schema 2.3/2.4 fields (Codex review on #557): _leaf_entry builds
+            # its own dict rather than routing through _change_to_dict, so
+            # root type changes in leaf_changes[]/changes[] were missing
+            # operation/finding_id/recommended_action even though non-type
+            # leaf entries (via _change_to_dict below) and full-mode entries
+            # all have them — breaking a consumer relying on finding_id
+            # correlation across --report-mode leaf and full-mode reports.
+            "operation": operation_for_kind(c.kind.value),
+            "finding_id": _finding_id(c),
+            "recommended_action": _recommended_action_for_change(
+                c, policy=result.policy, kind_sets=eff_sets, policy_file=result.policy_file,
             ),
             "affected_count": len(c.affected_symbols) if c.affected_symbols else 0,
             "affected_symbols": c.affected_symbols or [],
@@ -579,7 +599,13 @@ def to_json(
 
     changes = list(result.changes)
     if show_only:
-        changes = apply_show_only(changes, show_only, policy=result.policy)
+        changes = apply_show_only(
+            changes,
+            show_only,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
 
     d = _build_json_base(result)
     _add_abi_surface_breakdown(d, result)
@@ -611,6 +637,89 @@ def to_json(
     _add_policy_overrides(d, result)
     _add_trailing_fields(d, result, show_impact, show_only)
     return json.dumps(d, indent=indent)
+
+
+def _finding_id(c: object) -> str:
+    """Stable per-finding fingerprint (schema 2.3, additive).
+
+    Deterministic across repeated runs of the same comparison, so a
+    consumer can tell "is this the same finding" across two report runs
+    (e.g. to correlate a suppression/waiver, or diff two CI runs' findings)
+    without relying on array order or index — neither of which abicheck
+    guarantees stays stable release to release.
+
+    Derived only from fields that identify the finding's *identity* (kind,
+    symbol, old/new value, source location, description) — deliberately
+    excluding ``severity``/``evidence_status``, which are policy-derived and
+    would make the same underlying finding hash differently under a
+    different ``--policy``.
+
+    ``description`` is included as a discriminator: two findings of the same
+    kind on the same symbol with the same old/new value and no distinct
+    source location (e.g. ``param_pointer_level_changed`` on two different
+    parameters of one function, both going from pointer-depth 1 to 2) would
+    otherwise collide on an identical id even though they are different
+    findings — ``description`` embeds the per-finding detail (parameter
+    name/index, member name, …) that disambiguates them.
+    """
+    key = "\x1f".join(
+        [
+            str(getattr(getattr(c, "kind", None), "value", getattr(c, "kind", ""))),
+            str(getattr(c, "symbol", None) or ""),
+            str(getattr(c, "old_value", None) or ""),
+            str(getattr(c, "new_value", None) or ""),
+            str(getattr(c, "source_location", None) or ""),
+            str(getattr(c, "description", None) or ""),
+        ]
+    )
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+
+
+_VERDICT_TO_RECOMMENDED_ACTION: dict[Verdict, str] = {
+    Verdict.BREAKING: "recompile_and_relink_required",
+    Verdict.API_BREAK: "recompile_required",
+    Verdict.COMPATIBLE_WITH_RISK: "verify_deployment_compatibility",
+}
+
+
+def _recommended_action_for_change(
+    c: object,
+    *,
+    policy: str | None,
+    kind_sets: KindSets | None,
+    policy_file: object | None,
+) -> str:
+    """Return a structured, machine-readable next step for *c* (schema 2.4).
+
+    Derived from the same effective verdict/category resolution
+    ``severity``/``operation``/``finding_id`` already use, so it can never
+    disagree with them for the same finding:
+
+    - ``BREAKING`` → ``recompile_and_relink_required`` (binary ABI break)
+    - ``API_BREAK`` → ``recompile_required`` (source-level break only)
+    - ``COMPATIBLE_WITH_RISK`` → ``verify_deployment_compatibility``
+    - ``COMPATIBLE`` additions → ``no_action_required``
+    - ``COMPATIBLE`` non-additions (quality issues) → ``review_recommended``
+    """
+    from .severity import (
+        IssueCategory,
+        classify_effective_change,
+        effective_verdict_for_change,
+    )
+
+    verdict = effective_verdict_for_change(
+        cast(HasKind, c), policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+    )
+    action = _VERDICT_TO_RECOMMENDED_ACTION.get(verdict)
+    if action is not None:
+        return action
+    # COMPATIBLE: distinguish a genuine addition (nothing to do) from a
+    # quality issue (compatible, but worth a look) via the same category
+    # classification the severity JSON block uses.
+    category = classify_effective_change(
+        cast(HasKind, c), policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+    )
+    return "no_action_required" if category == IssueCategory.ADDITION else "review_recommended"
 
 
 def _change_to_dict(
@@ -661,6 +770,12 @@ def _change_to_dict(
         "new_value": getattr(c, "new_value", None),
         "severity": severity,
     }
+    if isinstance(kind, ChangeKind):
+        d["operation"] = operation_for_kind(kind.value)
+        d["finding_id"] = _finding_id(c)
+        d["recommended_action"] = _recommended_action_for_change(
+            c, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+        )
     if evidence_status is not None:
         d["evidence_status"] = evidence_status.value
     # Impact explanation
@@ -711,7 +826,7 @@ def _build_severity_json(
     *kind_sets* from ``DiffResult._effective_kind_sets()`` includes
     PolicyFile overrides.
     """
-    from .severity import SeverityLevel, categorize_changes, compute_exit_code
+    from .severity import SeverityLevel, categorize_changes, compute_gate_decision
 
     categorized = categorize_changes(
         changes,
@@ -744,10 +859,24 @@ def _build_severity_json(
         },
     }
 
-    # Exit code uses the full unfiltered change set so --show-only
-    # does not affect it.
+    # ``blocking``/``blocking_categories`` (schema 2.3, additive): a typed,
+    # auditable gate summary mirroring SARIF's ``severityGate`` block
+    # (``sarif._severity_gate_properties``) — without them, a JSON consumer
+    # had to independently recompute "which category is actually failing the
+    # build" from ``config``/``categories`` itself; this makes that answer a
+    # first-class, versioned part of the report.
+    #
+    # Derived from *exit_changes* (the unfiltered gate set), not ``changes``
+    # (the possibly --show-only-filtered *display* set) — otherwise hiding
+    # the one category that's actually failing the build (e.g.
+    # ``--show-only=breaking`` when an addition promoted to ``error`` is
+    # what's blocking) would report ``blocking: true`` alongside
+    # ``blocking_categories: []`` (Codex review on #557). Routed through
+    # ``compute_gate_decision`` — the single canonical gate computation —
+    # rather than hand-rolling exit_code and blocking_categories as two
+    # independent computations that could drift apart from each other.
     exit_changes = all_changes if all_changes is not None else changes
-    exit_code = compute_exit_code(
+    gate = compute_gate_decision(
         exit_changes,
         severity_config,
         policy=policy,
@@ -758,7 +887,9 @@ def _build_severity_json(
     return {
         "config": config_dict,
         "categories": categories,
-        "exit_code": exit_code,
+        "exit_code": gate.exit_code,
+        "blocking": gate.blocking,
+        "blocking_categories": list(gate.blocking_categories),
     }
 
 
@@ -805,10 +936,20 @@ def appcompat_to_json(result: object, indent: int = 2) -> str:
         getattr(getattr(result, "full_diff", None), "policy", "strict_abi")
         or "strict_abi"
     )
+    # Thread the full_diff's PolicyFile/effective kind_sets through, mirroring
+    # to_json's _change_to_dict calls (reporter.py _add_changes_block) —
+    # without them, a per-finding severity here falls back to raw-kind
+    # classification and can contradict full_library_verdict below, which
+    # already honours the PolicyFile via full_diff.verdict.
+    _kind_sets_fn = getattr(full_diff, "_effective_kind_sets", None)
+    appcompat_kind_sets = _kind_sets_fn() if callable(_kind_sets_fn) else None
+    appcompat_policy_file = getattr(full_diff, "policy_file", None)
     d["relevant_changes"] = [
         _change_to_dict(
             c,
             policy=appcompat_policy,
+            kind_sets=appcompat_kind_sets,
+            policy_file=appcompat_policy_file,
             evidence_status_override=EvidenceStatus.CONSUMER_PROVEN,
         )
         for c in breaking

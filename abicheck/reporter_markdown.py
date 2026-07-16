@@ -114,6 +114,127 @@ def to_stat(result: DiffResult, *, severity_config: SeverityConfig | None = None
 # Show-only filter
 # ---------------------------------------------------------------------------
 
+# Kind-name suffixes that identify an additive vs. a removal finding — shared
+# between ShowOnlyFilter's "added"/"removed"/"changed" action tokens and the
+# JSON report's structured per-finding "operation" field (schema 2.3), so the
+# two never drift apart.
+_ADDED_SUFFIXES = ("_added", "_added_compatible")
+_REMOVED_SUFFIXES = (
+    "_removed",
+    "_deleted",
+    "_elf_only",
+    "_elf_fallback",
+    "_const_overload",
+)
+
+# Kinds whose name doesn't end in one of the suffixes above but still name a
+# concrete symbol/entity appearing or disappearing (Codex review on #557:
+# operation_for_kind() reported these as "modified"). Checked before the
+# suffix rule. Deliberately does NOT include kinds naming a *property*
+# gained/lost on an entity that still exists — e.g. the "*_lost_*" family
+# (`field_lost_const`, `func_lost_inline`, ...) or the "*_introduced" family
+# (`vptr_introduced`, `static_tls_introduced`, ...): those are trait changes
+# on a persisting entity, which is what "modified" means here, not an
+# addition/removal of the entity itself.
+_OPERATION_OVERRIDES: dict[str, str] = {
+    # Ends in "_added_compat", not "_added"/"_added_compatible".
+    "symbol_version_required_added_compat": "added",
+    # Ends in "_removed_without_replacement", not "_removed".
+    "experimental_removed_without_replacement": "removed",
+    # Ends in "_deleted_dwarf", not "_deleted".
+    "func_deleted_dwarf": "removed",
+    # A whole ISA-dispatch family's concrete symbols vanish (case83), not a
+    # property change on a persisting symbol.
+    "cpu_dispatch_isa_dropped": "removed",
+    # A stable name is added alongside the still-present experimental alias
+    # (case99) -- without the dedicated detector this would just be a plain
+    # func_added; ADDITION_KINDS already classifies it as an addition
+    # (Codex review on #557).
+    "experimental_graduated": "added",
+    # These four end in "_added" but each names a trait *gained by an
+    # existing, persisting function* ("Function became virtual: {name}",
+    # "noexcept specifier added: {name}", "Function became variadic (gained
+    # ...): {name}" -- verified against their diff_symbols.py descriptions
+    # and change_registry.py entries, none of which set is_addition=True /
+    # belong to ADDITION_KINDS) -- the same "*_lost_*"/"*_introduced" trait-
+    # change pattern above, just spelled with "_added" (Codex review, PR
+    # #557). `func_pure_virtual_added` ("Function became pure virtual:
+    # {name}") is the identical pattern applied to its sibling kind
+    # `func_virtual_became_pure`, which already classifies correctly as
+    # "modified" since it doesn't end in "_added".
+    "func_noexcept_added": "modified",
+    "func_virtual_added": "modified",
+    "func_variadic_added": "modified",
+    "func_pure_virtual_added": "modified",
+    # A field inserted into an existing struct/class shifts every
+    # subsequent field's offset -- this modifies the *layout of the
+    # existing type*, not merely a new field appearing in isolation.
+    # `type_field_added_compatible` (append-at-end, no offset shift) is the
+    # dedicated addition-kind carve-out and is unaffected by this override
+    # (it doesn't end in plain "_added"). (Codex review, PR #557.)
+    "type_field_added": "modified",
+    # The identical layout-modification pattern applied to virtual methods
+    # instead of fields: a new virtual method on an already-existing class
+    # grows/relayouts the vtable (gains a hidden vtable pointer if it had
+    # none, or a new slot otherwise), breaking derived classes compiled
+    # against the old layout -- KDE's "do not add virtuals to a non-leaf
+    # class" rule. Not in ADDITION_KINDS (Codex review, PR #557).
+    "virtual_method_added": "modified",
+    # More of the same trait-gained-by-a-persisting-entity pattern, found on
+    # a second audit pass (Codex review, PR #557): a constructor/conversion
+    # operator gaining `explicit` (`ctor_explicit_added`), a template
+    # parameter that was defaulted/deduced becoming mandatory
+    # (`mandatory_template_param_added`), a Python-visible function gaining
+    # a new *required* parameter (`python_api_parameter_added`), and a
+    # function gaining a semantic contract attribute like nonnull/noreturn
+    # (`func_contract_attribute_added`) all describe an already-existing
+    # callable/template's signature or contract changing, not a new one
+    # appearing. None of these four is in ADDITION_KINDS either.
+    "ctor_explicit_added": "modified",
+    "mandatory_template_param_added": "modified",
+    "python_api_parameter_added": "modified",
+    "func_contract_attribute_added": "modified",
+    # Removed-side counterparts of the trait-change pattern: these end in
+    # plain "_removed" (so the suffix rule alone reports "removed"), but
+    # each names a trait *lost by* an entity that still exists — mirroring
+    # `func_noexcept_added`/`func_variadic_added`/etc. above, just the
+    # opposite direction of the same specifier gain/loss (Codex review, PR
+    # #557).
+    "func_noexcept_removed": "modified",
+    "func_variadic_removed": "modified",
+    "func_contract_attribute_removed": "modified",
+    "ctor_explicit_removed": "modified",
+    # A third audit pass turned up more of the same (Codex review, PR #557):
+    # `func_virtual_removed` ("Vtable entry removed" -- the sibling of
+    # `func_virtual_added` above, an existing function losing its
+    # virtual-ness) and `param_default_value_removed`/
+    # `python_api_default_removed` (an existing parameter of an existing
+    # function/method losing its default value, making a previously
+    # optional argument mandatory) all describe a trait lost by a
+    # persisting entity, not the entity itself disappearing.
+    "func_virtual_removed": "modified",
+    "param_default_value_removed": "modified",
+    "python_api_default_removed": "modified",
+}
+
+
+def operation_for_kind(kind_val: str) -> str:
+    """Classify a ``ChangeKind.value`` string into "added"/"removed"/"modified".
+
+    A kind is "added"/"removed" when it is listed in ``_OPERATION_OVERRIDES``
+    or its name ends with one of the corresponding suffixes above; every
+    other kind (parameter/type/layout changes, renames, trait gained/lost on
+    a persisting entity, etc.) is "modified".
+    """
+    override = _OPERATION_OVERRIDES.get(kind_val)
+    if override is not None:
+        return override
+    if any(kind_val.endswith(s) for s in _ADDED_SUFFIXES):
+        return "added"
+    if any(kind_val.endswith(s) for s in _REMOVED_SUFFIXES):
+        return "removed"
+    return "modified"
+
 
 @dataclass(frozen=True)
 class ShowOnlyFilter:
@@ -157,41 +278,43 @@ class ShowOnlyFilter:
             actions=frozenset(actions),
         )
 
-    def _check_severity(self, change: Change, policy: str) -> bool:
-        """Return True if *change* matches the severity filter."""
+    def _check_severity(
+        self,
+        change: Change,
+        policy: str,
+        kind_sets: KindSets | None = None,
+        policy_file: object | None = None,
+    ) -> bool:
+        """Return True if *change* matches the severity filter.
+
+        Resolves through ``severity.effective_verdict_for_change`` — the same
+        canonical resolver ``DiffResult._effective_verdict_for_change`` uses —
+        so both an A4 per-finding ``effective_verdict`` override (ADR-027) and
+        a kind-level ``PolicyFile.overrides`` entry are honoured. Without this,
+        `--show-only` could disagree with the JSON severity field and
+        filtered_summary counts for any change whose effective category
+        differs from its raw kind's policy bucket (a demoted opaque/PIMPL
+        layout change, or a kind moved by a policy-file override).
+        """
         if not self.severities:
             return True
-        breaking_set, api_break_set, compat_set, risk_set = _policy_kind_sets(policy)
-        # Honour an A4 per-finding effective_verdict override (ADR-027): a
-        # demoted opaque/PIMPL layout change must be filtered by its *effective*
-        # category, so `--show-only=breaking` excludes it — consistent with the
-        # JSON severity field and filtered_summary counts (which already route
-        # through effective_category). Without this the severity filter would
-        # leak a demoted finding it was meant to exclude.
-        eff = getattr(change, "effective_verdict", None)
-        if isinstance(eff, Verdict):
-            # NB: this maps to the CLI --show-only token vocabulary (hyphenated
-            # "api-break"), which intentionally differs from the JSON-field
-            # labels in _VERDICT_TO_SEVERITY_LABEL (underscored "api_break").
-            # The two are deliberately separate label spaces — keep them in sync
-            # by intent, not by sharing a dict.
-            label = {
-                Verdict.BREAKING: "breaking",
-                Verdict.API_BREAK: "api-break",
-                Verdict.COMPATIBLE_WITH_RISK: "risk",
-                Verdict.COMPATIBLE: "compatible",
-            }.get(eff)
-            return label in self.severities
-        severity_map = {
-            "breaking": breaking_set,
-            "api-break": api_break_set,
-            "risk": risk_set,
-            "compatible": compat_set,
-        }
-        return any(
-            sev in self.severities and change.kind in kind_set
-            for sev, kind_set in severity_map.items()
+        from .severity import effective_verdict_for_change
+
+        eff = effective_verdict_for_change(
+            change, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
         )
+        # NB: this maps to the CLI --show-only token vocabulary (hyphenated
+        # "api-break"), which intentionally differs from the JSON-field
+        # labels in _VERDICT_TO_SEVERITY_LABEL (underscored "api_break").
+        # The two are deliberately separate label spaces — keep them in sync
+        # by intent, not by sharing a dict.
+        label = {
+            Verdict.BREAKING: "breaking",
+            Verdict.API_BREAK: "api-break",
+            Verdict.COMPATIBLE_WITH_RISK: "risk",
+            Verdict.COMPATIBLE: "compatible",
+        }.get(eff)
+        return label in self.severities
 
     def _check_element(self, kind_val: str) -> bool:
         """Return True if *kind_val* matches the element filter."""
@@ -260,30 +383,23 @@ class ShowOnlyFilter:
         """Return True if *kind_val* matches the action filter."""
         if not actions:
             return True
-        _ADDED_SUFFIXES = ("_added", "_added_compatible")
-        _REMOVED_SUFFIXES = (
-            "_removed",
-            "_deleted",
-            "_elf_only",
-            "_elf_fallback",
-            "_const_overload",
+        op = operation_for_kind(kind_val)
+        # NB: "changed" (the --show-only token) maps to operation "modified".
+        return (
+            (op == "added" and "added" in actions)
+            or (op == "removed" and "removed" in actions)
+            or (op == "modified" and "changed" in actions)
         )
-        if "added" in actions and any(kind_val.endswith(s) for s in _ADDED_SUFFIXES):
-            return True
-        if "removed" in actions and any(
-            kind_val.endswith(s) for s in _REMOVED_SUFFIXES
-        ):
-            return True
-        if "changed" in actions and not (
-            any(kind_val.endswith(s) for s in _ADDED_SUFFIXES)
-            or any(kind_val.endswith(s) for s in _REMOVED_SUFFIXES)
-        ):
-            return True
-        return False
 
-    def matches(self, change: Change, policy: str = "strict_abi") -> bool:
+    def matches(
+        self,
+        change: Change,
+        policy: str = "strict_abi",
+        kind_sets: KindSets | None = None,
+        policy_file: object | None = None,
+    ) -> bool:
         """Return True if *change* passes this filter."""
-        if not self._check_severity(change, policy):
+        if not self._check_severity(change, policy, kind_sets, policy_file):
             return False
         if not self._check_element(change.kind.value):
             return False
@@ -294,10 +410,24 @@ def apply_show_only(
     changes: Sequence[Change],
     show_only: str,
     policy: str = "strict_abi",
+    kind_sets: KindSets | None = None,
+    policy_file: object | None = None,
 ) -> list[Change]:
-    """Filter changes according to a --show-only token string."""
+    """Filter changes according to a --show-only token string.
+
+    *kind_sets* / *policy_file*, when supplied by the caller (typically
+    ``result._effective_kind_sets()`` / ``result.policy_file``), let the
+    severity dimension resolve through the same effective-verdict logic as
+    the rest of the report — including kind-level ``PolicyFile.overrides``
+    and per-finding ``effective_verdict`` — so the filter never disagrees
+    with the JSON severity field for the same change.
+    """
     filt = ShowOnlyFilter.parse(show_only)
-    return [c for c in changes if filt.matches(c, policy=policy)]
+    return [
+        c
+        for c in changes
+        if filt.matches(c, policy=policy, kind_sets=kind_sets, policy_file=policy_file)
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -442,7 +572,13 @@ def _to_markdown_leaf(
 
     changes = list(result.changes)
     if show_only:
-        changes = apply_show_only(changes, show_only, policy=result.policy)
+        changes = apply_show_only(
+            changes,
+            show_only,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
         lines.append(
             f"> Filtered by: `--show-only {show_only}` ({len(changes)} of {len(result.changes)} changes shown)"
         )
@@ -875,10 +1011,18 @@ def to_review_digest(
         "",
     ]
 
-    # Top impacted symbols (breaking + API), capped for readability.
-    breaking_set, api_break_set, _, _ = result._effective_kind_sets()
+    # Top impacted symbols (breaking + API), capped for readability. Filters
+    # by each change's *effective* verdict (DiffResult._effective_verdict_for_change)
+    # rather than raw kind-set membership, so a per-finding override (A4
+    # pattern-verdict modulation, frozen-namespace guard) is reflected here
+    # the same way it already is in the counts table and merge-effect phrase
+    # above — otherwise this section could list a finding the rest of the
+    # digest reports as compatible, or omit one it reports as breaking.
     impacted = [
-        c for c in result.changes if c.kind in breaking_set or c.kind in api_break_set
+        c
+        for c in result.changes
+        if result._effective_verdict_for_change(c)
+        in (Verdict.BREAKING, Verdict.API_BREAK)
     ]
     if impacted:
         lines += ["**Top impacted symbols:**", ""]
@@ -952,7 +1096,13 @@ def to_markdown(
     # Apply show-only filter if provided (display-only, does not affect verdict)
     changes = list(result.changes)
     if show_only:
-        changes = apply_show_only(changes, show_only, policy=result.policy)
+        changes = apply_show_only(
+            changes,
+            show_only,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
 
     # Build the render-ready view once (C2/ADR-036): canonical verdict-axis
     # classification + summary in one place, shared across formats.

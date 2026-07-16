@@ -801,6 +801,11 @@ class TestSeverityConfig:
         root = _parse(xml)
         ts = root.find("testsuite")
         assert ts.get("failures") == "1"
+        # Verified defect: the failure `type=` must not still say COMPATIBLE
+        # once severity_config is the reason it failed at all — it should
+        # name the category (ADDITION) that severity_config promoted.
+        fail = root.find(".//failure")
+        assert fail.get("type") == "ADDITION"
 
     def test_demoted_compatible_fails_under_strict_preset(self) -> None:
         """ADR-027 review: a --pattern-verdicts demotion to COMPATIBLE must
@@ -822,6 +827,11 @@ class TestSeverityConfig:
         # with the nonzero severity-aware exit code.
         strict_xml = _parse(to_junit_xml(result, severity_config=PRESET_STRICT))
         assert strict_xml.find("testsuite").get("failures") == "1"
+        # The failure type must reflect *why* it failed under the strict
+        # preset (a quality issue promoted to error), not the raw COMPATIBLE
+        # verdict it was demoted to.
+        fail = strict_xml.find(".//failure")
+        assert fail.get("type") == "QUALITY_ISSUE"
 
     def test_severity_config_demotes_breaking_to_pass(self) -> None:
         """When severity_config marks abi_breaking as 'warning', additions
@@ -858,6 +868,95 @@ class TestSeverityConfig:
         root = _parse(xml)
         ts = root.find("testsuite")
         assert ts.get("failures") == "0"
+
+    def test_failure_type_reflects_severity_category_not_raw_verdict(self) -> None:
+        """Verified defect: `_failure_type` ignored `severity_config` and
+        always derived `type=` from the raw effective *verdict*
+        (`_VERDICT_TO_JUNIT_TYPE`, which has no COMPATIBLE entry and falls
+        back to `"COMPATIBLE"`), even when `_is_failure` had already decided
+        pass/fail from the effective *category* instead. A COMPATIBLE
+        addition promoted to `error` therefore both failed and reported
+        `type="COMPATIBLE"` — self-contradictory. The type must instead name
+        the category (ADDITION) that made it fail."""
+        from abicheck.severity import resolve_severity_config
+
+        changes = [
+            Change(kind=ChangeKind.FUNC_ADDED, symbol="f", description="added"),
+        ]
+        result = _make_result(changes, verdict=Verdict.COMPATIBLE)
+        cfg = resolve_severity_config("default", addition="error")
+        xml = to_junit_xml(result, severity_config=cfg)
+        root = _parse(xml)
+        fail = root.find(".//failure")
+        assert fail.get("type") != "COMPATIBLE"
+        assert fail.get("type") == "ADDITION"
+
+    def test_failure_type_distinguishes_api_break_from_risk_under_severity_config(
+        self,
+    ) -> None:
+        """POTENTIAL_BREAKING covers both API_BREAK and RISK kinds; the JUnit
+        type= must still distinguish them (matching the legacy, no-severity-
+        config type mapping) rather than collapsing both to one generic
+        label."""
+        from abicheck.severity import resolve_severity_config
+
+        api_break = Change(
+            kind=ChangeKind.ENUM_MEMBER_RENAMED, symbol="E", description="renamed",
+        )
+        risk = Change(
+            kind=ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED, symbol="f",
+            description="version req added",
+        )
+        cfg = resolve_severity_config("default", potential_breaking="error")
+
+        api_result = _make_result([api_break], verdict=Verdict.API_BREAK)
+        api_xml = _parse(to_junit_xml(api_result, severity_config=cfg))
+        assert api_xml.find(".//failure").get("type") == "API_BREAK"
+
+        risk_result = _make_result([risk], verdict=Verdict.COMPATIBLE_WITH_RISK)
+        risk_xml = _parse(to_junit_xml(risk_result, severity_config=cfg))
+        assert risk_xml.find(".//failure").get("type") == "COMPATIBLE_WITH_RISK"
+
+    def test_failure_type_honours_per_change_effective_verdict_override(
+        self,
+    ) -> None:
+        """A per-change `effective_verdict` override (A4 pattern-verdict
+        modulation, PolicyFile) can classify a finding as POTENTIAL_BREAKING
+        without its *kind* being a member of either api_break_set or
+        risk_set (those sets classify by raw kind, unaffected by a
+        per-change override) — `_failure_type` must derive the API_BREAK vs.
+        COMPATIBLE_WITH_RISK subtype from the finding's actual effective
+        verdict, not from raw kind-set membership, so it doesn't fall back
+        to a generic label that contradicts the override's own intent
+        (CodeRabbit review, PR #557)."""
+        from abicheck.severity import resolve_severity_config
+
+        c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="f", description="removed")
+        c.effective_verdict = Verdict.COMPATIBLE_WITH_RISK
+        result = _make_result([c], verdict=Verdict.COMPATIBLE_WITH_RISK)
+        cfg = resolve_severity_config("default", potential_breaking="error")
+        xml = to_junit_xml(result, severity_config=cfg)
+        fail = _parse(xml).find(".//failure")
+        assert fail.get("type") == "COMPATIBLE_WITH_RISK"
+
+    def test_failure_type_effective_verdict_wins_over_raw_kind_set(self) -> None:
+        """A raw-risk-set kind (SYMBOL_VERSION_REQUIRED_ADDED) whose
+        `effective_verdict` is overridden to API_BREAK must report
+        type="API_BREAK", not "COMPATIBLE_WITH_RISK" — the type it would get
+        from raw kind-set membership alone, which would contradict the
+        override (CodeRabbit review, PR #557)."""
+        from abicheck.severity import resolve_severity_config
+
+        c = Change(
+            kind=ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED, symbol="f",
+            description="version req added",
+        )
+        c.effective_verdict = Verdict.API_BREAK
+        result = _make_result([c], verdict=Verdict.API_BREAK)
+        cfg = resolve_severity_config("default", potential_breaking="error")
+        xml = to_junit_xml(result, severity_config=cfg)
+        fail = _parse(xml).find(".//failure")
+        assert fail.get("type") == "API_BREAK"
 
 
 # ---------------------------------------------------------------------------

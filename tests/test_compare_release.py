@@ -320,6 +320,80 @@ class TestDirVsDir:
         assert data["verdict"] == "NO_CHANGE"
         assert len(data["libraries"]) == 2
 
+    def test_json_output_embeds_findings_not_just_counts(self, tmp_path: Path) -> None:
+        """A breaking library entry must embed which symbols broke, not just
+        a bare count — verified defect: release JSON was count-centric
+        (breaking/source_breaks/risk_changes as ints) with no way to identify
+        the actual findings without a separate `compare` run or
+        `--output-dir` (mirroring the `scan --baseline` / stack-check fix)."""
+        old_dir = tmp_path / "old"
+        old_dir.mkdir()
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        old, new = _breaking_pair("libfoo.so")
+        _write_snap(old_dir / "libfoo.json", old)
+        _write_snap(new_dir / "libfoo.json", new)
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        assert code == 4
+        data = json.loads(out)
+        lib = data["libraries"][0]
+        assert lib["breaking"] == 1
+        assert "findings" in lib
+        assert lib["findings"][0]["symbol"] == "_Z3barv"
+        assert lib["findings"][0]["bucket"] == "breaking"
+        assert "findings_truncated" not in lib
+        assert "_diff_result" not in lib
+
+    def test_json_output_findings_capped_and_flagged_truncated(self, tmp_path: Path) -> None:
+        old_dir = tmp_path / "old"
+        old_dir.mkdir()
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        old_funcs = [
+            Function(name=f"foo{i}", mangled=f"_Z4foo{i}v", return_type="int",
+                      visibility=Visibility.PUBLIC)
+            for i in range(15)
+        ]
+        old = _snap("1.0", old_funcs, library="libfoo.so")
+        new = _snap("2.0", [], library="libfoo.so")
+        _write_snap(old_dir / "libfoo.json", old)
+        _write_snap(new_dir / "libfoo.json", new)
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        assert code == 4
+        lib = json.loads(out)["libraries"][0]
+        assert lib["breaking"] == 15
+        assert len(lib["findings"]) == 10
+        assert lib["findings_truncated"] is True
+
+    def test_json_findings_include_severity_gated_addition(self, tmp_path: Path) -> None:
+        """Codex review on #557: when --severity-addition error promotes a
+        compatible-additions-only library to a nonzero severity exit code,
+        the per-library findings list — which only walked the legacy
+        breaking/api_break/risk buckets — must still include the addition
+        finding that's actually responsible for the gate, not report an
+        empty findings list next to severity.exit_code != 0."""
+        old_dir = tmp_path / "old"
+        old_dir.mkdir()
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        old = _snap("1.0", [], library="libfoo.so")
+        new_funcs = [Function(name="new_api", mangled="_Z6new_apiv", return_type="int",
+                              visibility=Visibility.PUBLIC)]
+        new = _snap("2.0", new_funcs, library="libfoo.so")
+        _write_snap(old_dir / "libfoo.json", old)
+        _write_snap(new_dir / "libfoo.json", new)
+        code, out = _invoke(
+            "compare", str(old_dir), str(new_dir),
+            "--format", "json", "--severity-addition", "error",
+        )
+        assert code == 1
+        data = json.loads(out)
+        lib = data["libraries"][0]
+        assert data["severity"]["exit_code"] == 1
+        assert "findings" in lib
+        assert lib["findings"][0]["symbol"] == "_Z6new_apiv"
+        assert lib["findings"][0]["bucket"] == "addition"
+
     def test_breaking_overrides_api_break(self, tmp_path: Path) -> None:
         """Aggregate verdict is BREAKING even when another lib has API_BREAK."""
         old_dir = tmp_path / "old"

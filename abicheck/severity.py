@@ -584,3 +584,126 @@ def categorize_changes(
         quality_issues=quality,
         addition=adds,
     )
+
+
+# ---------------------------------------------------------------------------
+# Formal compatibility/gate separation (architectural recommendation from the
+# post-#549/#551 reporting review)
+# ---------------------------------------------------------------------------
+
+#: The compatibility axis is already exactly ``Verdict``: NO_CHANGE/
+#: COMPATIBLE/COMPATIBLE_WITH_RISK/API_BREAK/BREAKING answer "is this ABI/API
+#: compatible?" and nothing else. This alias gives that question a name
+#: distinct from the gate question below, without introducing a second enum
+#: or touching any existing ``Verdict`` call site (purely additive — no
+#: behavior or public-API change, just a second name for callers that want
+#: to say "compatibility decision" explicitly).
+CompatibilityDecision = Verdict
+
+
+@dataclass(frozen=True)
+class GateDecision:
+    """The CI-gate outcome — a decision formally distinct from compatibility.
+
+    A :data:`CompatibilityDecision` (== ``Verdict``) answers "is this
+    ABI/API compatible?". A ``GateDecision`` answers "does this block CI?" —
+    a genuinely separate question once severity configuration is in play: an
+    addition can gate CI (``--severity-addition error``) while its
+    compatibility decision stays ``COMPATIBLE``; a breaking kind can pass CI
+    (``--severity-preset info-only``) while its compatibility decision stays
+    ``BREAKING``. Renderers should read gate status from here rather than
+    inferring it from compatibility wording — the exact confusion this type
+    was introduced to close off.
+
+    Attributes:
+        scheme: ``"legacy"`` (verdict-only exit code — no ``SeverityConfig``
+            was supplied) or ``"severity"`` (severity-aware exit code).
+        exit_code: The resolved process exit code under this scheme.
+        blocking: ``exit_code != 0``, named separately so callers don't need
+            to know the exit-code convention.
+        blocking_categories: The :class:`IssueCategory` names actually
+            responsible for a nonzero ``exit_code``. Always empty under the
+            ``"legacy"`` scheme, which has no per-category configuration to
+            single one out — legacy exit codes key off the single overall
+            verdict.
+    """
+
+    scheme: str
+    exit_code: int
+    blocking: bool
+    blocking_categories: tuple[str, ...]
+
+
+def compute_gate_decision(
+    changes: Sequence[HasKind],
+    severity_config: SeverityConfig | None,
+    *,
+    policy: str | None = None,
+    kind_sets: KindSets | None = None,
+    policy_file: object | None = None,
+    legacy_exit_code: int = 0,
+) -> GateDecision:
+    """Compute the single, canonical :class:`GateDecision` for *changes*.
+
+    Without *severity_config* the gate is the legacy verdict-based scheme:
+    the caller supplies *legacy_exit_code* (typically from
+    :func:`legacy_exit_code` or a flow-specific floor, e.g. removed-library
+    escalation) and no category can be singled out as "the" blocker
+    (``blocking_categories`` is always empty in this scheme — there is no
+    per-category configuration to single one out from). None of this
+    function's three current call sites (``reporter._build_severity_json``,
+    ``sarif._severity_gate_properties``, ``cli_compare_release._release_gating_buckets``)
+    actually reach this branch — each already special-cases
+    ``severity_config is None`` itself before calling in, since their
+    own legacy-scheme needs differ from an empty ``blocking_categories``
+    (e.g. ``_release_gating_buckets``'s legacy branch needs three fixed
+    *named* buckets — breaking/api_break/risk — to walk, which this
+    branch's empty tuple can't supply). The legacy branch exists so a
+    caller that only ever wants a single, uniform :class:`GateDecision`
+    regardless of scheme has one to call — see ``tests/test_severity.py``'s
+    ``TestComputeGateDecision`` for its own direct coverage.
+
+    With *severity_config*, ``exit_code`` (via :func:`compute_exit_code`)
+    and ``blocking_categories`` (via :func:`categorize_changes`) are both
+    derived from the same *changes*/*kind_sets*/*policy_file*, so they can
+    never disagree with each other the way two independently-computed
+    values could — the root cause of two real bugs this function replaces
+    the duplicated logic for: JSON's ``severity.blocking_categories``
+    disagreeing with ``exit_code`` under ``--show-only`` (it was derived
+    from the display-filtered changes instead of the unfiltered gate set),
+    and release JSON's per-library ``findings`` list missing
+    severity-gated additions (it only ever walked the legacy verdict
+    buckets). Route every gate computation through this one function
+    instead of hand-rolling the categorize-then-filter-to-error pattern
+    again.
+    """
+    if severity_config is None:
+        return GateDecision(
+            scheme="legacy",
+            exit_code=legacy_exit_code,
+            blocking=legacy_exit_code != 0,
+            blocking_categories=(),
+        )
+
+    exit_code = compute_exit_code(
+        changes, severity_config, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+    )
+    categorized = categorize_changes(
+        changes, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+    )
+    blocking_categories = tuple(
+        cat.value
+        for cat, cat_changes in (
+            (IssueCategory.ABI_BREAKING, categorized.abi_breaking),
+            (IssueCategory.POTENTIAL_BREAKING, categorized.potential_breaking),
+            (IssueCategory.QUALITY_ISSUES, categorized.quality_issues),
+            (IssueCategory.ADDITION, categorized.addition),
+        )
+        if cat_changes and severity_config.level_for(cat) == SeverityLevel.ERROR
+    )
+    return GateDecision(
+        scheme="severity",
+        exit_code=exit_code,
+        blocking=exit_code != 0,
+        blocking_categories=blocking_categories,
+    )

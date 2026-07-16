@@ -31,6 +31,7 @@ from .checker import (
 )
 from .checker_policy import (
     ChangeKind,
+    Verdict,
 )
 
 if TYPE_CHECKING:
@@ -174,6 +175,34 @@ def _category_for_change_severity(
     )
 
 
+def _legacy_level_for_category(
+    category: IssueCategory,
+    annotate_additions: bool,
+) -> str | None:
+    """Fixed-mapping annotation level, keyed off the *effective* category.
+
+    Mirrors the pre-severity-config behaviour documented on
+    :func:`_classify_change` (BREAKING -> error, API_BREAK/RISK -> warning,
+    COMPATIBLE -> notice iff *annotate_additions*), but is driven by each
+    change's effective verdict (via *category*) rather than raw kind-set
+    membership — so a per-finding override (frozen-namespace clamp, A4
+    pattern-verdict modulation) is respected even when no SeverityConfig is
+    in play.
+    """
+    from .severity import IssueCategory as _IssueCategory
+
+    if category == _IssueCategory.ABI_BREAKING:
+        return "error"
+    if category == _IssueCategory.POTENTIAL_BREAKING:
+        return "warning"
+    if annotate_additions and category in (
+        _IssueCategory.ADDITION,
+        _IssueCategory.QUALITY_ISSUES,
+    ):
+        return "notice"
+    return None
+
+
 def _annotation_level_for_category(
     category: IssueCategory,
     severity_config: SeverityConfig,
@@ -209,6 +238,7 @@ def _title_for_change(
     compatible_set: frozenset[ChangeKind],
     *,
     category: IssueCategory | None = None,
+    effective_verdict: Verdict | None = None,
 ) -> str:
     """Return the annotation title prefix, distinguishing API Break from Deployment Risk.
 
@@ -223,6 +253,13 @@ def _title_for_change(
     ``::error`` annotation as "Quality Issue" (or "ABI Addition"). Checking
     *category* first — the same effective classification that already drove
     the annotation *level* — keeps the title consistent with it.
+
+    *effective_verdict*, when given, resolves the POTENTIAL_BREAKING API
+    Break vs. Deployment Risk split instead of raw kind-set membership: a
+    per-change ``effective_verdict`` override/modulation (A4 pattern-verdict,
+    PolicyFile) can move a finding between the two without changing which
+    kind-set its raw *kind* belongs to, so kind-set membership alone could
+    label the title with the wrong subtype (CodeRabbit review, PR #557).
     """
     kind_label = kind.value
     if category is not None:
@@ -235,7 +272,15 @@ def _title_for_change(
         if category == _IssueCategory.ADDITION:
             return f"ABI Addition: {kind_label}"
         # POTENTIAL_BREAKING: distinguish API Break from Deployment Risk via
-        # the kind sets, since IssueCategory does not itself split the two.
+        # the finding's actual effective verdict when available (falling
+        # back to the kind sets only if it wasn't supplied), since
+        # IssueCategory does not itself split the two.
+        if effective_verdict is not None:
+            if effective_verdict == Verdict.API_BREAK:
+                return f"API Break: {kind_label}"
+            if effective_verdict == Verdict.COMPATIBLE_WITH_RISK:
+                return f"Deployment Risk: {kind_label}"
+            return f"Potential Break: {kind_label}"
         if kind in api_break_set:
             return f"API Break: {kind_label}"
         if kind in risk_set:
@@ -292,33 +337,41 @@ def collect_annotations(
     mirrors each finding's actually-configured severity so an annotation is
     never silently absent (or under/over-stated) for a finding that does (or
     does not) gate CI — see :func:`_annotation_level_for_category`.
+
+    Both branches classify through each change's *effective* category (via
+    :func:`_category_for_change_severity`, which honours
+    ``DiffResult._effective_verdict_for_change`` semantics) rather than raw
+    kind-set membership, so a per-finding override is never misreported —
+    see :func:`_legacy_level_for_category`.
     """
+    from .severity import effective_verdict_for_change
+
     kind_sets = diff_result._effective_kind_sets()
     breaking_set, api_break_set, compatible_set, risk_set = kind_sets
 
     annotations: list[tuple[int, str]] = []
 
     for change in diff_result.changes:
-        category: IssueCategory | None = None
+        category = _category_for_change_severity(
+            change, kind_sets,
+            policy=diff_result.policy, policy_file=diff_result.policy_file,
+        )
         if severity_config is not None:
-            category = _category_for_change_severity(
-                change, kind_sets,
-                policy=diff_result.policy, policy_file=diff_result.policy_file,
-            )
             level = _annotation_level_for_category(
                 category, severity_config, annotate_additions,
             )
         else:
-            level = _classify_change(
-                change.kind, breaking_set, api_break_set, risk_set,
-                compatible_set, annotate_additions,
-            )
+            level = _legacy_level_for_category(category, annotate_additions)
         if level is None:
             continue
 
         title = _title_for_change(
             change.kind, breaking_set, api_break_set, risk_set, compatible_set,
             category=category,
+            effective_verdict=effective_verdict_for_change(
+                change, policy=diff_result.policy, kind_sets=kind_sets,
+                policy_file=diff_result.policy_file,
+            ),
         )
         line = _format_annotation(level, change, title, change.description)
         sort_key = _SEVERITY_ORDER.get(level, 99)

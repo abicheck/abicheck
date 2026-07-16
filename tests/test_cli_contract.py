@@ -594,6 +594,8 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--require-justification",
         "--scope-public-headers",
         "--search-path",
+        "--secondary-format",
+        "--secondary-output",
         "--severity-abi-breaking",
         "--severity-addition",
         "--severity-potential-breaking",

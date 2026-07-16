@@ -65,6 +65,42 @@ add_single_flag() {
   fi
 }
 
+# A directory, a file whose name matches a recognized package extension, or
+# an extensionless RPM/Deb detected by magic bytes (mirrors package.py's
+# is_package(), including its magic-byte fallback — abicheck/package.py:547-554
+# — since classify_compare_operand() delegates to it regardless of filename;
+# a name-suffix-only check here would still let the Action add
+# --secondary-format for such an operand and have the CLI reject it, Codex
+# review, PR #557). `compare` fans such an operand out through the release
+# engine internally regardless of the Action's MODE, and the release engine
+# rejects --secondary-format — used to skip the --secondary-format
+# optimization for compare mode's PR-comment JSON rather than let it
+# hard-fail a directory/package comparison that used to work.
+_is_release_style_operand() {
+  local path="$1"
+  [[ -d "$path" ]] && return 0
+  # Portable lowercasing: ${path,,} is bash-4+ only, but this script also
+  # supports macOS's stock (GPLv2-frozen) bash 3.2 (see add_flag above).
+  local lower
+  lower=$(printf '%s' "$path" | tr '[:upper:]' '[:lower:]')
+  case "$lower" in
+    *.rpm | *.deb | *.tar | *.tar.gz | *.tar.xz | *.tar.bz2 | *.tar.zst | *.tgz | *.conda | *.whl)
+      return 0
+      ;;
+  esac
+  [[ -f "$path" ]] || return 1
+  # Extensionless RPM (0xedabeedb lead magic) / Deb (ar archive "!<arch>\n")
+  # packages — read the first 8 bytes as hex (binary-safe; a bash string
+  # would truncate at an embedded NUL) and compare.
+  local magic
+  magic=$(od -An -tx1 -N 8 "$path" 2>/dev/null | tr -d ' \n')
+  case "$magic" in
+    edabeedb*) return 0 ;;          # RPM lead magic (first 4 bytes)
+    213c617263683e0a) return 0 ;;   # "!<arch>\n" (Deb ar archive, 8 bytes)
+  esac
+  return 1
+}
+
 # ---------------------------------------------------------------------------
 # Build the abicheck command
 # ---------------------------------------------------------------------------
@@ -197,6 +233,23 @@ elif [[ "$MODE" == "compare" ]]; then
   fi
   if [[ -n "$OUTPUT_FILE" ]]; then
     CMD+=(-o "$OUTPUT_FILE")
+  fi
+
+  # Render a second, always-unfiltered JSON report from this same run for the
+  # sticky PR comment (--secondary-format), instead of re-invoking abicheck a
+  # second time just to get JSON. Only needed when the primary format isn't
+  # already JSON — a json primary is reused as-is (see _can_reuse_primary_json
+  # below). compare-release/appcompat don't build CMD through this branch, so
+  # they keep using the rerun fallback. MODE=compare dispatches through the
+  # same release-fan-out engine internally when the operands are directories
+  # or packages (regardless of the Action's MODE), and that engine rejects
+  # --secondary-format — skip it there too, so a directory/package compare
+  # under MODE=compare keeps working instead of hard-failing (Codex review).
+  if [[ "$FORMAT" != "json" ]] \
+     && ! _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
+     && ! _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
+    PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
+    CMD+=(--secondary-format json --secondary-output "$PR_JSON")
   fi
 
   add_single_flag "--policy" "${INPUT_POLICY:-}"
@@ -758,14 +811,23 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" && "$MODE"
     fi
     echo ""
 
-    # If output was captured (no output-file), include it in summary
+    # If output was captured (no output-file), include it in summary. A
+    # markdown report is embedded as-is so GitHub renders its headings/
+    # tables/bold text in the step summary, instead of being wrapped in a
+    # code fence (which would make it display as literal ``` text). Every
+    # other format (json/sarif/text/review/etc.) is genuinely verbatim
+    # output, so it keeps the fence.
     if [[ -n "$ABICHECK_OUTPUT" ]]; then
       echo "<details>"
       echo "<summary>Full report</summary>"
       echo ""
-      echo '```'
-      echo "$ABICHECK_OUTPUT"
-      echo '```'
+      if [[ "${FORMAT:-markdown}" == "markdown" ]]; then
+        echo "$ABICHECK_OUTPUT"
+      else
+        echo '```'
+        echo "$ABICHECK_OUTPUT"
+        echo '```'
+      fi
       echo "</details>"
     fi
   } >> "$GITHUB_STEP_SUMMARY"
@@ -853,9 +915,14 @@ _maybe_post_pr_comment() {
   echo "::group::abicheck PR comment"
   # Template-based mktemp (X's at the end) — portable across GNU and BSD/macOS,
   # unlike the GNU-only --suffix option.
-  PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
+  if [[ -z "${PR_JSON:-}" ]]; then
+    PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
+  fi
   PR_BODY=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-body.XXXXXX")
-  if _can_reuse_primary_json; then
+  if [[ -s "$PR_JSON" ]]; then
+    : # Already populated by the primary run's --secondary-format (compare
+      # mode, non-json primary format) — nothing left to do.
+  elif _can_reuse_primary_json; then
     # The primary run already produced a faithful JSON report — reuse it instead
     # of re-running the whole comparison.
     cp "$OUTPUT_FILE" "$PR_JSON"

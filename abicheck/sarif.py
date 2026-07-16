@@ -119,12 +119,54 @@ def _severity(
     return entry.severity
 
 
+def _parse_source_location(loc: str) -> tuple[str, int | None, int | None]:
+    """Parse a ``file[:line[:column]]`` source location for a SARIF region.
+
+    Parses from the right rather than assuming the file is everything
+    before the *first* colon — a path can itself contain colons (a
+    synthetic/virtual scheme like ``generated:headers/foo.h:42``, or a
+    Windows drive letter like ``C:\\foo\\bar.h:42``), and the file is
+    whatever colon segments remain once the trailing numeric line[:column]
+    is peeled off, not a fixed prefix.
+
+    ``loc.rsplit(":", 2)`` gives at most the last two colon-separated
+    segments as candidates for line/column:
+
+    * If the middle segment is numeric, it's the line and everything before
+      it (which may itself contain colons) is the file; the last segment is
+      the column if it's numeric too, otherwise it's dropped (a malformed
+      trailing column shouldn't hide a good line number).
+    * If the middle segment *isn't* numeric, the split point assumed too few
+      file-side colons (e.g. the drive-letter or ``generated:`` cases above)
+      — recombine it into the file and treat the last segment as the line.
+    * Fewer than two colons: fall back to a single trailing split for
+      ``file:line``.
+
+    Any shape that doesn't resolve to a numeric line returns the location
+    unchanged with no region.
+    """
+    three = loc.rsplit(":", 2)
+    if len(three) == 3:
+        file_part, mid, last = three
+        if mid.isdigit():
+            column = int(last) if last.isdigit() else None
+            return file_part, int(mid), column
+        if last.isdigit():
+            return f"{file_part}:{mid}", int(last), None
+        return loc, None, None
+
+    two = loc.rsplit(":", 1)
+    if len(two) == 2 and two[1].isdigit():
+        return two[0], int(two[1]), None
+    return loc, None, None
+
+
 def _rule_for(kind: ChangeKind) -> dict[str, Any]:
     """Produce a SARIF reportingDescriptor for a ChangeKind."""
     rule_id = kind.value
     severity = policy_for(kind).severity
     doc_slug = policy_for(kind).doc_slug
-    help_uri = f"https://github.com/abicheck/abicheck/blob/main/docs/abi_breaking_cases_catalog.md#{doc_slug}"
+    help_uri = f"https://github.com/abicheck/abicheck/blob/main/docs/reference/change-kinds.md#{doc_slug}"
     impact = impact_for(kind)
     full_desc = (
         impact if impact else f"ABI change detected: {rule_id.replace('_', ' ')}"
@@ -158,17 +200,15 @@ def _result_for(
     # Build physical location — prefer source header over .so when available
     phys_loc: dict[str, Any]
     if change.source_location:
-        # Parse "header.h:42" into file + line
-        parts = change.source_location.rsplit(":", 1)
-        uri = parts[0]
+        uri, line, column = _parse_source_location(change.source_location)
         phys_loc = {
             "artifactLocation": {"uri": uri, "uriBaseId": "%SRCROOT%"},
         }
-        if len(parts) == 2:
-            try:
-                phys_loc["region"] = {"startLine": int(parts[1])}
-            except ValueError:
-                pass
+        if line is not None:
+            region: dict[str, int] = {"startLine": line}
+            if column is not None:
+                region["startColumn"] = column
+            phys_loc["region"] = region
     else:
         phys_loc = {
             "artifactLocation": {"uri": library, "uriBaseId": "%SRCROOT%"},
@@ -222,44 +262,25 @@ def _severity_gate_properties(
     Mirrors the categories/exit-code contract of JSON's ``severity`` block
     (:func:`abicheck.reporter._build_severity_json`) so a SARIF consumer can
     tell *why* the invocation's exit code is what it is without
-    cross-referencing the JSON report separately.
+    cross-referencing the JSON report separately. Both routed through
+    :func:`abicheck.severity.compute_gate_decision` — the single canonical
+    gate computation — so ``exitCode``/``blocking``/``blockingCategories``
+    can never independently drift apart from each other or from JSON's
+    equivalent block.
     """
-    from abicheck.severity import (
-        IssueCategory,
-        SeverityLevel,
-        categorize_changes,
-        compute_exit_code,
-    )
+    from abicheck.severity import compute_gate_decision
 
-    eff_sets = result._effective_kind_sets()
-    exit_code = compute_exit_code(
+    gate = compute_gate_decision(
         result.changes,
         severity_config,
         policy=result.policy,
-        kind_sets=eff_sets,
+        kind_sets=result._effective_kind_sets(),
         policy_file=result.policy_file,
     )
-    categorized = categorize_changes(
-        result.changes,
-        policy=result.policy,
-        kind_sets=eff_sets,
-        policy_file=result.policy_file,
-    )
-    by_category = {
-        IssueCategory.ABI_BREAKING: categorized.abi_breaking,
-        IssueCategory.POTENTIAL_BREAKING: categorized.potential_breaking,
-        IssueCategory.QUALITY_ISSUES: categorized.quality_issues,
-        IssueCategory.ADDITION: categorized.addition,
-    }
-    blocking_categories = [
-        cat.value
-        for cat, cat_changes in by_category.items()
-        if cat_changes and severity_config.level_for(cat) == SeverityLevel.ERROR
-    ]
     return {
-        "exitCode": exit_code,
-        "blocking": exit_code != 0,
-        "blockingCategories": blocking_categories,
+        "exitCode": gate.exit_code,
+        "blocking": gate.blocking,
+        "blockingCategories": list(gate.blocking_categories),
         "config": {
             "abi_breaking": severity_config.abi_breaking.value,
             "potential_breaking": severity_config.potential_breaking.value,
@@ -277,19 +298,34 @@ def to_sarif(
 ) -> dict[str, Any]:
     """Convert a DiffResult to a SARIF 2.1.0 document (dict).
 
-    *severity_config*, when given, drives the invocation's ``exitCode`` /
-    ``executionSuccessful`` from the actual severity-aware gate instead of
-    inferring "passed" purely from ``result.verdict`` — compatibility and
-    "blocks CI" are independent decisions once severity configuration is in
-    play (e.g. an addition configured ``error`` blocks the build despite a
-    ``COMPATIBLE`` verdict). A ``severityGate`` properties block is added so
-    the reason is auditable in the SARIF document itself.
+    *severity_config*, when given, drives the invocation's ``exitCode`` from
+    the actual severity-aware gate instead of inferring it purely from
+    ``result.verdict`` — compatibility and "blocks CI" are independent
+    decisions once severity configuration is in play (e.g. an addition
+    configured ``error`` blocks the build despite a ``COMPATIBLE`` verdict).
+    A ``severityGate`` properties block is added so the reason is auditable
+    in the SARIF document itself.
+
+    ``executionSuccessful`` is unrelated to any of this: per the SARIF spec
+    it reports whether the *analysis tool ran to completion*, not whether it
+    found blocking issues — the spec's own example shows a successful run
+    with ``exitCode: 1`` and warnings alongside ``executionSuccessful: true``.
+    A completed comparison (breaking, gate-failing, or otherwise) is always a
+    successful execution here; gate/verdict outcome belongs solely in
+    ``exitCode``, ``exitCodeDescription``, result ``level``\\ s, and
+    ``properties.severityGate``.
     """
     tool_version = _tool_version()
 
     changes = list(result.changes)
     if show_only:
-        changes = apply_show_only(changes, show_only, policy=result.policy)
+        changes = apply_show_only(
+            changes,
+            show_only,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
 
     # Collect unique rules used
     rules_seen: dict[str, dict[str, Any]] = {}
@@ -307,13 +343,6 @@ def to_sarif(
         else None
     )
 
-    # Overall ABI verdict as a notification
-    invocation_success = (
-        severity_gate["exitCode"] == 0
-        if severity_gate is not None
-        else result.verdict != Verdict.BREAKING
-    )
-
     return {
         "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
         "version": "2.1.0",
@@ -329,7 +358,10 @@ def to_sarif(
                 },
                 "invocations": [
                     {
-                        "executionSuccessful": invocation_success,
+                        # Always true: this reports the SARIF tool run, which
+                        # completed. It must not encode the ABI/severity gate
+                        # outcome — see the docstring above.
+                        "executionSuccessful": True,
                         # Exit codes mirror abicheck compare CLI contract when no
                         # severity_config is given: BREAKING=4 (mapped to SARIF 1),
                         # API_BREAK=2, others=0. COMPATIBLE_WITH_RISK intentionally
