@@ -999,6 +999,63 @@ class TestAbiCompare:
             assert "new_value" in c
             assert "source_location" in c
 
+    def test_used_by_and_required_symbols_are_mutually_exclusive(
+        self, tmp_path: Path
+    ):
+        old_p, new_p = self._make_pair(
+            tmp_path, _make_snapshot("1.0"), _make_snapshot("2.0")
+        )
+        raw = abi_compare(
+            str(old_p), str(new_p),
+            used_by=[str(tmp_path / "app")],
+            required_symbols=["_Zf"],
+        )
+        data = json.loads(raw)
+        assert data["status"] == "error"
+        assert "mutually exclusive" in data["error"]
+
+    def test_required_symbols_scopes_verdict_and_floors_exit_code(
+        self, tmp_path: Path
+    ):
+        # A break in a function no host-required entrypoint touches must not
+        # surface in the scoped verdict (ADR-043: compare --required-symbol
+        # folds the deleted plugin-check command).
+        kept = _pub_func("kept_entry", "_Z10kept_entryv", "int")
+        removed = _pub_func("unrelated", "_Z9unrelatedv", "int")
+        old = _make_snapshot("1.0", functions=[kept, removed])
+        new = _make_snapshot("2.0", functions=[kept])
+        old_p, new_p = self._make_pair(tmp_path, old, new)
+
+        raw = abi_compare(
+            str(old_p), str(new_p), required_symbols=["_Z10kept_entryv"],
+        )
+        data = json.loads(raw)
+        assert data["status"] == "ok"
+        # The full (unscoped) diff is still BREAKING (removed is gone)...
+        assert data["verdict"] == "BREAKING"
+        # ...but the required-symbol contract is untouched, so the scoped
+        # exit code is floored to 0, not the unscoped diff's 4.
+        contract = data["required_symbol_contract"]
+        assert contract["verdict"] == "COMPATIBLE"
+        assert contract["missing_entrypoints"] == []
+        assert data["exit_code"] == 0
+        assert data["exit_code_scheme"] == "scoped"
+
+    def test_required_symbols_missing_entrypoint_is_breaking(self, tmp_path: Path):
+        kept = _pub_func("entry", "_Z5entryv", "int")
+        old = _make_snapshot("1.0", functions=[kept])
+        new = _make_snapshot("2.0", functions=[])
+        old_p, new_p = self._make_pair(tmp_path, old, new)
+
+        raw = abi_compare(str(old_p), str(new_p), required_symbols=["_Z5entryv"])
+        data = json.loads(raw)
+        assert data["status"] == "ok"
+        contract = data["required_symbol_contract"]
+        assert contract["verdict"] == "BREAKING"
+        assert contract["missing_entrypoints"] == ["_Z5entryv"]
+        assert data["exit_code"] == 4
+        assert data["exit_code_scheme"] == "scoped"
+
     def test_json_report_embedded_as_object(self, tmp_path: Path):
         snap = _make_snapshot("1.0", functions=[_pub_func("f", "_Zf")])
         old_p, new_p = self._make_pair(tmp_path, snap, snap)
@@ -1527,7 +1584,6 @@ class TestAbiScanPublicHeaderDir:
         snap = self._snap_file(tmp_path)
         raw = abi_scan(
             str(snap),
-            mode="audit",
             public_header_dirs=[str(tmp_path / "missing")],
         )
         data = json.loads(raw)
@@ -1538,7 +1594,7 @@ class TestAbiScanPublicHeaderDir:
         snap = self._snap_file(tmp_path)
         not_a_dir = tmp_path / "all.hpp"
         not_a_dir.write_text("// umbrella\n", encoding="utf-8")
-        raw = abi_scan(str(snap), mode="audit", public_header_dirs=[str(not_a_dir)])
+        raw = abi_scan(str(snap), public_header_dirs=[str(not_a_dir)])
         data = json.loads(raw)
         assert data["status"] == "error"
         assert "must be an existing directory" in data["error"]
@@ -1559,7 +1615,7 @@ class TestAbiScanPublicHeaderDir:
             return {"verdict": "COMPATIBLE", "exit_code": 0}
 
         monkeypatch.setattr(service, "run_scan_subprocess", _fake_subprocess)
-        raw = abi_scan(str(snap), mode="audit", public_header_dirs=[str(pub)])
+        raw = abi_scan(str(snap), public_header_dirs=[str(pub)])
         data = json.loads(raw)
         assert data["status"] == "ok"
         assert captured["public_header_dirs"] == [pub.resolve()]

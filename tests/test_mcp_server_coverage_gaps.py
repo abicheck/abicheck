@@ -176,7 +176,6 @@ class TestAbiEstimate:
         so = _fake_elf(tmp_path)
         data = json.loads(abi_estimate(str(so)))
         assert data["status"] == "ok"
-        assert data["mode"] == "pr"
         assert isinstance(data["estimate"], list)
         assert len(data["estimate"]) >= 1
         assert data["total_est_seconds"] >= 0
@@ -249,7 +248,7 @@ class TestAbiScan:
             return {"verdict": "COMPATIBLE", "exit_code": 0}
 
         monkeypatch.setattr(service, "run_scan_subprocess", _fake)
-        data = json.loads(abi_scan(str(snap), compile_db=str(cdb), baseline=str(base)))
+        data = json.loads(abi_scan(str(snap), compile_db=str(cdb), against=str(base)))
         assert data["status"] == "ok"
         assert data["verdict"] == "COMPATIBLE"
         assert captured["compile_db"] == cdb.resolve()
@@ -279,6 +278,36 @@ class TestAbiScan:
         assert data["status"] == "error"
         assert "0xBEEF" not in data["error"]
         assert "unexpected error" in data["error"]
+
+    @pytest.mark.parametrize("bad_depth", ["full", "symbols", "graph"])
+    def test_rejects_internal_only_depth(self, tmp_path: Path, bad_depth: str):
+        # ADR-043: the public depth ladder is exactly binary/headers/build/source
+        # -- "full"/"symbols"/"graph" are internal vocabulary that must not leak
+        # into the MCP tool surface (parity with the CLI's --depth rejection).
+        snap = _snapshot_file(tmp_path)
+        data = json.loads(abi_scan(str(snap), depth=bad_depth))
+        assert data["status"] == "error"
+        assert "Unknown depth" in data["error"]
+
+    @pytest.mark.parametrize("good_depth", ["binary", "headers", "build", "source"])
+    def test_accepts_public_depth(self, tmp_path: Path, monkeypatch, good_depth: str):
+        snap = _snapshot_file(tmp_path)
+
+        def _fake(req, timeout):
+            return {"verdict": "COMPATIBLE", "exit_code": 0}
+
+        monkeypatch.setattr(service, "run_scan_subprocess", _fake)
+        data = json.loads(abi_scan(str(snap), depth=good_depth))
+        assert data["status"] == "ok"
+
+
+class TestAbiEstimateDepthValidation:
+    @pytest.mark.parametrize("bad_depth", ["full", "symbols", "graph"])
+    def test_rejects_internal_only_depth(self, tmp_path: Path, bad_depth: str):
+        so = _fake_elf(tmp_path)
+        data = json.loads(abi_estimate(str(so), depth=bad_depth))
+        assert data["status"] == "error"
+        assert "Unknown depth" in data["error"]
 
 
 # ===================================================================

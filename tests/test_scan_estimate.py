@@ -546,7 +546,9 @@ def test_estimate_binary_depth_suppresses_header_cost(
 def test_estimate_scan_honors_resolved_level(snap_path: Path) -> None:
     # estimate_scan honors a caller-supplied resolved (method, depth) verbatim: the
     # (s5, graph) pr-deep pair stays graph-full, whereas re-resolving the same req
-    # applies precedence and collapses to source-changed (Codex review).
+    # applies precedence and collapses to plain S5 — source-target here since the
+    # request carries no diff seed (ADR-043 D2/D3: unseeded S5 scopes to TARGET,
+    # never silently to a zero-TU "source-changed" default) — Codex review.
     from abicheck.buildsource.scan_levels import EvidenceDepth, SourceMethod
     from abicheck.service_scan import estimate_scan
 
@@ -560,9 +562,9 @@ def test_estimate_scan_honors_resolved_level(snap_path: Path) -> None:
             req, resolved_level=(SourceMethod.S5, EvidenceDepth.GRAPH)
         )
     )
-    assert "source-changed" in reresolved  # the round-trip hazard this guards
+    assert "source-target" in reresolved  # the round-trip hazard this guards
     assert "graph-full" in pinned
-    assert "source-changed" not in pinned
+    assert "source-target" not in pinned
 
 
 def test_estimate_l2_cost_is_size_aware(snap_path: Path, tmp_path: Path) -> None:

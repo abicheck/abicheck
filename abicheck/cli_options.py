@@ -1567,4 +1567,8 @@ MCP_CLI_NAME_MAP: dict[str, str | None] = {
     "severity_potential_breaking": "--severity-potential-breaking",
     "severity_quality_issues": "--severity-quality-issues",
     "severity_addition": "--severity-addition",
+    # ADR-043: generic scoped-comparison (folds the deleted appcompat/
+    # plugin-check commands into compare).
+    "used_by": "--used-by",
+    "required_symbols": "--required-symbol",
 }
