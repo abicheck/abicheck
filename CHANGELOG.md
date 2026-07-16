@@ -101,6 +101,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
     unifying the compare/compare-release dispatch into one code path,
     `severity-preset`/`severity-addition` now correctly gate directory/package
     comparisons too (previously silently not forwarded on that path).
+  - `compare --used-by`/`--required-symbol` scoping under a severity scheme
+    now floors the exit code correctly when the scoped verdict is BREAKING
+    solely because a required symbol/version/entrypoint is missing outright
+    (not a diff change) — the scoped exit code previously derived only from
+    `relevant_changes`, which is empty in this case, so a missing contract
+    silently exited `0` under any `--severity-*`/`--exit-code-scheme
+    severity` configuration. Fixed in both the CLI and the MCP `abi_compare`
+    tool.
 
 ### Changed
 

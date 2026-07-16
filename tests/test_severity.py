@@ -32,6 +32,7 @@ from abicheck.severity import (
     categorize_changes,
     classify_change,
     compute_exit_code,
+    missing_contract_exit_code,
     resolve_severity_config,
 )
 
@@ -328,6 +329,27 @@ class TestComputeExitCodeEdgeCases:
             _FakeChange(ChangeKind.FUNC_ADDED),
         ]
         assert compute_exit_code(changes, PRESET_DEFAULT) == 0
+
+
+class TestMissingContractExitCode:
+    """A scoped --used-by/--required-symbol contract missing outright (no
+    corresponding diff Change) floors the severity-scheme exit code by the
+    abi_breaking category, the same way a real BREAKING_KINDS finding would
+    (Codex P1: `compute_exit_code([], ...)` alone returns 0 for this case
+    since there is no Change for it to classify)."""
+
+    def test_default_preset_floors_at_4(self) -> None:
+        assert missing_contract_exit_code(PRESET_DEFAULT) == 4
+
+    def test_strict_preset_floors_at_4(self) -> None:
+        assert missing_contract_exit_code(PRESET_STRICT) == 4
+
+    def test_info_only_preset_is_zero(self) -> None:
+        assert missing_contract_exit_code(PRESET_INFO_ONLY) == 0
+
+    def test_abi_breaking_downgraded_to_warning_is_zero(self) -> None:
+        cfg = resolve_severity_config("default", abi_breaking="warning")
+        assert missing_contract_exit_code(cfg) == 0
 
 
 class TestSeverityConfigDescribe:

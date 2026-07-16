@@ -461,6 +461,7 @@ def _scoped_verdict_exit_code(verdict: object) -> int:
 def _scoped_exit_code(
     verdict: object, relevant_changes: list[Any], result: Any,
     severity_config: SeverityConfig | None, policy: str, policy_file: object,
+    *, has_missing_contract: bool = False,
 ) -> int:
     """Scoped-verdict exit code, respecting a severity config when given.
 
@@ -468,16 +469,25 @@ def _scoped_exit_code(
     used_by/required_symbols scope always fell back to the legacy 0/2/4
     verdict floor, silently ignoring any severity_* argument the caller
     passed (parity bug with the severity-aware unscoped path above).
+
+    *has_missing_contract* (a required symbol/version/entrypoint absent from
+    the new library) floors the severity-scheme exit code separately from
+    *relevant_changes*: a missing contract symbol is BREAKING but is not a
+    diff Change, so ``compute_exit_code`` never sees it and would otherwise
+    return 0 (Codex review).
     """
     if severity_config is not None:
-        from .severity import compute_exit_code
+        from .severity import compute_exit_code, missing_contract_exit_code
 
-        return compute_exit_code(
+        code = compute_exit_code(
             relevant_changes, severity_config,
             policy=policy,
             kind_sets=result._effective_kind_sets(),
             policy_file=policy_file,
         )
+        if has_missing_contract:
+            code = max(code, missing_contract_exit_code(severity_config))
+        return code
     return _scoped_verdict_exit_code(verdict)
 
 
@@ -939,6 +949,9 @@ def abi_compare(
                 app_exit = _scoped_exit_code(
                     scoped.verdict, scoped.breaking_for_app, result,
                     severity_config, active_policy, pf,
+                    has_missing_contract=bool(
+                        scoped.missing_symbols or scoped.missing_versions
+                    ),
                 )
                 # exit code (gating) and verdict (reporting) are maxed/ranked
                 # independently -- see _verdict_severity_rank.
@@ -978,6 +991,7 @@ def abi_compare(
             exit_code = _scoped_exit_code(
                 scoped_host.verdict, scoped_host.breaking_for_host, result,
                 severity_config, active_policy, pf,
+                has_missing_contract=bool(scoped_host.missing_entrypoints),
             )
             exit_code_scheme = "scoped"
             scoped_verdict_value = scoped_host.verdict.value

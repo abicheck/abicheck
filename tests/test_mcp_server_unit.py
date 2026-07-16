@@ -1113,6 +1113,32 @@ class TestAbiCompare:
         assert data["required_symbol_contract"]["verdict"] == "BREAKING"
         assert data["exit_code"] == 0
 
+    def test_required_symbols_never_present_floors_severity_at_4(
+        self, tmp_path: Path
+    ):
+        # Regression (Codex P1): a required symbol absent from *both* old and
+        # new is a missing contract with no corresponding diff Change (it was
+        # never removed -- it never existed), so `breaking_for_host` is empty
+        # even though the scoped verdict is BREAKING. `_scoped_exit_code`
+        # used to compute the severity-scheme exit purely from
+        # `breaking_for_host`, silently exiting 0.
+        kept = _pub_func("kept", "_Z4keptv", "int")
+        old = _make_snapshot("1.0", functions=[kept])
+        new = _make_snapshot("2.0", functions=[kept])
+        old_p, new_p = self._make_pair(tmp_path, old, new)
+
+        raw = abi_compare(
+            str(old_p), str(new_p), required_symbols=["never_existed"],
+            severity_preset="default",
+        )
+        data = json.loads(raw)
+        assert data["status"] == "ok"
+        assert data["required_symbol_contract"]["verdict"] == "BREAKING"
+        assert data["required_symbol_contract"]["missing_entrypoints"] == [
+            "never_existed"
+        ]
+        assert data["exit_code"] == 4
+
     def test_required_symbols_folds_scoped_verdict_into_nested_report(
         self, tmp_path: Path
     ):
@@ -1225,6 +1251,39 @@ class TestAbiCompare:
         assert data["verdict"] == "BREAKING"
         assert data["exit_code"] == 4
         assert data["exit_code_scheme"] == "scoped"
+
+    def test_used_by_missing_symbol_only_floors_severity_at_4(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # Regression (Codex P1): a required symbol absent from both old and
+        # new is a missing contract with no corresponding diff Change --
+        # `breaking_for_app` stays empty even though the scoped verdict is
+        # BREAKING. `_scoped_exit_code` used to compute the severity-scheme
+        # exit purely from `breaking_for_app`, silently exiting 0 for an app
+        # that can never resolve the required symbol at all.
+        from abicheck.appcompat import AppCompatResult
+
+        kept = _pub_func("kept", "_Z4keptv", "int")
+        old = _make_snapshot("1.0", functions=[kept])
+        new = _make_snapshot("2.0", functions=[kept])
+        old_p, new_p = self._make_binary_pair(tmp_path)
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        scoped = AppCompatResult(
+            app_path=str(app), old_lib_path=str(old_p), new_lib_path=str(new_p),
+            required_symbols={"never_existed"}, required_symbol_count=1,
+            missing_symbols=["never_existed"], verdict=Verdict.BREAKING,
+        )
+        self._patch_used_by(monkeypatch, tmp_path, old, new, scoped)
+
+        raw = abi_compare(
+            str(old_p), str(new_p), used_by=[str(app)],
+            severity_preset="default",
+        )
+        data = json.loads(raw)
+        assert data["used_by"][0]["missing_symbols"] == ["never_existed"]
+        assert data["verdict"] == "BREAKING"
+        assert data["exit_code"] == 4
 
     def test_used_by_rejects_non_binary_snapshot_input(self, tmp_path: Path):
         # --used-by needs real library binaries to parse app requirements

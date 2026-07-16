@@ -1210,6 +1210,25 @@ class TestUsedByScoping:
         )
         assert result.exit_code == 4
 
+    def test_severity_missing_symbols_only_floors_at_4(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Regression (Codex P1): a required symbol absent from both old and
+        # new libraries is a missing contract with no corresponding diff
+        # Change -- `scope_diff_to_app` reports it purely via
+        # `missing_symbols`, leaving `breaking_for_app` empty. Before the
+        # fix, `_scoped_exit_code` computed the severity-scheme exit solely
+        # from `breaking_for_app`, silently exiting 0 for an app that can
+        # never resolve the required symbol at all.
+        res = self._result(verdict=Verdict.BREAKING, missing=["foo"])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app),
+            "--severity-preset", "default",
+        )
+        assert result.exit_code == 4
+
     def test_severity_info_only_preset_overrides_missing_symbols_exit(
         self, tmp_path, monkeypatch
     ) -> None:

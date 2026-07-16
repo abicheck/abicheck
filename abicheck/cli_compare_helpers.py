@@ -492,6 +492,7 @@ def _scoped_exit_code(
     scoped: Any, relevant_changes: list[Any],
     result: Any, exit_code_scheme: str, sev_config: Any,
     policy: str, policy_file: PolicyFile | None,
+    *, has_missing_contract: bool = False,
 ) -> int:
     """Compute a scoped result's exit code under the active exit-code scheme.
 
@@ -502,16 +503,25 @@ def _scoped_exit_code(
     matter what severity configuration the caller passed, because the scoped
     branch returned straight to ``sys.exit`` before the severity-aware exit
     handler ever ran.
+
+    *has_missing_contract* (a required symbol/version/entrypoint absent from
+    the new library) floors the severity-scheme exit code separately from
+    *relevant_changes*: a missing contract symbol is BREAKING but is not a
+    diff ``Change``, so ``compute_exit_code`` never sees it and would
+    otherwise return 0 (Codex review).
     """
     if exit_code_scheme == "severity":
-        from .severity import compute_exit_code
+        from .severity import compute_exit_code, missing_contract_exit_code
 
-        return compute_exit_code(
+        code = compute_exit_code(
             relevant_changes, sev_config,
             policy=policy,
             kind_sets=result._effective_kind_sets(),
             policy_file=policy_file,
         )
+        if has_missing_contract:
+            code = max(code, missing_contract_exit_code(sev_config))
+        return code
     return _verdict_exit_code(scoped.verdict)
 
 
@@ -567,6 +577,7 @@ def _apply_used_by_scoping(
         exit_code = _scoped_exit_code(
             scoped, scoped.breaking_for_app, result, exit_code_scheme, sev_config,
             policy, policy_file,
+            has_missing_contract=bool(scoped.missing_symbols or scoped.missing_versions),
         )
         # exit code (gating) and verdict (reporting) are maxed/ranked
         # independently: under a severity scheme the two can disagree (a
@@ -604,6 +615,7 @@ def _apply_required_symbol_scoping(
     exit_code = _scoped_exit_code(
         scoped, scoped.breaking_for_host, result, exit_code_scheme, sev_config,
         policy, policy_file,
+        has_missing_contract=bool(scoped.missing_entrypoints),
     )
     result.scoped_exit_code = exit_code  # type: ignore[attr-defined]
     result.scoped_exit_code_scheme = exit_code_scheme  # type: ignore[attr-defined]

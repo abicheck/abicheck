@@ -333,6 +333,35 @@ class TestScopedExitRespectsSeverity:
         )
         assert result.exit_code == 4
 
+    def test_required_symbol_never_present_floors_severity_at_4(
+        self, tmp_path: Path,
+    ) -> None:
+        # Regression (Codex P1): a required symbol absent from *both* old and
+        # new is a missing contract with no corresponding diff Change (the
+        # symbol was never removed -- it never existed), so
+        # `scoped.breaking_for_host` is empty even though `scoped.verdict` is
+        # BREAKING. `_scoped_exit_code` used to compute the severity-scheme
+        # exit purely from `breaking_for_host`, silently exiting 0 for a
+        # scoped compare that can never satisfy the contract at all.
+        old_p, new_p = _write_identical(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            ["compare", str(old_p), str(new_p), "--required-symbol", "never_existed",
+             "--severity-preset", "default"],
+        )
+        assert result.exit_code == 4
+
+    def test_required_symbol_never_present_severity_info_only_exits_zero(
+        self, tmp_path: Path,
+    ) -> None:
+        old_p, new_p = _write_identical(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            ["compare", str(old_p), str(new_p), "--required-symbol", "never_existed",
+             "--severity-preset", "info-only"],
+        )
+        assert result.exit_code == 0
+
 
 # ── §1 appcompat warnings + scope ───────────────────────────────────────────
 #
