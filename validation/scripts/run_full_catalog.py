@@ -165,19 +165,26 @@ def _run_compiler_lane(
             "--json",
         ]
     )
-    if toolchain != "auto":
-        by_case = {
-            r["name"]: {**r, "toolchain_used": toolchain} for r in primary["results"]
-        }
-        return by_case, f"toolchain={toolchain} (forced for every case)", []
-
-    gt = json.loads(GROUND_TRUTH.read_text())["verdicts"]
+    # Even a forced --toolchain doesn't fail closed (Codex review):
+    # tests/validate_examples.py._find_compiler falls back to another family
+    # when the requested one isn't on PATH, so compiler_c/compiler_cxx in the
+    # JSON metadata is the *actual* producer, not necessarily `toolchain`.
+    # Blindly labeling every row `toolchain_used=toolchain` would then claim
+    # a family that never actually built the case.
     primary_family_c = _family_of(primary.get("compiler_c", "gcc"))
     primary_family_cxx = _family_of(primary.get("compiler_cxx", "gcc"))
     case_family = {
         r["name"]: _case_family(r["name"], primary_family_c, primary_family_cxx)
         for r in primary["results"]
     }
+    if toolchain != "auto":
+        by_case = {
+            r["name"]: {**r, "toolchain_used": case_family[r["name"]]}
+            for r in primary["results"]
+        }
+        return by_case, f"toolchain={toolchain} (forced for every case)", []
+
+    gt = json.loads(GROUND_TRUTH.read_text())["verdicts"]
     by_case = {
         r["name"]: {**r, "toolchain_used": case_family[r["name"]]}
         for r in primary["results"]
@@ -202,6 +209,7 @@ def _run_compiler_lane(
     retried = 0
     retry_failures: list[str] = []
     total_candidates = sum(len(names) for names in candidates_by_alt.values())
+    attempted_candidates = 0
     for alt_family, names in candidates_by_alt.items():
         if not _has_compiler(alt_family):
             sys.stderr.write(
@@ -209,6 +217,7 @@ def _run_compiler_lane(
                 "compiler on PATH — keeping the base-family result for them.\n"
             )
             continue
+        attempted_candidates += len(names)
         alt_result = _run_json(
             [
                 sys.executable,
@@ -236,7 +245,8 @@ def _run_compiler_lane(
                 )
     desc = (
         f"toolchain=auto (base c={primary_family_c}/cxx={primary_family_cxx}; "
-        f"{total_candidates} toolchain-sensitive case(s) retried, {retried} improved to PASS)"
+        f"{total_candidates} toolchain-sensitive case(s) found, "
+        f"{attempted_candidates} retried, {retried} improved to PASS)"
     )
     return by_case, desc, retry_failures
 

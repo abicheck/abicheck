@@ -290,10 +290,12 @@ class RecordType:
     # merely "at least one was" (Codex review): a mixed record like
     # `struct Foo { union { int i; }; int tag; };` has an ordinary field
     # (`tag`) with no such provenance guarantee, so the flag must be False
-    # for it too. DWARF's own record builder does not perform this
-    # flattening, so an *all-anonymous* record's DWARF view legitimately has
-    # an empty field list even though it carries the real size_bits — a
-    # structural signal the DWARF layout backfill needs to trust a
+    # for it too. DWARF's own record builder (dwarf_snapshot.py) now flattens
+    # *supported* anonymous aggregates too, but an unsupported producer/shape
+    # or a cached snapshot predating that flatten still legitimately leaves
+    # an all-anonymous record's DWARF view fieldless even though it carries
+    # the real size_bits — a structural signal the DWARF layout backfill
+    # needs to trust a
     # bare-suffix (namespaced) match for this case without also trusting an
     # ordinary record's coincidental match to an unrelated, fieldless type
     # reached the same way. False for every non-clang producer (castxml

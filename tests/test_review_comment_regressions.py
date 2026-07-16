@@ -615,17 +615,9 @@ def _build_source_artifact(
     the selected-case count -- ``_artifact_errors`` special-cases
     ``build_source`` that way (see its ``expected_ground_truth_cases``)."""
     cases = matrix.BUILD_SOURCE_PROOF_CASES
-    return {
-        "schema_version": "validate_examples.v2",
-        "runner": "tests/validate_examples.py",
-        "ground_truth_sha256": matrix._ground_truth_digest(),
-        "ground_truth_cases": len(gt),
-        "selected_cases": len(cases),
-        "artifact_variants": ["build-source"],
-        "toolchain": "auto",
-        "summary": {status: len(cases)},
-        "results": [{"case_id": cid, "status": status} for cid in sorted(cases)],
-    }
+    artifact = _artifact(matrix, "build_source", cases, status=status)
+    artifact["ground_truth_cases"] = len(gt)
+    return artifact
 
 
 def test_full_catalog_artifact_failures_is_clean_for_passing_lanes() -> None:
@@ -867,6 +859,85 @@ def test_run_compiler_lane_derives_retries_from_split_cc_cxx(
     }
     assert by_case["case64_calling_convention_changed"]["toolchain_used"] == "clang"
     assert by_case["case34_access_level"]["toolchain_used"] == "gcc"
+
+
+def test_run_compiler_lane_forced_toolchain_reports_actual_fallback_compiler(
+    monkeypatch,
+) -> None:
+    """Regression (Codex review): tests/validate_examples.py._find_compiler
+    doesn't fail closed on a forced --toolchain -- it falls back to the other
+    family when the requested one isn't on PATH, and reports the *actual*
+    producer via compiler_c/compiler_cxx. Blindly labeling every row
+    toolchain_used=<requested> would claim clang built a case gcc actually
+    built (and could wrongly promote a gcc-scoped known_gap as covered under
+    a clang label the case never really ran under)."""
+    catalog = _load_script("validation/scripts/run_full_catalog.py")
+    primary = {
+        # Requested clang, but neither compiler_c nor compiler_cxx actually
+        # resolved to clang -- a clang-less host silently fell back to gcc.
+        "compiler_c": "gcc",
+        "compiler_cxx": "g++",
+        "results": [
+            {"name": "case64_calling_convention_changed", "status": "PASS"},
+            {"name": "case34_access_level", "status": "PASS"},
+        ],
+    }
+    monkeypatch.setattr(catalog, "_run_json", lambda _cmd: primary)
+
+    by_case, desc, retry_failures = catalog._run_compiler_lane("clang")
+
+    assert retry_failures == []
+    assert desc == "toolchain=clang (forced for every case)"
+    # Both cases actually built with gcc regardless of source language --
+    # not the requested "clang".
+    assert by_case["case64_calling_convention_changed"]["toolchain_used"] == "gcc"
+    assert by_case["case34_access_level"]["toolchain_used"] == "gcc"
+
+
+def test_run_compiler_lane_desc_counts_only_attempted_retries(monkeypatch) -> None:
+    """Regression (CodeRabbit review): a retry group skipped because its
+    alternate compiler isn't on PATH must not be counted as "retried" in the
+    compiler_lane description -- only groups that actually ran a retry
+    subprocess should count toward the attempted figure."""
+    catalog = _load_script("validation/scripts/run_full_catalog.py")
+    gt = {
+        "caseC": {"known_gap_toolchains": ["gcc"]},  # retried: clang present
+        "caseCxx": {"known_gap_toolchains": ["clang"]},  # skipped: gcc absent
+    }
+
+    def fake_gt_text():
+        return json.dumps({"verdicts": gt})
+
+    monkeypatch.setattr(
+        catalog,
+        "GROUND_TRUTH",
+        type("P", (), {"read_text": staticmethod(fake_gt_text)})(),
+    )
+    monkeypatch.setattr(
+        catalog, "_case_family", lambda name, fc, fcxx: fc if name == "caseC" else fcxx
+    )
+    monkeypatch.setattr(catalog, "_has_compiler", lambda family: family == "clang")
+
+    primary = {
+        "compiler_c": "gcc",
+        "compiler_cxx": "clang++",
+        "results": [
+            {"name": "caseC", "status": "XFAIL", "message": "known_gap"},
+            {"name": "caseCxx", "status": "XFAIL", "message": "known_gap"},
+        ],
+    }
+
+    def fake_run_json(cmd):
+        if cmd[cmd.index("--toolchain") + 1] == "auto":
+            return primary
+        return {"results": [{"name": "caseC", "status": "PASS"}]}
+
+    monkeypatch.setattr(catalog, "_run_json", fake_run_json)
+
+    _by_case, desc, _retry_failures = catalog._run_compiler_lane("auto")
+    assert "2 toolchain-sensitive case(s) found" in desc
+    assert "1 retried" in desc
+    assert "1 improved to PASS" in desc
 
 
 def test_full_catalog_resolve_single_library_threads_ground_truth_entry() -> None:
