@@ -660,10 +660,14 @@ def run_abicheck_full(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | 
             if library is None or pack is None:
                 return ToolResult(verdict="ERROR", raw_output=error,
                                   elapsed_ms=(time.monotonic() - started) * 1000)
-            base = root / f"{version}.binary_headers.json"
             final = root / f"{version}.merged.json"
+            # The standalone `collect`/`merge` commands were removed in the
+            # ADR-043 CLI reset (PR #566); `dump --sources <pack> --depth
+            # source` now embeds the plugin's pack inline in one step instead
+            # of a separate dump-then-merge pair.
             dump = [_PYTHON, "-m", "abicheck.cli", "dump", str(library),
-                    "-o", str(base), "--version", version]
+                    "-o", str(final), "--version", version,
+                    "--sources", str(pack), "--depth", "source"]
             if header and header.exists():
                 # -H alone only feeds castxml which headers to parse; it does
                 # NOT mark them public for provenance classification (that's
@@ -675,22 +679,11 @@ def run_abicheck_full(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | 
                 dump += ["-H", str(header), "--public-header", str(header)]
             dr = subprocess.run(dump, capture_output=True, text=True,
                                 timeout=timeout, env=_ABICHECK_ENV)
-            if dr.returncode != 0 or not base.exists():
+            if dr.returncode != 0 or not final.exists():
                 return ToolResult(verdict="ERROR", raw_output=dr.stderr or dr.stdout,
                                   elapsed_ms=(time.monotonic() - started) * 1000)
-            mr = subprocess.run(
-                # ``abicheck.cli`` invokes Click before late subcommand modules
-                # register ``merge``; the package entry point imports the full
-                # module first and therefore exposes build-source commands.
-                [_PYTHON, "-m", "abicheck", "merge", str(base), str(pack),
-                 "-o", str(final), "--on-conflict", "error"],
-                capture_output=True, text=True, timeout=timeout, env=_ABICHECK_ENV,
-            )
-            if mr.returncode != 0 or not final.exists():
-                return ToolResult(verdict="ERROR", raw_output=mr.stderr or mr.stdout,
-                                  elapsed_ms=(time.monotonic() - started) * 1000)
             merged.append(final)
-            logs.extend([dr.stdout, dr.stderr, mr.stdout, mr.stderr])
+            logs.extend([dr.stdout, dr.stderr])
         compare = subprocess.run(
             [_PYTHON, "-m", "abicheck.cli", "compare", str(merged[0]), str(merged[1]),
              "--format", "json"], capture_output=True, text=True,
