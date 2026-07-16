@@ -75,6 +75,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   Missing-contract results also now separate `relevantToGate` (always
   true — scope membership) from `blocksGate` (severity-dependent), instead
   of conflating the two.
+- The same "scoped-only change"/uncovered-missing-label gap applied to
+  `compare --format json`'s `changes` array and the MCP `abi_compare`
+  tool's `changes` field, not just SARIF/JUnit: a `--used-by`/
+  `--required-symbol` run whose only gated issue was one of these reported
+  an empty `changes` array despite a nonzero scoped exit code/verdict. This
+  mattered in practice for the GitHub Action's `--on changes` PR-comment
+  gate, which buckets purely off that array and would silently skip
+  posting for exactly the runs that most needed one.
 - `dump -o`'s evidence-depth line and `compare`'s `old_evidence_depth`/
   `new_evidence_depth` no longer overstate `source`/`build` when a layer
   ran but linked no real facts (e.g. an inline source-ABI pass that finds
