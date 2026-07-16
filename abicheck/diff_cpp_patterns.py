@@ -516,7 +516,18 @@ def detect_tag_type_renamed(
     appears in *new* under the same parent namespace, AND there is at
     least one removed symbol whose mangled name embeds the old tag's
     leaf segment while at least one added symbol embeds the new leaf.
+
+    The symbol evidence (``only_removed``/``only_added``) is scoped to the
+    public surface (``PUBLIC`` + ``ELF_ONLY``): a snapshot can retain
+    ``HIDDEN`` functions for cross-reference (both the header/castxml
+    backend and, since the case06 fix, the DWARF-only backend), and a
+    hidden explicit-instantiation helper changing name is not real evidence
+    of an exported rename — including it here could emit a TAG_TYPE_RENAMED
+    for two empty tags that share a namespace purely by coincidence, backed
+    by symbol churn no consumer can ever see.
     """
+    from .diff_symbols import _PUBLIC_VIS
+
     old.index()
     new.index()
     old_types = {t.name: t for t in old.types}
@@ -526,8 +537,10 @@ def detect_tag_type_renamed(
     if not removed_empties or not added_empties:
         return []
     added_by_ns = _group_by_namespace(added_empties)
-    only_removed = {f.mangled for f in old.functions} - {f.mangled for f in new.functions}
-    only_added = {f.mangled for f in new.functions} - {f.mangled for f in old.functions}
+    old_mangled = {f.mangled for f in old.functions if f.visibility in _PUBLIC_VIS}
+    new_mangled = {f.mangled for f in new.functions if f.visibility in _PUBLIC_VIS}
+    only_removed = old_mangled - new_mangled
+    only_added = new_mangled - old_mangled
     findings: list[Change] = []
     for removed in removed_empties:
         ns = _parent_namespace(removed.name)

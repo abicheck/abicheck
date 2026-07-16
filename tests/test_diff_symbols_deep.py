@@ -446,6 +446,46 @@ class TestVarConstChanged:
         assert ChangeKind.VAR_BECAME_CONST in _kinds(r)
         assert ChangeKind.VAR_TYPE_CHANGED not in _kinds(r)
 
+    def test_templated_value_top_level_const_is_var_became_const(self):
+        """`std::vector<int>` -> `const std::vector<int>`: canonicalize_type_name
+        deliberately leaves a leading const untouched when the base type is
+        templated (skips east-const normalization for any base containing
+        "<...>"), so the top-level qualifier stays leading instead of
+        trailing. This must still be classified VAR_BECAME_CONST — the same
+        semantic transition as the scalar `int` -> `const int` case — not
+        VAR_TYPE_CHANGED (Codex review)."""
+        v_v1 = _pub_var("cfg", "_Z3cfg", "std::vector<int>", is_const=False)
+        v_v2 = _pub_var("cfg", "_Z3cfg", "const std::vector<int>", is_const=True)
+        r = compare(_snap(variables=[v_v1]), _snap(variables=[v_v2]))
+        assert ChangeKind.VAR_BECAME_CONST in _kinds(r)
+        assert ChangeKind.VAR_TYPE_CHANGED not in _kinds(r)
+
+    def test_templated_pointee_const_is_type_changed(self):
+        """`std::vector<int> *` -> `const std::vector<int> *`: the POINTEE
+        (a templated type) became const, not the pointer itself — the
+        templated analog of test_pointee_const_is_type_changed_not_var_became_const.
+        Must report VAR_TYPE_CHANGED, not VAR_BECAME_CONST."""
+        v_v1 = _pub_var("cfg", "_Z3cfg", "std::vector<int> *", is_const=False)
+        v_v2 = _pub_var("cfg", "_Z3cfg", "const std::vector<int> *", is_const=True)
+        r = compare(_snap(variables=[v_v1]), _snap(variables=[v_v2]))
+        assert ChangeKind.VAR_TYPE_CHANGED in _kinds(r)
+        assert ChangeKind.VAR_BECAME_CONST not in _kinds(r)
+
+    def test_pointer_inside_template_arg_is_not_top_level(self):
+        """`std::vector<int *>` -> `const std::vector<int *>`: the variable
+        itself is a by-value templated type (not a pointer) — the `*` lives
+        inside the template argument, not at the top level. A naive
+        substring search for `*`/`&` anywhere in the string would wrongly
+        route this into the pointer/reference branch (which only strips a
+        *trailing* const), missing the *leading* top-level const and
+        misreporting VAR_TYPE_CHANGED instead of VAR_BECAME_CONST
+        (Codex review)."""
+        v_v1 = _pub_var("cfg", "_Z3cfg", "std::vector<int *>", is_const=False)
+        v_v2 = _pub_var("cfg", "_Z3cfg", "const std::vector<int *>", is_const=True)
+        r = compare(_snap(variables=[v_v1]), _snap(variables=[v_v2]))
+        assert ChangeKind.VAR_BECAME_CONST in _kinds(r)
+        assert ChangeKind.VAR_TYPE_CHANGED not in _kinds(r)
+
 
 # ── constant_changed / constant_added / constant_removed ─────────────────
 
