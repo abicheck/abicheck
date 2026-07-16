@@ -1423,6 +1423,25 @@ class TestPythonVersionFromWheelFilename:
             is None
         )
 
+    def test_compressed_python_tag_spanning_multiple_minors_returns_none(
+        self,
+    ) -> None:
+        # Codex review: a PEP 425 compressed multi-tag Python segment
+        # (cp310.cp311, dot-joined) is valid too -- packaging.utils.
+        # parse_wheel_filename expands "cp310.cp311-cp310.cp311-..." to
+        # tags for both 3.10 and 3.11, so this wheel genuinely installs on
+        # either. The single-version-anchored _WHEEL_PYTHON_TAG_RE already
+        # fails to match a dot-joined segment and safely returns None
+        # (same "can't pin one value -> fall back to host" contract as the
+        # abi3 case) with no code change needed -- this test locks that
+        # in.
+        assert (
+            _python_version_from_wheel_filename(
+                "pkg-1.0-cp310.cp311-cp310.cp311-linux_x86_64.whl"
+            )
+            is None
+        )
+
 
 class TestPythonFullVersionFromWheelFilename:
     def test_cp_tag_gets_synthetic_micro(self) -> None:
