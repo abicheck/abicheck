@@ -59,17 +59,23 @@ def _target_tuple(version: str | None) -> tuple[int, ...]:
 
 
 def _declared_floor(specifiers: SpecifierSet) -> tuple[int, ...] | None:
-    """The largest lower-bound version among a SpecifierSet's >=/==/~= clauses.
+    """The largest lower-bound version among a SpecifierSet's >=/>/==/~= clauses.
 
     ``None`` when the set declares no lower bound at all (empty, or only
     upper-bound/exclusion clauses) — "any version is nominally allowed",
     distinct from "no numpy requirement declared at all" (also ``None`` at
     the caller, via ``declared_numpy_requirement`` being falsy in the first
     place — both cases correctly fail to cover any real target version).
+
+    An exclusive ``>`` bound (e.g. ``numpy>2.0``) is treated the same as
+    ``>=`` at this function's coarse major.minor granularity: excluding it
+    would make ``numpy>2.0`` look like "no floor declared", falsely flagging
+    a metadata gap and an ABI-major incompatibility for a requirement that
+    in fact excludes every NumPy 1.x runtime (Codex review).
     """
     best: tuple[int, ...] | None = None
     for spec in specifiers:
-        if spec.operator not in (">=", "==", "~="):
+        if spec.operator not in (">=", ">", "==", "~="):
             continue
         v = _target_tuple(spec.version.rstrip(".*"))
         if v and (best is None or v > best):
@@ -86,13 +92,26 @@ def diff_numpy_capi_surfaces(
     floor rising — never on the target *dropping* (an extension declaring
     it now works on an older NumPy floor than before is a compatibility
     improvement, not a regression).
+
+    *old*/*new* being ``None`` means no NumPy C-API evidence was captured on
+    that side at all — a snapshot predating this field's introduction, or a
+    binary that couldn't be scanned — which is not the same as
+    :attr:`~abicheck.numpy_capi.NumPyCapiSurface` confirming non-consumption
+    (``consumes_array_api=False, consumes_ufunc_api=False``). Comparing
+    against missing evidence would risk a false ADDED/REMOVED finding (e.g. a
+    library that already consumed the NumPy C-API before this evidence
+    existed, re-dumped only on the "new" side, looks identical to a genuine
+    new dependency), so this returns no findings whenever either side is
+    ``None`` (Codex review).
     """
     changes: list[Change] = []
-    old_consumes = bool(old and (old.consumes_array_api or old.consumes_ufunc_api))
-    new_consumes = bool(new and (new.consumes_array_api or new.consumes_ufunc_api))
+    if old is None or new is None:
+        return changes
+
+    old_consumes = old.consumes_array_api or old.consumes_ufunc_api
+    new_consumes = new.consumes_array_api or new.consumes_ufunc_api
 
     if not old_consumes and new_consumes:
-        assert new is not None
         apis = ", ".join(
             n
             for n, flag in (
@@ -120,7 +139,6 @@ def diff_numpy_capi_surfaces(
     if not old_consumes and not new_consumes:
         return changes
 
-    assert old is not None and new is not None
     old_target = _target_tuple(old.capi_target_version)
     new_target = _target_tuple(new.capi_target_version)
     if new_target and old_target and new_target > old_target:

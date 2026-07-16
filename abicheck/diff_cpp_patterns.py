@@ -1302,17 +1302,21 @@ def bundle_members_from_directory(directory: str) -> list[BundleMember]:
         soname = _read_soname_best_effort(full)
         if not soname:
             continue
-        major = _extract_soname_major(soname)
-        if major is None:
-            continue
         # G9 (remaining half): normalize the DT_SONAME the same way `.library`
         # (the filename) already is via _cohort_key, so BundleMember.soname
         # always carries the canonical logical SONAME regardless of an
-        # auditwheel/delocate content-hash suffix.
+        # auditwheel/delocate content-hash suffix. Strip *before* extracting
+        # the major version too — a hashed install name (e.g.
+        # ``libfoo.2-a1b2c3.dylib``) otherwise fails major extraction on the
+        # raw string and the member is skipped entirely (Codex review).
+        soname = strip_vendor_hash(soname)
+        major = _extract_soname_major(soname)
+        if major is None:
+            continue
         members.append(
             BundleMember(
                 library=name,
-                soname=strip_vendor_hash(soname),
+                soname=soname,
                 soname_major=major,
             )
         )

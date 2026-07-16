@@ -46,10 +46,20 @@ _UFUNC_API_BLOB = (
 
 
 class TestExtractNumPyCapiSurface:
-    def test_no_numpy_signature_returns_none(self, tmp_path: Path) -> None:
+    def test_no_numpy_signature_returns_confirmed_absent_surface(
+        self, tmp_path: Path
+    ) -> None:
+        # A successfully-scanned binary with no NumPy markers is "confirmed
+        # not consuming" -- a real NumPyCapiSurface(False, False, None), NOT
+        # None. None is reserved for "couldn't scan at all" (missing/empty/
+        # oversized/unreadable) so it stays distinguishable from a legacy
+        # snapshot that predates this field (Codex review).
         binary = tmp_path / "plain.so"
         binary.write_bytes(b"\x7fELF" + b"\x00" * 100 + b"some ordinary string data")
-        assert extract_numpy_capi_surface(binary) is None
+        surf = extract_numpy_capi_surface(binary)
+        assert surf == NumPyCapiSurface(
+            consumes_array_api=False, consumes_ufunc_api=False, capi_target_version=None
+        )
 
     def test_nonexistent_file_returns_none(self, tmp_path: Path) -> None:
         assert extract_numpy_capi_surface(tmp_path / "missing.so") is None
@@ -87,6 +97,25 @@ class TestExtractNumPyCapiSurface:
         assert surf is not None
         assert surf.consumes_array_api is True
         assert surf.consumes_ufunc_api is True
+        assert surf.capi_target_version == "1.23"
+
+    def test_decoy_parenthesized_version_string_is_not_matched(
+        self, tmp_path: Path
+    ) -> None:
+        # An unrelated "(NumPy X.Y)" string elsewhere in .rodata (e.g. a
+        # docstring or log message) must not be mistaken for the real shim
+        # message's floor -- the scan is anchored to the full "compiled
+        # against NumPy C-API version 0x... (NumPy X.Y)" phrase, not a bare
+        # "(NumPy X.Y)" (Codex review).
+        binary = tmp_path / "mod.so"
+        binary.write_bytes(
+            b"\x7fELF"
+            + b"\x00" * 50
+            + b"some unrelated docstring mentioning (NumPy 1.19) in passing\x00"
+            + _ARRAY_API_BLOB
+        )
+        surf = extract_numpy_capi_surface(binary)
+        assert surf is not None
         assert surf.capi_target_version == "1.23"
 
     def test_survives_symbol_stripping(self, tmp_path: Path) -> None:

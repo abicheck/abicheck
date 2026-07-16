@@ -546,12 +546,15 @@ def parse_wheel_numpy_requirement(wheel_path: Path) -> str | None:
     ``*.dist-info/METADATA`` (``Requires-Dist: numpy...``).
 
     Returns the specifier text (e.g. ``">=1.23.5,<3"``, or ``""`` for a bare
-    ``Requires-Dist: numpy`` with no version constraint) for the first
-    *unconditional* numpy requirement, or ``None`` when the wheel is
-    unreadable, carries no ``.dist-info/METADATA`` member, or declares no
-    unconditional numpy dependency at all — including when the only
-    ``numpy`` entry is marker-gated (e.g. ``numpy; extra == "test"``, an
-    optional extra, not a real runtime requirement).
+    ``Requires-Dist: numpy`` with no version constraint) for the first numpy
+    requirement that is a base install dependency, or ``None`` when the wheel
+    is unreadable, carries no ``.dist-info/METADATA`` member, or declares no
+    such numpy dependency at all — including when the only ``numpy`` entry is
+    gated behind an optional extra (e.g. ``numpy; extra == "test"``, only
+    installed via ``pip install pkg[test]``, not a real runtime requirement).
+    A requirement gated by an *ordinary* marker instead (e.g. ``numpy;
+    python_version >= "3.9"``) is still a real, unconditional-on-the-base-
+    install requirement and is returned normally.
     """
     try:
         with zipfile.ZipFile(wheel_path) as zf:
@@ -565,6 +568,17 @@ def parse_wheel_numpy_requirement(wheel_path: Path) -> str | None:
     except (OSError, zipfile.BadZipFile):
         return None
     return parse_numpy_requirement_from_metadata(text)
+
+
+#: Matches the ``extra`` marker variable (PEP 508) as a whole word, e.g. in
+#: ``extra == "test"`` or ``extra == "test" and python_version >= "3.8"``.
+#: Used to tell an optional-extra-gated requirement (only installed via
+#: ``pip install pkg[test]``, not a base runtime dependency) apart from an
+#: ordinary conditional one (e.g. ``python_version >= "3.9"``), which *is*
+#: still an unconditional base install requirement on the versions it
+#: applies to (Codex review: a blanket "any marker at all" skip discarded
+#: real requirements like ``numpy; python_version >= "3.9"``).
+_EXTRA_MARKER_RE = re.compile(r"\bextra\b")
 
 
 def parse_numpy_requirement_from_metadata(metadata_text: str) -> str | None:
@@ -585,7 +599,9 @@ def parse_numpy_requirement_from_metadata(metadata_text: str) -> str | None:
             req = Requirement(raw)
         except InvalidRequirement:
             continue
-        if req.name.lower() != "numpy" or req.marker is not None:
+        if req.name.lower() != "numpy":
+            continue
+        if req.marker is not None and _EXTRA_MARKER_RE.search(str(req.marker)):
             continue
         return str(req.specifier)
     return None

@@ -867,6 +867,31 @@ class TestParseNumpyRequirementFromMetadata:
         text = 'Metadata-Version: 2.1\nRequires-Dist: numpy>=1.20; extra == "test"\n'
         assert parse_numpy_requirement_from_metadata(text) is None
 
+    def test_extra_gated_combined_with_other_condition_is_still_skipped(self) -> None:
+        text = (
+            "Metadata-Version: 2.1\n"
+            'Requires-Dist: numpy>=1.20; extra == "test" and python_version >= "3.8"\n'
+        )
+        assert parse_numpy_requirement_from_metadata(text) is None
+
+    def test_python_version_gated_numpy_is_a_real_requirement(self) -> None:
+        # A marker that isn't extra-gated (e.g. python_version) still makes
+        # this an unconditional *base install* requirement -- it's not an
+        # optional extra, just conditional on the interpreter version. A
+        # blanket "any marker at all" skip previously discarded this real
+        # requirement (Codex review).
+        text = (
+            'Metadata-Version: 2.1\nRequires-Dist: numpy>=1.23; python_version >= "3.9"\n'
+        )
+        assert parse_numpy_requirement_from_metadata(text) == ">=1.23"
+
+    def test_platform_gated_numpy_is_a_real_requirement(self) -> None:
+        text = (
+            "Metadata-Version: 2.1\n"
+            'Requires-Dist: numpy>=1.23; platform_system == "Linux"\n'
+        )
+        assert parse_numpy_requirement_from_metadata(text) == ">=1.23"
+
     def test_case_insensitive_package_name(self) -> None:
         text = "Metadata-Version: 2.1\nRequires-Dist: NumPy>=1.24\n"
         assert parse_numpy_requirement_from_metadata(text) == ">=1.24"

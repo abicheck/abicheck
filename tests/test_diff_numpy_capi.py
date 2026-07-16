@@ -32,16 +32,22 @@ def _kinds(changes: list) -> set[ChangeKind]:
 
 
 class TestDiffNumPyCapiSurfaces:
-    def test_consumption_added(self) -> None:
+    def test_consumption_added_suppressed_when_old_evidence_missing(self) -> None:
+        # old=None means "no NumPy C-API evidence captured on this side" (a
+        # snapshot predating this field, or an unscanned binary) -- not
+        # "confirmed not consuming". It is indistinguishable from a library
+        # that already consumed the NumPy C-API before this evidence existed,
+        # so comparing against it must not claim a new-consumption finding
+        # (Codex review).
         changes = diff_numpy_capi_surfaces(
             None, NumPyCapiSurface(consumes_array_api=True)
         )
-        assert _kinds(changes) == {ChangeKind.NUMPY_CAPI_CONSUMPTION_ADDED}
+        assert changes == []
 
     def test_consumption_added_from_prior_non_consuming_surface(self) -> None:
-        # A prior surface object that exists but consumes nothing (e.g. a
-        # library that previously imported neither table) — same "added"
-        # transition as starting from None.
+        # A prior surface that was actually scanned and confirmed to consume
+        # nothing (e.g. a library that previously imported neither table) is
+        # real evidence, not a gap -- a genuine "added" transition.
         changes = diff_numpy_capi_surfaces(
             NumPyCapiSurface(), NumPyCapiSurface(consumes_ufunc_api=True)
         )
@@ -53,11 +59,13 @@ class TestDiffNumPyCapiSurfaces:
         )
         assert _kinds(changes) == {ChangeKind.NUMPY_CAPI_CONSUMPTION_REMOVED}
 
-    def test_consumption_removed_to_none(self) -> None:
+    def test_consumption_removed_suppressed_when_new_evidence_missing(self) -> None:
+        # Symmetric case: new=None means the "new" side wasn't scanned/has no
+        # evidence either -- can't confirm removal from missing evidence.
         changes = diff_numpy_capi_surfaces(
             NumPyCapiSurface(consumes_array_api=True), None
         )
-        assert _kinds(changes) == {ChangeKind.NUMPY_CAPI_CONSUMPTION_REMOVED}
+        assert changes == []
 
     def test_no_consumption_either_side_is_silent(self) -> None:
         assert diff_numpy_capi_surfaces(None, None) == []
@@ -102,6 +110,31 @@ class TestCheckNumPyMetadataContract:
         assert check_numpy_metadata_contract(surf, ">=1.23.5") == []
         assert check_numpy_metadata_contract(surf, ">=1.23") == []
         assert check_numpy_metadata_contract(surf, ">=1.25") == []
+
+    def test_exclusive_lower_bound_counts_as_floor(self) -> None:
+        # numpy>1.25 already exceeds the binary's 1.20 target -- with `>`
+        # previously ignored entirely, this fell through to "no floor
+        # declared" and always flagged understated metadata even though the
+        # requirement already covers the target (Codex review).
+        surf = NumPyCapiSurface(consumes_array_api=True, capi_target_version="1.20")
+        assert check_numpy_metadata_contract(surf, ">1.25") == []
+
+    def test_exclusive_lower_bound_excludes_numpy_1x_no_abi_major_flag(self) -> None:
+        # numpy>2.0 excludes every NumPy 1.x runtime, same as the Codex
+        # review's example -- must not falsely flag numpy_abi_major_incompatible
+        # for a binary targeting NumPy 2.x when the metadata already rules out
+        # a 1.x install.
+        surf = NumPyCapiSurface(consumes_array_api=True, capi_target_version="2.1")
+        changes = check_numpy_metadata_contract(surf, ">2.0")
+        assert ChangeKind.NUMPY_ABI_MAJOR_INCOMPATIBLE not in _kinds(changes)
+
+    def test_exclusive_lower_bound_still_flags_understated_floor(self) -> None:
+        surf = NumPyCapiSurface(consumes_array_api=True, capi_target_version="2.1")
+        changes = check_numpy_metadata_contract(surf, ">1.20")
+        assert _kinds(changes) == {
+            ChangeKind.NUMPY_METADATA_UNDERSTATES_REQUIRED_VERSION,
+            ChangeKind.NUMPY_ABI_MAJOR_INCOMPATIBLE,
+        }
 
     def test_declared_floor_understates_target(self) -> None:
         surf = NumPyCapiSurface(consumes_array_api=True, capi_target_version="1.23")
