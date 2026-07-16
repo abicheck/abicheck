@@ -1185,8 +1185,10 @@ class TestAbiCompare:
         report = data["report"]
         assert report["severity"]["exit_code"] == 0
         assert report["severity"]["blocking"] is False
+        assert report["severity"]["categories"]["abi_breaking"]["count"] == 0
         assert report["full_severity"]["exit_code"] == 4
         assert report["full_severity"]["blocking"] is True
+        assert report["full_severity"]["categories"]["abi_breaking"]["count"] == 1
 
     def test_required_symbols_missing_entrypoint_is_breaking(self, tmp_path: Path):
         kept = _pub_func("entry", "_Z5entryv", "int")
@@ -1311,6 +1313,11 @@ class TestAbiCompare:
         assert data["used_by"][0]["missing_symbols"] == ["never_existed"]
         assert data["verdict"] == "BREAKING"
         assert data["exit_code"] == 4
+        report = data["report"]
+        assert report["severity"]["exit_code"] == 4
+        assert report["severity"]["blocking_categories"] == ["abi_breaking"]
+        # The missing symbol itself (not a diff Change) still counts.
+        assert report["severity"]["categories"]["abi_breaking"]["count"] == 1
 
     def test_used_by_rejects_non_binary_snapshot_input(self, tmp_path: Path):
         # --used-by needs real library binaries to parse app requirements

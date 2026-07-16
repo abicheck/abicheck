@@ -1248,6 +1248,8 @@ class TestUsedByScoping:
         assert data["severity"]["exit_code"] == 4
         assert data["severity"]["blocking"] is True
         assert data["severity"]["blocking_categories"] == ["abi_breaking"]
+        # The missing symbol itself (not a diff Change) still counts.
+        assert data["severity"]["categories"]["abi_breaking"]["count"] == 1
 
     def test_severity_info_only_preset_overrides_missing_symbols_exit(
         self, tmp_path, monkeypatch
@@ -1402,11 +1404,15 @@ class TestUsedByScoping:
         assert data["severity"]["exit_code"] == 0
         assert data["severity"]["blocking"] is False
         assert data["severity"]["blocking_categories"] == []
+        # Category counts also move to the scoped tally -- not left over
+        # from the full-library breakdown alongside a non-blocking gate.
+        assert data["severity"]["categories"]["abi_breaking"]["count"] == 0
         # The full-library breakdown is preserved, just demoted to a
         # secondary key -- it still shows the real BREAKING removal.
         assert data["full_severity"]["exit_code"] == 4
         assert data["full_severity"]["blocking"] is True
         assert "abi_breaking" in data["full_severity"]["blocking_categories"]
+        assert data["full_severity"]["categories"]["abi_breaking"]["count"] == 1
 
 
 class TestUsedByScopingWithSnapshotInputs:

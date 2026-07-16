@@ -404,8 +404,10 @@ class TestScopedExitRespectsSeverity:
         assert data["verdict"] == "COMPATIBLE"
         assert data["severity"]["exit_code"] == 0
         assert data["severity"]["blocking"] is False
+        assert data["severity"]["categories"]["abi_breaking"]["count"] == 0
         assert data["full_severity"]["exit_code"] == 4
         assert data["full_severity"]["blocking"] is True
+        assert data["full_severity"]["categories"]["abi_breaking"]["count"] == 1
 
 
 # ── §1 appcompat warnings + scope ───────────────────────────────────────────

@@ -117,7 +117,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
     full-library gate even under `--used-by`/`--required-symbol` scoping, so
     a scoped-compatible run that exited `0` could still carry
     `severity.exit_code: 4`/`blocking: true` in its own JSON body, the
-    opposite of what the command that produced it just did.
+    opposite of what the command that produced it just did. The scoped
+    `severity.categories.*.count` values are recomputed to match — a scoped
+    -compatible `severity.exit_code: 0` no longer keeps a stale error-level
+    `categories.abi_breaking.count` left over from the full-library
+    breakdown alongside it.
 
 ### Changed
 

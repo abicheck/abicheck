@@ -525,33 +525,52 @@ def _scoped_exit_code(
     return _verdict_exit_code(scoped.verdict)
 
 
-def _scoped_blocking_categories(
-    relevant_changes: list[Any], has_missing_contract: bool,
+def _scoped_severity_summary(
+    relevant_changes: list[Any], missing_count: int,
     result: Any, sev_config: Any, policy: str, policy_file: PolicyFile | None,
-) -> tuple[str, ...]:
-    """Severity-scheme blocking categories for one scoped result.
+) -> tuple[tuple[str, ...], dict[str, int]]:
+    """(blocking_categories, per-category counts) for one scoped result.
 
     Mirrors ``_scoped_exit_code``'s missing-contract floor: a missing
-    symbol/version/entrypoint is the same failure class as ``abi_breaking``,
-    so when it is what pushes the scoped exit code above zero it is folded
-    into the reported blocking categories the same way -- otherwise a
-    missing-contract-only scoped BREAKING (no diff Change) would report an
-    empty ``blocking_categories`` alongside a nonzero exit code.
+    symbol/version/entrypoint has no diff Change, so it is folded into
+    ``abi_breaking`` directly here -- both into the blocking-categories set
+    (when abi_breaking is severity-configured as error, matching the exit
+    -code floor) and into the count (always, since a count is a factual
+    tally, not a gate decision) -- otherwise a missing-contract-only scoped
+    BREAKING would report an empty ``blocking_categories`` alongside a
+    nonzero exit code, or a ``categories.abi_breaking.count`` of 0 alongside
+    a blocking ``abi_breaking`` category (Codex review).
     """
-    from .severity import IssueCategory, SeverityLevel, compute_gate_decision
+    from .severity import (
+        IssueCategory,
+        SeverityLevel,
+        categorize_changes,
+        compute_gate_decision,
+    )
 
+    categorized = categorize_changes(
+        relevant_changes, policy=policy,
+        kind_sets=result._effective_kind_sets(), policy_file=policy_file,
+    )
+    counts = {
+        "abi_breaking": len(categorized.abi_breaking),
+        "potential_breaking": len(categorized.potential_breaking),
+        "quality_issues": len(categorized.quality_issues),
+        "addition": len(categorized.addition),
+    }
     gate = compute_gate_decision(
         relevant_changes, sev_config,
         policy=policy, kind_sets=result._effective_kind_sets(), policy_file=policy_file,
     )
     categories = list(gate.blocking_categories)
-    if (
-        has_missing_contract
-        and sev_config.abi_breaking == SeverityLevel.ERROR
-        and IssueCategory.ABI_BREAKING.value not in categories
-    ):
-        categories.append(IssueCategory.ABI_BREAKING.value)
-    return tuple(categories)
+    if missing_count > 0:
+        counts["abi_breaking"] += missing_count
+        if (
+            sev_config.abi_breaking == SeverityLevel.ERROR
+            and IssueCategory.ABI_BREAKING.value not in categories
+        ):
+            categories.append(IssueCategory.ABI_BREAKING.value)
+    return tuple(categories), counts
 
 
 def _apply_used_by_scoping(
@@ -598,17 +617,18 @@ def _apply_used_by_scoping(
     worst_verdict = None
     worst_verdict_rank = -1
     worst_categories: set[str] = set()
+    worst_counts: dict[str, int] = {}
     for app in used_by_apps:
         scoped = scope_diff_to_app(
             result, app, old_lib, new_lib,
             policy=policy, policy_file=policy_file,
         )
         summaries.append(_app_compat_summary(scoped))
-        has_missing = bool(scoped.missing_symbols or scoped.missing_versions)
+        missing_count = len(scoped.missing_symbols) + len(scoped.missing_versions)
         exit_code = _scoped_exit_code(
             scoped, scoped.breaking_for_app, result, exit_code_scheme, sev_config,
             policy, policy_file,
-            has_missing_contract=has_missing,
+            has_missing_contract=missing_count > 0,
         )
         # exit code (gating) and verdict (reporting) are maxed/ranked
         # independently: under a severity scheme the two can disagree (a
@@ -617,13 +637,16 @@ def _apply_used_by_scoping(
         # could let a later, less-severe app overwrite an earlier BREAKING
         # one merely because their exit codes tied at 0 (Codex review).
         if exit_code_scheme == "severity":
-            categories = _scoped_blocking_categories(
-                scoped.breaking_for_app, has_missing, result, sev_config, policy, policy_file,
+            categories, counts = _scoped_severity_summary(
+                scoped.breaking_for_app, missing_count, result, sev_config, policy, policy_file,
             )
             if exit_code > worst_exit:
                 worst_categories = set(categories)
+                worst_counts = dict(counts)
             elif exit_code == worst_exit:
                 worst_categories |= set(categories)
+                for cat, count in counts.items():
+                    worst_counts[cat] = worst_counts.get(cat, 0) + count
         worst_exit = max(worst_exit, exit_code)
         rank = _verdict_severity_rank(scoped.verdict)
         if worst_verdict is None or rank >= worst_verdict_rank:
@@ -635,6 +658,7 @@ def _apply_used_by_scoping(
     result.scoped_exit_code_scheme = exit_code_scheme  # type: ignore[attr-defined]
     if exit_code_scheme == "severity":
         result.scoped_blocking_categories = tuple(sorted(worst_categories))  # type: ignore[attr-defined]
+        result.scoped_severity_counts = worst_counts  # type: ignore[attr-defined]
     return worst_exit
 
 
@@ -653,18 +677,20 @@ def _apply_required_symbol_scoping(
     )
     result.required_symbols = _plugin_contract_summary(scoped)  # type: ignore[attr-defined]
     result.scoped_verdict = scoped.verdict  # type: ignore[attr-defined]
-    has_missing = bool(scoped.missing_entrypoints)
+    missing_count = len(scoped.missing_entrypoints)
     exit_code = _scoped_exit_code(
         scoped, scoped.breaking_for_host, result, exit_code_scheme, sev_config,
         policy, policy_file,
-        has_missing_contract=has_missing,
+        has_missing_contract=missing_count > 0,
     )
     result.scoped_exit_code = exit_code  # type: ignore[attr-defined]
     result.scoped_exit_code_scheme = exit_code_scheme  # type: ignore[attr-defined]
     if exit_code_scheme == "severity":
-        result.scoped_blocking_categories = _scoped_blocking_categories(  # type: ignore[attr-defined]
-            scoped.breaking_for_host, has_missing, result, sev_config, policy, policy_file,
+        categories, counts = _scoped_severity_summary(
+            scoped.breaking_for_host, missing_count, result, sev_config, policy, policy_file,
         )
+        result.scoped_blocking_categories = categories  # type: ignore[attr-defined]
+        result.scoped_severity_counts = counts  # type: ignore[attr-defined]
     return exit_code
 
 
@@ -1368,8 +1394,28 @@ def _fold_scoped_compat_into_text(text: str, fmt: str, result: Any) -> str:
             and isinstance(severity_block, dict)
         ):
             payload["full_severity"] = severity_block
+            # `categories.*.count` must also move to the scoped tally --
+            # otherwise a scoped-compatible `exit_code: 0` could still show
+            # an error-level `categories.abi_breaking.count > 0` left over
+            # from the full-library breakdown, contradicting the now-scoped
+            # `blocking`/`blocking_categories` fields above (Codex review).
+            scoped_counts = getattr(result, "scoped_severity_counts", None) or {}
+            full_categories = severity_block.get("categories")
+            scoped_categories = (
+                {
+                    cat: (
+                        {**info, "count": scoped_counts.get(cat, 0)}
+                        if isinstance(info, dict)
+                        else info
+                    )
+                    for cat, info in full_categories.items()
+                }
+                if isinstance(full_categories, dict)
+                else full_categories
+            )
             payload["severity"] = {
                 **severity_block,
+                "categories": scoped_categories,
                 "exit_code": scoped_exit_code,
                 "blocking": scoped_exit_code != 0,
                 "blocking_categories": list(
