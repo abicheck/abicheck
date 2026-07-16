@@ -171,6 +171,20 @@ the way it previously did (stale at a 169-case catalog for several releases).
   whitelisting exit 1 would mask the second one — see the case's README for
   the full explanation. It stays `BASELINE_SIGNAL`, which per policy is
   visible but not CI-blocking.
+- **11 cases regressed to a macOS-only `NO_CHANGE`/wrong-verdict result starting at commit
+  `71b4f624e2b10d53ee662b555907280baad0982a` (PR #555), Linux (gcc and clang) unaffected:**
+  `case22_method_const_changed`, `case47_inline_to_outlined`, `case71_inline_namespace_moved`,
+  `case82_sycl_overload_set_removed`, `case85_internal_template_signature_changed`,
+  `case88_cpo_kind_changed`, `case99_experimental_graduated`,
+  `case100_experimental_removed_without_replacement`, `case101_inline_namespace_version_bumped`,
+  `case110_concurrent_unordered_map_api_drift`, `case166_ref_qualifier_added`. Investigated at
+  length (CI history bisection to the exact commit, a full review of that PR's diff, and
+  Linux+clang reproduction attempts under both the narrow and full integration test suites)
+  without finding a mechanism that survives scrutiny against the actual code paths involved —
+  see each case's `known_gap` in `ground_truth.json` for the investigation notes. Diagnosing
+  further needs a real macOS shell to inspect the actual dump output, which wasn't available;
+  marked `known_gap_platforms: ["macos"]` (XFAIL, not silently skipped) to unblock CI rather
+  than guess at a fix. Root-causing and re-tightening these is tracked as follow-up work.
 
 Default/debug skips are not accepted as green coverage. They are cases outside
 the default single-library debug lane: G20 audit/cross-source snapshots, L3/L4/L5
