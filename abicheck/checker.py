@@ -588,6 +588,24 @@ def compare(
         if floor_changes:
             kept.extend(floor_changes)
 
+    # NumPy C-API compatibility-envelope delta (G26): needs only the two
+    # snapshots' own numpy_capi field (no external wheel metadata), so this
+    # runs unconditionally — unlike the wheel-metadata cross-check
+    # (check_numpy_metadata_contract), which needs a declared numpy
+    # requirement compare() has no access to and stays a standalone,
+    # programmatic-use function (same "not yet wired into the CLI path"
+    # precedent as G10's package.parse_manylinux_glibc_floor).
+    from .diff_numpy_capi import diff_numpy_capi_surfaces
+
+    numpy_capi_changes = diff_numpy_capi_surfaces(
+        getattr(old, "numpy_capi", None), getattr(new, "numpy_capi", None)
+    )
+    numpy_capi_changes = _filter_suppressed_changes(
+        numpy_capi_changes, suppression, suppressed
+    )
+    if numpy_capi_changes:
+        kept.extend(numpy_capi_changes)
+
     # Post-detector: SONAME bump policy check.  Runs after post-processing so
     # rename collapsing and other dedup is already settled before reading `kept`.
     kept = _apply_soname_policy(

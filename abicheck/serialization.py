@@ -448,6 +448,16 @@ def _kabi_from_dict(d: dict[str, Any]) -> Any:
     return KabiMetadata(entries=entries)
 
 
+def _numpy_capi_from_dict(d: dict[str, Any]) -> Any:
+    from .numpy_capi import NumPyCapiSurface
+
+    return NumPyCapiSurface(
+        consumes_array_api=d.get("consumes_array_api", False),
+        consumes_ufunc_api=d.get("consumes_ufunc_api", False),
+        capi_target_version=d.get("capi_target_version"),
+    )
+
+
 def _python_ext_from_dict(d: dict[str, Any]) -> Any:
     from .python_ext import PythonExtMetadata
 
@@ -670,6 +680,12 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
 
     kabi_data = d.get("kabi")
     kabi = _kabi_from_dict(kabi_data) if isinstance(kabi_data, dict) else None
+    numpy_capi_data = d.get("numpy_capi")
+    numpy_capi = (
+        _numpy_capi_from_dict(numpy_capi_data)
+        if isinstance(numpy_capi_data, dict)
+        else None
+    )
     python_ext_data = d.get("python_ext")
     python_ext = (
         _python_ext_from_dict(python_ext_data)
@@ -774,6 +790,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         dwarf_advanced=dwarf_advanced,
         sycl=sycl,
         kabi=kabi,
+        numpy_capi=numpy_capi,
         python_ext=python_ext,
         python_api=python_api,
         elf_only_mode=elf_only_mode,

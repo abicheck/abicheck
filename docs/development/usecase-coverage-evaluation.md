@@ -20,7 +20,7 @@ map across all three.
 ## Headline
 
 abicheck is **exceptionally deep on the change-taxonomy axis and comparatively
-thin on the breadth axes.** The "what changed" dimension — **355 `ChangeKind`s**
+thin on the breadth axes.** The "what changed" dimension — **360 `ChangeKind`s**
 in a 5-tier policy model, **181 calibrated example cases** (134 binary shared-library competitor lanes plus dedicated fixture/source lanes), ABICC + libabigail
 parity — is essentially complete and has diminishing returns.
 
@@ -72,7 +72,7 @@ A real invocation is a point in this space:
 
 | Use case | Status | Notes |
 |---|---|---|
-| Change taxonomy | `complete` | 355 change kinds; 181 ground-truth entries; parity tests; fixture/source-only L2/L5/source cases are tracked separately from binary `.so` competitor lanes |
+| Change taxonomy | `complete` | 360 change kinds; 181 ground-truth entries; parity tests; fixture/source-only L2/L5/source cases are tracked separately from binary `.so` competitor lanes |
 | **Release recommendation (semver + SONAME)** | `complete` | semver bump + SONAME action emitted in reports |
 | C / C++ archetypes | `complete` | 35 C + 52 C++ example pairs |
 | Linux ELF platform | `complete` | the CI-validated baseline |
@@ -122,7 +122,7 @@ A real invocation is a point in this space:
 | **G22** | ✅ closed | CLI interface contract, config balance, and extension policy ([ADR-037](adr/037-cli-interface-contract.md)). Followed G21's depth dial with the structural cleanup the flag-divergence audit surfaced: three named tiers with `service.py` as the only compare chokepoint (fixes `compare-release` bypassing it with a different `scope_public` default), typed `CompareRequest` dataclasses, one decorator per shared option family (kills the severity/header/policy/debug copy-paste drift), a single `--depth` vocabulary (drops the "evidence" naming and the user-facing L5-graph rung), folding `compare-release`/`deep-compare` into `compare`, `--header-backend` → `--ast-frontend`, a CLI↔`.abicheck.yml` rebalance, an explicit `--exit-code-scheme`, and a `cli-contract` CI gate. Backward-compat mechanism designed, left advisory until 1.0. |
 | **G16** | ✅ closed | Header-scoped source-mode toolchain robustness. Surfaced by 21 real-world cron records. Actionable diagnostics for all three host-toolchain signatures (sized-float `_FloatN`, GCC `__assume__`, `--lang c` + `extern "C"`), plus a `castxml --version` probe that recommends the Clang floor (≥ 18) on a version-mismatch failure; a dedicated `HeaderToolchainError` (a `SnapshotError` subclass) so callers can branch on "this failure carries an actionable remediation"; and a real-host `integration` end-to-end check (`tests/test_header_scope_toolchain.py`) over a `<math.h>`-including header. A `-D_FloatN` shim was prototyped and **rejected** (it rewrites glibc's own `typedef float _Float32;` fallback); the durable cure for a too-old host toolchain remains a newer-Clang castxml or the libclang extractor (G4). |
 | **G25** | planned | Cython API/ABI frontend (`.pxd` + `__pyx_capi__` capsule surface) — see the [SciPy/Scientific-Python Roadmap](scipy-scientific-python-roadmap.md#1-a-first-class-cython-apiabi-frontend). Neither the native C-ABI check (G14) nor the Python-level API check (G23) see a capsule signature change. |
-| **G26** | planned | NumPy C-API compatibility-envelope analysis (build/target facts vs. declared metadata range) — see the [SciPy/Scientific-Python Roadmap](scipy-scientific-python-roadmap.md#2-numpy-c-api-compatibility-envelope-analysis). NumPy's capsule-based C-API is invisible to ordinary symbol-table diffing. |
+| **G26** | partial | NumPy C-API compatibility-envelope analysis. `numpy_capi.extract_numpy_capi_surface()` recovers `_ARRAY_API`/`_UFUNC_API` consumption and the `NPY_TARGET_VERSION` build/target facts from binary evidence and cross-checks them against the declared metadata range; the raw `NPY_ABI_VERSION`/`NPY_API_VERSION` hex constants need disassembly to recover (out of scope, same reasoning as G4) — see the [SciPy/Scientific-Python Roadmap](scipy-scientific-python-roadmap.md#2-numpy-c-api-compatibility-envelope-analysis) and the plan's "Out of scope". NumPy's capsule-based C-API is invisible to ordinary symbol-table diffing. |
 | **G27** | planned | Wheel tag / deployment-claim verification across Linux (extends G10 to `GLIBCXX`/`CXXABI`/musllinux), macOS (deployment target), and Windows (UCRT/runtime) — see the [SciPy/Scientific-Python Roadmap](scipy-scientific-python-roadmap.md#3-wheel-tag-and-deployment-claim-verification). |
 
 ## Proposed next steps (tracked in the registry)

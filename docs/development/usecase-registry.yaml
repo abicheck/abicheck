@@ -29,7 +29,7 @@ use_cases:
   # ── change_class ──────────────────────────────────────────────────────────
   - id: UC-CHANGE-taxonomy
     axis: change_class
-    name: ABI/API change taxonomy (355 ChangeKinds, 5-tier policy)
+    name: ABI/API change taxonomy (360 ChangeKinds, 5-tier policy)
     status: complete
     evidence:
       modules: [abicheck/change_registry.py, abicheck/checker_policy.py]
@@ -622,18 +622,43 @@ use_cases:
   - id: UC-TC-numpy-capi-envelope
     axis: toolchain
     name: NumPy C-API build/target compatibility envelope
-    status: planned
+    status: partial
     gap: G26
     plan: docs/development/plans/g26-numpy-capi-envelope.md
+    evidence:
+      modules: [
+        abicheck/numpy_capi.py,
+        abicheck/diff_numpy_capi.py,
+        abicheck/change_registry_numpy.py,
+        abicheck/package.py,
+      ]
+      tests: [
+        tests/test_numpy_capi.py,
+        tests/test_diff_numpy_capi.py,
+        tests/test_package.py,
+      ]
     next_steps: >
-      Extract NPY_ABI_VERSION/NPY_API_VERSION/NPY_TARGET_VERSION facts from
-      binary evidence (rodata/string scanning, no header needed) and
-      cross-check against the declared numpy requirement range in wheel
-      metadata. Emit numpy_metadata_understates_required_version and
-      numpy_abi_major_incompatible; report a support-envelope summary rather
-      than a bare verdict. NumPy's capsule-based C-API is invisible to
-      ordinary symbol-table diffing. See the SciPy/Scientific-Python Roadmap
-      for full context.
+      DONE: NPY_TARGET_VERSION and _ARRAY_API/_UFUNC_API consumption
+      extracted from binary evidence (rodata/string scanning, no header
+      needed — numpy_capi.extract_numpy_capi_surface), cross-checked
+      against the declared numpy requirement range in wheel metadata
+      (package.parse_wheel_numpy_requirement). Emits
+      numpy_capi_consumption_added/removed, numpy_target_floor_raised
+      (wired into compare() unconditionally),
+      numpy_metadata_understates_required_version, and
+      numpy_abi_major_incompatible (both via the standalone
+      check_numpy_metadata_contract, mirroring G10's
+      parse_manylinux_glibc_floor — not auto-wired into the CLI compare
+      path). NumPy's capsule-based C-API is invisible to ordinary
+      symbol-table diffing.
+      STILL PLANNED: the raw NPY_ABI_VERSION/NPY_API_VERSION hex constants
+      (confirmed during implementation to need disassembly to recover — a
+      new heavy dependency out of scope, same reasoning as G4),
+      numpy_build_runtime_contract_mismatch,
+      numpy_deprecated_c_api_reintroduced (NPY_NO_DEPRECATED_API leaves no
+      runtime-visible trace at all), numpy_api_used_above_declared_floor,
+      a rendered support-envelope string, and a compiled examples/ fixture
+      pair. See the plan's "Out of scope" section for the full breakdown.
 
   - id: UC-TC-wheel-deployment-claims
     axis: toolchain

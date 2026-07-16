@@ -165,6 +165,13 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "symbol_version_defined_added": "L0",
     "dt_relr_introduced": "L0",
     "dt_relr_removed": "L0",
+    # NumPy C-API compatibility envelope (G26) — pure binary-evidence
+    # (rodata string) scans, no header/source/DWARF needed.
+    "numpy_capi_consumption_added": "L0",
+    "numpy_capi_consumption_removed": "L0",
+    "numpy_target_floor_raised": "L0",
+    "numpy_metadata_understates_required_version": "L0",
+    "numpy_abi_major_incompatible": "L0",
     "rpath_type_changed": "L0",
     "hash_style_removed": "L0",
     "time64_abi_changed": "L1",

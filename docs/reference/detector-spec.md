@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (355 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (360 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -168,6 +168,11 @@ One row per `ChangeKind` (355 total). Columns fuse the verdict partition (`check
 | `needed_added` | quality | `COMPATIBLE` | `warning` | L0 | `needed_added` | [case138](../examples/case138_needed_added.md) |
 | `needed_order_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `needed_order_changed` | — |
 | `needed_removed` | quality | `COMPATIBLE` | `warning` | L0 | `needed_removed` | — |
+| `numpy_abi_major_incompatible` | breaking | `BREAKING` | `error` | L0 | `numpy_abi_major_incompatible` | — |
+| `numpy_capi_consumption_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `numpy_capi_consumption_added` | — |
+| `numpy_capi_consumption_removed` | quality | `COMPATIBLE` | `warning` | L0 | `numpy_capi_consumption_removed` | — |
+| `numpy_metadata_understates_required_version` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `numpy_metadata_understates_required_version` | — |
+| `numpy_target_floor_raised` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `numpy_target_floor_raised` | — |
 | `odr_source_conflict` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `odr_source_conflict` | — |
 | `odr_type_variant` | api_break | `API_BREAK` | `warning` | L4 | `odr_type_variant` | [case149](../examples/case149_xcheck_odr_variant.md) |
 | `opaque_invariant_broken` | breaking | `BREAKING` | `error` | unspecified | `opaque_invariant_broken` | — |

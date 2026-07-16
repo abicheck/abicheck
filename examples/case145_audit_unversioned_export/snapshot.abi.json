@@ -91,6 +91,7 @@
   "language_profile": null,
   "library": "libdemo.so",
   "macho": null,
+  "numpy_capi": null,
   "parsed_with_build_context": false,
   "pe": null,
   "platform": null,

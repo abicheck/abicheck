@@ -30,6 +30,8 @@ from abicheck.package import (
     discover_shared_libraries,
     is_package,
     parse_manylinux_glibc_floor,
+    parse_numpy_requirement_from_metadata,
+    parse_wheel_numpy_requirement,
     resolve_debug_info,
 )
 
@@ -837,6 +839,72 @@ class TestParseManylinuxGlibcFloor:
         self, name: str, expected: str | None
     ) -> None:
         assert parse_manylinux_glibc_floor(name) == expected
+
+
+class TestParseNumpyRequirementFromMetadata:
+    """G26: declared numpy requirement from a wheel's *.dist-info/METADATA."""
+
+    def test_versioned_requirement(self) -> None:
+        text = (
+            "Metadata-Version: 2.1\nName: pkg\nVersion: 1.0\n"
+            "Requires-Dist: numpy>=1.23.5,<3\n"
+        )
+        assert parse_numpy_requirement_from_metadata(text) == "<3,>=1.23.5"
+
+    def test_no_requires_dist_at_all(self) -> None:
+        text = "Metadata-Version: 2.1\nName: pkg\nVersion: 1.0\n"
+        assert parse_numpy_requirement_from_metadata(text) is None
+
+    def test_requires_dist_for_other_packages_only(self) -> None:
+        text = "Metadata-Version: 2.1\nRequires-Dist: scipy>=1.10\n"
+        assert parse_numpy_requirement_from_metadata(text) is None
+
+    def test_bare_numpy_with_no_version_constraint(self) -> None:
+        text = "Metadata-Version: 2.1\nRequires-Dist: numpy\n"
+        assert parse_numpy_requirement_from_metadata(text) == ""
+
+    def test_marker_gated_numpy_is_not_a_real_requirement(self) -> None:
+        text = 'Metadata-Version: 2.1\nRequires-Dist: numpy>=1.20; extra == "test"\n'
+        assert parse_numpy_requirement_from_metadata(text) is None
+
+    def test_case_insensitive_package_name(self) -> None:
+        text = "Metadata-Version: 2.1\nRequires-Dist: NumPy>=1.24\n"
+        assert parse_numpy_requirement_from_metadata(text) == ">=1.24"
+
+    def test_first_unconditional_match_wins(self) -> None:
+        text = (
+            "Metadata-Version: 2.1\n"
+            'Requires-Dist: numpy>=1.20; extra == "test"\n'
+            "Requires-Dist: numpy>=1.23.5\n"
+        )
+        assert parse_numpy_requirement_from_metadata(text) == ">=1.23.5"
+
+
+class TestParseWheelNumpyRequirement:
+    """G26: reads *.dist-info/METADATA directly out of the wheel zip."""
+
+    def test_reads_metadata_from_wheel(self, tmp_path: Path) -> None:
+        whl = tmp_path / "pkg-1.0-cp311-cp311-linux_x86_64.whl"
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr(
+                "pkg-1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\nRequires-Dist: numpy>=1.23.5\n",
+            )
+        assert parse_wheel_numpy_requirement(whl) == ">=1.23.5"
+
+    def test_no_dist_info_metadata_member(self, tmp_path: Path) -> None:
+        whl = tmp_path / "pkg-1.0-cp311-cp311-linux_x86_64.whl"
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr("pkg/__init__.py", "")
+        assert parse_wheel_numpy_requirement(whl) is None
+
+    def test_not_a_zip_returns_none(self, tmp_path: Path) -> None:
+        whl = tmp_path / "not-a-wheel.whl"
+        whl.write_bytes(b"not a zip file")
+        assert parse_wheel_numpy_requirement(whl) is None
+
+    def test_nonexistent_wheel_returns_none(self, tmp_path: Path) -> None:
+        assert parse_wheel_numpy_requirement(tmp_path / "missing.whl") is None
 
 
 class TestCondaExtractor:

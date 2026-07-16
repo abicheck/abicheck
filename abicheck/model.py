@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     from .dwarf_metadata import DwarfMetadata
     from .elf_metadata import ElfMetadata
     from .macho_metadata import MachoMetadata
+    from .numpy_capi import NumPyCapiSurface
     from .pe_metadata import PeMetadata
     from .python_api import PythonApiSurface
     from .python_ext import PythonExtMetadata
@@ -382,6 +383,12 @@ class AbiSnapshot:
     # slot of ``enums``/``typedefs``/… for callers that build snapshots
     # positionally. None when no stub was found — the C-ABI/export view can't see
     # this surface, so it's a separate check.
+    numpy_capi: NumPyCapiSurface | None = field(
+        default=None, kw_only=True
+    )  # NumPy C-API consumption (_ARRAY_API/_UFUNC_API, NPY_TARGET_VERSION)
+    # recovered from binary evidence (G26). Keyword-only for the same reason
+    # as ``kabi``/``python_api``. None when the library shows no sign of
+    # consuming the NumPy C-API at all (an ordinary, non-NumPy library).
     enums: list[EnumType] = field(default_factory=list)
     typedefs: dict[str, str] = field(
         default_factory=dict

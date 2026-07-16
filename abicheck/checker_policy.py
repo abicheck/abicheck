@@ -828,6 +828,18 @@ class ChangeKind(str, Enum):
     PE_IMPORT_LOAD_MODE_CHANGED = "pe_import_load_mode_changed"  # an imported DLL function moved between eager (IAT) and delay-loaded → RISK
     WCHAR_MODEL_CHANGED = "wchar_model_changed"  # -fshort-wchar drift changes wchar_t size/signedness with no symbol-level signal → RISK
 
+    # ── NumPy C-API compatibility envelope (G26) ──────────────────────────────
+    # The NumPy C-API is consumed through an indirect function-pointer table
+    # (_ARRAY_API/_UFUNC_API, populated by import_array()/import_ufunc()), not
+    # ordinary dynamic symbol imports — invisible to symbol-table diffing.
+    # Binary evidence: NumPy's generated import_array()/import_umath() shims
+    # embed stable literal strings a rodata scan recovers reliably.
+    NUMPY_CAPI_CONSUMPTION_ADDED = "numpy_capi_consumption_added"  # module gained a NumPy C-API dependency ordinary symbol diffing can't see → RISK
+    NUMPY_CAPI_CONSUMPTION_REMOVED = "numpy_capi_consumption_removed"  # module dropped its NumPy C-API dependency → COMPATIBLE
+    NUMPY_TARGET_FLOOR_RAISED = "numpy_target_floor_raised"  # the module's NumPy C-API usage now requires a newer minimum NumPy (NPY_TARGET_VERSION rose) → RISK
+    NUMPY_METADATA_UNDERSTATES_REQUIRED_VERSION = "numpy_metadata_understates_required_version"  # wheel's declared numpy requirement is looser than the binary's own NumPy C-API target → RISK
+    NUMPY_ABI_MAJOR_INCOMPATIBLE = "numpy_abi_major_incompatible"  # binary's NumPy C-API target crosses the 1.x/2.x ABI boundary above what the declared numpy requirement allows — a real import crash, not just a stale metadata claim → BREAKING
+
     @classmethod
     def _missing_(cls, value: object) -> ChangeKind | None:
         # Back-compat: accept the pre-rename serialized value so reports and

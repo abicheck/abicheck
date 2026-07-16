@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from .change_registry_composition import COMPOSITION_EXTENSION_ENTRIES
 from .change_registry_coverage import COVERAGE_EXTENSION_ENTRIES
+from .change_registry_numpy import NUMPY_EXTENSION_ENTRIES
 from .change_registry_types import (  # noqa: F401
     ChangeKindMeta as ChangeKindMeta,
     ChangeKindRegistry as ChangeKindRegistry,
@@ -1988,4 +1989,7 @@ REGISTRY = ChangeKindRegistry([
     # contract, consumer-aware PE, wchar_t model) live in
     # change_registry_composition.py for the same reason.
     *COMPOSITION_EXTENSION_ENTRIES,
+    # NumPy C-API compatibility-envelope kinds (G26) live in
+    # change_registry_numpy.py for the same reason.
+    *NUMPY_EXTENSION_ENTRIES,
 ])

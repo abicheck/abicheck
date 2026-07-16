@@ -536,6 +536,61 @@ def parse_manylinux_glibc_floor(name: str) -> str | None:
     return f"{best[0]}.{best[1]}" if best is not None else None
 
 
+# G26: a wheel's *.dist-info/METADATA declares its runtime dependencies —
+# the "declared" side of the NumPy C-API compatibility-envelope check (the
+# binary-evidence "required" side comes from numpy_capi.py). Mirrors
+# parse_manylinux_glibc_floor's role for G10: a pure function callers wire
+# in programmatically (see diff_numpy_capi.check_numpy_metadata_contract).
+def parse_wheel_numpy_requirement(wheel_path: Path) -> str | None:
+    """Extract the declared ``numpy`` version-specifier range from a wheel's
+    ``*.dist-info/METADATA`` (``Requires-Dist: numpy...``).
+
+    Returns the specifier text (e.g. ``">=1.23.5,<3"``, or ``""`` for a bare
+    ``Requires-Dist: numpy`` with no version constraint) for the first
+    *unconditional* numpy requirement, or ``None`` when the wheel is
+    unreadable, carries no ``.dist-info/METADATA`` member, or declares no
+    unconditional numpy dependency at all — including when the only
+    ``numpy`` entry is marker-gated (e.g. ``numpy; extra == "test"``, an
+    optional extra, not a real runtime requirement).
+    """
+    try:
+        with zipfile.ZipFile(wheel_path) as zf:
+            metadata_name = next(
+                (n for n in zf.namelist() if n.endswith(".dist-info/METADATA")),
+                None,
+            )
+            if metadata_name is None:
+                return None
+            text = zf.read(metadata_name).decode("utf-8", errors="replace")
+    except (OSError, zipfile.BadZipFile):
+        return None
+    return parse_numpy_requirement_from_metadata(text)
+
+
+def parse_numpy_requirement_from_metadata(metadata_text: str) -> str | None:
+    """Extract the declared ``numpy`` specifier from raw METADATA text.
+
+    Split out from :func:`parse_wheel_numpy_requirement` so callers who
+    already have the METADATA content (e.g. from a directory-based compare,
+    no wheel zip involved) don't need to fabricate one. See that function's
+    docstring for the return-value contract.
+    """
+    from packaging.requirements import InvalidRequirement, Requirement
+
+    for line in metadata_text.splitlines():
+        if not line.startswith("Requires-Dist:"):
+            continue
+        raw = line[len("Requires-Dist:") :].strip()
+        try:
+            req = Requirement(raw)
+        except InvalidRequirement:
+            continue
+        if req.name.lower() != "numpy" or req.marker is not None:
+            continue
+        return str(req.specifier)
+    return None
+
+
 class WheelExtractor:
     """Extract Python wheel (.whl) packages.
 
