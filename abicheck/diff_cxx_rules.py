@@ -331,13 +331,32 @@ def virtual_signature_key(f: Function) -> str:
     return f"{leaf}({params}){quals}"
 
 
+def _owner_descends_from(owner: str, ancestor: str, types: dict[str, RecordType]) -> bool:
+    """True if *owner* names *ancestor* itself, or a transitive base of it in *types*.
+
+    Tolerant of qualified-vs-leaf naming the same way ``_transitive_bases``
+    resolves base names (no extra corroboration beyond that — CastXML base
+    names are leaf-only project-wide, and that module-level precedent already
+    accepts this level of ambiguity for hierarchy walks).
+    """
+    if owner == ancestor:
+        return True
+    leaf_owner = owner.rsplit("::", 1)[-1]
+    leaf_ancestor = ancestor.rsplit("::", 1)[-1]
+    if leaf_owner == leaf_ancestor:
+        return True
+    t = types.get(owner) or (types.get(leaf_owner) if leaf_owner != owner else None)
+    if t is None:
+        return False
+    bases = _transitive_bases(t, types)
+    return ancestor in bases or leaf_ancestor in bases
+
+
 def vtable_slot_is_override_reuse(
     old_entry: str,
     new_entry: str,
     old_funcs: dict[str, Function],
     new_funcs: dict[str, Function],
-    t_old: RecordType,
-    t_new: RecordType,
     old_types: dict[str, RecordType],
     new_types: dict[str, RecordType],
 ) -> bool:
@@ -359,15 +378,17 @@ def vtable_slot_is_override_reuse(
     A signature match alone is not sufficient: two *unrelated* classes could
     each declare an unrelated virtual that happens to share a leaf name and
     parameter list, and a class could switch which one occupies a slot
-    without genuinely overriding anything. ``virtual_method_addition()``
-    guards against that by requiring the old entry's owner to be a
-    transitive base of the class actually being diffed; this mirrors that
-    same guard via ``_transitive_bases`` — checked on *both* entries, since a
-    same-signature old owner outside ``name``'s hierarchy is just as
-    unrelated as a same-signature new owner outside it (checking only one
-    side would let a slot swap to a same-signature virtual from a wholly
-    unconnected class read as compatible, as long as the class being diffed
-    still happens to keep some unrelated base around).
+    without genuinely overriding anything. It is also not enough that both
+    owners are merely *somewhere* in the diffed class's combined old+new base
+    set — for a class with sibling bases (``Derived : Base1, Base2``), or one
+    whose base list itself changed (``Derived : Base1`` -> ``Derived :
+    Base2``), a slot swapping from ``Base1::foo()`` to an unrelated
+    ``Base2::foo()`` of the same signature would satisfy that looser test
+    without either genuinely overriding the other. The real requirement is an
+    actual override edge: the new entry's owner must be the old entry's
+    owner itself, or genuinely descend from it (``_owner_descends_from``,
+    checked against both new_types and old_types in case only one side's
+    snapshot fully resolves the ancestor's own base list).
     """
     if old_entry == new_entry:
         return True
@@ -381,13 +402,9 @@ def vtable_slot_is_override_reuse(
     new_owner = owner_class_of(f_new)
     if old_owner is None or new_owner is None:
         return False
-    bases = _transitive_bases(t_new, new_types) | _transitive_bases(t_old, old_types)
-
-    def _in_hierarchy(owner: str) -> bool:
-        leaf = owner.rsplit("::", 1)[-1]
-        return owner in bases or leaf in bases or owner == t_new.name or leaf == t_new.name
-
-    return _in_hierarchy(old_owner) and _in_hierarchy(new_owner)
+    return _owner_descends_from(new_owner, old_owner, new_types) or _owner_descends_from(
+        new_owner, old_owner, old_types
+    )
 
 
 def old_virtual_signatures(functions: Iterable[Function]) -> dict[str, set[str]]:

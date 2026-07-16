@@ -182,13 +182,33 @@ class TestVtableOverrideSlotReuse:
             name="Other::paint", mangled="_ZN6Other5paintEi",
             return_type="int", params=[Param(name="x", type="int")], is_virtual=True,
         )}
-        t_old = RecordType(
-            name="Derived", kind="class", bases=["Base"], vtable=["_ZN4Base5paintEi"],
-        )
-        t_new = RecordType(
-            name="Derived", kind="class", bases=["Base"], vtable=["_ZN6Other5paintEi"],
-        )
         assert not vtable_slot_is_override_reuse(
-            "_ZN4Base5paintEi", "_ZN6Other5paintEi",
-            old_funcs, new_funcs, t_old, t_new, {}, {},
+            "_ZN4Base5paintEi", "_ZN6Other5paintEi", old_funcs, new_funcs, {}, {},
+        )
+
+    def test_sibling_base_same_signature_not_treated_as_reuse(self) -> None:
+        """Both owners can independently sit somewhere in the diffed class's
+        base set without one genuinely overriding the other: a class with
+        sibling bases (Derived : Base1, Base2), or one whose base list itself
+        changed (Derived : Base1 -> Derived : Base2), could have a slot swap
+        from Base1::foo() to an unrelated, same-signature Base2::foo()
+        without either being an override of the other. Base2 does not
+        descend from Base1, so this must not be treated as a reuse.
+        """
+        old_funcs = {"_ZN5Base14fooEv": Function(
+            name="Base1::foo", mangled="_ZN5Base14fooEv",
+            return_type="void", is_virtual=True,
+        )}
+        new_funcs = {"_ZN5Base24fooEv": Function(
+            name="Base2::foo", mangled="_ZN5Base24fooEv",
+            return_type="void", is_virtual=True,
+        )}
+        old_types = {"Derived": RecordType(
+            name="Derived", kind="class", bases=["Base1"], vtable=["_ZN5Base14fooEv"],
+        )}
+        new_types = {"Derived": RecordType(
+            name="Derived", kind="class", bases=["Base2"], vtable=["_ZN5Base24fooEv"],
+        )}
+        assert not vtable_slot_is_override_reuse(
+            "_ZN5Base14fooEv", "_ZN5Base24fooEv", old_funcs, new_funcs, old_types, new_types,
         )

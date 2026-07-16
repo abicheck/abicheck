@@ -824,13 +824,12 @@ def _diff_type_vtable(
     # a slot's mangled owner renaming from base to derived; func_added (from
     # diff_symbols._diff_functions) already covers the newly-materialized
     # symbol. See vtable_slot_is_override_reuse() for why this must mirror
-    # virtual_method_addition()'s exemption (including its owner/transitive-base
-    # guard, so two unrelated same-signature virtuals can't false-suppress a
-    # genuine slot replacement).
+    # virtual_method_addition()'s exemption (including its own-owner-descends-
+    # from-old-owner guard, so an unrelated same-signature virtual -- e.g. a
+    # sibling base, or a base-class swap -- can't false-suppress a genuine
+    # slot replacement).
     if len(t_old.vtable) == len(t_new.vtable) and all(
-        vtable_slot_is_override_reuse(
-            old_entry, new_entry, old_funcs, new_funcs, t_old, t_new, old_types, new_types
-        )
+        vtable_slot_is_override_reuse(old_entry, new_entry, old_funcs, new_funcs, old_types, new_types)
         for old_entry, new_entry in zip(t_old.vtable, t_new.vtable)
     ):
         return []
