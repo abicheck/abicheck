@@ -867,7 +867,7 @@ def parse_wheel_numpy_requirement(
     or an ordinary marker that doesn't hold for *environment*.
 
     When *environment* is omitted, ``python_version``, ``python_full_version``,
-    ``implementation_version`` (CPython tags only), ``implementation_name``,
+    ``implementation_version``, ``implementation_name``,
     ``platform_python_implementation``, ``platform_system``, ``sys_platform``,
     ``os_name``, and (for single-architecture Linux/macOS tags)
     ``platform_machine`` are derived from the wheel's *own* filename tags
@@ -882,24 +882,31 @@ def parse_wheel_numpy_requirement(
     Python, implementation, platform, or CPU than the one running the scan
     (Codex review; both implementation-marker and all three OS-marker
     spellings are covered since real-world metadata uses any of them).
-    Falls back to the interpreter's own environment for whichever of these the filename
-    doesn't pin down (e.g. a bare directory-derived METADATA path, the
-    pure-Python ``any`` platform tag, a fat/universal macOS wheel, or a
-    Windows tag, whose ``platform_machine`` isn't derived at all).
+    ``implementation_version`` is derived for CPython (``cp``) tags only —
+    see :func:`_implementation_version_from_wheel_filename` for why guessing
+    it for any other implementation (e.g. PyPy) would be actively wrong
+    rather than merely imprecise, unlike every other marker derived here.
+    Falls back to the interpreter's own environment for whichever of these
+    the filename doesn't pin down (e.g. a bare directory-derived METADATA
+    path, the pure-Python ``any`` platform tag, a fat/universal macOS wheel,
+    or a Windows tag, whose ``platform_machine`` isn't derived at all).
 
-    Known residual gap: an ``abi3``-tagged wheel deliberately leaves
-    ``python_version``/``python_full_version`` undetermined rather than
-    pinning a single (wrong) value (see
-    :func:`_python_version_from_wheel_filename`), which means those keys
-    fall back to whatever interpreter is running abicheck rather than
-    being evaluated across the wheel's whole supported range — a real
-    metadata gap that only affects some Python versions the wheel supports
-    could go undetected depending on the scanning host (Codex review).
-    Correctly checking the full range would mean evaluating markers at
-    every version threshold a wheel's metadata references and combining
-    the results, which is meaningfully more than a wheel-tag-derivation
-    fix; left as a known limitation of this G26-partial feature rather
-    than attempted here.
+    Known residual gap: a wheel tag naming a *range* rather than one exact
+    Python version — either the ``abi3`` stable-ABI tag (``cp39-abi3-...``,
+    installable on Python 3.9 and every later 3.x minor) or a PEP 425
+    compressed multi-tag Python segment (``cp310.cp311-...``, installable on
+    either minor) — deliberately leaves ``python_version``/
+    ``python_full_version`` undetermined rather than pinning a single
+    (wrong) value (see :func:`_python_version_from_wheel_filename`), which
+    means those keys fall back to whatever interpreter is running abicheck
+    rather than being evaluated across the wheel's whole supported range —
+    a real metadata gap that only affects some Python versions the wheel
+    supports could go undetected depending on the scanning host (Codex
+    review). Correctly checking the full range would mean evaluating
+    markers at every version threshold a wheel's metadata references and
+    combining the results, which is meaningfully more than a wheel-tag-
+    derivation fix; left as a known limitation of this G26-partial feature
+    rather than attempted here.
     """
     try:
         with zipfile.ZipFile(wheel_path) as zf:
