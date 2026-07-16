@@ -539,30 +539,44 @@ class TestSeverityGate:
 
 
 class TestScopedGate:
-    """`--used-by`/`--required-symbol(s)` scoping (ADR-043) discoverability.
+    """`--used-by`/`--required-symbol(s)` scoping (ADR-043 + CLI-audit P1).
 
-    SARIF's own exitCode/results stay computed from the full, unscoped
-    library verdict (documented, intentional) -- but the CLI process exits
-    on the *scoped* verdict floor. Without a `scopedGate` block a SARIF
-    consumer had no way to discover that the two could disagree (post-merge
-    PR #566 review)."""
+    The scoped gate (`scoped_verdict`/`scoped_exit_code`) is authoritative for
+    this document's own `invocations[0].exitCode` and each result's `level`
+    when scoping is active -- `result.verdict` (the full, unscoped library
+    verdict) is still reported as `fullLibraryVerdict` for context, but no
+    longer drives what a SARIF consumer treats as blocking."""
 
     def test_no_scoped_gate_when_no_scoping(self) -> None:
         r = _make_result([_breaking_change()], verdict=Verdict.BREAKING)
         doc = to_sarif(r)
         assert "scopedGate" not in doc["runs"][0]["properties"]
+        # No scoping -> results keep the full-library severity, unaffected.
+        assert doc["runs"][0]["results"][0]["level"] == "error"
 
-    def test_scoped_gate_present_and_can_disagree_with_full_verdict(self) -> None:
+    def test_scoped_gate_exit_code_wins_over_full_library_exit_code(self) -> None:
+        # The scoped gate can legitimately disagree with the full-library
+        # verdict (a --used-by app unaffected by an otherwise-BREAKING
+        # change) -- the document's own exitCode must follow the scoped gate,
+        # not the full library, since that's what the CLI process itself
+        # exits with.
         r = _make_result([_breaking_change()], verdict=Verdict.BREAKING)
         r.scoped_verdict = Verdict.COMPATIBLE  # type: ignore[attr-defined]
+        r.scoped_exit_code = 0  # type: ignore[attr-defined]
+        r.scoped_exit_code_scheme = "legacy"  # type: ignore[attr-defined]
+        r.gate_scope = "used_by"  # type: ignore[attr-defined]
+        r.scoped_relevant_finding_ids = frozenset()  # type: ignore[attr-defined]
         r.used_by = [{"app": "/bin/myapp", "verdict": "COMPATIBLE"}]  # type: ignore[attr-defined]
         doc = to_sarif(r)
         scoped_gate = doc["runs"][0]["properties"]["scopedGate"]
-        assert scoped_gate["scopedVerdict"] == "COMPATIBLE"
+        assert scoped_gate["gateVerdict"] == "COMPATIBLE"
         assert scoped_gate["fullLibraryVerdict"] == "BREAKING"
+        assert scoped_gate["gateScope"] == "used_by"
         assert scoped_gate["usedBy"] == r.used_by  # type: ignore[attr-defined]
-        # The document's own exitCode/results stay full-library (unchanged).
-        assert doc["runs"][0]["invocations"][0]["exitCode"] == 4
+        # The document's own exitCode now follows the scoped gate (0), not
+        # the full-library BREAKING verdict's exit code (4).
+        assert doc["runs"][0]["invocations"][0]["exitCode"] == 0
+        assert "COMPATIBLE" in doc["runs"][0]["invocations"][0]["exitCodeDescription"]
 
     def test_scoped_gate_carries_required_symbol_contract(self) -> None:
         r = _make_result([_breaking_change()], verdict=Verdict.BREAKING)
@@ -572,21 +586,65 @@ class TestScopedGate:
         scoped_gate = doc["runs"][0]["properties"]["scopedGate"]
         assert scoped_gate["requiredSymbolContract"]["verdict"] == "BREAKING"
 
-    def test_scoped_gate_note_states_actual_exit_code_under_severity_scheme(
-        self,
-    ) -> None:
-        # Regression: the note used to claim "the CLI process exit code
-        # reflects scopedVerdict" unconditionally, which is wrong under a
-        # severity scheme -- e.g. --severity-preset info-only can floor the
-        # scoped exit code at 0 even for a BREAKING scopedVerdict (Codex
-        # review). The note must state the actual computed value/scheme.
+    def test_scoped_gate_exit_code_follows_severity_scheme(self) -> None:
+        # Under a severity scheme (e.g. --severity-preset info-only) the
+        # scoped exit code can be floored at 0 even for a BREAKING scoped
+        # verdict -- the document's exitCode must reflect that actual
+        # computed value, not re-derive 4 from the verdict.
         r = _make_result([_breaking_change()], verdict=Verdict.BREAKING)
         r.scoped_verdict = Verdict.BREAKING  # type: ignore[attr-defined]
         r.scoped_exit_code = 0  # type: ignore[attr-defined]
         r.scoped_exit_code_scheme = "severity"  # type: ignore[attr-defined]
         doc = to_sarif(r)
         scoped_gate = doc["runs"][0]["properties"]["scopedGate"]
-        assert scoped_gate["scopedExitCode"] == 0
-        assert scoped_gate["scopedExitCodeScheme"] == "severity"
-        assert "exits 0" in scoped_gate["note"]
-        assert "severity" in scoped_gate["note"]
+        assert scoped_gate["gateExitCode"] == 0
+        assert scoped_gate["gateExitCodeScheme"] == "severity"
+        assert doc["runs"][0]["invocations"][0]["exitCode"] == 0
+
+    def test_irrelevant_change_downgraded_to_note_and_marked(self) -> None:
+        # A change outside the --used-by/--required-symbol gate's relevance
+        # must not read as an "error" in the SARIF results -- it's downgraded
+        # to "note" and marked relevantToGate: false so a consumer can tell
+        # "not severe" apart from "out of scope" (CLI-audit P1).
+        c = _breaking_change()
+        r = _make_result([c], verdict=Verdict.BREAKING)
+        r.scoped_verdict = Verdict.COMPATIBLE  # type: ignore[attr-defined]
+        r.gate_scope = "used_by"  # type: ignore[attr-defined]
+        r.scoped_relevant_finding_ids = frozenset()  # type: ignore[attr-defined]
+        doc = to_sarif(r)
+        result = doc["runs"][0]["results"][0]
+        assert result["level"] == "note"
+        assert result["properties"]["relevantToGate"] is False
+
+    def test_relevant_change_keeps_its_level_and_marked(self) -> None:
+        from abicheck.reporter import _finding_id
+
+        c = _breaking_change()
+        r = _make_result([c], verdict=Verdict.BREAKING)
+        r.scoped_verdict = Verdict.BREAKING  # type: ignore[attr-defined]
+        r.gate_scope = "used_by"  # type: ignore[attr-defined]
+        r.scoped_relevant_finding_ids = frozenset({_finding_id(c)})  # type: ignore[attr-defined]
+        doc = to_sarif(r)
+        result = doc["runs"][0]["results"][0]
+        assert result["level"] == "error"
+        assert result["properties"]["relevantToGate"] is True
+
+    def test_missing_contract_synthesizes_a_result(self) -> None:
+        # A required symbol absent from the new library has no backing diff
+        # Change -- without a synthetic result the scoped gate's own
+        # exitCode could be nonzero (BREAKING) while `results` shows nothing
+        # to explain it.
+        r = _make_result([], verdict=Verdict.COMPATIBLE)
+        r.scoped_verdict = Verdict.BREAKING  # type: ignore[attr-defined]
+        r.scoped_exit_code = 4  # type: ignore[attr-defined]
+        r.scoped_exit_code_scheme = "legacy"  # type: ignore[attr-defined]
+        r.gate_scope = "used_by"  # type: ignore[attr-defined]
+        r.scoped_relevant_finding_ids = frozenset()  # type: ignore[attr-defined]
+        r.scoped_missing_labels = ("_Z6vanishv",)  # type: ignore[attr-defined]
+        doc = to_sarif(r)
+        results = doc["runs"][0]["results"]
+        assert len(results) == 1
+        assert results[0]["ruleId"] == "used_by_missing_symbol"
+        assert results[0]["level"] == "error"
+        assert "_Z6vanishv" in results[0]["message"]["text"]
+        assert doc["runs"][0]["invocations"][0]["exitCode"] == 4

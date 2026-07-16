@@ -46,7 +46,7 @@ from typing import TYPE_CHECKING
 
 from .checker_policy import ChangeKind, Verdict
 from .checker_types import Change, DiffResult
-from .reporter import apply_show_only
+from .reporter import _finding_id, apply_show_only
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
@@ -95,6 +95,8 @@ def _is_failure(
     result: DiffResult,
     kind_sets: KindSets,
     severity_config: SeverityConfig | None = None,
+    *,
+    relevant_ids: frozenset[str] | None = None,
 ) -> bool:
     """Return True if the change should be a JUnit ``<failure>``.
 
@@ -117,7 +119,16 @@ def _is_failure(
     API_BREAK verdicts always fail. COMPATIBLE_WITH_RISK fails only when its
     per-kind severity is ``"error"`` (currently all RISK_KINDS default to
     ``"warning"``, so they pass).
+
+    *relevant_ids*, when not ``None``, means a ``--used-by``/``--required-symbol``
+    gate is active: a change whose :func:`abicheck.reporter._finding_id` is
+    absent from the set can never fail here regardless of its own severity --
+    it is out of scope for the gate this testsuite now reports (CLI-audit P1:
+    JUnit failures must follow the scoped gate, not just the full-library
+    verdict).
     """
+    if relevant_ids is not None and _finding_id(change) not in relevant_ids:
+        return False
     if severity_config is not None:
         from .severity import SeverityLevel, classify_effective_change
 
@@ -271,11 +282,13 @@ def _count_failures(
     result: DiffResult,
     kind_sets: KindSets,
     severity_config: SeverityConfig | None,
+    *,
+    relevant_ids: frozenset[str] | None = None,
 ) -> int:
     """Count distinct symbols that have at least one failing change."""
     symbols_with_failure: set[str] = set()
     for c in changes:
-        if _is_failure(c, result, kind_sets, severity_config):
+        if _is_failure(c, result, kind_sets, severity_config, relevant_ids=relevant_ids):
             symbols_with_failure.add(c.symbol)
     return len(symbols_with_failure)
 
@@ -287,6 +300,8 @@ def _emit_testcases(
     result: DiffResult,
     kind_sets: KindSets,
     severity_config: SeverityConfig | None,
+    *,
+    relevant_ids: frozenset[str] | None = None,
 ) -> None:
     """Append ``<testcase>`` elements to *ts* for every symbol in *all_symbols*.
 
@@ -305,6 +320,7 @@ def _emit_testcases(
                     result,
                     kind_sets,
                     severity_config,
+                    relevant_ids=relevant_ids,
                 )
     else:
         # No snapshot — only emit changed symbols
@@ -318,6 +334,7 @@ def _emit_testcases(
                 result,
                 kind_sets,
                 severity_config,
+                relevant_ids=relevant_ids,
             )
 
 
@@ -327,6 +344,8 @@ def _append_extra_failures(
     result: DiffResult,
     kind_sets: KindSets,
     severity_config: SeverityConfig | None,
+    *,
+    relevant_ids: frozenset[str] | None = None,
 ) -> None:
     """Append extra ``<failure>`` children to already-existing testcases.
 
@@ -335,7 +354,7 @@ def _append_extra_failures(
     ``<testcase>`` with the matching name and attach a new ``<failure>``.
     """
     for c in extra_changes:
-        if _is_failure(c, result, kind_sets, severity_config):
+        if _is_failure(c, result, kind_sets, severity_config, relevant_ids=relevant_ids):
             for tc in ts:
                 if tc.get("name") == c.symbol:
                     _add_failure(tc, c, result, kind_sets, severity_config)
@@ -372,9 +391,18 @@ def _build_testsuite(
 
     change_by_symbol, extra_changes = _partition_changes(changes)
     all_symbols = _collect_all_symbols(old_snapshot, show_only, change_by_symbol)
-    failure_count = _count_failures(changes, result, kind_sets, severity_config)
 
-    total = len(all_symbols) if all_symbols else len(change_by_symbol)
+    # When --used-by/--required-symbol scoping is active, relevant_ids makes
+    # failures follow the scoped gate rather than the full library verdict
+    # (CLI-audit P1 fix); None means no scoping is active, so behavior below
+    # is unchanged from before.
+    relevant_ids = getattr(result, "scoped_relevant_finding_ids", None)
+    failure_count = _count_failures(
+        changes, result, kind_sets, severity_config, relevant_ids=relevant_ids
+    )
+    missing_labels = getattr(result, "scoped_missing_labels", ()) or ()
+    total = (len(all_symbols) if all_symbols else len(change_by_symbol)) + len(missing_labels)
+    failure_count += len(missing_labels)
 
     ts = ET.Element("testsuite")
     ts.set("name", result.library)
@@ -391,26 +419,47 @@ def _build_testsuite(
         result,
         kind_sets,
         severity_config,
+        relevant_ids=relevant_ids,
     )
-    _append_extra_failures(ts, extra_changes, result, kind_sets, severity_config)
+    _append_extra_failures(
+        ts, extra_changes, result, kind_sets, severity_config, relevant_ids=relevant_ids
+    )
+    _emit_missing_contract_testcases(ts, missing_labels, getattr(result, "gate_scope", None))
 
     return ts
 
 
+def _emit_missing_contract_testcases(
+    ts: ET.Element, missing_labels: tuple[str, ...], gate_scope: str | None,
+) -> None:
+    """Emit a failing ``<testcase>`` per missing required symbol/version/entrypoint.
+
+    A required contract member absent from the new library (--used-by's
+    ``missing_symbols``/``missing_versions``, or --required-symbol's
+    ``missing_entrypoints``) is unconditionally BREAKING for the scoped gate,
+    but has no backing diff ``Change`` -- without a synthetic testcase the
+    gate's own ``failures`` count could be nonzero while nothing in the XML
+    explains why (CLI-audit P1, mirrors ``sarif._missing_contract_result``).
+    """
+    classname = "used_by_contract" if gate_scope == "used_by" else "required_symbol_contract"
+    for label in missing_labels:
+        tc = ET.SubElement(ts, "testcase")
+        tc.set("name", label)
+        tc.set("classname", classname)
+        fail = ET.SubElement(tc, "failure")
+        fail.set("message", f"Required symbol/version '{label}' is missing from the new library.")
+        fail.set("type", "MISSING_CONTRACT_MEMBER")
+
+
 def _add_scoped_properties(ts: ET.Element, result: DiffResult) -> None:
     """Append a ``<properties>`` block when ``--used-by``/``--required-symbol(s)``
-    scoping was requested (ADR-043).
+    scoping was requested (ADR-043 + CLI-audit P1).
 
-    JUnit's ``<testsuite>``/``<testcase>`` pass/fail counts above stay
-    computed from the full, unscoped library diff -- this format's binary/
-    structured contract intentionally keeps that authoritative for CI
-    dashboards that parse it. But the actual CLI process exits on the
-    *scoped* verdict floor when scoping is requested, which can legitimately
-    disagree with this testsuite's own failure count. Without this block a
-    JUnit consumer had no way to discover that disagreement -- this makes it
-    auditable, mirroring the human-format banner
-    (``_fold_scoped_compat_into_text``) without changing this testsuite's own
-    pass/fail semantics.
+    The scoped gate is authoritative for this testsuite's own ``failures``
+    count and each ``<testcase>``'s pass/fail status -- ``result.verdict``
+    (the full, unscoped library verdict) is still reported here as
+    ``abicheck.full_library_verdict`` for context, but no longer drives what
+    a JUnit-consuming CI dashboard treats as failing.
     """
     scoped_verdict = getattr(result, "scoped_verdict", None)
     if scoped_verdict is None:
@@ -422,33 +471,25 @@ def _add_scoped_properties(ts: ET.Element, result: DiffResult) -> None:
         p.set("name", name)
         p.set("value", value)
 
-    _prop("abicheck.scoped_verdict", scoped_verdict.value)
+    gate_scope = getattr(result, "gate_scope", None)
+    if gate_scope is not None:
+        _prop("abicheck.gate_scope", gate_scope)
+    _prop("abicheck.gate_verdict", scoped_verdict.value)
     _prop("abicheck.full_library_verdict", result.verdict.value)
+    # Back-compat alias for the property's original name.
+    _prop("abicheck.scoped_verdict", scoped_verdict.value)
+    relevant_ids = getattr(result, "scoped_relevant_finding_ids", None) or frozenset()
+    relevant_count = sum(1 for c in result.changes if _finding_id(c) in relevant_ids)
+    _prop("abicheck.relevant_finding_count", str(relevant_count))
+    _prop("abicheck.unrelated_finding_count", str(len(result.changes) - relevant_count))
     scoped_exit_code = getattr(result, "scoped_exit_code", None)
     scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
-    # Under a severity scheme scoped_exit_code is NOT a fixed
-    # BREAKING->4/API_BREAK->2 mapping of scoped_verdict -- e.g.
-    # --severity-preset info-only can floor it at 0 even for a BREAKING
-    # scoped_verdict (Codex review) -- so state the actual computed value
-    # and scheme rather than implying a verdict->exit-code equivalence that
-    # only holds under the legacy scheme.
     if scoped_exit_code is not None:
+        _prop("abicheck.gate_exit_code", str(scoped_exit_code))
+        _prop("abicheck.gate_exit_code_scheme", str(scoped_exit_code_scheme))
+        # Back-compat aliases.
         _prop("abicheck.scoped_exit_code", str(scoped_exit_code))
         _prop("abicheck.scoped_exit_code_scheme", str(scoped_exit_code_scheme))
-        note = (
-            f"The CLI process exits {scoped_exit_code} under the "
-            f"{scoped_exit_code_scheme} exit-code scheme for this run -- "
-            f"this may differ from both scoped_verdict's legacy-scheme "
-            f"mapping and this testsuite's own failures count (which stays "
-            f"computed from the full library)."
-        )
-    else:
-        note = (
-            "The CLI process exit code for this run may differ from this "
-            "testsuite's own failures count (which stays computed from the "
-            "full library)."
-        )
-    _prop("abicheck.scoped_note", note)
     used_by = getattr(result, "used_by", None)
     if used_by is not None:
         _prop("abicheck.used_by_app_count", str(len(used_by)))
@@ -466,9 +507,11 @@ def _maybe_add_failure(
     result: DiffResult,
     kind_sets: KindSets,
     severity_config: SeverityConfig | None = None,
+    *,
+    relevant_ids: frozenset[str] | None = None,
 ) -> None:
     """Add a ``<failure>`` child to *tc* if the change is a failure."""
-    if _is_failure(change, result, kind_sets, severity_config):
+    if _is_failure(change, result, kind_sets, severity_config, relevant_ids=relevant_ids):
         _add_failure(tc, change, result, kind_sets, severity_config)
 
 

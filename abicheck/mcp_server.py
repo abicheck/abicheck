@@ -991,6 +991,12 @@ def abi_compare(
             # `cli_compare_helpers._apply_used_by_scoping`).
             worst_changes: dict[str, Any] = {}
             worst_missing: set[str] = set()
+            # Union across ALL apps of which findings this --used-by gate
+            # cares about -- SARIF/JUnit consult this to make their own
+            # result levels/failure counts follow the scoped gate (CLI-audit
+            # P1), mirroring cli_compare_helpers._apply_used_by_scoping.
+            relevant_finding_ids: set[str] = set()
+            missing_labels: set[str] = set()
             for app in used_by:
                 app_path = _safe_read_path(app, label="used_by")
                 if not app_path.exists():
@@ -1002,6 +1008,9 @@ def abi_compare(
                     result, app_path, old_lib, new_lib,
                     policy=active_policy, policy_file=pf,
                 )
+                relevant_finding_ids.update(_finding_id(c) for c in scoped.breaking_for_app)
+                missing_labels.update(scoped.missing_symbols)
+                missing_labels.update(scoped.missing_versions)
                 summaries.append(
                     {
                         "app": scoped.app_path,
@@ -1047,6 +1056,9 @@ def abi_compare(
             result.scoped_exit_code = worst_exit  # type: ignore[attr-defined]
             scoped_scheme = "severity" if severity_config is not None else "legacy"
             result.scoped_exit_code_scheme = scoped_scheme  # type: ignore[attr-defined]
+            result.gate_scope = "used_by"  # type: ignore[attr-defined]
+            result.scoped_relevant_finding_ids = frozenset(relevant_finding_ids)  # type: ignore[attr-defined]
+            result.scoped_missing_labels = tuple(sorted(missing_labels))  # type: ignore[attr-defined]
             if severity_config is not None:
                 categories, counts = _scoped_severity_summary(
                     list(worst_changes.values()), worst_missing,
@@ -1081,6 +1093,11 @@ def abi_compare(
             result.scoped_exit_code = exit_code  # type: ignore[attr-defined]
             scoped_scheme = "severity" if severity_config is not None else "legacy"
             result.scoped_exit_code_scheme = scoped_scheme  # type: ignore[attr-defined]
+            result.gate_scope = "required_symbol"  # type: ignore[attr-defined]
+            result.scoped_relevant_finding_ids = frozenset(  # type: ignore[attr-defined]
+                _finding_id(c) for c in scoped_host.breaking_for_host
+            )
+            result.scoped_missing_labels = tuple(sorted(scoped_host.missing_entrypoints))  # type: ignore[attr-defined]
             if severity_config is not None:
                 categories, counts = _scoped_severity_summary(
                     scoped_host.breaking_for_host, scoped_host.missing_entrypoints,

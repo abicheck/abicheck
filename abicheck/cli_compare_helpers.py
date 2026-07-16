@@ -680,12 +680,22 @@ def _apply_used_by_scoping(
     # that `id()` would double-count in the severity summary.
     worst_changes: dict[str, Any] = {}
     worst_missing: set[str] = set()
+    # Union across ALL apps (not just the worst-exit-code one) of which
+    # findings this --used-by gate actually cares about -- SARIF/JUnit
+    # consult this to make their own result levels/failure counts follow
+    # the scoped gate instead of the full, unscoped library diff (CLI-audit
+    # P1: "SARIF/JUnit computing pass/fail from the full library diff").
+    relevant_finding_ids: set[str] = set()
+    missing_labels: set[str] = set()
     for app in used_by_apps:
         scoped = scope_diff_to_app(
             result, app, old_lib, new_lib,
             policy=policy, policy_file=policy_file,
         )
         summaries.append(_app_compat_summary(scoped))
+        relevant_finding_ids.update(_finding_id(c) for c in scoped.breaking_for_app)
+        missing_labels.update(scoped.missing_symbols)
+        missing_labels.update(scoped.missing_versions)
         exit_code = _scoped_exit_code(
             scoped, scoped.breaking_for_app, result, exit_code_scheme, sev_config,
             policy, policy_file,
@@ -713,6 +723,9 @@ def _apply_used_by_scoping(
     result.scoped_verdict = worst_verdict  # type: ignore[attr-defined]
     result.scoped_exit_code = worst_exit  # type: ignore[attr-defined]
     result.scoped_exit_code_scheme = exit_code_scheme  # type: ignore[attr-defined]
+    result.gate_scope = "used_by"  # type: ignore[attr-defined]
+    result.scoped_relevant_finding_ids = frozenset(relevant_finding_ids)  # type: ignore[attr-defined]
+    result.scoped_missing_labels = tuple(sorted(missing_labels))  # type: ignore[attr-defined]
     if exit_code_scheme == "severity":
         categories, counts = _scoped_severity_summary(
             list(worst_changes.values()), worst_missing,
@@ -731,6 +744,7 @@ def _apply_required_symbol_scoping(
 ) -> int:
     """Scope *result* to an explicit ``--required-symbol(s)`` contract (ADR-043)."""
     from .appcompat import scope_diff_to_required_symbols
+    from .reporter import _finding_id
 
     scoped = scope_diff_to_required_symbols(
         result, old, new, required_symbols,
@@ -738,6 +752,11 @@ def _apply_required_symbol_scoping(
     )
     result.required_symbols = _plugin_contract_summary(scoped)  # type: ignore[attr-defined]
     result.scoped_verdict = scoped.verdict  # type: ignore[attr-defined]
+    result.gate_scope = "required_symbol"  # type: ignore[attr-defined]
+    result.scoped_relevant_finding_ids = frozenset(  # type: ignore[attr-defined]
+        _finding_id(c) for c in scoped.breaking_for_host
+    )
+    result.scoped_missing_labels = tuple(sorted(scoped.missing_entrypoints))  # type: ignore[attr-defined]
     exit_code = _scoped_exit_code(
         scoped, scoped.breaking_for_host, result, exit_code_scheme, sev_config,
         policy, policy_file,
