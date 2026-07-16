@@ -541,20 +541,24 @@ def parse_manylinux_glibc_floor(name: str) -> str | None:
 # binary-evidence "required" side comes from numpy_capi.py). Mirrors
 # parse_manylinux_glibc_floor's role for G10: a pure function callers wire
 # in programmatically (see diff_numpy_capi.check_numpy_metadata_contract).
-def parse_wheel_numpy_requirement(wheel_path: Path) -> str | None:
+def parse_wheel_numpy_requirement(
+    wheel_path: Path, environment: dict[str, str] | None = None
+) -> str | None:
     """Extract the declared ``numpy`` version-specifier range from a wheel's
     ``*.dist-info/METADATA`` (``Requires-Dist: numpy...``).
 
     Returns the specifier text (e.g. ``">=1.23.5,<3"``, or ``""`` for a bare
     ``Requires-Dist: numpy`` with no version constraint) for the first numpy
-    requirement that is a base install dependency, or ``None`` when the wheel
-    is unreadable, carries no ``.dist-info/METADATA`` member, or declares no
-    such numpy dependency at all — including when the only ``numpy`` entry is
-    gated behind an optional extra (e.g. ``numpy; extra == "test"``, only
-    installed via ``pip install pkg[test]``, not a real runtime requirement).
-    A requirement gated by an *ordinary* marker instead (e.g. ``numpy;
-    python_version >= "3.9"``) is still a real, unconditional-on-the-base-
-    install requirement and is returned normally.
+    requirement that is a base install dependency active for *environment*
+    (default: the interpreter running abicheck — see
+    :func:`parse_numpy_requirement_from_metadata`), or ``None`` when the
+    wheel is unreadable, carries no ``.dist-info/METADATA`` member, or
+    declares no such numpy dependency at all — including when the only
+    ``numpy`` entry is gated behind an optional extra (e.g. ``numpy; extra ==
+    "test"``, only installed via ``pip install pkg[test]``, not a real
+    runtime requirement) or an ordinary marker that doesn't hold for
+    *environment* (e.g. ``numpy>=2; python_version >= "3.12"`` on a cp39
+    wheel).
     """
     try:
         with zipfile.ZipFile(wheel_path) as zf:
@@ -567,7 +571,7 @@ def parse_wheel_numpy_requirement(wheel_path: Path) -> str | None:
             text = zf.read(metadata_name).decode("utf-8", errors="replace")
     except (OSError, zipfile.BadZipFile):
         return None
-    return parse_numpy_requirement_from_metadata(text)
+    return parse_numpy_requirement_from_metadata(text, environment)
 
 
 #: Matches the ``extra`` marker variable (PEP 508) as a whole word, e.g. in
@@ -581,13 +585,27 @@ def parse_wheel_numpy_requirement(wheel_path: Path) -> str | None:
 _EXTRA_MARKER_RE = re.compile(r"\bextra\b")
 
 
-def parse_numpy_requirement_from_metadata(metadata_text: str) -> str | None:
+def parse_numpy_requirement_from_metadata(
+    metadata_text: str, environment: dict[str, str] | None = None
+) -> str | None:
     """Extract the declared ``numpy`` specifier from raw METADATA text.
 
     Split out from :func:`parse_wheel_numpy_requirement` so callers who
     already have the METADATA content (e.g. from a directory-based compare,
     no wheel zip involved) don't need to fabricate one. See that function's
     docstring for the return-value contract.
+
+    *environment* is a PEP 508 marker environment override (``python_version``,
+    ``platform_system``, etc.) used to decide which non-extra-gated
+    ``Requires-Dist: numpy`` line is actually active; keys omitted from it
+    fall back to the real environment (the interpreter running abicheck) —
+    the same merge behavior as :meth:`packaging.markers.Marker.evaluate`,
+    which this delegates to directly. A wheel can legitimately declare more
+    than one base numpy requirement split by mutually exclusive markers
+    (e.g. ``numpy>=1.23; python_version < "3.12"`` followed by ``numpy>=2;
+    python_version >= "3.12"``); returning the first non-extra line
+    regardless of whether its marker actually holds would report an
+    inactive floor as the metadata's promise (Codex review).
     """
     from packaging.requirements import InvalidRequirement, Requirement
 
@@ -601,8 +619,11 @@ def parse_numpy_requirement_from_metadata(metadata_text: str) -> str | None:
             continue
         if req.name.lower() != "numpy":
             continue
-        if req.marker is not None and _EXTRA_MARKER_RE.search(str(req.marker)):
-            continue
+        if req.marker is not None:
+            if _EXTRA_MARKER_RE.search(str(req.marker)):
+                continue  # optional-extra-gated, not a base requirement
+            if not req.marker.evaluate(environment):
+                continue  # marker inactive for this environment
         return str(req.specifier)
     return None
 

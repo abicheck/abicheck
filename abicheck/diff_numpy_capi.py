@@ -58,6 +58,23 @@ def _target_tuple(version: str | None) -> tuple[int, ...]:
         return ()
 
 
+def _version_at_least(a: tuple[int, ...], b: tuple[int, ...]) -> bool:
+    """``a >= b`` as dotted versions, padding the shorter tuple with trailing
+    zeros first so ``(2,)`` (from ``numpy>=2``) compares equal to ``(2, 0)``
+    (from a binary target of ``"2.0"``) instead of Python's raw tuple
+    ordering treating the shorter tuple as strictly smaller (Codex review).
+    """
+    length = max(len(a), len(b))
+    return a + (0,) * (length - len(a)) >= b + (0,) * (length - len(b))
+
+
+def _version_greater_than(a: tuple[int, ...], b: tuple[int, ...]) -> bool:
+    """``a > b`` as dotted versions, with the same zero-padding as
+    :func:`_version_at_least`."""
+    length = max(len(a), len(b))
+    return a + (0,) * (length - len(a)) > b + (0,) * (length - len(b))
+
+
 def _declared_floor(specifiers: SpecifierSet) -> tuple[int, ...] | None:
     """The largest lower-bound version among a SpecifierSet's >=/>/==/~= clauses.
 
@@ -78,7 +95,7 @@ def _declared_floor(specifiers: SpecifierSet) -> tuple[int, ...] | None:
         if spec.operator not in (">=", ">", "==", "~="):
             continue
         v = _target_tuple(spec.version.rstrip(".*"))
-        if v and (best is None or v > best):
+        if v and (best is None or _version_greater_than(v, best)):
             best = v
     return best
 
@@ -141,7 +158,7 @@ def diff_numpy_capi_surfaces(
 
     old_target = _target_tuple(old.capi_target_version)
     new_target = _target_tuple(new.capi_target_version)
-    if new_target and old_target and new_target > old_target:
+    if new_target and old_target and _version_greater_than(new_target, old_target):
         changes.append(
             make_change(
                 ChangeKind.NUMPY_TARGET_FLOOR_RAISED,
@@ -182,7 +199,7 @@ def check_numpy_metadata_contract(
         specifiers = None
 
     declared_floor = _declared_floor(specifiers) if specifiers is not None else None
-    if declared_floor is not None and declared_floor >= target_tuple:
+    if declared_floor is not None and _version_at_least(declared_floor, target_tuple):
         return []  # declared lower bound already covers the binary's own target
 
     changes = [

@@ -886,11 +886,57 @@ class TestParseNumpyRequirementFromMetadata:
         assert parse_numpy_requirement_from_metadata(text) == ">=1.23"
 
     def test_platform_gated_numpy_is_a_real_requirement(self) -> None:
+        # Explicit environment override -- must not depend on which OS
+        # actually runs the test suite (Linux/macOS/Windows CI lanes).
         text = (
             "Metadata-Version: 2.1\n"
             'Requires-Dist: numpy>=1.23; platform_system == "Linux"\n'
         )
-        assert parse_numpy_requirement_from_metadata(text) == ">=1.23"
+        assert (
+            parse_numpy_requirement_from_metadata(
+                text, environment={"platform_system": "Linux"}
+            )
+            == ">=1.23"
+        )
+
+    def test_inactive_marker_is_skipped_not_returned(self) -> None:
+        # A marker that IS a real (non-extra) base requirement but doesn't
+        # hold for the given environment must not be reported as the active
+        # promise (Codex review).
+        text = (
+            "Metadata-Version: 2.1\n"
+            'Requires-Dist: numpy>=1.23; platform_system == "Linux"\n'
+        )
+        assert (
+            parse_numpy_requirement_from_metadata(
+                text, environment={"platform_system": "Darwin"}
+            )
+            is None
+        )
+
+    def test_active_branch_wins_over_inactive_earlier_branch(self) -> None:
+        # Codex review's exact scenario: a wheel lists two base numpy
+        # requirements split by mutually exclusive python_version markers.
+        # Returning the first non-extra line regardless of applicability
+        # would report the inactive 1.23 floor for a cp312 wheel instead of
+        # the active 2.0 floor.
+        text = (
+            "Metadata-Version: 2.1\n"
+            'Requires-Dist: numpy>=1.23; python_version < "3.12"\n'
+            'Requires-Dist: numpy>=2; python_version >= "3.12"\n'
+        )
+        assert (
+            parse_numpy_requirement_from_metadata(
+                text, environment={"python_version": "3.12"}
+            )
+            == ">=2"
+        )
+        assert (
+            parse_numpy_requirement_from_metadata(
+                text, environment={"python_version": "3.11"}
+            )
+            == ">=1.23"
+        )
 
     def test_case_insensitive_package_name(self) -> None:
         text = "Metadata-Version: 2.1\nRequires-Dist: NumPy>=1.24\n"

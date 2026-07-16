@@ -91,6 +91,16 @@ class TestDiffNumPyCapiSurfaces:
         new = NumPyCapiSurface(consumes_array_api=True, capi_target_version="1.23")
         assert diff_numpy_capi_surfaces(old, new) == []
 
+    def test_target_floor_unchanged_is_silent_across_differing_component_counts(
+        self,
+    ) -> None:
+        # "2" and "2.0" are the same version, just parsed to tuples of
+        # different lengths -- must not be misread as a floor raise
+        # (Codex review, same padding bug as check_numpy_metadata_contract).
+        old = NumPyCapiSurface(consumes_array_api=True, capi_target_version="2")
+        new = NumPyCapiSurface(consumes_array_api=True, capi_target_version="2.0")
+        assert diff_numpy_capi_surfaces(old, new) == []
+
     def test_missing_target_version_on_either_side_skips_floor_check(self) -> None:
         old = NumPyCapiSurface(consumes_array_api=True, capi_target_version=None)
         new = NumPyCapiSurface(consumes_array_api=True, capi_target_version="1.23")
@@ -110,6 +120,15 @@ class TestCheckNumPyMetadataContract:
         assert check_numpy_metadata_contract(surf, ">=1.23.5") == []
         assert check_numpy_metadata_contract(surf, ">=1.23") == []
         assert check_numpy_metadata_contract(surf, ">=1.25") == []
+
+    def test_short_declared_floor_covers_longer_target(self) -> None:
+        # numpy>=2 parses to (2,), the binary's "2.0" target parses to
+        # (2, 0). Raw tuple comparison treats (2,) < (2, 0) since Python
+        # orders a strict-prefix tuple as smaller -- pad both to the same
+        # length before comparing so this is correctly seen as covered
+        # (Codex review).
+        surf = NumPyCapiSurface(consumes_array_api=True, capi_target_version="2.0")
+        assert check_numpy_metadata_contract(surf, ">=2") == []
 
     def test_exclusive_lower_bound_counts_as_floor(self) -> None:
         # numpy>1.25 already exceeds the binary's 1.20 target -- with `>`
