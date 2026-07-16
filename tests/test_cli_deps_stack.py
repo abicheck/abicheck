@@ -237,8 +237,8 @@ class TestStackCheckCommand:
         runner = CliRunner()
         result = runner.invoke(main, [
             "deps", "compare", binary_rel,
-            "--baseline", str(baseline),
-            "--candidate", str(candidate),
+            "--old-root", str(baseline),
+            "--new-root", str(candidate),
             "--format", "json",
         ])
         assert result.exit_code == 0, result.output
@@ -267,8 +267,8 @@ class TestStackCheckCommand:
         runner = CliRunner()
         result = runner.invoke(main, [
             "deps", "compare", binary_rel,
-            "--baseline", str(baseline),
-            "--candidate", str(candidate),
+            "--old-root", str(baseline),
+            "--new-root", str(candidate),
             "--format", "markdown",
         ])
         assert result.exit_code == 0, result.output
@@ -293,8 +293,8 @@ class TestStackCheckCommand:
         runner = CliRunner()
         result = runner.invoke(main, [
             "deps", "compare", binary_rel,
-            "--baseline", str(baseline),
-            "--candidate", str(candidate),
+            "--old-root", str(baseline),
+            "--new-root", str(candidate),
             "--format", "json",
             "-o", str(outfile),
         ])
@@ -323,8 +323,8 @@ class TestStackCheckCommand:
         runner = CliRunner()
         result = runner.invoke(main, [
             "deps", "compare", binary_rel,
-            "--baseline", str(baseline),
-            "--candidate", str(candidate),
+            "--old-root", str(baseline),
+            "--new-root", str(candidate),
             "--format", "json",
         ])
         assert result.exit_code == 4
@@ -349,8 +349,8 @@ class TestStackCheckCommand:
         runner = CliRunner()
         result = runner.invoke(main, [
             "deps", "compare", binary_rel,
-            "--baseline", str(baseline),
-            "--candidate", str(candidate),
+            "--old-root", str(baseline),
+            "--new-root", str(candidate),
             "--format", "json",
         ])
         assert result.exit_code == 4
@@ -375,8 +375,8 @@ class TestStackCheckCommand:
         runner = CliRunner()
         result = runner.invoke(main, [
             "deps", "compare", binary_rel,
-            "--baseline", str(baseline),
-            "--candidate", str(candidate),
+            "--old-root", str(baseline),
+            "--new-root", str(candidate),
             "--format", "json",
         ])
         assert result.exit_code == 1
@@ -401,8 +401,8 @@ class TestStackCheckCommand:
         runner = CliRunner()
         result = runner.invoke(main, [
             "deps", "compare", binary_rel,
-            "--baseline", str(baseline),
-            "--candidate", str(candidate),
+            "--old-root", str(baseline),
+            "--new-root", str(candidate),
             "--format", "json",
         ])
         assert result.exit_code == 0
@@ -414,8 +414,8 @@ class TestStackCheckCommand:
         runner = CliRunner()
         result = runner.invoke(main, [
             "deps", "compare", "usr/bin/myapp",
-            "--baseline", str(same),
-            "--candidate", str(same),
+            "--old-root", str(same),
+            "--new-root", str(same),
         ])
         assert result.exit_code != 0
         assert "same sysroot" in result.output

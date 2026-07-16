@@ -69,7 +69,7 @@ class DryRunResult:
     warnings: list[str] = field(default_factory=list)
     blockers: list[str] = field(default_factory=list)
 
-    def add(self, section: str, *lines: str) -> None:
+    def add(self, section: str, *lines: str | None) -> None:
         """Append non-empty *lines* to *section*, creating it if needed."""
         clean = [ln for ln in lines if ln]
         if not clean:

@@ -57,11 +57,15 @@ def deps_group() -> None:
               default="markdown", show_default=True, help="Output format.")
 @click.option("-o", "--output", type=click.Path(path_type=Path), default=None,
               help="Write output to this path (default: stdout).")
+@click.option("--dry-run", "dry_run", is_flag=True, default=False,
+              help="Show the resolved binary, sysroot, search order, and loader "
+                   "inputs without walking/checking the full stack. Writes "
+                   "nothing; incompatible with -o/--output.")
 @verbose_option
 def deps_tree_cmd(
     binary: Path, search_paths: tuple[Path, ...],
     sysroot: Path | None, ld_library_path: str,
-    fmt: str, output: Path | None, verbose: bool,
+    fmt: str, output: Path | None, dry_run: bool, verbose: bool,
 ) -> None:
     """Show the resolved dependency tree and symbol binding status.
 
@@ -80,7 +84,35 @@ def deps_tree_cmd(
       abicheck deps tree /usr/bin/myapp --format json -o deps.json
       abicheck deps tree ./app --sysroot /path/to/container/rootfs
     """
+    from .dry_run import (
+        DryRunResult,
+        emit_dry_run,
+        reject_dry_run_with_output,
+        tool_status,
+    )
+
+    reject_dry_run_with_output(dry_run, output)
     _setup_verbosity(verbose)
+
+    if dry_run:
+        dry_result = DryRunResult(command="deps tree")
+        dry_result.add(
+            "Inputs",
+            f"binary: {binary}",
+            f"sysroot: {sysroot}" if sysroot else "sysroot: (none)",
+        )
+        dry_result.add(
+            "Build/source inputs",
+            f"search path: {', '.join(str(p) for p in search_paths)}" if search_paths else None,
+            f"LD_LIBRARY_PATH: {ld_library_path}" if ld_library_path else None,
+        )
+        dry_result.add("Tools and frontends", *tool_status("readelf", "ldd"))
+        dry_result.add(
+            "Output and exit-code behavior",
+            f"format: {fmt}",
+            "exit codes: 0 all resolved/bound, 1 missing dependency/symbol",
+        )
+        emit_dry_run(dry_result)
 
     fmt_detected = _detect_binary_format(binary)
     if fmt_detected != "elf":
@@ -118,12 +150,12 @@ def deps_tree_cmd(
 
 @deps_group.command("compare")
 @click.argument("binary", type=click.Path(path_type=Path))
-@click.option("--baseline", type=click.Path(exists=True, path_type=Path),
+@click.option("--old-root", type=click.Path(exists=True, path_type=Path),
               default=Path("/"), show_default=True,
-              help="Sysroot for the baseline environment.")
-@click.option("--candidate", type=click.Path(exists=True, path_type=Path),
+              help="Sysroot for the old (baseline) environment.")
+@click.option("--new-root", type=click.Path(exists=True, path_type=Path),
               default=Path("/"), show_default=True,
-              help="Sysroot for the candidate environment.")
+              help="Sysroot for the new (candidate) environment.")
 @click.option("--search-path", "search_paths", multiple=True,
               type=click.Path(exists=True, path_type=Path),
               help="Additional directory to search for shared libraries.")
@@ -133,15 +165,19 @@ def deps_tree_cmd(
               default="markdown", show_default=True, help="Output format.")
 @click.option("-o", "--output", type=click.Path(path_type=Path), default=None,
               help="Write output to this path (default: stdout).")
+@click.option("--dry-run", "dry_run", is_flag=True, default=False,
+              help="Show old/new roots, resolved binary paths, and search order "
+                   "without running per-library ABI diffs. Writes nothing; "
+                   "incompatible with -o/--output.")
 @verbose_option
 def deps_compare_cmd(
-    binary: Path, baseline: Path, candidate: Path,
+    binary: Path, old_root: Path, new_root: Path,
     search_paths: tuple[Path, ...], ld_library_path: str,
-    fmt: str, output: Path | None, verbose: bool,
+    fmt: str, output: Path | None, dry_run: bool, verbose: bool,
 ) -> None:
     """Compare a binary's full dependency stack across two environments.
 
-    Resolves all transitive dependencies in both BASELINE and CANDIDATE sysroots,
+    Resolves all transitive dependencies in both OLD_ROOT and NEW_ROOT sysroots,
     computes symbol bindings, detects changed DSOs, runs per-library ABI diffs,
     and produces a stack-level compatibility verdict.
 
@@ -155,21 +191,49 @@ def deps_compare_cmd(
 
     \b
     Examples:
-      abicheck deps compare usr/bin/myapp --baseline /old-root --candidate /new-root
+      abicheck deps compare usr/bin/myapp --old-root /old-root --new-root /new-root
       abicheck deps compare usr/lib/libfoo.so.1 \\
-        --baseline ./image-v1 --candidate ./image-v2 --format json
+        --old-root ./image-v1 --new-root ./image-v2 --format json
     """
+    from .dry_run import DryRunResult, emit_dry_run, reject_dry_run_with_output
+
+    reject_dry_run_with_output(dry_run, output)
     _setup_verbosity(verbose)
 
     # Guard against accidental no-op comparisons.
-    if baseline.resolve() == candidate.resolve():
+    if old_root.resolve() == new_root.resolve():
         raise click.UsageError(
-            "--baseline and --candidate resolve to the same sysroot; "
+            "--old-root and --new-root resolve to the same sysroot; "
             "provide two different roots for stack comparison."
         )
 
+    if dry_run:
+        dry_result = DryRunResult(command="deps compare")
+        dry_result.add(
+            "Inputs",
+            f"binary: {binary}",
+            f"old-root: {old_root}",
+            f"new-root: {new_root}",
+        )
+        dry_result.add(
+            "Build/source inputs",
+            f"old resolved path: {old_root / binary}",
+            f"new resolved path: {new_root / binary}",
+            f"search path: {', '.join(str(p) for p in search_paths)}" if search_paths else None,
+        )
+        dry_result.add(
+            "Consumer/contract scoping",
+            "intended: per-library ABI diff across the resolved dependency stacks",
+        )
+        dry_result.add(
+            "Output and exit-code behavior",
+            f"format: {fmt}",
+            "exit codes: 0 pass, 1 warn (ABI risk), 4 fail (load/ABI break)",
+        )
+        emit_dry_run(dry_result)
+
     # Validate that every existing binary is ELF in both sysroots
-    for label, root in [("baseline", baseline), ("candidate", candidate)]:
+    for label, root in [("old", old_root), ("new", new_root)]:
         resolved = root / binary
         if resolved.exists():
             fmt_detected = _detect_binary_format(resolved)
@@ -184,8 +248,8 @@ def deps_compare_cmd(
 
     result = check_stack(
         binary,
-        baseline_root=baseline,
-        candidate_root=candidate,
+        baseline_root=old_root,
+        candidate_root=new_root,
         ld_library_path=ld_library_path,
         search_paths=list(search_paths) or None,
     )

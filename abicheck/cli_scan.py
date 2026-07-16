@@ -74,6 +74,7 @@ from .buildsource.scan_levels import (
     EvidenceDepth,
     ScanMode,
     SourceMethod,
+    SourceScope,
     level_to_collect_mode,
     resolve_level,
 )
@@ -87,12 +88,13 @@ from .cli_options import (
     lang_option,
     merge_compile_config,
     resolve_compile_context,
+    split_sided_paths,
     verbose_option,
 )
-from .cli_params import DEPTH_PARAM
+from .cli_params import DEPTH_PARAM, SIDED_PATH_PARAM
 from .cli_scan_baseline import (
     _baseline_is_native_library,  # noqa: F401 - re-export for scan tests/service_scan
-    _emit_estimate,
+    _emit_estimate,  # noqa: F401 - re-export; --estimate CLI flag removed, kept for direct callers
     _expand_public_headers,  # noqa: F401 - re-export for tests
     _load_risk_rules,
     _public_provenance_set,
@@ -311,22 +313,6 @@ def _resolve_changed_seed(
     return [], "none (no diff seed; broad scope)", False
 
 
-def _warn_deprecated_scan_aliases(mode_explicit: bool, sm_explicit: bool) -> None:
-    """Warn that --mode/--source-method are deprecated aliases for --depth."""
-    if not (mode_explicit or sm_explicit):
-        return
-    dep = [
-        f
-        for f, e in (("--mode", mode_explicit), ("--source-method", sm_explicit))
-        if e
-    ]
-    click.echo(
-        f"warning: {', '.join(dep)} {'is' if len(dep) == 1 else 'are'} "
-        "deprecated (ADR-037 D5); use --depth "
-        "(binary|headers|build|source|full), or omit it for auto. --audit is "
-        "the no-baseline lint switch.",
-        err=True,
-    )
 
 
 def _parse_abi3_floor(abi3: str | None) -> tuple[int, int] | None:
@@ -382,6 +368,91 @@ def _scan_explicit_flags(
     return level_explicit, pinned_explicit
 
 
+def render_scan_dry_run(
+    *,
+    artifact: Path,
+    against: Path | None,
+    headers: list[Path],
+    includes: list[Path],
+    sources: Path | None,
+    effective_build_info: Path | None,
+    changed: list[str],
+    changed_src: str,
+    seeded: bool,
+    depth: str | None,
+    eff_depth_enum: EvidenceDepth,
+    resolved: SourceMethod,
+    collect_mode: str,
+    budget_s: float | None,
+    lang: str,
+    header_backend: str,
+    fmt: str,
+) -> Any:
+    """Build the ``scan --dry-run`` report (ADR-043 D4): resolve, never scan.
+
+    Reuses :func:`service.estimate_scan`'s per-layer cost/TU-count probe (the
+    same read-only projection ``--estimate`` used to provide) so the report
+    also states how many translation units the resolved level would touch.
+    """
+    from .dry_run import DryRunResult, tool_status
+    from .service import Budget, ScanRequest, estimate_scan
+
+    result = DryRunResult(command="scan")
+    result.add(
+        "Inputs",
+        f"artifact: {artifact}",
+        f"against: {against}" if against else "against: (none -- one-build audit only)",
+    )
+    scope_label = "changed" if seeded else "target"
+    result.add(
+        "Resolved depth and source scope",
+        f"requested depth: {depth or '(auto)'}",
+        f"effective collect mode: {collect_mode}",
+        f"source scope: {scope_label}" if resolved.value == "s5" else None,
+        f"changed paths ({changed_src}): {len(changed)}",
+    )
+    result.add("Headers and compile context", f"ast-frontend: {header_backend}")
+    result.add(
+        "Build/source inputs",
+        f"--sources: {sources}" if sources else None,
+        f"--build-info: {effective_build_info}" if effective_build_info else None,
+    )
+    result.add("Tools and frontends", *tool_status("castxml", "clang", "gcc", "g++"))
+    result.add(
+        "Consumer/contract scoping",
+        "audit checks: always run (pattern pre-scan + intra-version cross-source)",
+        "compatibility comparison: will run against --against"
+        if against is not None
+        else "compatibility comparison: will NOT run (no --against)",
+    )
+    result.add(
+        "Output and exit-code behavior",
+        f"format: {fmt}",
+        "exit codes: 0 compatible, 2 API break, 4 ABI break, 5 budget overflow",
+    )
+    try:
+        req = ScanRequest(
+            binaries=[artifact], headers=headers, includes=includes,
+            sources=sources, build_info=effective_build_info,
+            mode="pr", source_method=resolved.value, depth=eff_depth_enum.value,
+            changed_paths=list(changed), seeded=seeded,
+            budget=Budget(total_timeout=budget_s), lang=lang,
+        )
+        estimates = estimate_scan(req, resolved_level=(resolved, eff_depth_enum))
+        total = sum(e.est_seconds for e in estimates)
+        result.add(
+            "Resolved depth and source scope",
+            *(
+                f"{e.layer}: {e.tus} TU(s), ~{e.est_seconds:.2f}s -- {e.note}"
+                for e in estimates
+            ),
+            f"projected total: {total:.2f}s",
+        )
+    except Exception as exc:  # pragma: no cover - best-effort probe
+        result.warn(f"could not project per-layer cost: {exc}")
+    return result
+
+
 def _emit_scan_report(outcome: ScanOutcome, fmt: str, output: Path | None) -> None:
     """Render the scan outcome, write/echo it, and exit non-zero on a verdict."""
     text = (
@@ -400,30 +471,25 @@ def _emit_scan_report(outcome: ScanOutcome, fmt: str, output: Path | None) -> No
 
 
 @main.command("scan")
-@click.option(
-    "--binary",
-    "binaries",
-    multiple=True,
-    required=True,
-    type=click.Path(exists=True, path_type=Path),
-    help="Library/artifact (or .abi.json snapshot) to scan.",
-)
+@click.argument("artifact", type=click.Path(exists=True, path_type=Path))
 @click.option(
     "-H",
     "--header",
-    "--headers",
-    "headers",
+    "header_pairs",
     multiple=True,
-    type=click.Path(exists=True, path_type=Path),
-    help="Public header file or directory (repeatable). Alias: -H/--header.",
+    type=SIDED_PATH_PARAM,
+    help="Public header file or directory (repeatable). Applies to the current "
+    "ARTIFACT by default; scope to the --against side with an 'old=' prefix "
+    "(e.g. --header old=old/include, --header new=new/include).",
 )
 @click.option(
     "-I",
     "--include",
-    "includes",
+    "include_pairs",
     multiple=True,
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
-    help="Additional include directory for header parsing (repeatable).",
+    type=SIDED_PATH_PARAM,
+    help="Additional include directory for header parsing (repeatable). Same "
+    "old=/new= side-aware scoping as --header.",
 )
 @click.option(
     "--public-header-dir",
@@ -465,61 +531,27 @@ def _emit_scan_report(outcome: ScanOutcome, fmt: str, output: Path | None) -> No
     "--allow-build-query).",
 )
 @click.option(
-    "--baseline",
+    "--against",
+    "against",
     type=click.Path(exists=True, path_type=Path),
     default=None,
-    help="Previous build's dump/library to compare against.",
-)
-@click.option(
-    "--baseline-header",
-    "--baseline-headers",
-    "baseline_header",
-    multiple=True,
-    type=click.Path(exists=True, path_type=Path),
-    help="Public header(s)/dir for the --baseline side when it is a native "
-    "library whose headers differ from the new build's -H. Without this, a "
-    "native baseline is parsed with the new -H (correct only when the headers "
-    "did not change). Ignored for a JSON-snapshot baseline (headers already "
-    "baked in).",
-)
-@click.option(
-    "--baseline-include",
-    "baseline_include",
-    multiple=True,
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
-    help="Include root(s) for parsing --baseline-header (the old side's -I). "
-    "Defaults to the new build's -I when unset.",
-)
-@click.option(
-    "--mode",
-    "mode",
-    type=click.Choice([m.value for m in ScanMode]),
-    default=ScanMode.PR.value,
-    show_default=False,
-    hidden=True,
-    help="DEPRECATED (ADR-037 D5 G22 Phase 6): fixed (L,S) preset. Use --depth; "
-    "kept as a warned alias for one release. (--audit is the standalone "
-    "no-baseline lint switch.)",
-)
-@click.option(
-    "--source-method",
-    "source_method",
-    type=click.Choice([m.value for m in SourceMethod]),
-    default=None,
-    hidden=True,
-    help="DEPRECATED (ADR-037 D5 G22 Phase 6): precise S-axis technique. Use "
-    "--depth; kept as a warned alias for one release.",
+    help="Previous dump, library, directory, or package to compare ARTIFACT "
+    "against. Without --against, scan runs a one-build audit/hygiene/source "
+    "consistency scan only; with it, scan also compares ARTIFACT against this "
+    "(the two modes are not separate flags -- --against alone selects between "
+    "them).",
 )
 @click.option(
     "--depth",
     "depth",
     type=DEPTH_PARAM,
     default=None,
-    help="Evidence depth to collect — the single dial, named by what you get: "
+    help="Evidence depth to collect -- the single dial, named by what you get: "
     "binary (L0/L1 symbols only), headers (+L2 AST), build (+L3 build context), "
-    "source (+L4 replay & the L5 graph), full (deepest). Omit for 'auto' "
-    "(risk-driven when a --since/--changed-path seed is present, else a sensible "
-    "default). --audit is orthogonal (no-baseline lint).",
+    "source (+L4 replay & the L5 graph). Omit for 'auto' (risk-driven when a "
+    "--since/--changed-path seed is present, else a sensible default). "
+    "--depth source uses changed-path scope when --since/--changed-path is "
+    "given, else the current library target -- never a zero-TU no-op.",
 )
 @click.option(
     "--since",
@@ -540,13 +572,6 @@ def _emit_scan_report(outcome: ScanOutcome, fmt: str, output: Path | None) -> No
     help="Time guard (e.g. 15m); FAILS on overflow, never shrinks scope.",
 )
 @click.option(
-    "--audit",
-    "audit",
-    is_flag=True,
-    default=False,
-    help="Single-build hygiene lint, no baseline (intra-version).",
-)
-@click.option(
     "--abi3",
     "abi3",
     default=None,
@@ -559,11 +584,14 @@ def _emit_scan_report(outcome: ScanOutcome, fmt: str, output: Path | None) -> No
     "extension module as the --binary.",
 )
 @click.option(
-    "--estimate",
-    "estimate",
+    "--dry-run",
+    "dry_run",
     is_flag=True,
     default=False,
-    help="Dry-run: print projected per-layer cost for this project; scan nothing.",
+    help="Resolve and validate the invocation -- classify inputs, resolve "
+    "changed paths, show the audit checks and (if --against) the comparison "
+    "that would run, and print projected per-layer cost -- without scanning. "
+    "Writes nothing; incompatible with -o/--output.",
 )
 @click.option(
     "--crosscheck",
@@ -600,26 +628,21 @@ def _emit_scan_report(outcome: ScanOutcome, fmt: str, output: Path | None) -> No
 @verbose_option
 @compile_context_options  # dump↔scan L2 compile-context parity (ADR-037 D3)
 def scan_cmd(
-    binaries: tuple[Path, ...],
-    headers: tuple[Path, ...],
-    includes: tuple[Path, ...],
+    artifact: Path,
+    header_pairs: tuple[tuple[str, Path], ...],
+    include_pairs: tuple[tuple[str, Path], ...],
     public_header_dirs: tuple[Path, ...],
     sources: Path | None,
     build_info: Path | None,
     compile_db: Path | None,
     build_config: Path | None,
-    baseline: Path | None,
-    baseline_header: tuple[Path, ...],
-    baseline_include: tuple[Path, ...],
-    mode: str,
-    source_method: str | None,
+    against: Path | None,
     depth: str | None,
     since: str | None,
     changed_paths_opt: tuple[str, ...],
     budget: str | None,
-    audit: bool,
     abi3: str | None,
-    estimate: bool,
+    dry_run: bool,
     crosschecks: tuple[str, ...],
     risk_rules_path: Path | None,
     lang: str,
@@ -639,26 +662,39 @@ def scan_cmd(
 
     One orchestrator over `dump`/`compare`: classifies the PR's changed paths,
     runs the always-on compiler-free pattern pre-scan and the intra-version
-    cross-source checks, then runs the pinned evidence level (the `--depth` dial,
-    or `auto` when omitted) and — when `--baseline` is given —
-    compares against it. Emits one coverage-annotated report.
+    cross-source checks, then runs the pinned evidence level (the `--depth`
+    dial, or `auto` when omitted) and — when `--against` is given — compares
+    ARTIFACT against it. Emits one coverage-annotated report. Absence of
+    `--against` already means a one-build audit; it is not a separate mode flag.
 
     \b
     Exit codes:
       0  compatible (or advisory-only findings)
       2  source-level / API break (incl. API_BREAK cross-source findings)
-      4  ABI break (from the baseline comparison)
+      4  ABI break (from the --against comparison)
       5  --budget overflow
 
     \b
     Examples:
-      abicheck scan --binary new/libfoo.so --headers new/include \\
-                    --sources . --baseline old/libfoo.abi.json
-      abicheck scan --binary libfoo.so --headers include/ --audit
-      abicheck scan --binary new.so -H include/ --depth source --since origin/main
+      abicheck scan new/libfoo.so --header new/include \\
+                    --sources . --against old/libfoo.abi.json
+      abicheck scan libfoo.so --header include/
+      abicheck scan new.so -H include/ --depth source --since origin/main
     """
+    from .dry_run import reject_dry_run_with_output
+
+    reject_dry_run_with_output(dry_run, output)
     _setup_verbosity(verbose)
     start = time.monotonic()
+
+    # Side-aware --header/--include (ADR-040): a bare value applies to both the
+    # current ARTIFACT and the --against side; old=/new= scope to one side.
+    header_both, header_old, header_new = split_sided_paths(header_pairs)
+    include_both, include_old, include_new = split_sided_paths(include_pairs)
+    headers = tuple(header_both) + tuple(header_new)
+    includes = tuple(include_both) + tuple(include_new)
+    baseline_header = tuple(header_both) + tuple(header_old)
+    baseline_include = tuple(include_both) + tuple(include_old)
 
     # L2 header compile context (compare↔dump↔scan parity, ADR-037 D3): the one
     # shared resolver bundles the cross-toolchain + frontend flags and folds the
@@ -678,13 +714,8 @@ def scan_cmd(
         sources=sources,
     )
     includes = includes_tuple
-
-    if len(binaries) != 1:
-        raise click.UsageError(
-            "scan currently accepts a single --binary "
-            "(bundle scanning is planned for a later phase)."
-        )
-    binary = binaries[0]
+    binary = artifact
+    baseline = against
 
     budget_s = _parse_budget(budget)
     enabled_checks, severities = _parse_crosschecks(crosschecks)
@@ -696,22 +727,11 @@ def scan_cmd(
     risk_rules = _load_risk_rules(risk_rules_path)
     risk = score_changed_paths(changed, risk_rules)
 
-    # ADR-037 D5 G22 Phase 6: --depth is the single visible dial; --mode and
-    # --source-method are hidden, deprecated warned aliases for one release.
-    _ctx = click.get_current_context()
-    _mode_explicit = (
-        _ctx.get_parameter_source("mode") == click.core.ParameterSource.COMMANDLINE
-    )
-    _sm_explicit = (
-        _ctx.get_parameter_source("source_method")
-        == click.core.ParameterSource.COMMANDLINE
-    )
-    _warn_deprecated_scan_aliases(_mode_explicit, _sm_explicit)
-
-    scan_mode = ScanMode.AUDIT if audit else ScanMode(mode)
+    # Absence of --against is already the one-build audit; presence of --against
+    # is already the compare-too mode. Neither is a separate mode flag (ADR-043).
+    scan_mode = ScanMode.AUDIT if against is None else ScanMode.PR
     # --abi3: the target Py_LIMITED_API floor for the stable-ABI audit; None off.
     abi3_floor = _parse_abi3_floor(abi3)
-    sm = SourceMethod(source_method) if source_method else None
     # S2 (preprocessor macro/include capture) is collected by the conditional S2
     # tier (`preprocessor_scan.run_preprocessor_scan`) over the L3 build evidence;
     # it maps to the L3 `build` collect mode and the always-on tier runs the
@@ -719,25 +739,25 @@ def scan_cmd(
     # coverage row reports it skipped — ADR-035 D2 coverage honesty).
     dp = EvidenceDepth(depth) if depth else None
     # The unset dial means 'auto' (ADR-037 D5): opt into the risk-driven S-method
-    # so a seeded PR scan escalates by risk and an unseeded one falls back to the
-    # preset. Only when *nothing* was pinned (no --depth, no --source-method, no
-    # explicit --mode) — a pinned rung stays deterministic.
-    sm, is_auto, auto_method = _resolve_auto_source_method(
-        sm, dp, _mode_explicit, seeded, risk
-    )
+    # so a seeded scan escalates by risk and an unseeded one falls back to the
+    # preset. Only when --depth was omitted entirely -- a pinned rung stays
+    # deterministic.
+    sm, is_auto, auto_method = _resolve_auto_source_method(None, dp, False, seeded, risk)
     resolved, eff_depth_enum = resolve_level(
         mode=scan_mode,
         source_method=sm,
         depth=dp,
         auto_method=auto_method,
     )
-    # collect_mode and reported depth come from the resolved (method, depth) level,
-    # so a deeper preset (pr-deep = graph) is distinct from pr, and an explicit
-    # --source-method reports its own depth, not the mode preset (Codex review).
-    collect_mode = level_to_collect_mode(resolved, eff_depth_enum)
-    # Keyed on the *resolved* effective depth, not the raw --depth:
-    # --source-method wins over --depth, so `--source-method s5 --depth binary`
-    # still keeps the inputs needed for a source scan.
+    # collect_mode and reported depth come from the resolved (method, depth)
+    # level. The S5 (source) replay scope is command-aware (ADR-043 D3): a valid
+    # change seed (--since/--changed-path) scopes to CHANGED, otherwise TARGET --
+    # the current library target, never a zero-TU no-op, whether --depth source
+    # was pinned explicitly or reached via the auto/PR preset.
+    collect_mode = level_to_collect_mode(
+        resolved, eff_depth_enum,
+        source_scope=SourceScope.CHANGED if seeded else SourceScope.TARGET,
+    )
     headers, baseline_header, sources, build_info, compile_db = _normalize_depth_inputs(
         eff_depth_enum,
         headers,
@@ -748,46 +768,28 @@ def scan_cmd(
     )
     effective_build_info = compile_db or build_info
 
-    # --- --estimate: dry-run cost probe, scan nothing (ADR-035 D10) -----------
-    if estimate:
-        _emit_estimate(
-            binary=binary,
-            headers=list(headers),
-            includes=list(includes),
-            sources=sources,
-            build_info=effective_build_info,
-            mode=scan_mode.value,
-            # Thread the *resolved* concrete level (not the raw flags) so the
-            # estimate matches what the real scan would run — e.g. the auto
-            # default resolving a seeded empty diff to s0/off, not the pr preset,
-            # and pr-deep keeping its (s5, graph) depth rather than collapsing to
-            # source under the source-method>depth precedence (Codex review).
-            resolved_method=resolved,
-            eff_depth=eff_depth_enum,
-            changed=changed,
-            seeded=seeded,
-            budget_s=budget_s,
-            lang=lang,
-            fmt=fmt,
-            output=output,
-        )
-        return
+    if dry_run:
+        from .dry_run import emit_dry_run
+
+        emit_dry_run(render_scan_dry_run(
+            artifact=artifact, against=against,
+            headers=list(headers), includes=list(includes),
+            sources=sources, effective_build_info=effective_build_info,
+            changed=changed, changed_src=changed_src, seeded=seeded,
+            depth=depth, eff_depth_enum=eff_depth_enum, resolved=resolved,
+            collect_mode=collect_mode, budget_s=budget_s, lang=lang,
+            header_backend=header_backend, fmt=fmt,
+        ))
 
     # --- run the engine core (the shared orchestration; ADR-035 D10) ----------
     # The classify→tier→level→compare body lives in ``run_scan_core`` so the CLI,
     # ``service.run_scan``, and the MCP tool drive one engine. The CLI only parses
     # argv, renders, and maps the budget-overflow signal onto an exit code.
-    # Two distinct notions of "explicit", deliberately not the same boolean:
-    #  • _level_explicit — consent to auto-run build.query (level-implies-query):
-    #    a non-auto --source-method, or --depth ONLY when no --source-method is
-    #    given (--source-method auto wins in resolution and must NOT grant query
-    #    consent). Conservative.
-    #  • _pinned_explicit — the auto-strict evidence contract: an explicit --depth
-    #    *always* pins (regardless of --source-method auto, which only picks the
-    #    method, not whether the user demanded source depth), or a non-auto
-    #    --source-method (CodeRabbit review). --mode is a deprecated preset, never
-    #    a pin.
-    _level_explicit, _pinned_explicit = _scan_explicit_flags(source_method, depth)
+    # An explicit --depth both consents to auto-running build.query
+    # (level-implies-query) and pins the auto-strict evidence contract; with no
+    # --mode/--source-method left on the public CLI, the two notions collapse to
+    # one boolean.
+    _level_explicit, _pinned_explicit = _scan_explicit_flags(None, depth)
     prov_headers, prov_dirs = _public_provenance_set(
         list(headers), list(public_header_dirs)
     )

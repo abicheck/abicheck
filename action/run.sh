@@ -403,8 +403,8 @@ elif [[ "$MODE" == "stack-check" ]]; then
   # ── Stack-check mode (Linux ELF) → `deps compare` ───────────────────────
   CMD+=(deps compare)
   CMD+=("${INPUT_NEW_LIBRARY:?new-library (binary path) is required for stack-check mode}")
-  CMD+=(--baseline "${INPUT_BASELINE:?baseline is required for stack-check mode}")
-  CMD+=(--candidate "${INPUT_CANDIDATE:?candidate is required for stack-check mode}")
+  CMD+=(--old-root "${INPUT_BASELINE:?baseline is required for stack-check mode}")
+  CMD+=(--new-root "${INPUT_CANDIDATE:?candidate is required for stack-check mode}")
 
   add_flag "--search-path" "${INPUT_SEARCH_PATH:-}"
   add_single_flag "--ld-library-path" "${INPUT_LD_LIBRARY_PATH:-}"

@@ -381,8 +381,8 @@ class TestStackCheckCommand:
         runner = CliRunner()
         result = runner.invoke(main, [
             "deps", "compare", "usr/bin/test",
-            "--baseline", "/nonexistent/baseline",
-            "--candidate", "/nonexistent/candidate",
+            "--old-root", "/nonexistent/baseline",
+            "--new-root", "/nonexistent/candidate",
         ])
         assert result.exit_code != 0
         assert "does not exist" in result.output or "Invalid value" in result.output
@@ -411,8 +411,8 @@ class TestStackCheckCommand:
             runner = CliRunner()
             result = runner.invoke(main, [
                 "deps", "compare", "usr/bin/test",
-                "--baseline", str(baseline),
-                "--candidate", str(candidate),
+                "--old-root", str(baseline),
+                "--new-root", str(candidate),
             ])
             assert result.exit_code == 0
 
@@ -440,8 +440,8 @@ class TestStackCheckCommand:
             runner = CliRunner()
             result = runner.invoke(main, [
                 "deps", "compare", "usr/bin/test",
-                "--baseline", str(baseline),
-                "--candidate", str(candidate),
+                "--old-root", str(baseline),
+                "--new-root", str(candidate),
                 "--format", "json",
             ])
             assert result.exit_code == 0
@@ -474,8 +474,8 @@ class TestStackCheckCommand:
             runner = CliRunner()
             result = runner.invoke(main, [
                 "deps", "compare", "usr/bin/test",
-                "--baseline", str(baseline),
-                "--candidate", str(candidate),
+                "--old-root", str(baseline),
+                "--new-root", str(candidate),
             ])
             assert result.exit_code == 4
 
@@ -503,8 +503,8 @@ class TestStackCheckCommand:
             runner = CliRunner()
             result = runner.invoke(main, [
                 "deps", "compare", "usr/bin/test",
-                "--baseline", str(baseline),
-                "--candidate", str(candidate),
+                "--old-root", str(baseline),
+                "--new-root", str(candidate),
             ])
             assert result.exit_code == 1
 
@@ -533,8 +533,8 @@ class TestStackCheckCommand:
             runner = CliRunner()
             result = runner.invoke(main, [
                 "deps", "compare", "usr/bin/test",
-                "--baseline", str(baseline),
-                "--candidate", str(candidate),
+                "--old-root", str(baseline),
+                "--new-root", str(candidate),
                 "--output", str(out_file),
             ])
             assert result.exit_code == 0

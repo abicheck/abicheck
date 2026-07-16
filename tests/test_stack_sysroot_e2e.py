@@ -114,7 +114,7 @@ def test_stack_check_cli_reports_fail(tmp_path: Path) -> None:
     result = CliRunner().invoke(
         main,
         ["deps", "compare", str(ROOT_REL),
-         "--baseline", str(baseline), "--candidate", str(candidate)],
+         "--old-root", str(baseline), "--new-root", str(candidate)],
     )
     # FAIL → exit code 4 (see cli_stack.py).
     assert result.exit_code == 4, result.output

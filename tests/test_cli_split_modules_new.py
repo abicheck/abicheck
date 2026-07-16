@@ -299,8 +299,8 @@ class TestCliStackBasics:
     def test_stack_check_same_baseline_candidate_rejected(self, tmp_path: Path) -> None:
         result = CliRunner().invoke(main, [
             "deps", "compare", "usr/bin/myapp",
-            "--baseline", str(tmp_path),
-            "--candidate", str(tmp_path),
+            "--old-root", str(tmp_path),
+            "--new-root", str(tmp_path),
         ])
         assert result.exit_code != 0
         assert "same sysroot" in result.output
@@ -321,8 +321,8 @@ class TestCliStackBasics:
         (candidate / "fake").write_text("hello", encoding="utf-8")
         result = CliRunner().invoke(main, [
             "deps", "compare", "fake",
-            "--baseline", str(baseline),
-            "--candidate", str(candidate),
+            "--old-root", str(baseline),
+            "--new-root", str(candidate),
         ])
         assert result.exit_code != 0
         assert "requires an ELF binary" in result.output
