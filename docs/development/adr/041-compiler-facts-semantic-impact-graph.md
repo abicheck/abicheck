@@ -5,11 +5,12 @@
 graph diff over the full dependency-edge family), P0 slice 3 (`graph
 explain` proof paths), P0 slice 4 (body/type-hash-change correlation), the
 header-only-graph addendum (`header_graph.py`, no build integration required),
-and all five P1 items (object/link provenance graph, public-entry impact
-closure, per-edge confidence/provenance, and stable cross-clang-version
-identity — the last two landed partial in an earlier slice and are now
-complete) implemented; the rest of this ADR is a roadmap, not a commitment to
-ship on any timeline.
+and P1 items 1, 2, 4, 5 (plugin injection, object/link provenance graph,
+per-edge confidence/provenance, and stable cross-clang-version identity)
+implemented; P1 item 3 (public-entry impact closure) has its pure helper
+implemented and tested but not yet wired into any scan/replay path (see that
+item for the open follow-up); the rest of this ADR is a roadmap, not a
+commitment to ship on any timeline.
 **Decision maker:** Nikolay Petrov (@napetrov)
 
 ---
@@ -1226,17 +1227,21 @@ there is no equivalent "should this be automatic" question for them.
    edges stay reserved (schema-only): true archive-member/per-object-symbol
    enumeration needs a real `ar`/`nm`-equivalent introspection extractor this
    increment does not add.
-3. ~~**Public-entry impact closure.**~~ — **done, this change.**
-   `poi.resolve_changed_paths_public_impact(changed_paths, graph)` is the
-   reverse of `resolve_symbol_tus` (export delta → declaring TU): given a set
-   of changed source paths, it resolves which declarations live in those
+3. **Public-entry impact closure.** — **done (pure helper only), this
+   change.** `poi.resolve_changed_paths_public_impact(changed_paths, graph)`
+   is the reverse of `resolve_symbol_tus` (export delta → declaring TU): given
+   a set of changed source paths, it resolves which declarations live in those
    files (via `decl_declaring_files` plus a `def_file`/`source_location`
    fallback) and returns every public entry that either declares directly in
    a changed file or reaches one through `_dependency_reachability`'s forward
-   closure. Feeds PR-scoped deep scans ("this PR touches
-   `src/detail/cache.cpp`; only 3 public entries are reachable from it;
-   replay only those") on top of the existing changed-path/`headers-only`
-   scoping (ADR-035 D7).
+   closure. Unit-tested (`tests/test_poi.py`), but — unlike `resolve_symbol_tus`,
+   which `scan_engine.py` already calls to build the L4 replay seed — **nothing
+   calls this one yet** (Codex review): no scan/source-replay/crosscheck path
+   consumes the returned public-entry set, so the PR-scoped-deep-scan behavior
+   this item originally described ("this PR touches `src/detail/cache.cpp`;
+   only 3 public entries are reachable from it; replay only those") does not
+   actually happen today. Wiring it into `scan_engine.py` alongside
+   `resolve_symbol_tus` (or into a report/advisory surface) remains open.
 4. ~~**Explicit per-edge confidence/provenance model.**~~ — **done, this
    change.** `type_graph.py`'s `DECL_REFERENCES_DECL` edge (the one edge
    family whose resolution was a same-confidence guess regardless of how the
