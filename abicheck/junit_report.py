@@ -422,6 +422,21 @@ def _build_testsuite(
         from .severity import missing_contract_exit_code
 
         missing_blocks = missing_contract_exit_code(severity_config) != 0
+    # A missing-contract label has no backing Change/ChangeKind, so it can't
+    # run through apply_show_only above -- but --show-only's severity
+    # dimension still applies: without this, a --show-only run excluding
+    # breaking findings would still count/emit a failing testcase for a
+    # missing required symbol the filter was meant to hide (Codex review,
+    # mirrors the identical sarif.to_sarif/_fold_scoped_compat_into_text
+    # fix). Element/action tokens don't cleanly apply to "a symbol is simply
+    # absent", so only the severity dimension is checked.
+    if show_only and missing_labels:
+        from .reporter_markdown import ShowOnlyFilter
+
+        missing_severity_label = "breaking" if missing_blocks else "compatible"
+        show_only_severities = ShowOnlyFilter.parse(show_only).severities
+        if show_only_severities and missing_severity_label not in show_only_severities:
+            missing_labels = ()
     total = (len(all_symbols) if all_symbols else len(change_by_symbol)) + len(missing_labels)
     if missing_blocks:
         failure_count += len(missing_labels)

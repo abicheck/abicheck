@@ -1455,6 +1455,36 @@ class TestScopedProperties:
         props = {p.get("name"): p.get("value") for p in ts.find("properties")}
         assert props["abicheck.relevant_finding_count"] == "1"
 
+    def test_missing_contract_respects_show_only(self) -> None:
+        # Regression (Codex review): scoped_missing_labels bypassed
+        # --show-only entirely -- a missing required symbol has no backing
+        # Change/ChangeKind so it can't run through apply_show_only, but a
+        # --show-only run that excludes breaking findings must not still
+        # count/emit a failing testcase for it.
+        r = _make_result([], verdict=Verdict.COMPATIBLE)
+        r.scoped_verdict = Verdict.BREAKING  # type: ignore[attr-defined]
+        r.gate_scope = "used_by"  # type: ignore[attr-defined]
+        r.scoped_relevant_finding_ids = frozenset()  # type: ignore[attr-defined]
+        r.scoped_missing_labels = ("_Z6vanishv",)  # type: ignore[attr-defined]
+        xml_str = to_junit_xml(r, show_only="compatible")
+        root = _parse(xml_str)
+        ts = root.find("testsuite")
+        assert ts.get("failures") == "0"
+        assert ts.get("tests") == "0"
+        assert ts.find("testcase") is None
+
+    def test_missing_contract_shown_when_show_only_includes_breaking(self) -> None:
+        r = _make_result([], verdict=Verdict.COMPATIBLE)
+        r.scoped_verdict = Verdict.BREAKING  # type: ignore[attr-defined]
+        r.gate_scope = "used_by"  # type: ignore[attr-defined]
+        r.scoped_relevant_finding_ids = frozenset()  # type: ignore[attr-defined]
+        r.scoped_missing_labels = ("_Z6vanishv",)  # type: ignore[attr-defined]
+        xml_str = to_junit_xml(r, show_only="breaking")
+        root = _parse(xml_str)
+        ts = root.find("testsuite")
+        assert ts.get("failures") == "1"
+        assert ts.find("testcase") is not None
+
     def test_scoped_only_change_gets_a_testcase(self) -> None:
         # Regression (Codex review): scope_diff_to_app synthesizes a fresh
         # Change (e.g. PE_ORDINAL_RETARGETED) that is relevant to the gate
