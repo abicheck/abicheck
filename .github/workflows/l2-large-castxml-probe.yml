@@ -3,7 +3,7 @@ name: Temporary large L2 and CastXML probe
 on:
   pull_request:
     paths:
-      - scripts/profile_large_l2_castxml_v2.py
+      - scripts/profile_large_l2_castxml_v3.py
       - .github/workflows/l2-large-castxml-probe.yml
 
 permissions:
@@ -13,7 +13,7 @@ jobs:
   profile:
     name: Profile large L2 scans on current main
     runs-on: ubuntu-24.04
-    timeout-minutes: 75
+    timeout-minutes: 90
     env:
       ABICHECK_MAIN_SHA: 488f823cd58459307d969d92b9c5567d590043fd
       PYTHONHASHSEED: "0"
@@ -33,8 +33,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            castxml clang curl gcc g++ jq libeigen3-dev libjemalloc2 \
-            libssl-dev libtbb-dev strace time unzip xz-utils
+            castxml clang cmake curl gcc g++ git jq libclang-dev libeigen3-dev \
+            libjemalloc2 libssl-dev libtbb-dev llvm-dev ninja-build strace time \
+            unzip xz-utils
 
       - name: Install current-main source
         run: |
@@ -50,71 +51,54 @@ jobs:
           import abicheck, pathlib
           print("abicheck:", pathlib.Path(abicheck.__file__).resolve())
           PY
-          python -m py_compile scripts/profile_large_l2_castxml_v2.py
+          python -m py_compile scripts/profile_large_l2_castxml_v3.py
           castxml --version
           gcc --version | head -1
           clang --version | head -1
+          llvm-config --version
           free -h
           df -h / /dev/shm
 
-      - name: Download latest official CastXML superbuild binary
+      - name: Build current CastXML source against system LLVM
         continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euxo pipefail
-          mkdir -p /tmp/castxml-superbuild
-          curl -fsSL \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            https://api.github.com/repos/CastXML/CastXMLSuperbuild/releases/latest \
-            -o /tmp/castxml-superbuild/release.json
-          jq -r '.tag_name, (.assets[]?.name // empty)' /tmp/castxml-superbuild/release.json
-          url="$(jq -r '
-            [.assets[]
-             | select((.name | ascii_downcase | contains("linux"))
-                      and (.name | ascii_downcase | test("(tar\\.gz|tar\\.xz|tgz|zip)$")))
-             | .browser_download_url][0] // empty
-          ' /tmp/castxml-superbuild/release.json)"
-          test -n "$url"
-          archive=/tmp/castxml-superbuild/archive
-          curl -fL -H "Authorization: Bearer $GH_TOKEN" "$url" -o "$archive"
-          mkdir -p /tmp/castxml-superbuild/unpacked
-          if unzip -t "$archive" >/dev/null 2>&1; then
-            unzip -q "$archive" -d /tmp/castxml-superbuild/unpacked
-          else
-            tar -xf "$archive" -C /tmp/castxml-superbuild/unpacked
-          fi
-          bin="$(find /tmp/castxml-superbuild/unpacked -type f -name castxml -perm -111 | head -1)"
+          rm -rf /tmp/CastXML-src /tmp/CastXML-build
+          git clone --depth 1 https://github.com/CastXML/CastXML.git /tmp/CastXML-src
+          llvm_dir="$(llvm-config --cmakedir)"
+          clang_config="$(find /usr/lib/llvm-* -path '*/lib/cmake/clang/ClangConfig.cmake' | sort -V | tail -1)"
+          test -n "$clang_config"
+          clang_dir="$(dirname "$clang_config")"
+          cmake -S /tmp/CastXML-src -B /tmp/CastXML-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_DIR="$llvm_dir" \
+            -DClang_DIR="$clang_dir"
+          cmake --build /tmp/CastXML-build --target castxml -- -j2
+          bin="$(find /tmp/CastXML-build -type f -name castxml -perm -111 | head -1)"
           test -n "$bin"
           "$bin" --version
-          echo "CASTXML_LATEST_BIN=$bin" >> "$GITHUB_ENV"
+          git -C /tmp/CastXML-src rev-parse HEAD
+          echo "CASTXML_NEW_BIN=$bin" >> "$GITHUB_ENV"
+          echo "CASTXML_NEW_SHA=$(git -C /tmp/CastXML-src rev-parse HEAD)" >> "$GITHUB_ENV"
 
-      - name: Run large L2 and CastXML benchmark
+      - name: Run targeted large L2 and CastXML benchmark
         run: |
           rm -rf results/l2-large-castxml
           mkdir -p results/l2-large-castxml
           set +e
-          python scripts/profile_large_l2_castxml_v2.py \
+          python scripts/profile_large_l2_castxml_v3.py \
             --main-sha "$ABICHECK_MAIN_SHA" \
             --out-dir results/l2-large-castxml \
-            >results/l2-large-castxml/probe.log 2>&1
+            >results/l2-large-castxml/probe-v3.log 2>&1
           rc=$?
-          cat results/l2-large-castxml/probe.log
+          cat results/l2-large-castxml/probe-v3.log
           exit "$rc"
-
-      - name: Publish report in job summary
-        if: always()
-        run: |
-          if test -f results/l2-large-castxml/large-l2-castxml-profile.md; then
-            cat results/l2-large-castxml/large-l2-castxml-profile.md >> "$GITHUB_STEP_SUMMARY"
-          fi
 
       - name: Upload profiling artifact
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: large-l2-castxml-profile-main-488f823
+          name: large-l2-castxml-v3-main-488f823
           path: results/l2-large-castxml/
           if-no-files-found: warn
           retention-days: 7
