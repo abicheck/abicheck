@@ -39,6 +39,15 @@ jobs:
         with:
           persist-credentials: false
 
+      # dumper's on-disk AST cache (~/.cache/abi_check) keys each header on its
+      # mtime, not its content — actions/checkout sets every file's mtime to
+      # checkout time, so a persisted cache would miss on every entry, every
+      # run, without this. Restoring each file's last-commit mtime makes the
+      # cache key stable for unchanged content across checkouts (see
+      # scripts/restore_git_mtimes.py).
+      - name: Restore example file mtimes (stable AST-cache keys across CI runs)
+        run: python3 scripts/restore_git_mtimes.py examples
+
       - name: Create results dir
         run: mkdir -p results
 
@@ -46,6 +55,22 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y castxml gcc g++ clang cmake
+
+      # Folded into the cache key below so a runner-image castxml/gcc/clang
+      # upgrade invalidates the whole cache instead of silently reusing AST
+      # dumps from a different toolchain version (dumper's own cache key does
+      # not capture tool versions, only paths/mtimes/flags).
+      - name: Record toolchain versions (cache key input)
+        run: |
+          { castxml --version; gcc --version; clang --version; } > toolchain-versions.txt
+
+      - name: Cache abicheck AST dumps (castxml/clang header-AST cache)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/abi_check
+          key: abi-check-ast-cache-${{ runner.os }}-${{ matrix.toolchain }}-${{ hashFiles('toolchain-versions.txt') }}-${{ github.run_id }}
+          restore-keys: |
+            abi-check-ast-cache-${{ runner.os }}-${{ matrix.toolchain }}-${{ hashFiles('toolchain-versions.txt') }}-
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -121,6 +146,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Restore example file mtimes (stable AST-cache keys across CI runs)
+        run: python3 scripts/restore_git_mtimes.py examples
+
       - name: Create results dir
         run: mkdir -p results
 
@@ -128,6 +156,18 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y castxml gcc g++ clang cmake
+
+      - name: Record toolchain versions (cache key input)
+        run: |
+          { castxml --version; gcc --version; clang --version; } > toolchain-versions.txt
+
+      - name: Cache abicheck AST dumps (castxml/clang header-AST cache)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/abi_check
+          key: abi-check-ast-cache-${{ runner.os }}-clang-fallback-${{ hashFiles('toolchain-versions.txt') }}-${{ github.run_id }}
+          restore-keys: |
+            abi-check-ast-cache-${{ runner.os }}-clang-fallback-${{ hashFiles('toolchain-versions.txt') }}-
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -180,6 +220,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Restore example file mtimes (stable AST-cache keys across CI runs)
+        run: python3 scripts/restore_git_mtimes.py examples
+
       - name: Create results dir
         run: mkdir -p results
 
@@ -187,6 +230,18 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y castxml gcc g++ clang cmake binutils
+
+      - name: Record toolchain versions (cache key input)
+        run: |
+          { castxml --version; gcc --version; clang --version; } > toolchain-versions.txt
+
+      - name: Cache abicheck AST dumps (castxml/clang header-AST cache)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/abi_check
+          key: abi-check-ast-cache-${{ runner.os }}-artifact-modes-${{ hashFiles('toolchain-versions.txt') }}-${{ github.run_id }}
+          restore-keys: |
+            abi-check-ast-cache-${{ runner.os }}-artifact-modes-${{ hashFiles('toolchain-versions.txt') }}-
 
       - name: Set up Python
         uses: actions/setup-python@v6
