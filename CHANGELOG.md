@@ -21,6 +21,25 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   reuses each declaring header's public/private/system classification
   across every declaration it produced instead of reclassifying per
   declaration. No output/behavior change — same `AbiSnapshot` content.
+- **Whole-snapshot cache wired up**: `snapshot_cache.py` (previously
+  implemented but never called from the dump path) now sits in front of
+  `run_dump()` for the common "binary + public headers" shape, so a repeated
+  release-baseline comparison can skip castxml/DWARF/ELF extraction and
+  model construction entirely on a cache hit. Conservatively scoped — a PDB
+  path, DWARF root, debuginfod, forced debug format, symbols-only mode, a
+  custom compile context, or the header-only semantic graph all bypass the
+  cache rather than risk a stale/mismatched snapshot.
+- **Parallel old/new extraction**: `run_compare_request()` (the
+  `CompareRequest`/`run_compare` chokepoint) now resolves the old and new
+  sides concurrently instead of sequentially, since neither depends on the
+  other until they're diffed. Set `ABICHECK_PARALLEL_EXTRACTION=0` to
+  restore the old sequential behavior on memory-constrained runners
+  comparing very large surfaces.
+- Added `onedal_large_surface` / `onedal_packaging_noise` /
+  `onedal_mass_removal` scenarios to `scripts/benchmark_scaling.py`, modeled
+  on real Intel oneDAL validation runs (large near-static public surface,
+  bundled-dependency packaging noise that must stay non-breaking once
+  scoped, and mass export removal at oneDAL's reported scale).
 
 ---
 
