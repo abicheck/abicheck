@@ -28,7 +28,10 @@ abicheck compare``, or the ``main`` prog click uses under test. Unlisted options
 fall through to a default panel, and an unmatched command renders ungrouped — so
 this can never break a command, only prettify it.
 """
+
 from __future__ import annotations
+
+import sys
 
 # Per-command option panels. Options not listed here land in rich-click's
 # default trailing panel, so a new flag never has to be added here to work.
@@ -38,33 +41,58 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         {
             "name": "Output & reporting",
             "options": [
-                "--output", "--format", "--demangle", "--stat", "--report-mode",
-                "--show-impact", "--recommend", "--show-only", "--annotate",
-                "--annotate-additions", "--config", "--exit-code-scheme", "--verbose",
+                "--output",
+                "--format",
+                "--demangle",
+                "--stat",
+                "--report-mode",
+                "--show-impact",
+                "--recommend",
+                "--show-only",
+                "--annotate",
+                "--annotate-additions",
+                "--config",
+                "--exit-code-scheme",
+                "--verbose",
             ],
         },
         {
             "name": "Toolchain (L2 header AST)",
             "options": [
-                "--ast-frontend", "--old-ast-frontend", "--new-ast-frontend",
-                "--gcc-path", "--gcc-prefix", "--gcc-options", "--gcc-option",
-                "--sysroot", "--nostdinc",
+                "--ast-frontend",
+                "--old-ast-frontend",
+                "--new-ast-frontend",
+                "--gcc-path",
+                "--gcc-prefix",
+                "--gcc-options",
+                "--gcc-option",
+                "--sysroot",
+                "--nostdinc",
             ],
         },
         {
             "name": "Policy & severity",
             "options": [
-                "--policy", "--policy-file", "--suppress", "--strict-suppressions",
-                "--require-justification", "--severity-preset",
-                "--severity-abi-breaking", "--severity-potential-breaking",
-                "--severity-quality-issues", "--severity-addition",
+                "--policy",
+                "--policy-file",
+                "--suppress",
+                "--strict-suppressions",
+                "--require-justification",
+                "--severity-preset",
+                "--severity-abi-breaking",
+                "--severity-potential-breaking",
+                "--severity-quality-issues",
+                "--severity-addition",
             ],
         },
         {
             "name": "Public-surface scoping",
             "options": [
-                "--scope-public-headers", "--show-filtered", "--show-redundant",
-                "--collapse-versioned-symbols", "--public-symbol",
+                "--scope-public-headers",
+                "--show-filtered",
+                "--show-redundant",
+                "--collapse-versioned-symbols",
+                "--public-symbol",
                 "--public-symbols-list",
             ],
         },
@@ -78,7 +106,10 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         {
             "name": "Build/source evidence (L3–L5)",
             "options": [
-                "--build-info", "--sources", "--depth", "--max",
+                "--build-info",
+                "--sources",
+                "--depth",
+                "--max",
             ],
         },
         {
@@ -88,23 +119,34 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         {
             "name": "Per-side overrides",
             "options": [
-                "--version", "--pdb-path",
+                "--version",
+                "--pdb-path",
             ],
         },
         {
             "name": "Build-config matrix & idioms",
             "options": [
-                "--probe-matrix", "--pattern-verdicts",
-                "--explain-patterns", "--surface-metrics",
+                "--probe-matrix",
+                "--pattern-verdicts",
+                "--explain-patterns",
+                "--surface-metrics",
             ],
         },
         {
             "name": "Release (directory/package inputs)",
             "options": [
-                "--jobs", "--dso-only", "--output-dir", "--fail-on-removed-library",
-                "--debug-info", "--devel-pkg",
-                "--include-private-dso", "--keep-extracted", "--manifest",
-                "--bundle-system-providers", "--bundle-cohort", "--no-bundle-analysis",
+                "--jobs",
+                "--dso-only",
+                "--output-dir",
+                "--fail-on-removed-library",
+                "--debug-info",
+                "--devel-pkg",
+                "--include-private-dso",
+                "--keep-extracted",
+                "--manifest",
+                "--bundle-system-providers",
+                "--bundle-cohort",
+                "--no-bundle-analysis",
             ],
         },
     ],
@@ -112,22 +154,31 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         {
             "name": "Inputs",
             "options": [
-                "--binary", "--header", "--source-root", "--build-dir",
-                "--compile-db", "-p",
+                "--binary",
+                "--header",
+                "--source-root",
+                "--build-dir",
+                "--compile-db",
+                "-p",
             ],
         },
         {
             "name": "Build-system adapters",
             "options": [
-                "--from", "--build-system",
+                "--from",
+                "--build-system",
                 "--read-compiler-record",
             ],
         },
         {
             "name": "Source-ABI (L4)",
             "options": [
-                "--source-abi", "--source-abi-extractor", "--source-abi-scope",
-                "--source-abi-target", "--source-abi-cache", "--clang-bin",
+                "--source-abi",
+                "--source-abi-extractor",
+                "--source-abi-scope",
+                "--source-abi-target",
+                "--source-abi-cache",
+                "--clang-bin",
                 "--android-dump",
             ],
         },
@@ -135,13 +186,17 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "name": "Source graph (L5)",
             "options": [
                 "--source-graph",
-                "--kythe-entries", "--codeql-results", "--codeql-extends-results",
+                "--kythe-entries",
+                "--codeql-results",
+                "--codeql-extends-results",
             ],
         },
         {
             "name": "Extractors & collection",
             "options": [
-                "--extractor-manifest", "--collection-mode", "--allow-build-query",
+                "--extractor-manifest",
+                "--collection-mode",
+                "--allow-build-query",
                 "--changed-path",
             ],
         },
@@ -151,31 +206,50 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         {
             "name": "Inputs",
             "options": [
-                "--header", "--include", "--public-header", "--public-header-dir",
-                "--version", "--lang",
+                "--header",
+                "--include",
+                "--public-header",
+                "--public-header-dir",
+                "--version",
+                "--lang",
             ],
         },
         {"name": "Output", "options": ["--output", "--show-data-sources", "--verbose"]},
         {
             "name": "Toolchain",
             "options": [
-                "--ast-frontend", "--gcc-path", "--gcc-prefix", "--gcc-options",
-                "--gcc-option", "--sysroot", "--nostdinc",
+                "--ast-frontend",
+                "--gcc-path",
+                "--gcc-prefix",
+                "--gcc-options",
+                "--gcc-option",
+                "--sysroot",
+                "--nostdinc",
             ],
         },
         {
             "name": "Debug info",
             "options": [
-                "--dwarf-only", "--debug-format", "--debug-root", "--debuginfod",
-                "--debuginfod-url", "--pdb-path",
+                "--dwarf-only",
+                "--debug-format",
+                "--debug-root",
+                "--debuginfod",
+                "--debuginfod-url",
+                "--pdb-path",
             ],
         },
         {
             "name": "Build/source evidence (L3–L5)",
             "options": [
-                "--depth", "--max", "--build-info", "--sources",
-                "--build-dir", "--compile-db-filter",
-                "--build-query", "--build-compile-db", "--config",
+                "--depth",
+                "--max",
+                "--build-info",
+                "--sources",
+                "--build-dir",
+                "--compile-db-filter",
+                "--build-query",
+                "--build-compile-db",
+                "--config",
                 "--allow-build-query",
             ],
         },
@@ -203,15 +277,26 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         {
             "name": "Inputs",
             "options": [
-                "--binary", "--header", "--include", "--public-header-dir",
-                "--sources", "--build-info", "--compile-db", "--config",
+                "--binary",
+                "--header",
+                "--include",
+                "--public-header-dir",
+                "--sources",
+                "--build-info",
+                "--compile-db",
+                "--config",
             ],
         },
         {
             "name": "Baseline & scope",
             "options": [
-                "--baseline", "--baseline-header", "--baseline-include",
-                "--depth", "--since", "--changed-path", "--budget",
+                "--baseline",
+                "--baseline-header",
+                "--baseline-include",
+                "--depth",
+                "--since",
+                "--changed-path",
+                "--budget",
             ],
         },
         {
@@ -221,8 +306,14 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         {
             "name": "Toolchain (L2 header AST)",
             "options": [
-                "--lang", "--ast-frontend", "--gcc-path", "--gcc-prefix",
-                "--gcc-options", "--gcc-option", "--sysroot", "--nostdinc",
+                "--lang",
+                "--ast-frontend",
+                "--gcc-path",
+                "--gcc-prefix",
+                "--gcc-options",
+                "--gcc-option",
+                "--sysroot",
+                "--nostdinc",
                 "--allow-build-query",
             ],
         },
@@ -242,15 +333,21 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         {
             "name": "Policy & severity",
             "options": [
-                "--policy", "--policy-file", "--suppress", "--severity-preset",
+                "--policy",
+                "--policy-file",
+                "--suppress",
+                "--severity-preset",
                 "--scope-public-headers",
             ],
         },
         {
             "name": "Output & reporting",
             "options": [
-                "--format", "--output", "--show-irrelevant",
-                "--list-required-symbols", "--verbose",
+                "--format",
+                "--output",
+                "--show-irrelevant",
+                "--list-required-symbols",
+                "--verbose",
             ],
         },
     ],
@@ -261,12 +358,34 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
 }
 
 
+def _ensure_utf8_streams() -> None:
+    """Reconfigure stdout/stderr to UTF-8 on Windows, where they otherwise are not.
+
+    A `python -m abicheck.cli --help`/error-path write raises ``UnicodeEncodeError``
+    and crashes the process when help/error text carries a non-ASCII character
+    (an em dash, an arrow, …, both used throughout this CLI's help strings) and
+    the stream isn't a real UTF-8-capable console — e.g. redirected/piped output
+    on Windows, which defaults to the legacy ANSI code page rather than UTF-8.
+    POSIX terminals already default to UTF-8, so this is a no-op there.
+    ``reconfigure`` is a no-op if the stream is already UTF-8, and ``errors="replace"``
+    is a last-resort safety net rather than a crash if some other exotic case slips
+    through.
+    """
+    if sys.platform != "win32":
+        return
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 def configure_rich_help() -> None:
     """Register the option-group panels with rich-click (idempotent).
 
     Best-effort: if rich-click is unavailable the CLI still works with click's
     plain help, so the import failure is swallowed rather than aborting startup.
     """
+    _ensure_utf8_streams()
     try:
         import rich_click
     except ImportError:  # pragma: no cover - rich-click is a declared dependency
