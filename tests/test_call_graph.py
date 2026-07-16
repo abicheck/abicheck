@@ -831,6 +831,9 @@ def test_extract_from_build_parallelizes_and_dedupes(monkeypatch) -> None:
     import abicheck.buildsource.call_graph as cg
 
     monkeypatch.setenv("ABICHECK_CALL_GRAPH_JOBS", "2")
+    # This test exercises parallel extraction, not the independently tested
+    # host-memory clamp. Pin the cap so low-RAM CI/dev hosts remain deterministic.
+    monkeypatch.setattr(cg, "_call_graph_mem_cap", lambda: 2)
     monkeypatch.setattr(cg.shutil, "which", lambda _b: "/usr/bin/clang++")
     seen_sources: list[str] = []
 
