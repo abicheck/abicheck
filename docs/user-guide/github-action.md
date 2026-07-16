@@ -24,7 +24,7 @@ automatically, then runs ABI comparison and reports results.
 
 | Input | Required | Description |
 |-------|----------|-------------|
-| `mode` | no | `compare` (default), `compare-release`, `dump`, `scan`, `merge`, `appcompat`, `deps`, or `stack-check` |
+| `mode` | no | `compare` (default), `compare-release`, `dump`, `scan`, `deps`, or `stack-check` |
 | `old-library` | yes (compare, compare-release) | Path to old library, JSON snapshot, ABICC dump, directory, or package |
 | `new-library` | yes (compare, dump, scan, …) | Path to new library, binary, directory, or package. In `scan` mode this is the scanned binary or `.abi.json` snapshot. |
 
@@ -53,14 +53,23 @@ automatically, then runs ABI comparison and reports results.
     [Source scans](#source-scans-build-source-evidence) below and the
     [Build Info & Sources](../concepts/build-source-data.md) concept guide.
 
-### Application compatibility inputs (appcompat mode)
+### Application-scoped comparison (ADR-043: appcompat folded into `compare --used-by`)
 
-| Input | Required | Description |
-|-------|----------|-------------|
-| `app-binary` | yes (appcompat) | Path to application binary (ELF, PE, or Mach-O) |
-| `check-against` | no | Library for weak-mode symbol availability check (no old library needed) |
-| `show-irrelevant` | no | Include library changes not affecting the application (default `false`) |
-| `list-required-symbols` | no | List symbols the app requires and exit (default `false`) |
+There is no separate `appcompat` mode. Scope a normal `compare` to what an
+application actually uses via `extra-args`:
+
+```yaml
+- uses: abicheck/abicheck@v0.3.0
+  with:
+    old-library: libfoo-old.so
+    new-library: libfoo-new.so
+    extra-args: '--used-by myapp'
+```
+
+`--used-by <app-binary>` (repeatable) runs the full library comparison once,
+then scopes the primary verdict/exit code to the worst app-affecting result;
+the full verdict and unrelated changes stay as informational context. The
+`OLD`/`NEW` operands must be real library binaries, not JSON snapshots.
 
 ### Version labels
 
@@ -91,7 +100,7 @@ automatically, then runs ABI comparison and reports results.
 | `search-path` | — | Additional library search directories (space-separated) |
 | `ld-library-path` | — | Simulated `LD_LIBRARY_PATH` (colon-separated) |
 
-### Source-scan and build-source evidence (scan / dump / merge modes)
+### Source-scan and build-source evidence (scan / dump modes)
 
 These inputs drive [source intelligence](../concepts/build-source-data.md) —
 L3 build context, L4 source-ABI replay, and L5 source graphs — through the
@@ -106,7 +115,7 @@ scan degrades gracefully and L0–L2 stay authoritative.
 | `compile-db` | scan (dump folds into `build-info`) | Explicit `compile_commands.json` path. |
 | `build-config` | scan, dump | Trusted `.abicheck.yml`; its `build.query` runs automatically (operator-supplied = trusted). |
 | `allow-build-query` | scan, dump | **Deprecated, ignored.** Build queries now run automatically when `sources` is given; kept as a no-op for backward compatibility. |
-| `depth` | scan, dump | Evidence-depth dial: `binary`, `headers`, `build`, `source`, or `full`. Maps to `--depth`. Omit in scan mode for `auto` (risk-driven). |
+| `depth` | scan, dump | Evidence-depth dial: `binary`, `headers`, `build`, or `source`. Maps to `--depth`. Omit in scan mode for `auto` (risk-driven). |
 | `baseline` | scan | Previous build's dump/library to compare against (or use `abi-baseline` to auto-fetch one). |
 | `since` | scan | Focus the scan on files changed vs a git ref (e.g. `origin/main`). |
 | `changed-path` | scan | Changed path(s) to focus on (space-separated; alternative to `since`). |
@@ -115,30 +124,27 @@ scan degrades gracefully and L0–L2 stay authoritative.
 | `estimate` | scan | Dry-run: print projected per-layer cost and scan nothing (always exits 0). |
 | `crosscheck` | scan | Per-check severity overrides `KEY=LEVEL` (`off`/`info`/`warning`/`error`), space-separated. Promoting a check to `=error` makes a finding for it exit `2` (the API_BREAK tier); pair with `fail-on-api-break: true` to gate the step. |
 | `risk-rules` | scan | Path to a YAML file overriding the `risk_rules` profile. |
-| `merge-inputs` | merge | Space-separated `.abi.json` dumps and/or a Wrapper injection `abicheck_inputs/` pack directory to combine. |
-| `on-conflict` | merge | `warn` (default, first-wins + diagnostic) or `error` (exit non-zero) when two inputs supply the same layer with differing facts. |
 
 !!! note "format in scan mode"
     `scan` supports `format: text` (default) or `json`; other values fall back
-    to `text` with a warning. `merge` writes a `.abi.json` baseline to
-    `output-file` (default `merged-baseline.json`).
+    to `text` with a warning.
 
 !!! tip "Consuming build-emitted source facts (wrapper / Clang plugin)"
     If your **product build** emits its own `abicheck_inputs/` pack — via the
     `abicheck-cc` compiler wrapper or the optional
     [Clang plugin](../concepts/build-source-data.md) (both write the identical
-    schema) — the Action ingests it with **`mode: merge`**: pass the binary dump
-    plus the pack directory in `merge-inputs`. The Action does not run the
-    wrapper/plugin itself (that happens in your build); it folds the resulting
-    pack into a baseline with no re-parse, using the same merge logic
-    previously exposed as a standalone `merge` CLI command (now internal-only
-    — see [Companion Commands](companion-commands.md)).
+    schema) — there is no separate ingestion step. Pass the pack directory
+    directly in `sources` or `build-info` (scan/dump mode); abicheck
+    auto-detects it and folds it in with no re-parse. The Action does not run
+    the wrapper/plugin itself (that happens in your build). The standalone
+    `merge` CLI command that used to expose this is gone — see
+    [Companion Commands](companion-commands.md).
 
 ### Output and policy
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `format` | `markdown` (`text` for scan) | Output format: `markdown`, `json`, `sarif`, `html`. `sarif`/`html` are compare-only; `compare-release`/`appcompat`/`deps`/`stack-check` fall back to `markdown`; `scan` supports only `text`/`json` and falls back to `text`. |
+| `format` | `markdown` (`text` for scan) | Output format: `markdown`, `json`, `sarif`, `html`. `sarif`/`html` are compare-only; `compare-release`/`deps`/`stack-check` fall back to `markdown`; `scan` supports only `text`/`json` and falls back to `text`. |
 | `output-file` | — | Path to write report (auto-set for SARIF) |
 | `policy` | `strict_abi` | Built-in policy: `strict_abi`, `sdk_vendor`, `plugin_abi` |
 | `policy-file` | — | Custom YAML policy file |
@@ -164,7 +170,7 @@ extra-args: '--strict-suppressions --require-justification'
 | `severity-addition` | — | Severity for additions: `error`, `warning`, or `info` (compare mode only) |
 | `extra-args` | `''` | Additional CLI arguments passed to abicheck |
 | `add-job-summary` | `true` | Write summary to Job Summary panel (ignored for dump mode) |
-| `pr-comment` | `true` | Post a sticky ABI report comment on the PR (compare/compare-release/appcompat). No-op outside `pull_request` events. |
+| `pr-comment` | `true` | Post a sticky ABI report comment on the PR (compare/compare-release). No-op outside `pull_request` events. |
 | `pr-comment-mode` | `update` | `update` keeps one comment and edits it in place; `new` posts a fresh comment each run |
 | `pr-comment-on` | `changes` | When to comment: `changes`, `always`, or `never` |
 | `pr-comment-detail` | `standard` | Comment detail: `summary`, `standard`, or `full` |
@@ -187,8 +193,8 @@ extra-args: '--strict-suppressions --require-justification'
 
 | Output | Description |
 |--------|-------------|
-| `verdict` | **compare:** `COMPATIBLE`, `SEVERITY_ERROR`, `API_BREAK`, `BREAKING`, or `ERROR`. **compare-release:** `COMPATIBLE`, `API_BREAK`, `BREAKING`, `REMOVED_LIBRARY`, or `ERROR`. **appcompat:** `COMPATIBLE`, `API_BREAK`, `BREAKING`, or `ERROR`. **dump:** `COMPATIBLE` or `ERROR`. **scan:** `COMPATIBLE`, `API_BREAK`, `BREAKING`, `BUDGET_OVERFLOW`, or `ERROR`. **merge:** `COMPATIBLE` or `ERROR`. **stack-check:** `PASS`, `WARN`, `FAIL`, or `ERROR`. **deps:** `PASS`, `FAIL`, or `ERROR`. |
-| `exit-code` | **compare:** `0` (compatible), `1` (severity error), `2` (API break), `4` (ABI break). **compare-release:** `0` (compatible), `2` (API break), `4` (ABI break), `8` (library removed). **appcompat:** `0` (compatible), `2` (API break), `4` (ABI break). **scan:** `0` (compatible/advisory), `2` (API break), `4` (ABI break), `5` (budget overflow). **merge:** `0` (ok). **stack-check:** `0` (pass), `1` (warn), `4` (fail). **deps:** `0` (ok), `1` (missing). |
+| `verdict` | **compare** (including `--used-by`/`--required-symbol`-scoped runs): `COMPATIBLE`, `SEVERITY_ERROR`, `API_BREAK`, `BREAKING`, or `ERROR`. **compare-release:** `COMPATIBLE`, `API_BREAK`, `BREAKING`, `REMOVED_LIBRARY`, or `ERROR`. **dump:** `COMPATIBLE` or `ERROR`. **scan:** `COMPATIBLE`, `API_BREAK`, `BREAKING`, `BUDGET_OVERFLOW`, or `ERROR`. **stack-check:** `PASS`, `WARN`, `FAIL`, or `ERROR`. **deps:** `PASS`, `FAIL`, or `ERROR`. |
+| `exit-code` | **compare:** `0` (compatible), `1` (severity error), `2` (API break), `4` (ABI break). **compare-release:** `0` (compatible), `2` (API break), `4` (ABI break), `8` (library removed). **scan:** `0` (compatible/advisory), `2` (API break), `4` (ABI break), `5` (budget overflow). **stack-check:** `0` (pass), `1` (warn), `4` (fail). **deps:** `0` (ok), `1` (missing). |
 | `report-path` | Path to the generated report file (empty when no output file was produced) |
 
 ## Usage examples
@@ -275,8 +281,8 @@ classifies the PR's changed paths, runs the always-on pattern and cross-source
 checks plus the pinned evidence depth (L3 build context / L4 source-ABI replay
 / L5 source graph), and — with a `baseline` — compares against it. The full
 CI recipes — pinning `depth`, single-release audit, cost estimation,
-cross-check gating, and the three ways to feed build/source evidence into a
-baseline (`dump --sources`, `mode: merge`, build-emitted packs) — live on
+cross-check gating, and the ways to feed build/source evidence into a
+baseline (`dump --sources`, `build-info`, build-emitted packs) — live on
 their own page:
 
 ➡️ **[GitHub Action: Source Scans & Build Evidence](github-action-source-scans.md)**
@@ -284,7 +290,7 @@ their own page:
 ## More usage recipes
 
 Caching a baseline, SARIF upload, cross-compilation, multi-library/multi-platform
-matrices, dependency/appcompat checks, PR-comment tuning, and the
+matrices, dependency/app-scoped checks, PR-comment tuning, and the
 `compare-release` package-comparison recipes (RPM/Deb/tar/conda) are on their
 own page:
 

@@ -12,18 +12,22 @@
 # not just the entity comparison. It:
 #   1. compiles the fixture TU into a shared library WITH the plugin active, so
 #      the same build both links the .so and drops `abicheck_inputs/` beside it;
-#   2. `abicheck dump`s the .so (L0/L1 binary facts — no `-H`, so no castxml
-#      dependency in the plugin CI lane);
-#   3. `abicheck merge`s the plugin-emitted pack into the binary baseline (the
-#      real ingest path, no re-parse) and asserts the L4 source-ABI + L5 graph
-#      layers were folded in with a non-empty set of source entities, AND that
-#      the specific DECL_CALLS_DECL edges the fixture's overload(int)/
-#      overload(double) calls produce are actually present in the embedded L5
-#      graph (latest-main Clang plugin review, PR1: previously only L4 entity
+#   2. `abicheck dump`s the .so with `--build-info ./abicheck_inputs/` (L0/L1
+#      binary facts — no `-H`, so no castxml dependency in the plugin CI
+#      lane), which auto-detects and folds the plugin-emitted pack into the
+#      baseline in the same step (the real ingest path, no re-parse — the
+#      standalone `collect`/`merge` commands this used to go through were
+#      removed with no replacement in the ADR-043 CLI reset; `dump
+#      --build-info`/`--sources` now does the same auto-detect-and-fold
+#      inline) and asserts the L4 source-ABI + L5 graph layers were folded in
+#      with a non-empty set of source entities, AND that the specific
+#      DECL_CALLS_DECL edges the fixture's overload(int)/overload(double)
+#      calls produce are actually present in the embedded L5 graph
+#      (latest-main Clang plugin review, PR1: previously only L4 entity
 #      counts were asserted here, so this test could pass even if
 #      source_edges never reached the graph at all — the exact gap that
 #      review found);
-#   4. `abicheck compare`s the merged baseline against itself and asserts a
+#   3. `abicheck compare`s the resulting baseline against itself and asserts a
 #      clean (exit 0) verdict — proving the folded baseline is a valid, stable
 #      comparison input.
 #
@@ -165,18 +169,16 @@ def main(argv: list[str] | None = None) -> int:
     try:
         so = _compile_shared_lib_with_plugin(work, plugin, args.clangxx)
 
-        # 2. Binary facts (L0/L1) — no -H, so the lane needs no castxml.
-        _run(["abicheck", "dump", str(so), "-o", "widget.bin.json"], cwd=src)
-
-        # 3. Fold the plugin pack into the baseline (real ingest, no re-parse).
-        merge_out = _run(
+        # 2. Binary facts (L0/L1, no -H so the lane needs no castxml) with the
+        # plugin-emitted pack folded in inline (real ingest, no re-parse).
+        dump_out = _run(
             [
-                "abicheck", "merge", "widget.bin.json", "./abicheck_inputs/",
+                "abicheck", "dump", str(so), "--build-info", "./abicheck_inputs/",
                 "-o", "widget.baseline.json",
             ],
             cwd=src,
         )
-        print(merge_out, end="")
+        print(dump_out, end="")
         baseline = json.loads((src / "widget.baseline.json").read_text())
         build_source = baseline.get("build_source") or {}
         if not build_source:
@@ -196,17 +198,17 @@ def main(argv: list[str] | None = None) -> int:
                 f"DECL_CALLS_DECL edge(s) from source_edges: {missing_edges}"
             )
 
-        # 4. The merged baseline must be a valid comparison input (self-compare
+        # 3. The baseline must be a valid comparison input (self-compare
         #    is compatible → exit 0 under the legacy verdict scheme).
         _run(
             ["abicheck", "compare", "widget.baseline.json", "widget.baseline.json"],
             cwd=src,
         )
         print(
-            f"\nPlugin injection scan validation PASSED: plugin pack ingested via merge "
-            f"({folded} source entities folded, {len(graph_edges)} L5 graph edges "
-            "including the required DECL_CALLS_DECL overload edges) and the "
-            "baseline compares clean."
+            f"\nPlugin injection scan validation PASSED: plugin pack ingested via "
+            f"dump --build-info ({folded} source entities folded, "
+            f"{len(graph_edges)} L5 graph edges including the required "
+            "DECL_CALLS_DECL overload edges) and the baseline compares clean."
         )
         return 0
     finally:

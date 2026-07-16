@@ -889,6 +889,12 @@ def run_compare(
         old_inc = list(old_inc) + list(config_includes)
         new_inc = list(new_inc) + list(config_includes)
 
+    # Preserve the original library paths from before any inline-embed rewrite
+    # below, for --used-by/--required-symbol scoping (which needs the real
+    # OLD/NEW binaries to parse app import/export requirements, not a rewritten
+    # temporary .abi.json snapshot — Codex review).
+    used_by_old_input, used_by_new_input = old_input, new_input
+
     # Inline source-tree collection (deep-compare folded into compare): when a
     # side's --old/new-sources points at a raw checkout, or --old/new-build-info
     # at a raw build dir / compile_commands.json (not a `collect` pack), dump that
@@ -979,6 +985,13 @@ def run_compare(
     # is honoured (pre-split resolution semantics); the name is re-exported there.
     old_input, old_fmt = cli._normalize_binary_input(old_input)
     new_input, new_fmt = cli._normalize_binary_input(new_input)
+    # Same linker-script resolution for the paths --used-by/--required-symbol
+    # scoping will parse — these were captured before the inline-embed rewrite
+    # above may have replaced old_input/new_input with a temporary snapshot, so
+    # they need their own normalization rather than inheriting it from old_input/
+    # new_input (which, in that case, no longer point at the original library).
+    used_by_old_input, _ = cli._normalize_binary_input(used_by_old_input)
+    used_by_new_input, _ = cli._normalize_binary_input(used_by_new_input)
     _reject_debug_format_for_non_elf(effective_debug_format, old_fmt, new_fmt)
     _warn_ignored_flags(
         old_fmt is not None, new_fmt is not None,
@@ -1090,7 +1103,7 @@ def run_compare(
     scoped_exit_code: int | None = None
     if used_by_apps:
         scoped_exit_code = _apply_used_by_scoping(
-            result, used_by_apps, old_input, new_input, policy, pf,
+            result, used_by_apps, used_by_old_input, used_by_new_input, policy, pf,
         )
     elif required_symbols:
         scoped_exit_code = _apply_required_symbol_scoping(
@@ -1133,6 +1146,7 @@ def run_compare(
             show_recommendation=recommend,
             demangle=secondary_demangle,
         )
+        secondary_text = _fold_scoped_compat_into_text(secondary_text, secondary_fmt, result)
         _write_or_echo(secondary_output, secondary_text)
 
     if scoped_exit_code is not None:

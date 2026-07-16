@@ -836,20 +836,6 @@ def _resolved_build_info_path(
     return None
 
 
-def _registered_cli_command(*args: str) -> list[str]:
-    """Run abicheck CLI with plugin-style commands registered in subprocesses."""
-    return [
-        sys.executable,
-        "-c",
-        (
-            "import sys; import abicheck.cli_buildsource; "
-            "from abicheck.cli import main; "
-            "main(args=sys.argv[1:], prog_name='abicheck')"
-        ),
-        *args,
-    ]
-
-
 def _collect_build_source_evidence(
     tmp: Path,
     case_dir: Path,
@@ -861,7 +847,17 @@ def _collect_build_source_evidence(
     v2_so: Path,
     entry: dict,
 ) -> tuple[Path | None, Path | None, str | None]:
-    """Collect L3/L4/L5 build-source packs for the build-source artifact variant."""
+    """Collect L3/L4/L5 build-source packs for the build-source artifact variant.
+
+    There is no standalone `collect` CLI command any more (ADR-043 removed it
+    with no replacement); `dump --sources`/`--build-info` now collects the same
+    evidence inline via `buildsource.inline.collect_inline_pack()`. To still get
+    an on-disk pack directory to pass as an out-of-band `--build-info`/`--sources`
+    input (mirroring what standalone `collect` used to produce), call that same
+    inline collector directly and write its result to *out_dir*.
+    """
+    from abicheck.buildsource.inline import collect_inline_pack
+
     extractor = str(entry.get("source_abi_extractor", "castxml"))
     if extractor == "castxml" and not shutil.which("castxml"):
         return None, None, "SKIP:castxml not found for source-ABI replay"
@@ -884,22 +880,24 @@ def _collect_build_source_evidence(
             target_suffix="v1" if side == "old" else "v2",
         )
         out_dir = tmp / f"{side}.buildsource"
-        cmd = _registered_cli_command(
-            "collect",
-            "--binary", str(binary),
-            "--compile-db", str(db_path),
-            "--source-root", str(case_dir),
-            *(["-H", str(header)] if header is not None and header.exists() else []),
-            "--source-abi",
-            "--source-abi-extractor", extractor,
-            "--source-abi-scope", scope,
-            "--source-graph", "summary",
-            "-o", str(out_dir),
+        public_header_roots = (
+            (str(header),) if header is not None and header.exists() else ()
         )
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
-        if r.returncode != 0:
-            detail = (r.stderr or r.stdout)[:300]
-            return None, None, f"collect {side} failed: {detail}"
+        try:
+            pack = collect_inline_pack(
+                sources=case_dir,
+                build_info=db_path,
+                extractor=extractor,
+                scope=scope,
+                layers=("L3", "L4", "L5"),
+                public_header_roots=public_header_roots,
+            )
+        except Exception as exc:  # noqa: BLE001 - report as a case failure, not a crash
+            return None, None, f"collect {side} failed: {exc}"
+        if pack is None:
+            return None, None, f"collect {side} failed: no build/source evidence collected"
+        pack.root = out_dir
+        pack.write()
         results.append(out_dir)
     return results[0], results[1], None
 

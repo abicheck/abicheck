@@ -100,6 +100,7 @@ def test_python_dash_m_abicheck_shows_public_commands() -> None:
         [sys.executable, "-m", "abicheck", "--help"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=True,
     )
     for cmd in _PUBLIC_COMMANDS:
@@ -133,11 +134,11 @@ def test_python_dash_m_abicheck_cli_matches_python_dash_m_abicheck() -> None:
     invocation path (see test_main_entrypoint.py)."""
     via_package = subprocess.run(
         [sys.executable, "-m", "abicheck", "--help"],
-        capture_output=True, text=True, check=True,
+        capture_output=True, text=True, encoding="utf-8", check=True,
     ).stdout
     via_module = subprocess.run(
         [sys.executable, "-m", "abicheck.cli", "--help"],
-        capture_output=True, text=True, check=True,
+        capture_output=True, text=True, encoding="utf-8", check=True,
     ).stdout
     for cmd in _PUBLIC_COMMANDS:
         assert cmd in via_package

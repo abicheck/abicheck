@@ -843,6 +843,7 @@ def abi_compare(
         exit_code_scheme = "severity" if severity_config is not None else "legacy"
         scoped_key: str | None = None
         scoped_payload: Any = None
+        scoped_verdict_value: str | None = None
         if used_by:
             from .appcompat import scope_diff_to_app
             from .service import detect_binary_format
@@ -859,12 +860,14 @@ def abi_compare(
                     )
             summaries = []
             worst_exit = 0
+            worst_verdict = None
             for app in used_by:
                 app_path = _safe_read_path(app, label="used_by")
                 if not app_path.exists():
                     return json.dumps(
                         {"status": "error", "error": f"used_by app not found: {app}"}
                     )
+                _check_file_size(app_path, label="used_by")
                 scoped = scope_diff_to_app(
                     result, app_path, old_path, new_path,
                     policy=active_policy, policy_file=pf,
@@ -880,11 +883,15 @@ def abi_compare(
                         "symbol_coverage": round(scoped.symbol_coverage, 1),
                     }
                 )
-                worst_exit = max(worst_exit, _scoped_verdict_exit_code(scoped.verdict))
+                app_exit = _scoped_verdict_exit_code(scoped.verdict)
+                if worst_verdict is None or app_exit >= worst_exit:
+                    worst_exit = app_exit
+                    worst_verdict = scoped.verdict
             scoped_key = "used_by"
             scoped_payload = summaries
             exit_code = worst_exit
             exit_code_scheme = "scoped"
+            scoped_verdict_value = worst_verdict.value if worst_verdict is not None else None
         elif required_symbols:
             from .appcompat import scope_diff_to_required_symbols
 
@@ -902,11 +909,18 @@ def abi_compare(
             }
             exit_code = _scoped_verdict_exit_code(scoped_host.verdict)
             exit_code_scheme = "scoped"
+            scoped_verdict_value = scoped_host.verdict.value
 
-        # Build structured response
+        # Build structured response. When a used_by/required_symbols scope is in
+        # effect, mirror the CLI JSON contract (`_fold_scoped_compat_into_text`):
+        # the scoped verdict becomes the primary `verdict` the exit code reflects,
+        # with the full-library verdict kept as `full_verdict` for context (Codex
+        # review — a caller that only reads `verdict` must not see the full
+        # library's BREAKING alongside a scoped-compatible exit_code: 0).
         response: dict[str, Any] = {
             "status": "ok",
-            "verdict": result.verdict.value,
+            "verdict": scoped_verdict_value if scoped_verdict_value is not None else result.verdict.value,
+            "full_verdict": result.verdict.value,
             "exit_code": exit_code,
             "exit_code_scheme": exit_code_scheme,
             "summary": {

@@ -278,7 +278,7 @@ jobs:
           fi
           echo "Correctly detected API additions via severity (exit code 1)"
 
-  # ── Test: appcompat full mode ─────────────────────────────────────────────
+  # ── Test: app-scoped comparison (ADR-043: appcompat folded into --used-by) ──
   test-appcompat-full:
     name: 'Appcompat: detect breaking change affecting app'
     runs-on: ubuntu-latest
@@ -292,19 +292,18 @@ jobs:
           gcc -shared -fPIC v2.c -o libv2.so
           gcc app.c -L. -lv1 -o myapp -Wl,-rpath,.
 
-      - name: Run abicheck appcompat (breaking case)
+      - name: Run abicheck compare --used-by (breaking case)
         id: abi
         uses: ./
         continue-on-error: true
         with:
-          mode: appcompat
-          app-binary: examples/case01_symbol_removal/myapp
           old-library: examples/case01_symbol_removal/libv1.so
           new-library: examples/case01_symbol_removal/libv2.so
           format: json
           output-file: appcompat-result.json
           install-deps: false
           fail-on-breaking: true
+          extra-args: '--used-by examples/case01_symbol_removal/myapp'
 
       - name: Verify verdict is BREAKING
         shell: bash
@@ -316,7 +315,7 @@ jobs:
             exit 1
           fi
 
-  # ── Test: appcompat weak mode (check-against) ───────────────────────────
+  # ── Test: app-scoped comparison against an unchanged library (weak mode) ───
   test-appcompat-weak:
     name: 'Appcompat: weak mode symbol check'
     runs-on: ubuntu-latest
@@ -329,15 +328,15 @@ jobs:
           gcc -shared -fPIC v1.c -o libv1.so
           gcc app.c -L. -lv1 -o myapp -Wl,-rpath,.
 
-      - name: Run abicheck appcompat weak mode (all symbols present)
+      - name: Run abicheck compare --used-by (all symbols present)
         id: abi
         uses: ./
         with:
-          mode: appcompat
-          app-binary: examples/case01_symbol_removal/myapp
-          check-against: examples/case01_symbol_removal/libv1.so
+          old-library: examples/case01_symbol_removal/libv1.so
+          new-library: examples/case01_symbol_removal/libv1.so
           install-deps: false
           fail-on-breaking: true
+          extra-args: '--used-by examples/case01_symbol_removal/myapp'
 
       - name: Verify verdict is COMPATIBLE
         shell: bash
@@ -461,34 +460,3 @@ jobs:
             exit 1
           fi
 
-  # ── Merge mode: combine dumps into one self-contained baseline ─────────────
-  test-merge-dumps:
-    name: 'Merge: combine two dumps into a baseline'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-
-      - name: Run abicheck merge
-        id: abi
-        uses: ./
-        with:
-          mode: merge
-          merge-inputs: 'tests/fixtures/action/action_test_v1.json tests/fixtures/action/action_test_v2.json'
-          output-file: merged-baseline.json
-          install-deps: false
-
-      - name: Verify the merged baseline was written
-        shell: bash
-        run: |
-          echo "Verdict: ${{ steps.abi.outputs.verdict }}"
-          echo "Report path: ${{ steps.abi.outputs.report-path }}"
-          if [[ "${{ steps.abi.outputs.verdict }}" != "COMPATIBLE" ]]; then
-            echo "::error::Expected verdict COMPATIBLE, got ${{ steps.abi.outputs.verdict }}"
-            exit 1
-          fi
-          if [[ ! -s merged-baseline.json ]]; then
-            echo "::error::Expected merged-baseline.json to be written"
-            exit 1
-          fi

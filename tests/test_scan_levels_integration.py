@@ -77,7 +77,6 @@ def _scan(project, depth: str) -> dict:
         main,
         [
             "scan",
-            "--binary",
             str(project / "libfoo.so"),
             "-H",
             str(project / "include"),

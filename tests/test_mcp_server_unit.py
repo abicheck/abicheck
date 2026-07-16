@@ -1031,10 +1031,15 @@ class TestAbiCompare:
         )
         data = json.loads(raw)
         assert data["status"] == "ok"
-        # The full (unscoped) diff is still BREAKING (removed is gone)...
-        assert data["verdict"] == "BREAKING"
-        # ...but the required-symbol contract is untouched, so the scoped
-        # exit code is floored to 0, not the unscoped diff's 4.
+        # The full (unscoped) diff is still BREAKING (removed is gone) and is
+        # kept as informational context under full_verdict...
+        assert data["full_verdict"] == "BREAKING"
+        # ...but the required-symbol contract is untouched, so the *primary*
+        # verdict/exit_code the caller reads are the scoped ones (floored to
+        # COMPATIBLE/0), not the unscoped diff's BREAKING/4 (Codex review: a
+        # caller reading only `verdict` must not see BREAKING alongside a
+        # scoped-compatible exit_code: 0).
+        assert data["verdict"] == "COMPATIBLE"
         contract = data["required_symbol_contract"]
         assert contract["verdict"] == "COMPATIBLE"
         assert contract["missing_entrypoints"] == []

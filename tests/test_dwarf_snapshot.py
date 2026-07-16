@@ -1442,7 +1442,7 @@ class TestCLIInProcess:
 class TestPrintDataSourcesDirect:
     """Direct call to _print_data_sources for coverage."""
 
-    def test_print_data_sources(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    def testprint_data_sources(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         c_src = tmp_path / "lib.c"
         c_src.write_text("int bar(void) { return 1; }\n")
         so_path = tmp_path / "libtest.so"
@@ -1451,9 +1451,9 @@ class TestPrintDataSourcesDirect:
             capture_output=True, check=True, timeout=30,
         )
 
-        from abicheck.cli import _print_data_sources
+        from abicheck.cli_datasources import print_data_sources
 
-        _print_data_sources(so_path, has_headers=False)
+        print_data_sources(so_path, has_headers=False)
         out = capsys.readouterr().out
         assert "Data sources for libtest.so" in out
         assert "L3 Build context:   not collected" in out
@@ -1467,9 +1467,9 @@ class TestPrintDataSourcesDirect:
             capture_output=True, check=True, timeout=30,
         )
 
-        from abicheck.cli import _print_data_sources
+        from abicheck.cli_datasources import print_data_sources
 
-        _print_data_sources(so_path, has_headers=True)
+        print_data_sources(so_path, has_headers=True)
         out = capsys.readouterr().out
         assert "L2 Header AST:      available" in out
         assert "Headers mode (artifact + public header evidence)" in out
@@ -1491,9 +1491,9 @@ class TestPrintDataSourcesDirect:
         )
         pack.write()
 
-        from abicheck.cli import _print_data_sources
+        from abicheck.cli_datasources import print_data_sources
 
-        _print_data_sources(so_path, has_headers=True, build_source_path=pack.root)
+        print_data_sources(so_path, has_headers=True, build_source_path=pack.root)
         out = capsys.readouterr().out
         assert "L3 Build context: present (1 compile units, 1 targets)" in out
 
@@ -1524,9 +1524,9 @@ class TestPrintDataSourcesDirect:
         )
         source_pack.write()
 
-        from abicheck.cli import _print_data_sources
+        from abicheck.cli_datasources import print_data_sources
 
-        _print_data_sources(
+        print_data_sources(
             so_path,
             has_headers=True,
             build_source_path=build_pack.root,
@@ -1561,9 +1561,9 @@ class TestPrintDataSourcesDirect:
         manifest_only = BuildSourcePack.empty(tmp_path / "manifest-only")
         manifest_only.write()
 
-        from abicheck.cli import _print_data_sources
+        from abicheck.cli_datasources import print_data_sources
 
-        _print_data_sources(
+        print_data_sources(
             so_path,
             has_headers=True,
             build_source_path=full_pack.root,
@@ -1583,9 +1583,9 @@ class TestPrintDataSourcesDirect:
             capture_output=True, check=True, timeout=30,
         )
 
-        from abicheck.cli import _print_data_sources
+        from abicheck.cli_datasources import print_data_sources
 
-        _print_data_sources(so_path, has_headers=True, build_source_path=tmp_path)
+        print_data_sources(so_path, has_headers=True, build_source_path=tmp_path)
         captured = capsys.readouterr()
         assert "L3 Build context:   not collected" in captured.out
         assert "not collected in --show-data-sources" in captured.err
