@@ -299,14 +299,18 @@ def backfill_dwarf_layout(
     a public ``api::Foo { int x; }`` with no DWARF emission of its own can
     collide with an unrelated, genuinely global-scope, empty ``Foo`` in
     DWARF exactly as easily via an exact match as via a suffix one). Only a
-    trivial fieldless header record (nothing on either side to disagree
-    with, regardless of which key resolved the match) or one whose fields
-    are known to come from an anonymous-aggregate flatten still gets
-    trusted here — and so does a suffix *or* exact match when
-    ``has_anonymous_aggregate_fields`` is set, since that flag is a
-    structural fact about the header record, not a guess from field
-    non-emptiness (Codex review, see above), gated by the same
-    ``not dwarf.vtable`` check either way.
+    trivial fieldless header record, or one whose fields are known to come
+    from an anonymous-aggregate flatten, still gets trusted here — and so
+    does a suffix *or* exact match when ``has_anonymous_aggregate_fields``
+    is set, since that flag is a structural fact about the header record,
+    not a guess from field non-emptiness (Codex review, see above) — but
+    both, regardless of which key resolved the match, require
+    ``not dwarf.vtable`` too (Codex review, fresh evidence): a genuinely
+    empty header record is not itself proof of "nothing left to disagree
+    with" once the DWARF candidate has a vtable the header side
+    structurally can't (the clang header parser never populates
+    ``RecordType.vtable`` itself), so a fieldless-but-polymorphic unrelated
+    type must still be rejected exactly like the anonymous-aggregate case.
     """
     if not dwarf_types:
         return header_types
@@ -358,13 +362,17 @@ def backfill_dwarf_layout(
             # namespaced) type. A *populated* header record (real,
             # non-anonymous-aggregate fields) with an empty DWARF candidate
             # reached only by that coincidence is exactly the unrelated-
-            # type risk the field-overlap check above exists to catch; a
-            # trivial fieldless match still carries no such risk (nothing
-            # on either side to disagree with), and an anonymous-aggregate
-            # flatten needs the same ``not dwarf.vtable`` guard the suffix
-            # branch below requires, for the identical reason.
-            return not header.fields or (
-                header.has_anonymous_aggregate_fields and not dwarf.vtable
+            # type risk the field-overlap check above exists to catch. A
+            # trivial fieldless match still needs ``not dwarf.vtable`` too
+            # (Codex review, fresh evidence): a genuinely empty header
+            # record can exact-match a unique, unrelated, fieldless-but-
+            # *polymorphic* DWARF candidate just as easily as the
+            # anonymous-aggregate case below can — "nothing to disagree
+            # with" isn't true once the DWARF side has a vtable the header
+            # side structurally can't (the clang header parser never
+            # populates ``RecordType.vtable`` itself).
+            return not dwarf.vtable and (
+                not header.fields or header.has_anonymous_aggregate_fields
             )
         # Suffix-only match with no field/base overlap left to corroborate.
         # Trusting this on "header merely has some fields" would reopen the

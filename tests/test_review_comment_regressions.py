@@ -592,35 +592,78 @@ def test_build_source_proof_cases_cover_every_l3plus_single_library_case() -> No
     )
 
 
+def _full_catalog_case_sets(matrix: ModuleType) -> tuple[dict, set, set]:
+    with open(matrix.GROUND_TRUTH) as f:
+        gt = json.load(f)["verdicts"]
+    bundle_cases = {
+        name for name, entry in gt.items() if matrix._case_owner(name, entry) == "bundle"
+    }
+    special_cli_cases = {
+        name
+        for name, entry in gt.items()
+        if matrix._case_owner(name, entry) not in {"single-library", "bundle"}
+    }
+    return gt, bundle_cases, special_cli_cases
+
+
 def test_full_catalog_artifact_failures_is_clean_for_passing_lanes() -> None:
     catalog = _load_script("validation/scripts/run_full_catalog.py")
-    proofs = {"results": [{"owner": "g20", "status": "PASS", "returncode": 0}]}
-    runtime = {"results": [{"case_id": "case01", "status": "DEMONSTRATED"}]}
-    assert catalog._artifact_failures(proofs, runtime) == []
+    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    gt, bundle_cases, special_cli_cases = _full_catalog_case_sets(matrix)
+    proofs = _proof_artifact(matrix)
+    bundle = _artifact(matrix, "bundle", bundle_cases)
+    special_cli = _artifact(matrix, "special_cli", special_cli_cases)
+    runtime = _artifact(matrix, "runtime", set(gt), status="DEMONSTRATED")
+    assert catalog._artifact_failures(gt, proofs, bundle, special_cli, runtime) == []
 
 
 def test_full_catalog_artifact_failures_surfaces_owner_proof_failure() -> None:
     catalog = _load_script("validation/scripts/run_full_catalog.py")
-    proofs = {"results": [{"owner": "g20", "status": "FAIL", "returncode": 1}]}
-    runtime = {"results": []}
-    errors = catalog._artifact_failures(proofs, runtime)
-    assert errors == ["owner proof failed: g20 (FAIL)"]
+    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    gt, bundle_cases, special_cli_cases = _full_catalog_case_sets(matrix)
+    proofs = _proof_artifact(matrix)
+    proofs["results"][0]["status"] = "FAIL"
+    proofs["results"][0]["returncode"] = 1
+    proofs["summary"] = {"FAIL": 1, "PASS": len(matrix.SPECIAL_PROOFS) - 1}
+    bundle = _artifact(matrix, "bundle", bundle_cases)
+    special_cli = _artifact(matrix, "special_cli", special_cli_cases)
+    runtime = _artifact(matrix, "runtime", set(gt), status="DEMONSTRATED")
+    errors = catalog._artifact_failures(gt, proofs, bundle, special_cli, runtime)
+    assert any("failing owners" in error for error in errors)
 
 
-def test_full_catalog_artifact_failures_surfaces_owner_proof_nonzero_exit() -> None:
+def test_full_catalog_artifact_failures_surfaces_missing_owner_proof_row() -> None:
+    """Regression (Codex review): a hand-rolled loop over *present* proof
+    rows can't see an owner missing from the artifact entirely -- a
+    partial run_example_owner_proofs.py output that silently drops an
+    owner must still be caught, not just a present row with a bad
+    status."""
     catalog = _load_script("validation/scripts/run_full_catalog.py")
-    proofs = {"results": [{"owner": "kabi", "status": "PASS", "returncode": 1}]}
-    runtime = {"results": []}
-    errors = catalog._artifact_failures(proofs, runtime)
-    assert errors == ["owner proof failed: kabi (PASS)"]
+    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    gt, bundle_cases, special_cli_cases = _full_catalog_case_sets(matrix)
+    proofs = _proof_artifact(matrix)
+    del proofs["results"][0]
+    proofs["selected_owners"] -= 1
+    proofs["summary"] = {"PASS": len(matrix.SPECIAL_PROOFS) - 1}
+    bundle = _artifact(matrix, "bundle", bundle_cases)
+    special_cli = _artifact(matrix, "special_cli", special_cli_cases)
+    runtime = _artifact(matrix, "runtime", set(gt), status="DEMONSTRATED")
+    errors = catalog._artifact_failures(gt, proofs, bundle, special_cli, runtime)
+    assert any("missing owners" in error for error in errors)
 
 
 def test_full_catalog_artifact_failures_surfaces_runtime_build_error() -> None:
     catalog = _load_script("validation/scripts/run_full_catalog.py")
-    proofs = {"results": []}
-    runtime = {"results": [{"case_id": "case07", "status": "BUILD_ERROR"}]}
-    errors = catalog._artifact_failures(proofs, runtime)
-    assert errors == ["runtime smoke build error: case07"]
+    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    gt, bundle_cases, special_cli_cases = _full_catalog_case_sets(matrix)
+    proofs = _proof_artifact(matrix)
+    bundle = _artifact(matrix, "bundle", bundle_cases)
+    special_cli = _artifact(matrix, "special_cli", special_cli_cases)
+    runtime = _artifact(matrix, "runtime", set(gt), status="DEMONSTRATED")
+    runtime["results"][0]["status"] = "BUILD_ERROR"
+    runtime["summary"] = {"DEMONSTRATED": len(gt) - 1, "BUILD_ERROR": 1}
+    errors = catalog._artifact_failures(gt, proofs, bundle, special_cli, runtime)
+    assert any("failing runner statuses" in error for error in errors)
 
 
 def test_full_catalog_resolve_single_library_threads_ground_truth_entry() -> None:
@@ -679,3 +722,32 @@ def test_full_catalog_main_exit_code_reflects_artifact_errors(
         ["--toolchain", "auto", "--out", str(tmp_path / "out.json")]
     )
     assert exit_code == 1
+
+
+def test_full_catalog_main_creates_missing_out_parent_directory(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Regression (CodeRabbit review): a --out path whose parent directory
+    doesn't exist yet (e.g. --out artifacts/catalog/full.json) must not
+    crash -- write_text() doesn't create missing parents on its own."""
+    catalog = _load_script("validation/scripts/run_full_catalog.py")
+    monkeypatch.setattr(
+        catalog,
+        "run_full_catalog",
+        lambda *_args, **_kwargs: {
+            "schema_version": "full_catalog_single_config.v1",
+            "requested_toolchain": "auto",
+            "compiler_lane": "toolchain=auto",
+            "ground_truth_cases": 181,
+            "summary": {"COVERED": 181},
+            "owner_proofs_summary": {"PASS": 7},
+            "unresolved_cases": [],
+            "failed_cases": [],
+            "artifact_errors": [],
+            "results": [],
+        },
+    )
+    out_path = tmp_path / "artifacts" / "catalog" / "full.json"
+    exit_code = catalog.main(["--toolchain", "auto", "--out", str(out_path)])
+    assert exit_code == 0
+    assert out_path.exists()

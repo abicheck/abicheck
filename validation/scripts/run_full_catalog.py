@@ -228,26 +228,47 @@ def _resolve_special(
     return {"status": status, "proof_lane": proof_lane, "note": note, "lanes": [lane]}
 
 
-def _artifact_failures(proofs: dict[str, Any], runtime: dict[str, Any]) -> list[str]:
-    """Surface owner-proof/runtime-smoke failures the per-case matrix can't see.
+def _artifact_failures(
+    gt: dict[str, Any],
+    proofs: dict[str, Any],
+    bundle: dict[str, Any],
+    special_cli: dict[str, Any],
+    runtime: dict[str, Any],
+) -> list[str]:
+    """Surface proof/runtime-smoke artifact problems the per-case matrix can't see.
 
     Per-case ``status`` only reflects the lane that proved *that* case's
-    verdict — the dedicated-owner proofs and the runtime-smoke lane are
-    independent regression checks layered on top (mirroring
-    ``collect_full_example_matrix.py``'s ``_proof_artifact_errors``/
-    ``bad_statuses`` checks), so a failure there must not be silently
-    absorbed into an all-COVERED matrix (Codex review).
+    verdict — the dedicated-owner proofs, bundle, special-CLI, and
+    runtime-smoke lanes are independent regression checks layered on top, so
+    a failure (or an incomplete artifact — a missing/duplicate owner, a
+    partial case list) there must not be silently absorbed into an
+    all-COVERED matrix. Delegating to
+    ``collect_full_example_matrix``'s own ``_proof_artifact_errors``/
+    ``_artifact_errors`` — rather than a bespoke, narrower re-check here —
+    is deliberate (Codex review): those already validate runner/schema
+    identity, missing/duplicate/unexpected case or owner ids, declared vs.
+    recomputed summaries, and bad statuses (including a *missing* owner
+    row, which a hand-rolled "iterate present rows" loop can't see at all),
+    and these three artifacts are genuine, unmodified output of the same
+    sub-runners the collector itself consumes.
     """
-    errors = []
-    for row in proofs.get("results", []):
-        if row.get("status") != "PASS" or row.get("returncode") != 0:
-            errors.append(
-                f"owner proof failed: {row.get('owner')} ({row.get('status')})"
-            )
-    for row in runtime.get("results", []):
-        if row.get("status") == "BUILD_ERROR":
-            errors.append(f"runtime smoke build error: {row.get('case_id')}")
-    return errors
+    bundle_cases = {
+        name for name, entry in gt.items() if _matrix._case_owner(name, entry) == "bundle"
+    }
+    special_cli_cases = {
+        name
+        for name, entry in gt.items()
+        if _matrix._case_owner(name, entry) not in {"single-library", "bundle"}
+    }
+    all_cases = set(gt)
+    return [
+        *_matrix._proof_artifact_errors(proofs),
+        *_matrix._artifact_errors("bundle", bundle, expected_cases=bundle_cases),
+        *_matrix._artifact_errors(
+            "special_cli", special_cli, expected_cases=special_cli_cases
+        ),
+        *_matrix._artifact_errors("runtime", runtime, expected_cases=all_cases),
+    ]
 
 
 def run_full_catalog(toolchain: str, results_dir: Path) -> dict[str, Any]:
@@ -354,7 +375,7 @@ def run_full_catalog(toolchain: str, results_dir: Path) -> dict[str, Any]:
     unresolved = [row["case_id"] for row in rows if row["status"] == "UNRESOLVED"]
     failed = [row["case_id"] for row in rows if row["status"] == "FAILED"]
     owner_summary = proofs.get("summary", {})
-    artifact_errors = _artifact_failures(proofs, runtime)
+    artifact_errors = _artifact_failures(gt, proofs, bundle, special_cli, runtime)
 
     return {
         "schema_version": "full_catalog_single_config.v1",
@@ -403,6 +424,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     matrix = run_full_catalog(args.toolchain, args.results_dir)
+    args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(matrix, indent=2))
 
     if args.json_out:

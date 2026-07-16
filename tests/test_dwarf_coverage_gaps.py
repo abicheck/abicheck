@@ -1567,6 +1567,44 @@ class TestDwarfSnapshotFallbacks:
         # -> 32 bits) within the parent.
         assert [f.offset_bits for f in result] == [32, 32]
 
+    def test_process_field_flattens_anonymous_member_carries_outer_access(self):
+        """Regression (CodeRabbit review): flattened inner fields must take
+        the *outer* anonymous member's access, not their own (unset)
+        access. Confirmed against real GCC DWARF: a `protected:` anonymous
+        union's outer DW_TAG_member carries DW_AT_accessibility, while its
+        inner members carry none at all — so without this, they'd silently
+        resolve to PUBLIC via _access_from_dwarf's absent-value default,
+        misreporting a protected (or private) anonymous member as public."""
+        from abicheck.dwarf_snapshot import _DwarfSnapshotBuilder
+        from abicheck.model import AccessLevel
+
+        elf_meta = self._make_elf_meta()
+        builder = _DwarfSnapshotBuilder(Path("test.so"), elf_meta)
+
+        int_type = MockDIE(
+            tag="DW_TAG_base_type",
+            attributes={"DW_AT_name": MockAttr("int"), "DW_AT_byte_size": MockAttr(4)},
+        )
+        # Inner members carry no DW_AT_accessibility of their own -- matches
+        # real DWARF for an anonymous union's members.
+        inner_j = MockDIE(
+            tag="DW_TAG_member",
+            attributes={"DW_AT_name": MockAttr("j"), "DW_AT_type": MockAttr(10, form="DW_FORM_ref4")},
+        )
+        anon_union = MockDIE(tag="DW_TAG_union_type", attributes={}, children=[inner_j])
+        outer_member = MockDIE(
+            tag="DW_TAG_member",
+            attributes={
+                "DW_AT_type": MockAttr(20, form="DW_FORM_ref4"),
+                "DW_AT_accessibility": MockAttr(2),  # DW_ACCESS_protected
+            },
+        )
+        cu = MockCU(cu_offset=0, die_map={10: int_type, 20: anon_union})
+
+        result = builder._process_field(outer_member, cu)
+        assert [f.name for f in result] == ["j"]
+        assert result[0].access == AccessLevel.PROTECTED
+
     def test_process_field_does_not_flatten_named_anonymous_member_type(self):
         """A member whose type DIE carries its own DW_AT_name (a typedef'd
         anonymous-record type) is not flattened: the clang header parser

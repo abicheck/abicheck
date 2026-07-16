@@ -1005,6 +1005,18 @@ class _DwarfSnapshotBuilder:
         field's offset is relative to the anonymous aggregate, not the
         enclosing record, so it is adjusted by this member's own offset
         before returning.
+
+        Access is likewise resolved from *this* outer member, not each
+        inner one, and overrides it (CodeRabbit review): a C++ access
+        specifier applies to the anonymous member's *declaration*, not to
+        its individual members, and a compiler only emits
+        ``DW_AT_accessibility`` on the inner ``DW_TAG_member``\\ s when it
+        differs from *their own* enclosing (inner, anonymous) aggregate's
+        default — which is unrelated to the outer class's access section.
+        Confirmed against real GCC DWARF: a `protected:` anonymous union's
+        outer member DIE carries ``DW_AT_accessibility: 2``, while its
+        inner members carry none at all (and would otherwise silently
+        resolve to the wrong default via ``_access_from_dwarf``).
         """
         type_die = _resolve_type_die(die, CU)
         if type_die is None or type_die.tag not in (
@@ -1019,13 +1031,18 @@ class _DwarfSnapshotBuilder:
             outer_offset_bits = (
                 _decode_member_location(die.attributes["DW_AT_data_member_location"].value) * 8
             )
+        outer_access = self._access_from_dwarf(_attr_int(die, "DW_AT_accessibility"))
         flattened: list[TypeField] = []
         for child in type_die.iter_children():
             if child.tag != "DW_TAG_member":
                 continue  # e.g. a nested type declaration, not a data member
             for inner in self._process_field(child, CU):
                 flattened.append(
-                    replace(inner, offset_bits=(inner.offset_bits or 0) + outer_offset_bits)
+                    replace(
+                        inner,
+                        offset_bits=(inner.offset_bits or 0) + outer_offset_bits,
+                        access=outer_access,
+                    )
                 )
         return flattened
 

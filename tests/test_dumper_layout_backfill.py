@@ -250,15 +250,17 @@ class TestBackfillDwarfLayout:
         """Regression (Codex review): a struct whose only members come from an
         anonymous struct/union (`struct Foo { union { int i; float f; }; };`)
         is flattened onto the header side by dumper_clang.py (header.fields
-        lists i/f directly) but the DWARF builder does not flatten it the
-        same way, leaving dwarf.fields empty even though DWARF does carry the
-        record's real size_bits. Rejecting this on "no overlap" would make
-        every such struct permanently layout-blind under the clang backend —
-        reproduced directly against real clang+gcc+DWARF output before this
-        fix (size_bits stayed None; fixed, it backfills correctly). Same
-        (unscoped) name on both sides, so this is trusted via the exact-name
-        path regardless of has_anonymous_aggregate_fields — set here anyway
-        to match what the real clang parser would actually produce."""
+        lists i/f directly). The DWARF builder now flattens a *supported*
+        anonymous aggregate too (dwarf_snapshot.py's
+        _flatten_anonymous_member), but dwarf.fields staying empty is still
+        a defensive fallback this must handle (CodeRabbit review) — an
+        unsupported producer/shape, or a cached snapshot predating that
+        flatten, would otherwise be permanently layout-blind under the clang
+        backend even though DWARF does carry the record's real size_bits.
+        Same (unscoped) name on both sides, so this is trusted via the
+        exact-name path only because has_anonymous_aggregate_fields is set
+        (header.fields is non-empty here) and dwarf.vtable is empty — not
+        regardless of the flag."""
         header = RecordType(
             name="Foo", kind="struct",
             fields=[TypeField(name="i", type="int"), TypeField(name="f", type="float")],
@@ -480,18 +482,41 @@ class TestBackfillDwarfLayout:
         out = backfill_dwarf_layout([header], [unrelated])
         assert out[0].size_bits is None
 
+    def test_exact_name_match_fieldless_header_does_not_trust_unrelated_polymorphic_type(
+        self,
+    ) -> None:
+        """Regression (Codex review, fresh evidence): a genuinely fieldless
+        header record (no aggregate flatten either) exact-matching a unique,
+        unrelated, fieldless-but-*polymorphic* DWARF candidate must still be
+        rejected — a public `api::Foo {}` with no DWARF emission of its own
+        must not inherit an unrelated internal `Foo`'s real vtable/size just
+        because both names are bare and equal and neither has fields. The
+        `not dwarf.vtable` guard applies to the trivial-fieldless branch,
+        not only the anonymous-aggregate one."""
+        header = RecordType(name="Foo", kind="class", fields=[], bases=[])
+        unrelated = RecordType(
+            name="Foo", kind="class", size_bits=64, fields=[], bases=[],
+            vtable=["_ZN3Foo1fEv"],
+        )
+        out = backfill_dwarf_layout([header], [unrelated])
+        assert out[0].size_bits is None
+
     def test_namespaced_anonymous_aggregate_suffix_match_is_trusted(self) -> None:
         """Regression (Codex review): a *namespaced* anonymous-aggregate
         record (`namespace api { struct Foo { union { int i; float f; }; };
-        }`) has clang emit the header record as bare "Foo" while DWARF names
-        it "api::Foo" with an empty field list (the aggregate is skipped, not
-        flattened). The exact-name-only fallback introduced to close the
-        ordinary-struct risk above would make this common, legitimate pattern
-        permanently layout-blind under the clang backend — defeating the
-        point of the anonymous-aggregate exception for exactly the namespaced
-        case it needs to cover. has_anonymous_aggregate_fields is the
-        structural signal that distinguishes it from the rejected case above:
-        set by the clang parser itself, not inferred from field non-emptiness."""
+        }`) has clang emit the header record as bare "Foo". The DWARF builder
+        now flattens a *supported* anonymous aggregate the same way (see
+        dwarf_snapshot.py's _flatten_anonymous_member), but an empty
+        dwarf.fields here still needs to be trusted as a defensive fallback
+        (CodeRabbit review) — an unsupported producer/shape, or an older
+        cached snapshot predating that flatten, would otherwise be
+        permanently layout-blind under the clang backend, defeating the
+        point of the anonymous-aggregate exception for exactly the
+        namespaced case it needs to cover. has_anonymous_aggregate_fields is
+        the structural signal that distinguishes it from the rejected case
+        above: set by the clang parser itself, not inferred from field
+        non-emptiness. Trusted only because has_anonymous_aggregate_fields
+        is set and dwarf.vtable is empty here."""
         header = RecordType(
             name="Foo", kind="struct",
             fields=[TypeField(name="i", type="int"), TypeField(name="f", type="float")],
