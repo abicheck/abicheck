@@ -458,6 +458,28 @@ class TestPlatformBaselineFloorRaised:
         assert len(changes) == 1
         assert changes[0].new_value == "GLIBC_2.40"
 
+    def test_glibc_abi_dt_relr_marker_implies_floor_without_has_dt_relr(
+        self,
+    ) -> None:
+        # A legacy snapshot predating the has_dt_relr field deserializes with
+        # has_dt_relr=False, but may still carry the raw GLIBC_ABI_DT_RELR
+        # verneed marker in versions_required (verneed extraction predates
+        # the dedicated flag). The marker itself must still imply the
+        # GLIBC_2.36 floor — matching test_marker_still_reported_when_
+        # relr_fields_not_captured's equivalent case for the delta detector
+        # (Codex review).
+        from abicheck.diff_versioning import check_platform_baseline_floor
+
+        elf = _elf(
+            needed=["libc.so.6"],
+            versions_required={"libc.so.6": ["GLIBC_2.28", "GLIBC_ABI_DT_RELR"]},
+            has_dt_relr=False,
+        )
+        changes = check_platform_baseline_floor(elf, {"GLIBC": "2.28"})
+        assert len(changes) == 1
+        assert changes[0].kind is ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED
+        assert changes[0].new_value == "GLIBC_2.36"
+
 
 class TestPlatformBaselineFloorCliEndToEnd:
     """G10: the check reaches exit code / JSON through the real ``compare``

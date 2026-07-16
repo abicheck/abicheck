@@ -332,8 +332,20 @@ def check_platform_baseline_floor(
     best: tuple[int, ...] = (0,)
     best_tag = ""
     providers: set[str] = set()
+    relr_tuple = _parse_abi_version_tag(_DT_RELR_GLIBC_FLOOR_TAG)
     for lib, tags in (getattr(elf, "versions_required", None) or {}).items():
         for tag in tags:
+            if tag == "GLIBC_ABI_DT_RELR":
+                # Legacy snapshots predating the has_dt_relr field may still
+                # carry this synthetic verneed marker directly — treat it as
+                # implying the same floor the has_dt_relr fallback below
+                # applies, so an older snapshot isn't under-called just
+                # because the dedicated flag wasn't captured (Codex review).
+                if relr_tuple > best:
+                    best, best_tag = relr_tuple, _DT_RELR_GLIBC_FLOOR_TAG
+                if relr_tuple > floor_tuple:
+                    providers.add(lib)
+                continue
             if not tag.startswith("GLIBC_"):
                 continue
             parsed = _parse_abi_version_tag(tag)
@@ -344,7 +356,6 @@ def check_platform_baseline_floor(
             if parsed > floor_tuple:
                 providers.add(lib)
     if getattr(elf, "has_dt_relr", False):
-        relr_tuple = _parse_abi_version_tag(_DT_RELR_GLIBC_FLOOR_TAG)
         if relr_tuple > best:
             best, best_tag = relr_tuple, _DT_RELR_GLIBC_FLOOR_TAG
         if relr_tuple > floor_tuple:
