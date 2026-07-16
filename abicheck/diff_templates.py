@@ -103,6 +103,13 @@ _INTERNAL_TEMPLATE_NAMESPACES: tuple[str, ...] = (
 # ``<``, none of which match ``[^<>]``).
 _TEMPLATE_ARGS_RE = re.compile(r"<[^<>]")
 
+# Matches a genuine `operator` function-name token (`operator+`, `operator
+# new`, `operator T`, `::operator()`), not an incidental substring occurrence
+# inside an unrelated identifier such as a namespace named `cooperator`. The
+# lookaround pair requires a non-identifier character (or start/end of
+# string) on both sides, so `operator` must stand as its own token.
+_OPERATOR_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])operator(?![A-Za-z0-9_])")
+
 
 def _looks_like_template_instantiation(name: str) -> bool:
     """A declared C++ name is a template instantiation iff it contains a
@@ -160,7 +167,12 @@ def _strip_leading_return_type(sig: str) -> str:
     multi-word return type (``"unsigned long lib::sort"``). Left alone for
     an ``operator`` name (itself spelled with a space, e.g. ``"operator
     new"``) — CPOs are never operators, and blindly splitting there would
-    corrupt the operator's own name instead of stripping a return type.
+    corrupt the operator's own name instead of stripping a return type. The
+    check for that is a whole-token match, not a substring one: a namespace
+    or class merely spelled with ``operator`` as a substring (e.g.
+    ``"lib::cooperator::sort"``) is not an operator overload and must still
+    get the leaked-return-type strip, or the function-template-to-CPO
+    transition living under it goes undetected (Codex review).
 
     Callers must only invoke this once :func:`_looks_like_template_instantiation`
     has confirmed the *pre-strip* qualified name was actually a template
@@ -170,7 +182,7 @@ def _strip_leading_return_type(sig: str) -> str:
     thunk collapses to ``"lib::sort"`` and wrongly collides with an
     unrelated same-named CPO variable (Codex review).
     """
-    if " " not in sig or "operator" in sig:
+    if " " not in sig or _OPERATOR_TOKEN_RE.search(sig):
         return sig
     return sig.rsplit(" ", 1)[-1]
 

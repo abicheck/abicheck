@@ -244,6 +244,19 @@ class TestCpoKindChanged:
         new = _snap(vars_=[_var("sort", type_="lib::__sort_fn", mangled="_ZN3lib4sortE")])
         assert detect_cpo_kind_changed(old, new) == []
 
+    def test_operator_substring_in_namespace_is_not_an_operator_overload(self) -> None:
+        # A namespace merely spelled with "operator" as a substring
+        # ("cooperator") is not an operator overload — the leaked return
+        # type still needs stripping so the function-template-to-CPO
+        # transition living under it is detected (Codex review).
+        old = _snap(funcs=[_fn("int lib::cooperator::sort<int>")])
+        new = _snap(
+            vars_=[_var("sort", type_="lib::cooperator::__sort_fn", mangled="_ZN3lib10cooperator4sortE")]
+        )
+        changes = detect_cpo_kind_changed(old, new)
+        assert len(changes) == 1
+        assert changes[0].new_value == "variable"
+
 
 # ---------------------------------------------------------------------------
 # OVERLOAD_SET_REROUTED
