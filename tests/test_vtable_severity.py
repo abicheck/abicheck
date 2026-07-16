@@ -270,6 +270,18 @@ class TestOwnerDescendsFrom:
     def test_unrelated_leaf_and_unresolvable_type_returns_false(self) -> None:
         assert not _owner_descends_from("Other", "Base", {})
 
+    def test_qualified_ancestor_exact_match_in_bases_list(self) -> None:
+        """DWARF records base lists with their fully-qualified spelling
+        (unlike CastXML's leaf-only lists), so a qualified ``ancestor`` that
+        matches a ``bases`` entry exactly is unambiguous and trusted
+        directly, without needing the leaf-based corroboration fallback."""
+        types = {
+            "ns::Derived": RecordType(
+                name="ns::Derived", kind="class", bases=["ns::Base"]
+            ),
+        }
+        assert _owner_descends_from("ns::Derived", "ns::Base", types)
+
     def test_both_qualified_same_leaf_different_namespace_returns_false(self) -> None:
         """ns1::Base and ns2::Base share a leaf but are unrelated classes in
         different namespaces -- both sides are already fully qualified, so
@@ -316,3 +328,23 @@ class TestOwnerDescendsFrom:
             "ns2::Base": RecordType(name="ns2::Base", kind="class"),
         }
         assert not _owner_descends_from("ns2::Derived", "ns1::Base", types)
+
+    def test_bare_ancestor_not_trusted_against_leaf_only_base_with_namespaced_alternative(
+        self,
+    ) -> None:
+        """owner (``ns::Derived``) declares a bare leaf-only base (``Base``,
+        as CastXML would record it) -- its true base is the namespaced
+        ``ns::Base`` (recorded via ``qualified_name``, castxml's own-name
+        stays bare per model.py), not the unrelated global ``Base``.
+        Testing the real global ``Base`` (itself bare, so the exact-match
+        fast path can't apply either) against that leaf-only entry must not
+        succeed just because both happen to be spelled "Base" -- the
+        presence of a distinctly-qualified ``ns::Base`` record proves the
+        leaf is ambiguous in this snapshot."""
+        types = {
+            "Derived": RecordType(
+                name="Derived", qualified_name="ns::Derived", kind="class", bases=["Base"]
+            ),
+            "Base": RecordType(name="Base", qualified_name="ns::Base", kind="class"),
+        }
+        assert not _owner_descends_from("ns::Derived", "Base", types)

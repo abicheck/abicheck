@@ -361,9 +361,7 @@ def _owner_descends_from(owner: str, ancestor: str, types: dict[str, RecordType]
     owner_is_leaf = leaf_owner == owner
     ancestor_is_leaf = leaf_ancestor == ancestor
 
-    def _leaf_match_trustworthy(qualified: str | None) -> bool:
-        if qualified is None:
-            return True
+    def _leaf_match_trustworthy(qualified: str) -> bool:
         if qualified in types:
             return False
         # `types` is keyed by RecordType.name, which stays bare even for a
@@ -377,17 +375,53 @@ def _owner_descends_from(owner: str, ancestor: str, types: dict[str, RecordType]
         # way still corroborates and rejects the ambiguous leaf match.
         return not any(t.qualified_name == qualified for t in types.values())
 
+    def _leaf_has_qualified_alternative(leaf: str, exclude: str) -> bool:
+        """True if some *other* record's qualified_name shares this leaf.
+
+        Used when matching a bare ``ancestor`` against a leaf-only ``bases``
+        entry: ``_leaf_match_trustworthy`` above can only ask "does this
+        specific qualified spelling have its own record", which needs a
+        qualified string to check -- but a bare ancestor has none. Here the
+        question is the mirror image: does some *differently*-qualified
+        record (e.g. ``ns::Base``) exist for this same leaf, proving the
+        base list's bare, unqualified entry could plausibly mean that one
+        instead of the literal bare ``exclude`` spelling.
+        """
+        return any(
+            t.qualified_name
+            and t.qualified_name != exclude
+            and t.qualified_name.rsplit("::", 1)[-1] == leaf
+            for t in types.values()
+        )
+
     if leaf_owner == leaf_ancestor and (owner_is_leaf or ancestor_is_leaf):
-        qualified = ancestor if not ancestor_is_leaf else (owner if not owner_is_leaf else None)
+        # Reaching here with BOTH sides bare would mean owner == ancestor
+        # (each equals its own leaf), already handled by the equality check
+        # above -- so exactly one side is the qualified one to corroborate.
+        qualified = ancestor if not ancestor_is_leaf else owner
         if _leaf_match_trustworthy(qualified):
             return True
     t = types.get(owner) or (types.get(leaf_owner) if leaf_owner != owner else None)
     if t is None:
         return False
     bases = _transitive_bases(t, types)
-    if ancestor in bases:
+    # A qualified `ancestor` matching a `bases` entry exactly is unambiguous
+    # (both are fully-qualified spellings of the same string). But when
+    # `ancestor` is a bare leaf, an exact match against `bases` is NOT
+    # automatically trustworthy: CastXML's base lists are leaf-only, so a
+    # `bases` entry literally "Base" could equally have come from an
+    # unrelated `ns::Base` recorded without its namespace -- that's exactly
+    # the ambiguity `leaf_ancestor in bases` below already corroborates via
+    # `_leaf_match_trustworthy`, and a bare `ancestor` hits that identical
+    # string, so route it through the same corroboration rather than
+    # short-circuiting past it here.
+    if not ancestor_is_leaf and ancestor in bases:
         return True
-    return leaf_ancestor in bases and _leaf_match_trustworthy(None if ancestor_is_leaf else ancestor)
+    if leaf_ancestor not in bases:
+        return False
+    if ancestor_is_leaf:
+        return not _leaf_has_qualified_alternative(leaf_ancestor, ancestor)
+    return _leaf_match_trustworthy(ancestor)
 
 
 def vtable_slot_is_override_reuse(
