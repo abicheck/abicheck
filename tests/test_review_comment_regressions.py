@@ -587,8 +587,7 @@ def test_build_source_proof_cases_cover_every_l3plus_single_library_case() -> No
     }
     missing = required - matrix.BUILD_SOURCE_PROOF_CASES
     assert not missing, (
-        "single-library L3+ cases missing from BUILD_SOURCE_PROOF_CASES: "
-        f"{missing}"
+        f"single-library L3+ cases missing from BUILD_SOURCE_PROOF_CASES: {missing}"
     )
 
 
@@ -596,7 +595,9 @@ def _full_catalog_case_sets(matrix: ModuleType) -> tuple[dict, set, set]:
     with open(matrix.GROUND_TRUTH) as f:
         gt = json.load(f)["verdicts"]
     bundle_cases = {
-        name for name, entry in gt.items() if matrix._case_owner(name, entry) == "bundle"
+        name
+        for name, entry in gt.items()
+        if matrix._case_owner(name, entry) == "bundle"
     }
     special_cli_cases = {
         name
@@ -606,7 +607,9 @@ def _full_catalog_case_sets(matrix: ModuleType) -> tuple[dict, set, set]:
     return gt, bundle_cases, special_cli_cases
 
 
-def _build_source_artifact(matrix: ModuleType, gt: dict, *, status: str = "PASS") -> dict:
+def _build_source_artifact(
+    matrix: ModuleType, gt: dict, *, status: str = "PASS"
+) -> dict:
     """A clean build-source artifact fixture. Unlike ``_artifact()``, this
     label's ``ground_truth_cases`` is the *full* catalog count (181), not
     the selected-case count -- ``_artifact_errors`` special-cases
@@ -723,6 +726,22 @@ def test_full_catalog_artifact_failures_surfaces_build_source_failure() -> None:
         gt, proofs, bundle, special_cli, runtime, build_source
     )
     assert any("failing runner statuses" in error for error in errors)
+
+
+def test_full_catalog_has_compiler_finds_versioned_clang_only(monkeypatch) -> None:
+    """Regression (Codex review): tests/validate_examples.py._find_compiler
+    tries clang-18/clang++-18 before the bare clang/clang++ names, so a host
+    with only the versioned binaries installed must still be detected as
+    having a usable clang -- otherwise run_full_catalog.py silently skips an
+    available toolchain-sensitive retry even though
+    `validate_examples.py --toolchain clang` would succeed."""
+    catalog = _load_script("validation/scripts/run_full_catalog.py")
+
+    def fake_which(name: str) -> str | None:
+        return f"/usr/bin/{name}" if name in ("clang-18", "clang++-18") else None
+
+    monkeypatch.setattr(catalog.shutil, "which", fake_which)
+    assert catalog._has_compiler("clang") is True
 
 
 def test_full_catalog_resolve_single_library_threads_ground_truth_entry() -> None:

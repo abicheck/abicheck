@@ -70,7 +70,15 @@ OWNER_NAMES = (
     "snapshot_pair",
 )
 RETRYABLE_SKIP_PREFIX = "compiler lacks required feature"
-_ALT_COMPILER_PROBE = {"gcc": ("gcc", "g++"), "clang": ("clang", "clang++")}
+_ALT_COMPILER_PROBE = {
+    "gcc": ("gcc", "g++"),
+    # Must match tests/validate_examples.py._find_compiler's own clang
+    # candidate list, which tries the versioned name first (Codex review):
+    # a host with only clang-18/clang++-18 installed (no bare `clang` alias)
+    # would otherwise fail this probe and skip an available retry, even
+    # though validate_examples.py --toolchain clang would succeed.
+    "clang": ("clang-18", "clang++-18", "clang", "clang++"),
+}
 
 
 def _run_json(cmd: list[str]) -> dict[str, Any]:
