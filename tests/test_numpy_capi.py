@@ -33,12 +33,16 @@ from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
 
 # A representative slice of what NumPy's generated import_array() shim
 # actually compiles into .rodata (see abicheck/numpy_capi.py's module
-# docstring for the full derivation).
+# docstring for the full derivation). The "0x%x" placeholders are LITERAL
+# (not substituted hex digits) -- confirmed by compiling a real extension
+# against NumPy 2.0/2.2/2.4 headers and inspecting the resulting .so's raw
+# bytes; PyErr_Format() only fills them in at runtime, into a new heap
+# string never written back to .rodata (Codex review).
 _ARRAY_API_BLOB = (
     b"_ARRAY_API is NULL pointer\x00"
     b"_ARRAY_API is not PyCapsule object\x00"
-    b"module was compiled against NumPy C-API version 0x10 "
-    b"(NumPy 1.23) but the running NumPy has C-API version 0x15.\x00"
+    b"module was compiled against NumPy C-API version 0x%x "
+    b"(NumPy 1.23) but the running NumPy has C-API version 0x%x.\x00"
 )
 _UFUNC_API_BLOB = (
     b"_UFUNC_API is NULL pointer\x00_UFUNC_API is not PyCapsule object\x00"
@@ -113,6 +117,36 @@ class TestExtractNumPyCapiSurface:
             + b"\x00" * 50
             + b"some unrelated docstring mentioning (NumPy 1.19) in passing\x00"
             + _ARRAY_API_BLOB
+        )
+        surf = extract_numpy_capi_surface(binary)
+        assert surf is not None
+        assert surf.capi_target_version == "1.23"
+
+    def test_real_compiled_shim_message_with_literal_percent_x_matches(
+        self, tmp_path: Path
+    ) -> None:
+        # The exact byte sequence found in a real extension compiled against
+        # NumPy 2.4 headers (gcc -shared, import_array()) -- "0x%x" is a
+        # literal, un-substituted printf placeholder in the compiled-in
+        # format string, not rendered hex digits (Codex review; an earlier
+        # version of _TARGET_VERSION_RE required hex digits there instead,
+        # which never matches any real binary and silently degraded every
+        # scan to "no target version").
+        real_shim_message = (
+            b"module was compiled against NumPy C-API version 0x%x "
+            b"(NumPy 1.23) but the running NumPy has C-API version 0x%x. "
+            b"Check the section C-API incompatibility at the "
+            b"Troubleshooting ImportError section at "
+            b"https://numpy.org/devdocs/user/troubleshooting-importerror.html"
+            b"#c-api-incompatibility "
+            b"for indications on how to solve this problem.\x00"
+        )
+        binary = tmp_path / "mod.so"
+        binary.write_bytes(
+            b"\x7fELF"
+            + b"\x00" * 50
+            + b"_ARRAY_API is NULL pointer\x00"
+            + real_shim_message
         )
         surf = extract_numpy_capi_surface(binary)
         assert surf is not None

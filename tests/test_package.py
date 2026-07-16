@@ -1157,6 +1157,26 @@ class TestParseWheelNumpyRequirement:
             )
         assert parse_wheel_numpy_requirement(whl) == ">=1.23"
 
+    def test_abi3_wheel_python_version_marker_falls_back_to_running_interpreter(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review: a cp39-abi3 wheel genuinely installs on Python 3.9
+        # AND every later 3.x minor, so pinning python_version="3.9" would
+        # make a "later minor" marker wrongly evaluate inactive. This
+        # project requires Python 3.10+ to run at all (CLAUDE.md), so
+        # python_version >= "3.10" is guaranteed true on whatever host runs
+        # this test -- the old buggy derivation (pinning "3.9") would have
+        # made this assert ">=1.23" instead.
+        whl = tmp_path / "pkg-1.0-cp39-abi3-manylinux_2_17_x86_64.whl"
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr(
+                "pkg-1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\n"
+                'Requires-Dist: numpy>=1.23; python_version < "3.10"\n'
+                'Requires-Dist: numpy>=2; python_version >= "3.10"\n',
+            )
+        assert parse_wheel_numpy_requirement(whl) == ">=2"
+
     def test_python_full_version_spelling_also_derived_from_wheel_filename(
         self, tmp_path: Path
     ) -> None:
@@ -1366,6 +1386,19 @@ class TestPythonVersionFromWheelFilename:
     def test_too_few_segments_returns_none(self) -> None:
         assert _python_version_from_wheel_filename("weird.whl") is None
 
+    def test_abi3_tag_names_a_floor_not_one_minor_returns_none(self) -> None:
+        # Codex review: a cp39-abi3 wheel genuinely installs on Python 3.9
+        # AND every later 3.x minor (the stable/limited API's whole point),
+        # so pinning python_version="3.9" would be wrong -- confirmed
+        # against packaging.tags, which puts cp39-abi3 in the accepted tag
+        # set for a 3.12 interpreter too.
+        assert (
+            _python_version_from_wheel_filename(
+                "pkg-1.0-cp39-abi3-manylinux_2_17_x86_64.whl"
+            )
+            is None
+        )
+
 
 class TestPythonFullVersionFromWheelFilename:
     def test_cp_tag_gets_synthetic_micro(self) -> None:
@@ -1384,6 +1417,14 @@ class TestPythonFullVersionFromWheelFilename:
 
     def test_non_wheel_filename_returns_none(self) -> None:
         assert _python_full_version_from_wheel_filename("pkg-1.0.tar.gz") is None
+
+    def test_abi3_tag_names_a_floor_not_one_minor_returns_none(self) -> None:
+        assert (
+            _python_full_version_from_wheel_filename(
+                "pkg-1.0-cp39-abi3-manylinux_2_17_x86_64.whl"
+            )
+            is None
+        )
 
 
 class TestImplementationNameFromWheelFilename:

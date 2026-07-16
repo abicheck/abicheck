@@ -38,17 +38,23 @@ recovers reliably, independent of optimisation level and surviving
   object"`` — compiled in only when ``import_array()`` was called; presence
   is a reliable "consumes the array C-API" signal.
 * The ``_UFUNC_API`` counterparts for ``import_ufunc()``.
-* ``"...compiled against NumPy C-API version 0x<hex> (NumPy X.Y)..."`` — the
+* ``"...compiled against NumPy C-API version 0x%x (NumPy X.Y)..."`` — the
   exact ``NPY_TARGET_VERSION`` (or NumPy's own default when unset) as a
   human-readable release string, via NumPy's ``NPY_FEATURE_VERSION_STRING``
   macro, string-concatenated directly into the ``_import_array()``/
-  ``_import_umath()`` shim's error message at compile time. This is the
-  *minimum* NumPy runtime the module's C-API usage requires — the
-  practically important compatibility-envelope question. The scan anchors on
-  the full ``"compiled against NumPy C-API version 0x... (NumPy X.Y)"``
-  phrase rather than a bare ``"(NumPy X.Y)"``, so an unrelated parenthesized
-  version string elsewhere in ``.rodata`` (a docstring, a log message) can't
-  be mistaken for the shim's own floor (Codex review).
+  ``_import_umath()`` shim's error message at compile time. The ``0x%x`` is
+  a *literal* printf placeholder as it sits in ``.rodata`` — the hex value
+  is only substituted at runtime by ``PyErr_Format()`` into a new heap
+  string, never written back — so the compiled-in bytes always contain the
+  two characters ``%x``, verified against a real compiled extension across
+  NumPy 2.0/2.2/2.4 (Codex review; an earlier version of the anchor regex
+  required actual hex digits there, which no real binary ever matches).
+  This is the *minimum* NumPy runtime the module's C-API usage requires —
+  the practically important compatibility-envelope question. The scan
+  anchors on the full ``"compiled against NumPy C-API version 0x%x (NumPy
+  X.Y)"`` phrase rather than a bare ``"(NumPy X.Y)"``, so an unrelated
+  parenthesized version string elsewhere in ``.rodata`` (a docstring, a log
+  message) can't be mistaken for the shim's own floor (Codex review).
 
 What is deliberately NOT extracted: the raw ``NPY_ABI_VERSION``/
 ``NPY_API_VERSION`` hex constants. Those are passed as ``PyErr_Format``
@@ -82,11 +88,20 @@ _UFUNC_API_MARKERS = (
 #: NumPy's NPY_FEATURE_VERSION_STRING, string-concatenated verbatim into the
 #: import_array()/import_umath() shim's "module was compiled against NumPy
 #: C-API version 0x%x (NumPy X.Y) but the running NumPy has ..." message.
-#: Anchored to the full "compiled against ... 0x<hex> (NumPy X.Y)" phrase
+#: The "0x%x" is a *literal* printf-style placeholder in this format string
+#: as it sits in .rodata -- PyArray_GetNDArrayCFeatureVersion() only fills
+#: it in via PyErr_Format() at runtime (into a new heap string, not written
+#: back to .rodata), so the compiled-in bytes always contain the two
+#: characters "%x" verbatim, never actual hex digits. Verified empirically
+#: by compiling a real extension against NumPy 2.0/2.2/2.4 headers and
+#: inspecting the resulting .so's raw bytes: matching hex digits here (as
+#: an earlier version of this regex did) never matches any real binary,
+#: silently degrading every scan to "no target version" (Codex review).
+#: Anchored to the full "compiled against ... 0x%x (NumPy X.Y)" phrase
 #: (not a bare "(NumPy X.Y)") so an unrelated parenthesized version string
 #: elsewhere in .rodata can't be mistaken for the shim's own floor.
 _TARGET_VERSION_RE = re.compile(
-    rb"compiled against NumPy C-API version 0x[0-9a-fA-F]+ \(NumPy (\d+\.\d+)\)"
+    rb"compiled against NumPy C-API version 0x%x \(NumPy (\d+\.\d+)\)"
 )
 
 
