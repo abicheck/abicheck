@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -45,6 +46,11 @@ REPO_DIR = Path(__file__).resolve().parents[2]
 GROUND_TRUTH = REPO_DIR / "examples" / "ground_truth.json"
 DEFAULT_RESULTS_DIR = REPO_DIR / "results"
 
+# Run directly from a source checkout (no `pip install -e .` yet, no external
+# PYTHONPATH=.) needs abicheck itself on sys.path too, not just the sibling
+# runner modules below -- tests/validate_examples.py imports it at module
+# scope (Codex review).
+sys.path.insert(0, str(REPO_DIR))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import collect_full_example_matrix as _matrix  # noqa: E402
 
@@ -85,8 +91,19 @@ _ALT_COMPILER_PROBE = {
 
 
 def _run_json(cmd: list[str]) -> dict[str, Any]:
+    # Propagate REPO_DIR on PYTHONPATH so the subprocess's own `import
+    # abicheck` resolves the same way this process's does, even when
+    # abicheck isn't installed and no external PYTHONPATH=. was set
+    # (Codex review) -- subprocess.run without `env=` would otherwise
+    # inherit the parent's unmodified os.environ, missing the sys.path
+    # insert above entirely (that only affects this process's own imports).
+    env = dict(os.environ)
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = (
+        str(REPO_DIR) if not existing else f"{REPO_DIR}{os.pathsep}{existing}"
+    )
     proc = subprocess.run(
-        cmd, cwd=REPO_DIR, capture_output=True, text=True, check=False
+        cmd, cwd=REPO_DIR, capture_output=True, text=True, check=False, env=env
     )
     if proc.returncode not in (0, 1):
         sys.stderr.write(proc.stderr)
