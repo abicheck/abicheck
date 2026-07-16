@@ -491,9 +491,9 @@ def main() -> None:
                    "artifact checks without requiring castxml.")
 @click.option("--dry-run", "dry_run", is_flag=True, default=False,
               help="Resolve and validate the invocation -- classify inputs, discover "
-                   "config, show which data layers (L0-L5) are available -- and print "
-                   "a report without producing a snapshot. Writes nothing; incompatible "
-                   "with -o/--output.")
+                   "config, show which evidence depths (binary/headers/build/source) "
+                   "are available -- and print a report without producing a snapshot. "
+                   "Writes nothing; incompatible with -o/--output.")
 @click.option("--debug-format", "debug_format_opt",
               type=click.Choice(["auto", "dwarf", "btf", "ctf"], case_sensitive=False), default=None,
               help="Force the ELF debug format (auto=pick best available). "
@@ -1335,12 +1335,12 @@ def _embed_inline_source_side(
 @click.option("--ld-library-path", "ld_library_path", default="",
               help="Simulated LD_LIBRARY_PATH (with --follow-deps).")
 @click.option("--header-graph", is_flag=True, default=False,
-              help="Build and embed the L2 header-only semantic graph (ADR-041 addendum) "
+              help="Build and embed a header-only semantic graph (ADR-041 addendum) "
                    "for both sides from the parsed header AST alone (no build system "
                    "needed); the existing build-source-pack graph diff picks it up "
                    "automatically, so declaration reachability / internal-dependency "
                    "risk findings become available on an ordinary binary+headers compare, "
-                   "not just L3-L5 build-integrated runs. Degrades to declaration-visibility "
+                   "not just --depth build/source runs. Degrades to declaration-visibility "
                    "nodes only (no type/call edges) when clang is unavailable.")
 @click.option("--header-graph-includes", is_flag=True, default=False,
               help="With --header-graph, additionally run a per-header 'clang -M' pass to "
@@ -1351,7 +1351,7 @@ def _embed_inline_source_side(
               hidden=True,
               help="Disable redundancy filtering and show all changes including those "
                    "derived from root type changes. Demoted to config "
-                   "(scope.show_redundant, ADR-040 L2); --show-redundant/--no-show-redundant "
+                   "(scope.show_redundant, ADR-040); --show-redundant/--no-show-redundant "
                    "still overrides it either way.")
 @scope_options  # --scope-public-headers/--no- (ADR-037 D3); --show-filtered stays inline
 @click.option("--collapse-versioned-symbols", "collapse_versioned_symbols", is_flag=True, default=False,

@@ -57,7 +57,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             ],
         },
         {
-            "name": "Toolchain (L2 header AST)",
+            "name": "Toolchain (header parsing)",
             "options": [
                 "--ast-frontend",
                 "--old-ast-frontend",
@@ -104,7 +104,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "options": ["--debug-root"],
         },
         {
-            "name": "Build/source evidence (L3–L5)",
+            "name": "Build & source evidence (--depth build/source)",
             "options": [
                 "--build-info",
                 "--sources",
@@ -186,7 +186,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             ],
         },
         {
-            "name": "Build/source evidence (L3–L5)",
+            "name": "Build & source evidence (--depth build/source)",
             "options": [
                 "--depth",
                 "--build-info",
@@ -237,7 +237,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "options": ["--crosscheck", "--risk-rules"],
         },
         {
-            "name": "Toolchain (L2 header AST)",
+            "name": "Toolchain (header parsing)",
             "options": [
                 "--lang",
                 "--ast-frontend",

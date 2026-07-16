@@ -265,7 +265,7 @@ class TestSmallHelpers:
         runner = CliRunner()
         compare_help = runner.invoke(main, ["compare", "--help"]).output
         assert "Per-side overrides" in compare_help
-        assert "Build/source evidence" in compare_help
+        assert "Build & source evidence" in compare_help
         dump_help = runner.invoke(main, ["dump", "--help"]).output
         assert "Toolchain" in dump_help and "Provenance" in dump_help
 

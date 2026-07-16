@@ -1041,8 +1041,8 @@ def build_source_dump_options(func: F) -> F:
         type=DEPTH_PARAM,
         default=None,
         help="Evidence-depth dial (same vocabulary as `compare`/`scan --depth`): "
-        "binary=L0/L1 only, headers=+L2 AST (default), build=+L3 build context, "
-        "source=+L4 replay & the L5 graph.",
+        "binary=symbols only, headers=+header AST (default), build=+build "
+        "context, source=+source replay & call graph.",
     )(func)
     func = click.option(
         "--allow-build-query",
@@ -1091,17 +1091,17 @@ def build_source_dump_options(func: F) -> F:
         "sources",
         type=click.Path(exists=True, path_type=Path),
         default=None,
-        help="Source checkout to run L4 source ABI replay + the L5 graph over "
-        "and embed inline. (An existing pack directory — e.g. from the "
-        "abicheck-cc wrapper or Clang plugin — is auto-detected by its "
-        "manifest.json and loaded as that pack instead.)",
+        help="Source checkout to run source-ABI replay and build the call "
+        "graph over, embedding both inline. (An existing pack directory — e.g. "
+        "from the abicheck-cc wrapper or Clang plugin — is auto-detected by "
+        "its manifest.json and loaded as that pack instead.)",
     )(func)
     func = click.option(
         "--build-info",
         "build_info",
         type=click.Path(exists=True, path_type=Path),
         default=None,
-        help="Optional L3 build context: a build dir, a compile_commands.json, "
+        help="Optional build context: a build dir, a compile_commands.json, "
         "or a pre-captured pack. Auto-discovered inside the --sources tree when "
         "omitted.",
     )(func)
@@ -1134,16 +1134,16 @@ def evidence_options(func: F) -> F:
         "depth",
         type=DEPTH_PARAM,
         default=None,
-        help="Evidence-depth dial: binary=L0/L1 only, headers=+L2 AST (default), "
-        "build=+L3, source=+L4 replay & the L5 graph. Deeper-than-headers needs "
-        "--sources or --build-info.",
+        help="Evidence-depth dial: binary=symbols only, headers=+header AST "
+        "(default), build=+build context, source=+source replay & call graph. "
+        "Deeper-than-headers needs --sources or --build-info.",
     )(func)
     func = click.option(
         "--sources",
         "sources",
         multiple=True,
         type=SIDED_SOURCES_PARAM,
-        help="L4/L5 source: a raw source checkout (collected inline at --depth, "
+        help="Source checkout for --depth build/source (collected inline, "
         "embedding build/source/graph facts) or a pre-built `collect` pack, "
         "overriding embedded. Applies to both sides; scope to one with an "
         "'old='/'new=' prefix, repeating the flag per side "
@@ -1154,9 +1154,9 @@ def evidence_options(func: F) -> F:
         "build_info",
         multiple=True,
         type=SIDED_BUILD_INFO_PARAM,
-        help="Out-of-band L3 build-info: a build dir, a compile_commands.json, or "
-        "a pack, overriding embedded. Applies to both sides; scope to one with an "
-        "'old='/'new=' prefix, repeating the flag per side "
+        help="Out-of-band build context: a build dir, a compile_commands.json, "
+        "or a pack, overriding embedded. Applies to both sides; scope to one "
+        "with an 'old='/'new=' prefix, repeating the flag per side "
         "(e.g. --build-info old=b1 --build-info new=b2) (ADR-040).",
     )(func)
     return func
