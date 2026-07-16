@@ -29,7 +29,7 @@ in ``check_ai_readiness``). Verdict routing stays through the Tier-2 service
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import click
 
@@ -250,7 +250,6 @@ def _normalize_compare_options(
     resolved_cfg: ResolvedCompareConfig,
     *,
     depth: str | None,
-    max_depth: bool,
     annotate: bool,
     annotate_additions: bool,
     headers: tuple[Path, ...],
@@ -267,10 +266,10 @@ def _normalize_compare_options(
     if annotate_additions and not annotate:
         raise click.UsageError("--annotate-additions requires --annotate")
 
-    # Fold the unified --depth/--max dial into the internal collect mode
-    # (ADR-037 D5), the same way `dump` does. With no preset, compare reads at
-    # "off"; --depth binary suppresses the L2 header AST (symbols-only).
-    collect_mode = resolve_dump_depth(depth, max_depth, "off")
+    # Fold the --depth dial into the internal collect mode (ADR-037 D5), the
+    # same way `dump` does. With no preset, compare reads at "off"; --depth
+    # binary suppresses the L2 header AST (symbols-only).
+    collect_mode = resolve_dump_depth(depth, "off")
     if depth == "binary":
         headers, old_headers_only, new_headers_only = (), (), ()
 
@@ -293,9 +292,9 @@ def _normalize_compare_options(
         show_impact = True
 
     # ADR-037 D4: the precise S-axis lives in config (source.method). It sets the
-    # collection depth only when the user gave no explicit --depth/--max signal
+    # collection depth only when the user gave no explicit --depth signal
     # (CLI > config).
-    if resolved_cfg.source_method and depth is None and not max_depth:
+    if resolved_cfg.source_method and depth is None:
         from .buildsource.scan_levels import SourceMethod, method_to_collect_mode
         try:
             collect_mode = method_to_collect_mode(
@@ -417,6 +416,61 @@ def _warn_force_public_ignored(
         )
 
 
+def _render_compare_dry_run(
+    *,
+    old_input: Path, new_input: Path,
+    old_kind: str, new_kind: str,
+    depth: str | None,
+    headers: tuple[Path, ...], includes: tuple[Path, ...],
+    old_headers_only: tuple[Path, ...], new_headers_only: tuple[Path, ...],
+    old_sources: Path | None, new_sources: Path | None,
+    old_build_info: Path | None, new_build_info: Path | None,
+    cfg_path: Path | None,
+    fmt: str,
+    exit_code_scheme: str | None,
+    header_backend: str,
+) -> Any:
+    """Build the ``compare --dry-run`` report (ADR-043 D4): resolve, never diff."""
+    from .dry_run import DryRunResult, tool_status
+
+    result = DryRunResult(command="compare")
+    result.add(
+        "Inputs",
+        f"old: {old_input} ({old_kind})",
+        f"new: {new_input} ({new_kind})",
+    )
+    result.add(
+        "Resolved depth and source scope",
+        f"requested depth: {depth or '(auto)'}",
+        "source scope: target on each side (compare has no PR change seed)"
+        if depth == "source" else None,
+    )
+    all_headers = list(headers) + list(old_headers_only) + list(new_headers_only)
+    result.add(
+        "Headers and compile context",
+        f"ast-frontend: {header_backend}",
+        f"headers: {', '.join(str(h) for h in all_headers)}" if all_headers else None,
+    )
+    result.add(
+        "Build/source inputs",
+        f"old sources/build-info: {old_sources or old_build_info or '(embedded)'}",
+        f"new sources/build-info: {new_sources or new_build_info or '(embedded)'}",
+    )
+    result.add("Tools and frontends", *tool_status("castxml", "clang", "gcc", "g++"))
+    result.add(
+        "Configuration and value origins",
+        f".abicheck.yml: {cfg_path if cfg_path else '(none found)'}",
+    )
+    result.add(
+        "Output and exit-code behavior",
+        f"format: {fmt}",
+        f"exit-code scheme: {exit_code_scheme or 'legacy (0/2/4)'}",
+    )
+    if {old_kind, new_kind} & {"directory", "package"}:
+        result.add("Consumer/contract scoping", "dispatch: per-library release fan-out")
+    return result
+
+
 def run_compare(
     ctx: click.Context,
     *,
@@ -472,15 +526,19 @@ def run_compare(
     verbose: bool,
     old_build_info: Path | None = None, new_build_info: Path | None = None,
     old_sources: Path | None = None, new_sources: Path | None = None,
-    depth: str | None = None, max_depth: bool = False,
+    depth: str | None = None,
     probe_matrix_old: Path | None = None,
     probe_matrix_new: Path | None = None,
     header_graph: bool = False,
     header_graph_includes: bool = False,
     secondary_fmt: str | None = None,
     secondary_output: Path | None = None,
+    dry_run: bool = False,
 ) -> None:
     """Run the single-pair (or set fan-out) ``compare`` flow and exit accordingly."""
+    from .dry_run import reject_dry_run_with_output
+
+    reject_dry_run_with_output(dry_run, output)
     _setup_verbosity(verbose)
 
     if secondary_fmt is not None and secondary_output is None:
@@ -555,6 +613,21 @@ def run_compare(
     # severity) is forwarded so a set-input compare classifies the same way a
     # single-pair one would (ADR-037 D4).
     old_kind, new_kind = _classify_and_reject_operands(old_input, new_input)
+
+    if dry_run:
+        from .dry_run import emit_dry_run
+
+        emit_dry_run(_render_compare_dry_run(
+            old_input=old_input, new_input=new_input,
+            old_kind=old_kind, new_kind=new_kind,
+            depth=depth, headers=headers, includes=includes,
+            old_headers_only=old_headers_only, new_headers_only=new_headers_only,
+            old_sources=old_sources, new_sources=new_sources,
+            old_build_info=old_build_info, new_build_info=new_build_info,
+            cfg_path=cfg_path, fmt=fmt, exit_code_scheme=exit_code_scheme,
+            header_backend=header_backend,
+        ))
+
     if {old_kind, new_kind} & {"directory", "package"}:
         # The per-library fan-out (`compare-release` backend) consumes the
         # resolved scheme from config but has no public CLI support for these
@@ -616,7 +689,7 @@ def run_compare(
         effective_debug_format, demangle, report_mode, show_impact,
     ) = _normalize_compare_options(
         resolved_cfg,
-        depth=depth, max_depth=max_depth,
+        depth=depth,
         annotate=annotate, annotate_additions=annotate_additions,
         headers=headers,
         old_headers_only=old_headers_only, new_headers_only=new_headers_only,

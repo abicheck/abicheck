@@ -237,35 +237,25 @@ class TestSmallHelpers:
     @pytest.mark.parametrize(
         ("depth", "expected"),
         [
+            ("binary", "off"),
             ("headers", "off"),
             ("build", "build"),
-            ("graph", "graph-build"),
-            ("source", "source-changed"),
-            ("full", "graph-full"),
+            # ADR-043 D3: dump/compare always resolve --depth source at TARGET
+            # scope, never CHANGED — the zero-TU defect fix.
+            ("source", "source-target"),
         ],
     )
     def test_resolve_dump_depth_maps_each_depth(self, depth: str, expected: str) -> None:
         from abicheck.cli_dump_helpers import resolve_dump_depth
 
-        assert resolve_dump_depth(depth, False, "source-target") == expected
-
-    def test_resolve_dump_depth_max_is_full(self) -> None:
-        from abicheck.cli_dump_helpers import resolve_dump_depth
-
-        assert resolve_dump_depth(None, True, "source-target") == "graph-full"
+        assert resolve_dump_depth(depth, "source-target") == expected
 
     def test_resolve_dump_depth_no_preset_returns_default_mode(self) -> None:
         from abicheck.cli_dump_helpers import resolve_dump_depth
 
-        # No --depth/--max preset → the command's default collect mode is returned.
-        assert resolve_dump_depth(None, False, "build") == "build"
-        assert resolve_dump_depth(None, False, "off") == "off"
-
-    def test_resolve_dump_depth_conflicts_raise(self) -> None:
-        from abicheck.cli_dump_helpers import resolve_dump_depth
-
-        with pytest.raises(click.UsageError):
-            resolve_dump_depth("build", True, "source-target")  # --max + --depth build
+        # No --depth preset → the command's default collect mode is returned.
+        assert resolve_dump_depth(None, "build") == "build"
+        assert resolve_dump_depth(None, "off") == "off"
 
     def test_help_option_groups_render(self) -> None:
         # G21.8/M1: rich-click renders option-group panels so the big commands'
@@ -359,11 +349,11 @@ class TestSmallHelpers:
         )
 
     def test_dump_explicit_deep_depth_without_sources_warns(self, tmp_path) -> None:
-        # Codex: an explicit --max/--depth (deep collect mode) with no
-        # --sources/--build-info would silently write an L0-L2 snapshot; warn.
+        # Codex: an explicit deep --depth with no --sources/--build-info would
+        # silently write an L0-L2 snapshot; warn.
         so = tmp_path / "fake.so"
         so.write_bytes(b"\x7fELF")
-        result = CliRunner().invoke(main, ["dump", str(so), "--max"])
+        result = CliRunner().invoke(main, ["dump", str(so), "--depth", "source"])
         assert "carry only L0-L2 data" in result.output
 
     def test_dump_default_depth_no_warning(self, tmp_path) -> None:
@@ -399,19 +389,15 @@ class TestSmallHelpers:
         norm = out.replace("│", "").replace("\n", "").replace(" ", "")
         assert "--gcc-option" in norm
 
-    def test_dump_depth_help_and_max_mutual_exclusion(self) -> None:
+    def test_dump_depth_help_shows_four_rungs(self) -> None:
         runner = CliRunner()
         help_out = runner.invoke(main, ["dump", "--help"])
         assert help_out.exit_code == 0
-        assert "--depth" in help_out.output and "--max" in help_out.output
-        # --max is shorthand for --depth full; combining it with a *different*
-        # --depth is a usage error (resolved before any binary access, so a
-        # source-only invocation surfaces the error).
-        clash = runner.invoke(
-            main, ["dump", "--depth", "source", "--max"]
-        )
-        assert clash.exit_code != 0
-        assert "shorthand for --depth full" in clash.output
+        assert "--depth" in help_out.output
+        assert "--max" not in help_out.output
+        # full/symbols/graph are rejected outright -- no alias, no --max shorthand.
+        rejected = runner.invoke(main, ["dump", "--depth", "full"])
+        assert rejected.exit_code != 0
 
     def test_resolve_per_side_options_overrides(self, tmp_path: Path) -> None:
         h = (tmp_path / "h.h",)

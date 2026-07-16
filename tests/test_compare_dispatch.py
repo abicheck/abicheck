@@ -732,7 +732,6 @@ class TestCompareDispatch:
     @pytest.mark.parametrize(
         "flag, value, is_path",
         [
-            ("--max", None, False),
             ("--depth", "source", False),
             ("--sources", "old=src", True),
             ("--build-info", "new=build", True),

@@ -59,7 +59,9 @@ from .cli_buildsource_helpers import (  # noqa: F401  (re-exported for API stabi
     _exported_symbols_from_snapshot as _exported_symbols_from_snapshot,
     _ingest_graph_backends as _ingest_graph_backends,
     _intrinsic_coverage as _intrinsic_coverage,
+    _is_inputs_pack_dir as _is_inputs_pack_dir,
     _layer_presence as _layer_presence,
+    _load_inputs_pack_or_raise as _load_inputs_pack_or_raise,
     _load_pack_or_raise as _load_pack_or_raise,
     _merge_attach_combined as _merge_attach_combined,
     _merge_fold_packs as _merge_fold_packs,
@@ -828,17 +830,31 @@ def embed_build_source(
 
     bi_is_pack = is_pack_dir(build_info)
     src_is_pack = is_pack_dir(sources)
+    # A build-emitted abicheck_inputs/ pack (ADR-035 D5) is auto-detected and
+    # validated the same way here as a collect-produced BuildSourcePack --
+    # `--build-info`/`--sources` is the one public entry point for build-produced
+    # information; there is no separate `inputs validate` command to run first.
+    bi_is_inputs = (not bi_is_pack) and _is_inputs_pack_dir(build_info)
+    src_is_inputs = (not src_is_pack) and _is_inputs_pack_dir(sources)
     bi_pack = (
-        _load_pack_or_raise(build_info)
+        _load_inputs_pack_or_raise(build_info)
+        if (bi_is_inputs and build_info is not None)
+        else _load_pack_or_raise(build_info)
         if (bi_is_pack and build_info is not None)
         else None
     )
     src_pack = (
-        _load_pack_or_raise(sources) if (src_is_pack and sources is not None) else None
+        _load_inputs_pack_or_raise(sources)
+        if (src_is_inputs and sources is not None)
+        else _load_pack_or_raise(sources)
+        if (src_is_pack and sources is not None)
+        else None
     )
 
-    raw_build_info = None if (build_info is None or bi_is_pack) else build_info
-    raw_sources = None if (sources is None or src_is_pack) else sources
+    raw_build_info = (
+        None if (build_info is None or bi_is_pack or bi_is_inputs) else build_info
+    )
+    raw_sources = None if (sources is None or src_is_pack or src_is_inputs) else sources
 
     inline_pack: BuildSourcePack | None = None
     if raw_build_info is not None or raw_sources is not None:

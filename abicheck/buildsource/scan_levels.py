@@ -78,27 +78,72 @@ class EvidenceDepth(str, Enum):
     HEADERS = "headers"  # L2 only
     BUILD = "build"  # L3 (S1)
     SOURCE = "source"  # L4 scoped + L5 edges (S5)
-    FULL = "full"  # L4 full-scope (S6)
+    FULL = "full"  # INTERNAL only (ADR-043 D2); not a user --depth rung. ``source``
+    # and ``full`` differ only in replay *scope* (see SourceScope), not in the
+    # kind of evidence collected — the public ladder has one SOURCE rung and
+    # scope is resolved by the calling command, never by a second depth value.
     GRAPH = "graph"  # L5 edges (S4) — INTERNAL only (ADR-037 D6); not a user --depth
 
 
-#: The user-facing ``--depth`` ladder (ADR-037 D5). Monotone, coarse, teachable.
-#: ``GRAPH`` is excluded: the L5 graph is an *internal* consequence of
-#: ``--depth source`` (D6), never its own user rung.
+#: The user-facing ``--depth`` ladder (ADR-037 D5, narrowed by ADR-043 D2).
+#: Exactly four public rungs. ``FULL``/``GRAPH`` are internal-only: the L5 graph
+#: is an implementation consequence of ``--depth source`` (D6), and the old
+#: ``full`` rung collapsed into ``source`` — replay *scope* (changed/target/all,
+#: see :class:`SourceScope`), not a deeper depth, is what used to distinguish them.
 USER_DEPTHS: tuple[EvidenceDepth, ...] = (
     EvidenceDepth.BINARY,
     EvidenceDepth.HEADERS,
     EvidenceDepth.BUILD,
     EvidenceDepth.SOURCE,
-    EvidenceDepth.FULL,
 )
 
-#: Deprecated ``--depth`` spellings → their replacement (ADR-037 D5/D6).
-#: ``symbols`` was renamed to the evidence-named ``binary`` rung (ADR-037 D5 G22
-#: Phase 6) and keeps working as an alias. (The G21 ``graph`` rung was removed
-#: outright — the L5 graph is an internal consequence of ``--depth source``.)
-DEPRECATED_DEPTHS: dict[str, EvidenceDepth] = {
+#: Spellings the *public* ``--depth`` CLI flag rejects outright (ADR-043 D2) --
+#: ``DEPTH_PARAM`` (``cli_params.py``) checks membership in ``USER_DEPTHS`` and
+#: raises a plain "not one of ..." error for anything else, including these;
+#: there is no CLI-visible alias/translation. The internal Python service API
+#: (:func:`parse_user_depth`, used by ``ScanRequest``/MCP-adjacent programmatic
+#: callers, never by the CLI's own ``--depth`` parsing) keeps the historical
+#: ``symbols`` alias and accepts the internal ``full``/``graph`` rungs verbatim
+#: -- those rungs still exist as real :class:`EvidenceDepth` values for
+#: mode-preset-driven internal callers (e.g. ``pr-deep`` resolves ``GRAPH``).
+REJECTED_DEPTHS: frozenset[str] = frozenset({"symbols", "full", "graph"})
+
+#: ``parse_user_depth``'s one remaining alias: the historical ``symbols``
+#: spelling for the CLI-named ``binary`` rung, kept for non-CLI callers.
+_SERVICE_DEPTH_ALIASES: dict[str, EvidenceDepth] = {
     "symbols": EvidenceDepth.BINARY,
+}
+
+
+class SourceScope(str, Enum):
+    """Internal replay-scope axis for ``EvidenceDepth.SOURCE`` (ADR-043 D2/D3).
+
+    Never a public CLI flag. The public ``--depth source`` rung always means
+    "collect source-semantic facts"; *which* translation units get replayed is
+    resolved by the calling command from its own inputs, not by a second public
+    depth value (that was the old, removed ``full`` rung):
+
+    - ``dump``/``compare`` always resolve ``TARGET`` — the TUs owned by the
+      resolved library target (or every available compile unit, with a
+      warning, when target ownership cannot be resolved).
+    - ``scan`` resolves ``CHANGED`` when a change seed (``--since``/
+      ``--changed-path``) is present, else ``TARGET`` (never a zero-TU
+      no-op).
+    """
+
+    CHANGED = "changed"
+    TARGET = "target"
+    ALL = "all"  # reserved: no command selects this scope yet
+
+
+#: ``SourceScope`` → the ADR-033 D2 collect mode for the S5 (non-graph) source
+#: method. ``ALL`` reuses ``source-target``'s "no target id ⇒ every unit"
+#: fallback (see ``source_replay.select_compile_units``) rather than needing a
+#: distinct collect mode.
+_SOURCE_SCOPE_TO_COLLECT_MODE: dict[SourceScope, str] = {
+    SourceScope.CHANGED: "source-changed",
+    SourceScope.TARGET: "source-target",
+    SourceScope.ALL: "source-target",
 }
 
 
@@ -160,19 +205,21 @@ _METHOD_TO_DEPTH: dict[SourceMethod, EvidenceDepth] = {
 
 
 def parse_user_depth(value: str | None) -> EvidenceDepth | None:
-    """Resolve a ``--depth`` / ``ScanRequest.depth`` string to an EvidenceDepth.
+    """Resolve a ``ScanRequest.depth`` string to an ``EvidenceDepth`` (service API).
 
-    Honors the deprecated alias (``symbols``→``binary``)
-    so non-CLI callers (``service.run_scan`` / ``estimate_scan`` / MCP) accept the
-    compatibility spelling too — the Click ``DEPTH_PARAM`` normalizes
-    them on the CLI path, but programmatic callers construct the enum directly
-    (Codex review). ``None``/empty → ``None``.
+    ``None``/empty → ``None``. Honors the historical ``symbols`` alias so
+    non-CLI callers (``service.run_scan``/``estimate_scan``, and internal
+    mode-preset-driven callers) keep working; the internal ``full``/``graph``
+    rungs are accepted verbatim here too. This is the Python service layer,
+    not the public CLI: the ``--depth`` *flag* only ever accepts the four
+    public rungs, enforced independently by ``cli_params.DEPTH_PARAM`` (ADR-043
+    D2), which never calls this function.
     """
     if not value:
         return None
     v = str(value).lower()
-    if v in DEPRECATED_DEPTHS:
-        return DEPRECATED_DEPTHS[v]
+    if v in _SERVICE_DEPTH_ALIASES:
+        return _SERVICE_DEPTH_ALIASES[v]
     return EvidenceDepth(v)
 
 
@@ -283,7 +330,12 @@ def resolve_level(
     return method, eff_depth
 
 
-def level_to_collect_mode(method: SourceMethod, depth: EvidenceDepth) -> str:
+def level_to_collect_mode(
+    method: SourceMethod,
+    depth: EvidenceDepth,
+    *,
+    source_scope: SourceScope | None = None,
+) -> str:
     """The ADR-033 D2 CI evidence mode for a resolved (method, depth) level.
 
     Depth-aware for the S5 graph case only: ``pr-deep`` ((S5, GRAPH)) resolves to
@@ -293,8 +345,17 @@ def level_to_collect_mode(method: SourceMethod, depth: EvidenceDepth) -> str:
     it would not actually collect more (Codex review). S4 (``--depth graph``) keeps
     its own ``graph-build`` mode (L3+L5, no costly L4 replay) — it is graph-only,
     not source-ABI (Codex review). All other levels use the method's default mode.
+
+    ``source_scope`` (ADR-043 D2/D3) lets the caller pin the S5 replay scope
+    (changed vs target) explicitly instead of always defaulting to
+    ``"source-changed"`` — this is the fix for the zero-TU defect where an
+    explicit deep depth without a change seed silently selected no translation
+    units. Only S5 is scope-sensitive; every other method ignores the
+    parameter.
     """
     base = method_to_collect_mode(method)
     if depth is EvidenceDepth.GRAPH and base == "source-changed":
         return "graph-full"
+    if source_scope is not None and method is SourceMethod.S5:
+        return _SOURCE_SCOPE_TO_COLLECT_MODE[source_scope]
     return base

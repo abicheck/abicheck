@@ -1023,9 +1023,12 @@ def build_source_dump_options(func: F) -> F:
     Source-tree-centric inputs (ADR-028..033 amendment): ``--sources`` is a
     source checkout — L4 source ABI replay and the L5 graph are run inline and
     embedded; ``--build-info`` is an optional build dir / ``compile_commands.json``
-    / pre-captured pack supplying L3 (auto-discovered inside the source tree when
-    omitted). A path that is itself a pack directory from ``abicheck collect``
-    is loaded as that pack instead. Embedding makes the ``.abi.json``
+    / pre-built pack supplying L3 (auto-discovered inside the source tree when
+    omitted). Either flag also accepts, and auto-detects, a build-emitted
+    ``abicheck_inputs/`` Flow-2 pack directory or a pre-built ``BuildSourcePack``
+    directory (from an internal/producer-side collection step) — both are
+    ingested and validated automatically, no separate ``inputs validate``/
+    ``merge`` step needed (ADR-043 D1). Embedding makes the ``.abi.json``
     self-contained, so a later ``compare old.json new.json`` carries the facts
     with no out-of-band directories. Applied bottom-up, so listed in reverse of
     display.
@@ -1037,17 +1040,9 @@ def build_source_dump_options(func: F) -> F:
         "depth",
         type=DEPTH_PARAM,
         default=None,
-        help="Unified evidence-depth dial (ADR-037 D5; same vocabulary as "
-        "`compare`/`scan --depth`): symbols=L0/L1 only, headers=+L2 AST (default), "
-        "build=+L3 build context, source=+L4 replay & the L5 graph, full=deepest. "
-        "--max == --depth full.",
-    )(func)
-    func = click.option(
-        "--max",
-        "max_depth",
-        is_flag=True,
-        default=False,
-        help="Shorthand for --depth full (collect the deepest evidence available).",
+        help="Evidence-depth dial (same vocabulary as `compare`/`scan --depth`): "
+        "binary=L0/L1 only, headers=+L2 AST (default), build=+L3 build context, "
+        "source=+L4 replay & the L5 graph.",
     )(func)
     func = click.option(
         "--allow-build-query",
@@ -1109,17 +1104,6 @@ def build_source_dump_options(func: F) -> F:
         "or a pre-captured pack. Auto-discovered inside the --sources tree when "
         "omitted.",
     )(func)
-    func = click.option(
-        "--inputs",
-        "inputs_pack",
-        type=click.Path(exists=True, file_okay=False, path_type=Path),
-        default=None,
-        help="A Flow-2 `abicheck_inputs/` pack emitted by the build (abicheck-cc "
-        "wrapper or the Clang facts plugin). Its L3/L4/L5 facts are folded into "
-        "this dump inline and the source surface is linked against the binary's "
-        "exports — the same result as a follow-up `abicheck merge`, in one "
-        "command. No compiler frontend is re-run.",
-    )(func)
     return func
 
 
@@ -1127,7 +1111,7 @@ def evidence_options(func: F) -> F:
     """The shared two-sided evidence family (ADR-037 D3's ``@evidence_options``).
 
     The single source of truth for the depth/source/build-info surface a
-    *two-sided* verdict command exposes: ``--depth`` / ``--max`` plus the per-side
+    *two-sided* verdict command exposes: ``--depth`` plus the per-side
     ``--old/new-sources`` and ``--old/new-build-info`` packs. ``dump`` is
     single-sided (one artifact, plus the build-query knobs) so it composes the
     sibling :func:`build_source_dump_options` instead — they are deliberately not
@@ -1145,20 +1129,12 @@ def evidence_options(func: F) -> F:
     Applied bottom-up, so listed in reverse of displayed order.
     """
     func = click.option(
-        "--max",
-        "max_depth",
-        is_flag=True,
-        default=False,
-        help="Shorthand for --depth full (collect the deepest evidence available).",
-    )(func)
-    func = click.option(
         "--depth",
         "depth",
         type=DEPTH_PARAM,
         default=None,
-        help="Unified evidence-depth dial (ADR-037 D5): symbols=L0/L1 only, "
-        "headers=+L2 AST (default), build=+L3, source=+L4 replay & the L5 graph, "
-        "full=deepest. --max == --depth full. Deeper-than-headers needs "
+        help="Evidence-depth dial: binary=L0/L1 only, headers=+L2 AST (default), "
+        "build=+L3, source=+L4 replay & the L5 graph. Deeper-than-headers needs "
         "--sources or --build-info.",
     )(func)
     func = click.option(
@@ -1225,7 +1201,6 @@ FAMILY_FLAGS: dict[str, frozenset[str]] = {
     "evidence": frozenset(
         {
             "--depth",
-            "--max",
             "--sources",
             "--build-info",
         }
@@ -1424,7 +1399,7 @@ COMPARE_PROFILES: dict[str, dict[str, object]] = {
     # Release cut: deepest evidence, full Markdown report with a semver/SONAME
     # recommendation appended — the "should I bump?" flow.
     "release": {
-        "depth": "full",
+        "depth": "source",
         "fmt": "markdown",
         "recommend": True,
     },
@@ -1529,16 +1504,6 @@ def apply_compare_profile(ctx: object, kwargs: dict[str, object]) -> None:
         ParameterSource.ENVIRONMENT,
     }
     for dest, value in profile.items():
-        # ``--depth`` and ``--max`` are the same dial on two dests: an explicit
-        # ``--max`` (dest ``max_depth``) is the user's depth choice, so the
-        # profile's ``depth`` must yield to it — otherwise resolve_dump_depth
-        # sees "--max plus a different --depth" and exits 64 (Codex review).
-        if (
-            dest == "depth"
-            and get_source is not None
-            and get_source("max_depth") in explicit
-        ):
-            continue
         src = get_source(dest) if get_source is not None else None
         # Only fill a value the user did not set explicitly (DEFAULT / DEFAULT_MAP
         # / unknown). An explicit --flag or a mapped env var stays untouched.

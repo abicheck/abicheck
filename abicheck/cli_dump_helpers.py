@@ -148,38 +148,130 @@ def resolve_dump_debug_format(
 
 def resolve_dump_depth(
     depth: str | None,
-    max_depth: bool,
     default_mode: str,
 ) -> str:
-    """Resolve the ``--depth``/``--max`` preset into the internal collect-mode value.
+    """Resolve the ``--depth`` dial into the internal collect-mode value.
 
     ``--depth`` is the friendly evidence-depth dial (same vocabulary as
-    ``scan --depth``: binary/headers/build/source/full); it expands to the
+    ``scan --depth``: binary/headers/build/source); it expands to the
     underlying ADR-033 collect mode via the shared ``scan_levels`` mapping so the
-    commands stay consistent. ``--max`` is shorthand for ``--depth full``.
-
-    Raises :class:`click.UsageError` if ``--max`` is combined with a different
-    ``--depth``. When no depth preset is supplied, the command's *default_mode* is
-    returned (``dump`` embeds at ``source-target``; ``compare`` reads at ``off``).
+    commands stay consistent. When no depth preset is supplied, the command's
+    *default_mode* is returned (``dump`` embeds at ``source-target``;
+    ``compare`` reads at ``off``).
     """
     from .buildsource.scan_levels import (
         EvidenceDepth,
+        SourceScope,
         depth_to_method,
-        method_to_collect_mode,
+        level_to_collect_mode,
     )
 
-    if max_depth:
-        if depth is not None and depth != EvidenceDepth.FULL.value:
-            raise click.UsageError(
-                "--max is shorthand for --depth full; do not combine it with a "
-                "different --depth."
-            )
-        depth = EvidenceDepth.FULL.value
     if depth is None:
         return default_mode
-    method = depth_to_method(EvidenceDepth(depth))
-    # headers depth reaches no source method (L2 is intrinsic) — collect nothing.
-    return "off" if method is None else method_to_collect_mode(method)
+    evidence_depth = EvidenceDepth(depth)
+    method = depth_to_method(evidence_depth)
+    if method is None:
+        # headers/binary depth reaches no source method (L2 is intrinsic) --
+        # collect nothing.
+        return "off"
+    # dump/compare always resolve --depth source at target scope (ADR-043 D3):
+    # the fix for the zero-TU defect where an explicit deep depth without a
+    # change seed silently selected no translation units.
+    return level_to_collect_mode(method, evidence_depth, source_scope=SourceScope.TARGET)
+
+
+def render_dump_dry_run(
+    *,
+    so_path: Path | None,
+    headers: tuple[Path, ...],
+    sources: Path | None,
+    build_info: Path | None,
+    build_config: Path | None,
+    depth: str | None,
+    collect_mode: str,
+    header_backend: str,
+    output: Path | None,
+) -> Any:
+    """Build the ``dump --dry-run`` report (ADR-043 D4): resolve, never execute.
+
+    Cheap, read-only resolution only: classifies the inputs, discovers config,
+    shows the resolved depth/collect-mode and available data layers, and
+    checks tool availability on PATH. Never runs castxml/clang, a build query,
+    or any I/O beyond stat()/PATH lookups.
+    """
+    from .cli_helpers_compare import discover_project_config
+    from .dry_run import DryRunResult, tool_status
+
+    result = DryRunResult(command="dump")
+    result.add(
+        "Inputs",
+        f"artifact: {so_path}" if so_path else "artifact: (none -- source-only dump)",
+        f"headers: {', '.join(str(h) for h in headers)}" if headers else None,
+    )
+    result.add(
+        "Resolved depth and source scope",
+        f"requested depth: {depth or '(auto)'}",
+        f"effective collect mode: {collect_mode}",
+        "source scope: target (dump always analyzes the resolved library target)"
+        if collect_mode in ("source-target", "source-changed", "graph-full")
+        else None,
+    )
+    result.add(
+        "Headers and compile context",
+        f"ast-frontend: {header_backend}",
+    )
+    result.add(
+        "Build/source inputs",
+        f"--sources: {sources}" if sources else None,
+        f"--build-info: {build_info}" if build_info else None,
+        "no --sources/--build-info given -- L0-L2 only"
+        if sources is None and build_info is None and collect_mode != "off"
+        else None,
+    )
+    result.add("Tools and frontends", *tool_status("castxml", "clang", "gcc", "g++"))
+    if so_path is not None:
+        try:
+            from .binary_utils import detect_binary_format, normalize_binary_input
+            from .dwarf_snapshot import show_data_sources
+
+            normalized_path, binary_fmt = normalize_binary_input(so_path)
+            if binary_fmt is None:
+                binary_fmt = detect_binary_format(normalized_path)
+            elf_meta = None
+            dwarf_meta = None
+            if binary_fmt == "elf":
+                from .dwarf_unified import parse_dwarf
+                from .elf_metadata import parse_elf_metadata
+
+                elf_meta = parse_elf_metadata(normalized_path)
+                dwarf_meta, _ = parse_dwarf(normalized_path)
+            report = show_data_sources(
+                normalized_path, elf_meta, dwarf_meta, bool(headers), None
+            )
+            result.add("Available data layers", *report.splitlines())
+        except Exception as exc:  # pragma: no cover - best-effort diagnostic
+            result.warn(f"could not inspect available data layers: {exc}")
+    cfg_path = build_config or discover_project_config(sources)
+    result.add(
+        "Configuration and value origins",
+        f".abicheck.yml: {cfg_path if cfg_path else '(none found)'}",
+    )
+    result.add(
+        "Output and exit-code behavior",
+        f"output: {output if output else 'stdout'}",
+        "exit codes: 0 valid, 1 requested depth not satisfiable, 64 usage error",
+    )
+    if so_path is None and sources is None and build_info is None:
+        result.block(
+            "no artifact (SO_PATH) and no --sources/--build-info: dump has "
+            "nothing to analyze."
+        )
+    if depth is not None and depth != "binary" and sources is None and build_info is None:
+        result.warn(
+            f"--depth {depth} was requested but no --sources/--build-info was given; "
+            "the snapshot would carry only L0-L2 data."
+        )
+    return result
 
 
 def resolve_dump_compile_db(
@@ -291,7 +383,6 @@ def handle_non_elf_dump(
 
 def resolve_dump_collect_context(
     depth: str | None,
-    max_depth: bool,
     resolved_collect_mode: str | None,
     sources: Path | None,
     build_info: Path | None,
@@ -300,43 +391,41 @@ def resolve_dump_collect_context(
     compile_db_path_alt: Path | None,
     inputs_pack: Path | None = None,
 ) -> tuple[str, tuple[Path, ...], Path | None, Path | None]:
-    """Resolve the --depth/--max preset into the internal collect mode for a dump.
+    """Resolve the --depth preset into the internal collect mode for a dump.
 
     Returns the ``(collect_mode, headers, compile_db_path, compile_db_path_alt)``
     tuple the caller should proceed with — ``--depth binary`` suppresses the L2
     header AST and its compile DB, and an explicitly-requested deep depth without
     a source tree / build context warns loudly (G21.7-style fail-loud).
     """
-    # Resolve the --depth/--max preset into the internal collect mode before any
-    # dump path runs, so every branch (source-only / PE-Mach-O / ELF) embeds the
-    # same evidence depth (G21.1). With no preset, dump embeds at "source-target".
-    # ``compare``'s inline source-tree embed already resolved the mode (possibly
-    # from a config source.method, where --depth is None) and hands it over via
-    # the private _resolved_collect_mode hook so we don't re-derive a different
-    # default here (Codex review).
+    # Resolve the --depth preset into the internal collect mode before any dump
+    # path runs, so every branch (source-only / PE-Mach-O / ELF) embeds the same
+    # evidence depth (G21.1). With no preset, dump embeds at "source-target".
+    # ``compare``'s inline source-tree embed already resolved the mode and hands
+    # it over via the private _resolved_collect_mode hook so we don't re-derive a
+    # different default here (Codex review).
     if resolved_collect_mode is not None:  # pragma: no cover - only via compare's inline embed (integration)
         collect_mode = resolved_collect_mode
     else:
-        collect_mode = resolve_dump_depth(depth, max_depth, "source-target")
-    # --depth binary suppresses the L2 header AST (symbols-only dump, ADR-037 D5;
-    # the `symbols` alias is normalized to `binary` by DEPTH_PARAM). A compile DB
-    # only feeds the header parse, so discard it with the headers — otherwise
-    # resolve_dump_compile_db would reject the now-headerless invocation even though
-    # the user did supply headers, blocking the switch to the fast binary rung
-    # (Codex review).
+        collect_mode = resolve_dump_depth(depth, "source-target")
+    # --depth binary suppresses the L2 header AST (symbols-only dump, ADR-037 D5).
+    # A compile DB only feeds the header parse, so discard it with the headers --
+    # otherwise resolve_dump_compile_db would reject the now-headerless invocation
+    # even though the user did supply headers, blocking the switch to the fast
+    # binary rung (Codex review).
     if depth == "binary":
         headers = ()
         compile_db_path = None
         compile_db_path_alt = None
 
-    # An *explicitly* requested deep evidence depth (--depth/--max) collects
-    # nothing without a source tree / build context: _write_snapshot_output only
-    # embeds when --sources/--build-info is given. Warn loudly rather than
-    # silently writing an L0-L2 snapshot for an explicitly-requested deep depth
-    # (Codex review). The bare default (collect_mode "source-target" with no
-    # flag) stays silent — embedding is a no-op there by design. G21.7-style
-    # fail-loud (a warning, not an error).
-    depth_requested = depth is not None or max_depth
+    # An *explicitly* requested deep evidence depth (--depth) collects nothing
+    # without a source tree / build context: _write_snapshot_output only embeds
+    # when --sources/--build-info is given. Warn loudly rather than silently
+    # writing an L0-L2 snapshot for an explicitly-requested deep depth (Codex
+    # review). The bare default (collect_mode "source-target" with no flag) stays
+    # silent -- embedding is a no-op there by design. G21.7-style fail-loud (a
+    # warning, not an error).
+    depth_requested = depth is not None
     if (
         depth_requested
         and collect_mode != "off"

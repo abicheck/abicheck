@@ -295,7 +295,7 @@ def test_reported_depth_matches_resolved_source_method(
             "--binary",
             str(new_snap_compatible),
             "--depth",
-            "full",
+            "source",
             "--build-info",
             str(cdb),
             "--format",
@@ -305,9 +305,9 @@ def test_reported_depth_matches_resolved_source_method(
     )
     assert res.exit_code == 0, res.output
     payload = _payload(res)
-    # --depth full reaches s6 — must not be reported as the pr-preset 'source'.
-    assert payload["level"]["source_method"] == "s6"
-    assert payload["level"]["depth"] == "full"
+    # --depth source reaches s5 and is reported honestly.
+    assert payload["level"]["source_method"] == "s5"
+    assert payload["level"]["depth"] == "source"
 
 
 def test_pinned_depth_without_evidence_errors(runner, new_snap_compatible):

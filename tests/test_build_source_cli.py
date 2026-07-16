@@ -1733,18 +1733,6 @@ def test_dump_with_no_binary_and_no_inputs_errors():
     assert "source-only" in result.output
 
 
-def test_dump_show_data_sources_requires_binary(tmp_path):
-    tree = tmp_path / "src"
-    tree.mkdir()
-
-    result = CliRunner().invoke(
-        main, ["dump", "--show-data-sources", "--sources", str(tree)]
-    )
-
-    assert result.exit_code != 0
-    assert "--show-data-sources requires SO_PATH" in result.output
-
-
 def test_dump_source_only_then_merge_with_binary(tmp_path):
     """End-to-end: source-only dump + binary dump combine via `merge`."""
     from abicheck.elf_metadata import ElfMetadata

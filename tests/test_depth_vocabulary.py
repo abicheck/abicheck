@@ -44,18 +44,18 @@ _DEPTH_COMMANDS = ("compare", "dump", "scan")
 
 @pytest.mark.parametrize("cmd_name", _DEPTH_COMMANDS)
 def test_depth_dial_is_uniform(cmd_name: str) -> None:
-    """Each command's ``--depth`` exposes exactly the user ladder; ``graph`` gone."""
+    """Each command's ``--depth`` exposes exactly the four public rungs."""
     cmd = _registered()[cmd_name]
     depth = next(p for p in cmd.params if "--depth" in getattr(p, "opts", []))
     metavar = depth.type.get_metavar(depth)
-    assert metavar == "[binary|headers|build|source|full]", (cmd_name, metavar)
-    assert "graph" not in metavar and "symbols" not in metavar
+    assert metavar == "[binary|headers|build|source]", (cmd_name, metavar)
+    assert "graph" not in metavar and "symbols" not in metavar and "full" not in metavar
 
 
-# ── Alias resolution: every legacy spelling resolves to the right depth ──────
+# ── Exactly four public rungs; every removed spelling is a hard CLI error ────
 
 
-@pytest.mark.parametrize("depth_value", ["binary", "headers", "build", "source", "full"])
+@pytest.mark.parametrize("depth_value", ["binary", "headers", "build", "source"])
 def test_depth_user_rung_passes_through(depth_value: str) -> None:
     """Each user-ladder rung resolves to itself, independently."""
     assert DEPTH_PARAM.convert(depth_value, None, None) == depth_value
@@ -65,28 +65,29 @@ def test_user_depths_match_ladder() -> None:
     """The parametrized ladder above stays in lock-step with ``USER_DEPTHS``."""
     from abicheck.buildsource.scan_levels import USER_DEPTHS
 
-    assert [d.value for d in USER_DEPTHS] == [
-        "binary", "headers", "build", "source", "full"
-    ]
+    assert [d.value for d in USER_DEPTHS] == ["binary", "headers", "build", "source"]
 
 
 @pytest.mark.parametrize("spelling", ["symbols", "SYMBOLS"])
-def test_depth_symbols_alias_resolves_to_binary(spelling: str) -> None:
-    """``symbols`` was renamed to the evidence-named ``binary`` rung (G22 Phase 6);
-    it keeps working as a deprecated alias for one release."""
-    assert DEPTH_PARAM.convert(spelling, None, None) == "binary"
+def test_depth_symbols_is_rejected_on_cli(spelling: str) -> None:
+    """``symbols`` is a hard CLI error (ADR-043 D2) -- no alias, no translation.
+
+    (The internal Python service API, e.g. ``ScanRequest``, keeps a permissive
+    ``symbols``->``binary`` alias for non-CLI callers; only the public
+    ``--depth`` flag itself is strict.)
+    """
+    import click
+
+    with pytest.raises(click.BadParameter):
+        DEPTH_PARAM.convert(spelling, None, None)
 
 
-def test_depth_symbols_alias_warns_on_stderr() -> None:
-    res = CliRunner().invoke(main, ["dump", "--depth", "symbols", "/no/such/bin"])
-    text = _all_output(res)
-    assert "deprecated" in text and "--depth binary" in text
-
-
-@pytest.mark.parametrize("spelling", ["graph", "GRAPH"])
-def test_depth_graph_is_rejected(spelling: str) -> None:
-    """``graph`` was removed outright (the L5 graph is internal to ``--depth
-    source``); it is no longer accepted as a user rung or a deprecated alias."""
+@pytest.mark.parametrize("spelling", ["full", "FULL", "graph", "GRAPH"])
+def test_depth_full_and_graph_are_rejected(spelling: str) -> None:
+    """``full``/``graph`` were removed outright (ADR-043 D2): ``source`` now
+    covers what ``full`` used to mean (replay *scope*, not depth), and the L5
+    graph is an internal consequence of ``--depth source``. Neither is a user
+    rung or a deprecated alias any more."""
     import click
 
     with pytest.raises(click.BadParameter):
@@ -189,10 +190,9 @@ def test_graph_built_at_source_depth() -> None:
 def test_resolve_dump_depth_binary_collects_nothing() -> None:
     from abicheck.cli_dump_helpers import resolve_dump_depth
 
-    # DEPTH_PARAM normalizes the `symbols` alias to `binary` before this runs.
-    assert resolve_dump_depth("binary", False, "off") == "off"
-    assert resolve_dump_depth("headers", False, "off") == "off"
-    assert resolve_dump_depth("source", False, "off") != "off"
+    assert resolve_dump_depth("binary", "off") == "off"
+    assert resolve_dump_depth("headers", "off") == "off"
+    assert resolve_dump_depth("source", "off") != "off"
 
 
 # ── config: sources.graph: summary|full (ADR-037 D6) ─────────────────────────

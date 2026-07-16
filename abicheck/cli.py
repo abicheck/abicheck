@@ -36,7 +36,6 @@ except ImportError:  # pragma: no cover - rich-click is a declared dependency
 
 from .checker import DiffResult, LibraryMetadata
 from .cli_audit import echo_filtered_surface, echo_reconciled
-from .cli_datasources import print_data_sources as _print_data_sources
 from .cli_dump_helpers import (
     handle_non_elf_dump,
     perform_elf_dump,
@@ -481,11 +480,11 @@ def main() -> None:
               help="Force DWARF-only mode: use DWARF debug info as the primary "
                    "data source even when headers are available. Enables type-aware "
                    "artifact checks without requiring castxml.")
-@click.option("--show-data-sources", is_flag=True, default=False,
-              help="Preview only: print which data layers (L0-L5) are available "
-                   "for the binary and exit. No snapshot is written and no "
-                   "L3/L4/L5 facts are embedded — re-run without this flag "
-                   "(optionally with --build-info/--sources) to produce a snapshot.")
+@click.option("--dry-run", "dry_run", is_flag=True, default=False,
+              help="Resolve and validate the invocation -- classify inputs, discover "
+                   "config, show which data layers (L0-L5) are available -- and print "
+                   "a report without producing a snapshot. Writes nothing; incompatible "
+                   "with -o/--output.")
 @click.option("--debug-format", "debug_format_opt",
               type=click.Choice(["auto", "dwarf", "btf", "ctf"], case_sensitive=False), default=None,
               help="Force the ELF debug format (auto=pick best available). "
@@ -533,7 +532,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              gcc_option_tokens: tuple[str, ...],
              sysroot: Path | None, nostdinc: bool, pdb_path: Path | None,
              follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
-             dwarf_only: bool, show_data_sources: bool,
+             dwarf_only: bool, dry_run: bool,
              debug_format_opt: str | None,
              debug_format: str | None,
              compile_db_path: Path | None, compile_db_path_alt: Path | None,
@@ -545,8 +544,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              build_info: Path | None = None, sources: Path | None = None,
              build_config: Path | None = None, allow_build_query: bool = False,
              build_query: str | None = None, build_compile_db: str | None = None,
-             inputs_pack: Path | None = None,
-             depth: str | None = None, max_depth: bool = False,
+             depth: str | None = None,
              _resolved_compile_context: CompileContext | None = None,
              _resolved_collect_mode: str | None = None) -> None:
     """Dump ABI snapshot of a shared library to JSON.
@@ -556,46 +554,38 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
       abicheck dump libfoo.so.1 -H include/foo.h --version 1.2.3 -o snap.json
       abicheck dump --sources ./libfoo-src/ -o libfoo.src.json  # source-only (no binary)
     """
+    from .dry_run import emit_dry_run, reject_dry_run_with_output
+
+    reject_dry_run_with_output(dry_run, output)
     _setup_verbosity(verbose)
 
     # Resolve the evidence-depth preset into the collect mode, apply --depth binary
     # suppression, and warn on an explicitly-requested deep depth without sources.
-    # ``inputs_pack`` is threaded through so a bare ``--inputs`` (no --sources/
-    # --build-info) does not trigger the "no build/source facts" warning — the pack
-    # itself carries the L4 facts.
     collect_mode, headers, compile_db_path, compile_db_path_alt = resolve_dump_collect_context(
-        depth, max_depth, _resolved_collect_mode, sources, build_info,
-        headers, compile_db_path, compile_db_path_alt, inputs_pack=inputs_pack,
+        depth, _resolved_collect_mode, sources, build_info,
+        headers, compile_db_path, compile_db_path_alt,
     )
 
-    # Source-only dump (no binary) for the parallel-baseline / merge flow.
+    if dry_run:
+        from .cli_dump_helpers import render_dump_dry_run
+
+        emit_dry_run(
+            render_dump_dry_run(
+                so_path=so_path, headers=headers, sources=sources,
+                build_info=build_info, build_config=build_config,
+                depth=depth, collect_mode=collect_mode,
+                header_backend=header_backend, output=output,
+            )
+        )
+
+    # Source-only dump (no binary) for the parallel-baseline flow.
     if so_path is None:
-        if show_data_sources:
-            raise click.UsageError(
-                "--show-data-sources requires SO_PATH; source-only dump cannot "
-                "produce binary data-source diagnostics."
-            )
-        if inputs_pack is not None:
-            raise click.UsageError(
-                "--inputs folds a pack against a binary's exports, so it needs "
-                "SO_PATH. For a source-only baseline, use `abicheck merge` instead."
-            )
         from .cli_buildsource import dump_source_only
         dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db, extractor=header_backend)
         return
 
     effective_debug_format = resolve_dump_debug_format(debug_format_opt, debug_format)
     effective_compile_db = resolve_dump_compile_db(compile_db_path, compile_db_path_alt, headers)
-
-    # --show-data-sources: diagnostic output and exit
-    if show_data_sources:
-        _print_data_sources(
-            so_path,
-            bool(headers),
-            build_source_path=build_info,
-            sources_path=sources,
-        )
-        return
 
     # Auto-detect binary format — PE/Mach-O skip the ELF/castxml path. The
     # conventional ``libfoo.so`` dev symlink is often a GNU ld linker script;
@@ -632,7 +622,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             public_headers, public_header_dirs, build_info, sources, build_config,
             allow_build_query, collect_mode, build_query, build_compile_db,
             header_backend=header_backend, compile_context=_cc,
-            inputs_pack=inputs_pack,
         )
         return
 
@@ -694,7 +683,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         write_snapshot_output=_write_snapshot_output,
         build_query=build_query,
         build_compile_db=build_compile_db,
-        inputs_pack=inputs_pack,
     )
 
 
@@ -1403,7 +1391,7 @@ def _embed_inline_source_side(
 # --dwarf-only, --debug-root{,1,2}, --debuginfod[-url], --debug-format (+hidden
 # --btf/--ctf/--dwarf): the shared local-ELF debug-resolution family.
 @debug_resolution_options
-@evidence_options  # --depth/--max, --sources, --build-info
+@evidence_options  # --depth, --sources, --build-info
 @adr027_compare_options  # ADR-027: --pattern-verdicts/--explain-patterns/--surface-metrics
 @env_matrix_option  # ADR-020b: --env-matrix (runtime_floors contract)
 @profile_option  # ADR-040 Lever 3: --profile (workflow-default bundles)
@@ -1413,6 +1401,11 @@ def _embed_inline_source_side(
                    "add/remove/size change the build proves never happened is moved to an "
                    "audit bucket instead of the verdict. No-op unless snapshots carry "
                    "build_context_defines + per-field guards.")
+@click.option("--dry-run", "dry_run", is_flag=True, default=False,
+              help="Resolve and validate the invocation -- classify inputs, resolve "
+                   "depth/scope, show tool/config resolution -- and print a report "
+                   "without running the diff. Writes nothing; incompatible with "
+                   "-o/--output.")
 @verbose_option
 @click.pass_context
 def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
