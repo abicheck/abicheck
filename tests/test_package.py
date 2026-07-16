@@ -26,6 +26,7 @@ from abicheck.package import (
     _python_version_from_wheel_filename,
     _read_build_id,
     _safe_zip_extract,
+    _sys_platform_from_wheel_filename,
     _validate_member_path,
     _validate_symlink_target,
     detect_extractor,
@@ -1115,6 +1116,24 @@ class TestParseWheelNumpyRequirement:
             )
         assert parse_wheel_numpy_requirement(whl) == ">=2"
 
+    def test_sys_platform_spelling_also_derived_from_wheel_filename(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review: sys_platform ("darwin"/"linux"/"win32") is a
+        # different, equally common PEP 508 marker spelling for the same OS
+        # distinction as platform_system ("Darwin"/"Linux"/"Windows") --
+        # deriving only one still leaves the other spelling falling back to
+        # the host OS.
+        whl = tmp_path / "pkg-1.0-cp311-cp311-macosx_11_0_arm64.whl"
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr(
+                "pkg-1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\n"
+                'Requires-Dist: numpy>=1.23; sys_platform == "linux"\n'
+                'Requires-Dist: numpy>=2; sys_platform == "darwin"\n',
+            )
+        assert parse_wheel_numpy_requirement(whl) == ">=2"
+
 
 class TestPythonVersionFromWheelFilename:
     def test_cp_tag(self) -> None:
@@ -1207,6 +1226,36 @@ class TestPlatformSystemFromWheelFilename:
 
     def test_non_wheel_filename_returns_none(self) -> None:
         assert _platform_system_from_wheel_filename("pkg-1.0.tar.gz") is None
+
+
+class TestSysPlatformFromWheelFilename:
+    def test_manylinux_tag(self) -> None:
+        assert (
+            _sys_platform_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-manylinux_2_17_x86_64.whl"
+            )
+            == "linux"
+        )
+
+    def test_macosx_tag(self) -> None:
+        assert (
+            _sys_platform_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-macosx_11_0_arm64.whl"
+            )
+            == "darwin"
+        )
+
+    def test_win_tag(self) -> None:
+        assert (
+            _sys_platform_from_wheel_filename("pkg-1.0-cp311-cp311-win_amd64.whl")
+            == "win32"
+        )
+
+    def test_any_tag_returns_none(self) -> None:
+        assert _sys_platform_from_wheel_filename("pkg-1.0-py3-none-any.whl") is None
+
+    def test_non_wheel_filename_returns_none(self) -> None:
+        assert _sys_platform_from_wheel_filename("pkg-1.0.tar.gz") is None
 
 
 class TestCondaExtractor:

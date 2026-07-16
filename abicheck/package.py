@@ -597,6 +597,34 @@ def _platform_system_from_wheel_filename(filename: str) -> str | None:
     return None
 
 
+def _sys_platform_from_wheel_filename(filename: str) -> str | None:
+    """Derive ``sys_platform`` (``"linux"``/``"darwin"``/``"win32"``, i.e.
+    Python's own ``sys.platform`` spelling) from a wheel filename's platform
+    tag, the same way as :func:`_platform_system_from_wheel_filename`.
+
+    ``sys_platform`` and ``platform_system`` are two different, both
+    commonly-used PEP 508 marker spellings for the same OS distinction
+    (``sys_platform == "darwin"`` vs. ``platform_system == "Darwin"``);
+    deriving only one of them still leaves a marker written in the other
+    spelling falling back to the host running abicheck (Codex review). Same
+    scope caveats as that function (no ``platform_machine``, ``None`` for
+    ``any``/unrecognized/non-wheel names).
+    """
+    if not filename.lower().endswith(".whl"):
+        return None
+    parts = filename[: -len(".whl")].split("-")
+    if len(parts) < 5:
+        return None
+    tag = parts[-1].lower()
+    if tag.startswith(("manylinux", "musllinux", "linux")):
+        return "linux"
+    if tag.startswith("macosx"):
+        return "darwin"
+    if tag.startswith("win"):
+        return "win32"
+    return None
+
+
 # G26: a wheel's *.dist-info/METADATA declares its runtime dependencies —
 # the "declared" side of the NumPy C-API compatibility-envelope check (the
 # binary-evidence "required" side comes from numpy_capi.py). Mirrors
@@ -617,17 +645,18 @@ def parse_wheel_numpy_requirement(
     installed via ``pip install pkg[test]``, not a real runtime requirement)
     or an ordinary marker that doesn't hold for *environment*.
 
-    When *environment* is omitted, ``python_version`` and ``platform_system``
-    are derived from the wheel's *own* filename tags (e.g. ``cp39`` ->
-    ``"3.9"``, a ``macosx_...`` platform tag -> ``"Darwin"``) rather than
-    defaulting to the interpreter running abicheck — evaluating a
-    ``python_version``- or ``platform_system``-gated marker against the
-    wrong interpreter/OS could hide a real under-declared floor on a wheel
-    built for a different Python or platform than the one running the scan
-    (Codex review). Falls back to the interpreter's own environment for
-    whichever of those two the filename doesn't pin down (e.g. a bare
-    directory-derived METADATA path, or the pure-Python ``any`` platform
-    tag).
+    When *environment* is omitted, ``python_version``, ``platform_system``,
+    and ``sys_platform`` are derived from the wheel's *own* filename tags
+    (e.g. ``cp39`` -> ``"3.9"``, a ``macosx_...`` platform tag ->
+    ``platform_system="Darwin"``/``sys_platform="darwin"``) rather than
+    defaulting to the interpreter running abicheck — evaluating a marker
+    gated on any of those three against the wrong interpreter/OS could hide
+    a real under-declared floor on a wheel built for a different Python or
+    platform than the one running the scan (Codex review; both OS-marker
+    spellings are covered since real-world metadata uses either one).
+    Falls back to the interpreter's own environment for whichever of these
+    the filename doesn't pin down (e.g. a bare directory-derived METADATA
+    path, or the pure-Python ``any`` platform tag).
     """
     try:
         with zipfile.ZipFile(wheel_path) as zf:
@@ -648,6 +677,9 @@ def parse_wheel_numpy_requirement(
         platform_system = _platform_system_from_wheel_filename(wheel_path.name)
         if platform_system is not None:
             derived["platform_system"] = platform_system
+        sys_platform = _sys_platform_from_wheel_filename(wheel_path.name)
+        if sys_platform is not None:
+            derived["sys_platform"] = sys_platform
         environment = derived or None
     return parse_numpy_requirement_from_metadata(text, environment)
 
