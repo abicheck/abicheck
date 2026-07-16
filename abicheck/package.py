@@ -536,6 +536,36 @@ def parse_manylinux_glibc_floor(name: str) -> str | None:
     return f"{best[0]}.{best[1]}" if best is not None else None
 
 
+#: Matches a PEP 425 Python tag: an implementation abbreviation (``cp``
+#: CPython, ``pp`` PyPy, ``py`` generic, ``ip`` IronPython, ``jy`` Jython)
+#: followed by a single-digit major version and one-or-more-digit minor
+#: version run together, e.g. ``cp311`` -> major ``3``, minor ``11``. A bare
+#: implementation with no minor digits (``py3``) is intentionally
+#: unmatched — it doesn't pin a specific minor version, so there's nothing
+#: useful to derive.
+_WHEEL_PYTHON_TAG_RE = re.compile(r"^(?:cp|pp|py|ip|jy)(\d)(\d+)$")
+
+
+def _python_version_from_wheel_filename(filename: str) -> str | None:
+    """Derive ``python_version`` (e.g. ``"3.11"``) from a wheel filename's
+    own Python tag, for use as a PEP 508 marker-evaluation environment.
+
+    *filename* is a wheel filename ``{distribution}-{version}(-{build})?-
+    {python tag}-{abi tag}-{platform tag}.whl`` (PEP 427); the Python tag is
+    always the third-from-last ``-``-delimited segment regardless of
+    whether an optional build tag is present. Returns ``None`` when
+    *filename* isn't a recognizable wheel name or its Python tag doesn't
+    pin a specific minor version (e.g. the generic ``py3``).
+    """
+    if not filename.lower().endswith(".whl"):
+        return None
+    parts = filename[: -len(".whl")].split("-")
+    if len(parts) < 5:
+        return None
+    m = _WHEEL_PYTHON_TAG_RE.match(parts[-3])
+    return f"{m.group(1)}.{m.group(2)}" if m else None
+
+
 # G26: a wheel's *.dist-info/METADATA declares its runtime dependencies —
 # the "declared" side of the NumPy C-API compatibility-envelope check (the
 # binary-evidence "required" side comes from numpy_capi.py). Mirrors
@@ -548,17 +578,22 @@ def parse_wheel_numpy_requirement(
     ``*.dist-info/METADATA`` (``Requires-Dist: numpy...``).
 
     Returns the specifier text (e.g. ``">=1.23.5,<3"``, or ``""`` for a bare
-    ``Requires-Dist: numpy`` with no version constraint) for the first numpy
-    requirement that is a base install dependency active for *environment*
-    (default: the interpreter running abicheck — see
-    :func:`parse_numpy_requirement_from_metadata`), or ``None`` when the
-    wheel is unreadable, carries no ``.dist-info/METADATA`` member, or
-    declares no such numpy dependency at all — including when the only
-    ``numpy`` entry is gated behind an optional extra (e.g. ``numpy; extra ==
-    "test"``, only installed via ``pip install pkg[test]``, not a real
-    runtime requirement) or an ordinary marker that doesn't hold for
-    *environment* (e.g. ``numpy>=2; python_version >= "3.12"`` on a cp39
-    wheel).
+    ``Requires-Dist: numpy`` with no version constraint) for the numpy
+    requirement(s) active for *environment*, or ``None`` when the wheel is
+    unreadable, carries no ``.dist-info/METADATA`` member, or declares no
+    such numpy dependency at all — including when the only ``numpy`` entry
+    is gated behind an optional extra (e.g. ``numpy; extra == "test"``, only
+    installed via ``pip install pkg[test]``, not a real runtime requirement)
+    or an ordinary marker that doesn't hold for *environment*.
+
+    When *environment* is omitted, ``python_version`` is derived from the
+    wheel's *own* filename Python tag (e.g. ``cp39`` -> ``"3.9"``) rather
+    than defaulting to the interpreter running abicheck — evaluating a
+    ``python_version``-gated marker against the wrong interpreter could
+    hide a real under-declared floor on a wheel built for a different
+    Python than the one running the scan (Codex review). Falls back to the
+    interpreter's own environment when the filename carries no recognizable
+    Python tag (e.g. a bare directory-derived METADATA path).
     """
     try:
         with zipfile.ZipFile(wheel_path) as zf:
@@ -571,18 +606,11 @@ def parse_wheel_numpy_requirement(
             text = zf.read(metadata_name).decode("utf-8", errors="replace")
     except (OSError, zipfile.BadZipFile):
         return None
+    if environment is None:
+        py_version = _python_version_from_wheel_filename(wheel_path.name)
+        if py_version is not None:
+            environment = {"python_version": py_version}
     return parse_numpy_requirement_from_metadata(text, environment)
-
-
-#: Matches the ``extra`` marker variable (PEP 508) as a whole word, e.g. in
-#: ``extra == "test"`` or ``extra == "test" and python_version >= "3.8"``.
-#: Used to tell an optional-extra-gated requirement (only installed via
-#: ``pip install pkg[test]``, not a base runtime dependency) apart from an
-#: ordinary conditional one (e.g. ``python_version >= "3.9"``), which *is*
-#: still an unconditional base install requirement on the versions it
-#: applies to (Codex review: a blanket "any marker at all" skip discarded
-#: real requirements like ``numpy; python_version >= "3.9"``).
-_EXTRA_MARKER_RE = re.compile(r"\bextra\b")
 
 
 def parse_numpy_requirement_from_metadata(
@@ -596,18 +624,26 @@ def parse_numpy_requirement_from_metadata(
     docstring for the return-value contract.
 
     *environment* is a PEP 508 marker environment override (``python_version``,
-    ``platform_system``, etc.) used to decide which non-extra-gated
-    ``Requires-Dist: numpy`` line is actually active; keys omitted from it
-    fall back to the real environment (the interpreter running abicheck) —
-    the same merge behavior as :meth:`packaging.markers.Marker.evaluate`,
-    which this delegates to directly. A wheel can legitimately declare more
-    than one base numpy requirement split by markers, and more than one can
-    be simultaneously active for a given environment (e.g. ``numpy>=1.23;
-    python_version >= "3.9"`` and the stricter ``numpy>=2; python_version >=
-    "3.12"`` are both true on Python 3.12) — an installer enforces the
-    *intersection* of every active constraint, not just the first one found,
-    so returning only the first active line could under-report the real
-    floor (Codex review).
+    ``platform_system``, etc.) used to decide which ``Requires-Dist: numpy``
+    line is actually active; keys omitted from it fall back to the real
+    environment (the interpreter running abicheck) — the same merge behavior
+    as :meth:`packaging.markers.Marker.evaluate`, which this delegates to
+    directly, including its built-in default of evaluating with an empty
+    ``extra`` (a plain, non-extras install). That default is why an
+    optional-extra-only requirement (``numpy; extra == "test"``) correctly
+    evaluates inactive without any special-casing here — but so does an
+    ordinary requirement that merely *mentions* ``extra`` alongside other
+    conditions (``numpy; extra != "docs"``, ``numpy; extra == "test" or
+    python_version >= "3.12"``), which a blanket "marker text contains the
+    word extra" skip would incorrectly discard even though it's actually a
+    real base-install requirement (CodeRabbit / Codex review). A wheel can
+    legitimately declare more than one base numpy requirement split by
+    markers, and more than one can be simultaneously active for a given
+    environment (e.g. ``numpy>=1.23; python_version >= "3.9"`` and the
+    stricter ``numpy>=2; python_version >= "3.12"`` are both true on Python
+    3.12) — an installer enforces the *intersection* of every active
+    constraint, not just the first one found, so returning only the first
+    active line could under-report the real floor (Codex review).
     """
     from email import message_from_string
     from email.policy import default as _email_default_policy
@@ -634,11 +670,8 @@ def parse_numpy_requirement_from_metadata(
             continue
         if req.name.lower() != "numpy":
             continue
-        if req.marker is not None:
-            if _EXTRA_MARKER_RE.search(str(req.marker)):
-                continue  # optional-extra-gated, not a base requirement
-            if not req.marker.evaluate(environment):
-                continue  # marker inactive for this environment
+        if req.marker is not None and not req.marker.evaluate(environment):
+            continue  # marker inactive for this environment (extras included)
         found = True
         combined &= req.specifier
     return str(combined) if found else None

@@ -127,14 +127,11 @@ def extract_numpy_capi_surface(binary_path: Path) -> NumPyCapiSurface | None:
     try:
         if not binary_path.is_file():
             return None
-        size = binary_path.stat().st_size
+        with binary_path.open("rb") as f:
+            data = f.read(_MAX_SCAN_SIZE + 1)
     except OSError:
         return None
-    if size == 0 or size > _MAX_SCAN_SIZE:
-        return None
-    try:
-        data = binary_path.read_bytes()
-    except OSError:
+    if not data or len(data) > _MAX_SCAN_SIZE:
         return None
 
     consumes_array = any(marker in data for marker in _ARRAY_API_MARKERS)

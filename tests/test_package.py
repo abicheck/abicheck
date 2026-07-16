@@ -22,6 +22,7 @@ from abicheck.package import (
     TarExtractor,
     WheelExtractor,
     _is_elf_shared_object,
+    _python_version_from_wheel_filename,
     _read_build_id,
     _safe_zip_extract,
     _validate_member_path,
@@ -874,6 +875,30 @@ class TestParseNumpyRequirementFromMetadata:
         )
         assert parse_numpy_requirement_from_metadata(text) is None
 
+    def test_extra_inequality_marker_is_a_real_base_requirement(self) -> None:
+        # `extra != "docs"` mentions "extra" but isn't an optional-extra
+        # gate -- it's true for a plain (no-extras) install, since the
+        # active extra is "". A blanket "marker text contains extra" skip
+        # would incorrectly discard this real requirement (CodeRabbit /
+        # Codex review).
+        text = 'Metadata-Version: 2.1\nRequires-Dist: numpy>=1.20; extra != "docs"\n'
+        assert parse_numpy_requirement_from_metadata(text) == ">=1.20"
+
+    def test_extra_disjunction_marker_is_a_real_base_requirement(self) -> None:
+        # `python_version >= "3.9" or extra == "test"` is true for a plain
+        # install on Python 3.9+ regardless of any extra -- same
+        # over-skip risk as the inequality case above.
+        text = (
+            "Metadata-Version: 2.1\n"
+            'Requires-Dist: numpy>=1.20; python_version >= "3.9" or extra == "test"\n'
+        )
+        assert (
+            parse_numpy_requirement_from_metadata(
+                text, environment={"python_version": "3.12"}
+            )
+            == ">=1.20"
+        )
+
     def test_python_version_gated_numpy_is_a_real_requirement(self) -> None:
         # A marker that isn't extra-gated (e.g. python_version) still makes
         # this an unconditional *base install* requirement -- it's not an
@@ -1024,6 +1049,97 @@ class TestParseWheelNumpyRequirement:
 
     def test_nonexistent_wheel_returns_none(self, tmp_path: Path) -> None:
         assert parse_wheel_numpy_requirement(tmp_path / "missing.whl") is None
+
+    def test_python_version_derived_from_wheel_filename_not_running_interpreter(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review: a cp311 wheel scanned by a different (e.g. 3.12)
+        # interpreter running abicheck must have its markers evaluated
+        # against ITS OWN cp311 tag, not the host interpreter -- otherwise a
+        # real under-declared floor on that wheel could go undetected.
+        whl = tmp_path / "pkg-1.0-cp311-cp311-linux_x86_64.whl"
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr(
+                "pkg-1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\n"
+                'Requires-Dist: numpy>=1.23; python_version < "3.12"\n'
+                'Requires-Dist: numpy>=2; python_version >= "3.12"\n',
+            )
+        assert parse_wheel_numpy_requirement(whl) == ">=1.23"
+
+    def test_explicit_environment_overrides_wheel_filename_derivation(
+        self, tmp_path: Path
+    ) -> None:
+        whl = tmp_path / "pkg-1.0-cp311-cp311-linux_x86_64.whl"
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr(
+                "pkg-1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\n"
+                'Requires-Dist: numpy>=1.23; python_version < "3.12"\n'
+                'Requires-Dist: numpy>=2; python_version >= "3.12"\n',
+            )
+        assert (
+            parse_wheel_numpy_requirement(
+                whl, environment={"python_version": "3.12"}
+            )
+            == ">=2"
+        )
+
+    def test_generic_py3_tag_falls_back_to_running_interpreter(
+        self, tmp_path: Path
+    ) -> None:
+        # A "py3" tag doesn't pin a minor version -- nothing useful to
+        # derive, so this must not raise and must fall back cleanly.
+        whl = tmp_path / "pkg-1.0-py3-none-any.whl"
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr(
+                "pkg-1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\nRequires-Dist: numpy>=1.23.5\n",
+            )
+        assert parse_wheel_numpy_requirement(whl) == ">=1.23.5"
+
+
+class TestPythonVersionFromWheelFilename:
+    def test_cp_tag(self) -> None:
+        assert (
+            _python_version_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-linux_x86_64.whl"
+            )
+            == "3.11"
+        )
+
+    def test_cp_tag_single_digit_minor(self) -> None:
+        assert (
+            _python_version_from_wheel_filename("pkg-1.0-cp39-cp39-linux_x86_64.whl")
+            == "3.9"
+        )
+
+    def test_build_tag_does_not_shift_python_tag_position(self) -> None:
+        assert (
+            _python_version_from_wheel_filename(
+                "pkg-1.0-2-cp311-cp311-linux_x86_64.whl"
+            )
+            == "3.11"
+        )
+
+    def test_pypy_tag(self) -> None:
+        assert (
+            _python_version_from_wheel_filename(
+                "pkg-1.0-pp39-pypy39_pp73-linux_x86_64.whl"
+            )
+            == "3.9"
+        )
+
+    def test_generic_py3_tag_has_no_minor_returns_none(self) -> None:
+        assert (
+            _python_version_from_wheel_filename("pkg-1.0-py3-none-any.whl") is None
+        )
+
+    def test_non_wheel_filename_returns_none(self) -> None:
+        assert _python_version_from_wheel_filename("pkg-1.0.tar.gz") is None
+
+    def test_too_few_segments_returns_none(self) -> None:
+        assert _python_version_from_wheel_filename("weird.whl") is None
 
 
 class TestCondaExtractor:

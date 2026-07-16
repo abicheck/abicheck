@@ -387,8 +387,9 @@ class AbiSnapshot:
         default=None, kw_only=True
     )  # NumPy C-API consumption (_ARRAY_API/_UFUNC_API, NPY_TARGET_VERSION)
     # recovered from binary evidence (G26). Keyword-only for the same reason
-    # as ``kabi``/``python_api``. None when the library shows no sign of
-    # consuming the NumPy C-API at all (an ordinary, non-NumPy library).
+    # as ``kabi``/``python_api``. None when the binary could not be scanned
+    # or predates this field; an ordinary, successfully-scanned non-NumPy
+    # library carries a real surface with both flags False (CodeRabbit review).
     enums: list[EnumType] = field(default_factory=list)
     typedefs: dict[str, str] = field(
         default_factory=dict

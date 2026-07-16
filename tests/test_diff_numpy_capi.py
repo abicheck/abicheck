@@ -115,6 +115,14 @@ class TestCheckNumPyMetadataContract:
         surf = NumPyCapiSurface(consumes_array_api=True, capi_target_version=None)
         assert check_numpy_metadata_contract(surf, ">=1.20") == []
 
+    def test_malformed_target_version_returns_nothing(self) -> None:
+        # A non-empty but unparseable capi_target_version (_target_tuple
+        # returns ()) is degraded binary evidence, not "no floor" -- must
+        # not report a finding built on an unrecoverable target (CodeRabbit
+        # review).
+        surf = NumPyCapiSurface(consumes_array_api=True, capi_target_version="garbage")
+        assert check_numpy_metadata_contract(surf, ">=1.20") == []
+
     def test_declared_floor_covers_target_is_clean(self) -> None:
         surf = NumPyCapiSurface(consumes_array_api=True, capi_target_version="1.23")
         assert check_numpy_metadata_contract(surf, ">=1.23.5") == []

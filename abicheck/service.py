@@ -866,12 +866,13 @@ def _try_attach_numpy_capi_surface(snap: AbiSnapshot, lib_path: Path) -> None:
         return
     if numpy_capi is not None:
         snap.numpy_capi = numpy_capi
-        _logger.info(
-            "NumPy C-API consumption detected: array_api=%s, ufunc_api=%s, target=%s",
-            numpy_capi.consumes_array_api,
-            numpy_capi.consumes_ufunc_api,
-            numpy_capi.capi_target_version,
-        )
+        if numpy_capi.consumes_array_api or numpy_capi.consumes_ufunc_api:
+            _logger.info(
+                "NumPy C-API consumption detected: array_api=%s, ufunc_api=%s, target=%s",
+                numpy_capi.consumes_array_api,
+                numpy_capi.consumes_ufunc_api,
+                numpy_capi.capi_target_version,
+            )
 
 
 def _try_attach_python_api_surface(snap: AbiSnapshot) -> None:

@@ -190,6 +190,8 @@ def check_numpy_metadata_contract(
         return []
     target = surface.capi_target_version
     target_tuple = _target_tuple(target)
+    if not target_tuple:
+        return []  # malformed target -- degraded evidence, not "no floor"
 
     from packaging.specifiers import InvalidSpecifier, SpecifierSet
 
