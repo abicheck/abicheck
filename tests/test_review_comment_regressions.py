@@ -643,5 +643,7 @@ def test_full_catalog_main_exit_code_reflects_artifact_errors(
             "results": [],
         },
     )
-    exit_code = catalog.main(["--toolchain", "auto", "--out", str(tmp_path / "out.json")])
+    exit_code = catalog.main(
+        ["--toolchain", "auto", "--out", str(tmp_path / "out.json")]
+    )
     assert exit_code == 1
