@@ -756,6 +756,88 @@ def _compute_symbol_coverage(
     return (required_count - missing_count) / required_count * 100.0
 
 
+def scope_diff_to_app(
+    diff: DiffResult,
+    app_path: Path,
+    old_lib_path: Path,
+    new_lib_path: Path,
+    *,
+    policy: str = "strict_abi",
+    policy_file: PolicyFile | None = None,
+) -> AppCompatResult:
+    """Scope an already-computed library diff to one application's actual usage.
+
+    This is the generic-scoped-comparison core ``compare --used-by`` calls
+    (ADR-043): the full old/new library comparison runs exactly once (by the
+    caller, typically ``compare``'s own pipeline); this function only parses
+    the application's requirements and intersects them with that diff. It does
+    NOT re-dump or re-compare the libraries — see :func:`check_appcompat` for
+    the standalone (single-app, no pre-existing diff) convenience wrapper.
+    """
+    library_soname = _get_lib_soname(old_lib_path)
+    app_reqs = parse_app_requirements(app_path, library_soname)
+
+    # Guard against over-collection in ELF consumers with many dependencies:
+    # keep only symbols that are actually exported by the target old library.
+    _scope_app_symbols_to_library(app_reqs, old_lib_path, app_path)
+
+    # Check symbol availability in new library
+    new_exports = _get_new_lib_exports(new_lib_path)
+    # Ordinal-only PE imports never match a name in new_exports; resolve them
+    # against both DLLs' export directories so they aren't reported as
+    # generically "missing" when the ordinal still (possibly differently)
+    # resolves.
+    resolved_ordinals, ordinal_retargets, resolved_export_names = _check_pe_ordinal_imports(
+        old_lib_path, new_lib_path, app_reqs
+    )
+    missing_symbols = sorted(
+        sym for sym in app_reqs.undefined_symbols
+        if sym not in new_exports and sym not in resolved_ordinals
+    )
+
+    # Check version availability
+    missing_versions = _missing_app_versions(new_lib_path, app_reqs)
+
+    # Filter diff by app usage. An ordinal-only import carries no name of its
+    # own in app_reqs.undefined_symbols, so a diff finding for the named export
+    # the ordinal resolves to would otherwise read as irrelevant; layer the
+    # resolved name(s) into a relevance-only view without perturbing app_reqs
+    # (used above for missing/coverage and below in the result).
+    relevance_reqs = app_reqs
+    if resolved_export_names:
+        relevance_reqs = AppRequirements(
+            needed_libs=app_reqs.needed_libs,
+            undefined_symbols=app_reqs.undefined_symbols | resolved_export_names,
+            required_versions=app_reqs.required_versions,
+        )
+    breaking_for_app, irrelevant_for_app = _partition_app_changes(diff, relevance_reqs)
+    breaking_for_app = breaking_for_app + ordinal_retargets
+
+    # Compute app-specific verdict
+    required_count = len(app_reqs.undefined_symbols)
+    coverage = _compute_symbol_coverage(new_exports, required_count, len(missing_symbols))
+
+    verdict = _compute_appcompat_verdict(
+        missing_symbols, missing_versions, breaking_for_app,
+        required_count, policy, policy_file,
+    )
+
+    return AppCompatResult(
+        app_path=str(app_path),
+        old_lib_path=str(old_lib_path),
+        new_lib_path=str(new_lib_path),
+        required_symbols=app_reqs.undefined_symbols,
+        required_symbol_count=required_count,
+        breaking_for_app=breaking_for_app,
+        irrelevant_for_app=irrelevant_for_app,
+        missing_symbols=missing_symbols,
+        missing_versions=missing_versions,
+        full_diff=diff,
+        verdict=verdict,
+        symbol_coverage=coverage,
+    )
+
+
 def check_appcompat(
     app_path: Path,
     old_lib_path: Path,
@@ -775,25 +857,14 @@ def check_appcompat(
     policy_file: PolicyFile | None = None,
     scope_to_public_surface: bool = True,
 ) -> AppCompatResult:
-    """Check application compatibility with a library update.
+    """Check application compatibility with a library update (standalone).
 
-    1. Parse app binary → extract required symbols
-    2. Run standard compare() on libraries
-    3. Check symbol availability in new library
-    4. Filter changes by app usage
-    5. Compute app-specific verdict
+    Dumps and compares the two libraries itself, then delegates the app-usage
+    scoping to :func:`scope_diff_to_app`. When a diff already exists (e.g.
+    inside ``compare``'s own pipeline), call :func:`scope_diff_to_app` directly
+    instead of re-dumping/re-comparing through this wrapper.
     """
-    # Get library SONAME for filtering
-    library_soname = _get_lib_soname(old_lib_path)
-
-    # 1. Parse app requirements
-    app_reqs = parse_app_requirements(app_path, library_soname)
-
-    # Guard against over-collection in ELF consumers with many dependencies:
-    # keep only symbols that are actually exported by the target old library.
-    _scope_app_symbols_to_library(app_reqs, old_lib_path, app_path)
-
-    # 2. Run standard library comparison
+    # Run standard library comparison
     from .dumper import dump
 
     # Resolve per-side headers: old_headers/new_headers override shared headers
@@ -829,60 +900,9 @@ def check_appcompat(
     from .service import compare_snapshots
     diff = compare_snapshots(old_snap, new_snap, suppression=suppression, policy=policy, policy_file=policy_file, scope_to_public_surface=scope_to_public_surface)
 
-    # 3. Check symbol availability in new library
-    new_exports = _get_new_lib_exports(new_lib_path)
-    # Ordinal-only PE imports never match a name in new_exports; resolve them
-    # against both DLLs' export directories so they aren't reported as
-    # generically "missing" when the ordinal still (possibly differently)
-    # resolves.
-    resolved_ordinals, ordinal_retargets, resolved_export_names = _check_pe_ordinal_imports(
-        old_lib_path, new_lib_path, app_reqs
-    )
-    missing_symbols = sorted(
-        sym for sym in app_reqs.undefined_symbols
-        if sym not in new_exports and sym not in resolved_ordinals
-    )
-
-    # Check version availability
-    missing_versions = _missing_app_versions(new_lib_path, app_reqs)
-
-    # 4. Filter diff by app usage. An ordinal-only import carries no name of
-    # its own in app_reqs.undefined_symbols, so a diff finding for the named
-    # export the ordinal resolves to would otherwise read as irrelevant; layer
-    # the resolved name(s) into a relevance-only view without perturbing
-    # app_reqs (used above for missing/coverage and below in the result).
-    relevance_reqs = app_reqs
-    if resolved_export_names:
-        relevance_reqs = AppRequirements(
-            needed_libs=app_reqs.needed_libs,
-            undefined_symbols=app_reqs.undefined_symbols | resolved_export_names,
-            required_versions=app_reqs.required_versions,
-        )
-    breaking_for_app, irrelevant_for_app = _partition_app_changes(diff, relevance_reqs)
-    breaking_for_app = breaking_for_app + ordinal_retargets
-
-    # 5. Compute app-specific verdict
-    required_count = len(app_reqs.undefined_symbols)
-    coverage = _compute_symbol_coverage(new_exports, required_count, len(missing_symbols))
-
-    verdict = _compute_appcompat_verdict(
-        missing_symbols, missing_versions, breaking_for_app,
-        required_count, policy, policy_file,
-    )
-
-    return AppCompatResult(
-        app_path=str(app_path),
-        old_lib_path=str(old_lib_path),
-        new_lib_path=str(new_lib_path),
-        required_symbols=app_reqs.undefined_symbols,
-        required_symbol_count=required_count,
-        breaking_for_app=breaking_for_app,
-        irrelevant_for_app=irrelevant_for_app,
-        missing_symbols=missing_symbols,
-        missing_versions=missing_versions,
-        full_diff=diff,
-        verdict=verdict,
-        symbol_coverage=coverage,
+    return scope_diff_to_app(
+        diff, app_path, old_lib_path, new_lib_path,
+        policy=policy, policy_file=policy_file,
     )
 
 
@@ -983,38 +1003,25 @@ def _snapshot_export_names(snap: AbiSnapshot) -> set[str]:
     return names
 
 
-def check_plugin_host_contract(
+def scope_diff_to_required_symbols(
+    diff: DiffResult,
     old_plugin: AbiSnapshot,
     new_plugin: AbiSnapshot,
     required_entrypoints: Iterable[str],
     *,
-    suppression: SuppressionList | None = None,
     policy: str = "strict_abi",
     policy_file: PolicyFile | None = None,
 ) -> PluginHostContractResult:
-    """Check whether a plugin upgrade still satisfies a host's load contract.
+    """Scope an already-computed diff to an explicit required-symbol contract.
 
-    Given two snapshots of a plugin (old/new) and the set of entry-point
-    symbols a *host* resolves from it (a manifest, or symbols a host binary
-    exports back to the plugin), report whether the new plugin still satisfies
-    the host — the plugin-load mirror of :func:`check_appcompat`.
-
-    The host's required entrypoints are exactly the "undefined symbols" it
-    resolves from the plugin, so this reuses appcompat's consumer-scoping
-    (:func:`_partition_app_changes`) and verdict logic
-    (:func:`_compute_appcompat_verdict`): a dropped or incompatible entrypoint
-    is ``BREAKING`` for the host even when the wider library verdict differs.
+    This is the generic-scoped-comparison core ``compare --required-symbol(s)``
+    calls (ADR-043) — the plugin-host mirror of :func:`scope_diff_to_app`. The
+    full old/new comparison runs exactly once (by the caller); this function
+    only intersects the given ``required_entrypoints`` with that diff. See
+    :func:`check_plugin_host_contract` for the standalone convenience wrapper
+    that also runs the comparison itself.
     """
     required = set(required_entrypoints)
-
-    # Route through the Tier-2 service (lazy import avoids a
-    # service→cli→appcompat import cycle); ADR-037 D1.
-    from .service import compare_snapshots
-    diff = compare_snapshots(
-        old_plugin, new_plugin,
-        suppression=suppression, policy=policy, policy_file=policy_file,
-    )
-
     new_exports = _snapshot_export_names(new_plugin)
     missing = sorted(e for e in required if e not in new_exports)
 
@@ -1037,4 +1044,36 @@ def check_plugin_host_contract(
         full_diff=diff,
         verdict=verdict,
         coverage=coverage,
+    )
+
+
+def check_plugin_host_contract(
+    old_plugin: AbiSnapshot,
+    new_plugin: AbiSnapshot,
+    required_entrypoints: Iterable[str],
+    *,
+    suppression: SuppressionList | None = None,
+    policy: str = "strict_abi",
+    policy_file: PolicyFile | None = None,
+) -> PluginHostContractResult:
+    """Check whether a plugin upgrade still satisfies a host's load contract.
+
+    Given two snapshots of a plugin (old/new) and the set of entry-point
+    symbols a *host* resolves from it (a manifest, or symbols a host binary
+    exports back to the plugin), report whether the new plugin still satisfies
+    the host — the plugin-load mirror of :func:`check_appcompat`. Runs the
+    comparison itself; when a diff already exists, call
+    :func:`scope_diff_to_required_symbols` directly instead.
+    """
+    # Route through the Tier-2 service (lazy import avoids a
+    # service→cli→appcompat import cycle); ADR-037 D1.
+    from .service import compare_snapshots
+    diff = compare_snapshots(
+        old_plugin, new_plugin,
+        suppression=suppression, policy=policy, policy_file=policy_file,
+    )
+
+    return scope_diff_to_required_symbols(
+        diff, old_plugin, new_plugin, required_entrypoints,
+        policy=policy, policy_file=policy_file,
     )

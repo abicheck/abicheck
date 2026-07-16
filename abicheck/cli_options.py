@@ -1361,6 +1361,24 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "Companion to --secondary-format: the file path its output is written "
         "to. Always used together, like -o/--output for --format."
     ),
+    "--dry-run": (
+        "ADR-043: resolve and validate the invocation without running the diff. "
+        "A per-run preview toggle, not a stable project setting."
+    ),
+    "--used-by": (
+        "ADR-043: folds the removed `appcompat` command into compare -- scopes "
+        "the comparison to one or more applications' actual imports. Which "
+        "application(s) to check against varies per run, not a project setting."
+    ),
+    "--required-symbol": (
+        "ADR-043: folds the removed `plugin-check` command into compare -- an "
+        "explicit required-entrypoint contract for a plugin-host pairing. Varies "
+        "per run (which symbols a given host resolves), not a project setting."
+    ),
+    "--required-symbols": (
+        "ADR-043: file form of --required-symbol (one symbol per line). Same "
+        "per-run rationale."
+    ),
 }
 
 #: Derived ceiling — never hand-edit; add a ``COMPARE_FLAG_BUDGET_RAISES`` entry.

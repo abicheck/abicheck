@@ -1277,6 +1277,25 @@ def _embed_inline_source_side(
                    "sides; scope to one with an 'old='/'new=' prefix, repeating the flag "
                    "per side (e.g. --pdb-path old=a.pdb --pdb-path new=b.pdb). Overrides "
                    "automatic PDB discovery (ADR-040).")
+# ── Scoped comparison (ADR-043): app-usage and required-symbol contracts ─────
+@click.option("--used-by", "used_by_apps", multiple=True,
+              type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              help="Application binary whose actual imports/required symbol versions "
+                   "scope the comparison (repeatable; folds `appcompat`). The full "
+                   "library comparison still runs once; the worst app-scoped result "
+                   "becomes the primary verdict/exit code, with the full verdict and "
+                   "unrelated changes kept as informational context. OLD/NEW must be "
+                   "real library binaries (not JSON snapshots). Mutually exclusive "
+                   "with --required-symbol/--required-symbols.")
+@click.option("--required-symbol", "required_symbols_opt", multiple=True,
+              help="An exported linker symbol a plugin host resolves via dlopen/dlsym "
+                   "and requires (repeatable; folds `plugin-check`). Scopes the "
+                   "comparison to this explicit entrypoint contract instead of the "
+                   "full diff. Mutually exclusive with --used-by.")
+@click.option("--required-symbols", "required_symbols_file",
+              type=click.Path(exists=True, dir_okay=False, path_type=Path), default=None,
+              help="File of required symbols, one per line (blank lines and '#' "
+                   "comments ignored). Combined with any --required-symbol values.")
 # Severity preset + per-category overrides (ADR-037 D3 / D4).
 @severity_options
 # ── Project config & exit-code scheme (ADR-037 D4 / D12) ──────────────────────

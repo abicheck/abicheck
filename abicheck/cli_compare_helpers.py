@@ -28,6 +28,7 @@ in ``check_ai_readiness``). Verdict routing stays through the Tier-2 service
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -69,6 +70,7 @@ from .errors import AbicheckError
 if TYPE_CHECKING:
     from .cli_helpers_compare import ResolvedCompareConfig
     from .model import AbiSnapshot
+    from .policy_file import PolicyFile
 
 
 def _cli_flag(name: str, value: bool) -> bool | None:
@@ -416,6 +418,117 @@ def _warn_force_public_ignored(
         )
 
 
+def _app_compat_summary(result: object) -> dict[str, Any]:
+    """Project an :class:`appcompat.AppCompatResult` into a small JSON-safe dict."""
+    return {
+        "app": result.app_path,  # type: ignore[attr-defined]
+        "verdict": result.verdict.value,  # type: ignore[attr-defined]
+        "required_symbol_count": result.required_symbol_count,  # type: ignore[attr-defined]
+        "missing_symbols": result.missing_symbols,  # type: ignore[attr-defined]
+        "missing_versions": result.missing_versions,  # type: ignore[attr-defined]
+        "relevant_change_count": len(result.breaking_for_app),  # type: ignore[attr-defined]
+        "symbol_coverage": round(result.symbol_coverage, 1),  # type: ignore[attr-defined]
+    }
+
+
+def _plugin_contract_summary(result: object) -> dict[str, Any]:
+    """Project a :class:`appcompat.PluginHostContractResult` into a small dict."""
+    return {
+        "verdict": result.verdict.value,  # type: ignore[attr-defined]
+        "required_entrypoints": sorted(result.required_entrypoints),  # type: ignore[attr-defined]
+        "missing_entrypoints": result.missing_entrypoints,  # type: ignore[attr-defined]
+        "relevant_change_count": len(result.breaking_for_host),  # type: ignore[attr-defined]
+        "coverage": round(result.coverage, 1),  # type: ignore[attr-defined]
+    }
+
+
+def _verdict_exit_code(verdict: object) -> int:
+    """Map a scoped-comparison Verdict to its floor exit code (ADR-043)."""
+    value = getattr(verdict, "value", verdict)
+    if value == "BREAKING":
+        return 4
+    if value == "API_BREAK":
+        return 2
+    return 0
+
+
+def _apply_used_by_scoping(
+    result: Any, used_by_apps: tuple[Path, ...],
+    old_input: Path, new_input: Path,
+    policy: str, policy_file: PolicyFile | None,
+) -> int:
+    """Scope *result* to each ``--used-by`` app; worst-wins (ADR-043).
+
+    Requires OLD/NEW to be real library binaries (not JSON snapshots) since an
+    application's actual imports/required symbol versions can only be checked
+    against a real export table. Attaches a JSON-safe summary to
+    ``result.used_by`` for the renderer and returns the worst app's exit code.
+    """
+    from .appcompat import scope_diff_to_app
+    from .service import detect_binary_format
+
+    for path, label in ((old_input, "OLD"), (new_input, "NEW")):
+        if detect_binary_format(path) is None:
+            raise click.UsageError(
+                f"--used-by requires OLD/NEW to be real library binaries "
+                f"(not JSON snapshots); {label} ({path}) is not a recognized "
+                f"binary format."
+            )
+
+    summaries = []
+    worst_exit = 0
+    worst_verdict = None
+    for app in used_by_apps:
+        scoped = scope_diff_to_app(
+            result, app, old_input, new_input,
+            policy=policy, policy_file=policy_file,
+        )
+        summaries.append(_app_compat_summary(scoped))
+        exit_code = _verdict_exit_code(scoped.verdict)
+        if exit_code > worst_exit:
+            worst_exit = exit_code
+            worst_verdict = scoped.verdict
+    result.used_by = summaries  # type: ignore[attr-defined]
+    if worst_verdict is not None:
+        result.scoped_verdict = worst_verdict  # type: ignore[attr-defined]
+    return worst_exit
+
+
+def _apply_required_symbol_scoping(
+    result: Any, required_symbols: tuple[str, ...],
+    old: Any, new: Any,
+    policy: str, policy_file: PolicyFile | None,
+) -> int:
+    """Scope *result* to an explicit ``--required-symbol(s)`` contract (ADR-043)."""
+    from .appcompat import scope_diff_to_required_symbols
+
+    scoped = scope_diff_to_required_symbols(
+        result, old, new, required_symbols,
+        policy=policy, policy_file=policy_file,
+    )
+    result.required_symbols = _plugin_contract_summary(scoped)  # type: ignore[attr-defined]
+    result.scoped_verdict = scoped.verdict  # type: ignore[attr-defined]
+    return _verdict_exit_code(scoped.verdict)
+
+
+def _load_required_symbols(
+    symbols: tuple[str, ...], symbols_file: Path | None,
+) -> tuple[str, ...]:
+    """Combine ``--required-symbol`` values with a ``--required-symbols`` file.
+
+    The file format is one symbol per line; blank lines and ``#`` comments are
+    ignored (ADR-043, folds the removed ``plugin-check`` command's manifest).
+    """
+    combined = list(symbols)
+    if symbols_file is not None:
+        for line in symbols_file.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#"):
+                combined.append(stripped)
+    # De-duplicate while preserving first-seen order.
+    return tuple(dict.fromkeys(combined))
+
+
 def _render_compare_dry_run(
     *,
     old_input: Path, new_input: Path,
@@ -429,6 +542,8 @@ def _render_compare_dry_run(
     fmt: str,
     exit_code_scheme: str | None,
     header_backend: str,
+    used_by_apps: tuple[Path, ...] = (),
+    required_symbols: tuple[str, ...] = (),
 ) -> Any:
     """Build the ``compare --dry-run`` report (ADR-043 D4): resolve, never diff."""
     from .dry_run import DryRunResult, tool_status
@@ -468,6 +583,24 @@ def _render_compare_dry_run(
     )
     if {old_kind, new_kind} & {"directory", "package"}:
         result.add("Consumer/contract scoping", "dispatch: per-library release fan-out")
+    if used_by_apps:
+        from .appcompat import parse_app_requirements
+
+        for app in used_by_apps:
+            try:
+                reqs = parse_app_requirements(app, old_input.stem)
+                result.add(
+                    "Consumer/contract scoping",
+                    f"--used-by {app}: {len(reqs.undefined_symbols)} required "
+                    f"symbol(s), {len(reqs.required_versions)} required version(s)",
+                )
+            except Exception as exc:  # noqa: BLE001 - best-effort dry-run probe
+                result.warn(f"--used-by {app}: could not parse requirements: {exc}")
+    if required_symbols:
+        result.add(
+            "Consumer/contract scoping",
+            f"--required-symbol(s): {len(required_symbols)} entrypoint(s) required",
+        )
     return result
 
 
@@ -534,6 +667,9 @@ def run_compare(
     secondary_fmt: str | None = None,
     secondary_output: Path | None = None,
     dry_run: bool = False,
+    used_by_apps: tuple[Path, ...] = (),
+    required_symbols_opt: tuple[str, ...] = (),
+    required_symbols_file: Path | None = None,
 ) -> None:
     """Run the single-pair (or set fan-out) ``compare`` flow and exit accordingly."""
     from .dry_run import reject_dry_run_with_output
@@ -562,6 +698,18 @@ def run_compare(
             "formats to the same file would silently overwrite the primary "
             "report with the secondary one."
         )
+
+    required_symbols = _load_required_symbols(required_symbols_opt, required_symbols_file)
+    if used_by_apps and required_symbols:
+        raise click.UsageError(
+            "--used-by and --required-symbol/--required-symbols are mutually "
+            "exclusive: scope the comparison to either application imports or "
+            "an explicit required-symbol contract, not both."
+        )
+    # Required-symbol contracts default to the plugin-oriented policy unless the
+    # user explicitly picked one -- an explicit --policy always wins (ADR-043).
+    if required_symbols and ctx.get_parameter_source("policy") != click.core.ParameterSource.COMMANDLINE:
+        policy = "plugin_abi"
 
     # ADR-037 D4: load the project config and merge CLI flags over it
     # (precedence CLI > config > built-in default) *before* dispatch, so both the
@@ -626,6 +774,7 @@ def run_compare(
             old_build_info=old_build_info, new_build_info=new_build_info,
             cfg_path=cfg_path, fmt=fmt, exit_code_scheme=exit_code_scheme,
             header_backend=header_backend,
+            used_by_apps=used_by_apps, required_symbols=required_symbols,
         ))
 
     if {old_kind, new_kind} & {"directory", "package"}:
@@ -933,6 +1082,16 @@ def run_compare(
         severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
     )
 
+    scoped_exit_code: int | None = None
+    if used_by_apps:
+        scoped_exit_code = _apply_used_by_scoping(
+            result, used_by_apps, old_input, new_input, policy, pf,
+        )
+    elif required_symbols:
+        scoped_exit_code = _apply_required_symbol_scoping(
+            result, required_symbols, old, new, policy, pf,
+        )
+
     text = _render_output(
         fmt, result, old, new,
         follow_deps=follow_deps,
@@ -942,6 +1101,7 @@ def run_compare(
         show_recommendation=recommend,
         demangle=demangle,
     )
+    text = _fold_scoped_compat_into_text(text, fmt, result)
 
     _write_or_echo(output, text)
 
@@ -970,5 +1130,68 @@ def run_compare(
         )
         _write_or_echo(secondary_output, secondary_text)
 
+    if scoped_exit_code is not None:
+        # ADR-043: --used-by / --required-symbol(s) scope the primary verdict
+        # to the application/plugin-host contract, floored at the worst
+        # scoped result -- the full library verdict stays informational only
+        # (already folded into the rendered report above), never gating an
+        # invocation explicitly scoped this way.
+        sys.exit(scoped_exit_code)
+
     _announce_exit_scheme(resolved_cfg.exit_code_scheme, fmt=fmt, stat=stat)
     _exit_with_severity_or_verdict(result, sev_config, resolved_cfg.exit_code_scheme)
+
+
+def _fold_scoped_compat_into_text(text: str, fmt: str, result: Any) -> str:
+    """Fold ``--used-by``/``--required-symbol(s)`` summaries into the rendered text.
+
+    JSON gets the summaries as real keys (round-tripped through the existing
+    payload); other text-based formats get a small appended section. Binary/
+    structured formats (sarif, junit, html) are left untouched -- the full
+    verdict they already carry stays authoritative for those consumers.
+    """
+    used_by = getattr(result, "used_by", None)
+    required_symbols = getattr(result, "required_symbols", None)
+    if used_by is None and required_symbols is None:
+        return text
+    scoped_verdict = getattr(result, "scoped_verdict", None)
+    scoped_verdict_value = getattr(scoped_verdict, "value", scoped_verdict)
+
+    if fmt == "json":
+        import json
+
+        try:
+            payload = json.loads(text)
+        except ValueError:
+            return text
+        payload["full_verdict"] = payload.get("verdict")
+        if scoped_verdict_value is not None:
+            payload["verdict"] = scoped_verdict_value
+        if used_by is not None:
+            payload["used_by"] = used_by
+        if required_symbols is not None:
+            payload["required_symbol_contract"] = required_symbols
+        return json.dumps(payload, indent=2)
+
+    if fmt in ("markdown", "text", "review"):
+        lines = [text, ""]
+        if used_by is not None:
+            lines.append("## Scoped to --used-by applications")
+            for summary in used_by:
+                lines.append(
+                    f"- {summary['app']}: {summary['verdict']} "
+                    f"(missing {len(summary['missing_symbols'])} symbol(s), "
+                    f"{len(summary['missing_versions'])} version(s), "
+                    f"{summary['relevant_change_count']} relevant change(s))"
+                )
+        if required_symbols is not None:
+            lines.append("## Scoped to --required-symbol(s) contract")
+            lines.append(
+                f"- verdict: {required_symbols['verdict']} "
+                f"(missing {len(required_symbols['missing_entrypoints'])} of "
+                f"{len(required_symbols['required_entrypoints'])} required "
+                f"entrypoint(s))"
+            )
+        return "\n".join(lines)
+
+    return text
