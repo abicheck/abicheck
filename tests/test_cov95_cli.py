@@ -1223,6 +1223,41 @@ class TestUsedByScoping:
         assert result.exit_code == 0
         assert "<" in result.stdout  # HTML markup emitted
 
+    def test_markdown_states_scoped_verdict_when_it_disagrees_with_full(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # ADR-043 Codex review: the full-library verdict (BREAKING, from the
+        # symbol removal below) disagrees with the app-scoped verdict
+        # (COMPATIBLE, since the app never touches the removed symbol) --
+        # exit_code reflects the scoped one, so the markdown report must say
+        # so instead of only showing the full-library BREAKING headline.
+        old_snap = _snap(
+            "1.0", library="libfoo.so",
+            funcs=[Function(
+                name="removed", mangled="_Z7removedv", return_type="void",
+                visibility=Visibility.PUBLIC,
+            )],
+        )
+        new_snap = _snap("2.0", library="libfoo.so", funcs=[])
+        from abicheck import dumper as dumper_mod
+
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        old = tmp_path / "old.so"
+        old.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        new = tmp_path / "new.so"
+        new.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        monkeypatch.setattr(
+            dumper_mod, "dump", MagicMock(side_effect=[old_snap, new_snap])
+        )
+        self._patch_scope(monkeypatch, self._result(verdict=Verdict.COMPATIBLE))
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app), "--format", "markdown",
+        )
+        assert result.exit_code == 0  # the scoped verdict, not the full BREAKING
+        assert "Scoped verdict: COMPATIBLE" in result.stdout
+        assert "full library verdict above is BREAKING" in result.stdout
+
 
 # ── cli.py: _write_release_step_summary (1351-1372) ───────────────────────────
 

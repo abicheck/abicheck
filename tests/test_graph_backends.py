@@ -225,6 +225,7 @@ def test_collect_evidence_kythe_entries_folds_edges(tmp_path) -> None:
         merged, extractors,
         source_graph="off", changed_paths=(),
         kythe_entries=kythe, codeql_results=None,
+        codeql_extends_results=None,
         surface=None, clang_bin="clang",
     )
     assert graph is not None
@@ -244,6 +245,7 @@ def test_collect_evidence_codeql_results_folds_edges(tmp_path) -> None:
         merged, extractors,
         source_graph="off", changed_paths=(),
         kythe_entries=None, codeql_results=codeql,
+        codeql_extends_results=None,
         surface=None, clang_bin="clang",
     )
     assert graph is not None and any(e.kind == "DECL_CALLS_DECL" for e in graph.edges)
@@ -251,23 +253,23 @@ def test_collect_evidence_codeql_results_folds_edges(tmp_path) -> None:
 
 def test_collect_evidence_codeql_extends_results_folds_edges(tmp_path) -> None:
     # ADR-041 P2 #4: a separate flag from --codeql-results since the raw
-    # tuple shape carries no self-describing relation kind.
+    # tuple shape carries no self-describing relation kind. ADR-043: `collect`
+    # is gone, so this drives the surviving library function directly instead
+    # of the deleted CLI command.
     import json
 
-    from click.testing import CliRunner
-
-    from abicheck.buildsource.pack import BuildSourcePack
-    from abicheck.cli import main
+    from abicheck.cli_buildsource_helpers import _collect_source_graph
 
     codeql = tmp_path / "codeql-extends.json"
     codeql.write_text(json.dumps({"#select": {"tuples": [["Derived", "Base"]]}}))
-    out = tmp_path / "ev"
-    res = CliRunner().invoke(main, [
-        "collect", "--compile-db", str(_cdb(tmp_path)),
-        "--codeql-extends-results", str(codeql), "-o", str(out),
-    ])
-    assert res.exit_code == 0, res.output
-    graph = BuildSourcePack.load(out).source_graph
+    merged, extractors = _merged_from_compile_db(tmp_path)
+    graph, _detail = _collect_source_graph(
+        merged, extractors,
+        source_graph="off", changed_paths=(),
+        kythe_entries=None, codeql_results=None,
+        codeql_extends_results=codeql,
+        surface=None, clang_bin="clang",
+    )
     assert graph is not None and any(e.kind == "TYPE_INHERITS" for e in graph.edges)
     assert graph.external_graph_refs and graph.external_graph_refs[0]["backend"] == "codeql"
 
@@ -280,22 +282,20 @@ def test_collect_evidence_codeql_extends_non_object_records_failed_extractor(
     # the requested backend was never ingested.
     import json
 
-    from click.testing import CliRunner
-
-    from abicheck.buildsource.pack import BuildSourcePack
-    from abicheck.cli import main
+    from abicheck.cli_buildsource_helpers import _collect_source_graph
 
     codeql = tmp_path / "codeql-extends.json"
     codeql.write_text(json.dumps(["not", "an", "object"]))
-    out = tmp_path / "ev"
-    res = CliRunner().invoke(main, [
-        "collect", "--compile-db", str(_cdb(tmp_path)),
-        "--codeql-extends-results", str(codeql), "-o", str(out),
-    ])
-    assert res.exit_code == 0, res.output
-    pack = BuildSourcePack.load(out)
+    merged, extractors = _merged_from_compile_db(tmp_path)
+    _collect_source_graph(
+        merged, extractors,
+        source_graph="off", changed_paths=(),
+        kythe_entries=None, codeql_results=None,
+        codeql_extends_results=codeql,
+        surface=None, clang_bin="clang",
+    )
     record = next(
-        e for e in pack.manifest.extractors if e.name == "graph_backend:codeql_extends"
+        e for e in extractors if e.name == "graph_backend:codeql_extends"
     )
     assert record.status == "failed"
 
@@ -311,6 +311,7 @@ def test_collect_evidence_malformed_backend_export_degrades(tmp_path) -> None:
         merged, extractors,
         source_graph="off", changed_paths=(),
         kythe_entries=bad, codeql_results=None,
+        codeql_extends_results=None,
         surface=None, clang_bin="clang",
     )
     assert graph is not None
@@ -373,6 +374,7 @@ def test_collect_evidence_kythe_implied_graph_still_records_bazel_inputs(
         merged, extractors,
         source_graph="off", changed_paths=(),
         kythe_entries=kythe, codeql_results=None,
+        codeql_extends_results=None,
         surface=surface, clang_bin="clang",
     )
     assert graph is not None

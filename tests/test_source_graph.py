@@ -1782,7 +1782,8 @@ def _collect_graph_pack(
     graph, graph_detail = _collect_source_graph(
         merged, extractors,
         source_graph=source_graph, changed_paths=(),
-        kythe_entries=None, codeql_results=None, surface=None, clang_bin="clang",
+        kythe_entries=None, codeql_results=None, codeql_extends_results=None,
+        surface=None, clang_bin="clang",
     )
 
     out = tmp_path / f"{name}.evidence"
@@ -1915,7 +1916,8 @@ def test_collect_evidence_summary_without_build_is_partial(tmp_path) -> None:
     graph, graph_detail = _collect_source_graph(
         merged, extractors,
         source_graph="summary", changed_paths=(),
-        kythe_entries=None, codeql_results=None, surface=None, clang_bin="clang",
+        kythe_entries=None, codeql_results=None, codeql_extends_results=None,
+        surface=None, clang_bin="clang",
     )
     coverage = _build_coverage(merged, False, None, "", graph, graph_detail)
     l5 = next(c for c in coverage if c.layer == DataLayer.L5_SOURCE_GRAPH.value)

@@ -383,10 +383,16 @@ elif [[ "$MODE" == "scan" ]]; then
   CMD+=(scan)
   CMD+=("${INPUT_NEW_LIBRARY:?new-library (the scanned binary or .abi.json) is required for scan mode}")
 
+  # -H/-I are side-aware on scan: a bare value applies to both ARTIFACT and
+  # the --against side; old-header/old-include and new-header/new-include
+  # scope to one side only (ADR-040 L1) so a candidate-only header doesn't
+  # leak into the baseline side's parse (Codex review).
   add_flag "-H" "${INPUT_HEADER:-}"
-  add_flag "-H" "${INPUT_NEW_HEADER:-}"
+  add_sided_flag "-H" "old" "${INPUT_OLD_HEADER:-}"
+  add_sided_flag "-H" "new" "${INPUT_NEW_HEADER:-}"
   add_flag "-I" "${INPUT_INCLUDE:-}"
-  add_flag "-I" "${INPUT_NEW_INCLUDE:-}"
+  add_sided_flag "-I" "old" "${INPUT_OLD_INCLUDE:-}"
+  add_sided_flag "-I" "new" "${INPUT_NEW_INCLUDE:-}"
 
   # Build-source evidence inputs (L3/L4/L5)
   add_single_flag "--sources" "${INPUT_SOURCES:-}"

@@ -485,12 +485,17 @@ def _apply_used_by_scoping(
         )
         summaries.append(_app_compat_summary(scoped))
         exit_code = _verdict_exit_code(scoped.verdict)
-        if exit_code > worst_exit:
+        # `>=` (not `>`): the first app must always seed worst_verdict, even
+        # when its exit code is 0 (COMPATIBLE) -- a strict `>` against the 0
+        # starting point meant an all-COMPATIBLE --used-by set left
+        # scoped_verdict unset (None) forever, so the JSON verdict swap and
+        # the scoped-vs-full-verdict text banner both silently no-op'd for
+        # the (very common) fully-compatible case (Codex review).
+        if worst_verdict is None or exit_code >= worst_exit:
             worst_exit = exit_code
             worst_verdict = scoped.verdict
     result.used_by = summaries  # type: ignore[attr-defined]
-    if worst_verdict is not None:
-        result.scoped_verdict = worst_verdict  # type: ignore[attr-defined]
+    result.scoped_verdict = worst_verdict  # type: ignore[attr-defined]
     return worst_exit
 
 
@@ -1174,7 +1179,24 @@ def _fold_scoped_compat_into_text(text: str, fmt: str, result: Any) -> str:
         return json.dumps(payload, indent=2)
 
     if fmt in ("markdown", "text", "review"):
-        lines = [text, ""]
+        full_verdict_value = getattr(getattr(result, "verdict", None), "value", None)
+        header: list[str] = []
+        if (
+            scoped_verdict_value is not None
+            and full_verdict_value is not None
+            and scoped_verdict_value != full_verdict_value
+        ):
+            # The exit code reflects the *scoped* verdict (ADR-043 worst-wins),
+            # which can disagree with the full-library verdict this report's own
+            # headline already rendered above -- state which one is authoritative
+            # for CI instead of leaving the two to silently disagree (Codex review).
+            header = [
+                f"**Scoped verdict: {scoped_verdict_value}** "
+                f"(this is what the exit code reflects; the full library "
+                f"verdict above is {full_verdict_value}).",
+                "",
+            ]
+        lines = [*header, text, ""]
         if used_by is not None:
             lines.append("## Scoped to --used-by applications")
             for summary in used_by:

@@ -1043,24 +1043,26 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
 
 
 def _source_is_pack(path: Path) -> bool:
-    """True if *path* is a real ``collect``-produced evidence pack rather than a
-    raw source checkout — lets ``compare``'s --sources accepts either.
+    """True if *path* is a pack directory rather than a raw source checkout —
+    lets ``compare``'s --sources/--build-info accept either.
 
     Validates the manifest *content*, not just its presence: a raw checkout that
     happens to contain a top-level ``manifest.json`` (which ``BuildSourcePack.load``
     would otherwise accept with sparse defaults) must still be collected from, so
     we require the ``BuildSourcePack`` marker (``build_source_pack_version`` /
-    legacy ``evidence_pack_version``). A Flow-2 ``kind: abicheck_inputs`` pack is
-    deliberately **not** treated as a pack here: the compare evidence path loads
-    only ``BuildSourcePack`` (via ``_resolve_side_pack``), not inputs packs, so
-    classifying one as a pack would route it to the wrong loader and silently drop
-    its facts — feed those through ``merge`` instead.
+    legacy ``evidence_pack_version``) — or a build-emitted Flow-2 ``abicheck_inputs/``
+    pack. Both pack kinds are auto-detected and routed to the out-of-band pack
+    loader (``_load_side_pack_input``/``prepare_embedded_build_source``), which
+    handles either kind; only a genuinely raw tree/build dir falls through to the
+    inline-collection path below (ADR-043: there is no separate ``merge`` command
+    to route an inputs pack through anymore).
     """
     # Single source of truth: the dump/collect side validates the same way via
     # inline.is_pack_dir (content, not filename), so the two never disagree.
     from .buildsource.inline import is_pack_dir
+    from .cli_buildsource_helpers import _is_inputs_pack_dir
 
-    return is_pack_dir(path)
+    return is_pack_dir(path) or _is_inputs_pack_dir(path)
 
 
 def _embed_inline_source_side(

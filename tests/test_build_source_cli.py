@@ -305,6 +305,7 @@ def _collect(
     source_graph="off",
     kythe_entries=None,
     codeql_results=None,
+    codeql_extends_results=None,
     source_root=None,
     allow_build_query=False,
     collection_mode="permissive",
@@ -323,6 +324,7 @@ def _collect(
         source_graph == "summary"
         or bool(kythe_entries)
         or bool(codeql_results)
+        or bool(codeql_extends_results)
         or _source_abi_scope_needs_include_map(source_abi_scope, list(changed_paths))
     )
     adapters = parse_from_specs(from_adapters)
@@ -370,6 +372,7 @@ def _collect(
         changed_paths=changed_paths,
         kythe_entries=kythe_entries,
         codeql_results=codeql_results,
+        codeql_extends_results=codeql_extends_results,
         surface=surface,
         clang_bin=clang_bin,
     )
