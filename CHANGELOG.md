@@ -11,6 +11,35 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **`compare --glibc-floor X.Y` — manylinux/platform-baseline glibc check
+  (G10).** New `platform_baseline_floor_raised` deployment-`RISK` `ChangeKind`:
+  checks a binary's own maximum required `GLIBC_2.x` against a declared
+  platform-baseline floor (e.g. the floor implied by a `manylinux_2_27` wheel
+  tag), independent of any old/new delta — unlike the existing
+  `runtime_floor_raised` reclassification, this catches a binary that has
+  *always* required a newer glibc than its wheel tag promises. `--glibc-floor`
+  is a shorthand for `--env-matrix`'s `runtime_floors: {GLIBC: "X.Y"}`
+  (ADR-020b), folded together in `service.load_env_matrix`. New
+  `abicheck.package.parse_manylinux_glibc_floor()` derives the floor from a
+  manylinux wheel tag (PEP 600 plus the `manylinux1`/`2010`/`2014` legacy
+  aliases) for programmatic use.
+
+### Fixed
+
+- **Vendored-library SONAME normalization, remaining half (G9).**
+  `strip_vendor_hash()` now also normalizes the embedded ELF SONAME (not just
+  the on-disk filename) in `bundle.py`'s cohort-scoped `BUNDLE_SONAME_SKEW`
+  detector and `diff_cpp_patterns.bundle_members_from_directory`, so an
+  auditwheel/delocate content-hash rebuild of a cohort member no longer risks
+  an inconsistent `BundleMember.soname`.
+- **Header-scoped toolchain diagnostics: dedicated error type (G16).** A
+  recognised host-toolchain parse-failure signature (glibc sized-float types,
+  GCC `__assume__`, `--lang c` + `extern "C"`) now raises the new
+  `HeaderToolchainError` (a `SnapshotError` subclass) instead of a generic
+  `SnapshotError`, so callers can branch on "this failure carries an
+  actionable remediation". Added a real-toolchain `integration` end-to-end
+  test over a `<math.h>`-including header.
+
 - **`compare --header-graph` / `--header-graph-includes` — the L2 header-only
   semantic graph is now reachable from a plain `compare` run.**
   `service.run_dump` could already build this graph (declaration reachability
