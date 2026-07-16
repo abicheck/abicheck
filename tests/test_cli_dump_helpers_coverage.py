@@ -397,16 +397,24 @@ def test_perform_elf_dump_detects_python_surfaces_and_follow_deps(
     so = tmp_path / "lib.so"
 
     snap = AbiSnapshot(library="lib.so", version="2.0")
-    assert snap.python_ext is None and snap.python_api is None
+    assert (
+        snap.python_ext is None
+        and snap.python_api is None
+        and snap.numpy_capi is None
+    )
     monkeypatch.setattr("abicheck.cli_dump_helpers.dump", lambda **_kw: snap)
 
     ext_sentinel = object()
     api_sentinel = object()
+    numpy_sentinel = object()
     monkeypatch.setattr(
         "abicheck.python_ext.detect_python_extension", lambda _s: ext_sentinel
     )
     monkeypatch.setattr(
         "abicheck.python_api.detect_python_api", lambda _s: api_sentinel
+    )
+    monkeypatch.setattr(
+        "abicheck.numpy_capi.extract_numpy_capi_surface", lambda _p: numpy_sentinel
     )
 
     events, _stamp, _write, _expand, _populate = _elf_dump_callables()
@@ -450,6 +458,9 @@ def test_perform_elf_dump_detects_python_surfaces_and_follow_deps(
     assert snap.parsed_with_build_context is False
     assert snap.python_ext is ext_sentinel
     assert snap.python_api is api_sentinel
+    # G26 (Codex review): numpy_capi must also be attached on this ELF `dump`
+    # CLI path, since it bypasses service.run_dump's own attach point.
+    assert snap.numpy_capi is numpy_sentinel
     # follow_deps path invoked populate_dependency_info with the search paths.
     assert events["populated"] == (so, (tmp_path,))
 
@@ -457,15 +468,17 @@ def test_perform_elf_dump_detects_python_surfaces_and_follow_deps(
 def test_perform_elf_dump_preserves_existing_python_metadata(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """When the snapshot already carries python_ext/python_api, detection is not
-    re-run (the ``is None`` guards on lines 496 and 505 stay false)."""
+    """When the snapshot already carries python_ext/python_api/numpy_capi,
+    detection is not re-run (the ``is None`` guards stay false)."""
     so = tmp_path / "lib.so"
 
     snap = AbiSnapshot(library="lib.so", version="1")
     preexisting_ext = object()
     preexisting_api = object()
+    preexisting_numpy = object()
     snap.python_ext = preexisting_ext  # type: ignore[assignment]
     snap.python_api = preexisting_api  # type: ignore[assignment]
+    snap.numpy_capi = preexisting_numpy  # type: ignore[assignment]
     monkeypatch.setattr("abicheck.cli_dump_helpers.dump", lambda **_kw: snap)
 
     def _boom(_s):  # noqa: ANN001, ANN202
@@ -473,6 +486,7 @@ def test_perform_elf_dump_preserves_existing_python_metadata(
 
     monkeypatch.setattr("abicheck.python_ext.detect_python_extension", _boom)
     monkeypatch.setattr("abicheck.python_api.detect_python_api", _boom)
+    monkeypatch.setattr("abicheck.numpy_capi.extract_numpy_capi_surface", _boom)
 
     events, _stamp, _write, _expand, _populate = _elf_dump_callables()
 
@@ -513,6 +527,7 @@ def test_perform_elf_dump_preserves_existing_python_metadata(
 
     assert snap.python_ext is preexisting_ext
     assert snap.python_api is preexisting_api
+    assert snap.numpy_capi is preexisting_numpy
 
 
 def test_perform_elf_dump_wraps_dump_errors(tmp_path: Path, monkeypatch) -> None:
