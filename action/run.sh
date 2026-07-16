@@ -125,7 +125,7 @@ if [[ -n "$ABI_BASELINE" && ( "$MODE" == "compare" || "$MODE" == "scan" ) ]]; th
     if [[ "$ABI_BASELINE" == "latest-release" ]]; then
       echo "::group::Fetch ABI baseline from latest release"
       if ! gh release download --pattern '*.abicheck.json' -D "$BASELINE_DIR"; then
-        echo "::error::No ABI baseline found in latest release. Run 'abicheck dump --output-name auto' in your release workflow and upload the *.abicheck.json file as a release asset."
+        echo "::error::No ABI baseline found in latest release. Run 'abicheck dump path/to/libfoo.so -o libfoo.abicheck.json' in your release workflow and upload the resulting *.abicheck.json file as a release asset."
         exit 1
       fi
       echo "::endgroup::"

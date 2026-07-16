@@ -340,10 +340,11 @@ def _write_snapshot_output(
                     f"collected but linked no facts: {', '.join(ran_empty)} — the "
                     "extractor ran but matched nothing; see the coverage rows for "
                     "the reason (commonly a public-header-roots mismatch, an "
-                    "unseeded `--depth source` that selected 0 TUs — use --max or "
-                    "--changed-path/--since — or the snapshot binary not matching "
-                    "--sources; a '0/N symbols matched' means source decls did not "
-                    "link to the binary's exports)"
+                    "unseeded `--depth source` that selected 0 TUs — use "
+                    "--changed-path/--since to seed a changed scope — or the "
+                    "snapshot binary not matching --sources; a '0/N symbols "
+                    "matched' means source decls did not link to the binary's "
+                    "exports)"
                 )
             click.echo(
                 "Warning: requested evidence layer(s) " + "; ".join(parts) + ".",
@@ -1153,7 +1154,7 @@ def _embed_inline_source_side(
         click.echo(
             f"Warning: --{label}-sources/--{label}-build-info was given but the "
             "selected --depth collects no evidence; ignoring it. Use --depth "
-            "build/source/full (or --max) to collect from it.",
+            "build or --depth source to collect from it.",
             err=True,
         )
         return input_path, kept_sources, kept_build_info

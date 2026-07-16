@@ -264,6 +264,56 @@ def _resolve_demangle(fmt: str, demangle: bool | None) -> bool:
     return fmt in {"markdown", "review"} if demangle is None else demangle
 
 
+def _resolve_compare_collect_mode(
+    depth: str | None,
+    source_method: str | None,
+    old_sources: Path | None,
+    new_sources: Path | None,
+    old_build_info: Path | None,
+    new_build_info: Path | None,
+) -> tuple[str, str]:
+    """Resolve compare's source/build collect mode, plus a human label for it.
+
+    Precedence (ADR-037 D4/D5, extended by the P1 CLI-contract fix below):
+    explicit ``--depth`` > ``.abicheck.yml`` ``source.method`` > inferred from
+    raw ``--old/new-sources``/``--old/new-build-info`` given with neither of
+    the above > off.
+
+    The inferred rung closes a gap where passing ``--sources``/``--build-info``
+    with no ``--depth`` (and no ``source.method`` in config) silently resolved
+    to "off" and the inputs were ignored with a warning: an explicit
+    source/build-info input is itself a request to use it, so omitted depth
+    should not default to discarding it. This mirrors ``scan``'s own
+    "auto" depth, which is likewise input-driven rather than a fixed default.
+    The label is shown verbatim in ``compare --dry-run``'s "Resolved depth and
+    source scope" section so a dry run reports the *effective* depth, not just
+    the raw ``--depth`` string the user passed (or omitted).
+    """
+    if depth is not None:
+        return resolve_dump_depth(depth, "off"), f"--depth {depth}"
+    if source_method:
+        from .buildsource.scan_levels import SourceMethod, method_to_collect_mode
+        try:
+            mode = method_to_collect_mode(SourceMethod(source_method))
+        except ValueError:
+            raise click.UsageError(
+                f"source.method in .abicheck.yml is invalid: "
+                f"{source_method!r} (expected s0..s6 or auto)."
+            ) from None
+        return mode, f"source.method={source_method} (.abicheck.yml)"
+    if old_sources is not None or new_sources is not None:
+        return (
+            resolve_dump_depth("source", "off"),
+            "source (inferred: --old-sources/--new-sources given, no --depth)",
+        )
+    if old_build_info is not None or new_build_info is not None:
+        return (
+            resolve_dump_depth("build", "off"),
+            "build (inferred: --old-build-info/--new-build-info given, no --depth)",
+        )
+    return "off", "off (no --depth, no --sources/--build-info, no source.method)"
+
+
 def _normalize_compare_options(
     resolved_cfg: ResolvedCompareConfig,
     *,
@@ -279,15 +329,22 @@ def _normalize_compare_options(
     fmt: str,
     report_mode: str,
     show_impact: bool,
+    old_sources: Path | None = None,
+    new_sources: Path | None = None,
+    old_build_info: Path | None = None,
+    new_build_info: Path | None = None,
 ) -> _NormalizedCompareOptions:
     """Fold the compare option flags into their resolved, dispatch-ready values."""
     if annotate_additions and not annotate:
         raise click.UsageError("--annotate-additions requires --annotate")
 
     # Fold the --depth dial into the internal collect mode (ADR-037 D5), the
-    # same way `dump` does. With no preset, compare reads at "off"; --depth
-    # binary suppresses the L2 header AST (symbols-only).
-    collect_mode = resolve_dump_depth(depth, "off")
+    # same way `dump` does; when omitted, infer it from --sources/--build-info
+    # (or config source.method) rather than defaulting to "off" (P1 fix).
+    collect_mode, _ = _resolve_compare_collect_mode(
+        depth, resolved_cfg.source_method,
+        old_sources, new_sources, old_build_info, new_build_info,
+    )
     if depth == "binary":
         headers, old_headers_only, new_headers_only = (), (), ()
 
@@ -308,21 +365,6 @@ def _normalize_compare_options(
     if report_mode == "impact":
         report_mode = "full"
         show_impact = True
-
-    # ADR-037 D4: the precise S-axis lives in config (source.method). It sets the
-    # collection depth only when the user gave no explicit --depth signal
-    # (CLI > config).
-    if resolved_cfg.source_method and depth is None:
-        from .buildsource.scan_levels import SourceMethod, method_to_collect_mode
-        try:
-            collect_mode = method_to_collect_mode(
-                SourceMethod(resolved_cfg.source_method)
-            )
-        except ValueError:
-            raise click.UsageError(
-                f"source.method in .abicheck.yml is invalid: "
-                f"{resolved_cfg.source_method!r} (expected s0..s6 or auto)."
-            ) from None
 
     return _NormalizedCompareOptions(
         collect_mode, headers, old_headers_only, new_headers_only,
@@ -619,16 +661,24 @@ def _apply_used_by_scoping(
                 f"library, not headers-only); {label} ({path}) is neither."
             )
 
+    from .reporter import _finding_id
+
     summaries = []
     worst_exit = 0
     worst_verdict = None
     worst_verdict_rank = -1
-    # Keyed by id(change)/the missing string itself so a Change or missing
-    # symbol shared by two tied apps (e.g. both import the same removed
-    # symbol) collapses to one entry instead of being tallied once per app
-    # (Codex review) -- `_scoped_severity_summary` runs once at the end over
-    # this deduplicated union, not per app summed together.
-    worst_changes: dict[int, Any] = {}
+    # Keyed by the change's semantic identity (kind/symbol/old/new/location/
+    # description, via `_finding_id`) -- not id(change) -- so a Change or
+    # missing symbol shared by two tied apps (e.g. both import the same
+    # removed symbol) collapses to one entry instead of being tallied once
+    # per app (Codex review) -- `_scoped_severity_summary` runs once at the
+    # end over this deduplicated union, not per app summed together.
+    # `id()` alone under-deduplicates PE_ORDINAL_RETARGETED findings:
+    # `scope_diff_to_app` synthesizes a fresh `Change` object per app (via
+    # `_check_pe_ordinal_imports`), so two apps hitting the same ordinal
+    # retarget produce structurally-identical but object-distinct `Change`s
+    # that `id()` would double-count in the severity summary.
+    worst_changes: dict[str, Any] = {}
     worst_missing: set[str] = set()
     for app in used_by_apps:
         scoped = scope_diff_to_app(
@@ -649,10 +699,10 @@ def _apply_used_by_scoping(
         # one merely because their exit codes tied at 0 (Codex review).
         if exit_code_scheme == "severity":
             if exit_code > worst_exit:
-                worst_changes = {id(c): c for c in scoped.breaking_for_app}
+                worst_changes = {_finding_id(c): c for c in scoped.breaking_for_app}
                 worst_missing = set(scoped.missing_symbols) | set(scoped.missing_versions)
             elif exit_code == worst_exit:
-                worst_changes.update({id(c): c for c in scoped.breaking_for_app})
+                worst_changes.update({_finding_id(c): c for c in scoped.breaking_for_app})
                 worst_missing |= set(scoped.missing_symbols) | set(scoped.missing_versions)
         worst_exit = max(worst_exit, exit_code)
         rank = _verdict_severity_rank(scoped.verdict)
@@ -728,6 +778,7 @@ def _render_compare_dry_run(
     old_input: Path, new_input: Path,
     old_kind: str, new_kind: str,
     depth: str | None,
+    source_method: str | None = None,
     headers: tuple[Path, ...], includes: tuple[Path, ...],
     old_headers_only: tuple[Path, ...], new_headers_only: tuple[Path, ...],
     old_sources: Path | None, new_sources: Path | None,
@@ -748,11 +799,21 @@ def _render_compare_dry_run(
         f"old: {old_input} ({old_kind})",
         f"new: {new_input} ({new_kind})",
     )
+    # Effective depth (P1 fix): a dry run must report what the real run will
+    # actually do, not just echo the raw --depth string back — the same
+    # inference _normalize_compare_options applies (--depth > source.method >
+    # inferred from --sources/--build-info > off) drives this.
+    collect_mode, effective_depth_label = _resolve_compare_collect_mode(
+        depth, source_method, old_sources, new_sources, old_build_info, new_build_info,
+    )
     result.add(
         "Resolved depth and source scope",
-        f"requested depth: {depth or '(auto)'}",
+        f"requested depth: {depth or '(not given)'}",
+        f"effective depth: {effective_depth_label}",
+        f"effective collect mode: {collect_mode}",
         "source scope: target on each side (compare has no PR change seed)"
-        if depth == "source" else None,
+        if collect_mode in ("source-target", "source-changed", "graph-full")
+        else None,
     )
     all_headers = list(headers) + list(old_headers_only) + list(new_headers_only)
     result.add(
@@ -869,6 +930,12 @@ def run_compare(
     from .dry_run import reject_dry_run_with_output
 
     reject_dry_run_with_output(dry_run, output)
+    if dry_run and secondary_output is not None:
+        raise click.UsageError(
+            "--dry-run cannot be combined with --secondary-output: a dry run "
+            "performs no analysis and writes nothing, so there is no "
+            "secondary report to produce."
+        )
     _setup_verbosity(verbose)
 
     if secondary_fmt is not None and secondary_output is None:
@@ -976,7 +1043,8 @@ def run_compare(
         emit_dry_run(_render_compare_dry_run(
             old_input=old_input, new_input=new_input,
             old_kind=old_kind, new_kind=new_kind,
-            depth=depth, headers=headers, includes=includes,
+            depth=depth, source_method=resolved_cfg.source_method,
+            headers=headers, includes=includes,
             old_headers_only=old_headers_only, new_headers_only=new_headers_only,
             old_sources=old_sources, new_sources=new_sources,
             old_build_info=old_build_info, new_build_info=new_build_info,
@@ -1045,6 +1113,8 @@ def run_compare(
         debug_format_opt=debug_format_opt, debug_format=debug_format,
         demangle=demangle, fmt=fmt,
         report_mode=report_mode, show_impact=show_impact,
+        old_sources=old_sources, new_sources=new_sources,
+        old_build_info=old_build_info, new_build_info=new_build_info,
     )
 
     # L2 header compile context (compare↔dump↔scan parity, ADR-037 D3): the one

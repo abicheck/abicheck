@@ -1367,6 +1367,47 @@ class TestUsedByScoping:
         assert result.exit_code == 4
         assert data["severity"]["categories"]["abi_breaking"]["count"] == 1
 
+    def test_multi_app_semantically_identical_change_not_double_counted(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Regression (CLI-audit P2): unlike the shared-object case above,
+        # `appcompat._check_pe_ordinal_imports` constructs a FRESH
+        # PE_ORDINAL_RETARGETED Change per `scope_diff_to_app` call, so two
+        # apps retargeting the same ordinal get two distinct Change objects
+        # with identical kind/symbol/description but different id() -- the
+        # old id()-keyed dedup in `_apply_used_by_scoping` would count that
+        # as two findings instead of one.
+        import abicheck.appcompat as appcompat_mod
+        from abicheck.appcompat import AppCompatResult
+
+        res1 = AppCompatResult(
+            app_path="/app1", old_lib_path="old.so", new_lib_path="new.so",
+            required_symbols={"foo"}, required_symbol_count=1,
+            breaking_for_app=[Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")],
+            verdict=Verdict.BREAKING,
+        )
+        res2 = AppCompatResult(
+            app_path="/app2", old_lib_path="old.so", new_lib_path="new.so",
+            required_symbols={"foo"}, required_symbol_count=1,
+            breaking_for_app=[Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")],
+            verdict=Verdict.BREAKING,
+        )
+        app1, old, new = self._setup(tmp_path, monkeypatch)
+        app2 = tmp_path / "app2"
+        app2.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        monkeypatch.setattr(
+            appcompat_mod, "scope_diff_to_app",
+            MagicMock(side_effect=[res1, res2]),
+        )
+        result = _invoke(
+            "compare", str(old), str(new),
+            "--used-by", str(app1), "--used-by", str(app2),
+            "--severity-preset", "default", "--format", "json",
+        )
+        data = json.loads(result.stdout)
+        assert result.exit_code == 4
+        assert data["severity"]["categories"]["abi_breaking"]["count"] == 1
+
     def test_severity_clean_exit_0(self, tmp_path, monkeypatch) -> None:
         res = self._result(verdict=Verdict.COMPATIBLE)
         app, old, new = self._setup(tmp_path, monkeypatch)

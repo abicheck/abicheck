@@ -1392,6 +1392,57 @@ class TestAbiCompare:
         report = data["report"]
         assert report["severity"]["categories"]["abi_breaking"]["count"] == 1
 
+    def test_used_by_multi_app_semantically_identical_change_not_double_counted(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # Regression (CLI-audit P2): two apps whose scope_diff_to_app calls
+        # each synthesize their OWN fresh Change object for the same
+        # underlying finding (exactly what appcompat._check_pe_ordinal_imports
+        # does for PE_ORDINAL_RETARGETED -- one new Change per app, not a
+        # shared reference into the base diff) must still collapse to one
+        # entry. id()-based dedup would double-count these two
+        # structurally-identical-but-object-distinct Changes.
+        from abicheck.appcompat import AppCompatResult
+        from abicheck.checker import Change
+        from abicheck.checker_policy import ChangeKind
+
+        old = _make_snapshot("1.0", functions=[_pub_func("foo", "foo", "int")])
+        new = _make_snapshot("2.0", functions=[])
+        old_p, new_p = self._make_binary_pair(tmp_path)
+        app1 = tmp_path / "app1"
+        app1.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        app2 = tmp_path / "app2"
+        app2.write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+        def _scoped_for(*_args, **_kwargs):
+            # A fresh, distinct Change object per call -- same semantic
+            # identity (kind/symbol/description), different Python id().
+            change = Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")
+            return AppCompatResult(
+                app_path="/app", old_lib_path=str(old_p), new_lib_path=str(new_p),
+                required_symbols={"foo"}, required_symbol_count=1,
+                breaking_for_app=[change], verdict=Verdict.BREAKING,
+            )
+
+        from abicheck import mcp_server
+
+        monkeypatch.setattr(
+            mcp_server, "_resolve_input",
+            MagicMock(side_effect=[old, new]),
+        )
+        import abicheck.appcompat as appcompat_mod
+
+        monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", _scoped_for)
+
+        raw = abi_compare(
+            str(old_p), str(new_p), used_by=[str(app1), str(app2)],
+            severity_preset="default",
+        )
+        data = json.loads(raw)
+        assert data["exit_code"] == 4
+        report = data["report"]
+        assert report["severity"]["categories"]["abi_breaking"]["count"] == 1
+
     def test_used_by_rejects_non_binary_snapshot_input(self, tmp_path: Path):
         # --used-by needs real library binaries to parse app requirements
         # against; JSON snapshots must be rejected with a clear error rather

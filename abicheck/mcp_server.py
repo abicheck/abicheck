@@ -70,7 +70,7 @@ from .checker_policy import (
 )
 from .errors import AbicheckError
 from .model import AbiSnapshot
-from .reporter import to_json, to_markdown
+from .reporter import _finding_id, to_json, to_markdown
 from .serialization import snapshot_to_json
 from .service import compare_snapshots
 
@@ -978,13 +978,18 @@ def abi_compare(
             worst_exit = 0
             worst_verdict = None
             worst_verdict_rank = -1
-            # Keyed by id(change)/the missing string itself so a Change or
-            # missing symbol shared by two tied apps (e.g. both import the
-            # same removed symbol) collapses to one entry instead of being
-            # tallied once per app (Codex review) -- `_scoped_severity_summary`
-            # runs once at the end over this deduplicated union, not per app
-            # summed together.
-            worst_changes: dict[int, Any] = {}
+            # Keyed by the change's semantic identity (kind/symbol/old/new/
+            # location/description, via `_finding_id`) -- not id(change) --
+            # so a Change or missing symbol shared by two tied apps (e.g.
+            # both import the same removed symbol) collapses to one entry
+            # instead of being tallied once per app (Codex review) --
+            # `_scoped_severity_summary` runs once at the end over this
+            # deduplicated union, not per app summed together. `id()` alone
+            # under-deduplicates PE_ORDINAL_RETARGETED findings: each app's
+            # `scope_diff_to_app` call synthesizes a fresh `Change` object
+            # for the same underlying ordinal retarget (see
+            # `cli_compare_helpers._apply_used_by_scoping`).
+            worst_changes: dict[str, Any] = {}
             worst_missing: set[str] = set()
             for app in used_by:
                 app_path = _safe_read_path(app, label="used_by")
@@ -1019,10 +1024,10 @@ def abi_compare(
                 # independently -- see _verdict_severity_rank.
                 if severity_config is not None:
                     if app_exit > worst_exit:
-                        worst_changes = {id(c): c for c in scoped.breaking_for_app}
+                        worst_changes = {_finding_id(c): c for c in scoped.breaking_for_app}
                         worst_missing = set(scoped.missing_symbols) | set(scoped.missing_versions)
                     elif app_exit == worst_exit:
-                        worst_changes.update({id(c): c for c in scoped.breaking_for_app})
+                        worst_changes.update({_finding_id(c): c for c in scoped.breaking_for_app})
                         worst_missing |= set(scoped.missing_symbols) | set(scoped.missing_versions)
                 worst_exit = max(worst_exit, app_exit)
                 rank = _verdict_severity_rank(scoped.verdict)
