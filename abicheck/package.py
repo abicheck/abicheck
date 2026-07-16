@@ -646,6 +646,34 @@ def _sys_platform_from_wheel_filename(filename: str) -> str | None:
     return None
 
 
+def _os_name_from_wheel_filename(filename: str) -> str | None:
+    """Derive ``os_name`` (``"posix"``/``"nt"``, i.e. Python's own
+    ``os.name`` spelling) from a wheel filename's platform tag, the same
+    way as :func:`_platform_system_from_wheel_filename`.
+
+    ``os_name`` is a third, less common PEP 508 marker spelling for the
+    same OS distinction as ``platform_system``/``sys_platform``
+    (``os_name == "nt"`` vs. ``platform_system == "Windows"``); deriving
+    only the other two spellings still leaves a marker written in this one
+    falling back to the host running abicheck (Codex review). Same scope
+    caveats as that function (no ``platform_machine``, ``None`` for
+    ``any``/unrecognized/non-wheel names). Linux and macOS both map to
+    ``"posix"`` since that's the shared ``os.name`` value on any POSIX
+    platform, not a Linux-specific one.
+    """
+    if not filename.lower().endswith(".whl"):
+        return None
+    parts = filename[: -len(".whl")].split("-")
+    if len(parts) < 5:
+        return None
+    tag = parts[-1].lower()
+    if tag.startswith(("manylinux", "musllinux", "linux", "macosx")):
+        return "posix"
+    if tag.startswith("win"):
+        return "nt"
+    return None
+
+
 #: Single-architecture suffixes a Linux wheel platform tag can end in. Order
 #: doesn't matter for correctness (each is ``$``-anchored, so e.g. ``ppc64``
 #: can't spuriously match a ``...ppc64le`` tag), but longer/more-specific
@@ -730,17 +758,18 @@ def parse_wheel_numpy_requirement(
     or an ordinary marker that doesn't hold for *environment*.
 
     When *environment* is omitted, ``python_version``, ``python_full_version``,
-    ``platform_system``, ``sys_platform``, and (for single-architecture
-    Linux/macOS tags) ``platform_machine`` are derived from the wheel's
-    *own* filename tags (e.g. ``cp39`` -> ``python_version="3.9"``/
-    ``python_full_version="3.9.0"``, a ``macosx_11_0_arm64`` platform tag ->
-    ``platform_system="Darwin"``/``sys_platform="darwin"``/
+    ``platform_system``, ``sys_platform``, ``os_name``, and (for
+    single-architecture Linux/macOS tags) ``platform_machine`` are derived
+    from the wheel's *own* filename tags (e.g. ``cp39`` ->
+    ``python_version="3.9"``/``python_full_version="3.9.0"``, a
+    ``macosx_11_0_arm64`` platform tag -> ``platform_system="Darwin"``/
+    ``sys_platform="darwin"``/``os_name="posix"``/
     ``platform_machine="arm64"``) rather than defaulting to the interpreter
     running abicheck — evaluating a marker gated on any of these against the
     wrong interpreter/OS/architecture could hide a real under-declared
     floor on a wheel built for a different Python, platform, or CPU than
-    the one running the scan (Codex review; both OS-marker spellings are
-    covered since real-world metadata uses either one). Falls back to the
+    the one running the scan (Codex review; all three OS-marker spellings
+    are covered since real-world metadata uses any of them). Falls back to the
     interpreter's own environment for whichever of these the filename
     doesn't pin down (e.g. a bare directory-derived METADATA path, the
     pure-Python ``any`` platform tag, a fat/universal macOS wheel, or a
@@ -779,6 +808,7 @@ def parse_wheel_numpy_requirement(
             ("python_full_version", _python_full_version_from_wheel_filename),
             ("platform_system", _platform_system_from_wheel_filename),
             ("sys_platform", _sys_platform_from_wheel_filename),
+            ("os_name", _os_name_from_wheel_filename),
             ("platform_machine", _platform_machine_from_wheel_filename),
         )
         derived = {

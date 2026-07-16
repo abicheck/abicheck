@@ -22,6 +22,7 @@ from abicheck.package import (
     TarExtractor,
     WheelExtractor,
     _is_elf_shared_object,
+    _os_name_from_wheel_filename,
     _platform_machine_from_wheel_filename,
     _platform_system_from_wheel_filename,
     _python_full_version_from_wheel_filename,
@@ -1236,6 +1237,24 @@ class TestParseWheelNumpyRequirement:
             )
         assert parse_wheel_numpy_requirement(whl) == ">=2"
 
+    def test_os_name_spelling_also_derived_from_wheel_filename(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review's exact scenario: os_name ("posix"/"nt") is a third
+        # PEP 508 marker spelling for the same OS distinction as
+        # platform_system/sys_platform -- a win_amd64 wheel scanned on
+        # Linux must have an os_name-gated marker evaluated against ITS OWN
+        # "nt", not the host's "posix".
+        whl = tmp_path / "pkg-1.0-cp311-cp311-win_amd64.whl"
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr(
+                "pkg-1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\n"
+                'Requires-Dist: numpy>=1.23; os_name == "posix"\n'
+                'Requires-Dist: numpy>=2; os_name == "nt"\n',
+            )
+        assert parse_wheel_numpy_requirement(whl) == ">=2"
+
     def test_platform_machine_derived_from_wheel_filename_for_single_arch(
         self, tmp_path: Path
     ) -> None:
@@ -1422,6 +1441,36 @@ class TestSysPlatformFromWheelFilename:
 
     def test_too_few_segments_returns_none(self) -> None:
         assert _sys_platform_from_wheel_filename("weird.whl") is None
+
+
+class TestOsNameFromWheelFilename:
+    def test_manylinux_tag(self) -> None:
+        assert (
+            _os_name_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-manylinux_2_17_x86_64.whl"
+            )
+            == "posix"
+        )
+
+    def test_macosx_tag(self) -> None:
+        assert (
+            _os_name_from_wheel_filename("pkg-1.0-cp311-cp311-macosx_11_0_arm64.whl")
+            == "posix"
+        )
+
+    def test_win_tag(self) -> None:
+        assert (
+            _os_name_from_wheel_filename("pkg-1.0-cp311-cp311-win_amd64.whl") == "nt"
+        )
+
+    def test_any_tag_returns_none(self) -> None:
+        assert _os_name_from_wheel_filename("pkg-1.0-py3-none-any.whl") is None
+
+    def test_non_wheel_filename_returns_none(self) -> None:
+        assert _os_name_from_wheel_filename("pkg-1.0.tar.gz") is None
+
+    def test_too_few_segments_returns_none(self) -> None:
+        assert _os_name_from_wheel_filename("weird.whl") is None
 
 
 class TestPlatformMachineFromWheelFilename:
