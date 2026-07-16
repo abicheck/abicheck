@@ -1,0 +1,113 @@
+name: Temporary large L2 and CastXML probe
+
+on:
+  pull_request:
+    paths:
+      - scripts/profile_large_l2_castxml.py
+      - .github/workflows/l2-large-castxml-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  profile:
+    name: Profile large L2 scans on current main
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    env:
+      ABICHECK_MAIN_SHA: 488f823cd58459307d969d92b9c5567d590043fd
+      PYTHONHASHSEED: "0"
+    steps:
+      - name: Checkout probe branch
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install native benchmark dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            castxml clang curl gcc g++ jq libeigen3-dev libjemalloc2 \
+            libssl-dev libtbb-dev strace time unzip xz-utils
+
+      - name: Install current-main source
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Verify production source identity
+        run: |
+          git fetch --no-tags origin main
+          test "$(git rev-parse origin/main)" = "$ABICHECK_MAIN_SHA"
+          git diff --exit-code "$ABICHECK_MAIN_SHA" -- abicheck pyproject.toml
+          python - <<'PY'
+          import abicheck, pathlib
+          print("abicheck:", pathlib.Path(abicheck.__file__).resolve())
+          PY
+          castxml --version
+          gcc --version | head -1
+          clang --version | head -1
+          free -h
+          df -h / /dev/shm
+
+      - name: Download latest official CastXML superbuild binary
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euxo pipefail
+          mkdir -p /tmp/castxml-superbuild
+          curl -fsSL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/CastXML/CastXMLSuperbuild/releases/latest \
+            -o /tmp/castxml-superbuild/release.json
+          jq -r '.tag_name, (.assets[]?.name // empty)' /tmp/castxml-superbuild/release.json
+          url="$(jq -r '
+            [.assets[]
+             | select((.name | ascii_downcase | contains("linux"))
+                      and (.name | ascii_downcase | test("(tar\\.gz|tar\\.xz|tgz|zip)$")))
+             | .browser_download_url][0] // empty
+          ' /tmp/castxml-superbuild/release.json)"
+          test -n "$url"
+          archive=/tmp/castxml-superbuild/archive
+          curl -fL -H "Authorization: Bearer $GH_TOKEN" "$url" -o "$archive"
+          mkdir -p /tmp/castxml-superbuild/unpacked
+          if unzip -t "$archive" >/dev/null 2>&1; then
+            unzip -q "$archive" -d /tmp/castxml-superbuild/unpacked
+          else
+            tar -xf "$archive" -C /tmp/castxml-superbuild/unpacked
+          fi
+          bin="$(find /tmp/castxml-superbuild/unpacked -type f -name castxml -perm -111 | head -1)"
+          test -n "$bin"
+          "$bin" --version
+          echo "CASTXML_LATEST_BIN=$bin" >> "$GITHUB_ENV"
+
+      - name: Run large L2 and CastXML benchmark
+        run: |
+          rm -rf results/l2-large-castxml
+          python scripts/profile_large_l2_castxml.py \
+            --main-sha "$ABICHECK_MAIN_SHA" \
+            --out-dir results/l2-large-castxml
+
+      - name: Publish report in job summary
+        if: always()
+        run: |
+          if test -f results/l2-large-castxml/large-l2-castxml-profile.md; then
+            cat results/l2-large-castxml/large-l2-castxml-profile.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload profiling artifact
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: large-l2-castxml-profile-main-488f823
+          path: results/l2-large-castxml/
+          if-no-files-found: warn
+          retention-days: 7
