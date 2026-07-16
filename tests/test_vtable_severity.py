@@ -348,3 +348,19 @@ class TestOwnerDescendsFrom:
             "Base": RecordType(name="Base", qualified_name="ns::Base", kind="class"),
         }
         assert not _owner_descends_from("ns::Derived", "Base", types)
+
+    def test_bare_ancestor_not_trusted_against_leaf_only_base_dwarf_shaped(
+        self,
+    ) -> None:
+        """Same ambiguity as the CastXML-shaped test above, but shaped the
+        way DWARF snapshots store it: ``dwarf_snapshot.py`` records
+        ``RecordType.name`` as the already-qualified spelling itself
+        (``qualified_name`` stays unset), while inheritance edges still keep
+        only the base DIE's leaf name. The competing ``ns::Base`` record must
+        still be found via ``name``, not just ``qualified_name`` -- checking
+        only one field would miss whichever backend produced it."""
+        types = {
+            "ns::Derived": RecordType(name="ns::Derived", kind="class", bases=["Base"]),
+            "ns::Base": RecordType(name="ns::Base", kind="class"),
+        }
+        assert not _owner_descends_from("ns::Derived", "Base", types)

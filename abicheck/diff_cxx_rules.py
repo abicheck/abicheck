@@ -376,7 +376,7 @@ def _owner_descends_from(owner: str, ancestor: str, types: dict[str, RecordType]
         return not any(t.qualified_name == qualified for t in types.values())
 
     def _leaf_has_qualified_alternative(leaf: str, exclude: str) -> bool:
-        """True if some *other* record's qualified_name shares this leaf.
+        """True if some *other* record's qualified spelling shares this leaf.
 
         Used when matching a bare ``ancestor`` against a leaf-only ``bases``
         entry: ``_leaf_match_trustworthy`` above can only ask "does this
@@ -386,13 +386,23 @@ def _owner_descends_from(owner: str, ancestor: str, types: dict[str, RecordType]
         record (e.g. ``ns::Base``) exist for this same leaf, proving the
         base list's bare, unqualified entry could plausibly mean that one
         instead of the literal bare ``exclude`` spelling.
+
+        Checks both ``RecordType.qualified_name`` (CastXML: ``name`` stays
+        bare, the namespaced spelling lives in this separate field) and
+        ``RecordType.name`` itself (DWARF: ``dwarf_snapshot.py`` stores the
+        already-qualified spelling directly as ``name``, leaving
+        ``qualified_name`` unset) -- checking only one field misses whichever
+        backend produced the competing record.
         """
-        return any(
-            t.qualified_name
-            and t.qualified_name != exclude
-            and t.qualified_name.rsplit("::", 1)[-1] == leaf
-            for t in types.values()
-        )
+        for t in types.values():
+            for candidate in (t.name, t.qualified_name):
+                if (
+                    candidate
+                    and candidate != exclude
+                    and candidate.rsplit("::", 1)[-1] == leaf
+                ):
+                    return True
+        return False
 
     if leaf_owner == leaf_ancestor and (owner_is_leaf or ancestor_is_leaf):
         # Reaching here with BOTH sides bare would mean owner == ancestor

@@ -283,6 +283,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   share this leaf — so a `Base::foo()` → `ns::Base::foo()` (or `ns::Derived`
   via a leaf-only `Base` base entry) slot replacement is no longer
   misclassified as an override reuse.
+- **case185 follow-up #2: DWARF-shaped leaf-alternative detection.**
+  `_leaf_has_qualified_alternative()` (above) only inspected
+  `RecordType.qualified_name`, but `dwarf_snapshot.py` stores an
+  already-qualified spelling directly as `RecordType.name` and leaves
+  `qualified_name` unset, while its inheritance edges still keep only the
+  base DIE's leaf name — the same ambiguity, produced by the other backend.
+  The helper now checks both `name` and `qualified_name` on each candidate
+  record so a competing namespaced type is found regardless of which
+  backend produced it.
 - **Vendored-library SONAME normalization, remaining half (G9).**
   `strip_vendor_hash()` now also normalizes the embedded ELF SONAME (not just
   the on-disk filename) in `bundle.py`'s cohort-scoped `BUNDLE_SONAME_SKEW`
