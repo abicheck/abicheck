@@ -402,6 +402,17 @@ class TestOperationForKind:
         assert operation_for_kind("type_field_added") == "modified"
         assert operation_for_kind("type_field_added_compatible") == "added"
 
+    def test_virtual_method_added_is_modified_not_added(self):
+        """`virtual_method_added` is the identical layout-modification
+        pattern as `type_field_added` applied to virtual methods instead of
+        fields: a new virtual method on an already-existing class
+        grows/relayouts the vtable, breaking derived classes compiled
+        against the old layout — not a compatible added API surface
+        (Codex review, PR #557)."""
+        from abicheck.reporter_markdown import operation_for_kind
+
+        assert operation_for_kind("virtual_method_added") == "modified"
+
     def test_added_suffix_signature_or_contract_change_is_modified(self):
         """A second audit pass (Codex review, PR #557): a constructor gaining
         `explicit`, a template parameter becoming mandatory, a Python

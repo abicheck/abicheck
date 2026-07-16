@@ -173,6 +173,13 @@ _OPERATION_OVERRIDES: dict[str, str] = {
     # dedicated addition-kind carve-out and is unaffected by this override
     # (it doesn't end in plain "_added"). (Codex review, PR #557.)
     "type_field_added": "modified",
+    # The identical layout-modification pattern applied to virtual methods
+    # instead of fields: a new virtual method on an already-existing class
+    # grows/relayouts the vtable (gains a hidden vtable pointer if it had
+    # none, or a new slot otherwise), breaking derived classes compiled
+    # against the old layout -- KDE's "do not add virtuals to a non-leaf
+    # class" rule. Not in ADDITION_KINDS (Codex review, PR #557).
+    "virtual_method_added": "modified",
     # More of the same trait-gained-by-a-persisting-entity pattern, found on
     # a second audit pass (Codex review, PR #557): a constructor/conversion
     # operator gaining `explicit` (`ctor_explicit_added`), a template

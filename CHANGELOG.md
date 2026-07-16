@@ -809,7 +809,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `func_virtual_added`, an existing function losing its virtual-ness) and
   `param_default_value_removed`/`python_api_default_removed` (an existing
   parameter losing its default value) — the same pattern again; all three
-  now classify as `"modified"` too.
+  now classify as `"modified"` too. A fourth pass (Codex review, PR #557)
+  found `virtual_method_added` itself — the identical layout-modification
+  pattern as `type_field_added` applied to virtual methods instead of
+  fields (a new virtual method on an already-existing class grows/relayouts
+  the vtable and breaks derived classes) — also reclassified.
 
 - **Self-review polish on the `GateDecision`/`--secondary-format` work above
   (PR #557):** the native HTML report's "CI Gate" card computed pass/fail
