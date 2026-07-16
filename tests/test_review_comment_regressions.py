@@ -623,6 +623,38 @@ def test_full_catalog_artifact_failures_surfaces_runtime_build_error() -> None:
     assert errors == ["runtime smoke build error: case07"]
 
 
+def test_full_catalog_resolve_single_library_threads_ground_truth_entry() -> None:
+    """collect_full_example_matrix._single_library_status takes (name, entry,
+    lanes) — calling it without entry raises TypeError on every single-library
+    case (Codex review). Cover both branches entry actually drives: a PASS
+    lane (entry unused) and an all-XFAIL lane with no declared source_smoke
+    (entry.get("source_smoke") must gate UNRESOLVED vs COVERED)."""
+    catalog = _load_script("validation/scripts/run_full_catalog.py")
+    entry = {"expected": "API_BREAK"}
+    compiler_result = {
+        "status": "PASS",
+        "toolchain_used": "gcc",
+        "expected": "API_BREAK",
+        "got": "API_BREAK",
+        "message": "",
+    }
+    resolved = catalog._resolve_single_library("case01", entry, compiler_result, None)
+    assert resolved["status"] == "COVERED"
+
+    xfail_no_oracle_result = {
+        "status": "XFAIL",
+        "toolchain_used": "gcc",
+        "expected": "API_BREAK",
+        "got": "COMPATIBLE",
+        "message": "known_gap: no oracle behind it",
+    }
+    resolved = catalog._resolve_single_library(
+        "case02", entry, xfail_no_oracle_result, None
+    )
+    assert resolved["status"] == "UNRESOLVED"
+    assert "no source_smoke oracle" in resolved["note"]
+
+
 def test_full_catalog_main_exit_code_reflects_artifact_errors(
     monkeypatch, tmp_path: Path
 ) -> None:

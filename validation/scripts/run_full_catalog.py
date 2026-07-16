@@ -170,6 +170,7 @@ def _run_compiler_lane(toolchain: str) -> tuple[dict[str, dict[str, Any]], str]:
 
 def _resolve_single_library(
     name: str,
+    entry: dict[str, Any],
     compiler_result: dict[str, Any] | None,
     build_source_result: dict[str, Any] | None,
 ) -> dict[str, Any]:
@@ -177,7 +178,7 @@ def _resolve_single_library(
         _matrix._lane_record("auto-debug-headers", compiler_result),
         _matrix._lane_record("build-source", build_source_result),
     ]
-    status, proof_lane, note = _matrix._single_library_status(name, lanes)
+    status, proof_lane, note = _matrix._single_library_status(name, entry, lanes)
     toolchain_used = (compiler_result or {}).get("toolchain_used")
     return {
         "status": status,
@@ -313,7 +314,10 @@ def run_full_catalog(toolchain: str, results_dir: Path) -> dict[str, Any]:
         owner = _matrix._case_owner(name, entry)
         if owner == "single-library":
             resolved = _resolve_single_library(
-                name, compiler_by_case.get(name), build_source_by_case.get(name)
+                name,
+                entry,
+                compiler_by_case.get(name),
+                build_source_by_case.get(name),
             )
         elif owner == "bundle":
             resolved = _resolve_bundle(name, bundle_by_case.get(name))
