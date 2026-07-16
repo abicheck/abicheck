@@ -98,6 +98,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   no reachable declarations because clang was unavailable) — depth is now
   computed from the same payload-emptiness check the CLI's own coverage
   warnings use, not mere non-`None` presence.
+- `compare`'s `old_evidence_depth`/`new_evidence_depth` JSON fields now
+  account for an out-of-band `--old/new-sources`/`--old/new-build-info`
+  *pack directory*, not just each side's embedded snapshot payload — a pack
+  directory (unlike a raw checkout, which gets embedded before this point)
+  is resolved separately and was previously invisible to this calculation,
+  so a compare run using only such a pack reported `binary`/`headers`
+  even though its build/source findings came from real evidence.
 
 ### Added
 
