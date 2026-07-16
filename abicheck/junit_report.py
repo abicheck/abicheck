@@ -401,8 +401,22 @@ def _build_testsuite(
         changes, result, kind_sets, severity_config, relevant_ids=relevant_ids
     )
     missing_labels = getattr(result, "scoped_missing_labels", ()) or ()
+    # The missing-contract failure decision must follow the same severity
+    # decision as the gate's own exit code (severity.missing_contract_exit_code,
+    # which _scoped_exit_code floors on): under the legacy scheme (no
+    # severity_config) a missing contract member is unconditionally BREAKING,
+    # but under a scheme that demotes abi_breaking the scoped exit code can be
+    # 0 for the same missing member -- unconditionally failing here would mark
+    # a JUnit-consuming CI run failed even though the gate itself passed
+    # (Codex review).
+    missing_blocks = severity_config is None
+    if severity_config is not None:
+        from .severity import missing_contract_exit_code
+
+        missing_blocks = missing_contract_exit_code(severity_config) != 0
     total = (len(all_symbols) if all_symbols else len(change_by_symbol)) + len(missing_labels)
-    failure_count += len(missing_labels)
+    if missing_blocks:
+        failure_count += len(missing_labels)
 
     ts = ET.Element("testsuite")
     ts.set("name", result.library)
@@ -424,31 +438,41 @@ def _build_testsuite(
     _append_extra_failures(
         ts, extra_changes, result, kind_sets, severity_config, relevant_ids=relevant_ids
     )
-    _emit_missing_contract_testcases(ts, missing_labels, getattr(result, "gate_scope", None))
+    _emit_missing_contract_testcases(
+        ts, missing_labels, getattr(result, "gate_scope", None), blocks=missing_blocks
+    )
 
     return ts
 
 
 def _emit_missing_contract_testcases(
     ts: ET.Element, missing_labels: tuple[str, ...], gate_scope: str | None,
+    *, blocks: bool = True,
 ) -> None:
-    """Emit a failing ``<testcase>`` per missing required symbol/version/entrypoint.
+    """Emit a ``<testcase>`` per missing required symbol/version/entrypoint.
 
     A required contract member absent from the new library (--used-by's
     ``missing_symbols``/``missing_versions``, or --required-symbol's
-    ``missing_entrypoints``) is unconditionally BREAKING for the scoped gate,
-    but has no backing diff ``Change`` -- without a synthetic testcase the
-    gate's own ``failures`` count could be nonzero while nothing in the XML
-    explains why (CLI-audit P1, mirrors ``sarif._missing_contract_result``).
+    ``missing_entrypoints``) has no backing diff ``Change`` -- without a
+    synthetic testcase the gate's own ``failures`` count could be nonzero
+    while nothing in the XML explains why (CLI-audit P1, mirrors
+    ``sarif._missing_contract_result``).
+
+    *blocks* (the caller's severity-aware decision, mirroring
+    ``sarif._missing_contract_result``) decides whether the testcase gets a
+    ``<failure>`` child: a testcase always exists so the missing member is
+    still visible in the report, but only fails when the gate itself
+    considers it blocking.
     """
     classname = "used_by_contract" if gate_scope == "used_by" else "required_symbol_contract"
     for label in missing_labels:
         tc = ET.SubElement(ts, "testcase")
         tc.set("name", label)
         tc.set("classname", classname)
-        fail = ET.SubElement(tc, "failure")
-        fail.set("message", f"Required symbol/version '{label}' is missing from the new library.")
-        fail.set("type", "MISSING_CONTRACT_MEMBER")
+        if blocks:
+            fail = ET.SubElement(tc, "failure")
+            fail.set("message", f"Required symbol/version '{label}' is missing from the new library.")
+            fail.set("type", "MISSING_CONTRACT_MEMBER")
 
 
 def _add_scoped_properties(ts: ET.Element, result: DiffResult) -> None:

@@ -1232,6 +1232,40 @@ class TestUsedByScoping:
         data = json.loads(result.stdout)
         assert data["severity"]["categories"]["abi_breaking"]["count"] == 1
 
+    def test_sarif_missing_symbol_covered_by_change_not_double_synthesized(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Regression (Codex review): "_Z3foov" is both a missing symbol
+        # (absent from new's exports) *and* the subject of a real, scoped
+        # FUNC_REMOVED Change in the actual diff -- the SARIF report must
+        # show one result for it, not two (the real Change plus a synthetic
+        # missing-contract entry double-reporting the same break).
+        from abicheck import dumper as dumper_mod
+
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        old = tmp_path / "old.so"
+        old.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        new = tmp_path / "new.so"
+        new.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        old_snap = _snap("1.0", library="libfoo.so")  # has foo/_Z3foov
+        new_snap = _snap("2.0", library="libfoo.so", funcs=[])  # foo removed
+        monkeypatch.setattr(
+            dumper_mod, "dump", MagicMock(side_effect=[old_snap, new_snap])
+        )
+        res = self._result(
+            verdict=Verdict.BREAKING, missing=["_Z3foov"],
+            breaking_for_app=[Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")],
+        )
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app), "--format", "sarif",
+        )
+        data = json.loads(result.stdout)
+        sarif_results = data["runs"][0]["results"]
+        assert len(sarif_results) == 1
+        assert sarif_results[0]["ruleId"] == "func_removed"
+
     def test_severity_missing_symbols_only_floors_at_4(
         self, tmp_path, monkeypatch
     ) -> None:

@@ -647,4 +647,28 @@ class TestScopedGate:
         assert results[0]["ruleId"] == "used_by_missing_symbol"
         assert results[0]["level"] == "error"
         assert "_Z6vanishv" in results[0]["message"]["text"]
-        assert doc["runs"][0]["invocations"][0]["exitCode"] == 4
+
+    def test_missing_contract_demoted_by_severity_config_is_not_blocking(
+        self,
+    ) -> None:
+        # Regression (Codex review): under a severity config that demotes
+        # abi_breaking (e.g. --severity-preset info-only), the scoped exit
+        # code for a missing contract member is floored at 0 by
+        # missing_contract_exit_code -- the synthetic result must not read
+        # as "error" in that case, or a code-scanning consumer would flag/
+        # block a finding the gate itself passed.
+        from abicheck.severity import SeverityConfig, SeverityLevel
+
+        demoted = SeverityConfig(abi_breaking=SeverityLevel.WARNING)
+        r = _make_result([], verdict=Verdict.COMPATIBLE)
+        r.scoped_verdict = Verdict.BREAKING  # type: ignore[attr-defined]
+        r.scoped_exit_code = 0  # type: ignore[attr-defined]
+        r.scoped_exit_code_scheme = "severity"  # type: ignore[attr-defined]
+        r.gate_scope = "used_by"  # type: ignore[attr-defined]
+        r.scoped_relevant_finding_ids = frozenset()  # type: ignore[attr-defined]
+        r.scoped_missing_labels = ("_Z6vanishv",)  # type: ignore[attr-defined]
+        doc = to_sarif(r, severity_config=demoted)
+        result = doc["runs"][0]["results"][0]
+        assert result["level"] == "note"
+        assert result["properties"]["relevantToGate"] is False
+        assert doc["runs"][0]["invocations"][0]["exitCode"] == 0

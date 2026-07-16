@@ -37,6 +37,7 @@ except ImportError:  # pragma: no cover - rich-click is a declared dependency
 from .checker import DiffResult, LibraryMetadata
 from .cli_audit import echo_filtered_surface, echo_reconciled
 from .cli_dump_helpers import (
+    evidence_depth_label,
     handle_non_elf_dump,
     perform_elf_dump,
     resolve_dump_collect_context,
@@ -360,6 +361,13 @@ def _write_snapshot_output(
     if output:
         _safe_write_output(output, result)
         click.echo(f"Snapshot written to {output}", err=True)
+        # Self-describing output (CLI-audit P2): report the evidence depth
+        # this snapshot actually reached -- computed from what it carries,
+        # not the requested --depth, so an explicit --depth source that
+        # collected nothing usable is never silently reported as if it had
+        # succeeded. Only alongside the file-write notice above (never for
+        # bare stdout output, which callers may pipe/parse as pure JSON).
+        click.echo(f"Resolved evidence depth: {evidence_depth_label(snap)}", err=True)
     else:
         click.echo(result)
 

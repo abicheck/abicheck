@@ -661,6 +661,7 @@ def _apply_used_by_scoping(
                 f"library, not headers-only); {label} ({path}) is neither."
             )
 
+    from .appcompat import uncovered_missing_symbols
     from .reporter import _finding_id
 
     summaries = []
@@ -694,8 +695,16 @@ def _apply_used_by_scoping(
         )
         summaries.append(_app_compat_summary(scoped))
         relevant_finding_ids.update(_finding_id(c) for c in scoped.breaking_for_app)
-        missing_labels.update(scoped.missing_symbols)
-        missing_labels.update(scoped.missing_versions)
+        # A missing symbol/version already covered by a relevant Change (e.g.
+        # FUNC_REMOVED) must not also become a synthetic missing-contract
+        # finding -- that would double-report the same ABI break (Codex
+        # review, mirrors _scoped_severity_summary's own dedup below).
+        missing_labels.update(
+            uncovered_missing_symbols(
+                list(scoped.missing_symbols) + list(scoped.missing_versions),
+                scoped.breaking_for_app,
+            )
+        )
         exit_code = _scoped_exit_code(
             scoped, scoped.breaking_for_app, result, exit_code_scheme, sev_config,
             policy, policy_file,
@@ -743,7 +752,7 @@ def _apply_required_symbol_scoping(
     exit_code_scheme: str = "legacy", sev_config: Any = None,
 ) -> int:
     """Scope *result* to an explicit ``--required-symbol(s)`` contract (ADR-043)."""
-    from .appcompat import scope_diff_to_required_symbols
+    from .appcompat import scope_diff_to_required_symbols, uncovered_missing_symbols
     from .reporter import _finding_id
 
     scoped = scope_diff_to_required_symbols(
@@ -756,7 +765,12 @@ def _apply_required_symbol_scoping(
     result.scoped_relevant_finding_ids = frozenset(  # type: ignore[attr-defined]
         _finding_id(c) for c in scoped.breaking_for_host
     )
-    result.scoped_missing_labels = tuple(sorted(scoped.missing_entrypoints))  # type: ignore[attr-defined]
+    # An entrypoint already covered by a relevant Change must not also
+    # become a synthetic missing-contract finding (Codex review, mirrors
+    # _apply_used_by_scoping's identical dedup).
+    result.scoped_missing_labels = tuple(sorted(  # type: ignore[attr-defined]
+        uncovered_missing_symbols(scoped.missing_entrypoints, scoped.breaking_for_host)
+    ))
     exit_code = _scoped_exit_code(
         scoped, scoped.breaking_for_host, result, exit_code_scheme, sev_config,
         policy, policy_file,
@@ -1407,6 +1421,7 @@ def run_compare(
         demangle=demangle,
     )
     text = _fold_scoped_compat_into_text(text, fmt, result)
+    text = _fold_evidence_depth_into_json(text, fmt, old, new)
 
     _write_or_echo(output, text)
 
@@ -1434,6 +1449,7 @@ def run_compare(
             demangle=secondary_demangle,
         )
         secondary_text = _fold_scoped_compat_into_text(secondary_text, secondary_fmt, result)
+        secondary_text = _fold_evidence_depth_into_json(secondary_text, secondary_fmt, old, new)
         _write_or_echo(secondary_output, secondary_text)
 
     if scoped_exit_code is not None:
@@ -1446,6 +1462,32 @@ def run_compare(
 
     _announce_exit_scheme(resolved_cfg.exit_code_scheme, fmt=fmt, stat=stat)
     _exit_with_severity_or_verdict(result, sev_config, resolved_cfg.exit_code_scheme)
+
+
+def _fold_evidence_depth_into_json(text: str, fmt: str, old: Any, new: Any) -> str:
+    """Add ``old_evidence_depth``/``new_evidence_depth`` to a JSON report (CLI-audit P2).
+
+    Self-describing output: the evidence depth each side's snapshot *actually*
+    reached (``binary``/``headers``/``build``/``source``), computed from what
+    the snapshot carries rather than the requested ``--depth`` -- so a report
+    is never silently mismatched against what was actually collected. JSON
+    only; other formats already show depth-related context in their own
+    ways (or, for binary/structured formats, are left untouched per
+    :func:`_fold_scoped_compat_into_text`'s convention).
+    """
+    if fmt != "json":
+        return text
+    import json
+
+    from .cli_dump_helpers import evidence_depth_label
+
+    try:
+        payload = json.loads(text)
+    except ValueError:
+        return text
+    payload["old_evidence_depth"] = evidence_depth_label(old)
+    payload["new_evidence_depth"] = evidence_depth_label(new)
+    return json.dumps(payload, indent=2)
 
 
 def _fold_scoped_compat_into_text(text: str, fmt: str, result: Any) -> str:

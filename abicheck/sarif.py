@@ -40,6 +40,7 @@ from abicheck.checker_policy import (
 )
 from abicheck.report_model import VERDICT_TO_SARIF_LEVEL as _VERDICT_TO_SARIF_LEVEL
 from abicheck.reporter import _finding_id, apply_show_only
+from abicheck.severity import missing_contract_exit_code
 
 if TYPE_CHECKING:
     from abicheck.severity import SeverityConfig
@@ -309,27 +310,43 @@ def _severity_gate_properties(
     }
 
 
-def _missing_contract_result(label: str, gate_scope: str) -> dict[str, Any]:
+def _missing_contract_result(
+    label: str, gate_scope: str, severity_config: SeverityConfig | None,
+) -> dict[str, Any]:
     """Synthesize a SARIF result for a missing required symbol/version/entrypoint.
 
     A required contract member absent from the new library (--used-by's
     ``missing_symbols``/``missing_versions``, or --required-symbol's
-    ``missing_entrypoints``) is unconditionally BREAKING for the scoped gate,
-    but it has no backing diff ``Change`` -- it was never in ``result.changes``
-    to begin with, so :func:`_result_for` never emits it. Without a synthetic
-    result the gate's own ``exitCode`` could be a nonzero (BREAKING) value
-    while ``results`` shows nothing to explain it (CLI-audit P1).
+    ``missing_entrypoints``) has no backing diff ``Change`` -- it was never in
+    ``result.changes`` to begin with, so :func:`_result_for` never emits it.
+    Without a synthetic result the gate's own ``exitCode`` could be a nonzero
+    (BREAKING) value while ``results`` shows nothing to explain it (CLI-audit
+    P1).
+
+    The level must follow the same severity decision as the gate's own exit
+    code (:func:`abicheck.severity.missing_contract_exit_code`, the function
+    ``_scoped_exit_code`` floors on): under the legacy scheme (no
+    *severity_config*) a missing contract member is unconditionally BREAKING,
+    but under a severity scheme that demotes ``abi_breaking`` (e.g.
+    ``--severity-preset info-only``), the scoped exit code can be 0 for the
+    same missing member -- emitting ``level: "error"`` regardless would let a
+    SARIF/code-scanning consumer flag/block a finding the gate itself passed
+    (Codex review).
     """
     rule_id = (
         "used_by_missing_symbol" if gate_scope == "used_by" else "required_symbol_missing"
     )
+    blocks = (
+        severity_config is None
+        or missing_contract_exit_code(severity_config) != 0
+    )
     return {
         "ruleId": rule_id,
-        "level": "error",
+        "level": "error" if blocks else "note",
         "message": {
             "text": f"Required symbol/version '{label}' is missing from the new library.",
         },
-        "properties": {"relevantToGate": True, "missingContractMember": label},
+        "properties": {"relevantToGate": blocks, "missingContractMember": label},
     }
 
 
@@ -434,7 +451,9 @@ def to_sarif(
     gate_scope = getattr(result, "gate_scope", None)
     if gate_scope is not None:
         for label in getattr(result, "scoped_missing_labels", ()) or ():
-            sarif_results.append(_missing_contract_result(label, gate_scope))
+            sarif_results.append(
+                _missing_contract_result(label, gate_scope, severity_config)
+            )
 
     severity_gate = (
         _severity_gate_properties(result, severity_config)

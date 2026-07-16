@@ -180,6 +180,29 @@ def resolve_dump_depth(
     return level_to_collect_mode(method, evidence_depth, source_scope=SourceScope.TARGET)
 
 
+def evidence_depth_label(snap: AbiSnapshot) -> str:
+    """Report which evidence depth a snapshot *actually* carries (CLI-audit P2).
+
+    Computed purely from what the snapshot already holds -- ``binary``/
+    ``headers``/``build``/``source`` -- rather than echoing back the
+    requested ``--depth``: an explicit ``--depth source`` with no usable
+    source facts still produces a snapshot that only reaches ``headers`` (or
+    ``binary``), and this makes that honest instead of silently overstating
+    what was collected. Requires no new ``AbiSnapshot`` field -- it reads the
+    same ``from_headers``/``build_source`` data the snapshot already carries.
+    """
+    build_source = snap.build_source
+    if build_source is not None and (
+        build_source.source_abi is not None or build_source.source_graph is not None
+    ):
+        return "source"
+    if build_source is not None and build_source.build_evidence is not None:
+        return "build"
+    if snap.from_headers:
+        return "headers"
+    return "binary"
+
+
 def render_dump_dry_run(
     *,
     so_path: Path | None,

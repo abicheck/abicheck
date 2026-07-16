@@ -953,7 +953,7 @@ def abi_compare(
         scoped_payload: Any = None
         scoped_verdict_value: str | None = None
         if used_by:
-            from .appcompat import scope_diff_to_app
+            from .appcompat import scope_diff_to_app, uncovered_missing_symbols
             from .service import detect_binary_format
 
             old_lib: Any = old_path if detect_binary_format(old_path) is not None else old_snap
@@ -1009,8 +1009,16 @@ def abi_compare(
                     policy=active_policy, policy_file=pf,
                 )
                 relevant_finding_ids.update(_finding_id(c) for c in scoped.breaking_for_app)
-                missing_labels.update(scoped.missing_symbols)
-                missing_labels.update(scoped.missing_versions)
+                # A missing symbol/version already covered by a relevant
+                # Change (e.g. FUNC_REMOVED) must not also become a
+                # synthetic missing-contract finding (Codex review, mirrors
+                # cli_compare_helpers._apply_used_by_scoping's dedup).
+                missing_labels.update(
+                    uncovered_missing_symbols(
+                        list(scoped.missing_symbols) + list(scoped.missing_versions),
+                        scoped.breaking_for_app,
+                    )
+                )
                 summaries.append(
                     {
                         "app": scoped.app_path,
@@ -1067,7 +1075,10 @@ def abi_compare(
                 result.scoped_blocking_categories = categories  # type: ignore[attr-defined]
                 result.scoped_severity_counts = counts  # type: ignore[attr-defined]
         elif required_symbols:
-            from .appcompat import scope_diff_to_required_symbols
+            from .appcompat import (
+                scope_diff_to_required_symbols,
+                uncovered_missing_symbols,
+            )
 
             scoped_host = scope_diff_to_required_symbols(
                 result, old_snap, new_snap, required_symbols,
@@ -1097,7 +1108,14 @@ def abi_compare(
             result.scoped_relevant_finding_ids = frozenset(  # type: ignore[attr-defined]
                 _finding_id(c) for c in scoped_host.breaking_for_host
             )
-            result.scoped_missing_labels = tuple(sorted(scoped_host.missing_entrypoints))  # type: ignore[attr-defined]
+            # An entrypoint already covered by a relevant Change must not
+            # also become a synthetic missing-contract finding (Codex
+            # review).
+            result.scoped_missing_labels = tuple(sorted(  # type: ignore[attr-defined]
+                uncovered_missing_symbols(
+                    scoped_host.missing_entrypoints, scoped_host.breaking_for_host
+                )
+            ))
             if severity_config is not None:
                 categories, counts = _scoped_severity_summary(
                     scoped_host.breaking_for_host, scoped_host.missing_entrypoints,

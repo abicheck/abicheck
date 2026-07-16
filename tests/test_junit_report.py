@@ -1427,3 +1427,25 @@ class TestScopedProperties:
         assert tc.get("name") == "_Z6vanishv"
         assert tc.get("classname") == "used_by_contract"
         assert tc.find("failure") is not None
+
+    def test_missing_contract_demoted_by_severity_config_does_not_fail(self) -> None:
+        # Regression (Codex review): under a severity config that demotes
+        # abi_breaking, the scoped exit code for a missing contract member
+        # is floored at 0 by missing_contract_exit_code -- the synthetic
+        # testcase must not fail in that case, or a JUnit-consuming CI would
+        # mark the run failed even though the gate itself passed.
+        from abicheck.severity import SeverityConfig, SeverityLevel
+
+        demoted = SeverityConfig(abi_breaking=SeverityLevel.WARNING)
+        r = _make_result([], verdict=Verdict.COMPATIBLE)
+        r.scoped_verdict = Verdict.BREAKING  # type: ignore[attr-defined]
+        r.gate_scope = "used_by"  # type: ignore[attr-defined]
+        r.scoped_relevant_finding_ids = frozenset()  # type: ignore[attr-defined]
+        r.scoped_missing_labels = ("_Z6vanishv",)  # type: ignore[attr-defined]
+        xml_str = to_junit_xml(r, severity_config=demoted)
+        root = _parse(xml_str)
+        ts = root.find("testsuite")
+        assert ts.get("failures") == "0"
+        tc = ts.find("testcase")
+        assert tc.get("name") == "_Z6vanishv"
+        assert tc.find("failure") is None
