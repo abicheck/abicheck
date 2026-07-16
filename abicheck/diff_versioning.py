@@ -307,14 +307,23 @@ def check_platform_baseline_floor(
 
     *runtime_floors* is the same ``{prefix: "X.Y"}`` mapping consumed by
     :func:`apply_runtime_floor_contract` (ADR-020b ``EnvironmentMatrix`` /
-    ``--env-matrix``, or a ``--glibc-floor`` CLI flag folded into it) — only
-    the ``GLIBC`` entry is read here; other prefixes have no platform-tag
-    concept yet. Returns ``[]`` when no ``GLIBC`` floor is declared, the
-    floor is malformed, or the binary's own requirement is at or below it.
+    ``--env-matrix``) — keys are matched case-insensitively (normalized to
+    upper), same as that function, since a direct API caller can construct
+    ``EnvironmentMatrix(runtime_floors={"glibc": ...})`` bypassing
+    ``from_dict``'s uppercasing. Only the ``GLIBC`` entry is read here; other
+    prefixes have no platform-tag concept yet. Returns ``[]`` when no
+    ``GLIBC`` floor is declared, the floor is malformed, or the binary's own
+    requirement is at or below it.
+
+    A binary built with packed relative relocations (``DT_RELR``) implicitly
+    requires glibc >= 2.36 to load even when no ``GLIBC_ABI_DT_RELR``-tagged
+    symbol version happens to appear in ``versions_required`` — the same
+    implied floor :func:`apply_runtime_floor_contract` folds in for the delta
+    case via ``_DT_RELR_GLIBC_FLOOR_TAG``, so it is folded in here too.
     """
     if not runtime_floors:
         return []
-    floor_raw = runtime_floors.get("GLIBC")
+    floor_raw = {k.upper(): v for k, v in runtime_floors.items()}.get("GLIBC")
     if not floor_raw:
         return []
     floor_tuple = _parse_dotted_numeric_version(floor_raw)
@@ -334,6 +343,12 @@ def check_platform_baseline_floor(
                 best, best_tag = parsed, tag
             if parsed > floor_tuple:
                 providers.add(lib)
+    if getattr(elf, "has_dt_relr", False):
+        relr_tuple = _parse_abi_version_tag(_DT_RELR_GLIBC_FLOOR_TAG)
+        if relr_tuple > best:
+            best, best_tag = relr_tuple, _DT_RELR_GLIBC_FLOOR_TAG
+        if relr_tuple > floor_tuple:
+            providers.add(getattr(elf, "soname", "") or "<binary>")
     if best == (0,) or best <= floor_tuple:
         return []
     return [

@@ -1375,54 +1375,25 @@ def load_suppression_and_policy(
     return suppression, pf
 
 
-def load_env_matrix(
-    path: Path | None, *, glibc_floor: str | None = None
-) -> EnvironmentMatrix | None:
-    """Load an ADR-020b environment-matrix YAML, or None when both inputs are unset.
+def load_env_matrix(path: Path | None) -> EnvironmentMatrix | None:
+    """Load an ADR-020b environment-matrix YAML, or None when *path* is None.
 
     Tier-2 loader (mirrors :func:`load_suppression_and_policy`): parse/shape
     errors surface as :class:`ValidationError` with identical text across
     front-ends.
-
-    *glibc_floor* (G10's ``--glibc-floor`` CLI shorthand) is folded into the
-    returned matrix's ``runtime_floors["GLIBC"]``. An explicit ``GLIBC`` entry
-    already present in the loaded YAML wins — *glibc_floor* only fills the
-    entry in when it is absent, so a full ``--env-matrix`` declaration is
-    never silently overridden by the shorthand flag.
     """
+    if path is None:
+        return None
     from .environment_matrix import EnvironmentMatrix
 
-    matrix: EnvironmentMatrix | None
-    if path is None:
-        matrix = None
-    else:
-        try:
-            # from_yaml converts malformed YAML to ValueError, so no yaml import
-            # is needed here (abicheck.service has no import-untyped override).
-            matrix = EnvironmentMatrix.from_yaml(Path(path))
-        except (TypeError, ValueError) as e:
-            raise ValidationError(f"Invalid environment matrix {path}: {e}") from e
-        except OSError as e:
-            raise ValidationError(f"Cannot read environment matrix {path}: {e}") from e
-
-    if not glibc_floor:
-        return matrix
-    if matrix is not None and "GLIBC" in matrix.runtime_floors:
-        return matrix
-    from dataclasses import replace
-
-    from .diff_versioning import _parse_dotted_numeric_version
-
-    if _parse_dotted_numeric_version(glibc_floor) is None:
-        raise ValidationError(
-            f"--glibc-floor must be a dotted numeric version (digits and "
-            f"dots only, e.g. '2.27'), got {glibc_floor!r}"
-        )
-    if matrix is None:
-        return EnvironmentMatrix(runtime_floors={"GLIBC": glibc_floor})
-    floors = dict(matrix.runtime_floors)
-    floors["GLIBC"] = glibc_floor
-    return replace(matrix, runtime_floors=floors)
+    try:
+        # from_yaml converts malformed YAML to ValueError, so no yaml import
+        # is needed here (abicheck.service has no import-untyped override).
+        return EnvironmentMatrix.from_yaml(Path(path))
+    except (TypeError, ValueError) as e:
+        raise ValidationError(f"Invalid environment matrix {path}: {e}") from e
+    except OSError as e:
+        raise ValidationError(f"Cannot read environment matrix {path}: {e}") from e
 
 
 def compare_snapshots(

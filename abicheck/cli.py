@@ -69,7 +69,6 @@ from .cli_options import (
     debug_resolution_options,
     env_matrix_option,
     evidence_options,
-    glibc_floor_option,
     lang_option,
     normalize_sided_options,
     output_options,
@@ -1407,7 +1406,6 @@ def _embed_inline_source_side(
 @evidence_options  # --depth/--max, --sources, --build-info
 @adr027_compare_options  # ADR-027: --pattern-verdicts/--explain-patterns/--surface-metrics
 @env_matrix_option  # ADR-020b: --env-matrix (runtime_floors contract)
-@glibc_floor_option  # G10: --glibc-floor (manylinux platform-baseline shorthand)
 @profile_option  # ADR-040 Lever 3: --profile (workflow-default bundles)
 @click.option("--reconcile-build-context", is_flag=True, default=False,
               help="Clear context-free header-parse false positives using the build's "

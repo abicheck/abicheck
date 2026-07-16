@@ -509,8 +509,8 @@ def parse_manylinux_glibc_floor(name: str) -> str | None:
     glibc version among them is the one an actual binary must not exceed.
 
     Returns a dotted ``"X.Y"`` string suitable for
-    ``EnvironmentMatrix.runtime_floors["GLIBC"]`` / ``--glibc-floor``, or
-    ``None`` if *name* carries no recognizable manylinux tag.
+    ``EnvironmentMatrix.runtime_floors["GLIBC"]``, or ``None`` if *name*
+    carries no recognizable manylinux tag.
     """
     best: tuple[int, int] | None = None
     for m in _MANYLINUX_TAG_RE.finditer(name):

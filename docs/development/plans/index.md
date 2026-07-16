@@ -41,7 +41,7 @@ Completed or decided plans are retained for implementation history:
 | **G6** | Done — BTF/CTF and SYCL PI/UR workflows | [g6](g6-kernel-btf-and-accelerator.md) |
 | **G7** | Done — release recommendation | `abicheck/semver.py` |
 | **G9** | Done — auditwheel/delocate vendored-library pairing, filename and embedded DT_SONAME/install-name both normalized via `strip_vendor_hash` | [g9](g9-wheel-vendored-matching.md) |
-| **G10** | Done — manylinux glibc-floor / platform-baseline check (`platform_baseline_floor_raised`, `--glibc-floor`) | [g10](g10-glibc-floor-check.md) |
+| **G10** | Done — manylinux glibc-floor / platform-baseline check (`platform_baseline_floor_raised`, declared via `--env-matrix`'s `runtime_floors`) | [g10](g10-glibc-floor-check.md) |
 | **G16** | Done — header-scope toolchain diagnostics, `HeaderToolchainError`, and a real-host `integration` end-to-end check | [g16](g16-header-scope-toolchain-robustness.md) |
 | **G8** | Decided — static/import archives are a by-design non-goal | [g8](g8-static-libraries.md) |
 | **G12** | Done — security-hardening drift surface and policy preset | [g12](g12-security-hardening.md) |

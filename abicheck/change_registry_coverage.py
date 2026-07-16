@@ -203,7 +203,7 @@ COVERAGE_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
     _E("platform_baseline_floor_raised", _R,
        impact="The binary's own maximum required symbol-version tag exceeds a "
               "declared platform-baseline promise (e.g. a manylinux wheel tag "
-              "such as `manylinux_2_27`, or an explicit `--glibc-floor`/"
+              "such as `manylinux_2_27`, or an explicit `--env-matrix` "
               "`runtime_floors` declaration). Unlike a runtime-floor *raise* "
               "between releases, this fires on a single artifact's own "
               "requirement — the classic 'works on my box, `GLIBC_2.x not "

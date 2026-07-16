@@ -11,18 +11,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
-- **`compare --glibc-floor X.Y` — manylinux/platform-baseline glibc check
-  (G10).** New `platform_baseline_floor_raised` deployment-`RISK` `ChangeKind`:
-  checks a binary's own maximum required `GLIBC_2.x` against a declared
+- **manylinux/platform-baseline glibc check (G10).** New
+  `platform_baseline_floor_raised` deployment-`RISK` `ChangeKind`: checks a
+  binary's own maximum required `GLIBC_2.x` (including the implied floor from
+  packed relative relocations, `DT_RELR` -> glibc >= 2.36) against a declared
   platform-baseline floor (e.g. the floor implied by a `manylinux_2_27` wheel
   tag), independent of any old/new delta — unlike the existing
   `runtime_floor_raised` reclassification, this catches a binary that has
-  *always* required a newer glibc than its wheel tag promises. `--glibc-floor`
-  is a shorthand for `--env-matrix`'s `runtime_floors: {GLIBC: "X.Y"}`
-  (ADR-020b), folded together in `service.load_env_matrix`. New
-  `abicheck.package.parse_manylinux_glibc_floor()` derives the floor from a
-  manylinux wheel tag (PEP 600 plus the `manylinux1`/`2010`/`2014` legacy
-  aliases) for programmatic use.
+  *always* required a newer glibc than its wheel tag promises. Declared via
+  `--env-matrix`'s existing `runtime_floors: {GLIBC: "X.Y"}` (ADR-020b) — no
+  new flag. New `abicheck.package.parse_manylinux_glibc_floor()` derives the
+  floor from a manylinux wheel tag (PEP 600 plus the
+  `manylinux1`/`2010`/`2014` legacy aliases) for programmatic use.
 
 ### Fixed
 

@@ -183,7 +183,6 @@ def _reject_set_input_flags(
     reconcile_build_context: bool,
     env_matrix_path: Path | None,
     secondary_fmt: str | None = None,
-    glibc_floor: str | None = None,
 ) -> None:
     """Reject single-pair-only flags on a directory/package (release) compare.
 
@@ -209,14 +208,6 @@ def _reject_set_input_flags(
             "--env-matrix is not supported for directory/package (release) "
             "comparisons yet; it applies to single-file / snapshot inputs. "
             "Compare the libraries individually to use it."
-        )
-    if glibc_floor is not None:
-        raise click.UsageError(
-            "--glibc-floor is not supported for directory/package (release) "
-            "comparisons yet; it applies to single-file / snapshot inputs "
-            "(same restriction as --env-matrix, which it shares its "
-            "runtime_floors mechanism with). Compare the libraries "
-            "individually to use it."
         )
     if secondary_fmt is not None:
         raise click.UsageError(
@@ -478,7 +469,6 @@ def run_compare(
     surface_metrics: bool,
     reconcile_build_context: bool,
     env_matrix_path: Path | None,
-    glibc_floor: str | None,
     verbose: bool,
     old_build_info: Path | None = None, new_build_info: Path | None = None,
     old_sources: Path | None = None, new_sources: Path | None = None,
@@ -571,7 +561,6 @@ def run_compare(
         # single-pair-only flags on set inputs — reject them loudly (ADR-037 D12).
         _reject_set_input_flags(
             exit_code_scheme, reconcile_build_context, env_matrix_path, secondary_fmt,
-            glibc_floor,
         )
         _reject_compile_context_for_set_inputs(ctx, project_cfg)
         _reject_evidence_flags_for_set_inputs(ctx)
@@ -840,7 +829,7 @@ def run_compare(
     apply_patterns = pattern_verdicts or explain_patterns  # --explain implies on
     from .service import compare_snapshots, load_env_matrix
     try:
-        env_matrix = load_env_matrix(env_matrix_path, glibc_floor=glibc_floor)
+        env_matrix = load_env_matrix(env_matrix_path)
     except AbicheckError as exc:
         raise click.UsageError(str(exc)) from exc
     result = compare_snapshots(

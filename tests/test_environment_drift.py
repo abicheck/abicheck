@@ -416,9 +416,54 @@ class TestPlatformBaselineFloorRaised:
         )
         assert check_platform_baseline_floor(elf, {"GLIBC": "2.27"}) == []
 
+    def test_lowercase_floor_key_still_matches(self) -> None:
+        # A direct API caller can construct EnvironmentMatrix(runtime_floors=
+        # {"glibc": ...}), bypassing from_dict's uppercasing. Keys must be
+        # matched case-insensitively here too, like apply_runtime_floor_contract.
+        from abicheck.diff_versioning import check_platform_baseline_floor
 
-class TestGlibcFloorCliFlag:
-    """G10: ``compare --glibc-floor X.Y`` end-to-end over JSON snapshots."""
+        elf = _elf(
+            needed=["libc.so.6"],
+            versions_required={"libc.so.6": ["GLIBC_2.34"]},
+        )
+        changes = check_platform_baseline_floor(elf, {"glibc": "2.27"})
+        assert len(changes) == 1
+        assert changes[0].kind is ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED
+
+    def test_dt_relr_implies_floor_even_without_matching_version_tag(self) -> None:
+        # DT_RELR requires glibc >= 2.36 to load even when no
+        # GLIBC_ABI_DT_RELR-tagged symbol version happens to appear in
+        # versions_required (e.g. a snapshot that only captured non-glibc
+        # imports) — the same implied floor apply_runtime_floor_contract
+        # folds in for the delta case must be folded in here too.
+        from abicheck.diff_versioning import check_platform_baseline_floor
+
+        elf = _elf(needed=["libc.so.6"], has_dt_relr=True)
+        assert check_platform_baseline_floor(elf, {"GLIBC": "2.38"}) == []
+        changes = check_platform_baseline_floor(elf, {"GLIBC": "2.28"})
+        assert len(changes) == 1
+        assert changes[0].kind is ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED
+        assert changes[0].new_value == "GLIBC_2.36"
+
+    def test_dt_relr_floor_combines_with_explicit_version_tags(self) -> None:
+        # The higher of the two implied floors (explicit tags vs. DT_RELR) wins.
+        from abicheck.diff_versioning import check_platform_baseline_floor
+
+        elf = _elf(
+            needed=["libc.so.6"],
+            versions_required={"libc.so.6": ["GLIBC_2.40"]},
+            has_dt_relr=True,
+        )
+        changes = check_platform_baseline_floor(elf, {"GLIBC": "2.28"})
+        assert len(changes) == 1
+        assert changes[0].new_value == "GLIBC_2.40"
+
+
+class TestPlatformBaselineFloorCliEndToEnd:
+    """G10: the check reaches exit code / JSON through the real ``compare``
+    CLI via ``--env-matrix``'s existing ``runtime_floors`` mechanism (no
+    dedicated flag — this reuses the same declared-constraint contract
+    ``apply_runtime_floor_contract`` already uses)."""
 
     @staticmethod
     def _write_snapshot(path, tag: str) -> None:
@@ -436,11 +481,13 @@ class TestGlibcFloorCliFlag:
         new_p = tmp_path / "new.json"
         self._write_snapshot(old_p, "GLIBC_2.34")
         self._write_snapshot(new_p, "GLIBC_2.34")
+        env_p = tmp_path / "env.yaml"
+        env_p.write_text('runtime_floors:\n  GLIBC: "2.27"\n')
         result = CliRunner().invoke(
             main,
             [
                 "compare", str(old_p), str(new_p),
-                "--glibc-floor", "2.27", "--format", "json",
+                "--env-matrix", str(env_p), "--format", "json",
             ],
         )
         assert result.exit_code == 0, result.output  # COMPATIBLE_WITH_RISK
@@ -455,31 +502,17 @@ class TestGlibcFloorCliFlag:
         new_p = tmp_path / "new.json"
         self._write_snapshot(old_p, "GLIBC_2.17")
         self._write_snapshot(new_p, "GLIBC_2.17")
+        env_p = tmp_path / "env.yaml"
+        env_p.write_text('runtime_floors:\n  GLIBC: "2.27"\n')
         result = CliRunner().invoke(
             main,
             [
                 "compare", str(old_p), str(new_p),
-                "--glibc-floor", "2.27", "--format", "json",
+                "--env-matrix", str(env_p), "--format", "json",
             ],
         )
         assert result.exit_code == 0, result.output
         assert "platform_baseline_floor_raised" not in result.output
-
-    def test_malformed_glibc_floor_is_usage_error(self, tmp_path) -> None:
-        from click.testing import CliRunner
-
-        from abicheck.cli import main
-
-        old_p = tmp_path / "old.json"
-        new_p = tmp_path / "new.json"
-        self._write_snapshot(old_p, "GLIBC_2.17")
-        self._write_snapshot(new_p, "GLIBC_2.17")
-        result = CliRunner().invoke(
-            main,
-            ["compare", str(old_p), str(new_p), "--glibc-floor", "nope"],
-        )
-        assert result.exit_code == 64
-        assert "dotted numeric" in result.output
 
 
 class TestEnvironmentMatrixRuntimeFloors:
@@ -578,45 +611,6 @@ class TestLoadEnvMatrix:
 
         with pytest.raises(ValidationError, match="Cannot read environment matrix"):
             load_env_matrix(tmp_path / "nope.yaml")
-
-    def test_glibc_floor_alone_builds_matrix(self) -> None:
-        from abicheck.service import load_env_matrix
-
-        matrix = load_env_matrix(None, glibc_floor="2.27")
-        assert matrix is not None
-        assert matrix.runtime_floors == {"GLIBC": "2.27"}
-
-    def test_no_path_no_glibc_floor_returns_none(self) -> None:
-        from abicheck.service import load_env_matrix
-
-        assert load_env_matrix(None, glibc_floor=None) is None
-
-    def test_glibc_floor_merges_into_loaded_matrix(self, tmp_path) -> None:
-        from abicheck.service import load_env_matrix
-
-        p = tmp_path / "env.yaml"
-        p.write_text('runtime_floors:\n  GLIBCXX: "3.4.30"\n')
-        matrix = load_env_matrix(p, glibc_floor="2.27")
-        assert matrix is not None
-        assert matrix.runtime_floors == {"GLIBCXX": "3.4.30", "GLIBC": "2.27"}
-
-    def test_explicit_env_matrix_glibc_entry_wins_over_shorthand(
-        self, tmp_path
-    ) -> None:
-        from abicheck.service import load_env_matrix
-
-        p = tmp_path / "env.yaml"
-        p.write_text('runtime_floors:\n  GLIBC: "2.28"\n')
-        matrix = load_env_matrix(p, glibc_floor="2.17")
-        assert matrix is not None
-        assert matrix.runtime_floors == {"GLIBC": "2.28"}
-
-    def test_malformed_glibc_floor_raises_validation_error(self) -> None:
-        from abicheck.errors import ValidationError
-        from abicheck.service import load_env_matrix
-
-        with pytest.raises(ValidationError, match="dotted numeric"):
-            load_env_matrix(None, glibc_floor="not-a-version")
 
     def test_compare_request_validates_path_exists(self, tmp_path) -> None:
         from abicheck.api_types import CompareRequest, InputSpec

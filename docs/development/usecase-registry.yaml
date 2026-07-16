@@ -594,25 +594,23 @@ use_cases:
         abicheck/diff_versioning.py,
         abicheck/checker_policy.py,
         abicheck/change_registry_coverage.py,
-        abicheck/cli_options.py,
-        abicheck/service.py,
         abicheck/package.py,
       ]
       tests: [tests/test_environment_drift.py, tests/test_package.py]
     note: >
       check_platform_baseline_floor() (diff_versioning.py) compares the max
-      GLIBC_2.x in elf.versions_required against a declared floor and emits
+      GLIBC_2.x in elf.versions_required (plus the implied floor from
+      DT_RELR, glibc >= 2.36) against a declared floor and emits
       platform_baseline_floor_raised (new deployment-RISK ChangeKind) — fires
       even with no old/new delta, unlike the existing runtime_floor_raised
-      contract. Declared via --env-matrix's runtime_floors (ADR-020b) or the
-      new --glibc-floor X.Y shorthand (compare command only; wired through
-      the Tier-2 service.load_env_matrix). package.parse_manylinux_glibc_floor()
-      derives the floor from a manylinux wheel tag (PEP 600 + legacy aliases)
-      for programmatic/future CLI auto-derivation use, though CLI
-      auto-derivation from a wheel filename is not yet wired end-to-end (the
-      explicit flag/env-matrix path is). compare-release (directory/package
-      release fan-out) does not support --glibc-floor/--env-matrix yet —
-      same restriction as --env-matrix already had.
+      contract. Declared via --env-matrix's existing runtime_floors
+      (ADR-020b) — no dedicated CLI flag; runtime_floors keys are matched
+      case-insensitively, same as apply_runtime_floor_contract.
+      package.parse_manylinux_glibc_floor() derives the floor from a
+      manylinux wheel tag (PEP 600 + legacy aliases) for programmatic/future
+      auto-derivation use — not yet wired into any CLI path.
+      compare-release (directory/package release fan-out) does not support
+      --env-matrix yet, so this check does not run there either.
 
   - id: UC-TC-numpy-capi-envelope
     axis: toolchain
