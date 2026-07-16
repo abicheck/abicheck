@@ -601,6 +601,34 @@ def _python_full_version_from_wheel_filename(filename: str) -> str | None:
     return f"{version}.0" if version is not None else None
 
 
+def _implementation_version_from_wheel_filename(filename: str) -> str | None:
+    """Derive ``implementation_version`` from a wheel filename's Python tag.
+
+    Only attempted for CPython (``cp``) tags: PEP 508's
+    ``implementation_version`` is ``sys.implementation.version`` formatted
+    the same way as ``python_full_version`` (``packaging.markers``'s
+    ``default_environment()`` computes both from the *same* underlying
+    version info on CPython, so they're identical there), but for any
+    other implementation it's *that implementation's own* release number
+    (e.g. PyPy's ``7.3.x``), which a ``pp39`` wheel tag says nothing about
+    at all — ``39`` there is CPython-ABI-compatibility version, not PyPy's
+    own version. Deriving a CPython-style ``"3.9.0"`` for a PyPy wheel
+    would therefore be actively wrong, not just imprecise, so this returns
+    ``None`` for any non-``cp`` tag rather than guessing (Codex review).
+    Otherwise delegates to :func:`_python_full_version_from_wheel_filename`
+    (including its ``abi3``-floor handling), since the two markers are
+    the same value for CPython.
+    """
+    if not filename.lower().endswith(".whl"):
+        return None
+    parts = filename[: -len(".whl")].split("-")
+    if len(parts) < 5:
+        return None
+    if not parts[-3].lower().startswith("cp"):
+        return None
+    return _python_full_version_from_wheel_filename(filename)
+
+
 #: Wheel Python-tag implementation abbreviation -> PEP 508 marker value, in
 #: each of the two marker spellings (``implementation_name`` uses
 #: ``sys.implementation.name``'s lowercase spelling;
@@ -839,12 +867,12 @@ def parse_wheel_numpy_requirement(
     or an ordinary marker that doesn't hold for *environment*.
 
     When *environment* is omitted, ``python_version``, ``python_full_version``,
-    ``implementation_name``, ``platform_python_implementation``,
-    ``platform_system``, ``sys_platform``, ``os_name``, and (for
-    single-architecture Linux/macOS tags) ``platform_machine`` are derived
-    from the wheel's *own* filename tags (e.g. ``cp39`` ->
-    ``python_version="3.9"``/``python_full_version="3.9.0"``/
-    ``implementation_name="cpython"``/
+    ``implementation_version`` (CPython tags only), ``implementation_name``,
+    ``platform_python_implementation``, ``platform_system``, ``sys_platform``,
+    ``os_name``, and (for single-architecture Linux/macOS tags)
+    ``platform_machine`` are derived from the wheel's *own* filename tags
+    (e.g. ``cp39`` -> ``python_version="3.9"``/``python_full_version="3.9.0"``/
+    ``implementation_version="3.9.0"``/``implementation_name="cpython"``/
     ``platform_python_implementation="CPython"``, a ``macosx_11_0_arm64``
     platform tag -> ``platform_system="Darwin"``/``sys_platform="darwin"``/
     ``os_name="posix"``/``platform_machine="arm64"``) rather than defaulting
@@ -904,6 +932,10 @@ def parse_wheel_numpy_requirement(
         derivers = (
             ("python_version", _python_version_from_wheel_filename),
             ("python_full_version", _python_full_version_from_wheel_filename),
+            (
+                "implementation_version",
+                _implementation_version_from_wheel_filename,
+            ),
             ("implementation_name", _implementation_name_from_wheel_filename),
             (
                 "platform_python_implementation",

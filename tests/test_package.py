@@ -22,6 +22,7 @@ from abicheck.package import (
     TarExtractor,
     WheelExtractor,
     _implementation_name_from_wheel_filename,
+    _implementation_version_from_wheel_filename,
     _is_elf_shared_object,
     _os_name_from_wheel_filename,
     _platform_machine_from_wheel_filename,
@@ -1313,6 +1314,23 @@ class TestParseWheelNumpyRequirement:
             )
         assert parse_wheel_numpy_requirement(whl2) == ">=2"
 
+    def test_implementation_version_derived_from_cpython_wheel_filename(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review's exact scenario: a cp310 wheel scanned on a
+        # different (e.g. 3.12) host must have implementation_version
+        # evaluated against ITS OWN synthetic "3.10.0", not the host's
+        # actual implementation_version.
+        whl = tmp_path / "pkg-1.0-cp310-cp310-linux_x86_64.whl"
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr(
+                "pkg-1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\n"
+                'Requires-Dist: numpy>=1.23; implementation_version < "3.11"\n'
+                'Requires-Dist: numpy>=2; implementation_version >= "3.11"\n',
+            )
+        assert parse_wheel_numpy_requirement(whl) == ">=1.23"
+
     def test_platform_machine_derived_from_wheel_filename_for_single_arch(
         self, tmp_path: Path
     ) -> None:
@@ -1468,6 +1486,52 @@ class TestPythonFullVersionFromWheelFilename:
             )
             is None
         )
+
+
+class TestImplementationVersionFromWheelFilename:
+    def test_cp_tag_gets_synthetic_micro(self) -> None:
+        # implementation_version == python_full_version for CPython
+        # specifically (packaging.markers.default_environment() computes
+        # both from the same sys.implementation.version there).
+        assert (
+            _implementation_version_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-linux_x86_64.whl"
+            )
+            == "3.11.0"
+        )
+
+    def test_pypy_tag_returns_none(self) -> None:
+        # A pp39 tag's "39" is CPython-ABI-compatibility, not PyPy's own
+        # release number -- deriving "3.9.0" here would be actively wrong
+        # (PyPy's real implementation_version is its own X.Y.Z, e.g.
+        # 7.3.x), not just imprecise, so this must not guess (Codex
+        # review).
+        assert (
+            _implementation_version_from_wheel_filename(
+                "pkg-1.0-pp39-pypy39_pp73-linux_x86_64.whl"
+            )
+            is None
+        )
+
+    def test_abi3_tag_names_a_floor_not_one_minor_returns_none(self) -> None:
+        assert (
+            _implementation_version_from_wheel_filename(
+                "pkg-1.0-cp39-abi3-manylinux_2_17_x86_64.whl"
+            )
+            is None
+        )
+
+    def test_generic_py3_tag_has_no_minor_returns_none(self) -> None:
+        assert (
+            _implementation_version_from_wheel_filename("pkg-1.0-py3-none-any.whl")
+            is None
+        )
+
+    def test_non_wheel_filename_returns_none(self) -> None:
+        assert _implementation_version_from_wheel_filename("pkg-1.0.tar.gz") is None
+
+    def test_too_few_segments_returns_none(self) -> None:
+        assert _implementation_version_from_wheel_filename("weird.whl") is None
 
 
 class TestImplementationNameFromWheelFilename:
