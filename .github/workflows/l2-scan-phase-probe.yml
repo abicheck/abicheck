@@ -1,0 +1,75 @@
+name: Temporary L2 scan phase probe
+
+on:
+  push:
+    branches:
+      - perf/l2-scan-phase-probe-488f823
+  pull_request:
+    branches:
+      - main
+    paths:
+      - scripts/profile_l2_scan_phases.py
+      - .github/workflows/l2-scan-phase-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  profile:
+    name: Profile L2 scan phases on current main
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      PROFILE_SOURCE_SHA: 488f823cd58459307d969d92b9c5567d590043fd
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Checkout probe branch
+        uses: actions/checkout@v6
+        with:
+          ref: perf/l2-scan-phase-probe-488f823
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install native toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends castxml gcc g++
+
+      - name: Install current-main source
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Verify source identity
+        run: |
+          git rev-parse HEAD
+          python - <<'PY'
+          import abicheck
+          from pathlib import Path
+          print("abicheck loaded from:", Path(abicheck.__file__).resolve())
+          PY
+          castxml --version
+          gcc --version | head -1
+
+      - name: Run instrumented L2 scans
+        run: python scripts/profile_l2_scan_phases.py
+
+      - name: Print report
+        if: always()
+        run: |
+          test -f profile-results/l2-scan-phase-profile.md && cat profile-results/l2-scan-phase-profile.md || true
+
+      - name: Upload phase profile
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: l2-scan-phase-profile-main-488f823
+          path: profile-results/
+          if-no-files-found: warn
+          retention-days: 7
