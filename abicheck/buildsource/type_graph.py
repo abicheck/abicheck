@@ -70,7 +70,13 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
-from .source_graph import CONF_HIGH, CONF_REDUCED, GraphEdge, GraphNode
+from .source_graph import (
+    CONF_HIGH,
+    CONF_REDUCED,
+    GraphEdge,
+    GraphNode,
+    function_decl_identity,
+)
 
 if TYPE_CHECKING:
     from .build_evidence import BuildEvidence, CompileUnit as BuildEvidenceCompileUnit
@@ -1051,7 +1057,18 @@ def _walk_types(
             )
 
     if kind in _FUNCTION_DECL_KINDS:
-        ident = _decl_identity(node)
+        qualified_name = "::".join([*scope, name]) if scope else name
+        type_obj = node.get("type")
+        type_qual = (
+            str(type_obj.get("qualType", "")) if isinstance(type_obj, dict) else ""
+        )
+        ident = (
+            function_decl_identity(
+                str(node.get("mangledName") or ""), name, qualified_name, type_qual
+            )
+            if name
+            else ""
+        )
         if ident:
             raw_return = _decl_return_type_name(node)
             if raw_return:
@@ -1136,7 +1153,9 @@ def _walk_types(
                         enclosing_func,
                         ref_ident,
                         EDGE_DECL_REFERENCES_DECL,
-                        CONF_HIGH if ref_resolution == RESOLUTION_REF_EXACT else CONF_REDUCED,
+                        CONF_HIGH
+                        if ref_resolution == RESOLUTION_REF_EXACT
+                        else CONF_REDUCED,
                         "ref",
                         ref_file,
                         ref_resolution,

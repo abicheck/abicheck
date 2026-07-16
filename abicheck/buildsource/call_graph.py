@@ -56,6 +56,7 @@ from .source_graph import (
     GraphEdge,
     GraphNode,
     _file_in_project,
+    function_decl_identity,
     project_source_files,
 )
 
@@ -101,6 +102,12 @@ _CALL_EXPR_KINDS = frozenset({"CallExpr", "CXXMemberCallExpr", "CXXOperatorCallE
 #: referenced-decl kinds that mean "called through a pointer/variable".
 _POINTER_DECL_KINDS = frozenset(
     {"VarDecl", "ParmVarDecl", "FieldDecl", "NonTypeTemplateParmDecl"}
+)
+#: clang AST decl kinds that open a named scope contributing to a qualified
+#: name — mirrors ``type_graph._SCOPE_DECL_KINDS`` (duplicated rather than
+#: imported: the two modules are siblings with no cross-dependency today).
+_SCOPE_DECL_KINDS = frozenset(
+    {"NamespaceDecl", "CXXRecordDecl", "RecordDecl", "ClassTemplateSpecializationDecl"}
 )
 
 #: ABI/API-affecting flags safe to replay into clang for AST parsing.  This is
@@ -170,6 +177,31 @@ def _identity(node: dict[str, Any]) -> str:
     """Stable callee/caller identity: the mangled name when clang emits one
     (encodes the full signature, keeps overloads distinct), else the name."""
     return str(node.get("mangledName") or node.get("name") or "")
+
+
+def _function_identity(node: dict[str, Any], scope: list[str]) -> str:
+    """Like :func:`_identity`, but falls back to
+    :func:`~abicheck.buildsource.source_graph.function_decl_identity` (ADR-041
+    P1 #5) instead of the bare name when clang's ``mangledName`` doesn't
+    distinguish the declaration (absent, or equal to ``name`` — the extern
+    "C"/C-linkage case) — matching ``SourceEntity.identity()``'s own
+    ``qualified_name#signature_hash`` fallback so this function's call-graph
+    node lands on the same ``decl://`` id as its L4 ``SOURCE_DECLARES`` node.
+    Used only where a node's *own* identity is recorded (the enclosing
+    function scope); a ``referencedDecl`` call-site stub carries no scope
+    to qualify with, so callee resolution still goes through the id-index
+    (:func:`_resolve_ref_callee_identity`), which looks up the value this
+    function already computed for the same declaration's full node.
+    """
+    name = str(node.get("name") or "")
+    if not name:
+        return _identity(node)
+    qualified_name = "::".join([*scope, name]) if scope else name
+    type_obj = node.get("type")
+    type_qual = str(type_obj.get("qualType", "")) if isinstance(type_obj, dict) else ""
+    return function_decl_identity(
+        str(node.get("mangledName") or ""), name, qualified_name, type_qual
+    )
 
 
 def _find_referenced_decl(node: dict[str, Any]) -> dict[str, Any] | None:
@@ -273,11 +305,12 @@ def _enter_function_scope(
     caller: str,
     caller_file: str,
     cur_file: str,
+    scope: list[str],
     decl_files: dict[str, str],
     id_index: dict[str, str],
 ) -> tuple[str, str]:
     """Return the ``(caller, caller_file)`` scope after a function-decl node, recording its definition file."""
-    ident = _identity(node) or caller
+    ident = _function_identity(node, scope) or caller
     if ident != caller:
         # Entering a new enclosing function: its body lives in cur_file.
         caller, caller_file = ident, cur_file
@@ -302,7 +335,7 @@ def _enter_function_scope(
     # only ones with a body, so a pure prototype still resolves callers of
     # a not-yet-defined declaration.
     node_id = str(node.get("id") or "")
-    real_ident = _identity(node)
+    real_ident = _function_identity(node, scope)
     if node_id and real_ident:
         id_index.setdefault(node_id, real_ident)
     return caller, caller_file
@@ -327,25 +360,39 @@ def _walk_calls(
     caller: str,
     caller_file: str,
     cur_file: str,
+    scope: list[str],
     edges: list[CallEdge],
     decl_files: dict[str, str],
     id_index: dict[str, str],
 ) -> None:
-    """Recursive AST walk tracking the nearest enclosing function as the *caller*."""
+    """Recursive AST walk tracking the nearest enclosing function as the *caller*
+    and the qualified-name scope (ADR-041 P1 #5), mirroring
+    ``type_graph._walk_types``'s identical scope-tracking pattern."""
     if not isinstance(node, dict):
         return
     f = _node_file(node)
     if f:
         cur_file = f
     kind = str(node.get("kind", ""))
+    name = str(node.get("name") or "")
     if kind in _FUNCTION_DECL_KINDS:
         caller, caller_file = _enter_function_scope(
-            node, caller, caller_file, cur_file, decl_files, id_index
+            node, caller, caller_file, cur_file, scope, decl_files, id_index
         )
     if kind in _CALL_EXPR_KINDS and caller:
         _append_call_edge(node, caller, caller_file, edges, id_index)
+    child_scope = [*scope, name] if kind in _SCOPE_DECL_KINDS and name else scope
     for child in node.get("inner", []) or []:
-        _walk_calls(child, caller, caller_file, cur_file, edges, decl_files, id_index)
+        _walk_calls(
+            child,
+            caller,
+            caller_file,
+            cur_file,
+            child_scope,
+            edges,
+            decl_files,
+            id_index,
+        )
 
 
 def _fill_callee_files(
@@ -395,7 +442,7 @@ def parse_clang_ast_calls(ast: dict[str, Any]) -> list[CallEdge]:
     # referencedDecl stub can resolve its real (mangled, overload-distinct)
     # identity instead of the stub's own name-only fallback (PR1b).
     id_index: dict[str, str] = {}
-    _walk_calls(ast, "", "", "", edges, decl_files, id_index)
+    _walk_calls(ast, "", "", "", [], edges, decl_files, id_index)
     return _dedupe_edges(_fill_callee_files(edges, decl_files))
 
 

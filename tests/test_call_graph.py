@@ -322,6 +322,71 @@ def test_parse_uses_name_when_no_mangled() -> None:
     assert e.caller == "caller" and e.callee == "callee"
 
 
+def test_parse_extern_c_caller_identity_matches_source_entity_fallback() -> None:
+    # ADR-041 P1 #5 (Codex review): clang reports mangledName == name for an
+    # extern "C"/C-linkage function -- SourceEntity.identity() treats that as
+    # "no distinguishing mangled name" and falls back to
+    # qualified_name#signature_hash instead of the bare name, so the
+    # AST-replay caller identity must match rather than keying on the bare
+    # name (which used to land the call edge on a different decl:// node
+    # than the L4 surface's own SOURCE_DECLARES node for the same function).
+    import hashlib
+
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "FunctionDecl",
+                "name": "api",
+                "mangledName": "api",
+                "type": {"qualType": "void (void)"},
+                "inner": [
+                    {
+                        "kind": "CompoundStmt",
+                        "inner": [_direct_call(_ref("FunctionDecl", "helper"))],
+                    }
+                ],
+            },
+        ],
+    }
+    e = parse_clang_ast_calls(ast)[0]
+    expected_hash = hashlib.sha256(b"sig\x00void (void)").hexdigest()
+    assert e.caller == f"api#sha256:{expected_hash}"
+
+
+def test_parse_namespaced_extern_c_style_caller_is_qualified() -> None:
+    # Scope tracking (new in this fix) must qualify the fallback identity the
+    # same way type_graph.py's own scope walk already does for types.
+    import hashlib
+
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "NamespaceDecl",
+                "name": "detail",
+                "inner": [
+                    {
+                        "kind": "FunctionDecl",
+                        "name": "api",
+                        "mangledName": "api",
+                        "type": {"qualType": "void (void)"},
+                        "inner": [
+                            {
+                                "kind": "CompoundStmt",
+                                "inner": [_direct_call(_ref("FunctionDecl", "helper"))],
+                            }
+                        ],
+                    }
+                ],
+            },
+        ],
+    }
+    e = parse_clang_ast_calls(ast)[0]
+    expected_hash = hashlib.sha256(b"sig\x00void (void)").hexdigest()
+    assert e.caller == f"detail::api#sha256:{expected_hash}"
+
+
 def test_parse_self_recursive_call_skipped() -> None:
     ast = {
         "kind": "TranslationUnitDecl",

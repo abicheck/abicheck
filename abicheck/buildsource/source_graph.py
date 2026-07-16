@@ -545,6 +545,43 @@ def _type_node_id(identity: str) -> str:
     return f"type://{identity}"
 
 
+def function_decl_identity(
+    mangled_name: str, name: str, qualified_name: str, type_qual: str
+) -> str:
+    """Mirror ``SourceEntity.identity()``'s fallback chain for a function decl
+    node at the AST-replay layer (ADR-041 P1 #5, Codex review).
+
+    ``call_graph.py``/``type_graph.py`` used to key a function's graph-node
+    identity on the bare ``mangledName or name`` clang emits — but
+    ``SourceEntity.identity()`` (the identity the L4 surface's own
+    ``SOURCE_DECLARES`` node for the *same* declaration is keyed on) treats a
+    ``mangledName`` that equals the bare ``name`` as "no real mangling" (every
+    ``source_extractors/*`` mapper does this deliberately: extern "C"/C-linkage
+    functions report ``mangledName == name``, not absent) and falls back to
+    ``f"{qualified_name}#{signature_hash}"`` instead. A raw ``mangled or name``
+    fallback silently picks that same non-distinguishing bare name, so a
+    public C-linkage function's call/type-graph edges land on a *different*
+    ``decl://`` node than its own ``SOURCE_DECLARES`` node — the two never
+    merge, and dependency-reachability BFS starting from the public entry
+    never reaches edges keyed by this mismatched identity.
+
+    ``type_qual`` is the function's ``type.qualType`` spelling (the same value
+    :func:`abicheck.buildsource.source_extractors.clang._signature` reads) —
+    when non-empty, the ``signature_hash`` suffix is computed identically to
+    :func:`abicheck.buildsource.source_extractors.clang._hash`
+    (``"sha256:" + sha256("sig\\x00" + type_qual).hexdigest()``), so a
+    matching declaration walked by either producer resolves to the exact same
+    string. Falls back to the bare ``qualified_name`` when no type spelling is
+    available, matching ``SourceEntity.identity()``'s own final fallback.
+    """
+    if mangled_name and mangled_name != name:
+        return mangled_name
+    if type_qual:
+        digest = hashlib.sha256(f"sig\x00{type_qual}".encode()).hexdigest()
+        return f"{qualified_name}#sha256:{digest}"
+    return qualified_name
+
+
 def _symbol_node_id(symbol: str) -> str:
     return f"binary_symbol://{symbol}"
 

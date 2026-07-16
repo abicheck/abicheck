@@ -20,6 +20,8 @@ no compiler is required; the live subprocess path is integration-only."""
 
 from __future__ import annotations
 
+import hashlib
+
 from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 from abicheck.buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary
 from abicheck.buildsource.type_graph import (
@@ -1760,3 +1762,48 @@ def test_augment_graph_with_types_carries_resolution_into_edge_attrs() -> None:
     edge = next(e for e in graph.edges if e.kind == "TYPE_HAS_FIELD_TYPE")
     assert edge.attrs["resolution"] == "unique_candidate"
     assert edge.attrs["role"] == "field"
+
+
+def test_extern_c_function_identity_matches_source_entity_fallback() -> None:
+    # ADR-041 P1 #5 (Codex review): clang reports mangledName == name for an
+    # extern "C"/C-linkage function (no real Itanium mangling), and
+    # SourceEntity.identity() treats that as "no distinguishing mangled name"
+    # -- falling back to qualified_name#signature_hash. The AST-replay layer
+    # used to key this same function's DECL_HAS_TYPE src on the bare
+    # mangled-or-name (identical to the bare name here), landing on a
+    # different decl:// node than the L4 surface's own SOURCE_DECLARES node
+    # for the same declaration.
+    ast = _tu(
+        {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Config")]},
+        {
+            "kind": "FunctionDecl",
+            "name": "api",
+            "mangledName": "api",
+            "type": {"qualType": "int (detail::Config)"},
+            "inner": [_param("x", "detail::Config")],
+        },
+    )
+    edges = parse_clang_ast_types(ast)
+    param_edges = [e for e in edges if e.role == "param"]
+    assert len(param_edges) == 1
+    expected_hash = hashlib.sha256(b"sig\x00int (detail::Config)").hexdigest()
+    assert param_edges[0].src == f"api#sha256:{expected_hash}"
+
+
+def test_real_mangled_function_identity_stays_the_mangled_name() -> None:
+    # A genuinely mangled C++ function (mangledName != name) is unaffected --
+    # the mangled name alone already matches SourceEntity.identity()'s primary
+    # case, so no signature-hash suffix should be added.
+    ast = _tu(
+        {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Config")]},
+        _record(
+            "Widget",
+            inner=[
+                _method("bar", "_ZN6Widget3barE", [_param("x", "detail::Config")])
+            ],
+        ),
+    )
+    edges = parse_clang_ast_types(ast)
+    param_edges = [e for e in edges if e.role == "param"]
+    assert len(param_edges) == 1
+    assert param_edges[0].src == "_ZN6Widget3barE"

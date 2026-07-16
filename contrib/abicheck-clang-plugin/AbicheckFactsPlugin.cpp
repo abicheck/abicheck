@@ -1450,23 +1450,131 @@ std::string declFile(const Decl *d) {
   return pl.getFilename();
 }
 
+// Port of type_graph.py::_top_level_paren_index: index of the first '(' not
+// nested inside a '<...>' template-angle group, or npos. Distinguishes the
+// outer parameter-list paren of a callback-shaped spelling
+// ("detail::Impl ()") from one nested inside an enclosing template
+// instantiation ("std::function<detail::Impl ()>" -- the first '(' there
+// belongs to the *argument*, not the outer type).
+size_t topLevelParenIndex(const std::string &s) {
+  int depth = 0;
+  for (size_t i = 0; i < s.size(); ++i) {
+    char c = s[i];
+    if (c == '<')
+      ++depth;
+    else if (c == '>')
+      --depth;
+    else if (c == '(' && depth == 0)
+      return i;
+  }
+  return std::string::npos;
+}
+
+// Port of type_graph.py::_base_type_name: strip cv/pointer/reference/array
+// decoration down to a base type spelling (best-effort textual
+// normalization, e.g. "const detail::Impl *" -> "detail::Impl" -- not a real
+// type-identity resolution). ADR-041 P1 identity-mismatch fix (Codex
+// review): this plugin used to emit the raw, undecorated getAsString(PP)
+// spelling as a TYPE_INHERITS/TYPE_HAS_FIELD_TYPE/DECL_HAS_TYPE edge's dst,
+// while type_graph.py's standalone replay always normalizes through this
+// exact algorithm before using the result as a graph-node identity -- so a
+// pointer/reference-typed field/base/param (the common PImpl-idiom shape)
+// never merged the plugin's source_edges node with the replay's node for the
+// same declaration. Must stay a faithful, line-for-line port so both
+// producers compute byte-identical strings from the same printed spelling.
+std::string baseTypeName(const std::string &qualTypeIn) {
+  auto trim = [](std::string s) {
+    size_t b = s.find_first_not_of(" \t");
+    size_t e = s.find_last_not_of(" \t");
+    return (b == std::string::npos) ? std::string() : s.substr(b, e - b + 1);
+  };
+  std::string s = trim(qualTypeIn);
+  if (s.empty())
+    return s;
+  // clang glues a top-level cv/restrict-qualified pointer directly to the
+  // star with no separating space ("detail::Impl *const", not
+  // "* const"); normalize so the suffix-stripping below handles it like the
+  // spaced form it already recognizes.
+  auto replaceAll = [](std::string &str, const std::string &from,
+                        const std::string &to) {
+    size_t pos = 0;
+    while ((pos = str.find(from, pos)) != std::string::npos) {
+      str.replace(pos, from.size(), to);
+      pos += to.size();
+    }
+  };
+  replaceAll(s, "*const", "* const");
+  replaceAll(s, "*volatile", "* volatile");
+  replaceAll(s, "*restrict", "* restrict");
+  replaceAll(s, "*__restrict__", "* __restrict__");
+  replaceAll(s, "*__restrict", "* __restrict");
+
+  static const char *const kTrailingDecorators[] = {"&&", "&", "*"};
+  static const char *const kTrailingQualifiers[] = {
+      " const", " volatile", " __restrict__", " __restrict", " restrict"};
+  static const char *const kLeadingQualifiers[] = {
+      "const ", "volatile ", "struct ", "class ", "enum ", "union "};
+
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    // Array bounds must be stripped inside the loop, not only once at the
+    // end -- an array of pointers ("detail::Impl *[4]") ends in "]", so the
+    // suffix-stripping checks below never fire before this runs.
+    size_t bracket = s.find('[');
+    if (bracket != std::string::npos) {
+      s = trim(s.substr(0, bracket));
+      changed = true;
+    }
+    // A callback-shaped template argument carries a parameter-list suffix
+    // ("detail::Impl ()") the checks below don't recognize; strip up to the
+    // first top-level '(' and keep looping so leftover pointer/cv decoration
+    // on the return-type spelling still gets stripped too.
+    size_t paren = topLevelParenIndex(s);
+    if (paren != std::string::npos) {
+      s = trim(s.substr(0, paren));
+      changed = true;
+    }
+    for (const char *suf : kTrailingDecorators) {
+      size_t len = std::strlen(suf);
+      if (s.size() >= len && s.compare(s.size() - len, len, suf) == 0) {
+        s = trim(s.substr(0, s.size() - len));
+        changed = true;
+      }
+    }
+    for (const char *suf : kTrailingQualifiers) {
+      size_t len = std::strlen(suf);
+      if (s.size() >= len && s.compare(s.size() - len, len, suf) == 0) {
+        s = trim(s.substr(0, s.size() - len));
+        changed = true;
+      }
+    }
+    for (const char *pre : kLeadingQualifiers) {
+      size_t len = std::strlen(pre);
+      if (s.compare(0, len, pre) == 0) {
+        s = s.substr(len);
+        changed = true;
+      }
+    }
+  }
+  return trim(s);
+}
+
 // Resolve *qt* to the declaring file of the record/enum/typedef decl it
 // names, if any -- the type-edge counterpart of declFile() (ADR-041 P1 #1
-// addendum, Codex review): TYPE_INHERITS/TYPE_HAS_FIELD_TYPE/DECL_HAS_TYPE's
-// dst is a *printed* type spelling (getAsString(PP)), which this never
-// touches -- it operates on the real QualType the spelling was derived
-// from, so it needs no re-parsing/name lookup. A pointer/reference/array is
-// unwrapped down to its pointee/element first (the printed spelling of
-// `Impl *` still names `Impl`); a typedef is resolved to the *alias*
-// itself, not what it desugars to, matching the pretty-printer's default
-// sugar-preserving spelling (`Handle` stays `Handle`, not `detail::Impl *`)
-// -- checked before the pointer/reference unwrap since isPointerType()/
-// isReferenceType() desugar through a typedef to inspect the aliased type,
-// which would skip straight past a `using Handle = Impl*` alias to `Impl`
-// and resolve the wrong decl. A dependent/template-parameter type or a
-// builtin has no such decl and yields "" (best-effort, no diagnostic --
-// mirrors declFile()'s own silent-empty contract for an unresolvable
-// location).
+// addendum, Codex review). Operates on the real QualType (not the printed
+// spelling baseTypeName() normalizes), so it needs no re-parsing/name
+// lookup. A pointer/reference/array is unwrapped down to its pointee/element
+// first (the printed spelling of `Impl *` still names `Impl`); a typedef is
+// resolved to the *alias* itself, not what it desugars to, matching the
+// pretty-printer's default sugar-preserving spelling (`Handle` stays
+// `Handle`, not `detail::Impl *`) -- checked before the pointer/reference
+// unwrap since isPointerType()/isReferenceType() desugar through a typedef
+// to inspect the aliased type, which would skip straight past a
+// `using Handle = Impl*` alias to `Impl` and resolve the wrong decl. A
+// dependent/template-parameter type or a builtin has no such decl and
+// yields "" (best-effort, no diagnostic -- mirrors declFile()'s own
+// silent-empty contract for an unresolvable location).
 std::string typeDeclFile(QualType qt) {
   for (;;) {
     const Type *t = qt.getTypePtrOrNull();
@@ -2119,10 +2227,11 @@ public:
     // overloads share one `name`, and using it as the edge src would let the
     // (kind, src, dst) dedup conflate `foo(int)`'s edges with `foo(double)`'s
     // (CodeRabbit review, P2; see mangledOrScopedName()).
-    addEdge("DECL_HAS_TYPE", key, fd->getReturnType().getAsString(PP), "high",
+    addEdge("DECL_HAS_TYPE", key,
+            baseTypeName(fd->getReturnType().getAsString(PP)), "high",
             typeEdgeAttrs("return", fd->getReturnType()));
     for (const ParmVarDecl *p : fd->parameters()) {
-      std::string ptype = p->getType().getAsString(PP);
+      std::string ptype = baseTypeName(p->getType().getAsString(PP));
       if (!ptype.empty())
         addEdge("DECL_HAS_TYPE", key, ptype, "high",
                 typeEdgeAttrs("param", p->getType()));
@@ -2190,13 +2299,13 @@ public:
     // JSON dump) — bounds edge capture to exactly the public surface
     // FactsVisitor already walks.
     for (const CXXBaseSpecifier &base : rd->bases()) {
-      std::string baseName = base.getType().getAsString(PP);
+      std::string baseName = baseTypeName(base.getType().getAsString(PP));
       if (!baseName.empty())
         addEdge("TYPE_INHERITS", name, baseName, "high",
                 typeEdgeAttrs("base", base.getType()));
     }
     for (const FieldDecl *field : rd->fields()) {
-      std::string ftype = field->getType().getAsString(PP);
+      std::string ftype = baseTypeName(field->getType().getAsString(PP));
       if (!ftype.empty())
         addEdge("TYPE_HAS_FIELD_TYPE", name, ftype, "high",
                 typeEdgeAttrs("field", field->getType()));
@@ -2607,10 +2716,11 @@ private:
       // (unlike VisitFunctionDecl's `key`, which prefers one), so edges are
       // keyed by the same qualified `name` used for this entity's own
       // identity above.
-      addEdge("DECL_HAS_TYPE", name, fd->getReturnType().getAsString(PP),
-              "high", typeEdgeAttrs("return", fd->getReturnType()));
+      addEdge("DECL_HAS_TYPE", name,
+              baseTypeName(fd->getReturnType().getAsString(PP)), "high",
+              typeEdgeAttrs("return", fd->getReturnType()));
       for (const ParmVarDecl *p : fd->parameters()) {
-        std::string ptype = p->getType().getAsString(PP);
+        std::string ptype = baseTypeName(p->getType().getAsString(PP));
         if (!ptype.empty())
           addEdge("DECL_HAS_TYPE", name, ptype, "high",
                   typeEdgeAttrs("param", p->getType()));
