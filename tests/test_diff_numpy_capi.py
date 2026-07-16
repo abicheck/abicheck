@@ -187,6 +187,49 @@ class TestCheckNumPyMetadataContract:
         changes = check_numpy_metadata_contract(surf, "<3")
         assert ChangeKind.NUMPY_METADATA_UNDERSTATES_REQUIRED_VERSION in _kinds(changes)
 
+    def test_wildcard_major_exclusion_covers_the_target(self) -> None:
+        # numpy>=1.23,!=1.* combines a lower bound that looks like a
+        # NumPy 1.x floor with a wildcard exclusion that in fact rules out
+        # every 1.x release -- an installer can only ever select NumPy
+        # 2.0+, so a binary targeting exactly 2.0 is already fully
+        # compatible. _declared_floor only scanning >=/>/==/~= clauses
+        # previously missed the != exclusion entirely and falsely flagged
+        # both findings even though the metadata already excludes the
+        # incompatible major (Codex review).
+        surf = NumPyCapiSurface(consumes_array_api=True, capi_target_version="2.0")
+        assert check_numpy_metadata_contract(surf, ">=1.23,!=1.*") == []
+
+    def test_wildcard_major_exclusion_still_flags_understated_minor(self) -> None:
+        # The exclusion bumps the effective floor to (2, 0), not all the
+        # way up to the binary's actual (2, 1) target -- the RISK finding
+        # must still fire for that real remaining gap, but not the
+        # BREAKING ABI-major finding since the major itself is covered.
+        surf = NumPyCapiSurface(consumes_array_api=True, capi_target_version="2.1")
+        changes = check_numpy_metadata_contract(surf, ">=1.23,!=1.*")
+        assert _kinds(changes) == {ChangeKind.NUMPY_METADATA_UNDERSTATES_REQUIRED_VERSION}
+
+    def test_chained_wildcard_major_exclusions_bump_repeatedly(self) -> None:
+        # numpy>=1.23,!=1.*,!=2.* excludes two entire majors in a row --
+        # the effective floor must bump twice, to (3, 0), not just once.
+        surf = NumPyCapiSurface(consumes_array_api=True, capi_target_version="3.0")
+        assert check_numpy_metadata_contract(surf, ">=1.23,!=1.*,!=2.*") == []
+
+    def test_earlier_higher_lower_bound_clause_wins(self) -> None:
+        # numpy>=2.0,>=1.5 has two lower-bound clauses; the second (1.5)
+        # is not higher than the first (2.0) already found, so the scan
+        # must keep the higher one rather than overwriting it.
+        surf = NumPyCapiSurface(consumes_array_api=True, capi_target_version="2.0")
+        assert check_numpy_metadata_contract(surf, ">=2.0,>=1.5") == []
+
+    def test_partial_minor_exclusion_does_not_bump_the_major(self) -> None:
+        # numpy>=1.23,!=1.24.* only excludes one minor within major 1, not
+        # the whole major -- other 1.x releases (e.g. 1.25) are still
+        # installable, so the ABI-major-incompatible finding must still
+        # fire for a binary targeting NumPy 2.x.
+        surf = NumPyCapiSurface(consumes_array_api=True, capi_target_version="2.1")
+        changes = check_numpy_metadata_contract(surf, ">=1.23,!=1.24.*")
+        assert ChangeKind.NUMPY_ABI_MAJOR_INCOMPATIBLE in _kinds(changes)
+
     def test_declared_floor_understates_target(self) -> None:
         surf = NumPyCapiSurface(consumes_array_api=True, capi_target_version="1.23")
         changes = check_numpy_metadata_contract(surf, ">=1.20")

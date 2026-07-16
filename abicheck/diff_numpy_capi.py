@@ -87,6 +87,23 @@ def _version_greater_than(a: tuple[int, ...], b: tuple[int, ...]) -> bool:
     return a + (0,) * (length - len(a)) > b + (0,) * (length - len(b))
 
 
+def _excludes_entire_major(specifiers: SpecifierSet, major: int) -> bool:
+    """True if *specifiers* has a ``!=<major>.*`` clause ruling out every
+    version in that major release line.
+
+    Deliberately narrow: only the exact ``!=X.*`` wildcard-exclusion
+    pattern is recognized, not arbitrary partial exclusions like
+    ``!=1.24.*`` (which only rules out one minor, not the whole major, so
+    a floor still inside that major should still count as the real one)
+    -- proving a *partial* exclusion still admits no other version in the
+    major would need enumerating the whole version space, which is out of
+    scope for this coarse major.minor check.
+    """
+    return any(
+        spec.operator == "!=" and spec.version == f"{major}.*" for spec in specifiers
+    )
+
+
 def _declared_floor(specifiers: SpecifierSet) -> tuple[int, ...] | None:
     """The largest lower-bound version among a SpecifierSet's >=/>/==/~= clauses.
 
@@ -101,6 +118,18 @@ def _declared_floor(specifiers: SpecifierSet) -> tuple[int, ...] | None:
     would make ``numpy>2.0`` look like "no floor declared", falsely flagging
     a metadata gap and an ABI-major incompatibility for a requirement that
     in fact excludes every NumPy 1.x runtime (Codex review).
+
+    A requirement like ``numpy>=1.23,!=1.*`` combines a lower bound that,
+    read in isolation, still looks like a NumPy 1.x floor with a wildcard
+    exclusion that in fact rules out every 1.x release entirely -- an
+    installer can only ever select NumPy 2.0+ under that combined
+    specifier, so the *true* effective floor is the next major up, not the
+    raw ``>=`` value. Bumped via :func:`_excludes_entire_major` (looped, so
+    a chain like ``!=1.*,!=2.*`` correctly bumps twice) so callers comparing
+    against a binary's target version see the metadata's real guarantee
+    instead of falsely flagging both an understated-metadata RISK finding
+    and an ABI-major-incompatible BREAKING finding for metadata that
+    already excludes the incompatible major (Codex review).
     """
     best: tuple[int, ...] | None = None
     for spec in specifiers:
@@ -109,6 +138,8 @@ def _declared_floor(specifiers: SpecifierSet) -> tuple[int, ...] | None:
         v = _target_tuple(spec.version.rstrip(".*"))
         if v and (best is None or _version_greater_than(v, best)):
             best = v
+    while best is not None and _excludes_entire_major(specifiers, best[0]):
+        best = (best[0] + 1, 0)
     return best
 
 
