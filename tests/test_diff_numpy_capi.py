@@ -163,6 +163,22 @@ class TestCheckNumPyMetadataContract:
             ChangeKind.NUMPY_ABI_MAJOR_INCOMPATIBLE,
         }
 
+    def test_prerelease_lower_bound_covers_the_target(self) -> None:
+        # numpy>=2.0rc1 already excludes every NumPy 1.x runtime, same as a
+        # final numpy>=2.0 floor would -- a plain int(p) split on "2.0rc1"
+        # raises on the non-numeric "0rc1" component, previously making
+        # this look like "no floor declared" and falsely flagging both
+        # findings even though the metadata already covers the target
+        # (Codex review).
+        surf = NumPyCapiSurface(consumes_array_api=True, capi_target_version="2.0")
+        assert check_numpy_metadata_contract(surf, ">=2.0rc1") == []
+
+    def test_prerelease_lower_bound_still_flags_understated_floor(self) -> None:
+        surf = NumPyCapiSurface(consumes_array_api=True, capi_target_version="2.1")
+        changes = check_numpy_metadata_contract(surf, ">=2.0rc1")
+        assert ChangeKind.NUMPY_METADATA_UNDERSTATES_REQUIRED_VERSION in _kinds(changes)
+        assert ChangeKind.NUMPY_ABI_MAJOR_INCOMPATIBLE not in _kinds(changes)
+
     def test_declared_floor_understates_target(self) -> None:
         surf = NumPyCapiSurface(consumes_array_api=True, capi_target_version="1.23")
         changes = check_numpy_metadata_contract(surf, ">=1.20")

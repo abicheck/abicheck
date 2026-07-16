@@ -44,18 +44,30 @@ if TYPE_CHECKING:
 
 
 def _target_tuple(version: str | None) -> tuple[int, ...]:
-    """Parse a dotted "X.Y" target-version string into a comparable tuple.
+    """Parse a version string into a comparable release-segment tuple.
 
-    Returns ``()`` (sorts lowest) for ``None``/malformed input — mirrors
+    Delegates to :class:`packaging.version.Version` rather than a plain
+    ``int(p) for p in version.split(".")`` split so a PEP 440 prerelease
+    lower bound (e.g. ``numpy>=2.0rc1``) still yields its release segment
+    ``(2, 0)`` instead of raising on the non-numeric ``"0rc1"`` component --
+    a wheel declaring only a prerelease floor already excludes every NumPy
+    1.x runtime just as surely as a final-release floor does, so treating
+    it as "no floor declared" would falsely flag both an understated-
+    metadata RISK finding and a BREAKING ABI-major-incompatible finding for
+    metadata that's actually already correct (Codex review). Returns ``()``
+    (sorts lowest) for ``None``/genuinely malformed input — mirrors
     ``diff_versioning``'s "malformed/missing leaves the finding uncomputed
     rather than crashing" convention.
     """
     if not version:
         return ()
+    from packaging.version import InvalidVersion, Version
+
     try:
-        return tuple(int(p) for p in version.split("."))
-    except ValueError:
+        release: tuple[int, ...] = Version(version).release
+    except InvalidVersion:
         return ()
+    return release
 
 
 def _version_at_least(a: tuple[int, ...], b: tuple[int, ...]) -> bool:
