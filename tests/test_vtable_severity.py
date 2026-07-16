@@ -348,3 +348,34 @@ class TestOwnerDescendsFrom:
             "Base": RecordType(name="Base", qualified_name="ns::Base", kind="class"),
         }
         assert not _owner_descends_from("ns::Derived", "Base", types)
+
+    def test_bare_ancestor_not_trusted_against_leaf_only_base_dwarf_shaped(
+        self,
+    ) -> None:
+        """Same ambiguity as the CastXML-shaped test above, but shaped the
+        way DWARF snapshots store it: ``dwarf_snapshot.py`` records
+        ``RecordType.name`` as the already-qualified spelling itself
+        (``qualified_name`` stays unset), while inheritance edges still keep
+        only the base DIE's leaf name. The competing ``ns::Base`` record must
+        still be found via ``name``, not just ``qualified_name`` -- checking
+        only one field would miss whichever backend produced it."""
+        types = {
+            "ns::Derived": RecordType(name="ns::Derived", kind="class", bases=["Base"]),
+            "ns::Base": RecordType(name="ns::Base", kind="class"),
+        }
+        assert not _owner_descends_from("ns::Derived", "Base", types)
+
+    def test_owner_sharing_ancestor_leaf_is_not_treated_as_own_alternative(
+        self,
+    ) -> None:
+        """A class that inherits from a global type sharing its own leaf
+        (``namespace ns { struct Base : ::Base { ... }; }``, DWARF-shaped:
+        the owner's own ``name`` is ``ns::Base``, its base list still bare
+        ``Base``) is a valid, unambiguous inheritance -- the owner record's
+        own qualified identity must not be mistaken for a *competing*
+        alternative to itself, or a genuine override-slot reuse gets
+        reported as a spurious ``TYPE_VTABLE_CHANGED``."""
+        types = {
+            "ns::Base": RecordType(name="ns::Base", kind="class", bases=["Base"]),
+        }
+        assert _owner_descends_from("ns::Base", "Base", types)

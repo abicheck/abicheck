@@ -375,8 +375,8 @@ def _owner_descends_from(owner: str, ancestor: str, types: dict[str, RecordType]
         # way still corroborates and rejects the ambiguous leaf match.
         return not any(t.qualified_name == qualified for t in types.values())
 
-    def _leaf_has_qualified_alternative(leaf: str, exclude: str) -> bool:
-        """True if some *other* record's qualified_name shares this leaf.
+    def _leaf_has_qualified_alternative(leaf: str, *excludes: str) -> bool:
+        """True if some *other* record's qualified spelling shares this leaf.
 
         Used when matching a bare ``ancestor`` against a leaf-only ``bases``
         entry: ``_leaf_match_trustworthy`` above can only ask "does this
@@ -386,13 +386,32 @@ def _owner_descends_from(owner: str, ancestor: str, types: dict[str, RecordType]
         record (e.g. ``ns::Base``) exist for this same leaf, proving the
         base list's bare, unqualified entry could plausibly mean that one
         instead of the literal bare ``exclude`` spelling.
+
+        Checks both ``RecordType.qualified_name`` (CastXML: ``name`` stays
+        bare, the namespaced spelling lives in this separate field) and
+        ``RecordType.name`` itself (DWARF: ``dwarf_snapshot.py`` stores the
+        already-qualified spelling directly as ``name``, leaving
+        ``qualified_name`` unset) -- checking only one field misses whichever
+        backend produced the competing record.
+
+        ``excludes`` must cover both the literal ``ancestor`` spelling AND
+        the owning record's own identity (``owner``): a class that inherits
+        from a global type sharing its own leaf (e.g. ``ns::Base : ::Base``)
+        has a ``name``/``qualified_name`` that itself matches this leaf --
+        that's the record whose base list is being interpreted, not a
+        competing alternative, and excluding only the bare ancestor would
+        wrongly treat the owner's own qualified identity as proof of
+        ambiguity, hiding a genuine override-slot reuse.
         """
-        return any(
-            t.qualified_name
-            and t.qualified_name != exclude
-            and t.qualified_name.rsplit("::", 1)[-1] == leaf
-            for t in types.values()
-        )
+        for t in types.values():
+            for candidate in (t.name, t.qualified_name):
+                if (
+                    candidate
+                    and candidate not in excludes
+                    and candidate.rsplit("::", 1)[-1] == leaf
+                ):
+                    return True
+        return False
 
     if leaf_owner == leaf_ancestor and (owner_is_leaf or ancestor_is_leaf):
         # Reaching here with BOTH sides bare would mean owner == ancestor
@@ -420,7 +439,7 @@ def _owner_descends_from(owner: str, ancestor: str, types: dict[str, RecordType]
     if leaf_ancestor not in bases:
         return False
     if ancestor_is_leaf:
-        return not _leaf_has_qualified_alternative(leaf_ancestor, ancestor)
+        return not _leaf_has_qualified_alternative(leaf_ancestor, ancestor, owner)
     return _leaf_match_trustworthy(ancestor)
 
 

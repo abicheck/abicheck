@@ -283,6 +283,25 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   share this leaf — so a `Base::foo()` → `ns::Base::foo()` (or `ns::Derived`
   via a leaf-only `Base` base entry) slot replacement is no longer
   misclassified as an override reuse.
+- **case185 follow-up #2: DWARF-shaped leaf-alternative detection.**
+  `_leaf_has_qualified_alternative()` (above) only inspected
+  `RecordType.qualified_name`, but `dwarf_snapshot.py` stores an
+  already-qualified spelling directly as `RecordType.name` and leaves
+  `qualified_name` unset, while its inheritance edges still keep only the
+  base DIE's leaf name — the same ambiguity, produced by the other backend.
+  The helper now checks both `name` and `qualified_name` on each candidate
+  record so a competing namespaced type is found regardless of which
+  backend produced it.
+- **case185 follow-up #3: owner's own identity false-flagged as a
+  competing alternative.** The DWARF-shaped fix above widened
+  `_leaf_has_qualified_alternative()` to scan `RecordType.name` too, but for
+  a class that inherits from a global type sharing its own leaf (e.g.
+  `namespace ns { struct Base : ::Base { ... }; }` — DWARF-shaped: the
+  owner's own `name` is `ns::Base`, its base list still bare `Base`), the
+  scan found the *owner's own record* as a "competing alternative" to
+  itself, wrongly rejecting a genuine override-slot reuse as
+  `TYPE_VTABLE_CHANGED`. The exclude set now also covers the owner's own
+  identity, not just the literal bare-ancestor spelling.
 - **Vendored-library SONAME normalization, remaining half (G9).**
   `strip_vendor_hash()` now also normalizes the embedded ELF SONAME (not just
   the on-disk filename) in `bundle.py`'s cohort-scoped `BUNDLE_SONAME_SKEW`
