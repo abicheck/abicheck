@@ -26,6 +26,13 @@ mypy abicheck/
 ruff format --check abicheck/ tests/
 ```
 
+[pixi](https://pixi.sh) is also supported (`pixi install && pixi run test`,
+`pixi run check`) and additionally manages the `castxml`/compiler/`libabigail`/
+`abi-compliance-checker` system tools for the `integration`/`libabigail`/`abicc`
+marker lanes below — see `[tool.pixi.*]` in `pyproject.toml` and
+`CONTRIBUTING.md`. Prefer `pip install -e ".[dev]"` above when pixi isn't
+available in your environment.
+
 ## Test markers — know which tests you can run
 
 | Marker | What it needs | When to use |
