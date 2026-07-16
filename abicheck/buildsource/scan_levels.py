@@ -97,16 +97,15 @@ USER_DEPTHS: tuple[EvidenceDepth, ...] = (
     EvidenceDepth.SOURCE,
 )
 
-#: Spellings the *public* ``--depth`` CLI flag rejects outright (ADR-043 D2) --
 #: ``DEPTH_PARAM`` (``cli_params.py``) checks membership in ``USER_DEPTHS`` and
-#: raises a plain "not one of ..." error for anything else, including these;
-#: there is no CLI-visible alias/translation. The internal Python service API
-#: (:func:`parse_user_depth`, used by ``ScanRequest``/MCP-adjacent programmatic
-#: callers, never by the CLI's own ``--depth`` parsing) keeps the historical
-#: ``symbols`` alias and accepts the internal ``full``/``graph`` rungs verbatim
-#: -- those rungs still exist as real :class:`EvidenceDepth` values for
-#: mode-preset-driven internal callers (e.g. ``pr-deep`` resolves ``GRAPH``).
-REJECTED_DEPTHS: frozenset[str] = frozenset({"symbols", "full", "graph"})
+#: raises a plain "not one of ..." error for anything else (``symbols``/
+#: ``full``/``graph`` included) -- there is no CLI-visible alias/translation
+#: (ADR-043 D2). The internal Python service API (:func:`parse_user_depth`,
+#: used by ``ScanRequest``/MCP-adjacent programmatic callers, never by the
+#: CLI's own ``--depth`` parsing) keeps the historical ``symbols`` alias and
+#: accepts the internal ``full``/``graph`` rungs verbatim -- those rungs still
+#: exist as real :class:`EvidenceDepth` values for mode-preset-driven internal
+#: callers (e.g. ``pr-deep`` resolves ``GRAPH``).
 
 #: ``parse_user_depth``'s one remaining alias: the historical ``symbols``
 #: spelling for the CLI-named ``binary`` rung, kept for non-CLI callers.

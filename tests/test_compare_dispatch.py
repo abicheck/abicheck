@@ -794,6 +794,40 @@ class TestCompareDispatch:
         assert code != 0
         assert "not supported for directory/package" in (out + err)
 
+    def test_used_by_rejected_on_set_inputs(self, tmp_path: Path) -> None:
+        # The release fan-out has no per-app scoping; a directory/package
+        # compare with --used-by must reject loudly rather than silently run
+        # an unscoped release comparison (Codex review).
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        _write_snap(old_dir / "libfoo.json", _snap())
+        _write_snap(new_dir / "libfoo.json", _snap())
+        app = _make_pie_executable(tmp_path / "myapp")
+        code, out, err = _invoke(
+            "compare", str(old_dir), str(new_dir), "--used-by", str(app)
+        )
+        assert code != 0
+        msg = out + err
+        assert "not supported for directory/package" in msg
+        assert "--used-by" in msg
+
+    def test_required_symbol_rejected_on_set_inputs(self, tmp_path: Path) -> None:
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        _write_snap(old_dir / "libfoo.json", _snap())
+        _write_snap(new_dir / "libfoo.json", _snap())
+        code, out, err = _invoke(
+            "compare", str(old_dir), str(new_dir), "--required-symbol", "_Z3foov"
+        )
+        assert code != 0
+        msg = out + err
+        assert "not supported for directory/package" in msg
+        assert "--required-symbol" in msg
+
     def test_app_operand_rejected_with_hint(self, tmp_path: Path) -> None:
         app = _make_pie_executable(tmp_path / "myapp")
         new = _write_snap(tmp_path / "new.json", _snap())

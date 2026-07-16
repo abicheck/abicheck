@@ -1083,6 +1083,141 @@ class TestAbiCompare:
         assert data["exit_code"] == 4
         assert data["exit_code_scheme"] == "scoped"
 
+    def _make_binary_pair(self, tmp_path: Path):
+        """Real-binary-shaped (ELF-magic) old/new paths for --used-by, which
+        requires actual library binaries, not JSON snapshots."""
+        old_p = tmp_path / "old.so"
+        new_p = tmp_path / "new.so"
+        old_p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        new_p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        return old_p, new_p
+
+    def _patch_used_by(self, monkeypatch, tmp_path: Path, old_snap, new_snap, scoped):
+        """Stub snapshot resolution (fake ELF paths aren't real libraries) and
+        appcompat.scope_diff_to_app so --used-by is exercised end to end
+        without a real compiler/binary."""
+        from abicheck import mcp_server
+
+        monkeypatch.setattr(
+            mcp_server, "_resolve_input",
+            MagicMock(side_effect=[old_snap, new_snap]),
+        )
+        import abicheck.appcompat as appcompat_mod
+
+        monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", lambda *a, **k: scoped)
+
+    def test_used_by_scopes_verdict_and_floors_exit_code(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # A break in a function the app doesn't use must not surface in the
+        # scoped verdict (ADR-043: compare --used-by folds appcompat).
+        from abicheck.appcompat import AppCompatResult
+
+        kept = _pub_func("kept_entry", "_Z10kept_entryv", "int")
+        removed = _pub_func("unrelated", "_Z9unrelatedv", "int")
+        old = _make_snapshot("1.0", functions=[kept, removed])
+        new = _make_snapshot("2.0", functions=[kept])
+        old_p, new_p = self._make_binary_pair(tmp_path)
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        scoped = AppCompatResult(
+            app_path=str(app), old_lib_path=str(old_p), new_lib_path=str(new_p),
+            required_symbols={"_Z10kept_entryv"}, required_symbol_count=1,
+            verdict=Verdict.COMPATIBLE,
+        )
+        self._patch_used_by(monkeypatch, tmp_path, old, new, scoped)
+
+        raw = abi_compare(str(old_p), str(new_p), used_by=[str(app)])
+        data = json.loads(raw)
+        assert data["status"] == "ok"
+        assert data["full_verdict"] == "BREAKING"
+        assert data["verdict"] == "COMPATIBLE"
+        assert data["used_by"][0]["app"] == str(app)
+        assert data["used_by"][0]["verdict"] == "COMPATIBLE"
+        assert data["exit_code"] == 0
+        assert data["exit_code_scheme"] == "scoped"
+
+    def test_used_by_missing_symbol_is_breaking(self, tmp_path: Path, monkeypatch):
+        from abicheck.appcompat import AppCompatResult
+
+        old = _make_snapshot("1.0", functions=[_pub_func("entry", "_Z5entryv", "int")])
+        new = _make_snapshot("2.0", functions=[])
+        old_p, new_p = self._make_binary_pair(tmp_path)
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        scoped = AppCompatResult(
+            app_path=str(app), old_lib_path=str(old_p), new_lib_path=str(new_p),
+            required_symbols={"_Z5entryv"}, required_symbol_count=1,
+            missing_symbols=["_Z5entryv"], verdict=Verdict.BREAKING,
+        )
+        self._patch_used_by(monkeypatch, tmp_path, old, new, scoped)
+
+        raw = abi_compare(str(old_p), str(new_p), used_by=[str(app)])
+        data = json.loads(raw)
+        assert data["used_by"][0]["missing_symbols"] == ["_Z5entryv"]
+        assert data["verdict"] == "BREAKING"
+        assert data["exit_code"] == 4
+        assert data["exit_code_scheme"] == "scoped"
+
+    def test_used_by_rejects_non_binary_snapshot_input(self, tmp_path: Path):
+        # --used-by needs real library binaries to parse app requirements
+        # against; JSON snapshots must be rejected with a clear error rather
+        # than silently mis-scoping.
+        old_p, new_p = self._make_pair(
+            tmp_path, _make_snapshot("1.0"), _make_snapshot("2.0")
+        )
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        raw = abi_compare(str(old_p), str(new_p), used_by=[str(app)])
+        data = json.loads(raw)
+        assert data["status"] == "error"
+        assert "real library binaries" in data["error"]
+
+    def test_used_by_app_not_found(self, tmp_path: Path, monkeypatch):
+        from abicheck import mcp_server
+
+        old = _make_snapshot("1.0")
+        new = _make_snapshot("2.0")
+        old_p, new_p = self._make_binary_pair(tmp_path)
+        monkeypatch.setattr(
+            mcp_server, "_resolve_input",
+            MagicMock(side_effect=[old, new]),
+        )
+        raw = abi_compare(
+            str(old_p), str(new_p), used_by=[str(tmp_path / "no_such_app")],
+        )
+        data = json.loads(raw)
+        assert data["status"] == "error"
+        assert "not found" in data["error"]
+
+    def test_used_by_folds_scoped_verdict_into_nested_report(
+        self, tmp_path: Path, monkeypatch
+    ):
+        from abicheck.appcompat import AppCompatResult
+
+        kept = _pub_func("kept_entry", "_Z10kept_entryv", "int")
+        removed = _pub_func("unrelated", "_Z9unrelatedv", "int")
+        old = _make_snapshot("1.0", functions=[kept, removed])
+        new = _make_snapshot("2.0", functions=[kept])
+        old_p, new_p = self._make_binary_pair(tmp_path)
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        scoped = AppCompatResult(
+            app_path=str(app), old_lib_path=str(old_p), new_lib_path=str(new_p),
+            required_symbols={"_Z10kept_entryv"}, required_symbol_count=1,
+            verdict=Verdict.COMPATIBLE,
+        )
+        self._patch_used_by(monkeypatch, tmp_path, old, new, scoped)
+
+        raw = abi_compare(
+            str(old_p), str(new_p), used_by=[str(app)], output_format="json",
+        )
+        data = json.loads(raw)
+        report = data["report"]
+        assert report["verdict"] == "COMPATIBLE"
+        assert report["full_verdict"] == "BREAKING"
+        assert report["used_by"][0]["verdict"] == "COMPATIBLE"
+
     def test_json_report_embedded_as_object(self, tmp_path: Path):
         snap = _make_snapshot("1.0", functions=[_pub_func("f", "_Zf")])
         old_p, new_p = self._make_pair(tmp_path, snap, snap)

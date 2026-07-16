@@ -185,6 +185,8 @@ def _reject_set_input_flags(
     reconcile_build_context: bool,
     env_matrix_path: Path | None,
     secondary_fmt: str | None = None,
+    used_by_apps: tuple[Path, ...] = (),
+    required_symbols: tuple[str, ...] = (),
 ) -> None:
     """Reject single-pair-only flags on a directory/package (release) compare.
 
@@ -216,6 +218,19 @@ def _reject_set_input_flags(
             "--secondary-format is not supported for directory/package "
             "(release) comparisons yet; it applies to single-file / snapshot "
             "inputs. Compare the libraries individually to use it."
+        )
+    if used_by_apps:
+        raise click.UsageError(
+            "--used-by is not supported for directory/package (release) "
+            "comparisons: the per-library fan-out has no per-app scoping. "
+            "Compare the specific library individually with --used-by."
+        )
+    if required_symbols:
+        raise click.UsageError(
+            "--required-symbol/--required-symbols is not supported for "
+            "directory/package (release) comparisons: the per-library "
+            "fan-out has no plugin-host-contract scoping. Compare the "
+            "specific library individually with --required-symbol."
         )
 
 
@@ -788,6 +803,7 @@ def run_compare(
         # single-pair-only flags on set inputs — reject them loudly (ADR-037 D12).
         _reject_set_input_flags(
             exit_code_scheme, reconcile_build_context, env_matrix_path, secondary_fmt,
+            used_by_apps=used_by_apps, required_symbols=required_symbols,
         )
         _reject_compile_context_for_set_inputs(ctx, project_cfg)
         _reject_evidence_flags_for_set_inputs(ctx)

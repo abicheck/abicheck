@@ -1551,7 +1551,7 @@ main.add_command(compat_group)
 # ``@main.command(...)`` decorator then attaches to that second group, not
 # the one actually running, so `python -m abicheck.cli --help` silently
 # listed only the handful of commands defined directly in this file (dump/
-# compare/compat) and omitted every sibling-registered one (scan, appcompat,
+# compare/compat) and omitted every sibling-registered one (scan, deps,
 # ...). Alias the already-running module under its real
 # package name first, so the relative import below reuses it instead
 # (Codex review).
