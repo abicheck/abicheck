@@ -1046,6 +1046,51 @@ class TestAbiCompare:
         assert data["exit_code"] == 0
         assert data["exit_code_scheme"] == "scoped"
 
+    def test_multi_app_scoped_verdict_ranked_independently_of_exit_code(
+        self, tmp_path: Path, monkeypatch,
+    ):
+        # Regression: under a severity config, a BREAKING app can carry exit
+        # code 0 (info-only preset). Picking the reported scoped verdict by
+        # exit code (both apps tie at 0) let a later, merely-COMPATIBLE app
+        # overwrite the first BREAKING app's verdict (Codex review).
+        from abicheck import mcp_server
+        from abicheck.appcompat import AppCompatResult
+
+        old = _make_snapshot("1.0", functions=[_pub_func("f", "_Zf")])
+        new = _make_snapshot("2.0", functions=[_pub_func("f", "_Zf")])
+        old_p, new_p = self._make_binary_pair(tmp_path)
+        app1 = tmp_path / "app1"
+        app1.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        app2 = tmp_path / "app2"
+        app2.write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+        monkeypatch.setattr(
+            mcp_server, "_resolve_input", MagicMock(side_effect=[old, new]),
+        )
+        breaking_scoped = AppCompatResult(
+            app_path=str(app1), old_lib_path=str(old_p), new_lib_path=str(new_p),
+            required_symbols={"_Zf"}, required_symbol_count=1,
+            missing_symbols=["_Zf"], verdict=Verdict.BREAKING,
+        )
+        compatible_scoped = AppCompatResult(
+            app_path=str(app2), old_lib_path=str(old_p), new_lib_path=str(new_p),
+            required_symbols=set(), required_symbol_count=0,
+            verdict=Verdict.COMPATIBLE,
+        )
+        import abicheck.appcompat as appcompat_mod
+        monkeypatch.setattr(
+            appcompat_mod, "scope_diff_to_app",
+            MagicMock(side_effect=[breaking_scoped, compatible_scoped]),
+        )
+
+        raw = abi_compare(
+            str(old_p), str(new_p), used_by=[str(app1), str(app2)],
+            severity_preset="info-only",
+        )
+        data = json.loads(raw)
+        assert data["exit_code"] == 0  # severity config still floors the gate
+        assert data["verdict"] == "BREAKING"  # but the reported verdict is not lost
+
     def test_required_symbols_scoped_exit_respects_severity_config(
         self, tmp_path: Path
     ):

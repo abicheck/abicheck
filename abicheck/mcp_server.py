@@ -481,6 +481,25 @@ def _scoped_exit_code(
     return _scoped_verdict_exit_code(verdict)
 
 
+_VERDICT_SEVERITY_RANK = {
+    "BREAKING": 3, "API_BREAK": 2, "COMPATIBLE_WITH_RISK": 1,
+    "COMPATIBLE": 0, "NO_CHANGE": 0,
+}
+
+
+def _verdict_severity_rank(verdict: object) -> int:
+    """Rank a Verdict by severity, independent of any exit-code scheme.
+
+    Mirrors ``cli_compare_helpers._verdict_severity_rank``: under a severity
+    scheme a BREAKING app can carry exit code 0 (e.g. an info-only preset),
+    so picking the reported scoped verdict by exit code could let a later,
+    less-severe app overwrite an earlier BREAKING one merely because their
+    exit codes tied at 0 (Codex review).
+    """
+    value = getattr(verdict, "value", verdict)
+    return _VERDICT_SEVERITY_RANK.get(value, 0) if isinstance(value, str) else 0
+
+
 def _impact_category(kind: ChangeKind, policy: str = "strict_abi") -> str:
     """Return the impact category string for a ChangeKind under the given policy.
 
@@ -894,6 +913,7 @@ def abi_compare(
             summaries = []
             worst_exit = 0
             worst_verdict = None
+            worst_verdict_rank = -1
             for app in used_by:
                 app_path = _safe_read_path(app, label="used_by")
                 if not app_path.exists():
@@ -920,8 +940,12 @@ def abi_compare(
                     scoped.verdict, scoped.breaking_for_app, result,
                     severity_config, active_policy, pf,
                 )
-                if worst_verdict is None or app_exit >= worst_exit:
-                    worst_exit = app_exit
+                # exit code (gating) and verdict (reporting) are maxed/ranked
+                # independently -- see _verdict_severity_rank.
+                worst_exit = max(worst_exit, app_exit)
+                rank = _verdict_severity_rank(scoped.verdict)
+                if worst_verdict is None or rank >= worst_verdict_rank:
+                    worst_verdict_rank = rank
                     worst_verdict = scoped.verdict
             scoped_key = "used_by"
             scoped_payload = summaries

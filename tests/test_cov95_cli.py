@@ -1229,6 +1229,43 @@ class TestUsedByScoping:
         )
         assert result.exit_code == 0
 
+    def test_multi_app_scoped_verdict_ranked_independently_of_exit_code(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Regression: under a severity scheme, a BREAKING app can carry exit
+        # code 0 (info-only preset). Picking the reported scoped_verdict by
+        # exit code (both apps tie at 0) let the second, merely-COMPATIBLE
+        # app overwrite the first BREAKING app's verdict -- the JSON/report
+        # verdict must stay BREAKING even though the gated exit code is
+        # floored at 0 by the severity config (Codex review).
+        import abicheck.appcompat as appcompat_mod
+        from abicheck.appcompat import AppCompatResult
+
+        breaking_res = self._result(
+            verdict=Verdict.BREAKING, missing=["foo"],
+            breaking_for_app=[Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")],
+        )
+        compatible_res = AppCompatResult(
+            app_path="/app2", old_lib_path="old.so", new_lib_path="new.so",
+            required_symbols=set(), required_symbol_count=0,
+            verdict=Verdict.COMPATIBLE, symbol_coverage=100.0,
+        )
+        app1, old, new = self._setup(tmp_path, monkeypatch)
+        app2 = tmp_path / "app2"
+        app2.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        monkeypatch.setattr(
+            appcompat_mod, "scope_diff_to_app",
+            MagicMock(side_effect=[breaking_res, compatible_res]),
+        )
+        result = _invoke(
+            "compare", str(old), str(new),
+            "--used-by", str(app1), "--used-by", str(app2),
+            "--severity-preset", "info-only", "--format", "json",
+        )
+        data = json.loads(result.stdout)
+        assert result.exit_code == 0  # severity config still floors the gate
+        assert data["verdict"] == "BREAKING"  # but the reported verdict is not lost
+
     def test_severity_clean_exit_0(self, tmp_path, monkeypatch) -> None:
         res = self._result(verdict=Verdict.COMPATIBLE)
         app, old, new = self._setup(tmp_path, monkeypatch)

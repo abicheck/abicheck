@@ -467,6 +467,27 @@ def _verdict_exit_code(verdict: object) -> int:
     return 0
 
 
+_VERDICT_SEVERITY_RANK = {
+    "BREAKING": 3, "API_BREAK": 2, "COMPATIBLE_WITH_RISK": 1,
+    "COMPATIBLE": 0, "NO_CHANGE": 0,
+}
+
+
+def _verdict_severity_rank(verdict: object) -> int:
+    """Rank a Verdict by severity, independent of any exit-code scheme.
+
+    Under a severity scheme, a BREAKING app can carry exit code 0 (e.g.
+    ``--severity-preset info-only``) -- ranking "worst app" by exit code
+    would then let a later COMPATIBLE app (also exit code 0) overwrite the
+    reported scoped verdict, so JSON/HTML/SARIF could claim COMPATIBLE while
+    an earlier --used-by summary is still BREAKING (Codex review). Verdict
+    selection for reporting must stay keyed on verdict severity, not on the
+    (independently correct) max-exit-code computation used for gating.
+    """
+    value = getattr(verdict, "value", verdict)
+    return _VERDICT_SEVERITY_RANK.get(value, 0) if isinstance(value, str) else 0
+
+
 def _scoped_exit_code(
     scoped: Any, relevant_changes: list[Any],
     result: Any, exit_code_scheme: str, sev_config: Any,
@@ -536,6 +557,7 @@ def _apply_used_by_scoping(
     summaries = []
     worst_exit = 0
     worst_verdict = None
+    worst_verdict_rank = -1
     for app in used_by_apps:
         scoped = scope_diff_to_app(
             result, app, old_lib, new_lib,
@@ -546,14 +568,16 @@ def _apply_used_by_scoping(
             scoped, scoped.breaking_for_app, result, exit_code_scheme, sev_config,
             policy, policy_file,
         )
-        # `>=` (not `>`): the first app must always seed worst_verdict, even
-        # when its exit code is 0 (COMPATIBLE) -- a strict `>` against the 0
-        # starting point meant an all-COMPATIBLE --used-by set left
-        # scoped_verdict unset (None) forever, so the JSON verdict swap and
-        # the scoped-vs-full-verdict text banner both silently no-op'd for
-        # the (very common) fully-compatible case (Codex review).
-        if worst_verdict is None or exit_code >= worst_exit:
-            worst_exit = exit_code
+        # exit code (gating) and verdict (reporting) are maxed/ranked
+        # independently: under a severity scheme the two can disagree (a
+        # BREAKING app can carry exit code 0 under e.g. `--severity-preset
+        # info-only`), so picking the reported scoped_verdict by exit code
+        # could let a later, less-severe app overwrite an earlier BREAKING
+        # one merely because their exit codes tied at 0 (Codex review).
+        worst_exit = max(worst_exit, exit_code)
+        rank = _verdict_severity_rank(scoped.verdict)
+        if worst_verdict is None or rank >= worst_verdict_rank:
+            worst_verdict_rank = rank
             worst_verdict = scoped.verdict
     result.used_by = summaries  # type: ignore[attr-defined]
     result.scoped_verdict = worst_verdict  # type: ignore[attr-defined]
