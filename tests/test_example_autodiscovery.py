@@ -117,6 +117,16 @@ KNOWN_GAP_PLATFORMS: dict[str, list[str]] = {
     for k, v in _gt_data["verdicts"].items()
     if v.get("known_gap_platforms")
 }
+# known_gap_observed: case_name → the specific wrong verdict(s) the gap
+# documents. When set, only THAT verdict xfails; any other mismatch (e.g. a
+# false positive in the opposite direction from what was actually observed)
+# is a real FAIL instead of being silently swept into the same known gap
+# (Codex review). Absent ⇒ any mismatch xfails (back-compat).
+KNOWN_GAP_OBSERVED: dict[str, list[str]] = {
+    k: list(v["known_gap_observed"])
+    for k, v in _gt_data["verdicts"].items()
+    if v.get("known_gap_observed")
+}
 # source_smoke: case_name → consumer compile/link proof declared in ground_truth.
 # These cases intentionally need validate_examples.py because plain dump+compare
 # cannot observe downstream source-only compile/link failures.
@@ -584,7 +594,8 @@ def _assert_verdict(
 ) -> None:
     """Assert that the verdict matches, handling known gaps as xfail."""
     if case_name in KNOWN_GAPS and _gap_applies(case_name, is_cpp):
-        if got != expected_verdict:
+        allowed_verdicts = KNOWN_GAP_OBSERVED.get(case_name)
+        if got != expected_verdict and (allowed_verdicts is None or got in allowed_verdicts):
             pytest.xfail(KNOWN_GAPS[case_name])
 
     assert got == expected_verdict, (
