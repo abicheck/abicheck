@@ -215,6 +215,12 @@ class _CastxmlParser:
         # `overrides` chain. Populated lazily by _collect_virtual_methods(); see
         # its docstring for why this is needed alongside vtable_index.
         self._vtable_slot_root: dict[str, int | str] = {}
+        # method element id -> any ADDITIONAL slot keys beyond the primary one
+        # in _vtable_slot_root, for a method that itself overrides more than
+        # one base slot (non-virtual multiple inheritance). A further-derived
+        # override referencing this id by `overrides` must propagate to every
+        # one of these, not just the primary -- see _collect_virtual_methods.
+        self._vtable_slot_extra_roots: dict[str, list[int | str]] = {}
         self._build_id_map()
 
     def _build_id_map(self) -> None:
@@ -1326,15 +1332,28 @@ class _CastxmlParser:
                 # collapsing them into one entry -- which would under-report
                 # the vtable's true size -- or leaving them with stale
                 # pre-override content.
-                key = overrides_id
+                #
+                # A resolved id can itself carry extra roots from an earlier
+                # multi-slot override (a further-derived override referencing
+                # an intermediate override's id by `overrides` must propagate
+                # to every slot that intermediate one touched, not just its
+                # primary) -- both _vtable_slot_root and
+                # _vtable_slot_extra_roots are consulted per id below.
+                resolved_keys: list[int | str] = []
                 for oid in overrides_id.split():
-                    resolved = self._vtable_slot_root.get(oid)
-                    if resolved is None:
-                        continue
-                    if key == overrides_id:
-                        key = resolved
-                    elif resolved != key and resolved not in extra_keys:
-                        extra_keys.append(resolved)
+                    candidates: list[int | str] = []
+                    primary = self._vtable_slot_root.get(oid)
+                    if primary is not None:
+                        candidates.append(primary)
+                    candidates.extend(self._vtable_slot_extra_roots.get(oid, ()))
+                    for candidate in candidates:
+                        if candidate not in resolved_keys:
+                            resolved_keys.append(candidate)
+                if resolved_keys:
+                    key = resolved_keys[0]
+                    extra_keys = resolved_keys[1:]
+                else:
+                    key = overrides_id
                 if isinstance(key, int):
                     # Consistently-indexed lineage: adopt the resolved index
                     # for sorting when this declaration has none of its own,
@@ -1369,6 +1388,11 @@ class _CastxmlParser:
                 # `overrides="Mid's id"`) must still resolve back to the int index
                 # Base's slot is keyed by, or it would append instead of replace.
                 self._vtable_slot_root[mid] = key
+                if extra_keys:
+                    # This id itself touches more than one slot -- a further-
+                    # derived override referencing it by `overrides` must
+                    # propagate to all of them (see the resolution loop above).
+                    self._vtable_slot_extra_roots[mid] = list(extra_keys)
             slots[key] = (idx, mangled_name)
             for extra_key in extra_keys:
                 prev_idx, _ = slots.get(extra_key, (None, ""))

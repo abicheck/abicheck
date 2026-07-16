@@ -1258,6 +1258,35 @@ class TestCastxmlParserVtable:
         derived_t = next(t for t in types if t.name == "Derived")
         assert derived_t.vtable == ["_ZN7Derived3fooEv", "_ZN7Derived3fooEv"]
 
+    def test_vtable_multi_id_override_chain_propagates_to_every_slot(self):
+        """Base1/Base2 -> Derived::foo (overrides both) -> MoreDerived::foo
+        (overrides Derived::foo by ITS id alone). Derived's own multi-slot
+        override must record both underlying slots against its own id, so
+        MoreDerived's single-id ``overrides="m3"`` still resolves to (and
+        updates) both positions -- not just the first one Derived happened
+        to register as its primary key.
+        """
+        base1 = Element("Class", id="c1", name="Base1")
+        m1 = Element("Method", id="m1", name="foo", mangled="_ZN5Base13fooEv",
+                      virtual="1", context="c1")
+        base2 = Element("Class", id="c2", name="Base2")
+        m2 = Element("Method", id="m2", name="foo", mangled="_ZN5Base23fooEv",
+                      virtual="1", context="c2")
+        derived = Element("Class", id="c3", name="Derived")
+        SubElement(derived, "Base", type="c1")
+        SubElement(derived, "Base", type="c2")
+        m3 = Element("Method", id="m3", name="foo", mangled="_ZN7Derived3fooEv",
+                      virtual="1", context="c3", overrides="m1 m2")
+        more_derived = Element("Class", id="c4", name="MoreDerived")
+        SubElement(more_derived, "Base", type="c3")
+        m4 = Element("Method", id="m4", name="foo", mangled="_ZN11MoreDerived3fooEv",
+                      virtual="1", context="c4", overrides="m3")
+        root = _xml_root(base1, base2, derived, more_derived, m1, m2, m3, m4)
+        p = _CastxmlParser(root, set(), set())
+        types = p.parse_types()
+        more_derived_t = next(t for t in types if t.name == "MoreDerived")
+        assert more_derived_t.vtable == ["_ZN11MoreDerived3fooEv", "_ZN11MoreDerived3fooEv"]
+
     def test_vtable_diamond_inheritance_does_not_infinite_loop(self):
         """Diamond inheritance (Derived : Left, Right; both : Base) revisits
         Base through two paths. The `seen` guard must return {} on the
