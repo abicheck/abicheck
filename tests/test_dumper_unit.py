@@ -1165,6 +1165,63 @@ class TestCastxmlParserVtable:
         derived_t = next(t for t in types if t.name == "Derived")
         assert derived_t.vtable == ["_ZN7Derived3fooEv", "_ZN4Base3barEv"]
 
+    def test_vtable_diamond_inheritance_does_not_infinite_loop(self):
+        """Diamond inheritance (Derived : Left, Right; both : Base) revisits
+        Base through two paths. The `seen` guard must return {} on the
+        second visit rather than re-walking (or infinite-looping on a cycle);
+        Base's own slot still comes through once, via whichever path visits
+        it first.
+        """
+        base = Element("Class", id="c1", name="Base")
+        m1 = Element("Method", id="m1", name="foo", mangled="_ZN4Base3fooEv",
+                      virtual="1", context="c1")
+        left = Element("Class", id="c2", name="Left")
+        SubElement(left, "Base", type="c1")
+        right = Element("Class", id="c3", name="Right")
+        SubElement(right, "Base", type="c1")
+        derived = Element("Class", id="c4", name="Derived")
+        SubElement(derived, "Base", type="c2")
+        SubElement(derived, "Base", type="c3")
+        root = _xml_root(base, left, right, derived, m1)
+        p = _CastxmlParser(root, set(), set())
+        types = p.parse_types()
+        derived_t = next(t for t in types if t.name == "Derived")
+        assert derived_t.vtable == ["_ZN4Base3fooEv"]
+
+    def test_vtable_dangling_base_type_reference_is_skipped(self):
+        """A <Base type="..."> pointing at an id with no matching element
+        (a malformed/truncated castxml dump) must be skipped, not crash."""
+        derived = Element("Class", id="c1", name="Derived")
+        SubElement(derived, "Base", type="does-not-exist")
+        root = _xml_root(derived)
+        p = _CastxmlParser(root, set(), set())
+        types = p.parse_types()
+        derived_t = next(t for t in types if t.name == "Derived")
+        assert derived_t.vtable == []
+
+    def test_collect_virtual_methods_unresolvable_cid_returns_empty(self):
+        """_collect_virtual_methods() called directly with a class id that
+        isn't in the id map (defensive guard -- unreachable through the
+        normal _resolve()-gated recursive call, since _resolve already
+        filters out dangling Base references before recursing)."""
+        root = _xml_root(Element("Class", id="c1", name="C"))
+        p = _CastxmlParser(root, set(), set())
+        assert p._collect_virtual_methods("does-not-exist") == {}
+
+    def test_vtable_method_without_id_attribute_is_not_registered_as_slot_root(self):
+        """A virtual method element missing its own `id` attribute (malformed
+        castxml output) must still contribute its slot -- just without being
+        recorded in `_vtable_slot_root`, since there's no id to key it by."""
+        cls = Element("Class", id="c1", name="C")
+        method = Element("Method", name="foo", mangled="_ZN1C3fooEv",
+                          virtual="1", context="c1")
+        root = _xml_root(cls, method)
+        p = _CastxmlParser(root, set(), set())
+        types = p.parse_types()
+        c_t = next(t for t in types if t.name == "C")
+        assert c_t.vtable == ["_ZN1C3fooEv"]
+        assert p._vtable_slot_root == {}
+
 
 class TestCastxmlParserEnums:
     def test_parse_enum(self):

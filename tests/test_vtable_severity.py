@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.checker_policy import BREAKING_KINDS
-from abicheck.diff_cxx_rules import vtable_slot_is_override_reuse
+from abicheck.diff_cxx_rules import _owner_descends_from, vtable_slot_is_override_reuse
 from abicheck.model import AbiSnapshot, Function, Param, RecordType
 
 
@@ -212,3 +212,60 @@ class TestVtableOverrideSlotReuse:
         assert not vtable_slot_is_override_reuse(
             "_ZN5Base14fooEv", "_ZN5Base24fooEv", old_funcs, new_funcs, old_types, new_types,
         )
+
+    def test_identical_slot_entry_is_trivially_a_reuse(self) -> None:
+        """The old_entry == new_entry fast path: an unchanged slot is
+        trivially a 'reuse' (nothing to suppress a real change for)."""
+        assert vtable_slot_is_override_reuse(
+            "_ZN4Base5paintEi", "_ZN4Base5paintEi", {}, {}, {}, {},
+        )
+
+    def test_different_signature_returns_false_directly(self) -> None:
+        """virtual_signature_key mismatch short-circuits to False, independent
+        of owner/hierarchy -- exercised directly since a differing vtable
+        length (as in the compare()-level negative-twin test) never reaches
+        this helper at all (_diff_type_vtable only calls it when both
+        vtables are the same length)."""
+        old_funcs = {"_ZN4Base5paintEi": Function(
+            name="Base::paint", mangled="_ZN4Base5paintEi",
+            return_type="int", params=[Param(name="x", type="int")], is_virtual=True,
+        )}
+        new_funcs = {"_ZN7Derived5paintEd": Function(
+            name="Derived::paint", mangled="_ZN7Derived5paintEd",
+            return_type="int", params=[Param(name="x", type="double")], is_virtual=True,
+        )}
+        assert not vtable_slot_is_override_reuse(
+            "_ZN4Base5paintEi", "_ZN7Derived5paintEd", old_funcs, new_funcs, {}, {},
+        )
+
+    def test_unresolvable_owner_returns_false(self) -> None:
+        """A Function whose owner can't be determined (no '::' in its name
+        and an unparseable mangled symbol) must not be treated as a reuse --
+        there is nothing to verify an override edge against."""
+        old_funcs = {"paint": Function(
+            name="paint", mangled="not_a_mangled_name",
+            return_type="int", params=[Param(name="x", type="int")], is_virtual=True,
+        )}
+        new_funcs = {"paint2": Function(
+            name="paint", mangled="also_not_mangled",
+            return_type="int", params=[Param(name="x", type="int")], is_virtual=True,
+        )}
+        assert not vtable_slot_is_override_reuse(
+            "paint", "paint2", old_funcs, new_funcs, {}, {},
+        )
+
+
+class TestOwnerDescendsFrom:
+    """Direct coverage of diff_cxx_rules._owner_descends_from()'s branches."""
+
+    def test_owner_equals_ancestor(self) -> None:
+        assert _owner_descends_from("Base", "Base", {})
+
+    def test_leaf_names_match_across_qualification(self) -> None:
+        """A qualified owner and a bare-leaf ancestor with the same leaf
+        component are treated as the same class (CastXML records bases as
+        bare leaves; DWARF records the qualified form)."""
+        assert _owner_descends_from("ns::Base", "Base", {})
+
+    def test_unrelated_leaf_and_unresolvable_type_returns_false(self) -> None:
+        assert not _owner_descends_from("Other", "Base", {})
