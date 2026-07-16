@@ -94,7 +94,7 @@ One row per `ChangeKind` (355 total). Columns fuse the verdict partition (`check
 | `float_abi_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `float_abi_changed` | — |
 | `fortify_source_weakened` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `fortify_source_weakened` | — |
 | `frame_register_changed` | breaking | `BREAKING` | `error` | unspecified | `frame_register_changed` | — |
-| `func_added` | addition | `COMPATIBLE` | `warning` | L0 | `func_added` | [case03](../examples/case03_compat_addition.md), [case111](../examples/case111_enumerable_thread_specific_lambda_ambiguity.md), [case141](../examples/case141_versioned_symbol_scheme.md), [case16](../examples/case16_inline_to_non_inline.md), +4 |
+| `func_added` | addition | `COMPATIBLE` | `warning` | L0 | `func_added` | [case03](../examples/case03_compat_addition.md), [case111](../examples/case111_enumerable_thread_specific_lambda_ambiguity.md), [case141](../examples/case141_versioned_symbol_scheme.md), [case16](../examples/case16_inline_to_non_inline.md), +5 |
 | `func_became_inline` | api_break | `API_BREAK` | `warning` | unspecified | `func_became_inline` | — |
 | `func_contract_attribute_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `func_contract_attribute_added` | — |
 | `func_contract_attribute_removed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `func_contract_attribute_removed` | — |
@@ -112,7 +112,7 @@ One row per `ChangeKind` (355 total). Columns fuse the verdict partition (`check
 | `func_pure_virtual_added` | breaking | `BREAKING` | `error` | L1 | `func_pure_virtual_added` | — |
 | `func_ref_qual_changed` | breaking | `BREAKING` | `error` | L2 | `func_ref_qual_changed` | [case166](../examples/case166_ref_qualifier_added.md) |
 | `func_removed` | breaking | `BREAKING` | `error` | L0 | `func_removed` | [case01](../examples/case01_symbol_removal.md), [case100](../examples/case100_experimental_removed_without_replacement.md), [case104](../examples/case104_glibcxx_dual_abi_flip.md), [case107](../examples/case107_task_scheduler_init_removed.md), +8 |
-| `func_removed_elf_only` | breaking | `BREAKING` | `error` | L0 | `func_removed_elf_only` | [case59](../examples/case59_func_became_inline.md), [case97](../examples/case97_api_depends_on_consumer_env.md) |
+| `func_removed_elf_only` | breaking | `BREAKING` | `error` | L0 | `func_removed_elf_only` | [case182](../examples/case182_accidental_export_removed_still_breaking.md), [case59](../examples/case59_func_became_inline.md), [case97](../examples/case97_api_depends_on_consumer_env.md) |
 | `func_return_changed` | breaking | `BREAKING` | `error` | L1 | `func_return_changed` | [case102](../examples/case102_frozen_runtime_signature_changed.md), [case10](../examples/case10_return_type.md), [case46](../examples/case46_pointer_chain_type_change.md), [case70](../examples/case70_flexible_array_member_changed.md), +1 |
 | `func_static_changed` | breaking | `BREAKING` | `error` | L1 | `func_static_changed` | [case21](../examples/case21_method_became_static.md) |
 | `func_variadic_added` | breaking | `BREAKING` | `error` | L2 | `func_variadic_added` | — |
@@ -287,7 +287,7 @@ One row per `ChangeKind` (355 total). Columns fuse the verdict partition (`check
 | `symbol_version_alias_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `symbol_version_alias_changed` | — |
 | `symbol_version_defined_added` | quality | `COMPATIBLE` | `warning` | L0 | `symbol_version_defined_added` | [case13](../examples/case13_symbol_versioning.md) |
 | `symbol_version_defined_removed` | breaking | `BREAKING` | `error` | L0 | `symbol_version_defined_removed` | — |
-| `symbol_version_node_removed` | breaking | `BREAKING` | `error` | L0 | `symbol_version_node_removed` | [case139](../examples/case139_symbol_version_node_removed.md), [case65](../examples/case65_symbol_version_removed.md) |
+| `symbol_version_node_removed` | breaking | `BREAKING` | `error` | L0 | `symbol_version_node_removed` | [case139](../examples/case139_symbol_version_node_removed.md), [case183](../examples/case183_internal_version_node_churn.md), [case65](../examples/case65_symbol_version_removed.md) |
 | `symbol_version_required_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `symbol_version_required_added` | [case170](../examples/case170_env_runtime_floor_raised.md) |
 | `symbol_version_required_added_compat` | quality | `COMPATIBLE` | `warning` | unspecified | `symbol_version_required_added_compat` | — |
 | `symbol_version_required_removed` | quality | `COMPATIBLE` | `warning` | unspecified | `symbol_version_required_removed` | — |

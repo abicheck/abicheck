@@ -3,7 +3,7 @@
 
 Backward-compatible at the symbol level but with behavioral risk.
 
-_25 case(s)._ [← back to all examples](../index.md)
+_26 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -32,3 +32,4 @@ _25 case(s)._ [← back to all examples](../index.md)
 | [case178_unnamed_type_in_public_abi](../case178_unnamed_type_in_public_abi.md) | Unnamed Type Leaks Into the Public ABI | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case179_cet_protection_weakened](../case179_cet_protection_weakened.md) | CET Protection Weakened | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case180_symbol_binding_lost_unique](../case180_symbol_binding_lost_unique.md) | Symbol Binding Lost GNU_UNIQUE | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case183_internal_version_node_churn](../case183_internal_version_node_churn.md) | Internal ELF symbol-version node churn | 🟡 COMPATIBLE_WITH_RISK | Risk |

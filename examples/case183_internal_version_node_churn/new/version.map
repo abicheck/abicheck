@@ -1,0 +1,4 @@
+FOO_1.0 {
+    global:
+        public_api;
+};

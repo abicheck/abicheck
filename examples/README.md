@@ -1,7 +1,7 @@
 # ABI Scenario Catalog
 
 <!-- BEGIN GENERATED: catalog-headline (keep counts in sync with examples/ground_truth.json) -->
-This directory contains **181 cases** (176 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
+This directory contains **186 cases** (181 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
 <!-- END GENERATED: catalog-headline -->
 
 - Paired `v1/` and `v2/` source + headers.
@@ -20,12 +20,12 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 <!-- BEGIN GENERATED: verdict-distribution (keep counts in sync with examples/ground_truth.json) -->
 | Verdict | Count | `checker_policy.py` set | Icon |
 |---------|-------|-------------------------|------|
-| BREAKING | 100 | `BREAKING_KINDS` | 🔴 |
+| BREAKING | 101 | `BREAKING_KINDS` | 🔴 |
 | API_BREAK | 17 | `API_BREAK_KINDS` | 🟠 |
-| COMPATIBLE_WITH_RISK | 25 | `RISK_KINDS` | 🟡 |
-| COMPATIBLE (addition) | 8 | `ADDITION_KINDS` | 🟢 |
+| COMPATIBLE_WITH_RISK | 26 | `RISK_KINDS` | 🟡 |
+| COMPATIBLE (addition) | 9 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 21 | `QUALITY_KINDS` | 🟡 |
-| NO_CHANGE | 5 | — | ✅ |
+| NO_CHANGE | 7 | — | ✅ |
 | Bundle (multi-binary) | 5 | see [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md) | 🔵 |
 <!-- END GENERATED: verdict-distribution -->
 
@@ -408,6 +408,11 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [179](case179_cet_protection_weakened/README.md) | CET Protection Weakened | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [180](case180_symbol_binding_lost_unique/README.md) | Symbol Binding Lost GNU_UNIQUE | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [181](case181_xcheck_public_to_internal_dependency/README.md) | Public API reaches an internal declaration | Quality | 🟢 COMPATIBLE (bad practice) |
+| [182](case182_accidental_export_removed_still_breaking/README.md) | Accidental export removed — still BREAKING under public-header scoping | Breaking | 🔴 BREAKING (bad practice) |
+| [183](case183_internal_version_node_churn/README.md) | Internal ELF symbol-version node churn | Risk | 🟡 COMPATIBLE_WITH_RISK |
+| [184](case184_internal_enum_churn_scoped/README.md) | Internal enum churn, scoped out by private-header origin | No Change | ✅ NO_CHANGE |
+| [185](case185_inherited_override_reuses_slot/README.md) | Inherited override reuses the base's vtable slot | Addition | 🟢 COMPATIBLE |
+| [186](case186_c_api_pointee_const_abi_neutral/README.md) | C API pointee const-qualification is ABI-neutral | No Change | ✅ NO_CHANGE |
 <!-- END GENERATED: case-index -->
 
 ---

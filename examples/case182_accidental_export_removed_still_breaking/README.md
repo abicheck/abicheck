@@ -1,0 +1,69 @@
+# Case 182: Accidental export removed — still BREAKING under public-header scoping
+
+**Category:** Breaking | **Verdict:** ❌ BREAKING (exit 4)
+
+## What changes
+
+`internal_helper()` is exported by the v1 library (default visibility, no
+`-fvisibility=hidden`, no version script) but **never declared in `v1.h`** —
+an accidental export, the same pattern audited by
+[`case143_audit_accidental_export`](../case143_audit_accidental_export/README.md).
+v2 inlines its logic into `public_api()` and drops the symbol entirely.
+`public_api()` itself is unchanged.
+
+## Why this stays BREAKING (not laundered by scoping)
+
+This looks, at first glance, like a case for ADR-024 public-surface scoping:
+`internal_helper` was never part of the documented API, so shouldn't its
+removal be filtered the same way
+[case118](../case118_internal_struct_field_added_scoped/README.md)'s internal
+struct layout change is?
+
+**No — and this is intentional.** Public-surface scoping filters changes to
+types/symbols it can *prove* are unreachable from the public-header surface.
+An internal struct's layout is only observable by a caller that names the
+type — and nothing public names `InternalStats`. But `internal_helper` is a
+real, exported, callable symbol. The *absence* of a header declaration proves
+it wasn't part of the documented contract — it does **not** prove nobody
+depends on it. A consumer could still:
+
+- call it via `dlsym(handle, "internal_helper")`,
+- declare its own prototype and link directly against the symbol, or
+- have obtained it from a leaked/vendored copy of an internal header.
+
+abicheck's authority model deliberately never lets an absence of *positive*
+evidence (a header declaration) override *negative* evidence already proven
+at the ELF/DWARF layer (a real, exported function that just disappeared).
+Compare this to
+[case164](../case164_preproc_conditional_field/README.md), where build
+context *adds* positive evidence (the same preprocessor macro was defined on
+both sides) to clear a phantom the header parser invented — evidence is only
+ever used to add confidence, never to make a real, already-proven break
+disappear.
+
+```bash
+abicheck compare libv1.so libv2.so -H v1.h --show-filtered
+# verdict: BREAKING (exit 4)
+# func_removed_elf_only: Elf_only function removed: internal_helper
+# (--scope-public-headers is on by default here and changes nothing —
+#  nothing is filtered, because nothing can be proven non-public)
+```
+
+## Relationship to case143
+
+case143 is the audit-mode companion: it demonstrates that while
+`internal_helper` is *still present*, cross-checking the export table
+against the public-header AST flags it as `EXPORTED_NOT_PUBLIC` — a quality
+issue (bad practice), not a break. This case is the natural next step:
+once that accidental export is *removed* between releases, the tool refuses
+to treat "undocumented" as "safe to remove" and reports the real binary break.
+
+## How to fix
+
+- If `internal_helper` truly has no external callers, ship the removal with a
+  major version bump / SONAME change to signal the break, or
+- if it must stay ABI-stable for `dlsym()`-based consumers, keep the symbol
+  exported (even as a thin compatibility shim), or
+- better yet, mark it `static`/hidden-visibility from the start so it never
+  becomes an accidental export in the next release (see case06 for the
+  visibility-based fix).

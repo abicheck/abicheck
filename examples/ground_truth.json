@@ -1880,6 +1880,86 @@
     ]
    }
   },
+  "case182_accidental_export_removed_still_breaking": {
+   "abi_break": true,
+   "api_break": false,
+   "bad_practice": true,
+   "category": "breaking",
+   "description": "internal_helper() is exported with default visibility but never declared in v1.h (an accidental export, same pattern as case143). v2 removes it entirely. abicheck deliberately keeps this BREAKING even under --scope-public-headers (on by default): scoping filters changes it can prove are unreachable from the public surface (case118/case184), but a bare ELF export with no header declaration at all cannot be proven non-contractual -- it might still be reached via dlsym() or direct linkage. Only the audit/crosscheck layer (case143) flags the still-present symbol as a quality issue; removing it stays a real binary break.",
+   "expected": "BREAKING",
+   "expected_kinds": [
+    "func_removed_elf_only"
+   ],
+   "min_evidence": "L0",
+   "platforms": [
+    "linux"
+   ],
+   "scope_public_headers": true
+  },
+  "case183_internal_version_node_churn": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "risk",
+   "description": "foo_worker() is versioned onto FOO_INTERNAL_1, an ELF symbol-version node whose name itself signals a private ABI (the same convention as glibc's GLIBC_PRIVATE and nettle's NETTLE_INTERNAL_x/HOGWEED_INTERNAL_x nodes). v2 removes foo_worker() and the entire FOO_INTERNAL_1 node; the public FOO_1.0 node (public_api) is untouched. abicheck/diff_versioning.py's is_internal_version_node()/demote_internal_version_node_findings() recognize the internal node name and demote what would otherwise be a hard break to COMPATIBLE_WITH_RISK -- the real rule behind abicheck's 67%->100% live agreement jump on a nettle 3.6->3.7 upgrade.",
+   "expected": "COMPATIBLE_WITH_RISK",
+   "expected_kinds": [
+    "symbol_version_node_removed"
+   ],
+   "min_evidence": "L0",
+   "platforms": [
+    "linux"
+   ]
+  },
+  "case184_internal_enum_churn_scoped": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "no_change",
+   "description": "InternalMode::MODE_B's value changes (1 -> 9). InternalMode is declared in a private detail header transitively #include-d by the public umbrella header, never itself passed via -H/--header, and unreachable from any public function signature. Unlike a struct (case118), an enum's header-declared members are seeded into the public surface regardless of reachability (ADR-024, case20 regression) -- the override is skipped only because the enum's own declaration origin classifies as PRIVATE_HEADER, letting true reachability apply and filter it.",
+   "expected": "NO_CHANGE",
+   "expected_absent_kinds": [
+    "enum_member_value_changed"
+   ],
+   "expected_kinds": [],
+   "min_evidence": "L2",
+   "platforms": [
+    "linux"
+   ],
+   "scope_public_headers": true
+  },
+  "case185_inherited_override_reuses_slot": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "addition",
+   "description": "Derived does not override Base::paint(int) in v1; in v2 it adds int paint(int) override -- the exact same signature as the inherited virtual. This reuses Base's existing vtable slot (Derived's vtable stays 40 bytes in both versions) rather than adding one, so diff_cxx_rules.py's virtual_method_addition() does not classify it as VIRTUAL_METHOD_ADDED. The only observable change is a new mangled Derived::paint(int) symbol (func_added, COMPATIBLE) -- overriding with a different signature (e.g. paint(double)) does grow the vtable by one slot and is BREAKING (virtual_method_added + vtable_slot_count_changed), the negative twin documented in the README.",
+   "expected": "COMPATIBLE",
+   "expected_kinds": [
+    "func_added"
+   ],
+   "min_evidence": "L0",
+   "platforms": [
+    "linux"
+   ]
+  },
+  "case186_c_api_pointee_const_abi_neutral": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "no_change",
+   "description": "Buffer.data and send_buffer()'s parameter both change char* to const char* -- same pointer size/offset/calling convention, only the pointee's mutability contract tightens. name_classification.py's cv_qualifiers_only_differ() recognizes the top-level-pointer-plus-const/volatile-only shape and diff_symbols.py/diff_types.py skip emitting any finding at all (fully suppressed, not merely downgraded) -- the real false-positive class behind Wayland's wl_display accessors and libuv's uv_cpu_info_s::model pointee-const churn (conda-forge libuv 1.5x campaign).",
+   "expected": "NO_CHANGE",
+   "expected_absent_kinds": [
+    "type_field_type_changed",
+    "func_params_changed"
+   ],
+   "expected_kinds": [],
+   "min_evidence": "L2",
+   "platforms": [
+    "linux"
+   ]
+  },
   "case18_dependency_leak": {
    "abi_break": true,
    "api_break": false,
