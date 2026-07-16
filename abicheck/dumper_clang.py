@@ -49,8 +49,11 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
+from pathlib import Path
 from typing import Any
 
+from .errors import SnapshotError
 from .model import (
     AccessLevel,
     EnumMember,
@@ -68,6 +71,40 @@ from .provenance import (
     classify_origin,
     header_from_location,
 )
+
+
+def _clang_available(clang_bin: str = "clang") -> bool:
+    return shutil.which(clang_bin) is not None
+
+
+def _resolve_clang_bin(
+    compiler: str, gcc_path: str | None, gcc_prefix: str | None,
+) -> str:
+    """Resolve the clang executable to run, raising if it is not on ``PATH``.
+
+    ``--gcc-path`` is honored only when it points at a clang (castxml emulates a
+    GCC/G++ binary, which can't take clang-only flags); ``--gcc-prefix`` maps to
+    the prefixed clang driver.
+    """
+    clang_bin: str | None = None
+    if gcc_path and "clang" in Path(gcc_path).name.lower():
+        clang_bin = gcc_path
+    elif gcc_prefix:
+        clang_bin = (
+            f"{gcc_prefix}clang++"
+            if compiler in ("c++", "g++", "clang++")
+            else f"{gcc_prefix}clang"
+        )
+    if not clang_bin:
+        clang_bin = "clang++" if compiler in ("c++", "g++", "clang++") else "clang"
+    if not _clang_available(clang_bin):
+        raise SnapshotError(
+            f"{clang_bin} not found in PATH. The clang header backend needs clang/clang++ "
+            "installed (apt install clang, brew install llvm, or conda install -c conda-forge "
+            "clang). Or use the castxml frontend (--ast-frontend castxml)."
+        )
+    return clang_bin
+
 
 #: Clang AST node kinds for the function-like declarations we emit. Includes the
 #: C++ special members so a public constructor/destructor/conversion change is

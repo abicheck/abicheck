@@ -22,6 +22,7 @@ from abicheck.package import (
     TarExtractor,
     WheelExtractor,
     _is_elf_shared_object,
+    _platform_machine_from_wheel_filename,
     _platform_system_from_wheel_filename,
     _python_version_from_wheel_filename,
     _read_build_id,
@@ -870,6 +871,32 @@ class TestParseNumpyRequirementFromMetadata:
         text = 'Metadata-Version: 2.1\nRequires-Dist: numpy>=1.20; extra == "test"\n'
         assert parse_numpy_requirement_from_metadata(text) is None
 
+    def test_extra_seeded_even_on_packaging_without_auto_default(
+        self, monkeypatch
+    ) -> None:
+        # packaging>=22 auto-defaults "extra" to "" inside Marker.evaluate();
+        # this project's pinned floor is packaging>=21.0, whose evaluate()
+        # has no such default and raises UndefinedEnvironmentName on a bare
+        # `extra == "test"` marker if the caller doesn't seed it. Simulate
+        # that stricter contract by asserting "extra" is always present in
+        # the dict this module passes, regardless of installed packaging
+        # version (Codex review; verified for real against a packaging==21.0
+        # venv during development).
+        from packaging.markers import Marker
+
+        real_evaluate = Marker.evaluate
+
+        def strict_evaluate(self, environment=None):
+            assert environment is not None and "extra" in environment, (
+                "caller must seed 'extra' -- packaging>=21.0's evaluate() "
+                "has no auto-default and would raise UndefinedEnvironmentName"
+            )
+            return real_evaluate(self, environment)
+
+        monkeypatch.setattr(Marker, "evaluate", strict_evaluate)
+        text = 'Metadata-Version: 2.1\nRequires-Dist: numpy>=1.20; extra == "test"\n'
+        assert parse_numpy_requirement_from_metadata(text) is None
+
     def test_extra_gated_combined_with_other_condition_is_still_skipped(self) -> None:
         text = (
             "Metadata-Version: 2.1\n"
@@ -1134,6 +1161,22 @@ class TestParseWheelNumpyRequirement:
             )
         assert parse_wheel_numpy_requirement(whl) == ">=2"
 
+    def test_platform_machine_derived_from_wheel_filename_for_single_arch(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review's exact scenario: a manylinux aarch64 wheel scanned
+        # on an x86_64 host must have its platform_machine-gated markers
+        # evaluated against ITS OWN architecture, not the host's.
+        whl = tmp_path / "pkg-1.0-cp311-cp311-manylinux_2_17_aarch64.whl"
+        with zipfile.ZipFile(whl, "w") as zf:
+            zf.writestr(
+                "pkg-1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\n"
+                'Requires-Dist: numpy>=1.23; platform_machine == "x86_64"\n'
+                'Requires-Dist: numpy>=2; platform_machine == "aarch64"\n',
+            )
+        assert parse_wheel_numpy_requirement(whl) == ">=2"
+
 
 class TestPythonVersionFromWheelFilename:
     def test_cp_tag(self) -> None:
@@ -1256,6 +1299,72 @@ class TestSysPlatformFromWheelFilename:
 
     def test_non_wheel_filename_returns_none(self) -> None:
         assert _sys_platform_from_wheel_filename("pkg-1.0.tar.gz") is None
+
+
+class TestPlatformMachineFromWheelFilename:
+    def test_manylinux_x86_64(self) -> None:
+        assert (
+            _platform_machine_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-manylinux_2_17_x86_64.whl"
+            )
+            == "x86_64"
+        )
+
+    def test_manylinux_aarch64(self) -> None:
+        assert (
+            _platform_machine_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-manylinux_2_17_aarch64.whl"
+            )
+            == "aarch64"
+        )
+
+    def test_manylinux_ppc64le_not_confused_with_ppc64(self) -> None:
+        assert (
+            _platform_machine_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-manylinux2014_ppc64le.whl"
+            )
+            == "ppc64le"
+        )
+
+    def test_macosx_x86_64(self) -> None:
+        assert (
+            _platform_machine_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-macosx_10_9_x86_64.whl"
+            )
+            == "x86_64"
+        )
+
+    def test_macosx_arm64(self) -> None:
+        assert (
+            _platform_machine_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-macosx_11_0_arm64.whl"
+            )
+            == "arm64"
+        )
+
+    def test_macosx_universal2_is_ambiguous_returns_none(self) -> None:
+        assert (
+            _platform_machine_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-macosx_11_0_universal2.whl"
+            )
+            is None
+        )
+
+    def test_win_tag_not_derived(self) -> None:
+        # Windows arch-string conventions in platform.machine() are less
+        # standardized than Linux/macOS -- deliberately left undetermined.
+        assert (
+            _platform_machine_from_wheel_filename("pkg-1.0-cp311-cp311-win_amd64.whl")
+            is None
+        )
+
+    def test_any_tag_returns_none(self) -> None:
+        assert (
+            _platform_machine_from_wheel_filename("pkg-1.0-py3-none-any.whl") is None
+        )
+
+    def test_non_wheel_filename_returns_none(self) -> None:
+        assert _platform_machine_from_wheel_filename("pkg-1.0.tar.gz") is None
 
 
 class TestCondaExtractor:

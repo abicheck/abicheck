@@ -625,6 +625,49 @@ def _sys_platform_from_wheel_filename(filename: str) -> str | None:
     return None
 
 
+#: Single-architecture suffixes a Linux wheel platform tag can end in. Order
+#: doesn't matter for correctness (each is ``$``-anchored, so e.g. ``ppc64``
+#: can't spuriously match a ``...ppc64le`` tag), but longer/more-specific
+#: names are listed first for readability.
+_WHEEL_LINUX_MACHINE_RE = re.compile(
+    r"(x86_64|aarch64|i686|armv7l|ppc64le|ppc64|s390x)$"
+)
+
+
+def _platform_machine_from_wheel_filename(filename: str) -> str | None:
+    """Derive ``platform_machine`` from a wheel filename's platform tag, for
+    the *single-architecture* Linux and macOS tags where it's unambiguous.
+
+    Unlike :func:`_platform_system_from_wheel_filename`/
+    :func:`_sys_platform_from_wheel_filename`, most wheel platform tags
+    *do* name exactly one architecture (``manylinux_2_17_aarch64`` vs.
+    ``..._x86_64`` are genuinely different, non-interchangeable wheels), so
+    this is worth deriving where it's safe (Codex review). Still returns
+    ``None`` for anything that isn't safe to guess: a fat/universal macOS
+    wheel (``macosx_11_0_universal2``/``_universal``/``_intel``, which
+    supports more than one architecture at once), Windows tags (``win32``/
+    ``win_amd64``/``win_arm64`` don't map onto a single well-standardized
+    ``platform.machine()`` string the way Linux/macOS tags do), the
+    pure-Python ``any`` tag, or an unrecognized platform tag prefix.
+    """
+    if not filename.lower().endswith(".whl"):
+        return None
+    parts = filename[: -len(".whl")].split("-")
+    if len(parts) < 5:
+        return None
+    tag = parts[-1].lower()
+    if tag.startswith(("manylinux", "musllinux", "linux")):
+        m = _WHEEL_LINUX_MACHINE_RE.search(tag)
+        return m.group(1) if m else None
+    if tag.startswith("macosx"):
+        if tag.endswith("_x86_64"):
+            return "x86_64"
+        if tag.endswith("_arm64"):
+            return "arm64"
+        return None  # universal2/universal/intel: more than one architecture
+    return None
+
+
 # G26: a wheel's *.dist-info/METADATA declares its runtime dependencies —
 # the "declared" side of the NumPy C-API compatibility-envelope check (the
 # binary-evidence "required" side comes from numpy_capi.py). Mirrors
@@ -646,17 +689,20 @@ def parse_wheel_numpy_requirement(
     or an ordinary marker that doesn't hold for *environment*.
 
     When *environment* is omitted, ``python_version``, ``platform_system``,
-    and ``sys_platform`` are derived from the wheel's *own* filename tags
-    (e.g. ``cp39`` -> ``"3.9"``, a ``macosx_...`` platform tag ->
-    ``platform_system="Darwin"``/``sys_platform="darwin"``) rather than
-    defaulting to the interpreter running abicheck — evaluating a marker
-    gated on any of those three against the wrong interpreter/OS could hide
-    a real under-declared floor on a wheel built for a different Python or
-    platform than the one running the scan (Codex review; both OS-marker
-    spellings are covered since real-world metadata uses either one).
-    Falls back to the interpreter's own environment for whichever of these
-    the filename doesn't pin down (e.g. a bare directory-derived METADATA
-    path, or the pure-Python ``any`` platform tag).
+    ``sys_platform``, and (for single-architecture Linux/macOS tags)
+    ``platform_machine`` are derived from the wheel's *own* filename tags
+    (e.g. ``cp39`` -> ``"3.9"``, a ``macosx_11_0_arm64`` platform tag ->
+    ``platform_system="Darwin"``/``sys_platform="darwin"``/
+    ``platform_machine="arm64"``) rather than defaulting to the interpreter
+    running abicheck — evaluating a marker gated on any of these against the
+    wrong interpreter/OS/architecture could hide a real under-declared
+    floor on a wheel built for a different Python, platform, or CPU than
+    the one running the scan (Codex review; both OS-marker spellings are
+    covered since real-world metadata uses either one). Falls back to the
+    interpreter's own environment for whichever of these the filename
+    doesn't pin down (e.g. a bare directory-derived METADATA path, the
+    pure-Python ``any`` platform tag, a fat/universal macOS wheel, or a
+    Windows tag, whose ``platform_machine`` isn't derived at all).
     """
     try:
         with zipfile.ZipFile(wheel_path) as zf:
@@ -670,16 +716,17 @@ def parse_wheel_numpy_requirement(
     except (OSError, zipfile.BadZipFile):
         return None
     if environment is None:
-        derived: dict[str, str] = {}
-        py_version = _python_version_from_wheel_filename(wheel_path.name)
-        if py_version is not None:
-            derived["python_version"] = py_version
-        platform_system = _platform_system_from_wheel_filename(wheel_path.name)
-        if platform_system is not None:
-            derived["platform_system"] = platform_system
-        sys_platform = _sys_platform_from_wheel_filename(wheel_path.name)
-        if sys_platform is not None:
-            derived["sys_platform"] = sys_platform
+        derivers = (
+            ("python_version", _python_version_from_wheel_filename),
+            ("platform_system", _platform_system_from_wheel_filename),
+            ("sys_platform", _sys_platform_from_wheel_filename),
+            ("platform_machine", _platform_machine_from_wheel_filename),
+        )
+        derived = {
+            key: value
+            for key, derive in derivers
+            if (value := derive(wheel_path.name)) is not None
+        }
         environment = derived or None
     return parse_numpy_requirement_from_metadata(text, environment)
 
@@ -732,6 +779,14 @@ def parse_numpy_requirement_from_metadata(
     # one that actually joins a folded header into a single logical line
     # (Codex review).
     headers = message_from_string(metadata_text, policy=_email_default_policy)
+    # Marker.evaluate() only auto-defaults "extra" to "" on packaging>=22;
+    # this project's pinned floor is packaging>=21.0, whose evaluate() has
+    # no such default and raises UndefinedEnvironmentName on a bare `extra
+    # == "test"` marker instead of treating it as inactive. Seed it
+    # ourselves so behavior is identical across the whole supported range;
+    # a caller-supplied *environment* can still override it explicitly
+    # (Codex review).
+    eval_environment = {"extra": "", **(environment or {})}
     found = False
     combined = SpecifierSet()
     for raw in headers.get_all("Requires-Dist") or ():
@@ -741,7 +796,7 @@ def parse_numpy_requirement_from_metadata(
             continue
         if req.name.lower() != "numpy":
             continue
-        if req.marker is not None and not req.marker.evaluate(environment):
+        if req.marker is not None and not req.marker.evaluate(eval_environment):
             continue  # marker inactive for this environment (extras included)
         found = True
         combined &= req.specifier

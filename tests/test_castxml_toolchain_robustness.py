@@ -419,3 +419,80 @@ class TestHeaderToolchainErrorClass:
         # The generic hint text is still present in the message — only the
         # exception *class* changes, not the diagnostic content.
         assert "missing_dep.h" in str(exc.value)
+
+
+class TestG16ClangFallbackRespectsConfiguredDriver:
+    """The G16 recoverable-fallback guard must probe the exact clang driver
+    _run_clang() would actually invoke (_resolve_clang_bin honors
+    --gcc-path/--gcc-prefix), not a bare "clang" on PATH -- a caller-
+    configured or prefixed clang may be available and should let the
+    fallback recover even when bare "clang" isn't on PATH at all (Codex
+    review). Fully mocked -- no castxml/clang needed."""
+
+    _KWARGS = dict(
+        backend="auto",
+        gcc_options=None,
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+    )
+
+    def test_fallback_recovers_with_configured_gcc_path(self, tmp_path: Path) -> None:
+        from abicheck.dumper import _header_ast_parser
+
+        header = tmp_path / "api.h"
+        header.write_text("int f(void);\n", encoding="utf-8")
+        configured = "/opt/llvm/bin/clang++"
+
+        def fake_which(name):  # noqa: ANN001
+            # Bare "clang"/"clang++" is NOT on PATH -- only the exact
+            # --gcc-path driver is.
+            return configured if name == configured else None
+
+        sentinel = MagicMock()
+        with (
+            patch(
+                "abicheck.dumper._castxml_dump",
+                side_effect=SnapshotError(_ASSUME_STDERR),
+            ),
+            patch("abicheck.dumper.shutil.which", side_effect=fake_which),
+            patch("abicheck.dumper._clang_header_dump", return_value=MagicMock()),
+            patch("abicheck.dumper._ClangAstParser", return_value=sentinel),
+        ):
+            result = _header_ast_parser(
+                [header],
+                [],
+                compiler="c++",
+                gcc_path=configured,
+                gcc_prefix=None,
+                **self._KWARGS,
+            )
+        assert result is sentinel
+
+    def test_no_fallback_when_no_clang_driver_is_available(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.dumper import _header_ast_parser
+
+        header = tmp_path / "api.h"
+        header.write_text("int f(void);\n", encoding="utf-8")
+        with (
+            patch(
+                "abicheck.dumper._castxml_dump",
+                side_effect=SnapshotError(_ASSUME_STDERR),
+            ),
+            patch("abicheck.dumper.shutil.which", return_value=None),
+            pytest.raises(SnapshotError),
+        ):
+            _header_ast_parser(
+                [header],
+                [],
+                compiler="c++",
+                gcc_path=None,
+                gcc_prefix=None,
+                **self._KWARGS,
+            )

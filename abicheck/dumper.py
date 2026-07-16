@@ -61,7 +61,11 @@ from .dumper_castxml import (
     _parse_vtable_index as _parse_vtable_index,
     _vt_sort_key as _vt_sort_key,
 )
-from .dumper_clang import _ClangAstParser as _ClangAstParser
+from .dumper_clang import (
+    _clang_available as _clang_available,
+    _ClangAstParser as _ClangAstParser,
+    _resolve_clang_bin as _resolve_clang_bin,
+)
 from .dumper_clang_errors import (
     _is_direct_include_guard_failure,
     _is_missing_cpp_stdlib_header_error,
@@ -143,10 +147,6 @@ def _safe_size(path: Path) -> int | None:
 
 def _castxml_available() -> bool:
     return shutil.which("castxml") is not None
-
-
-def _clang_available(clang_bin: str = "clang") -> bool:
-    return shutil.which(clang_bin) is not None
 
 
 #: Header-AST backend identifiers (the L2 producers). castxml is the default and
@@ -247,35 +247,6 @@ def _build_clang_header_command(
         str(agg_path),
     ]
     return cmd
-
-
-def _resolve_clang_bin(
-    compiler: str, gcc_path: str | None, gcc_prefix: str | None,
-) -> str:
-    """Resolve the clang executable to run, raising if it is not on ``PATH``.
-
-    ``--gcc-path`` is honored only when it points at a clang (castxml emulates a
-    GCC/G++ binary, which can't take clang-only flags); ``--gcc-prefix`` maps to
-    the prefixed clang driver.
-    """
-    clang_bin: str | None = None
-    if gcc_path and "clang" in Path(gcc_path).name.lower():
-        clang_bin = gcc_path
-    elif gcc_prefix:
-        clang_bin = (
-            f"{gcc_prefix}clang++"
-            if compiler in ("c++", "g++", "clang++")
-            else f"{gcc_prefix}clang"
-        )
-    if not clang_bin:
-        clang_bin = "clang++" if compiler in ("c++", "g++", "clang++") else "clang"
-    if not _clang_available(clang_bin):
-        raise SnapshotError(
-            f"{clang_bin} not found in PATH. The clang header backend needs clang/clang++ "
-            "installed (apt install clang, brew install llvm, or conda install -c conda-forge "
-            "clang). Or use the castxml frontend (--ast-frontend castxml)."
-        )
-    return clang_bin
 
 
 def _resolve_clang_langmode(
@@ -524,9 +495,19 @@ def _header_ast_parser(
             extra_hash_dirs=extra_hash_dirs,
         )
     except SnapshotError as exc:
+        # Probe the driver _run_clang() would actually invoke (honors
+        # --gcc-path/--gcc-prefix), not just a bare "clang" on PATH (Codex
+        # review).
+        def _clang_fallback_ready() -> bool:
+            try:
+                _resolve_clang_bin(compiler, gcc_path, gcc_prefix)
+                return True
+            except SnapshotError:
+                return False
+
         if (
             auto_selected
-            and _clang_available()
+            and _clang_fallback_ready()
             and (
                 _is_toolchain_version_failure(str(exc))
                 or _is_direct_include_guard_failure(str(exc))
