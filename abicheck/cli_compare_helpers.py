@@ -1444,7 +1444,11 @@ def run_compare(
         text, fmt, result,
         severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
     )
-    text = _fold_evidence_depth_into_json(text, fmt, old, new)
+    text = _fold_evidence_depth_into_json(
+        text, fmt, old, new,
+        old_build_info=old_build_info, new_build_info=new_build_info,
+        old_sources=old_sources, new_sources=new_sources,
+    )
 
     _write_or_echo(output, text)
 
@@ -1475,7 +1479,11 @@ def run_compare(
             secondary_text, secondary_fmt, result,
             severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
         )
-        secondary_text = _fold_evidence_depth_into_json(secondary_text, secondary_fmt, old, new)
+        secondary_text = _fold_evidence_depth_into_json(
+            secondary_text, secondary_fmt, old, new,
+            old_build_info=old_build_info, new_build_info=new_build_info,
+            old_sources=old_sources, new_sources=new_sources,
+        )
         _write_or_echo(secondary_output, secondary_text)
 
     if scoped_exit_code is not None:
@@ -1490,29 +1498,48 @@ def run_compare(
     _exit_with_severity_or_verdict(result, sev_config, resolved_cfg.exit_code_scheme)
 
 
-def _fold_evidence_depth_into_json(text: str, fmt: str, old: Any, new: Any) -> str:
+def _fold_evidence_depth_into_json(
+    text: str, fmt: str, old: Any, new: Any,
+    old_build_info: Path | None = None, new_build_info: Path | None = None,
+    old_sources: Path | None = None, new_sources: Path | None = None,
+) -> str:
     """Add ``old_evidence_depth``/``new_evidence_depth`` to a JSON report (CLI-audit P2).
 
-    Self-describing output: the evidence depth each side's snapshot *actually*
-    reached (``binary``/``headers``/``build``/``source``), computed from what
-    the snapshot carries rather than the requested ``--depth`` -- so a report
-    is never silently mismatched against what was actually collected. JSON
-    only; other formats already show depth-related context in their own
-    ways (or, for binary/structured formats, are left untouched per
+    Self-describing output: the evidence depth each side *actually* reached
+    (``binary``/``headers``/``build``/``source``), computed from what was
+    resolved rather than the requested ``--depth`` -- so a report is never
+    silently mismatched against what was actually collected. JSON only; other
+    formats already show depth-related context in their own ways (or, for
+    binary/structured formats, are left untouched per
     :func:`_fold_scoped_compat_into_text`'s convention).
+
+    An out-of-band ``--old/new-build-info``/``--old/new-sources`` *pack
+    directory* (as opposed to a raw checkout, which gets embedded into the
+    snapshot before this point) is resolved via ``_resolve_side_pack`` and
+    never attached back to ``old``/``new`` themselves -- reading only
+    ``old.build_source``/``new.build_source`` would then report the
+    snapshot's own (absent or unrelated) embedded depth instead of the pack
+    that was actually used to produce this comparison's build/source
+    findings (Codex review). Re-resolving here is cheap (pure pack-directory
+    metadata load, no diffing) and mirrors the same resolution
+    ``prepare_embedded_build_source``/``diff_embedded_build_source`` already
+    performed to run the comparison itself.
     """
     if fmt != "json":
         return text
     import json
 
+    from .cli_buildsource_helpers import _resolve_side_pack
     from .cli_dump_helpers import evidence_depth_label
 
     try:
         payload = json.loads(text)
     except ValueError:
         return text
-    payload["old_evidence_depth"] = evidence_depth_label(old)
-    payload["new_evidence_depth"] = evidence_depth_label(new)
+    old_pack = _resolve_side_pack(old_build_info, old_sources, old)
+    new_pack = _resolve_side_pack(new_build_info, new_sources, new)
+    payload["old_evidence_depth"] = evidence_depth_label(old, old_pack)
+    payload["new_evidence_depth"] = evidence_depth_label(new, new_pack)
     return json.dumps(payload, indent=2)
 
 

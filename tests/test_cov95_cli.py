@@ -1660,6 +1660,73 @@ class TestUsedByScoping:
         assert entry["severity"] == "compatible"
 
 
+class TestFoldEvidenceDepthOutOfBandPack:
+    """``_fold_evidence_depth_into_json`` with an out-of-band pack directory.
+
+    Regression (Codex review): an out-of-band ``--old/new-build-info``/
+    ``--old/new-sources`` *pack directory* (as opposed to a raw checkout,
+    which gets embedded into the snapshot before this point) is resolved via
+    ``_resolve_side_pack`` inside ``prepare_embedded_build_source`` /
+    ``diff_embedded_build_source`` but never attached back onto the snapshot
+    object itself -- so reading only ``snap.build_source`` for the JSON
+    ``old_evidence_depth``/``new_evidence_depth`` fields reported the
+    snapshot's own (absent) embedded depth instead of the pack that was
+    actually used to produce the comparison's build/source findings.
+    """
+
+    def test_out_of_band_pack_depth_beats_absent_embedded_snapshot(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        import json as json_mod
+
+        from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.cli_compare_helpers import _fold_evidence_depth_into_json
+
+        old_snap = _snap("1.0", library="libfoo.so")
+        new_snap = _snap("2.0", library="libfoo.so")
+        assert old_snap.build_source is None
+        assert new_snap.build_source is None
+
+        pack = BuildSourcePack(
+            root=tmp_path,
+            build_evidence=BuildEvidence(
+                compile_units=[CompileUnit(id="cu1", source="a.c")]
+            ),
+        )
+        monkeypatch.setattr(
+            "abicheck.cli_buildsource_helpers._resolve_side_pack",
+            lambda build_info, sources, snap: pack,
+        )
+
+        text = json_mod.dumps({"changes": []})
+        result_text = _fold_evidence_depth_into_json(
+            text, "json", old_snap, new_snap,
+            old_build_info=tmp_path / "old_build", new_build_info=tmp_path / "new_build",
+        )
+        data = json_mod.loads(result_text)
+        assert data["old_evidence_depth"] == "build"
+        assert data["new_evidence_depth"] == "build"
+
+    def test_no_pack_args_falls_back_to_snapshot_embedded_depth(self) -> None:
+        # Without --old/new-build-info/--old/new-sources, behavior is
+        # unchanged: depth comes straight from each snapshot's own embedded
+        # build_source (or absence thereof).
+        import json as json_mod
+
+        from abicheck.cli_compare_helpers import _fold_evidence_depth_into_json
+
+        old_snap = _snap("1.0", library="libfoo.so")
+        new_snap = _snap("2.0", library="libfoo.so")
+        new_snap.from_headers = True
+
+        text = json_mod.dumps({"changes": []})
+        result_text = _fold_evidence_depth_into_json(text, "json", old_snap, new_snap)
+        data = json_mod.loads(result_text)
+        assert data["old_evidence_depth"] == "binary"
+        assert data["new_evidence_depth"] == "headers"
+
+
 class TestUsedByScopingWithSnapshotInputs:
     """`compare --used-by` OLD/NEW as saved JSON snapshots (ADR-043 follow-up).
 
