@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.checker_policy import BREAKING_KINDS
-from abicheck.model import AbiSnapshot, RecordType
+from abicheck.model import AbiSnapshot, Function, Param, RecordType
 
 
 def _snap(**kwargs: object) -> AbiSnapshot:
@@ -86,3 +86,75 @@ class TestVtableSeverity:
     def test_vtable_change_kind_value(self) -> None:
         """TYPE_VTABLE_CHANGED enum value is 'type_vtable_changed'."""
         assert ChangeKind.TYPE_VTABLE_CHANGED.value == "type_vtable_changed"
+
+
+class TestVtableOverrideSlotReuse:
+    """case185: an override that reuses its base's slot must not fire
+    TYPE_VTABLE_CHANGED, even though the slot's mangled entry renames from
+    base to derived. Mirrors diff_cxx_rules.virtual_method_addition()'s own
+    exemption for the identical relationship
+    (diff_cxx_rules.vtable_slot_is_override_reuse)."""
+
+    def test_same_signature_override_reusing_slot_is_not_vtable_changed(self) -> None:
+        old = _snap(
+            types=[RecordType(
+                name="Derived", kind="class", bases=["Base"],
+                vtable=["_ZN4Base5paintEi"],
+            )],
+            functions=[Function(
+                name="Base::paint", mangled="_ZN4Base5paintEi",
+                return_type="int", params=[Param(name="x", type="int")],
+                is_virtual=True,
+            )],
+        )
+        new = _snap(
+            types=[RecordType(
+                name="Derived", kind="class", bases=["Base"],
+                vtable=["_ZN7Derived5paintEi"],
+            )],
+            functions=[Function(
+                name="Derived::paint", mangled="_ZN7Derived5paintEi",
+                return_type="int", params=[Param(name="x", type="int")],
+                is_virtual=True,
+            )],
+        )
+        result = compare(old, new)
+        kinds = {c.kind for c in result.changes}
+        assert ChangeKind.TYPE_VTABLE_CHANGED not in kinds
+
+    def test_different_signature_same_name_still_fires(self) -> None:
+        """The negative twin: same method name but a different parameter
+        list has no matching virtual_signature_key, so it's a genuine new
+        slot, not a reuse -- must still be reported."""
+        old = _snap(
+            types=[RecordType(
+                name="Derived", kind="class", bases=["Base"],
+                vtable=["_ZN4Base5paintEi"],
+            )],
+            functions=[Function(
+                name="Base::paint", mangled="_ZN4Base5paintEi",
+                return_type="int", params=[Param(name="x", type="int")],
+                is_virtual=True,
+            )],
+        )
+        new = _snap(
+            types=[RecordType(
+                name="Derived", kind="class", bases=["Base"],
+                vtable=["_ZN4Base5paintEi", "_ZN7Derived5paintEd"],
+            )],
+            functions=[
+                Function(
+                    name="Base::paint", mangled="_ZN4Base5paintEi",
+                    return_type="int", params=[Param(name="x", type="int")],
+                    is_virtual=True,
+                ),
+                Function(
+                    name="Derived::paint", mangled="_ZN7Derived5paintEd",
+                    return_type="int", params=[Param(name="x", type="double")],
+                    is_virtual=True,
+                ),
+            ],
+        )
+        result = compare(old, new)
+        kinds = {c.kind for c in result.changes}
+        assert ChangeKind.TYPE_VTABLE_CHANGED in kinds

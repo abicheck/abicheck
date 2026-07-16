@@ -252,6 +252,8 @@ class TestCastxmlVtableUnindexed:
         parser = _CastxmlParser(root, set(), set())
         slots = parser._collect_virtual_methods("c1")
         # Pre-fix, both methods would land on the same `None` key in a dict and
-        # one would silently overwrite the other. Both must survive.
-        names = [name for _idx, name in slots]
+        # one would silently overwrite the other. Neither overrides the other
+        # (no `overrides` attribute), so both must survive as distinct slots
+        # keyed by their own method id.
+        names = [name for _idx, name in slots.values()]
         assert sorted(names) == ["_ZN1C3barEv", "_ZN1C3fooEv"]

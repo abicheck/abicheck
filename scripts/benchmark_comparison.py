@@ -17,6 +17,23 @@ Supports two case layouts:
   - v1/v2 layout: case_dir/v1.c + case_dir/v2.c (cases 01-18)
   - old/new layout: case_dir/old/lib.c + case_dir/new/lib.c (cases 19+)
 
+Requirements for a full-catalog run (a subset still runs with less):
+  - gcc/g++ and CastXML — abicheck's default L2 header-AST backend; without
+    CastXML the abicheck/abicheck_full lanes cannot run at all (`pip install
+    castxml` on hosts without a system package).
+  - clang/clang++ — used opportunistically for case64_calling_convention_changed
+    and the abicheck_full Clang-plugin L3-L5 lane.
+  - A *second*, newer compiler for case115_bit_int_width_changed: it needs
+    C23 `_BitInt(N)`, which GCC only gained in GCC 14. This script tries
+    `gcc-15`/`gcc-14`/`gcc-13`/`gcc-12` on PATH ahead of the bare `gcc` alias
+    (see the case115 special-case below) but does NOT fall back to a clean
+    SKIP if none of those support the feature — on a host stuck on GCC <14
+    with no versioned newer gcc installed, this one case reports ERROR
+    instead of BREAKING. That's a toolchain gap, not an abicheck defect;
+    `tests/feature_probe.py`-gated pytest lanes skip it cleanly instead.
+  - abidiff / abi-compliance-checker are optional — omitted tools fall back to
+    previously frozen results (`--freeze`) or SKIP.
+
 Usage:
     python3 scripts/benchmark_comparison.py
     python3 scripts/benchmark_comparison.py --suite pinned74

@@ -22,7 +22,7 @@ from collections.abc import Collection
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
-from .diff_cxx_rules import itanium_qualified_name
+from .diff_cxx_rules import itanium_qualified_name, vtable_slot_is_override_reuse
 from .diff_helpers import make_change
 from .diff_symbols import (
     _PUBLIC_VIS,
@@ -157,6 +157,9 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # RD2-5: don't manufacture phantom TYPE_REMOVED when the new side is stripped.
     suppress_removed = _removals_are_unconfirmed(old, new)
 
+    old_funcs = old.function_map
+    new_funcs = new.function_map
+
     for name, t_old in old_map.items():
         t_new = new_map.get(name)
         if t_new is None:
@@ -168,7 +171,7 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 description=f"Type removed: {name}",
             ))
             continue
-        changes.extend(_diff_type_pair(name, t_old, t_new))
+        changes.extend(_diff_type_pair(name, t_old, t_new, old_funcs, new_funcs))
 
     for name in new_map:
         if name not in old_map:
@@ -257,7 +260,13 @@ def _diff_overload_additions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]
     return changes
 
 
-def _diff_type_pair(name: str, t_old: RecordType, t_new: RecordType) -> list[Change]:
+def _diff_type_pair(
+    name: str,
+    t_old: RecordType,
+    t_new: RecordType,
+    old_funcs: dict[str, Function],
+    new_funcs: dict[str, Function],
+) -> list[Change]:
     changes: list[Change] = []
 
     # TYPE_BECAME_OPAQUE: was complete, now forward-decl only
@@ -275,7 +284,7 @@ def _diff_type_pair(name: str, t_old: RecordType, t_new: RecordType) -> list[Cha
     if not t_old.is_union:
         changes.extend(_diff_type_fields(name, t_old, t_new))
     changes.extend(_diff_type_bases(name, t_old, t_new))
-    changes.extend(_diff_type_vtable(name, t_old, t_new))
+    changes.extend(_diff_type_vtable(name, t_old, t_new, old_funcs, new_funcs))
     _append_type_finality_changes(changes, name, t_old, t_new)
     return changes
 
@@ -787,8 +796,25 @@ def _diff_type_bases(name: str, t_old: RecordType, t_new: RecordType) -> list[Ch
     return changes
 
 
-def _diff_type_vtable(name: str, t_old: RecordType, t_new: RecordType) -> list[Change]:
+def _diff_type_vtable(
+    name: str,
+    t_old: RecordType,
+    t_new: RecordType,
+    old_funcs: dict[str, Function],
+    new_funcs: dict[str, Function],
+) -> list[Change]:
     if t_old.vtable == t_new.vtable:
+        return []
+    # Same slot count, same order, and every differing slot is a same-signature
+    # override reusing its base's slot (case185) -> no real layout change, just
+    # a slot's mangled owner renaming from base to derived; func_added (from
+    # diff_symbols._diff_functions) already covers the newly-materialized
+    # symbol. See vtable_slot_is_override_reuse() for why this must mirror
+    # virtual_method_addition()'s exemption.
+    if len(t_old.vtable) == len(t_new.vtable) and all(
+        vtable_slot_is_override_reuse(old_entry, new_entry, old_funcs, new_funcs)
+        for old_entry, new_entry in zip(t_old.vtable, t_new.vtable)
+    ):
         return []
     description = (
         f"vtable reordered: {name}"

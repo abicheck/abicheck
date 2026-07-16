@@ -26,6 +26,18 @@ Run on Linux x86_64 with the repository development environment and the same
 tool dependencies as `Examples Validation` CI: gcc/g++, clang/clang++, CMake,
 Ninja, CastXML, and binutils.
 
+A single default `gcc`/`clang` is not enough to build the *full* catalog:
+`case115_bit_int_width_changed` requires a C23 `_BitInt`-capable compiler
+(GCC 14+, or a recent Clang) — GCC 13 and earlier reject `_BitInt(N)`
+outright. The benchmark runners (`scripts/benchmark_comparison.py`,
+`scripts/generate_benchmark_report.py`) prefer a versioned `gcc-15`/`gcc-14`
+binary on `PATH` over the bare `gcc` alias for this one case; without any of
+those installed, the case fails to build (reported `ERROR`) rather than
+building at reduced fidelity. `tests/feature_probe.py`-gated pytest lanes
+skip the case cleanly instead when the toolchain lacks the feature — the
+benchmark scripts do not (yet) have the same graceful fallback, so treat an
+`ERROR` on this case as a missing `gcc-14+`, not a product regression.
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate

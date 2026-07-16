@@ -211,6 +211,10 @@ class _CastxmlParser:
         self._id_map: dict[str, Element] = {}
         self._virtual_methods_by_class: dict[str, list[Element]] = {}
         self._source_lines_cache: dict[str, list[str]] = {}
+        # method element id -> canonical vtable-slot key, resolved through any
+        # `overrides` chain. Populated lazily by _collect_virtual_methods(); see
+        # its docstring for why this is needed alongside vtable_index.
+        self._vtable_slot_root: dict[str, str] = {}
         self._build_id_map()
 
     def _build_id_map(self) -> None:
@@ -1225,43 +1229,58 @@ class _CastxmlParser:
         return (bitfield_bits, bitfield_bits is not None)
 
     def _build_vtable(self, class_id: str) -> list[str]:
-        virtual_methods = self._collect_virtual_methods(class_id)
-        virtual_methods.sort(key=_vt_sort_key)
-        return [m for _, m in virtual_methods]
+        slots = self._collect_virtual_methods(class_id)
+        ordered = sorted(slots.values(), key=_vt_sort_key)
+        return [name for _, name in ordered]
 
     def _collect_virtual_methods(
         self,
         cid: str,
         seen: set[str] | None = None,
-    ) -> list[tuple[int | None, str]]:
+    ) -> dict[int | str, tuple[int | None, str]]:
+        """Ordered mapping of *canonical vtable-slot key* -> ``(vtable_index, mangled)``.
+
+        Keyed so a derived override replaces its base's entry **in place**
+        rather than appending a duplicate: dict re-assignment to an existing
+        key keeps that key's original insertion position (Python dict
+        semantics), so a reused slot stays where the base declared it while a
+        genuinely new virtual still appends at the end.
+
+        ``vtable_index`` is the preferred slot identity when castxml emits it
+        (unchanged from prior behavior). But that attribute is not always
+        present — this castxml/Clang build may track no slot indices at all —
+        and without it, a same-signature override (which reuses its base's
+        slot per the Itanium ABI) has no other signal tying it to the base
+        entry it replaces, so it was appended as a spurious extra slot,
+        growing the reconstructed vtable by one entry it never actually
+        gained (case185's false-positive ``type_vtable_changed``: a
+        `Derived::paint(int) override` reusing `Base::paint(int)`'s slot read
+        as vtable growth instead of a compatible rename in place).
+        castxml's ``overrides`` attribute — the id of the method declaration
+        this one overrides — is the fallback signal: resolved (through
+        ``_vtable_slot_root``, to survive multi-level override chains where
+        ``overrides`` points at an intermediate override rather than the
+        slot's original declarer) to the same key the overridden entry was
+        stored under, so the override replaces it instead of duplicating it.
+        """
         if seen is None:
             seen = set()
         if cid in seen:
-            return []
+            return {}
         seen.add(cid)
         class_el = self._id_map.get(cid)
         if class_el is None:
-            return []
+            return {}
 
-        # Use a dict keyed by vtable_index so derived methods overwrite base entries,
-        # preventing duplicate slots when a derived class overrides a virtual method.
-        # Unindexed entries (no vtable_index attribute) are kept separately so
-        # multiple virtuals without an index don't collapse onto a single ``None``
-        # key — that would silently drop all but the last one from the vtable.
-        slots: dict[int, str] = {}
-        unindexed: list[str] = []
+        slots: dict[int | str, tuple[int | None, str]] = {}
         for base in class_el:
             if base.tag != "Base":
                 continue
             base_type_el = self._resolve(base.get("type", ""))
             if base_type_el is not None:
-                for idx, name in self._collect_virtual_methods(
-                    base_type_el.get("id", ""), seen
-                ):
-                    if idx is None:
-                        unindexed.append(name)
-                    else:
-                        slots[idx] = name
+                slots.update(
+                    self._collect_virtual_methods(base_type_el.get("id", ""), seen)
+                )
 
         for method_el in self._virtual_methods_by_class.get(cid, []):
             mangled_name = method_el.get("mangled", "")
@@ -1277,12 +1296,20 @@ class _CastxmlParser:
             if not mangled_name:
                 continue
             idx = _parse_vtable_index(method_el.get("vtable_index"))
-            if idx is None:
-                unindexed.append(mangled_name)
+            mid = method_el.get("id", "")
+            overrides_id = method_el.get("overrides")
+            key: int | str
+            if idx is not None:
+                key = idx
+            elif overrides_id:
+                key = self._vtable_slot_root.get(overrides_id, overrides_id)
             else:
-                slots[idx] = mangled_name
+                key = mid or mangled_name
+            if mid:
+                self._vtable_slot_root[mid] = key if isinstance(key, str) else mid
+            slots[key] = (idx, mangled_name)
 
-        return list(slots.items()) + [(None, name) for name in unindexed]
+        return slots
 
     def parse_enums(self) -> list[EnumType]:
         enums = []

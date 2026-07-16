@@ -331,6 +331,36 @@ def virtual_signature_key(f: Function) -> str:
     return f"{leaf}({params}){quals}"
 
 
+def vtable_slot_is_override_reuse(
+    old_entry: str,
+    new_entry: str,
+    old_funcs: dict[str, Function],
+    new_funcs: dict[str, Function],
+) -> bool:
+    """True if a vtable slot's mangled entry changed only because a derived
+    class overrode the inherited virtual that occupied it, reusing the same
+    slot rather than growing the vtable (case185).
+
+    ``virtual_method_addition()`` already withholds ``VIRTUAL_METHOD_ADDED``
+    for exactly this situation — a same-signature override of an inherited
+    virtual — by comparing ``virtual_signature_key``. The per-type vtable diff
+    (``diff_types._diff_type_vtable``) independently compares each class's
+    raw vtable entry list, so without this check it disagrees with that
+    exemption: the slot's mangled name textually changes (``Base::paint`` ->
+    ``Derived::paint``) even though the slot index, order, and call signature
+    are identical, and it would report ``TYPE_VTABLE_CHANGED`` for a change
+    the other detector already deemed compatible. Mirroring the same
+    signature-key comparison here keeps the two detectors in agreement.
+    """
+    if old_entry == new_entry:
+        return True
+    f_old = old_funcs.get(old_entry)
+    f_new = new_funcs.get(new_entry)
+    if f_old is None or f_new is None or not f_old.is_virtual or not f_new.is_virtual:
+        return False
+    return virtual_signature_key(f_old) == virtual_signature_key(f_new)
+
+
 def old_virtual_signatures(functions: Iterable[Function]) -> dict[str, set[str]]:
     """Per-class virtual-method signature keys for override detection.
 

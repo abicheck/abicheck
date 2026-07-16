@@ -72,34 +72,39 @@ See `tests/test_kde_compat_detectors.py::test_inherited_override_is_not_virtual_
 and `::test_same_name_different_signature_virtual_is_new_slot` for the
 unit-level pair this compiled example mirrors.
 
-## Known gap: a second, blunter detector still overcalls this end-to-end
+## Two detectors, one exemption
 
-The unit tests above exercise `virtual_method_addition()` in isolation, and
-it does correctly withhold `VIRTUAL_METHOD_ADDED` for this pattern. But
-running the *full* compiled example through `abicheck compare` currently
-still reports `BREAKING`, via a second, independent check:
-`diff_types.py`'s `_diff_type_vtable()` just compares each class's list of
-vtable entries for equality — it has no awareness of "same slot, different
-target is fine." Since `Derived`'s vtable entry list textually changes
-(`Base::paint`'s slot now names `Derived::paint`) even though its length and
-order are identical, this cruder check unconditionally emits
-`type_vtable_changed`:
+`diff_types.py`'s `_diff_type_vtable()` independently compares each class's
+list of vtable entries. Left on its own, it would just see `Derived`'s
+vtable entry list textually change (`Base::paint`'s slot now names
+`Derived::paint`), even though its length and order are identical, and
+unconditionally emit `type_vtable_changed` — disagreeing with
+`virtual_method_addition()`'s slot-reuse exemption above and reporting
+`BREAKING` for a case that is genuinely `COMPATIBLE`.
+
+`_diff_type_vtable()` calls `diff_cxx_rules.vtable_slot_is_override_reuse()`
+— the same signature-key comparison `virtual_method_addition()` uses — to
+recognize when a differing vtable slot is exactly this override-reuse
+relationship, and withholds `TYPE_VTABLE_CHANGED` for it too. The two
+detectors now agree:
 
 ```bash
 abicheck compare libv1.so libv2.so --header old=v1.hpp --header new=v2.hpp
-# verdict: BREAKING (currently observed)
-# type_vtable_changed: vtable changed: Derived
+# verdict: COMPATIBLE
 # func_added: New public function: paint
 ```
 
-This is tracked as a `known_gap` in `ground_truth.json`: the canonical,
-intended verdict is `COMPATIBLE` (this genuinely is not an ABI break — the
-dispatch mechanics are unchanged, only the target function, which is the
-entire point of an override), but `_diff_type_vtable()` and
-`virtual_method_addition()` currently disagree with each other. Closing this
-gap means teaching `_diff_type_vtable()` the same slot-reuse exemption
-`virtual_method_addition()` already has, rather than changing this case's
-canonical truth.
+Reaching that agreement at the castxml layer, on real compiled binaries,
+also needed a fix one level lower: `dumper_castxml.py`'s `_build_vtable()`
+previously deduplicated an override against the base slot it reuses only via
+castxml's `vtable_index` attribute. Not every castxml/Clang build emits that
+attribute, and without it the reused slot was never deduplicated at all —
+`Derived`'s reconstructed vtable listed *both* `Base::paint` and
+`Derived::paint`, one entry longer than the real vtable, which
+`vtable_slot_is_override_reuse()` (a same-length, positional check) cannot
+see through. `_build_vtable()` now falls back to castxml's `overrides`
+attribute (resolved through any multi-level override chain) to collapse the
+reused slot in place when `vtable_index` is absent.
 
 ## How to reproduce
 

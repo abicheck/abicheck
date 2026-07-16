@@ -1056,6 +1056,67 @@ class TestCastxmlParserVtable:
         derived_t = next(t for t in types if t.name == "Derived")
         assert derived_t.vtable == ["_ZN7Derived3fooEv"]
 
+    def test_vtable_override_no_vtable_index_uses_overrides_attr(self):
+        """case185: some castxml/Clang builds never emit ``vtable_index`` at
+        all. Without a fallback signal, a same-signature override used to be
+        appended as a spurious extra slot instead of replacing its base's
+        entry (a false vtable-growth positive). castxml's ``overrides``
+        attribute is that fallback: it must still collapse to one slot.
+        """
+        base = Element("Class", id="c1", name="Base")
+        m1 = Element("Method", id="m1", name="paint", mangled="_ZN4Base5paintEi",
+                      virtual="1", context="c1")
+        derived = Element("Class", id="c2", name="Derived")
+        SubElement(derived, "Base", type="c1")
+        m2 = Element("Method", id="m2", name="paint", mangled="_ZN7Derived5paintEi",
+                      virtual="1", context="c2", overrides="m1")
+        root = _xml_root(base, derived, m1, m2)
+        p = _CastxmlParser(root, set(), set())
+        types = p.parse_types()
+        derived_t = next(t for t in types if t.name == "Derived")
+        assert derived_t.vtable == ["_ZN7Derived5paintEi"]
+
+    def test_vtable_no_vtable_index_different_signature_adds_slot(self):
+        """The negative twin documented in case185's README: a same-named but
+        different-signature virtual does NOT reuse a slot (no ``overrides``
+        attribute links it to the base method), so it must still grow the
+        vtable by one entry rather than being collapsed away.
+        """
+        base = Element("Class", id="c1", name="Base")
+        m1 = Element("Method", id="m1", name="paint", mangled="_ZN4Base5paintEi",
+                      virtual="1", context="c1")
+        derived = Element("Class", id="c2", name="Derived")
+        SubElement(derived, "Base", type="c1")
+        m2 = Element("Method", id="m2", name="paint", mangled="_ZN7Derived5paintEd",
+                      virtual="1", context="c2")
+        root = _xml_root(base, derived, m1, m2)
+        p = _CastxmlParser(root, set(), set())
+        types = p.parse_types()
+        derived_t = next(t for t in types if t.name == "Derived")
+        assert derived_t.vtable == ["_ZN4Base5paintEi", "_ZN7Derived5paintEd"]
+
+    def test_vtable_override_chain_resolves_to_root_slot(self):
+        """A 3-level override chain (Base -> Mid -> Derived), each level
+        missing ``vtable_index`` and pointing ``overrides`` at its immediate
+        (not root) base declaration, must still collapse to a single slot.
+        """
+        base = Element("Class", id="c1", name="Base")
+        m1 = Element("Method", id="m1", name="foo", mangled="_ZN4Base3fooEv",
+                      virtual="1", context="c1")
+        mid = Element("Class", id="c2", name="Mid")
+        SubElement(mid, "Base", type="c1")
+        m2 = Element("Method", id="m2", name="foo", mangled="_ZN3Mid3fooEv",
+                      virtual="1", context="c2", overrides="m1")
+        derived = Element("Class", id="c3", name="Derived")
+        SubElement(derived, "Base", type="c2")
+        m3 = Element("Method", id="m3", name="foo", mangled="_ZN7Derived3fooEv",
+                      virtual="1", context="c3", overrides="m2")
+        root = _xml_root(base, mid, derived, m1, m2, m3)
+        p = _CastxmlParser(root, set(), set())
+        types = p.parse_types()
+        derived_t = next(t for t in types if t.name == "Derived")
+        assert derived_t.vtable == ["_ZN7Derived3fooEv"]
+
 
 class TestCastxmlParserEnums:
     def test_parse_enum(self):
