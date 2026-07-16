@@ -43,6 +43,16 @@ from typing import Any
 # Ordered tiers, weakest evidence first. The index is the comparison key.
 TIER_ORDER: list[str] = ["L0", "L1", "L2", "L3", "L4", "L5"]
 
+# Sentinel for a case whose canonical verdict is proven by an independent
+# oracle (e.g. a source_smoke) but which no evidence tier L0-L5 currently
+# reaches — a real, tracked detector gap, not a floor a stronger source would
+# clear. Deliberately outside TIER_ORDER: it is not comparable via tier_rank,
+# and callers that gate on "min_evidence in TIER_ORDER" (see detected_at)
+# already skip the comparison for it. ground_truth.json marks these cases
+# with `"detectability": "none"`; do not hand-set this value in
+# EVIDENCE_TIER_BY_KIND or KINDLESS_CASE_TIER.
+UNDETECTABLE: str = "none"
+
 TIER_LABELS: dict[str, str] = {
     "L0": "binary only (exported symbols / linker metadata)",
     "L1": "binary + debug info (DWARF/PDB layout)",
@@ -224,6 +234,8 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "type_size_changed": "L1",
     "type_field_offset_changed": "L1",
     "type_field_added": "L1",
+    # Same DWARF-layout evidence as type_field_added; distinguished only by
+    # severity (compatible append vs. breaking), not by evidence source.
     "type_field_added_compatible": "L1",
     "type_base_changed": "L1",
     # Fine-grained class-layout descriptor: a base subobject moving (e.g. an
@@ -262,6 +274,10 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "type_became_opaque": "L1",
     "func_virtual_added": "L1",
     "func_pure_virtual_added": "L1",
+    # Same is_virtual/is_pure_virtual DWARF comparison as func_pure_virtual_added
+    # (diff_types.py); only the old function's is_virtual value picks which of
+    # the two kinds fires, not the evidence source.
+    "func_virtual_became_pure": "L1",
     "used_reserved_field": "L1",
     # Build flags are recorded redundantly in debug info (DW_AT_producer /
     # .GCC.command.line), so a `-g` build exposes toolchain flag drift at L1 — a
@@ -403,7 +419,15 @@ def compute_min_evidence(case_name: str, info: dict[str, Any]) -> str:
     ordinary comparisons. Their workflow differs; their truth does not. Those
     kinds are mapped in :data:`EVIDENCE_TIER_BY_KIND`, so their tier is derived
     in exactly the same way.
+
+    A case marked ``"detectability": "none"`` in ground_truth.json returns
+    :data:`UNDETECTABLE` regardless of its ``expected_kinds``: those kinds are
+    the tool's actual (insufficient) observation under the known gap, not a
+    calibration target that proves the canonical verdict, so they must not be
+    read as an ordinary L0-L5 floor (see case111).
     """
+    if info.get("detectability") == "none":
+        return UNDETECTABLE
     kinds = list(info.get("expected_kinds", []))
     if not kinds:
         if case_name not in KINDLESS_CASE_TIER:

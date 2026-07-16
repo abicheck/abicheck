@@ -61,9 +61,10 @@ def _fn(name: str, mangled: str | None = None,
 
 
 def _var(name: str, type_: str = "int",
-         visibility: Visibility = Visibility.PUBLIC) -> Variable:
-    return Variable(name=name, mangled=f"_Z{name}", type=type_,
-                    visibility=visibility)
+         visibility: Visibility = Visibility.PUBLIC,
+         mangled: str | None = None) -> Variable:
+    return Variable(name=name, mangled=mangled if mangled is not None else f"_Z{name}",
+                    type=type_, visibility=visibility)
 
 
 def _rec(name: str) -> RecordType:
@@ -165,9 +166,15 @@ class TestInternalTemplateLeaks:
 
 
 class TestCpoKindChanged:
+    # Variables use a bare, unqualified `name` ("sort") to match real castxml
+    # output — it never namespace-qualifies Variable elements — but a real
+    # external-linkage variable's `mangled` demangles to the full qualified
+    # path ("lib::sort"), which is what the detector actually compares (both
+    # sides are matched by full qualified name, never a bare leaf, so two
+    # unrelated namespaces reusing the same leaf never cross-match).
     def test_function_became_variable(self) -> None:
         old = _snap(funcs=[_fn("lib::sort")])
-        new = _snap(vars_=[_var("lib::sort", type_="lib::__sort_fn")])
+        new = _snap(vars_=[_var("sort", type_="lib::__sort_fn", mangled="_ZN3lib4sortE")])
         changes = detect_cpo_kind_changed(old, new)
         assert len(changes) == 1
         c = changes[0]
@@ -176,7 +183,7 @@ class TestCpoKindChanged:
         assert c.new_value == "variable"
 
     def test_variable_became_function(self) -> None:
-        old = _snap(vars_=[_var("lib::sort", type_="lib::__sort_fn")])
+        old = _snap(vars_=[_var("sort", type_="lib::__sort_fn", mangled="_ZN3lib4sortE")])
         new = _snap(funcs=[_fn("lib::sort")])
         changes = detect_cpo_kind_changed(old, new)
         assert len(changes) == 1
@@ -193,9 +200,19 @@ class TestCpoKindChanged:
         # false positives.
         old = _snap(
             funcs=[_fn("lib::sort")],
-            vars_=[_var("lib::sort")],
+            vars_=[_var("sort", mangled="_ZN3lib4sortE")],
         )
-        new = _snap(vars_=[_var("lib::sort")])
+        new = _snap(vars_=[_var("sort", mangled="_ZN3lib4sortE")])
+        assert detect_cpo_kind_changed(old, new) == []
+
+    def test_different_namespaces_not_conflated(self) -> None:
+        # ns1::sort (a function, removed) and ns2::sort (an unrelated
+        # variable, added) share a bare leaf name but live in different
+        # namespaces — this must NOT be reported as a CPO kind flip
+        # (regression: a bare-leaf-only comparison would wrongly conflate
+        # them, since Variable.name itself carries no namespace).
+        old = _snap(funcs=[_fn("ns1::sort")])
+        new = _snap(vars_=[_var("sort", type_="ns2::__sort_fn", mangled="_ZN3ns24sortE")])
         assert detect_cpo_kind_changed(old, new) == []
 
 
@@ -387,7 +404,10 @@ class TestCombined:
                 _fn("lib::__detail::walk<char>"),
                 _fn("lib::make", return_type="lib::Foo"),
             ],
-            vars_=[_var("lib::sort", type_="lib::__sort_fn")],
+            # Bare, unqualified `name` — matches real castxml Variable output —
+            # with a realistic mangled name so it demangles to "lib::sort"
+            # (see TestCpoKindChanged's comment).
+            vars_=[_var("sort", type_="lib::__sort_fn", mangled="_ZN3lib4sortE")],
         )
         changes = detect_template_patterns(old, new)
         kinds = {c.kind for c in changes}

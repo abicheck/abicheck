@@ -67,6 +67,7 @@ from .diff_serialization import (  # noqa: F401
 )
 from .diff_templates import (  # noqa: F401
     _looks_like_template_instantiation,
+    _qualified_function_name,
     _strip_template_args as _callable_stem,
     detect_missing_instantiations,
 )
@@ -122,11 +123,39 @@ def _parent_namespace(qualified_name: str) -> str:
 _SYCL_QUEUE_PARAM_RE = re.compile(r"\bsycl\s*::\s*queue\b")
 
 
-def _has_sycl_queue_first_param(fn: Function) -> bool:
+def _strip_param_decorators(type_str: str) -> str:
+    """Reduce a param type spelling to its bare base identifier for a
+    type-map lookup: drop ``const``/``volatile`` and trailing pointer/
+    reference markers (``queue&`` -> ``queue``)."""
+    s = re.sub(r"\bconst\b|\bvolatile\b", "", type_str or "")
+    return s.strip().rstrip("*&").strip()
+
+
+def _has_sycl_queue_first_param(
+    fn: Function, type_qualified_index: Mapping[str, set[str | None]] | None = None
+) -> bool:
     if not fn.params:
         return False
     first = fn.params[0]
-    return bool(_SYCL_QUEUE_PARAM_RE.search(first.type or ""))
+    type_str = first.type or ""
+    if _SYCL_QUEUE_PARAM_RE.search(type_str):
+        return True
+    if type_qualified_index is None:
+        return False
+    # castxml never namespace-qualifies a Struct/Class/Union spelling in a
+    # param type (RecordType.name itself stays bare — see its docstring in
+    # model.py), so a real ``sycl::queue&`` param shows up here as the bare
+    # ``queue&``. Fall back to the RecordType's qualified_name (when the
+    # dumper recovered one) before giving up (case82) — but only when the
+    # bare name unambiguously names one distinct type across both snapshots;
+    # an ambiguous bare name (multiple distinct qualified names, e.g. both
+    # ``mylib::queue`` and ``sycl::queue``) can't be resolved from the type
+    # alone and must not guess.
+    qnames = type_qualified_index.get(_strip_param_decorators(type_str))
+    if not qnames or len(qnames) != 1:
+        return False
+    (qname,) = qnames
+    return bool(qname and _SYCL_QUEUE_PARAM_RE.search(qname))
 
 
 def _unqualified_function_name(name: str) -> str:
@@ -171,9 +200,33 @@ def detect_sycl_overload_set_removal(
     the ``func_removed`` stream because they are children of the grouped
     finding.
     """
+    from .diff_symbols import _PUBLIC_VIS
+
     old.index()
     new.index()
-    new_mangled = {f.mangled for f in new.functions}
+    # Scoped to the public surface (PUBLIC + ELF_ONLY, same set diff_symbols
+    # uses): a snapshot can retain HIDDEN functions for cross-reference (both
+    # the header/castxml backend and, since the case06 fix, the DWARF-only
+    # backend), and a purely-internal helper disappearing between versions is
+    # not a real ABI event — including it here could group non-exported churn
+    # into a user-facing SYCL_OVERLOAD_SET_REMOVED finding. ELF_ONLY stays
+    # included for consistency with the sibling ISA-dropped detector, though
+    # a param-type check can't fire in symbols-only mode anyway (no header
+    # info means Function.params is always empty there).
+    old_funcs = [f for f in old.functions if f.visibility in _PUBLIC_VIS]
+    new_funcs = [f for f in new.functions if f.visibility in _PUBLIC_VIS]
+    new_mangled = {f.mangled for f in new_funcs}
+    # Bare-name -> {distinct qualified_names}, merged from both sides, so a
+    # bare param spelling (``queue&``) can be resolved to its real namespace
+    # path via RecordType.qualified_name when castxml recovered one (case82).
+    # A *set* (not a plain dict overwrite) so an ambiguous bare name shared by
+    # two distinct types (e.g. both ``mylib::queue`` and ``sycl::queue``) is
+    # detectable — silently keeping whichever record was inserted last could
+    # either wrongly treat an unrelated ``mylib::queue&`` param as SYCL, or
+    # miss a real SYCL removal, depending on insertion order.
+    type_qualified_index: dict[str, set[str | None]] = defaultdict(set)
+    for t in (*old.types, *new.types):
+        type_qualified_index[t.name].add(t.qualified_name)
     # Group removed SYCL-overload candidates by the *qualified* callable
     # stem (full namespace path with template args stripped). Keying by
     # the unqualified leaf name alone would let unrelated symbols like
@@ -182,18 +235,18 @@ def detect_sycl_overload_set_removal(
     # per-symbol removals. Same fix that ``detect_default_template_arg_changed``
     # already uses.
     by_entity: dict[str, list[Function]] = defaultdict(list)
-    for fn in old.functions:
+    for fn in old_funcs:
         if fn.mangled in new_mangled:
             continue
-        if not _has_sycl_queue_first_param(fn):
+        if not _has_sycl_queue_first_param(fn, type_qualified_index):
             continue
         by_entity[_callable_stem(fn.name)].append(fn)
     # Surviving non-SYCL siblings give us confidence that the family
     # was withdrawn deliberately (DPC++ build disabled), not that the
     # whole algorithm was deleted. Use the same qualified key.
     surviving_non_sycl: set[str] = set()
-    for fn in new.functions:
-        if not _has_sycl_queue_first_param(fn):
+    for fn in new_funcs:
+        if not _has_sycl_queue_first_param(fn, type_qualified_index):
             surviving_non_sycl.add(_callable_stem(fn.name))
     findings: list[Change] = []
     suppressed: set[str] = set()
@@ -359,12 +412,26 @@ def detect_cpu_dispatch_isa_dropped(
     are those rolled up under the grouped finding so the per-symbol
     ``func_removed`` noise doesn't double-count.
     """
+    from .diff_symbols import _PUBLIC_VIS
+
     old.index()
     new.index()
-    new_mangled = {f.mangled for f in new.functions}
-    removed_by_isa = _build_removed_by_isa(old.functions, new_mangled)
-    all_surviving_stems = _build_all_surviving_stems(new.functions)
-    old_index: dict[str, Function] = {f.mangled: f for f in old.functions}
+    # Scoped to the public surface (PUBLIC + ELF_ONLY, same set diff_symbols
+    # uses): a snapshot can retain HIDDEN functions for cross-reference (both
+    # the header/castxml backend and, since the case06 fix, the DWARF-only
+    # backend). A hidden dispatch helper (e.g. a `static`/non-exported
+    # `*_avx2` specialization) disappearing between versions never affected
+    # any real ABI consumer and must not be grouped into a user-facing
+    # CPU_DISPATCH_ISA_DROPPED finding. ELF_ONLY must stay included though —
+    # this detector is calibrated as an L0 (symbols-only) signal, where every
+    # real exported function is ELF_ONLY, never PUBLIC; excluding it would
+    # empty out old_funcs/new_funcs and silently disable case83 in that mode.
+    old_funcs = [f for f in old.functions if f.visibility in _PUBLIC_VIS]
+    new_funcs = [f for f in new.functions if f.visibility in _PUBLIC_VIS]
+    new_mangled = {f.mangled for f in new_funcs}
+    removed_by_isa = _build_removed_by_isa(old_funcs, new_mangled)
+    all_surviving_stems = _build_all_surviving_stems(new_funcs)
+    old_index: dict[str, Function] = {f.mangled: f for f in old_funcs}
     findings: list[Change] = []
     suppressed: set[str] = set()
     for token, removed in removed_by_isa.items():
@@ -589,28 +656,49 @@ def detect_default_template_arg_changed(
     emit the finding when the args differ but the *prefix* (everything
     up to the differing arg) matches and the function unqualified name
     matches one-for-one.
+
+    Uses :func:`_qualified_function_name` (demangles when ``Function.name``
+    itself carries no template args) rather than the raw ``name`` field: the
+    header/castxml backend populates ``.name`` from the bare AST method name
+    only, so a real templated method name (e.g. ``dimension``) never shows
+    ``<...>`` there, and this check could otherwise never match (case87).
+
+    Scoped to the public surface (``PUBLIC`` + ``ELF_ONLY``, same set
+    ``diff_symbols.py`` uses): a snapshot can retain ``HIDDEN`` functions for
+    cross-reference (both the header/castxml backend and, since the case06
+    fix, the DWARF-only backend), and a purely-internal template
+    instantiation changing is not a real ABI event — including it here could
+    emit a DEFAULT_TEMPLATE_ARG_CHANGED finding for a helper no consumer can
+    ever see.
     """
+    from .diff_symbols import _PUBLIC_VIS
+
     old.index()
     new.index()
-    new_mangled = {f.mangled for f in new.functions}
-    removed = [f for f in old.functions if f.mangled not in new_mangled]
+    old_funcs = [f for f in old.functions if f.visibility in _PUBLIC_VIS]
+    new_funcs = [f for f in new.functions if f.visibility in _PUBLIC_VIS]
+    new_mangled = {f.mangled for f in new_funcs}
+    removed = [f for f in old_funcs if f.mangled not in new_mangled]
     # Key by *qualified* callable stem (full namespace path with all
     # template args stripped). This prevents matching ``ns1::foo::compute``
     # against ``ns2::bar::compute`` and other namespace-confusion false
     # positives — only different instantiations of the SAME callable get
     # paired.
     added_by_entity: dict[str, list[Function]] = defaultdict(list)
-    for fn in new.functions:
-        added_by_entity[_callable_stem(fn.name)].append(fn)
+    for fn in new_funcs:
+        qname = _qualified_function_name(fn.name, fn.mangled)
+        added_by_entity[_callable_stem(qname)].append(fn)
     findings: list[Change] = []
     seen_pairs: set[tuple[str, str]] = set()
     for fn in removed:
-        old_args = _extract_template_args(fn.name)
+        old_qname = _qualified_function_name(fn.name, fn.mangled)
+        old_args = _extract_template_args(old_qname)
         if old_args is None:
             continue
-        entity = _callable_stem(fn.name)
+        entity = _callable_stem(old_qname)
         for cand in added_by_entity.get(entity, []):
-            new_args = _extract_template_args(cand.name)
+            new_qname = _qualified_function_name(cand.name, cand.mangled)
+            new_args = _extract_template_args(new_qname)
             if new_args is None or new_args == old_args:
                 continue
             # Require that the two argument lists differ only in trailing

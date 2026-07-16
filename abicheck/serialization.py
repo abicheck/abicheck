@@ -643,6 +643,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             is_trivially_copyable=t.get("is_trivially_copyable"),
             vptr_offset_bits=t.get("vptr_offset_bits"),
             base_offsets=t.get("base_offsets", {}),
+            qualified_name=t.get("qualified_name"),
         )
         for t in d.get("types", [])
     ]

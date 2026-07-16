@@ -97,6 +97,7 @@
    "api_break": false,
    "bad_practice": true,
    "category": "breaking",
+   "description": "internal_helper's default→hidden visibility change is a DWARF-only (no headers, no castxml) L0/L1 fixture. Detected via func_visibility_changed: dwarf_snapshot.py's _process_subprogram no longer unconditionally drops a non-exported function — when DW_AT_external shows real external linkage (not a genuine C `static`) but the symbol is absent from .dynsym, the function is kept as Visibility.HIDDEN (mirroring the header/castxml backend's existing hidden-retention behaviour) instead of vanishing from the snapshot, so the hidden-visibility transition is distinguishable from an outright removal.",
    "expected": "BREAKING",
    "expected_kinds": [
     "func_visibility_changed"
@@ -363,6 +364,7 @@
   "case109_flow_graph_policy_renames": {
    "abi_break": false,
    "api_break": true,
+   "underlying_fact": "API_BREAK",
    "bad_practice": false,
    "category": "breaking",
    "description": "Header-only policy-tag types used as template parameters for `function_node` are renamed wholesale (queueing/rejecting \u2192 buffering_policy/backpressure_policy) and the instantiation-anchor typedef is dropped. The example deliberately keeps v1.cpp / v2.cpp byte-identical (no template instantiations) so the .so symbol table is unchanged across the version pair; any rebuild against v2 headers still fails. Detected via `typedef_removed` + `type_removed` (both BREAKING per change_registry). Member of the oneTBB regression suite; mirrors the 2021 flow::graph policy reshuffle.",
@@ -422,11 +424,19 @@
    "category": "api_break",
    "description": "A second constructor overload accepting `std::function<int()>` is added next to the existing `int`-form constructor. By itself this looks like a pure addition \u2014 existing call sites that pass an int still resolve to the original constructor. But this case's own source_smoke proves the real failure mode: brace-initialization (`ets({})`) becomes an ambiguous overload at downstream call sites, so recompilation against v2 fails while already-built v1 binaries keep working \u2014 the textbook definition of API_BREAK. Member of the oneTBB regression suite.",
    "expected": "API_BREAK",
+   "detectability": "none",
+   "observed_detector_behavior": {
+    "verdict": "COMPATIBLE",
+    "kinds": [
+     "func_added"
+    ]
+   },
    "expected_kinds": [
     "func_added"
    ],
-   "known_gap": "The tool genuinely cannot see this case's real failure mode: this case's own source_smoke proves recompilation against v2 fails (ambiguous overload resolution for `ets({})`), which is an API_BREAK by the project's own definitions. No snapshot-level detector exists that reasons about downstream overload-resolution ambiguity for newly-added constructor overloads (unlike case169_overload_added's OVERLOAD_ADDED, which only groups same-named *free-function* overloads by Itanium mangling). From symbols/DWARF/headers alone the only observable fact is a pure func_added, so every current evidence tier (L0-L5) reaches COMPATIBLE, not the canonical API_BREAK \u2014 this is a real, currently-unfixed detector gap, not an evidence-depth limitation like case105's concept tightening (which L4 source-ABI replay does catch). `expected` records the canonical scenario truth (API_BREAK, proven by source_smoke); the mismatch against every lane's actual COMPATIBLE output is the known gap itself, not a reason to weaken the canonical verdict to match current tool behavior. Tracked as a real detector gap \u2014 a constructor-overload-ambiguity detector is the natural home for this; see case105 concept tightening for the sibling 'needs call-site context' pattern.",
-   "min_evidence": "L0",
+   "known_detector_gap": "constructor_overload_ambiguity",
+   "known_gap": "The tool genuinely cannot see this case's real failure mode: this case's own source_smoke proves recompilation against v2 fails (ambiguous overload resolution for `ets({})`), which is an API_BREAK by the project's own definitions. No snapshot-level detector exists that reasons about downstream overload-resolution ambiguity for newly-added constructor overloads (unlike case169_overload_added's OVERLOAD_ADDED, which only groups same-named *free-function* overloads by Itanium mangling). From symbols/DWARF/headers alone the only observable fact is a pure func_added, so every current evidence tier (L0-L5) reaches COMPATIBLE, not the canonical API_BREAK \u2014 this is a real, currently-unfixed detector gap, not an evidence-depth limitation like case105's concept tightening (which L4 source-ABI replay does catch). `expected` records the canonical scenario truth (API_BREAK, proven by source_smoke); the mismatch against every lane's actual COMPATIBLE output is the known gap itself, not a reason to weaken the canonical verdict to match current tool behavior. `expected_kinds` records the same `func_added` that `observed_detector_behavior.kinds` does \u2014 the actual, insufficient, currently-observed detector output \u2014 not a calibration target that proves API_BREAK; `detectability: none` (and the derived `min_evidence: none`, see scripts/evidence_tiers.py) is the explicit signal that no L0-L5 tier proves the canonical verdict, so `min_evidence` must not be misread as \"L0 already sees this.\" Tracked as a real detector gap \u2014 a constructor-overload-ambiguity detector is the natural home for this; see case105 concept tightening for the sibling 'needs call-site context' pattern.",
+   "min_evidence": "none",
    "platforms": [
     "linux",
     "macos"
@@ -512,7 +522,7 @@
    "api_break": false,
    "bad_practice": false,
    "category": "breaking",
-   "description": "A public struct field and a return type gained the C11 _Atomic qualifier. Per WG14 the size/alignment of an _Atomic-qualified type may differ from the unqualified type and varies across compilers, so layout and the return ABI diverge.",
+   "description": "A public struct field and a return type gained the C11 _Atomic qualifier. Per WG14 the size/alignment of an _Atomic-qualified type may differ from the unqualified type and varies across compilers, so layout and the return ABI diverge. Detected via atomic_qualifier_changed: both metadata layers now spell the qualifier as the literal string \"_Atomic\" instead of losing it — dwarf_metadata.py/dwarf_snapshot.py special-case DW_TAG_atomic_type (previously unhandled, falling through to a generic fallback), and dumper_castxml.py recognises castxml's Unimplemented/type_class=\"Atomic\" node (castxml cannot model _Atomic at all and exposes no reference to the wrapped inner type) and renders it as \"_Atomic\" rather than the literal tag name \"Unimplemented\".",
    "expected": "BREAKING",
    "expected_kinds": [
     "atomic_qualifier_changed"
@@ -741,10 +751,10 @@
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
-   "description": "Distilled from intel/llvm PR #20821 (the `abi-break`-labelled change that swapped `std::shared_ptr<device_impl>` for a raw `device_impl*` inside `sycl::device`, surfacing as issue #20915 / fix #21028). The shared_ptr member is two pointers (16 bytes) on LP64; the raw pointer is one (8 bytes), so sizeof(sycl::device) shrinks 16->8 \u2014 an ABI break for every consumer that holds a device by value or embeds it. The method mangled names are unchanged, so a pure exported-symbol dump (sycl_symbols_*.dump) does not see the layout change directly; abicheck's type/layout diff reports the root cause as TYPE_SIZE_CHANGED. Built with -fvisibility-inlines-hidden so the diff shows the public ABI break rather than libstdc++ template noise, mirroring how libsycl is built.",
+   "description": "Distilled from intel/llvm PR #20821 (the `abi-break`-labelled change that swapped `std::shared_ptr<device_impl>` for a raw `device_impl*` inside `sycl::device`, surfacing as issue #20915 / fix #21028). The shared_ptr member is two pointers (16 bytes) on LP64; the raw pointer is one (8 bytes), so sizeof(sycl::device) shrinks 16->8 \u2014 an ABI break for every consumer that holds a device by value or embeds it. The method mangled names are unchanged, so a pure exported-symbol dump (sycl_symbols_*.dump) does not see the layout change directly. DWARF (L1, from the real compiled .so's) independently detects the 16->8 shrink and reports struct_size_changed; the AST-side type_size_changed does not fire because v1's real std::shared_ptr<device_impl> from <memory> fails castxml, falls back to the clang JSON-AST backend, which cannot compute record layout, leaving size_bits None for v1 \u2014 the null-evidence guard in diff_types.py correctly declines to emit a size-change finding from absent data rather than guessing. struct_size_changed is the kind this case actually calibrates.",
    "expected": "BREAKING",
    "expected_kinds": [
-    "type_size_changed"
+    "struct_size_changed"
    ],
    "min_evidence": "L1",
    "platforms": [
@@ -1002,7 +1012,7 @@
    "api_break": false,
    "bad_practice": true,
    "category": "breaking",
-   "description": "Library carries its major version as a suffix on every exported symbol (ICU u_<name>_<major>); v2 bumps the whole API _3 -> _4 at once. Source using a version macro keeps compiling, but the .so renames all symbols, so consumers linked at the same SONAME fail with undefined symbol. abicheck reports the removals (BREAKING) and adds one advisory versioned_symbol_scheme_detected finding; opt-in --collapse-versioned-symbols reclassifies the version-rename pairs to show the real delta.",
+   "description": "Library carries its major version as a suffix on every exported symbol (ICU u_<name>_<major>); v2 bumps the whole API _3 -> _4 at once. Source using a version macro keeps compiling, but the .so renames all symbols, so consumers linked at the same SONAME fail with undefined symbol. abicheck reports the removals (BREAKING) and adds one advisory versioned_symbol_scheme_detected finding; opt-in --collapse-versioned-symbols reclassifies the version-rename pairs to show the real delta. Detected via versioned_symbol_scheme_detected: dumper_castxml.py now reconciles a function's mangled identity against the real ELF export table before it reaches the detector — these are plain C functions with no extern \"C\", so castxml (parsing the header in ambiguous/C++ mode) previously pseudo-mangled them (e.g. 'mylib_init_3' -> '_Z12mylib_init_3'); when that guessed mangling matches no real export while the bare declared name does, the bare name is now used as the canonical symbol identity instead, so the digit-collapse path in versioned_symbol_scheme.py's _scheme_key sees the real plain names and pairs them correctly.",
    "expected": "BREAKING",
    "expected_kinds": [
     "func_removed",
@@ -1966,9 +1976,10 @@
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
+   "description": "An existing concrete virtual method (Processor::process()) becomes pure virtual. diff_types.py picks between two kinds sharing the same detection code based on the old function's is_virtual flag: FUNC_VIRTUAL_BECAME_PURE (old function was already virtual — this case) vs. FUNC_PURE_VIRTUAL_ADDED (old function was not virtual at all). This case is the former.",
    "expected": "BREAKING",
    "expected_kinds": [
-    "func_pure_virtual_added"
+    "func_virtual_became_pure"
    ],
    "min_evidence": "L1",
    "platforms": [
@@ -2087,8 +2098,9 @@
    ]
   },
   "case30_field_qualifiers": {
-   "abi_break": true,
+   "abi_break": false,
    "api_break": true,
+   "underlying_fact": "API_BREAK",
    "bad_practice": false,
    "category": "breaking",
    "expected": "BREAKING",
@@ -2259,6 +2271,7 @@
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
+   "description": "A previously-mutable public variable becomes const-qualified. Detected via var_became_const: _check_variable (diff_symbols.py) now compares the canonicalized type strings with the `const` token stripped from both sides before deciding a base-type change occurred, so a pure const-qualifier flip (which canonicalize_type_name normalizes but never removes) reaches the VAR_BECAME_CONST/VAR_LOST_CONST check instead of being swallowed by VAR_TYPE_CHANGED first.",
    "expected": "BREAKING",
    "expected_kinds": [
     "var_became_const"
@@ -2740,7 +2753,7 @@
    "api_break": false,
    "bad_practice": false,
    "category": "breaking",
-   "description": "ELF symbol version node CRYPTO_1.0 removed \u2014 old binaries linked against that version fail at load time. The more specific SYMBOL_VERSION_NODE_REMOVED wins cross-detector dedup over the simpler SYMBOL_VERSION_DEFINED_REMOVED (see diff_platform.py).",
+   "description": "ELF symbol version node CRYPTO_1.0 removed \u2014 old binaries linked against that version fail at load time. Both SYMBOL_VERSION_DEFINED_REMOVED and SYMBOL_VERSION_NODE_REMOVED detect this same removal; _deduplicate_cross_detector (diff_filtering.py) deliberately collapses them and keeps the more specific SYMBOL_VERSION_NODE_REMOVED (diff_platform.py), so that is the kind this case actually calibrates.",
    "expected": "BREAKING",
    "expected_kinds": [
     "symbol_version_node_removed"
@@ -2760,6 +2773,8 @@
    "expected_kinds": [
     "func_language_linkage_changed"
    ],
+   "known_kind_gap": "func_language_linkage_changed",
+   "known_kind_gap_note": "The overall verdict (BREAKING) is correct via func_removed (v1's plain-name pair has no counterpart under v2's mangled name), but func_language_linkage_changed never fires \u2014 a real, root-caused gap, not a fixture problem, though narrower than first documented (superseding an earlier, incorrect theory about castxml never emitting extern=\"1\"). Root cause, confirmed by direct castxml invocation: v2.h has no extern \"C\" and no other C++-looking construct, so dumper.py's _detect_cpp_headers() content-sniff (correctly, from the header text alone) does not classify it as C++ and castxml parses it in C mode (`-x c -std=gnu11`). castxml still emits a pseudo-Itanium `mangled` attribute even in C mode, but *without* parameter-type encoding (e.g. 'parse_config' -> '_Z12parse_config', missing the 'PKc' suffix a real `const char*` parameter would add) \u2014 this incomplete guess matches neither v1's real plain export ('parse_config') nor v2's real, fully-mangled C++ export ('_Z12parse_configPKc', since v2.cpp is genuinely compiled as C++). The real fix needs TU-level context (this header is included from a .cpp, so it has C++ linkage) that no per-header content sniff can recover; a bare-name/real-export reconciliation (the fix applied for case141) does not help here because neither side of this pair matches by bare name.",
    "min_evidence": "L0",
    "platforms": [
     "linux",
@@ -2901,7 +2916,7 @@
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
-   "description": "Internal-namespace leak: mylib::detail::descriptor_base gains a field; public mylib::knn_descriptor inherits from it, so sizeof/layout of the public class changes. Detected by existing type_size_changed/struct_field_added, escalated by internal_type_leaks_via_public_api.",
+   "description": "Internal-namespace leak: mylib::detail::descriptor_base gains a field; public mylib::knn_descriptor inherits from it, so sizeof/layout of the public class changes. Detected via internal_type_leaks_via_public_api, escalating the existing type_size_changed/struct_field_added findings: dumper_castxml.py's _build_record_type now also records a namespace-qualified RecordType.qualified_name (e.g. \"mylib::detail::descriptor_base\") alongside the bare RecordType.name, and internal_leak.py consults it whenever the bare spelling alone carries no namespace segment — RecordType.name itself stays bare so it keeps matching the DWARF backend's equally-bare struct names.",
    "expected": "BREAKING",
    "expected_kinds": [
     "internal_type_leaks_via_public_api"
@@ -2918,7 +2933,7 @@
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
-   "description": "Internal-namespace leak: mylib::detail::table_impl gains a field; public mylib::table embeds it by value, so sizeof(table) grows. Detected by existing struct_field_added on detail::table_impl, escalated by internal_type_leaks_via_public_api.",
+   "description": "Internal-namespace leak: mylib::detail::table_impl gains a field; public mylib::table embeds it by value, so sizeof(table) grows. Detected via internal_type_leaks_via_public_api, escalating the existing struct_size_changed/type_field_added_compatible findings — same fix as case74/case76: dumper_castxml.py records a namespace-qualified RecordType.qualified_name that internal_leak.py consults when the bare type spelling carries no namespace segment.",
    "expected": "BREAKING",
    "expected_kinds": [
     "internal_type_leaks_via_public_api"
@@ -2935,7 +2950,7 @@
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
-   "description": "Internal-namespace leak: mylib::detail::algorithm_iface gains a virtual method inserted mid-vtable; public mylib::svm_algorithm inherits from it, so vtable slot indices shift for all consumers. Detected by existing type_vtable_changed / func_virtual_added, escalated by internal_type_leaks_via_public_api.",
+   "description": "Internal-namespace leak: mylib::detail::algorithm_iface gains a virtual method inserted mid-vtable; public mylib::svm_algorithm inherits from it, so vtable slot indices shift for all consumers. Detected via internal_type_leaks_via_public_api on the Linux lane, escalating the existing type_vtable_changed/vtable_slot_count_changed findings \u2014 same fix as case74/case75: dumper_castxml.py records a namespace-qualified RecordType.qualified_name that internal_leak.py consults when the bare type spelling carries no namespace segment. See known_gap below for the separate macOS/Windows verdict gap (unrelated to this fix).",
    "expected": "BREAKING",
    "expected_kinds": [
     "internal_type_leaks_via_public_api"
@@ -2957,7 +2972,7 @@
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
-   "description": "Internal-namespace leak through a templated detail:: base: mylib::detail::descriptor_base<Task> gains a field, growing every knn_descriptor<Task> instantiation. Detected by the dedicated template-leak detector (diff_templates.py), which emits INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API for this pattern (not the generic INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API).",
+   "description": "Internal-namespace leak through a templated detail:: base: mylib::detail::descriptor_base<Task> gains a field, growing every knn_descriptor<Task> instantiation. The leak is templated, so the sibling mangled-name-based detect_internal_template_leaks (diff_templates.py) — not the plain non-template internal_type_leaks_via_public_api — is the kind that actually fires and correctly captures this: it works from fully-qualified mangled names rather than castxml's bare RecordType.name (RecordType.qualified_name, added for case74/75/76, does not cover template instantiations — castxml's context-chain walk only reaches the enclosing namespace/class path, not per-instantiation template args).",
    "expected": "BREAKING",
    "expected_kinds": [
     "internal_template_leaks_via_public_api"
@@ -2993,7 +3008,7 @@
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
-   "description": "Header advertises descriptor<float> and descriptor<double>; v2 library ships only the float instantiation. Header is unchanged so source compiles, link/load fails with undefined symbol. Emits INSTANTIATION_MISSING_FROM_BINARY.",
+   "description": "Header advertises descriptor<float> and descriptor<double>; v2 library ships only the float instantiation. Header is unchanged so source compiles, link/load fails with undefined symbol. Emits INSTANTIATION_MISSING_FROM_BINARY: detect_missing_instantiations (diff_templates.py) demangles Function.mangled to recover the template-arg-embedded name (the header/castxml dumper's bare Function.name never carries template args) and scopes its removed/surviving checks to Visibility.PUBLIC functions, so a stale extern-template declaration for the dropped instantiation (kept as a HIDDEN cross-reference entry) can't be mistaken for a surviving one.",
    "expected": "BREAKING",
    "expected_kinds": [
     "instantiation_missing_from_binary"
@@ -3009,16 +3024,17 @@
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
-   "description": "Pimpl alias switched from shared_ptr<T> to unique_ptr<T>. The type of descriptor::impl_ changed; inline accessors re-mangle, destruction model changes (no atomic refcount), copy semantics flip from refcounted-share to move-only. Detected by existing type_field_type_changed escalated via internal_type_leaks_via_public_api.",
+   "description": "Pimpl alias switched from shared_ptr<T> to unique_ptr<T>. detail::pimpl<detail::descriptor_impl>'s declared spelling is textually identical in both snapshots (only the `using` target changes), so type_field_type_changed never fires on impl_ as an earlier description of this case claimed. The real, portable signal is the alias-target flip itself (typedef_base_changed: shared_ptr<T> -> unique_ptr<T>) plus the resulting struct_size_changed on the public descriptor struct (refcount/deleter bookkeeping differs between the two smart pointers). internal_type_leaks_via_public_api does not fire here: no internal type's own layout changes (descriptor_impl is untouched; only which smart pointer wraps it changes), and internal_type_leaks_via_public_api's reachability check requires an internal type's layout change to leak, not a pimpl alias-target swap.",
    "expected": "BREAKING",
    "expected_kinds": [
-    "internal_type_leaks_via_public_api"
+    "typedef_base_changed",
+    "struct_size_changed"
    ],
    "known_gap": "Windows: std::shared_ptr / std::unique_ptr layout names differ between MSVC STL and libstdc++/libc++, so the type-name-based detection signal is not portable as-shipped. Tracked for a follow-up that normalises smart-pointer template-arg names across stdlibs.",
    "known_gap_platforms": [
     "windows"
    ],
-   "min_evidence": "L2",
+   "min_evidence": "L1",
    "platforms": [
     "linux",
     "macos"
@@ -3049,7 +3065,7 @@
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
-   "description": "DPC++ build withdrawn between releases \u2014 every sycl::queue&-taking overload disappears across multiple algorithms. Reported as one grouped SYCL_OVERLOAD_SET_REMOVED finding instead of N independent func_removed.",
+   "description": "DPC++ build withdrawn between releases \u2014 every sycl::queue&-taking overload disappears across multiple algorithms. Reported as one grouped SYCL_OVERLOAD_SET_REMOVED finding instead of N independent func_removed. Detected via sycl_overload_set_removed: _has_sycl_queue_first_param now falls back to the first parameter's RecordType.qualified_name (populated by dumper_castxml.py) when the bare param spelling alone ('queue&') doesn't match \u2014 the same qualified-name mechanism used for case74/75/76's internal-leak detection.",
    "expected": "BREAKING",
    "expected_kinds": [
     "sycl_overload_set_removed"
@@ -3138,7 +3154,7 @@
    "api_break": false,
    "bad_practice": false,
    "category": "breaking",
-   "description": "Default template argument changed (Distance = minkowski_distance \u2192 euclidean_distance). Consumer source compiles unchanged but substituted instantiation type differs, producing a different mangled symbol. Emits DEFAULT_TEMPLATE_ARG_CHANGED. Unlike case32 (function default param, source-only API_BREAK), template defaults are part of the substituted type and re-mangle, so this is a binary BREAKING change.",
+   "description": "Default template argument changed (Distance = minkowski_distance \u2192 euclidean_distance). Consumer source compiles unchanged but substituted instantiation type differs, producing a different mangled symbol. Emits DEFAULT_TEMPLATE_ARG_CHANGED: detect_default_template_arg_changed (diff_cpp_patterns.py) demangles Function.mangled to recover the template-arg-embedded name before extracting/comparing template args, since Function.name itself never carries them (the header/castxml backend sets .name from the bare AST method name). Unlike case32 (function default param, source-only API_BREAK), template defaults are part of the substituted type and re-mangle, so this is a binary BREAKING change.",
    "expected": "BREAKING",
    "expected_kinds": [
     "default_template_arg_changed"
@@ -3155,7 +3171,7 @@
    "api_break": false,
    "bad_practice": false,
    "category": "breaking",
-   "description": "Public name `lib::sort` is published in v1 as a free function and in v2 as a customisation point object (constexpr variable of an unspecified function-object class type). Call syntax keeps working but decltype, extern templates, and trait specialisations break.",
+   "description": "Public name `lib::sort` is published in v1 as a free function and in v2 as a customisation point object (constexpr variable of an unspecified function-object class type). Call syntax keeps working but decltype, extern templates, and trait specialisations break. Detected via cpo_kind_changed: dumper_castxml.py's parse_variables falls back to Visibility.PUBLIC for a namespace-scope variable with external linkage and no ELF symbol at all (a real CPO with no forced ODR-use emits none), mirroring the existing _constructor_visibility fallback; detect_cpo_kind_changed's function-name and variable-name sets are both reduced to a bare, unqualified leaf name so they correlate correctly.",
    "expected": "BREAKING",
    "expected_kinds": [
     "cpo_kind_changed"
@@ -3318,7 +3334,7 @@
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
-   "description": "An empty tag struct (mirrors tbb::auto_partitioner) gains a member; sizeof grows from 1 to 8. Any consumer that passed the tag by value into a header-inline algorithm interface now writes an undersized argument into a wider slot. A field addition to a non-polymorphic struct is intentionally classified TYPE_FIELD_ADDED_COMPATIBLE (see diff_types.py _new_field_change_kind), not the generic TYPE_FIELD_ADDED; the overall verdict stays BREAKING via the co-emitted TYPE_SIZE_CHANGED.",
+   "description": "An empty tag struct (mirrors tbb::auto_partitioner) gains a member; sizeof grows from 1 to 8. Any consumer that passed the tag by value into a header-inline algorithm interface now writes an undersized argument into a wider slot. type_size_changed captures the breaking size growth; the field addition itself is correctly classified type_field_added_compatible (non-polymorphic struct, existing-field offsets unaffected) rather than type_field_added — the two are not the same claim, and the by-value-parameter risk this case demonstrates is carried entirely by type_size_changed.",
    "expected": "BREAKING",
    "expected_kinds": [
     "type_size_changed",
@@ -3334,6 +3350,7 @@
   "case95_allocator_nested_typedef_removed": {
    "abi_break": false,
    "api_break": true,
+   "underlying_fact": "API_BREAK",
    "bad_practice": false,
    "category": "breaking",
    "description": "An allocator-style class drops the historical STL nested-typedef set (value_type, pointer, reference, size_type, difference_type). Exported member symbols are unchanged so binaries still link, but consumer source using `typename Alloc::value_type` etc. fails to compile. Detected via `typedef_removed` (BREAKING per change_registry). Demonstrates the new `member_name` suppression selector \u2014 combined with `change_kind: typedef_removed`, it scopes the inevitable noise from removing a uniform set of nested aliases.",

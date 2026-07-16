@@ -31,6 +31,7 @@ from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change
 from abicheck.dwarf_metadata import DwarfMetadata, FieldInfo, StructLayout
 from abicheck.internal_leak import (
+    _build_qualified_index,
     _build_type_map,
     _seed_queue_from_public_types,
     compute_leak_paths,
@@ -144,6 +145,7 @@ class TestSeedQueueSkipsOnDwarfFallback:
         queue: collections.deque[tuple[str, list[str]]] = collections.deque()
         _seed_queue_from_public_types(
             type_map,
+            _build_qualified_index(snap.types),
             {"detail", "impl", "internal"},
             queue,
             is_dwarf_fallback=True,
@@ -160,6 +162,7 @@ class TestSeedQueueSkipsOnDwarfFallback:
         queue: collections.deque[tuple[str, list[str]]] = collections.deque()
         _seed_queue_from_public_types(
             type_map,
+            _build_qualified_index(snap.types),
             {"detail", "impl", "internal"},
             queue,
             is_dwarf_fallback=False,

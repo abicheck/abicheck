@@ -7,7 +7,7 @@
 | **Category** | Breaking |
 | **Platforms** | Linux |
 | **Flags** | ABI break, API break |
-| **Detected `ChangeKind`s** | `type_size_changed` |
+| **Detected `ChangeKind`s** | `struct_size_changed` |
 | **Source files** | `examples/case126_sycl_device_impl_ptr/` |
 
 **Category:** C++ ABI | **Verdict:** 🔴 ABI BREAK (exit 4)
@@ -66,11 +66,19 @@ to stabilise. abicheck's layout diff catches the **root cause**.
 
 ## Why abicheck catches it
 
-With DWARF or headers (L1/L2) abicheck reports:
+With DWARF (L1, from the compiled `.so`s) abicheck reports:
 
 ```
-type_size_changed  sycl::device   (16 → 8 bytes)  → BREAKING
+struct_size_changed  sycl::device   (16 → 8 bytes)  → BREAKING
 ```
+
+The header-AST path's `type_size_changed` does not additionally fire here:
+`std::shared_ptr<device_impl>`'s real definition (from `<memory>`) is enough
+to trip up castxml, which falls back to the clang JSON-AST backend — one
+that cannot compute a full record layout, so v1's `size_bits` comes back
+`None`. abicheck's null-evidence guard correctly declines to report a size
+change from absent data rather than guessing; DWARF independently and
+correctly catches the real 16→8 shrink regardless.
 
 **Without any DWARF (L0, symbols only)** abicheck still flags the related
 binary-only signals through `diff_elf_layout.py`: had the change instead added

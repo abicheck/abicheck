@@ -103,14 +103,29 @@ assert not d["artifact_errors"]
 assert not d["unresolved_cases"]
 assert not d["failed_cases"]
 direct = d["direct_coverage"]
-assert direct["covered"] == total
-print(f"{total}/{total} COVERED; direct={direct['covered']}/{direct['total']}")
+# A case can be COVERED two ways: directly (a compiler lane or public-CLI
+# workflow reached the canonical verdict) or via known-gap-oracle (a
+# reviewed known_gap plus the case's own source_smoke oracle proves the
+# canonical truth while every evidence tier still XFAILs — see case111).
+# direct_coverage deliberately excludes the latter, so asserting
+# direct["covered"] == total is wrong on a fully-green matrix whenever any
+# case is covered that way. Assert the two provenances sum to the total
+# instead of hard-coding which cases (if any) are oracle-only.
+known_gap_oracle = d["coverage_by_provenance"].get("known-gap-oracle", 0)
+assert direct["covered"] + known_gap_oracle == total
+print(
+    f"{total}/{total} COVERED; direct={direct['covered']}/{direct['total']}, "
+    f"known-gap-oracle={known_gap_oracle}"
+)
 PY
 ```
 
 The exact count comes from `examples/ground_truth.json`; automation must not
 hard-code a historic count. When this runbook was added, the proven result was
-`181/181 COVERED`.
+`181/181 COVERED`. As of this writing that is `180` direct + `1` known-gap-oracle
+(`case111`) — a case only qualifies for known-gap-oracle provenance when its
+own declared `source_smoke` oracle proved the canonical verdict; see
+`_single_library_status` in `collect_full_example_matrix.py`.
 
 ## Interpret results
 

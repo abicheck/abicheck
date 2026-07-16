@@ -479,3 +479,114 @@ def test_forced_validate_results_path_matches_ci_workflow(tmp_path: Path) -> Non
         json.dumps({"summary": {"PASS": 2}, "results": []}), encoding="utf-8"
     )
     assert (results / "validate_examples.json").exists()
+
+
+def _synthetic_ground_truth(tmp_path: Path, verdicts: dict) -> Path:
+    gt = tmp_path / "ground_truth.json"
+    gt.write_text(json.dumps({"verdicts": verdicts}), encoding="utf-8")
+    return gt
+
+
+def test_all_xfail_without_source_smoke_is_unresolved_not_covered(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """An all-XFAIL known_gap case with no declared oracle must not earn free
+    known-gap-oracle coverage — only a case whose own source_smoke actually
+    proved the canonical verdict may skip direct detector/CLI proof."""
+    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    case_id = "caseXX_unproven_known_gap"
+    gt = _synthetic_ground_truth(
+        tmp_path,
+        {
+            case_id: {
+                "expected": "API_BREAK",
+                "known_gap": "claims a detector gap but has no oracle behind it",
+            }
+        },
+    )
+    monkeypatch.setattr(matrix, "GROUND_TRUTH", gt)
+    xfail_lane = {
+        "results": [
+            {
+                "case_id": case_id,
+                "status": "XFAIL",
+                "expected": "API_BREAK",
+                "got": "COMPATIBLE",
+                "message": "known_gap: claims a detector gap but has no oracle behind it",
+            }
+        ]
+    }
+    result = matrix.build_matrix(
+        gcc=xfail_lane, clang=xfail_lane, bundle=None, special_cli=None, runtime=None
+    )
+    row = next(r for r in result["results"] if r["case_id"] == case_id)
+    assert row["status"] == "UNRESOLVED"
+    assert "no source_smoke oracle" in row["note"]
+
+
+def test_all_xfail_with_source_smoke_is_covered_known_gap_oracle(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The mirror case: an all-XFAIL known_gap case that DOES declare a
+    source_smoke oracle is legitimately COVERED via known-gap-oracle
+    provenance (this is case111's actual shape)."""
+    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    case_id = "caseXX_proven_known_gap"
+    gt = _synthetic_ground_truth(
+        tmp_path,
+        {
+            case_id: {
+                "expected": "API_BREAK",
+                "known_gap": "detector gap, but proven by this case's own source_smoke",
+                "source_smoke": {
+                    "v1": {"code": "int main(){return 0;}", "expect": "success"},
+                    "v2": {"code": "int main(){return bad;}", "expect": "failure"},
+                },
+            }
+        },
+    )
+    monkeypatch.setattr(matrix, "GROUND_TRUTH", gt)
+    xfail_lane = {
+        "results": [
+            {
+                "case_id": case_id,
+                "status": "XFAIL",
+                "expected": "API_BREAK",
+                "got": "COMPATIBLE",
+                "message": "known_gap: detector gap, but proven by this case's own source_smoke",
+            }
+        ]
+    }
+    result = matrix.build_matrix(
+        gcc=xfail_lane, clang=xfail_lane, bundle=None, special_cli=None, runtime=None
+    )
+    row = next(r for r in result["results"] if r["case_id"] == case_id)
+    assert row["status"] == "COVERED"
+    assert row["proof_lane"] == "known-gap-xfail"
+    assert row["provenance"] == "known-gap-oracle"
+
+
+def test_build_source_proof_cases_cover_every_l3plus_single_library_case() -> None:
+    """BUILD_SOURCE_PROOF_CASES must include every single-library case whose
+    min_evidence is L3/L4/L5 — the only shape `--artifact-variant
+    build-source` can actually prove (it needs a real compilable v1/v2 pair).
+    g20/l3l4l5/reconcile-owned L3-L5 cases ship committed snapshot fixtures
+    instead and are proven by their own dedicated lanes
+    (test_g20_catalog.py, test_l3l4l5_examples.py, test_diff_reconcile.py),
+    not this variant — see examples/README.md's "Known validation gaps".
+    This guards against a newly-added single-library L3+ case silently
+    missing the build-source smoke."""
+    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    with open(matrix.GROUND_TRUTH) as f:
+        verdicts = json.load(f)["verdicts"]
+    required = {
+        name
+        for name, entry in verdicts.items()
+        if matrix._case_owner(name, entry) == "single-library"
+        and entry.get("min_evidence") in ("L3", "L4", "L5")
+    }
+    missing = required - matrix.BUILD_SOURCE_PROOF_CASES
+    assert not missing, (
+        "single-library L3+ cases missing from BUILD_SOURCE_PROOF_CASES: "
+        f"{missing}"
+    )

@@ -149,6 +149,15 @@ class Case:
     bad_practice: bool
     expected_kinds: list[str]
     body: str  # README content with H1 stripped
+    # Fact-vs-policy and kind-gap provenance (ADR-038-adjacent additions):
+    # surfaced here so this metadata is visible in the generated docs without
+    # hand-editing every case's README (see docs completeness review finding).
+    underlying_fact: str | None = None
+    policy_note: str | None = None
+    detectability: str | None = None
+    known_detector_gap: str | None = None
+    known_kind_gap: str | None = None
+    known_kind_gap_note: str | None = None
 
 
 def _read_case(name: str, meta: dict) -> Case:
@@ -173,6 +182,12 @@ def _read_case(name: str, meta: dict) -> Case:
         bad_practice=bool(meta.get("bad_practice", False)),
         expected_kinds=list(meta.get("expected_kinds", [])),
         body=body,
+        underlying_fact=meta.get("underlying_fact"),
+        policy_note=meta.get("policy_note"),
+        detectability=meta.get("detectability"),
+        known_detector_gap=meta.get("known_detector_gap"),
+        known_kind_gap=meta.get("known_kind_gap"),
+        known_kind_gap_note=meta.get("known_kind_gap_note"),
     )
 
 
@@ -224,7 +239,7 @@ def _meta_table(case: Case) -> str:
     kinds = (
         ", ".join(f"`{k}`" for k in case.expected_kinds) if case.expected_kinds else "—"
     )
-    return (
+    rows = (
         "| Field | Value |\n"
         "|-------|-------|\n"
         f"| **Verdict** | {vinfo['icon']} **{vinfo['label']}** |\n"
@@ -234,6 +249,22 @@ def _meta_table(case: Case) -> str:
         f"| **Detected `ChangeKind`s** | {kinds} |\n"
         f"| **Source files** | `examples/{case.name}/` |\n"
     )
+    # Fact vs. policy: only present when ground_truth.json's `expected` is a
+    # policy escalation of a weaker underlying compatibility fact (case30,
+    # case95, case109-style) — see policy_note in ground_truth.json.
+    if case.underlying_fact and case.underlying_fact != case.verdict:
+        rows += f"| **Underlying fact** | {case.underlying_fact} (policy-escalated to {case.verdict}) |\n"
+    # Detectability: only present for a case where no L0-L5 evidence tier
+    # currently reaches the canonical verdict (case111-style known gap).
+    if case.detectability == "none":
+        rows += "| **Detectability** | None — no evidence tier currently proves this verdict (known detector gap) |\n"
+    if case.known_detector_gap:
+        rows += f"| **Known detector gap** | `{case.known_detector_gap}` |\n"
+    # Kind gap: the verdict/severity is correct, but the specific calibrated
+    # ChangeKind above is not what the tool currently emits (case06-style).
+    if case.known_kind_gap:
+        rows += f"| **Known kind gap** | `{case.known_kind_gap}` — verdict is correct; see note below |\n"
+    return rows
 
 
 def _source_links(case: Case) -> str:
@@ -247,6 +278,20 @@ def _source_links(case: Case) -> str:
     return "## Source files\n\n" + "\n".join(lines) + "\n"
 
 
+def _provenance_notes(case: Case) -> str:
+    """Render policy_note/known_kind_gap_note prose when ground_truth.json sets
+    them, so the fact-vs-policy or kind-gap distinction is visible in the
+    generated docs rather than only in the raw JSON."""
+    parts = []
+    if case.policy_note:
+        parts.append(f"**Policy note:** {case.policy_note}\n")
+    if case.known_kind_gap_note:
+        parts.append(f"**Known kind gap:** {case.known_kind_gap_note}\n")
+    if not parts:
+        return ""
+    return "## Ground-truth provenance\n\n" + "\n".join(parts) + "\n"
+
+
 def _render_case_page(case: Case) -> str:
     body = case.body.replace("__CASE__", case.name)
     parts = [
@@ -256,6 +301,7 @@ def _render_case_page(case: Case) -> str:
         "\n",
         body.rstrip() + "\n\n",
         "---\n\n",
+        _provenance_notes(case),
         _source_links(case),
         "\n",
         f"_See also: [Examples overview](index.md) · "

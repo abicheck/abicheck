@@ -126,6 +126,7 @@
       "kind": "struct",
       "name": "detail::WidgetImpl",
       "origin": "private_header",
+      "qualified_name": null,
       "size_bits": null,
       "source_header": null,
       "source_location": null,

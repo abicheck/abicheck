@@ -497,8 +497,20 @@ class _DwarfSnapshotBuilder:
         # Visibility: must be in ELF exported symbols.
         # BUT: deleted functions won't have symbols in the new binary, so bypass
         # the export check — we need them in the snapshot for cross-reference.
+        # A function that is present in the binary (has a real DWARF
+        # definition, already established above — declarations without a
+        # definition returned earlier) with external linkage (DW_AT_external,
+        # i.e. not a C `static`) but absent from the dynamic export set has had
+        # its ELF visibility hidden — recorded as Visibility.HIDDEN rather than
+        # dropped, so it isn't indistinguishable from an outright removal (see
+        # case06_visibility). A function with NO external linkage (a genuine
+        # `static`) was never part of the ABI and is correctly dropped.
+        visibility = Visibility.PUBLIC
         if not is_deleted and not self._is_exported(mangled, name):
-            return
+            if _attr_bool(die, "DW_AT_external"):
+                visibility = Visibility.HIDDEN
+            else:
+                return
 
         # Dedup
         if mangled in self._seen_func_mangles:
@@ -506,7 +518,10 @@ class _DwarfSnapshotBuilder:
         self._seen_func_mangles.add(mangled)
 
         self.functions.append(
-            self._build_function(die, CU, scope, name, mangled, qualified_name, is_deleted)
+            self._build_function(
+                die, CU, scope, name, mangled, qualified_name, is_deleted,
+                visibility=visibility,
+            )
         )
 
     def _build_function(
@@ -518,6 +533,7 @@ class _DwarfSnapshotBuilder:
         mangled: str,
         qualified_name: str,
         is_deleted: bool,
+        visibility: Visibility = Visibility.PUBLIC,
     ) -> Function:
         """Construct a :class:`Function` from a (already surface-admitted)
         ``DW_TAG_subprogram`` DIE.
@@ -575,7 +591,7 @@ class _DwarfSnapshotBuilder:
             mangled=mangled,
             return_type=ret_type,
             params=params,
-            visibility=Visibility.PUBLIC,
+            visibility=visibility,
             is_virtual=is_virtual,
             is_extern_c=is_extern_c,
             vtable_index=vtable_index,
@@ -1220,6 +1236,14 @@ class _DwarfSnapshotBuilder:
             if inner_info is None:
                 return (qualifier, 0)
             return (f"{qualifier} {inner_info[0]}", inner_info[1])
+
+        if tag == "DW_TAG_atomic_type":
+            # Spelled "_Atomic" (not the generic tag.split() lowercase form) so
+            # it matches the C11 keyword diff_atomic.py's _has_atomic() looks for.
+            inner_info = self._resolve_inner_info(die, CU, depth)
+            if inner_info is None:
+                return ("_Atomic", 0)
+            return (f"_Atomic {inner_info[0]}", inner_info[1])
 
         if tag == "DW_TAG_typedef":
             name = _attr_str(die, "DW_AT_name")

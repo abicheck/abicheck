@@ -36,8 +36,19 @@ def test_every_case_has_min_evidence() -> None:
 @pytest.mark.parametrize("case", sorted(_VERDICTS))
 def test_min_evidence_in_vocabulary(case: str) -> None:
     tier = _VERDICTS[case]["min_evidence"]
-    assert tier in evidence_tiers.TIER_ORDER, (
-        f"{case}: min_evidence {tier!r} not in {evidence_tiers.TIER_ORDER}"
+    allowed = {*evidence_tiers.TIER_ORDER, evidence_tiers.UNDETECTABLE}
+    assert tier in allowed, f"{case}: min_evidence {tier!r} not in {allowed}"
+
+
+@pytest.mark.parametrize("case", sorted(_VERDICTS))
+def test_undetectable_min_evidence_matches_detectability_field(case: str) -> None:
+    """``min_evidence: "none"`` and ``detectability: "none"`` must agree exactly."""
+    info = _VERDICTS[case]
+    is_undetectable_tier = info["min_evidence"] == evidence_tiers.UNDETECTABLE
+    is_marked_undetectable = info.get("detectability") == "none"
+    assert is_undetectable_tier == is_marked_undetectable, (
+        f"{case}: min_evidence={info['min_evidence']!r} but "
+        f"detectability={info.get('detectability')!r} — they must agree"
     )
 
 

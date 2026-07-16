@@ -242,11 +242,11 @@ def _artifact_errors(
         errors.append(f"{label}: unknown statuses: {', '.join(unknown_statuses)}")
 
     # ``summary`` in the gcc/clang artifacts mixes status counts (PASS/FAIL/...)
-    # with diagnostic counters (KINDS_MISMATCH, CATEGORY_COLLAPSED) that
-    # validate_examples.py adds alongside them (see _summary_counts). Those
-    # counters are not row statuses, so they must be validated against their
-    # own per-row signals, not folded into the status-count recomputation —
-    # otherwise every artifact with a diagnostic counter fails this check.
+    # with diagnostic counters (KINDS_MISMATCH) that validate_examples.py adds
+    # alongside them (see _summary_counts). Those counters are not row
+    # statuses, so they must be validated against their own per-row signals,
+    # not folded into the status-count recomputation — otherwise every
+    # artifact with a diagnostic counter fails this check.
     actual_summary = dict(
         Counter(
             str(row.get("status"))
@@ -276,13 +276,6 @@ def _artifact_errors(
         )
         if kinds_mismatch:
             actual_diagnostics["KINDS_MISMATCH"] = kinds_mismatch
-        category_collapsed = sum(
-            1
-            for row in results
-            if isinstance(row, dict) and row.get("category_strict") == "collapsed"
-        )
-        if category_collapsed:
-            actual_diagnostics["CATEGORY_COLLAPSED"] = category_collapsed
         if declared_diagnostics != actual_diagnostics:
             errors.append(
                 f"{label}: diagnostic summary={declared_diagnostics!r}, "
@@ -407,6 +400,7 @@ def _lane_record(label: str, result: dict[str, Any] | None) -> dict[str, Any]:
 
 def _single_library_status(
     name: str,
+    entry: dict[str, Any],
     lanes: list[dict[str, Any]],
 ) -> tuple[str, str, str]:
     failed = [
@@ -433,6 +427,25 @@ def _single_library_status(
         # UNRESOLVED. Distinguish it from an ordinary PASS via the
         # "known-gap-xfail" proof_lane so coverage-by-provenance stays honest
         # about which cases were proven by a lane vs. by a reviewed gap.
+        #
+        # That promotion is only trustworthy when an independent oracle
+        # actually backs the known_gap: validate_examples.py's run_case()
+        # only lets a lane reach XFAIL via a declared source_smoke if that
+        # smoke *passed* (a FAIL/SKIP smoke short-circuits to that status
+        # instead), so "a lane is XFAIL AND ground_truth.json declares
+        # source_smoke for this case" together already imply a passed oracle
+        # for that lane. Require the declaration explicitly here rather than
+        # trusting known_gap text alone, so a future case can't earn
+        # known-gap-oracle coverage from an unreviewed excuse with no proof
+        # behind it.
+        if not entry.get("source_smoke"):
+            return (
+                "UNRESOLVED",
+                "none",
+                f"{name}: every lane reports XFAIL via known_gap, but no "
+                "source_smoke oracle is declared in ground_truth.json to "
+                f"prove the canonical verdict; {reasons}",
+            )
         return "COVERED", "known-gap-xfail", reasons
     return "UNRESOLVED", "none", f"{name}: no PASS lane"
 
@@ -478,7 +491,7 @@ def build_matrix(
         runtime_lane = runtime_results.get(name)
 
         if owner == "single-library":
-            status, proof_lane, note = _single_library_status(name, lanes)
+            status, proof_lane, note = _single_library_status(name, entry, lanes)
             if proof_lane == "build-source":
                 provenance = "abicheck-cli-workflow"
             elif proof_lane == "known-gap-xfail":
@@ -560,6 +573,12 @@ def build_matrix(
     kind_mismatch_cases = sorted(
         row["case_id"] for row in rows if row.get("kinds_strict") == "mismatch"
     )
+    # Separate from kind_mismatch_cases: these have already been triaged (root
+    # cause identified and recorded in ground_truth.json's known_kind_gap/
+    # known_kind_gap_note) rather than being an unexplained backlog item.
+    documented_kind_gap_cases = sorted(
+        row["case_id"] for row in rows if row.get("kinds_strict") == "documented-mismatch"
+    )
     return {
         "schema_version": SCHEMA_VERSION,
         "runner": "validation/scripts/collect_full_example_matrix.py",
@@ -580,6 +599,10 @@ def build_matrix(
         # the verdict without producing the calibrated ChangeKind. Triage
         # target for known_detector_gap entries.
         "kind_mismatch_cases": kind_mismatch_cases,
+        # Already root-caused (ground_truth.json's known_kind_gap/
+        # known_kind_gap_note) — a triaged, tracked detector gap, not an
+        # untriaged item on the kind_mismatch_cases backlog above.
+        "documented_kind_gap_cases": documented_kind_gap_cases,
         "results": rows,
     }
 

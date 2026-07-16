@@ -425,6 +425,27 @@ class TestVarConstChanged:
         r = compare(_snap(variables=[v_v1]), _snap(variables=[v_v2]))
         assert ChangeKind.VAR_LOST_CONST in _kinds(r)
 
+    def test_pointee_const_is_type_changed_not_var_became_const(self):
+        """`int *p` -> `const int *p`: the POINTEE became const, not the
+        pointer variable itself (the pointer is still reassignable) — this
+        must report VAR_TYPE_CHANGED, not VAR_BECAME_CONST (Codex review:
+        a naive strip-every-"const" comparison would misclassify this as a
+        pure top-level const flip)."""
+        v_v1 = _pub_var("ptr", "_Z3ptr", "int *", is_const=False)
+        v_v2 = _pub_var("ptr", "_Z3ptr", "const int *", is_const=True)
+        r = compare(_snap(variables=[v_v1]), _snap(variables=[v_v2]))
+        assert ChangeKind.VAR_TYPE_CHANGED in _kinds(r)
+        assert ChangeKind.VAR_BECAME_CONST not in _kinds(r)
+
+    def test_pointer_itself_const_is_var_became_const(self):
+        """`int *p` -> `int * const p`: the pointer itself became const
+        (top-level qualifier) — this is the genuine VAR_BECAME_CONST case."""
+        v_v1 = _pub_var("ptr", "_Z3ptr", "int *", is_const=False)
+        v_v2 = _pub_var("ptr", "_Z3ptr", "int * const", is_const=True)
+        r = compare(_snap(variables=[v_v1]), _snap(variables=[v_v2]))
+        assert ChangeKind.VAR_BECAME_CONST in _kinds(r)
+        assert ChangeKind.VAR_TYPE_CHANGED not in _kinds(r)
+
 
 # ── constant_changed / constant_added / constant_removed ─────────────────
 

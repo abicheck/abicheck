@@ -9,6 +9,8 @@
 | **Flags** | API break, Bad practice |
 | **Detected `ChangeKind`s** | `func_added` |
 | **Source files** | `examples/case111_enumerable_thread_specific_lambda_ambiguity/` |
+| **Detectability** | None — no evidence tier currently proves this verdict (known detector gap) |
+| **Known detector gap** | `constructor_overload_ambiguity` |
 
 **Category:** Subtle source break / regression suite | **Verdict:** 🟠 API_BREAK (known detector gap — abicheck currently reports COMPATIBLE at every evidence tier; see below)
 

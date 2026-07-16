@@ -736,8 +736,15 @@ __attribute__((visibility("hidden"))) int hidden_func(int x) { return x * 2; }
         )
         return so_path
 
-    def test_hidden_symbols_excluded(self, _visibility_lib: Path) -> None:
-        """Hidden-visibility functions should not appear in DWARF snapshot."""
+    def test_hidden_symbols_marked_not_excluded(self, _visibility_lib: Path) -> None:
+        """Hidden-visibility functions are retained (Visibility.HIDDEN), not
+        dropped: a real function that transitions default->hidden between
+        versions must stay distinguishable from an outright removal (see
+        case06_visibility) — the header/castxml backend already retains
+        hidden functions this way, so the DWARF-only backend follows suit
+        for consistency (rather than silently excluding them, which made a
+        hidden-visibility function indistinguishable from a removed one in a
+        version-to-version diff)."""
         from abicheck.dwarf_unified import parse_dwarf
         from abicheck.elf_metadata import parse_elf_metadata
 
@@ -748,9 +755,11 @@ __attribute__((visibility("hidden"))) int hidden_func(int x) { return x * 2; }
             _visibility_lib, elf_meta, dwarf_meta, dwarf_adv,
         )
 
-        func_names = {f.name for f in snap.functions}
-        assert "public_func" in func_names
-        assert "hidden_func" not in func_names
+        funcs_by_name = {f.name: f for f in snap.functions}
+        assert "public_func" in funcs_by_name
+        assert funcs_by_name["public_func"].visibility == Visibility.PUBLIC
+        assert "hidden_func" in funcs_by_name
+        assert funcs_by_name["hidden_func"].visibility == Visibility.HIDDEN
 
 
 # ── Dumper _dump_macho dwarf_only warning ───────────────────────────────────

@@ -9,6 +9,7 @@
 | **Flags** | API break |
 | **Detected `ChangeKind`s** | `typedef_removed`, `type_removed` |
 | **Source files** | `examples/case109_flow_graph_policy_renames/` |
+| **Underlying fact** | API_BREAK (policy-escalated to BREAKING) |
 
 **Category:** Source API / regression suite | **Verdict:** 🔴 BREAKING (policy escalated source break)
 
@@ -77,6 +78,10 @@ additions.
 - oneTBB 2021 migration guide: `flow::graph` node policy updates.
 
 ---
+
+## Ground-truth provenance
+
+**Policy note:** The .so files are byte-identical between v1 and v2 (deliberately — no template instantiations in v1.cpp/v2.cpp), so an already-built consumer binary keeps linking and running unmodified. The underlying compatibility fact is API_BREAK (recompilation-only failure: the renamed policy tags and dropped instantiation-anchor typedef stop resolving against v2 headers). `expected` stays BREAKING because `typedef_removed`/`type_removed` are generic detectors that conservatively classify every such removal as BREAKING by default policy, without distinguishing 'this symbol never existed in the binary to begin with' from an actual layout/link break.
 
 ## Source files
 

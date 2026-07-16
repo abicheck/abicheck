@@ -303,6 +303,15 @@ class RecordType:
     # an empty-base-optimization is lost, or a member is inserted ahead of it)
     # without the name list reordering. Empty when unknown.
     base_offsets: dict[str, int] = field(default_factory=dict)
+    # Namespace/enclosing-class-qualified spelling (e.g. "mylib::detail::Impl"),
+    # set only when it differs from the bare ``name`` above. ``name`` itself
+    # stays bare (matching the DWARF backend, which has no cheaper way to
+    # qualify a struct name) so type-map lookups and DWARF/header merges keep
+    # matching by the same key across both backends; this field exists solely
+    # for namespace-aware checks (internal-leak detection, SYCL-queue param
+    # matching) that need to see the real namespace path. None when the type
+    # is at global scope or the dumper couldn't determine it (e.g. DWARF-only).
+    qualified_name: str | None = None
 
 
 @dataclass

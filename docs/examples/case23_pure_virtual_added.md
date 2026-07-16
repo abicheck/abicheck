@@ -7,7 +7,7 @@
 | **Category** | Breaking |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
-| **Detected `ChangeKind`s** | `func_pure_virtual_added` |
+| **Detected `ChangeKind`s** | `func_virtual_became_pure` |
 | **Source files** | `examples/case23_pure_virtual_added/` |
 
 **Verdict:** 🔴 BREAKING
@@ -74,6 +74,22 @@ struct MyPlugin : Processor {
 +    virtual void process() = 0;
  };
 ```
+
+`new/lib.cpp` also keeps an out-of-line `void Processor::process() { ... }` body
+alongside the pure declarator. A pure virtual function may still have a
+definition — it's reachable only via an explicit qualified call
+(`Processor::process()`), never through the vtable of the abstract class
+itself, so this changes no runtime behavior. It exists so v2's binary/DWARF
+still carries a `Processor::process()` symbol to compare against v1's,
+letting abicheck's virtual-to-pure-virtual detector see this as one function
+changing state (`FUNC_VIRTUAL_BECAME_PURE`) instead of a plain removal.
+
+abicheck's `diff_types.py` distinguishes two related kinds sharing the same
+detection code: `FUNC_VIRTUAL_BECAME_PURE` (this case — an already-virtual
+concrete method becomes pure) vs. `FUNC_PURE_VIRTUAL_ADDED` (a non-virtual
+function becomes pure virtual, a rarer shape). `ground_truth.json`'s
+`expected_kinds` was previously the latter, which is not what this fixture
+demonstrates.
 
 ## Real Failure Demo
 

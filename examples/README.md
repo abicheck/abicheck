@@ -38,7 +38,7 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 - 🟡 **BAD PRACTICE** — library works today but mismanages the ABI contract
 - ✅ **BASELINE** — no change; expected passing state
 
-Some policy-escalated source/contract breaks (notably case30, case35) may keep identical runtime output for prebuilt binaries. For those, the demo shows: (1) binary still runs, and (2) recompilation against new headers fails or changes allowed behavior.
+Some policy-escalated source/contract breaks (notably case30, case95, case109 — each an underlying API_BREAK fact escalated to BREAKING by default policy; see each case's `policy_note` in `ground_truth.json`) may keep identical runtime output for prebuilt binaries. For those, the demo shows: (1) binary still runs, and (2) recompilation against new headers fails or changes allowed behavior.
 
 ## Runtime Demos vs. abicheck Analysis
 
@@ -89,69 +89,78 @@ the way it previously did (stale at a 169-case catalog for several releases).
 
 ### Known validation gaps
 
-- **`expected_kinds`/`expected_absent_kinds` are checked but not yet blocking.**
-  `tests/validate_examples.py` parses the real compare output's change kinds and checks them
-  against `expected_kinds`/`expected_absent_kinds`, surfaced per-case as `kinds_strict` and
-  summarized as a `KINDS_MISMATCH` count — previously only the final verdict string was asserted,
-  so a case could PASS with the right severity for the wrong detector reason. A first full-catalog
-  run under this check found 22 (gcc) / 24 (clang) such cases; triaging each individually (see
-  below) closed 8/9 of them, leaving **14 (gcc) / 15 (clang)** — set `ABICHECK_STRICT_KINDS=1`
-  (see `tests/check_validate_results.py`) to make the remainder blocking once fixed case by case.
-  Case-level membership is toolchain-sensitive even within "gcc"/"clang" (e.g. a gcc 13 vs. gcc 14
-  install), so treat the counts as the latest CI-authoritative run, not a fixed set. The full
-  example matrix (`validation/scripts/collect_full_example_matrix.py`) surfaces each covered case's
-  winning-lane `kinds_strict` and rolls up a `kind_mismatch_cases` list at the matrix level, so
-  this triage backlog is machine-readable instead of living only in this prose.
-
-  Of the original 22/24, triage sorted every case into one of three buckets:
-  - **4 had a stale `expected_kinds` entry** — the detector already fires correctly, just under a
-    newer/more specific kind than the ground truth recorded (each corroborated by an existing code
-    comment documenting the more-specific kind as intentional). Fixed by updating
-    `ground_truth.json`: `case59_func_became_inline` (`func_removed` →
-    `func_removed_elf_only`+`func_visibility_changed`), `case65_symbol_version_removed`
-    (`symbol_version_defined_removed` → `symbol_version_node_removed`, which wins cross-detector
-    dedup — see `diff_platform.py`), `case77_detail_templated_base_changed`
-    (`internal_type_leaks_via_public_api` → `internal_template_leaks_via_public_api`, the dedicated
-    template-leak detector in `diff_templates.py`), `case94_empty_tag_gained_state`
-    (`type_field_added` → `type_field_added_compatible`, per `diff_types.py`'s
-    `_new_field_change_kind` — a field added to a non-polymorphic struct is intentionally the
-    "compatible" variant; the verdict still stays BREAKING via the co-emitted `type_size_changed`).
-  - **6 already had an accurate `known_gap`/`known_gap_toolchains`/`known_gap_variants`** in
-    `ground_truth.json` — the top-level PASS/XFAIL verdict already accounted for them, but
-    `_kinds_strict_signal()` never consulted that field, so a documented, honest gap *also*
-    surfaced as an undifferentiated mismatch. Fixed by wiring the same known-gap check into
-    `_kinds_strict_signal()` that `_evaluate_verdict()` already used: `case64_calling_convention_changed`
-    (gcc; needs Clang for `DW_AT_calling_convention` on `ms_abi`), `case98_cxx_standard_floor_raised`
-    (both toolchains; needs L3 build context), `case103_toolchain_flag_drift` (clang; needs
-    `-grecord-command-line`), `case105_concept_tightening` and `case122_template_signature_uninstantiated`
-    (both toolchains; need L4 source-ABI replay), `case180_symbol_binding_lost_unique` (clang;
-    clang never emits the GCC-specific `STB_GNU_UNIQUE` extension).
-  - **The remaining 14 (gcc) / 15 (clang) are real detector gaps**, root-caused but not yet fixed:
-    `case23_pure_virtual_added`, `case39_var_const`, `case66_language_linkage_changed`,
-    `case72_covariant_return_changed`, `case79_missing_template_instantiation`,
-    `case82_sycl_overload_set_removed`, `case87_default_template_arg_changed`,
-    `case88_cpo_kind_changed`, `case116_atomic_qualifier_changed`, and (clang only)
-    `case115_bit_int_width_changed`. Six of these — `case74/75/76/80_detail_*` (internal-namespace
-    leak via a `detail::`-qualified type) and `case82_sycl_overload_set_removed` (a `sycl::queue`
-    parameter-type pattern match) — trace to **one systemic root cause**: `dumper_castxml.py`'s
-    `_type_name()`/`_build_record_type()` resolve `Struct`/`Class`/`Union` type references to their
-    bare, unqualified name (discarding namespace context), breaking any detector that pattern-matches
-    on a qualified name. `case79_missing_template_instantiation`/`case87_default_template_arg_changed`
-    independently trace to `Function.name` never carrying template arguments (only `Function.mangled`
-    does). `case06_visibility` is a related but distinct **harness** gap, not a detector gap: its
-    README's documented repro passes `-H bad.c`/`-H good.c` directly (castxml can parse a `.c` file
-    as a header), but `validate_examples.py`'s `_hdr()` only recognizes a dedicated `.h`/`.hpp` file,
-    so the automated run compares without header evidence and can't distinguish
-    `func_visibility_changed` from a plain removal. Left unfixed here — broadening `_hdr()` to also
-    accept `.c`/`.cpp` would change header-scoping behavior for every case using that helper, too
-    wide a blast radius to land alongside an unrelated documentation pass.
-- **`API_BREAK`/`COMPATIBLE` normalization can mask a real regression.** `_normalize_verdict`
-  treats `API_BREAK` and `COMPATIBLE` as equivalent for the default PASS/FAIL gate (a case's
-  `category_strict` field flags — but does not block on — the collapse); CI does not currently
-  set `ABICHECK_STRICT_CATEGORY=1` to make a collapse blocking.
-- **Build/source coverage is a 10-case smoke, not full L3–L5 coverage.** The `--artifact-variant
-  build-source` lane exercises a representative subset (the cases in
-  `BUILD_SOURCE_PROOF_CASES`), not every L3/L4/L5 case in the catalog.
+- **`expected_kinds`/`expected_absent_kinds` are checked but not yet blocking, and every
+  case that ever mismatched has now been individually triaged.** `tests/validate_examples.py`
+  parses the real compare output's change kinds and checks them against
+  `expected_kinds`/`expected_absent_kinds`, surfaced per-case as `kinds_strict` — previously only
+  the final verdict string was asserted, so a case could PASS with the right severity for the
+  wrong detector reason. A prior full-catalog run found 19 such cases; each was independently
+  re-derived (per-case: is the expected kind semantically correct, is the fixture actually
+  constructed to trigger it, is a generic detected kind sufficient, is this a detector bug, a
+  fixture bug, or a metadata bug) rather than blanket-implementing 19 detectors:
+  - **6 were metadata bugs** — `expected_kinds` named the wrong (or an overly specific) kind for
+    what the fixture actually demonstrates; corrected in `ground_truth.json`:
+    `case65_symbol_version_removed` (`symbol_version_defined_removed` → `symbol_version_node_removed`,
+    the two are deliberately deduplicated to the more specific kind), `case77_detail_templated_base_changed`
+    (→ `internal_template_leaks_via_public_api`, the templated sibling of the non-template kind),
+    `case80_pimpl_shared_to_unique` (→ `typedef_base_changed` + `struct_size_changed`; its README's
+    claim that `type_field_type_changed` fires on `impl_` was factually wrong), `case94_empty_tag_gained_state`
+    (→ `type_field_added_compatible`, the correct classification for a non-polymorphic field append),
+    `case126_sycl_device_impl_ptr` (→ `struct_size_changed`, the DWARF-side kind that actually proves
+    the break; the AST-side `type_size_changed` correctly declines given null layout evidence), and
+    `case23_pure_virtual_added` (→ `func_virtual_became_pure`, not `func_pure_virtual_added` — the
+    fixture's method was already virtual, not newly added).
+  - **1 was a fixture bug**, fixed in source: `case23_pure_virtual_added`'s v2 library defined no
+    out-of-line `Processor::process()` body at all, so v2's binary had no symbol to pair against
+    v1's for the pure-virtual-transition comparison; added a body (legal for a pure virtual function,
+    reachable only via an explicit qualified call, so it changes no runtime behavior) so the two
+    versions' `Processor::process()` can be compared.
+  - **13 are genuine, root-caused detector gaps**, documented in `ground_truth.json` via a
+    `known_kind_gap` (the specific missing/wrong kind) + `known_kind_gap_note` (the grounded root
+    cause, cited to file:line) on each case, and surfaced by `validate_examples.py`'s `kinds_strict`
+    as `documented-mismatch` (a triaged, tracked gap) rather than a bare `mismatch` (an unexplained
+    one): `case06_visibility`, `case39_var_const`, `case66_language_linkage_changed`,
+    `case72_covariant_return_changed`, `case74_detail_base_class_changed`,
+    `case75_detail_embedded_by_value`, `case76_detail_pimpl_vtable_changed`,
+    `case79_missing_template_instantiation`, `case82_sycl_overload_set_removed`,
+    `case87_default_template_arg_changed`, `case88_cpo_kind_changed`,
+    `case116_atomic_qualifier_changed`, `case141_versioned_symbol_scheme`. Several share one root
+    cause: castxml never namespace-qualifies `RecordType.name` (case74/75/76) nor parameter types
+    (case82), and no dumper backend ever produces a demangled, template-arg-embedded `Function.name`
+    (case79, case87) — see each case's `known_kind_gap_note` for specifics.
+  - `case59_func_became_inline` and (clang-only) `case115_bit_int_width_changed` no longer/don't
+    reproduce as kind mismatches in this pass (the former is fixed upstream; the latter is a
+    local castxml/`_BitInt` parsing limitation in this environment, not evaluated) — case membership
+    here is toolchain-sensitive, so treat the 13 above as the latest triaged set, not a fixed list.
+  - Setting `ABICHECK_STRICT_KINDS=1` (see `tests/check_validate_results.py`) makes any *new*,
+    untriaged `mismatch` blocking while leaving the 13 documented `documented-mismatch` gaps
+    non-blocking — implementing fixes for those 13 remains future work, not something this pass
+    attempted (per the guidance above: triage first, then decide case by case whether a fix is
+    warranted). The full example matrix (`validation/scripts/collect_full_example_matrix.py`)
+    surfaces both `kind_mismatch_cases` (untriaged) and `documented_kind_gap_cases` (triaged)
+    separately at the matrix level.
+- **Verdicts are matched exactly — there is no `API_BREAK`/`COMPATIBLE` normalization.**
+  `tests/validate_examples.py` compares the actual verdict to `expected` verbatim; an
+  earlier `_normalize_verdict` helper that treated the two as equivalent has been removed.
+  The one declared escape hatch is a case-level `known_gap`: it only turns a verdict
+  mismatch into `XFAIL` (not a silent PASS) when `ground_truth.json` explicitly records
+  the gap, and the full example matrix additionally requires a case's own `source_smoke`
+  oracle to have proven the canonical verdict before crediting it as `COVERED` — see
+  `case111_enumerable_thread_specific_lambda_ambiguity`, the catalog's one case covered
+  this way instead of by a direct detector/CLI match (`docs/development/examples-validation-runbook.md`).
+- **Build/source coverage is a 10-case lane, not every L3/L4/L5 catalog entry —**
+  **but it is every entry that lane *can* prove.** `--artifact-variant build-source`
+  needs a real compilable `v1`/`v2` pair; of the catalog's L3/L4/L5 cases, only 7
+  are `single-library`-owned (`case98`, `case105`, `case122`, `case130`-`case133`)
+  and all 7 are in `BUILD_SOURCE_PROOF_CASES` (plus `case01`/`case04`/`case129` as
+  L0/L1 regression smoke for the variant itself). The other 14 L3-L5 cases are
+  `g20`/`l3l4l5`/`reconcile`-owned: they ship committed snapshot fixtures instead
+  of compilable sources by design (some, like `case160`-`162`'s L5 source-graph
+  deltas, can't be derived deterministically from a real build) and are proven by
+  their own dedicated fixture tests (`test_g20_catalog.py`, `test_l3l4l5_examples.py`,
+  `test_diff_reconcile.py`) — see the full example matrix's `SPECIAL_PROOFS`.
+  `test_review_comment_regressions.py::test_build_source_proof_cases_cover_every_l3plus_single_library_case`
+  gates this so a newly-added `single-library` L3+ case can't silently miss the smoke.
 - **`case06_visibility`'s runtime baseline is intentionally left unwhitelisted.**
   Its `app.c` doesn't fit the runtime-smoke harness's baseline-then-swap model
   — it `dlopen`s both `./libv1.so` and `./libv2.so` by name in a single run,
