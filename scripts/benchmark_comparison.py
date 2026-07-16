@@ -660,14 +660,10 @@ def run_abicheck_full(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | 
             if library is None or pack is None:
                 return ToolResult(verdict="ERROR", raw_output=error,
                                   elapsed_ms=(time.monotonic() - started) * 1000)
+            base = root / f"{version}.binary_headers.json"
             final = root / f"{version}.merged.json"
-            # The standalone `collect`/`merge` commands were removed in the
-            # ADR-043 CLI reset (PR #566); `dump --sources <pack> --depth
-            # source` now embeds the plugin's pack inline in one step instead
-            # of a separate dump-then-merge pair.
             dump = [_PYTHON, "-m", "abicheck.cli", "dump", str(library),
-                    "-o", str(final), "--version", version,
-                    "--sources", str(pack), "--depth", "source"]
+                    "-o", str(base), "--version", version]
             if header and header.exists():
                 # -H alone only feeds castxml which headers to parse; it does
                 # NOT mark them public for provenance classification (that's
@@ -679,11 +675,38 @@ def run_abicheck_full(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | 
                 dump += ["-H", str(header), "--public-header", str(header)]
             dr = subprocess.run(dump, capture_output=True, text=True,
                                 timeout=timeout, env=_ABICHECK_ENV)
-            if dr.returncode != 0 or not final.exists():
+            if dr.returncode != 0 or not base.exists():
                 return ToolResult(verdict="ERROR", raw_output=dr.stderr or dr.stdout,
                                   elapsed_ms=(time.monotonic() - started) * 1000)
+            # The standalone `merge` CLI command was removed in the ADR-043 CLI
+            # reset (PR #566). Its replacement, `dump --sources <pack>`, loads
+            # a pre-captured Flow-2 pack but does NOT relink its source
+            # surface against the binary's real exports — that relink
+            # (`_relink_combined_against_exports`) only runs inside
+            # `embed_inputs_pack`, which has no CLI entry point post-reset
+            # (verified empirically: `--sources <pack>` leaves
+            # `source_abi.roots["exported_symbols"] == []` where the old
+            # `merge` command populated it, per Codex review on PR #581).
+            # Call `embed_inputs_pack` directly to preserve that relink
+            # instead of silently under-exercising L4/L5 source-evidence
+            # checks.
+            mr = subprocess.run(
+                [_PYTHON, "-c",
+                 "import sys\n"
+                 "from pathlib import Path\n"
+                 "from abicheck.serialization import load_snapshot, save_snapshot\n"
+                 "from abicheck.cli_buildsource_merge import embed_inputs_pack\n"
+                 "snap = load_snapshot(Path(sys.argv[1]))\n"
+                 "embed_inputs_pack(snap, Path(sys.argv[2]), Path(sys.argv[3]))\n"
+                 "save_snapshot(snap, Path(sys.argv[3]))\n",
+                 str(base), str(pack), str(final)],
+                capture_output=True, text=True, timeout=timeout, env=_ABICHECK_ENV,
+            )
+            if mr.returncode != 0 or not final.exists():
+                return ToolResult(verdict="ERROR", raw_output=mr.stderr or mr.stdout,
+                                  elapsed_ms=(time.monotonic() - started) * 1000)
             merged.append(final)
-            logs.extend([dr.stdout, dr.stderr])
+            logs.extend([dr.stdout, dr.stderr, mr.stdout, mr.stderr])
         compare = subprocess.run(
             [_PYTHON, "-m", "abicheck.cli", "compare", str(merged[0]), str(merged[1]),
              "--format", "json"], capture_output=True, text=True,
