@@ -235,11 +235,30 @@ inputs:
       performing any analysis or writing output (always exits 0). Maps to
       --dry-run; supported by every mode (compare, dump, scan, deps-tree,
       deps-compare). For scan, this also reports the projected per-layer
-      cost (formerly the separate --estimate flag, folded into the general
-      --dry-run report). To force a scan-mode single-build hygiene lint
-      instead of a baseline compare, simply omit against/abi-baseline for
-      that step — scan already runs audit-only whenever no against is
-      given (the old separate audit input was a redundant alias for this).
+      cost (the same preview the deprecated estimate input below used to
+      provide). To force a scan-mode single-build hygiene lint instead of a
+      baseline compare, simply omit against/abi-baseline for that step —
+      scan already runs audit-only whenever no against is given (the
+      deprecated audit input below is a functional alias for this).
+    required: false
+    default: 'false'
+  estimate:
+    description: >
+      Deprecated alias for dry-run (scan mode only, historical name).
+      Setting this to true is equivalent to dry-run: 'true'. Prefer dry-run
+      directly, which now applies to every mode, not just scan. Kept as a
+      functional (not just accepted-and-ignored) alias for backward
+      compatibility with existing workflows.
+    required: false
+    default: 'false'
+  audit:
+    description: >
+      Deprecated. scan mode only. Forces a one-build audit-only run (omits
+      --against) even when against/abi-baseline is configured elsewhere in
+      the workflow. Prefer simply omitting against/abi-baseline for the
+      step instead — scan already runs audit-only whenever no against is
+      given. Kept as a functional (not just accepted-and-ignored) alias for
+      backward compatibility with existing workflows.
     required: false
     default: 'false'
   crosscheck:
@@ -494,6 +513,8 @@ runs:
         INPUT_CHANGED_PATH: ${{ inputs.changed-path }}
         INPUT_BUDGET: ${{ inputs.budget }}
         INPUT_DRY_RUN: ${{ inputs.dry-run }}
+        INPUT_ESTIMATE: ${{ inputs.estimate }}
+        INPUT_AUDIT: ${{ inputs.audit }}
         INPUT_CROSSCHECK: ${{ inputs.crosscheck }}
         INPUT_RISK_RULES: ${{ inputs.risk-rules }}
         GH_TOKEN: ${{ inputs.github-token }}

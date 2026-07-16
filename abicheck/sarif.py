@@ -493,8 +493,21 @@ def to_sarif(
     # the gate but was never added to `result.changes` -- without rendering
     # these too, a --used-by run that fails solely because of one of these
     # would report a nonzero gate exitCode with zero results to explain it
-    # (Codex review).
-    for change in getattr(result, "scoped_only_changes", ()) or ():
+    # (Codex review). Run them through the same `--show-only` filter as
+    # `result.changes` above -- otherwise a `--show-only additions` run would
+    # still upload a scoped-only breaking result the user explicitly asked
+    # to filter out, unlike the normal `result.changes` path (Codex review
+    # follow-up).
+    scoped_only_changes = list(getattr(result, "scoped_only_changes", ()) or ())
+    if show_only and scoped_only_changes:
+        scoped_only_changes = apply_show_only(
+            scoped_only_changes,
+            show_only,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
+    for change in scoped_only_changes:
         rule_id = change.kind.value
         if rule_id not in rules_seen:
             rules_seen[rule_id] = _rule_for(change.kind)

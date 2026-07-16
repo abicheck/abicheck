@@ -109,6 +109,24 @@ CMD=(abicheck)
 MODE="${INPUT_MODE:-compare}"
 
 # ---------------------------------------------------------------------------
+# Back-compat aliases: `estimate`/`audit` (pre-dry-run/scan-reshape inputs,
+# Codex review). Removing these outright (rather than keeping them as
+# functional aliases, like the existing `allow-build-query` no-op above)
+# would silently break existing workflows that still set them: GitHub
+# Actions drops an input the action.yml no longer declares with only a
+# warning, so `estimate: true` would otherwise silently run a real scan
+# instead of the preview it used to produce, and `audit: true` would
+# silently stop forcing a baseline-less hygiene lint once a
+# baseline/abi-baseline is configured -- a much worse failure mode than a
+# hard error, since nothing signals that the step is no longer doing what
+# the workflow author intended.
+# ---------------------------------------------------------------------------
+if [[ "${INPUT_ESTIMATE:-false}" == "true" ]]; then
+  INPUT_DRY_RUN="true"
+fi
+FORCE_AUDIT_ONLY="${INPUT_AUDIT:-false}"
+
+# ---------------------------------------------------------------------------
 # Baseline auto-fetch: resolve INPUT_ABI_BASELINE → INPUT_OLD_LIBRARY
 # ---------------------------------------------------------------------------
 ABI_BASELINE="${INPUT_ABI_BASELINE:-}"
@@ -402,11 +420,14 @@ elif [[ "$MODE" == "scan" ]]; then
   # scan's config flag is --config (not --build-config, which does not exist on
   # scan and hard-fails with exit 64). dump uses --config for the same input.
   add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
-  # Omitting --against is already a one-build audit-only run (no separate
-  # audit flag needed or offered here); to force an audit-only run for one
-  # step despite an against/abi-baseline configured elsewhere in the
-  # workflow, simply don't set those inputs on this step.
-  add_single_flag "--against" "${INPUT_AGAINST:-}"
+  # Omitting --against is already a one-build audit-only run; the preferred
+  # way to force one for a single step is to simply not set against/
+  # abi-baseline there. The deprecated `audit: true` back-compat alias
+  # (above) achieves the same by skipping --against outright even when
+  # against/abi-baseline resolved to a value elsewhere in the workflow.
+  if [[ "$FORCE_AUDIT_ONLY" != "true" ]]; then
+    add_single_flag "--against" "${INPUT_AGAINST:-}"
+  fi
   add_single_flag "--lang" "${INPUT_LANG:-}"
 
   # Level selection — the modern --depth dial (omit for 'auto'). The deprecated

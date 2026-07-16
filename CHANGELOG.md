@@ -49,6 +49,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   (`L0`-`L5`) with no explanation of what it means — reworded to plain terms
   tied to the public `--depth` ladder (`binary`/`headers`/`build`/`source`).
   Text only; no option, default, or behavior changes.
+- **GitHub Action**: reinstated the `estimate`/`audit` inputs, dropped
+  outright in an earlier `[Unreleased]` change, as deprecated *functional*
+  aliases for `dry-run`/omitting `against` (mirroring the existing
+  `allow-build-query` no-op precedent), instead of removing them (Codex
+  review). Silently dropping an Action input a workflow still sets is worse
+  than a hard CLI error: GitHub Actions accepts an undeclared input with
+  only a warning, so `estimate: true` would otherwise silently run a real
+  scan instead of the preview it used to produce, and `audit: true` would
+  silently stop forcing a baseline-less hygiene lint once a baseline is
+  configured — both fail open rather than loud.
 
 ### Fixed
 
@@ -105,6 +115,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   is resolved separately and was previously invisible to this calculation,
   so a compare run using only such a pack reported `binary`/`headers`
   even though its build/source findings came from real evidence.
+- `compare --format sarif`'s scoped-only changes (e.g. `PE_ORDINAL_RETARGETED`)
+  now respect `--show-only`, matching `result.changes`'s own filtering — a
+  `--used-by --show-only ...` run no longer uploads a scoped-only finding
+  the filter was supposed to exclude (JUnit already applied `--show-only`
+  to these consistently; only SARIF had the gap).
 
 ### Added
 

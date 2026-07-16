@@ -146,6 +146,8 @@ scan degrades gracefully and L0–L2 stay authoritative.
 | `format` | `markdown` (`text` for scan) | Output format: `markdown`, `json`, `sarif`, `html`. `sarif`/`html` are only available in `compare` mode when `old-library`/`new-library` are a single pair — a directory/package comparison rejects them with a clear error (choose `markdown` or `json` instead). `deps-tree`/`deps-compare` support only `markdown`/`json` and fall back to `markdown`; `scan` supports only `text`/`json` and falls back to `text`. |
 | `output-file` | — | Path to write report (auto-set for SARIF) |
 | `dry-run` | `false` | Resolve inputs/config and print what the run would do, without analyzing anything or writing output (always exits 0). Maps to `--dry-run`; supported by every mode. In scan mode this also prints the projected per-layer cost. |
+| `estimate` | `false` | **Deprecated.** scan mode only. Functional alias for `dry-run: 'true'` — prefer `dry-run` directly, which applies to every mode. |
+| `audit` | `false` | **Deprecated.** scan mode only. Forces a single-build hygiene lint by skipping `--against` even when `against`/`abi-baseline` is configured elsewhere in the workflow. Prefer omitting `against`/`abi-baseline` on the step instead — `scan` already runs audit-only whenever no baseline is given. |
 | `policy` | `strict_abi` | Built-in policy: `strict_abi`, `sdk_vendor`, `plugin_abi` |
 | `policy-file` | — | Custom YAML policy file |
 | `suppress` | — | YAML suppression file (supports `label`, `source_location`, `expires`) |
