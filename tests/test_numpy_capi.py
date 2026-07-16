@@ -176,6 +176,22 @@ class TestExtractNumPyCapiSurface:
         binary.write_bytes(_ARRAY_API_BLOB)  # far bigger than the 8-byte cap
         assert extract_numpy_capi_surface(binary) is None
 
+    def test_read_oserror_returns_none(self, tmp_path: Path, monkeypatch) -> None:
+        # is_file() can return True and the read still fail (permission
+        # denied, a broken symlink, the file removed in between) -- the
+        # OSError guard around the read must degrade to None, not raise.
+        binary = tmp_path / "mod.so"
+        binary.write_bytes(_ARRAY_API_BLOB)
+        real_open = Path.open
+
+        def raising_open(self: Path, *args, **kwargs):
+            if self == binary:
+                raise OSError("simulated read failure")
+            return real_open(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "open", raising_open)
+        assert extract_numpy_capi_surface(binary) is None
+
 
 class TestNumPyCapiSurfaceSerializationRoundTrip:
     def test_round_trips_through_dict(self) -> None:
