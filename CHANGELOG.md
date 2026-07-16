@@ -131,6 +131,21 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- **Inherited-override vtable-slot-reuse false positive (case185).** An
+  override that reuses an inherited virtual method's vtable slot (same
+  signature, no new slot — e.g. `Derived::paint(int) override` of
+  `Base::paint(int)`) was misreported as `type_vtable_changed`/`BREAKING`.
+  Root cause was two-layered: `dumper_castxml.py`'s `_build_vtable()` relied
+  solely on castxml's `vtable_index` attribute to detect slot reuse, and
+  some castxml/Clang builds never emit it at all, so the override was
+  appended as a spurious extra vtable entry instead of replacing its base's
+  slot; it now falls back to castxml's `overrides` attribute (resolved
+  through multi-level override chains) when `vtable_index` is absent. Second,
+  `diff_types.py`'s `_diff_type_vtable()` had no override-reuse exemption at
+  all, unlike `diff_cxx_rules.virtual_method_addition()`'s existing one for
+  the identical relationship — the new `vtable_slot_is_override_reuse()`
+  helper mirrors that same signature-key comparison so the two vtable-related
+  detectors agree.
 - **Vendored-library SONAME normalization, remaining half (G9).**
   `strip_vendor_hash()` now also normalizes the embedded ELF SONAME (not just
   the on-disk filename) in `bundle.py`'s cohort-scoped `BUNDLE_SONAME_SKEW`

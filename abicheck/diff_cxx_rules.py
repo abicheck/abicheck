@@ -331,6 +331,120 @@ def virtual_signature_key(f: Function) -> str:
     return f"{leaf}({params}){quals}"
 
 
+def _owner_descends_from(owner: str, ancestor: str, types: dict[str, RecordType]) -> bool:
+    """True if *owner* names *ancestor* itself, or a transitive base of it in *types*.
+
+    Tolerant of qualified-vs-leaf naming the same way ``_transitive_bases``
+    resolves base names (CastXML base lists are leaf-only project-wide; DWARF
+    records the qualified form) — but only when at least one side IS a bare
+    leaf, the genuine source of that ambiguity, AND the qualified side has no
+    separately-resolvable type record of its own. Two *fully-qualified* names
+    that merely share a leaf component (``ns1::Base`` vs ``ns2::Base``) are
+    unrelated classes in different namespaces, not the same class recorded
+    two ways, and must not be treated as equal; the same is true of a bare
+    global name (``Base``) against a namespaced one (``ns::Base``) when
+    ``ns::Base`` resolves to its own record in *types* -- that record's very
+    presence proves this snapshot retains namespace fidelity, so the bare
+    name can no longer be assumed to mean the same class.
+
+    The identical corroboration applies when checking *ancestor* against
+    *owner*'s declared bases below: a leaf-only base entry (e.g. ``owner``'s
+    record lists a bare ``Base``) matches *any* same-leaf ``ancestor``
+    unless that ``ancestor`` has its own resolvable qualified record too --
+    otherwise a mixed snapshot where both ``ns1::Base`` and ``ns2::Base``
+    exist could match a base list that only ever meant one specific one.
+    """
+    if owner == ancestor:
+        return True
+    leaf_owner = owner.rsplit("::", 1)[-1]
+    leaf_ancestor = ancestor.rsplit("::", 1)[-1]
+    owner_is_leaf = leaf_owner == owner
+    ancestor_is_leaf = leaf_ancestor == ancestor
+
+    def _leaf_match_trustworthy(qualified: str | None) -> bool:
+        if qualified is None:
+            return True
+        if qualified in types:
+            return False
+        # `types` is keyed by RecordType.name, which stays bare even for a
+        # namespaced record (model.py: qualified_name is a separate field so
+        # both backends key the same way) -- so a castxml-style record for
+        # `ns::Base` lives at types["Base"] with qualified_name="ns::Base",
+        # never at types["ns::Base"]. The key-only check above can therefore
+        # never see it; without this, castxml snapshots would always treat
+        # the qualified spelling as unresolvable and wrongly trust the leaf
+        # match. Check qualified_name too so a record entered *only* that
+        # way still corroborates and rejects the ambiguous leaf match.
+        return not any(t.qualified_name == qualified for t in types.values())
+
+    if leaf_owner == leaf_ancestor and (owner_is_leaf or ancestor_is_leaf):
+        qualified = ancestor if not ancestor_is_leaf else (owner if not owner_is_leaf else None)
+        if _leaf_match_trustworthy(qualified):
+            return True
+    t = types.get(owner) or (types.get(leaf_owner) if leaf_owner != owner else None)
+    if t is None:
+        return False
+    bases = _transitive_bases(t, types)
+    if ancestor in bases:
+        return True
+    return leaf_ancestor in bases and _leaf_match_trustworthy(None if ancestor_is_leaf else ancestor)
+
+
+def vtable_slot_is_override_reuse(
+    old_entry: str,
+    new_entry: str,
+    old_funcs: dict[str, Function],
+    new_funcs: dict[str, Function],
+    old_types: dict[str, RecordType],
+    new_types: dict[str, RecordType],
+) -> bool:
+    """True if a vtable slot's mangled entry changed only because a derived
+    class overrode the inherited virtual that occupied it, reusing the same
+    slot rather than growing the vtable (case185).
+
+    ``virtual_method_addition()`` already withholds ``VIRTUAL_METHOD_ADDED``
+    for exactly this situation — a same-signature override of an inherited
+    virtual — by comparing ``virtual_signature_key``. The per-type vtable diff
+    (``diff_types._diff_type_vtable``) independently compares each class's
+    raw vtable entry list, so without this check it disagrees with that
+    exemption: the slot's mangled name textually changes (``Base::paint`` ->
+    ``Derived::paint``) even though the slot index, order, and call signature
+    are identical, and it would report ``TYPE_VTABLE_CHANGED`` for a change
+    the other detector already deemed compatible. Mirroring the same
+    signature-key comparison here keeps the two detectors in agreement.
+
+    A signature match alone is not sufficient: two *unrelated* classes could
+    each declare an unrelated virtual that happens to share a leaf name and
+    parameter list, and a class could switch which one occupies a slot
+    without genuinely overriding anything. It is also not enough that both
+    owners are merely *somewhere* in the diffed class's combined old+new base
+    set — for a class with sibling bases (``Derived : Base1, Base2``), or one
+    whose base list itself changed (``Derived : Base1`` -> ``Derived :
+    Base2``), a slot swapping from ``Base1::foo()`` to an unrelated
+    ``Base2::foo()`` of the same signature would satisfy that looser test
+    without either genuinely overriding the other. The real requirement is an
+    actual override edge: the new entry's owner must be the old entry's
+    owner itself, or genuinely descend from it (``_owner_descends_from``,
+    checked against both new_types and old_types in case only one side's
+    snapshot fully resolves the ancestor's own base list).
+    """
+    if old_entry == new_entry:
+        return True
+    f_old = old_funcs.get(old_entry)
+    f_new = new_funcs.get(new_entry)
+    if f_old is None or f_new is None or not f_old.is_virtual or not f_new.is_virtual:
+        return False
+    if virtual_signature_key(f_old) != virtual_signature_key(f_new):
+        return False
+    old_owner = owner_class_of(f_old)
+    new_owner = owner_class_of(f_new)
+    if old_owner is None or new_owner is None:
+        return False
+    return _owner_descends_from(new_owner, old_owner, new_types) or _owner_descends_from(
+        new_owner, old_owner, old_types
+    )
+
+
 def old_virtual_signatures(functions: Iterable[Function]) -> dict[str, set[str]]:
     """Per-class virtual-method signature keys for override detection.
 

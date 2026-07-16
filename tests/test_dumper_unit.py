@@ -1056,6 +1056,336 @@ class TestCastxmlParserVtable:
         derived_t = next(t for t in types if t.name == "Derived")
         assert derived_t.vtable == ["_ZN7Derived3fooEv"]
 
+    def test_vtable_override_no_vtable_index_uses_overrides_attr(self):
+        """case185: some castxml/Clang builds never emit ``vtable_index`` at
+        all. Without a fallback signal, a same-signature override used to be
+        appended as a spurious extra slot instead of replacing its base's
+        entry (a false vtable-growth positive). castxml's ``overrides``
+        attribute is that fallback: it must still collapse to one slot.
+        """
+        base = Element("Class", id="c1", name="Base")
+        m1 = Element("Method", id="m1", name="paint", mangled="_ZN4Base5paintEi",
+                      virtual="1", context="c1")
+        derived = Element("Class", id="c2", name="Derived")
+        SubElement(derived, "Base", type="c1")
+        m2 = Element("Method", id="m2", name="paint", mangled="_ZN7Derived5paintEi",
+                      virtual="1", context="c2", overrides="m1")
+        root = _xml_root(base, derived, m1, m2)
+        p = _CastxmlParser(root, set(), set())
+        types = p.parse_types()
+        derived_t = next(t for t in types if t.name == "Derived")
+        assert derived_t.vtable == ["_ZN7Derived5paintEi"]
+
+    def test_vtable_no_vtable_index_different_signature_adds_slot(self):
+        """The negative twin documented in case185's README: a same-named but
+        different-signature virtual does NOT reuse a slot (no ``overrides``
+        attribute links it to the base method), so it must still grow the
+        vtable by one entry rather than being collapsed away.
+        """
+        base = Element("Class", id="c1", name="Base")
+        m1 = Element("Method", id="m1", name="paint", mangled="_ZN4Base5paintEi",
+                      virtual="1", context="c1")
+        derived = Element("Class", id="c2", name="Derived")
+        SubElement(derived, "Base", type="c1")
+        m2 = Element("Method", id="m2", name="paint", mangled="_ZN7Derived5paintEd",
+                      virtual="1", context="c2")
+        root = _xml_root(base, derived, m1, m2)
+        p = _CastxmlParser(root, set(), set())
+        types = p.parse_types()
+        derived_t = next(t for t in types if t.name == "Derived")
+        assert derived_t.vtable == ["_ZN4Base5paintEi", "_ZN7Derived5paintEd"]
+
+    def test_vtable_override_chain_resolves_to_root_slot(self):
+        """A 3-level override chain (Base -> Mid -> Derived), each level
+        missing ``vtable_index`` and pointing ``overrides`` at its immediate
+        (not root) base declaration, must still collapse to a single slot.
+        """
+        base = Element("Class", id="c1", name="Base")
+        m1 = Element("Method", id="m1", name="foo", mangled="_ZN4Base3fooEv",
+                      virtual="1", context="c1")
+        mid = Element("Class", id="c2", name="Mid")
+        SubElement(mid, "Base", type="c1")
+        m2 = Element("Method", id="m2", name="foo", mangled="_ZN3Mid3fooEv",
+                      virtual="1", context="c2", overrides="m1")
+        derived = Element("Class", id="c3", name="Derived")
+        SubElement(derived, "Base", type="c2")
+        m3 = Element("Method", id="m3", name="foo", mangled="_ZN7Derived3fooEv",
+                      virtual="1", context="c3", overrides="m2")
+        root = _xml_root(base, mid, derived, m1, m2, m3)
+        p = _CastxmlParser(root, set(), set())
+        types = p.parse_types()
+        derived_t = next(t for t in types if t.name == "Derived")
+        assert derived_t.vtable == ["_ZN7Derived3fooEv"]
+
+    def test_vtable_override_chain_mixed_indexed_and_unindexed(self):
+        """Base and Mid carry ``vtable_index`` (slot 0), but Mid's override
+        drops the index and Derived overrides Mid via ``overrides`` only.
+        Derived's unindexed override must still resolve back to Base/Mid's
+        int-keyed slot 0, not append a spurious extra entry -- a downstream
+        override in a mixed indexed/unindexed chain has no other signal
+        tying it to the base's slot once the index disappears partway
+        through the hierarchy.
+        """
+        base = Element("Class", id="c1", name="Base")
+        m1 = Element("Method", id="m1", name="foo", mangled="_ZN4Base3fooEv",
+                      virtual="1", vtable_index="0", context="c1")
+        mid = Element("Class", id="c2", name="Mid")
+        SubElement(mid, "Base", type="c1")
+        m2 = Element("Method", id="m2", name="foo", mangled="_ZN3Mid3fooEv",
+                      virtual="1", vtable_index="0", context="c2")
+        derived = Element("Class", id="c3", name="Derived")
+        SubElement(derived, "Base", type="c2")
+        m3 = Element("Method", id="m3", name="foo", mangled="_ZN7Derived3fooEv",
+                      virtual="1", context="c3", overrides="m2")
+        root = _xml_root(base, mid, derived, m1, m2, m3)
+        p = _CastxmlParser(root, set(), set())
+        types = p.parse_types()
+        derived_t = next(t for t in types if t.name == "Derived")
+        assert derived_t.vtable == ["_ZN7Derived3fooEv"]
+
+    def test_vtable_unindexed_override_of_indexed_slot_keeps_position(self):
+        """Base declares two indexed virtuals (slots 0 and 1). Derived
+        overrides slot 0 via ``overrides`` only, without its own
+        ``vtable_index``. The reused slot must sort at position 0 (ahead of
+        slot 1), not fall to the unindexed tail -- landing after slot 1 would
+        read as a spurious vtable reorder even though nothing moved.
+        """
+        base = Element("Class", id="c1", name="Base")
+        m1 = Element("Method", id="m1", name="foo", mangled="_ZN4Base3fooEv",
+                      virtual="1", vtable_index="0", context="c1")
+        m2 = Element("Method", id="m2", name="bar", mangled="_ZN4Base3barEv",
+                      virtual="1", vtable_index="1", context="c1")
+        derived = Element("Class", id="c2", name="Derived")
+        SubElement(derived, "Base", type="c1")
+        m3 = Element("Method", id="m3", name="foo", mangled="_ZN7Derived3fooEv",
+                      virtual="1", context="c2", overrides="m1")
+        root = _xml_root(base, derived, m1, m2, m3)
+        p = _CastxmlParser(root, set(), set())
+        types = p.parse_types()
+        derived_t = next(t for t in types if t.name == "Derived")
+        assert derived_t.vtable == ["_ZN7Derived3fooEv", "_ZN4Base3barEv"]
+
+    def test_vtable_indexed_override_of_unindexed_base_collapses_to_one_slot(self):
+        """The reverse mixed-index direction: Base has NO vtable_index, but
+        Derived's override of it DOES carry one (plus ``overrides``). The
+        override must still collapse onto Base's (string-id-keyed) slot
+        rather than opening a second, int-keyed slot alongside it.
+        """
+        base = Element("Class", id="c1", name="Base")
+        m1 = Element("Method", id="m1", name="foo", mangled="_ZN4Base3fooEv",
+                      virtual="1", context="c1")
+        derived = Element("Class", id="c2", name="Derived")
+        SubElement(derived, "Base", type="c1")
+        m2 = Element("Method", id="m2", name="foo", mangled="_ZN7Derived3fooEv",
+                      virtual="1", vtable_index="0", context="c2", overrides="m1")
+        root = _xml_root(base, derived, m1, m2)
+        p = _CastxmlParser(root, set(), set())
+        types = p.parse_types()
+        derived_t = next(t for t in types if t.name == "Derived")
+        assert derived_t.vtable == ["_ZN7Derived3fooEv"]
+
+    def test_vtable_indexed_override_of_unindexed_sibling_preserves_order(self):
+        """Base has two UNINDEXED virtuals, foo then bar. Derived overrides
+        bar only, and that override happens to carry its own vtable_index
+        ("1"). That local index has no verified relationship to foo's
+        (unknown) true position, so it must not be trusted to sort Derived's
+        override ahead of foo -- the reconstructed vtable must preserve
+        discovery order (foo, then the overridden bar), not read as
+        ``[Derived::bar, Base::foo]`` (a spurious reorder).
+        """
+        base = Element("Class", id="c1", name="Base")
+        m1 = Element("Method", id="m1", name="foo", mangled="_ZN4Base3fooEv",
+                      virtual="1", context="c1")
+        m2 = Element("Method", id="m2", name="bar", mangled="_ZN4Base3barEv",
+                      virtual="1", context="c1")
+        derived = Element("Class", id="c2", name="Derived")
+        SubElement(derived, "Base", type="c1")
+        m3 = Element("Method", id="m3", name="bar", mangled="_ZN7Derived3barEv",
+                      virtual="1", vtable_index="1", context="c2", overrides="m2")
+        root = _xml_root(base, derived, m1, m2, m3)
+        p = _CastxmlParser(root, set(), set())
+        types = p.parse_types()
+        derived_t = next(t for t in types if t.name == "Derived")
+        assert derived_t.vtable == ["_ZN4Base3fooEv", "_ZN7Derived3barEv"]
+
+    def test_vtable_multi_id_overrides_resolves_to_known_slot(self):
+        """castxml can list more than one overridden declaration as a
+        whitespace-separated ``overrides`` id list (e.g. a single override
+        simultaneously covering more than one base-class branch in multiple
+        inheritance). An exact-string lookup of that composite value never
+        matches any registered slot, so without splitting it, the override
+        would open a phantom extra slot keyed by the literal multi-id string
+        instead of collapsing onto the real inherited slot any of its ids
+        names.
+        """
+        base = Element("Class", id="c1", name="Base")
+        m1 = Element("Method", id="m1", name="foo", mangled="_ZN4Base3fooEv",
+                      virtual="1", context="c1")
+        derived = Element("Class", id="c2", name="Derived")
+        SubElement(derived, "Base", type="c1")
+        m2 = Element("Method", id="m2", name="foo", mangled="_ZN7Derived3fooEv",
+                      virtual="1", context="c2", overrides="m1 nonexistent")
+        root = _xml_root(base, derived, m1, m2)
+        p = _CastxmlParser(root, set(), set())
+        types = p.parse_types()
+        derived_t = next(t for t in types if t.name == "Derived")
+        assert derived_t.vtable == ["_ZN7Derived3fooEv"]
+
+    def test_vtable_multi_id_overrides_replaces_every_resolved_slot(self):
+        """Non-virtual multiple inheritance: Derived : Base1, Base2, each
+        declaring its own unrelated foo(). A single final overrider covers
+        both (``overrides="m1 m2"``, both already-resolvable slots). Each
+        resolved slot is a genuinely distinct position in the object's real
+        vtable-group layout, so both must survive -- neither collapsed away
+        (which would under-report the vtable's true size) nor left with
+        stale pre-override content -- each showing the override's mangled
+        name.
+        """
+        base1 = Element("Class", id="c1", name="Base1")
+        m1 = Element("Method", id="m1", name="foo", mangled="_ZN5Base13fooEv",
+                      virtual="1", context="c1")
+        base2 = Element("Class", id="c2", name="Base2")
+        m2 = Element("Method", id="m2", name="foo", mangled="_ZN5Base23fooEv",
+                      virtual="1", context="c2")
+        derived = Element("Class", id="c3", name="Derived")
+        SubElement(derived, "Base", type="c1")
+        SubElement(derived, "Base", type="c2")
+        m3 = Element("Method", id="m3", name="foo", mangled="_ZN7Derived3fooEv",
+                      virtual="1", context="c3", overrides="m1 m2")
+        root = _xml_root(base1, base2, derived, m1, m2, m3)
+        p = _CastxmlParser(root, set(), set())
+        types = p.parse_types()
+        derived_t = next(t for t in types if t.name == "Derived")
+        assert derived_t.vtable == ["_ZN7Derived3fooEv", "_ZN7Derived3fooEv"]
+
+    def test_vtable_multi_id_override_chain_propagates_to_every_slot(self):
+        """Base1/Base2 -> Derived::foo (overrides both) -> MoreDerived::foo
+        (overrides Derived::foo by ITS id alone). Derived's own multi-slot
+        override must record both underlying slots against its own id, so
+        MoreDerived's single-id ``overrides="m3"`` still resolves to (and
+        updates) both positions -- not just the first one Derived happened
+        to register as its primary key.
+        """
+        base1 = Element("Class", id="c1", name="Base1")
+        m1 = Element("Method", id="m1", name="foo", mangled="_ZN5Base13fooEv",
+                      virtual="1", context="c1")
+        base2 = Element("Class", id="c2", name="Base2")
+        m2 = Element("Method", id="m2", name="foo", mangled="_ZN5Base23fooEv",
+                      virtual="1", context="c2")
+        derived = Element("Class", id="c3", name="Derived")
+        SubElement(derived, "Base", type="c1")
+        SubElement(derived, "Base", type="c2")
+        m3 = Element("Method", id="m3", name="foo", mangled="_ZN7Derived3fooEv",
+                      virtual="1", context="c3", overrides="m1 m2")
+        more_derived = Element("Class", id="c4", name="MoreDerived")
+        SubElement(more_derived, "Base", type="c3")
+        m4 = Element("Method", id="m4", name="foo", mangled="_ZN11MoreDerived3fooEv",
+                      virtual="1", context="c4", overrides="m3")
+        root = _xml_root(base1, base2, derived, more_derived, m1, m2, m3, m4)
+        p = _CastxmlParser(root, set(), set())
+        types = p.parse_types()
+        more_derived_t = next(t for t in types if t.name == "MoreDerived")
+        assert more_derived_t.vtable == ["_ZN11MoreDerived3fooEv", "_ZN11MoreDerived3fooEv"]
+
+    def test_vtable_overrides_all_ids_unresolvable_falls_back_to_composite_key(self):
+        """An ``overrides`` id list where none of the listed ids resolve to a
+        known slot (e.g. a malformed/truncated castxml dump) must still
+        register the method under *some* key rather than being dropped --
+        falls back to the raw composite ``overrides`` string, same as the
+        pre-multi-id behavior for a single unresolvable id.
+        """
+        derived = Element("Class", id="c1", name="Derived")
+        m1 = Element(
+            "Method",
+            id="m1",
+            name="foo",
+            mangled="_ZN7Derived3fooEv",
+            virtual="1",
+            context="c1",
+            overrides="nonexistent1 nonexistent2",
+        )
+        root = _xml_root(derived, m1)
+        p = _CastxmlParser(root, set(), set())
+        types = p.parse_types()
+        derived_t = next(t for t in types if t.name == "Derived")
+        assert derived_t.vtable == ["_ZN7Derived3fooEv"]
+
+    def test_vtable_multi_id_overrides_deduplicates_repeated_id(self):
+        """A repeated id in the whitespace-separated ``overrides`` list (or
+        two ids that resolve to the same slot) must not register that slot
+        twice as an "extra" -- the dedup check against already-resolved
+        keys must actually skip the repeat rather than double-applying it.
+        """
+        base = Element("Class", id="c1", name="Base")
+        m1 = Element("Method", id="m1", name="foo", mangled="_ZN4Base3fooEv",
+                      virtual="1", context="c1")
+        derived = Element("Class", id="c2", name="Derived")
+        SubElement(derived, "Base", type="c1")
+        m2 = Element("Method", id="m2", name="foo", mangled="_ZN7Derived3fooEv",
+                      virtual="1", context="c2", overrides="m1 m1")
+        root = _xml_root(base, derived, m1, m2)
+        p = _CastxmlParser(root, set(), set())
+        types = p.parse_types()
+        derived_t = next(t for t in types if t.name == "Derived")
+        assert derived_t.vtable == ["_ZN7Derived3fooEv"]
+
+    def test_vtable_diamond_inheritance_does_not_infinite_loop(self):
+        """Diamond inheritance (Derived : Left, Right; both : Base) revisits
+        Base through two paths. The `seen` guard must return {} on the
+        second visit rather than re-walking (or infinite-looping on a cycle);
+        Base's own slot still comes through once, via whichever path visits
+        it first.
+        """
+        base = Element("Class", id="c1", name="Base")
+        m1 = Element("Method", id="m1", name="foo", mangled="_ZN4Base3fooEv",
+                      virtual="1", context="c1")
+        left = Element("Class", id="c2", name="Left")
+        SubElement(left, "Base", type="c1")
+        right = Element("Class", id="c3", name="Right")
+        SubElement(right, "Base", type="c1")
+        derived = Element("Class", id="c4", name="Derived")
+        SubElement(derived, "Base", type="c2")
+        SubElement(derived, "Base", type="c3")
+        root = _xml_root(base, left, right, derived, m1)
+        p = _CastxmlParser(root, set(), set())
+        types = p.parse_types()
+        derived_t = next(t for t in types if t.name == "Derived")
+        assert derived_t.vtable == ["_ZN4Base3fooEv"]
+
+    def test_vtable_dangling_base_type_reference_is_skipped(self):
+        """A <Base type="..."> pointing at an id with no matching element
+        (a malformed/truncated castxml dump) must be skipped, not crash."""
+        derived = Element("Class", id="c1", name="Derived")
+        SubElement(derived, "Base", type="does-not-exist")
+        root = _xml_root(derived)
+        p = _CastxmlParser(root, set(), set())
+        types = p.parse_types()
+        derived_t = next(t for t in types if t.name == "Derived")
+        assert derived_t.vtable == []
+
+    def test_collect_virtual_methods_unresolvable_cid_returns_empty(self):
+        """_collect_virtual_methods() called directly with a class id that
+        isn't in the id map (defensive guard -- unreachable through the
+        normal _resolve()-gated recursive call, since _resolve already
+        filters out dangling Base references before recursing)."""
+        root = _xml_root(Element("Class", id="c1", name="C"))
+        p = _CastxmlParser(root, set(), set())
+        assert p._collect_virtual_methods("does-not-exist") == {}
+
+    def test_vtable_method_without_id_attribute_is_not_registered_as_slot_root(self):
+        """A virtual method element missing its own `id` attribute (malformed
+        castxml output) must still contribute its slot -- just without being
+        recorded in `_vtable_slot_root`, since there's no id to key it by."""
+        cls = Element("Class", id="c1", name="C")
+        method = Element("Method", name="foo", mangled="_ZN1C3fooEv",
+                          virtual="1", context="c1")
+        root = _xml_root(cls, method)
+        p = _CastxmlParser(root, set(), set())
+        types = p.parse_types()
+        c_t = next(t for t in types if t.name == "C")
+        assert c_t.vtable == ["_ZN1C3fooEv"]
+        assert p._vtable_slot_root == {}
+
 
 class TestCastxmlParserEnums:
     def test_parse_enum(self):

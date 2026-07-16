@@ -1977,12 +1977,11 @@
    "api_break": false,
    "bad_practice": false,
    "category": "addition",
-   "description": "Derived does not override Base::paint(int) in v1; in v2 it adds int paint(int) override -- the exact same signature as the inherited virtual. This reuses Base's existing vtable slot (Derived's vtable stays 40 bytes in both versions) rather than adding one, so diff_cxx_rules.py's virtual_method_addition() does not classify it as VIRTUAL_METHOD_ADDED. The only observable change is a new mangled Derived::paint(int) symbol (func_added, COMPATIBLE) -- overriding with a different signature (e.g. paint(double)) does grow the vtable by one slot and is BREAKING (virtual_method_added + vtable_slot_count_changed), the negative twin documented in the README.",
+   "description": "Derived does not override Base::paint(int) in v1; in v2 it adds int paint(int) override -- the exact same signature as the inherited virtual. This reuses Base's existing vtable slot (Derived's vtable stays 40 bytes in both versions) rather than adding one, so diff_cxx_rules.py's virtual_method_addition() does not classify it as VIRTUAL_METHOD_ADDED, and diff_types.py's _diff_type_vtable() (via diff_cxx_rules.vtable_slot_is_override_reuse) recognizes the same override-reuse relationship and withholds TYPE_VTABLE_CHANGED for it too. The only observable change is a new mangled Derived::paint(int) symbol (func_added, COMPATIBLE) -- overriding with a different signature (e.g. paint(double)) does grow the vtable by one slot and is BREAKING (virtual_method_added + vtable_slot_count_changed), the negative twin documented in the README.",
    "expected": "COMPATIBLE",
    "expected_kinds": [
     "func_added"
    ],
-   "known_gap": "diff_cxx_rules.py's virtual_method_addition() correctly recognizes the slot reuse and withholds VIRTUAL_METHOD_ADDED, but a separate, blunter check -- diff_types.py's _diff_type_vtable(), which just compares each class's RecordType.vtable entry list for equality -- has no such exemption. Since Derived's vtable entry list textually changes (Base::paint's slot now names Derived::paint) even though its length/order is identical, it unconditionally emits TYPE_VTABLE_CHANGED, so the case is currently observed as BREAKING (type_vtable_changed + func_added) instead of the canonical COMPATIBLE. A real, currently-unaddressed inconsistency between the two vtable-related detectors, not an evidence-depth limitation.",
    "min_evidence": "L0",
    "platforms": [
     "linux"

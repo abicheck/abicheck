@@ -20,6 +20,14 @@ This script adds: Markdown rendering, wall-time + peak-RSS capture for the
 whole run, frozen-vs-live cache-state reporting per tool, and the doc
 drift check.
 
+Requirements: same as ``benchmark_comparison.py`` — see its module docstring
+for the full list (gcc/g++, CastXML, clang/clang++, plus a versioned
+gcc-14+/gcc-15 for case115_bit_int_width_changed's C23 `_BitInt` build; a
+host stuck on GCC <14 with no newer versioned gcc reports that one case as
+ERROR rather than BREAKING). Missing external tools don't block a run —
+they either fall back to frozen data (``--no-frozen`` disables that) or
+score as SKIP/ERROR for that lane.
+
 Usage:
     # Full catalog, whatever tools are available (frozen data fills the rest):
     python3 scripts/generate_benchmark_report.py

@@ -17,6 +17,23 @@ Supports two case layouts:
   - v1/v2 layout: case_dir/v1.c + case_dir/v2.c (cases 01-18)
   - old/new layout: case_dir/old/lib.c + case_dir/new/lib.c (cases 19+)
 
+Requirements for a full-catalog run (a subset still runs with less):
+  - gcc/g++ and CastXML — abicheck's default L2 header-AST backend; without
+    CastXML the abicheck/abicheck_full lanes cannot run at all (`pip install
+    castxml` on hosts without a system package).
+  - clang/clang++ — used opportunistically for case64_calling_convention_changed
+    and the abicheck_full Clang-plugin L3-L5 lane.
+  - A *second*, newer compiler for case115_bit_int_width_changed: it needs
+    C23 `_BitInt(N)`, which GCC only gained in GCC 14. This script tries
+    `gcc-15`/`gcc-14`/`gcc-13`/`gcc-12` on PATH ahead of the bare `gcc` alias
+    (see the case115 special-case below) but does NOT fall back to a clean
+    SKIP if none of those support the feature — on a host stuck on GCC <14
+    with no versioned newer gcc installed, this one case reports ERROR
+    instead of BREAKING. That's a toolchain gap, not an abicheck defect;
+    `tests/feature_probe.py`-gated pytest lanes skip it cleanly instead.
+  - abidiff / abi-compliance-checker are optional — omitted tools fall back to
+    previously frozen results (`--freeze`) or SKIP.
+
 Usage:
     python3 scripts/benchmark_comparison.py
     python3 scripts/benchmark_comparison.py --suite pinned74
@@ -170,6 +187,24 @@ def _first_available_tool(*names: str) -> str | None:
         if path:
             return path
     return None
+
+
+def _gcc_major_version(tool: str) -> int | None:
+    """Best-effort GCC major version number for *tool*, or None."""
+    path = shutil.which(tool)
+    if path is None:
+        return None
+    try:
+        r = subprocess.run(
+            [path, "-dumpversion"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    major = (r.stdout or "").strip().split(".", 1)[0]
+    return int(major) if major.isdigit() else None
 
 # Load platform info from ground_truth.json
 PLATFORMS: dict[str, list[str]] = {
@@ -1445,20 +1480,23 @@ def _build_case_artifacts(
         cmake_build.mkdir(parents=True)
         cmake_env = _configure_cmake_env(force_case64_compile, preferred_family)
         if name == "case115_bit_int_width_changed":
-            # Needs C23 _BitInt(N); the default system gcc may predate GCC 14
-            # (which added _BitInt support). Prefer the newest gcc-1N on PATH
-            # over the bare "gcc" alias rather than reporting a build error —
-            # this is a toolchain-availability question, not a product gap.
-            newer_gcc = _first_available_tool(
-                "gcc-15", "gcc-14", "gcc-13", "gcc-12",
-            )
-            newer_gxx = _first_available_tool(
-                "g++-15", "g++-14", "g++-13", "g++-12",
-            )
-            if newer_gcc:
-                cmake_env = {**cmake_env, "CC": newer_gcc}
-            if newer_gxx:
-                cmake_env = {**cmake_env, "CXX": newer_gxx}
+            # Needs C23 _BitInt(N), which GCC only gained in GCC 14. Only
+            # override CC/CXX when the bare "gcc" alias itself predates that
+            # — and only ever select a versioned alternative we know
+            # supports it (gcc-14/gcc-15). Candidates must NOT include
+            # gcc-13/gcc-12: on a host where "gcc" is already a GCC 14+
+            # alternatives alias but an older gcc-13 is also installed
+            # alongside it, preferring gcc-13 would force CMake onto a
+            # known-incompatible compiler and turn a buildable case into
+            # ERROR instead of leaving the already-sufficient bare "gcc" in
+            # place.
+            if (_gcc_major_version("gcc") or 0) < 14:
+                newer_gcc = _first_available_tool("gcc-15", "gcc-14")
+                newer_gxx = _first_available_tool("g++-15", "g++-14")
+                if newer_gcc:
+                    cmake_env = {**cmake_env, "CC": newer_gcc}
+                if newer_gxx:
+                    cmake_env = {**cmake_env, "CXX": newer_gxx}
         cr = _run_cmake_configure_and_build(case_dir, cmake_build, name, cmake_env)
         return _resolve_cmake_libs(
             name, expected, cmake_build, cr, v1_so, v2_so,
