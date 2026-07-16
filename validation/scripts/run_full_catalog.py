@@ -227,6 +227,28 @@ def _resolve_special(
     return {"status": status, "proof_lane": proof_lane, "note": note, "lanes": [lane]}
 
 
+def _artifact_failures(proofs: dict[str, Any], runtime: dict[str, Any]) -> list[str]:
+    """Surface owner-proof/runtime-smoke failures the per-case matrix can't see.
+
+    Per-case ``status`` only reflects the lane that proved *that* case's
+    verdict — the dedicated-owner proofs and the runtime-smoke lane are
+    independent regression checks layered on top (mirroring
+    ``collect_full_example_matrix.py``'s ``_proof_artifact_errors``/
+    ``bad_statuses`` checks), so a failure there must not be silently
+    absorbed into an all-COVERED matrix (Codex review).
+    """
+    errors = []
+    for row in proofs.get("results", []):
+        if row.get("status") != "PASS" or row.get("returncode") != 0:
+            errors.append(
+                f"owner proof failed: {row.get('owner')} ({row.get('status')})"
+            )
+    for row in runtime.get("results", []):
+        if row.get("status") == "BUILD_ERROR":
+            errors.append(f"runtime smoke build error: {row.get('case_id')}")
+    return errors
+
+
 def run_full_catalog(toolchain: str, results_dir: Path) -> dict[str, Any]:
     results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -328,6 +350,7 @@ def run_full_catalog(toolchain: str, results_dir: Path) -> dict[str, Any]:
     unresolved = [row["case_id"] for row in rows if row["status"] == "UNRESOLVED"]
     failed = [row["case_id"] for row in rows if row["status"] == "FAILED"]
     owner_summary = proofs.get("summary", {})
+    artifact_errors = _artifact_failures(proofs, runtime)
 
     return {
         "schema_version": "full_catalog_single_config.v1",
@@ -339,6 +362,7 @@ def run_full_catalog(toolchain: str, results_dir: Path) -> dict[str, Any]:
         "owner_proofs_summary": owner_summary,
         "unresolved_cases": unresolved,
         "failed_cases": failed,
+        "artifact_errors": artifact_errors,
         "results": rows,
     }
 
@@ -387,9 +411,19 @@ def main(argv: list[str] | None = None) -> int:
             print(f"UNRESOLVED: {matrix['unresolved_cases']}", file=sys.stderr)
         if matrix["failed_cases"]:
             print(f"FAILED: {matrix['failed_cases']}", file=sys.stderr)
+        if matrix["artifact_errors"]:
+            print(f"ARTIFACT ERRORS: {matrix['artifact_errors']}", file=sys.stderr)
         print(f"matrix written to {args.out}")
 
-    return 1 if (matrix["unresolved_cases"] or matrix["failed_cases"]) else 0
+    return (
+        1
+        if (
+            matrix["unresolved_cases"]
+            or matrix["failed_cases"]
+            or matrix["artifact_errors"]
+        )
+        else 0
+    )
 
 
 if __name__ == "__main__":

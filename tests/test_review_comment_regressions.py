@@ -590,3 +590,58 @@ def test_build_source_proof_cases_cover_every_l3plus_single_library_case() -> No
         "single-library L3+ cases missing from BUILD_SOURCE_PROOF_CASES: "
         f"{missing}"
     )
+
+
+def test_full_catalog_artifact_failures_is_clean_for_passing_lanes() -> None:
+    catalog = _load_script("validation/scripts/run_full_catalog.py")
+    proofs = {"results": [{"owner": "g20", "status": "PASS", "returncode": 0}]}
+    runtime = {"results": [{"case_id": "case01", "status": "DEMONSTRATED"}]}
+    assert catalog._artifact_failures(proofs, runtime) == []
+
+
+def test_full_catalog_artifact_failures_surfaces_owner_proof_failure() -> None:
+    catalog = _load_script("validation/scripts/run_full_catalog.py")
+    proofs = {"results": [{"owner": "g20", "status": "FAIL", "returncode": 1}]}
+    runtime = {"results": []}
+    errors = catalog._artifact_failures(proofs, runtime)
+    assert errors == ["owner proof failed: g20 (FAIL)"]
+
+
+def test_full_catalog_artifact_failures_surfaces_owner_proof_nonzero_exit() -> None:
+    catalog = _load_script("validation/scripts/run_full_catalog.py")
+    proofs = {"results": [{"owner": "kabi", "status": "PASS", "returncode": 1}]}
+    runtime = {"results": []}
+    errors = catalog._artifact_failures(proofs, runtime)
+    assert errors == ["owner proof failed: kabi (PASS)"]
+
+
+def test_full_catalog_artifact_failures_surfaces_runtime_build_error() -> None:
+    catalog = _load_script("validation/scripts/run_full_catalog.py")
+    proofs = {"results": []}
+    runtime = {"results": [{"case_id": "case07", "status": "BUILD_ERROR"}]}
+    errors = catalog._artifact_failures(proofs, runtime)
+    assert errors == ["runtime smoke build error: case07"]
+
+
+def test_full_catalog_main_exit_code_reflects_artifact_errors(
+    monkeypatch, tmp_path: Path
+) -> None:
+    catalog = _load_script("validation/scripts/run_full_catalog.py")
+    monkeypatch.setattr(
+        catalog,
+        "run_full_catalog",
+        lambda *_args, **_kwargs: {
+            "schema_version": "full_catalog_single_config.v1",
+            "requested_toolchain": "auto",
+            "compiler_lane": "toolchain=auto",
+            "ground_truth_cases": 181,
+            "summary": {"COVERED": 181},
+            "owner_proofs_summary": {"PASS": 7},
+            "unresolved_cases": [],
+            "failed_cases": [],
+            "artifact_errors": ["runtime smoke build error: case07"],
+            "results": [],
+        },
+    )
+    exit_code = catalog.main(["--toolchain", "auto", "--out", str(tmp_path / "out.json")])
+    assert exit_code == 1
