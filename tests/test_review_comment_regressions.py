@@ -801,6 +801,74 @@ def test_run_compiler_lane_surfaces_failed_and_missing_retries(
     assert by_case["caseB"]["status"] == "XFAIL"
 
 
+def test_run_compiler_lane_derives_retries_from_split_cc_cxx(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Regression (Codex review): with split CC/CXX (e.g. CC=gcc CXX=clang++),
+    a C case's own family is compiler_c while a C++ case's is compiler_cxx --
+    using compiler_cxx alone for every case mislabels toolchain_used for C
+    cases and picks the wrong alternate family for their retry. Uses two
+    real example cases (case64, a .c case; case34, a .cpp case) so
+    _case_family's real _resolve_case_sources call resolves them for real."""
+    catalog = _load_script("validation/scripts/run_full_catalog.py")
+    synthetic_gt = tmp_path / "ground_truth.json"
+    synthetic_gt.write_text(
+        json.dumps(
+            {
+                "verdicts": {
+                    "case64_calling_convention_changed": {
+                        "known_gap_toolchains": ["gcc"]
+                    },
+                    "case34_access_level": {"known_gap_toolchains": ["clang"]},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(catalog, "GROUND_TRUTH", synthetic_gt)
+    monkeypatch.setattr(catalog, "_has_compiler", lambda _family: True)
+
+    primary = {
+        "compiler_c": "gcc",
+        "compiler_cxx": "clang++",
+        "results": [
+            {
+                "name": "case64_calling_convention_changed",
+                "status": "XFAIL",
+                "message": "known_gap",
+            },
+            {"name": "case34_access_level", "status": "XFAIL", "message": "known_gap"},
+        ],
+    }
+    retry_calls: list[list[str]] = []
+
+    def fake_run_json(cmd):
+        if cmd[cmd.index("--toolchain") + 1] == "auto":
+            return primary
+        retry_calls.append(cmd)
+        toolchain = cmd[cmd.index("--toolchain") + 1]
+        name = cmd[-1]
+        return {"results": [{"name": name, "status": "PASS", "toolchain": toolchain}]}
+
+    monkeypatch.setattr(catalog, "_run_json", fake_run_json)
+
+    by_case, _desc, retry_failures = catalog._run_compiler_lane("auto")
+
+    assert retry_failures == []
+    # C case retried with clang (opposite of its own family_c=gcc); C++ case
+    # retried with gcc (opposite of its own family_cxx=clang) -- two distinct
+    # alternate families derived from ONE split-compiler primary run.
+    retried_toolchains = {
+        cmd[cmd.index("--toolchain") + 1]: cmd[-1] for cmd in retry_calls
+    }
+    assert retried_toolchains == {
+        "clang": "case64_calling_convention_changed",
+        "gcc": "case34_access_level",
+    }
+    assert by_case["case64_calling_convention_changed"]["toolchain_used"] == "clang"
+    assert by_case["case34_access_level"]["toolchain_used"] == "gcc"
+
+
 def test_full_catalog_resolve_single_library_threads_ground_truth_entry() -> None:
     """collect_full_example_matrix._single_library_status takes (name, entry,
     lanes) — calling it without entry raises TypeError on every single-library

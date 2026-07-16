@@ -48,6 +48,9 @@ DEFAULT_RESULTS_DIR = REPO_DIR / "results"
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import collect_full_example_matrix as _matrix  # noqa: E402
 
+sys.path.insert(0, str(REPO_DIR / "tests"))
+import validate_examples as _ve  # noqa: E402
+
 BUILD_SOURCE_CASES = (
     "case01",
     "case04",
@@ -103,6 +106,30 @@ def _has_compiler(family: str) -> bool:
     return any(shutil.which(c) for c in _ALT_COMPILER_PROBE[family])
 
 
+def _case_family(name: str, family_c: str, family_cxx: str) -> str:
+    """The compiler family that actually built *name*, honoring split CC/CXX.
+
+    ``tests/validate_examples.py`` reports ``compiler_c``/``compiler_cxx``
+    separately (it picks per-source-language: ``.c`` vs ``.cpp``), so a run
+    with e.g. ``CC=gcc CXX=clang++`` builds C cases with gcc and C++ cases
+    with clang under the *same* ``--toolchain auto`` invocation. Blanket-
+    labeling every case with ``family_cxx`` mislabels C cases and — worse —
+    picks the wrong alternate family for their retry decision (Codex
+    review). Falls back to *family_cxx* when the case's own source can't be
+    resolved (mirrors ``_resolve_case_sources``'s own error contract).
+    """
+    resolved = _ve._resolve_case_sources(name, None)
+    # `CaseResult` is itself a NamedTuple (so a tuple instance too) -- the
+    # error leg must be excluded explicitly, not just `isinstance(_, tuple)`,
+    # or a missing/unresolvable case name misparses its CaseResult fields as
+    # (case_dir, sources) and crashes on the unpack.
+    if not isinstance(resolved, _ve.CaseResult):
+        _case_dir, (v1_src, _v2_src, _v1_hdr, _v2_hdr) = resolved
+        if v1_src.suffix == ".c":
+            return family_c
+    return family_cxx
+
+
 def _retry_candidates(
     primary_results: list[dict[str, Any]], gt: dict[str, Any], alt_family: str
 ) -> list[str]:
@@ -145,28 +172,55 @@ def _run_compiler_lane(
         return by_case, f"toolchain={toolchain} (forced for every case)", []
 
     gt = json.loads(GROUND_TRUTH.read_text())["verdicts"]
-    primary_family = _family_of(primary.get("compiler_cxx", "gcc"))
-    alt_family = _alternate(primary_family)
-    candidates = _retry_candidates(primary["results"], gt, alt_family)
+    primary_family_c = _family_of(primary.get("compiler_c", "gcc"))
+    primary_family_cxx = _family_of(primary.get("compiler_cxx", "gcc"))
+    case_family = {
+        r["name"]: _case_family(r["name"], primary_family_c, primary_family_cxx)
+        for r in primary["results"]
+    }
     by_case = {
-        r["name"]: {**r, "toolchain_used": primary_family} for r in primary["results"]
+        r["name"]: {**r, "toolchain_used": case_family[r["name"]]}
+        for r in primary["results"]
+    }
+
+    # A split CC/CXX (e.g. CC=gcc CXX=clang++) means a C case's alternate is
+    # the opposite of family_c while a C++ case's alternate is the opposite
+    # of family_cxx — these can differ, so candidates are grouped by their
+    # own case's alternate family and retried in separate batches (Codex
+    # review) rather than one blanket `--toolchain <alt>` call that would
+    # force the wrong family onto whichever language disagrees.
+    candidates_by_alt: dict[str, list[str]] = {}
+    for r in primary["results"]:
+        alt_fam = _alternate(case_family[r["name"]])
+        candidates_by_alt.setdefault(alt_fam, []).extend(
+            _retry_candidates([r], gt, alt_fam)
+        )
+    candidates_by_alt = {
+        fam: names for fam, names in candidates_by_alt.items() if names
     }
 
     retried = 0
     retry_failures: list[str] = []
-    if candidates and _has_compiler(alt_family):
-        alt = _run_json(
+    total_candidates = sum(len(names) for names in candidates_by_alt.values())
+    for alt_family, names in candidates_by_alt.items():
+        if not _has_compiler(alt_family):
+            sys.stderr.write(
+                f"note: {len(names)} toolchain-sensitive case(s) found but no {alt_family} "
+                "compiler on PATH — keeping the base-family result for them.\n"
+            )
+            continue
+        alt_result = _run_json(
             [
                 sys.executable,
                 "tests/validate_examples.py",
                 "--toolchain",
                 alt_family,
                 "--json",
-                *candidates,
+                *names,
             ]
         )
-        alt_by_case = {r["name"]: r for r in alt["results"]}
-        for name in candidates:
+        alt_by_case = {r["name"]: r for r in alt_result["results"]}
+        for name in names:
             alt_r = alt_by_case.get(name)
             if alt_r is None:
                 retry_failures.append(
@@ -180,14 +234,9 @@ def _run_compiler_lane(
                 retry_failures.append(
                     f"{name}: {alt_family} retry returned {alt_r['status']}"
                 )
-    elif candidates:
-        sys.stderr.write(
-            f"note: {len(candidates)} toolchain-sensitive case(s) found but no {alt_family} "
-            "compiler on PATH — keeping the base-family result for them.\n"
-        )
     desc = (
-        f"toolchain=auto (base {primary_family}; {len(candidates)} toolchain-sensitive "
-        f"case(s) retried with {alt_family}, {retried} improved to PASS)"
+        f"toolchain=auto (base c={primary_family_c}/cxx={primary_family_cxx}; "
+        f"{total_candidates} toolchain-sensitive case(s) retried, {retried} improved to PASS)"
     )
     return by_case, desc, retry_failures
 
