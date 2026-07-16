@@ -11,7 +11,43 @@ Thank you for your interest in contributing!
 
 ## Setup
 
-### Option A: conda-forge (recommended)
+### Option A: pixi (recommended)
+
+[pixi](https://pixi.sh) manages both the Python dev tools *and* the
+conda-forge system tools (`castxml`, a C/C++ compiler, `libabigail`,
+`abi-compliance-checker`) from the single `[tool.pixi.*]` section in
+`pyproject.toml` — no separate `conda create`/`apt install` step needed.
+
+```bash
+curl -fsSL https://pixi.sh/install.sh | sh   # or: conda install -c conda-forge pixi
+
+git clone https://github.com/abicheck/abicheck.git
+cd abicheck
+pixi install          # base dev environment (lint/type/unit-test tools)
+pixi run test          # fast unit-test lane
+pixi run check           # lint + format-check + typecheck + test
+```
+
+`abicheck` itself is installed editable (`pip install -e .` equivalent) into
+every pixi environment, so `pixi run abicheck --help` works too. Additional
+environments layer on the system tools for the heavier marker lanes:
+
+| Environment | `pixi run -e <env> <task>` | Adds |
+|-------------|------------------------------|------|
+| `default` | `test`, `test-cov`, `lint`, `fmt`, `fmt-check`, `typecheck`, `check` | (base — no system tools) |
+| `integration` | `test-integration` | `castxml`, C/C++ compiler, `cmake` (linux-64/osx-64/osx-arm64 only — no MSVC via conda-forge; see `integration` marker below) |
+| `parity` | `test-libabigail`, `test-abicc` | `libabigail` (`abidiff`) + `abi-compliance-checker` (linux-64 only, conda-forge doesn't ship these elsewhere) |
+| `docs` | `docs-build`, `docs-serve` | `mkdocs` + plugins |
+
+Note: the `integration`/`parity` environments pull `castxml`/`libabigail`/
+`abi-compliance-checker` from conda-forge at whatever version is current,
+which can drift from the pinned versions CI installs via `apt`/`brew`/
+`choco`. A handful of parity tests are sensitive to exact tool versions
+(struct-layout/calling-convention edge cases); a local pixi-driven
+`integration`/`parity` failure that doesn't reproduce in CI is usually that,
+not a real regression — check the CI logs for the authoritative verdict.
+
+### Option B: conda-forge
 
 ```bash
 # Create a development environment with all dependencies
@@ -23,7 +59,7 @@ cd abicheck
 pip install -e ".[dev]"
 ```
 
-### Option B: pip + system castxml
+### Option C: pip + system castxml
 
 ```bash
 # Install castxml separately (Ubuntu/Debian)

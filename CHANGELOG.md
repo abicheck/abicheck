@@ -120,6 +120,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   new flag. New `abicheck.package.parse_manylinux_glibc_floor()` derives the
   floor from a manylinux wheel tag (PEP 600 plus the
   `manylinux1`/`2010`/`2014` legacy aliases) for programmatic use.
+- **pixi dev-environment support.** `[tool.pixi.*]` in `pyproject.toml` (plus
+  a committed `pixi.lock`) gives contributors `pixi install && pixi run test`
+  as an alternative to `pip install -e ".[dev]"` — conda-forge-backed, so it
+  also provisions the system tools (`castxml`, a C/C++ compiler, `cmake`,
+  `libabigail`, `abi-compliance-checker`) that the `integration`/`libabigail`/
+  `abicc` marker lanes need, via the `integration`/`parity`/`docs` pixi
+  environments. No change to the published package or its runtime deps. See
+  `CONTRIBUTING.md`.
 
 ### Fixed
 

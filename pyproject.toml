@@ -228,3 +228,91 @@ paths_to_mutate = [
 ]
 tests_dir = "tests/"
 runner = "python -m pytest -x -q --tb=no -m 'not integration and not libabigail and not abicc and not slow'"
+
+# ---------------------------------------------------------------------------
+# pixi (https://pixi.sh) — conda-forge-based dev environments.
+#
+# `pip install -e ".[dev]"` (see CONTRIBUTING.md) remains fully supported;
+# pixi is an alternative that also manages the *system* tools (castxml, a
+# C/C++ compiler, libabigail, abi-compliance-checker) that CONTRIBUTING.md's
+# "Option A: conda-forge" section previously had to install by hand.
+#
+#   pixi install            # base dev environment (lint/type/unit-test tools)
+#   pixi run test            # fast unit-test lane (same as CLAUDE.md quick reference)
+#   pixi run check            # lint + format-check + typecheck + test + ai-readiness
+#   pixi run -e integration test-integration   # + castxml/compiler (needs `integration` env)
+#   pixi run -e parity test-libabigail          # + libabigail (linux-64 only)
+#   pixi run -e parity test-abicc                # + abi-compliance-checker (linux-64 only)
+#   pixi run -e docs docs-build                   # mkdocs --strict build
+# ---------------------------------------------------------------------------
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-64", "osx-arm64", "win-64"]
+
+[tool.pixi.pypi-dependencies]
+abicheck = { path = ".", editable = true }
+
+[tool.pixi.feature.dev.tasks]
+lint = "ruff check abicheck/ tests/"
+fmt = "ruff format abicheck/ tests/"
+fmt-check = "ruff format --check abicheck/ tests/"
+test = "pytest tests/ -m \"not integration and not libabigail and not abicc and not slow and not golden\""
+test-cov = "pytest tests/ -m \"not integration and not libabigail and not abicc and not slow and not golden\" --cov=abicheck --cov-report=term-missing"
+typecheck = "mypy abicheck/"
+ai-readiness = "python scripts/check_ai_readiness.py"
+check = { depends-on = ["lint", "fmt-check", "typecheck", "test", "ai-readiness"] }
+
+# Shared castxml + C/C++ compiler, needed by both `integration` (header/DWARF
+# parsing) and `parity` (feeding abidiff/abi-compliance-checker ABI dumps).
+# Not offered for win-64: MSVC isn't installable from conda-forge alone (see
+# the `windows-msvc` CI lane, which sets up cl.exe separately via
+# ilammy/msvc-dev-cmd) — Windows contributors run the base `dev` environment.
+[tool.pixi.feature.native-toolchain]
+platforms = ["linux-64", "osx-64", "osx-arm64"]
+
+[tool.pixi.feature.native-toolchain.dependencies]
+castxml = "*"
+c-compiler = "*"
+cxx-compiler = "*"
+
+# `integration` marker (DWARF/header parsing tests) — adds cmake on top of
+# the shared native-toolchain feature.
+[tool.pixi.feature.integration.dependencies]
+cmake = "*"
+
+[tool.pixi.feature.integration.tasks]
+test-integration = "pytest tests/ -v -m integration --tb=short"
+
+# libabigail (abidiff/abipkgdiff) + abi-compliance-checker, for the
+# `libabigail`/`abicc` parity markers. Both are conda-forge linux-64-only
+# packages (see the `libabigail-parity`/`abicc-parity` CI jobs).
+[tool.pixi.feature.parity]
+platforms = ["linux-64"]
+
+[tool.pixi.feature.parity.dependencies]
+libabigail = "*"
+abi-compliance-checker = "*"
+
+[tool.pixi.feature.parity.tasks]
+# Marker-scoped across all of tests/ (not a hard-coded file list) so newly
+# added `libabigail`/`abicc`-marked files (e.g. the `_extended` parity
+# suites) are picked up automatically.
+test-libabigail = "pytest tests/ -v -m libabigail --tb=short"
+test-abicc = "pytest tests/ -v -m abicc --tb=short"
+
+# mkdocs site build (`docs/`), matching the `lint-and-types` CI job.
+[tool.pixi.feature.docs.pypi-dependencies]
+mkdocs = "*"
+mkdocs-material = "*"
+pymdown-extensions = "*"
+mkdocs-redirects = "*"
+
+[tool.pixi.feature.docs.tasks]
+docs-build = "mkdocs build --strict"
+docs-serve = "mkdocs serve"
+
+[tool.pixi.environments]
+default = { features = ["dev", "mcp"], solve-group = "default" }
+integration = { features = ["dev", "mcp", "native-toolchain", "integration"], solve-group = "default" }
+parity = { features = ["dev", "mcp", "native-toolchain", "parity"], solve-group = "parity" }
+docs = { features = ["docs"], solve-group = "docs" }
