@@ -41,6 +41,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   bundled-dependency packaging noise that must stay non-breaking once
   scoped, and mass export removal at oneDAL's reported scale).
 
+### Changed
+
+- `--depth`/`--sources`/`--build-info`/`--header-graph`/`--dry-run` `--help`
+  text on `dump`/`compare`/`scan`, and their rich-click option-panel titles,
+  no longer reference the internal ADR-033 evidence-layer vocabulary
+  (`L0`-`L5`) with no explanation of what it means — reworded to plain terms
+  tied to the public `--depth` ladder (`binary`/`headers`/`build`/`source`).
+  Text only; no option, default, or behavior changes.
+
 ### Fixed
 
 - `compare` no longer silently discards explicit `--sources`/`--build-info`
