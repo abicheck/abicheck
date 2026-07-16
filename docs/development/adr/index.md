@@ -81,3 +81,4 @@ against the code as unverified, regardless of how confident it reads.
 | [040](040-compare-surface-reduction.md) | `compare` Surface Reduction — Side-Aware Flags, Config Demotion, Run Profiles | Accepted — phased (Phase A landed) |
 | [041](041-compiler-facts-semantic-impact-graph.md) | Compiler-Facts Semantic Impact Graph — Roadmap and P0 Slice | Accepted — P0 slice 1 implemented |
 | [042](042-compatibility-and-gate-decision-separation.md) | Formal separation of CompatibilityDecision and GateDecision | Accepted — implemented for JSON/SARIF/compare-release gate summaries |
+| [043](043-cli-pre-1.0-surface-reset.md) | Pre-1.0 CLI Surface Reset — Root Command Collapse, Depth Ladder Narrowing, and Dry-Run Unification | Accepted — implemented |
