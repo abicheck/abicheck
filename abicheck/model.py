@@ -275,6 +275,33 @@ class RecordType:
     #           diff skips the finality detector when either side is None to
     #           avoid false findings from schema evolution / tier downgrade.
     is_final: bool | None = None
+    # True when this RecordType is a class/struct template's own pattern body
+    # (e.g. the clang header backend's CXXRecordDecl nested inside a
+    # ClassTemplateDecl) rather than a concrete, instantiable type. Its field
+    # *names*/*types* are still real public surface, but it has no fixed
+    # layout for any one instantiation — detectors that need real
+    # size/offset data (e.g. DWARF layout backfill's name-based matching)
+    # must not treat it as an ordinary type. False for every non-clang
+    # producer (castxml/DWARF never emit an uninstantiated pattern this way).
+    is_template_pattern: bool = False
+    # True when *every* entry in `fields` was flattened up from an anonymous
+    # struct/union member by the clang header backend (clang emits an
+    # IndirectFieldDecl for each such member; see dumper_clang.py) -- not
+    # merely "at least one was" (Codex review): a mixed record like
+    # `struct Foo { union { int i; }; int tag; };` has an ordinary field
+    # (`tag`) with no such provenance guarantee, so the flag must be False
+    # for it too. DWARF's own record builder (dwarf_snapshot.py) now flattens
+    # *supported* anonymous aggregates too, but an unsupported producer/shape
+    # or a cached snapshot predating that flatten still legitimately leaves
+    # an all-anonymous record's DWARF view fieldless even though it carries
+    # the real size_bits — a structural signal the DWARF layout backfill
+    # needs to trust a
+    # bare-suffix (namespaced) match for this case without also trusting an
+    # ordinary record's coincidental match to an unrelated, fieldless type
+    # reached the same way. False for every non-clang producer (castxml
+    # computes real layout itself and is never backfilled; DWARF-only
+    # snapshots have no header view to flatten).
+    has_anonymous_aggregate_fields: bool = False
     # Provenance (ADR-015, schema v6) — see Function.source_header.
     source_header: str | None = None
     origin: ScopeOrigin = ScopeOrigin.UNKNOWN

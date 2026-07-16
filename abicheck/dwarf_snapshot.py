@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import collections
 import logging
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -254,6 +255,21 @@ def _record_kind_from_tag(tag: str) -> str:
     if tag == "DW_TAG_class_type":
         return "class"
     return "struct"
+
+
+def _default_member_access_for_tag(tag: str) -> AccessLevel:
+    """C++'s default member access for a record-type DWARF tag.
+
+    A compiler only emits ``DW_AT_accessibility`` on a member when it
+    *differs* from the enclosing record's language default — ``class``
+    defaults to private, ``struct``/``union`` to public (matching the C++
+    access-specifier rules) — so an absent attribute must resolve to this,
+    not unconditionally to public (Codex review: a `class`'s first,
+    unlabelled member, or an anonymous aggregate declared before any access
+    label, both carry no ``DW_AT_accessibility`` at all and were previously
+    misread as public).
+    """
+    return AccessLevel.PRIVATE if tag == "DW_TAG_class_type" else AccessLevel.PUBLIC
 
 
 # DIE tags whose children can hold ABI-relevant *top-level* declarations the
@@ -814,13 +830,12 @@ class _DwarfSnapshotBuilder:
         # base name → bit offset within this object (from the inheritance DIE's
         # DW_AT_data_member_location); empty when no such offset is present.
         base_offsets: dict[str, int] = {}
+        default_access = _default_member_access_for_tag(die.tag)
 
         kids = children if children is not None else die.iter_children()
         for child in kids:
             if child.tag == "DW_TAG_member":
-                tf = self._process_field(child, CU)
-                if tf is not None:
-                    fields.append(tf)
+                fields.extend(self._process_field(child, CU, default_access))
             elif child.tag == "DW_TAG_inheritance":
                 self._process_inheritance_child(
                     child, CU, bases, virtual_bases, base_offsets
@@ -911,11 +926,49 @@ class _DwarfSnapshotBuilder:
             log.debug("Failed to resolve source location for DIE")
         return None
 
-    def _process_field(self, die: Any, CU: Any) -> TypeField | None:
-        """Extract a struct/class/union field."""
+    def _process_field(
+        self,
+        die: Any,
+        CU: Any,
+        default_access: AccessLevel = AccessLevel.PUBLIC,
+    ) -> list[TypeField]:
+        """Extract a struct/class/union field, or the flattened fields of an
+        anonymous struct/union member.
+
+        *default_access* is the enclosing record's language default (private
+        for ``class``, public for ``struct``/``union``), used when this
+        field's own ``DW_AT_accessibility`` is absent — a compiler only
+        emits that attribute when it differs from the default (Codex
+        review).
+
+        Returns a list (0, 1, or more ``TypeField``\\ s): an unnamed
+        ``DW_TAG_member`` is either padding (0 results) or an anonymous
+        aggregate whose own members clang flattens into the enclosing
+        record's public surface (``RecordType.has_anonymous_aggregate_fields``
+        in ``dumper_clang.py``) — recursing into it here and adjusting each
+        inner field's offset by this member's own offset keeps DWARF's field
+        offsets in step with the header's flattened view, so a field
+        reordered *within* the aggregate remains a detectable layout change
+        under the clang+DWARF backend instead of always resolving to
+        ``offset_bits=None`` (Codex review).
+        """
         name = _attr_str(die, "DW_AT_name")
         if not name:
-            return None  # anonymous member (padding or anonymous aggregate)
+            return self._flatten_anonymous_member(die, CU, default_access)
+        if _attr_bool(die, "DW_AT_artificial"):
+            # Compiler-injected, not a real user-visible member — e.g. the
+            # implicit vtable pointer, which gcc names "_vptr.Foo" and
+            # clang spells differently, a documented cross-compiler false-
+            # positive source (test_cross_compiler_fp.py). It's already
+            # represented separately via RecordType.vtable/vptr_offset_bits,
+            # so surfacing it again as an ordinary field is both redundant
+            # and, for a fieldless-but-polymorphic class specifically,
+            # actively harmful: the clang header parser never emits it (no
+            # data members at all), so it made every such class's non-empty
+            # dwarf.fields look "unrelated" to the header's empty one and
+            # block backfill outright, even for an exact name match (Codex
+            # review).
+            return []
 
         type_name = "?"
         if "DW_AT_type" in die.attributes:
@@ -943,7 +996,7 @@ class _DwarfSnapshotBuilder:
 
         # Access level
         access_val = _attr_int(die, "DW_AT_accessibility")
-        access = self._access_from_dwarf(access_val)
+        access = self._access_from_dwarf(access_val, default_access)
 
         # Const / volatile
         is_const = False
@@ -955,16 +1008,85 @@ class _DwarfSnapshotBuilder:
             elif type_die.tag == "DW_TAG_volatile_type":
                 is_volatile = True
 
-        return TypeField(
-            name=name,
-            type=type_name,
-            offset_bits=offset_bits,
-            is_bitfield=is_bitfield,
-            bitfield_bits=bitfield_bits,
-            is_const=is_const,
-            is_volatile=is_volatile,
-            access=access,
+        return [
+            TypeField(
+                name=name,
+                type=type_name,
+                offset_bits=offset_bits,
+                is_bitfield=is_bitfield,
+                bitfield_bits=bitfield_bits,
+                is_const=is_const,
+                is_volatile=is_volatile,
+                access=access,
+            )
+        ]
+
+    def _flatten_anonymous_member(
+        self,
+        die: Any,
+        CU: Any,
+        default_access: AccessLevel = AccessLevel.PUBLIC,
+    ) -> list[TypeField]:
+        """Flatten an anonymous struct/union member's own fields.
+
+        *die* is the unnamed ``DW_TAG_member`` slot for the aggregate itself
+        (not its type). Only a genuinely anonymous member type is flattened —
+        a named (typedef'd) anonymous-record type isn't flattened by the
+        clang header parser either, so treating it the same way here would
+        create fields DWARF has that the header side doesn't. Each inner
+        field's offset is relative to the anonymous aggregate, not the
+        enclosing record, so it is adjusted by this member's own offset
+        before returning.
+
+        Access is likewise resolved from *this* outer member, not each
+        inner one, and overrides it (CodeRabbit review): a C++ access
+        specifier applies to the anonymous member's *declaration*, not to
+        its individual members, and a compiler only emits
+        ``DW_AT_accessibility`` on the inner ``DW_TAG_member``\\ s when it
+        differs from *their own* enclosing (inner, anonymous) aggregate's
+        default — which is unrelated to the outer class's access section.
+        Confirmed against real GCC DWARF: a `protected:` anonymous union's
+        outer member DIE carries ``DW_AT_accessibility: 2``, while its
+        inner members carry none at all (and would otherwise silently
+        resolve to the wrong default via ``_access_from_dwarf``).
+
+        *default_access* is *this* member's own enclosing record's language
+        default (private for `class`, public for `struct`/`union`), used
+        when the outer member's own accessibility is absent — e.g. a
+        `class`'s first, unlabelled anonymous union carries no
+        ``DW_AT_accessibility`` at all (its access matches the class
+        default, so the compiler omits it) and must not resolve to public
+        (Codex review).
+        """
+        type_die = _resolve_type_die(die, CU)
+        if type_die is None or type_die.tag not in (
+            "DW_TAG_structure_type",
+            "DW_TAG_union_type",
+        ):
+            return []
+        if _attr_str(type_die, "DW_AT_name"):
+            return []
+        outer_offset_bits = 0
+        if "DW_AT_data_member_location" in die.attributes:
+            outer_offset_bits = (
+                _decode_member_location(die.attributes["DW_AT_data_member_location"].value) * 8
+            )
+        outer_access = self._access_from_dwarf(
+            _attr_int(die, "DW_AT_accessibility"), default_access
         )
+        flattened: list[TypeField] = []
+        for child in type_die.iter_children():
+            if child.tag != "DW_TAG_member":
+                continue  # e.g. a nested type declaration, not a data member
+            for inner in self._process_field(child, CU):
+                flattened.append(
+                    replace(
+                        inner,
+                        offset_bits=(inner.offset_bits or 0) + outer_offset_bits,
+                        access=outer_access,
+                    )
+                )
+        return flattened
 
     def _resolve_base_name(self, die: Any, CU: Any) -> str:
         """Resolve DW_TAG_inheritance → base class name."""
@@ -1302,13 +1424,24 @@ class _DwarfSnapshotBuilder:
         return 0
 
     @staticmethod
-    def _access_from_dwarf(val: int) -> AccessLevel:
-        """Map DW_AT_accessibility value to AccessLevel."""
+    def _access_from_dwarf(
+        val: int, default: AccessLevel = AccessLevel.PUBLIC
+    ) -> AccessLevel:
+        """Map DW_AT_accessibility value to AccessLevel.
+
+        *default* is returned for an absent attribute (``val == 0``) — the
+        caller passes the enclosing record's actual language default
+        (private for ``class``, public for ``struct``/``union``) where that
+        distinction matters (record fields); other call sites keep the
+        historical unconditional-public default.
+        """
         if val == 2:  # DW_ACCESS_protected
             return AccessLevel.PROTECTED
         if val == 3:  # DW_ACCESS_private
             return AccessLevel.PRIVATE
-        return AccessLevel.PUBLIC  # 0 (absent) or 1 (DW_ACCESS_public)
+        if val == 1:  # DW_ACCESS_public
+            return AccessLevel.PUBLIC
+        return default  # 0 (absent)
 
 
 # ---------------------------------------------------------------------------

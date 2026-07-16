@@ -266,6 +266,20 @@ def _clang_exception_spec(quals: str) -> str:
     return f"throw({inner})"
 
 
+def _clang_record_is_final(node: dict[str, Any]) -> bool:
+    """Whether a ``CXXRecordDecl`` carries the ``final`` class-virt-specifier.
+
+    Unlike castxml (which exposes ``final`` as a plain XML attribute), clang's
+    ``-ast-dump=json`` signals it as a child ``FinalAttr`` node under
+    ``"inner"`` rather than a boolean field on the record itself — there is no
+    ``node["final"]`` key to read.
+    """
+    return any(
+        isinstance(child, dict) and child.get("kind") == "FinalAttr"
+        for child in node.get("inner", []) or []
+    )
+
+
 def _clang_var_alignment_bits(node: dict[str, Any]) -> int | None:
     """Explicit alignment (bits) from an AlignedAttr, when evaluable."""
     for child in node.get("inner", []) or []:
@@ -361,6 +375,7 @@ class _ClangAstParser:
         access: str,
         extern_c: bool,
         in_friend: bool,
+        in_template: bool = False,
     ) -> str:
         """Pre-order walk that categorizes public decls, threading the sticky file.
 
@@ -376,7 +391,7 @@ class _ClangAstParser:
         name = node.get("name") or ""
 
         if not node.get("isImplicit"):
-            self._categorize(node, kind, name, scope, file, access, extern_c, in_friend)
+            self._categorize(node, kind, name, scope, file, access, extern_c, in_friend, in_template)
 
         # A function/method body is not an ABI declaration surface: its
         # parameters and defaults are read straight off the function node in
@@ -398,6 +413,20 @@ class _ClangAstParser:
         # subtree so parse_functions can flag it (matches castxml's
         # ``befriending`` link). Friends never define a new scope.
         child_in_friend = in_friend or kind == "FriendDecl"
+        # The template pattern's own CXXRecordDecl body (e.g. `template<typename T>
+        # struct Foo { T value; };`) is otherwise indistinguishable from an
+        # ordinary record: same kind, same bare name, no template-argument
+        # suffix. Its field *names*/*types* are still real public surface (a
+        # field added/removed from the pattern is a real API change regardless
+        # of instantiation), so it is still emitted as a RecordType — but it
+        # has no fixed *layout* for any one instantiation, so a plain-name
+        # DWARF match against it (e.g. layout backfill) would attach an
+        # unrelated type's or instantiation's real layout — silent corruption
+        # (Codex review). Mark the whole subtree so RecordType.is_template_pattern
+        # is set and the backfill matcher can skip it specifically.
+        child_in_template = in_template or kind in (
+            "ClassTemplateDecl", "ClassTemplatePartialSpecializationDecl",
+        )
         for child in node.get("inner", []) or []:
             if not isinstance(child, dict):
                 continue
@@ -411,6 +440,7 @@ class _ClangAstParser:
                 access=child.get("access", running),
                 extern_c=child_extern_c,
                 in_friend=child_in_friend,
+                in_template=child_in_template,
             )
         return file
 
@@ -424,9 +454,11 @@ class _ClangAstParser:
         access: str,
         extern_c: bool,
         in_friend: bool,
+        in_template: bool = False,
     ) -> None:
         entry = _Decl(
-            node=node, scope=scope, file=file, access=access, extern_c=extern_c, in_friend=in_friend
+            node=node, scope=scope, file=file, access=access, extern_c=extern_c,
+            in_friend=in_friend, in_template=in_template,
         )
         if kind in _FUNCTION_NODE_KINDS and name:
             self._functions.append(entry)
@@ -707,6 +739,7 @@ class _ClangAstParser:
         )
         fields = self._parse_fields(node)
         bases, virtual_bases, base_access = _parse_bases(node)
+        injected = _anonymous_member_names(node)
         return RecordType(
             name=override_name or str(node.get("name", "")),
             kind=kind,
@@ -721,7 +754,17 @@ class _ClangAstParser:
             vtable=[],
             is_union=kind == "union",
             is_opaque=False,
-            is_final=bool(node.get("final")),
+            is_final=_clang_record_is_final(node),
+            is_template_pattern=entry.in_template,
+            # True only when *every* field came from the anonymous-aggregate
+            # flatten, not merely "at least one did" (Codex review): a mixed
+            # record like `struct Foo { union { int i; }; int tag; };` would
+            # otherwise report the flag for `tag` too, letting the DWARF
+            # layout-backfill exact-match branch trust an unrelated empty
+            # DWARF candidate for a field (`tag`) the flag was never meant to
+            # vouch for.
+            has_anonymous_aggregate_fields=bool(injected)
+            and all(f.name in injected for f in fields),
             source_location=self._source_location(entry),
         )
 
@@ -849,7 +892,7 @@ class _Decl:
     ``__slots__`` keeps the per-decl overhead low on large headers.
     """
 
-    __slots__ = ("node", "scope", "file", "access", "extern_c", "in_friend")
+    __slots__ = ("node", "scope", "file", "access", "extern_c", "in_friend", "in_template")
 
     def __init__(
         self,
@@ -859,6 +902,7 @@ class _Decl:
         access: str,
         extern_c: bool = False,
         in_friend: bool = False,
+        in_template: bool = False,
     ) -> None:
         self.node = node
         self.scope = scope
@@ -871,6 +915,15 @@ class _Decl:
         # function is ADL-only ("hidden friend") and the diff treats it apart
         # from the ordinary public surface.
         self.in_friend = in_friend
+        # True when the decl is the pattern body of a class template (e.g. the
+        # CXXRecordDecl inside a ClassTemplateDecl): same kind and bare name as
+        # an ordinary record, but its members reference dependent template-
+        # parameter types with no fixed layout for any one instantiation. Kept
+        # as a RecordType (its field *names*/*types* are still real public
+        # surface — case17_template_abi's field-added detection relies on it)
+        # but flagged so a name-based match (e.g. DWARF layout backfill)
+        # never treats it as an ordinary concrete type (Codex review).
+        self.in_template = in_template
 
 
 def _qualtype(node: dict[str, Any]) -> str:

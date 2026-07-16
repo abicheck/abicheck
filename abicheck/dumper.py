@@ -77,6 +77,7 @@ from .dumper_debug import (
     _is_kernel_binary as _is_kernel_binary,
     _resolve_debug_metadata as _resolve_debug_metadata,
 )
+from .dumper_layout_backfill import backfill_dwarf_layout, dwarf_layout_types_or_empty
 from .dumper_sysinc import (
     _auto_system_includes_enabled as _auto_system_includes_enabled,
     _parse_gnu_include_search_dirs as _parse_gnu_include_search_dirs,
@@ -1654,26 +1655,26 @@ def _dump_elf(
     # leaks. The built snapshot holds extracted model objects, not live DIE
     # references, so closing after it is returned is safe.
     _dwarf_session_out: list[DwarfSession] = []
+    # Auto-detect can resolve to BTF/CTF with debug_format still None (Codex review).
+    _dwarf_format_out: list[str | None] = []
     dwarf_only_types: list[RecordType] = []
     try:
         if symbols_only or debug_presence_only:
             from .dwarf_presence import cheap_debug_presence_metadata
-            dwarf_meta, dwarf_adv = cheap_debug_presence_metadata(
-                so_path,
-                debug_format=debug_format,
-            )
+            dwarf_meta, dwarf_adv = cheap_debug_presence_metadata(so_path, debug_format=debug_format)
         else:
-            dwarf_meta, dwarf_adv = _resolve_debug_metadata(
-                so_path, debug_format, _session_out=_dwarf_session_out,
-                dwarf_source=debug_info_path,
-            )
+            dwarf_meta, dwarf_adv = _resolve_debug_metadata(so_path, debug_format, _session_out=_dwarf_session_out, _format_out=_dwarf_format_out, dwarf_source=debug_info_path)
+        resolved_debug_format = _dwarf_format_out[0] if _dwarf_format_out else debug_format
         dwarf_session = _dwarf_session_out[0] if _dwarf_session_out else None
         profile_hint = _lang_to_profile(lang)
-        # ADR-003: Updated fallback chain
-        # --dwarf-only → force DWARF mode regardless of headers
-        # no headers + DWARF available -> DWARF-only mode with type-aware checks
-        # no headers + no DWARF -> symbols-only mode
-        if not (symbols_only or debug_presence_only) and (
+        # ADR-003 fallback chain: --dwarf-only forces DWARF mode; no headers +
+        # DWARF -> DWARF-only mode; no headers + no DWARF -> symbols-only. Both
+        # legs gated on resolved_debug_format, not dwarf_meta.has_dwarf (which
+        # mirrors BTF/CTF presence too, and --dwarf-only + --debug-format
+        # btf/ctf resolves no real DWARF either — Codex review, twice).
+        if dwarf_only and resolved_debug_format != "dwarf":
+            warnings.warn(f"--dwarf-only requested but resolved debug format is {resolved_debug_format!r}; ignoring.", UserWarning, stacklevel=2)
+        if not (symbols_only or debug_presence_only) and resolved_debug_format == "dwarf" and (
             dwarf_only or (not headers and dwarf_meta.has_dwarf)
         ):
             snap, dwarf_only_types = _try_dwarf_snapshot(
@@ -1689,20 +1690,21 @@ def _dump_elf(
                 exported_dynamic_funcs, exported_dynamic_objects, exported_dynamic_tls,
                 dwarf_only_types, profile_hint,
             )
+        # Built here (session still open): the "auto" frontend can fall back to clang internally (G16) even when _resolve_header_backend guesses castxml, so the actual parser type is the only reliable signal below (Codex review).
+        parser = _header_ast_parser(
+            headers, extra_includes, backend=header_backend, compiler=compiler,
+            gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens,
+            sysroot=sysroot, nostdinc=nostdinc, lang=lang,
+            exported_dynamic=exported_dynamic, exported_static=exported_static,
+            public_header_paths=[str(h) for h in headers] + [str(h) for h in (public_headers or [])],
+            public_dir_paths=[str(d) for d in (public_header_dirs or [])],
+            extra_hash_dirs=extra_hash_dirs,
+        )
+        dwarf_layout_types = dwarf_layout_types_or_empty(so_path, elf_meta, dwarf_meta, dwarf_adv, isinstance(parser, _ClangAstParser), symbols_only=symbols_only, debug_presence_only=debug_presence_only, debug_format=resolved_debug_format, version=version, language_profile=profile_hint, session=dwarf_session)
     finally:
         for _sess in _dwarf_session_out:
             _sess.close()
-
-    parser = _header_ast_parser(
-        headers, extra_includes, backend=header_backend, compiler=compiler,
-        gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
-        gcc_option_tokens=gcc_option_tokens,
-        sysroot=sysroot, nostdinc=nostdinc, lang=lang,
-        exported_dynamic=exported_dynamic, exported_static=exported_static,
-        public_header_paths=[str(h) for h in headers] + [str(h) for h in (public_headers or [])],
-        public_dir_paths=[str(d) for d in (public_header_dirs or [])],
-        extra_hash_dirs=extra_hash_dirs,
-    )
 
     _so_mtime, _so_mtime_epoch = _safe_mtime(so_path)
     snapshot = AbiSnapshot(
@@ -1714,7 +1716,7 @@ def _dump_elf(
         source_size=_safe_size(so_path),
         functions=parser.parse_functions(),
         variables=parser.parse_variables(),
-        types=parser.parse_types(),
+        types=backfill_dwarf_layout(parser.parse_types(), dwarf_layout_types),
         enums=parser.parse_enums(),
         typedefs=parser.parse_typedefs(),
         constants=parser.parse_constants(),

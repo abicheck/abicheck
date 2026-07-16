@@ -618,18 +618,13 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         frozenset({"cli", "cli_compare_release"}),
         frozenset({"cli", "cli_baseline"}),
         frozenset({"cli", "cli_debian_symbols"}),
-        frozenset({"cli", "cli_buildsource"}),
-        frozenset({"cli", "cli_graph"}),
-        frozenset({"cli", "cli_inputs"}),
         frozenset({"cli", "cli_appcompat"}),
         frozenset({"cli", "cli_plugin"}),
         frozenset({"cli", "cli_pr_comment"}),
         frozenset({"cli", "cli_probe"}),
-        frozenset({"cli", "cli_scan"}),
         frozenset({"cli", "cli_stack"}),
         frozenset({"cli", "cli_suggest"}),
         frozenset({"cli", "cli_surface"}),
-        frozenset({"cli", "cli_doctor"}),
         # `scan` (cli_scan) reuses `embed_build_source` from cli_buildsource to
         # collect L3/L4/L5 inline; cli_buildsource imports `main`/helpers from cli;
         # cli imports cli_scan at its tail to register the command. All three edges

@@ -15,6 +15,7 @@ evidence and is exercised by `.github/workflows/examples-validation.yml`.
 | `scripts/run_tracker_parity.py`, `scripts/fetch_tracker_oracle.py` | Score abicheck against the ABICC abi-laboratory.pro parity oracle (harvest expected verdicts, then compare). |
 | `scripts/run_component_suites.py` | pytest harness for source-family component remeasurement. |
 | `scripts/run_example_runtime_smoke.py` | Runtime smoke over example cases. |
+| `scripts/run_full_catalog.py` | Single entry point: runs every runner below for one chosen `--toolchain` (default `auto` — base family, with per-case retry only for cases with a toolchain-scoped `known_gap` or a real compiler-capability skip) and emits one row-per-case matrix, without needing the manual multi-command sequence in the runbook. |
 | `scripts/summarize_remeasurement.py` | Combines example / component-suite / real-world artifacts into the release-gate summary. |
 | `scripts/conda_harness.py`, `scripts/validate.py` | Fetch/extract + unified end-to-end validation loop. |
 | `scripts/fp_depth_demo.py` | Pure-Python (no toolchain/network) runnable demonstration of *which evidence depth clears a false positive*: the build-context/preprocessor-divergence FP that `binary`/`headers` raise and `build` clears, plus the honest negative that no pure source-only clear exists. Backs `false-positive-depth-analysis-2026-07.md`. |

@@ -335,7 +335,14 @@ class TestResolveDebugMetadata:
         assert not dwarf_meta.has_dwarf
 
     def test_auto_kernel_prefers_btf(self, tmp_path, monkeypatch):
-        """Auto-detect on a kernel binary with a .BTF section prefers BTF."""
+        """Auto-detect on a kernel binary with a .BTF section prefers BTF.
+
+        _format_out must report "btf" here even though the *requested*
+        debug_format was None (Codex review): a caller checking has_dwarf
+        alone, or the raw requested format, can't tell BTF was actually
+        used and would otherwise open a second, direct DWARF walk of
+        whatever real .debug_info the binary happens to also carry.
+        """
         from abicheck.btf_metadata import BtfMetadata
 
         monkeypatch.setattr("abicheck.dumper_debug._is_kernel_binary", lambda _p: True)
@@ -344,8 +351,12 @@ class TestResolveDebugMetadata:
             "abicheck.btf_metadata.parse_btf_metadata",
             lambda _p: BtfMetadata(has_btf=True),
         )
-        dwarf_meta, _ = _resolve_debug_metadata(tmp_path / "vmlinux", None)
+        format_out: list[str | None] = []
+        dwarf_meta, _ = _resolve_debug_metadata(
+            tmp_path / "vmlinux", None, _format_out=format_out,
+        )
         assert dwarf_meta.has_dwarf  # BTF converted to DwarfMetadata
+        assert format_out == ["btf"]
 
     def test_auto_falls_back_to_btf_when_no_dwarf(self, tmp_path, monkeypatch):
         """Userspace binary with no DWARF but a .BTF section falls back to BTF."""
@@ -363,8 +374,12 @@ class TestResolveDebugMetadata:
             "abicheck.btf_metadata.parse_btf_metadata",
             lambda _p: BtfMetadata(has_btf=True),
         )
-        dwarf_meta, _ = _resolve_debug_metadata(tmp_path / "lib.so", None)
+        format_out: list[str | None] = []
+        dwarf_meta, _ = _resolve_debug_metadata(
+            tmp_path / "lib.so", None, _format_out=format_out,
+        )
         assert dwarf_meta.has_dwarf
+        assert format_out == ["btf"]
 
     def test_auto_falls_back_to_ctf_when_no_dwarf_or_btf(self, tmp_path, monkeypatch):
         """No DWARF and no BTF but a .ctf section falls back to CTF."""
@@ -383,8 +398,37 @@ class TestResolveDebugMetadata:
             "abicheck.ctf_metadata.parse_ctf_metadata",
             lambda _p: CtfMetadata(has_ctf=True),
         )
-        dwarf_meta, _ = _resolve_debug_metadata(tmp_path / "lib.so", None)
+        format_out: list[str | None] = []
+        dwarf_meta, _ = _resolve_debug_metadata(
+            tmp_path / "lib.so", None, _format_out=format_out,
+        )
         assert dwarf_meta.has_dwarf
+        assert format_out == ["ctf"]
+
+    def test_format_out_reports_dwarf_and_none(self, tmp_path, monkeypatch):
+        """_format_out reports "dwarf" when real DWARF is found on the
+        auto-detect path, and None when no debug info exists at all."""
+        from abicheck.dwarf_advanced import AdvancedDwarfMetadata
+        from abicheck.dwarf_metadata import DwarfMetadata
+
+        monkeypatch.setattr("abicheck.dumper_debug._is_kernel_binary", lambda _p: False)
+        monkeypatch.setattr(
+            "abicheck.dwarf_unified.parse_dwarf",
+            lambda _p, **_k: (DwarfMetadata(has_dwarf=True), AdvancedDwarfMetadata()),
+        )
+        format_out: list[str | None] = []
+        _resolve_debug_metadata(tmp_path / "lib.so", None, _format_out=format_out)
+        assert format_out == ["dwarf"]
+
+        monkeypatch.setattr(
+            "abicheck.dwarf_unified.parse_dwarf",
+            lambda _p, **_k: (DwarfMetadata(has_dwarf=False), AdvancedDwarfMetadata()),
+        )
+        monkeypatch.setattr("abicheck.btf_metadata.has_btf_section", lambda _p: False)
+        monkeypatch.setattr("abicheck.ctf_metadata.has_ctf_section", lambda _p: False)
+        format_out2: list[str | None] = []
+        _resolve_debug_metadata(tmp_path / "lib.so", None, _format_out=format_out2)
+        assert format_out2 == [None]
 
     @pytest.mark.parametrize("btf_section_present", [False, True])
     def test_auto_kernel_btf_absent_falls_through_to_dwarf(
