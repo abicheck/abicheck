@@ -164,6 +164,9 @@
    "known_gap_platforms": [
     "macos"
    ],
+   "known_gap_observed": [
+    "NO_CHANGE"
+   ],
    "min_evidence": "L0",
    "platforms": [
     "linux",
@@ -183,6 +186,9 @@
    "known_gap": "macOS integration-tests observes NO_CHANGE for this case as of commit 71b4f624e2b10d53ee662b555907280baad0982a (PR #555); see case100_experimental_removed_without_replacement's known_gap for the shared investigation notes. Linux (gcc and clang) remains the blocking detector lane.",
    "known_gap_platforms": [
     "macos"
+   ],
+   "known_gap_observed": [
+    "NO_CHANGE"
    ],
    "min_evidence": "L0",
    "platforms": [
@@ -421,6 +427,9 @@
    "known_gap": "macOS integration-tests observes NO_CHANGE for this case as of commit 71b4f624e2b10d53ee662b555907280baad0982a (PR #555); see case100_experimental_removed_without_replacement's known_gap for the shared investigation notes. Linux (gcc and clang) remains the blocking detector lane.",
    "known_gap_platforms": [
     "macos"
+   ],
+   "known_gap_observed": [
+    "NO_CHANGE"
    ],
    "min_evidence": "L0",
    "platforms": [
@@ -1577,6 +1586,9 @@
    "known_gap_platforms": [
     "macos"
    ],
+   "known_gap_observed": [
+    "NO_CHANGE"
+   ],
    "min_evidence": "L2",
    "platforms": [
     "linux",
@@ -2094,6 +2106,9 @@
    "known_gap_platforms": [
     "macos"
    ],
+   "known_gap_observed": [
+    "NO_CHANGE"
+   ],
    "min_evidence": "L1",
    "platforms": [
     "linux",
@@ -2581,6 +2596,9 @@
    "known_gap": "macOS integration-tests observes NO_CHANGE (instead of the expected func_added) for this case as of commit 71b4f624e2b10d53ee662b555907280baad0982a (PR #555); see case100_experimental_removed_without_replacement's known_gap for the shared investigation notes. Linux (gcc and clang) remains the blocking detector lane.",
    "known_gap_platforms": [
     "macos"
+   ],
+   "known_gap_observed": [
+    "NO_CHANGE"
    ]
   },
   "case48_leaf_struct_through_pointer": {
@@ -3002,6 +3020,9 @@
    "known_gap_platforms": [
     "macos"
    ],
+   "known_gap_observed": [
+    "NO_CHANGE"
+   ],
    "min_evidence": "L0",
    "platforms": [
     "linux",
@@ -3212,6 +3233,9 @@
    "known_gap_platforms": [
     "macos"
    ],
+   "known_gap_observed": [
+    "NO_CHANGE"
+   ],
    "min_evidence": "L0",
    "platforms": [
     "linux",
@@ -3272,6 +3296,9 @@
    "known_gap_platforms": [
     "macos"
    ],
+   "known_gap_observed": [
+    "NO_CHANGE"
+   ],
    "min_evidence": "L2",
    "platforms": [
     "linux",
@@ -3325,6 +3352,9 @@
    "known_gap": "macOS integration-tests observes COMPATIBLE (var_added/constant_added only, missing the cpo_kind_changed correlation) instead of BREAKING for this case as of commit 71b4f624e2b10d53ee662b555907280baad0982a (PR #555); see case100_experimental_removed_without_replacement's known_gap for the shared investigation notes. Linux (gcc and clang) remains the blocking detector lane.",
    "known_gap_platforms": [
     "macos"
+   ],
+   "known_gap_observed": [
+    "COMPATIBLE"
    ],
    "min_evidence": "L2",
    "platforms": [
@@ -3640,6 +3670,9 @@
    "known_gap": "macOS integration-tests observes NO_CHANGE for this case as of commit 71b4f624e2b10d53ee662b555907280baad0982a (PR #555); see case100_experimental_removed_without_replacement's known_gap for the shared investigation notes. Linux (gcc and clang) remains the blocking detector lane.",
    "known_gap_platforms": [
     "macos"
+   ],
+   "known_gap_observed": [
+    "NO_CHANGE"
    ],
    "min_evidence": "L0",
    "platforms": [

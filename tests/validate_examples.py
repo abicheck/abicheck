@@ -974,12 +974,20 @@ def _evaluate_verdict(
     expected_raw: str | None,
     got: str,
     known_gap: str | None,
+    known_gap_observed: list[str] | None = None,
 ) -> CaseResult:
-    """Compare *got* verdict against *expected_raw* and return a CaseResult."""
+    """Compare *got* verdict against *expected_raw* and return a CaseResult.
+
+    *known_gap_observed*, when set, restricts the xfail to the specific wrong
+    verdict(s) the gap documents — any other mismatch (e.g. a false positive
+    in the opposite direction from what was actually observed) is a real FAIL
+    instead of being silently swept into the same known gap (Codex review).
+    Absent ⇒ any mismatch xfails (back-compat).
+    """
     expected = expected_raw or "UNKNOWN"
     if got == expected:
         return CaseResult(name, "PASS", expected_raw, got, "")
-    if known_gap:
+    if known_gap and (not known_gap_observed or got in known_gap_observed):
         return CaseResult(name, "XFAIL", expected_raw, got, known_gap)
     return CaseResult(name, "FAIL", expected_raw, got, f"expected={expected!r} got={got!r}")
 
@@ -1222,11 +1230,9 @@ def run_case(
     # A producer-scoped known_gap only excuses a mismatch under the producer that
     # actually built the case (resolved per source language); on other producers
     # the gap is dropped so a regression FAILs rather than being xfailed.
-    known_gap = (
-        entry.get("known_gap")
-        if _gap_applies(entry, v1_src.suffix == ".cpp", variant)
-        else None
-    )
+    gap_applies = _gap_applies(entry, v1_src.suffix == ".cpp", variant)
+    known_gap = entry.get("known_gap") if gap_applies else None
+    known_gap_observed = entry.get("known_gap_observed") if gap_applies else None
 
     tmp = _case_work_dir(tmp_base, name, variant)
     tmp.mkdir(parents=True)
@@ -1310,7 +1316,7 @@ def run_case(
         build_info=build_info_present,
     )
     result = _evaluate_verdict(
-        name, expected_raw, got, known_gap,
+        name, expected_raw, got, known_gap, known_gap_observed,
     )._replace(variant=variant, source_layers=source_layers)
     if smoke_proof:
         combined = smoke_proof if not result.message else f"{smoke_proof} | {result.message}"

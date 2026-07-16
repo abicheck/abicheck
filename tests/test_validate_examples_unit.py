@@ -173,6 +173,52 @@ class TestKnownGapToolchainScope:
         }
 
 
+class TestKnownGapVerdictScope:
+    """A known_gap must only excuse the SPECIFIC wrong verdict it documents.
+
+    Without this scope, any mismatch — including a false positive in the
+    opposite direction from what was actually observed (e.g. a case
+    documented as regressing to NO_CHANGE instead reports BREAKING) — would
+    be silently swept into the same known gap instead of failing (Codex
+    review on PR #567's macOS known_gap additions).
+    """
+
+    def test_unscoped_gap_excuses_any_mismatch(self):
+        result = _evaluate_verdict("case", "BREAKING", "COMPATIBLE", "some gap")
+        assert result.status == "XFAIL"
+
+    def test_scoped_gap_excuses_the_documented_verdict(self):
+        result = _evaluate_verdict(
+            "case", "BREAKING", "NO_CHANGE", "some gap", ["NO_CHANGE"]
+        )
+        assert result.status == "XFAIL"
+
+    def test_scoped_gap_does_not_excuse_a_different_mismatch(self):
+        result = _evaluate_verdict(
+            "case", "BREAKING", "COMPATIBLE", "some gap", ["NO_CHANGE"]
+        )
+        assert result.status == "FAIL"
+
+    def test_real_macos_cases_are_verdict_scoped(self):
+        gt = json.loads(_GROUND_TRUTH.read_text())["verdicts"]
+        verdict_scoped = {
+            "case22_method_const_changed": ["NO_CHANGE"],
+            "case47_inline_to_outlined": ["NO_CHANGE"],
+            "case71_inline_namespace_moved": ["NO_CHANGE"],
+            "case82_sycl_overload_set_removed": ["NO_CHANGE"],
+            "case85_internal_template_signature_changed": ["NO_CHANGE"],
+            "case88_cpo_kind_changed": ["COMPATIBLE"],
+            "case99_experimental_graduated": ["NO_CHANGE"],
+            "case100_experimental_removed_without_replacement": ["NO_CHANGE"],
+            "case101_inline_namespace_version_bumped": ["NO_CHANGE"],
+            "case110_concurrent_unordered_map_api_drift": ["NO_CHANGE"],
+            "case166_ref_qualifier_added": ["NO_CHANGE"],
+        }
+        for case_name, expected_verdicts in verdict_scoped.items():
+            assert gt[case_name]["known_gap_platforms"] == ["macos"]
+            assert gt[case_name]["known_gap_observed"] == expected_verdicts
+
+
 class TestBuildInfoVariantScope:
     def test_unscoped_build_info_applies_to_every_variant(self):
         entry = {"build_info": True}
