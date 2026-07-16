@@ -131,6 +131,16 @@ class CommentModel:
     library_rows: list[tuple[str, str, int, int, int]] = field(default_factory=list)
     removed_libraries: list[str] = field(default_factory=list)
     added_libraries: list[str] = field(default_factory=list)
+    # compare --used-by/--required-symbol(s) scoping (ADR-043): the headline
+    # emoji/title and check gate follow *this* verdict when set, not the raw
+    # bucket counts below (which stay the full, unscoped library diff, kept as
+    # informational context per this module's own "content channel" design) —
+    # otherwise a scoped-compatible run could render an alarming "ABI BREAKING"
+    # headline that disagrees with the actual (scoped) exit code (Codex review).
+    scoped_verdict: str | None = None
+    full_verdict: str | None = None
+    used_by_summaries: list[dict[str, object]] = field(default_factory=list)
+    required_symbol_summary: dict[str, object] | None = None
 
     @property
     def counts(self) -> tuple[int, int, int]:
@@ -237,6 +247,17 @@ def _from_compare(
     breaking, review, safe = _bucket_changes(
         report.get("changes"), gate_api_break, _severity_levels(report)
     )
+    # ADR-043 `compare --used-by`/`--required-symbol(s)`: the JSON report
+    # overwrites `verdict` with the scoped result and adds `full_verdict` plus
+    # `used_by`/`required_symbol_contract` (see cli_compare_helpers's
+    # _fold_scoped_compat_into_text) — carry those through so the comment's
+    # headline can follow the scoped verdict instead of the raw bucket counts.
+    used_by = report.get("used_by")
+    required_symbol_contract = report.get("required_symbol_contract")
+    scoped_verdict: str | None = None
+    if isinstance(used_by, list) or isinstance(required_symbol_contract, dict):
+        verdict = report.get("verdict")
+        scoped_verdict = str(verdict) if verdict is not None else None
     return CommentModel(
         mode="compare",
         subject=str(report.get("library", "library")),
@@ -246,6 +267,18 @@ def _from_compare(
         breaking=breaking,
         review=review,
         safe=safe,
+        scoped_verdict=scoped_verdict,
+        full_verdict=(
+            str(report["full_verdict"]) if "full_verdict" in report else None
+        ),
+        used_by_summaries=[a for a in used_by if isinstance(a, dict)]
+        if isinstance(used_by, list)
+        else [],
+        required_symbol_summary=(
+            required_symbol_contract
+            if isinstance(required_symbol_contract, dict)
+            else None
+        ),
     )
 
 
@@ -496,7 +529,21 @@ def _md_url(url: str) -> str:
     return url.replace("(", "%28").replace(")", "%29").replace(" ", "%20")
 
 
+#: Scoped-verdict (--used-by/--required-symbol) headline per verdict string —
+#: this is what the actual exit code reflects, so it takes priority over the
+#: raw (unscoped) bucket counts, which stay informational context below.
+_SCOPED_HEADER: dict[str, tuple[str, str]] = {
+    "BREAKING": ("❌", "ABI BREAKING (scoped)"),
+    "API_BREAK": ("⚠️", "API break (scoped)"),
+    "COMPATIBLE": ("✅", "Compatible (scoped)"),
+}
+
+
 def _header(model: CommentModel) -> tuple[str, str]:
+    if model.scoped_verdict is not None:
+        header = _SCOPED_HEADER.get(model.scoped_verdict)
+        if header is not None:
+            return header
     b, r, s = model.counts
     if model.removed_libraries:
         return "❌", "LIBRARY REMOVED"
@@ -683,6 +730,49 @@ def _library_notes(model: CommentModel) -> list[str]:
     return out
 
 
+def _scoped_notes(model: CommentModel) -> list[str]:
+    """`compare --used-by`/`--required-symbol(s)` scoping banner + summary.
+
+    States which verdict the exit code actually reflects whenever it disagrees
+    with the full-library breaking/review/safe buckets rendered below, then
+    lists each app's/contract's own scoped result (Codex review) — otherwise a
+    reviewer sees only the alarming full-library findings with no indication
+    the gate is scoped and currently passing (or vice versa).
+    """
+    if model.scoped_verdict is None:
+        return []
+    out: list[str] = []
+    if model.full_verdict is not None and model.full_verdict != model.scoped_verdict:
+        out += [
+            f"> ℹ️ **Scoped verdict: {model.scoped_verdict}** — this is what the "
+            f"exit code reflects. The full library (all changes below) is "
+            f"`{model.full_verdict}`.",
+            "",
+        ]
+    for app in model.used_by_summaries:
+        missing_symbols = app.get("missing_symbols")
+        n_missing = len(missing_symbols) if isinstance(missing_symbols, list) else 0
+        out.append(
+            f"- `--used-by {_esc(app.get('app'))}`: **{_esc(app.get('verdict'))}** "
+            f"(missing {n_missing} symbol(s), "
+            f"{app.get('relevant_change_count', 0)} relevant change(s))"
+        )
+    if model.required_symbol_summary is not None:
+        rs = model.required_symbol_summary
+        missing_entrypoints = rs.get("missing_entrypoints")
+        n_missing_ep = (
+            len(missing_entrypoints) if isinstance(missing_entrypoints, list) else 0
+        )
+        out.append(
+            f"- `--required-symbol` contract: **{_esc(rs.get('verdict'))}** "
+            f"(missing {n_missing_ep} "
+            f"entrypoint(s), {rs.get('relevant_change_count', 0)} relevant change(s))"
+        )
+    if out:
+        out.append("")
+    return out
+
+
 def _body_sections(model: CommentModel, detail: str) -> list[str]:
     if model.mode == "release":
         return _release_table(model, detail)
@@ -730,6 +820,7 @@ def _render_body(
         note += f" — see the [full report]({_md_url(report_url)})._" if report_url else "._"
         lines += [note, ""]
     lines += _library_notes(model)
+    lines += _scoped_notes(model)
     if detail != "summary":
         lines += _body_sections(model, detail)
     lines += _footer_block(ts, run_label, short_sha, report_url)
