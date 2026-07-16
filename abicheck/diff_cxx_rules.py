@@ -346,6 +346,13 @@ def _owner_descends_from(owner: str, ancestor: str, types: dict[str, RecordType]
     ``ns::Base`` resolves to its own record in *types* -- that record's very
     presence proves this snapshot retains namespace fidelity, so the bare
     name can no longer be assumed to mean the same class.
+
+    The identical corroboration applies when checking *ancestor* against
+    *owner*'s declared bases below: a leaf-only base entry (e.g. ``owner``'s
+    record lists a bare ``Base``) matches *any* same-leaf ``ancestor``
+    unless that ``ancestor`` has its own resolvable qualified record too --
+    otherwise a mixed snapshot where both ``ns1::Base`` and ``ns2::Base``
+    exist could match a base list that only ever meant one specific one.
     """
     if owner == ancestor:
         return True
@@ -353,15 +360,21 @@ def _owner_descends_from(owner: str, ancestor: str, types: dict[str, RecordType]
     leaf_ancestor = ancestor.rsplit("::", 1)[-1]
     owner_is_leaf = leaf_owner == owner
     ancestor_is_leaf = leaf_ancestor == ancestor
+
+    def _leaf_match_trustworthy(qualified: str | None) -> bool:
+        return qualified is None or qualified not in types
+
     if leaf_owner == leaf_ancestor and (owner_is_leaf or ancestor_is_leaf):
         qualified = ancestor if not ancestor_is_leaf else (owner if not owner_is_leaf else None)
-        if qualified is None or qualified not in types:
+        if _leaf_match_trustworthy(qualified):
             return True
     t = types.get(owner) or (types.get(leaf_owner) if leaf_owner != owner else None)
     if t is None:
         return False
     bases = _transitive_bases(t, types)
-    return ancestor in bases or leaf_ancestor in bases
+    if ancestor in bases:
+        return True
+    return leaf_ancestor in bases and _leaf_match_trustworthy(None if ancestor_is_leaf else ancestor)
 
 
 def vtable_slot_is_override_reuse(

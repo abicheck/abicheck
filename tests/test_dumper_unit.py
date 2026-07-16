@@ -1234,10 +1234,12 @@ class TestCastxmlParserVtable:
     def test_vtable_multi_id_overrides_replaces_every_resolved_slot(self):
         """Non-virtual multiple inheritance: Derived : Base1, Base2, each
         declaring its own unrelated foo(). A single final overrider covers
-        both (``overrides="m1 m2"``, both already-resolvable slots). The
-        reconstructed vtable must collapse onto ONE entry for the override,
-        not leave the second base's slot behind as a stale phantom entry
-        that no longer reflects reality once the override materializes.
+        both (``overrides="m1 m2"``, both already-resolvable slots). Each
+        resolved slot is a genuinely distinct position in the object's real
+        vtable-group layout, so both must survive -- neither collapsed away
+        (which would under-report the vtable's true size) nor left with
+        stale pre-override content -- each showing the override's mangled
+        name.
         """
         base1 = Element("Class", id="c1", name="Base1")
         m1 = Element("Method", id="m1", name="foo", mangled="_ZN5Base13fooEv",
@@ -1254,7 +1256,7 @@ class TestCastxmlParserVtable:
         p = _CastxmlParser(root, set(), set())
         types = p.parse_types()
         derived_t = next(t for t in types if t.name == "Derived")
-        assert derived_t.vtable == ["_ZN7Derived3fooEv"]
+        assert derived_t.vtable == ["_ZN7Derived3fooEv", "_ZN7Derived3fooEv"]
 
     def test_vtable_diamond_inheritance_does_not_infinite_loop(self):
         """Diamond inheritance (Derived : Left, Right; both : Base) revisits

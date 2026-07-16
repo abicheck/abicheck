@@ -286,3 +286,18 @@ class TestOwnerDescendsFrom:
         ways, and must not be treated as equal."""
         types = {"ns::Base": RecordType(name="ns::Base", kind="class")}
         assert not _owner_descends_from("ns::Base", "Base", types)
+
+    def test_leaf_only_base_list_not_trusted_against_disambiguated_ancestor(self) -> None:
+        """owner (``ns2::Derived``) declares a bare leaf-only base (``Base``,
+        as CastXML would record it) -- but if BOTH ``ns1::Base`` and
+        ``ns2::Base`` have their own resolvable qualified records elsewhere
+        in this (mixed DWARF/header) snapshot, that bare ``Base`` entry
+        can't be assumed to mean one specific one of them. Testing against
+        the unrelated ``ns1::Base`` must not succeed just because its leaf
+        happens to match."""
+        types = {
+            "ns2::Derived": RecordType(name="ns2::Derived", kind="class", bases=["Base"]),
+            "ns1::Base": RecordType(name="ns1::Base", kind="class"),
+            "ns2::Base": RecordType(name="ns2::Base", kind="class"),
+        }
+        assert not _owner_descends_from("ns2::Derived", "ns1::Base", types)
