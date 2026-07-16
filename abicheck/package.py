@@ -556,21 +556,25 @@ def _python_version_from_wheel_filename(filename: str) -> str | None:
     whether an optional build tag is present. Returns ``None`` when
     *filename* isn't a recognizable wheel name, its Python tag doesn't pin
     a specific minor version (e.g. the generic ``py3``), or the ABI tag
-    (second-from-last segment) is ``abi3`` — a ``cp39-abi3-...`` wheel
-    genuinely installs on Python 3.9 *and every later* 3.x minor (the whole
-    point of the stable/limited API), so it names a *floor*, not one exact
-    minor; pinning ``python_version="3.9"`` would make a marker like
-    ``python_version >= "3.10"`` wrongly evaluate inactive for an
-    interpreter the wheel actually supports (verified against
-    ``packaging.tags``: a ``cp39-abi3`` tag is in the accepted set for a
-    3.12 interpreter too) (Codex review).
+    (second-from-last segment) names ``abi3`` — either exactly (``cp39-
+    abi3-...``) or as one component of a PEP 425 compressed multi-tag ABI
+    segment (``.``-joined, e.g. ``cp39-cp39.abi3-...``, which ``packaging``
+    expands to *both* an exact-build tag and a stable-ABI tag). Either way
+    the wheel genuinely installs on the named Python 3.x minor *and every
+    later* one (the whole point of the stable/limited API), so it names a
+    *floor*, not one exact minor; pinning ``python_version="3.9"`` would
+    make a marker like ``python_version >= "3.10"`` wrongly evaluate
+    inactive for an interpreter the wheel actually supports (verified
+    against ``packaging.utils.parse_wheel_filename``: a ``cp39-cp39.abi3-
+    ...`` filename expands to both ``cp39-cp39-...`` and ``cp39-abi3-...``
+    tags) (Codex review).
     """
     if not filename.lower().endswith(".whl"):
         return None
     parts = filename[: -len(".whl")].split("-")
     if len(parts) < 5:
         return None
-    if parts[-2].lower() == "abi3":
+    if "abi3" in parts[-2].lower().split("."):
         return None
     m = _WHEEL_PYTHON_TAG_RE.match(parts[-3])
     return f"{m.group(1)}.{m.group(2)}" if m else None

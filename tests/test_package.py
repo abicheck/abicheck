@@ -1408,6 +1408,21 @@ class TestPythonVersionFromWheelFilename:
             is None
         )
 
+    def test_compressed_abi_tag_including_abi3_also_names_a_floor(self) -> None:
+        # Codex review: a PEP 425 compressed multi-tag ABI segment
+        # (cp39.abi3, dot-joined) is a different spelling of the same
+        # ambiguity -- packaging.utils.parse_wheel_filename expands
+        # "cp39-cp39.abi3-..." to BOTH an exact cp39-cp39 tag and a
+        # cp39-abi3 stable-ABI tag, so this wheel is just as installable
+        # on later 3.x minors as a plain cp39-abi3 wheel. An exact
+        # string-equality check against the whole ABI segment misses this.
+        assert (
+            _python_version_from_wheel_filename(
+                "pkg-1.0-cp39-cp39.abi3-manylinux_2_17_x86_64.whl"
+            )
+            is None
+        )
+
 
 class TestPythonFullVersionFromWheelFilename:
     def test_cp_tag_gets_synthetic_micro(self) -> None:
