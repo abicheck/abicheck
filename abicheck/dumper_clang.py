@@ -739,6 +739,7 @@ class _ClangAstParser:
         )
         fields = self._parse_fields(node)
         bases, virtual_bases, base_access = _parse_bases(node)
+        injected = _anonymous_member_names(node)
         return RecordType(
             name=override_name or str(node.get("name", "")),
             kind=kind,
@@ -755,7 +756,15 @@ class _ClangAstParser:
             is_opaque=False,
             is_final=_clang_record_is_final(node),
             is_template_pattern=entry.in_template,
-            has_anonymous_aggregate_fields=bool(_anonymous_member_names(node)),
+            # True only when *every* field came from the anonymous-aggregate
+            # flatten, not merely "at least one did" (Codex review): a mixed
+            # record like `struct Foo { union { int i; }; int tag; };` would
+            # otherwise report the flag for `tag` too, letting the DWARF
+            # layout-backfill exact-match branch trust an unrelated empty
+            # DWARF candidate for a field (`tag`) the flag was never meant to
+            # vouch for.
+            has_anonymous_aggregate_fields=bool(injected)
+            and all(f.name in injected for f in fields),
             source_location=self._source_location(entry),
         )
 

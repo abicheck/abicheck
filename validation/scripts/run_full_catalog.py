@@ -117,8 +117,18 @@ def _retry_candidates(
     return names
 
 
-def _run_compiler_lane(toolchain: str) -> tuple[dict[str, dict[str, Any]], str]:
-    """Return ({case_name: result}, human-readable description of what ran)."""
+def _run_compiler_lane(
+    toolchain: str,
+) -> tuple[dict[str, dict[str, Any]], str, list[str]]:
+    """Return ({case_name: result}, human-readable description, retry failures).
+
+    The third element surfaces a toolchain-sensitive retry that itself
+    FAIL/ERROR/BUILD_ERROR-ed, or produced no result row at all (Codex
+    review): silently keeping the primary (gcc) XFAIL/SKIP result in that
+    case would let ``_single_library_status`` promote it to COVERED via its
+    own ``source_smoke`` oracle, hiding a real regression in the alternate
+    toolchain path behind a match that never actually proved anything.
+    """
     primary = _run_json(
         [
             sys.executable,
@@ -132,7 +142,7 @@ def _run_compiler_lane(toolchain: str) -> tuple[dict[str, dict[str, Any]], str]:
         by_case = {
             r["name"]: {**r, "toolchain_used": toolchain} for r in primary["results"]
         }
-        return by_case, f"toolchain={toolchain} (forced for every case)"
+        return by_case, f"toolchain={toolchain} (forced for every case)", []
 
     gt = json.loads(GROUND_TRUTH.read_text())["verdicts"]
     primary_family = _family_of(primary.get("compiler_cxx", "gcc"))
@@ -143,6 +153,7 @@ def _run_compiler_lane(toolchain: str) -> tuple[dict[str, dict[str, Any]], str]:
     }
 
     retried = 0
+    retry_failures: list[str] = []
     if candidates and _has_compiler(alt_family):
         alt = _run_json(
             [
@@ -157,13 +168,18 @@ def _run_compiler_lane(toolchain: str) -> tuple[dict[str, dict[str, Any]], str]:
         alt_by_case = {r["name"]: r for r in alt["results"]}
         for name in candidates:
             alt_r = alt_by_case.get(name)
-            if (
-                alt_r
-                and alt_r["status"] == "PASS"
-                and by_case[name]["status"] != "PASS"
-            ):
+            if alt_r is None:
+                retry_failures.append(
+                    f"{name}: {alt_family} retry produced no result row"
+                )
+                continue
+            if alt_r["status"] == "PASS" and by_case[name]["status"] != "PASS":
                 by_case[name] = {**alt_r, "toolchain_used": alt_family}
                 retried += 1
+            elif alt_r["status"] in ("FAIL", "ERROR", "BUILD_ERROR"):
+                retry_failures.append(
+                    f"{name}: {alt_family} retry returned {alt_r['status']}"
+                )
     elif candidates:
         sys.stderr.write(
             f"note: {len(candidates)} toolchain-sensitive case(s) found but no {alt_family} "
@@ -173,7 +189,7 @@ def _run_compiler_lane(toolchain: str) -> tuple[dict[str, dict[str, Any]], str]:
         f"toolchain=auto (base {primary_family}; {len(candidates)} toolchain-sensitive "
         f"case(s) retried with {alt_family}, {retried} improved to PASS)"
     )
-    return by_case, desc
+    return by_case, desc, retry_failures
 
 
 def _resolve_single_library(
@@ -292,7 +308,7 @@ def _artifact_failures(
 def run_full_catalog(toolchain: str, results_dir: Path) -> dict[str, Any]:
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    compiler_by_case, compiler_desc = _run_compiler_lane(toolchain)
+    compiler_by_case, compiler_desc, retry_failures = _run_compiler_lane(toolchain)
 
     build_source_toolchain = [] if toolchain == "auto" else ["--toolchain", toolchain]
     build_source = _run_json(
@@ -393,8 +409,9 @@ def run_full_catalog(toolchain: str, results_dir: Path) -> dict[str, Any]:
     unresolved = [row["case_id"] for row in rows if row["status"] == "UNRESOLVED"]
     failed = [row["case_id"] for row in rows if row["status"] == "FAILED"]
     owner_summary = proofs.get("summary", {})
-    artifact_errors = _artifact_failures(
-        gt, proofs, bundle, special_cli, runtime, build_source
+    artifact_errors = (
+        _artifact_failures(gt, proofs, bundle, special_cli, runtime, build_source)
+        + retry_failures
     )
 
     return {

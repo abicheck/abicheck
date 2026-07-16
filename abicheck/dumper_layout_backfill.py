@@ -216,8 +216,15 @@ def backfill_dwarf_layout(
     which is a real, common C pattern, not a hypothetical. The exception is
     keyed off that dedicated flag rather than field non-emptiness alone, so
     an *ordinary* struct with real (non-anonymous) fields whose DWARF
-    counterpart happens to be absent doesn't get the same free pass. The
-    flag only vouches for the *header* side, though — it says nothing about
+    counterpart happens to be absent doesn't get the same free pass — that
+    requires the flag to mean "*every* field came from the flatten", not
+    "at least one did" (Codex review, fresh evidence): a mixed record like
+    ``struct Foo { union { int i; }; int tag; };`` sets the same flag if it
+    were computed from mere field-injection presence, letting an ordinary
+    field (``tag``) ride along with no corroboration of its own —
+    ``dumper_clang.py`` computes the flag as ``all(f.name in injected for f
+    in fields)``, not ``any(...)``, specifically to close this. The flag
+    only vouches for the *header* side, though — it says nothing about
     whether the specific unique suffix-matched DWARF candidate is really
     the same declaration, so a non-empty ``dwarf.vtable`` (an unrelated,
     fieldless-but-polymorphic type) still blocks the match even with the

@@ -744,6 +744,63 @@ def test_full_catalog_has_compiler_finds_versioned_clang_only(monkeypatch) -> No
     assert catalog._has_compiler("clang") is True
 
 
+def test_run_compiler_lane_surfaces_failed_and_missing_retries(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Regression (Codex review): when --toolchain auto retries a
+    toolchain-sensitive case with the alternate compiler and that retry
+    itself FAILs/ERRORs, or produces no result row at all, the primary
+    XFAIL result was kept unchanged with no record that the retry ever
+    went wrong -- collect_full_example_matrix._single_library_status would
+    then promote the untouched primary XFAIL to COVERED via its own
+    source_smoke oracle, hiding a real alternate-toolchain regression
+    behind a match that never actually proved anything."""
+    catalog = _load_script("validation/scripts/run_full_catalog.py")
+    synthetic_gt = tmp_path / "ground_truth.json"
+    synthetic_gt.write_text(
+        json.dumps(
+            {
+                "verdicts": {
+                    "caseA": {"known_gap_toolchains": ["gcc"]},
+                    "caseB": {"known_gap_toolchains": ["gcc"]},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(catalog, "GROUND_TRUTH", synthetic_gt)
+    monkeypatch.setattr(catalog, "_has_compiler", lambda _family: True)
+
+    primary = {
+        "compiler_cxx": "g++",
+        "results": [
+            {"name": "caseA", "status": "XFAIL", "message": "known_gap"},
+            {"name": "caseB", "status": "XFAIL", "message": "known_gap"},
+        ],
+    }
+    alt = {
+        "results": [
+            {"name": "caseA", "status": "FAIL", "message": "boom"},
+            # caseB deliberately omitted from the alt run's own results.
+        ],
+    }
+    calls = {"n": 0}
+
+    def fake_run_json(_cmd):
+        calls["n"] += 1
+        return primary if calls["n"] == 1 else alt
+
+    monkeypatch.setattr(catalog, "_run_json", fake_run_json)
+
+    by_case, _desc, retry_failures = catalog._run_compiler_lane("auto")
+    assert sorted(retry_failures) == [
+        "caseA: clang retry returned FAIL",
+        "caseB: clang retry produced no result row",
+    ]
+    assert by_case["caseA"]["status"] == "XFAIL"
+    assert by_case["caseB"]["status"] == "XFAIL"
+
+
 def test_full_catalog_resolve_single_library_threads_ground_truth_entry() -> None:
     """collect_full_example_matrix._single_library_status takes (name, entry,
     lanes) — calling it without entry raises TypeError on every single-library

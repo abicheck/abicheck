@@ -284,17 +284,21 @@ class RecordType:
     # must not treat it as an ordinary type. False for every non-clang
     # producer (castxml/DWARF never emit an uninstantiated pattern this way).
     is_template_pattern: bool = False
-    # True when one or more entries in `fields` were flattened up from an
-    # anonymous struct/union member by the clang header backend (clang emits
-    # an IndirectFieldDecl for each such member; see dumper_clang.py). DWARF's
-    # own record builder does not perform this flattening, so the same
-    # record's DWARF view legitimately has an empty field list even though it
-    # carries the real size_bits — a structural signal the DWARF layout
-    # backfill needs to trust a bare-suffix (namespaced) match for this case
-    # without also trusting an ordinary record's coincidental match to an
-    # unrelated, fieldless type reached the same way. False for every
-    # non-clang producer (castxml computes real layout itself and is never
-    # backfilled; DWARF-only snapshots have no header view to flatten).
+    # True when *every* entry in `fields` was flattened up from an anonymous
+    # struct/union member by the clang header backend (clang emits an
+    # IndirectFieldDecl for each such member; see dumper_clang.py) -- not
+    # merely "at least one was" (Codex review): a mixed record like
+    # `struct Foo { union { int i; }; int tag; };` has an ordinary field
+    # (`tag`) with no such provenance guarantee, so the flag must be False
+    # for it too. DWARF's own record builder does not perform this
+    # flattening, so an *all-anonymous* record's DWARF view legitimately has
+    # an empty field list even though it carries the real size_bits — a
+    # structural signal the DWARF layout backfill needs to trust a
+    # bare-suffix (namespaced) match for this case without also trusting an
+    # ordinary record's coincidental match to an unrelated, fieldless type
+    # reached the same way. False for every non-clang producer (castxml
+    # computes real layout itself and is never backfilled; DWARF-only
+    # snapshots have no header view to flatten).
     has_anonymous_aggregate_fields: bool = False
     # Provenance (ADR-015, schema v6) — see Function.source_header.
     source_header: str | None = None
