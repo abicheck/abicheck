@@ -58,6 +58,23 @@ issue (bad practice), not a break. This case is the natural next step:
 once that accidental export is *removed* between releases, the tool refuses
 to treat "undocumented" as "safe to remove" and reports the real binary break.
 
+## A note on how this is validated
+
+The `BREAKING` verdict above is what the real `abicheck compare` CLI produces
+(shown by the command above, and by `tests/validate_examples.py`, which
+drives the actual CLI as a subprocess). abicheck's catalog test suite also
+has a second, faster harness (`tests/test_example_autodiscovery.py`) that
+calls the lower-level `dump()`/`compare()` API directly, skipping the CLI's
+own orchestration layer. That layer is where `fold_l0_hard_removals()` lives
+— the reconciliation step that folds a raw ELF-only removal back in when a
+header-scoped compare can't see it on its own (ADR-037 D10.1 keeps this
+CLI-specific step out of the Tier-1 `checker.compare()` this faster harness
+calls). Since `internal_helper` has no header declaration at all, the direct
+API path never learns it existed, so that one harness alone reports
+`NO_CHANGE` — a known, tracked gap between the two validation paths
+(`known_gap` in `ground_truth.json`), not a change in what the tool actually
+reports to a real user running the CLI.
+
 ## How to fix
 
 - If `internal_helper` truly has no external callers, ship the removal with a

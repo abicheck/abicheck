@@ -72,6 +72,35 @@ See `tests/test_kde_compat_detectors.py::test_inherited_override_is_not_virtual_
 and `::test_same_name_different_signature_virtual_is_new_slot` for the
 unit-level pair this compiled example mirrors.
 
+## Known gap: a second, blunter detector still overcalls this end-to-end
+
+The unit tests above exercise `virtual_method_addition()` in isolation, and
+it does correctly withhold `VIRTUAL_METHOD_ADDED` for this pattern. But
+running the *full* compiled example through `abicheck compare` currently
+still reports `BREAKING`, via a second, independent check:
+`diff_types.py`'s `_diff_type_vtable()` just compares each class's list of
+vtable entries for equality — it has no awareness of "same slot, different
+target is fine." Since `Derived`'s vtable entry list textually changes
+(`Base::paint`'s slot now names `Derived::paint`) even though its length and
+order are identical, this cruder check unconditionally emits
+`type_vtable_changed`:
+
+```bash
+abicheck compare libv1.so libv2.so --header old=v1.hpp --header new=v2.hpp
+# verdict: BREAKING (currently observed)
+# type_vtable_changed: vtable changed: Derived
+# func_added: New public function: paint
+```
+
+This is tracked as a `known_gap` in `ground_truth.json`: the canonical,
+intended verdict is `COMPATIBLE` (this genuinely is not an ABI break — the
+dispatch mechanics are unchanged, only the target function, which is the
+entire point of an override), but `_diff_type_vtable()` and
+`virtual_method_addition()` currently disagree with each other. Closing this
+gap means teaching `_diff_type_vtable()` the same slot-reuse exemption
+`virtual_method_addition()` already has, rather than changing this case's
+canonical truth.
+
 ## How to reproduce
 
 ```bash

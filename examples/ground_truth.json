@@ -1890,6 +1890,7 @@
    "expected_kinds": [
     "func_removed_elf_only"
    ],
+   "known_gap": "fold_l0_hard_removals() (cli_compare_helpers.py) is CLI-only plumbing invoked from the `compare` command's full pipeline, not from Tier-1 abicheck.checker.compare() (ADR-037 D10.1 keeps Tier-1 from depending on CLI-layer code). Since internal_helper has zero header declaration on either side, a direct dump()+compare() call (as this test harness makes) never surfaces its removal at all -- NO_CHANGE. The full `abicheck compare` CLI path (exercised by tests/validate_examples.py) correctly reconciles the raw ELF-only removal back in and returns BREAKING, matching `expected`.",
    "min_evidence": "L0",
    "platforms": [
     "linux"
@@ -1922,6 +1923,7 @@
     "enum_member_value_changed"
    ],
    "expected_kinds": [],
+   "known_gap": "Verified working end-to-end with the clang AST frontend (--ast-frontend clang): InternalMode's origin correctly classifies as PRIVATE_HEADER and the scoping filters it, giving NO_CHANGE. Under the default castxml frontend (the CI 'debug-headers' lane), the enum's declaration-origin classification does not come out as a confident PRIVATE_HEADER the same way, so the ADR-024 enum-seeding override is not skipped and MODE_B's value change is reported as BREAKING (enum_member_value_changed). A real, currently-undiagnosed castxml-vs-clang divergence in provenance classification for a transitively-included, non-passed header -- not a fundamental flaw in the scoping rule itself.",
    "min_evidence": "L2",
    "platforms": [
     "linux"
@@ -1938,6 +1940,7 @@
    "expected_kinds": [
     "func_added"
    ],
+   "known_gap": "diff_cxx_rules.py's virtual_method_addition() correctly recognizes the slot reuse and withholds VIRTUAL_METHOD_ADDED, but a separate, blunter check -- diff_types.py's _diff_type_vtable(), which just compares each class's RecordType.vtable entry list for equality -- has no such exemption. Since Derived's vtable entry list textually changes (Base::paint's slot now names Derived::paint) even though its length/order is identical, it unconditionally emits TYPE_VTABLE_CHANGED, so the case is currently observed as BREAKING (type_vtable_changed + func_added) instead of the canonical COMPATIBLE. A real, currently-unaddressed inconsistency between the two vtable-related detectors, not an evidence-depth limitation.",
    "min_evidence": "L0",
    "platforms": [
     "linux"

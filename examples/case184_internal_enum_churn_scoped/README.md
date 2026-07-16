@@ -28,17 +28,26 @@ alone (ADR-024; the case20 regression this guards against).
 
 The override is skipped only when the enum's **own declaration origin** is
 confidently non-public: `v1_internal.h` is a real header, transitively
-included, but it was never passed via `-H`/`--header` — so
-`dumper_castxml`/`dumper_clang`'s provenance classifier tags `InternalMode` as
-`PRIVATE_HEADER`, not `PUBLIC_HEADER`, and reachability applies normally after
-all. Since nothing public reaches it, it's filtered.
+included, but it was never passed via `-H`/`--header` — so the header-AST
+provenance classifier should tag `InternalMode` as `PRIVATE_HEADER`, not
+`PUBLIC_HEADER`, letting reachability apply normally after all. Since
+nothing public reaches it, it's filtered.
 
 ```bash
 abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h \
-    --show-filtered
+    --ast-frontend clang --show-filtered
 # verdict: NO_CHANGE (exit 0)
 # filtered ledger lists: enum_member_value_changed: InternalMode::MODE_B (private-header)
 ```
+
+**Frontend caveat:** this is confirmed working end-to-end with the `clang`
+AST frontend (`--ast-frontend clang`). Under the default `castxml` frontend
+(the CI "debug-headers" lane), `InternalMode`'s declaration-origin doesn't
+currently come out as a confident `PRIVATE_HEADER` the same way, so the
+ADR-024 enum-seeding override isn't skipped and the value change is reported
+as `BREAKING` instead. That's a tracked, currently-undiagnosed
+castxml-vs-clang divergence in provenance classification (`known_gap` in
+`ground_truth.json`), not a flaw in the scoping rule itself.
 
 Without `--scope-public-headers`, or if `InternalMode` were declared directly
 in `v1.h` itself (no separate private header — an enum with a confident
