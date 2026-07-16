@@ -1299,11 +1299,19 @@ class _CastxmlParser:
             mid = method_el.get("id", "")
             overrides_id = method_el.get("overrides")
             key: int | str
-            if idx is not None:
-                key = idx
-            elif overrides_id:
+            if overrides_id:
+                # An override always reuses whatever slot its base declaration
+                # landed under -- checked BEFORE falling back to this
+                # declaration's own vtable_index. Preferring a fresh idx here
+                # instead would miss the reverse mixed-index direction: a base
+                # that lacks vtable_index (so its slot is keyed by its own
+                # string id) but is overridden by a declaration that DOES
+                # carry an index would otherwise open a new int-keyed slot
+                # instead of collapsing onto the base's string-keyed one. A
+                # fresh idx here only refines this slot's sort position (see
+                # below); it never means "this is a new slot".
                 key = self._vtable_slot_root.get(overrides_id, overrides_id)
-                if isinstance(key, int):
+                if idx is None and isinstance(key, int):
                     # This override has no vtable_index of its own, but it
                     # reuses an inherited *indexed* slot -- adopt that index so
                     # _build_vtable's final _vt_sort_key sort places it at the
@@ -1312,6 +1320,8 @@ class _CastxmlParser:
                     # declared after this one, an apparent "vtable reordered"
                     # that never actually happened).
                     idx = key
+            elif idx is not None:
+                key = idx
             else:
                 key = mid or mangled_name
             if mid:

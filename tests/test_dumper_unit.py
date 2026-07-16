@@ -1165,6 +1165,25 @@ class TestCastxmlParserVtable:
         derived_t = next(t for t in types if t.name == "Derived")
         assert derived_t.vtable == ["_ZN7Derived3fooEv", "_ZN4Base3barEv"]
 
+    def test_vtable_indexed_override_of_unindexed_base_collapses_to_one_slot(self):
+        """The reverse mixed-index direction: Base has NO vtable_index, but
+        Derived's override of it DOES carry one (plus ``overrides``). The
+        override must still collapse onto Base's (string-id-keyed) slot
+        rather than opening a second, int-keyed slot alongside it.
+        """
+        base = Element("Class", id="c1", name="Base")
+        m1 = Element("Method", id="m1", name="foo", mangled="_ZN4Base3fooEv",
+                      virtual="1", context="c1")
+        derived = Element("Class", id="c2", name="Derived")
+        SubElement(derived, "Base", type="c1")
+        m2 = Element("Method", id="m2", name="foo", mangled="_ZN7Derived3fooEv",
+                      virtual="1", vtable_index="0", context="c2", overrides="m1")
+        root = _xml_root(base, derived, m1, m2)
+        p = _CastxmlParser(root, set(), set())
+        types = p.parse_types()
+        derived_t = next(t for t in types if t.name == "Derived")
+        assert derived_t.vtable == ["_ZN7Derived3fooEv"]
+
     def test_vtable_diamond_inheritance_does_not_infinite_loop(self):
         """Diamond inheritance (Derived : Left, Right; both : Base) revisits
         Base through two paths. The `seen` guard must return {} on the

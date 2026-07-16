@@ -269,3 +269,10 @@ class TestOwnerDescendsFrom:
 
     def test_unrelated_leaf_and_unresolvable_type_returns_false(self) -> None:
         assert not _owner_descends_from("Other", "Base", {})
+
+    def test_both_qualified_same_leaf_different_namespace_returns_false(self) -> None:
+        """ns1::Base and ns2::Base share a leaf but are unrelated classes in
+        different namespaces -- both sides are already fully qualified, so
+        this is not the castxml-leaf-only ambiguity the leaf fallback exists
+        for, and must not be treated as the same class."""
+        assert not _owner_descends_from("ns2::Base", "ns1::Base", {})

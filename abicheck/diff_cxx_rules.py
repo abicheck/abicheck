@@ -335,15 +335,18 @@ def _owner_descends_from(owner: str, ancestor: str, types: dict[str, RecordType]
     """True if *owner* names *ancestor* itself, or a transitive base of it in *types*.
 
     Tolerant of qualified-vs-leaf naming the same way ``_transitive_bases``
-    resolves base names (no extra corroboration beyond that — CastXML base
-    names are leaf-only project-wide, and that module-level precedent already
-    accepts this level of ambiguity for hierarchy walks).
+    resolves base names (CastXML base lists are leaf-only project-wide; DWARF
+    records the qualified form) — but only when at least one side IS a bare
+    leaf, the genuine source of that ambiguity. Two *fully-qualified* names
+    that merely share a leaf component (``ns1::Base`` vs ``ns2::Base``) are
+    unrelated classes in different namespaces, not the same class recorded
+    two ways, and must not be treated as equal.
     """
     if owner == ancestor:
         return True
     leaf_owner = owner.rsplit("::", 1)[-1]
     leaf_ancestor = ancestor.rsplit("::", 1)[-1]
-    if leaf_owner == leaf_ancestor:
+    if leaf_owner == leaf_ancestor and (leaf_owner == owner or leaf_ancestor == ancestor):
         return True
     t = types.get(owner) or (types.get(leaf_owner) if leaf_owner != owner else None)
     if t is None:
