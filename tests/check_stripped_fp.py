@@ -122,7 +122,12 @@ def _classify_results(
         # (toolchain/platform/variant) -- a gap documented for e.g. macOS/clang
         # only must not mask a genuine Linux/gcc regression on the same case.
         platform = r.get("platform") or data.get("platform", "")
-        variant = r.get("variant") or label
+        # _result_to_json (validate_examples.py) writes the artifact variant to
+        # both "mode" and "variant" (mode is the JSON artifact schema's
+        # canonical field name) -- prefer "mode" so a results file that only
+        # carries one of the two still resolves correctly, only falling back
+        # to the CLI label when a row has neither (Codex review).
+        variant = r.get("mode") or r.get("variant") or label
         if (
             entry.get("known_gap")
             and _gap_applies(entry, case, platform, variant, data)

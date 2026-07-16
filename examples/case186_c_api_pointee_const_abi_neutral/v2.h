@@ -1,16 +1,13 @@
 #ifndef CASE186_H
 #define CASE186_H
-#include <stddef.h>
 
-/* data's pointee gained `const`: the field is still one pointer-width, at
- * the same offset -- only the mutability contract tightened (the library
- * now promises not to write through it).
+/* The parameter's pointee gained `const`: the pointer itself is still one
+ * machine word, passed the same way -- only the mutability contract
+ * tightened (the callee now promises not to write through it). Unlike a
+ * public struct field, a function parameter is a pure input-direction
+ * contract: any caller passing a `char *` (mutable or not) still satisfies
+ * `const char *` implicitly, so no existing call site can fail to compile.
  */
-typedef struct {
-    const char *data;
-    size_t size;
-} Buffer;
-
 void send_buffer(const char *data);
 
 #endif

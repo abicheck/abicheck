@@ -1979,10 +1979,9 @@
    "api_break": false,
    "bad_practice": false,
    "category": "no_change",
-   "description": "Buffer.data and send_buffer()'s parameter both change char* to const char* -- same pointer size/offset/calling convention, only the pointee's mutability contract tightens. name_classification.py's cv_qualifiers_only_differ() recognizes the top-level-pointer-plus-const/volatile-only shape and diff_symbols.py/diff_types.py skip emitting any finding at all (fully suppressed, not merely downgraded) -- the real false-positive class behind Wayland's wl_display accessors and libuv's uv_cpu_info_s::model pointee-const churn (conda-forge libuv 1.5x campaign).",
+   "description": "send_buffer()'s parameter changes char* to const char* -- same pointer size/offset/calling convention, only the pointee's mutability contract tightens. Deliberately scoped to a function parameter (a pure input-direction contract every existing caller still satisfies) rather than a public struct field, where the same char*->const char* spelling change would be a real source break for code writing through the field. name_classification.py's cv_qualifiers_only_differ() recognizes the top-level-pointer-plus-const/volatile-only shape and diff_symbols.py skips emitting any finding at all (fully suppressed, not merely downgraded) -- the real false-positive class behind Wayland's wl_display accessor functions picking up pointee const (conda-forge libuv 1.5x campaign).",
    "expected": "NO_CHANGE",
    "expected_absent_kinds": [
-    "type_field_type_changed",
     "func_params_changed"
    ],
    "expected_kinds": [],
