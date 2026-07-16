@@ -1945,13 +1945,12 @@
    "api_break": false,
    "bad_practice": false,
    "category": "no_change",
-   "description": "InternalMode::MODE_B's value changes (1 -> 9). InternalMode is declared in a private detail header transitively #include-d by the public umbrella header, never itself passed via -H/--header, and unreachable from any public function signature. Unlike a struct (case118), an enum's header-declared members are seeded into the public surface regardless of reachability (ADR-024, case20 regression) -- the override is skipped only because the enum's own declaration origin classifies as PRIVATE_HEADER, letting true reachability apply and filter it.",
+   "description": "InternalMode::MODE_B's value changes (1 -> 9). InternalMode is declared in a private detail header transitively #include-d by the public umbrella header, never itself passed via -H/--header, and unreachable from any public function signature. Unlike a struct (case118), an enum's header-declared members are seeded into the public surface regardless of reachability (ADR-024, case20 regression) -- the override is skipped only because the enum's own declaration origin classifies as PRIVATE_HEADER, letting true reachability apply and filter it. Previously a castxml-vs-clang provenance-classification divergence made the default castxml frontend miss the PRIVATE_HEADER classification (see git history for the prior known_gap text); verified fixed end-to-end on both the castxml and clang frontends as of this commit -- both now correctly give NO_CHANGE.",
    "expected": "NO_CHANGE",
    "expected_absent_kinds": [
     "enum_member_value_changed"
    ],
    "expected_kinds": [],
-   "known_gap": "Verified working end-to-end with the clang AST frontend (--ast-frontend clang): InternalMode's origin correctly classifies as PRIVATE_HEADER and the scoping filters it, giving NO_CHANGE. Under the default castxml frontend (the CI 'debug-headers' lane), the enum's declaration-origin classification does not come out as a confident PRIVATE_HEADER the same way, so the ADR-024 enum-seeding override is not skipped and MODE_B's value change is reported as BREAKING (enum_member_value_changed). A real, currently-undiagnosed castxml-vs-clang divergence in provenance classification for a transitively-included, non-passed header -- not a fundamental flaw in the scoping rule itself.",
    "min_evidence": "L2",
    "platforms": [
     "linux"

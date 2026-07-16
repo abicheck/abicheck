@@ -35,9 +35,14 @@ jobs:
         toolchain: [gcc, clang]
 
     steps:
+      # fetch-depth: 0 (full history) is required by the AST-cache step below:
+      # scripts/restore_git_mtimes.py needs each file's real last-commit time,
+      # which a shallow (default depth-1) clone can't see — every file would
+      # resolve to the single boundary commit's timestamp instead.
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Create results dir
         run: mkdir -p results
@@ -46,6 +51,10 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y castxml gcc g++ clang cmake
+
+      - uses: ./.github/actions/cache-ast-dumps
+        with:
+          key-suffix: ${{ matrix.toolchain }}
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -120,6 +129,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Create results dir
         run: mkdir -p results
@@ -128,6 +138,10 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y castxml gcc g++ clang cmake
+
+      - uses: ./.github/actions/cache-ast-dumps
+        with:
+          key-suffix: clang-fallback
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -179,6 +193,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Create results dir
         run: mkdir -p results
@@ -187,6 +202,10 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y castxml gcc g++ clang cmake binutils
+
+      - uses: ./.github/actions/cache-ast-dumps
+        with:
+          key-suffix: artifact-modes
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -269,6 +288,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Create results dir
         run: mkdir -p results downloaded
@@ -283,6 +303,13 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y castxml gcc g++ clang cmake binutils
+
+      # The owner-proofs/bundle/special-cli validators below also dump
+      # bundle/G20/special-shape example headers through the same castxml/
+      # clang AST cache as the other jobs.
+      - uses: ./.github/actions/cache-ast-dumps
+        with:
+          key-suffix: full-matrix
 
       - name: Set up Python
         uses: actions/setup-python@v6

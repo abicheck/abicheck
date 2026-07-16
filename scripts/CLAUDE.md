@@ -27,6 +27,7 @@ Each must run with Python 3.10+ and the package installed in dev mode
 | `demo_libz.py` | End-to-end demo on libz, used by the `e2e` CI job. | CI (`e2e` job) |
 | `summarize_test_durations.py` | Renders the per-test durations captured by the `tests/conftest.py` `ABICHECK_DURATIONS_JSON` hook into a Markdown table (GitHub run summary in CI, stdout locally). Reporting only — not a gate. Unit-tested in `tests/test_summarize_test_durations.py`. | CI (`unit-tests`, Linux/3.13) |
 | `extract_bundle_manifest.py` | Extracts a manifest from multi-library bundles (cases 90–93). | manual |
+| `restore_git_mtimes.py` | Restores each tracked file's mtime to its last-commit timestamp (one `git log` walk, not one subprocess per file). `dumper`'s on-disk AST cache keys headers by mtime, not content; `actions/checkout` resets every file's mtime to checkout time, so without this a persisted `actions/cache` for `~/.cache/abi_check` would miss every entry, every run. Restoring last-commit mtimes makes the cache key stable across checkouts of the same commit. | CI (`examples-validation.yml`); manual |
 
 ## Conventions
 

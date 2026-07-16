@@ -1,0 +1,54 @@
+name: Cache AST dumps
+description: >-
+  Restores example file mtimes to their last-commit timestamps and wires
+  actions/cache around dumper's on-disk AST cache (~/.cache/abi_check), so
+  castxml/clang header-AST dumps persist across examples-validation runs
+  instead of resetting on every fresh container.
+
+inputs:
+  key-suffix:
+    description: >-
+      Cache-key suffix identifying this job/matrix leg (e.g. "gcc", "clang",
+      "clang-fallback", "artifact-modes", "full-matrix") so parallel jobs
+      don't collide on the same cache key.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # dumper's on-disk AST cache (~/.cache/abi_check) keys each header on its
+    # mtime, not its content — actions/checkout sets every file's mtime to
+    # checkout time, so a persisted cache would miss on every entry, every
+    # run, without this. Restoring each file's last-commit mtime makes the
+    # cache key stable for unchanged content across checkouts (see
+    # scripts/restore_git_mtimes.py). Requires the calling job's checkout
+    # step to use `fetch-depth: 0` — a shallow (depth-1) clone only has one
+    # commit, so every file would be stamped with that single commit's time
+    # instead of its own last edit, defeating the point.
+    - name: Restore example file mtimes (stable AST-cache keys across CI runs)
+      shell: bash
+      run: python3 scripts/restore_git_mtimes.py examples
+
+    # Folded into the cache key below so a runner-image castxml/gcc/clang
+    # upgrade invalidates the whole cache instead of silently reusing AST
+    # dumps from a different toolchain version (dumper's own cache key does
+    # not capture tool versions, only paths/mtimes/flags). Written under
+    # results/ (already gitignored, and hashFiles() only resolves paths
+    # relative to GITHUB_WORKSPACE — an absolute /tmp path won't match).
+    - name: Record toolchain versions (cache key input)
+      shell: bash
+      run: |
+        mkdir -p results
+        { castxml --version; gcc --version; clang --version; } > results/abi-check-toolchain-versions.txt
+
+    # actions/cache only saves under a key that didn't already exist, so the
+    # primary key includes github.run_id (always fresh) and restore-keys
+    # falls back to the most recent cache sharing the same prefix — the
+    # standard "growing cache" idiom.
+    - name: Cache abicheck AST dumps (castxml/clang header-AST cache)
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/abi_check
+        key: abi-check-ast-cache-${{ runner.os }}-${{ inputs.key-suffix }}-${{ hashFiles('results/abi-check-toolchain-versions.txt') }}-${{ github.run_id }}
+        restore-keys: |
+          abi-check-ast-cache-${{ runner.os }}-${{ inputs.key-suffix }}-${{ hashFiles('results/abi-check-toolchain-versions.txt') }}-

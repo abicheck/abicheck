@@ -663,6 +663,38 @@ def _run_compare_and_parse(
     return data.get("verdict", "UNKNOWN"), kinds, None
 
 
+def _build_compare_direct_cmd(
+    v1_so: Path,
+    v2_so: Path,
+    v1_hdr: Path | None,
+    v2_hdr: Path | None,
+    scope_public_headers: bool,
+    pattern_verdicts: bool = False,
+) -> list[str]:
+    """Build a single ``abicheck compare`` command run directly on both binaries.
+
+    ``compare`` auto-detects a .so/.dylib/.dll operand and dumps it in-process,
+    so one invocation replaces the ``dump v1`` + ``dump v2`` + ``compare``
+    three-subprocess sequence for the common case. Profiling showed process/CLI
+    startup (Python interpreter + ``abicheck.cli`` import + Click registration),
+    not the dump/compare work itself, dominates wall time for small examples —
+    this removes two of those three process starts per case.
+    """
+    cmd = [
+        sys.executable, "-m", "abicheck.cli", "compare", str(v1_so), str(v2_so), "--format", "json",
+    ]
+    if v1_hdr and v1_hdr.exists():
+        cmd += ["-H", "old=" + str(v1_hdr)]
+    if v2_hdr and v2_hdr.exists():
+        cmd += ["-H", "new=" + str(v2_hdr)]
+    # Scoping is on by default since ADR-024 Phase 5; ground_truth.json verdicts
+    # are authored unscoped unless the case opts in, so be explicit either way.
+    cmd.append("--scope-public-headers" if scope_public_headers else "--no-scope-public-headers")
+    if pattern_verdicts:
+        cmd.append("--pattern-verdicts")
+    return cmd
+
+
 def _dump_and_compare(
     tmp: Path,
     v1_so: Path,
@@ -682,7 +714,32 @@ def _dump_and_compare(
 
     On success *error_msg* is None. On failure *verdict* is None and *kinds*
     is empty.
+
+    Cases with no out-of-band build-source pack and no dump-embedded
+    ``--build-info``/``--sources`` opt-in (the large majority of examples) take
+    a single-process ``compare v1.so v2.so`` fast path instead of dumping each
+    side to a snapshot first. Cases that need those (``old_build_source``/
+    ``new_build_source``, or a resolved ``old_build_info``/``new_build_info``,
+    or ``sources=True``) keep the three-call dump+dump+compare path: the
+    harness inspects each intermediate snapshot's embedded ``build_source``
+    coverage afterwards (see ``_embedded_present_layers`` in ``run_case``) to
+    confirm those layers were actually captured, not just requested, and the
+    single-call path has no snapshot to inspect.
     """
+    if (
+        old_build_source is None
+        and new_build_source is None
+        and old_build_info is None
+        and new_build_info is None
+        and not sources
+    ):
+        compare_cmd = _build_compare_direct_cmd(
+            v1_so, v2_so, v1_hdr, v2_hdr,
+            scope_public_headers=scope_public_headers,
+            pattern_verdicts=pattern_verdicts,
+        )
+        return _run_compare_and_parse(compare_cmd)
+
     snap1 = tmp / "snap1.json"
     cmd1 = _build_dump_cmd(
         so=v1_so,
