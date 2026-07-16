@@ -93,9 +93,15 @@ jobs:
       - name: Run large L2 and CastXML benchmark
         run: |
           rm -rf results/l2-large-castxml
+          mkdir -p results/l2-large-castxml
+          set +e
           python scripts/profile_large_l2_castxml_runner.py \
             --main-sha "$ABICHECK_MAIN_SHA" \
-            --out-dir results/l2-large-castxml
+            --out-dir results/l2-large-castxml \
+            >results/l2-large-castxml/probe.log 2>&1
+          rc=$?
+          cat results/l2-large-castxml/probe.log
+          exit "$rc"
 
       - name: Publish report in job summary
         if: always()
