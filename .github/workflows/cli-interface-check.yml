@@ -56,8 +56,14 @@ jobs:
           python scripts/diff_cli_surface.py \
             /tmp/cli-surface-base.json /tmp/cli-surface-head.json --markdown \
             > /tmp/cli-surface-diff.md
-          echo "changed=$?" >> "$GITHUB_OUTPUT"
+          status=$?
           set -e
+          if [ "$status" -gt 1 ]; then
+            echo "::error::diff_cli_surface.py exited $status (expected 0 or 1) — treating as a hard failure rather than silently skipping the CLI-surface gate."
+            cat /tmp/cli-surface-diff.md >&2 || true
+            exit "$status"
+          fi
+          echo "changed=$status" >> "$GITHUB_OUTPUT"
           cat /tmp/cli-surface-diff.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Label and comment when the CLI surface changed

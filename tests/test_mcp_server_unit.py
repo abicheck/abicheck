@@ -1046,6 +1046,28 @@ class TestAbiCompare:
         assert data["exit_code"] == 0
         assert data["exit_code_scheme"] == "scoped"
 
+    def test_required_symbols_folds_scoped_verdict_into_nested_report(
+        self, tmp_path: Path
+    ):
+        # The nested response["report"] (output_format="json") must reflect
+        # the same scoped verdict as the top-level fields, not the unscoped
+        # full-library result (Codex review).
+        kept = _pub_func("kept_entry", "_Z10kept_entryv", "int")
+        removed = _pub_func("unrelated", "_Z9unrelatedv", "int")
+        old = _make_snapshot("1.0", functions=[kept, removed])
+        new = _make_snapshot("2.0", functions=[kept])
+        old_p, new_p = self._make_pair(tmp_path, old, new)
+
+        raw = abi_compare(
+            str(old_p), str(new_p),
+            required_symbols=["_Z10kept_entryv"], output_format="json",
+        )
+        data = json.loads(raw)
+        report = data["report"]
+        assert report["verdict"] == "COMPATIBLE"
+        assert report["full_verdict"] == "BREAKING"
+        assert report["required_symbol_contract"]["verdict"] == "COMPATIBLE"
+
     def test_required_symbols_missing_entrypoint_is_breaking(self, tmp_path: Path):
         kept = _pub_func("entry", "_Z5entryv", "int")
         old = _make_snapshot("1.0", functions=[kept])

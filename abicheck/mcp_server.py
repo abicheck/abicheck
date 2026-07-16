@@ -892,6 +892,11 @@ def abi_compare(
             exit_code = worst_exit
             exit_code_scheme = "scoped"
             scoped_verdict_value = worst_verdict.value if worst_verdict is not None else None
+            # Mirror the CLI's result attributes (cli_compare_helpers._apply_used_by_scoping)
+            # so _fold_scoped_compat_into_text below can fold the same scoping into the
+            # rendered report, not just this response's top-level fields.
+            result.used_by = summaries  # type: ignore[attr-defined]
+            result.scoped_verdict = worst_verdict  # type: ignore[attr-defined]
         elif required_symbols:
             from .appcompat import scope_diff_to_required_symbols
 
@@ -910,6 +915,8 @@ def abi_compare(
             exit_code = _scoped_verdict_exit_code(scoped_host.verdict)
             exit_code_scheme = "scoped"
             scoped_verdict_value = scoped_host.verdict.value
+            result.required_symbols = scoped_payload  # type: ignore[attr-defined]
+            result.scoped_verdict = scoped_host.verdict  # type: ignore[attr-defined]
 
         # Build structured response. When a used_by/required_symbols scope is in
         # effect, mirror the CLI JSON contract (`_fold_scoped_compat_into_text`):
@@ -960,6 +967,15 @@ def abi_compare(
             severity_config=severity_config,
         )
         # When format is json, embed as nested object (not double-encoded string)
+        if scoped_key is not None:
+            from .cli_compare_helpers import _fold_scoped_compat_into_text
+
+            # Fold the same scoped-verdict swap/sections into the *rendered*
+            # report as the top-level fields above, mirroring the CLI's
+            # --secondary-format behavior — otherwise a client reading
+            # response["report"] sees the unscoped full-library verdict even
+            # though the top-level verdict/exit_code are scoped (Codex review).
+            rendered = _fold_scoped_compat_into_text(rendered, output_format, result)
         if output_format == "json":
             response["report"] = json.loads(rendered)
         else:

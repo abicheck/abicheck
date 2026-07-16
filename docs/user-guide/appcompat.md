@@ -2,10 +2,12 @@
 
 `compare --used-by APP` answers: **"Will my application still work with the new library version?"**
 
-Unlike a plain `compare` (which reports all library changes), `--used-by`
-scopes the diff to show only changes that affect the specific application
-binary you provide. This is the application-centric view of ABI
-compatibility.
+Unlike a plain `compare` (whose verdict and exit code reflect the whole
+library), `--used-by` scopes the **verdict and exit code** to just the
+changes that affect the specific application binary you provide — the
+report still lists every library change, but adds a per-app verdict/summary
+and makes that scoped verdict (not the full-library one) drive the exit
+code. This is the application-centric view of ABI compatibility.
 
 > **History note:** this used to be a standalone `abicheck appcompat`
 > command. The pre-1.0 CLI reset folded it into `compare --used-by` (ADR-043)
@@ -54,38 +56,46 @@ abicheck compare libfoo.so.1 libfoo.so.2 \
 This will:
 
 1. Parse each application binary to extract required symbols
-2. Run the full library comparison (same as plain `compare`)
+2. Run the full library comparison (same as plain `compare`) — the report
+   still lists every library change, not just the app-relevant ones
 3. Check symbol availability in the new library
-4. Filter changes to show only those affecting each application
+4. Internally partition the library's changes into those relevant to each
+   application's imports and those that are not, to compute a per-app count
+   and verdict (see "How symbol filtering works" below)
 5. Compute an app-specific verdict per `--used-by` app, and fold the worst
    one into the run's primary verdict/exit code
 
 ### Example output
 
+The full-library report (same body plain `compare` would produce) is
+rendered first, followed by an appended `--used-by` summary. When the
+app-scoped verdict differs from the full-library verdict, a banner states
+which one the exit code actually reflects:
+
 ```text
+**Scoped verdict: BREAKING** (this is what the exit code reflects; the full
+library verdict above is COMPATIBLE_WITH_RISK).
+
 # Comparison Report
 
 **Library:** `libfoo.so.1` → `libfoo.so.2`
-**Verdict:** `BREAKING` (worst of: full-library `COMPATIBLE_WITH_RISK`, `./myapp` `BREAKING`)
+**Verdict:** `COMPATIBLE_WITH_RISK`
 
-## used_by: ./myapp
+... (the full, unfiltered set of library changes) ...
 
-App requires **12** library symbols.
-11 of 12 required symbols present in new version.
+## Scoped to --used-by applications
 
-### Relevant Changes (1 of 7 total)
-
-These library changes affect symbols this application uses:
-
-| Kind | Symbol | Description |
-|------|--------|-------------|
-| `func_params_changed` | `foo_process` | parameter type changed |
-
-_6 library ABI change(s) do NOT affect this application._
+- ./myapp: BREAKING (missing 1 symbol(s), 0 version(s), 1 relevant change(s))
 ```
 
-(Exact rendering depends on `--format`; see `abicheck compare --help` for the
-full output-format list.)
+The full-library report body is **not** filtered down to app-relevant
+changes — every change is still listed there. The `--used-by` section names
+each app's scoped verdict and a small missing-symbol/relevant-change count;
+the `json` format instead adds `used_by` (per-app detail, including
+`missing_symbols`/`missing_versions`/`relevant_change_count`) and
+`full_verdict` keys alongside the usual payload, with `verdict` overwritten
+to the scoped verdict. (Exact rendering depends on `--format`; see
+`abicheck compare --help` for the full output-format list.)
 
 ---
 
@@ -140,9 +150,10 @@ flags.
 
 ## Exit codes
 
-`compare --used-by` uses the same exit codes as plain `compare`, computed
-from the worst of the full-library verdict and every `--used-by` app's
-scoped verdict:
+`compare --used-by` computes the exit code from the worst of every
+`--used-by` app's own scoped verdict — the full-library verdict is folded
+into the rendered report as informational context (see "Example output"
+above) but does **not** participate in the exit-code calculation:
 
 | Exit code | Verdict | Meaning |
 |-----------|---------|---------|
@@ -151,15 +162,21 @@ scoped verdict:
 | `4` | `BREAKING` | Binary ABI break or missing symbols |
 | `64` | usage error | Bad arguments/invocation |
 
-### Severity-aware exit codes
+### `--severity-*` flags have no effect here
 
-Passing any `--severity-*` option switches to the same severity-aware exit
-scheme as plain `compare` (see [Exit Codes](../reference/exit-codes.md)),
-classifying the **app-relevant** changes (the ones that affect an app, not
-the whole library diff) by category. Missing required symbols/versions are
-still treated as a hard runtime break and always floor the exit code at `4`,
-even under `--severity-preset info-only` — an application that can't resolve
-a symbol it needs is not something a severity downgrade should hide.
+Unlike plain `compare`, a scoped `--used-by` (or `--required-symbol(s)`) run
+always uses this fixed legacy mapping — passing `--severity-preset` or any
+other `--severity-*` option does **not** switch it to the severity-aware
+`0`/`1`/`2`/`4` scheme described in [Exit Codes](../reference/exit-codes.md).
+The scoped exit code is derived purely from the worst app-scoped `Verdict`
+(`BREAKING` → `4`, `API_BREAK` → `2`, otherwise `0`). One consequence: a
+missing required symbol/version is always `Verdict.BREAKING`, so it always
+exits `4` — even under `--severity-preset info-only` — but that's because
+severity presets don't reach the scoped path at all, not because of a
+special-cased floor. If you need severity-aware exit codes for the
+app-relevant subset of changes, don't pass `--used-by`; run plain `compare`
+with your `--severity-*` flags and use `--show-only`/the JSON report to
+inspect the changes touching your app's imports instead.
 
 ---
 

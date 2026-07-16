@@ -113,128 +113,95 @@ but off the visible surface. The L2/L4 frontend is one knob, `--ast-frontend`
 (`auto`/`castxml`/`clang`; env `ABICHECK_AST_FRONTEND`), shared across header-AST
 parsing and source-ABI replay (ADR-037 D8).
 
-## Advanced: `collect` and out-of-band packs
+## Advanced: out-of-band packs, and what `collect`/`graph` left behind
 
-The `collect` command (which writes an on-disk pack directory) remains for
-advanced use — raw-provenance retention, external CLI extractors (ADR-032 D3),
-per-TU caching, and audit mode. The common workflow above never needs it. A
-pack directory it produces can still be embedded (`dump --build-info <pack>` /
+> **History note:** the standalone `collect` command (which wrote a raw,
+> on-disk pack directory) and the `graph explain`/`graph compare` commands
+> were both removed outright in the ADR-043 CLI reset — neither has a direct
+> CLI replacement. `collect`'s capability lives on as `dump --sources`/
+> `--build-info`'s inline collection (below) plus a few library-only
+> functions for advanced producers; `graph explain`/`graph compare`'s
+> structural diff/localization is Python-API only (see "The L5 graph's own
+> diff/localize" below) — only its *derived findings* still surface
+> automatically through an ordinary `compare`.
+
+A pack directory (from the `abicheck-cc` wrapper, the Clang plugin, or a
+hand-written producer) can be embedded (`dump --build-info <pack>` /
 `--sources <pack>` auto-detect a pack by its `manifest.json`) or supplied
-out-of-band per side at compare time:
+out-of-band per side at compare time instead:
 
 ```bash
 # (Advanced) Override or supply facts out-of-band per side instead of embedding:
 abicheck compare old.abi.json new.abi.json \
   --build-info old=old.bs/ --build-info new=new.bs/
-
-# (Advanced) Collect a pack from an existing build tree (no rebuild), then embed.
-#   --source-abi-extractor : clang (default) | castxml | android
-#   --source-abi-scope     : off | headers-only | changed | target | full
-#   --source-abi-cache     : optional per-TU dump cache (ADR-030 D8)
-abicheck collect \
-  --compile-db build/compile_commands.json \
-  --source-abi \
-  --source-abi-extractor clang \
-  --source-abi-scope target \
-  --source-abi-cache .abicache/source \
-  --source-graph summary \
-  --output libfoo.evidence/
-abicheck dump libfoo.so -H include/ --sources libfoo.evidence/ -o new.abi.json
 ```
 
-- `--source-abi-scope changed --changed-path src/foo.cpp` replays only changed
-  TUs (and TUs of any target whose public header changed) — PR mode.
-- `--source-abi-extractor android --android-dump libfoo.lsdump` reuses a
-  pre-captured Android `header-abi-dumper`/`header-abi-linker` dump instead of
-  running a compiler.
+### The one-step inline flow replaces `collect` + a separate embed
 
-`--source-abi` and `--source-graph summary` together (as above) also fold
-three further edge kinds into the graph **automatically** — there is no
-separate opt-in flag for any of them, matching `dump --sources`'s own
-behavior exactly:
-
-- Approximate direct-call edges (`DECL_CALLS_DECL`, each labelled with a
-  `call_kind` and `resolution` confidence), enabling the
-  `call_graph_public_entry_reachability_changed` quality finding.
-- Type/field-dependency edges (`TYPE_INHERITS`/`TYPE_HAS_FIELD_TYPE`/
-  `DECL_HAS_TYPE`/`DECL_REFERENCES_DECL`), feeding
-  `public_to_internal_dependency`.
-- Compile-unit include edges (`COMPILE_UNIT_INCLUDES_FILE`, preferring
-  already-recorded build-tool inputs over a fresh `clang -M` invocation),
-  enabling `include_graph_public_header_drift`.
-
-All three require `clang++` and degrade gracefully without it — the graph is
-still collected, just without those edges (never aborts collection). Without
-`--source-abi` (L4), the graph stays structural-only (L3+L5) — the same
-cost-gating `dump --sources` uses (parsing every TU with `clang -ast-dump=json`
-for call/type edges is roughly as expensive as the L4 replay itself, so it
-only runs when you've already opted into that cost).
-
-A further, independent graph layer (optional, non-aborting if the file is
-absent):
-
-- `--kythe-entries FILE` / `--codeql-results FILE` fold a **pre-captured**
-  Kythe entries export or CodeQL call-graph query result into the graph
-  (ADR-031 D5). abicheck never runs Kythe or CodeQL — it ingests their exported
-  JSON and records the external store in `external_graph_refs`.
-
-Localize a single finding through the graph:
+`dump --sources <tree>` **is** the collection step now — it resolves the
+compile database (inferring and running the CMake/Bazel/Make query itself
+when none is given), runs the L4 replay, and folds the L5 graph, embedding
+everything straight into the `.abi.json` in the same invocation that dumps
+the binary+headers:
 
 ```bash
-abicheck graph explain --sources libfoo.evidence/ --symbol _ZN3foo3barEv
-# or resolve the symbol from a JSON report:
-abicheck graph explain --sources libfoo.evidence/ --report report.json --finding-id 0
+abicheck dump libfoo.so -H include/ --sources . --depth source -o new.abi.json
 ```
 
-It reports what produced and reaches the symbol — exporting target, source
-declaration(s), declaring public header(s), ABI-relevant build option(s), and
-static callees — as graph-derived explanation, never an ABI verdict.
+There is no longer a separate pack-then-embed step, and no `--source-abi-scope`/
+`--source-abi-extractor`/`--source-graph` flags to pick — `--depth source`
+always runs L4 replay + folds the L5 graph (with the same three automatic
+edge kinds `dump --sources` has always added: approximate call edges
+`DECL_CALLS_DECL`, type/field-dependency edges, and compile-unit include
+edges — each degrading gracefully without `clang++` rather than aborting).
+`--depth build` stops at L3 (structural graph only, no L4 replay) for a
+cheaper run when you don't need the source-ABI findings.
 
-Compare two graph summaries directly — pass either the pack directories or the
-`graph/source_graph_summary.json` files:
+### What `collect`'s advanced flags have no CLI replacement for
 
-```bash
-abicheck graph compare old.evidence/ new.evidence/            # structural delta
-abicheck graph compare old.evidence/ new.evidence/ --format json
+A few capabilities `collect` exposed as flags never got a `dump`/`compare`
+equivalent — ADR-043 D4 judged them below the five-command bar — but the
+underlying library functions were *not* deleted, only their Click wiring:
+
+| `collect` flag (removed) | Library function to call instead |
+|---|---|
+| `--from cmake/ninja/bazel/make` (explicit build-system adapter) | `abicheck.buildsource.adapters.{cmake_file_api,ninja,bazel,make}` — `--sources` already infers one of these automatically for the common case |
+| `--read-compiler-record` | `abicheck.buildsource.compiler_record` (ELF `.GCC.command.line` / DWARF `DW_AT_producer`, advisory) |
+| `--source-abi-cache` (persistent per-TU replay cache) | `abicheck.buildsource.source_replay.SourceAbiCache` / the `ABICHECK_L4_CACHE_DIR` env var still works with `dump --sources` |
+| `--extractor-manifest` (external CLI extractors) | `abicheck.buildsource.extractor_manifest.load_extractor_manifest()` / `run_external_extractor()` — see "External CLI extractors" below |
+| `--collection-mode {permissive,strict,audit}` | No survivor — a failed producer step degrades coverage silently when scripted directly; call the library function inline in your own producer script if you need one of these behaviors |
+| `--kythe-entries`/`--codeql-results` | `abicheck.buildsource.graph_backends.ingest_kythe_entries()` / `ingest_codeql_call_results()` |
+
+See `abicheck/buildsource/CLAUDE.md` for the full module map if you need to
+script one of these directly.
+
+### The L5 graph's own diff/localize (`graph explain`/`graph compare`) is Python-API only
+
+```python
+from abicheck.buildsource.source_graph import diff_source_graph, localize_symbol
+
+# Structural delta between two source-graph summaries (nodes/edges added/removed)
+delta = diff_source_graph(old_graph, new_graph)
+
+# What produced and reaches a symbol: exporting target, source declaration(s),
+# declaring public header(s), ABI-relevant build option(s), static callees.
+explanation = localize_symbol(graph, "_ZN3foo3barEv")
 ```
 
-The diff is **structural** (which nodes/edges entered or left the graph). Per
-the authority rule it explains and prioritizes impact; it never, on its own,
-decides or suppresses an artifact-proven ABI break.
-
-`collect` accepts:
-
-- `--compile-db PATH` / `-p DIR` — a `compile_commands.json` (the universal,
-  low-friction input).
-
-Build-system adapters are selected with a single repeatable
-`--from ADAPTER[=PATH]`. Live adapters read `--build-dir` and take no path;
-pre-captured adapters require a path:
-
-- `--build-dir DIR --from cmake` — the CMake File API *reply* directory (target
-  graph, public/private header file sets, toolchains).
-- `--build-dir DIR --from ninja` / `--from ninja-compdb=FILE` — Ninja
-  `-t compdb`/`graph` output (live query or pre-captured for hermetic CI).
-- `--from bazel-cquery=FILE` / `--from bazel-aquery=FILE` — pre-captured
-  `bazel cquery --output=jsonproto` (configured target graph) and
-  `bazel aquery --output=jsonproto` (compile/link action graph). Use the
-  textual `jsonproto` form: a binary `--output=proto` blob is reported with a
-  diagnostic rather than decoded (binary-proto ingestion is a documented
-  follow-up).
-- `--from make=FILE` — a pre-captured `make -n`/`make --trace` transcript.
-  Make has no authoritative target graph, so the recovered compile units are
-  **reduced confidence**; prefer a generated `compile_commands.json` when one
-  is available.
-- `--read-compiler-record` (with `--binary`) — recover compiler provenance from
-  the built binary itself: the `.GCC.command.line` ELF section
-  (`-frecord-gcc-switches` / `-frecord-command-line`) and DWARF
-  `DW_AT_producer`. These signals are **advisory** unless cross-checked against
-  build-system evidence.
+Both load a `SourceGraphSummary` — from a pack directory's
+`graph/source_graph_summary.json`, or from `BuildSourcePack.load(path).source_graph`.
+Per the authority rule, this only explains and prioritizes impact; it never
+decides or suppresses an artifact-proven ABI break on its own. What *did*
+carry forward automatically into `compare` is the graph's **derived
+findings** (`SOURCE_TO_BINARY_MAPPING_CHANGED`, `PUBLIC_REACHABILITY_CHANGED`,
+`INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT`, etc.) — those are ordinary `ChangeKind`s
+a `--sources`/`--build-info` comparison reports like any other finding, with
+no separate command needed to see them.
 
 ## Worked example: a CMake library, end to end
 
 Two releases of `libfoo`, each built with CMake. The goal is a full
-**L0+L1+L2+L3(+L4)** compare so a build-flag change or a source-only API change
+**L0+L1+L2+L3+L4** compare so a build-flag change or a source-only API change
 is caught alongside the binary diff.
 
 ```bash
@@ -244,45 +211,39 @@ cmake -S libfoo-1.0 -B build-old -DCMAKE_BUILD_TYPE=Debug \
       -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 cmake --build build-old
 
-# 2. Collect the build/source pack from the existing build tree (no rebuild).
-#    Add --source-abi for L4 (needs clang); drop it for L3-only.
-abicheck collect \
-    --compile-db build-old/compile_commands.json \
-    --build-dir build-old --from cmake \
-    --source-abi \
-    --output libfoo-1.0.evidence/
+# 2. Snapshot the built library WITH headers, the build context, AND the
+#    source tree — one step folds L0-L2 (binary+headers), L3 (build-old's
+#    compile DB), and L4/L5 (replay + graph from libfoo-1.0) into one
+#    self-contained snapshot. --build-info points at the compile DB since
+#    build-old lives outside the libfoo-1.0 --sources tree.
+abicheck dump build-old/libfoo.so -H libfoo-1.0/include \
+    --sources libfoo-1.0 --build-info build-old/compile_commands.json \
+    --depth source --version 1.0 -o libfoo-1.0.abi.json
 
-# 3. Snapshot the built library WITH headers and the build context.
-#    -p bakes the L3 build flags into how the headers are parsed, and records
-#    parsed_with_build_context so the later compare won't flag header drift.
-abicheck dump build-old/libfoo.so -H libfoo-1.0/include -p build-old \
-    --version 1.0 -o libfoo-1.0.abi.json
+# (repeat steps 1-2 for the new release → libfoo-2.0.abi.json)
 
-# (repeat steps 1-3 for the new release → libfoo-2.0.abi.json + libfoo-2.0.evidence/)
-
-# --- At compare time (CI), pass BOTH snapshots AND both packs ---
-abicheck compare libfoo-1.0.abi.json libfoo-2.0.abi.json \
-    --build-info old=libfoo-1.0.evidence/ \
-    --build-info new=libfoo-2.0.evidence/
+# --- At compare time (CI), just the two snapshots — facts are already embedded ---
+abicheck compare libfoo-1.0.abi.json libfoo-2.0.abi.json
 ```
 
 The compare prints the [coverage table and capability report](../concepts/build-source-data.md#evidence-coverage)
 first, so you can confirm every layer landed before trusting the verdict — if a
 row says `not_collected` or `[off]`, that is exactly the input or tool to add.
 
-Because `dump --build-info/--sources` embeds the normalized facts into the
-`.abi.json`, a normal `compare old.json new.json` carries the L3/L4/L5 findings
-with **no out-of-band directories**. Keeping the `*.evidence/` pack directories
-next to the snapshots (e.g. as CI artifacts) is therefore optional — useful only
-when you want to re-attach raw provenance, override a side at compare time with
-`--build-info` / `--sources`, or debug what was collected.
+Because `dump --sources`/`--build-info` embeds the normalized facts into the
+`.abi.json`, a normal `compare old.json new.json` carries the L3/L4/L5
+findings with **no out-of-band directories** to manage or keep in sync —
+pass `--build-info old=/new=` only when you deliberately want to override a
+side's facts at compare time instead of what's already embedded.
 
 ## External CLI extractors & the security model (ADR-032)
 
 A build system abicheck does not natively support can be integrated through an
 **external CLI extractor** — a separate program registered by a YAML manifest,
 talked to over a subprocess boundary with declared inputs, outputs, and actions.
-No untrusted Python is ever imported into the abicheck process.
+No untrusted Python is ever imported into the abicheck process. There is no
+longer a CLI command to invoke this (the removed `collect --extractor-manifest`
+was the only wiring); call it from Python instead:
 
 ```yaml
 # my-extractor.yaml
@@ -298,42 +259,47 @@ outputs:
     - { kind: build_evidence, path: build/build_evidence.json }
 ```
 
-```bash
-abicheck collect \
-  --extractor-manifest my-extractor.yaml \
-  --allow-build-query \
-  -o libfoo.evidence/
+```python
+from pathlib import Path
+from abicheck.buildsource.extractor import CollectionContext, DEFAULT_ALLOWED_ACTIONS
+from abicheck.buildsource.extractor_manifest import (
+    load_extractor_manifest, run_external_extractor,
+)
+
+manifest = load_extractor_manifest(Path("my-extractor.yaml"))
+context = CollectionContext(
+    binary_paths=[Path("libfoo.so")],
+    header_roots=[Path("include")],
+    compile_db=Path("build/compile_commands.json"),
+    # allowed_actions defaults to DEFAULT_ALLOWED_ACTIONS (inspect only); add
+    # CollectionAction.QUERY_BUILD_SYSTEM etc. explicitly to permit more.
+)
+result, ledger_record = run_external_extractor(manifest, context, Path("libfoo.evidence"))
 ```
 
-The security model has three pillars:
+The security model has three pillars, enforced the same way whether the
+manifest is driven by this library call or (historically) the deleted CLI:
 
-- **Trusted-by-operator, never auto-discovered.** A manifest runs only when you
-  register it explicitly with `--extractor-manifest PATH`. abicheck never scans
-  `PATH`, the working tree, or any plugin directory.
+- **Trusted-by-operator, never auto-discovered.** A manifest runs only when
+  your own code loads it explicitly by path. abicheck never scans a
+  filesystem path, the working tree, or any plugin directory looking for one.
 - **Declared actions are a ceiling, not a grant.** `inspect` (read existing
-  files) is the only action allowed by default. `query_build_system` is enabled
-  by `--allow-build-query`; `run_compiler`, `run_build`, `wrap_build`, and
-  `network` are denied by default (network always). A manifest's
-  `allowed_actions` are *intersected* with what the run permits, so a manifest
-  can never escalate beyond what you turned on — and an extractor that needs an
-  action you did not enable is **skipped** with a diagnostic, never run.
-- **No shell, sanitized environment.** Commands are an argv list (never a shell
-  string) run with `shell=False` and a minimal environment, so a third-party
-  tool never receives your full environment (which may hold tokens). Note the
-  action model gates *invocation* — abicheck refuses to launch an extractor that
-  needs a disallowed action — but it does not sandbox a process once launched;
-  `network` being denied means no extractor that *declares* it is run, not a
-  kernel-level block. This is why manifests are trusted-by-operator: register
-  only extractors you vet.
+  files) is the only action allowed by default; `query_build_system`,
+  `run_compiler`, `run_build`, `wrap_build`, and `network` are denied by
+  default (network always) unless the caller explicitly opts in. A
+  manifest's `allowed_actions` are *intersected* with what the caller
+  permits, so a manifest can never escalate beyond what you turned on — and
+  an extractor that needs an action you did not enable is **skipped** with a
+  diagnostic, never run.
+- **No shell, sanitized environment.** Commands are an argv list (never a
+  shell string) run with `shell=False` and a minimal environment, so a
+  third-party tool never receives your full environment (which may hold
+  tokens). Note the action model gates *invocation* — abicheck refuses to
+  launch an extractor that needs a disallowed action — but it does not
+  sandbox a process once launched; `network` being denied means no extractor
+  that *declares* it is run, not a kernel-level block. This is why manifests
+  are trusted-by-operator: register only extractors you vet.
 
 Every external run records a full **reproducibility ledger** row in the pack
 manifest (ADR-032 D10): the redacted command, its content hash, declared
 capabilities, start/finish timestamps, status, and diagnostics.
-
-`--collection-mode` controls how failures are handled (ADR-032 D9):
-
-- `permissive` (default) — a failed extractor degrades coverage; collection
-  continues. Good for PR CI.
-- `strict` — a failed or invalid extractor exits non-zero. Good for baseline
-  generation, where missing evidence must be a hard error.
-- `audit` — preserve raw artifacts and full diagnostics for debugging.

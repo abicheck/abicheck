@@ -54,7 +54,9 @@ declarations with a constraint hash (`abicheck/buildsource/source_extractors/cla
 compares that hash and reports a tightened constraint as
 `ChangeKind.CONCEPT_TIGHTENED` (API_BREAK). Verified end to end against
 this case's real `v1.h`/`v2.h`: with L3 compile-unit evidence + an
-explicit public-header root (`abicheck collect -H`) and
+explicit public-header root (built the same way as case122's README —
+`collect_inline_pack(..., public_header_roots=(...))`, since the standalone
+`collect -H` command this used to run through no longer exists) and
 `--no-scope-public-headers` on `compare` (see case122's README for why
 that flag is needed — the same castxml-can't-see-it gap applies to the
 default public-surface scoping), the comparison reports
