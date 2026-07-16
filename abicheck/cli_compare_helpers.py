@@ -687,6 +687,13 @@ def _apply_used_by_scoping(
     # the scoped gate instead of the full, unscoped library diff (CLI-audit
     # P1: "SARIF/JUnit computing pass/fail from the full library diff").
     relevant_finding_ids: set[str] = set()
+    # Union across ALL apps of relevant Change objects, keyed by finding id --
+    # not just their ids -- so scoped-only changes (e.g. PE_ORDINAL_RETARGETED,
+    # which scope_diff_to_app synthesizes fresh per app and never adds to
+    # result.changes) can still be rendered by SARIF/JUnit instead of only
+    # contributing to the gate's exit code with nothing to explain it (Codex
+    # review).
+    relevant_changes_by_id: dict[str, Any] = {}
     missing_labels: set[str] = set()
     for app in used_by_apps:
         scoped = scope_diff_to_app(
@@ -695,6 +702,9 @@ def _apply_used_by_scoping(
         )
         summaries.append(_app_compat_summary(scoped))
         relevant_finding_ids.update(_finding_id(c) for c in scoped.breaking_for_app)
+        relevant_changes_by_id.update(
+            {_finding_id(c): c for c in scoped.breaking_for_app}
+        )
         # A missing symbol/version already covered by a relevant Change (e.g.
         # FUNC_REMOVED) must not also become a synthetic missing-contract
         # finding -- that would double-report the same ABI break (Codex
@@ -735,6 +745,10 @@ def _apply_used_by_scoping(
     result.gate_scope = "used_by"  # type: ignore[attr-defined]
     result.scoped_relevant_finding_ids = frozenset(relevant_finding_ids)  # type: ignore[attr-defined]
     result.scoped_missing_labels = tuple(sorted(missing_labels))  # type: ignore[attr-defined]
+    _existing_ids = {_finding_id(c) for c in result.changes}
+    result.scoped_only_changes = tuple(  # type: ignore[attr-defined]
+        c for fid, c in relevant_changes_by_id.items() if fid not in _existing_ids
+    )
     if exit_code_scheme == "severity":
         categories, counts = _scoped_severity_summary(
             list(worst_changes.values()), worst_missing,
@@ -771,6 +785,12 @@ def _apply_required_symbol_scoping(
     result.scoped_missing_labels = tuple(sorted(  # type: ignore[attr-defined]
         uncovered_missing_symbols(scoped.missing_entrypoints, scoped.breaking_for_host)
     ))
+    # Scoped-only changes: relevant to the host contract but never added to
+    # result.changes (mirrors _apply_used_by_scoping's identical handling).
+    _existing_ids = {_finding_id(c) for c in result.changes}
+    result.scoped_only_changes = tuple(  # type: ignore[attr-defined]
+        c for c in scoped.breaking_for_host if _finding_id(c) not in _existing_ids
+    )
     exit_code = _scoped_exit_code(
         scoped, scoped.breaking_for_host, result, exit_code_scheme, sev_config,
         policy, policy_file,

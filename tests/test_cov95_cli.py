@@ -1253,11 +1253,27 @@ class TestUsedByScoping:
         monkeypatch.setattr(
             dumper_mod, "dump", MagicMock(side_effect=[old_snap, new_snap])
         )
-        res = self._result(
-            verdict=Verdict.BREAKING, missing=["_Z3foov"],
-            breaking_for_app=[Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")],
-        )
-        self._patch_scope(monkeypatch, res)
+
+        # Extract the REAL diff's FUNC_REMOVED Change (not a hand-built stub
+        # with different description/old_value text) so its finding id
+        # genuinely matches the one in result.changes -- otherwise the dedup
+        # this test targets would never engage, since _finding_id is content-
+        # based, not id()-based.
+        def _scoped_for(diff, *_args, **_kwargs):
+            from abicheck.appcompat import AppCompatResult
+
+            real_change = next(c for c in diff.changes if c.kind == ChangeKind.FUNC_REMOVED)
+            return AppCompatResult(
+                app_path="/app", old_lib_path=str(old), new_lib_path=str(new),
+                required_symbols={"_Z3foov"}, required_symbol_count=1,
+                missing_symbols=["_Z3foov"],
+                breaking_for_app=[real_change],
+                verdict=Verdict.BREAKING,
+            )
+
+        import abicheck.appcompat as appcompat_mod
+
+        monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", _scoped_for)
         result = _invoke(
             "compare", str(old), str(new), "--used-by", str(app), "--format", "sarif",
         )

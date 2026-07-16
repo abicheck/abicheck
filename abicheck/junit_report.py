@@ -380,6 +380,14 @@ def _build_testsuite(
     kind_sets = result._effective_kind_sets()
 
     changes = list(result.changes)
+    # Scoped-only changes: scope_diff_to_app/scope_diff_to_required_symbols
+    # can synthesize a Change (e.g. PE_ORDINAL_RETARGETED) that is relevant
+    # to the gate but was never added to result.changes -- fold them into the
+    # same testcase pipeline (symbol grouping, failure decision via
+    # relevant_ids below) rather than a bespoke path, so a --used-by run
+    # that fails solely because of one of these still has a testcase/failure
+    # to explain it (Codex review).
+    changes += list(getattr(result, "scoped_only_changes", ()) or ())
     if show_only:
         changes = apply_show_only(
             changes,
@@ -503,9 +511,17 @@ def _add_scoped_properties(ts: ET.Element, result: DiffResult) -> None:
     # Back-compat alias for the property's original name.
     _prop("abicheck.scoped_verdict", scoped_verdict.value)
     relevant_ids = getattr(result, "scoped_relevant_finding_ids", None) or frozenset()
-    relevant_count = sum(1 for c in result.changes if _finding_id(c) in relevant_ids)
+    relevant_in_changes = sum(1 for c in result.changes if _finding_id(c) in relevant_ids)
+    # Scoped-only changes and missing-contract members are relevant by
+    # construction and never in result.changes, so they count toward
+    # relevant_finding_count but not unrelated_finding_count, which only
+    # counts irrelevant entries *within* result.changes (CodeRabbit review,
+    # mirrors sarif._scoped_gate_properties).
+    scoped_only_count = len(getattr(result, "scoped_only_changes", ()) or ())
+    missing_count = len(getattr(result, "scoped_missing_labels", ()) or ())
+    relevant_count = relevant_in_changes + scoped_only_count + missing_count
     _prop("abicheck.relevant_finding_count", str(relevant_count))
-    _prop("abicheck.unrelated_finding_count", str(len(result.changes) - relevant_count))
+    _prop("abicheck.unrelated_finding_count", str(len(result.changes) - relevant_in_changes))
     scoped_exit_code = getattr(result, "scoped_exit_code", None)
     scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
     if scoped_exit_code is not None:

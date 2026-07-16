@@ -646,7 +646,17 @@ class TestScopedGate:
         assert len(results) == 1
         assert results[0]["ruleId"] == "used_by_missing_symbol"
         assert results[0]["level"] == "error"
+        assert results[0]["properties"]["relevantToGate"] is True
+        assert results[0]["properties"]["blocksGate"] is True
         assert "_Z6vanishv" in results[0]["message"]["text"]
+        # The synthetic rule id must be registered too (Codex review) --
+        # otherwise a SARIF consumer resolving annotations from
+        # tool.driver.rules has no metadata for this finding.
+        rule_ids = {rule["id"] for rule in doc["runs"][0]["tool"]["driver"]["rules"]}
+        assert "used_by_missing_symbol" in rule_ids
+        # Counted as relevant even with no backing Change (CodeRabbit review).
+        scoped_gate = doc["runs"][0]["properties"]["scopedGate"]
+        assert scoped_gate["relevantFindingCount"] == 1
 
     def test_missing_contract_demoted_by_severity_config_is_not_blocking(
         self,
@@ -670,5 +680,42 @@ class TestScopedGate:
         doc = to_sarif(r, severity_config=demoted)
         result = doc["runs"][0]["results"][0]
         assert result["level"] == "note"
-        assert result["properties"]["relevantToGate"] is False
+        # relevantToGate stays true -- a missing-contract member is always in
+        # the --used-by/--required-symbol scope by construction (that's an
+        # orthogonal question from whether severity makes it block, which
+        # blocksGate/level carry -- CodeRabbit review).
+        assert result["properties"]["relevantToGate"] is True
+        assert result["properties"]["blocksGate"] is False
         assert doc["runs"][0]["invocations"][0]["exitCode"] == 0
+
+    def test_scoped_only_change_is_rendered(self) -> None:
+        # Regression (Codex review): scope_diff_to_app synthesizes a fresh
+        # Change (e.g. PE_ORDINAL_RETARGETED) that is relevant to the gate
+        # but never added to result.changes -- without rendering it, a
+        # --used-by run that fails solely because of one of these would
+        # report a nonzero gate exitCode with zero results to explain it.
+        from abicheck.reporter import _finding_id
+
+        scoped_only = Change(
+            kind=ChangeKind.PE_ORDINAL_RETARGETED,
+            symbol="ordinal:5",
+            description="ordinal 5 retargeted",
+            old_value="OldFunc", new_value="NewFunc",
+        )
+        r = _make_result([], verdict=Verdict.COMPATIBLE)
+        r.scoped_verdict = Verdict.BREAKING  # type: ignore[attr-defined]
+        r.scoped_exit_code = 4  # type: ignore[attr-defined]
+        r.scoped_exit_code_scheme = "legacy"  # type: ignore[attr-defined]
+        r.gate_scope = "used_by"  # type: ignore[attr-defined]
+        r.scoped_relevant_finding_ids = frozenset({_finding_id(scoped_only)})  # type: ignore[attr-defined]
+        r.scoped_only_changes = (scoped_only,)  # type: ignore[attr-defined]
+        doc = to_sarif(r)
+        results = doc["runs"][0]["results"]
+        assert len(results) == 1
+        assert results[0]["ruleId"] == "pe_ordinal_retargeted"
+        assert results[0]["properties"]["relevantToGate"] is True
+        rule_ids = {rule["id"] for rule in doc["runs"][0]["tool"]["driver"]["rules"]}
+        assert "pe_ordinal_retargeted" in rule_ids
+        scoped_gate = doc["runs"][0]["properties"]["scopedGate"]
+        assert scoped_gate["relevantFindingCount"] == 1
+        assert scoped_gate["unrelatedFindingCount"] == 0

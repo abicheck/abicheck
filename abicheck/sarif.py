@@ -183,6 +183,28 @@ def _rule_for(kind: ChangeKind) -> dict[str, Any]:
     }
 
 
+def _missing_contract_rule(rule_id: str) -> dict[str, Any]:
+    """Produce a SARIF reportingDescriptor for a synthetic missing-contract rule id.
+
+    Mirrors :func:`_rule_for`'s shape so ``used_by_missing_symbol``/
+    ``required_symbol_missing`` results carry the same rule metadata as any
+    other -- without a matching entry in ``tool.driver.rules``, a SARIF
+    consumer that resolves annotations by rule id would have no metadata for
+    these synthetic findings (Codex review).
+    """
+    return {
+        "id": rule_id,
+        "name": "".join(w.capitalize() for w in rule_id.split("_")),
+        "shortDescription": {"text": rule_id.replace("_", " ").capitalize()},
+        "fullDescription": {
+            "text": "A required symbol/version/entrypoint is missing from the new library."
+        },
+        "helpUri": "https://github.com/abicheck/abicheck/blob/main/docs/reference/exit-codes.md",
+        "defaultConfiguration": {"level": "error"},
+        "properties": {"tags": ["abi", "binary-compatibility", "missing-contract"]},
+    }
+
+
 def _result_for(
     change: Change,
     result: DiffResult,
@@ -346,7 +368,16 @@ def _missing_contract_result(
         "message": {
             "text": f"Required symbol/version '{label}' is missing from the new library.",
         },
-        "properties": {"relevantToGate": blocks, "missingContractMember": label},
+        # relevantToGate is always true here -- a missing-contract member is
+        # in the --used-by/--required-symbol scope by construction, distinct
+        # from whether severity config makes it block (`blocksGate`). The two
+        # axes are orthogonal: severity decides blocking, not scope
+        # membership (CodeRabbit review).
+        "properties": {
+            "relevantToGate": True,
+            "blocksGate": blocks,
+            "missingContractMember": label,
+        },
     }
 
 
@@ -371,13 +402,22 @@ def _scoped_gate_properties(result: DiffResult) -> dict[str, Any] | None:
     scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
     gate_scope = getattr(result, "gate_scope", None)
     relevant_ids = getattr(result, "scoped_relevant_finding_ids", None) or frozenset()
-    relevant_count = sum(1 for c in result.changes if _finding_id(c) in relevant_ids)
+    relevant_in_changes = sum(1 for c in result.changes if _finding_id(c) in relevant_ids)
+    # scoped-only changes (e.g. PE_ORDINAL_RETARGETED) and missing-contract
+    # members are relevant by construction -- they exist only because
+    # scope_diff_to_app/scope_diff_to_required_symbols found them relevant --
+    # and are never in result.changes, so they don't affect unrelatedFindingCount
+    # (which counts only irrelevant entries *within* result.changes) but do
+    # count toward relevantFindingCount (CodeRabbit review).
+    scoped_only_count = len(getattr(result, "scoped_only_changes", ()) or ())
+    missing_count = len(getattr(result, "scoped_missing_labels", ()) or ())
+    relevant_count = relevant_in_changes + scoped_only_count + missing_count
     block: dict[str, Any] = {
         "gateScope": gate_scope,
         "gateVerdict": scoped_verdict.value,
         "fullLibraryVerdict": result.verdict.value,
         "relevantFindingCount": relevant_count,
-        "unrelatedFindingCount": len(result.changes) - relevant_count,
+        "unrelatedFindingCount": len(result.changes) - relevant_in_changes,
         # Back-compat alias for the block's original field name.
         "scopedVerdict": scoped_verdict.value,
     }
@@ -448,9 +488,29 @@ def to_sarif(
             _result_for(change, result, severity_config, relevant_ids=relevant_ids)
         )
 
+    # Scoped-only changes: `scope_diff_to_app`/`scope_diff_to_required_symbols`
+    # can synthesize a Change (e.g. PE_ORDINAL_RETARGETED) that is relevant to
+    # the gate but was never added to `result.changes` -- without rendering
+    # these too, a --used-by run that fails solely because of one of these
+    # would report a nonzero gate exitCode with zero results to explain it
+    # (Codex review).
+    for change in getattr(result, "scoped_only_changes", ()) or ():
+        rule_id = change.kind.value
+        if rule_id not in rules_seen:
+            rules_seen[rule_id] = _rule_for(change.kind)
+        sarif_results.append(
+            _result_for(change, result, severity_config, relevant_ids=relevant_ids)
+        )
+
     gate_scope = getattr(result, "gate_scope", None)
     if gate_scope is not None:
         for label in getattr(result, "scoped_missing_labels", ()) or ():
+            rule_id = (
+                "used_by_missing_symbol" if gate_scope == "used_by"
+                else "required_symbol_missing"
+            )
+            if rule_id not in rules_seen:
+                rules_seen[rule_id] = _missing_contract_rule(rule_id)
             sarif_results.append(
                 _missing_contract_result(label, gate_scope, severity_config)
             )

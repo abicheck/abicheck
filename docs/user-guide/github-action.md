@@ -117,12 +117,10 @@ scan degrades gracefully and L0–L2 stay authoritative.
 | `build-config` | scan, dump | Trusted `.abicheck.yml`; its `build.query` runs automatically (operator-supplied = trusted). |
 | `allow-build-query` | scan, dump | **Deprecated, ignored.** Build queries now run automatically when `sources` is given; kept as a no-op for backward compatibility. |
 | `depth` | scan, dump | Evidence-depth dial: `binary`, `headers`, `build`, or `source`. Maps to `--depth`. Omit in scan mode for `auto` (risk-driven). |
-| `against` | scan | Previous build's dump/library to compare against (or use `abi-baseline` to auto-fetch one). Maps to `--against`. |
+| `against` | scan | Previous build's dump/library to compare against (or use `abi-baseline` to auto-fetch one). Maps to `--against`. Omit it (and `abi-baseline`) on a step to run a single-build hygiene lint instead — `scan` already runs audit-only whenever no baseline is given. |
 | `since` | scan | Focus the scan on files changed vs a git ref (e.g. `origin/main`). |
 | `changed-path` | scan | Changed path(s) to focus on (space-separated; alternative to `since`). |
 | `budget` | scan | Time guard (e.g. `15m`). The step **fails** on overflow (`verdict: BUDGET_OVERFLOW`) — a budget never silently shrinks scope. |
-| `audit` | scan | Single-build hygiene lint, no baseline (intra-version cross-source checks). |
-| `estimate` | scan | Dry-run: print projected per-layer cost and scan nothing (always exits 0). |
 | `crosscheck` | scan | Per-check severity overrides `KEY=LEVEL` (`off`/`info`/`warning`/`error`), space-separated. Promoting a check to `=error` makes a finding for it exit `2` (the API_BREAK tier); pair with `fail-on-api-break: true` to gate the step. |
 | `risk-rules` | scan | Path to a YAML file overriding the `risk_rules` profile. |
 
@@ -147,6 +145,7 @@ scan degrades gracefully and L0–L2 stay authoritative.
 |-------|---------|-------------|
 | `format` | `markdown` (`text` for scan) | Output format: `markdown`, `json`, `sarif`, `html`. `sarif`/`html` are only available in `compare` mode when `old-library`/`new-library` are a single pair — a directory/package comparison rejects them with a clear error (choose `markdown` or `json` instead). `deps-tree`/`deps-compare` support only `markdown`/`json` and fall back to `markdown`; `scan` supports only `text`/`json` and falls back to `text`. |
 | `output-file` | — | Path to write report (auto-set for SARIF) |
+| `dry-run` | `false` | Resolve inputs/config and print what the run would do, without analyzing anything or writing output (always exits 0). Maps to `--dry-run`; supported by every mode. In scan mode this also prints the projected per-layer cost. |
 | `policy` | `strict_abi` | Built-in policy: `strict_abi`, `sdk_vendor`, `plugin_abi` |
 | `policy-file` | — | Custom YAML policy file |
 | `suppress` | — | YAML suppression file (supports `label`, `source_location`, `expires`) |

@@ -24,6 +24,7 @@ import click
 import pytest
 
 from abicheck.cli_dump_helpers import (
+    evidence_depth_label,
     handle_non_elf_dump,
     perform_elf_dump,
     resolve_dump_compile_context,
@@ -576,3 +577,82 @@ def test_perform_elf_dump_wraps_dump_errors(tmp_path: Path, monkeypatch) -> None
             _write,
         )
     assert "written" not in events
+
+
+# ── evidence_depth_label (CLI-audit P2 self-describing output) ──────────────
+
+
+def _pack(build_evidence=None, source_abi=None, source_graph=None):
+    from abicheck.buildsource.pack import BuildSourcePack
+
+    return BuildSourcePack(
+        root=Path("/nonexistent"),
+        build_evidence=build_evidence,
+        source_abi=source_abi,
+        source_graph=source_graph,
+    )
+
+
+def test_evidence_depth_label_binary_when_no_headers_no_build_source() -> None:
+    snap = AbiSnapshot(library="libfoo.so", version="1.0")
+    assert evidence_depth_label(snap) == "binary"
+
+
+def test_evidence_depth_label_headers_when_from_headers_set() -> None:
+    snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
+    assert evidence_depth_label(snap) == "headers"
+
+
+def test_evidence_depth_label_build_when_build_evidence_has_facts() -> None:
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+
+    snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
+    snap.build_source = _pack(
+        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")])
+    )
+    assert evidence_depth_label(snap) == "build"
+
+
+def test_evidence_depth_label_source_when_source_abi_has_reachable_entities() -> None:
+    from abicheck.buildsource.build_evidence import BuildEvidence
+    from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
+
+    snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
+    snap.build_source = _pack(
+        build_evidence=BuildEvidence(),
+        source_abi=SourceAbiSurface(
+            reachable_declarations=[SourceEntity(id="foo", kind="function")]
+        ),
+    )
+    assert evidence_depth_label(snap) == "source"
+
+
+def test_evidence_depth_label_source_when_source_graph_has_nodes() -> None:
+    from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
+
+    snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
+    snap.build_source = _pack(
+        source_graph=SourceGraphSummary(nodes=[GraphNode(id="n1", kind="function")])
+    )
+    assert evidence_depth_label(snap) == "source"
+
+
+def test_evidence_depth_label_does_not_overstate_empty_source_abi() -> None:
+    # Regression (CodeRabbit review): source_abi/source_graph/build_evidence
+    # can be present (non-None) but carry no real facts -- e.g.
+    # _run_inline_source_abi returns an empty SourceAbiSurface() when clang is
+    # unavailable after L3 was found. Presence alone must not overstate
+    # "source"/"build" for a layer that ran but linked nothing.
+    from abicheck.buildsource.build_evidence import BuildEvidence
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+    from abicheck.buildsource.source_graph import SourceGraphSummary
+
+    snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
+    snap.build_source = _pack(
+        build_evidence=BuildEvidence(),  # no targets/compile_units
+        source_abi=SourceAbiSurface(),  # no reachable entities
+        source_graph=SourceGraphSummary(),  # no nodes
+    )
+    # All three layers are present but empty -- falls all the way back to
+    # "headers" (from_headers=True), not "source" or "build".
+    assert evidence_depth_label(snap) == "headers"

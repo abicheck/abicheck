@@ -1449,3 +1449,35 @@ class TestScopedProperties:
         tc = ts.find("testcase")
         assert tc.get("name") == "_Z6vanishv"
         assert tc.find("failure") is None
+        # A missing-contract member still counts as relevant even when
+        # demoted (severity decides blocking, not scope membership --
+        # CodeRabbit review).
+        props = {p.get("name"): p.get("value") for p in ts.find("properties")}
+        assert props["abicheck.relevant_finding_count"] == "1"
+
+    def test_scoped_only_change_gets_a_testcase(self) -> None:
+        # Regression (Codex review): scope_diff_to_app synthesizes a fresh
+        # Change (e.g. PE_ORDINAL_RETARGETED) that is relevant to the gate
+        # but never added to result.changes -- without a testcase for it, a
+        # --used-by run that fails solely because of one of these would have
+        # no testcase/failure in the XML to explain it.
+        from abicheck.reporter import _finding_id
+
+        scoped_only = Change(
+            kind=ChangeKind.PE_ORDINAL_RETARGETED,
+            symbol="ordinal:5",
+            description="ordinal 5 retargeted",
+            old_value="OldFunc", new_value="NewFunc",
+        )
+        r = _make_result([], verdict=Verdict.COMPATIBLE)
+        r.scoped_verdict = Verdict.BREAKING  # type: ignore[attr-defined]
+        r.gate_scope = "used_by"  # type: ignore[attr-defined]
+        r.scoped_relevant_finding_ids = frozenset({_finding_id(scoped_only)})  # type: ignore[attr-defined]
+        r.scoped_only_changes = (scoped_only,)  # type: ignore[attr-defined]
+        xml_str = to_junit_xml(r)
+        root = _parse(xml_str)
+        ts = root.find("testsuite")
+        assert ts.get("failures") == "1"
+        tc = ts.find("testcase")
+        assert tc.get("name") == "ordinal:5"
+        assert tc.find("failure") is not None

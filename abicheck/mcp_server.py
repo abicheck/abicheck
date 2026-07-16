@@ -996,6 +996,12 @@ def abi_compare(
             # result levels/failure counts follow the scoped gate (CLI-audit
             # P1), mirroring cli_compare_helpers._apply_used_by_scoping.
             relevant_finding_ids: set[str] = set()
+            # Union across ALL apps of relevant Change objects (not just
+            # ids) so scoped-only changes (e.g. PE_ORDINAL_RETARGETED,
+            # synthesized fresh per app and never added to result.changes)
+            # can still be rendered by SARIF/JUnit (Codex review, mirrors
+            # cli_compare_helpers._apply_used_by_scoping).
+            relevant_changes_by_id: dict[str, Any] = {}
             missing_labels: set[str] = set()
             for app in used_by:
                 app_path = _safe_read_path(app, label="used_by")
@@ -1009,6 +1015,9 @@ def abi_compare(
                     policy=active_policy, policy_file=pf,
                 )
                 relevant_finding_ids.update(_finding_id(c) for c in scoped.breaking_for_app)
+                relevant_changes_by_id.update(
+                    {_finding_id(c): c for c in scoped.breaking_for_app}
+                )
                 # A missing symbol/version already covered by a relevant
                 # Change (e.g. FUNC_REMOVED) must not also become a
                 # synthetic missing-contract finding (Codex review, mirrors
@@ -1067,6 +1076,10 @@ def abi_compare(
             result.gate_scope = "used_by"  # type: ignore[attr-defined]
             result.scoped_relevant_finding_ids = frozenset(relevant_finding_ids)  # type: ignore[attr-defined]
             result.scoped_missing_labels = tuple(sorted(missing_labels))  # type: ignore[attr-defined]
+            _existing_ids = {_finding_id(c) for c in result.changes}
+            result.scoped_only_changes = tuple(  # type: ignore[attr-defined]
+                c for fid, c in relevant_changes_by_id.items() if fid not in _existing_ids
+            )
             if severity_config is not None:
                 categories, counts = _scoped_severity_summary(
                     list(worst_changes.values()), worst_missing,
@@ -1116,6 +1129,12 @@ def abi_compare(
                     scoped_host.missing_entrypoints, scoped_host.breaking_for_host
                 )
             ))
+            # Scoped-only changes: relevant to the host contract but never
+            # added to result.changes (mirrors the used_by branch above).
+            _existing_ids = {_finding_id(c) for c in result.changes}
+            result.scoped_only_changes = tuple(  # type: ignore[attr-defined]
+                c for c in scoped_host.breaking_for_host if _finding_id(c) not in _existing_ids
+            )
             if severity_config is not None:
                 categories, counts = _scoped_severity_summary(
                     scoped_host.breaking_for_host, scoped_host.missing_entrypoints,

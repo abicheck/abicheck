@@ -202,9 +202,16 @@ if [[ "$MODE" == "dump" ]]; then
     CMD+=(--allow-build-query)
   fi
 
-  # Output file — required for dump in action context (otherwise stdout)
-  OUTPUT_FILE="${INPUT_OUTPUT_FILE:-abicheck-baseline.json}"
-  CMD+=(-o "$OUTPUT_FILE")
+  # dry-run performs no analysis and writes nothing, so it is mutually
+  # exclusive with -o/--output on the CLI -- skip the output file entirely
+  # when set, rather than passing both and letting the CLI reject it.
+  if [[ "${INPUT_DRY_RUN:-false}" == "true" ]]; then
+    CMD+=(--dry-run)
+  else
+    # Output file — required for dump in action context (otherwise stdout)
+    OUTPUT_FILE="${INPUT_OUTPUT_FILE:-abicheck-baseline.json}"
+    CMD+=(-o "$OUTPUT_FILE")
+  fi
 
 elif [[ "$MODE" == "compare" ]]; then
   # ── Compare mode ─────────────────────────────────────────────────────────
@@ -235,26 +242,36 @@ elif [[ "$MODE" == "compare" ]]; then
   FORMAT="${INPUT_FORMAT:-markdown}"
   CMD+=(--format "$FORMAT")
 
-  OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
-  if [[ "$FORMAT" == "sarif" && -z "$OUTPUT_FILE" ]]; then
-    OUTPUT_FILE="abicheck-results.sarif"
-  fi
-  if [[ -n "$OUTPUT_FILE" ]]; then
-    CMD+=(-o "$OUTPUT_FILE")
-  fi
+  # dry-run performs no analysis and writes nothing, so it is mutually
+  # exclusive with -o/--output AND --secondary-output/--secondary-format on
+  # the CLI -- skip both entirely when set, rather than passing them and
+  # letting the CLI reject the combination.
+  DRY_RUN="${INPUT_DRY_RUN:-false}"
+  if [[ "$DRY_RUN" == "true" ]]; then
+    CMD+=(--dry-run)
+  else
+    OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
+    if [[ "$FORMAT" == "sarif" && -z "$OUTPUT_FILE" ]]; then
+      OUTPUT_FILE="abicheck-results.sarif"
+    fi
+    if [[ -n "$OUTPUT_FILE" ]]; then
+      CMD+=(-o "$OUTPUT_FILE")
+    fi
 
-  # Render a second, always-unfiltered JSON report from this same run for the
-  # sticky PR comment (--secondary-format), instead of re-invoking abicheck a
-  # second time just to get JSON. Only needed when the primary format isn't
-  # already JSON — a json primary is reused as-is (see _can_reuse_primary_json
-  # below). The per-library release fan-out (directory/package operands)
-  # rejects --secondary-format, so it's skipped there too, falling back to
-  # the rerun path in _maybe_post_pr_comment (Codex review).
-  if [[ "$FORMAT" != "json" ]] \
-     && ! _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
-     && ! _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
-    PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
-    CMD+=(--secondary-format json --secondary-output "$PR_JSON")
+    # Render a second, always-unfiltered JSON report from this same run for
+    # the sticky PR comment (--secondary-format), instead of re-invoking
+    # abicheck a second time just to get JSON. Only needed when the primary
+    # format isn't already JSON — a json primary is reused as-is (see
+    # _can_reuse_primary_json below). The per-library release fan-out
+    # (directory/package operands) rejects --secondary-format, so it's
+    # skipped there too, falling back to the rerun path in
+    # _maybe_post_pr_comment (Codex review).
+    if [[ "$FORMAT" != "json" ]] \
+       && ! _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
+       && ! _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
+      PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
+      CMD+=(--secondary-format json --secondary-output "$PR_JSON")
+    fi
   fi
 
   add_single_flag "--policy" "${INPUT_POLICY:-}"
@@ -320,9 +337,13 @@ elif [[ "$MODE" == "deps-tree" ]]; then
   fi
   CMD+=(--format "$FORMAT")
 
-  OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
-  if [[ -n "$OUTPUT_FILE" ]]; then
-    CMD+=(-o "$OUTPUT_FILE")
+  if [[ "${INPUT_DRY_RUN:-false}" == "true" ]]; then
+    CMD+=(--dry-run)
+  else
+    OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
+    if [[ -n "$OUTPUT_FILE" ]]; then
+      CMD+=(-o "$OUTPUT_FILE")
+    fi
   fi
 
 elif [[ "$MODE" == "deps-compare" ]]; then
@@ -343,9 +364,13 @@ elif [[ "$MODE" == "deps-compare" ]]; then
   fi
   CMD+=(--format "$FORMAT")
 
-  OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
-  if [[ -n "$OUTPUT_FILE" ]]; then
-    CMD+=(-o "$OUTPUT_FILE")
+  if [[ "${INPUT_DRY_RUN:-false}" == "true" ]]; then
+    CMD+=(--dry-run)
+  else
+    OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
+    if [[ -n "$OUTPUT_FILE" ]]; then
+      CMD+=(-o "$OUTPUT_FILE")
+    fi
   fi
 
 elif [[ "$MODE" == "scan" ]]; then
@@ -377,14 +402,11 @@ elif [[ "$MODE" == "scan" ]]; then
   # scan's config flag is --config (not --build-config, which does not exist on
   # scan and hard-fails with exit 64). dump uses --config for the same input.
   add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
-  # audit=true forces a one-build audit even when an against baseline is
-  # configured (e.g. via abi-baseline auto-fetch) — the old --audit flag
-  # ignored --baseline the same way; --against structurally cannot be
-  # combined with an audit-only run any more, so the emulation is to simply
-  # omit --against.
-  if [[ "${INPUT_AUDIT:-false}" != "true" ]]; then
-    add_single_flag "--against" "${INPUT_AGAINST:-}"
-  fi
+  # Omitting --against is already a one-build audit-only run (no separate
+  # audit flag needed or offered here); to force an audit-only run for one
+  # step despite an against/abi-baseline configured elsewhere in the
+  # workflow, simply don't set those inputs on this step.
+  add_single_flag "--against" "${INPUT_AGAINST:-}"
   add_single_flag "--lang" "${INPUT_LANG:-}"
 
   # Level selection — the modern --depth dial (omit for 'auto'). The deprecated
@@ -410,10 +432,11 @@ elif [[ "$MODE" == "scan" ]]; then
   fi
   CMD+=(--format "$FORMAT")
 
-  # estimate=true now maps to --dry-run (the old --estimate's cost-projection
-  # folded into the general dry-run report). A dry run writes nothing, so skip
-  # -o/--output entirely when it's set (they are mutually exclusive on scan).
-  if [[ "${INPUT_ESTIMATE:-false}" == "true" ]]; then
+  # dry-run maps directly to --dry-run (the cost-projection formerly under
+  # the separate --estimate flag is folded into the general dry-run report).
+  # A dry run writes nothing, so skip -o/--output entirely when it's set
+  # (they are mutually exclusive on scan).
+  if [[ "${INPUT_DRY_RUN:-false}" == "true" ]]; then
     CMD+=(--dry-run)
   else
     OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
@@ -740,6 +763,10 @@ _maybe_post_pr_comment() {
     compare) ;;
     *) return 0 ;;
   esac
+  # A dry run performed no real comparison -- posting a comment would either
+  # show nothing (no PR_JSON) or silently trigger a second, real compare just
+  # to produce one, defeating the point of --dry-run. Skip entirely.
+  [[ "${INPUT_DRY_RUN:-false}" == "true" ]] && return 0
   [[ "${INPUT_PR_COMMENT_ON:-changes}" == "never" ]] && return 0
   [[ "$VERDICT" == "ERROR" ]] && return 0
   case "${GITHUB_EVENT_NAME:-}" in

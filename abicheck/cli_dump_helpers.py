@@ -190,13 +190,24 @@ def evidence_depth_label(snap: AbiSnapshot) -> str:
     ``binary``), and this makes that honest instead of silently overstating
     what was collected. Requires no new ``AbiSnapshot`` field -- it reads the
     same ``from_headers``/``build_source`` data the snapshot already carries.
+
+    Uses the same payload-emptiness checks as ``_write_snapshot_output``'s own
+    fail-loud warning (``cli._layer_payload_empty``): a coverage row / field
+    can be non-``None`` while the embedded payload carries no real facts (e.g.
+    ``_run_inline_source_abi`` returns an empty ``SourceAbiSurface()`` when
+    clang is unavailable after L3 was found) -- checking presence alone would
+    overstate ``source``/``build`` for a layer that ran but linked nothing
+    (CodeRabbit review).
     """
+    from .cli import _layer_payload_empty
+
     build_source = snap.build_source
     if build_source is not None and (
-        build_source.source_abi is not None or build_source.source_graph is not None
+        not _layer_payload_empty(build_source, "L4")
+        or not _layer_payload_empty(build_source, "L5")
     ):
         return "source"
-    if build_source is not None and build_source.build_evidence is not None:
+    if build_source is not None and not _layer_payload_empty(build_source, "L3"):
         return "build"
     if snap.from_headers:
         return "headers"
