@@ -1308,7 +1308,21 @@ class _CastxmlParser:
                 # string id) but is overridden by a declaration that DOES
                 # carry an index would otherwise open a new int-keyed slot
                 # instead of collapsing onto the base's string-keyed one.
-                key = self._vtable_slot_root.get(overrides_id, overrides_id)
+                #
+                # castxml can list more than one overridden declaration as a
+                # whitespace-separated id list when a single override
+                # simultaneously covers more than one base-class branch
+                # (multiple/diamond inheritance) -- an exact lookup of the raw
+                # composite string never matches _vtable_slot_root, so resolve
+                # each id and reuse whichever already-registered slot is found
+                # first, rather than opening a phantom extra slot no override
+                # chain ever pointed at.
+                key = overrides_id
+                for oid in overrides_id.split():
+                    resolved = self._vtable_slot_root.get(oid)
+                    if resolved is not None:
+                        key = resolved
+                        break
                 if isinstance(key, int):
                     # Consistently-indexed lineage: adopt the resolved index
                     # for sorting when this declaration has none of its own,

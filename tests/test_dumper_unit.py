@@ -1208,6 +1208,29 @@ class TestCastxmlParserVtable:
         derived_t = next(t for t in types if t.name == "Derived")
         assert derived_t.vtable == ["_ZN4Base3fooEv", "_ZN7Derived3barEv"]
 
+    def test_vtable_multi_id_overrides_resolves_to_known_slot(self):
+        """castxml can list more than one overridden declaration as a
+        whitespace-separated ``overrides`` id list (e.g. a single override
+        simultaneously covering more than one base-class branch in multiple
+        inheritance). An exact-string lookup of that composite value never
+        matches any registered slot, so without splitting it, the override
+        would open a phantom extra slot keyed by the literal multi-id string
+        instead of collapsing onto the real inherited slot any of its ids
+        names.
+        """
+        base = Element("Class", id="c1", name="Base")
+        m1 = Element("Method", id="m1", name="foo", mangled="_ZN4Base3fooEv",
+                      virtual="1", context="c1")
+        derived = Element("Class", id="c2", name="Derived")
+        SubElement(derived, "Base", type="c1")
+        m2 = Element("Method", id="m2", name="foo", mangled="_ZN7Derived3fooEv",
+                      virtual="1", context="c2", overrides="m1 nonexistent")
+        root = _xml_root(base, derived, m1, m2)
+        p = _CastxmlParser(root, set(), set())
+        types = p.parse_types()
+        derived_t = next(t for t in types if t.name == "Derived")
+        assert derived_t.vtable == ["_ZN7Derived3fooEv"]
+
     def test_vtable_diamond_inheritance_does_not_infinite_loop(self):
         """Diamond inheritance (Derived : Left, Right; both : Base) revisits
         Base through two paths. The `seen` guard must return {} on the
