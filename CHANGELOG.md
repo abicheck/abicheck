@@ -61,6 +61,21 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   values, and a GitHub Action baseline-fetch error message pointing at a
   nonexistent `--output-name` flag.
 
+### Changed
+
+- `compare --format sarif/junit` now follow the scoped `--used-by`/
+  `--required-symbol` gate instead of always reflecting the full,
+  unscoped library diff: the scoped exit code drives the SARIF
+  document's own `exitCode` and JUnit's `failures` count, findings
+  outside the gate's relevance are downgraded (SARIF level `"note"`,
+  JUnit non-failing) and marked so a consumer can tell "not severe"
+  from "out of scope", and a missing required symbol/version/entrypoint
+  (which has no backing diff `Change`) now gets its own synthetic
+  result/testcase so the gate's exit code is never left unexplained.
+  New `gateScope`/`gateVerdict`/`gateExitCode` fields are added
+  alongside the existing `scopedVerdict`/`abicheck.scoped_verdict`
+  names, kept as aliases.
+
 ---
 
 ## [0.5.0] — 2026-07-16
