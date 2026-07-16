@@ -208,6 +208,21 @@ class TestCheckNumPyMetadataContract:
             ChangeKind.NUMPY_METADATA_UNDERSTATES_REQUIRED_VERSION
         }
 
+    def test_malformed_declared_specifier_does_not_escalate_to_abi_major(
+        self,
+    ) -> None:
+        # An unparseable specifier is "we can't tell what this allows" --
+        # degraded evidence, not positive proof the metadata admits a NumPy
+        # 1.x runtime. Treating it the same as "no floor declared" would
+        # escalate malformed metadata text into a hard BREAKING verdict for
+        # a 2.x-targeting binary (independent review finding).
+        surf = NumPyCapiSurface(consumes_array_api=True, capi_target_version="2.0")
+        changes = check_numpy_metadata_contract(surf, "not a valid specifier!!")
+        assert _kinds(changes) == {
+            ChangeKind.NUMPY_METADATA_UNDERSTATES_REQUIRED_VERSION
+        }
+        assert ChangeKind.NUMPY_ABI_MAJOR_INCOMPATIBLE not in _kinds(changes)
+
 
 class TestNumPyCapiWiredIntoCompare:
     """checker.compare() runs diff_numpy_capi_surfaces automatically — no

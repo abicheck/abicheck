@@ -195,8 +195,10 @@ def check_numpy_metadata_contract(
 
     try:
         specifiers = SpecifierSet(declared_numpy_requirement or "")
+        unparseable = False
     except InvalidSpecifier:
         specifiers = None
+        unparseable = True
 
     declared_floor = _declared_floor(specifiers) if specifiers is not None else None
     if declared_floor is not None and _version_at_least(declared_floor, target_tuple):
@@ -213,8 +215,13 @@ def check_numpy_metadata_contract(
     # The 1.x/2.0 ABI boundary is a hard import crash (NumPy 2.0 changed the
     # ABI), not merely a missing/stale metadata promise — a separate,
     # BREAKING finding when the declared floor still allows a NumPy 1.x
-    # runtime but the binary's own target requires >= 2.0.
-    if target_tuple and target_tuple[0] >= 2:
+    # runtime but the binary's own target requires >= 2.0. Skipped when the
+    # declared specifier text itself was unparseable: "we can't tell what
+    # this allows" is degraded evidence (the RISK finding above already
+    # covers it), not positive proof the metadata admits a NumPy 1.x
+    # install — treating parse failure the same as "no floor declared"
+    # would escalate malformed input into a hard BREAKING verdict.
+    if not unparseable and target_tuple and target_tuple[0] >= 2:
         if declared_floor is None or declared_floor[0] < 2:
             changes.append(
                 make_change(

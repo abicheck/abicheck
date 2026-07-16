@@ -950,6 +950,31 @@ class TestParseNumpyRequirementFromMetadata:
         )
         assert parse_numpy_requirement_from_metadata(text) == ">=1.23.5"
 
+    def test_folded_header_continuation_line_is_unfolded(self) -> None:
+        # Core Metadata is an RFC 5322-style header block; a long
+        # Requires-Dist value can be folded across physical lines with
+        # leading whitespace on the continuation. A plain
+        # line.startswith("Requires-Dist:") scan only sees the first
+        # physical line ("numpy") and mangles the folded specifier/marker
+        # (independent review finding, confirmed by Codex).
+        text = (
+            "Metadata-Version: 2.1\n"
+            "Name: pkg\n"
+            'Requires-Dist: numpy\n >=2; python_version >= "3.12"\n'
+        )
+        assert (
+            parse_numpy_requirement_from_metadata(
+                text, environment={"python_version": "3.12"}
+            )
+            == ">=2"
+        )
+        assert (
+            parse_numpy_requirement_from_metadata(
+                text, environment={"python_version": "3.11"}
+            )
+            is None
+        )
+
 
 class TestParseWheelNumpyRequirement:
     """G26: reads *.dist-info/METADATA directly out of the wheel zip."""

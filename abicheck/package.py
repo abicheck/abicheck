@@ -607,14 +607,24 @@ def parse_numpy_requirement_from_metadata(
     regardless of whether its marker actually holds would report an
     inactive floor as the metadata's promise (Codex review).
     """
+    from email import message_from_string
+    from email.policy import default as _email_default_policy
+
     from packaging.requirements import InvalidRequirement, Requirement
 
-    for line in metadata_text.splitlines():
-        if not line.startswith("Requires-Dist:"):
-            continue
-        raw = line[len("Requires-Dist:") :].strip()
+    # Core Metadata is an RFC 5322-style header block: a long Requires-Dist
+    # value may be folded across physical lines with leading whitespace on
+    # the continuation lines. A plain `line.startswith("Requires-Dist:")`
+    # scan only sees the first physical line and mangles a folded specifier
+    # or marker, so parse it as real headers instead. The default
+    # (compat32) email policy preserves the raw fold (embedded newline +
+    # leading whitespace) in the returned value; ``policy.default`` is the
+    # one that actually joins a folded header into a single logical line
+    # (Codex review).
+    headers = message_from_string(metadata_text, policy=_email_default_policy)
+    for raw in headers.get_all("Requires-Dist") or ():
         try:
-            req = Requirement(raw)
+            req = Requirement(str(raw))
         except InvalidRequirement:
             continue
         if req.name.lower() != "numpy":
