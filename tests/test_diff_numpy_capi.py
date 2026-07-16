@@ -223,6 +223,24 @@ class TestCheckNumPyMetadataContract:
         }
         assert ChangeKind.NUMPY_ABI_MAJOR_INCOMPATIBLE not in _kinds(changes)
 
+    def test_combined_active_wheel_requirements_cover_the_target(self) -> None:
+        # End-to-end: package.parse_numpy_requirement_from_metadata's
+        # combined-specifier fix (Codex review) feeding straight into this
+        # function must not false-positive when multiple simultaneously
+        # active markers jointly already require NumPy 2.x.
+        from abicheck.package import parse_numpy_requirement_from_metadata
+
+        text = (
+            "Metadata-Version: 2.1\n"
+            'Requires-Dist: numpy>=1.23; python_version >= "3.9"\n'
+            'Requires-Dist: numpy>=2; python_version >= "3.12"\n'
+        )
+        declared = parse_numpy_requirement_from_metadata(
+            text, environment={"python_version": "3.12"}
+        )
+        surf = NumPyCapiSurface(consumes_array_api=True, capi_target_version="2.0")
+        assert check_numpy_metadata_contract(surf, declared) == []
+
 
 class TestNumPyCapiWiredIntoCompare:
     """checker.compare() runs diff_numpy_capi_surfaces automatically — no

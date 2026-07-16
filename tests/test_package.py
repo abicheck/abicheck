@@ -938,6 +938,29 @@ class TestParseNumpyRequirementFromMetadata:
             == ">=1.23"
         )
 
+    def test_simultaneously_active_requirements_are_combined_not_first_wins(
+        self,
+    ) -> None:
+        # Codex review: unlike the mutually-exclusive-markers case above,
+        # markers here aren't exclusive -- both "python_version >= 3.9" and
+        # the stricter "python_version >= 3.12" hold on Python 3.12. An
+        # installer enforces the intersection of every active constraint,
+        # so returning only the first active line (>=1.23) would understate
+        # the real (>=2) floor.
+        text = (
+            "Metadata-Version: 2.1\n"
+            'Requires-Dist: numpy>=1.23; python_version >= "3.9"\n'
+            'Requires-Dist: numpy>=2; python_version >= "3.12"\n'
+        )
+        combined = parse_numpy_requirement_from_metadata(
+            text, environment={"python_version": "3.12"}
+        )
+        from packaging.specifiers import SpecifierSet
+
+        assert SpecifierSet(combined) == SpecifierSet(">=1.23,>=2")
+        assert "2.5" in SpecifierSet(combined)
+        assert "1.5" not in SpecifierSet(combined)
+
     def test_case_insensitive_package_name(self) -> None:
         text = "Metadata-Version: 2.1\nRequires-Dist: NumPy>=1.24\n"
         assert parse_numpy_requirement_from_metadata(text) == ">=1.24"

@@ -601,16 +601,19 @@ def parse_numpy_requirement_from_metadata(
     fall back to the real environment (the interpreter running abicheck) —
     the same merge behavior as :meth:`packaging.markers.Marker.evaluate`,
     which this delegates to directly. A wheel can legitimately declare more
-    than one base numpy requirement split by mutually exclusive markers
-    (e.g. ``numpy>=1.23; python_version < "3.12"`` followed by ``numpy>=2;
-    python_version >= "3.12"``); returning the first non-extra line
-    regardless of whether its marker actually holds would report an
-    inactive floor as the metadata's promise (Codex review).
+    than one base numpy requirement split by markers, and more than one can
+    be simultaneously active for a given environment (e.g. ``numpy>=1.23;
+    python_version >= "3.9"`` and the stricter ``numpy>=2; python_version >=
+    "3.12"`` are both true on Python 3.12) — an installer enforces the
+    *intersection* of every active constraint, not just the first one found,
+    so returning only the first active line could under-report the real
+    floor (Codex review).
     """
     from email import message_from_string
     from email.policy import default as _email_default_policy
 
     from packaging.requirements import InvalidRequirement, Requirement
+    from packaging.specifiers import SpecifierSet
 
     # Core Metadata is an RFC 5322-style header block: a long Requires-Dist
     # value may be folded across physical lines with leading whitespace on
@@ -622,6 +625,8 @@ def parse_numpy_requirement_from_metadata(
     # one that actually joins a folded header into a single logical line
     # (Codex review).
     headers = message_from_string(metadata_text, policy=_email_default_policy)
+    found = False
+    combined = SpecifierSet()
     for raw in headers.get_all("Requires-Dist") or ():
         try:
             req = Requirement(str(raw))
@@ -634,8 +639,9 @@ def parse_numpy_requirement_from_metadata(
                 continue  # optional-extra-gated, not a base requirement
             if not req.marker.evaluate(environment):
                 continue  # marker inactive for this environment
-        return str(req.specifier)
-    return None
+        found = True
+        combined &= req.specifier
+    return str(combined) if found else None
 
 
 class WheelExtractor:
