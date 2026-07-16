@@ -15,7 +15,8 @@
 """Tests for the ADR-035 D10 typed scan API + dry-run cost estimate (G19.7).
 
 Covers ``service.estimate_scan`` (the project cost probe) and the ``scan
---estimate`` / ``scan --audit`` CLI surfaces. Default lane — no compiler.
+--dry-run`` CLI surface (which reuses it) / the default one-build-audit
+``scan`` flow (no ``--against``). Default lane — no compiler.
 """
 
 from __future__ import annotations
@@ -355,43 +356,38 @@ def test_estimate_l4_uses_cold_realworld_anchor(
     assert l4.est_seconds == pytest.approx(30.0)
 
 
-# ── CLI: scan --estimate / --audit ───────────────────────────────────────────
+# ── CLI: scan --dry-run / (default) audit ────────────────────────────────────
 
 
-def test_cli_estimate_scans_nothing(
+def test_cli_dry_run_scans_nothing(
     runner: CliRunner, snap_path: Path, header: Path
 ) -> None:
-    res = runner.invoke(
-        main, ["scan", "--binary", str(snap_path), "-H", str(header), "--estimate"]
-    )
-    assert res.exit_code == 0
-    assert "dry run" in res.output
+    # --estimate was folded into the general --dry-run report (CLI
+    # simplification); it still reuses service.estimate_scan under the hood, so
+    # the per-layer TU/cost projection (e.g. L4_source_abi) is still printed.
+    res = runner.invoke(main, ["scan", str(snap_path), "-H", str(header), "--dry-run"])
+    assert res.exit_code == 0, res.output
+    assert "Dry run only" in res.output
     assert "L4_source_abi" in res.output
 
 
-def test_cli_estimate_json(runner: CliRunner, snap_path: Path) -> None:
-    res = runner.invoke(
-        main, ["scan", "--binary", str(snap_path), "--estimate", "--format", "json"]
-    )
-    assert res.exit_code == 0
-    payload = json.loads(res.output)
-    assert payload["mode"] == "pr"
-    assert payload["estimate"]
-    assert "total_est_seconds" in payload
-
-
-def test_estimate_pr_deep_preserves_graph_full_depth(
-    runner: CliRunner, snap_path: Path
-) -> None:
-    # pr-deep pins (s5, graph) = graph-full; the CLI estimate must not collapse it
-    # to source-changed by re-resolving the round-tripped flags under the
-    # source-method > depth precedence (Codex review).
-    res = runner.invoke(
-        main, ["scan", "--estimate", "--mode", "pr-deep", "--binary", str(snap_path)]
-    )
+def test_cli_dry_run_reports_projected_cost(runner: CliRunner, snap_path: Path) -> None:
+    # scan --dry-run always renders as text (fmt only affects the informational
+    # "format: ..." line), never the old --estimate JSON payload shape.
+    res = runner.invoke(main, ["scan", str(snap_path), "--dry-run", "--format", "json"])
     assert res.exit_code == 0, res.output
-    assert "graph-full" in res.output
-    assert "source-changed replay scope" not in res.output
+    assert "format: json" in res.output
+    assert "projected total:" in res.output
+    assert "against: (none -- one-build audit only)" in res.output
+
+
+# NOTE: test_estimate_pr_deep_preserves_graph_full_depth (--estimate --mode
+# pr-deep) is deleted — --estimate/--mode are both gone, and pr-deep's (s5,
+# graph) preset is unreachable from the CLI at all (the public --depth ladder
+# stops at "source"; see test_pr_deep_is_distinct_from_pr's deletion note in
+# test_cli_scan.py). The "resolved level is honored verbatim, not re-resolved"
+# concern it guarded stays covered by test_estimate_scan_honors_resolved_level
+# below, which drives service.estimate_scan directly.
 
 
 def test_count_bazel_build_info_tus_branches(monkeypatch, tmp_path: Path) -> None:
@@ -421,9 +417,7 @@ def test_count_bazel_build_info_tus_branches(monkeypatch, tmp_path: Path) -> Non
     def _boom(_p):
         raise RuntimeError("adapter blew up")
 
-    monkeypatch.setattr(
-        "abicheck.buildsource.inline.sniff_build_info_format", _boom
-    )
+    monkeypatch.setattr("abicheck.buildsource.inline.sniff_build_info_format", _boom)
     assert _count_bazel_build_info_tus(cq) is None  # guard swallows the failure
 
 
@@ -532,7 +526,9 @@ def test_estimate_binary_depth_suppresses_header_cost(
     from abicheck.service_scan import estimate_scan
 
     binary = estimate_scan(
-        ScanRequest(binaries=[snap_path], depth="binary", headers=[header], mode="audit")
+        ScanRequest(
+            binaries=[snap_path], depth="binary", headers=[header], mode="audit"
+        )
     )
     l2 = next(e for e in binary if e.layer == "L2_header")
     assert l2.tus == 0
@@ -560,7 +556,9 @@ def test_estimate_scan_honors_resolved_level(snap_path: Path) -> None:
     reresolved = " ".join(e.note for e in estimate_scan(req))
     pinned = " ".join(
         e.note
-        for e in estimate_scan(req, resolved_level=(SourceMethod.S5, EvidenceDepth.GRAPH))
+        for e in estimate_scan(
+            req, resolved_level=(SourceMethod.S5, EvidenceDepth.GRAPH)
+        )
     )
     assert "source-changed" in reresolved  # the round-trip hazard this guards
     assert "graph-full" in pinned
@@ -581,7 +579,9 @@ def test_estimate_l2_cost_is_size_aware(snap_path: Path, tmp_path: Path) -> None
 
     def l2(header: Path) -> float:
         est = estimate_scan(
-            ScanRequest(binaries=[snap_path], depth="headers", headers=[header], mode="audit")
+            ScanRequest(
+                binaries=[snap_path], depth="headers", headers=[header], mode="audit"
+            )
         )
         return next(e.est_seconds for e in est if e.layer == "L2_header")
 
@@ -592,7 +592,9 @@ def test_estimate_l2_cost_is_size_aware(snap_path: Path, tmp_path: Path) -> None
     assert big_s > 0.5
 
 
-def test_estimate_l2_two_headers_sum_their_sizes(snap_path: Path, tmp_path: Path) -> None:
+def test_estimate_l2_two_headers_sum_their_sizes(
+    snap_path: Path, tmp_path: Path
+) -> None:
     from abicheck.service_scan import estimate_scan
 
     d = tmp_path / "inc"
@@ -604,7 +606,9 @@ def test_estimate_l2_two_headers_sum_their_sizes(snap_path: Path, tmp_path: Path
     )
     l2 = next(e for e in est if e.layer == "L2_header")
     assert l2.tus == 2  # both headers counted
-    assert l2.est_seconds > 0.1  # two non-trivial headers cost more than the base anchors
+    assert (
+        l2.est_seconds > 0.1
+    )  # two non-trivial headers cost more than the base anchors
 
 
 def test_estimate_header_seconds_falls_back_when_unstattable(tmp_path: Path) -> None:
@@ -659,12 +663,11 @@ def test_replay_seed_empty_without_diff_seed(
         main,
         [
             "scan",
-            "--binary",
             str(snap_path),
             "-H",
             str(header),
-            "--source-method",
-            "s5",
+            "--depth",
+            "source",
             "--build-info",
             str(_minimal_compile_db(tmp_path)),
         ],
@@ -693,12 +696,11 @@ def test_replay_seed_used_when_changed_path_given(
         main,
         [
             "scan",
-            "--binary",
             str(snap_path),
             "-H",
             str(header),
-            "--source-method",
-            "s5",
+            "--depth",
+            "source",
             "--build-info",
             str(_minimal_compile_db(tmp_path)),
             "--changed-path",
@@ -719,7 +721,6 @@ def test_seeded_empty_diff_scans_nothing(
         main,
         [
             "scan",
-            "--binary",
             str(snap_path),
             "-H",
             str(header),
@@ -739,9 +740,8 @@ def test_seeded_empty_diff_scans_nothing(
 def test_cli_audit_emits_hygiene_catalog(
     runner: CliRunner, snap_path: Path, header: Path
 ) -> None:
-    res = runner.invoke(
-        main, ["scan", "--binary", str(snap_path), "-H", str(header), "--audit"]
-    )
+    # Absence of --against already means a one-build audit (no separate flag).
+    res = runner.invoke(main, ["scan", str(snap_path), "-H", str(header)])
     assert res.exit_code == 0
     assert "ABI-hygiene catalog" in res.output
     # The accidental export _Z6secretv is flagged.
@@ -755,11 +755,9 @@ def test_cli_audit_json_carries_poi(
         main,
         [
             "scan",
-            "--binary",
             str(snap_path),
             "-H",
             str(header),
-            "--audit",
             "--format",
             "json",
         ],
@@ -780,7 +778,7 @@ def test_cli_scan_json_carries_scan_schema_version(
 
     res = runner.invoke(
         main,
-        ["scan", "--binary", str(snap_path), "-H", str(header), "--format", "json"],
+        ["scan", str(snap_path), "-H", str(header), "--format", "json"],
     )
     assert res.exit_code == 0
     payload = json.loads(res.output)
@@ -838,7 +836,9 @@ def test_run_scan_confidence_matrix_present(snap_path: Path) -> None:
     assert "exported_not_public" in res.confidence
 
 
-def test_run_scan_pinned_depth_without_evidence_is_contract_error(snap_path: Path) -> None:
+def test_run_scan_pinned_depth_without_evidence_is_contract_error(
+    snap_path: Path,
+) -> None:
     # ADR-037 D5 auto-strict applies to the programmatic API too: a pinned deep
     # depth with no source input maps to a failed ScanResult (not a silent shallow
     # scan), mirroring the CLI (CodeRabbit/Codex review).

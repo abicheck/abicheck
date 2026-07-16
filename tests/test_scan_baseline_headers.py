@@ -13,12 +13,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""`scan --baseline-header`/`--baseline-include` (the old-side header fix).
+"""`scan`'s old-side header handling (the old-side header fix).
 
-`scan` has a single ``-H`` built for the candidate; a native ``--baseline``
-library was therefore parsed with the *new* headers — wrong when the public
-headers changed between versions. These guard the new opt-in old-side headers
-plus the loud warning that replaces the old silent reuse.
+`scan` used to build a single ``-H`` for the candidate only; a native
+``--baseline``/``--against`` library was therefore parsed with the *new*
+headers — wrong when the public headers changed between versions. The
+opt-in old-side headers are now reached via the side-aware ``--header
+old=PATH``/``--include old=PATH`` spelling (ADR-040), replacing the old
+standalone ``--baseline-header``/``--baseline-include`` options. These tests
+guard the old-side-header codepath (``cli_scan._run_baseline_compare``, still
+addressed by its own ``baseline_headers``/``baseline_includes`` keyword
+arguments) plus the loud warning that replaces the old silent reuse.
 """
 
 from __future__ import annotations
@@ -66,9 +71,15 @@ def test_baseline_is_native_library_real_json_is_not_native(tmp_path: Path) -> N
     assert cli_scan._baseline_is_native_library(snap) is False
 
 
-def test_scan_exposes_baseline_header_options() -> None:
+def test_scan_exposes_side_aware_header_options() -> None:
+    # The standalone --baseline-header/--baseline-include options are gone;
+    # -H/--header and -I/--include are now side-aware (ADR-040), so
+    # `--header old=X` is the new spelling for what used to be
+    # `--baseline-header X`. Confirm the CLI param destinations reflect that
+    # (and that the old, removed dests are really gone).
     dests = {p.name for p in scan_cmd.params}
-    assert {"baseline_header", "baseline_include"} <= dests
+    assert {"header_pairs", "include_pairs"} <= dests
+    assert not ({"baseline_header", "baseline_include"} & dests)
 
 
 class _FakeVerdict:

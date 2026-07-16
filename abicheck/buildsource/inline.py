@@ -52,7 +52,6 @@ import os
 import shlex
 import subprocess
 import time
-import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -104,6 +103,44 @@ _SEVERITY_LEVELS = ("error", "warning", "info")
 _SEVERITY_PRESETS = ("default", "strict", "info-only")
 #: Valid exit-code schemes (ADR-037 D12 ``exit_code_scheme:``).
 _EXIT_CODE_SCHEMES = ("auto", "legacy", "severity")
+
+# ── strict-schema knowledge (ADR-043 CLI reset: no separate `config validate`
+# command — every real ingestion path enforces this) ─────────────────────────
+#
+# Block subkeys BuildConfig.from_dict() parses with `_opt_bool`/`_opt_str`/
+# `_str`/`_strs` — a value of the wrong type there (e.g. the YAML string
+# "false" for a boolean, or a bare number for a string/list field) must be
+# rejected outright rather than silently dropped/coerced. Keep these three
+# maps in sync with `BuildConfig.from_dict`'s helper calls when a new subkey
+# is added — nothing enforces that automatically.
+_BOOL_SUBKEYS: dict[str, frozenset[str]] = {
+    "scope": frozenset({"public", "collapse_versioned_symbols", "show_redundant"}),
+    "suppression": frozenset({"strict", "require_justification"}),
+    "compile": frozenset({"nostdinc"}),
+    "debug": frozenset({"dwarf_only", "debuginfod"}),
+}
+_STR_SUBKEYS: dict[str, frozenset[str]] = {
+    "build": frozenset({"system", "query", "compile_db"}),
+    "sources": frozenset({"graph"}),
+    "severity": frozenset(
+        {"preset", "abi_breaking", "potential_breaking", "quality_issues", "addition"}
+    ),
+    "source": frozenset({"method"}),
+    "compile": frozenset({"frontend", "std", "sysroot"}),
+    "debug": frozenset({"format", "debuginfod_url"}),
+}
+# `_strs()` accepts either a list of strings or a single bare string (folded
+# to a 1-element list), so both shapes are valid here — anything else isn't.
+_LIST_SUBKEYS: dict[str, frozenset[str]] = {
+    "sources": frozenset({"public_headers", "exclude"}),
+    "scope": frozenset({"public_symbols"}),
+    "compile": frozenset({"include_dirs", "defines"}),
+}
+# Recognized top-level keys that are scalars, not blocks (i.e. absent from
+# _KNOWN_BLOCK_KEYS) — the same wrong-type gap as the block subkeys above, one
+# level up.
+_TOP_LEVEL_STR_KEYS: frozenset[str] = frozenset({"exit_code_scheme"})
+_TOP_LEVEL_INT_KEYS: frozenset[str] = frozenset({"version"})
 
 
 @dataclass
@@ -236,34 +273,92 @@ class BuildConfig:
     }
 
     @classmethod
-    def _warn_unknown_keys(cls, data: dict[str, object]) -> None:
-        """Warn (never error) on unrecognized keys — config forward-compat (D-§BC)."""
-        for key in data:
+    def _validate_structure(cls, data: dict[str, object]) -> None:
+        """Raise ``ValueError`` for every structural problem in a raw ``.abicheck.yml``.
+
+        ADR-043 (pre-1.0 CLI reset): unknown keys and wrong-typed values used
+        to only ``warnings.warn`` (forward-compat) or be silently
+        coerced/dropped, which is what the now-removed ``abicheck config
+        validate`` command existed to catch as a separate, easy-to-skip step.
+        That strictness now lives here, so it fires on every real dump/
+        compare/scan ingestion of a project config — no opt-in step needed.
+        Collects every finding (not just the first) so a single bad file
+        reports everything wrong with it at once.
+        """
+        findings: list[str] = []
+        for key, value in data.items():
             if key not in cls._KNOWN_TOP_KEYS:
-                warnings.warn(
-                    f"unknown .abicheck.yml key {key!r} ignored (forward-compat; "
-                    "ADR-037 §Backward compatibility). Check the spelling, or bump "
-                    "'version:' once the schema for this key ships.",
-                    UserWarning,
-                    stacklevel=3,
+                findings.append(f"unknown .abicheck.yml key {key!r}")
+                continue
+            known_block = cls._KNOWN_BLOCK_KEYS.get(key)
+            if known_block is None:
+                # A recognized top-level *scalar* (not a block key) — e.g.
+                # exit_code_scheme/version. risk_rules/crosschecks are
+                # deliberately excluded: from_dict never parses them at all
+                # (consumed by risk.py/crosscheck.py instead), so there is no
+                # from_dict-level type contract to enforce here.
+                if value is not None:
+                    if key in _TOP_LEVEL_STR_KEYS and not isinstance(value, str):
+                        findings.append(
+                            f"{key} must be a string, got "
+                            f"{type(value).__name__}: {value!r}"
+                        )
+                    elif key in _TOP_LEVEL_INT_KEYS and (
+                        not isinstance(value, int) or isinstance(value, bool)
+                    ):
+                        findings.append(
+                            f"{key} must be an integer, got "
+                            f"{type(value).__name__}: {value!r}"
+                        )
+                continue
+            if value is None:
+                continue
+            if not isinstance(value, dict):
+                findings.append(
+                    f"{key} must be a mapping, got {type(value).__name__}: {value!r}"
                 )
                 continue
-            block = data.get(key)
-            known = cls._KNOWN_BLOCK_KEYS.get(key)
-            if known is not None and isinstance(block, dict):
-                for sub in block:
-                    if sub not in known:
-                        warnings.warn(
-                            f"unknown .abicheck.yml key {key}.{sub!r} ignored "
-                            "(forward-compat; ADR-037 §Backward compatibility).",
-                            UserWarning,
-                            stacklevel=3,
+            for sub, sub_value in value.items():
+                if sub not in known_block:
+                    findings.append(f"unknown .abicheck.yml key {key}.{sub!r}")
+                    continue
+                if sub in _BOOL_SUBKEYS.get(key, ()) and not isinstance(
+                    sub_value, bool
+                ):
+                    findings.append(
+                        f"{key}.{sub} must be a boolean, got "
+                        f"{type(sub_value).__name__}: {sub_value!r}"
+                    )
+                elif sub in _STR_SUBKEYS.get(key, ()) and not isinstance(
+                    sub_value, str
+                ):
+                    findings.append(
+                        f"{key}.{sub} must be a string, got "
+                        f"{type(sub_value).__name__}: {sub_value!r}"
+                    )
+                elif sub in _LIST_SUBKEYS.get(key, ()):
+                    if not isinstance(sub_value, (list, str)):
+                        findings.append(
+                            f"{key}.{sub} must be a string or list of strings, "
+                            f"got {type(sub_value).__name__}: {sub_value!r}"
                         )
+                    elif isinstance(sub_value, list):
+                        # `_strs()` accepts a list container but a non-string
+                        # element must be rejected outright, not coerced via
+                        # `str(x)`.
+                        bad = [x for x in sub_value if not isinstance(x, str)]
+                        if bad:
+                            findings.append(
+                                f"{key}.{sub} must be a list of strings, got "
+                                f"non-string element(s): {bad!r}"
+                            )
+        if findings:
+            raise ValueError("; ".join(findings))
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> BuildConfig:
         if isinstance(data, dict):
-            cls._warn_unknown_keys(data)
+            cls._validate_structure(data)
         build = data.get("build") if isinstance(data, dict) else None
         build = build if isinstance(build, dict) else {}
         sources = data.get("sources") if isinstance(data, dict) else None

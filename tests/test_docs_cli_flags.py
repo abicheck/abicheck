@@ -31,18 +31,18 @@ from pathlib import Path
 import pytest
 
 from abicheck.cli import compare_cmd, dump_cmd
-from abicheck.cli_buildsource import collect_cmd
 from abicheck.cli_scan import scan_cmd
 
 _DOCS = Path(__file__).resolve().parent.parent / "docs" / "user-guide"
 _DOC_FILES = ("real-world-example.md", "scan-levels.md", "cli-usage.md")
 
 #: subcommand name → click command object whose options are authoritative.
+#: `collect` was removed (ADR-043 D1): dump/compare now auto-collect/ingest
+#: build-source facts through --build-info/--sources.
 _COMMANDS = {
     "compare": compare_cmd,
     "dump": dump_cmd,
     "scan": scan_cmd,
-    "collect": collect_cmd,
 }
 
 _BASH_BLOCK = re.compile(r"```bash\n(.*?)```", re.DOTALL)

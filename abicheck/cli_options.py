@@ -576,9 +576,9 @@ def merge_compile_config(
             # L2-only dump/scan (no --sources/--build-info) nothing reloads it
             # downstream, so a warn-and-fallback would silently drop the intended
             # compile.std/defines/sysroot/frontend and still exit 0 (Codex review).
-            raise click.ClickException(
-                f"cannot parse build config {cfg}: {exc}"
-            ) from exc
+            # UsageError (not plain ClickException) so it exits 64, not 1 — a bad
+            # .abicheck.yml is a usage error (ADR-043 CLI reset).
+            raise click.UsageError(f"cannot parse build config {cfg}: {exc}") from exc
         # An *auto-discovered* config stays best-effort: a malformed file found by
         # walking up from cwd / the --sources root shouldn't fail a run the user
         # didn't ask to bind to it. Warn so it isn't silently ignored; the real

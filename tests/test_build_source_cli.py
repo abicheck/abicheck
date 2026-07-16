@@ -1281,9 +1281,13 @@ def test_build_config_from_dict_and_load(tmp_path):
     assert cfg.public_headers == ["a/**.hpp"]
     assert cfg.exclude == ["**/test/**"]
 
-    # Empty / malformed inputs fall back to all-defaults.
+    # Empty input falls back to all-defaults.
     assert BuildConfig.from_dict({}).system == "auto"
-    assert BuildConfig.from_dict({"build": "nope"}).query == ""
+    # ADR-043 CLI reset: a block key given a scalar (not a mapping) is a hard
+    # error now, not a silent coercion to `{}` (this used to be exactly the gap
+    # the now-removed `abicheck config validate` command existed to catch).
+    with pytest.raises(ValueError, match="build must be a mapping"):
+        BuildConfig.from_dict({"build": "nope"})
 
     # load_build_config: missing file → defaults; present file → parsed.
     assert load_build_config(tmp_path / "nope.yml").system == "auto"
@@ -2188,9 +2192,13 @@ def test_build_info_invalid_compile_db_is_graceful(tmp_path):
         assert not snap.build_source.build_evidence.compile_units
 
 
-def test_build_config_malformed_yaml_falls_back_to_defaults(tmp_path):
-    """D4: a malformed `.abicheck.yml` build block degrades to defaults instead of
-    raising, so collection is never aborted by a bad config."""
+def test_build_config_malformed_block_shape_raises(tmp_path):
+    """ADR-043 CLI reset: a `build:` block that isn't a mapping is a hard
+    ``ValueError`` from ``load_build_config`` now, not a silent degrade to
+    defaults — the strictness the removed `abicheck config validate` command
+    used to provide as a separate opt-in step now lives in the loader itself,
+    so every real caller sees it (embed_build_source/compare/scan all wrap
+    this in a click.UsageError -> exit 64, never an uncaught traceback)."""
     from abicheck.buildsource.inline import (
         discover_build_config,
         load_build_config,
@@ -2200,11 +2208,10 @@ def test_build_config_malformed_yaml_falls_back_to_defaults(tmp_path):
     tree.mkdir()
     cfg_path = tree / ".abicheck.yml"
     cfg_path.write_text("build:\n  - this is a list not a mapping\n", encoding="utf-8")
-    # discover finds it; load tolerates the malformed shape.
+    # discover still finds it; load now raises on the malformed shape.
     assert discover_build_config(tree) == cfg_path
-    cfg = load_build_config(cfg_path)
-    assert cfg.system == "auto"
-    assert cfg.query == ""
+    with pytest.raises(ValueError, match="build must be a mapping"):
+        load_build_config(cfg_path)
 
 
 def test_dump_sources_and_build_info_together(tmp_path):

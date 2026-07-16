@@ -1498,21 +1498,6 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     run_compare(ctx, **kwargs)
 
 
-@main.command("recommend-collect-mode")
-@click.argument("paths", nargs=-1)
-def recommend_collect_mode_cmd(paths: tuple[str, ...]) -> None:
-    """Recommend an evidence collection scope from a PR's changed paths (ADR-033 D3).
-
-    Prints the internal collection mode a CI job should use: `build` for
-    build-system-only changes, `source-changed` when sources or headers changed,
-    else `off`. Use it to pick the `--depth` rung (build → `--depth build`,
-    source-changed → `--depth source`). The artifact compare stays authoritative —
-    this only scopes which optional evidence a CI job should collect.
-    """
-    from .buildsource.source_replay import recommend_collect_mode
-    click.echo(recommend_collect_mode(paths))
-
-
 # ── ABICC compat subcommands (implementation in abicheck.compat) ─────────────
 # NOTE: eagerly loads abicheck.compat.cli at import time — intentional so all
 # consumers get compat commands registered. Private helpers re-exported for
@@ -1564,8 +1549,8 @@ main.add_command(compat_group)
 # ``@main.command(...)`` decorator then attaches to that second group, not
 # the one actually running, so `python -m abicheck.cli --help` silently
 # listed only the handful of commands defined directly in this file (dump/
-# compare/compat) and omitted every sibling-registered one (config, doctor,
-# scan, appcompat, ...). Alias the already-running module under its real
+# compare/compat) and omitted every sibling-registered one (scan, appcompat,
+# ...). Alias the already-running module under its real
 # package name first, so the relative import below reuses it instead
 # (Codex review).
 # ---------------------------------------------------------------------------
@@ -1575,21 +1560,10 @@ if __name__ == "__main__":
     sys.modules.setdefault("abicheck.cli", sys.modules[__name__])
 
 from . import (  # noqa: E402  — must run after `main` and helpers are defined
-    cli_appcompat,  # noqa: F401  — registers appcompat
-    cli_baseline,  # noqa: F401  — registers baseline
-    cli_buildsource,  # noqa: F401  — registers collect
-    cli_config,  # noqa: F401  — registers init, config (validate, show-effective)
-    cli_debian_symbols,  # noqa: F401  — registers debian-symbols
-    cli_doctor,  # noqa: F401  — registers doctor
-    cli_graph,  # noqa: F401  — registers graph (compare, explain)
-    cli_inputs,  # noqa: F401  — registers inputs (validate)
-    cli_plugin,  # noqa: F401  — registers plugin-check
-    cli_pr_comment,  # noqa: F401  — registers pr-comment
-    cli_probe,  # noqa: F401  — registers probe (run, compare)
+    cli_buildsource,  # noqa: F401  — buildsource internals (no command of its own)
+    cli_pr_comment,  # noqa: F401  — registers pr-comment (Action-only; TODO(ADR-043))
     cli_scan,  # noqa: F401  — registers scan
     cli_stack,  # noqa: F401  — registers deps (tree, compare)
-    cli_suggest,  # noqa: F401  — registers suggest-suppressions
-    cli_surface,  # noqa: F401  — registers surface-report
 )
 
 if __name__ == "__main__":

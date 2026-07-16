@@ -425,9 +425,13 @@ elif [[ "$MODE" == "stack-check" ]]; then
 elif [[ "$MODE" == "scan" ]]; then
   # ── Scan mode (source-intelligence orchestrator) ─────────────────────────
   # One front-end over dump/compare: always-on pattern + cross-source tier,
-  # then the pinned evidence level, optionally compared against --baseline.
+  # then the pinned evidence level, optionally compared against --against.
+  # ARTIFACT is a positional argument (not --binary); absence of --against is
+  # already a one-build audit, presence of --against is already audit+compare
+  # — there is no separate --audit/--mode/--source-method/--estimate flag any
+  # more (CLI simplification).
   CMD+=(scan)
-  CMD+=(--binary "${INPUT_NEW_LIBRARY:?new-library (the scanned binary or .abi.json) is required for scan mode}")
+  CMD+=("${INPUT_NEW_LIBRARY:?new-library (the scanned binary or .abi.json) is required for scan mode}")
 
   add_flag "-H" "${INPUT_HEADER:-}"
   add_flag "-H" "${INPUT_NEW_HEADER:-}"
@@ -441,7 +445,13 @@ elif [[ "$MODE" == "scan" ]]; then
   # scan's config flag is --config (not --build-config, which does not exist on
   # scan and hard-fails with exit 64). dump uses --config for the same input.
   add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
-  add_single_flag "--baseline" "${INPUT_BASELINE:-}"
+  # audit=true forces a one-build audit even when a baseline is configured
+  # (e.g. via abi-baseline auto-fetch) — the old --audit flag ignored
+  # --baseline the same way; --against structurally cannot be combined with
+  # an audit-only run any more, so the emulation is to simply omit --against.
+  if [[ "${INPUT_AUDIT:-false}" != "true" ]]; then
+    add_single_flag "--against" "${INPUT_BASELINE:-}"
+  fi
   add_single_flag "--lang" "${INPUT_LANG:-}"
 
   # Level selection — the modern --depth dial (omit for 'auto'). The deprecated
@@ -455,12 +465,6 @@ elif [[ "$MODE" == "scan" ]]; then
   add_single_flag "--risk-rules" "${INPUT_RISK_RULES:-}"
   add_flag "--crosscheck" "${INPUT_CROSSCHECK:-}"
 
-  if [[ "${INPUT_AUDIT:-false}" == "true" ]]; then
-    CMD+=(--audit)
-  fi
-  if [[ "${INPUT_ESTIMATE:-false}" == "true" ]]; then
-    CMD+=(--estimate)
-  fi
   if [[ "${INPUT_ALLOW_BUILD_QUERY:-false}" == "true" ]]; then
     CMD+=(--allow-build-query)
   fi
@@ -473,9 +477,16 @@ elif [[ "$MODE" == "scan" ]]; then
   fi
   CMD+=(--format "$FORMAT")
 
-  OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
-  if [[ -n "$OUTPUT_FILE" ]]; then
-    CMD+=(-o "$OUTPUT_FILE")
+  # estimate=true now maps to --dry-run (the old --estimate's cost-projection
+  # folded into the general dry-run report). A dry run writes nothing, so skip
+  # -o/--output entirely when it's set (they are mutually exclusive on scan).
+  if [[ "${INPUT_ESTIMATE:-false}" == "true" ]]; then
+    CMD+=(--dry-run)
+  else
+    OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
+    if [[ -n "$OUTPUT_FILE" ]]; then
+      CMD+=(-o "$OUTPUT_FILE")
+    fi
   fi
 
 elif [[ "$MODE" == "merge" ]]; then

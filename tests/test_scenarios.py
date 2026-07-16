@@ -603,9 +603,8 @@ def test_sc_scan_binary_depth_matrix_args(tmp_path: Path) -> None:
 
     res = _cli(
         "scan",
-        "--binary",
         new_path,
-        "--baseline",
+        "--against",
         old_path,
         "-H",
         str(include),

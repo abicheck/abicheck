@@ -135,14 +135,14 @@ abicheck dump libfoo-2.3.0/lib/libfoo.so -H libfoo-2.3.0/include \
 
 # 2) Run from the NEW source checkout (where .abicheck.yml lives, so its relative
 #    include_dirs resolve), and gate the new build against that snapshot:
-abicheck scan --binary build/libfoo.so -H include/ \
-  --baseline baselines/libfoo-2.3.0.abi.json --config .abicheck.yml
+abicheck scan build/libfoo.so -H include/ \
+  --against baselines/libfoo-2.3.0.abi.json --config .abicheck.yml
 ```
 
 Run the scan from the project root so the config's `include_dirs` (relative to
 `.abicheck.yml`) point at the checked-out tree. Each side is parsed with **its
 own** headers — the baseline is a snapshot dumped from the old headers, not the
-raw old `.so` (a raw `--baseline` library would be re-parsed with the *new* `-H`,
+raw old `.so` (a raw `--against` library would be re-parsed with the *new* `-H`,
 fine only when the headers didn't change). Give the baseline `dump` the same
 include roots, dialect, and macros as the scan side so the comparison isn't noisy
 — passed inline as `-I`/`--gcc-options` here because the baseline is dumped from
@@ -170,8 +170,8 @@ that neither the binary nor the headers reveal. The simple model: give it your
 ```bash
 # run from the new checkout (as in §4), with a diff seed so the source replay
 # (--depth source) only re-parses the changed TUs
-abicheck scan --binary build/libfoo.so -H include/ --sources . --since origin/main \
-  --baseline baselines/libfoo-2.3.0.abi.json --config .abicheck.yml --depth source
+abicheck scan build/libfoo.so -H include/ --sources . --since origin/main \
+  --against baselines/libfoo-2.3.0.abi.json --config .abicheck.yml --depth source
 ```
 
 - `--sources .` — your checkout.
@@ -192,13 +192,15 @@ abicheck scan --binary build/libfoo.so -H include/ --sources . --since origin/ma
     it adds the **new** build's source checks; to diff body changes *across
     releases*, dump the baseline with source evidence too (`abicheck dump … --sources …`).
 
-The depth knob is `--depth {binary,headers,build,source,full}` (`binary` =
-binary-only, up to `full` = whole-library replay); leave it off and abicheck
-**auto**-picks by changed-path risk. **How each depth works, how to produce a
-compile database for `make`/`cmake`/`bazel`/`meson`, and the per-level input
-table live in [Source-Scan Depth](scan-levels.md)** — that's the home for the
-build-system details (and the deprecated `--source-method s0…s6` axis), kept
-out of this walkthrough on purpose.
+The depth knob is `--depth {binary,headers,build,source}` (`binary` =
+binary-only, up to `source` = source-ABI replay — unseeded, it replays the
+whole library; with a `--since`/`--changed-path` seed, just the changed TUs);
+leave it off and abicheck **auto**-picks by changed-path risk. **How each depth
+works, how to produce a compile database for `make`/`cmake`/`bazel`/`meson`,
+and the per-level input table live in [Source-Scan Depth](scan-levels.md)** —
+that's the home for the build-system details, kept out of this walkthrough on
+purpose. (The old `--source-method s0…s6`/`--mode` axes and the separate
+`--depth full` rung have been removed outright.)
 
 ---
 

@@ -2,7 +2,14 @@
 
 `abicheck scan` is the one-shot orchestrator over `dump`/`compare`: it classifies
 the changed paths, runs the always-on compiler-free pattern pre-scan, then runs a
-**pinned evidence depth** and (with `--baseline`) compares against it.
+**pinned evidence depth** and (with `--against`) compares against it.
+
+`abicheck scan ARTIFACT [OPTIONS]` takes the scanned binary/snapshot as a
+**positional** argument (not a flag). `--against OLD` is the previous
+dump/library/directory/package to compare against; **omitting** `--against`
+already means a one-build audit/hygiene/source-consistency scan (there is no
+separate `--audit` flag any more — presence or absence of `--against` is what
+selects the mode).
 
 !!! info "This topic in three pages — you are on **Flags**"
     **Model** — [Evidence & Detectability](../concepts/evidence-and-detectability.md):
@@ -16,28 +23,31 @@ the changed paths, runs the always-on compiler-free pattern pre-scan, then runs 
 
 **One dial selects how deep it goes — `--depth`, named by the evidence you get:**
 
-- **`--depth binary|headers|build|source|full`** — the single knob (ADR-037 D5).
-  `binary` = L0/L1 exported symbols + binary metadata; `headers` = +L2 header AST;
-  `build` = +L3 build context; `source` = +L4 replay & the L5 graph; `full` =
-  deepest (whole-library replay). **Omit it for `auto`** — the default: risk-driven
-  when a `--since`/`--changed-path` seed is present, else a sensible preset.
-- **`--audit`** is orthogonal: a single-build, no-baseline hygiene lint (it does
-  not need a previous version).
+- **`--depth binary|headers|build|source`** — the single knob (ADR-037 D5 /
+  ADR-043 D2). `binary` = L0/L1 exported symbols + binary metadata; `headers` =
+  +L2 header AST; `build` = +L3 build context; `source` = +L4 replay & the L5
+  graph. **Omit it for `auto`** — the default: risk-driven when a
+  `--since`/`--changed-path` seed is present, else a sensible preset.
+- **`--depth source` always analyses *something* real, never a zero-TU no-op**
+  (ADR-043 D3): with a `--since`/`--changed-path` seed it replays the *changed*
+  TUs; without one it replays the **whole current library target** (what an
+  older, now-removed `--depth full` rung used to require explicitly) — so it is
+  never silently empty, just potentially more expensive unseeded.
+- Absence of `--against` is already a single-build, no-baseline hygiene lint;
+  there is no separate `--audit` flag any more.
 
 !!! warning "A pinned depth is a contract (fail-loud)"
-    Pinning a deep depth (`--depth build|source|full`) with **no source input**
+    Pinning a deep depth (`--depth build|source`) with **no source input**
     (`--sources`/`--build-info`) is an error, not a silent shallow scan: there is
     nothing to collect L3/L4/L5 from. Pass the evidence, or use the default `auto`
     for a best-effort binary scan. (The `auto` default never errors this way.)
 
-??? note "Migrating from `--source-method`/`--mode`? (deprecated aliases)"
+!!! note "`--mode`/`--source-method` are gone"
     Earlier releases exposed a precise `--source-method s0…s6` axis and
-    `--mode pr|pr-deep|baseline|audit` presets. Both still parse but are now
-    **hidden, deprecated aliases** (they print a warning and map onto `--depth`).
-    Prefer `--depth`. The mapping table is in the
-    [Deprecated axes appendix](../concepts/evidence-and-detectability.md#appendix-deprecated-scan-axes-s0s6-and-mode).
-    (`--depth symbols` was renamed to `--depth binary`; `symbols` keeps working as
-    a warned alias.)
+    `--mode pr|pr-deep|baseline|audit` presets as deprecated aliases for
+    `--depth`. Both have since been **removed outright** (passing either is now
+    a plain usage error, exit 64) — use `--depth`. (`--depth symbols` was
+    likewise renamed to `--depth binary`, with no alias kept.)
 
 ## What each depth reaches
 
@@ -46,8 +56,7 @@ the changed paths, runs the always-on compiler-free pattern pre-scan, then runs 
 | `binary` | L0/L1 exported symbols + binary metadata + debug-info *presence* (no deep DWARF type walk, no L2 AST) + always-on pattern scan | just the artifact(s) |
 | `headers` | + **L2** header AST (the public/internal boundary) | a public-header directory + a C/C++ frontend |
 | `build` | + **L3** build context (flag/toolchain drift) | a compile DB / build dir |
-| `source` | + **L4** source-ABI replay of changed TUs + the **L5** graph | sources **and** `clang` (+ a diff seed to scope it) |
-| `full` | **L4** over the whole library | sources **and** `clang` |
+| `source` | + **L4** source-ABI replay of changed TUs (seeded) or the whole library target (unseeded) + the **L5** graph | sources **and** `clang` (+ a diff seed to scope it to just the changed TUs) |
 
 ### What each depth does, in plain terms
 
@@ -60,21 +69,20 @@ the changed paths, runs the always-on compiler-free pattern pre-scan, then runs 
 - **`headers` — the header API surface.** Adds the L2 header AST, which
   establishes the **public/internal boundary** — so an internal-symbol removal
   (compatible) is told apart from a public one (breaking). Needs a public-header
-  directory (`-H`/`--headers`) and a C/C++ frontend (`castxml` or `clang`).
+  directory (`-H`/`--header`) and a C/C++ frontend (`castxml` or `clang`).
 - **`build` — build context.** Reads a compile database to see the flags each
   translation unit was built with, so it can flag `-fvisibility`/`-D`/standard or
   toolchain **drift** between the two builds, plus (when `clang -E` is available)
   macro-value and include-graph divergence. Needs a compile DB / build dir.
-- **`source` — semantic replay of changed TUs (the diff-seeded default).**
-  Re-parses the *changed* translation units with `clang` and replays their ABI —
-  the only depth that sees inline / template / macro / default-argument /
-  `constexpr` **body** changes, and it folds the L5 reachability graph. Needs a
-  compile DB, the source checkout (`--sources`), and a diff seed
-  (`--since`/`--changed-path`); without a seed it falls back to a headers-only
-  replay and emits an advisory.
-- **`full` — full semantic replay.** Like `source` but over the **whole**
-  library, not just the changed TUs — the most thorough and the most expensive
-  (the one real cost cliff). Use it for an amortized release baseline.
+- **`source` — semantic replay, scope depends on whether you seed it.**
+  Re-parses translation units with `clang` and replays their ABI — the only
+  depth that sees inline / template / macro / default-argument / `constexpr`
+  **body** changes, and it folds the L5 reachability graph. With a diff seed
+  (`--since`/`--changed-path`) it replays only the *changed* TUs (cheap,
+  PR-sized); without one it replays the **whole current library target**
+  (ADR-043 D3 — never a zero-TU no-op, but potentially as expensive as a full
+  release-baseline replay). Needs a compile DB and the source checkout
+  (`--sources`).
 
 ### Benefits and cost at a glance
 
@@ -129,9 +137,9 @@ matches your goal, then supply the input named in column 3.
 | Binary-only ABI gate (removed/changed exports; no-DWARF vtable/RTTI size) | `binary` | two `.so` (or `.abi.json`) | release artifacts / conda / `.deb` | always available (L0/L1) |
 | Header-aware API surface + internal-vs-public scoping + cross-source checks | `headers` | a public-header **directory** + a C/C++ frontend | `-H include/ --public-header-dir include/`; `castxml` **or** `clang` on `PATH` | a lone `-H file.h` does not establish a boundary → provenance/cross-checks stay dormant |
 | Build-flag / toolchain / visibility drift (+ macro/include divergence) | `build` | an L3 compile database | `cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` (configure-only), `meson setup`, `bazel aquery --output=jsonproto`, or `bear -- make`; pass via `--build-info`/`--compile-db` | L3 `not_collected`; the scan advises the exact remedy |
-| Semantic source-ABI replay of changed TUs (macro/default-arg/inline/template/constexpr **body** changes) + L5 graph | `source` | L3 compile DB + source checkout + `clang` + generated headers present | configure for the DB; **codegen/partial build** for generated headers; seed with `--since`/`--changed-path` | without a seed, `source` falls back to a headers-only public-API replay and emits an advisory (not a full per-TU replay); missing generated headers → L4 `partial` |
-| Full-library source replay | `full` | as `source`, whole library | amortized baseline build | expensive — the one cost cliff is at L4 |
-| Single-build hygiene lint (accidental exports, leaks, unversioned/RTTI) | `--audit` (any depth) | binary + public-header **dir** (+ optional L3/L4) | as above | `header_build_context_mismatch` needs L3; `odr_type_variant` needs L4 |
+| Semantic source-ABI replay of changed TUs (macro/default-arg/inline/template/constexpr **body** changes) + L5 graph | `source` | L3 compile DB + source checkout + `clang` + generated headers present | configure for the DB; **codegen/partial build** for generated headers; seed with `--since`/`--changed-path` | without a seed, `source` replays the **whole current library target** instead of just the changed TUs (ADR-043 D3 — never a zero-TU no-op, but more expensive); missing generated headers → L4 `partial` |
+| Full-library source replay (an amortized release baseline) | `source` (unseeded — no `--since`/`--changed-path`) | as above, whole library | amortized baseline build | expensive — the one cost cliff is at L4 |
+| Single-build hygiene lint (accidental exports, leaks, unversioned/RTTI) | any depth, no `--against` | binary + public-header **dir** (+ optional L3/L4) | as above | `header_build_context_mismatch` needs L3; `odr_type_variant` needs L4 |
 
 ### Obtaining a compile database without a full build
 
@@ -140,14 +148,14 @@ Generate one — none of these compiles the library, they only configure / query
 the build graph:
 
 ```bash
-# CMake: configure-only (source/full also need --sources . and a diff seed --since)
+# CMake: configure-only (source also needs --sources . and a diff seed --since)
 cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-abicheck scan --binary new/libfoo.so -H include/ --build-info build --depth source …
+abicheck scan new/libfoo.so -H include/ --build-info build --depth source …
 
 # Bazel: query the action graph (no build); --build-info sniffs the aquery
 # jsonproto and routes it straight to the Bazel adapter (ADR-037 D5 — no pack step)
 bazel aquery 'mnemonic("CppCompile", //...)' --output=jsonproto > aq.json
-abicheck scan --binary new/libonedal_core.so -H include/ --build-info aq.json --depth build …
+abicheck scan new/libonedal_core.so -H include/ --build-info aq.json --depth build …
 ```
 
 !!! tip "`--build-info` auto-detects the format (ADR-037 D5)"
@@ -195,8 +203,8 @@ build:
 ```
 
 ```bash
-abicheck scan --binary new/libfoo.so -H include/ --sources . \
-  --config .abicheck.yml --depth source --baseline old/libfoo.abi.json
+abicheck scan new/libfoo.so -H include/ --sources . \
+  --config .abicheck.yml --depth source --against old/libfoo.abi.json
 ```
 
 ## Compile context for header parsing (L2)
@@ -285,29 +293,29 @@ touched. The `--since` seed is what keeps this cheaper than a full `full` scan �
 without it, `source` replays every TU.
 
 ```bash
-abicheck scan \
-  --binary build/libfoo.so --headers include/ \
+abicheck scan build/libfoo.so \
+  -H include/ \
   --sources . --since origin/main \
-  --baseline artifacts/libfoo-main.abi.json
+  --against artifacts/libfoo-main.abi.json
 ```
 
 - **Depth:** `auto` with a diff seed resolves to `source` (`--depth source`); pin
   it explicitly if you want a fixed rung.
 - **Exit code:** `0` compatible, `2` source/API break, `4` ABI break (from the
-  baseline compare), `5` `--budget` overflow.
+  `--against` compare), `5` `--budget` overflow.
 - `--depth source` folds the L5 reachability **edges scoped to the changed TUs**
   for cross-symbol impact in the report. The *whole-library* reachability graph
-  is an internal level (`GRAPH`, D6) with no user-facing `--depth` rung — reach it
-  only via the deprecated `--mode pr-deep`.
+  is an internal level (`GRAPH`, D6) with no user-facing `--depth` rung.
 
-### Single-build audit — no baseline
+### Single-build audit — no `--against`
 
-`--audit` runs the intra-version cross-source hygiene checks against **one**
-build — no previous version required. With just the binary and headers it catches
-accidental exports, private-header leaks, and unversioned symbols:
+Omitting `--against` already runs the intra-version cross-source hygiene checks
+against **one** build — no previous version required (there is no separate
+`--audit` flag any more). With just the binary and headers it catches accidental
+exports, private-header leaks, and unversioned symbols:
 
 ```bash
-abicheck scan --binary libfoo.so --headers include/ --audit
+abicheck scan libfoo.so -H include/
 ```
 
 Worked example cases for each audit finding:
@@ -327,8 +335,8 @@ real build flags, so it only fires when you also pass an L3 build input
 skipped coverage row, not a pass:
 
 ```bash
-abicheck scan --binary libfoo.so --headers include/ \
-  --build-info build/compile_commands.json --audit
+abicheck scan libfoo.so -H include/ \
+  --build-info build/compile_commands.json
 ```
 
 This reports the eight ADR-035 cross-source / single-release findings rather than
@@ -349,56 +357,59 @@ reported `not_collected` and no drift is checked. `--depth binary` stays on the
 exported-symbol surface (L0) plus cheap debug-info *presence* and the always-on
 pattern scan — it skips the deep DWARF type walk, so no compiler, headers, or
 sources are needed. (`--depth headers` is the next rung up: it adds the L2 header
-AST, which needs a header directory via `--headers` and a C/C++ frontend on
+AST, which needs a header directory via `-H`/`--header` and a C/C++ frontend on
 `PATH`.)
 
 ```bash
 # build-flag drift only, flat ~0.3–0.5s regardless of project size
 # (the compile DB is what supplies L3 — without it the scan is artifact-only)
-abicheck scan --binary new/libfoo.so --baseline old/libfoo.abi.json \
+abicheck scan new/libfoo.so --against old/libfoo.abi.json \
   --build-info build/compile_commands.json --depth build
 
 # exported symbols + always-on lexical scan only (no DWARF walk, no L2 AST,
 # no L3/L4/L5; no compiler needed)
-abicheck scan --binary new/libfoo.so --baseline old/libfoo.abi.json --depth binary
+abicheck scan new/libfoo.so --against old/libfoo.abi.json --depth binary
 ```
 
-### Estimate before you spend — `--estimate`
+### Estimate before you spend — `--dry-run`
 
 L4 cost scales with C++ template depth, so on a heavy library project the per-TU
-replay cost first. `--estimate` is a dry run: it prints the projected per-layer
-cost for *this* project and scans nothing.
+replay cost first. `--dry-run` resolves and validates the invocation (depth,
+scope, tool availability) and prints the projected per-layer cost for *this*
+project without scanning anything or writing output (always exits 0).
 
 ```bash
-abicheck scan --binary libfoo.so --sources . --depth source --estimate
+abicheck scan libfoo.so --sources . --depth source --dry-run
 ```
 
-### Release baseline — full `full`
+### Release baseline — unseeded `source`
 
-The reusable `--baseline` that PR scans compare against is a **`dump`-produced
-snapshot**, not a scan report. `scan -o` writes the rendered scan report (text or
-JSON), so it cannot be fed back as a `--baseline`; produce the baseline with
-`abicheck dump` instead. Pass `--sources` to embed the full-depth L3/L4/L5 facts
-so the later PR compare carries them:
+The reusable `--against` target that PR scans compare against is a
+**`dump`-produced snapshot**, not a scan report. `scan -o` writes the rendered
+scan report (text or JSON), so it cannot be fed back as `--against`; produce the
+baseline with `abicheck dump` instead. Pass `--sources` to embed the full-depth
+L3/L4/L5 facts so the later PR compare carries them:
 
 ```bash
 # Produce the reusable baseline snapshot once per release
-# (dump uses -H/--header — the plural --headers alias is scan-only):
+# (dump uses -H/--header, same as scan):
 abicheck dump build/libfoo.so -H include/ \
   --sources . --version 1.0 -o artifacts/libfoo-1.0.abi.json
 
 # PR scans then compare against it:
-abicheck scan --binary build/libfoo.so --headers include/ \
-  --sources . --since origin/main --baseline artifacts/libfoo-1.0.abi.json
+abicheck scan build/libfoo.so -H include/ \
+  --sources . --since origin/main --against artifacts/libfoo-1.0.abi.json
 ```
 
-To get a full-depth scan *report* of a release (replays every TU, folds the full
-graph) for human review — as opposed to the reusable baseline above — run
-`scan --depth full` and send its report to `-o`:
+To get a whole-library scan *report* of a release (replays every TU, folds the
+full graph) for human review — as opposed to the reusable baseline above — run
+`scan --depth source` **without** a `--since`/`--changed-path` seed (which
+resolves to the whole current library target, ADR-043 D3 — what a now-removed
+`--depth full` rung used to require explicitly) and send its report to `-o`:
 
 ```bash
-abicheck scan --binary build/libfoo.so --headers include/ \
-  --sources . --depth full -o artifacts/libfoo-1.0-scan.json
+abicheck scan build/libfoo.so -H include/ \
+  --sources . --depth source -o artifacts/libfoo-1.0-scan.json
 ```
 
 ### Let risk pick the depth — `auto` (local/dev only)
@@ -408,7 +419,7 @@ changed paths and picks a depth. It is the default and **never** overrides a
 pinned depth — keep CI on a fixed `--depth` for reproducibility.
 
 ```bash
-abicheck scan --binary new.so -H include/ --since origin/main
+abicheck scan new.so -H include/ --since origin/main
 ```
 
 ### Reading the coverage block
@@ -441,7 +452,7 @@ Measured on two UXL libraries (full data: `validation/`):
 | Tier | Depths | Relative cost |
 |------|--------|---------------|
 | **Cheap** | `binary`, `headers`, `build` | One price — dominated by the binary dump + lexical scan, *not* the source layer. |
-| **Expensive** | `source`, `full` | clang per-TU AST replay (L4). |
+| **Expensive** | `source` | clang per-TU AST replay (L4). |
 
 - **The cliff is at L4 (`build`→`source`), and its height tracks C++ complexity.**
   L4 cost scales with template/STL instantiation depth, not `.so`/TU count — a
@@ -449,16 +460,17 @@ Measured on two UXL libraries (full data: `validation/`):
   library is barely affected (~1.3×).
 - **Choose a cheap depth by coverage, not cost.** `binary` (symbols + pattern
   only); `headers` adds the L2 API surface; `build` adds L3 build context.
-- **`source` is only cheaper than `full` if you give it a diff seed.** Without
-  `--since <ref>` or `--changed-path <file>`, the changed-TU set is empty and
-  `source` replays every TU — the same cost as `full`. With a real PR diff,
-  `source` scopes L4 to the touched TUs and can be **an order of magnitude
-  faster** for the identical verdict. Always pass `--since`/`--changed-path` in
-  PR CI.
+- **`source` is only cheap when you give it a diff seed.** Without
+  `--since <ref>` or `--changed-path <file>`, `source` replays the **whole
+  current library target** instead of just the changed TUs (ADR-043 D3 — never a
+  zero-TU no-op, but the most expensive shape, same cost as an amortized release
+  baseline). With a real PR diff, `source` scopes L4 to the touched TUs and can be
+  **an order of magnitude faster** for the identical verdict. Always pass
+  `--since`/`--changed-path` in PR CI.
 - **The verdict usually does not change with depth** — the binary diff sets the
   gate; L3–L5 add localization/explanation. For a pass/fail **gate**, the cheap
-  tier is enough; spend on L4 (`source`/`full`) when you want source-body
-  semantics or per-PR localization for humans.
+  tier is enough; spend on L4 (`source`) when you want source-body semantics or
+  per-PR localization for humans.
 
 See [Comparison Performance](../development/performance.md#scan-level-cost-model-one-cliff-at-l4)
 for the measured numbers.

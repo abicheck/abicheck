@@ -417,7 +417,9 @@ def test_compare_no_above_floor_check_without_declared_floor() -> None:
     # A bare `.abi3.so` carries no declared floor → no inference (avoids the
     # min-of-imports false positive); a stable import is not flagged.
     old = _ext_snapshot("1.0", ["PyList_New"], source_path="foo.abi3.so")
-    new = _ext_snapshot("2.0", ["PyList_New", "PyType_GetName"], source_path="foo.abi3.so")
+    new = _ext_snapshot(
+        "2.0", ["PyList_New", "PyType_GetName"], source_path="foo.abi3.so"
+    )
     result = compare(old, new)
     assert ChangeKind.PYTHON_STABLE_ABI_VIOLATION not in _kinds(result)
 
@@ -611,14 +613,12 @@ def _write_snapshot(tmp_path: object, snap: AbiSnapshot) -> str:
 
 
 def _scan_abi3(path: str, *args: str) -> object:
-    """Invoke ``scan --binary <path> --depth binary`` with extra args."""
+    """Invoke ``scan <path> --depth binary`` with extra args."""
     from click.testing import CliRunner
 
     from abicheck.cli import main
 
-    return CliRunner().invoke(
-        main, ["scan", "--binary", path, "--depth", "binary", *args]
-    )
+    return CliRunner().invoke(main, ["scan", path, "--depth", "binary", *args])
 
 
 #: Promote the audit finding to a hard gate (scan's advisory→error path).
@@ -779,9 +779,7 @@ def test_audit_stable_abi_imports_helper() -> None:
     )
     findings = audit_stable_abi_imports(meta, (3, 9))
     assert findings
-    assert all(
-        f.kind is ChangeKind.PYTHON_STABLE_ABI_VIOLATION for f in findings
-    )
+    assert all(f.kind is ChangeKind.PYTHON_STABLE_ABI_VIOLATION for f in findings)
     joined = " ".join(str(f.new_value) for f in findings)
     assert "_PyObject_LookupSpecial" in joined
     assert "PyType_GetName" in joined

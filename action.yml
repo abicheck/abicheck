@@ -223,9 +223,10 @@ inputs:
   depth:
     description: >
       Evidence-depth selector (scan and dump modes): binary, headers, build,
-      source, or full. In scan mode, omit it for 'auto' (risk-driven). Maps to
-      --depth. (The deprecated scan-mode/source-method inputs have been removed;
-      use depth.)
+      or source. In scan mode, omit it for 'auto' (risk-driven); --depth source
+      analyses the whole current library target unless since/changed-path
+      seeds a narrower changed scope. Maps to --depth. (The deprecated
+      scan-mode/source-method inputs have been removed; use depth.)
     required: false
   since:
     description: >
@@ -245,14 +246,20 @@ inputs:
     required: false
   audit:
     description: >
-      scan mode only. Single-build hygiene lint with no baseline
-      (intra-version cross-source checks). Maps to scan --audit.
+      scan mode only. Force a single-build hygiene lint (intra-version
+      cross-source checks) even when a baseline is configured (e.g. via
+      abi-baseline auto-fetch), by omitting scan's --against — scan already
+      runs audit-only whenever no baseline/against is given. The old --audit
+      CLI flag was removed (absence of --against now means audit-only,
+      presence means audit+compare — the two are no longer separate flags).
     required: false
     default: 'false'
   estimate:
     description: >
-      scan mode only. Dry-run: print the projected per-layer cost for this
-      project and scan nothing (always exits 0). Maps to scan --estimate.
+      scan mode only. Dry-run: print the resolved depth/scope and the
+      projected per-layer cost for this project without scanning anything or
+      writing output (always exits 0). Maps to scan --dry-run (the old
+      --estimate CLI flag was folded into the general --dry-run report).
     required: false
     default: 'false'
   crosscheck:
