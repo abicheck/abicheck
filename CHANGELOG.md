@@ -130,6 +130,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   re-surface a scoped-only finding the filter excluded. Fixed the same way
   (the `--secondary-format` render and the MCP top-level `changes` summary
   are unaffected — both are deliberately always-unfiltered by design).
+- `--show-only` in both `compare --format sarif` and `compare --format json`
+  now also applies to synthesized missing-contract results (a required
+  symbol/version simply absent from the new library) — these have no
+  backing `Change`/`ChangeKind` so they can't run through the same filter as
+  ordinary findings, but a `--show-only` run excluding breaking findings
+  previously still uploaded/serialized the (by-default-blocking) synthetic
+  result regardless.
 
 ### Added
 
