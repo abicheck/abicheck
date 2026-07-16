@@ -66,6 +66,21 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   and a `FUNC_REMOVED` finding), and now respects severity-config
   demotion of `abi_breaking` instead of always emitting `level: "error"`/
   a failing testcase.
+- `--used-by`/`--required-symbol` scoping can find a `Change` relevant
+  (e.g. `PE_ORDINAL_RETARGETED`, synthesized fresh per app/host and never
+  added to the base library diff) that previously drove the gate's exit
+  code with no corresponding SARIF result or JUnit testcase to explain it.
+  These "scoped-only" changes are now rendered like any other finding, and
+  count toward `relevantFindingCount`/`abicheck.relevant_finding_count`.
+  Missing-contract results also now separate `relevantToGate` (always
+  true — scope membership) from `blocksGate` (severity-dependent), instead
+  of conflating the two.
+- `dump -o`'s evidence-depth line and `compare`'s `old_evidence_depth`/
+  `new_evidence_depth` no longer overstate `source`/`build` when a layer
+  ran but linked no real facts (e.g. an inline source-ABI pass that finds
+  no reachable declarations because clang was unavailable) — depth is now
+  computed from the same payload-emptiness check the CLI's own coverage
+  warnings use, not mere non-`None` presence.
 
 ### Added
 
@@ -88,6 +103,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   New `gateScope`/`gateVerdict`/`gateExitCode` fields are added
   alongside the existing `scopedVerdict`/`abicheck.scoped_verdict`
   names, kept as aliases.
+- **GitHub Action**: the scan-only `audit`/`estimate` inputs are replaced
+  by a single cross-mode `dry-run` input, matching the CLI's own
+  pre-1.0 no-alias policy (ADR-043). `dry-run: 'true'` now maps to
+  `--dry-run` for every mode (`dump`, `compare`, `scan`, `deps-tree`,
+  `deps-compare`) and skips writing `-o`/`--secondary-output` for that
+  step. Forcing scan's single-build hygiene lint (the old `audit: 'true'`)
+  is now done by simply omitting `against`/`abi-baseline` on that step —
+  `scan` already runs audit-only whenever no baseline is given.
 
 ---
 
