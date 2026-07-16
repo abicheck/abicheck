@@ -811,6 +811,25 @@ class TestParseManylinuxGlibcFloor:
     def test_bare_tag_without_arch_suffix(self) -> None:
         assert parse_manylinux_glibc_floor("manylinux_2_27") == "2.27"
 
+    def test_manylinux_prefixed_distribution_name_not_mistaken_for_tag(
+        self,
+    ) -> None:
+        # A distribution named "manylinux_2_17_helper" makes no manylinux
+        # promise at all — only its platform-tag segment (the last
+        # -delimited component, "linux_x86_64") may be scanned.
+        assert parse_manylinux_glibc_floor(
+            "manylinux_2_17_helper-1.0-cp312-cp312-linux_x86_64.whl"
+        ) is None
+
+    def test_manylinux_prefixed_distribution_with_real_manylinux_platform(
+        self,
+    ) -> None:
+        # Same trap, but this one's actual platform tag IS manylinux — must
+        # still be picked up from the platform-tag segment, not skipped.
+        assert parse_manylinux_glibc_floor(
+            "manylinux_2_17_helper-1.0-cp312-cp312-manylinux_2_28_x86_64.whl"
+        ) == "2.28"
+
 
 class TestCondaExtractor:
     def test_detect_conda_extension(self, tmp_path: Path) -> None:

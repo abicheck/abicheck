@@ -508,12 +508,25 @@ def parse_manylinux_glibc_floor(name: str) -> str | None:
     is claiming to work on *every* listed baseline, so the strictest (lowest)
     glibc version among them is the one an actual binary must not exceed.
 
+    When *name* ends in ``.whl``, only its platform-tag segment (the last
+    ``-``-delimited component before the extension, per the PEP 427 wheel
+    filename spec ``{distribution}-{version}(-{build})?-{python}-{abi}-
+    {platform}.whl``) is scanned — not the whole filename. Otherwise a
+    ``manylinux``-prefixed *distribution* name (e.g.
+    ``manylinux_2_17_helper-1.0-cp312-cp312-linux_x86_64.whl``, whose
+    platform tag makes no manylinux promise at all) would be misread as a
+    manylinux tag.
+
     Returns a dotted ``"X.Y"`` string suitable for
     ``EnvironmentMatrix.runtime_floors["GLIBC"]``, or ``None`` if *name*
     carries no recognizable manylinux tag.
     """
+    tag_segment = name
+    if name.lower().endswith(".whl"):
+        stem = name[: -len(".whl")]
+        tag_segment = stem.rsplit("-", 1)[-1]
     best: tuple[int, int] | None = None
-    for m in _MANYLINUX_TAG_RE.finditer(name):
+    for m in _MANYLINUX_TAG_RE.finditer(tag_segment):
         if m.group("legacy"):
             version = _MANYLINUX_LEGACY_FLOORS[f"manylinux{m.group('legacy')}"]
         else:

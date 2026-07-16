@@ -34,11 +34,21 @@ would mean a known host-toolchain signature slipped past
 ``_castxml_failure_hint`` — exactly the 21-issue real-world regression G16
 closes.
 
-Requires: gcc/g++, castxml.
+Linux-only: every signature ``_castxml_failure_hint`` recognises (glibc
+sized-float types, the GCC 13+ libstdc++ ``__assume__`` attribute) is a
+glibc/GCC-specific host-header quirk — the real-world scan campaign this plan
+responds to was entirely Linux. macOS's Xcode SDK headers can fail this same
+``<math.h>`` probe for an unrelated reason (Xcode's ``libc++`` using
+``__has_cpp_attribute`` in a way the castxml-bundled clang frontend doesn't
+support), which is a different, out-of-scope problem this test must not be
+conflated with.
+
+Requires: gcc/g++, castxml (Linux).
 """
 from __future__ import annotations
 
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -74,6 +84,12 @@ class TestHeaderScopeSurvivesMathH:
     def test_castxml_parses_or_degrades_with_actionable_hint(
         self, tmp_path: Path
     ) -> None:
+        if not sys.platform.startswith("linux"):
+            pytest.skip(
+                "G16's known signatures are glibc/GCC-specific (Linux-only); "
+                "non-Linux hosts can fail this <math.h> probe for unrelated "
+                "SDK reasons this plan does not cover."
+            )
         _require_tool("castxml")
         _require_tool("g++")
 
