@@ -959,6 +959,151 @@ def _build_serialize(n: int) -> AbiSnapshot:
     )
 
 
+# ── oneDAL-shaped scenarios ────────────────────────────────────────────────────
+#
+# Generic scaling scenarios above are function-count-only or single-dimension
+# churn; oneDAL's own validation runs (~20-25k functions / ~1k records / a few
+# hundred enums from oneapi/dal.hpp and daal.h) surface three distinct shapes
+# none of the above stress: a huge *unchanged* public surface, a mass binary-
+# export removal that is entirely bundled/non-public (packaging noise — must
+# stay non-breaking once scoped), and a mass removal that *is* genuinely public
+# (must stay breaking). See docs/development/performance.md.
+def _build_onedal_large_surface(n: int) -> tuple[AbiSnapshot, AbiSnapshot]:
+    """A large, almost entirely unchanged public surface: ``n`` functions,
+    ``n // 20`` records, ``n // 100`` enums, with exactly one function's
+    return type changed. Stresses per-declaration overhead (provenance/
+    surface computation, dedup, enrichment) across a surface sized like
+    oneDAL's ~20k-25k function public headers, where the dominant cost must
+    come from processing the surface, not from the single real change.
+    """
+    n_types = max(50, n // 20)
+    n_enums = max(20, n // 100)
+    types = [
+        RecordType(
+            name=f"Type_{i}",
+            kind="struct",
+            size_bits=64,
+            fields=[
+                TypeField(name="a", type="int", offset_bits=0),
+                TypeField(name="b", type="long", offset_bits=64),
+            ],
+        )
+        for i in range(n_types)
+    ]
+    enums = [
+        EnumType(
+            name=f"Enum_{i}",
+            members=[EnumMember(name=f"Enum_{i}_A", value=0)],
+        )
+        for i in range(n_enums)
+    ]
+    funcs = [
+        Function(
+            name=f"dal_func_{i}",
+            mangled=f"_Z9dal_func_{i}P{i % n_types}",
+            return_type="int",
+            params=[Param(name="p", type=f"Type_{i % n_types} *")],
+            visibility=Visibility.PUBLIC,
+        )
+        for i in range(n)
+    ]
+    old = AbiSnapshot(
+        library="libonedal_core.so",
+        version="2026.0",
+        functions=funcs,
+        types=types,
+        enums=enums,
+    )
+    changed_funcs = list(funcs)
+    changed_funcs[0] = Function(
+        name=changed_funcs[0].name,
+        mangled=changed_funcs[0].mangled,
+        return_type="long",  # the one real change in an otherwise-static surface
+        params=changed_funcs[0].params,
+        visibility=Visibility.PUBLIC,
+    )
+    new = AbiSnapshot(
+        library="libonedal_core.so",
+        version="2026.1",
+        functions=changed_funcs,
+        types=list(types),
+        enums=list(enums),
+    )
+    return old, new
+
+
+def _build_onedal_packaging_noise(n: int) -> tuple[AbiSnapshot, AbiSnapshot]:
+    """The public header surface is completely unchanged; ``n`` bundled-
+    dependency exports (``Visibility.ELF_ONLY`` — modeling vendored MKL/BLAS
+    symbols carried inside a oneDAL release binary, not part of the public
+    ``oneapi::dal``/``daal`` API) are removed.
+
+    Mirrors the reported oneDAL 2025.0→2025.1 case: the binary/export tier
+    alone sees these removals as breaking, but public-header scoping must
+    still classify the release as non-breaking overall — see
+    ``_run_compare_verify_scoped_non_breaking``, which gates this as a
+    correctness check, not just a timing one.
+    """
+    n_public = max(50, n // 20)
+    public_funcs = [
+        Function(
+            name=f"dal_public_{i}",
+            mangled=f"_Z11dal_public_{i}v",
+            return_type="int",
+            visibility=Visibility.PUBLIC,
+        )
+        for i in range(n_public)
+    ]
+    bundled_funcs = [
+        Function(
+            name=f"mkl_bundled_{i}",
+            mangled=f"_Z12mkl_bundled_{i}v",
+            return_type="int",
+            visibility=Visibility.ELF_ONLY,
+        )
+        for i in range(n)
+    ]
+    old = AbiSnapshot(
+        library="libonedal_core.so",
+        version="2025.0",
+        functions=public_funcs + bundled_funcs,
+    )
+    new = AbiSnapshot(
+        library="libonedal_core.so",
+        version="2025.1",
+        functions=list(public_funcs),  # every bundled export gone, public API intact
+    )
+    return old, new
+
+
+def _build_onedal_mass_removal(n: int) -> tuple[AbiSnapshot, AbiSnapshot]:
+    """Nearly all of a large *public* function surface removed in one
+    release, with no replacements added — the shape of a hard deprecation
+    sweep (the reported libonedal_core.so.4 2026.0→2026.1 binary-tier
+    experiment: ~2,134 removed exported functions). Unlike
+    ``_build_onedal_packaging_noise``, these removals are genuinely public
+    and must stay classified as breaking; this scenario instead stresses
+    change-object allocation, grouping/collapse, and report generation at
+    oneDAL's observed mass-removal scale.
+    """
+    funcs = [
+        Function(
+            name=f"dal_func_{i}",
+            mangled=f"_Z9dal_func_{i}v",
+            return_type="int",
+            visibility=Visibility.PUBLIC,
+        )
+        for i in range(n)
+    ]
+    old = AbiSnapshot(library="libonedal_core.so", version="2026.0", functions=funcs)
+    new = AbiSnapshot(
+        library="libonedal_core.so",
+        version="2026.1",
+        functions=funcs[: max(1, n // 1000)],
+    )
+    return old, new
+
+
 # ── Timed runners (one per measured entry point) ──────────────────────────────
 def _run_compare(prepared: tuple[AbiSnapshot, AbiSnapshot]) -> int:
     """Time ``compare(old, new)``; return the number of detected changes."""
@@ -979,6 +1124,28 @@ def _run_compare_collapse(prepared: tuple[AbiSnapshot, AbiSnapshot]) -> int:
     """
     old, new = prepared
     return len(compare(old, new, collapse_versioned_symbols=True).changes)
+
+
+def _run_compare_verify_scoped_non_breaking(
+    prepared: tuple[AbiSnapshot, AbiSnapshot],
+) -> int:
+    """Time ``compare()`` for the packaging-noise scenario AND assert the
+    result stays non-breaking — a correctness gate, not just a timing one.
+
+    If public-surface scoping regressed (e.g. a bundled ELF-only export
+    leaking into the public verdict), this raises instead of silently
+    measuring a wrong-but-fast result.
+    """
+    old, new = prepared
+    result = compare(old, new)
+    if result.verdict == Verdict.BREAKING:
+        raise AssertionError(
+            "onedal_packaging_noise must not classify as BREAKING: removed "
+            "exports here are all Visibility.ELF_ONLY (bundled dependency "
+            "symbols), and public-surface scoping should demote them — "
+            f"got {len(result.breaking)} breaking change(s)"
+        )
+    return len(result.changes)
 
 
 def _run_suppression_audit(prepared: tuple[list[Change], SuppressionList]) -> int:
@@ -1086,6 +1253,23 @@ SCENARIOS: dict[str, Scenario] = {
     ),
     "nested_types": Scenario(
         _build_nested_types, sizes=(100, 200, 400), max_size=500, gate_exponent=False
+    ),
+    # oneDAL-shaped scenarios (see the section comment above the builders).
+    "onedal_large_surface": Scenario(
+        _build_onedal_large_surface,
+        sizes=(5000, 10000, 20000),
+        max_size=25000,
+    ),
+    "onedal_packaging_noise": Scenario(
+        _build_onedal_packaging_noise,
+        run=_run_compare_verify_scoped_non_breaking,
+        sizes=(500, 1000, 2000),
+        max_size=5000,
+    ),
+    "onedal_mass_removal": Scenario(
+        _build_onedal_mass_removal,
+        sizes=(500, 1000, 2000),
+        max_size=5000,
     ),
 }
 
