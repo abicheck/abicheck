@@ -41,6 +41,7 @@ from abicheck.appcompat import (
     check_appcompat,
     parse_app_requirements,
     scope_diff_to_app,
+    uncovered_missing_symbols,
 )
 from abicheck.checker import Change, DiffResult
 from abicheck.checker_policy import ChangeKind, Verdict
@@ -192,6 +193,64 @@ class TestIsRelevantToApp:
             old_value="FOO_2.0",
         )
         assert _is_relevant_to_app(change, app) is False
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: uncovered_missing_symbols
+# ---------------------------------------------------------------------------
+
+class TestUncoveredMissingSymbols:
+    """A missing symbol/version/entrypoint that already has a matching
+    scoped Change must not be counted as a second, separate ABI break
+    (Codex review)."""
+
+    def test_missing_symbol_covered_by_matching_change_is_excluded(self):
+        change = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol="foo",
+            description="Function removed: foo",
+        )
+        assert uncovered_missing_symbols(["foo"], [change]) == []
+
+    def test_missing_symbol_with_no_matching_change_is_uncovered(self):
+        change = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol="bar",
+            description="Function removed: bar",
+        )
+        assert uncovered_missing_symbols(["foo"], [change]) == ["foo"]
+
+    def test_missing_symbol_covered_via_demangled_name(self, monkeypatch):
+        # The "missing" name (e.g. from a header-level requirement) can be
+        # the plain/demangled spelling while the Change carries the mangled
+        # linker symbol -- stub the demangler so this doesn't depend on a
+        # working platform demangler (cxxfilt/c++filt) being installed.
+        import abicheck.demangle as demangle_mod
+
+        monkeypatch.setattr(
+            demangle_mod, "demangle", lambda s: "foo()" if s == "_Z3foov" else s,
+        )
+        change = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov",
+            description="Function removed: _Z3foov",
+        )
+        assert uncovered_missing_symbols(["foo()"], [change]) == []
+
+    def test_missing_symbol_covered_via_affected_symbols(self):
+        change = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Config",
+            description="Type size changed: Config",
+            affected_symbols=["foo_init"],
+        )
+        assert uncovered_missing_symbols(["foo_init"], [change]) == []
+
+    def test_no_relevant_changes_all_missing_are_uncovered(self):
+        assert uncovered_missing_symbols(["foo", "bar"], []) == ["foo", "bar"]
+
+    def test_empty_missing_returns_empty(self):
+        change = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol="foo",
+            description="Function removed: foo",
+        )
+        assert uncovered_missing_symbols([], [change]) == []
 
 
 # ---------------------------------------------------------------------------

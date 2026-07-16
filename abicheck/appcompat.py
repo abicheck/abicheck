@@ -522,6 +522,42 @@ def _is_relevant_to_app(change: Change, app: AppRequirements) -> bool:
     return False
 
 
+def _change_covers_symbol(change: Change, symbol: str) -> bool:
+    """Does *change* already account for *symbol* (exact, demangled, or via
+    ``affected_symbols``)? Mirrors :func:`_is_relevant_to_app`'s matching in
+    reverse -- symbol-name lookup, not app-requirements lookup."""
+    if change.symbol == symbol:
+        return True
+    from .demangle import demangle as _demangle_symbol
+
+    plain = _demangle_symbol(change.symbol)
+    if plain and plain == symbol:
+        return True
+    return bool(change.affected_symbols and symbol in change.affected_symbols)
+
+
+def uncovered_missing_symbols(
+    missing: Iterable[str], relevant_changes: Iterable[Change],
+) -> list[str]:
+    """*missing* entries not already represented by a *relevant_changes* Change.
+
+    A required symbol that was removed shows up twice in a scoped result:
+    once in ``missing_symbols``/``missing_entrypoints`` (absent from the new
+    export table) and once as the diff Change that actually removed it (e.g.
+    ``FUNC_REMOVED``) in ``breaking_for_app``/``breaking_for_host``. Callers
+    that derive a severity-scheme finding count from both must not count
+    that as two ABI breaks — this is the missing-symbol side of that dedup
+    (Codex review): only symbols with no matching Change are genuinely
+    "extra" (e.g. a symbol dropped for a reason the diff itself never
+    surfaced as a Change, such as a versioned-symbol default retarget).
+    """
+    changes = list(relevant_changes)
+    return [
+        m for m in missing
+        if not any(_change_covers_symbol(c, m) for c in changes)
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Get new library exported symbols
 # ---------------------------------------------------------------------------

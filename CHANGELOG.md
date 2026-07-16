@@ -132,13 +132,23 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
     -library diff, so the card could say "FAIL (exit 4)" for a run whose
     scoped contract was compatible and that actually exited `0`.
   - `deps compare BINARY` (and the underlying `stack_checker.check_stack`)
-    now resolves an absolute `BINARY` argument as relative to each sysroot
+    now resolves an anchored `BINARY` argument as relative to each sysroot
     (chroot semantics), matching `resolver._seed_root`'s existing handling
     for the single-env `deps stack` command — previously a plain `root /
-    binary` join silently dropped `root` for an absolute `BINARY` (pathlib
-    semantics), so the ELF-format check and stack walk targeted the host
-    filesystem path instead of the confined `--old-root`/`--new-root`
-    environments.
+    binary` join silently dropped `root`'s directory for an anchored
+    `BINARY` (pathlib semantics), so the ELF-format check and stack walk
+    targeted the host filesystem path instead of the confined `--old-root`/
+    `--new-root` environments. The new `under_sysroot()` helper checks
+    `binary.anchor` rather than `binary.is_absolute()` — Windows considers a
+    drive-less rooted path like `/usr/bin/x` non-absolute, but pathlib's
+    join still resets to the sysroot's own drive and drops its directory
+    for such a path, so `is_absolute()` alone missed that case.
+  - `--used-by`/`--required-symbol`'s severity-scheme
+    `severity.categories.abi_breaking.count` no longer double-counts a
+    missing symbol/version/entrypoint that already has a matching scoped
+    `Change` (e.g. a removed function is both "missing" from the new
+    export table and its own `FUNC_REMOVED` finding) — one ABI break is
+    now counted once, via the new `appcompat.uncovered_missing_symbols()`.
   - Fixed a stale docstring on `abi_compare`'s `used_by`/`required_symbols`
     MCP parameters that promised a fixed `BREAKING → 4`/`API_BREAK → 2`
     exit-code mapping; it now describes the active legacy/severity-aware

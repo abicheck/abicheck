@@ -1210,6 +1210,28 @@ class TestUsedByScoping:
         )
         assert result.exit_code == 4
 
+    def test_severity_missing_symbol_covered_by_change_not_double_counted(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Regression (Codex P2 follow-up): "foo" is both a missing symbol
+        # (absent from the new exports) *and* the subject of a scoped
+        # FUNC_REMOVED Change -- that's one ABI break, not two. Before the
+        # fix, the missing-contract count was added on top of the
+        # categorized Change count unconditionally.
+        res = self._result(
+            verdict=Verdict.BREAKING, missing=["foo"],
+            breaking_for_app=[Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")],
+        )
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app),
+            "--format", "json", "--severity-preset", "default",
+        )
+        assert result.exit_code == 4
+        data = json.loads(result.stdout)
+        assert data["severity"]["categories"]["abi_breaking"]["count"] == 1
+
     def test_severity_missing_symbols_only_floors_at_4(
         self, tmp_path, monkeypatch
     ) -> None:

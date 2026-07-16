@@ -186,20 +186,26 @@ def _compute_risk_score(loadability: StackVerdict, abi_risk: StackVerdict) -> st
 
 
 def under_sysroot(root: Path, binary: Path) -> Path:
-    """Join *binary* under *root*, treating an absolute BINARY as sysroot
+    """Join *binary* under *root*, treating an anchored BINARY as sysroot
     -relative (chroot semantics).
 
-    ``Path.__truediv__`` discards its left operand entirely when the right
-    operand is absolute (``root / "/usr/bin/x"`` == ``Path("/usr/bin/x")``),
-    so a plain ``root / binary`` join silently escapes the sysroot for a
-    user-supplied absolute BINARY -- the ELF check and stack walk would then
+    ``Path.__truediv__`` discards *root* (or, on Windows, its non-drive
+    directory components) whenever *binary* carries its own anchor --
+    ``root / "/usr/bin/x"`` == ``Path("/usr/bin/x")`` on POSIX, and even a
+    *non*-``is_absolute()`` drive-less-but-rooted Windows path like
+    ``/usr/bin/x`` resets the join to ``root``'s drive only (e.g.
+    ``C:/old-root`` + ``/usr/bin/x`` -> ``C:/usr/bin/x``, silently dropping
+    ``old-root``) -- checking ``is_absolute()`` alone misses that case, so
+    this checks ``anchor`` (drive and/or root) instead. A plain ``root /
+    binary`` join therefore silently escapes the sysroot for a user
+    -supplied anchored BINARY -- the ELF check and stack walk would then
     target the host filesystem instead of the confined environment this
     command is scoped to. Mirrors ``resolver._seed_root``'s sysroot
     -prefixing for the single-env ``deps stack`` command, so the dual
     -sysroot ``deps compare`` command applies the same normalization.
     """
-    if binary.is_absolute():
-        return root / str(binary).lstrip("/")
+    if binary.anchor:
+        binary = Path(*binary.parts[1:])
     return root / binary
 
 

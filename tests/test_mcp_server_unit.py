@@ -1319,6 +1319,41 @@ class TestAbiCompare:
         # The missing symbol itself (not a diff Change) still counts.
         assert report["severity"]["categories"]["abi_breaking"]["count"] == 1
 
+    def test_used_by_missing_symbol_covered_by_change_not_double_counted(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # Regression (Codex P2 follow-up): "foo" is both a missing symbol
+        # (absent from the new exports) *and* the subject of a scoped
+        # FUNC_REMOVED Change -- one ABI break, not two.
+        from abicheck.appcompat import AppCompatResult
+        from abicheck.checker import Change
+        from abicheck.checker_policy import ChangeKind
+
+        old = _make_snapshot("1.0", functions=[_pub_func("foo", "foo", "int")])
+        new = _make_snapshot("2.0", functions=[])
+        old_p, new_p = self._make_binary_pair(tmp_path)
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        scoped = AppCompatResult(
+            app_path=str(app), old_lib_path=str(old_p), new_lib_path=str(new_p),
+            required_symbols={"foo"}, required_symbol_count=1,
+            missing_symbols=["foo"],
+            breaking_for_app=[
+                Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")
+            ],
+            verdict=Verdict.BREAKING,
+        )
+        self._patch_used_by(monkeypatch, tmp_path, old, new, scoped)
+
+        raw = abi_compare(
+            str(old_p), str(new_p), used_by=[str(app)],
+            severity_preset="default",
+        )
+        data = json.loads(raw)
+        assert data["exit_code"] == 4
+        report = data["report"]
+        assert report["severity"]["categories"]["abi_breaking"]["count"] == 1
+
     def test_used_by_multi_app_shared_change_not_double_counted(
         self, tmp_path: Path, monkeypatch
     ):

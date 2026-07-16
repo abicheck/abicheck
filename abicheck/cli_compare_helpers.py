@@ -29,6 +29,7 @@ in ``check_ai_readiness``). Verdict routing stays through the Tier-2 service
 from __future__ import annotations
 
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -526,21 +527,26 @@ def _scoped_exit_code(
 
 
 def _scoped_severity_summary(
-    relevant_changes: list[Any], missing_count: int,
+    relevant_changes: list[Any], missing: Iterable[str],
     result: Any, sev_config: Any, policy: str, policy_file: PolicyFile | None,
 ) -> tuple[tuple[str, ...], dict[str, int]]:
     """(blocking_categories, per-category counts) for one scoped result.
 
     Mirrors ``_scoped_exit_code``'s missing-contract floor: a missing
-    symbol/version/entrypoint has no diff Change, so it is folded into
+    symbol/version/entrypoint with no matching diff Change is folded into
     ``abi_breaking`` directly here -- both into the blocking-categories set
     (when abi_breaking is severity-configured as error, matching the exit
     -code floor) and into the count (always, since a count is a factual
     tally, not a gate decision) -- otherwise a missing-contract-only scoped
     BREAKING would report an empty ``blocking_categories`` alongside a
     nonzero exit code, or a ``categories.abi_breaking.count`` of 0 alongside
-    a blocking ``abi_breaking`` category (Codex review).
+    a blocking ``abi_breaking`` category (Codex review). A *missing* entry
+    that already has a matching Change in *relevant_changes* (e.g. a removed
+    symbol is both "missing" from the new export table and a ``FUNC_REMOVED``
+    Change) is excluded via ``uncovered_missing_symbols`` -- otherwise that
+    single ABI break would be counted twice (Codex review follow-up).
     """
+    from .appcompat import uncovered_missing_symbols
     from .severity import (
         IssueCategory,
         SeverityLevel,
@@ -563,8 +569,9 @@ def _scoped_severity_summary(
         policy=policy, kind_sets=result._effective_kind_sets(), policy_file=policy_file,
     )
     categories = list(gate.blocking_categories)
-    if missing_count > 0:
-        counts["abi_breaking"] += missing_count
+    uncovered = uncovered_missing_symbols(missing, relevant_changes)
+    if uncovered:
+        counts["abi_breaking"] += len(uncovered)
         if (
             sev_config.abi_breaking == SeverityLevel.ERROR
             and IssueCategory.ABI_BREAKING.value not in categories
@@ -629,11 +636,10 @@ def _apply_used_by_scoping(
             policy=policy, policy_file=policy_file,
         )
         summaries.append(_app_compat_summary(scoped))
-        missing_count = len(scoped.missing_symbols) + len(scoped.missing_versions)
         exit_code = _scoped_exit_code(
             scoped, scoped.breaking_for_app, result, exit_code_scheme, sev_config,
             policy, policy_file,
-            has_missing_contract=missing_count > 0,
+            has_missing_contract=bool(scoped.missing_symbols or scoped.missing_versions),
         )
         # exit code (gating) and verdict (reporting) are maxed/ranked
         # independently: under a severity scheme the two can disagree (a
@@ -659,7 +665,7 @@ def _apply_used_by_scoping(
     result.scoped_exit_code_scheme = exit_code_scheme  # type: ignore[attr-defined]
     if exit_code_scheme == "severity":
         categories, counts = _scoped_severity_summary(
-            list(worst_changes.values()), len(worst_missing),
+            list(worst_changes.values()), worst_missing,
             result, sev_config, policy, policy_file,
         )
         result.scoped_blocking_categories = categories  # type: ignore[attr-defined]
@@ -682,17 +688,17 @@ def _apply_required_symbol_scoping(
     )
     result.required_symbols = _plugin_contract_summary(scoped)  # type: ignore[attr-defined]
     result.scoped_verdict = scoped.verdict  # type: ignore[attr-defined]
-    missing_count = len(scoped.missing_entrypoints)
     exit_code = _scoped_exit_code(
         scoped, scoped.breaking_for_host, result, exit_code_scheme, sev_config,
         policy, policy_file,
-        has_missing_contract=missing_count > 0,
+        has_missing_contract=bool(scoped.missing_entrypoints),
     )
     result.scoped_exit_code = exit_code  # type: ignore[attr-defined]
     result.scoped_exit_code_scheme = exit_code_scheme  # type: ignore[attr-defined]
     if exit_code_scheme == "severity":
         categories, counts = _scoped_severity_summary(
-            scoped.breaking_for_host, missing_count, result, sev_config, policy, policy_file,
+            scoped.breaking_for_host, scoped.missing_entrypoints,
+            result, sev_config, policy, policy_file,
         )
         result.scoped_blocking_categories = categories  # type: ignore[attr-defined]
         result.scoped_severity_counts = counts  # type: ignore[attr-defined]
