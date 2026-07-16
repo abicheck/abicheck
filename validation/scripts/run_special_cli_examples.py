@@ -7,7 +7,7 @@ The GCC/Clang lanes intentionally own only compilable single-library pairs and
 the remaining committed fixture shapes through ``python -m abicheck``:
 
 * BTF, reconcile, environment, and Linux kABI comparisons;
-* G20 single-release ``scan --audit`` cross-checks;
+* G20 single-release ``scan`` (no ``--against``) audit cross-checks;
 * L3/L4/L5 evidence packs attached to ``compare``;
 * a CPython-extension comparison with sibling ``.pyi`` stubs.
 
@@ -286,9 +286,7 @@ def _run_scan_case(case_id: str, entry: dict[str, Any], timeout: int) -> dict[st
         "-m",
         "abicheck",
         "scan",
-        "--binary",
         str(snapshot),
-        "--audit",
         "--format",
         "json",
     ]
