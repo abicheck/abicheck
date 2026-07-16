@@ -364,3 +364,18 @@ class TestOwnerDescendsFrom:
             "ns::Base": RecordType(name="ns::Base", kind="class"),
         }
         assert not _owner_descends_from("ns::Derived", "Base", types)
+
+    def test_owner_sharing_ancestor_leaf_is_not_treated_as_own_alternative(
+        self,
+    ) -> None:
+        """A class that inherits from a global type sharing its own leaf
+        (``namespace ns { struct Base : ::Base { ... }; }``, DWARF-shaped:
+        the owner's own ``name`` is ``ns::Base``, its base list still bare
+        ``Base``) is a valid, unambiguous inheritance -- the owner record's
+        own qualified identity must not be mistaken for a *competing*
+        alternative to itself, or a genuine override-slot reuse gets
+        reported as a spurious ``TYPE_VTABLE_CHANGED``."""
+        types = {
+            "ns::Base": RecordType(name="ns::Base", kind="class", bases=["Base"]),
+        }
+        assert _owner_descends_from("ns::Base", "Base", types)
