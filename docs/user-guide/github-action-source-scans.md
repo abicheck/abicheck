@@ -14,8 +14,8 @@ underlying CLI flags, see [Source-Scan Depth](scan-levels.md).
 `mode: scan` is the **one-step entry point** for source intelligence. It
 classifies the PR's changed paths, always runs the compiler-free pattern and
 intra-version cross-source checks, then runs the pinned evidence level
-(L3 build context / L4 source-ABI replay / L5 source graph) and — when a
-`baseline` is given — compares against it. It emits a single
+(L3 build context / L4 source-ABI replay / L5 source graph) and — when
+`against` is given — compares against it. It emits a single
 coverage-annotated report saying, per layer, what ran versus what was skipped.
 
 > **New to what these layers see?** The concept-track
@@ -24,7 +24,7 @@ coverage-annotated report saying, per layer, what ran versus what was skipped.
 > and where each goes blind — the "why" behind the inputs below.
 
 The common case needs four inputs — the built binary, its public headers, the
-source tree, and a baseline:
+source tree, and a baseline to compare `against`:
 
 ```yaml
 permissions:
@@ -47,7 +47,7 @@ jobs:
           new-library: build/libfoo.so
           new-header: include/
           sources: .
-          baseline: abi-baseline.json   # committed, or use abi-baseline: latest-release
+          against: abi-baseline.json   # committed, or use abi-baseline: latest-release
           since: origin/${{ github.base_ref }}   # focus on changed files
           fail-on-api-break: true       # gate on source/API breaks too
 ```
@@ -69,7 +69,7 @@ for `auto` (risk-driven, best paired with `since:`):
           new-library: build/libfoo.so
           new-header: include/
           sources: .
-          baseline: abi-baseline.json
+          against: abi-baseline.json
           depth: source         # source-ABI replay of changed TUs (deterministic)
           since: origin/main    # scope the L4 replay to the PR's changed TUs
           budget: 15m           # fail (BUDGET_OVERFLOW) rather than overrun
@@ -138,7 +138,7 @@ that exit turns the step red:
           new-library: build/libfoo.so
           new-header: include/
           sources: .
-          baseline: abi-baseline.json
+          against: abi-baseline.json
           crosscheck: 'private_header_leak=error odr_type_variant=error'
           fail-on-api-break: true   # gate on the exit-2 (API_BREAK) tier
 ```
