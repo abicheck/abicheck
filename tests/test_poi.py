@@ -32,6 +32,7 @@ from abicheck.buildsource.poi import (
     PointsOfInterest,
     POIReason,
     build_points_of_interest,
+    resolve_changed_paths_public_impact,
     resolve_symbol_tus,
 )
 from abicheck.buildsource.risk import score_changed_paths
@@ -348,3 +349,128 @@ def test_resolve_symbol_tus_end_to_end_from_export_delta() -> None:
         ],
     )
     assert resolve_symbol_tus(poi, _graph_baseline(graph)) == ("src/bar.cpp",)
+
+
+# ── resolve_changed_paths_public_impact (ADR-041 P1 #3) ─────────────────────
+
+
+def test_changed_paths_impact_finds_public_entry_reaching_changed_internal() -> None:
+    # `api` (public) calls `helper` (internal, declared in src/detail/cache.cpp).
+    # A change to that file should flag `api` as impacted.
+    graph = SourceGraphSummary(
+        nodes=[
+            GraphNode(
+                id="decl://api",
+                kind="source_decl",
+                label="api",
+                attrs={"visibility": "public_header"},
+            ),
+            GraphNode(
+                id="decl://helper",
+                kind="source_decl",
+                label="helper",
+                attrs={"visibility": "private_header"},
+            ),
+            GraphNode(
+                id="header://src/detail/cache.cpp",
+                kind="header",
+                label="src/detail/cache.cpp",
+            ),
+        ],
+        edges=[
+            GraphEdge(src="decl://api", dst="decl://helper", kind="DECL_CALLS_DECL"),
+            GraphEdge(
+                src="header://src/detail/cache.cpp",
+                dst="decl://helper",
+                kind="SOURCE_DECLARES",
+            ),
+        ],
+    )
+    impacted = resolve_changed_paths_public_impact(
+        ["src/detail/cache.cpp"], graph
+    )
+    assert impacted == frozenset({"decl://api"})
+
+
+def test_changed_paths_impact_matches_by_suffix() -> None:
+    # Graph node labels carry an absolute build path; the caller passes a
+    # repo-relative changed path — suffix matching bridges the two spellings.
+    graph = SourceGraphSummary(
+        nodes=[
+            GraphNode(
+                id="decl://api",
+                kind="source_decl",
+                label="api",
+                attrs={"visibility": "public_header"},
+            ),
+            GraphNode(
+                id="decl://helper",
+                kind="source_decl",
+                label="helper",
+                attrs={"def_file": "/work/src/detail/cache.cpp"},
+            ),
+        ],
+        edges=[
+            GraphEdge(src="decl://api", dst="decl://helper", kind="DECL_CALLS_DECL"),
+        ],
+    )
+    impacted = resolve_changed_paths_public_impact(
+        ["src/detail/cache.cpp"], graph
+    )
+    assert impacted == frozenset({"decl://api"})
+
+
+def test_changed_paths_impact_includes_entry_declared_in_changed_file_itself() -> None:
+    # A public entry directly declared in a changed file is trivially impacted,
+    # even with no outgoing dependency edge at all.
+    graph = SourceGraphSummary(
+        nodes=[
+            GraphNode(
+                id="decl://api",
+                kind="source_decl",
+                label="api",
+                attrs={"visibility": "public_header"},
+            ),
+            GraphNode(id="header://api.hpp", kind="header", label="api.hpp"),
+        ],
+        edges=[
+            GraphEdge(src="header://api.hpp", dst="decl://api", kind="SOURCE_DECLARES"),
+        ],
+    )
+    assert resolve_changed_paths_public_impact(["api.hpp"], graph) == frozenset(
+        {"decl://api"}
+    )
+
+
+def test_changed_paths_impact_unrelated_change_yields_nothing() -> None:
+    graph = SourceGraphSummary(
+        nodes=[
+            GraphNode(
+                id="decl://api",
+                kind="source_decl",
+                label="api",
+                attrs={"visibility": "public_header"},
+            ),
+            GraphNode(
+                id="decl://helper",
+                kind="source_decl",
+                label="helper",
+                attrs={"def_file": "src/detail/cache.cpp"},
+            ),
+        ],
+        edges=[
+            GraphEdge(src="decl://api", dst="decl://helper", kind="DECL_CALLS_DECL"),
+        ],
+    )
+    assert resolve_changed_paths_public_impact(["src/unrelated.cpp"], graph) == (
+        frozenset()
+    )
+
+
+def test_changed_paths_impact_degrades_without_graph_or_paths() -> None:
+    assert resolve_changed_paths_public_impact([], SourceGraphSummary()) == frozenset()
+    assert resolve_changed_paths_public_impact(["a.cpp"], None) == frozenset()
+    assert (
+        resolve_changed_paths_public_impact(["a.cpp"], SourceGraphSummary())
+        == frozenset()
+    )

@@ -52,6 +52,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from ..model import AbiSnapshot, Function, Variable
     from .risk import RiskScore
+    from .source_graph import SourceGraphSummary
 
 #: POI fact-schema version. Independent of every other buildsource schema
 #: version (see ``buildsource/CLAUDE.md`` "Versioning").
@@ -415,3 +416,118 @@ def resolve_symbol_tus(
             files.setdefault(_path_of_location(str(loc)), None)
     files.pop("", None)
     return tuple(files)
+
+
+# ---------------------------------------------------------------------------
+# changed-path → public-entry impact closure (ADR-041 P1 roadmap item 3)
+# ---------------------------------------------------------------------------
+
+
+def _norm_path(path: str) -> str:
+    """Normalize a path for cross-source comparison: forward slashes, no ``./``.
+
+    Duplicated from ``crosscheck._norm_path`` rather than imported — the two
+    modules are parallel, not layered (this one focuses *before* a scan,
+    crosscheck reads facts *after* one), and the codebase's own precedent
+    (crosscheck.py itself duplicates this instead of importing
+    ``source_replay``'s identical helper) is to keep small pure string
+    helpers local rather than introduce a cross-engine dependency.
+    """
+    p = path.replace("\\", "/")
+    while p.startswith("./"):
+        p = p[2:]
+    return p
+
+
+def _path_matches(candidate: str, changed: frozenset[str]) -> bool:
+    """Whether *candidate* refers to one of the *changed* paths.
+
+    Graph node labels are often absolute build/clang paths
+    (``/work/src/foo.cc``) while a caller passes repo-relative paths
+    (``src/foo.cc``); match when either is a path-component suffix of the
+    other (mirrors ``crosscheck._path_matches``).
+    """
+    if not candidate:
+        return False
+    c = _norm_path(candidate)
+    for ch in changed:
+        n = _norm_path(ch)
+        if c == n or c.endswith("/" + n) or n.endswith("/" + c):
+            return True
+    return False
+
+
+def resolve_changed_paths_public_impact(
+    changed_paths: list[str] | tuple[str, ...] | frozenset[str],
+    graph: SourceGraphSummary | None,
+) -> frozenset[str]:
+    """Which public-entry decl/type nodes are reachable *from* the changed files.
+
+    The mirror image of :func:`resolve_symbol_tus` (export delta → declaring
+    TU) — ADR-041 roadmap item 3, "public-entry impact closure": a
+    changed-file → affected-public-API walk over the existing L5 graph, on
+    top of the existing changed-path/headers-only scoping (ADR-035 D7).
+    Feeds a PR-scoped deep scan ("this PR touches ``src/detail/cache.cpp``;
+    only 3 public entries are reachable from it; replay only those").
+
+    Reuses :func:`~abicheck.buildsource.source_graph_findings._dependency_reachability`
+    (already computed for the ``PUBLIC_API_INTERNAL_DEPENDENCY_ADDED``
+    finding: entry → everything it reaches over
+    :data:`~abicheck.buildsource.source_graph.DEPENDENCY_EDGE_KINDS`) and
+    inverts it: a public entry is "impacted" when its own declaration lives
+    in one of *changed_paths*, or its reachable set includes a decl/type
+    declared there.
+
+    Pure and best-effort, mirroring :func:`resolve_symbol_tus`'s degrade
+    contract: returns an empty set whenever *graph* is absent/empty or no
+    changed path resolves to a declared decl — never an error. This only
+    ever *narrows* which public entries a caller chooses to re-verify; it
+    never substitutes for the existing changed-path/headers-only floor
+    (ADR-035 D7), which every caller already applies independently.
+    """
+    if not changed_paths or graph is None or not getattr(graph, "nodes", None):
+        return frozenset()
+    changed = frozenset(str(p) for p in changed_paths if p)
+    if not changed:
+        return frozenset()
+
+    from .source_graph import (
+        DEPENDENCY_EDGE_KINDS,
+        decl_declaring_files,
+        is_public_dependency_node,
+    )
+    from .source_graph_findings import _dependency_reachability
+
+    decl_to_file = decl_declaring_files(graph)
+    changed_decls = {
+        decl for decl, path in decl_to_file.items() if _path_matches(path, changed)
+    }
+    # A call/type-graph-only decl (no SOURCE_DECLARES edge) still carries its
+    # own def_file/source_location attr — the same fallback resolve_symbol_tus
+    # uses for the reverse direction.
+    for n in graph.nodes:
+        loc = n.attrs.get("def_file") or n.attrs.get("source_location")
+        if loc and _path_matches(_path_of_location(str(loc)), changed):
+            changed_decls.add(n.id)
+    if not changed_decls:
+        return frozenset()
+
+    # A public entry declared directly in a changed file is impacted even with
+    # zero outgoing dependency edges — computed independently of
+    # _dependency_reachability (which returns {} outright when the graph
+    # carries no DEPENDENCY_EDGE_KINDS edges at all, losing this case).
+    node_by_id = {n.id: n for n in graph.nodes}
+    exported_decls = {
+        e.src for e in graph.edges if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL"
+    }
+    impacted = {
+        n.id
+        for n in graph.nodes
+        if n.id in changed_decls
+        and is_public_dependency_node(n.id, node_by_id, exported_decls)
+    }
+    reachability = _dependency_reachability(graph, DEPENDENCY_EDGE_KINDS)
+    impacted.update(
+        entry for entry, reached in reachability.items() if reached & changed_decls
+    )
+    return frozenset(impacted)
