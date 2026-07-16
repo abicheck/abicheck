@@ -1928,7 +1928,21 @@
    "platforms": [
     "linux"
    ],
-   "scope_public_headers": true
+   "scope_public_headers": true,
+   "source_smoke": {
+    "mode": "run",
+    "proof": "consumer runtime smoke: recompiling+relinking+running against v2 (private-header enum value change) still succeeds, proving the underlying behavior is genuinely unchanged regardless of the castxml provenance gap above",
+    "source": "app.c",
+    "standard": "c11",
+    "v1": {
+     "expect": "success",
+     "lib_source": "v1.c"
+    },
+    "v2": {
+     "expect": "success",
+     "lib_source": "v2.c"
+    }
+   }
   },
   "case185_inherited_override_reuses_slot": {
    "abi_break": false,
@@ -1944,7 +1958,21 @@
    "min_evidence": "L0",
    "platforms": [
     "linux"
-   ]
+   ],
+   "source_smoke": {
+    "mode": "run",
+    "proof": "consumer runtime smoke: recompiling+relinking+running against v2 (override reusing the inherited vtable slot) still succeeds, proving the underlying dispatch is genuinely compatible regardless of the diff_types.py vtable-content gap above",
+    "source": "app.cpp",
+    "standard": "c++17",
+    "v1": {
+     "expect": "success",
+     "lib_source": "v1.cpp"
+    },
+    "v2": {
+     "expect": "success",
+     "lib_source": "v2.cpp"
+    }
+   }
   },
   "case186_c_api_pointee_const_abi_neutral": {
    "abi_break": false,

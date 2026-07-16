@@ -50,7 +50,8 @@ def _classify_results(
     for r in rows:
         case = r.get("case_id") or r.get("name")
         got = (r.get("got") or "").upper()
-        expected = (gt.get(case, {}).get("expected") or "").upper()
+        entry = gt.get(case, {})
+        expected = (entry.get("expected") or "").upper()
         status = r.get("status")
         # SKIP is benign (tool/platform/feature unavailable). ERROR is NOT: the
         # validate run is invoked under `set +e`, so an ERROR row is the only
@@ -62,6 +63,16 @@ def _classify_results(
             continue
         if status == "ERROR" or not got:
             errors.append(f"{case}: status={status} ({r.get('message', '')[:120]})")
+            continue
+        # A case with a known_gap already reports BREAKING under *full* debug
+        # evidence too (validate_examples.py/test_example_autodiscovery.py
+        # XFAIL it there) -- this invariant only guards against a *reduced*
+        # mode manufacturing a break full evidence doesn't already show, so a
+        # known_gap case's BREAKING here isn't something this mode invented.
+        if entry.get("known_gap") and expected in _COMPATIBLE_EXPECTED and got == "BREAKING":
+            downgrades.append(
+                f"{case}: {expected}→{got} (known_gap, not evidence loss in {label} mode)"
+            )
             continue
         if expected in _COMPATIBLE_EXPECTED and got == "BREAKING":
             false_positives.append(f"{case}: expected {expected} got {got}")
