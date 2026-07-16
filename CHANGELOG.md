@@ -41,6 +41,26 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   bundled-dependency packaging noise that must stay non-breaking once
   scoped, and mass export removal at oneDAL's reported scale).
 
+### Fixed
+
+- `compare` no longer silently discards explicit `--sources`/`--build-info`
+  when `--depth` is omitted: the collect mode is now inferred from those
+  inputs (`--depth` > `.abicheck.yml` `source.method` > inferred from
+  `--sources`/`--build-info` > off), matching `scan`'s input-driven "auto"
+  depth. `compare --dry-run` now reports this effective/inferred depth
+  instead of only echoing back the raw `--depth` string.
+- `compare --used-by`'s severity-summary dedup across multiple apps now
+  keys findings by semantic identity instead of Python `id()`, fixing
+  double-counting of `PE_ORDINAL_RETARGETED` findings (each app's
+  `scope_diff_to_app` call constructs its own `Change` object for the same
+  underlying ordinal retarget).
+- `compare --dry-run` now rejects `--secondary-output`/`--secondary-format`
+  (previously accepted and silently never written, since a dry run exits
+  before the secondary render runs).
+- Fixed two stale CLI warnings referencing removed `--depth full`/`--max`
+  values, and a GitHub Action baseline-fetch error message pointing at a
+  nonexistent `--output-name` flag.
+
 ---
 
 ## [0.5.0] — 2026-07-16
