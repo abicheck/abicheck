@@ -146,7 +146,7 @@ def test_native_baseline_without_baseline_header_warns_and_reuses_candidate(
 ) -> None:
     _run()
     err = capsys.readouterr().err
-    assert "--baseline-header" in err and "native library" in err
+    assert "-H old=" in err and "native library" in err
     # Fell back to the candidate -H (the documented, now-warned behavior).
     assert _patched["headers"] == [Path("new/include")]
 
@@ -172,12 +172,12 @@ def test_baseline_header_overrides_old_side_and_silences_warning(
         baseline_includes=[old_inc],
     )
     err = capsys.readouterr().err
-    assert "--baseline-header" not in err
+    assert "-H old=" not in err
     # Old side parsed with ITS OWN headers, not the new ones.
     assert _patched["headers"] == [old_inc]
     assert _patched["includes"] == [old_inc]
     assert _patched["public_headers"] == [old_inc]
-    # The old-side public boundary is derived ONLY from --baseline-header dirs;
+    # The old-side public boundary is derived ONLY from -H old= dirs;
     # the candidate's new/include must NOT leak in (Codex review). A relative
     # dir like `include/` would otherwise re-mark old private headers PUBLIC.
     assert _patched["public_header_dirs"] == [old_inc]
@@ -189,4 +189,4 @@ def test_snapshot_baseline_does_not_warn(
 ) -> None:
     # A .json snapshot has headers baked in → reuse is harmless → no warning.
     _run(baseline=Path("old/libfoo.abi.json"))
-    assert "--baseline-header" not in capsys.readouterr().err
+    assert "-H old=" not in capsys.readouterr().err

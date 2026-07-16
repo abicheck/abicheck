@@ -14,9 +14,11 @@ code. This is the application-centric view of ABI compatibility.
 > — the full library comparison runs once, and the worst app-scoped result
 > becomes the primary verdict/exit code, with the full-library verdict and
 > unrelated changes kept as informational context. `OLD_INPUT`/`NEW_INPUT`
-> must be real library binaries (not JSON snapshots) when `--used-by` is
-> used, since the app's imports have to be resolved against the actual
-> library files.
+> may be real library binaries or JSON snapshots that carry binary evidence
+> (a `dump` of a real library, not headers-only) when `--used-by` is used —
+> the app's imports are resolved against whichever the caller gives. The
+> application binary itself always has to be real: its imports can only be
+> read from a genuine ELF/PE/Mach-O file.
 
 ---
 

@@ -293,6 +293,47 @@ class TestCompareReleaseSeverityExit:
         assert result.exit_code == 4
 
 
+# ── §2.3 --severity-* respected under --used-by/--required-symbol scoping ──
+#
+# Regression: `_apply_used_by_scoping`/`_apply_required_symbol_scoping`
+# returned straight to `sys.exit(scoped_exit_code)` before the general
+# severity-aware exit handler ever ran, so a scoped compare always used the
+# legacy 0/2/4 verdict floor and silently ignored any --severity-*/
+# --severity-preset flag the caller passed (post-merge PR #566 review).
+
+
+class TestScopedExitRespectsSeverity:
+    def test_required_symbol_legacy_scope_exits_breaking(self, tmp_path: Path) -> None:
+        old_p, new_p = _write_removed_cpp_symbol(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            ["compare", str(old_p), str(new_p), "--required-symbol", "_Z3foov"],
+        )
+        assert result.exit_code == 4
+
+    def test_required_symbol_severity_info_only_exits_zero(self, tmp_path: Path) -> None:
+        old_p, new_p = _write_removed_cpp_symbol(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            ["compare", str(old_p), str(new_p), "--required-symbol", "_Z3foov",
+             "--severity-preset", "info-only"],
+        )
+        # Before the fix this always exited 4 (the legacy scoped-verdict
+        # floor), ignoring --severity-preset entirely.
+        assert result.exit_code == 0
+
+    def test_required_symbol_severity_default_still_exits_breaking(
+        self, tmp_path: Path,
+    ) -> None:
+        old_p, new_p = _write_removed_cpp_symbol(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            ["compare", str(old_p), str(new_p), "--required-symbol", "_Z3foov",
+             "--severity-preset", "default"],
+        )
+        assert result.exit_code == 4
+
+
 # ── §1 appcompat warnings + scope ───────────────────────────────────────────
 #
 # The standalone `appcompat` CLI command (and `cli_appcompat.py`, including

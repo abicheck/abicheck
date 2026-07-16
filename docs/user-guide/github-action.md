@@ -69,7 +69,8 @@ application actually uses via `extra-args`:
 `--used-by <app-binary>` (repeatable) runs the full library comparison once,
 then scopes the primary verdict/exit code to the worst app-affecting result;
 the full verdict and unrelated changes stay as informational context. The
-`OLD`/`NEW` operands must be real library binaries, not JSON snapshots.
+`OLD`/`NEW` operands may be real library binaries or JSON snapshots that
+carry binary evidence (a `dump` of a real library, not headers-only).
 
 ### Version labels
 

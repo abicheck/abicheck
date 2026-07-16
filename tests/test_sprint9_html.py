@@ -549,3 +549,24 @@ def test_gate_card_absent_from_abicc_compatible_layout() -> None:
     cfg = resolve_severity_config("default", addition="error")
     out = generate_html_report(result, severity_config=cfg, compat_html=True)
     assert "CI Gate" not in out
+
+
+def test_scoped_verdict_box_absent_when_no_scoping() -> None:
+    r = _result(verdict="BREAKING")
+    out = generate_html_report(r)
+    assert "Scoped verdict" not in out
+
+
+def test_scoped_verdict_box_present_and_can_disagree_with_full_verdict() -> None:
+    # `--used-by`/`--required-symbol(s)` scoping (ADR-043): the CLI process
+    # exits on the scoped verdict floor, which can disagree with the full
+    # library's Compatibility verdict box above -- the report must surface
+    # that instead of only showing the (possibly misleading) full verdict
+    # (post-merge PR #566 review).
+    r = _result(verdict="BREAKING")
+    r.scoped_verdict = SimpleNamespace(value="COMPATIBLE")
+    r.used_by = [{"app": "/bin/myapp", "verdict": "COMPATIBLE"}]
+    out = generate_html_report(r)
+    assert "Scoped verdict: COMPATIBLE" in out
+    # The main verdict box stays the full-library one (unchanged).
+    assert "Compatibility: BREAKING" in out

@@ -94,11 +94,22 @@ def deps_tree_cmd(
     reject_dry_run_with_output(dry_run, output)
     _setup_verbosity(verbose)
 
+    # Validated ahead of the --dry-run emit below (not just before the real
+    # walk) -- a stat/magic-byte check is itself cheap, read-only resolution,
+    # so a dry run must agree with the real run instead of reporting "ok" for
+    # a non-ELF binary the real run immediately rejects (Codex review).
+    fmt_detected = _detect_binary_format(binary)
+    if fmt_detected != "elf":
+        raise click.ClickException(
+            f"deps tree requires an ELF binary; got "
+            f"{fmt_detected or 'unknown format'}: {binary}"
+        )
+
     if dry_run:
         dry_result = DryRunResult(command="deps tree")
         dry_result.add(
             "Inputs",
-            f"binary: {binary}",
+            f"binary: {binary} (detected format: {fmt_detected})",
             f"sysroot: {sysroot}" if sysroot else "sysroot: (none)",
         )
         dry_result.add(
@@ -113,13 +124,6 @@ def deps_tree_cmd(
             "exit codes: 0 all resolved/bound, 1 missing dependency/symbol",
         )
         emit_dry_run(dry_result)
-
-    fmt_detected = _detect_binary_format(binary)
-    if fmt_detected != "elf":
-        raise click.ClickException(
-            f"deps tree requires an ELF binary; got "
-            f"{fmt_detected or 'unknown format'}: {binary}"
-        )
 
     from .stack_checker import check_single_env
     from .stack_report import stack_to_json, stack_to_markdown
@@ -207,6 +211,21 @@ def deps_compare_cmd(
             "provide two different roots for stack comparison."
         )
 
+    # Validate that every existing binary is ELF in both sysroots. Checked
+    # ahead of the --dry-run emit below (not just before the real stack walk)
+    # -- a stat/magic-byte check is itself cheap, read-only resolution, so a
+    # dry run must agree with the real run instead of reporting "ok" for a
+    # non-ELF binary the real run immediately rejects (Codex review).
+    for label, root in [("old", old_root), ("new", new_root)]:
+        resolved = root / binary
+        if resolved.exists():
+            fmt_detected = _detect_binary_format(resolved)
+            if fmt_detected != "elf":
+                raise click.ClickException(
+                    f"deps compare requires an ELF binary; got "
+                    f"{fmt_detected or 'unknown format'}: {resolved}"
+                )
+
     if dry_run:
         dry_result = DryRunResult(command="deps compare")
         dry_result.add(
@@ -231,17 +250,6 @@ def deps_compare_cmd(
             "exit codes: 0 pass, 1 warn (ABI risk), 4 fail (load/ABI break)",
         )
         emit_dry_run(dry_result)
-
-    # Validate that every existing binary is ELF in both sysroots
-    for label, root in [("old", old_root), ("new", new_root)]:
-        resolved = root / binary
-        if resolved.exists():
-            fmt_detected = _detect_binary_format(resolved)
-            if fmt_detected != "elf":
-                raise click.ClickException(
-                    f"deps compare requires an ELF binary; got "
-                    f"{fmt_detected or 'unknown format'}: {resolved}"
-                )
 
     from .stack_checker import check_stack
     from .stack_report import stack_to_json, stack_to_markdown

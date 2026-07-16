@@ -382,6 +382,8 @@ def _build_testsuite(
     ts.set("failures", str(failure_count))
     ts.set("errors", "0")
 
+    _add_scoped_properties(ts, result)
+
     _emit_testcases(
         ts,
         all_symbols,
@@ -393,6 +395,50 @@ def _build_testsuite(
     _append_extra_failures(ts, extra_changes, result, kind_sets, severity_config)
 
     return ts
+
+
+def _add_scoped_properties(ts: ET.Element, result: DiffResult) -> None:
+    """Append a ``<properties>`` block when ``--used-by``/``--required-symbol(s)``
+    scoping was requested (ADR-043).
+
+    JUnit's ``<testsuite>``/``<testcase>`` pass/fail counts above stay
+    computed from the full, unscoped library diff -- this format's binary/
+    structured contract intentionally keeps that authoritative for CI
+    dashboards that parse it. But the actual CLI process exits on the
+    *scoped* verdict floor when scoping is requested, which can legitimately
+    disagree with this testsuite's own failure count. Without this block a
+    JUnit consumer had no way to discover that disagreement -- this makes it
+    auditable, mirroring the human-format banner
+    (``_fold_scoped_compat_into_text``) without changing this testsuite's own
+    pass/fail semantics.
+    """
+    scoped_verdict = getattr(result, "scoped_verdict", None)
+    if scoped_verdict is None:
+        return
+    props = ET.SubElement(ts, "properties")
+
+    def _prop(name: str, value: str) -> None:
+        p = ET.SubElement(props, "property")
+        p.set("name", name)
+        p.set("value", value)
+
+    _prop("abicheck.scoped_verdict", scoped_verdict.value)
+    _prop("abicheck.full_library_verdict", result.verdict.value)
+    _prop(
+        "abicheck.scoped_note",
+        "The CLI process exit code reflects scoped_verdict, not "
+        "full_library_verdict or this testsuite's own failures count "
+        "(both of which stay computed from the full library).",
+    )
+    used_by = getattr(result, "used_by", None)
+    if used_by is not None:
+        _prop("abicheck.used_by_app_count", str(len(used_by)))
+    required_symbols = getattr(result, "required_symbols", None)
+    if required_symbols is not None:
+        _prop(
+            "abicheck.required_symbol_contract_verdict",
+            str(required_symbols.get("verdict", "")),
+        )
 
 
 def _maybe_add_failure(

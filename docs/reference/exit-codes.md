@@ -167,8 +167,9 @@ Their scoping now folds into `compare` itself:
 
 - **`compare --used-by APP`** (repeatable) — folds `appcompat`. `APP` is a
   real application binary; its actual imports/required symbol versions scope
-  the comparison. `OLD`/`NEW` must be real library binaries (not JSON
-  snapshots). Mutually exclusive with `--required-symbol`/`--required-symbols`.
+  the comparison. `OLD`/`NEW` may be real library binaries or JSON snapshots
+  that carry binary evidence (a `dump` of a real library, not headers-only).
+  Mutually exclusive with `--required-symbol`/`--required-symbols`.
 - **`compare --required-symbol SYM`** (repeatable) / **`--required-symbols
   FILE`** — folds `plugin-check`. Scopes the comparison to an explicit
   dlopen/dlsym entrypoint contract instead of the full diff. Mutually

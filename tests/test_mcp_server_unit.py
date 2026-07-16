@@ -1046,6 +1046,28 @@ class TestAbiCompare:
         assert data["exit_code"] == 0
         assert data["exit_code_scheme"] == "scoped"
 
+    def test_required_symbols_scoped_exit_respects_severity_config(
+        self, tmp_path: Path
+    ):
+        # Regression: the scoped exit code used to always use the legacy
+        # BREAKING->4/API_BREAK->2 floor even when a severity_* argument was
+        # given, silently ignoring it (post-merge PR #566 review). A required
+        # entrypoint being removed is still scoped-BREAKING, but
+        # severity_preset="info-only" must now floor exit_code at 0.
+        removed = _pub_func("entry", "_Z5entryv", "int")
+        old = _make_snapshot("1.0", functions=[removed])
+        new = _make_snapshot("2.0", functions=[])
+        old_p, new_p = self._make_pair(tmp_path, old, new)
+
+        raw = abi_compare(
+            str(old_p), str(new_p), required_symbols=["_Z5entryv"],
+            severity_preset="info-only",
+        )
+        data = json.loads(raw)
+        assert data["status"] == "ok"
+        assert data["required_symbol_contract"]["verdict"] == "BREAKING"
+        assert data["exit_code"] == 0
+
     def test_required_symbols_folds_scoped_verdict_into_nested_report(
         self, tmp_path: Path
     ):

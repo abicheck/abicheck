@@ -1326,3 +1326,46 @@ class TestJUnitCLICompare:
         # Must parse as valid XML regardless of exit code
         root = xml_fromstring(result.output)
         assert root.tag == "testsuites"
+
+
+class TestScopedProperties:
+    """`--used-by`/`--required-symbol(s)` scoping (ADR-043) discoverability.
+
+    JUnit's own tests/failures counts stay computed from the full, unscoped
+    library diff (documented, intentional) -- but the CLI process exits on
+    the *scoped* verdict floor. Without a `<properties>` block a JUnit
+    consumer had no way to discover that the two could disagree (post-merge
+    PR #566 review)."""
+
+    def test_no_properties_when_no_scoping(self) -> None:
+        r = _make_result([], verdict=Verdict.BREAKING)
+        xml_str = to_junit_xml(r)
+        root = _parse(xml_str)
+        ts = root.find("testsuite")
+        assert ts.find("properties") is None
+
+    def test_properties_present_and_can_disagree_with_full_verdict(self) -> None:
+        r = _make_result([], verdict=Verdict.BREAKING)
+        r.scoped_verdict = Verdict.COMPATIBLE  # type: ignore[attr-defined]
+        r.used_by = [{"app": "/bin/myapp", "verdict": "COMPATIBLE"}]  # type: ignore[attr-defined]
+        xml_str = to_junit_xml(r)
+        root = _parse(xml_str)
+        ts = root.find("testsuite")
+        props = {
+            p.get("name"): p.get("value") for p in ts.find("properties")
+        }
+        assert props["abicheck.scoped_verdict"] == "COMPATIBLE"
+        assert props["abicheck.full_library_verdict"] == "BREAKING"
+        assert props["abicheck.used_by_app_count"] == "1"
+
+    def test_properties_carry_required_symbol_contract_verdict(self) -> None:
+        r = _make_result([], verdict=Verdict.BREAKING)
+        r.scoped_verdict = Verdict.BREAKING  # type: ignore[attr-defined]
+        r.required_symbols = {"verdict": "BREAKING"}  # type: ignore[attr-defined]
+        xml_str = to_junit_xml(r)
+        root = _parse(xml_str)
+        ts = root.find("testsuite")
+        props = {
+            p.get("name"): p.get("value") for p in ts.find("properties")
+        }
+        assert props["abicheck.required_symbol_contract_verdict"] == "BREAKING"

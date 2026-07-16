@@ -312,7 +312,7 @@ python3 scripts/benchmark_comparison.py --evidence-tiers --cases case01 case07 c
 For each case it builds the libraries once, then runs the full `dump`+`compare`
 pipeline four times:
 
-| Tier | abicheck input | `--show-data-sources` mode | Active detectors |
+| Tier | abicheck input | `--dry-run` mode | Active detectors |
 |:----:|----------------|----------------------------|:----------------:|
 | **L0** binary only | stripped `.so`, no `-H` | Symbols-only | ≈ 6 / 30 |
 | **L1** + debug info | `-g` `.so`, no `-H` | DWARF-only | ≈ 24 / 30 |
@@ -322,7 +322,7 @@ pipeline four times:
 > The `/30` denominator above is a point-in-time snapshot from an earlier run
 > and has not been refreshed since (the registered-detector count is now 56,
 > per `detector_registry.registry` — see `abicheck/detector_registry.py`).
-> `--show-data-sources` also no longer reports a detector-enabled fraction at
+> `--dry-run` also no longer reports a detector-enabled fraction at
 > all (it now lists which `Lx` layers are present, with basic per-layer
 > stats). Re-run `python3 scripts/benchmark_comparison.py --evidence-tiers`
 > (needs `castxml` + `gcc`/`g++`) for current per-tier numbers rather than

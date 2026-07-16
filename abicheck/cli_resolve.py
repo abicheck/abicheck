@@ -615,15 +615,14 @@ _COMPILE_CONTEXT_SET_INPUT_FLAGS: dict[str, str] = {
     "new_header_backend": "--new-ast-frontend",
 }
 
-#: Build/source evidence flags (param dest → flag). ``max_depth``/``depth`` are
-#: the evidence-depth dial; the four per-side --sources/--build-info are the
+#: Build/source evidence flags (param dest → flag). ``depth`` is the
+#: evidence-depth dial; the four per-side --sources/--build-info are the
 #: inline evidence inputs.
 #: ADR-040 L1: keyed on the *side-aware* CLI param dests (``sources`` /
 #: ``build_info``) — the rejection runs on the raw Click params (before the
 #: sided values are normalised into per-side kwargs), so it must check the
 #: dest the user actually typed to.
 _EVIDENCE_SET_INPUT_FLAGS: dict[str, str] = {
-    "max_depth": "--max",
     "depth": "--depth",
     "sources": "--sources",
     "build_info": "--build-info",
@@ -635,7 +634,7 @@ _EVIDENCE_SET_INPUT_FLAGS: dict[str, str] = {
 def _reject_evidence_flags_for_set_inputs(ctx: click.Context) -> None:
     """Reject inline build/source evidence flags for directory/package compares.
 
-    The release fan-out forwards only release-comparison kwargs, so ``--max``/
+    The release fan-out forwards only release-comparison kwargs, so
     ``--depth``, the per-side ``--old/new-sources`` / ``--old/new-build-info``,
     and ``--header-graph``/``--header-graph-includes`` would be accepted and
     silently dropped (no L3-L5 collected, no L2 header graph built). Fail

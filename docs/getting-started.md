@@ -275,7 +275,7 @@ abicheck compare old.json new.json -v
 
 ## 5) Application compatibility check
 
-Check whether your **application** is affected by a library update — filtering out irrelevant changes — with `compare --used-by` (repeatable; OLD and NEW must be real library binaries, not JSON snapshots):
+Check whether your **application** is affected by a library update — filtering out irrelevant changes — with `compare --used-by` (repeatable; OLD and NEW may be real library binaries or JSON snapshots carrying binary evidence):
 
 ```bash
 abicheck compare libfoo.so.1 libfoo.so.2 --used-by ./myapp -H include/foo.h

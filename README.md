@@ -46,7 +46,7 @@ The layers are **independent and additive, not a fallback chain** — abicheck o
 
 > **A sixth code you may see in the docs:** `L5` is the source *reachability graph* abicheck **derives** from L3/L4 evidence — you provide five sources (L0–L4); L5 is computed, never an input. It appears in the [`scan` documentation](https://abicheck.github.io/abicheck/concepts/evidence-and-detectability/).
 
-With less input, abicheck degrades gracefully *down the staircase* rather than failing — a stripped binary with no headers collapses toward symbol-only checking — and `abicheck dump --show-data-sources` reports exactly which layers it found. The best input you can give it is **old library + new library + matching public headers + debug info + build data**. See [Evidence & Detectability](https://abicheck.github.io/abicheck/concepts/evidence-and-detectability/) for what each source can and cannot see, and [Architecture](https://abicheck.github.io/abicheck/concepts/architecture/) for how the layers are reconciled.
+With less input, abicheck degrades gracefully *down the staircase* rather than failing — a stripped binary with no headers collapses toward symbol-only checking — and `abicheck dump --dry-run` reports exactly which layers it found. The best input you can give it is **old library + new library + matching public headers + debug info + build data**. See [Evidence & Detectability](https://abicheck.github.io/abicheck/concepts/evidence-and-detectability/) for what each source can and cannot see, and [Architecture](https://abicheck.github.io/abicheck/concepts/architecture/) for how the layers are reconciled.
 
 ---
 

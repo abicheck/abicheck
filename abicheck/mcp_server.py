@@ -458,6 +458,29 @@ def _scoped_verdict_exit_code(verdict: object) -> int:
     return 0
 
 
+def _scoped_exit_code(
+    verdict: object, relevant_changes: list[Any], result: Any,
+    severity_config: SeverityConfig | None, policy: str, policy_file: object,
+) -> int:
+    """Scoped-verdict exit code, respecting a severity config when given.
+
+    Mirrors ``cli_compare_helpers._scoped_exit_code``: without this, a
+    used_by/required_symbols scope always fell back to the legacy 0/2/4
+    verdict floor, silently ignoring any severity_* argument the caller
+    passed (parity bug with the severity-aware unscoped path above).
+    """
+    if severity_config is not None:
+        from .severity import compute_exit_code
+
+        return compute_exit_code(
+            relevant_changes, severity_config,
+            policy=policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=policy_file,
+        )
+    return _scoped_verdict_exit_code(verdict)
+
+
 def _impact_category(kind: ChangeKind, policy: str = "strict_abi") -> str:
     """Return the impact category string for a ChangeKind under the given policy.
 
@@ -654,10 +677,12 @@ def abi_compare(
         severity_addition: Override severity for addition findings.
         used_by: Application binary paths (ADR-043) — scope the comparison to
             what each app actually imports/requires, instead of the full
-            library surface. OLD/NEW must be real library binaries (not JSON
-            snapshots). Mutually exclusive with required_symbols. Adds a
-            ``used_by`` list to the response and floors ``exit_code`` on the
-            worst-scoped app's verdict (BREAKING → 4, API_BREAK → 2).
+            library surface. old_input/new_input may be real library binaries
+            or JSON snapshots carrying binary evidence (a dump of a real
+            library, not headers-only). Mutually exclusive with
+            required_symbols. Adds a ``used_by`` list to the response and
+            floors ``exit_code`` on the worst-scoped app's verdict
+            (BREAKING → 4, API_BREAK → 2).
         required_symbols: An explicit plugin/host required-entrypoint contract
             (ADR-043) — scope the comparison to only these exported symbols.
             Mutually exclusive with used_by. Adds a ``required_symbol_contract``
@@ -848,14 +873,22 @@ def abi_compare(
             from .appcompat import scope_diff_to_app
             from .service import detect_binary_format
 
-            for p, label in ((old_path, "old_input"), (new_path, "new_input")):
-                if detect_binary_format(p) is None:
+            old_lib: Any = old_path if detect_binary_format(old_path) is not None else old_snap
+            new_lib: Any = new_path if detect_binary_format(new_path) is not None else new_snap
+            for lib, p, label in (
+                (old_lib, old_path, "old_input"), (new_lib, new_path, "new_input"),
+            ):
+                has_binary_evidence = isinstance(lib, Path) or any(
+                    getattr(lib, field, None) is not None for field in ("elf", "pe", "macho")
+                )
+                if not has_binary_evidence:
                     return json.dumps(
                         {
                             "status": "error",
                             "error": f"used_by requires old_input/new_input to be "
-                            f"real library binaries (not JSON snapshots); "
-                            f"{label} ({p}) is not a recognized binary format.",
+                            f"real library binaries, or JSON snapshots carrying "
+                            f"binary evidence (a dump of a real library, not "
+                            f"headers-only); {label} ({p}) is neither.",
                         }
                     )
             summaries = []
@@ -869,7 +902,7 @@ def abi_compare(
                     )
                 _check_file_size(app_path, label="used_by")
                 scoped = scope_diff_to_app(
-                    result, app_path, old_path, new_path,
+                    result, app_path, old_lib, new_lib,
                     policy=active_policy, policy_file=pf,
                 )
                 summaries.append(
@@ -883,7 +916,10 @@ def abi_compare(
                         "symbol_coverage": round(scoped.symbol_coverage, 1),
                     }
                 )
-                app_exit = _scoped_verdict_exit_code(scoped.verdict)
+                app_exit = _scoped_exit_code(
+                    scoped.verdict, scoped.breaking_for_app, result,
+                    severity_config, active_policy, pf,
+                )
                 if worst_verdict is None or app_exit >= worst_exit:
                     worst_exit = app_exit
                     worst_verdict = scoped.verdict
@@ -912,7 +948,10 @@ def abi_compare(
                 "relevant_change_count": len(scoped_host.breaking_for_host),
                 "coverage": round(scoped_host.coverage, 1),
             }
-            exit_code = _scoped_verdict_exit_code(scoped_host.verdict)
+            exit_code = _scoped_exit_code(
+                scoped_host.verdict, scoped_host.breaking_for_host, result,
+                severity_config, active_policy, pf,
+            )
             exit_code_scheme = "scoped"
             scoped_verdict_value = scoped_host.verdict.value
             result.required_symbols = scoped_payload  # type: ignore[attr-defined]

@@ -800,6 +800,35 @@ def generate_html_report(
             f"</div></div>"
         )
 
+    scoped_verdict = getattr(result, "scoped_verdict", None)
+    scoped_html = ""
+    if scoped_verdict is not None:
+        # `--used-by`/`--required-symbol(s)` scoping (ADR-043): the
+        # Compatibility verdict box above stays computed from the full,
+        # unscoped library diff -- this format's own gate/verdict rendering
+        # intentionally keeps that authoritative. But the actual CLI process
+        # exits on the *scoped* verdict floor when scoping is requested,
+        # which can legitimately disagree with the verdict shown above.
+        # Surfaced here so a reader of the HTML report can't miss that
+        # disagreement, mirroring the human-format banner
+        # (`_fold_scoped_compat_into_text`) without changing this report's
+        # own verdict-box semantics.
+        scoped_value = (
+            scoped_verdict.value if hasattr(scoped_verdict, "value") else str(scoped_verdict)
+        )
+        scoped_fg, scoped_bg = _VERDICT_STYLE.get(scoped_value, ("#212121", "#f5f5f5"))
+        scoped_html = (
+            f"<div class='verdict-box' "
+            f"style='background:{scoped_bg}; color:{scoped_fg}; "
+            f"border-left:6px solid {scoped_fg};'>"
+            f"<h2>{_verdict_icon(scoped_value)} Scoped verdict: {h(scoped_value)}</h2>"
+            f"<div class='bc-metric' style='font-size:0.85em; opacity:0.85;'>"
+            f"This is what the CLI process exit code reflects for this "
+            f"--used-by/--required-symbol run — it may differ from the "
+            f"full-library Compatibility verdict above."
+            f"</div></div>"
+        )
+
     summary_html = _summary_table(removed, changed, added, suppressed_count)
     nav_html = _nav_bar(removed, changed, added, suppressed_count)
 
@@ -886,6 +915,7 @@ def generate_html_report(
 </div>
 
 {gate_html}
+{scoped_html}
 {_confidence_html(result)}
 {nav_html}
 {summary_html}

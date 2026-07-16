@@ -61,6 +61,7 @@ from abicheck.cli_compare_release import (
     _resolve_release_headers,
     _resolve_release_severity_config,
 )
+from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.serialization import snapshot_to_json
 
@@ -1135,7 +1136,7 @@ class TestUsedByScoping:
 
         monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", lambda *a, **k: result)
 
-    def _result(self, *, verdict=Verdict.COMPATIBLE, missing=None):
+    def _result(self, *, verdict=Verdict.COMPATIBLE, missing=None, breaking_for_app=None):
         from abicheck.appcompat import AppCompatResult
 
         return AppCompatResult(
@@ -1144,6 +1145,7 @@ class TestUsedByScoping:
             new_lib_path="new.so",
             required_symbols={"foo"},
             required_symbol_count=1,
+            breaking_for_app=breaking_for_app or [],
             missing_symbols=missing or [],
             missing_versions=[],
             verdict=verdict,
@@ -1190,18 +1192,42 @@ class TestUsedByScoping:
         assert out.exists()
         assert "Report written to" in result.output
 
-    def test_severity_missing_symbols_floors_at_4(self, tmp_path, monkeypatch) -> None:
-        # A --severity-preset alongside --used-by has no effect on the scoped
-        # exit code (see the module-level note above) -- the missing-symbol
-        # BREAKING floor holds regardless of an info-only preset.
-        res = self._result(verdict=Verdict.BREAKING, missing=["foo"])
+    def test_severity_missing_symbols_default_preset_floors_at_4(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # A required symbol's removal is a real Change in breaking_for_app
+        # (as scope_diff_to_app would report it) -- abi_breaking defaults to
+        # error, so the scoped exit code still floors at 4.
+        res = self._result(
+            verdict=Verdict.BREAKING, missing=["foo"],
+            breaking_for_app=[Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")],
+        )
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app),
+            "--severity-preset", "default",
+        )
+        assert result.exit_code == 4
+
+    def test_severity_info_only_preset_overrides_missing_symbols_exit(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Regression: --severity-preset used to have NO effect on the scoped
+        # exit code at all -- an info-only preset must now floor exit_code at
+        # 0 despite the scoped verdict staying BREAKING (post-merge PR #566
+        # review).
+        res = self._result(
+            verdict=Verdict.BREAKING, missing=["foo"],
+            breaking_for_app=[Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")],
+        )
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke(
             "compare", str(old), str(new), "--used-by", str(app),
             "--severity-preset", "info-only",
         )
-        assert result.exit_code == 4
+        assert result.exit_code == 0
 
     def test_severity_clean_exit_0(self, tmp_path, monkeypatch) -> None:
         res = self._result(verdict=Verdict.COMPATIBLE)
@@ -1257,6 +1283,67 @@ class TestUsedByScoping:
         assert result.exit_code == 0  # the scoped verdict, not the full BREAKING
         assert "Scoped verdict: COMPATIBLE" in result.stdout
         assert "full library verdict above is BREAKING" in result.stdout
+
+
+class TestUsedByScopingWithSnapshotInputs:
+    """`compare --used-by` OLD/NEW as saved JSON snapshots (ADR-043 follow-up).
+
+    Regression: --used-by used to hard-require OLD/NEW to be real library
+    binaries, breaking the natural `dump` once + `compare ... --used-by`
+    later workflow (post-merge PR #566 review) -- a snapshot carrying binary
+    evidence (its `elf`/`pe`/`macho` field) must now work.
+    """
+
+    def _snap_with_elf(self, version: str, symbol_names: list[str]) -> AbiSnapshot:
+        return AbiSnapshot(
+            library="libfoo.so.1", version=version,
+            elf=ElfMetadata(
+                soname="libfoo.so.1",
+                symbols=[ElfSymbol(name=n) for n in symbol_names],
+            ),
+        )
+
+    def _write(self, path: Path, snap: AbiSnapshot) -> Path:
+        from abicheck.serialization import snapshot_to_json
+        path.write_text(snapshot_to_json(snap), encoding="utf-8")
+        return path
+
+    def _patch_scope(self, monkeypatch, result):
+        import abicheck.appcompat as appcompat_mod
+        monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", lambda *a, **k: result)
+
+    def test_both_sides_json_snapshots_with_elf_evidence_succeed(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        old = self._write(tmp_path / "old.json", self._snap_with_elf("1.0", ["foo"]))
+        new = self._write(tmp_path / "new.json", self._snap_with_elf("2.0", ["foo"]))
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 200)
+
+        from abicheck.appcompat import AppCompatResult
+        self._patch_scope(monkeypatch, AppCompatResult(
+            app_path=str(app), old_lib_path="libfoo.so.1", new_lib_path="libfoo.so.1",
+            required_symbols={"foo"}, required_symbol_count=1,
+            verdict=Verdict.COMPATIBLE, symbol_coverage=100.0,
+        ))
+        result = _invoke("compare", str(old), str(new), "--used-by", str(app))
+        assert result.exit_code == 0
+        assert "requires OLD/NEW to be real library binaries" not in (result.output or "")
+
+    def test_headers_only_json_snapshots_still_rejected(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # No `elf`/`pe`/`macho` field at all -- no binary evidence to scope
+        # against, so this must still fail loudly rather than silently
+        # mis-scope (unlike a snapshot from a real library dump).
+        old = self._write(tmp_path / "old.json", _snap("1.0"))
+        new = self._write(tmp_path / "new.json", _snap("2.0"))
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 200)
+
+        result = _invoke("compare", str(old), str(new), "--used-by", str(app))
+        assert result.exit_code == 64
+        assert "requires OLD/NEW to be real library binaries" in (result.output or "")
 
 
 # ── cli.py: _write_release_step_summary (1351-1372) ───────────────────────────

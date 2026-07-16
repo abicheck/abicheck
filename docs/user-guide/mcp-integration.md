@@ -109,7 +109,7 @@ ABICC Perl dump (`.pl` / `.dump`).
 | `report_mode` | string | no | `"full"` (default) or `"leaf"` (root-type-grouped view) |
 | `show_impact` | boolean | no | If `true`, append an impact summary table to the rendered report |
 | `stat` | boolean | no | If `true`, emit a one-line summary instead of the full report |
-| `used_by` | string[] | no | Application binary paths — scope the comparison to what each app actually imports/requires instead of the full library surface (folds the old `appcompat` command). `old_input`/`new_input` must be real library binaries, not JSON snapshots. Mutually exclusive with `required_symbols`. Adds a `used_by` list to the response and floors `exit_code` on the worst-scoped app's verdict |
+| `used_by` | string[] | no | Application binary paths — scope the comparison to what each app actually imports/requires instead of the full library surface (folds the old `appcompat` command). `old_input`/`new_input` may be real library binaries or JSON snapshots carrying binary evidence (a dump of a real library, not headers-only). Mutually exclusive with `required_symbols`. Adds a `used_by` list to the response and floors `exit_code` on the worst-scoped app's verdict |
 | `required_symbols` | string[] | no | An explicit plugin/host required-entrypoint contract — scope the comparison to only these exported symbols (folds the old `plugin-check` command). Mutually exclusive with `used_by`. Adds a `required_symbol_contract` object to the response and floors `exit_code` on its verdict |
 
 **Response fields:**

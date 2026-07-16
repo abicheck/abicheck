@@ -467,27 +467,70 @@ def _verdict_exit_code(verdict: object) -> int:
     return 0
 
 
+def _scoped_exit_code(
+    scoped: Any, relevant_changes: list[Any],
+    result: Any, exit_code_scheme: str, sev_config: Any,
+    policy: str, policy_file: PolicyFile | None,
+) -> int:
+    """Compute a scoped result's exit code under the active exit-code scheme.
+
+    ADR-043's --used-by/--required-symbol(s) floor the exit code on the
+    *scoped* verdict rather than the full library's -- but that floor must
+    still respect ``--exit-code-scheme severity``/``--severity-*``: without
+    this, a scoped compare silently reverted to the legacy 0/2/4 mapping no
+    matter what severity configuration the caller passed, because the scoped
+    branch returned straight to ``sys.exit`` before the severity-aware exit
+    handler ever ran.
+    """
+    if exit_code_scheme == "severity":
+        from .severity import compute_exit_code
+
+        return compute_exit_code(
+            relevant_changes, sev_config,
+            policy=policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=policy_file,
+        )
+    return _verdict_exit_code(scoped.verdict)
+
+
 def _apply_used_by_scoping(
     result: Any, used_by_apps: tuple[Path, ...],
     old_input: Path, new_input: Path,
+    old_snapshot: Any, new_snapshot: Any,
     policy: str, policy_file: PolicyFile | None,
+    exit_code_scheme: str = "legacy", sev_config: Any = None,
 ) -> int:
     """Scope *result* to each ``--used-by`` app; worst-wins (ADR-043).
 
-    Requires OLD/NEW to be real library binaries (not JSON snapshots) since an
-    application's actual imports/required symbol versions can only be checked
-    against a real export table. Attaches a JSON-safe summary to
-    ``result.used_by`` for the renderer and returns the worst app's exit code.
+    OLD/NEW may be real library binaries or JSON snapshots (e.g. a saved
+    ``dump`` output): a recognized binary is parsed directly; otherwise the
+    already-loaded snapshot (``old_snapshot``/``new_snapshot``, from
+    ``compare``'s own pipeline) is used instead, since a snapshot's
+    ``elf``/``pe``/``macho`` fields already carry the SONAME/export table/
+    version list/PE ordinal table :func:`~abicheck.appcompat.scope_diff_to_app`
+    needs. Attaches a JSON-safe summary to ``result.used_by`` for the
+    renderer and returns the worst app's exit code, computed under
+    *exit_code_scheme* (legacy verdict floor, or severity-aware over each
+    app's relevant changes when the caller passed --severity-*).
     """
     from .appcompat import scope_diff_to_app
     from .service import detect_binary_format
 
-    for path, label in ((old_input, "OLD"), (new_input, "NEW")):
-        if detect_binary_format(path) is None:
+    old_lib = old_input if detect_binary_format(old_input) is not None else old_snapshot
+    new_lib = new_input if detect_binary_format(new_input) is not None else new_snapshot
+
+    for lib, path, label in (
+        (old_lib, old_input, "OLD"), (new_lib, new_input, "NEW"),
+    ):
+        has_binary_evidence = isinstance(lib, Path) or any(
+            getattr(lib, field, None) is not None for field in ("elf", "pe", "macho")
+        )
+        if not has_binary_evidence:
             raise click.UsageError(
-                f"--used-by requires OLD/NEW to be real library binaries "
-                f"(not JSON snapshots); {label} ({path}) is not a recognized "
-                f"binary format."
+                f"--used-by requires OLD/NEW to be real library binaries, or "
+                f"JSON snapshots carrying binary evidence (a `dump` of a real "
+                f"library, not headers-only); {label} ({path}) is neither."
             )
 
     summaries = []
@@ -495,11 +538,14 @@ def _apply_used_by_scoping(
     worst_verdict = None
     for app in used_by_apps:
         scoped = scope_diff_to_app(
-            result, app, old_input, new_input,
+            result, app, old_lib, new_lib,
             policy=policy, policy_file=policy_file,
         )
         summaries.append(_app_compat_summary(scoped))
-        exit_code = _verdict_exit_code(scoped.verdict)
+        exit_code = _scoped_exit_code(
+            scoped, scoped.breaking_for_app, result, exit_code_scheme, sev_config,
+            policy, policy_file,
+        )
         # `>=` (not `>`): the first app must always seed worst_verdict, even
         # when its exit code is 0 (COMPATIBLE) -- a strict `>` against the 0
         # starting point meant an all-COMPATIBLE --used-by set left
@@ -518,6 +564,7 @@ def _apply_required_symbol_scoping(
     result: Any, required_symbols: tuple[str, ...],
     old: Any, new: Any,
     policy: str, policy_file: PolicyFile | None,
+    exit_code_scheme: str = "legacy", sev_config: Any = None,
 ) -> int:
     """Scope *result* to an explicit ``--required-symbol(s)`` contract (ADR-043)."""
     from .appcompat import scope_diff_to_required_symbols
@@ -528,7 +575,10 @@ def _apply_required_symbol_scoping(
     )
     result.required_symbols = _plugin_contract_summary(scoped)  # type: ignore[attr-defined]
     result.scoped_verdict = scoped.verdict  # type: ignore[attr-defined]
-    return _verdict_exit_code(scoped.verdict)
+    return _scoped_exit_code(
+        scoped, scoped.breaking_for_host, result, exit_code_scheme, sev_config,
+        policy, policy_file,
+    )
 
 
 def _load_required_symbols(
@@ -782,6 +832,20 @@ def run_compare(
     # single-pair one would (ADR-037 D4).
     old_kind, new_kind = _classify_and_reject_operands(old_input, new_input)
 
+    if {old_kind, new_kind} & {"directory", "package"}:
+        # The per-library fan-out (`compare-release` backend) consumes the
+        # resolved scheme from config but has no public CLI support for these
+        # single-pair-only flags on set inputs — reject them loudly (ADR-037 D12).
+        # Validated ahead of the --dry-run emit below (not just before the real
+        # dispatch) so a dry run can't report "ok" for a flag combination the
+        # real run would then reject (Codex review).
+        _reject_set_input_flags(
+            exit_code_scheme, reconcile_build_context, env_matrix_path, secondary_fmt,
+            used_by_apps=used_by_apps, required_symbols=required_symbols,
+        )
+        _reject_compile_context_for_set_inputs(ctx, project_cfg)
+        _reject_evidence_flags_for_set_inputs(ctx)
+
     if dry_run:
         from .dry_run import emit_dry_run
 
@@ -798,15 +862,6 @@ def run_compare(
         ))
 
     if {old_kind, new_kind} & {"directory", "package"}:
-        # The per-library fan-out (`compare-release` backend) consumes the
-        # resolved scheme from config but has no public CLI support for these
-        # single-pair-only flags on set inputs — reject them loudly (ADR-037 D12).
-        _reject_set_input_flags(
-            exit_code_scheme, reconcile_build_context, env_matrix_path, secondary_fmt,
-            used_by_apps=used_by_apps, required_symbols=required_symbols,
-        )
-        _reject_compile_context_for_set_inputs(ctx, project_cfg)
-        _reject_evidence_flags_for_set_inputs(ctx)
         # Resolved through the ``cli`` module (not a by-name import) so a test that
         # monkeypatches ``abicheck.cli._dispatch_release_compare`` before invoking
         # ``compare`` is honoured — matching the pre-split resolution semantics.
@@ -1119,11 +1174,14 @@ def run_compare(
     scoped_exit_code: int | None = None
     if used_by_apps:
         scoped_exit_code = _apply_used_by_scoping(
-            result, used_by_apps, used_by_old_input, used_by_new_input, policy, pf,
+            result, used_by_apps, used_by_old_input, used_by_new_input, old, new,
+            policy, pf,
+            exit_code_scheme=resolved_cfg.exit_code_scheme, sev_config=sev_config,
         )
     elif required_symbols:
         scoped_exit_code = _apply_required_symbol_scoping(
             result, required_symbols, old, new, policy, pf,
+            exit_code_scheme=resolved_cfg.exit_code_scheme, sev_config=sev_config,
         )
 
     text = _render_output(

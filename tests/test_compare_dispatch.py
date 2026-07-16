@@ -813,6 +813,30 @@ class TestCompareDispatch:
         assert "not supported for directory/package" in msg
         assert "--used-by" in msg
 
+    def test_used_by_rejected_on_set_inputs_even_with_dry_run(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression: --dry-run used to emit its "ok" report and exit 0/1
+        # *before* this rejection ran, so a dry run could report a
+        # --used-by + directory/package combination as valid even though the
+        # real run immediately rejects it (Codex review / post-merge PR #566
+        # review). The dry run must agree with the real run.
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        _write_snap(old_dir / "libfoo.json", _snap())
+        _write_snap(new_dir / "libfoo.json", _snap())
+        app = _make_pie_executable(tmp_path / "myapp")
+        code, out, err = _invoke(
+            "compare", str(old_dir), str(new_dir), "--used-by", str(app), "--dry-run"
+        )
+        assert code != 0
+        msg = out + err
+        assert "not supported for directory/package" in msg
+        assert "--used-by" in msg
+        assert "Dry run only" not in msg
+
     def test_required_symbol_rejected_on_set_inputs(self, tmp_path: Path) -> None:
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"

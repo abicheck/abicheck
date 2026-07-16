@@ -99,7 +99,7 @@ Full flag reference: [CLI Usage](cli-usage.md).
 The "native mode" above is not one fixed mode — it **adapts to the evidence you
 give it**. Each additional source (the five of the
 [L0–L4 model](../concepts/evidence-and-detectability.md#0-the-five-sources-of-information))
-switches on more detectors. Run `abicheck dump <lib> --show-data-sources` to see
+switches on more detectors. Run `abicheck dump <lib> --dry-run` to see
 exactly which `Lx` layers a binary affords (it lists per-layer presence and
 basic stats — e.g. exported-symbol/type/enum counts — not a detector-count
 fraction or a named "mode").

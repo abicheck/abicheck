@@ -104,7 +104,7 @@ compare that uses build/source evidence prints an **evidence-coverage** table
 (and a structured `layer_coverage` array in JSON) so consumers can tell which
 findings are artifact-proven vs. context-only — see [Build & Source Packs](build-source-data.md).
 
-**Graceful degradation.** `abicheck dump --show-data-sources` reports exactly
+**Graceful degradation.** `abicheck dump --dry-run` reports exactly
 which of L0/L1/L2 a binary affords (as of this writing it lists per-layer
 presence and basic stats — symbol/type/enum counts — not a detector-enabled
 fraction). With less input abicheck degrades down the staircase rather than
