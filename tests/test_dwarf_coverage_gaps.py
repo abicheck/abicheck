@@ -1605,6 +1605,134 @@ class TestDwarfSnapshotFallbacks:
         assert [f.name for f in result] == ["j"]
         assert result[0].access == AccessLevel.PROTECTED
 
+    def test_process_field_anonymous_member_absent_access_uses_class_default(self):
+        """Regression (Codex review): an outer anonymous member with NO
+        DW_AT_accessibility of its own (e.g. a `class`'s first, unlabelled
+        anonymous union — matching its enclosing class's default private
+        access, so GCC omits the attribute entirely) must resolve to the
+        enclosing record's default, not unconditionally to public.
+        Confirmed against real GCC DWARF: a default-private anonymous
+        union's outer DW_TAG_member carries no DW_AT_accessibility at all."""
+        from abicheck.dwarf_snapshot import _DwarfSnapshotBuilder
+        from abicheck.model import AccessLevel
+
+        elf_meta = self._make_elf_meta()
+        builder = _DwarfSnapshotBuilder(Path("test.so"), elf_meta)
+
+        int_type = MockDIE(
+            tag="DW_TAG_base_type",
+            attributes={"DW_AT_name": MockAttr("int"), "DW_AT_byte_size": MockAttr(4)},
+        )
+        inner_k = MockDIE(
+            tag="DW_TAG_member",
+            attributes={"DW_AT_name": MockAttr("k"), "DW_AT_type": MockAttr(10, form="DW_FORM_ref4")},
+        )
+        anon_union = MockDIE(tag="DW_TAG_union_type", attributes={}, children=[inner_k])
+        outer_member = MockDIE(
+            tag="DW_TAG_member",
+            attributes={"DW_AT_type": MockAttr(20, form="DW_FORM_ref4")},
+        )
+        cu = MockCU(cu_offset=0, die_map={10: int_type, 20: anon_union})
+
+        # No default_access passed -> historical PUBLIC default (struct/union caller).
+        result = builder._process_field(outer_member, cu)
+        assert result[0].access == AccessLevel.PUBLIC
+
+        # A `class` caller passes its own default (private) explicitly.
+        result = builder._process_field(outer_member, cu, AccessLevel.PRIVATE)
+        assert [f.name for f in result] == ["k"]
+        assert result[0].access == AccessLevel.PRIVATE
+
+    def test_process_field_ordinary_field_absent_access_uses_class_default(self):
+        """Regression: the same absent-accessibility defaulting bug applies
+        to an ordinary (non-anonymous) field — a `class`'s first, unlabelled
+        field carries no DW_AT_accessibility either (its access matches the
+        class default, so GCC omits it), and must resolve to private, not
+        the historical unconditional public."""
+        from abicheck.dwarf_snapshot import _DwarfSnapshotBuilder
+        from abicheck.model import AccessLevel
+
+        elf_meta = self._make_elf_meta()
+        builder = _DwarfSnapshotBuilder(Path("test.so"), elf_meta)
+
+        field_die = MockDIE(
+            tag="DW_TAG_member",
+            attributes={"DW_AT_name": MockAttr("priv_field")},
+        )
+        cu = MockCU()
+
+        result = builder._process_field(field_die, cu)
+        assert result[0].access == AccessLevel.PUBLIC  # struct/union default
+
+        result = builder._process_field(field_die, cu, AccessLevel.PRIVATE)
+        assert result[0].access == AccessLevel.PRIVATE  # class default
+
+    def test_default_member_access_for_tag(self):
+        """`class` defaults to private; `struct`/`union` default to public,
+        matching C++'s own access-specifier defaults."""
+        from abicheck.dwarf_snapshot import _default_member_access_for_tag
+        from abicheck.model import AccessLevel
+
+        assert _default_member_access_for_tag("DW_TAG_class_type") == AccessLevel.PRIVATE
+        assert _default_member_access_for_tag("DW_TAG_structure_type") == AccessLevel.PUBLIC
+        assert _default_member_access_for_tag("DW_TAG_union_type") == AccessLevel.PUBLIC
+
+    def test_process_record_type_named_class_field_absent_access_is_private(self):
+        """End-to-end (Codex review): a `DW_TAG_class_type` record's field
+        with no DW_AT_accessibility of its own (its access matches the
+        class's default private, so GCC never emits the attribute) resolves
+        to private, not the historical unconditional public — verified via
+        the full record-building path, not just the field helper in
+        isolation."""
+        from abicheck.dwarf_snapshot import _DwarfSnapshotBuilder
+        from abicheck.model import AccessLevel
+
+        elf_meta = self._make_elf_meta()
+        builder = _DwarfSnapshotBuilder(Path("test.so"), elf_meta)
+
+        field_die = MockDIE(
+            tag="DW_TAG_member",
+            attributes={"DW_AT_name": MockAttr("priv_field")},
+        )
+        class_die = MockDIE(
+            tag="DW_TAG_class_type",
+            attributes={"DW_AT_byte_size": MockAttr(4)},
+            children=[field_die],
+        )
+        cu = MockCU()
+
+        builder._process_record_type_named(class_die, cu, "Foo")
+
+        assert len(builder.types) == 1
+        assert builder.types[0].fields[0].access == AccessLevel.PRIVATE
+
+    def test_process_record_type_named_struct_field_absent_access_is_public(self):
+        """The `struct` counterpart of the test above: a field with no
+        DW_AT_accessibility in a `DW_TAG_structure_type` record resolves to
+        public (struct's own default), preserving pre-fix behavior for the
+        non-class case."""
+        from abicheck.dwarf_snapshot import _DwarfSnapshotBuilder
+        from abicheck.model import AccessLevel
+
+        elf_meta = self._make_elf_meta()
+        builder = _DwarfSnapshotBuilder(Path("test.so"), elf_meta)
+
+        field_die = MockDIE(
+            tag="DW_TAG_member",
+            attributes={"DW_AT_name": MockAttr("pub_field")},
+        )
+        struct_die = MockDIE(
+            tag="DW_TAG_structure_type",
+            attributes={"DW_AT_byte_size": MockAttr(4)},
+            children=[field_die],
+        )
+        cu = MockCU()
+
+        builder._process_record_type_named(struct_die, cu, "Bar")
+
+        assert len(builder.types) == 1
+        assert builder.types[0].fields[0].access == AccessLevel.PUBLIC
+
     def test_process_field_does_not_flatten_named_anonymous_member_type(self):
         """A member whose type DIE carries its own DW_AT_name (a typedef'd
         anonymous-record type) is not flattened: the clang header parser
