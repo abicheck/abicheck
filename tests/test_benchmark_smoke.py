@@ -302,8 +302,11 @@ def test_abicheck_full_builds_separate_targets_merges_separate_packs(tmp_path):
             injection = Path(injection_arg.split("=", 1)[1]).read_text()
             pack = Path(injection.split("out=", 1)[1].split("'", 1)[0].split()[0])
             _write_plugin_pack(pack, version, v1_src if version == "v1" else v2_src)
-        elif "dump" in cmd or "merge" in cmd:
+        elif "dump" in cmd:
             Path(cmd[cmd.index("-o") + 1]).touch()
+        elif "-c" in cmd:
+            # embed_inputs_pack() relink step: [python, -c, script, base, pack, final].
+            Path(cmd[-1]).touch()
         return Result()
 
     build_root = tmp_path / "bench-build"
@@ -322,12 +325,16 @@ def test_abicheck_full_builds_separate_targets_merges_separate_packs(tmp_path):
     assert result.verdict == "BREAKING"
     targets = [cmd[cmd.index("--target") + 1] for cmd in commands if "--target" in cmd]
     assert targets == [f"{case}_v1", f"{case}_v2"]
-    merges = [cmd for cmd in commands if "merge" in cmd]
+    # No standalone `merge` CLI command (removed in the ADR-043 CLI reset) and
+    # no `--sources <pack>` shortcut (which skips the export relink — Codex
+    # review on PR #581); the pack is folded in via a direct embed_inputs_pack()
+    # call, which relinks the source surface against the binary's real exports.
+    merges = [cmd for cmd in commands if "-c" in cmd and "embed_inputs_pack" in cmd[2]]
     assert len(merges) == 2
-    assert merges[0][1:3] == ["-m", "abicheck"]
     assert "abicheck_inputs_v1" in " ".join(merges[0])
     assert "abicheck_inputs_v2" in " ".join(merges[1])
     assert not any("--sources" in cmd for cmd in commands)
+    assert not any(cmd[:3] == ["-m", "abicheck", "merge"] for cmd in commands)
     assert all(kwargs_timeout == 177 for kwargs_timeout in [177])
 
 
