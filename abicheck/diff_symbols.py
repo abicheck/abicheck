@@ -1107,7 +1107,28 @@ def _check_variable_alignment(
 
 _TRAILING_CONST_RE = re.compile(r"\s*\bconst\b\s*$")
 _LEADING_CONST_TOKEN_RE = re.compile(r"^\s*\bconst\b\s*")
-_POINTER_OR_REF_RE = re.compile(r"[*&]")
+
+
+def _has_top_level_pointer_or_ref(canonical_type: str) -> bool:
+    """True if *canonical_type* has a ``*``/``&`` outside any ``<...>``
+    template-argument bracket.
+
+    A plain substring search for ``*``/``&`` would also match one nested
+    *inside* a template argument (e.g. ``std::vector<int *>`` — a by-value
+    vector of pointers, not itself a pointer), wrongly routing a pure
+    top-level const flip on that by-value variable into the
+    pointer/reference branch below, which only strips a *trailing* const —
+    but the top-level const here is leading (Codex review).
+    """
+    depth = 0
+    for ch in canonical_type:
+        if ch == "<":
+            depth += 1
+        elif ch == ">":
+            depth = max(0, depth - 1)
+        elif ch in "*&" and depth == 0:
+            return True
+    return False
 
 
 def _without_top_level_const(canonical_type: str) -> str:
@@ -1137,7 +1158,7 @@ def _without_top_level_const(canonical_type: str) -> str:
       const" (Codex review, x2: the original non-template pointee-const
       case, and the templated-base variant of the same issue).
     """
-    if _POINTER_OR_REF_RE.search(canonical_type):
+    if _has_top_level_pointer_or_ref(canonical_type):
         return _TRAILING_CONST_RE.sub("", canonical_type)
     stripped = _LEADING_CONST_TOKEN_RE.sub("", canonical_type)
     return _TRAILING_CONST_RE.sub("", stripped)
