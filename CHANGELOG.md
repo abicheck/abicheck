@@ -613,6 +613,37 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
     trade-off `_both_castxml_backed` already makes elsewhere: losing one
     axis of detection on a legacy/fresh mixed pairing to avoid a
     systematic false positive.
+  - **`header_cv_facts_reliable` was gated too broadly** (a follow-up Codex
+    finding on the fix directly above): the flag was derived purely from
+    `schema_version`, regardless of which extraction path actually produced
+    the snapshot's field data. A DWARF-only snapshot derives
+    `is_const`/`is_volatile` independently from
+    `DW_TAG_const_type`/`DW_TAG_volatile_type` (`dwarf_snapshot.py`), and the
+    clang L2 header backend derives them via its own regex-based qualifier
+    scan (`dumper_clang.py`) — neither was ever touched by the CastXML
+    parser bug, but the blanket `schema_version < 9` check marked a legacy
+    snapshot from *either* path unreliable too, silently swallowing a
+    genuine `FIELD_BECAME_CONST`/`VOLATILE` transition on, e.g., a legacy
+    DWARF-vs-DWARF compare. Now scoped: non-header snapshots
+    (`from_headers=False`) and clang-backend snapshots
+    (`ast_producer="clang"`) are always reliable regardless of
+    `schema_version`; only a CastXML-produced (or `ast_producer`-predating,
+    conservatively-treated-the-same) header snapshot still needs the v9
+    gate.
+  - **Cross-producer unmangled constructor/destructor identity is a known,
+    documented (not fixed) limitation**: comparing a castxml-produced
+    snapshot against a clang-produced snapshot of the same, unchanged
+    source reports a false `FUNC_REMOVED`+`FUNC_ADDED` pair for every
+    constructor/destructor whose synthetic key (built when castxml omits a
+    real mangled name) has no shared identity with the real Itanium-mangled
+    key clang uses for the same entity — confirmed symmetric with an
+    already-existing constructor-side gap, not a new regression from the
+    destructor work above. Deliberately left unfixed (needs real
+    cross-producer identity reconciliation, i.e. Phase 3 of
+    `docs/development/plans/g28-castxml-clang-l2-parity-hardening.md`) but
+    now has a documenting regression test
+    (`TestCrossProducerUnmangledIdentityKnownLimitation`) so it isn't
+    silently forgotten.
 - **MCP `abi_compare`**: a `--used-by`/`--required-symbol` response's
   `summary` (`total_changes`/`breaking`/`api_breaks`/`risk_changes`/
   `compatible`) is now recomputed after scoped-only changes and

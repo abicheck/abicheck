@@ -124,6 +124,24 @@ each fact, upgrading the many `_both_castxml_backed`-gated detectors from
 "disabled when producers differ" to "always available, backfilled from
 whichever backend saw it."
 
+**Confirmed concrete motivating case (Codex review, PR #582).** A synthetic
+constructor/destructor key (`__abicheck_ctor__ns::Class(...)` / `~ns::Class`,
+built when castxml omits a real mangled name) has no shared identity with
+the SAME entity's real Itanium-mangled key on the clang backend. Comparing
+a castxml-produced snapshot against a clang-produced snapshot of the
+*same, unchanged* source reports a false `FUNC_REMOVED` + `FUNC_ADDED` pair
+for every such unmangled constructor/destructor — verified with a real
+castxml+clang dump of an unchanged corpus (both a constructor and a virtual
+destructor). This is symmetric, pre-existing behavior — the constructor
+case predates the destructor work in this PR — not a new regression, and
+is deliberately left unfixed here (see
+`tests/test_castxml_clang_parity_gate.py::TestCrossProducerUnmangledIdentityKnownLimitation`,
+which documents today's behavior). A sound fix needs exactly this phase's
+per-fact provenance/reconciliation: matching a synthetic key against a real
+mangled symbol via structural equivalence (same qualified class, compatible
+signature, same access/virtuality) without risking a false match between
+two coincidentally-same-signature but genuinely different entities.
+
 **Design sketch.**
 
 - A per-field/per-record provenance map (`{field_path: producer}`) alongside

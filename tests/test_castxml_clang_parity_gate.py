@@ -421,6 +421,57 @@ class TestDestructorNamespaceQualification:
             assert f.mangled.startswith("__abicheck_ctor__outer::inner::Widget(")
 
 
+class TestCrossProducerUnmangledIdentityKnownLimitation:
+    """Known, accepted limitation (Codex review, PR #582 — flagged against
+    the destructor path specifically, but confirmed here to be symmetric
+    with an ALREADY-EXISTING, pre-dating-this-PR gap for constructors too):
+    a synthetic key (``__abicheck_ctor__...`` / ``~ns::Class``) built when
+    CastXML omits a real mangled name has no shared identity with the SAME
+    entity's real Itanium-mangled key on the clang backend. Comparing a
+    castxml-produced snapshot against a clang-produced snapshot of the
+    *same, unchanged* source reports a false FUNC_REMOVED + FUNC_ADDED pair
+    for every such unmangled constructor/destructor, instead of recognizing
+    them as identical.
+
+    This is NOT fixed here: a sound fix needs real cross-producer identity
+    reconciliation (matching a synthetic key against a real mangled symbol
+    via structural equivalence — same qualified class, compatible
+    signature, same access/virtuality — without risking a FALSE match
+    between two coincidentally-same-signature but genuinely different
+    entities). That is exactly the class of problem Phase 3 (hybrid
+    multi-producer snapshot with per-fact provenance) in
+    docs/development/plans/g28-castxml-clang-l2-parity-hardening.md is
+    scoped to solve. This test documents today's known behavior so a
+    future Phase-3 fix has a concrete regression to flip (from asserting
+    the false pair fires, to asserting it doesn't) rather than this gap
+    being silently reintroduced or forgotten.
+    """
+
+    def test_unmangled_constructor_cross_producer_compare_reports_false_remove_and_add(
+        self, cpp_snapshots
+    ) -> None:
+        from abicheck.checker import ChangeKind, compare
+
+        castxml_snap, clang_snap = cpp_snapshots
+        r = compare(castxml_snap, clang_snap)
+        widget_changes = [c for c in r.changes if c.description.endswith(": Widget")]
+        kinds = {c.kind for c in widget_changes}
+        assert ChangeKind.FUNC_REMOVED in kinds
+        assert ChangeKind.FUNC_ADDED in kinds
+
+    def test_unmangled_destructor_cross_producer_compare_reports_false_remove_and_add(
+        self, cpp_snapshots
+    ) -> None:
+        from abicheck.checker import ChangeKind, compare
+
+        castxml_snap, clang_snap = cpp_snapshots
+        r = compare(castxml_snap, clang_snap)
+        dtor_changes = [c for c in r.changes if c.description.endswith(": ~Base1")]
+        kinds = {c.kind for c in dtor_changes}
+        assert ChangeKind.FUNC_REMOVED in kinds
+        assert ChangeKind.FUNC_ADDED in kinds
+
+
 # ── Variables and constants ─────────────────────────────────────────────────
 
 

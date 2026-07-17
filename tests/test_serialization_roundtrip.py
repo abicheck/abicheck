@@ -111,15 +111,23 @@ class TestAstProducerRoundTrip:
 
 class TestHeaderCvFactsReliableRoundTrip:
     """AbiSnapshot.header_cv_facts_reliable must be derived from
-    schema_version on load, not merely round-tripped as an opaque key
-    (Codex review, PR #582).
+    schema_version, but SCOPED to the CastXML header path specifically —
+    not a blanket schema_version cutoff (Codex review, PR #582, second
+    round: the original blanket-by-schema_version derivation incorrectly
+    also marked legacy DWARF-only and legacy clang-backend snapshots
+    unreliable, even though neither was ever affected by the CastXML
+    parser bug this flag exists to guard against).
 
-    A pre-v9 persisted snapshot's TypeField.is_const/is_volatile/is_mutable
-    are permanently False and its type spelling never carried a cv
-    qualifier — real (not absent) data indistinguishable from a genuine
-    "not const" fact by value alone. Only the schema_version boundary can
-    tell a legacy snapshot's data apart from a snapshot written by the
-    fixed parser.
+    A pre-v9 *CastXML header-parsed* snapshot's
+    TypeField.is_const/is_volatile/is_mutable are permanently False and its
+    type spelling never carried a cv qualifier — real (not absent) data
+    indistinguishable from a genuine "not const" fact by value alone. But a
+    DWARF-only snapshot (``from_headers=False``) derives these independently
+    from DW_TAG_const_type/DW_TAG_volatile_type (dwarf_snapshot.py), and the
+    clang L2 header backend (``ast_producer="clang"``) derives them via its
+    own regex-based qualifier scan (dumper_clang.py) — neither code path was
+    ever touched by the CastXML bug, so both stay reliable regardless of
+    schema_version.
     """
 
     def test_fresh_in_memory_snapshot_defaults_reliable(self) -> None:
@@ -133,21 +141,47 @@ class TestHeaderCvFactsReliableRoundTrip:
         j = json.loads(snapshot_to_json(snap))
         assert j["schema_version"] == SCHEMA_VERSION == 9
 
-    def test_legacy_schema_version_8_loads_as_unreliable(self) -> None:
-        d = _minimal_dict(schema_version=8)
+    def test_legacy_castxml_header_snapshot_loads_as_unreliable(self) -> None:
+        d = _minimal_dict(schema_version=8, from_headers=True, ast_producer="castxml")
         restored = snapshot_from_dict(d)
         assert restored.header_cv_facts_reliable is False
 
-    def test_current_schema_version_9_loads_as_reliable(self) -> None:
-        d = _minimal_dict(schema_version=9)
+    def test_current_castxml_header_snapshot_loads_as_reliable(self) -> None:
+        d = _minimal_dict(schema_version=9, from_headers=True, ast_producer="castxml")
         restored = snapshot_from_dict(d)
         assert restored.header_cv_facts_reliable is True
 
-    def test_missing_schema_version_key_treated_as_legacy(self) -> None:
-        """A snapshot with no schema_version key at all predates even the
-        original schema-versioning PR (#89) — necessarily older than the
-        CV-fact fix too."""
-        d = _minimal_dict()
+    def test_legacy_header_snapshot_predating_ast_producer_is_conservatively_unreliable(
+        self,
+    ) -> None:
+        """A header-parsed snapshot with no ast_producer key at all predates
+        that field's introduction and cannot be told apart from a pre-fix
+        castxml dump — conservatively treated as unreliable, mirroring
+        ast_producer's own None-handling elsewhere."""
+        d = _minimal_dict(schema_version=8, from_headers=True)
+        assert "ast_producer" not in d
+        assert snapshot_from_dict(d).header_cv_facts_reliable is False
+
+    def test_legacy_dwarf_only_snapshot_stays_reliable(self) -> None:
+        """A DWARF-only snapshot's is_const/is_volatile were never derived
+        by CastXML at all — schema_version is irrelevant to their
+        reliability."""
+        d = _minimal_dict(schema_version=8, from_headers=False)
+        assert snapshot_from_dict(d).header_cv_facts_reliable is True
+
+    def test_legacy_clang_backend_snapshot_stays_reliable(self) -> None:
+        """The clang L2 header backend has always derived these facts via
+        its own code path — never affected by the CastXML parser bug."""
+        d = _minimal_dict(schema_version=8, from_headers=True, ast_producer="clang")
+        assert snapshot_from_dict(d).header_cv_facts_reliable is True
+
+    def test_missing_schema_version_key_on_castxml_header_snapshot_is_legacy(
+        self,
+    ) -> None:
+        """No schema_version key at all predates even the original
+        schema-versioning PR (#89) — necessarily older than the CV-fact fix
+        too, for a CastXML-parsed header snapshot."""
+        d = _minimal_dict(from_headers=True, ast_producer="castxml")
         assert "schema_version" not in d
         assert snapshot_from_dict(d).header_cv_facts_reliable is False
 

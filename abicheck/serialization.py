@@ -797,6 +797,8 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         # that demand genuine header evidence (parameter renames) stay quiet.
         from_headers_inferred = from_headers
 
+    ast_producer_value = d.get("ast_producer")
+
     snap = AbiSnapshot(
         library=d["library"],
         version=d["version"],
@@ -828,13 +830,34 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         # this was omitted entirely, so every persisted-then-reloaded
         # castxml snapshot silently lost the tag and permanently disabled
         # all 8 detectors gated on it).
-        ast_producer=d.get("ast_producer"),
-        # Derived purely from schema_version, not read back from the dict:
-        # the fact this flag encodes (whether CastXML field CV facts are
-        # reliable) is entirely determined by which parser generation wrote
-        # this snapshot, which schema_version already identifies (Codex
-        # review, PR #582; see SCHEMA_VERSION's v9 entry above).
-        header_cv_facts_reliable=_schema_version >= _MIN_SCHEMA_VERSION_FOR_CV_FACTS,
+        ast_producer=ast_producer_value,
+        # Scoped to the CastXML header path specifically, NOT a blanket
+        # schema_version cutoff (Codex review, PR #582 — the schema_version
+        # bump only marks when *CastXML's* field-CV-fact bug was fixed):
+        #   - A non-header snapshot (from_headers False: DWARF-only or
+        #     symbols-only) derives is_const/is_volatile independently via
+        #     DW_TAG_const_type/DW_TAG_volatile_type (dwarf_snapshot.py) and
+        #     was never affected by the CastXML parser bug — always
+        #     reliable, regardless of schema_version. The earlier blanket
+        #     `_schema_version >= 9` check incorrectly also marked a
+        #     perfectly-reliable legacy DWARF snapshot's fields unreliable,
+        #     silently swallowing a genuine FIELD_BECAME_CONST/VOLATILE
+        #     transition on a legacy-DWARF-vs-legacy-DWARF compare.
+        #   - The clang L2 header backend (dumper_clang.py) derives these
+        #     via its own regex-based qualifier scan over the type spelling
+        #     — a different code path, also never affected by the CastXML
+        #     bug, and also always reliable.
+        #   - Only a CastXML-produced header snapshot (`ast_producer ==
+        #     "castxml"`) — or a header snapshot predating the
+        #     `ast_producer` field itself (`None`), which cannot be told
+        #     apart from a pre-fix castxml dump and is conservatively
+        #     treated the same as one, mirroring `ast_producer`'s own
+        #     None-handling — needs the schema_version >= 9 gate.
+        header_cv_facts_reliable=(
+            not from_headers
+            or ast_producer_value == "clang"
+            or _schema_version >= _MIN_SCHEMA_VERSION_FOR_CV_FACTS
+        ),
         constants=d.get("constants", {}),
         platform=d.get("platform"),
         language_profile=d.get("language_profile"),
