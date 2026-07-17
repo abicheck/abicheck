@@ -653,6 +653,7 @@ def perform_elf_dump(
         # (Codex review).
         allow_inferred_build_query=collect_mode != "off",
     )
+    dump_failed = False
     try:
         snap = dump(
             so_path=so_path,
@@ -676,11 +677,19 @@ def perform_elf_dump(
             debug_info_path=debug_info_path,
         )
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
+        dump_failed = True
         raise click.ClickException(str(exc)) from exc
     finally:
-        # The header parse has consumed the build-seeded include dirs (success or
-        # failure), so release any inferred-CMake temp build dir now.
-        if _l2_pending_cleanups:
+        # The header-graph attach below (when requested) reuses these same
+        # seeded include dirs for its own independent clang pass, so releasing
+        # the temp build dir here -- right after the main parse -- would leave
+        # it already gone by the time that second pass tries to resolve
+        # against it, silently degrading the graph to declaration-only for
+        # inferred-build cases with generated/dependency headers (Codex
+        # review). Only clean up now when there is no header-graph pass left
+        # to consume them (a failed dump() never reaches that pass either);
+        # otherwise cleanup is deferred to right after the attach below.
+        if _l2_pending_cleanups and (dump_failed or not header_graph):
             _run_cleanups(_l2_pending_cleanups)
 
     # Record that the header AST was parsed with the real build context (ADR-029)
@@ -782,17 +791,24 @@ def perform_elf_dump(
                     gcc_options=effective_gcc_options
                 )
 
-        snap = _attach_header_graph(
-            snap,
-            header_graph,
-            header_graph_includes,
-            list(headers),
-            list(eff_includes),
-            lang,
-            header_graph_compile_context,
-            list(public_headers),
-            list(public_header_dirs),
-        )
+        try:
+            snap = _attach_header_graph(
+                snap,
+                header_graph,
+                header_graph_includes,
+                list(headers),
+                list(eff_includes),
+                lang,
+                header_graph_compile_context,
+                list(public_headers),
+                list(public_header_dirs),
+            )
+        finally:
+            # Deferred from the main dump() try/finally above: this pass has
+            # now consumed the seeded include dirs too, so release them here
+            # instead (Codex review).
+            if _l2_pending_cleanups:
+                _run_cleanups(_l2_pending_cleanups)
 
     if follow_deps:
         populate_dependency_info(

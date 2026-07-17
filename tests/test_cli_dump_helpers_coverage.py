@@ -748,6 +748,92 @@ def test_perform_elf_dump_seeds_l2_includes_and_runs_cleanup(
     assert events == ["dump", "cleanup"]  # cleanup drained after the parse
 
 
+def test_perform_elf_dump_defers_l2_cleanup_until_after_header_graph(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """With --header-graph, the seeded temp build dir must survive past the main
+    dump() parse: _attach_header_graph reuses the same seeded include dirs for
+    its own independent clang pass, so cleaning up right after dump() (the
+    plain seeds_l2_includes_and_runs_cleanup ordering above) would hand that
+    second pass a directory that is already gone, silently degrading the
+    graph for inferred-build cases with generated/dependency headers (Codex
+    review). Cleanup must instead run after the header-graph attach."""
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "h.h"
+    hdr.write_text("struct S { int x; };\n", encoding="utf-8")
+    seeded = tmp_path / "buildinc"
+    seeded.mkdir()
+
+    events: list[str] = []
+    plain_snap = AbiSnapshot(library="lib.so", version="1.0")
+
+    def fake_seed(**kwargs):
+        return [seeded], [lambda: events.append("cleanup")]
+
+    def fake_dump(**kw):
+        events.append("dump")
+        return plain_snap
+
+    def fake_attach(*a, **k):  # noqa: ANN002, ANN003
+        events.append("attach")
+        return plain_snap
+
+    monkeypatch.setattr("abicheck.buildsource.l2_seed.seed_l2_includes", fake_seed)
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
+    monkeypatch.setattr("abicheck.service._attach_header_graph", fake_attach)
+
+    _events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+
+    perform_elf_dump(
+        so, (hdr,), (), "1.0", "c", None, None, None, (), None, True, False, None,
+        (), (), None, False, (), "", None, None, False, None, None, tmp_path, None,
+        False, "build", _expand, _populate, _stamp, _write,
+        header_graph=True, header_graph_includes=False,
+    )
+
+    assert events == ["dump", "attach", "cleanup"]
+
+
+def test_perform_elf_dump_no_header_graph_cleans_up_right_after_dump(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Without --header-graph there is no second pass to hold the seeded temp
+    build dir open for, so cleanup must run immediately after dump() as
+    before -- confirms the deferral above is conditional, not a blanket
+    delay."""
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "h.h"
+    hdr.write_text("struct S { int x; };\n", encoding="utf-8")
+    seeded = tmp_path / "buildinc"
+    seeded.mkdir()
+
+    events: list[str] = []
+
+    def fake_seed(**kwargs):
+        return [seeded], [lambda: events.append("cleanup")]
+
+    def fake_dump(**kw):
+        events.append("dump")
+        return AbiSnapshot(library="lib.so", version="1.0")
+
+    def fake_attach(*a, **k):  # noqa: ANN002, ANN003
+        raise AssertionError("_attach_header_graph must not be called")
+
+    monkeypatch.setattr("abicheck.buildsource.l2_seed.seed_l2_includes", fake_seed)
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
+    monkeypatch.setattr("abicheck.service._attach_header_graph", fake_attach)
+
+    _events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+
+    perform_elf_dump(
+        so, (hdr,), (), "1.0", "c", None, None, None, (), None, True, False, None,
+        (), (), None, False, (), "", None, None, False, None, None, tmp_path, None,
+        False, "build", _expand, _populate, _stamp, _write,
+    )
+
+    assert events == ["dump", "cleanup"]
+
+
 def test_perform_elf_dump_detects_python_surfaces_and_follow_deps(
     tmp_path: Path, monkeypatch
 ) -> None:

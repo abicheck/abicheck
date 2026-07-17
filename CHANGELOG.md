@@ -121,6 +121,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   pass silently degraded to declaration-only. `perform_elf_dump` now builds
   a `compile_context` with `effective_gcc_options` for the header-graph
   attach when the two differ (Codex review).
+- **Fix**: `dump --header-graph` on the ELF path could still silently degrade
+  to a declaration-only graph for a `--sources`/`--build-info`-seeded
+  inferred-build temp directory: `seed_l2_includes`'s temp build dir was
+  cleaned up in a `finally` right after the main `dump()` parse, before the
+  separate `--header-graph` clang pass (which reuses the same seeded include
+  dirs) ever ran — so that second pass could be handed a directory that no
+  longer existed. `perform_elf_dump` now defers that cleanup until after the
+  header-graph attach has consumed the seeded dirs, only cleaning up
+  immediately when there is no header-graph pass to wait for, or the main
+  parse itself failed (Codex review).
 
 ### Documentation
 
