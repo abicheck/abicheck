@@ -229,22 +229,36 @@ inputs:
       overflow (exit 5) — a budget never silently shrinks scope.
       Maps to scan --budget.
     required: false
-  audit:
+  dry-run:
     description: >
-      scan mode only. Force a single-build hygiene lint (intra-version
-      cross-source checks) even when an against baseline is configured (e.g.
-      via abi-baseline auto-fetch), by omitting scan's --against — scan
-      already runs audit-only whenever no against is given. The old --audit
-      CLI flag was removed (absence of --against now means audit-only,
-      presence means audit+compare — the two are no longer separate flags).
+      Resolve inputs/config and print what the run would do, without
+      performing any analysis or writing output (always exits 0). Maps to
+      --dry-run; supported by every mode (compare, dump, scan, deps-tree,
+      deps-compare). For scan, this also reports the projected per-layer
+      cost (the same preview the deprecated estimate input below used to
+      provide). To force a scan-mode single-build hygiene lint instead of a
+      baseline compare, simply omit against/abi-baseline for that step —
+      scan already runs audit-only whenever no against is given (the
+      deprecated audit input below is a functional alias for this).
     required: false
     default: 'false'
   estimate:
     description: >
-      scan mode only. Dry-run: print the resolved depth/scope and the
-      projected per-layer cost for this project without scanning anything or
-      writing output (always exits 0). Maps to scan --dry-run (the old
-      --estimate CLI flag was folded into the general --dry-run report).
+      Deprecated alias for dry-run (scan mode only, historical name).
+      Setting this to true is equivalent to dry-run: 'true'. Prefer dry-run
+      directly, which now applies to every mode, not just scan. Kept as a
+      functional (not just accepted-and-ignored) alias for backward
+      compatibility with existing workflows.
+    required: false
+    default: 'false'
+  audit:
+    description: >
+      Deprecated. scan mode only. Forces a one-build audit-only run (omits
+      --against) even when against/abi-baseline is configured elsewhere in
+      the workflow. Prefer simply omitting against/abi-baseline for the
+      step instead — scan already runs audit-only whenever no against is
+      given. Kept as a functional (not just accepted-and-ignored) alias for
+      backward compatibility with existing workflows.
     required: false
     default: 'false'
   crosscheck:
@@ -498,8 +512,9 @@ runs:
         INPUT_SINCE: ${{ inputs.since }}
         INPUT_CHANGED_PATH: ${{ inputs.changed-path }}
         INPUT_BUDGET: ${{ inputs.budget }}
-        INPUT_AUDIT: ${{ inputs.audit }}
+        INPUT_DRY_RUN: ${{ inputs.dry-run }}
         INPUT_ESTIMATE: ${{ inputs.estimate }}
+        INPUT_AUDIT: ${{ inputs.audit }}
         INPUT_CROSSCHECK: ${{ inputs.crosscheck }}
         INPUT_RISK_RULES: ${{ inputs.risk-rules }}
         GH_TOKEN: ${{ inputs.github-token }}

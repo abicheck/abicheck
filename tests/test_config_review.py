@@ -208,7 +208,9 @@ class TestDebugFormatSelector:
 
 class TestReportModeImpact:
     def test_impact_in_choices(self):
-        out = CliRunner().invoke(main, ["compare", "--help"]).output
+        # --report-mode is in compare's advanced tier (G21.8 collapse M2),
+        # folded behind --help-all; plain --help only shows the common subset.
+        out = CliRunner().invoke(main, ["compare", "--help-all"]).output
         assert "impact" in out
 
     def test_impact_mode_runs(self, tmp_path):
@@ -234,15 +236,17 @@ class TestCompareReleaseDefaults:
         assert "--no-scope-public-headers" in opt.secondary_opts
 
     def test_jobs_default_zero(self):
-        out = CliRunner().invoke(main, ["compare", "--help"]).output
+        # --jobs is in compare's advanced/release tier (G21.8 collapse M2).
+        out = CliRunner().invoke(main, ["compare", "--help-all"]).output
         assert "auto-detect" in out
 
     def test_severity_options_present(self):
-        out = CliRunner().invoke(main, ["compare", "--help"]).output
+        out = CliRunner().invoke(main, ["compare", "--help-all"]).output
         # `compare` now drives directory/package (release) comparisons too. It
         # surfaces the full severity family (the coarse --severity-preset plus the
         # per-category overrides) — unlike the removed `compare-release` command,
-        # which hid the per-category knobs.
+        # which hid the per-category knobs. The per-category overrides are in
+        # the advanced tier (G21.8 collapse M2), folded behind --help-all.
         assert "--severity-preset" in out
         assert "--severity-abi-breaking" in out
 

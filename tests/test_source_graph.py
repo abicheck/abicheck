@@ -906,7 +906,10 @@ def test_findings_mapping_changed_for_persisting_decl() -> None:
     c = findings[0]
     assert c.kind == ChangeKind.SOURCE_TO_BINARY_MAPPING_CHANGED
     assert c.old_value == "_Zb" and c.new_value == "_Zb2"
-    assert c.source_location == f"[{EVIDENCE_TIER_L5}]"
+    # CLI audit finding: source_location should localize to the declaration's
+    # actual declaring file, not the generic evidence-tier tag, when the
+    # graph resolves one via a SOURCE_DECLARES edge (it does here).
+    assert c.source_location == "inc/foo.h"
 
 
 def test_findings_reachability_ignores_brand_new_or_removed_decls() -> None:
@@ -1060,6 +1063,10 @@ def test_owner_changed_when_relative_path_actually_moves() -> None:
     ]
     assert len(owner) == 1
     assert owner[0].symbol == "_Zc"
+    # CLI audit finding: source_location should localize to the symbol's new
+    # declaring file, not the generic evidence-tier tag -- this family always
+    # has one on hand (it's the whole point of the finding).
+    assert owner[0].source_location == "/root/inc/baz.h"
 
 
 def test_owner_changed_when_sole_declaring_file_is_renamed_both_sides() -> None:

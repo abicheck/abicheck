@@ -28,6 +28,7 @@ from .dumper import dump
 from .errors import AbicheckError
 
 if TYPE_CHECKING:
+    from .buildsource.pack import BuildSourcePack
     from .model import AbiSnapshot
     from .service_scan import CompileContext
 
@@ -178,6 +179,51 @@ def resolve_dump_depth(
     # the fix for the zero-TU defect where an explicit deep depth without a
     # change seed silently selected no translation units.
     return level_to_collect_mode(method, evidence_depth, source_scope=SourceScope.TARGET)
+
+
+def evidence_depth_label(
+    snap: AbiSnapshot, build_source: BuildSourcePack | None = None,
+) -> str:
+    """Report which evidence depth a snapshot *actually* carries (CLI-audit P2).
+
+    Computed purely from what was actually resolved -- ``binary``/
+    ``headers``/``build``/``source`` -- rather than echoing back the
+    requested ``--depth``: an explicit ``--depth source`` with no usable
+    source facts still produces a snapshot that only reaches ``headers`` (or
+    ``binary``), and this makes that honest instead of silently overstating
+    what was collected.
+
+    *build_source*, when given, overrides ``snap.build_source`` -- ``compare``
+    can resolve an out-of-band ``--old/new-sources``/``--old/new-build-info``
+    pack that is never attached back to the snapshot object itself
+    (``_resolve_side_pack`` returns it standalone); without this override, a
+    compare run using only out-of-band packs would report the depth of the
+    *unrelated* embedded (or absent) snapshot payload instead of the pack
+    that was actually used (Codex review). Defaults to ``snap.build_source``
+    for the plain single-artifact (embedded-only) case ``dump -o`` uses.
+
+    Uses the same payload-emptiness checks as ``_write_snapshot_output``'s own
+    fail-loud warning (``cli._layer_payload_empty``): a coverage row / field
+    can be non-``None`` while the embedded payload carries no real facts (e.g.
+    ``_run_inline_source_abi`` returns an empty ``SourceAbiSurface()`` when
+    clang is unavailable after L3 was found) -- checking presence alone would
+    overstate ``source``/``build`` for a layer that ran but linked nothing
+    (CodeRabbit review).
+    """
+    from .cli import _layer_payload_empty
+
+    if build_source is None:
+        build_source = snap.build_source
+    if build_source is not None and (
+        not _layer_payload_empty(build_source, "L4")
+        or not _layer_payload_empty(build_source, "L5")
+    ):
+        return "source"
+    if build_source is not None and not _layer_payload_empty(build_source, "L3"):
+        return "build"
+    if snap.from_headers:
+        return "headers"
+    return "binary"
 
 
 def render_dump_dry_run(

@@ -557,6 +557,8 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--header",
         "--header-graph",
         "--header-graph-includes",
+        "--help",
+        "--help-all",
         "--include",
         "--include-private-dso",
         "--jobs",

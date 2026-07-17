@@ -41,6 +41,190 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   bundled-dependency packaging noise that must stay non-breaking once
   scoped, and mass export removal at oneDAL's reported scale).
 
+### Added
+
+- `compare --help-all`: a second-level `--help` disclosure tier (G21.8
+  collapse M2). Plain `compare --help` now shows only a curated common
+  subset of the ~62 options (inputs, output/format, `--show-only`, policy,
+  the `--used-by`/`--required-symbol` scoped gate, `--depth`/`--sources`/
+  `--build-info`, `--scope-public-headers`, `--verbose`, `--dry-run`, …),
+  with a footer noting how many advanced options are hidden and pointing to
+  `--help-all` for the full surface. Every option keeps working unqualified
+  either way — this only changes default help-screen visibility, not
+  behavior.
+
+### Changed
+
+- **Breaking:** `compare --profile release` renamed to `--profile
+  release-cut` (CLI audit finding). `compare`'s directory/package fan-out
+  mode is *also* informally branded "release" throughout
+  (`compare_release_cmd`, the "Release (directory/package inputs)" help
+  panel) — an unrelated concept that only shared the word. `--profile` was
+  already rejected outright on directory/package operands with a clear
+  usage error, so this was never a live bug, just a naming collision worth
+  disambiguating. Update any script/CI config using `--profile release`.
+- `--depth`/`--sources`/`--build-info`/`--header-graph`/`--dry-run` `--help`
+  text on `dump`/`compare`/`scan`, and their rich-click option-panel titles,
+  no longer reference the internal ADR-033 evidence-layer vocabulary
+  (`L0`-`L5`) with no explanation of what it means — reworded to plain terms
+  tied to the public `--depth` ladder (`binary`/`headers`/`build`/`source`).
+  Text only; no option, default, or behavior changes.
+- **GitHub Action**: reinstated the `estimate`/`audit` inputs, dropped
+  outright in an earlier `[Unreleased]` change, as deprecated *functional*
+  aliases for `dry-run`/omitting `against` (mirroring the existing
+  `allow-build-query` no-op precedent), instead of removing them (Codex
+  review). Silently dropping an Action input a workflow still sets is worse
+  than a hard CLI error: GitHub Actions accepts an undeclared input with
+  only a warning, so `estimate: true` would otherwise silently run a real
+  scan instead of the preview it used to produce, and `audit: true` would
+  silently stop forcing a baseline-less hygiene lint once a baseline is
+  configured — both fail open rather than loud. The `estimate` alias is
+  scoped to scan mode only (matching its historical scope) — it has no
+  effect set on a `compare`/`dump`/`deps-tree`/`deps-compare` step, rather
+  than silently turning that step into a `--dry-run` no-op (Codex review
+  follow-up).
+
+### Fixed
+
+- **MCP `abi_compare`**: a `--used-by`/`--required-symbol` response's
+  `summary` (`total_changes`/`breaking`/`api_breaks`/`risk_changes`/
+  `compatible`) is now recomputed after scoped-only changes and
+  missing-contract labels are folded into `changes`, instead of only
+  reflecting `result.changes` from before the fold-in — a run gated purely
+  by one of these (e.g. a missing required symbol) used to report
+  `total_changes: 0` alongside a `BREAKING` verdict and nonzero `exit_code`
+  (CodeRabbit review).
+- **GitHub Action**: a scan-mode `audit: true` run no longer fetches
+  `abi-baseline` at all — it was always discarded (`--against` is omitted
+  for audit-only runs), so an unavailable release could needlessly fail a
+  run that never used the baseline (Codex + CodeRabbit review). Also:
+  a release with more than one `*.abicheck.json` asset is now rejected as
+  ambiguous instead of silently picking an arbitrary one via `find | head
+  -1`, which could compare against the wrong library (CodeRabbit review).
+- `--depth source`/`--sources` findings from the L5 source graph
+  (`SOURCE_TO_BINARY_MAPPING_CHANGED`, `EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED`)
+  now localize `source_location` to the declaration's actual declaring file
+  when the graph resolves one, instead of always carrying the generic
+  `[L5_SOURCE_GRAPH]` evidence-tier tag (CLI audit finding). The graph's
+  `SOURCE_DECLARES` edges already had the real file; these two families
+  simply weren't using it.
+- **GitHub Action**: `dry-run: true` no longer hard-fails (`exit 1`) when
+  combined with `abi-baseline` and the release/token/`*.abicheck.json` asset
+  is unavailable — the baseline auto-fetch ran before the mode branch ever
+  consulted `INPUT_DRY_RUN`, contradicting `dry-run`'s documented "always
+  exits 0" preview contract (Codex review). A fetch failure now reports a
+  warning and continues under `--dry-run`; if no other `old-library`/
+  `against` was independently given (nothing left to preview), the step
+  exits 0 with a notice instead of falling through to a hard failure.
+  Non-`--dry-run` behavior is unchanged.
+- `compare --used-by`/`--required-symbol(s)`'s default markdown/text/review
+  report now names the actual missing symbol/version/entrypoint and any
+  scoped-only change (e.g. `PE_ORDINAL_RETARGETED`) that failed the gate,
+  instead of only printing a bare count — matching the detail already present
+  in JSON/SARIF/JUnit output (Codex review).
+- `compare` no longer silently discards explicit `--sources`/`--build-info`
+  when `--depth` is omitted: the collect mode is now inferred from those
+  inputs (`--depth` > `.abicheck.yml` `source.method` > inferred from
+  `--sources`/`--build-info` > off), matching `scan`'s input-driven "auto"
+  depth. `compare --dry-run` now reports this effective/inferred depth
+  instead of only echoing back the raw `--depth` string.
+- `compare --used-by`'s severity-summary dedup across multiple apps now
+  keys findings by semantic identity instead of Python `id()`, fixing
+  double-counting of `PE_ORDINAL_RETARGETED` findings (each app's
+  `scope_diff_to_app` call constructs its own `Change` object for the same
+  underlying ordinal retarget).
+- `compare --dry-run` now rejects `--secondary-output`/`--secondary-format`
+  (previously accepted and silently never written, since a dry run exits
+  before the secondary render runs).
+- Fixed two stale CLI warnings referencing removed `--depth full`/`--max`
+  values, and a GitHub Action baseline-fetch error message pointing at a
+  nonexistent `--output-name` flag.
+- `--used-by`/`--required-symbol`'s missing-contract SARIF/JUnit synthesis
+  no longer double-reports a missing symbol/entrypoint that is already
+  covered by a relevant `Change` (e.g. a removed symbol is both "missing"
+  and a `FUNC_REMOVED` finding), and now respects severity-config
+  demotion of `abi_breaking` instead of always emitting `level: "error"`/
+  a failing testcase.
+- `--used-by`/`--required-symbol` scoping can find a `Change` relevant
+  (e.g. `PE_ORDINAL_RETARGETED`, synthesized fresh per app/host and never
+  added to the base library diff) that previously drove the gate's exit
+  code with no corresponding SARIF result or JUnit testcase to explain it.
+  These "scoped-only" changes are now rendered like any other finding, and
+  count toward `relevantFindingCount`/`abicheck.relevant_finding_count`.
+  Missing-contract results also now separate `relevantToGate` (always
+  true — scope membership) from `blocksGate` (severity-dependent), instead
+  of conflating the two.
+- The same "scoped-only change"/uncovered-missing-label gap applied to
+  `compare --format json`'s `changes` array and the MCP `abi_compare`
+  tool's `changes` field, not just SARIF/JUnit: a `--used-by`/
+  `--required-symbol` run whose only gated issue was one of these reported
+  an empty `changes` array despite a nonzero scoped exit code/verdict. This
+  mattered in practice for the GitHub Action's `--on changes` PR-comment
+  gate, which buckets purely off that array and would silently skip
+  posting for exactly the runs that most needed one.
+- `dump -o`'s evidence-depth line and `compare`'s `old_evidence_depth`/
+  `new_evidence_depth` no longer overstate `source`/`build` when a layer
+  ran but linked no real facts (e.g. an inline source-ABI pass that finds
+  no reachable declarations because clang was unavailable) — depth is now
+  computed from the same payload-emptiness check the CLI's own coverage
+  warnings use, not mere non-`None` presence.
+- `compare`'s `old_evidence_depth`/`new_evidence_depth` JSON fields now
+  account for an out-of-band `--old/new-sources`/`--old/new-build-info`
+  *pack directory*, not just each side's embedded snapshot payload — a pack
+  directory (unlike a raw checkout, which gets embedded before this point)
+  is resolved separately and was previously invisible to this calculation,
+  so a compare run using only such a pack reported `binary`/`headers`
+  even though its build/source findings came from real evidence.
+- `compare --format sarif`'s scoped-only changes (e.g. `PE_ORDINAL_RETARGETED`)
+  now respect `--show-only`, matching `result.changes`'s own filtering — a
+  `--used-by --show-only ...` run no longer uploads a scoped-only finding
+  the filter was supposed to exclude (JUnit already applied `--show-only`
+  to these consistently; only SARIF had the gap).
+- `compare --format json`'s scoped-only changes had the identical
+  `--show-only` gap as SARIF — the JSON `changes` array's own filtering only
+  ever touched `result.changes`, so a `--used-by --show-only ...` run could
+  re-surface a scoped-only finding the filter excluded. Fixed the same way
+  (the `--secondary-format` render and the MCP top-level `changes` summary
+  are unaffected — both are deliberately always-unfiltered by design).
+- `--show-only` in `compare --format sarif`/`json`/`junit` now also applies
+  to synthesized missing-contract results (a required symbol/version simply
+  absent from the new library) — these have no backing `Change`/`ChangeKind`
+  so they can't run through the same filter as ordinary findings, but a
+  `--show-only` run excluding breaking findings previously still uploaded,
+  serialized, or failed the testsuite on the (by-default-blocking) synthetic
+  result regardless.
+
+### Added
+
+- `dump -o` now prints the evidence depth a snapshot actually reached
+  (`binary`/`headers`/`build`/`source`, computed from what it carries
+  rather than the requested `--depth`); `compare`'s JSON report gains
+  matching `old_evidence_depth`/`new_evidence_depth` fields.
+
+### Changed
+
+- `compare --format sarif/junit` now follow the scoped `--used-by`/
+  `--required-symbol` gate instead of always reflecting the full,
+  unscoped library diff: the scoped exit code drives the SARIF
+  document's own `exitCode` and JUnit's `failures` count, findings
+  outside the gate's relevance are downgraded (SARIF level `"note"`,
+  JUnit non-failing) and marked so a consumer can tell "not severe"
+  from "out of scope", and a missing required symbol/version/entrypoint
+  (which has no backing diff `Change`) now gets its own synthetic
+  result/testcase so the gate's exit code is never left unexplained.
+  New `gateScope`/`gateVerdict`/`gateExitCode` fields are added
+  alongside the existing `scopedVerdict`/`abicheck.scoped_verdict`
+  names, kept as aliases.
+- **GitHub Action**: added a single cross-mode `dry-run` input, the
+  preferred replacement for the scan-only `audit`/`estimate` inputs.
+  `dry-run: 'true'` now maps to `--dry-run` for every mode (`dump`,
+  `compare`, `scan`, `deps-tree`, `deps-compare`) and skips writing
+  `-o`/`--secondary-output` for that step. Forcing scan's single-build
+  hygiene lint (the old `audit: 'true'`) can also be done by simply
+  omitting `against`/`abi-baseline` on that step — `scan` already runs
+  audit-only whenever no baseline is given. `audit`/`estimate` themselves
+  remain functional (scan-only) deprecated aliases — see below.
+
 ---
 
 ## [0.5.0] — 2026-07-16

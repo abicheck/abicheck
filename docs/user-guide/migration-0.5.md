@@ -108,7 +108,7 @@ config `true`: `--no-dwarf-only` (restore header parsing), `--no-debuginfod`,
 
 ## Run profiles (Lever 3, additive)
 
-New in the same line of work: `--profile {ci-gate,release,quick}` bundles a
+New in the same line of work: `--profile {ci-gate,release-cut,quick}` bundles a
 workflow's common defaults into one token (explicit flags still win). It is
 additive — nothing to migrate — but it can replace habitual flag stacks. See
 [CLI usage](cli-usage.md).

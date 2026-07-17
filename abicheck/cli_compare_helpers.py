@@ -264,6 +264,56 @@ def _resolve_demangle(fmt: str, demangle: bool | None) -> bool:
     return fmt in {"markdown", "review"} if demangle is None else demangle
 
 
+def _resolve_compare_collect_mode(
+    depth: str | None,
+    source_method: str | None,
+    old_sources: Path | None,
+    new_sources: Path | None,
+    old_build_info: Path | None,
+    new_build_info: Path | None,
+) -> tuple[str, str]:
+    """Resolve compare's source/build collect mode, plus a human label for it.
+
+    Precedence (ADR-037 D4/D5, extended by the P1 CLI-contract fix below):
+    explicit ``--depth`` > ``.abicheck.yml`` ``source.method`` > inferred from
+    raw ``--old/new-sources``/``--old/new-build-info`` given with neither of
+    the above > off.
+
+    The inferred rung closes a gap where passing ``--sources``/``--build-info``
+    with no ``--depth`` (and no ``source.method`` in config) silently resolved
+    to "off" and the inputs were ignored with a warning: an explicit
+    source/build-info input is itself a request to use it, so omitted depth
+    should not default to discarding it. This mirrors ``scan``'s own
+    "auto" depth, which is likewise input-driven rather than a fixed default.
+    The label is shown verbatim in ``compare --dry-run``'s "Resolved depth and
+    source scope" section so a dry run reports the *effective* depth, not just
+    the raw ``--depth`` string the user passed (or omitted).
+    """
+    if depth is not None:
+        return resolve_dump_depth(depth, "off"), f"--depth {depth}"
+    if source_method:
+        from .buildsource.scan_levels import SourceMethod, method_to_collect_mode
+        try:
+            mode = method_to_collect_mode(SourceMethod(source_method))
+        except ValueError:
+            raise click.UsageError(
+                f"source.method in .abicheck.yml is invalid: "
+                f"{source_method!r} (expected s0..s6 or auto)."
+            ) from None
+        return mode, f"source.method={source_method} (.abicheck.yml)"
+    if old_sources is not None or new_sources is not None:
+        return (
+            resolve_dump_depth("source", "off"),
+            "source (inferred: --old-sources/--new-sources given, no --depth)",
+        )
+    if old_build_info is not None or new_build_info is not None:
+        return (
+            resolve_dump_depth("build", "off"),
+            "build (inferred: --old-build-info/--new-build-info given, no --depth)",
+        )
+    return "off", "off (no --depth, no --sources/--build-info, no source.method)"
+
+
 def _normalize_compare_options(
     resolved_cfg: ResolvedCompareConfig,
     *,
@@ -279,15 +329,22 @@ def _normalize_compare_options(
     fmt: str,
     report_mode: str,
     show_impact: bool,
+    old_sources: Path | None = None,
+    new_sources: Path | None = None,
+    old_build_info: Path | None = None,
+    new_build_info: Path | None = None,
 ) -> _NormalizedCompareOptions:
     """Fold the compare option flags into their resolved, dispatch-ready values."""
     if annotate_additions and not annotate:
         raise click.UsageError("--annotate-additions requires --annotate")
 
     # Fold the --depth dial into the internal collect mode (ADR-037 D5), the
-    # same way `dump` does. With no preset, compare reads at "off"; --depth
-    # binary suppresses the L2 header AST (symbols-only).
-    collect_mode = resolve_dump_depth(depth, "off")
+    # same way `dump` does; when omitted, infer it from --sources/--build-info
+    # (or config source.method) rather than defaulting to "off" (P1 fix).
+    collect_mode, _ = _resolve_compare_collect_mode(
+        depth, resolved_cfg.source_method,
+        old_sources, new_sources, old_build_info, new_build_info,
+    )
     if depth == "binary":
         headers, old_headers_only, new_headers_only = (), (), ()
 
@@ -308,21 +365,6 @@ def _normalize_compare_options(
     if report_mode == "impact":
         report_mode = "full"
         show_impact = True
-
-    # ADR-037 D4: the precise S-axis lives in config (source.method). It sets the
-    # collection depth only when the user gave no explicit --depth signal
-    # (CLI > config).
-    if resolved_cfg.source_method and depth is None:
-        from .buildsource.scan_levels import SourceMethod, method_to_collect_mode
-        try:
-            collect_mode = method_to_collect_mode(
-                SourceMethod(resolved_cfg.source_method)
-            )
-        except ValueError:
-            raise click.UsageError(
-                f"source.method in .abicheck.yml is invalid: "
-                f"{resolved_cfg.source_method!r} (expected s0..s6 or auto)."
-            ) from None
 
     return _NormalizedCompareOptions(
         collect_mode, headers, old_headers_only, new_headers_only,
@@ -619,23 +661,60 @@ def _apply_used_by_scoping(
                 f"library, not headers-only); {label} ({path}) is neither."
             )
 
+    from .appcompat import uncovered_missing_symbols
+    from .reporter import _finding_id
+
     summaries = []
     worst_exit = 0
     worst_verdict = None
     worst_verdict_rank = -1
-    # Keyed by id(change)/the missing string itself so a Change or missing
-    # symbol shared by two tied apps (e.g. both import the same removed
-    # symbol) collapses to one entry instead of being tallied once per app
-    # (Codex review) -- `_scoped_severity_summary` runs once at the end over
-    # this deduplicated union, not per app summed together.
-    worst_changes: dict[int, Any] = {}
+    # Keyed by the change's semantic identity (kind/symbol/old/new/location/
+    # description, via `_finding_id`) -- not id(change) -- so a Change or
+    # missing symbol shared by two tied apps (e.g. both import the same
+    # removed symbol) collapses to one entry instead of being tallied once
+    # per app (Codex review) -- `_scoped_severity_summary` runs once at the
+    # end over this deduplicated union, not per app summed together.
+    # `id()` alone under-deduplicates PE_ORDINAL_RETARGETED findings:
+    # `scope_diff_to_app` synthesizes a fresh `Change` object per app (via
+    # `_check_pe_ordinal_imports`), so two apps hitting the same ordinal
+    # retarget produce structurally-identical but object-distinct `Change`s
+    # that `id()` would double-count in the severity summary.
+    worst_changes: dict[str, Any] = {}
     worst_missing: set[str] = set()
+    # Union across ALL apps (not just the worst-exit-code one) of which
+    # findings this --used-by gate actually cares about -- SARIF/JUnit
+    # consult this to make their own result levels/failure counts follow
+    # the scoped gate instead of the full, unscoped library diff (CLI-audit
+    # P1: "SARIF/JUnit computing pass/fail from the full library diff").
+    relevant_finding_ids: set[str] = set()
+    # Union across ALL apps of relevant Change objects, keyed by finding id --
+    # not just their ids -- so scoped-only changes (e.g. PE_ORDINAL_RETARGETED,
+    # which scope_diff_to_app synthesizes fresh per app and never adds to
+    # result.changes) can still be rendered by SARIF/JUnit instead of only
+    # contributing to the gate's exit code with nothing to explain it (Codex
+    # review).
+    relevant_changes_by_id: dict[str, Any] = {}
+    missing_labels: set[str] = set()
     for app in used_by_apps:
         scoped = scope_diff_to_app(
             result, app, old_lib, new_lib,
             policy=policy, policy_file=policy_file,
         )
         summaries.append(_app_compat_summary(scoped))
+        relevant_finding_ids.update(_finding_id(c) for c in scoped.breaking_for_app)
+        relevant_changes_by_id.update(
+            {_finding_id(c): c for c in scoped.breaking_for_app}
+        )
+        # A missing symbol/version already covered by a relevant Change (e.g.
+        # FUNC_REMOVED) must not also become a synthetic missing-contract
+        # finding -- that would double-report the same ABI break (Codex
+        # review, mirrors _scoped_severity_summary's own dedup below).
+        missing_labels.update(
+            uncovered_missing_symbols(
+                list(scoped.missing_symbols) + list(scoped.missing_versions),
+                scoped.breaking_for_app,
+            )
+        )
         exit_code = _scoped_exit_code(
             scoped, scoped.breaking_for_app, result, exit_code_scheme, sev_config,
             policy, policy_file,
@@ -649,10 +728,10 @@ def _apply_used_by_scoping(
         # one merely because their exit codes tied at 0 (Codex review).
         if exit_code_scheme == "severity":
             if exit_code > worst_exit:
-                worst_changes = {id(c): c for c in scoped.breaking_for_app}
+                worst_changes = {_finding_id(c): c for c in scoped.breaking_for_app}
                 worst_missing = set(scoped.missing_symbols) | set(scoped.missing_versions)
             elif exit_code == worst_exit:
-                worst_changes.update({id(c): c for c in scoped.breaking_for_app})
+                worst_changes.update({_finding_id(c): c for c in scoped.breaking_for_app})
                 worst_missing |= set(scoped.missing_symbols) | set(scoped.missing_versions)
         worst_exit = max(worst_exit, exit_code)
         rank = _verdict_severity_rank(scoped.verdict)
@@ -663,6 +742,13 @@ def _apply_used_by_scoping(
     result.scoped_verdict = worst_verdict  # type: ignore[attr-defined]
     result.scoped_exit_code = worst_exit  # type: ignore[attr-defined]
     result.scoped_exit_code_scheme = exit_code_scheme  # type: ignore[attr-defined]
+    result.gate_scope = "used_by"  # type: ignore[attr-defined]
+    result.scoped_relevant_finding_ids = frozenset(relevant_finding_ids)  # type: ignore[attr-defined]
+    result.scoped_missing_labels = tuple(sorted(missing_labels))  # type: ignore[attr-defined]
+    _existing_ids = {_finding_id(c) for c in result.changes}
+    result.scoped_only_changes = tuple(  # type: ignore[attr-defined]
+        c for fid, c in relevant_changes_by_id.items() if fid not in _existing_ids
+    )
     if exit_code_scheme == "severity":
         categories, counts = _scoped_severity_summary(
             list(worst_changes.values()), worst_missing,
@@ -680,7 +766,8 @@ def _apply_required_symbol_scoping(
     exit_code_scheme: str = "legacy", sev_config: Any = None,
 ) -> int:
     """Scope *result* to an explicit ``--required-symbol(s)`` contract (ADR-043)."""
-    from .appcompat import scope_diff_to_required_symbols
+    from .appcompat import scope_diff_to_required_symbols, uncovered_missing_symbols
+    from .reporter import _finding_id
 
     scoped = scope_diff_to_required_symbols(
         result, old, new, required_symbols,
@@ -688,6 +775,22 @@ def _apply_required_symbol_scoping(
     )
     result.required_symbols = _plugin_contract_summary(scoped)  # type: ignore[attr-defined]
     result.scoped_verdict = scoped.verdict  # type: ignore[attr-defined]
+    result.gate_scope = "required_symbol"  # type: ignore[attr-defined]
+    result.scoped_relevant_finding_ids = frozenset(  # type: ignore[attr-defined]
+        _finding_id(c) for c in scoped.breaking_for_host
+    )
+    # An entrypoint already covered by a relevant Change must not also
+    # become a synthetic missing-contract finding (Codex review, mirrors
+    # _apply_used_by_scoping's identical dedup).
+    result.scoped_missing_labels = tuple(sorted(  # type: ignore[attr-defined]
+        uncovered_missing_symbols(scoped.missing_entrypoints, scoped.breaking_for_host)
+    ))
+    # Scoped-only changes: relevant to the host contract but never added to
+    # result.changes (mirrors _apply_used_by_scoping's identical handling).
+    _existing_ids = {_finding_id(c) for c in result.changes}
+    result.scoped_only_changes = tuple(  # type: ignore[attr-defined]
+        c for c in scoped.breaking_for_host if _finding_id(c) not in _existing_ids
+    )
     exit_code = _scoped_exit_code(
         scoped, scoped.breaking_for_host, result, exit_code_scheme, sev_config,
         policy, policy_file,
@@ -728,6 +831,7 @@ def _render_compare_dry_run(
     old_input: Path, new_input: Path,
     old_kind: str, new_kind: str,
     depth: str | None,
+    source_method: str | None = None,
     headers: tuple[Path, ...], includes: tuple[Path, ...],
     old_headers_only: tuple[Path, ...], new_headers_only: tuple[Path, ...],
     old_sources: Path | None, new_sources: Path | None,
@@ -748,11 +852,21 @@ def _render_compare_dry_run(
         f"old: {old_input} ({old_kind})",
         f"new: {new_input} ({new_kind})",
     )
+    # Effective depth (P1 fix): a dry run must report what the real run will
+    # actually do, not just echo the raw --depth string back — the same
+    # inference _normalize_compare_options applies (--depth > source.method >
+    # inferred from --sources/--build-info > off) drives this.
+    collect_mode, effective_depth_label = _resolve_compare_collect_mode(
+        depth, source_method, old_sources, new_sources, old_build_info, new_build_info,
+    )
     result.add(
         "Resolved depth and source scope",
-        f"requested depth: {depth or '(auto)'}",
+        f"requested depth: {depth or '(not given)'}",
+        f"effective depth: {effective_depth_label}",
+        f"effective collect mode: {collect_mode}",
         "source scope: target on each side (compare has no PR change seed)"
-        if depth == "source" else None,
+        if collect_mode in ("source-target", "source-changed", "graph-full")
+        else None,
     )
     all_headers = list(headers) + list(old_headers_only) + list(new_headers_only)
     result.add(
@@ -869,6 +983,12 @@ def run_compare(
     from .dry_run import reject_dry_run_with_output
 
     reject_dry_run_with_output(dry_run, output)
+    if dry_run and secondary_output is not None:
+        raise click.UsageError(
+            "--dry-run cannot be combined with --secondary-output: a dry run "
+            "performs no analysis and writes nothing, so there is no "
+            "secondary report to produce."
+        )
     _setup_verbosity(verbose)
 
     if secondary_fmt is not None and secondary_output is None:
@@ -976,7 +1096,8 @@ def run_compare(
         emit_dry_run(_render_compare_dry_run(
             old_input=old_input, new_input=new_input,
             old_kind=old_kind, new_kind=new_kind,
-            depth=depth, headers=headers, includes=includes,
+            depth=depth, source_method=resolved_cfg.source_method,
+            headers=headers, includes=includes,
             old_headers_only=old_headers_only, new_headers_only=new_headers_only,
             old_sources=old_sources, new_sources=new_sources,
             old_build_info=old_build_info, new_build_info=new_build_info,
@@ -1045,6 +1166,8 @@ def run_compare(
         debug_format_opt=debug_format_opt, debug_format=debug_format,
         demangle=demangle, fmt=fmt,
         report_mode=report_mode, show_impact=show_impact,
+        old_sources=old_sources, new_sources=new_sources,
+        old_build_info=old_build_info, new_build_info=new_build_info,
     )
 
     # L2 header compile context (compare↔dump↔scan parity, ADR-037 D3): the one
@@ -1317,7 +1440,16 @@ def run_compare(
         show_recommendation=recommend,
         demangle=demangle,
     )
-    text = _fold_scoped_compat_into_text(text, fmt, result)
+    text = _fold_scoped_compat_into_text(
+        text, fmt, result,
+        severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
+        show_only=show_only,
+    )
+    text = _fold_evidence_depth_into_json(
+        text, fmt, old, new,
+        old_build_info=old_build_info, new_build_info=new_build_info,
+        old_sources=old_sources, new_sources=new_sources,
+    )
 
     _write_or_echo(output, text)
 
@@ -1344,7 +1476,15 @@ def run_compare(
             show_recommendation=recommend,
             demangle=secondary_demangle,
         )
-        secondary_text = _fold_scoped_compat_into_text(secondary_text, secondary_fmt, result)
+        secondary_text = _fold_scoped_compat_into_text(
+            secondary_text, secondary_fmt, result,
+            severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
+        )
+        secondary_text = _fold_evidence_depth_into_json(
+            secondary_text, secondary_fmt, old, new,
+            old_build_info=old_build_info, new_build_info=new_build_info,
+            old_sources=old_sources, new_sources=new_sources,
+        )
         _write_or_echo(secondary_output, secondary_text)
 
     if scoped_exit_code is not None:
@@ -1359,13 +1499,135 @@ def run_compare(
     _exit_with_severity_or_verdict(result, sev_config, resolved_cfg.exit_code_scheme)
 
 
-def _fold_scoped_compat_into_text(text: str, fmt: str, result: Any) -> str:
+def _fold_evidence_depth_into_json(
+    text: str, fmt: str, old: Any, new: Any,
+    old_build_info: Path | None = None, new_build_info: Path | None = None,
+    old_sources: Path | None = None, new_sources: Path | None = None,
+) -> str:
+    """Add ``old_evidence_depth``/``new_evidence_depth`` to a JSON report (CLI-audit P2).
+
+    Self-describing output: the evidence depth each side *actually* reached
+    (``binary``/``headers``/``build``/``source``), computed from what was
+    resolved rather than the requested ``--depth`` -- so a report is never
+    silently mismatched against what was actually collected. JSON only; other
+    formats already show depth-related context in their own ways (or, for
+    binary/structured formats, are left untouched per
+    :func:`_fold_scoped_compat_into_text`'s convention).
+
+    An out-of-band ``--old/new-build-info``/``--old/new-sources`` *pack
+    directory* (as opposed to a raw checkout, which gets embedded into the
+    snapshot before this point) is resolved via ``_resolve_side_pack`` and
+    never attached back to ``old``/``new`` themselves -- reading only
+    ``old.build_source``/``new.build_source`` would then report the
+    snapshot's own (absent or unrelated) embedded depth instead of the pack
+    that was actually used to produce this comparison's build/source
+    findings (Codex review). Re-resolving here is cheap (pure pack-directory
+    metadata load, no diffing) and mirrors the same resolution
+    ``prepare_embedded_build_source``/``diff_embedded_build_source`` already
+    performed to run the comparison itself.
+    """
+    if fmt != "json":
+        return text
+    import json
+
+    from .cli_buildsource_helpers import _resolve_side_pack
+    from .cli_dump_helpers import evidence_depth_label
+
+    try:
+        payload = json.loads(text)
+    except ValueError:
+        return text
+    old_pack = _resolve_side_pack(old_build_info, old_sources, old)
+    new_pack = _resolve_side_pack(new_build_info, new_sources, new)
+    payload["old_evidence_depth"] = evidence_depth_label(old, old_pack)
+    payload["new_evidence_depth"] = evidence_depth_label(new, new_pack)
+    return json.dumps(payload, indent=2)
+
+
+def _resolve_scoped_gate_findings(
+    result: Any, severity_config: Any, show_only: str | None,
+) -> tuple[list[Any], list[str], bool, str]:
+    """Resolve the scoped-only ``Change``s and missing-contract labels relevant
+    to the ``--used-by``/``--required-symbol`` gate, deduped against
+    ``result.changes`` and filtered by ``--show-only``.
+
+    Factored out of the JSON branch below so markdown/text/review output can
+    render the identical actionable findings instead of only a bare count
+    (Codex review: a scoped run whose only gated issue was a missing contract
+    member or a scoped-only change like ``PE_ORDINAL_RETARGETED`` didn't name
+    either one in the default text report, unlike JSON/SARIF/JUnit).
+
+    Returns ``(scoped_only_changes, missing_labels, blocks, missing_kind)``.
+    """
+    from .reporter import _finding_id, apply_show_only
+    from .reporter_markdown import ShowOnlyFilter
+    from .severity import missing_contract_exit_code
+
+    existing_ids = {_finding_id(c) for c in result.changes}
+    eff_sets = result._effective_kind_sets()
+    scoped_only = list(getattr(result, "scoped_only_changes", ()) or ())
+    if show_only and scoped_only:
+        scoped_only = apply_show_only(
+            scoped_only,
+            show_only,
+            policy=result.policy,
+            kind_sets=eff_sets,
+            policy_file=result.policy_file,
+        )
+    scoped_only = [c for c in scoped_only if _finding_id(c) not in existing_ids]
+
+    gate_scope = getattr(result, "gate_scope", None)
+    missing_kind = (
+        "used_by_missing_symbol" if gate_scope == "used_by"
+        else "required_symbol_missing"
+    )
+    blocks = (
+        severity_config is None
+        or missing_contract_exit_code(severity_config) != 0
+    )
+    # A missing-contract label has no backing Change/ChangeKind, so it can't
+    # run through apply_show_only -- but --show-only's severity dimension
+    # still applies: without this, a --show-only run that excludes breaking
+    # findings would still include a blocking missing-contract entry the
+    # filter was meant to exclude (Codex review, mirrors the identical
+    # sarif.to_sarif fix). Element/action tokens don't cleanly apply to "a
+    # symbol is simply absent", so only the severity dimension is checked.
+    missing_severity_label = "breaking" if blocks else "compatible"
+    show_only_severities = (
+        ShowOnlyFilter.parse(show_only).severities if show_only else frozenset()
+    )
+    missing_labels = list(
+        getattr(result, "scoped_missing_labels", ()) or ()
+        if not show_only_severities or missing_severity_label in show_only_severities
+        else ()
+    )
+    return scoped_only, missing_labels, blocks, missing_kind
+
+
+def _fold_scoped_compat_into_text(
+    text: str, fmt: str, result: Any, severity_config: Any = None,
+    show_only: str | None = None,
+) -> str:
     """Fold ``--used-by``/``--required-symbol(s)`` summaries into the rendered text.
 
     JSON gets the summaries as real keys (round-tripped through the existing
     payload); other text-based formats get a small appended section. Binary/
     structured formats (sarif, junit, html) are left untouched -- the full
     verdict they already carry stays authoritative for those consumers.
+
+    *severity_config* (when the run used a severity scheme) decides whether a
+    synthesized missing-contract entry is itself blocking, mirroring
+    ``sarif._missing_contract_result``/``junit_report``'s severity-aware
+    missing-contract handling.
+
+    *show_only*, when given, filters ``scoped_only_changes`` before they are
+    folded into the JSON ``changes`` array -- ``to_json`` already filtered
+    ``result.changes`` by the same tokens upstream, so leaving the
+    scoped-only fold-in unfiltered would let a `--show-only` run re-surface a
+    finding it explicitly excluded (Codex review, mirrors the identical
+    ``sarif.to_sarif`` fix). Pass ``None`` (the default) for a render that is
+    deliberately always-unfiltered, e.g. the ``--secondary-format`` render,
+    which ignores the primary format's own ``--show-only``.
     """
     used_by = getattr(result, "used_by", None)
     required_symbols = getattr(result, "required_symbols", None)
@@ -1433,6 +1695,50 @@ def _fold_scoped_compat_into_text(text: str, fmt: str, result: Any) -> str:
                     getattr(result, "scoped_blocking_categories", ()) or ()
                 ),
             }
+        # Scoped-only changes (e.g. PE_ORDINAL_RETARGETED, synthesized fresh
+        # per app/host by scope_diff_to_app/scope_diff_to_required_symbols)
+        # and uncovered missing-contract labels are relevant to the scoped
+        # gate but never land in `result.changes` -- without folding them
+        # into `changes` here too, a --used-by/--required-symbol run whose
+        # only gated issue is one of these reports an empty `changes` array
+        # despite a nonzero scoped exit code/verdict, so a JSON consumer
+        # (e.g. the GitHub Action's `--on changes` PR-comment gate, which
+        # buckets purely off this array) sees nothing to explain the failure
+        # and silently skips posting (Codex review, mirrors
+        # sarif.to_sarif/junit_report._build_testsuite's identical fold-in).
+        changes_list = payload.get("changes")
+        if isinstance(changes_list, list):
+            from .reporter import _change_to_dict
+
+            eff_sets = result._effective_kind_sets()
+            scoped_only, missing_labels, blocks, missing_kind = (
+                _resolve_scoped_gate_findings(result, severity_config, show_only)
+            )
+            for c in scoped_only:
+                changes_list.append(
+                    _change_to_dict(
+                        c,
+                        policy=result.policy or "strict_abi",
+                        kind_sets=eff_sets,
+                        policy_file=result.policy_file,
+                    )
+                )
+            for label in missing_labels:
+                changes_list.append(
+                    {
+                        "kind": missing_kind,
+                        "symbol": label,
+                        "description": (
+                            f"Required symbol/version '{label}' is missing "
+                            "from the new library."
+                        ),
+                        "old_value": None,
+                        "new_value": None,
+                        "severity": "breaking" if blocks else "compatible",
+                        "relevant_to_gate": True,
+                        "blocks_gate": blocks,
+                    }
+                )
         return json.dumps(payload, indent=2)
 
     if fmt in ("markdown", "text", "review"):
@@ -1478,6 +1784,14 @@ def _fold_scoped_compat_into_text(text: str, fmt: str, result: Any) -> str:
                     f"{len(summary['missing_versions'])} version(s), "
                     f"{summary['relevant_change_count']} relevant change(s))"
                 )
+                # Name the actual missing symbols/versions, not just their
+                # count (Codex review) -- a human reading the default text
+                # report otherwise has no way to tell *which* symbol broke
+                # this app without re-running with --format json.
+                for sym in summary["missing_symbols"]:
+                    lines.append(f"  - missing symbol: `{sym}`")
+                for ver in summary["missing_versions"]:
+                    lines.append(f"  - missing version: `{ver}`")
         if required_symbols is not None:
             lines.append("## Scoped to --required-symbol(s) contract")
             lines.append(
@@ -1486,6 +1800,26 @@ def _fold_scoped_compat_into_text(text: str, fmt: str, result: Any) -> str:
                 f"{len(required_symbols['required_entrypoints'])} required "
                 f"entrypoint(s))"
             )
+            for entrypoint in required_symbols["missing_entrypoints"]:
+                lines.append(f"  - missing entrypoint: `{entrypoint}`")
+        # Scoped-only changes (e.g. PE_ORDINAL_RETARGETED) and uncovered
+        # missing-contract labels are relevant to the scoped gate but never
+        # land in `result.changes` -- name them here too, mirroring the
+        # JSON/SARIF/JUnit fold-in, so a text/markdown/review reader sees the
+        # same actionable findings a JSON consumer would (Codex review).
+        scoped_only, missing_labels, blocks, _missing_kind = (
+            _resolve_scoped_gate_findings(result, severity_config, show_only)
+        )
+        if scoped_only or missing_labels:
+            lines.append("## Additional scoped-gate findings")
+            severity_tag = "breaking" if blocks else "compatible"
+            for label in missing_labels:
+                lines.append(
+                    f"- `{label}` is required but missing from the new "
+                    f"library ({severity_tag})"
+                )
+            for c in scoped_only:
+                lines.append(f"- {c.kind.value}: {c.description}")
         return "\n".join(lines)
 
     return text

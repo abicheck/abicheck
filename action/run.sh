@@ -109,13 +109,52 @@ CMD=(abicheck)
 MODE="${INPUT_MODE:-compare}"
 
 # ---------------------------------------------------------------------------
-# Baseline auto-fetch: resolve INPUT_ABI_BASELINE → INPUT_OLD_LIBRARY
+# Back-compat aliases: `estimate`/`audit` (pre-dry-run/scan-reshape inputs,
+# Codex review). Removing these outright (rather than keeping them as
+# functional aliases, like the existing `allow-build-query` no-op above)
+# would silently break existing workflows that still set them: GitHub
+# Actions drops an input the action.yml no longer declares with only a
+# warning, so `estimate: true` would otherwise silently run a real scan
+# instead of the preview it used to produce, and `audit: true` would
+# silently stop forcing a baseline-less hygiene lint once a
+# baseline/abi-baseline is configured -- a much worse failure mode than a
+# hard error, since nothing signals that the step is no longer doing what
+# the workflow author intended.
 # ---------------------------------------------------------------------------
+if [[ "$MODE" == "scan" && "${INPUT_ESTIMATE:-false}" == "true" ]]; then
+  INPUT_DRY_RUN="true"
+fi
+FORCE_AUDIT_ONLY="${INPUT_AUDIT:-false}"
+
+# ---------------------------------------------------------------------------
+# Baseline auto-fetch: resolve INPUT_ABI_BASELINE → INPUT_OLD_LIBRARY
+#
+# A fetch failure (missing release/token/asset) reports and continues rather
+# than exiting 1 under --dry-run: dry-run is documented as "always exits 0"
+# (action.yml), but this block runs before any mode branch ever consults
+# INPUT_DRY_RUN, so an unavailable baseline used to hard-fail a preview run
+# before it ever got the chance to no-op (Codex review). BASELINE_FILE is
+# left unset in that case; the mode branches' existing required-input checks
+# still apply if no other old-library/against source was given.
+# ---------------------------------------------------------------------------
+_baseline_unavailable() {
+  local message="$1"
+  if [[ "${INPUT_DRY_RUN:-false}" == "true" ]]; then
+    echo "::warning::$message (continuing: --dry-run performs no analysis and never exits nonzero for an unresolved baseline)"
+    return 0
+  fi
+  echo "::error::$message"
+  exit 1
+}
+
 ABI_BASELINE="${INPUT_ABI_BASELINE:-}"
-if [[ -n "$ABI_BASELINE" && ( "$MODE" == "compare" || "$MODE" == "scan" ) ]]; then
+if [[ -n "$ABI_BASELINE" \
+   && ( "$MODE" == "compare" || "$MODE" == "scan" ) \
+   && ! ( "$MODE" == "scan" && "$FORCE_AUDIT_ONLY" == "true" ) ]]; then
   BASELINE_DIR=$(mktemp -d)
   # Clean up temp dir on exit (combined with STDERR_FILE cleanup later)
   _BASELINE_CLEANUP="$BASELINE_DIR"
+  BASELINE_FILE=""
   if [[ -f "$ABI_BASELINE" ]]; then
     # Direct file path — use it as-is (any name, e.g. abi-baseline.json), no
     # download and no *.abicheck.json pattern match (which would reject a
@@ -125,32 +164,56 @@ if [[ -n "$ABI_BASELINE" && ( "$MODE" == "compare" || "$MODE" == "scan" ) ]]; th
     if [[ "$ABI_BASELINE" == "latest-release" ]]; then
       echo "::group::Fetch ABI baseline from latest release"
       if ! gh release download --pattern '*.abicheck.json' -D "$BASELINE_DIR"; then
-        echo "::error::No ABI baseline found in latest release. Run 'abicheck dump --output-name auto' in your release workflow and upload the *.abicheck.json file as a release asset."
-        exit 1
+        _baseline_unavailable "No ABI baseline found in latest release. Run 'abicheck dump path/to/libfoo.so -o libfoo.abicheck.json' in your release workflow and upload the resulting *.abicheck.json file as a release asset."
       fi
       echo "::endgroup::"
     else
       # Treat as a tag name
       echo "::group::Fetch ABI baseline from release $ABI_BASELINE"
       if ! gh release download "$ABI_BASELINE" --pattern '*.abicheck.json' -D "$BASELINE_DIR"; then
-        echo "::error::No ABI baseline found in release '$ABI_BASELINE'. Ensure the release has a *.abicheck.json asset."
-        exit 1
+        _baseline_unavailable "No ABI baseline found in release '$ABI_BASELINE'. Ensure the release has a *.abicheck.json asset."
       fi
       echo "::endgroup::"
     fi
-    # Pick the first .abicheck.json found in the download dir.
-    BASELINE_FILE=$(find "$BASELINE_DIR" -name '*.abicheck.json' | head -1)
-    if [[ -z "$BASELINE_FILE" ]]; then
-      echo "::error::No *.abicheck.json file found after download."
-      exit 1
+    # Require exactly one *.abicheck.json in the download dir: `head -1`
+    # picking an arbitrary match on a multi-asset release could silently
+    # compare against the wrong library and produce an invalid verdict
+    # (Codex review). Built via a while/read loop (not `mapfile`, a bash 4+
+    # builtin) for macOS's stock (GPLv2-frozen) bash 3.2, same portability
+    # constraint as add_flag() above. An empty result also covers the
+    # download itself failing and _baseline_unavailable returning instead
+    # of exiting (e.g. under --dry-run).
+    BASELINE_FILES=()
+    while IFS= read -r _found; do
+      [[ -n "$_found" ]] && BASELINE_FILES+=("$_found")
+    done <<< "$(find "$BASELINE_DIR" -name '*.abicheck.json' 2>/dev/null)"
+    if [[ ${#BASELINE_FILES[@]} -eq 1 ]]; then
+      BASELINE_FILE="${BASELINE_FILES[0]}"
+    elif [[ ${#BASELINE_FILES[@]} -eq 0 ]]; then
+      _baseline_unavailable "No *.abicheck.json file found after download."
+    else
+      _baseline_unavailable "Multiple *.abicheck.json assets found (${BASELINE_FILES[*]}); ambiguous which is the baseline. Publish exactly one *.abicheck.json asset per release, or pass abi-baseline a direct file path instead."
     fi
   fi
-  echo "Using ABI baseline: $BASELINE_FILE"
-  # compare consumes the baseline as old-library; scan consumes it as --against.
-  if [[ "$MODE" == "scan" ]]; then
-    INPUT_AGAINST="$BASELINE_FILE"
-  else
-    INPUT_OLD_LIBRARY="$BASELINE_FILE"
+  if [[ -n "$BASELINE_FILE" ]]; then
+    echo "Using ABI baseline: $BASELINE_FILE"
+    # compare consumes the baseline as old-library; scan consumes it as --against.
+    if [[ "$MODE" == "scan" ]]; then
+      INPUT_AGAINST="$BASELINE_FILE"
+    else
+      INPUT_OLD_LIBRARY="$BASELINE_FILE"
+    fi
+  elif [[ "${INPUT_DRY_RUN:-false}" == "true" ]]; then
+    # The fetch was tolerated above (dry-run never hard-fails on it), but if
+    # no other old-library/against was independently given there is nothing
+    # left to preview -- report and stop here rather than falling through to
+    # `${INPUT_OLD_LIBRARY:?...}` below, whose bash parameter-expansion abort
+    # would itself violate the documented "dry-run always exits 0" contract.
+    if [[ "$MODE" == "scan" && -z "${INPUT_AGAINST:-}" ]] ||
+       [[ "$MODE" == "compare" && -z "${INPUT_OLD_LIBRARY:-}" ]]; then
+      echo "::notice::--dry-run: no ABI baseline could be resolved and no other old-library/against was given, so there is nothing to preview."
+      exit 0
+    fi
   fi
 fi
 
@@ -202,9 +265,16 @@ if [[ "$MODE" == "dump" ]]; then
     CMD+=(--allow-build-query)
   fi
 
-  # Output file — required for dump in action context (otherwise stdout)
-  OUTPUT_FILE="${INPUT_OUTPUT_FILE:-abicheck-baseline.json}"
-  CMD+=(-o "$OUTPUT_FILE")
+  # dry-run performs no analysis and writes nothing, so it is mutually
+  # exclusive with -o/--output on the CLI -- skip the output file entirely
+  # when set, rather than passing both and letting the CLI reject it.
+  if [[ "${INPUT_DRY_RUN:-false}" == "true" ]]; then
+    CMD+=(--dry-run)
+  else
+    # Output file — required for dump in action context (otherwise stdout)
+    OUTPUT_FILE="${INPUT_OUTPUT_FILE:-abicheck-baseline.json}"
+    CMD+=(-o "$OUTPUT_FILE")
+  fi
 
 elif [[ "$MODE" == "compare" ]]; then
   # ── Compare mode ─────────────────────────────────────────────────────────
@@ -235,26 +305,36 @@ elif [[ "$MODE" == "compare" ]]; then
   FORMAT="${INPUT_FORMAT:-markdown}"
   CMD+=(--format "$FORMAT")
 
-  OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
-  if [[ "$FORMAT" == "sarif" && -z "$OUTPUT_FILE" ]]; then
-    OUTPUT_FILE="abicheck-results.sarif"
-  fi
-  if [[ -n "$OUTPUT_FILE" ]]; then
-    CMD+=(-o "$OUTPUT_FILE")
-  fi
+  # dry-run performs no analysis and writes nothing, so it is mutually
+  # exclusive with -o/--output AND --secondary-output/--secondary-format on
+  # the CLI -- skip both entirely when set, rather than passing them and
+  # letting the CLI reject the combination.
+  DRY_RUN="${INPUT_DRY_RUN:-false}"
+  if [[ "$DRY_RUN" == "true" ]]; then
+    CMD+=(--dry-run)
+  else
+    OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
+    if [[ "$FORMAT" == "sarif" && -z "$OUTPUT_FILE" ]]; then
+      OUTPUT_FILE="abicheck-results.sarif"
+    fi
+    if [[ -n "$OUTPUT_FILE" ]]; then
+      CMD+=(-o "$OUTPUT_FILE")
+    fi
 
-  # Render a second, always-unfiltered JSON report from this same run for the
-  # sticky PR comment (--secondary-format), instead of re-invoking abicheck a
-  # second time just to get JSON. Only needed when the primary format isn't
-  # already JSON — a json primary is reused as-is (see _can_reuse_primary_json
-  # below). The per-library release fan-out (directory/package operands)
-  # rejects --secondary-format, so it's skipped there too, falling back to
-  # the rerun path in _maybe_post_pr_comment (Codex review).
-  if [[ "$FORMAT" != "json" ]] \
-     && ! _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
-     && ! _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
-    PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
-    CMD+=(--secondary-format json --secondary-output "$PR_JSON")
+    # Render a second, always-unfiltered JSON report from this same run for
+    # the sticky PR comment (--secondary-format), instead of re-invoking
+    # abicheck a second time just to get JSON. Only needed when the primary
+    # format isn't already JSON — a json primary is reused as-is (see
+    # _can_reuse_primary_json below). The per-library release fan-out
+    # (directory/package operands) rejects --secondary-format, so it's
+    # skipped there too, falling back to the rerun path in
+    # _maybe_post_pr_comment (Codex review).
+    if [[ "$FORMAT" != "json" ]] \
+       && ! _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
+       && ! _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
+      PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
+      CMD+=(--secondary-format json --secondary-output "$PR_JSON")
+    fi
   fi
 
   add_single_flag "--policy" "${INPUT_POLICY:-}"
@@ -320,9 +400,13 @@ elif [[ "$MODE" == "deps-tree" ]]; then
   fi
   CMD+=(--format "$FORMAT")
 
-  OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
-  if [[ -n "$OUTPUT_FILE" ]]; then
-    CMD+=(-o "$OUTPUT_FILE")
+  if [[ "${INPUT_DRY_RUN:-false}" == "true" ]]; then
+    CMD+=(--dry-run)
+  else
+    OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
+    if [[ -n "$OUTPUT_FILE" ]]; then
+      CMD+=(-o "$OUTPUT_FILE")
+    fi
   fi
 
 elif [[ "$MODE" == "deps-compare" ]]; then
@@ -343,9 +427,13 @@ elif [[ "$MODE" == "deps-compare" ]]; then
   fi
   CMD+=(--format "$FORMAT")
 
-  OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
-  if [[ -n "$OUTPUT_FILE" ]]; then
-    CMD+=(-o "$OUTPUT_FILE")
+  if [[ "${INPUT_DRY_RUN:-false}" == "true" ]]; then
+    CMD+=(--dry-run)
+  else
+    OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
+    if [[ -n "$OUTPUT_FILE" ]]; then
+      CMD+=(-o "$OUTPUT_FILE")
+    fi
   fi
 
 elif [[ "$MODE" == "scan" ]]; then
@@ -377,12 +465,12 @@ elif [[ "$MODE" == "scan" ]]; then
   # scan's config flag is --config (not --build-config, which does not exist on
   # scan and hard-fails with exit 64). dump uses --config for the same input.
   add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
-  # audit=true forces a one-build audit even when an against baseline is
-  # configured (e.g. via abi-baseline auto-fetch) — the old --audit flag
-  # ignored --baseline the same way; --against structurally cannot be
-  # combined with an audit-only run any more, so the emulation is to simply
-  # omit --against.
-  if [[ "${INPUT_AUDIT:-false}" != "true" ]]; then
+  # Omitting --against is already a one-build audit-only run; the preferred
+  # way to force one for a single step is to simply not set against/
+  # abi-baseline there. The deprecated `audit: true` back-compat alias
+  # (above) achieves the same by skipping --against outright even when
+  # against/abi-baseline resolved to a value elsewhere in the workflow.
+  if [[ "$FORCE_AUDIT_ONLY" != "true" ]]; then
     add_single_flag "--against" "${INPUT_AGAINST:-}"
   fi
   add_single_flag "--lang" "${INPUT_LANG:-}"
@@ -410,10 +498,11 @@ elif [[ "$MODE" == "scan" ]]; then
   fi
   CMD+=(--format "$FORMAT")
 
-  # estimate=true now maps to --dry-run (the old --estimate's cost-projection
-  # folded into the general dry-run report). A dry run writes nothing, so skip
-  # -o/--output entirely when it's set (they are mutually exclusive on scan).
-  if [[ "${INPUT_ESTIMATE:-false}" == "true" ]]; then
+  # dry-run maps directly to --dry-run (the cost-projection formerly under
+  # the separate --estimate flag is folded into the general dry-run report).
+  # A dry run writes nothing, so skip -o/--output entirely when it's set
+  # (they are mutually exclusive on scan).
+  if [[ "${INPUT_DRY_RUN:-false}" == "true" ]]; then
     CMD+=(--dry-run)
   else
     OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
@@ -740,6 +829,10 @@ _maybe_post_pr_comment() {
     compare) ;;
     *) return 0 ;;
   esac
+  # A dry run performed no real comparison -- posting a comment would either
+  # show nothing (no PR_JSON) or silently trigger a second, real compare just
+  # to produce one, defeating the point of --dry-run. Skip entirely.
+  [[ "${INPUT_DRY_RUN:-false}" == "true" ]] && return 0
   [[ "${INPUT_PR_COMMENT_ON:-changes}" == "never" ]] && return 0
   [[ "$VERDICT" == "ERROR" ]] && return 0
   case "${GITHUB_EVENT_NAME:-}" in

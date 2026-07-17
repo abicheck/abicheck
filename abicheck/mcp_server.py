@@ -70,7 +70,7 @@ from .checker_policy import (
 )
 from .errors import AbicheckError
 from .model import AbiSnapshot
-from .reporter import to_json, to_markdown
+from .reporter import _finding_id, to_json, to_markdown
 from .serialization import snapshot_to_json
 from .service import compare_snapshots
 
@@ -953,7 +953,7 @@ def abi_compare(
         scoped_payload: Any = None
         scoped_verdict_value: str | None = None
         if used_by:
-            from .appcompat import scope_diff_to_app
+            from .appcompat import scope_diff_to_app, uncovered_missing_symbols
             from .service import detect_binary_format
 
             old_lib: Any = old_path if detect_binary_format(old_path) is not None else old_snap
@@ -978,14 +978,31 @@ def abi_compare(
             worst_exit = 0
             worst_verdict = None
             worst_verdict_rank = -1
-            # Keyed by id(change)/the missing string itself so a Change or
-            # missing symbol shared by two tied apps (e.g. both import the
-            # same removed symbol) collapses to one entry instead of being
-            # tallied once per app (Codex review) -- `_scoped_severity_summary`
-            # runs once at the end over this deduplicated union, not per app
-            # summed together.
-            worst_changes: dict[int, Any] = {}
+            # Keyed by the change's semantic identity (kind/symbol/old/new/
+            # location/description, via `_finding_id`) -- not id(change) --
+            # so a Change or missing symbol shared by two tied apps (e.g.
+            # both import the same removed symbol) collapses to one entry
+            # instead of being tallied once per app (Codex review) --
+            # `_scoped_severity_summary` runs once at the end over this
+            # deduplicated union, not per app summed together. `id()` alone
+            # under-deduplicates PE_ORDINAL_RETARGETED findings: each app's
+            # `scope_diff_to_app` call synthesizes a fresh `Change` object
+            # for the same underlying ordinal retarget (see
+            # `cli_compare_helpers._apply_used_by_scoping`).
+            worst_changes: dict[str, Any] = {}
             worst_missing: set[str] = set()
+            # Union across ALL apps of which findings this --used-by gate
+            # cares about -- SARIF/JUnit consult this to make their own
+            # result levels/failure counts follow the scoped gate (CLI-audit
+            # P1), mirroring cli_compare_helpers._apply_used_by_scoping.
+            relevant_finding_ids: set[str] = set()
+            # Union across ALL apps of relevant Change objects (not just
+            # ids) so scoped-only changes (e.g. PE_ORDINAL_RETARGETED,
+            # synthesized fresh per app and never added to result.changes)
+            # can still be rendered by SARIF/JUnit (Codex review, mirrors
+            # cli_compare_helpers._apply_used_by_scoping).
+            relevant_changes_by_id: dict[str, Any] = {}
+            missing_labels: set[str] = set()
             for app in used_by:
                 app_path = _safe_read_path(app, label="used_by")
                 if not app_path.exists():
@@ -996,6 +1013,20 @@ def abi_compare(
                 scoped = scope_diff_to_app(
                     result, app_path, old_lib, new_lib,
                     policy=active_policy, policy_file=pf,
+                )
+                relevant_finding_ids.update(_finding_id(c) for c in scoped.breaking_for_app)
+                relevant_changes_by_id.update(
+                    {_finding_id(c): c for c in scoped.breaking_for_app}
+                )
+                # A missing symbol/version already covered by a relevant
+                # Change (e.g. FUNC_REMOVED) must not also become a
+                # synthetic missing-contract finding (Codex review, mirrors
+                # cli_compare_helpers._apply_used_by_scoping's dedup).
+                missing_labels.update(
+                    uncovered_missing_symbols(
+                        list(scoped.missing_symbols) + list(scoped.missing_versions),
+                        scoped.breaking_for_app,
+                    )
                 )
                 summaries.append(
                     {
@@ -1019,10 +1050,10 @@ def abi_compare(
                 # independently -- see _verdict_severity_rank.
                 if severity_config is not None:
                     if app_exit > worst_exit:
-                        worst_changes = {id(c): c for c in scoped.breaking_for_app}
+                        worst_changes = {_finding_id(c): c for c in scoped.breaking_for_app}
                         worst_missing = set(scoped.missing_symbols) | set(scoped.missing_versions)
                     elif app_exit == worst_exit:
-                        worst_changes.update({id(c): c for c in scoped.breaking_for_app})
+                        worst_changes.update({_finding_id(c): c for c in scoped.breaking_for_app})
                         worst_missing |= set(scoped.missing_symbols) | set(scoped.missing_versions)
                 worst_exit = max(worst_exit, app_exit)
                 rank = _verdict_severity_rank(scoped.verdict)
@@ -1042,6 +1073,13 @@ def abi_compare(
             result.scoped_exit_code = worst_exit  # type: ignore[attr-defined]
             scoped_scheme = "severity" if severity_config is not None else "legacy"
             result.scoped_exit_code_scheme = scoped_scheme  # type: ignore[attr-defined]
+            result.gate_scope = "used_by"  # type: ignore[attr-defined]
+            result.scoped_relevant_finding_ids = frozenset(relevant_finding_ids)  # type: ignore[attr-defined]
+            result.scoped_missing_labels = tuple(sorted(missing_labels))  # type: ignore[attr-defined]
+            _existing_ids = {_finding_id(c) for c in result.changes}
+            result.scoped_only_changes = tuple(  # type: ignore[attr-defined]
+                c for fid, c in relevant_changes_by_id.items() if fid not in _existing_ids
+            )
             if severity_config is not None:
                 categories, counts = _scoped_severity_summary(
                     list(worst_changes.values()), worst_missing,
@@ -1050,7 +1088,10 @@ def abi_compare(
                 result.scoped_blocking_categories = categories  # type: ignore[attr-defined]
                 result.scoped_severity_counts = counts  # type: ignore[attr-defined]
         elif required_symbols:
-            from .appcompat import scope_diff_to_required_symbols
+            from .appcompat import (
+                scope_diff_to_required_symbols,
+                uncovered_missing_symbols,
+            )
 
             scoped_host = scope_diff_to_required_symbols(
                 result, old_snap, new_snap, required_symbols,
@@ -1076,6 +1117,24 @@ def abi_compare(
             result.scoped_exit_code = exit_code  # type: ignore[attr-defined]
             scoped_scheme = "severity" if severity_config is not None else "legacy"
             result.scoped_exit_code_scheme = scoped_scheme  # type: ignore[attr-defined]
+            result.gate_scope = "required_symbol"  # type: ignore[attr-defined]
+            result.scoped_relevant_finding_ids = frozenset(  # type: ignore[attr-defined]
+                _finding_id(c) for c in scoped_host.breaking_for_host
+            )
+            # An entrypoint already covered by a relevant Change must not
+            # also become a synthetic missing-contract finding (Codex
+            # review).
+            result.scoped_missing_labels = tuple(sorted(  # type: ignore[attr-defined]
+                uncovered_missing_symbols(
+                    scoped_host.missing_entrypoints, scoped_host.breaking_for_host
+                )
+            ))
+            # Scoped-only changes: relevant to the host contract but never
+            # added to result.changes (mirrors the used_by branch above).
+            _existing_ids = {_finding_id(c) for c in result.changes}
+            result.scoped_only_changes = tuple(  # type: ignore[attr-defined]
+                c for c in scoped_host.breaking_for_host if _finding_id(c) not in _existing_ids
+            )
             if severity_config is not None:
                 categories, counts = _scoped_severity_summary(
                     scoped_host.breaking_for_host, scoped_host.missing_entrypoints,
@@ -1119,6 +1178,81 @@ def abi_compare(
         }
         if scoped_key is not None:
             response[scoped_key] = scoped_payload
+            # Scoped-only changes/missing-contract labels are relevant to the
+            # scoped gate but never land in result.changes -- without folding
+            # them into the top-level "changes" array too, a --used-by/
+            # --required-symbol response whose only gated issue is one of
+            # these shows an empty "changes" list despite a scoped
+            # verdict/exit_code that blocks, leaving a caller that only reads
+            # this array with nothing to explain the failure (Codex review,
+            # mirrors the identical fold-in in
+            # cli_compare_helpers._fold_scoped_compat_into_text).
+            existing_ids = {_finding_id(c) for c in result.changes}
+            for c in getattr(result, "scoped_only_changes", ()) or ():
+                if _finding_id(c) not in existing_ids:
+                    response["changes"].append(
+                        {
+                            "kind": c.kind.value,
+                            "symbol": c.symbol,
+                            "description": c.description,
+                            "impact": _impact_category(c.kind, active_policy),
+                            "old_value": c.old_value,
+                            "new_value": c.new_value,
+                            "source_location": c.source_location,
+                        }
+                    )
+            from .severity import missing_contract_exit_code
+
+            missing_kind = (
+                "used_by_missing_symbol"
+                if getattr(result, "gate_scope", None) == "used_by"
+                else "required_symbol_missing"
+            )
+            blocks = (
+                severity_config is None
+                or missing_contract_exit_code(severity_config) != 0
+            )
+            for label in getattr(result, "scoped_missing_labels", ()) or ():
+                response["changes"].append(
+                    {
+                        "kind": missing_kind,
+                        "symbol": label,
+                        "description": (
+                            f"Required symbol/version '{label}' is missing "
+                            "from the new library."
+                        ),
+                        # A missing-contract label has no ChangeKind to run
+                        # through _impact_category, but its severity is known
+                        # (blocks_gate) -- reuse the same "breaking"/
+                        # "compatible" label the CLI text report and severity
+                        # gate already use for this, so the summary tally
+                        # below has something to count it under.
+                        "impact": "breaking" if blocks else "compatible",
+                        "old_value": None,
+                        "new_value": None,
+                        "source_location": None,
+                        "relevant_to_gate": True,
+                        "blocks_gate": blocks,
+                    }
+                )
+
+            # Recompute summary now that scoped-only changes/missing-contract
+            # labels were folded into "changes" above -- otherwise a run
+            # gated purely by one of these (e.g. a missing required symbol,
+            # or a scoped-only PE_ORDINAL_RETARGETED change) reports
+            # total_changes: 0 alongside a BREAKING verdict/nonzero exit_code,
+            # since the per-category counts were computed from result.changes
+            # before the fold-in (CodeRabbit review).
+            impact_tally = {"breaking": 0, "api_break": 0, "risk": 0, "compatible": 0}
+            for c in response["changes"]:
+                impact_tally[c["impact"]] = impact_tally.get(c["impact"], 0) + 1
+            response["summary"] = {
+                "breaking": impact_tally["breaking"],
+                "api_breaks": impact_tally["api_break"],
+                "risk_changes": impact_tally["risk"],
+                "compatible": impact_tally["compatible"],
+                "total_changes": len(response["changes"]),
+            }
 
         # Include rendered report
         rendered = _render_output(
@@ -1141,7 +1275,10 @@ def abi_compare(
             # --secondary-format behavior — otherwise a client reading
             # response["report"] sees the unscoped full-library verdict even
             # though the top-level verdict/exit_code are scoped (Codex review).
-            rendered = _fold_scoped_compat_into_text(rendered, output_format, result)
+            rendered = _fold_scoped_compat_into_text(
+                rendered, output_format, result, severity_config=severity_config,
+                show_only=show_only,
+            )
         if output_format == "json":
             response["report"] = json.loads(rendered)
         else:

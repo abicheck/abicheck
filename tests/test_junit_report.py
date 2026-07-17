@@ -1329,13 +1329,13 @@ class TestJUnitCLICompare:
 
 
 class TestScopedProperties:
-    """`--used-by`/`--required-symbol(s)` scoping (ADR-043) discoverability.
+    """`--used-by`/`--required-symbol(s)` scoping (ADR-043 + CLI-audit P1).
 
-    JUnit's own tests/failures counts stay computed from the full, unscoped
-    library diff (documented, intentional) -- but the CLI process exits on
-    the *scoped* verdict floor. Without a `<properties>` block a JUnit
-    consumer had no way to discover that the two could disagree (post-merge
-    PR #566 review)."""
+    The scoped gate is authoritative for this testsuite's own `failures`
+    count and each `<testcase>`'s pass/fail status when scoping is active --
+    `result.verdict` (the full, unscoped library verdict) is still reported
+    as `abicheck.full_library_verdict` for context, but no longer drives
+    what a JUnit-consuming CI dashboard treats as failing."""
 
     def test_no_properties_when_no_scoping(self) -> None:
         r = _make_result([], verdict=Verdict.BREAKING)
@@ -1347,6 +1347,7 @@ class TestScopedProperties:
     def test_properties_present_and_can_disagree_with_full_verdict(self) -> None:
         r = _make_result([], verdict=Verdict.BREAKING)
         r.scoped_verdict = Verdict.COMPATIBLE  # type: ignore[attr-defined]
+        r.gate_scope = "used_by"  # type: ignore[attr-defined]
         r.used_by = [{"app": "/bin/myapp", "verdict": "COMPATIBLE"}]  # type: ignore[attr-defined]
         xml_str = to_junit_xml(r)
         root = _parse(xml_str)
@@ -1354,7 +1355,8 @@ class TestScopedProperties:
         props = {
             p.get("name"): p.get("value") for p in ts.find("properties")
         }
-        assert props["abicheck.scoped_verdict"] == "COMPATIBLE"
+        assert props["abicheck.gate_scope"] == "used_by"
+        assert props["abicheck.gate_verdict"] == "COMPATIBLE"
         assert props["abicheck.full_library_verdict"] == "BREAKING"
         assert props["abicheck.used_by_app_count"] == "1"
 
@@ -1370,11 +1372,10 @@ class TestScopedProperties:
         }
         assert props["abicheck.required_symbol_contract_verdict"] == "BREAKING"
 
-    def test_note_states_actual_exit_code_under_severity_scheme(self) -> None:
-        # Regression: the note used to claim "exit code reflects
-        # scoped_verdict" unconditionally, wrong under a severity scheme --
-        # e.g. --severity-preset info-only can floor the scoped exit code at
-        # 0 even for a BREAKING scoped_verdict (Codex review).
+    def test_gate_exit_code_follows_severity_scheme(self) -> None:
+        # Under a severity scheme the scoped exit code can be floored at 0
+        # even for a BREAKING scoped verdict -- the properties must report
+        # the actual computed value/scheme.
         r = _make_result([], verdict=Verdict.BREAKING)
         r.scoped_verdict = Verdict.BREAKING  # type: ignore[attr-defined]
         r.scoped_exit_code = 0  # type: ignore[attr-defined]
@@ -1385,7 +1386,128 @@ class TestScopedProperties:
         props = {
             p.get("name"): p.get("value") for p in ts.find("properties")
         }
-        assert props["abicheck.scoped_exit_code"] == "0"
-        assert props["abicheck.scoped_exit_code_scheme"] == "severity"
-        assert "exits 0" in props["abicheck.scoped_note"]
-        assert "severity" in props["abicheck.scoped_note"]
+        assert props["abicheck.gate_exit_code"] == "0"
+        assert props["abicheck.gate_exit_code_scheme"] == "severity"
+
+    def test_irrelevant_change_does_not_fail_but_relevant_one_does(self) -> None:
+        # A change outside the --used-by/--required-symbol gate's relevance
+        # must not count as a JUnit failure -- it's out of scope for the
+        # gate this testsuite now reports (CLI-audit P1).
+        from abicheck.reporter import _finding_id
+
+        relevant = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        irrelevant = Change(ChangeKind.FUNC_REMOVED, "_Z3barv", "removed: bar")
+        r = _make_result([relevant, irrelevant], verdict=Verdict.BREAKING)
+        r.scoped_verdict = Verdict.BREAKING  # type: ignore[attr-defined]
+        r.gate_scope = "used_by"  # type: ignore[attr-defined]
+        r.scoped_relevant_finding_ids = frozenset({_finding_id(relevant)})  # type: ignore[attr-defined]
+        xml_str = to_junit_xml(r)
+        root = _parse(xml_str)
+        ts = root.find("testsuite")
+        assert ts.get("failures") == "1"
+        tcs = {tc.get("name"): tc for tc in ts.findall("testcase")}
+        assert tcs["_Z3foov"].find("failure") is not None
+        assert tcs["_Z3barv"].find("failure") is None
+
+    def test_missing_contract_emits_a_failing_testcase(self) -> None:
+        # A required symbol absent from the new library has no backing diff
+        # Change -- without a synthetic testcase the gate's own `failures`
+        # count could be nonzero while nothing in the XML explains why.
+        r = _make_result([], verdict=Verdict.COMPATIBLE)
+        r.scoped_verdict = Verdict.BREAKING  # type: ignore[attr-defined]
+        r.gate_scope = "used_by"  # type: ignore[attr-defined]
+        r.scoped_relevant_finding_ids = frozenset()  # type: ignore[attr-defined]
+        r.scoped_missing_labels = ("_Z6vanishv",)  # type: ignore[attr-defined]
+        xml_str = to_junit_xml(r)
+        root = _parse(xml_str)
+        ts = root.find("testsuite")
+        assert ts.get("failures") == "1"
+        assert ts.get("tests") == "1"
+        tc = ts.find("testcase")
+        assert tc.get("name") == "_Z6vanishv"
+        assert tc.get("classname") == "used_by_contract"
+        assert tc.find("failure") is not None
+
+    def test_missing_contract_demoted_by_severity_config_does_not_fail(self) -> None:
+        # Regression (Codex review): under a severity config that demotes
+        # abi_breaking, the scoped exit code for a missing contract member
+        # is floored at 0 by missing_contract_exit_code -- the synthetic
+        # testcase must not fail in that case, or a JUnit-consuming CI would
+        # mark the run failed even though the gate itself passed.
+        from abicheck.severity import SeverityConfig, SeverityLevel
+
+        demoted = SeverityConfig(abi_breaking=SeverityLevel.WARNING)
+        r = _make_result([], verdict=Verdict.COMPATIBLE)
+        r.scoped_verdict = Verdict.BREAKING  # type: ignore[attr-defined]
+        r.gate_scope = "used_by"  # type: ignore[attr-defined]
+        r.scoped_relevant_finding_ids = frozenset()  # type: ignore[attr-defined]
+        r.scoped_missing_labels = ("_Z6vanishv",)  # type: ignore[attr-defined]
+        xml_str = to_junit_xml(r, severity_config=demoted)
+        root = _parse(xml_str)
+        ts = root.find("testsuite")
+        assert ts.get("failures") == "0"
+        tc = ts.find("testcase")
+        assert tc.get("name") == "_Z6vanishv"
+        assert tc.find("failure") is None
+        # A missing-contract member still counts as relevant even when
+        # demoted (severity decides blocking, not scope membership --
+        # CodeRabbit review).
+        props = {p.get("name"): p.get("value") for p in ts.find("properties")}
+        assert props["abicheck.relevant_finding_count"] == "1"
+
+    def test_missing_contract_respects_show_only(self) -> None:
+        # Regression (Codex review): scoped_missing_labels bypassed
+        # --show-only entirely -- a missing required symbol has no backing
+        # Change/ChangeKind so it can't run through apply_show_only, but a
+        # --show-only run that excludes breaking findings must not still
+        # count/emit a failing testcase for it.
+        r = _make_result([], verdict=Verdict.COMPATIBLE)
+        r.scoped_verdict = Verdict.BREAKING  # type: ignore[attr-defined]
+        r.gate_scope = "used_by"  # type: ignore[attr-defined]
+        r.scoped_relevant_finding_ids = frozenset()  # type: ignore[attr-defined]
+        r.scoped_missing_labels = ("_Z6vanishv",)  # type: ignore[attr-defined]
+        xml_str = to_junit_xml(r, show_only="compatible")
+        root = _parse(xml_str)
+        ts = root.find("testsuite")
+        assert ts.get("failures") == "0"
+        assert ts.get("tests") == "0"
+        assert ts.find("testcase") is None
+
+    def test_missing_contract_shown_when_show_only_includes_breaking(self) -> None:
+        r = _make_result([], verdict=Verdict.COMPATIBLE)
+        r.scoped_verdict = Verdict.BREAKING  # type: ignore[attr-defined]
+        r.gate_scope = "used_by"  # type: ignore[attr-defined]
+        r.scoped_relevant_finding_ids = frozenset()  # type: ignore[attr-defined]
+        r.scoped_missing_labels = ("_Z6vanishv",)  # type: ignore[attr-defined]
+        xml_str = to_junit_xml(r, show_only="breaking")
+        root = _parse(xml_str)
+        ts = root.find("testsuite")
+        assert ts.get("failures") == "1"
+        assert ts.find("testcase") is not None
+
+    def test_scoped_only_change_gets_a_testcase(self) -> None:
+        # Regression (Codex review): scope_diff_to_app synthesizes a fresh
+        # Change (e.g. PE_ORDINAL_RETARGETED) that is relevant to the gate
+        # but never added to result.changes -- without a testcase for it, a
+        # --used-by run that fails solely because of one of these would have
+        # no testcase/failure in the XML to explain it.
+        from abicheck.reporter import _finding_id
+
+        scoped_only = Change(
+            kind=ChangeKind.PE_ORDINAL_RETARGETED,
+            symbol="ordinal:5",
+            description="ordinal 5 retargeted",
+            old_value="OldFunc", new_value="NewFunc",
+        )
+        r = _make_result([], verdict=Verdict.COMPATIBLE)
+        r.scoped_verdict = Verdict.BREAKING  # type: ignore[attr-defined]
+        r.gate_scope = "used_by"  # type: ignore[attr-defined]
+        r.scoped_relevant_finding_ids = frozenset({_finding_id(scoped_only)})  # type: ignore[attr-defined]
+        r.scoped_only_changes = (scoped_only,)  # type: ignore[attr-defined]
+        xml_str = to_junit_xml(r)
+        root = _parse(xml_str)
+        ts = root.find("testsuite")
+        assert ts.get("failures") == "1"
+        tc = ts.find("testcase")
+        assert tc.get("name") == "ordinal:5"
+        assert tc.find("failure") is not None

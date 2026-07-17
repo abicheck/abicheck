@@ -515,7 +515,8 @@ def _emit_scan_report(outcome: ScanOutcome, fmt: str, output: Path | None) -> No
     "build_info",
     type=click.Path(exists=True, path_type=Path),
     default=None,
-    help="Out-of-tree build dir / compile_commands.json / pack supplying L3.",
+    help="Out-of-tree build dir / compile_commands.json / pack supplying "
+    "build context.",
 )
 @click.option(
     "--compile-db",
@@ -549,8 +550,8 @@ def _emit_scan_report(outcome: ScanOutcome, fmt: str, output: Path | None) -> No
     type=DEPTH_PARAM,
     default=None,
     help="Evidence depth to collect -- the single dial, named by what you get: "
-    "binary (L0/L1 symbols only), headers (+L2 AST), build (+L3 build context), "
-    "source (+L4 replay & the L5 graph). Omit for 'auto' (risk-driven when a "
+    "binary (symbols only), headers (+header AST), build (+build context), "
+    "source (+source replay & call graph). Omit for 'auto' (risk-driven when a "
     "--since/--changed-path seed is present, else a sensible default). "
     "--depth source uses changed-path scope when --since/--changed-path is "
     "given, else the current library target -- never a zero-TU no-op.",

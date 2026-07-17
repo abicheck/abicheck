@@ -1041,8 +1041,8 @@ def build_source_dump_options(func: F) -> F:
         type=DEPTH_PARAM,
         default=None,
         help="Evidence-depth dial (same vocabulary as `compare`/`scan --depth`): "
-        "binary=L0/L1 only, headers=+L2 AST (default), build=+L3 build context, "
-        "source=+L4 replay & the L5 graph.",
+        "binary=symbols only, headers=+header AST (default), build=+build "
+        "context, source=+source replay & call graph.",
     )(func)
     func = click.option(
         "--allow-build-query",
@@ -1091,17 +1091,17 @@ def build_source_dump_options(func: F) -> F:
         "sources",
         type=click.Path(exists=True, path_type=Path),
         default=None,
-        help="Source checkout to run L4 source ABI replay + the L5 graph over "
-        "and embed inline. (An existing pack directory — e.g. from the "
-        "abicheck-cc wrapper or Clang plugin — is auto-detected by its "
-        "manifest.json and loaded as that pack instead.)",
+        help="Source checkout to run source-ABI replay and build the call "
+        "graph over, embedding both inline. (An existing pack directory — e.g. "
+        "from the abicheck-cc wrapper or Clang plugin — is auto-detected by "
+        "its manifest.json and loaded as that pack instead.)",
     )(func)
     func = click.option(
         "--build-info",
         "build_info",
         type=click.Path(exists=True, path_type=Path),
         default=None,
-        help="Optional L3 build context: a build dir, a compile_commands.json, "
+        help="Optional build context: a build dir, a compile_commands.json, "
         "or a pre-captured pack. Auto-discovered inside the --sources tree when "
         "omitted.",
     )(func)
@@ -1134,16 +1134,16 @@ def evidence_options(func: F) -> F:
         "depth",
         type=DEPTH_PARAM,
         default=None,
-        help="Evidence-depth dial: binary=L0/L1 only, headers=+L2 AST (default), "
-        "build=+L3, source=+L4 replay & the L5 graph. Deeper-than-headers needs "
-        "--sources or --build-info.",
+        help="Evidence-depth dial: binary=symbols only, headers=+header AST "
+        "(default), build=+build context, source=+source replay & call graph. "
+        "Deeper-than-headers needs --sources or --build-info.",
     )(func)
     func = click.option(
         "--sources",
         "sources",
         multiple=True,
         type=SIDED_SOURCES_PARAM,
-        help="L4/L5 source: a raw source checkout (collected inline at --depth, "
+        help="Source checkout for --depth build/source (collected inline, "
         "embedding build/source/graph facts) or a pre-built `collect` pack, "
         "overriding embedded. Applies to both sides; scope to one with an "
         "'old='/'new=' prefix, repeating the flag per side "
@@ -1154,9 +1154,9 @@ def evidence_options(func: F) -> F:
         "build_info",
         multiple=True,
         type=SIDED_BUILD_INFO_PARAM,
-        help="Out-of-band L3 build-info: a build dir, a compile_commands.json, or "
-        "a pack, overriding embedded. Applies to both sides; scope to one with an "
-        "'old='/'new=' prefix, repeating the flag per side "
+        help="Out-of-band build context: a build dir, a compile_commands.json, "
+        "or a pack, overriding embedded. Applies to both sides; scope to one "
+        "with an 'old='/'new=' prefix, repeating the flag per side "
         "(e.g. --build-info old=b1 --build-info new=b2) (ADR-040).",
     )(func)
     return func
@@ -1387,10 +1387,20 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
 COMPARE_FLAG_BUDGET = COMPARE_FLAG_BUDGET_BASE + len(COMPARE_FLAG_BUDGET_RAISES)
 
 
+#: Navigational meta-options excluded from the flag-count budget: they are
+#: not a per-run analysis input the ADR-037 D10.5 budget is bounding, just a
+#: help-screen escape hatch (G21.8 collapse M2's curated/full `compare --help`
+#: split, mirroring how Click's own auto-added ``--help`` was never a real
+#: ``cmd.params`` entry and so never counted either).
+_HELP_META_OPTION_NAMES = frozenset({"help", "help_all"})
+
+
 def count_visible_options(cmd: object) -> int:
     """Count a Click command's user-visible (non-hidden) options (ADR-037 D10.5)."""
     n = 0
     for p in getattr(cmd, "params", []):
+        if getattr(p, "name", None) in _HELP_META_OPTION_NAMES:
+            continue
         if getattr(p, "param_type_name", None) == "option" and not getattr(
             p, "hidden", False
         ):
@@ -1417,8 +1427,16 @@ COMPARE_PROFILES: dict[str, dict[str, object]] = {
         "exit_code_scheme": "severity",
     },
     # Release cut: deepest evidence, full Markdown report with a semver/SONAME
-    # recommendation appended — the "should I bump?" flow.
-    "release": {
+    # recommendation appended — the "should I bump?" flow. Named "release-cut"
+    # rather than bare "release" (CLI audit finding): compare's directory/
+    # package fan-out mode is *also* informally branded "release" throughout
+    # (compare_release_cmd, release_options, the "Release (directory/package
+    # inputs)" help panel) -- an unrelated concept that shares only the word.
+    # `_profile_targets_set_input` already rejects `--profile` on a directory/
+    # package operand with a clear error, so the collision was never a live
+    # bug, but a user skimming --help could reasonably (and wrongly) assume
+    # the two are related.
+    "release-cut": {
         "depth": "source",
         "fmt": "markdown",
         "recommend": True,
@@ -1468,9 +1486,12 @@ def profile_option(func: F) -> F:
         default=None,
         help="Run-profile preset bundling workflow defaults (ADR-040): "
         "'ci-gate' (headers depth, review digest, severity exit codes), "
-        "'release' (source depth, recommendation, Markdown), 'quick' "
-        "(symbols-only, one-line summary). Explicit flags override the profile; "
-        "single-pair compares only (configure release defaults in .abicheck.yml).",
+        "'release-cut' (source depth, recommendation, Markdown -- the "
+        "'should I bump semver?' flow; distinct from directory/package "
+        "'release' comparisons, which this profile does not apply to), "
+        "'quick' (symbols-only, one-line summary). Explicit flags override "
+        "the profile; single-pair compares only (configure release defaults "
+        "in .abicheck.yml).",
     )(func)
     return func
 

@@ -88,7 +88,7 @@ for `auto` (risk-driven, best paired with `since:`):
     As of the ADR-043 pre-1.0 CLI reset all three are removed outright, not
     deprecated — the CLI's `--depth` no longer accepts `full`/`--mode`/
     `--source-method`/`--max` at all (a plain usage error). Use `depth`
-    (or `audit: 'true'`); `full` collapsed into `source`, since the two only
+    (omitting `against`/`abi-baseline` for an audit-only run); `full` collapsed into `source`, since the two only
     ever differed in replay *scope*, and an unseeded `depth: source` already
     resolves to the whole target. The mapping from the old axes is in the
     [Removed scan axes appendix](../concepts/evidence-and-detectability.md#appendix-removed-scan-axes-s0s6-mode-source-method-max).
@@ -105,14 +105,15 @@ Useful as a standing lint on the default branch:
           new-library: build/libfoo.so
           new-header: include/
           sources: .
-          audit: 'true'
+          # No `against`/`abi-baseline` on this step -- scan already runs
+          # audit-only whenever no baseline is given.
 ```
 
 ### Estimate cost before committing to a depth
 
-`estimate: 'true'` is a dry run — it prints the projected per-layer cost (TU
-count, seconds) and scans nothing, always exiting 0. Handy when sizing a budget
-for a large repo:
+`dry-run: 'true'` prints the resolved depth/scope and, in scan mode, the
+projected per-layer cost (TU count, seconds) — without scanning anything,
+always exiting 0. Handy when sizing a budget for a large repo:
 
 ```yaml
       - uses: abicheck/abicheck@v0.3.0
@@ -122,7 +123,7 @@ for a large repo:
           new-header: include/
           sources: .
           depth: source
-          estimate: 'true'
+          dry-run: 'true'
 ```
 
 ### Gate CI on a specific cross-source check

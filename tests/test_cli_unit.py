@@ -159,6 +159,75 @@ class TestResolveDemangle:
         assert _resolve_demangle("markdown", False) is False
 
 
+# ── _resolve_compare_collect_mode (CLI-audit P1: --depth inference) ──────
+#
+# Precedence: explicit --depth > .abicheck.yml source.method > inferred from
+# raw --sources/--build-info > off. Before this fix, omitting --depth always
+# resolved to "off" even when --old-sources/--new-sources/--build-info were
+# explicitly given, so those inputs were silently ignored.
+
+class TestResolveCompareCollectMode:
+    def _call(self, depth=None, source_method=None, old_sources=None,
+              new_sources=None, old_build_info=None, new_build_info=None):
+        from abicheck.cli_compare_helpers import _resolve_compare_collect_mode
+
+        return _resolve_compare_collect_mode(
+            depth, source_method, old_sources, new_sources,
+            old_build_info, new_build_info,
+        )
+
+    def test_no_depth_no_inputs_is_off(self):
+        mode, label = self._call()
+        assert mode == "off"
+        assert "off" in label
+
+    def test_sources_given_no_depth_infers_source(self, tmp_path):
+        mode, label = self._call(old_sources=tmp_path / "src")
+        assert mode == "source-target"
+        assert "inferred" in label
+
+    def test_new_sources_alone_also_infers_source(self, tmp_path):
+        mode, _ = self._call(new_sources=tmp_path / "src")
+        assert mode == "source-target"
+
+    def test_build_info_given_no_depth_infers_build(self, tmp_path):
+        mode, label = self._call(old_build_info=tmp_path / "build")
+        assert mode == "build"
+        assert "inferred" in label
+
+    def test_sources_takes_precedence_over_build_info_when_both_given(self, tmp_path):
+        mode, _ = self._call(
+            old_sources=tmp_path / "src", old_build_info=tmp_path / "build",
+        )
+        assert mode == "source-target"
+
+    def test_explicit_depth_wins_over_inference(self, tmp_path):
+        # --depth binary explicitly requested despite raw --sources: the
+        # explicit choice must still suppress collection (with the CLI's own
+        # "ignoring it" warning), not be silently overridden by inference.
+        mode, label = self._call(depth="binary", old_sources=tmp_path / "src")
+        assert mode == "off"
+        assert "--depth binary" in label
+
+    def test_config_source_method_wins_over_inference(self, tmp_path):
+        # .abicheck.yml source.method applies when no --depth was given, even
+        # if raw --sources are also present (config > bare inference).
+        mode, label = self._call(source_method="s1", old_sources=tmp_path / "src")
+        assert mode == "build"
+        assert "source.method=s1" in label
+
+    def test_explicit_depth_wins_over_config_source_method(self, tmp_path):
+        mode, label = self._call(depth="source", source_method="s1")
+        assert mode == "source-target"
+        assert "--depth source" in label
+
+    def test_invalid_source_method_raises_usage_error(self):
+        import click
+
+        with pytest.raises(click.UsageError, match="source.method"):
+            self._call(source_method="not-a-method")
+
+
 # ── compare --secondary-format/--secondary-output ───────────────────────
 
 class TestCompareSecondaryFormat:
@@ -263,6 +332,22 @@ class TestCompareSecondaryFormat:
         ])
         assert result.exit_code == 64
         assert "--secondary-output must differ from --output/-o" in result.output
+
+    def test_dry_run_rejects_secondary_output(self, tmp_path):
+        # Regression (CLI-audit P2): --dry-run promises no output-file side
+        # effect and already rejects -o/--output, but --secondary-output was
+        # accepted and then silently never written (the dry run exits before
+        # the secondary render runs) — reject it the same way.
+        old_p, new_p = _write_snapshots(tmp_path)
+        secondary_out = tmp_path / "secondary.json"
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "compare", str(old_p), str(new_p), "--dry-run",
+            "--secondary-format", "json", "--secondary-output", str(secondary_out),
+        ])
+        assert result.exit_code == 64
+        assert "--dry-run cannot be combined with --secondary-output" in result.output
+        assert not secondary_out.exists()
 
 
 # ── compare with suppression ────────────────────────────────────────────

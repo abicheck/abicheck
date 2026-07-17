@@ -265,7 +265,7 @@ class TestSmallHelpers:
         runner = CliRunner()
         compare_help = runner.invoke(main, ["compare", "--help"]).output
         assert "Per-side overrides" in compare_help
-        assert "Build/source evidence" in compare_help
+        assert "Build & source evidence" in compare_help
         dump_help = runner.invoke(main, ["dump", "--help"]).output
         assert "Toolchain" in dump_help and "Provenance" in dump_help
 
@@ -1136,7 +1136,10 @@ class TestUsedByScoping:
 
         monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", lambda *a, **k: result)
 
-    def _result(self, *, verdict=Verdict.COMPATIBLE, missing=None, breaking_for_app=None):
+    def _result(
+        self, *, verdict=Verdict.COMPATIBLE, missing=None, missing_versions=None,
+        breaking_for_app=None,
+    ):
         from abicheck.appcompat import AppCompatResult
 
         return AppCompatResult(
@@ -1147,7 +1150,7 @@ class TestUsedByScoping:
             required_symbol_count=1,
             breaking_for_app=breaking_for_app or [],
             missing_symbols=missing or [],
-            missing_versions=[],
+            missing_versions=missing_versions or [],
             verdict=verdict,
             symbol_coverage=100.0,
         )
@@ -1192,6 +1195,41 @@ class TestUsedByScoping:
         assert out.exists()
         assert "Report written to" in result.output
 
+    def test_default_markdown_names_uncovered_missing_symbol(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Codex review: the default (markdown) report must name the actual
+        missing symbol, not just its count -- otherwise a human reading the
+        default output has no way to tell which symbol broke the gate."""
+        res = self._result(
+            verdict=Verdict.BREAKING, missing=["foo_removed"],
+            missing_versions=["FOO_1.2"],
+        )
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke("compare", str(old), str(new), "--used-by", str(app))
+        assert result.exit_code == 4
+        assert "missing symbol: `foo_removed`" in result.output
+        assert "missing version: `FOO_1.2`" in result.output
+        assert "## Additional scoped-gate findings" in result.output
+        assert "`foo_removed` is required but missing from the new library" in result.output
+
+    def test_default_markdown_names_scoped_only_change(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Codex review: a scoped-only Change (e.g. PE_ORDINAL_RETARGETED,
+        relevant to the gate but never added to result.changes) must be named
+        in the default text report too, mirroring the JSON/SARIF/JUnit fold-in."""
+        scoped_change = Change(
+            ChangeKind.PE_ORDINAL_RETARGETED, "MyExport", "ordinal changed from 5 to 7",
+        )
+        res = self._result(verdict=Verdict.BREAKING, breaking_for_app=[scoped_change])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke("compare", str(old), str(new), "--used-by", str(app))
+        assert "## Additional scoped-gate findings" in result.output
+        assert "pe_ordinal_retargeted: ordinal changed from 5 to 7" in result.output
+
     def test_severity_missing_symbols_default_preset_floors_at_4(
         self, tmp_path, monkeypatch
     ) -> None:
@@ -1231,6 +1269,56 @@ class TestUsedByScoping:
         assert result.exit_code == 4
         data = json.loads(result.stdout)
         assert data["severity"]["categories"]["abi_breaking"]["count"] == 1
+
+    def test_sarif_missing_symbol_covered_by_change_not_double_synthesized(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Regression (Codex review): "_Z3foov" is both a missing symbol
+        # (absent from new's exports) *and* the subject of a real, scoped
+        # FUNC_REMOVED Change in the actual diff -- the SARIF report must
+        # show one result for it, not two (the real Change plus a synthetic
+        # missing-contract entry double-reporting the same break).
+        from abicheck import dumper as dumper_mod
+
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        old = tmp_path / "old.so"
+        old.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        new = tmp_path / "new.so"
+        new.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        old_snap = _snap("1.0", library="libfoo.so")  # has foo/_Z3foov
+        new_snap = _snap("2.0", library="libfoo.so", funcs=[])  # foo removed
+        monkeypatch.setattr(
+            dumper_mod, "dump", MagicMock(side_effect=[old_snap, new_snap])
+        )
+
+        # Extract the REAL diff's FUNC_REMOVED Change (not a hand-built stub
+        # with different description/old_value text) so its finding id
+        # genuinely matches the one in result.changes -- otherwise the dedup
+        # this test targets would never engage, since _finding_id is content-
+        # based, not id()-based.
+        def _scoped_for(diff, *_args, **_kwargs):
+            from abicheck.appcompat import AppCompatResult
+
+            real_change = next(c for c in diff.changes if c.kind == ChangeKind.FUNC_REMOVED)
+            return AppCompatResult(
+                app_path="/app", old_lib_path=str(old), new_lib_path=str(new),
+                required_symbols={"_Z3foov"}, required_symbol_count=1,
+                missing_symbols=["_Z3foov"],
+                breaking_for_app=[real_change],
+                verdict=Verdict.BREAKING,
+            )
+
+        import abicheck.appcompat as appcompat_mod
+
+        monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", _scoped_for)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app), "--format", "sarif",
+        )
+        data = json.loads(result.stdout)
+        sarif_results = data["runs"][0]["results"]
+        assert len(sarif_results) == 1
+        assert sarif_results[0]["ruleId"] == "func_removed"
 
     def test_severity_missing_symbols_only_floors_at_4(
         self, tmp_path, monkeypatch
@@ -1350,6 +1438,47 @@ class TestUsedByScoping:
             app_path="/app2", old_lib_path="old.so", new_lib_path="new.so",
             required_symbols={"foo"}, required_symbol_count=1,
             breaking_for_app=[shared_change], verdict=Verdict.BREAKING,
+        )
+        app1, old, new = self._setup(tmp_path, monkeypatch)
+        app2 = tmp_path / "app2"
+        app2.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        monkeypatch.setattr(
+            appcompat_mod, "scope_diff_to_app",
+            MagicMock(side_effect=[res1, res2]),
+        )
+        result = _invoke(
+            "compare", str(old), str(new),
+            "--used-by", str(app1), "--used-by", str(app2),
+            "--severity-preset", "default", "--format", "json",
+        )
+        data = json.loads(result.stdout)
+        assert result.exit_code == 4
+        assert data["severity"]["categories"]["abi_breaking"]["count"] == 1
+
+    def test_multi_app_semantically_identical_change_not_double_counted(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Regression (CLI-audit P2): unlike the shared-object case above,
+        # `appcompat._check_pe_ordinal_imports` constructs a FRESH
+        # PE_ORDINAL_RETARGETED Change per `scope_diff_to_app` call, so two
+        # apps retargeting the same ordinal get two distinct Change objects
+        # with identical kind/symbol/description but different id() -- the
+        # old id()-keyed dedup in `_apply_used_by_scoping` would count that
+        # as two findings instead of one.
+        import abicheck.appcompat as appcompat_mod
+        from abicheck.appcompat import AppCompatResult
+
+        res1 = AppCompatResult(
+            app_path="/app1", old_lib_path="old.so", new_lib_path="new.so",
+            required_symbols={"foo"}, required_symbol_count=1,
+            breaking_for_app=[Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")],
+            verdict=Verdict.BREAKING,
+        )
+        res2 = AppCompatResult(
+            app_path="/app2", old_lib_path="old.so", new_lib_path="new.so",
+            required_symbols={"foo"}, required_symbol_count=1,
+            breaking_for_app=[Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")],
+            verdict=Verdict.BREAKING,
         )
         app1, old, new = self._setup(tmp_path, monkeypatch)
         app2 = tmp_path / "app2"
@@ -1496,6 +1625,201 @@ class TestUsedByScoping:
         assert data["full_severity"]["blocking"] is True
         assert "abi_breaking" in data["full_severity"]["blocking_categories"]
         assert data["full_severity"]["categories"]["abi_breaking"]["count"] == 1
+
+    def test_json_scoped_only_change_is_included_in_changes(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Regression (Codex review): scope_diff_to_app can synthesize a fresh
+        # Change (e.g. PE_ORDINAL_RETARGETED) that is relevant to the gate but
+        # never lands in result.changes -- SARIF/JUnit already fold this into
+        # their own rendering (scoped_only_changes), but the JSON `changes`
+        # array (which the GitHub Action's `--on changes` PR-comment gate
+        # buckets off directly) did not, so a --used-by run whose only gated
+        # issue is one of these reported an empty `changes` array despite a
+        # nonzero scoped exit code.
+        scoped_only = Change(
+            kind=ChangeKind.PE_ORDINAL_RETARGETED,
+            symbol="ordinal:5",
+            description="ordinal 5 retargeted",
+            old_value="OldFunc", new_value="NewFunc",
+        )
+        res = self._result(verdict=Verdict.BREAKING, breaking_for_app=[scoped_only])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
+        )
+        assert result.exit_code == 4
+        data = json.loads(result.stdout)
+        assert data["full_verdict"] == "NO_CHANGE"
+        assert data["verdict"] == "BREAKING"
+        kinds = [c["kind"] for c in data["changes"]]
+        assert "pe_ordinal_retargeted" in kinds
+        entry = next(c for c in data["changes"] if c["kind"] == "pe_ordinal_retargeted")
+        assert entry["symbol"] == "ordinal:5"
+
+    def test_json_uncovered_missing_symbol_is_included_in_changes(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Same gap as above, for a missing required symbol/version with no
+        # backing Change at all (scoped_missing_labels, not scoped_only_changes).
+        res = self._result(verdict=Verdict.BREAKING, missing=["needed_symbol"])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
+        )
+        assert result.exit_code == 4
+        data = json.loads(result.stdout)
+        entry = next(
+            c for c in data["changes"] if c["kind"] == "used_by_missing_symbol"
+        )
+        assert entry["symbol"] == "needed_symbol"
+        assert entry["blocks_gate"] is True
+
+    def test_json_uncovered_missing_symbol_not_blocking_under_demoted_severity(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # A missing-contract entry must not claim blocks_gate=True when a
+        # severity config demotes abi_breaking below error (mirrors the
+        # SARIF/JUnit severity-aware missing-contract handling).
+        res = self._result(verdict=Verdict.BREAKING, missing=["needed_symbol"])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
+            "--severity-abi-breaking", "warning",
+        )
+        data = json.loads(result.stdout)
+        entry = next(
+            c for c in data["changes"] if c["kind"] == "used_by_missing_symbol"
+        )
+        assert entry["blocks_gate"] is False
+        assert entry["severity"] == "compatible"
+
+    def test_json_scoped_only_change_respects_show_only(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Regression (Codex review): to_json's own --show-only filtering
+        # only ever touched result.changes -- scoped_only_changes were
+        # appended to the JSON `changes` array unconditionally afterward, so
+        # a --used-by --show-only run could re-surface a finding the filter
+        # was supposed to exclude (mirrors the identical sarif.to_sarif fix).
+        scoped_only = Change(
+            kind=ChangeKind.PE_ORDINAL_RETARGETED,
+            symbol="ordinal:5",
+            description="ordinal 5 retargeted",
+            old_value="OldFunc", new_value="NewFunc",
+        )
+        res = self._result(verdict=Verdict.BREAKING, breaking_for_app=[scoped_only])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
+            "--show-only", "compatible",
+        )
+        data = json.loads(result.stdout)
+        kinds = [c["kind"] for c in data["changes"]]
+        assert "pe_ordinal_retargeted" not in kinds
+
+    def test_json_missing_symbol_respects_show_only(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Regression (Codex review): a missing-contract label has no backing
+        # Change/ChangeKind so it can't run through apply_show_only -- but a
+        # --show-only run that excludes breaking findings must still not
+        # include the (default-blocking) missing-contract entry.
+        res = self._result(verdict=Verdict.BREAKING, missing=["needed_symbol"])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
+            "--show-only", "compatible",
+        )
+        data = json.loads(result.stdout)
+        kinds = [c["kind"] for c in data["changes"]]
+        assert "used_by_missing_symbol" not in kinds
+
+    def test_json_missing_symbol_shown_when_show_only_includes_breaking(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        res = self._result(verdict=Verdict.BREAKING, missing=["needed_symbol"])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
+            "--show-only", "breaking",
+        )
+        data = json.loads(result.stdout)
+        kinds = [c["kind"] for c in data["changes"]]
+        assert "used_by_missing_symbol" in kinds
+
+
+class TestFoldEvidenceDepthOutOfBandPack:
+    """``_fold_evidence_depth_into_json`` with an out-of-band pack directory.
+
+    Regression (Codex review): an out-of-band ``--old/new-build-info``/
+    ``--old/new-sources`` *pack directory* (as opposed to a raw checkout,
+    which gets embedded into the snapshot before this point) is resolved via
+    ``_resolve_side_pack`` inside ``prepare_embedded_build_source`` /
+    ``diff_embedded_build_source`` but never attached back onto the snapshot
+    object itself -- so reading only ``snap.build_source`` for the JSON
+    ``old_evidence_depth``/``new_evidence_depth`` fields reported the
+    snapshot's own (absent) embedded depth instead of the pack that was
+    actually used to produce the comparison's build/source findings.
+    """
+
+    def test_out_of_band_pack_depth_beats_absent_embedded_snapshot(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        import json as json_mod
+
+        from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.cli_compare_helpers import _fold_evidence_depth_into_json
+
+        old_snap = _snap("1.0", library="libfoo.so")
+        new_snap = _snap("2.0", library="libfoo.so")
+        assert old_snap.build_source is None
+        assert new_snap.build_source is None
+
+        pack = BuildSourcePack(
+            root=tmp_path,
+            build_evidence=BuildEvidence(
+                compile_units=[CompileUnit(id="cu1", source="a.c")]
+            ),
+        )
+        monkeypatch.setattr(
+            "abicheck.cli_buildsource_helpers._resolve_side_pack",
+            lambda build_info, sources, snap: pack,
+        )
+
+        text = json_mod.dumps({"changes": []})
+        result_text = _fold_evidence_depth_into_json(
+            text, "json", old_snap, new_snap,
+            old_build_info=tmp_path / "old_build", new_build_info=tmp_path / "new_build",
+        )
+        data = json_mod.loads(result_text)
+        assert data["old_evidence_depth"] == "build"
+        assert data["new_evidence_depth"] == "build"
+
+    def test_no_pack_args_falls_back_to_snapshot_embedded_depth(self) -> None:
+        # Without --old/new-build-info/--old/new-sources, behavior is
+        # unchanged: depth comes straight from each snapshot's own embedded
+        # build_source (or absence thereof).
+        import json as json_mod
+
+        from abicheck.cli_compare_helpers import _fold_evidence_depth_into_json
+
+        old_snap = _snap("1.0", library="libfoo.so")
+        new_snap = _snap("2.0", library="libfoo.so")
+        new_snap.from_headers = True
+
+        text = json_mod.dumps({"changes": []})
+        result_text = _fold_evidence_depth_into_json(text, "json", old_snap, new_snap)
+        data = json_mod.loads(result_text)
+        assert data["old_evidence_depth"] == "binary"
+        assert data["new_evidence_depth"] == "headers"
 
 
 class TestUsedByScopingWithSnapshotInputs:

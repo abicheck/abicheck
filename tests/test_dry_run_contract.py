@@ -104,6 +104,31 @@ class TestCompareDryRun:
         assert _CONTRACT_FOOTER in first.output
         assert "Command: compare" in first.output
 
+    def test_reports_effective_depth_not_just_raw_requested(self, tmp_path: Path) -> None:
+        # Regression (CLI-audit P1/P2): a dry run must report the *effective*
+        # depth the real run will use, not just echo back the raw --depth
+        # string. With no --depth given but a raw --sources tree, the real
+        # run now infers "source" (see TestResolveCompareCollectMode) --
+        # the dry run must show that inference, not "requested depth: (not
+        # given)" alone with no indication of what will actually happen.
+        old = tmp_path / "old.abi.json"
+        new = tmp_path / "new.abi.json"
+        _write_snapshot(old, "1.0")
+        _write_snapshot(new, "2.0")
+        tree = tmp_path / "src"
+        tree.mkdir()
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old), str(new), "--dry-run",
+                "--sources", "old=" + str(tree),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "requested depth: (not given)" in result.output
+        assert "effective depth: source" in result.output
+        assert "inferred" in result.output
+
 
 class TestDepsTreeDryRun:
     def test_writes_nothing_and_rejects_output(self, tmp_path: Path) -> None:

@@ -39,7 +39,9 @@ from abicheck.checker_policy import (
     policy_for,
 )
 from abicheck.report_model import VERDICT_TO_SARIF_LEVEL as _VERDICT_TO_SARIF_LEVEL
-from abicheck.reporter import apply_show_only
+from abicheck.reporter import _finding_id, apply_show_only
+from abicheck.reporter_markdown import ShowOnlyFilter
+from abicheck.severity import missing_contract_exit_code
 
 if TYPE_CHECKING:
     from abicheck.severity import SeverityConfig
@@ -182,12 +184,46 @@ def _rule_for(kind: ChangeKind) -> dict[str, Any]:
     }
 
 
+def _missing_contract_rule(rule_id: str) -> dict[str, Any]:
+    """Produce a SARIF reportingDescriptor for a synthetic missing-contract rule id.
+
+    Mirrors :func:`_rule_for`'s shape so ``used_by_missing_symbol``/
+    ``required_symbol_missing`` results carry the same rule metadata as any
+    other -- without a matching entry in ``tool.driver.rules``, a SARIF
+    consumer that resolves annotations by rule id would have no metadata for
+    these synthetic findings (Codex review).
+    """
+    return {
+        "id": rule_id,
+        "name": "".join(w.capitalize() for w in rule_id.split("_")),
+        "shortDescription": {"text": rule_id.replace("_", " ").capitalize()},
+        "fullDescription": {
+            "text": "A required symbol/version/entrypoint is missing from the new library."
+        },
+        "helpUri": "https://github.com/abicheck/abicheck/blob/main/docs/reference/exit-codes.md",
+        "defaultConfiguration": {"level": "error"},
+        "properties": {"tags": ["abi", "binary-compatibility", "missing-contract"]},
+    }
+
+
 def _result_for(
     change: Change,
     result: DiffResult,
     severity_config: SeverityConfig | None = None,
+    *,
+    relevant_ids: frozenset[str] | None = None,
 ) -> dict[str, Any]:
-    """Produce a SARIF result object for a Change."""
+    """Produce a SARIF result object for a Change.
+
+    *relevant_ids*, when not ``None``, means a ``--used-by``/``--required-symbol``
+    gate is active: a change whose :func:`_finding_id` is absent from the set is
+    not relevant to that gate, so its ``level`` is downgraded to ``"note"``
+    (informational, never blocks the scoped gate) regardless of its own
+    computed severity, and its ``properties.relevantToGate`` is set to
+    ``false`` so a consumer can distinguish "not severe" from "out of scope"
+    (CLI-audit P1: SARIF result levels must follow the scoped gate, not just
+    the full-library verdict).
+    """
     library, old_version, new_version = (
         result.library,
         result.old_version,
@@ -233,9 +269,16 @@ def _result_for(
     if evidence_status is not None:
         properties["evidenceStatus"] = evidence_status.value
 
+    level = _severity(change, result, severity_config)
+    if relevant_ids is not None:
+        is_relevant = _finding_id(change) in relevant_ids
+        properties["relevantToGate"] = is_relevant
+        if not is_relevant:
+            level = "note"
+
     return {
         "ruleId": change.kind.value,
-        "level": _severity(change, result, severity_config),
+        "level": level,
         "message": {
             "text": " ".join(msg_parts),
         },
@@ -290,20 +333,66 @@ def _severity_gate_properties(
     }
 
 
+def _missing_contract_result(
+    label: str, gate_scope: str, severity_config: SeverityConfig | None,
+) -> dict[str, Any]:
+    """Synthesize a SARIF result for a missing required symbol/version/entrypoint.
+
+    A required contract member absent from the new library (--used-by's
+    ``missing_symbols``/``missing_versions``, or --required-symbol's
+    ``missing_entrypoints``) has no backing diff ``Change`` -- it was never in
+    ``result.changes`` to begin with, so :func:`_result_for` never emits it.
+    Without a synthetic result the gate's own ``exitCode`` could be a nonzero
+    (BREAKING) value while ``results`` shows nothing to explain it (CLI-audit
+    P1).
+
+    The level must follow the same severity decision as the gate's own exit
+    code (:func:`abicheck.severity.missing_contract_exit_code`, the function
+    ``_scoped_exit_code`` floors on): under the legacy scheme (no
+    *severity_config*) a missing contract member is unconditionally BREAKING,
+    but under a severity scheme that demotes ``abi_breaking`` (e.g.
+    ``--severity-preset info-only``), the scoped exit code can be 0 for the
+    same missing member -- emitting ``level: "error"`` regardless would let a
+    SARIF/code-scanning consumer flag/block a finding the gate itself passed
+    (Codex review).
+    """
+    rule_id = (
+        "used_by_missing_symbol" if gate_scope == "used_by" else "required_symbol_missing"
+    )
+    blocks = (
+        severity_config is None
+        or missing_contract_exit_code(severity_config) != 0
+    )
+    return {
+        "ruleId": rule_id,
+        "level": "error" if blocks else "note",
+        "message": {
+            "text": f"Required symbol/version '{label}' is missing from the new library.",
+        },
+        # relevantToGate is always true here -- a missing-contract member is
+        # in the --used-by/--required-symbol scope by construction, distinct
+        # from whether severity config makes it block (`blocksGate`). The two
+        # axes are orthogonal: severity decides blocking, not scope
+        # membership (CodeRabbit review).
+        "properties": {
+            "relevantToGate": True,
+            "blocksGate": blocks,
+            "missingContractMember": label,
+        },
+    }
+
+
 def _scoped_gate_properties(result: DiffResult) -> dict[str, Any] | None:
     """Build a ``scopedGate`` block when ``--used-by``/``--required-symbol(s)``
     scoping was requested (ADR-043).
 
-    The invocation's ``exitCode``/results above stay computed from the full,
-    unscoped library verdict (``result.verdict``) -- SARIF's binary/structured
-    contract intentionally keeps that authoritative for tooling that only
-    reads this format. But the actual CLI process exits on the *scoped*
-    verdict floor when scoping is requested, which can legitimately disagree
-    with the full-library verdict this document reports. Without this block a
-    SARIF consumer had no way to discover that disagreement -- this makes it
-    auditable in the document itself, mirroring the human-format banner
-    (``_fold_scoped_compat_into_text``) without changing SARIF's own gating
-    semantics.
+    The scoped gate (``result.scoped_verdict``/``scoped_exit_code``) is
+    authoritative for this document's own ``invocations[0].exitCode`` and each
+    result's ``level`` (CLI-audit P1 fix) -- ``result.verdict`` (the full,
+    unscoped library verdict) is still reported here as ``fullLibraryVerdict``
+    for context, but no longer drives what SARIF consumers treat as
+    blocking. This block also carries the relevant/unrelated finding counts so
+    a consumer can see how many of ``results`` actually gated this run.
     """
     scoped_verdict = getattr(result, "scoped_verdict", None)
     if scoped_verdict is None:
@@ -312,29 +401,31 @@ def _scoped_gate_properties(result: DiffResult) -> dict[str, Any] | None:
     required_symbols = getattr(result, "required_symbols", None)
     scoped_exit_code = getattr(result, "scoped_exit_code", None)
     scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
-    # Under a severity scheme the scoped exit code is NOT a fixed
-    # BREAKING->4/API_BREAK->2 mapping of scopedVerdict -- e.g.
-    # --severity-preset info-only can floor it at 0 even for a BREAKING
-    # scopedVerdict (Codex review) -- so state the actual computed value and
-    # scheme rather than implying a verdict->exit-code equivalence that only
-    # holds under the legacy scheme.
-    note = (
-        f"The CLI process exits {scoped_exit_code} under the "
-        f"{scoped_exit_code_scheme} exit-code scheme for this "
-        f"--used-by/--required-symbol run -- this may differ from both "
-        f"scopedVerdict's legacy-scheme mapping and this document's own "
-        f"exitCode/results (which stay computed from the full library)."
-        if scoped_exit_code is not None
-        else "The CLI process exit code for this --used-by/--required-symbol "
-        "run may differ from this document's own exitCode/results (which "
-        "stay computed from the full library)."
-    )
+    gate_scope = getattr(result, "gate_scope", None)
+    relevant_ids = getattr(result, "scoped_relevant_finding_ids", None) or frozenset()
+    relevant_in_changes = sum(1 for c in result.changes if _finding_id(c) in relevant_ids)
+    # scoped-only changes (e.g. PE_ORDINAL_RETARGETED) and missing-contract
+    # members are relevant by construction -- they exist only because
+    # scope_diff_to_app/scope_diff_to_required_symbols found them relevant --
+    # and are never in result.changes, so they don't affect unrelatedFindingCount
+    # (which counts only irrelevant entries *within* result.changes) but do
+    # count toward relevantFindingCount (CodeRabbit review).
+    scoped_only_count = len(getattr(result, "scoped_only_changes", ()) or ())
+    missing_count = len(getattr(result, "scoped_missing_labels", ()) or ())
+    relevant_count = relevant_in_changes + scoped_only_count + missing_count
     block: dict[str, Any] = {
-        "scopedVerdict": scoped_verdict.value,
+        "gateScope": gate_scope,
+        "gateVerdict": scoped_verdict.value,
         "fullLibraryVerdict": result.verdict.value,
-        "note": note,
+        "relevantFindingCount": relevant_count,
+        "unrelatedFindingCount": len(result.changes) - relevant_in_changes,
+        # Back-compat alias for the block's original field name.
+        "scopedVerdict": scoped_verdict.value,
     }
     if scoped_exit_code is not None:
+        block["gateExitCode"] = scoped_exit_code
+        block["gateExitCodeScheme"] = scoped_exit_code_scheme
+        # Back-compat aliases.
         block["scopedExitCode"] = scoped_exit_code
         block["scopedExitCodeScheme"] = scoped_exit_code_scheme
     if used_by is not None:
@@ -385,11 +476,76 @@ def to_sarif(
     rules_seen: dict[str, dict[str, Any]] = {}
     sarif_results: list[dict[str, Any]] = []
 
+    # When --used-by/--required-symbol scoping is active, relevant_ids makes
+    # each result's own level follow the scoped gate rather than the full
+    # library verdict (CLI-audit P1 fix); None means no scoping is active, so
+    # _result_for's existing full-library severity computation is unchanged.
+    relevant_ids = getattr(result, "scoped_relevant_finding_ids", None)
     for change in changes:
         rule_id = change.kind.value
         if rule_id not in rules_seen:
             rules_seen[rule_id] = _rule_for(change.kind)
-        sarif_results.append(_result_for(change, result, severity_config))
+        sarif_results.append(
+            _result_for(change, result, severity_config, relevant_ids=relevant_ids)
+        )
+
+    # Scoped-only changes: `scope_diff_to_app`/`scope_diff_to_required_symbols`
+    # can synthesize a Change (e.g. PE_ORDINAL_RETARGETED) that is relevant to
+    # the gate but was never added to `result.changes` -- without rendering
+    # these too, a --used-by run that fails solely because of one of these
+    # would report a nonzero gate exitCode with zero results to explain it
+    # (Codex review). Run them through the same `--show-only` filter as
+    # `result.changes` above -- otherwise a `--show-only additions` run would
+    # still upload a scoped-only breaking result the user explicitly asked
+    # to filter out, unlike the normal `result.changes` path (Codex review
+    # follow-up).
+    scoped_only_changes = list(getattr(result, "scoped_only_changes", ()) or ())
+    if show_only and scoped_only_changes:
+        scoped_only_changes = apply_show_only(
+            scoped_only_changes,
+            show_only,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
+    for change in scoped_only_changes:
+        rule_id = change.kind.value
+        if rule_id not in rules_seen:
+            rules_seen[rule_id] = _rule_for(change.kind)
+        sarif_results.append(
+            _result_for(change, result, severity_config, relevant_ids=relevant_ids)
+        )
+
+    gate_scope = getattr(result, "gate_scope", None)
+    if gate_scope is not None:
+        # A missing-contract label has no backing Change/ChangeKind, so it
+        # can't run through apply_show_only (which resolves severity via
+        # effective_verdict_for_change) -- but --show-only's severity
+        # dimension still applies: without this, a --show-only run that
+        # excludes breaking findings would still upload an `error`-level
+        # missing-contract result the filter was meant to exclude (Codex
+        # review follow-up to the scoped_only_changes show-only fix above).
+        # Element/action tokens don't cleanly apply to "a symbol is simply
+        # absent", so only the severity dimension is checked here.
+        missing_severity = (
+            "breaking"
+            if severity_config is None or missing_contract_exit_code(severity_config) != 0
+            else "compatible"
+        )
+        show_only_severities = (
+            ShowOnlyFilter.parse(show_only).severities if show_only else frozenset()
+        )
+        if not show_only_severities or missing_severity in show_only_severities:
+            for label in getattr(result, "scoped_missing_labels", ()) or ():
+                rule_id = (
+                    "used_by_missing_symbol" if gate_scope == "used_by"
+                    else "required_symbol_missing"
+                )
+                if rule_id not in rules_seen:
+                    rules_seen[rule_id] = _missing_contract_rule(rule_id)
+                sarif_results.append(
+                    _missing_contract_result(label, gate_scope, severity_config)
+                )
 
     severity_gate = (
         _severity_gate_properties(result, severity_config)
@@ -397,6 +553,7 @@ def to_sarif(
         else None
     )
     scoped_gate = _scoped_gate_properties(result)
+    scoped_exit_code = getattr(result, "scoped_exit_code", None)
 
     return {
         "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
@@ -423,9 +580,16 @@ def to_sarif(
                         # exits 0 — binary-compatible, deployment risk is surfaced
                         # via exitCodeDescription only. When severity_config *is*
                         # given, the exit code instead follows the severity-aware
-                        # gate (severityGate.exitCode below) — see docstring.
+                        # gate (severityGate.exitCode below). When --used-by/
+                        # --required-symbol scoping is active, the scoped gate
+                        # wins over both — it's what the CLI process actually
+                        # exits with (CLI-audit P1 fix; matches
+                        # cli_compare_helpers.run_compare's unconditional
+                        # sys.exit(scoped_exit_code) when scoping was requested).
                         "exitCode": (
-                            severity_gate["exitCode"]
+                            scoped_exit_code
+                            if scoped_exit_code is not None
+                            else severity_gate["exitCode"]
                             if severity_gate is not None
                             else (
                                 4
@@ -436,7 +600,9 @@ def to_sarif(
                             )
                         ),
                         "exitCodeDescription": (
-                            f"{result.verdict.value} (severity-gated)"
+                            f"{scoped_gate['gateVerdict']} (scoped: {scoped_gate['gateScope']})"
+                            if scoped_gate is not None
+                            else f"{result.verdict.value} (severity-gated)"
                             if severity_gate is not None
                             else result.verdict.value
                         ),

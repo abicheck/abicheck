@@ -37,6 +37,7 @@ except ImportError:  # pragma: no cover - rich-click is a declared dependency
 from .checker import DiffResult, LibraryMetadata
 from .cli_audit import echo_filtered_surface, echo_reconciled
 from .cli_dump_helpers import (
+    evidence_depth_label,
     handle_non_elf_dump,
     perform_elf_dump,
     resolve_dump_collect_context,
@@ -44,7 +45,7 @@ from .cli_dump_helpers import (
     resolve_dump_compile_db,
     resolve_dump_debug_format,
 )
-from .cli_help import configure_rich_help
+from .cli_help import compare_help_options, configure_rich_help
 from .cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli import sites stable
     _build_match_map as _build_match_map,
     _canonical_library_key as _canonical_library_key,
@@ -340,10 +341,11 @@ def _write_snapshot_output(
                     f"collected but linked no facts: {', '.join(ran_empty)} — the "
                     "extractor ran but matched nothing; see the coverage rows for "
                     "the reason (commonly a public-header-roots mismatch, an "
-                    "unseeded `--depth source` that selected 0 TUs — use --max or "
-                    "--changed-path/--since — or the snapshot binary not matching "
-                    "--sources; a '0/N symbols matched' means source decls did not "
-                    "link to the binary's exports)"
+                    "unseeded `--depth source` that selected 0 TUs — use "
+                    "--changed-path/--since to seed a changed scope — or the "
+                    "snapshot binary not matching --sources; a '0/N symbols "
+                    "matched' means source decls did not link to the binary's "
+                    "exports)"
                 )
             click.echo(
                 "Warning: requested evidence layer(s) " + "; ".join(parts) + ".",
@@ -359,6 +361,13 @@ def _write_snapshot_output(
     if output:
         _safe_write_output(output, result)
         click.echo(f"Snapshot written to {output}", err=True)
+        # Self-describing output (CLI-audit P2): report the evidence depth
+        # this snapshot actually reached -- computed from what it carries,
+        # not the requested --depth, so an explicit --depth source that
+        # collected nothing usable is never silently reported as if it had
+        # succeeded. Only alongside the file-write notice above (never for
+        # bare stdout output, which callers may pipe/parse as pure JSON).
+        click.echo(f"Resolved evidence depth: {evidence_depth_label(snap)}", err=True)
     else:
         click.echo(result)
 
@@ -482,9 +491,9 @@ def main() -> None:
                    "artifact checks without requiring castxml.")
 @click.option("--dry-run", "dry_run", is_flag=True, default=False,
               help="Resolve and validate the invocation -- classify inputs, discover "
-                   "config, show which data layers (L0-L5) are available -- and print "
-                   "a report without producing a snapshot. Writes nothing; incompatible "
-                   "with -o/--output.")
+                   "config, show which evidence depths (binary/headers/build/source) "
+                   "are available -- and print a report without producing a snapshot. "
+                   "Writes nothing; incompatible with -o/--output.")
 @click.option("--debug-format", "debug_format_opt",
               type=click.Choice(["auto", "dwarf", "btf", "ctf"], case_sensitive=False), default=None,
               help="Force the ELF debug format (auto=pick best available). "
@@ -1153,7 +1162,7 @@ def _embed_inline_source_side(
         click.echo(
             f"Warning: --{label}-sources/--{label}-build-info was given but the "
             "selected --depth collects no evidence; ignoring it. Use --depth "
-            "build/source/full (or --max) to collect from it.",
+            "build or --depth source to collect from it.",
             err=True,
         )
         return input_path, kept_sources, kept_build_info
@@ -1212,6 +1221,7 @@ def _embed_inline_source_side(
 
 
 @main.command("compare")
+@compare_help_options  # curated --help + full --help-all (G21.8 collapse M2)
 @click.argument("old_input", type=click.Path(exists=True, path_type=Path))
 @click.argument("new_input", type=click.Path(exists=True, path_type=Path))
 # Set-input fan-out (ADR-037 D7): -j/--jobs, --dso-only, --output-dir only bite
@@ -1326,12 +1336,12 @@ def _embed_inline_source_side(
 @click.option("--ld-library-path", "ld_library_path", default="",
               help="Simulated LD_LIBRARY_PATH (with --follow-deps).")
 @click.option("--header-graph", is_flag=True, default=False,
-              help="Build and embed the L2 header-only semantic graph (ADR-041 addendum) "
+              help="Build and embed a header-only semantic graph (ADR-041 addendum) "
                    "for both sides from the parsed header AST alone (no build system "
                    "needed); the existing build-source-pack graph diff picks it up "
                    "automatically, so declaration reachability / internal-dependency "
                    "risk findings become available on an ordinary binary+headers compare, "
-                   "not just L3-L5 build-integrated runs. Degrades to declaration-visibility "
+                   "not just --depth build/source runs. Degrades to declaration-visibility "
                    "nodes only (no type/call edges) when clang is unavailable.")
 @click.option("--header-graph-includes", is_flag=True, default=False,
               help="With --header-graph, additionally run a per-header 'clang -M' pass to "
@@ -1342,7 +1352,7 @@ def _embed_inline_source_side(
               hidden=True,
               help="Disable redundancy filtering and show all changes including those "
                    "derived from root type changes. Demoted to config "
-                   "(scope.show_redundant, ADR-040 L2); --show-redundant/--no-show-redundant "
+                   "(scope.show_redundant, ADR-040); --show-redundant/--no-show-redundant "
                    "still overrides it either way.")
 @scope_options  # --scope-public-headers/--no- (ADR-037 D3); --show-filtered stays inline
 @click.option("--collapse-versioned-symbols", "collapse_versioned_symbols", is_flag=True, default=False,
