@@ -44,9 +44,14 @@ _NON_FRAGMENT_NAMES = {"README.md"}
 
 
 def changed_files(base: str, head: str) -> list[str]:
-    """Return paths changed between base and head (added/copied/modified/renamed)."""
+    """Return paths changed between base and head, including deletions.
+
+    A PR that only *removes* an `abicheck/**/*.py` module/API is exactly the
+    kind of user-visible change that needs a fragment, so deletions (`D`)
+    must count alongside additions/copies/modifications/renames.
+    """
     result = subprocess.run(
-        ["git", "diff", "--name-only", "--diff-filter=ACMR", f"{base}...{head}"],
+        ["git", "diff", "--name-only", "--diff-filter=ACDMR", f"{base}...{head}"],
         cwd=ROOT,
         capture_output=True,
         text=True,
