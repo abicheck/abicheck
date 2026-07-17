@@ -43,11 +43,21 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
-- **`examples/case187_public_struct_private_field_type`**: a new L5
-  fixture case demonstrating ADR-041's own headline "not a call at all"
-  scenario — a public struct gaining a private field type
-  (`TYPE_HAS_FIELD_TYPE`), sibling to `case160`'s call-edge case for the
-  same `public_api_internal_dependency_added` finding.
+- **`examples/case187`–`case191`**: five new L5 fixture cases covering the
+  full `DEPENDENCY_EDGE_KINDS` family behind `public_api_internal_dependency_added`
+  — `TYPE_HAS_FIELD_TYPE` (case187, ADR-041's own headline example),
+  `TYPE_INHERITS` (case188), `DECL_HAS_TYPE` (case189),
+  `DECL_REFERENCES_DECL` (case190, ADR-041's other headline example,
+  verbatim), and the same case187 finding proven entirely through the
+  header-only-graph addendum with no build integration (case191).
+
+- **`tests/test_dependency_edge_coverage_properties.py`**: Hypothesis-driven
+  metamorphic property tests for `_common_dependency_edge_kinds`'s
+  coverage-honesty bookkeeping (pass-confirmation / narrowed-scope-matching /
+  identical-edges-never-fabricate-a-finding), randomizing the combination
+  space against an oracle derived independently from the documented rules —
+  complements the existing hand-picked example tests in
+  `test_l3l4l5_new_kinds.py`, which each fix one combination at a time.
 
 ### Documentation
 
