@@ -276,3 +276,77 @@ abicheck scan new/libfoo.so --against old/libfoo.so \
   time.
 
 See [Source-Scan Depth](scan-levels.md) for the full `scan` flag reference.
+
+## Two kinds of baseline: release contract vs. accepted-main
+
+A single fixed baseline answers only one question well. Most projects
+actually need *two* baselines, because they answer different questions and
+should behave differently when a PR is labeled as an intentional break:
+
+| Baseline | Question it answers | Where it comes from | What advances it |
+|---|---|---|---|
+| **Release / contract baseline** | Is the current code still compatible with what we already shipped? | A dump of the last **released** version (a release tag/asset — [Recipe A](#recipe-a-github-releases-recommended) above) | Only a new project release |
+| **Accepted-main baseline** | Did *this PR* introduce a new break (as opposed to one already merged)? | A dump of the last build that passed CI on the default branch | Every PR merged to the default branch |
+
+Conflating them causes a specific, recurring failure: if CI only keeps a
+*fixed* release baseline and skips the whole check whenever a PR carries an
+"intentional API/ABI break" label, the break lands on the default branch
+still relative to the old release. Every subsequent, unrelated PR then
+diffs against that same stale release baseline, sees the same break again,
+and fails too — even though the break was already reviewed and accepted.
+The label suppressed the *check*, not just the *gate*, so nothing ever
+re-baselines.
+
+**The fix is to keep both baselines running, and let the label only relax
+which one gates the build:**
+
+- Always run and publish **both** comparisons — the release-contract report
+  stays visible even when its gate is relaxed, so "compatible with the last
+  release" doesn't silently go unreported.
+- The label affects only the **gate** for that specific PR (e.g. downgrade
+  `fail-on-breaking`/`fail-on-api-break` for the release-contract job), never
+  whether the comparison **runs**.
+- The accepted-main baseline is what should ordinarily gate merges: refresh
+  it from the default branch after every merge (a lightweight `dump` step on
+  a `push` trigger, [Recipe C](#recipe-c-github-actions-cache) or a
+  git-committed file work well for this since it churns on every merge).
+- The release-contract baseline advances deliberately, only when you cut a
+  new release — treat that refresh as part of the release process, not
+  something a regular PR should touch.
+
+```yaml
+# PR workflow — both baselines compared, only one gates by default
+jobs:
+  release-contract:
+    steps:
+      - uses: abicheck/abicheck@v0.3.0
+        with:
+          abi-baseline: latest-release       # fixed until the next release
+          new-library: build/libfoo.so
+          new-header: include/foo.h
+          fail-on-breaking: ${{ !contains(github.event.pull_request.labels.*.name, 'intentional-api-break') }}
+
+  accepted-main:
+    steps:
+      - uses: abicheck/abicheck@v0.3.0
+        with:
+          old-library: main-baseline.json     # refreshed on every merge to main
+          new-library: build/libfoo.so
+          new-header: include/foo.h
+          fail-on-breaking: true               # never relaxed by a label
+```
+
+### Baseline identity is more than a version number
+
+A baseline file name like `2.0.0.abicheck.json` is not self-describing
+enough on its own to guarantee two dumps are comparable — a meaningful
+identity also includes the platform/architecture, build profile (compiler,
+ISA, debug/release), the public-header/source configuration used to dump it,
+and (for build-source evidence) the producer and toolchain that collected it
+(replay vs. `abicheck-cc` vs. the Clang plugin — see [Producing Source
+Facts](producing-source-facts.md) for how each is versioned). If your project ships more
+than one platform/architecture/build-profile combination, encode that in the
+baseline's path or filename (e.g.
+`linux-x86_64-icx-avx2-debug/2.0.0.abicheck.json`), not just the version —
+otherwise a baseline dumped on one profile can silently get compared against
+a candidate built on another.

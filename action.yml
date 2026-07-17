@@ -34,9 +34,15 @@ inputs:
     required: false
   new-library:
     description: >
-      Path to the new (current) library or binary. Required for compare and
-      dump modes. May also be a directory or package (RPM, Deb, tar, conda,
-      wheel), matching old-library.
+      Path to the new (current) library, binary, or JSON snapshot. Required
+      for compare, dump (unless a source-only sources/build-info/compile-db
+      input is given), scan, and deps-tree/deps-compare modes. May be a
+      directory or package (RPM, Deb, tar, conda, wheel) ONLY in compare
+      mode, matching old-library — compare then fans out to a per-library
+      comparison automatically. dump and scan each analyse exactly one
+      artifact and reject a directory/package with an error (they have no
+      per-library fan-out); for a multi-library release, dump/scan each
+      library individually or use compare instead.
     required: false
 
   # ── Package inputs (compare mode, directory/package operands only) ──────────
@@ -287,10 +293,16 @@ inputs:
   # ── Output & policy ─────────────────────────────────────────────────────────
   format:
     description: >
-      Output format: markdown (default), json, sarif, html.
-      sarif and html are only supported in compare mode; other modes
-      support markdown and json only (unsupported formats fall back
-      to markdown with a warning).
+      Output format: markdown (default), json, sarif, html. sarif and html
+      are only supported in compare mode with a single-pair (non-directory,
+      non-package) operand — a directory/package compare rejects them with
+      an error. scan supports text (its default) and json only.
+      deps-tree/deps-compare support markdown and json only. dump ignores
+      this input; it always writes a JSON snapshot. Requesting an
+      unsupported format for the mode is a hard error raised before any
+      dependency install (it used to silently fall back to a supported
+      format with only a warning, which is unsafe for CI — see
+      upload-sarif).
     required: false
     default: 'markdown'
   output-file:
@@ -323,7 +335,9 @@ inputs:
   upload-sarif:
     description: >
       Upload SARIF results to GitHub Code Scanning (requires security-events: write permission).
-      Only effective when format=sarif.
+      Requires format=sarif and mode=compare — setting this with any other
+      mode or format is a hard error raised before any dependency install
+      (mode=scan/dump/deps-tree/deps-compare never produce a SARIF report).
     required: false
     default: 'false'
   fail-on-breaking:
@@ -431,6 +445,20 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    # ── 0. Validate mode/input combinations ──────────────────────────────────
+    # Fails fast on an unsupported mode/input combination (e.g. a directory
+    # passed to dump/scan, or format: sarif on a non-compare mode) before
+    # Python setup, system-dependency installation, or any build/analysis
+    # work runs — see action/validate-inputs.sh for the rationale.
+    - name: Validate mode/input combination
+      shell: bash
+      env:
+        INPUT_MODE: ${{ inputs.mode }}
+        INPUT_NEW_LIBRARY: ${{ inputs.new-library }}
+        INPUT_FORMAT: ${{ inputs.format }}
+        INPUT_UPLOAD_SARIF: ${{ inputs.upload-sarif }}
+      run: bash "${{ github.action_path }}/action/validate-inputs.sh"
+
     # ── 1. Python ─────────────────────────────────────────────────────────────
     - name: Set up Python
       uses: actions/setup-python@v6

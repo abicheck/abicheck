@@ -18,6 +18,37 @@ automatically, then runs ABI comparison and reports results.
     new-header: include/foo.h
 ```
 
+## Mode/input compatibility
+
+Not every input is meaningful in every `mode`. The Action's first step
+(`Validate mode/input combination`) checks the combinations below **before**
+Python setup, system-dependency installation, or `pip install abicheck` —
+an unsupported combination fails immediately with a clear error instead of
+after a multi-minute toolchain install, and instead of silently falling
+back to a different, unrequested behavior.
+
+| Capability | `compare` | `dump` | `scan` | `deps-tree` / `deps-compare` |
+|---|:--:|:--:|:--:|:--:|
+| Single binary/snapshot | yes | yes | yes | yes |
+| Directory/package (`new-library`/`old-library`) | yes (fans out per-library) | **error** | **error** | — |
+| Source-only (no `new-library`, via `sources`/`build-info`/`compile-db`) | — | yes | — | — |
+| `format: sarif` / `html` | yes (single pair only) | n/a (always JSON) | **error** | **error** |
+| `format: json` | yes | n/a (always JSON) | yes | yes |
+| `format: markdown` / `text` | yes | n/a (always JSON) | `text` only | `markdown` only |
+| `upload-sarif: true` | yes (needs `format: sarif`) | **error** | **error** | **error** |
+| `pr-comment` | yes | no-op | no-op | no-op |
+
+For a multi-library release directory (several `.so`/`.dll`/`.dylib` files),
+use `mode: compare` with a directory/package operand — it fans out to a
+per-library comparison automatically (see [Package comparison
+inputs](#package-comparison-inputs-compare-mode-directorypackage-operands-only)
+below). `dump` and `scan` have no such fan-out: dump each library
+individually (one step per binary, or a matrix), and scan one representative
+artifact at a time, or run `compare` for the binary side and `scan --sources`
+separately for the source/API side (see [Choose Your
+Workflow](choose-your-workflow.md) for weighing that split against a single
+combined step).
+
 ## Inputs
 
 ### Library inputs
@@ -26,7 +57,7 @@ automatically, then runs ABI comparison and reports results.
 |-------|----------|-------------|
 | `mode` | no | `compare` (default), `dump`, `scan`, `deps-tree`, or `deps-compare` |
 | `old-library` | yes (compare) | Path to old library, JSON snapshot, ABICC dump, directory, or package (a directory/package fans out to a per-library comparison automatically — no separate mode) |
-| `new-library` | yes (compare, dump, scan, …) | Path to new library, binary, directory, or package. In `scan` mode this is the scanned binary or `.abi.json` snapshot. |
+| `new-library` | yes (compare, dump\*, scan, deps-tree, deps-compare) | Path to new library, binary, or JSON snapshot. **Directory/package is `compare`-only** — `dump` and `scan` each analyse exactly one artifact and reject a directory/package with a fail-fast error, before any dependency install. \*`dump` may omit `new-library` entirely for a source-only dump (`sources`/`build-info`/`compile-db` given instead). See [Mode/input compatibility](#modeinput-compatibility) below. |
 
 ### Header inputs
 
@@ -143,7 +174,7 @@ scan degrades gracefully and L0–L2 stay authoritative.
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `format` | `markdown` (`text` for scan) | Output format: `markdown`, `json`, `sarif`, `html`. `sarif`/`html` are only available in `compare` mode when `old-library`/`new-library` are a single pair — a directory/package comparison rejects them with a clear error (choose `markdown` or `json` instead). `deps-tree`/`deps-compare` support only `markdown`/`json` and fall back to `markdown`; `scan` supports only `text`/`json` and falls back to `text`. |
+| `format` | `markdown` (`text` for scan) | Output format: `markdown`, `json`, `sarif`, `html`. `sarif`/`html` are only available in `compare` mode when `old-library`/`new-library` are a single pair — a directory/package comparison rejects them with a clear error (choose `markdown` or `json` instead). `deps-tree`/`deps-compare` support only `markdown`/`json`; `scan` supports only `text`/`json`. Requesting an unsupported format for the mode is a **hard error**, raised before any dependency install — it used to silently fall back to a supported format with only a warning, which is unsafe for CI (see [Mode/input compatibility](#modeinput-compatibility)). |
 | `output-file` | — | Path to write report (auto-set for SARIF) |
 | `dry-run` | `false` | Resolve inputs/config and print what the run would do, without analyzing anything or writing output (always exits 0). Maps to `--dry-run`; supported by every mode. In scan mode this also prints the projected per-layer cost. |
 | `estimate` | `false` | **Deprecated.** scan mode only. Functional alias for `dry-run: 'true'` — prefer `dry-run` directly, which applies to every mode. |
@@ -165,7 +196,7 @@ extra-args: '--strict-suppressions --require-justification'
 |-------|---------|-------------|
 | `python-version` | `3.13` | Python version for setup-python |
 | `install-deps` | `true` | Install castxml + gcc automatically |
-| `upload-sarif` | `false` | Upload SARIF to GitHub Code Scanning |
+| `upload-sarif` | `false` | Upload SARIF to GitHub Code Scanning. Requires `format: sarif` and `mode: compare`; any other combination is a hard error raised before any dependency install. |
 | `fail-on-breaking` | `true` | Fail step on binary ABI break |
 | `fail-on-api-break` | `false` | Fail step on source-level API break |
 | `severity-preset` | — | Severity preset: `default`, `strict`, or `info-only` (compare mode only) |
