@@ -173,6 +173,72 @@ the portable defaults.
     explicit `public-roots=` when you want the surface scoped precisely to your
     installed public headers.
 
+## GitHub Actions: the `collect-facts` Action
+
+The three producers above are CLI-level (`dump --sources`, the `abicheck-cc`
+wrapper's environment variables, the plugin's `-fplugin=` flags) — wiring any
+of them into CI by hand means writing shell to pick a producer, install its
+dependencies, and (for the wrapper/plugin) export the right environment
+variables before your build runs. `abicheck/abicheck/actions/collect-facts`
+does that wiring once, so an integration doesn't need its own shell scripts
+or a separately pinned plugin version:
+
+```yaml
+- uses: abicheck/abicheck/actions/collect-facts@<same-sha-as-below>
+  id: facts
+  with:
+    phase: prepare
+    producer: auto            # or: replay | wrapper | clang-plugin
+    sources: .
+    public-roots: |
+      include
+    output: abicheck_inputs
+
+- name: Build (wrapper/clang-plugin producers pick this up via env vars)
+  run: cmake -B build -S . && cmake --build build
+
+- uses: abicheck/abicheck/actions/collect-facts@<same-sha-as-below>
+  id: facts-verify
+  with:
+    phase: verify
+    producer: ${{ steps.facts.outputs.producer }}
+    output: abicheck_inputs
+
+- uses: abicheck/abicheck@<same-sha-as-above>
+  with:
+    mode: dump
+    new-library: build/libfoo.so
+    header: include/
+    build-info: ${{ steps.facts-verify.outputs.pack-path }}
+```
+
+Pin both `uses:` lines to the **same commit SHA** and there is exactly one
+version to track: the Action builds the Clang plugin (when
+`producer: clang-plugin`) from its own checked-out copy of
+`contrib/abicheck-clang-plugin` at that SHA, not a separately versioned
+`plugin_ref` — the scanner and the producer can never drift apart the way a
+hand-rolled `plugin_ref: v0.5.0` variable next to a differently-pinned
+`uses: abicheck/abicheck@v0.5.0` line can.
+
+**`phase: prepare` / `phase: verify`, and why there are two steps.** Wrapper
+and Clang-plugin injection both need *your* build command to run in between —
+this Action cannot invoke it for you. `phase: prepare` resolves the producer,
+installs what it needs (the matching `libclang-<N>-dev` for `clang-plugin`,
+`castxml`/`clang` for `wrapper`), and exports the environment variables/flags
+your build step reads; `phase: verify` (run after your build) checks the
+resulting pack is non-empty and reports its path. `producer: replay` needs
+neither — `phase: auto` (the default) completes it in one step, since replay
+collects inline at `dump`/`scan`/`compare` time rather than producing a pack
+ahead of time; pass `sources:` straight to the next abicheck step and skip
+`collect-facts` for that producer entirely if you already know you're on the
+replay path.
+
+**`producer: auto`** inspects `sources` for an existing compile database or a
+CMake/Bazel project (→ `replay`) and falls back to `wrapper` otherwise. It
+never auto-selects `clang-plugin` — "you own the toolchain image and the
+second-parse cost is worth removing" is an operator decision the Action can't
+infer, matching the [decision tree](#which-producer-pick-one) above.
+
 ## Then: fold the facts onto the binary
 
 However you produced them, ingest is a single `dump` call — pass the

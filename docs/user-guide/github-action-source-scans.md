@@ -222,6 +222,11 @@ which is easy to miss without seeing them chained together:
    single combined verdict from a fan-out this page's `dump`/`scan` don't do
    natively.
 
+The `abicheck_inputs/` pack itself is produced by whichever [producer](producing-source-facts.md#which-producer-pick-one)
+fits your build; the [`collect-facts` Action](producing-source-facts.md#github-actions-the-collect-facts-action)
+wires that up (`phase: prepare` before the build, `phase: verify` after)
+instead of a hand-rolled build script:
+
 ```yaml
 # Release workflow — build once, produce a per-library baseline set from the
 # one shared facts pack (matches "Recipe A" in Baseline Management, but with a
@@ -231,8 +236,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build (source-fact collection wired into this step)
-        run: ./ci/build.sh --with-source-facts   # emits abicheck_inputs/ once
+      - uses: abicheck/abicheck/actions/collect-facts@v0.3.0
+        id: facts
+        with: { phase: prepare, producer: auto, public-roots: "include" }
+      - name: Build
+        run: cmake -B build -S . && cmake --build build   # picks up the wrapper/plugin env vars collect-facts exported
+      - uses: abicheck/abicheck/actions/collect-facts@v0.3.0
+        id: facts-verify
+        with: { phase: verify, producer: ${{ steps.facts.outputs.producer }} }
       - uses: actions/upload-artifact@v4
         with:
           name: release-build
