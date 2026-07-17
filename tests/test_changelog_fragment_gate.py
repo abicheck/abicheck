@@ -73,6 +73,9 @@ def test_needs_changelog_entry(changed: list[tuple[str, str]], expected: bool) -
         # scriv only reads *.md (per [tool.scriv] format = "md") — a
         # non-Markdown file under changelog.d/ satisfies nothing.
         ([("A", "changelog.d/placeholder.txt")], False),
+        # scriv's collector globs changelog.d/*.md non-recursively, so a
+        # nested fragment would never actually be collected.
+        ([("A", "changelog.d/subdir/nested.md")], False),
         ([("M", "abicheck/checker.py")], False),
         ([], False),
     ],

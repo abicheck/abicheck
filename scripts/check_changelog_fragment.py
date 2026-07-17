@@ -98,12 +98,20 @@ def needs_changelog_entry(changed: list[ChangedFile]) -> bool:
 
 
 def has_changelog_fragment(changed: list[ChangedFile]) -> bool:
-    """True if the diff adds/modifies (not just deletes) a fragment in changelog.d/."""
+    """True if the diff adds/modifies (not just deletes) a fragment in changelog.d/.
+
+    Must be a *direct* child of changelog.d/: scriv's collector globs
+    `Path(fragment_directory).glob("*.md")`, which is non-recursive, so a
+    nested changelog.d/foo/bar.md would satisfy this check but never
+    actually be collected or deleted at release time.
+    """
     for status, f in changed:
         if status == "D" or not f.startswith("changelog.d/"):
             continue
         name = f.split("/", 1)[1]
-        if name in _NON_FRAGMENT_NAMES or not name.endswith(_FRAGMENT_SUFFIX):
+        if "/" in name or name in _NON_FRAGMENT_NAMES:
+            continue
+        if not name.endswith(_FRAGMENT_SUFFIX):
             continue
         return True
     return False
