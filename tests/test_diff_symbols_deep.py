@@ -4,6 +4,7 @@ Targets ChangeKinds that have only 1-3 test references — ensures each one is
 exercised with a realistic scenario that triggers the detector, not just a
 registry/classification assertion.
 """
+
 from __future__ import annotations
 
 from abicheck.checker import ChangeKind, Verdict, compare
@@ -18,26 +19,46 @@ from abicheck.model import (
 )
 
 
-def _snap(version="1.0", functions=None, variables=None, types=None,
-enums=None, typedefs=None, elf=None, constants=None, from_headers=True):
+def _snap(
+    version="1.0",
+    functions=None,
+    variables=None,
+    types=None,
+    enums=None,
+    typedefs=None,
+    elf=None,
+    constants=None,
+    from_headers=True,
+):
     return AbiSnapshot(
-        library="libtest.so.1", version=version,
-        functions=functions or [], variables=variables or [],
-        types=types or [], enums=enums or [],
-        typedefs=typedefs or {}, elf=elf,
+        library="libtest.so.1",
+        version=version,
+        functions=functions or [],
+        variables=variables or [],
+        types=types or [],
+        enums=enums or [],
+        typedefs=typedefs or {},
+        elf=elf,
         constants=constants or {},
         from_headers=from_headers,
     )
 
 
 def _pub_func(name, mangled, ret="void", params=None, **kwargs):
-    return Function(name=name, mangled=mangled, return_type=ret,
-                    params=params or [], visibility=Visibility.PUBLIC, **kwargs)
+    return Function(
+        name=name,
+        mangled=mangled,
+        return_type=ret,
+        params=params or [],
+        visibility=Visibility.PUBLIC,
+        **kwargs,
+    )
 
 
 def _pub_var(name, mangled, type_, **kwargs):
-    return Variable(name=name, mangled=mangled, type=type_,
-                    visibility=Visibility.PUBLIC, **kwargs)
+    return Variable(
+        name=name, mangled=mangled, type=type_, visibility=Visibility.PUBLIC, **kwargs
+    )
 
 
 def _kinds(result):
@@ -45,6 +66,7 @@ def _kinds(result):
 
 
 # ── func_static_changed (3 refs) ──────────────────────────────────────────
+
 
 class TestFuncStaticChanged:
     """Static ↔ non-static changes the implicit 'this' parameter."""
@@ -63,6 +85,7 @@ class TestFuncStaticChanged:
 
 
 # ── func_cv_changed (4 refs) ──────────────────────────────────────────────
+
 
 class TestFuncCvChanged:
     """const/volatile qualifier on member function changes mangling.
@@ -95,13 +118,18 @@ class TestFuncCvChanged:
 
 # ── func_visibility_changed (3 refs for protected variant) ────────────────
 
+
 class TestFuncVisibilityChanged:
     """Visibility changes: public → hidden is breaking."""
 
     def test_public_to_hidden_is_breaking(self):
         f_v1 = _pub_func("api", "_Z3apiv")
-        f_v2 = Function(name="api", mangled="_Z3apiv", return_type="void",
-                         visibility=Visibility.HIDDEN)
+        f_v2 = Function(
+            name="api",
+            mangled="_Z3apiv",
+            return_type="void",
+            visibility=Visibility.HIDDEN,
+        )
         # The function disappears from public API
         r = compare(_snap(functions=[f_v1]), _snap(functions=[f_v2]))
         # Hidden function is not visible, so this looks like removal
@@ -113,17 +141,32 @@ class TestFuncVisibilityChanged:
         This detection happens in the ELF symbol metadata detector (diff_platform),
         comparing ElfSymbol.visibility fields, not Function.elf_visibility.
         """
-        old_elf = ElfMetadata(symbols=[
-            ElfSymbol(name="_Z3symv", binding=SymbolBinding.GLOBAL,
-                      sym_type=SymbolType.FUNC, visibility="default")])
-        new_elf = ElfMetadata(symbols=[
-            ElfSymbol(name="_Z3symv", binding=SymbolBinding.GLOBAL,
-                      sym_type=SymbolType.FUNC, visibility="protected")])
+        old_elf = ElfMetadata(
+            symbols=[
+                ElfSymbol(
+                    name="_Z3symv",
+                    binding=SymbolBinding.GLOBAL,
+                    sym_type=SymbolType.FUNC,
+                    visibility="default",
+                )
+            ]
+        )
+        new_elf = ElfMetadata(
+            symbols=[
+                ElfSymbol(
+                    name="_Z3symv",
+                    binding=SymbolBinding.GLOBAL,
+                    sym_type=SymbolType.FUNC,
+                    visibility="protected",
+                )
+            ]
+        )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert ChangeKind.FUNC_VISIBILITY_PROTECTED_CHANGED in _kinds(r)
 
 
 # ── func_virtual_added / func_virtual_removed (3 refs each) ──────────────
+
 
 class TestFuncVirtualChanged:
     """Adding/removing virtual changes vtable layout."""
@@ -145,32 +188,39 @@ class TestFuncVirtualChanged:
 
 # ── func_pure_virtual_added / func_virtual_became_pure (3 refs each) ─────
 
+
 class TestFuncPureVirtualChanged:
     """Pure virtual changes force subclass implementation."""
 
     def test_became_pure_virtual(self):
-        f_v1 = _pub_func("Base::update", "_ZN4Base6updateEv",
-                          is_virtual=True, is_pure_virtual=False)
-        f_v2 = _pub_func("Base::update", "_ZN4Base6updateEv",
-                          is_virtual=True, is_pure_virtual=True)
+        f_v1 = _pub_func(
+            "Base::update", "_ZN4Base6updateEv", is_virtual=True, is_pure_virtual=False
+        )
+        f_v2 = _pub_func(
+            "Base::update", "_ZN4Base6updateEv", is_virtual=True, is_pure_virtual=True
+        )
         r = compare(_snap(functions=[f_v1]), _snap(functions=[f_v2]))
         assert ChangeKind.FUNC_VIRTUAL_BECAME_PURE in _kinds(r)
         assert r.verdict == Verdict.BREAKING
 
     def test_added_new_pure_virtual(self):
         """New pure virtual function added — subclasses must implement."""
-        f_new = _pub_func("Base::draw", "_ZN4Base4drawEv",
-                          is_virtual=True, is_pure_virtual=True)
+        f_new = _pub_func(
+            "Base::draw", "_ZN4Base4drawEv", is_virtual=True, is_pure_virtual=True
+        )
         old = _snap(functions=[_pub_func("Base::init", "_ZN4Base4initEv")])
-        new_snap = _snap(functions=[
-            _pub_func("Base::init", "_ZN4Base4initEv"),
-            f_new,
-        ])
+        new_snap = _snap(
+            functions=[
+                _pub_func("Base::init", "_ZN4Base4initEv"),
+                f_new,
+            ]
+        )
         r = compare(old, new_snap)
         assert ChangeKind.FUNC_ADDED in _kinds(r)
 
 
 # ── func_noexcept_removed (3 refs) ───────────────────────────────────────
+
 
 class TestFuncNoexceptRemoved:
     """Removing noexcept can cause std::terminate."""
@@ -190,6 +240,7 @@ class TestFuncNoexceptRemoved:
 
 # ── header-declared function disappeared from .dynsym ─────────────────────
 
+
 class TestHeaderDeclaredFunctionMissingFromBinary:
     """Function declared in header but not in binary symbol table.
 
@@ -202,8 +253,13 @@ class TestHeaderDeclaredFunctionMissingFromBinary:
         """When a function's ELF symbol disappears, FUNC_DELETED_ELF_FALLBACK fires."""
         f = _pub_func("api_call", "_Z8api_callv")
         old_elf = ElfMetadata(
-            symbols=[ElfSymbol(name="_Z8api_callv", binding=SymbolBinding.GLOBAL,
-                               sym_type=SymbolType.FUNC)],
+            symbols=[
+                ElfSymbol(
+                    name="_Z8api_callv",
+                    binding=SymbolBinding.GLOBAL,
+                    sym_type=SymbolType.FUNC,
+                )
+            ],
         )
         new_elf = ElfMetadata(symbols=[])  # symbol disappeared from binary
 
@@ -215,6 +271,7 @@ class TestHeaderDeclaredFunctionMissingFromBinary:
 
 
 # ── func_deleted (= delete) ──────────────────────────────────────────────
+
 
 class TestFuncDeleted:
     """Function marked = delete; old binaries still reference it."""
@@ -228,6 +285,7 @@ class TestFuncDeleted:
 
 
 # ── func_ref_qual_changed ────────────────────────────────────────────────
+
 
 class TestFuncRefQualChanged:
     """Ref-qualifier changes alter mangling."""
@@ -247,6 +305,7 @@ class TestFuncRefQualChanged:
 
 # ── func_language_linkage_changed ────────────────────────────────────────
 
+
 class TestFuncLanguageLinkageChanged:
     """extern 'C' ↔ C++ linkage changes mangling."""
 
@@ -264,6 +323,7 @@ class TestFuncLanguageLinkageChanged:
 
 
 # ── func_became_inline / func_lost_inline ────────────────────────────────
+
 
 class TestFuncInlineChanged:
     """Inline attribute changes."""
@@ -283,94 +343,157 @@ class TestFuncInlineChanged:
 
 # ── param_pointer_level_changed / return_pointer_level_changed ───────────
 
+
 class TestPointerLevelChanged:
     """Pointer depth changes (T vs T* vs T**)."""
 
     def test_param_pointer_level_changed(self):
-        f_v1 = _pub_func("process", "_Z7processv",
-                          params=[Param(name="data", type="int", pointer_depth=0)])
-        f_v2 = _pub_func("process", "_Z7processv",
-                          params=[Param(name="data", type="int *", pointer_depth=1)])
+        f_v1 = _pub_func(
+            "process",
+            "_Z7processv",
+            params=[Param(name="data", type="int", pointer_depth=0)],
+        )
+        f_v2 = _pub_func(
+            "process",
+            "_Z7processv",
+            params=[Param(name="data", type="int *", pointer_depth=1)],
+        )
         r = compare(_snap(functions=[f_v1]), _snap(functions=[f_v2]))
         assert ChangeKind.PARAM_POINTER_LEVEL_CHANGED in _kinds(r)
 
     def test_return_pointer_level_changed(self):
-        f_v1 = _pub_func("getData", "_Z7getDatav", ret="int",
-                          return_pointer_depth=0)
-        f_v2 = _pub_func("getData", "_Z7getDatav", ret="int *",
-                          return_pointer_depth=1)
+        f_v1 = _pub_func("getData", "_Z7getDatav", ret="int", return_pointer_depth=0)
+        f_v2 = _pub_func("getData", "_Z7getDatav", ret="int *", return_pointer_depth=1)
         r = compare(_snap(functions=[f_v1]), _snap(functions=[f_v2]))
         assert ChangeKind.RETURN_POINTER_LEVEL_CHANGED in _kinds(r)
 
 
 # ── param_restrict_changed ───────────────────────────────────────────────
 
+
 class TestParamRestrictChanged:
     """restrict qualifier on pointer parameter."""
 
     def test_restrict_added(self):
-        f_v1 = _pub_func("memcopy", "_Z7memcopyv",
-                          params=[Param(name="dst", type="void *", is_restrict=False)])
-        f_v2 = _pub_func("memcopy", "_Z7memcopyv",
-                          params=[Param(name="dst", type="void * restrict", is_restrict=True)])
+        f_v1 = _pub_func(
+            "memcopy",
+            "_Z7memcopyv",
+            params=[Param(name="dst", type="void *", is_restrict=False)],
+        )
+        f_v2 = _pub_func(
+            "memcopy",
+            "_Z7memcopyv",
+            params=[Param(name="dst", type="void * restrict", is_restrict=True)],
+        )
         r = compare(_snap(functions=[f_v1]), _snap(functions=[f_v2]))
         assert ChangeKind.PARAM_RESTRICT_CHANGED in _kinds(r)
 
+    def test_restrict_only_change_does_not_also_report_params_changed(self):
+        """A dumper that keeps `type` identical and only flips `is_restrict`
+        (the correct representation — restrict has no ABI/mangling effect,
+        unlike the previous test's synthetic ``type="void * restrict"``
+        spelling) must report the dedicated compatible kind alone, not also
+        the generic BREAKING params-changed kind (Codex review, PR #582:
+        folding `restrict` into the type spelling itself would double-report
+        a restrict-only change as a breaking parameter mismatch)."""
+        f_v1 = _pub_func(
+            "memcopy",
+            "_Z7memcopyv",
+            params=[Param(name="dst", type="void *", is_restrict=False)],
+        )
+        f_v2 = _pub_func(
+            "memcopy",
+            "_Z7memcopyv",
+            params=[Param(name="dst", type="void *", is_restrict=True)],
+        )
+        r = compare(_snap(functions=[f_v1]), _snap(functions=[f_v2]))
+        kinds = _kinds(r)
+        assert ChangeKind.PARAM_RESTRICT_CHANGED in kinds
+        assert ChangeKind.FUNC_PARAMS_CHANGED not in kinds
+        assert r.verdict == Verdict.COMPATIBLE
+
 
 # ── param_became_va_list / param_lost_va_list ────────────────────────────
+
 
 class TestParamVaListChanged:
     """va_list parameter changes."""
 
     def test_param_became_va_list(self):
-        f_v1 = _pub_func("vformat", "_Z7vformatv",
-                          params=[Param(name="args", type="int", is_va_list=False)])
-        f_v2 = _pub_func("vformat", "_Z7vformatv",
-                          params=[Param(name="args", type="va_list", is_va_list=True)])
+        f_v1 = _pub_func(
+            "vformat",
+            "_Z7vformatv",
+            params=[Param(name="args", type="int", is_va_list=False)],
+        )
+        f_v2 = _pub_func(
+            "vformat",
+            "_Z7vformatv",
+            params=[Param(name="args", type="va_list", is_va_list=True)],
+        )
         r = compare(_snap(functions=[f_v1]), _snap(functions=[f_v2]))
         assert ChangeKind.PARAM_BECAME_VA_LIST in _kinds(r)
 
     def test_param_lost_va_list(self):
-        f_v1 = _pub_func("vformat", "_Z7vformatv",
-                          params=[Param(name="args", type="va_list", is_va_list=True)])
-        f_v2 = _pub_func("vformat", "_Z7vformatv",
-                          params=[Param(name="args", type="int", is_va_list=False)])
+        f_v1 = _pub_func(
+            "vformat",
+            "_Z7vformatv",
+            params=[Param(name="args", type="va_list", is_va_list=True)],
+        )
+        f_v2 = _pub_func(
+            "vformat",
+            "_Z7vformatv",
+            params=[Param(name="args", type="int", is_va_list=False)],
+        )
         r = compare(_snap(functions=[f_v1]), _snap(functions=[f_v2]))
         assert ChangeKind.PARAM_LOST_VA_LIST in _kinds(r)
 
 
 # ── param_default_value_changed / removed ────────────────────────────────
 
+
 class TestParamDefaultChanged:
     """Default parameter value changes/removal."""
 
     def test_default_value_changed(self):
-        f_v1 = _pub_func("connect", "_Z7connectv",
-                          params=[Param(name="timeout", type="int", default="30")])
-        f_v2 = _pub_func("connect", "_Z7connectv",
-                          params=[Param(name="timeout", type="int", default="60")])
+        f_v1 = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="30")],
+        )
+        f_v2 = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="60")],
+        )
         r = compare(_snap(functions=[f_v1]), _snap(functions=[f_v2]))
         assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED in _kinds(r)
 
     def test_default_value_removed(self):
-        f_v1 = _pub_func("connect", "_Z7connectv",
-                          params=[Param(name="timeout", type="int", default="30")])
-        f_v2 = _pub_func("connect", "_Z7connectv",
-                          params=[Param(name="timeout", type="int", default=None)])
+        f_v1 = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="30")],
+        )
+        f_v2 = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default=None)],
+        )
         r = compare(_snap(functions=[f_v1]), _snap(functions=[f_v2]))
         assert ChangeKind.PARAM_DEFAULT_VALUE_REMOVED in _kinds(r)
 
 
 # ── param_renamed ────────────────────────────────────────────────────────
 
+
 class TestParamRenamed:
     """Parameter name change (source-level break)."""
 
     def test_param_renamed(self):
-        f_v1 = _pub_func("draw", "_Z4drawv",
-                          params=[Param(name="x_pos", type="int")])
-        f_v2 = _pub_func("draw", "_Z4drawv",
-                          params=[Param(name="horizontal", type="int")])
+        f_v1 = _pub_func("draw", "_Z4drawv", params=[Param(name="x_pos", type="int")])
+        f_v2 = _pub_func(
+            "draw", "_Z4drawv", params=[Param(name="horizontal", type="int")]
+        )
         r = compare(
             _snap(functions=[f_v1], from_headers=True),
             _snap(functions=[f_v2], from_headers=True),
@@ -379,6 +502,7 @@ class TestParamRenamed:
 
 
 # ── var_value_changed ────────────────────────────────────────────────────
+
 
 class TestVarValueChanged:
     """Compile-time constant value changes."""
@@ -391,6 +515,7 @@ class TestVarValueChanged:
 
 
 # ── var_access_changed / var_access_widened ──────────────────────────────
+
 
 class TestVarAccessChanged:
     """Variable access level changes."""
@@ -409,6 +534,7 @@ class TestVarAccessChanged:
 
 
 # ── var_became_const / var_lost_const ────────────────────────────────────
+
 
 class TestVarConstChanged:
     """Variable const qualifier changes."""
@@ -489,6 +615,7 @@ class TestVarConstChanged:
 
 # ── constant_changed / constant_added / constant_removed ─────────────────
 
+
 class TestConstantChanges:
     """Preprocessor/constexpr constant changes."""
 
@@ -512,6 +639,7 @@ class TestConstantChanges:
 
 
 # ── Multiple simultaneous symbol changes ─────────────────────────────────
+
 
 class TestMultipleSymbolChanges:
     """Verify multiple detectors fire correctly together."""

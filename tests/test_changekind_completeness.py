@@ -45,6 +45,8 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.EVIDENCE_REQUIRED_MISSING,
     # exercised by tests/test_versioned_symbol_scheme.py (P08 advisory recogniser)
     ChangeKind.VERSIONED_SYMBOL_SCHEME_DETECTED,
+    # exercised by tests/test_reachability_aware_suppression.py (ADR-044 D4)
+    ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK,
     ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED,
     ChangeKind.ENUM_MEMBER_ADDED,
     ChangeKind.ENUM_MEMBER_REMOVED,
@@ -375,6 +377,26 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     # tests/test_new_detectors.py::TestTypeFinalityChanged
     ChangeKind.TYPE_BECAME_FINAL,
     ChangeKind.TYPE_LOST_FINAL,
+    # CastXML schema-completeness kinds — exercised in
+    # tests/test_castxml_schema_completeness.py
+    ChangeKind.TYPE_BECAME_ABSTRACT,
+    ChangeKind.TYPE_LOST_ABSTRACT,
+    ChangeKind.ENUM_BECAME_SCOPED,
+    ChangeKind.ENUM_LOST_SCOPED,
+    ChangeKind.FUNC_OVERRIDE_SPECIFIER_ADDED,
+    ChangeKind.FUNC_OVERRIDE_SPECIFIER_REMOVED,
+    ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED,
+    ChangeKind.FIELD_DEFAULT_INITIALIZER_CHANGED,
+    ChangeKind.FUNC_DEPRECATED_ADDED,
+    ChangeKind.FUNC_DEPRECATED_REMOVED,
+    ChangeKind.VAR_DEPRECATED_ADDED,
+    ChangeKind.VAR_DEPRECATED_REMOVED,
+    ChangeKind.TYPE_DEPRECATED_ADDED,
+    ChangeKind.TYPE_DEPRECATED_REMOVED,
+    ChangeKind.ENUM_DEPRECATED_ADDED,
+    ChangeKind.ENUM_DEPRECATED_REMOVED,
+    ChangeKind.FIELD_DEPRECATED_ADDED,
+    ChangeKind.FIELD_DEPRECATED_REMOVED,
     # Namespace-shape patterns — exercised in tests/test_diff_namespaces.py
     ChangeKind.EXPERIMENTAL_GRADUATED,
     ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT,

@@ -119,6 +119,27 @@ class TestFieldBecameConst:
         r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
         assert ChangeKind.FIELD_BECAME_CONST in _kinds(r)
 
+    def test_field_became_const_with_type_spelling_change_also_reports_type_changed(self):
+        """A real dumper (castxml) spells the qualifier into `type` too
+        ("int" -> "const int"), not just the boolean — and unlike a
+        pointer/reference cv change, a BY-VALUE field's own const/volatile
+        change is a deliberate source-break escalation (case30_field_qualifiers
+        ground truth; see test_top_level_field_const_is_not_neutralised in
+        test_const_pointer_abi_neutral.py), so both the compatible
+        FIELD_BECAME_CONST and the breaking TYPE_FIELD_TYPE_CHANGED are
+        expected together here — a prior attempt to suppress the latter
+        (Codex review, PR #582) was reverted because it silently regressed
+        that ground truth."""
+        t_old = RecordType(name="Cfg", kind="struct", size_bits=32,
+                           fields=[TypeField("val", "int", 0, is_const=False)])
+        t_new = RecordType(name="Cfg", kind="struct", size_bits=32,
+                           fields=[TypeField("val", "const int", 0, is_const=True)])
+        r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
+        kinds = _kinds(r)
+        assert ChangeKind.FIELD_BECAME_CONST in kinds
+        assert ChangeKind.TYPE_FIELD_TYPE_CHANGED in kinds
+        assert r.verdict == Verdict.BREAKING
+
 
 class TestFieldLostConst:
     """Field const qualifier removed."""
@@ -150,6 +171,23 @@ class TestFieldVolatileChanged:
                            fields=[TypeField("status", "int", 0, is_volatile=False)])
         r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
         assert ChangeKind.FIELD_LOST_VOLATILE in _kinds(r)
+
+    def test_field_became_volatile_with_type_spelling_change_also_reports_type_changed(self):
+        """Same as the by-value const case above: a field changing from
+        "int" to "volatile int" (castxml's real spelling) is a deliberate
+        source-break escalation, so both FIELD_BECAME_VOLATILE and
+        TYPE_FIELD_TYPE_CHANGED fire, and the verdict is BREAKING — not
+        merely COMPATIBLE (a prior attempt to suppress the latter, per
+        Codex review on PR #582, was reverted as an incorrect regression)."""
+        t_old = RecordType(name="Reg", kind="struct", size_bits=32,
+                           fields=[TypeField("status", "int", 0, is_volatile=False)])
+        t_new = RecordType(name="Reg", kind="struct", size_bits=32,
+                           fields=[TypeField("status", "volatile int", 0, is_volatile=True)])
+        r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
+        kinds = _kinds(r)
+        assert ChangeKind.FIELD_BECAME_VOLATILE in kinds
+        assert ChangeKind.TYPE_FIELD_TYPE_CHANGED in kinds
+        assert r.verdict == Verdict.BREAKING
 
 
 class TestFieldMutableChanged:
@@ -497,6 +535,189 @@ class TestFieldAccessChanged:
                                              access=AccessLevel.PROTECTED)])
         r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
         assert ChangeKind.FIELD_ACCESS_CHANGED in _kinds(r)
+
+
+# ── Field default initializer changes ───────────────────────────────────
+
+class TestFieldDefaultInitializerChanged:
+    """FIELD_DEFAULT_INITIALIZER_CHANGED's description must render the real
+    old/new values, not the literal string "None" (Codex review, PR #582):
+    make_change() only fills {old}/{new} in the registry description
+    template from its ``old=``/``new=`` kwargs, not from ``old_value``/
+    ``new_value`` — passing the latter alone left the template's
+    placeholders unformatted."""
+
+    def test_description_contains_real_old_and_new_values(self):
+        t_old = RecordType(name="Cfg", kind="struct", size_bits=32,
+                           fields=[TypeField("timeout", "int", 0, default="30")])
+        t_new = RecordType(name="Cfg", kind="struct", size_bits=32,
+                           fields=[TypeField("timeout", "int", 0, default="60")])
+        old = AbiSnapshot(library="libtest.so.1", version="1.0",
+                          types=[t_old], ast_producer="castxml", from_headers=True)
+        new = AbiSnapshot(library="libtest.so.1", version="2.0",
+                          types=[t_new], ast_producer="castxml", from_headers=True)
+        r = compare(old, new)
+        changed = [c for c in r.changes
+                   if c.kind == ChangeKind.FIELD_DEFAULT_INITIALIZER_CHANGED]
+        assert len(changed) == 1
+        assert changed[0].old_value == "30"
+        assert changed[0].new_value == "60"
+        assert "30" in changed[0].description
+        assert "60" in changed[0].description
+        assert "None" not in changed[0].description
+
+
+class TestFieldDeprecated:
+    """TypeField.deprecated was populated and serialized but nothing read
+    it — a field changing from `int x;` to `[[deprecated]] int x;` (or
+    losing the marker) went completely undetected (Codex review, PR #582).
+    """
+
+    def _snap(self, version, default=None):
+        t = RecordType(name="Cfg", kind="struct", size_bits=32,
+                       fields=[TypeField("count", "int", 0, deprecated=default)])
+        return AbiSnapshot(library="libtest.so.1", version=version, types=[t],
+                          from_headers=True, ast_producer="castxml")
+
+    def test_field_gained_deprecated(self):
+        old = self._snap("1.0", default=None)
+        new = self._snap("2.0", default="use new_count instead")
+        r = compare(old, new)
+        changed = [c for c in r.changes if c.kind == ChangeKind.FIELD_DEPRECATED_ADDED]
+        assert len(changed) == 1
+        assert "use new_count instead" in changed[0].description
+        assert r.verdict == Verdict.COMPATIBLE
+
+    def test_field_lost_deprecated(self):
+        old = self._snap("1.0", default="use new_count instead")
+        new = self._snap("2.0", default=None)
+        r = compare(old, new)
+        assert ChangeKind.FIELD_DEPRECATED_REMOVED in _kinds(r)
+
+    def test_bare_deprecated_with_no_message(self):
+        old = self._snap("1.0", default=None)
+        new = self._snap("2.0", default="")
+        r = compare(old, new)
+        assert ChangeKind.FIELD_DEPRECATED_ADDED in _kinds(r)
+
+    def test_gated_on_both_castxml_backed(self):
+        """clang doesn't populate TypeField.deprecated yet — a producer
+        mismatch must not misread it as the field losing its marker."""
+        t_old = RecordType(name="Cfg", kind="struct", size_bits=32,
+                           fields=[TypeField("count", "int", 0, deprecated="msg")])
+        t_new = RecordType(name="Cfg", kind="struct", size_bits=32,
+                           fields=[TypeField("count", "int", 0, deprecated=None)])
+        old = AbiSnapshot(library="libtest.so.1", version="1.0", types=[t_old],
+                          from_headers=True, ast_producer="castxml")
+        new = AbiSnapshot(library="libtest.so.1", version="2.0", types=[t_new],
+                          from_headers=True, ast_producer="clang")
+        r = compare(old, new)
+        assert ChangeKind.FIELD_DEPRECATED_REMOVED not in _kinds(r)
+
+    def test_union_variant_deprecated_detected(self):
+        """Matches FIELD_DEFAULT_INITIALIZER_*'s union-inclusive precedent:
+        a union variant can carry [[deprecated]] too."""
+        u_old = RecordType(name="Value", kind="union", size_bits=32, is_union=True,
+                           fields=[TypeField("as_int", "int", 0, deprecated=None)])
+        u_new = RecordType(name="Value", kind="union", size_bits=32, is_union=True,
+                           fields=[TypeField("as_int", "int", 0, deprecated="msg")])
+        old = AbiSnapshot(library="libtest.so.1", version="1.0", types=[u_old],
+                          from_headers=True, ast_producer="castxml")
+        new = AbiSnapshot(library="libtest.so.1", version="2.0", types=[u_new],
+                          from_headers=True, ast_producer="castxml")
+        r = compare(old, new)
+        assert ChangeKind.FIELD_DEPRECATED_ADDED in _kinds(r)
+
+
+class TestLegacyCvFactsReliableGating:
+    """A persisted pre-CV-fact-fix CastXML snapshot must not misreport a
+    false FIELD_BECAME_CONST/VOLATILE/MUTABLE or TYPE_FIELD_TYPE_CHANGED
+    purely from a tool upgrade, when compared against a fresh dump of
+    genuinely unchanged headers (Codex review, PR #582 — the two open
+    findings following the destructor/namespace-qualification fixes).
+
+    The pre-fix parser left TypeField.is_const/is_volatile/is_mutable
+    permanently False and never included the qualifier in the field's type
+    spelling; a legacy snapshot's False/qualifier-less values are
+    real-but-wrong data, not absent data, so only a snapshot-level
+    ``header_cv_facts_reliable`` marker (derived from schema_version on
+    deserialization) can distinguish them from a genuine "not const" fact.
+    """
+
+    def _legacy_snap(self, version, **type_kwargs):
+        t = RecordType(name="Cfg", kind="struct", size_bits=32,
+                       fields=[TypeField("flag", **type_kwargs)])
+        return AbiSnapshot(
+            library="libtest.so.1", version=version, types=[t],
+            from_headers=True, ast_producer="castxml",
+            header_cv_facts_reliable=False,
+        )
+
+    def _fresh_snap(self, version, **type_kwargs):
+        t = RecordType(name="Cfg", kind="struct", size_bits=32,
+                       fields=[TypeField("flag", **type_kwargs)])
+        return AbiSnapshot(
+            library="libtest.so.1", version=version, types=[t],
+            from_headers=True, ast_producer="castxml",
+            header_cv_facts_reliable=True,
+        )
+
+    def test_legacy_vs_fresh_suppresses_false_field_became_volatile(self):
+        old = self._legacy_snap("1.0", type="int", offset_bits=0,
+                                is_const=False, is_volatile=False)
+        new = self._fresh_snap("2.0", type="volatile int", offset_bits=0,
+                               is_const=False, is_volatile=True)
+        r = compare(old, new)
+        kinds = _kinds(r)
+        assert ChangeKind.FIELD_BECAME_VOLATILE not in kinds
+        assert ChangeKind.TYPE_FIELD_TYPE_CHANGED not in kinds
+        assert r.verdict == Verdict.NO_CHANGE
+
+    def test_legacy_vs_fresh_suppresses_false_field_became_const(self):
+        old = self._legacy_snap("1.0", type="int", offset_bits=0,
+                                is_const=False, is_volatile=False)
+        new = self._fresh_snap("2.0", type="const int", offset_bits=0,
+                               is_const=True, is_volatile=False)
+        r = compare(old, new)
+        kinds = _kinds(r)
+        assert ChangeKind.FIELD_BECAME_CONST not in kinds
+        assert ChangeKind.TYPE_FIELD_TYPE_CHANGED not in kinds
+
+    def test_both_reliable_still_detects_genuine_volatile_addition(self):
+        """The gate must not neutralize a REAL change between two
+        current-generation snapshots — only the mixed legacy/fresh pairing."""
+        old = self._fresh_snap("1.0", type="int", offset_bits=0,
+                               is_const=False, is_volatile=False)
+        new = self._fresh_snap("2.0", type="volatile int", offset_bits=0,
+                               is_const=False, is_volatile=True)
+        r = compare(old, new)
+        kinds = _kinds(r)
+        assert ChangeKind.FIELD_BECAME_VOLATILE in kinds
+        assert ChangeKind.TYPE_FIELD_TYPE_CHANGED in kinds
+        assert r.verdict == Verdict.BREAKING
+
+    def test_unrelated_type_change_still_detected_when_legacy(self):
+        """A genuine non-cv type change (int -> double) must still fire
+        even when the pair is legacy/unreliable for cv facts specifically —
+        the gate only neutralizes the cv axis, not the whole detector."""
+        old = self._legacy_snap("1.0", type="int", offset_bits=0)
+        new = self._fresh_snap("2.0", type="double", offset_bits=0)
+        r = compare(old, new)
+        assert ChangeKind.TYPE_FIELD_TYPE_CHANGED in _kinds(r)
+
+    def test_union_variant_legacy_vs_fresh_suppresses_false_positive(self):
+        u_old = RecordType(name="Value", kind="union", size_bits=32, is_union=True,
+                           fields=[TypeField("val", "int", 0)])
+        u_new = RecordType(name="Value", kind="union", size_bits=32, is_union=True,
+                           fields=[TypeField("val", "volatile int", 0)])
+        old = AbiSnapshot(library="libtest.so.1", version="1.0", types=[u_old],
+                          from_headers=True, ast_producer="castxml",
+                          header_cv_facts_reliable=False)
+        new = AbiSnapshot(library="libtest.so.1", version="2.0", types=[u_new],
+                          from_headers=True, ast_producer="castxml",
+                          header_cv_facts_reliable=True)
+        r = compare(old, new)
+        assert ChangeKind.UNION_FIELD_TYPE_CHANGED not in _kinds(r)
 
 
 # ── Base class changes ──────────────────────────────────────────────────

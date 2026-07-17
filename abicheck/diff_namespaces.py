@@ -48,7 +48,7 @@ from .checker_types import Change
 from .diff_helpers import make_change
 
 if TYPE_CHECKING:
-    from .model import AbiSnapshot
+    from .model import AbiSnapshot, RecordType, ScopeOrigin
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -226,6 +226,24 @@ def _index_types_by_stable_key(
     return out
 
 
+def _origin_by_name(types: list[RecordType]) -> dict[str, ScopeOrigin]:
+    """Map qualified type name -> ``ScopeOrigin``, first occurrence wins.
+
+    Mirrors ``pattern_verdicts._exact_record``'s exact-identity lookup (which
+    takes the first match for a given name via a linear scan) rather than a
+    plain ``{t.name: t.origin for t in types}`` dict comprehension, which
+    would silently let a later duplicate-named entry overwrite an earlier
+    one. Two ``RecordType`` entries sharing one exact qualified name in a
+    single snapshot is unusual input, but staying consistent with the
+    established "first occurrence is authoritative" convention costs
+    nothing here.
+    """
+    out: dict[str, ScopeOrigin] = {}
+    for t in types:
+        out.setdefault(t.name, t.origin)
+    return out
+
+
 def _classify_experimental_event(
     old_exp: list[str],
     old_stable: list[str],
@@ -253,18 +271,53 @@ def _emit_experimental_change(
     old_exp: list[str],
     new_stable: list[str],
     kind_label: str,
+    *,
+    old_origins: dict[str, ScopeOrigin] | None,
+    new_origins: dict[str, ScopeOrigin] | None,
 ) -> Change:
-    """Build the ``Change`` record for one classified event."""
+    """Build the ``Change`` record for one classified event.
+
+    ADR-044 D1 (Codex review): the function-sourced path (``kind_label ==
+    "declaration"``, ``old_origins``/``new_origins`` both ``None``) is only
+    ever built from ``_index_funcs_by_stable_key``, which indexes public
+    functions only — so unlike the reverted "any non-internal-namespaced
+    subject" heuristic (which had to guess at a raw symbol's visibility with
+    no reliable signal), a function finding's mere existence already proves
+    its subject is public, and is tagged directly at construction time,
+    mirroring ``internal_leak._build_leak_change``/``diff_templates._leak_change``
+    — these run via ``DetectNamespacePatterns``, *after* ``MarkReachability``,
+    so nothing else would ever tag them.
+
+    The type-sourced path (``kind_label == "type"``, origins dicts provided)
+    has no ``Visibility`` field to fall back on — ``RecordType`` carries
+    none (unlike ``Function``/``Variable``) — but it *does* carry ``origin``
+    (ADR-024's ``ScopeOrigin``, opt-in via ``--public-header``/
+    ``--public-header-dir``): a type explicitly scoped to the public-header
+    set (``ScopeOrigin.PUBLIC_HEADER``) is a reliable public-reachability
+    signal Codex review pointed out was overlooked. Without that opt-in flag
+    every type's origin is ``ScopeOrigin.UNKNOWN``, so this degrades to the
+    prior untagged behavior automatically for the common case.
+    """
+    from .model import ScopeOrigin
+
     old_q = old_exp[0]
     if event == "graduated":
         new_q = new_stable[0]
+        subject_is_public = (
+            new_origins is None or new_origins.get(new_q) == ScopeOrigin.PUBLIC_HEADER
+        )
         return make_change(
             ChangeKind.EXPERIMENTAL_GRADUATED,
             symbol=new_q,
             detail=kind_label,
             old=old_q,
             new=new_q,
+            public_reachable=subject_is_public,
+            reachability_kind="direct_public_symbol" if subject_is_public else None,
         )
+    subject_is_public = (
+        old_origins is None or old_origins.get(old_q) == ScopeOrigin.PUBLIC_HEADER
+    )
     return make_change(
         ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT,
         symbol=old_q,
@@ -272,6 +325,8 @@ def _emit_experimental_change(
         detail=kind_label,
         old=old_q,
         new_value=None,
+        public_reachable=subject_is_public,
+        reachability_kind="direct_public_symbol" if subject_is_public else None,
     )
 
 
@@ -280,8 +335,16 @@ def _findings_for(
     new_index: dict[tuple[str, str], list[str]],
     experimental_namespaces: tuple[str, ...],
     kind_label: str,
+    *,
+    old_origins: dict[str, ScopeOrigin] | None = None,
+    new_origins: dict[str, ScopeOrigin] | None = None,
 ) -> list[Change]:
-    """Walk old/new indices, emitting one finding per classified event."""
+    """Walk old/new indices, emitting one finding per classified event.
+
+    *old_origins*/*new_origins* are ``None`` for the function-sourced path
+    (always reliably public) or a ``{qualified_name: ScopeOrigin}`` map for
+    the type-sourced path (public only when ``ScopeOrigin.PUBLIC_HEADER``).
+    """
     out: list[Change] = []
     for (stable_key, leaf), qnames in old_index.items():
         old_exp, old_stable = _split_experimental(qnames, experimental_namespaces)
@@ -298,6 +361,7 @@ def _findings_for(
             continue
         out.append(_emit_experimental_change(
             event, leaf, old_exp, new_stable, kind_label,
+            old_origins=old_origins, new_origins=new_origins,
         ))
     return out
 
@@ -339,6 +403,8 @@ def detect_experimental_namespace_changes(
         _index_types_by_stable_key(new, experimental_namespaces),
         experimental_namespaces,
         "type",
+        old_origins=_origin_by_name(old.types),
+        new_origins=_origin_by_name(new.types),
     ))
     return out
 
@@ -416,7 +482,13 @@ def _batch_demangle_public(snap: AbiSnapshot) -> dict[str, str]:
 
 
 def _build_std_reexport_change(declared: str, underlying: str) -> Change:
-    """Build a single ``STD_REEXPORT_REMOVED`` finding."""
+    """Build a single ``STD_REEXPORT_REMOVED`` finding.
+
+    ADR-044 D1 (Codex review): only ever emitted for a declaration that was a
+    *public* function (``detect_std_reexport_removed`` filters on
+    ``Visibility.PUBLIC`` before calling this) — same construction-time
+    tagging rationale as ``_emit_experimental_change``.
+    """
     return make_change(
         ChangeKind.STD_REEXPORT_REMOVED,
         symbol=declared,
@@ -424,6 +496,8 @@ def _build_std_reexport_change(declared: str, underlying: str) -> Change:
         detail=underlying,
         old_value=f"{declared} → {underlying}",
         new_value=None,
+        public_reachable=True,
+        reachability_kind="direct_public_symbol",
     )
 
 
@@ -528,39 +602,49 @@ def detect_inline_namespace_version_bump(
 
 
 def _index_versioned(
-    items: list[tuple[str, str]],
-) -> dict[tuple[str, ...], list[tuple[str, int, str]]]:
-    """Map version-stripped segments → list of ``(qualified, version_int, kind)``."""
-    out: dict[tuple[str, ...], list[tuple[str, int, str]]] = {}
-    for qname, kind in items:
+    items: list[tuple[str, bool]],
+) -> dict[tuple[str, ...], list[tuple[str, int, bool]]]:
+    """Map version-stripped segments → list of ``(qualified, version_int, is_public)``."""
+    out: dict[tuple[str, ...], list[tuple[str, int, bool]]] = {}
+    for qname, is_public in items:
         segs = _segments(qname)
         stripped, ver = _version_strip_segments(segs)
         if ver is None:
             continue
-        out.setdefault(stripped, []).append((qname, ver, kind))
+        out.setdefault(stripped, []).append((qname, ver, is_public))
     return out
 
 
-def _collect_versioned_entries(snap: AbiSnapshot) -> list[tuple[str, str]]:
-    """Return ``[(qualified_name, "function"|"type"), …]`` for *snap*."""
-    from .model import Visibility
+def _collect_versioned_entries(snap: AbiSnapshot) -> list[tuple[str, bool]]:
+    """Return ``[(qualified_name, is_reliably_public), …]`` for *snap*.
+
+    A function entry is reliably public because it was filtered to
+    ``Visibility.PUBLIC`` above. A type entry is reliably public only when
+    ``RecordType.origin == ScopeOrigin.PUBLIC_HEADER`` (ADR-024's opt-in
+    public-header scoping, ``--public-header``/``--public-header-dir``) —
+    the one signal that *does* exist for a type in the absence of a
+    visibility field (Codex review). Without that opt-in flag every type's
+    ``origin`` is ``ScopeOrigin.UNKNOWN``, so this degrades to the prior
+    untagged behavior automatically, not a regression for the common case.
+    """
+    from .model import ScopeOrigin, Visibility
     demangled = _batch_demangle_public(snap)
-    items: list[tuple[str, str]] = []
+    items: list[tuple[str, bool]] = []
     for f in snap.functions:
         if f.visibility != Visibility.PUBLIC:
             continue
         qname = _qualified_function_name(f.name, f.mangled, demangled)
         if qname:
-            items.append((qname, "function"))
+            items.append((qname, True))
     for t in snap.types:
         if t.name:
-            items.append((t.name, "type"))
+            items.append((t.name, t.origin == ScopeOrigin.PUBLIC_HEADER))
     return items
 
 
 def _emit_version_bumps(
-    old_idx: dict[tuple[str, ...], list[tuple[str, int, str]]],
-    new_idx: dict[tuple[str, ...], list[tuple[str, int, str]]],
+    old_idx: dict[tuple[str, ...], list[tuple[str, int, bool]]],
+    new_idx: dict[tuple[str, ...], list[tuple[str, int, bool]]],
 ) -> list[Change]:
     changes: list[Change] = []
     for stripped, old_list in old_idx.items():
@@ -575,12 +659,27 @@ def _emit_version_bumps(
             continue
         old_q = old_list[0][0]
         new_q = new_list[0][0]
+        # `_collect_versioned_entries` marks a function entry reliably
+        # public (Visibility.PUBLIC filter) and a type entry reliably
+        # public only when its origin is ScopeOrigin.PUBLIC_HEADER (Codex
+        # review) — untagged otherwise, same as before public-header
+        # scoping is used. `or`, not `and` (Codex review, fresh evidence):
+        # old-side public evidence alone already proves an old-consumer
+        # break (an application linked against the old public symbol),
+        # regardless of whether the new symbol also has public-header
+        # evidence — public-header scoping can be asymmetric between two
+        # snapshots (a type moved out of the scoped header set, or the flag
+        # only covers one side), so requiring both sides publicly-tagged
+        # let a genuine old-consumer break stay untagged and suppressible.
+        subject_is_public = old_list[0][2] or new_list[0][2]
         changes.append(make_change(
             ChangeKind.INLINE_NAMESPACE_VERSION_BUMPED,
             symbol=new_q,
             old=old_q,
             new=new_q,
             detail=f"{sorted(old_versions)} to {sorted(new_versions)}",
+            public_reachable=subject_is_public,
+            reachability_kind="direct_public_symbol" if subject_is_public else None,
         ))
     return changes
 

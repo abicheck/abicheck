@@ -26,10 +26,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
+from .checker_policy import ChangeKind
+
 if TYPE_CHECKING:
     from .checker_types import Change
     from .model import AbiSnapshot
-    from .suppression import SuppressionList
+    from .suppression import Suppression, SuppressionList
     from .surface import PublicSurface
 
 
@@ -499,8 +501,206 @@ class DemoteOffPythonSurface:
         return kept
 
 
+# diff_types.py builds ENUM_MEMBER_*/ENUM_LAST_MEMBER_VALUE_CHANGED's symbol
+# as "EnumName::member" (unlike TYPE_FIELD_* kinds, which carry the
+# containing type name directly) — MarkReachability.run needs this set to
+# know when to peel the member suffix before checking the owning EnumType's
+# public-header origin.
+_ENUM_MEMBER_KINDS = frozenset({
+    ChangeKind.ENUM_MEMBER_REMOVED,
+    ChangeKind.ENUM_MEMBER_ADDED,
+    ChangeKind.ENUM_MEMBER_VALUE_CHANGED,
+    ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED,
+})
+
+
+class MarkReachability:
+    """Tag each change with public-reachability metadata, before suppression runs.
+
+    ADR-044 D1: the pipeline-order bug this step fixes is that
+    ``ApplySuppression`` used to run before ``DetectInternalLeaks``, so a broad
+    namespace/source_location suppression rule could remove the raw evidence
+    (e.g. a ``type_size_changed`` on an internal type) before the internal-leak
+    detector ever got a chance to see it — silently hiding a genuine leak
+    through the public ABI with no trace in the report.
+
+    This step computes the same public-surface reachability walk
+    (:func:`internal_leak.compute_leak_paths`) that ``DetectInternalLeaks``
+    uses, but up front — before any filtering — and tags every matching change
+    with ``public_reachable``/``reachability_kind``/``reachability_proof_path``.
+    ``compute_leak_paths`` is a pure function of the snapshot (function/
+    variable/type declarations), not of the change list, so computing it here
+    does not depend on pipeline position and does not need to be recomputed by
+    ``DetectInternalLeaks`` later (which still runs after redundancy filtering
+    to decide which *triggering* changes produce a synthetic leak finding).
+
+    Deliberately does **not** also tag a change "reachable" merely because its
+    own subject fails to look internal-namespaced (Codex review; reverted
+    after landing — see ADR-044's "Post-merge review rounds" note). A
+    ``source_location``/``namespace`` rule's whole reason to exist is
+    compensating for `AbiSnapshot`'s visibility model marking *every* exported
+    C/C++ symbol ``Visibility.PUBLIC`` regardless of whether the maintainer
+    considers it part of the contract — ``AbiSnapshot`` carries no signal that
+    distinguishes "a private helper the maintainer knows lives under
+    ``internal/``" from "a genuinely public symbol that happens to be declared
+    under a matching path" (both are ``Visibility.PUBLIC``, and neither name
+    need contain an internal-namespace segment). Tagging any
+    non-internal-namespaced subject reachable breaks the former, ordinary,
+    already-relied-upon case (``tests/test_libabigail_parity_extended.py``'s
+    own ``test_suppress_by_source_location`` encodes exactly this) in the
+    course of trying to fix the latter — and no naming heuristic can tell them
+    apart. Closing the latter gap for real needs actual dependency evidence
+    (the L5 call-graph / consumer-import work already on this ADR's P1/P2
+    roadmap), not a heuristic on the symbol's own spelling.
+
+    ``RecordType.origin == ScopeOrigin.PUBLIC_HEADER`` (ADR-024's opt-in
+    ``--public-header``/``--public-header-dir`` scoping) is a *different*
+    signal from the naming heuristic just described — an explicit, reliable
+    tag, not a guess — and is consulted directly below for a change whose
+    own subject type carries it, since :func:`internal_leak.compute_leak_paths`
+    only ever records *internal* types reached while walking from the public
+    surface, never the public seed types themselves (Codex review).
+
+    ``Suppression.matches()`` (ADR-044 D2) consults ``public_reachable`` to
+    decide whether a broad rule may apply at all — so the underlying evidence
+    for a public-reachable internal change now survives ``ApplySuppression``
+    by default, and ``DetectInternalLeaks`` (still running later in the
+    pipeline, unchanged position) has real evidence to correlate.
+
+    Skipped entirely when no suppression rules are configured
+    (``ctx.suppression is None``, the common case, mirroring
+    ``ApplySuppression``'s own no-op check): the reachability tags this step
+    computes have no other consumer in this slice, and
+    :func:`internal_leak.compute_leak_paths` is a full public-surface BFS —
+    running it here unconditionally would duplicate the walk
+    ``DetectInternalLeaks`` always performs later, roughly doubling that cost
+    on every comparison even when nothing will ever read the tag (perf
+    regression caught by ``benchmark_scaling.py``'s CI gate). Likewise
+    skipped when a suppression *is* configured but every rule in it is
+    narrow with the default (or explicit ``"any"``) reachability (Codex
+    review) — :meth:`SuppressionList.needs_reachability_evidence` proves
+    such a file's rules can never actually consult the tag either, which is
+    the common case (a handful of exact ``symbol:`` waivers).
+    """
+
+    name = "mark_reachability"
+
+    def __init__(self, namespaces: tuple[str, ...] | None = None) -> None:
+        # Mirrors DetectInternalLeaks/DemoteUnreachableInternalChurn's own
+        # constructor (Codex review, P2): those two steps already accept an
+        # internal-namespace override, so MarkReachability must too, or a
+        # project whose internal-namespace convention isn't in
+        # DEFAULT_INTERNAL_NAMESPACES (e.g. "priv" instead of "detail") would
+        # be recognized by the leak detector but invisible to the
+        # reachability tag that gates suppression — reintroducing this ADR's
+        # own failure mode for exactly that convention. No caller wires a
+        # non-default value through DEFAULT_PIPELINE today (see ADR-044's
+        # changelog); this only removes the structural inconsistency so a
+        # future policy-level override reaches this step too.
+        self._namespaces = namespaces
+
+    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        if ctx.suppression is None or not ctx.suppression.needs_reachability_evidence():
+            return changes
+
+        from .internal_leak import (
+            _IDENTITY_VTABLE_KINDS,
+            DEFAULT_INTERNAL_NAMESPACES,
+            _format_path,
+            _path_has_indirection,
+            _path_is_value_propagating,
+            _root_type_name_for_change,
+            compute_leak_paths,
+        )
+        from .model import ScopeOrigin
+
+        def _public_header_names(snap: AbiSnapshot) -> set[str]:
+            """Names of every declaration ADR-024's opt-in ``--public-header``/
+            ``--public-header-dir`` scoping marked ``ScopeOrigin.PUBLIC_HEADER``
+            — ``Function``/``Variable``/``RecordType``/``EnumType`` all carry
+            this field. Without that flag every origin is ``ScopeOrigin.UNKNOWN``,
+            so this returns empty and degrades to the prior behavior."""
+            names: set[str] = set()
+            names.update(f.name for f in snap.functions if f.origin == ScopeOrigin.PUBLIC_HEADER)
+            names.update(v.name for v in snap.variables if v.origin == ScopeOrigin.PUBLIC_HEADER)
+            names.update(t.name for t in snap.types if t.origin == ScopeOrigin.PUBLIC_HEADER)
+            names.update(e.name for e in snap.enums if e.origin == ScopeOrigin.PUBLIC_HEADER)
+            return names
+
+        namespaces = self._namespaces or DEFAULT_INTERNAL_NAMESPACES
+        old_paths = compute_leak_paths(ctx.old, namespaces)
+        new_paths = compute_leak_paths(ctx.new, namespaces)
+        reachable_types = set(old_paths) | set(new_paths)
+        # ScopeOrigin.PUBLIC_HEADER (Codex review, fresh evidence):
+        # compute_leak_paths only ever records *internal* types reached
+        # while walking from the public surface — a declaration that is
+        # itself the public surface (e.g. a header-only type never
+        # referenced by an exported function/variable) never becomes a key
+        # in its result, so a raw change on that declaration's own layout
+        # got no tag at all from the walk above. ADR-024's opt-in
+        # public-header scoping is the same reliable direct signal already
+        # used for the late-detector findings in diff_namespaces.py/
+        # diff_templates.py — apply it here too, across every declaration
+        # kind that carries the field (function/variable/type/enum), not
+        # just RecordType.
+        public_header_names = _public_header_names(ctx.old) | _public_header_names(ctx.new)
+        if not reachable_types and not public_header_names:
+            return changes
+
+        for c in changes:
+            root = _root_type_name_for_change(c)
+            # An enum-member finding's symbol is "EnumName::member" (diff_types.py),
+            # not stripped by _root_type_name_for_change (that stripping is
+            # scoped to STRUCT_FIELD_* kinds only) — peel it here so a
+            # public-header-scoped EnumType's own member churn is found too.
+            enum_owner = (
+                root.rsplit("::", 1)[0]
+                if "::" in root and c.kind in _ENUM_MEMBER_KINDS
+                else None
+            )
+            if root in public_header_names or enum_owner in public_header_names:
+                c.public_reachable = True
+                c.reachability_kind = "direct_public_symbol"
+                continue
+            if root not in reachable_types:
+                continue
+            old_pl = old_paths.get(root, [])
+            new_pl = new_paths.get(root, [])
+            paths = old_pl + [p for p in new_pl if p not in old_pl]
+            if not paths:
+                continue
+            # Mirror DetectInternalLeaks's own value/indirection judgment
+            # (Codex review): a pure-layout change reached *only* through a
+            # pointer/reference is not consumer-visible and DetectInternalLeaks
+            # will not emit a leak finding for it either — tagging it
+            # public_reachable anyway would refuse a broad suppression rule
+            # and append a suppression_would_hide_public_break diagnostic for
+            # churn that was always going to be demoted as unreachable by
+            # DemoteUnreachableInternalChurn, a false alarm.
+            identity_or_vtable = c.kind in _IDENTITY_VTABLE_KINDS
+            all_indirect = all(_path_has_indirection(p) for p in paths)
+            if all_indirect and not identity_or_vtable:
+                continue
+            c.public_reachable = True
+            c.reachability_kind = (
+                "value_embedding"
+                if any(_path_is_value_propagating(p) for p in paths)
+                else "pointer_or_signature"
+            )
+            c.reachability_proof_path = _format_path(min(paths, key=len))
+        return changes
+
+
 class ApplySuppression:
-    """Apply user-provided suppression rules."""
+    """Apply user-provided suppression rules.
+
+    ADR-044 D2: a rule matches only when ``Suppression.matches()`` also passes
+    its reachability/``allow_public_break`` gate — see that method for the
+    semantics. A match refused by that gate is recorded as a
+    ``SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`` diagnostic (ADR-044 D4) instead of
+    being silently dropped, so the change stays visible *and* the suppression
+    author sees why their rule did not apply.
+    """
 
     name = "apply_suppression"
 
@@ -508,12 +708,104 @@ class ApplySuppression:
         if ctx.suppression is None:
             return changes
         filtered: list[Change] = []
+        diagnostics: list[Change] = []
         for c in changes:
-            if ctx.suppression.is_suppressed(c):
+            outcome = ctx.suppression.evaluate(c)
+            if outcome.suppressed:
                 ctx.suppressed.append(c)
-            else:
-                filtered.append(c)
+                continue
+            filtered.append(c)
+            if outcome.withheld_rule is not None:
+                diagnostics.append(
+                    _build_suppression_overreach_change(c, outcome.withheld_rule)
+                )
+        filtered.extend(diagnostics)
         return filtered
+
+
+def _build_suppression_overreach_change(change: Change, rule: Suppression) -> Change:
+    """Build the ``SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`` diagnostic for *change*.
+
+    ADR-044 D4. *rule* is the suppression whose selectors matched *change* but
+    whose reachability/``allow_public_break`` gate withheld the match.
+    """
+    from .checker_policy import ChangeKind
+    from .checker_types import Change
+
+    # would_withhold() only ever returns True for a *broad* rule (namespace/
+    # entity_namespace/cause_namespace/source_location, no primary narrow
+    # selector — see Suppression._is_broad_selector): a rule with symbol/
+    # symbol_pattern/type_pattern set has _is_broad_selector=False, so
+    # _passes_public_break_gate short-circuits True and would_withhold can
+    # never fire for it. The selector fallback below only needs the three
+    # broad-shaped fields; entity_namespace is the canonical spelling of
+    # namespace (self-review finding: it was missing here even though the
+    # equivalent SuppressionAudit string-building was already fixed).
+    selector = (
+        rule.namespace
+        or rule.entity_namespace
+        or rule.cause_namespace
+        or rule.source_location
+        or "?"
+    )
+    proof = (
+        f" via {change.reachability_proof_path}"
+        if change.reachability_proof_path
+        else ""
+    )
+    return Change(
+        kind=ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK,
+        symbol=change.symbol,
+        description=(
+            f"Suppression rule {selector!r} matched {change.symbol!r} "
+            f"({change.kind.value}) but was not applied: the symbol is "
+            f"public-reachable{proof}. Add `allow_public_break: true` to this "
+            "rule to suppress it anyway."
+        ),
+        caused_by_type=change.symbol,
+    )
+
+
+def _merge_findings_respecting_suppression(
+    changes: list[Change],
+    new_findings: list[Change],
+    ctx: PipelineContext,
+) -> None:
+    """Append deduplicated ``new_findings`` to ``changes``, respecting suppression.
+
+    Mutates ``changes`` in place. Shared by every post-``ApplySuppression``
+    detector that builds fresh ``Change`` objects (``DetectCppPatterns``,
+    ``DetectTemplatePatterns``, ``DetectNamespacePatterns``) — those findings
+    never passed through ``ApplySuppression`` itself, so they must run their
+    own suppression check here.
+
+    Uses :meth:`SuppressionList.evaluate` (not the cheaper ``is_suppressed``)
+    so a broad rule whose selectors matched but was withheld by the
+    reachability/``allow_public_break`` gate still emits the same
+    ``SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`` diagnostic ``ApplySuppression``
+    produces for changes it sees directly (ADR-044 D4; Codex review, fresh
+    evidence) — otherwise a late finding that a broad rule *would* have
+    hidden, had it been reachable earlier, is silently kept with no
+    explanation of why the matching rule didn't apply.
+    """
+    seen_keys = {(c.kind, c.symbol) for c in changes}
+    diagnostics: list[Change] = []
+    for c in new_findings:
+        if ctx.suppression is not None:
+            outcome = ctx.suppression.evaluate(c)
+            if outcome.suppressed:
+                ctx.suppressed.append(c)
+                continue
+            if outcome.withheld_rule is not None:
+                diagnostics.append(
+                    _build_suppression_overreach_change(c, outcome.withheld_rule)
+                )
+        key = (c.kind, c.symbol)
+        if key in seen_keys:
+            continue
+        changes.append(c)
+        seen_keys.add(key)
+    changes.extend(diagnostics)
 
 
 class SuppressRenamedPairs:
@@ -755,24 +1047,6 @@ class DetectCppPatterns:
             to_keep.append(ch)
         changes[:] = to_keep
 
-    @staticmethod
-    def _merge_new_findings(
-        changes: list[Change],
-        new_findings: list[Change],
-        ctx: PipelineContext,
-    ) -> None:
-        """Append deduplicated ``new_findings`` to ``changes``, respecting suppression."""
-        seen_keys = {(c.kind, c.symbol) for c in changes}
-        for c in new_findings:
-            if ctx.suppression is not None and ctx.suppression.is_suppressed(c):
-                ctx.suppressed.append(c)
-                continue
-            key = (c.kind, c.symbol)
-            if key in seen_keys:
-                continue
-            changes.append(c)
-            seen_keys.add(key)
-
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         new_findings, suppressed_keys = self._run_all_detectors(ctx, changes)
 
@@ -780,7 +1054,7 @@ class DetectCppPatterns:
             self._suppress_grouped_children(changes, suppressed_keys, ctx)
 
         if new_findings:
-            self._merge_new_findings(changes, new_findings, ctx)
+            _merge_findings_respecting_suppression(changes, new_findings, ctx)
 
         return changes
 
@@ -802,16 +1076,7 @@ class DetectTemplatePatterns:
         new_findings = detect_template_patterns(ctx.old, ctx.new)
         if not new_findings:
             return changes
-        seen_keys = {(c.kind, c.symbol) for c in changes}
-        for c in new_findings:
-            if ctx.suppression is not None and ctx.suppression.is_suppressed(c):
-                ctx.suppressed.append(c)
-                continue
-            key = (c.kind, c.symbol)
-            if key in seen_keys:
-                continue
-            changes.append(c)
-            seen_keys.add(key)
+        _merge_findings_respecting_suppression(changes, new_findings, ctx)
         return changes
 
 
@@ -846,16 +1111,7 @@ class DetectNamespacePatterns:
         )
         if not new_findings:
             return changes
-        seen_keys = {(c.kind, c.symbol) for c in changes}
-        for c in new_findings:
-            if ctx.suppression is not None and ctx.suppression.is_suppressed(c):
-                ctx.suppressed.append(c)
-                continue
-            key = (c.kind, c.symbol)
-            if key in seen_keys:
-                continue
-            changes.append(c)
-            seen_keys.add(key)
+        _merge_findings_respecting_suppression(changes, new_findings, ctx)
         return changes
 
 
@@ -883,19 +1139,12 @@ class DetectInternalLeaks:
         extra = detect_internal_leaks(changes, ctx.old, ctx.new, namespaces)
         if not extra:
             return changes
-        # Avoid duplicates if the pipeline is re-run.
-        seen_symbols = {(c.kind, c.symbol) for c in changes}
-        # Synthetic leak findings must respect user suppression rules
-        # too. ``ApplySuppression`` ran earlier in the pipeline, so we
-        # apply the same predicate by hand here rather than re-running
-        # the whole step.
-        for c in extra:
-            if ctx.suppression is not None and ctx.suppression.is_suppressed(c):
-                ctx.suppressed.append(c)
-                continue
-            if (c.kind, c.symbol) not in seen_symbols:
-                changes.append(c)
-                seen_symbols.add((c.kind, c.symbol))
+        # Synthetic leak findings must respect user suppression rules too.
+        # ``ApplySuppression`` ran earlier in the pipeline, so we apply the
+        # same check by hand here (via the shared helper, which also emits
+        # the withheld-rule diagnostic ``ApplySuppression`` would have)
+        # rather than re-running the whole step.
+        _merge_findings_respecting_suppression(changes, extra, ctx)
         return changes
 
 
@@ -1287,6 +1536,10 @@ DEFAULT_PIPELINE = PostProcessingPipeline(
         # resolved C-header surface (ctx.surf_new) and defer to it; otherwise it
         # uses the recovered Python API as the extension's public-contract oracle.
         DemoteOffPythonSurface(),
+        # ADR-044 D1: must run before ApplySuppression so a broad suppression
+        # rule can see whether the change it is about to remove is part of the
+        # effective public ABI.
+        MarkReachability(),
         ApplySuppression(),
         SuppressRenamedPairs(),
         FilterRedundant(),

@@ -244,6 +244,7 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "bundle_provider_changed": "L0",
     "bundle_soname_skew": "L0",
     # ── L1: needs debug info (layout, offsets, sizes, enum values, calling conv) ──
+    "suppression_would_hide_public_break": "L1",  # ADR-044: needs struct/field layout (internal_leak.compute_leak_paths) to judge public reachability
     "struct_size_changed": "L1",
     "struct_packing_changed": "L1",
     "type_size_changed": "L1",
@@ -313,6 +314,25 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "constant_changed": "L2",
     "param_default_value_changed": "L2",
     "param_default_value_removed": "L2",
+    # ── L2: CastXML schema-completeness (all castxml/header-only facts) ──
+    "field_default_initializer_removed": "L2",
+    "field_default_initializer_changed": "L2",
+    "type_became_abstract": "L2",
+    "type_lost_abstract": "L2",
+    "enum_became_scoped": "L2",
+    "enum_lost_scoped": "L2",
+    "func_override_specifier_added": "L2",
+    "func_override_specifier_removed": "L2",
+    "func_deprecated_added": "L2",
+    "func_deprecated_removed": "L2",
+    "var_deprecated_added": "L2",
+    "var_deprecated_removed": "L2",
+    "type_deprecated_added": "L2",
+    "type_deprecated_removed": "L2",
+    "enum_deprecated_added": "L2",
+    "enum_deprecated_removed": "L2",
+    "field_deprecated_added": "L2",
+    "field_deprecated_removed": "L2",
     # ── L2: ADR-035 D4 cross-source validation that needs binary exports ↔
     # header decls ↔ header provenance (no compile DB) ──
     "exported_not_public": "L2",

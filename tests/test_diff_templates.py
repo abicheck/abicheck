@@ -28,6 +28,7 @@ from abicheck.model import (
     Function,
     Param,
     RecordType,
+    ScopeOrigin,
     Variable,
     Visibility,
 )
@@ -69,6 +70,13 @@ def _var(name: str, type_: str = "int",
 
 def _rec(name: str) -> RecordType:
     return RecordType(name=name, kind="class")
+
+
+def _rec_public(name: str) -> RecordType:
+    """A type explicitly scoped to the public-header set (ADR-024
+    --public-header), the one reliable public-reachability signal
+    RecordType carries."""
+    return RecordType(name=name, kind="class", origin=ScopeOrigin.PUBLIC_HEADER)
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +140,11 @@ class TestInternalTemplateLeaks:
         assert len(changes) == 1
         c = changes[0]
         assert c.kind == ChangeKind.INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API
+        # ADR-044 D1/D2 (Codex review): this finding's mere existence proves
+        # public reachability, so it must be tagged directly — it is created
+        # by DetectTemplatePatterns, which runs after ApplySuppression/
+        # MarkReachability, so nothing else would ever tag it.
+        assert c.public_reachable is True
         assert c.symbol == "lib::__detail::walk"
 
     def test_internal_stem_unchanged_no_finding(self) -> None:
@@ -181,6 +194,12 @@ class TestCpoKindChanged:
         assert c.kind == ChangeKind.CPO_KIND_CHANGED
         assert c.old_value == "function"
         assert c.new_value == "variable"
+        # ADR-044 D1 (Codex review): _func_names/_var_names filter to
+        # Visibility.PUBLIC, so this finding must be tagged reachable at
+        # construction time — DetectTemplatePatterns runs after
+        # ApplySuppression, so nothing else would ever tag it.
+        assert c.public_reachable is True
+        assert c.reachability_kind == "direct_public_symbol"
 
     def test_variable_became_function(self) -> None:
         old = _snap(vars_=[_var("sort", type_="lib::__sort_fn", mangled="_ZN3lib4sortE")])
@@ -277,6 +296,8 @@ class TestOverloadSetRerouted:
         assert len(changes) == 1
         assert changes[0].kind == ChangeKind.OVERLOAD_SET_REROUTED
         assert changes[0].symbol == "lib::sort"
+        assert changes[0].public_reachable is True
+        assert changes[0].reachability_kind == "direct_public_symbol"
 
     def test_pure_addition_no_finding(self) -> None:
         old = _snap(funcs=[
@@ -396,6 +417,23 @@ class TestMandatoryTemplateParamAdded:
         new = _snap(types=[_rec("Bar<int, float>")])
         changes = detect_mandatory_template_param_added(old, new)
         assert len(changes) == 1
+        # RecordType carries no visibility field, and this type's origin
+        # defaults to ScopeOrigin.UNKNOWN (no --public-header scoping used)
+        # — no reliable signal in that (common) case.
+        assert changes[0].public_reachable is False
+        assert changes[0].reachability_kind is None
+
+    def test_public_header_type_is_reachable(self) -> None:
+        """Codex review: RecordType.origin == ScopeOrigin.PUBLIC_HEADER (set
+        only under ADR-024's opt-in --public-header scoping) IS a reliable
+        public-reachability signal, unlike the default ScopeOrigin.UNKNOWN
+        case above."""
+        old = _snap(types=[_rec_public("Bar<int>")])
+        new = _snap(types=[_rec_public("Bar<int, float>")])
+        changes = detect_mandatory_template_param_added(old, new)
+        assert len(changes) == 1
+        assert changes[0].public_reachable is True
+        assert changes[0].reachability_kind == "direct_public_symbol"
 
 
 # ---------------------------------------------------------------------------
@@ -413,6 +451,8 @@ class TestUnspecifiedReturnNowNamed:
         assert c.kind == ChangeKind.UNSPECIFIED_RETURN_NOW_NAMED
         assert c.old_value == "auto"
         assert c.new_value == "lib::Foo"
+        assert c.public_reachable is True
+        assert c.reachability_kind == "direct_public_symbol"
 
     def test_named_to_lambda(self) -> None:
         old = _snap(funcs=[_fn("lib::make", return_type="lib::Foo")])

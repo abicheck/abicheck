@@ -46,6 +46,7 @@ from abicheck.model import (
 )
 from abicheck.resolver import DependencyGraph, ResolvedDSO
 from abicheck.stack_checker import StackChange, StackCheckResult, StackVerdict
+from abicheck.suppression import SuppressionOutcome
 
 # ===========================================================================
 # Shared builders
@@ -108,6 +109,12 @@ class _AllSuppression:
 
     def is_suppressed(self, change: Change) -> bool:
         return True
+
+    def evaluate(self, change: Change) -> SuppressionOutcome:
+        # _merge_findings_respecting_suppression (post_processing.py) calls
+        # evaluate(), not is_suppressed(), so this duck-typed double needs a
+        # matching method too.
+        return SuppressionOutcome(suppressed=True, withheld_rule=None)
 
 
 # ===========================================================================

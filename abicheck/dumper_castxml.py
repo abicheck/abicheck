@@ -93,6 +93,28 @@ def _extract_contract_attributes(attributes: str) -> list[str]:
     return sorted(tokens)
 
 
+def _deprecation_marker(el: Element) -> str | None:
+    """Deprecation message for *el*, or ``None`` if not deprecated.
+
+    castxml's ``GetDeclAttributes`` (``Output.cxx``) always adds a bare
+    ``"deprecated"`` token to the compound ``attributes`` string when
+    ``DeprecatedAttr`` is present, but only emits the dedicated
+    ``deprecation="..."`` XML attribute when the attribute carries a
+    non-empty message. A BARE ``[[deprecated]]``/
+    ``__attribute__((deprecated))`` (no message) therefore has NO
+    ``deprecation`` attribute at all — reading only ``el.get("deprecation")``
+    missed every messageless deprecation (Codex review, PR #582, confirmed
+    against castxml's own source). Falls back to ``""`` (deprecated, no
+    message) when the bare token is present in ``attributes`` instead.
+    """
+    msg = el.get("deprecation")
+    if msg is not None:
+        return msg
+    if re.search(r"\bdeprecated\b", el.get("attributes", "")):
+        return ""
+    return None
+
+
 def _parse_vtable_index(vi_str: str | None) -> int | None:
     """Parse vtable_index attribute, returning None for missing/invalid values."""
     if vi_str is None:
@@ -179,6 +201,30 @@ SYNTHETIC_CTOR_KEY_PREFIX = "__abicheck_ctor__"
 def is_synthetic_ctor_key(key: str) -> bool:
     """Whether *key* is a castxml constructor-overload synthetic identity."""
     return key.startswith(SYNTHETIC_CTOR_KEY_PREFIX)
+
+
+#: Marker for a snapshot key synthesized for a destructor whose real mangled
+#: name castxml omitted (see ``_CastxmlParser._function_display_name`` and
+#: ``_function_mangled_name``'s ``return name`` fallback). A class has at
+#: most one destructor, so — unlike constructors — no per-overload prefix is
+#: needed: the synthesized "~ClassName" display name is itself already a
+#: stable, unique identity. It is intentionally not a real ABI symbol (a real
+#: Itanium destructor mangling always starts with ``_Z``, never ``~``), only
+#: a stable key — ``diff_symbols._public_functions()`` reads this the same
+#: way it already does :data:`SYNTHETIC_CTOR_KEY_PREFIX`/
+#: :func:`is_synthetic_ctor_key`, to exempt such entries from its
+#: ELF-export-set narrowing, which they could never pass. Without this, a
+#: real virtual destructor's PUBLIC visibility (``_ctor_or_dtor_visibility``)
+#: was necessary but not sufficient: it would still be silently dropped
+#: before reaching the diff whenever ELF metadata is present (Codex review,
+#: PR #582 — found after the destructor-visibility fix, via the same Phase 2
+#: parity gate).
+_SYNTHETIC_DTOR_KEY_PREFIX = "~"
+
+
+def is_synthetic_dtor_key(key: str) -> bool:
+    """Whether *key* is a castxml destructor synthetic identity."""
+    return key.startswith(_SYNTHETIC_DTOR_KEY_PREFIX)
 
 
 class _CastxmlParser:
@@ -337,8 +383,32 @@ class _CastxmlParser:
             return self._type_name(el.get("type", ""), depth + 1) + "&&"
         if tag == "CvQualifiedType":
             base = self._type_name(el.get("type", ""), depth + 1)
-            const = "const " if el.get("const") == "1" else ""
-            return f"{const}{base}"
+            # castxml's CvQualifiedType also carries `volatile`; only `const`
+            # was read here previously, so a volatile-qualified type's name
+            # silently dropped it instead of just missing a dedicated
+            # attribute (unlike the genuinely-unmodelable Atomic case below).
+            # Order matches the "const volatile" spelling convention already
+            # used by the DWARF backend's own qualifier stripping
+            # (dwarf_snapshot._strip_type_decorators).
+            #
+            # Deliberately NOT `restrict` here (Codex review, PR #582):
+            # unlike const/volatile — which are real signature-level
+            # qualifiers on a pointee position and participate in mangling —
+            # `restrict` has zero ABI/mangling effect and is already tracked
+            # as its own compatible-classified fact (Param.is_restrict /
+            # PARAM_RESTRICT_CHANGED, populated in _parse_function_params
+            # via _resolve_cv_restrict below). Folding it into the generic
+            # type-name spelling would make a restrict-only parameter change
+            # look like an ordinary type mismatch and misfire the BREAKING
+            # ``FUNC_PARAMS_CHANGED`` generic-type-diff path instead of the
+            # dedicated compatible one.
+            quals = [
+                q
+                for q, attr in (("const", "const"), ("volatile", "volatile"))
+                if el.get(attr) == "1"
+            ]
+            prefix = f"{' '.join(quals)} " if quals else ""
+            return f"{prefix}{base}"
         if tag == "ElaboratedType":
             # castxml wraps an elaborated-type-specifier (`struct Foo`, `union
             # Foo`, `enum Foo` used directly rather than via a typedef) in an
@@ -363,6 +433,44 @@ class _CastxmlParser:
             # detect the qualifier being added/removed on this slot.
             return "_Atomic"
         return el.get("name", tag)
+
+    def _resolve_cv_restrict(self, id_: str, depth: int = 0) -> tuple[bool, bool, bool]:
+        """Whether *id_*'s own (top-level) qualification is const/volatile/restrict.
+
+        Walks the real XML type chain rather than pattern-matching the
+        rendered ``_type_name`` spelling: a field or parameter declared
+        through a ``Typedef`` whose target is itself cv-qualified (``typedef
+        const int T; struct S { T x; };``) renders as the bare alias name
+        ("T"), so a regex over the spelling can never see the qualifier
+        behind it (Codex review, PR #582). ``ElaboratedType`` is followed for
+        the same reason ``_type_name`` follows it. A further ``CvQualifiedType``
+        or ``Typedef`` reached *through* one already-seen ``CvQualifiedType``
+        combines in (rare, but e.g. two typedefs each adding one qualifier);
+        any other tag (``PointerType`` chief among them) stops the walk so a
+        *pointee*'s qualification is never attributed to the pointer/field
+        itself — ``const int *`` is a non-const pointer to const int, not a
+        const pointer.
+        """
+        if depth > 20 or not id_:
+            return (False, False, False)
+        el = self._resolve(id_)
+        if el is None:
+            return (False, False, False)
+        if el.tag == "CvQualifiedType":
+            const = el.get("const") == "1"
+            volatile = el.get("volatile") == "1"
+            restrict = el.get("restrict") == "1"
+            inner_const, inner_volatile, inner_restrict = self._resolve_cv_restrict(
+                el.get("type", ""), depth + 1
+            )
+            return (
+                const or inner_const,
+                volatile or inner_volatile,
+                restrict or inner_restrict,
+            )
+        if el.tag in ("Typedef", "ElaboratedType"):
+            return self._resolve_cv_restrict(el.get("type", ""), depth + 1)
+        return (False, False, False)
 
     def _is_global_scope(self, el: Any) -> bool:
         """True if *el*'s immediate lexical context is the root ``::``
@@ -471,7 +579,7 @@ class _CastxmlParser:
             return Visibility.ELF_ONLY
         return Visibility.HIDDEN
 
-    def _constructor_visibility(
+    def _ctor_or_dtor_visibility(
         self,
         raw_mangled: str,
         name: str,
@@ -479,7 +587,8 @@ class _CastxmlParser:
         is_deleted: bool,
         is_artificial: bool,
     ) -> Visibility:
-        """Visibility for a Constructor element, with a source-access fallback.
+        """Visibility for a Constructor or Destructor element, with a
+        source-access fallback.
 
         ``_visibility()`` is an ELF-symbol-table lookup: it needs a real
         mangled name to check. When castxml omits the mangled name for a
@@ -495,18 +604,28 @@ class _CastxmlParser:
         never fired for the new ``std::function<int()>`` overload) behind
         `_public_functions()`'s PUBLIC/ELF_ONLY filter.
 
+        castxml ALSO omits the mangled name for every ``<Destructor>``
+        (never just user-declared/overloaded ones — a class has at most one
+        destructor, so there's no overload-collision risk the way there is
+        for constructors), so the exact same problem applies there: a
+        removed or added virtual destructor would silently classify HIDDEN
+        (Phase 2 castxml↔clang parity gate, PR #582 — discovered by
+        comparing real castxml/clang dumps of a multiple/virtual-inheritance
+        hierarchy: clang correctly reports a base's virtual destructor as
+        PUBLIC while castxml reported it HIDDEN).
+
         Falls back to the real ELF lookup first (it stays authoritative
         whenever it can actually resolve something); only when that lookup
         has no mangled name to work with does a public, non-deleted,
-        **user-declared** (``is_artificial`` false) constructor default to
-        PUBLIC — the same "declared public in a public header, without
-        contrary evidence" principle already used for source-graph
+        **user-declared** (``is_artificial`` false) constructor/destructor
+        default to PUBLIC — the same "declared public in a public header,
+        without contrary evidence" principle already used for source-graph
         public-surface classification
         (:data:`abicheck.buildsource.source_graph.PUBLIC_VISIBILITIES`).
-        Compiler-generated implicit constructors (default/copy/move, marked
+        Compiler-generated implicit constructors/destructors (marked
         ``artificial="1"``) are excluded: they have no source declaration of
         their own to compare across versions, so promoting them would treat
-        every trivial aggregate's synthesized ctors as a churny "added"/
+        every trivial aggregate's synthesized ctor/dtor as a churny "added"/
         "removed" API surface instead of staying silent like the clang
         header backend already does for them.
         """
@@ -538,7 +657,7 @@ class _CastxmlParser:
         ``constexpr`` variable with no ``extern`` — internal linkage by
         default, mangled with an ``L`` marker rather than exported) — the
         same "declared public, without contrary evidence" principle already
-        applied to constructors (:meth:`_constructor_visibility`).
+        applied to constructors/destructors (:meth:`_ctor_or_dtor_visibility`).
         """
         vis = self._visibility(mangled, name)
         if vis is not Visibility.HIDDEN:
@@ -629,6 +748,17 @@ class _CastxmlParser:
             ret_id = el.get("returns", "")
             ret_type_for_name = self._type_name(ret_id) if ret_id else "?"
             name = f"operator {ret_type_for_name}"
+        if name and el.tag == "Destructor":
+            # castxml's <Destructor name="..."> is the bare CLASS name (e.g.
+            # "Base1"), identical to its own Constructor's — unlike clang's
+            # `-ast-dump=json`, which already names a CXXDestructorDecl
+            # "~Base1" (confirmed against a live clang 18 dump; Phase 2
+            # parity gate, PR #582). Synthesizing the same "~ClassName" form
+            # here both matches clang's convention and gives
+            # _function_mangled_name's no-mangled-name fallback (`return
+            # name`) a key that can never collide with the class's own
+            # constructor/type entries.
+            name = f"~{name}"
         # castxml emits operator name as the bare symbol (e.g. "==", "+").
         # Normalize to the canonical "operator==" form for readability and
         # to match how the rest of the pipeline (and human reports)
@@ -641,9 +771,39 @@ class _CastxmlParser:
             name = f"operator{name}"
         return name
 
-    def _parse_function_params(self, el: Element) -> tuple[list[Param], bool]:
-        """Collect a function element's parameters and whether it is C-variadic."""
+    def _ctor_param_identity_type(self, type_id: str) -> str:
+        """Type spelling for a synthesized constructor identity key: like
+        ``_type_name``, but with at most one OUTERMOST ``CvQualifiedType``
+        layer removed.
+
+        A top-level cv-qualifier — one directly wrapping the parameter's own
+        type, whether that type is by-value (``volatile int``) or a pointer
+        VALUE itself (``int * volatile``, i.e. ``CvQualifiedType`` directly
+        wrapping ``PointerType``) — participates in neither real Itanium
+        mangling nor overload identity, so it must not change the
+        synthesized key either (Codex review, PR #582). A POINTEE-position
+        qualifier (``const int *`` — ``PointerType`` wrapping
+        ``CvQualifiedType``) is NOT touched: that one genuinely does
+        distinguish two overloads and would mangle differently, so it must
+        keep contributing to the key. This can't be done by pattern-matching
+        the rendered ``_type_name`` string (both cases can render
+        identically, e.g. ``"volatile int*"`` for either a volatile pointer
+        VALUE or a pointer to volatile int) — only the real XML structure
+        tells them apart: only strip when the type id itself resolves
+        directly to a ``CvQualifiedType`` element.
+        """
+        el = self._resolve(type_id)
+        if el is not None and el.tag == "CvQualifiedType":
+            return self._type_name(el.get("type", ""))
+        return self._type_name(type_id)
+
+    def _parse_function_params(self, el: Element) -> tuple[list[Param], bool, list[str]]:
+        """Collect a function element's parameters, whether it is
+        C-variadic, and each parameter's ctor-identity-key type spelling
+        (mirrors ``params`` positionally; see ``_ctor_param_identity_type``).
+        """
         params: list[Param] = []
+        ctor_identity_types: list[str] = []
         is_variadic = False
         for arg in el:
             if arg.tag == "Argument":
@@ -651,6 +811,7 @@ class _CastxmlParser:
                 p_type_id = arg.get("type", "")
                 p_type = self._type_name(p_type_id)
                 p_depth = self._pointer_depth(p_type_id)
+                _, _, p_restrict = self._resolve_cv_restrict(p_type_id)
                 # castxml emits default="<expr>" on Arguments that carry a
                 # default value. Removing/changing a default is a source-API
                 # (and silent-behaviour) concern even though the mangled name
@@ -662,16 +823,43 @@ class _CastxmlParser:
                         type=p_type,
                         pointer_depth=p_depth,
                         default=arg.get("default"),
+                        # restrict has no ABI/mangling effect (unlike
+                        # const/volatile) — tracked as its own compatible-
+                        # classified fact via the dedicated param_restrict
+                        # detector rather than folded into `type` (see
+                        # _type_name's CvQualifiedType handling above).
+                        is_restrict=p_restrict,
                     )
                 )
+                ctor_identity_types.append(self._ctor_param_identity_type(p_type_id))
             elif arg.tag == "Ellipsis":
                 # Trailing C ellipsis (...) — the function is variadic.
                 is_variadic = True
-        return params, is_variadic
+        return params, is_variadic, ctor_identity_types
+
+    def _enclosing_class_qualified_name(self, el: Element) -> str:
+        """Fully-qualified (``ns::Outer::Class``) name of the class/struct/
+        union enclosing a Constructor/Destructor element *el*.
+
+        Distinct from calling ``_qualified_name(el)`` directly on *el*: a
+        Constructor/Destructor's own bare ``name`` attribute already equals
+        the class's own leaf name, so walking from *el* itself would count
+        that leaf twice (``Foo::Foo`` instead of ``ns::Foo``). Walking from
+        *el*'s ``context`` (the class element) instead starts one level up,
+        at the class's own name.
+        """
+        class_el = self._resolve(el.get("context", ""))
+        if class_el is None:
+            return el.get("name", "")
+        return self._qualified_name(class_el)
 
     @staticmethod
     def _function_mangled_name(
-        el: Element, name: str, params: list[Param], raw_mangled: str
+        el: Element,
+        name: str,
+        ctor_identity_types: list[str],
+        raw_mangled: str,
+        qualified_scope: str = "",
     ) -> str:
         """Pick the snapshot key for a function: mangled name, ctor synthesis, or plain name."""
         if raw_mangled:
@@ -684,8 +872,37 @@ class _CastxmlParser:
             # deterministic internal identity from the display name and
             # normalized parameter types; it is intentionally not an ABI
             # symbol, only a stable snapshot key for source-level overloads.
-            param_sig = ",".join(p.type for p in params)
-            return f"{SYNTHETIC_CTOR_KEY_PREFIX}{name}({param_sig})"
+            # ctor_identity_types (not the raw Param.type strings) drops a
+            # TOP-LEVEL cv qualifier the same way real Itanium mangling
+            # would — see _ctor_param_identity_type's docstring: without it,
+            # a layout-neutral declaration change like ``Widget(int)`` ->
+            # ``Widget(volatile int)`` (by-value) or ``Widget(int*)`` ->
+            # ``Widget(int* volatile)`` (the pointer VALUE itself, not its
+            # pointee) produced two different synthetic keys, so the diff
+            # engine saw a removed + added constructor instead of the same
+            # overload reaching the cv-neutral param comparison (Codex
+            # review, PR #582).
+            #
+            # Use the fully-qualified enclosing class name (falling back to
+            # the bare *name* only if it couldn't be resolved), not just the
+            # bare class name: two public classes with the same leaf name in
+            # different namespaces (``ns1::Foo``/``ns2::Foo``) would
+            # otherwise synthesize the identical key, silently colliding in
+            # ``AbiSnapshot.function_map`` — one class's constructor
+            # additions/removals then went undetected, "first-wins" (Codex
+            # review, PR #582). A non-namespaced class's qualified name is
+            # just its bare name, so this is a no-op for the common case.
+            scope = qualified_scope or name
+            param_sig = ",".join(ctor_identity_types)
+            return f"{SYNTHETIC_CTOR_KEY_PREFIX}{scope}({param_sig})"
+        if el.tag == "Destructor" and qualified_scope:
+            # Same namespace-collision reasoning as above, applied to the
+            # destructor's synthesized "~ClassName" key: qualify it as
+            # "~ns::Class" instead of bare "~Class". The leading "~" is
+            # preserved (is_synthetic_dtor_key() checks for it), and a
+            # non-namespaced class again collapses to the pre-existing
+            # "~Class" form.
+            return f"~{qualified_scope}"
         return name  # C functions: use plain name
 
     def _function_source_location(
@@ -771,8 +988,15 @@ class _CastxmlParser:
         ret_type = self._type_name(ret_id) if ret_id else "void"
         ret_ptr_depth = self._pointer_depth(ret_id) if ret_id else 0
 
-        params, is_variadic = self._parse_function_params(el)
-        mangled = self._function_mangled_name(el, name, params, raw_mangled)
+        params, is_variadic, ctor_identity_types = self._parse_function_params(el)
+        qualified_scope = (
+            self._enclosing_class_qualified_name(el)
+            if el.tag in ("Constructor", "Destructor")
+            else ""
+        )
+        mangled = self._function_mangled_name(
+            el, name, ctor_identity_types, raw_mangled, qualified_scope
+        )
 
         # Real ELF export evidence overrides castxml's language-mode guess:
         # castxml ALWAYS emits a pseudo-Itanium `mangled` attribute, even for
@@ -826,10 +1050,10 @@ class _CastxmlParser:
         access = self._access_level(el)
         is_deleted = el.get("deleted") == "1"
         visibility = (
-            self._constructor_visibility(
+            self._ctor_or_dtor_visibility(
                 raw_mangled, name, access, is_deleted, el.get("artificial") == "1"
             )
-            if el.tag == "Constructor"
+            if el.tag in ("Constructor", "Destructor")
             else self._visibility(raw_mangled, name)
         )
 
@@ -864,6 +1088,22 @@ class _CastxmlParser:
             # the compound ``attributes`` string (same channel as noexcept).
             contract_attributes=_extract_contract_attributes(el.get("attributes", "")),
             exception_spec=self._function_exception_spec(el),
+            # See _deprecation_marker for why this isn't a plain
+            # el.get("deprecation") read.
+            deprecated=_deprecation_marker(el),
+            # Explicit C++11 `override` specifier: castxml has no dedicated
+            # boolean for it (distinct from `overrides`, the id-reference
+            # list used for vtable-slot dedup) — the `override` token is
+            # embedded in the same compound `attributes` string as
+            # `noexcept`/`final`. Only member-function forms that can
+            # actually be virtual may carry it; a free function/operator or
+            # a constructor never can, so those stay None (not merely
+            # False) rather than asserting a fact that's not applicable.
+            is_override=(
+                bool(re.search(r"\boverride\b", el.get("attributes", "")))
+                if el.tag in ("Method", "Destructor", "Converter", "OperatorMethod")
+                else None
+            ),
         )
 
     def parse_variables(self) -> list[Variable]:
@@ -876,6 +1116,26 @@ class _CastxmlParser:
             mangled = el.get("mangled", "") or name
             if not mangled:
                 continue
+            # Real ELF export evidence overrides castxml's language-mode guess
+            # — the same "case141" fallback already applied to functions
+            # above (_parse_function_element): castxml ALWAYS emits a
+            # pseudo-Itanium `mangled` attribute for a Variable too, even
+            # when the header is actually a plain C API compiled with a C
+            # linkage that never mangles at all (confirmed empirically —
+            # Phase 2 castxml↔clang parity gate, PR #582: a `.c`-compiled
+            # `extern int g;` got a bogus `_Z1g`-style key from castxml
+            # while clang correctly reported the real bare-name export).
+            # Restricted to global scope for the same reason as the function
+            # override: a namespaced C++ variable's bare leaf could
+            # coincidentally match an unrelated global export.
+            if (
+                mangled.startswith("_Z")
+                and mangled not in self._exported_dynamic
+                and mangled not in self._exported_static
+                and name in (self._exported_dynamic | self._exported_static)
+                and self._is_global_scope(el)
+            ):
+                mangled = name
             # Skip compiler built-ins and command-line synthetic declarations
             if self._is_builtin_element(el):
                 continue
@@ -898,6 +1158,8 @@ class _CastxmlParser:
                     # Explicit alignas/aligned attribute when castxml emits an
                     # ``align`` attribute on the Variable; None = unknown.
                     alignment_bits=self._optional_int_attr(el, "align"),
+                    # See RecordType.deprecated for the message-text convention.
+                    deprecated=_deprecation_marker(el),
                 )
             )
         return variables
@@ -1139,6 +1401,18 @@ class _CastxmlParser:
             # model default of None since the binary carries no `final` info.
             is_final=bool(re.search(r"\bfinal\b", el.get("attributes", ""))),
             source_location=self._source_location(el),
+            # castxml's `abstract="1"` marks a class/struct with at least one
+            # pure virtual function (cannot be instantiated). Header mode
+            # always knows the answer for a complete type, matching the
+            # `is_final` convention above; left None for an opaque/incomplete
+            # record (no member list to have judged it from).
+            is_abstract=None if is_opaque else el.get("abstract") == "1",
+            # `[[deprecated("msg")]]` -> the message text verbatim; a bare
+            # `[[deprecated]]` with no message -> "" (see _deprecation_marker:
+            # castxml only emits the `deprecation` XML attribute when there
+            # IS a message, so a bare marker must be read from the
+            # compound `attributes` string instead); not deprecated -> None.
+            deprecated=_deprecation_marker(el),
         )
 
     def _source_location(self, el: Any) -> str | None:
@@ -1195,14 +1469,35 @@ class _CastxmlParser:
                 fields.extend(self._expand_anonymous_field(child))
                 continue
             bitfield_bits, is_bitfield = self._parse_bitfield_bits(child.get("bits"))
+            field_type_id = child.get("type", "")
+            field_type = self._type_name(field_type_id)
+            # Resolved from the real XML type chain (following through any
+            # Typedef indirection), not a regex over `field_type`: a field
+            # declared through a typedef to a cv-qualified type (`typedef
+            # const int T; struct S { T x; };`) renders as the bare alias
+            # name ("T"), which a spelling-based regex could never see
+            # through (Codex review, PR #582).
+            field_const, field_volatile, _ = self._resolve_cv_restrict(field_type_id)
             fields.append(
                 TypeField(
                     name=child_name,
-                    type=self._type_name(child.get("type", "")),
+                    type=field_type,
                     offset_bits=self._optional_int_attr(child, "offset"),
                     is_bitfield=is_bitfield,
                     bitfield_bits=bitfield_bits,
+                    is_const=field_const,
+                    is_volatile=field_volatile,
+                    # castxml's Field element carries its own `mutable="1"`
+                    # attribute (fixed xs:int, per castxml.xsd) rather than
+                    # deriving it from the referenced type like const/volatile.
+                    is_mutable=child.get("mutable") == "1",
                     access=self._access_level(child),
+                    # Default member initializer expression, verbatim
+                    # (castxml's Field ``init`` attribute — the same channel
+                    # already used for Variable/constant initializers).
+                    default=child.get("init"),
+                    # See RecordType.deprecated for the message-text convention.
+                    deprecated=_deprecation_marker(child),
                 )
             )
         return fields
@@ -1254,14 +1549,26 @@ class _CastxmlParser:
                 continue
             inner_offset = self._optional_int_attr(inner, "offset") or 0
             bitfield_bits, is_bitfield = self._parse_bitfield_bits(inner.get("bits"))
+            inner_type_id = inner.get("type", "")
+            inner_type = self._type_name(inner_type_id)
+            inner_const, inner_volatile, _ = self._resolve_cv_restrict(inner_type_id)
             result.append(
                 TypeField(
                     name=inner_name,
-                    type=self._type_name(inner.get("type", "")),
+                    type=inner_type,
                     offset_bits=this_offset + inner_offset,
                     is_bitfield=is_bitfield,
                     bitfield_bits=bitfield_bits,
+                    is_const=inner_const,
+                    is_volatile=inner_volatile,
+                    is_mutable=inner.get("mutable") == "1",
                     access=self._access_level(inner),
+                    # Same channel as the direct-field path in
+                    # _parse_record_fields — a field inside an anonymous
+                    # struct/union must not lose its initializer/deprecation
+                    # just because it was flattened (Codex review, PR #582).
+                    default=inner.get("init"),
+                    deprecated=_deprecation_marker(inner),
                 )
             )
         return result
@@ -1466,6 +1773,13 @@ class _CastxmlParser:
                     name=name,
                     members=members,
                     source_location=self._source_location(el),
+                    # castxml's `scoped="1"` marks a C++11 `enum class`/`enum
+                    # struct` (as opposed to a plain C-style enum). Header
+                    # mode always knows the answer, so this is a concrete
+                    # bool (never None on the castxml path).
+                    is_scoped=el.get("scoped") == "1",
+                    # See RecordType.deprecated for the message-text convention.
+                    deprecated=_deprecation_marker(el),
                 )
             )
         return enums

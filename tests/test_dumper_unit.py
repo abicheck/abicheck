@@ -812,7 +812,10 @@ class TestCastxmlParserFunctions:
         assert funcs[0].name == "Widget"
 
     def test_destructor(self):
-        fn = Element("Destructor", id="d1", name="~Widget", mangled="_ZN6WidgetD1Ev")
+        # castxml's real <Destructor name="..."> is the bare CLASS name (no
+        # "~"), confirmed against a live castxml dump (Phase 2 parity gate,
+        # PR #582) — the parser synthesizes the "~Widget" display name.
+        fn = Element("Destructor", id="d1", name="Widget", mangled="_ZN6WidgetD1Ev")
         root = _xml_root(fn)
         p = _CastxmlParser(root, set(), set())
         funcs = p.parse_functions()

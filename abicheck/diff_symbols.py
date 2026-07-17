@@ -62,7 +62,7 @@ from .diff_symbols_scalar import (  # noqa: F401  (public-surface re-exports)
     _canonical_int_spelling as _canonical_int_spelling,
     _scalar_repr as _scalar_repr,
 )
-from .dumper_castxml import is_synthetic_ctor_key
+from .dumper_castxml import is_synthetic_ctor_key, is_synthetic_dtor_key
 from .elf_symbol_filter import (
     FUNCTION_SYMBOL_TYPES,
     exported_symbol_names,
@@ -77,6 +77,7 @@ from .model import (
     Visibility,
     canonicalize_type_name,
     cv_qualifiers_only_differ,
+    func_signature_cv_only_differ,
     is_abi_surface_type_name,
     stdlib_namespaces_excluded,
 )
@@ -189,6 +190,13 @@ def _public_functions(snap: AbiSnapshot) -> dict[str, Function]:
             # removed / case111's added overload); its visibility was already
             # resolved from source access when castxml gave no name to check.
             or is_synthetic_ctor_key(k)
+            # Same reasoning for a synthetic destructor key ("~ClassName",
+            # castxml omitted the real mangled name): it can never equal a
+            # real exported symbol either, so without this a genuinely
+            # public virtual destructor's PUBLIC visibility
+            # (_ctor_or_dtor_visibility) would still be silently dropped
+            # here — necessary but not sufficient (Codex review, PR #582).
+            or is_synthetic_dtor_key(k)
         )
     }
 
@@ -283,6 +291,12 @@ def _check_return_type_change(
     # binary ABI break (ISSUE-29/52: libuv/Wayland const-pointer churn).
     if cv_qualifiers_only_differ(f_old.return_type, f_new.return_type):
         return []
+    # A top-level BY-VALUE cv change on the return type (``int`` -> ``volatile
+    # int``) is absent from the function's mangled name entirely, unlike the
+    # equivalent field/variable case — see func_signature_cv_only_differ's
+    # docstring (Codex review, PR #582).
+    if func_signature_cv_only_differ(f_old.return_type, f_new.return_type):
+        return []
     # A name-only change between ABI-equivalent integer spellings (e.g.
     # long -> long long, size_t -> unsigned long on LP64) is not a binary ABI
     # break: same width, signedness, and calling convention.
@@ -312,6 +326,12 @@ def _params_differ(p_old: Param, p_new: Param, is_llp64: bool) -> bool:
     # calling convention and binary layout identical — it is source/API churn,
     # not a binary ABI break (ISSUE-29/52).
     if cv_qualifiers_only_differ(p_old.type, p_new.type):
+        return False
+    # A top-level BY-VALUE cv change (``int`` -> ``volatile int``) is, unlike
+    # the equivalent field/variable case, not merely layout-neutral but
+    # genuinely absent from the function's type/mangled name — see
+    # func_signature_cv_only_differ's docstring (Codex review, PR #582).
+    if func_signature_cv_only_differ(p_old.type, p_new.type):
         return False
     # Same kind, different spelling: not a change if the integer types are
     # ABI-equivalent (long -> long long, size_t -> unsigned long on LP64).
@@ -1261,6 +1281,31 @@ def _both_header_aware(old: AbiSnapshot, new: AbiSnapshot) -> bool:
     )
 
 
+def _both_castxml_backed(old: AbiSnapshot, new: AbiSnapshot) -> bool:
+    """True only when BOTH snapshots are confirmed header-aware AND were
+    produced by the castxml L2 backend specifically.
+
+    Stricter than :func:`_both_header_aware`: the clang header backend
+    (``--ast-frontend clang``) ALSO sets ``from_headers=True``, but its
+    parser (``dumper_clang._ClangAstParser``) does not yet populate several
+    facts this gate protects — ``TypeField.default``/``deprecated``,
+    ``RecordType.is_abstract``/``deprecated``, ``EnumType.is_scoped``/
+    ``deprecated``, ``Function.is_override``/``deprecated``,
+    ``Variable.deprecated``. Gating on ``_both_header_aware`` alone would let
+    a castxml-parsed old snapshot compared against a clang-parsed new
+    snapshot read as "every one of these facts was removed", since the new
+    side is always ``None`` for a reason unrelated to the actual source
+    (Codex review, PR #582). ``ast_producer`` is ``None`` for snapshots
+    predating this field, which correctly fails this gate too (unknown
+    producer, not assumed castxml).
+    """
+    return (
+        _both_header_aware(old, new)
+        and old.ast_producer == "castxml"
+        and new.ast_producer == "castxml"
+    )
+
+
 @registry.detector("param_defaults")
 def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect parameter default value changes/removals.
@@ -1703,6 +1748,128 @@ def _diff_param_restrict(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         new_value=f"restrict={p_new.is_restrict}",
                     )
                 )
+    return changes
+
+
+@registry.detector("func_deprecated")
+def _diff_func_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
+    """Detect a function gaining or losing `[[deprecated]]`.
+
+    Header-tier only, gated at the snapshot level like ``param_defaults``:
+    ``Function.deprecated`` is ``None`` both for "not deprecated" and "the
+    dumper doesn't capture this" (see its docstring in model.py), so a
+    per-pair None check would silently miss every real transition (one side
+    of a real add/remove is always None by construction). Gates on
+    ``_both_castxml_backed`` rather than plain ``_both_header_aware``: the
+    clang header backend doesn't populate ``Function.deprecated`` yet, so a
+    castxml-vs-clang comparison would otherwise read as every deprecation
+    having been removed (Codex review, PR #582).
+    """
+    if not _both_castxml_backed(old, new):
+        return []
+    changes: list[Change] = []
+    old_map = _public_functions(old)
+    new_map = _public_functions(new)
+
+    for mangled, f_old in old_map.items():
+        f_new = new_map.get(mangled)
+        if f_new is None:
+            continue
+        if f_old.deprecated is None and f_new.deprecated is not None:
+            changes.append(make_change(
+                ChangeKind.FUNC_DEPRECATED_ADDED,
+                symbol=mangled,
+                name=f_old.name, detail=f_new.deprecated,
+                new_value=f_new.deprecated,
+            ))
+        elif f_old.deprecated is not None and f_new.deprecated is None:
+            changes.append(make_change(
+                ChangeKind.FUNC_DEPRECATED_REMOVED,
+                symbol=mangled,
+                name=f_old.name,
+                old_value=f_old.deprecated,
+            ))
+    return changes
+
+
+@registry.detector("func_override_specifier")
+def _diff_func_override_specifier(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
+    """Detect a virtual method gaining or losing the explicit `override` specifier.
+
+    Tri-state, same rationale as the vtable-index/explicit checks elsewhere:
+    only fire when BOTH sides record it (and only for a member-function form
+    that can carry the specifier at all — see ``Function.is_override``'s
+    docstring); ``None`` means not applicable / not determined, not "no
+    override". Also gated on ``_both_castxml_backed``: unlike ``is_final``,
+    ``is_override`` is castxml-only today, so a clang-parsed side's
+    unconditional ``None`` must not be misread as "override was removed"
+    (Codex review, PR #582).
+    """
+    if not _both_castxml_backed(old, new):
+        return []
+    changes: list[Change] = []
+    old_map = _public_functions(old)
+    new_map = _public_functions(new)
+
+    for mangled, f_old in old_map.items():
+        f_new = new_map.get(mangled)
+        if f_new is None:
+            continue
+        if f_old.is_override is None or f_new.is_override is None:
+            continue
+        if f_old.is_override == f_new.is_override:
+            continue
+        if f_new.is_override:
+            changes.append(make_change(
+                ChangeKind.FUNC_OVERRIDE_SPECIFIER_ADDED,
+                symbol=mangled,
+                name=f_old.name,
+                old_value="no override",
+                new_value="override",
+            ))
+        else:
+            changes.append(make_change(
+                ChangeKind.FUNC_OVERRIDE_SPECIFIER_REMOVED,
+                symbol=mangled,
+                name=f_old.name,
+                old_value="override",
+                new_value="no override",
+            ))
+    return changes
+
+
+@registry.detector("var_deprecated")
+def _diff_var_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
+    """Detect a variable gaining or losing `[[deprecated]]` (header-tier only).
+
+    Gates on ``_both_castxml_backed`` — see ``FUNC_DEPRECATED_ADDED``'s
+    docstring above (the clang backend doesn't populate
+    ``Variable.deprecated`` yet).
+    """
+    if not _both_castxml_backed(old, new):
+        return []
+    changes: list[Change] = []
+    old_map = _public_variables(old)
+    new_map = _public_variables(new)
+
+    for mangled, v_old in old_map.items():
+        v_new = new_map.get(mangled)
+        if v_new is None:
+            continue
+        if v_old.deprecated is None and v_new.deprecated is not None:
+            changes.append(make_change(
+                ChangeKind.VAR_DEPRECATED_ADDED,
+                symbol=mangled,
+                name=v_old.name, detail=v_new.deprecated,
+                new_value=v_new.deprecated,
+            ))
+        elif v_old.deprecated is not None and v_new.deprecated is None:
+            changes.append(make_change(
+                ChangeKind.VAR_DEPRECATED_REMOVED,
+                symbol=mangled,
+                name=v_old.name,
+                old_value=v_old.deprecated,
+            ))
     return changes
 
 

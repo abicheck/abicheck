@@ -29,9 +29,11 @@ Architecture review: Problem A — eliminates scattered metadata across 5+ locat
 from __future__ import annotations
 
 from .change_registry_buildsource import BUILDSOURCE_EXTENSION_ENTRIES
+from .change_registry_castxml import CASTXML_EXTENSION_ENTRIES
 from .change_registry_composition import COMPOSITION_EXTENSION_ENTRIES
 from .change_registry_coverage import COVERAGE_EXTENSION_ENTRIES
 from .change_registry_numpy import NUMPY_EXTENSION_ENTRIES
+from .change_registry_suppression import SUPPRESSION_EXTENSION_ENTRIES
 from .change_registry_types import (  # noqa: F401
     ChangeKindMeta as ChangeKindMeta,
     ChangeKindRegistry as ChangeKindRegistry,
@@ -1982,19 +1984,15 @@ REGISTRY = ChangeKindRegistry([
               "limit). The Python API surface is therefore untrusted and must "
               "fail closed rather than disabling Python-level API checks.",
        description_template="Invalid Python API stub for extension module: {detail}"),
-    # Coverage-extension kinds (dynamic loader, PE, Mach-O, language
-    # contracts) live in change_registry_coverage.py to keep this file under
-    # the 2000-line cap; they are part of this same single registry.
+    # Coverage-extension, composition-compatibility, build-source (L3/L4/L5),
+    # NumPy C-API (G26), wheel deployment-claim (G27), CastXML schema-
+    # completeness, and suppression reachability (ADR-044) kinds each live in
+    # their own change_registry_*.py file to keep this file under the cap.
     *COVERAGE_EXTENSION_ENTRIES,
-    # Composition-compatibility kinds (runtime binding, ordered loader
-    # contract, consumer-aware PE, wchar_t model) live in
-    # change_registry_composition.py for the same reason.
     *COMPOSITION_EXTENSION_ENTRIES,
-    # Build-source (L3/L4/L5) evidence-layer kinds live in
-    # change_registry_buildsource.py for the same reason.
     *BUILDSOURCE_EXTENSION_ENTRIES,
-    # NumPy C-API (G26) / wheel tag deployment-claim (G27) kinds live in
-    # change_registry_numpy.py / change_registry_wheel.py for the same reason.
     *NUMPY_EXTENSION_ENTRIES,
     *WHEEL_DEPLOYMENT_EXTENSION_ENTRIES,
+    *CASTXML_EXTENSION_ENTRIES,
+    *SUPPRESSION_EXTENSION_ENTRIES,
 ])

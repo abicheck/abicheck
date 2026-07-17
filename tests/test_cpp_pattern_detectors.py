@@ -334,6 +334,12 @@ class TestMissingInstantiationDetector:
         assert len(findings) == 1
         assert findings[0].kind == ChangeKind.INSTANTIATION_MISSING_FROM_BINARY
         assert "descriptor<double>" in findings[0].description
+        # ADR-044 D1 (Codex review): both loops in detect_missing_instantiations
+        # filter to Visibility.PUBLIC, so this finding must be tagged
+        # reachable at construction time — DetectCppPatterns runs after
+        # ApplySuppression, so nothing else would ever tag it.
+        assert findings[0].public_reachable is True
+        assert findings[0].reachability_kind == "direct_public_symbol"
 
     def test_whole_template_removed_not_flagged_here(self) -> None:
         # If no descriptor<*> survives, this is plain func_removed, not
@@ -470,6 +476,8 @@ class TestSyclOverloadSetDetector:
         assert "_Z7computeRN4sycl5queueE" in suppressed
         assert "_Z5trainRN4sycl5queueE" in suppressed
         assert "_Z5inferRN4sycl5queueE" in suppressed
+        assert f.public_reachable is True
+        assert f.reachability_kind == "direct_public_symbol"
 
     def test_cross_namespace_compute_not_cross_matched(self) -> None:
         """CodeRabbit regression: SYCL family matching must use the
@@ -610,6 +618,8 @@ class TestCpuDispatchIsaDetector:
         # ``Change.symbol`` uses a different mangling than ``fn.mangled``).
         for algo in ("kmeans", "knn", "linreg"):
             assert any(f"{algo}_compute_avx512" in s for s in suppressed)
+        assert f.public_reachable is True
+        assert f.reachability_kind == "direct_public_symbol"
 
     def test_below_threshold_no_finding(self) -> None:
         old, new = self._build_three_algorithms()
@@ -785,6 +795,8 @@ class TestTagTypeRenamedDetector:
         assert f.old_value == "mylib::method::brute_force"
         assert f.new_value == "mylib::method::search_brute"
         assert f.affected_symbols and len(f.affected_symbols) == 1
+        assert f.public_reachable is True
+        assert f.reachability_kind == "direct_public_symbol"
 
     def test_no_symbol_evidence_no_finding(self) -> None:
         old_tag = RecordType(name="a::tagA", kind="struct", size_bits=8)
@@ -834,6 +846,8 @@ class TestDefaultTemplateArgDetector:
         assert len(findings) == 1
         f = findings[0]
         assert f.kind == ChangeKind.DEFAULT_TEMPLATE_ARG_CHANGED
+        assert f.public_reachable is True
+        assert f.reachability_kind == "direct_public_symbol"
 
     def test_no_change_no_finding(self) -> None:
         old = _snap(
@@ -1000,6 +1014,12 @@ class TestInlineAccessorRenamedMember:
         assert f.kind == ChangeKind.INLINE_BODY_REFERENCES_RENAMED_MEMBER
         assert f.old_value == "class_count_"
         assert f.new_value == "n_classes_"
+        # ADR-044: deliberately untagged — `_find_public_pimpl_holders`
+        # infers "public" from `not is_internal_type(name)`, a naming
+        # heuristic, not a Visibility.PUBLIC filter. Same unreliable-signal
+        # category as the reverted MarkReachability broadening.
+        assert f.public_reachable is False
+        assert f.reachability_kind is None
 
     def test_no_inline_accessor_no_finding(self) -> None:
         old, new, changes = self._build()

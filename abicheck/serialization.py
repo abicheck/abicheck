@@ -55,7 +55,22 @@ from .model import (
 #     a v7-only reader knows only the old evidence_pack key, so without it a v8
 #     snapshot's renamed provenance would be silently dropped — bumping makes such
 #     readers reject the format (forward-version error) instead of misreading it.
-SCHEMA_VERSION: int = 8
+# v9: CastXML field const/volatile/mutable facts (TypeField.is_const/
+#     is_volatile/is_mutable) and full CV-qualifier type spelling became
+#     reliably populated (previously silently dead — see CHANGELOG). Unlike
+#     earlier bumps, a pre-v9 snapshot is not merely missing a key — it has
+#     real but WRONG data (permanently False booleans, qualifier-less type
+#     spelling) that reads identically to a genuine "not const"/"not
+#     volatile" fact. `snapshot_from_dict` marks such a snapshot's
+#     `AbiSnapshot.header_cv_facts_reliable` False so the affected detectors
+#     in diff_types.py can skip it, instead of misreporting a false
+#     FIELD_BECAME_CONST/VOLATILE/MUTABLE or TYPE_FIELD_TYPE_CHANGED purely
+#     from a tool upgrade comparing a legacy snapshot to a fresh dump of
+#     unchanged headers (Codex review, PR #582).
+SCHEMA_VERSION: int = 9
+
+# Schema version at which CastXML field CV facts became reliable (see v9 above).
+_MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
 
 
 def _sets_to_lists(obj: Any) -> Any:
@@ -199,6 +214,8 @@ def _enum_type_from_dict(e: dict[str, Any]) -> EnumType:
         source_location=e.get("source_location"),
         source_header=e.get("source_header"),
         origin=_scope_origin_or_unknown(e.get("origin")),
+        is_scoped=e.get("is_scoped"),
+        deprecated=e.get("deprecated"),
     )
 
 
@@ -595,6 +612,8 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             is_variadic=f.get("is_variadic"),
             contract_attributes=f.get("contract_attributes"),
             exception_spec=f.get("exception_spec"),
+            deprecated=f.get("deprecated"),
+            is_override=f.get("is_override"),
         )
         for f in d.get("functions", [])
     ]
@@ -614,6 +633,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             source_header=v.get("source_header"),
             origin=_scope_origin_or_unknown(v.get("origin")),
             alignment_bits=v.get("alignment_bits"),
+            deprecated=v.get("deprecated"),
         )
         for v in d.get("variables", [])
     ]
@@ -634,6 +654,8 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
                     is_volatile=f.get("is_volatile", False),
                     is_mutable=f.get("is_mutable", False),
                     access=AccessLevel(f.get("access", "public")),
+                    default=f.get("default"),
+                    deprecated=f.get("deprecated"),
                 )
                 for f in t.get("fields", [])
             ],
@@ -656,6 +678,8 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             vptr_offset_bits=t.get("vptr_offset_bits"),
             base_offsets=t.get("base_offsets", {}),
             qualified_name=t.get("qualified_name"),
+            is_abstract=t.get("is_abstract"),
+            deprecated=t.get("deprecated"),
         )
         for t in d.get("types", [])
     ]
@@ -773,6 +797,26 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         # that demand genuine header evidence (parameter renames) stay quiet.
         from_headers_inferred = from_headers
 
+    ast_producer_value = d.get("ast_producer")
+    if "header_cv_facts_reliable" in d:
+        # Trust an explicit marker over re-deriving from schema_version: a
+        # load -> snapshot_to_dict -> (save) -> load round-trip always
+        # re-stamps schema_version to the CURRENT SCHEMA_VERSION (it
+        # describes the writing tool's format capability, not the
+        # snapshot's true field-fact origin), so re-deriving purely from
+        # schema_version on a reserialized legacy snapshot would silently
+        # flip an already-known-unreliable snapshot's stale, real-but-wrong
+        # cv facts back to "reliable" — reintroducing the exact false
+        # FIELD_BECAME_CONST/VOLATILE/TYPE_FIELD_TYPE_CHANGED positives this
+        # flag exists to prevent (Codex review, PR #582).
+        header_cv_facts_reliable_value = bool(d["header_cv_facts_reliable"])
+    else:
+        header_cv_facts_reliable_value = (
+            not from_headers
+            or ast_producer_value == "clang"
+            or _schema_version >= _MIN_SCHEMA_VERSION_FOR_CV_FACTS
+        )
+
     snap = AbiSnapshot(
         library=d["library"],
         version=d["version"],
@@ -798,6 +842,18 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         elf_only_mode=elf_only_mode,
         from_headers=from_headers,
         from_headers_inferred=from_headers_inferred,
+        # Which L2 header-AST backend produced this snapshot ("castxml" |
+        # "clang"); missing on older snapshots loads as None, which
+        # correctly fails _both_castxml_backed (Codex review, PR #582 —
+        # this was omitted entirely, so every persisted-then-reloaded
+        # castxml snapshot silently lost the tag and permanently disabled
+        # all 8 detectors gated on it).
+        ast_producer=ast_producer_value,
+        # See header_cv_facts_reliable_value's computation above: prefers an
+        # explicit dict key (round-trip stability) and otherwise derives
+        # from schema_version scoped to the CastXML header path specifically
+        # (Codex review, PR #582).
+        header_cv_facts_reliable=header_cv_facts_reliable_value,
         constants=d.get("constants", {}),
         platform=d.get("platform"),
         language_profile=d.get("language_profile"),

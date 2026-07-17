@@ -379,8 +379,7 @@ def _clang_header_dump(
 
     _write_agg(active_headers)
 
-    # Each attempt's AST spills to its own temp file (multi-GiB-safe, P0 SVS);
-    # only the last is parsed, every one is cleaned up in `finally` below.
+    # Each attempt's AST spills to its own temp file, cleaned up in `finally` below.
     _ast_paths: list[Path] = []
 
     def _run_clang(fcpp: bool, fcpp20: bool, sysinc: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
@@ -391,8 +390,7 @@ def _clang_header_dump(
             force_cpp=fcpp, force_cpp20=fcpp20,
             system_includes=sysinc,
         )
-        # DeadlineExceeded propagates uncaught so run_scan_core maps it to
-        # _BudgetOverflow, distinct from an ordinary parse timeout.
+        # DeadlineExceeded propagates uncaught, mapped by run_scan_core to _BudgetOverflow.
         deadline.check()
         try:
             return run_clang_to_ast_file(cmd, timeout=120, on_created=_ast_paths.append)
@@ -1725,6 +1723,7 @@ def _dump_elf(
         # Reached only when headers were supplied and castxml ran (the no-header
         # and DWARF-only branches return earlier): this surface is header-parsed.
         from_headers=True,
+        ast_producer="clang" if isinstance(parser, _ClangAstParser) else "castxml",
         platform="elf",
         language_profile=profile_hint,
     )
@@ -1865,6 +1864,7 @@ def _dump_macho(
         # Reached only when headers were supplied and castxml ran (the no-header
         # branch returns earlier): this surface is header-parsed.
         from_headers=True,
+        ast_producer="clang" if isinstance(parser, _ClangAstParser) else "castxml",
         platform="macho",
         language_profile=profile_hint,
     )
@@ -1958,6 +1958,7 @@ def _dump_pe(
         # Reached only when headers were supplied and castxml ran (the no-header
         # branch returns earlier): this surface is header-parsed.
         from_headers=True,
+        ast_producer="clang" if isinstance(parser, _ClangAstParser) else "castxml",
         platform="pe",
         language_profile=profile_hint,
     )
