@@ -101,6 +101,9 @@ EVIDENCE_CASES: dict[str, EvidenceSpec] = {
     "case162_symbol_source_owner_changed": EvidenceSpec(
         "graph/source_graph_summary.json", "--sources"
     ),
+    "case187_public_struct_private_field_type": EvidenceSpec(
+        "graph/source_graph_summary.json", "--sources"
+    ),
 }
 
 PYTHON_CASE = "case163_python_kwarg_renamed"
