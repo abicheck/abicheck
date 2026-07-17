@@ -125,6 +125,13 @@ class Finding:
     # the renderer *why* a finding landed in Breaking, so a policy-gated
     # COMPATIBLE addition doesn't get reported as "ABI BREAKING".
     category: str = ""
+    # Raw severity label ("breaking" / "api_break" / "risk" / "compatible" /
+    # "unknown"), or "" when not tracked. `category` alone conflates
+    # "api_break" and "risk" into one "potential_breaking" bucket (they share
+    # a severity-config knob), which isn't enough to word the headline
+    # correctly: a risk finding promoted by `potential_breaking: error` is
+    # not a "source API break" (Codex review, PR #595).
+    severity: str = ""
 
 
 @dataclass
@@ -151,6 +158,12 @@ class CommentModel:
     # tell a genuine ABI/API break apart from a policy-gated COMPATIBLE
     # finding without re-deriving it from bucket membership alone.
     breaking_categories: frozenset[str] = field(default_factory=frozenset)
+    # Raw severities ("breaking" / "api_break" / "risk") behind a non-empty
+    # Breaking bucket — same purpose as `breaking_categories`, but resolves
+    # the "potential_breaking" category into which severity actually caused
+    # it, since "api_break" (a real source break) and "risk" (a risk
+    # promoted to blocking) need different headline wording.
+    breaking_severities: frozenset[str] = field(default_factory=frozenset)
     # release mode only: (library, verdict, n_breaking, n_review, n_safe)
     library_rows: list[tuple[str, str, int, int, int]] = field(default_factory=list)
     removed_libraries: list[str] = field(default_factory=list)
@@ -262,6 +275,7 @@ def _bucket_changes(
                     detail=_detail_text(c),
                     location=str(loc) if loc else None,
                     category=category,
+                    severity=sev,
                 )
             )
     return breaking, review, safe
@@ -270,6 +284,17 @@ def _bucket_changes(
 def _breaking_categories(findings: list[Finding]) -> frozenset[str]:
     """The set of severity-config categories present in a Breaking bucket."""
     return frozenset(f.category for f in findings if f.category)
+
+
+def _breaking_severities(findings: list[Finding]) -> frozenset[str]:
+    """The set of raw severities present in a Breaking bucket.
+
+    Resolves the "potential_breaking" category (which "api_break" and "risk"
+    both map to) back to which severity is actually responsible, so the
+    headline can tell a real source break apart from a risk promoted to
+    blocking.
+    """
+    return frozenset(f.severity for f in findings if f.severity)
 
 
 def _from_compare(
@@ -299,6 +324,7 @@ def _from_compare(
         review=review,
         safe=safe,
         breaking_categories=_breaking_categories(breaking),
+        breaking_severities=_breaking_severities(breaking),
         scoped_verdict=scoped_verdict,
         full_verdict=(
             str(report["full_verdict"]) if "full_verdict" in report else None
@@ -329,6 +355,7 @@ def _from_appcompat(
                     symbol=str(sym),
                     detail="required symbol not provided by new library",
                     category="abi_breaking",
+                    severity="breaking",
                 )
             )
     # A missing required version tag is breaking for the app too (appcompat
@@ -342,6 +369,7 @@ def _from_appcompat(
                     symbol=str(ver),
                     detail="required symbol version not provided by new library",
                     category="abi_breaking",
+                    severity="breaking",
                 )
             )
     return CommentModel(
@@ -354,6 +382,7 @@ def _from_appcompat(
         review=review,
         safe=safe,
         breaking_categories=_breaking_categories(breaking),
+        breaking_severities=_breaking_severities(breaking),
     )
 
 
@@ -362,9 +391,10 @@ def _append_release_global_row(
     name: str,
     verdict: object,
     findings: object,
-    gate_api_break: bool = False,
-    levels: dict[str, str] | None = None,
-    categories: set[str] | None = None,
+    gate_api_break: bool,
+    levels: dict[str, str],
+    categories: set[str],
+    severities: set[str],
 ) -> None:
     """Fold a release-global check (bundle / probe-matrix) into the rows.
 
@@ -376,15 +406,19 @@ def _append_release_global_row(
     issues are classified per finding and only the gated category is promoted to
     Breaking, matching what ``_fold_release_global_severity`` actually computes.
 
-    *categories* (when given) accumulates the severity-config category
-    responsible each time this call pushes a count into the Breaking column,
-    so the headline can tell a genuine break from a policy-gated COMPATIBLE
-    section (see ``CommentModel.breaking_categories``).
+    *categories* accumulates the severity-config category responsible each
+    time this call pushes a count into the Breaking column, so the headline
+    can tell a genuine break from a policy-gated COMPATIBLE section (see
+    ``CommentModel.breaking_categories``). *severities* similarly accumulates
+    "breaking"/"api_break"/"risk" — needed because "api_break" and "risk"
+    share the same "potential_breaking" category but need different headline
+    wording (a risk is not a "source API break"). Both are caller-owned
+    accumulators (the sole caller, ``_from_release``, shares one set across
+    all rows) rather than defaulted here, since an empty-per-call set would
+    silently lose that aggregation.
     """
     if not isinstance(findings, list) or not findings:
         return
-    if categories is None:
-        categories = set()
     verdict_map = (
         {**_VERDICT_BUCKET, "API_BREAK": "breaking"}
         if gate_api_break
@@ -393,10 +427,26 @@ def _append_release_global_row(
     bucket = verdict_map.get(str(verdict or ""), "review")
     levels = levels or {}
     n = len(findings)
-    # A risk section under potential_breaking=error turns the check red.
-    if bucket == "review" and levels.get("potential_breaking") == "error":
+    # Classify *why* the section is Breaking exactly once: either it started
+    # there (an intrinsically BREAKING verdict — a genuine break — or, under
+    # fail-on-api-break, a gated API_BREAK promotion, a source break), or it
+    # got promoted from "review" by potential_breaking=error (elif, not a
+    # second independent `if`: reusing `if bucket == "breaking"` here would
+    # re-fire on the just-promoted bucket and mis-tag a risk as "breaking").
+    if bucket == "breaking":
+        if str(verdict) == "API_BREAK":
+            categories.add("potential_breaking")
+            severities.add("api_break")
+        else:
+            categories.add("abi_breaking")
+            severities.add("breaking")
+    elif bucket == "review" and levels.get("potential_breaking") == "error":
+        # A risk (or, without fail-on-api-break, a plain API_BREAK) section
+        # promoted this way — COMPATIBLE_WITH_RISK is a risk, API_BREAK is a
+        # real source break; only the latter is a "source API break".
         bucket = "breaking"
         categories.add("potential_breaking")
+        severities.add("api_break" if str(verdict) == "API_BREAK" else "risk")
     # A compatible section is additions + quality; classify each finding by its
     # kind and promote only the gated category to Breaking (addition and quality
     # gates are not interchangeable).
@@ -417,10 +467,6 @@ def _append_release_global_row(
                 categories.add("quality_issues")
             rows.append((name, str(verdict or "?"), nb, 0, n - nb))
             return
-    if bucket == "breaking":
-        # An intrinsically BREAKING verdict is a genuine break; API_BREAK only
-        # lands here under fail-on-api-break gating, so it's a source break.
-        categories.add("potential_breaking" if str(verdict) == "API_BREAK" else "abi_breaking")
     rows.append(
         (
             name,
@@ -437,6 +483,7 @@ def _release_lib_row(
     gate_api_break: bool,
     levels: dict[str, str],
     categories: set[str],
+    severities: set[str],
 ) -> tuple[str, str, int, int, int]:
     """Per-library (name, verdict, breaking, review, safe) counts.
 
@@ -449,11 +496,15 @@ def _release_lib_row(
 
     *categories* accumulates the severity-config category responsible each
     time a count is pushed into ``nb`` (see ``CommentModel.breaking_categories``).
+    *severities* similarly accumulates "breaking"/"api_break"/"risk" — needed
+    because source_breaks (api_break) and risk_changes (risk) both feed the
+    same "potential_breaking" category but need different headline wording.
     """
     name = str(lib.get("library", "?"))
     verdict = str(lib.get("verdict", "?"))
     if verdict == "ERROR":
         categories.add("abi_breaking")
+        severities.add("breaking")
         return name, verdict, 1, 0, 0
     src = _as_int(lib.get("source_breaks"))
     risk = _as_int(lib.get("risk_changes"))
@@ -469,17 +520,20 @@ def _release_lib_row(
     nb = _as_int(lib.get("breaking"))
     if nb:
         categories.add("abi_breaking")
+        severities.add("breaking")
     nr = 0
     ns = 0
     if gate_api_break or pot_err:
         if src:
             categories.add("potential_breaking")
+            severities.add("api_break")
         nb, nr = nb + src, nr
     else:
         nb, nr = nb, nr + src
     if pot_err:
         if risk:
             categories.add("potential_breaking")
+            severities.add("risk")
         nb, nr = nb + risk, nr
     else:
         nb, nr = nb, nr + risk
@@ -504,12 +558,15 @@ def _from_release(
     rows: list[tuple[str, str, int, int, int]] = []
     levels = _severity_levels(report)
     categories: set[str] = set()
+    severities: set[str] = set()
     libraries = report.get("libraries")
     if isinstance(libraries, list):
         for lib in libraries:
             if not isinstance(lib, dict):
                 continue
-            rows.append(_release_lib_row(lib, gate_api_break, levels, categories))
+            rows.append(
+                _release_lib_row(lib, gate_api_break, levels, categories, severities)
+            )
     n_libs = len(rows)
     _append_release_global_row(
         rows,
@@ -519,6 +576,7 @@ def _from_release(
         gate_api_break,
         levels,
         categories,
+        severities,
     )
     _append_release_global_row(
         rows,
@@ -528,6 +586,7 @@ def _from_release(
         gate_api_break,
         levels,
         categories,
+        severities,
     )
     removed = report.get("unmatched_old")
     added = report.get("unmatched_new")
@@ -539,6 +598,7 @@ def _from_release(
         policy="strict_abi",
         library_rows=rows,
         breaking_categories=frozenset(categories),
+        breaking_severities=frozenset(severities),
         removed_libraries=[str(x) for x in removed]
         if isinstance(removed, list)
         else [],
@@ -654,6 +714,16 @@ def _header(model: CommentModel) -> tuple[str, str]:
         if "abi_breaking" in cats:
             return "❌", "ABI BREAKING"
         if "potential_breaking" in cats:
+            # "potential_breaking" covers both "api_break" (a real source
+            # break) and "risk" (a risk promoted to blocking) — they share a
+            # severity-config knob but are not the same claim, so resolve
+            # via the raw severities rather than wording every gated risk as
+            # a "source API break" (Codex review, PR #595).
+            sevs = model.breaking_severities
+            if "api_break" in sevs:
+                return "⛔", "Source API break blocks this PR"
+            if "risk" in sevs:
+                return "⛔", "Compatibility risk blocks this PR"
             return "⛔", "Source API break blocks this PR"
         policy_header = _POLICY_ONLY_HEADER.get(cats)
         if policy_header is not None:

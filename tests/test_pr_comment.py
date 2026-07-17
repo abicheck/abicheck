@@ -23,6 +23,7 @@ import pytest
 from abicheck.pr_comment import (
     MARKER,
     CommentModel,
+    Finding,
     build_model,
     render_comment,
     should_post,
@@ -395,6 +396,189 @@ def test_gate_api_break_files_api_break_as_breaking():
     # default (ungated) keeps api_break in review
     ungated = build_model(report)
     assert ungated.counts == (0, 2, 0)
+
+
+def test_severity_potential_breaking_error_risk_only_not_worded_as_source_break():
+    # "api_break" and "risk" share the "potential_breaking" severity-config
+    # category, but a risk-only gate is not a source API break — the
+    # headline must say so distinctly (Codex review, PR #595).
+    report = _compare_report(
+        [
+            {
+                "kind": "type_field_added",
+                "symbol": "S",
+                "description": "d",
+                "severity": "risk",
+            },
+        ]
+    )
+    report["severity"] = {"config": {"potential_breaking": "error"}, "exit_code": 1}
+    model = build_model(report)
+    assert model.counts == (1, 0, 0)
+    assert model.breaking_categories == frozenset({"potential_breaking"})
+    assert model.breaking_severities == frozenset({"risk"})
+    body = render_comment(model, sha="x")
+    assert "ABI BREAKING" not in body
+    assert "Source API break" not in body
+    assert "Compatibility risk blocks this PR" in body
+
+
+def test_severity_potential_breaking_error_api_break_worded_as_source_break():
+    # The api_break sibling of the case above: this one genuinely is a
+    # source-level API break, so it keeps the "Source API break" wording.
+    report = _compare_report(
+        [
+            {
+                "kind": "enum_member_added",
+                "symbol": "E::X",
+                "description": "d",
+                "severity": "api_break",
+            },
+        ]
+    )
+    report["severity"] = {"config": {"potential_breaking": "error"}, "exit_code": 1}
+    model = build_model(report)
+    assert model.breaking_severities == frozenset({"api_break"})
+    body = render_comment(model, sha="x")
+    assert "Source API break blocks this PR" in body
+
+
+def test_severity_potential_breaking_error_release_risk_only_not_source_break():
+    # Release-mode twin: risk_changes (not source_breaks) promoted by
+    # potential_breaking=error must not read as a "source API break" either.
+    report = {
+        "verdict": "COMPATIBLE_WITH_RISK",
+        "old_dir": "/o",
+        "new_dir": "/n",
+        "libraries": [
+            {
+                "library": "lib.so",
+                "verdict": "COMPATIBLE_WITH_RISK",
+                "breaking": 0,
+                "source_breaks": 0,
+                "risk_changes": 3,
+                "compatible_additions": 0,
+            },
+        ],
+        "severity": {"config": {"potential_breaking": "error"}, "exit_code": 1},
+        "unmatched_old": [],
+        "unmatched_new": [],
+    }
+    model = build_model(report)
+    assert model.counts == (3, 0, 0)
+    assert model.breaking_severities == frozenset({"risk"})
+    body = render_comment(model, sha="x")
+    assert "Source API break" not in body
+    assert "Compatibility risk blocks this PR" in body
+
+
+def test_severity_potential_breaking_error_release_api_break_source_break():
+    # Release-mode twin: source_breaks promoted by potential_breaking=error
+    # (without fail-on-api-break) is a genuine source API break.
+    report = {
+        "verdict": "API_BREAK",
+        "old_dir": "/o",
+        "new_dir": "/n",
+        "libraries": [
+            {
+                "library": "lib.so",
+                "verdict": "API_BREAK",
+                "breaking": 0,
+                "source_breaks": 2,
+                "risk_changes": 0,
+                "compatible_additions": 0,
+            },
+        ],
+        "severity": {"config": {"potential_breaking": "error"}, "exit_code": 1},
+        "unmatched_old": [],
+        "unmatched_new": [],
+    }
+    model = build_model(report)
+    assert model.counts == (2, 0, 0)
+    assert model.breaking_severities == frozenset({"api_break"})
+    body = render_comment(model, sha="x")
+    assert "Source API break blocks this PR" in body
+
+
+def test_severity_potential_breaking_error_release_global_risk_section():
+    # A release-global (bundle/matrix) COMPATIBLE_WITH_RISK section promoted
+    # by potential_breaking=error is a risk, not a source API break.
+    report = {
+        "verdict": "COMPATIBLE_WITH_RISK",
+        "old_dir": "/o",
+        "new_dir": "/n",
+        "libraries": [],
+        "matrix_verdict": "COMPATIBLE_WITH_RISK",
+        "matrix_findings": [
+            {"kind": "macro_guarded", "symbol": "FOO", "description": "z"},
+        ],
+        "severity": {"config": {"potential_breaking": "error"}, "exit_code": 1},
+        "unmatched_old": [],
+        "unmatched_new": [],
+    }
+    model = build_model(report)
+    assert model.counts == (1, 0, 0)
+    assert model.breaking_severities == frozenset({"risk"})
+    body = render_comment(model, sha="x")
+    assert "Source API break" not in body
+    assert "Compatibility risk blocks this PR" in body
+
+
+def test_gate_api_break_release_global_api_break_worded_as_source_break():
+    # A release-global section whose own verdict IS API_BREAK, promoted to
+    # Breaking directly via fail-on-api-break's verdict_map override (not via
+    # the potential_breaking=error "review"→"breaking" promotion path) — the
+    # `if bucket == "breaking":` branch must still classify it as a source
+    # break, not silently mis-tag it as a binary ABI break.
+    report = {
+        "verdict": "API_BREAK",
+        "old_dir": "/o",
+        "new_dir": "/n",
+        "libraries": [],
+        "matrix_verdict": "API_BREAK",
+        "matrix_findings": [
+            {"kind": "macro_guarded", "symbol": "FOO", "description": "z"},
+        ],
+        "unmatched_old": [],
+        "unmatched_new": [],
+    }
+    model = build_model(report, gate_api_break=True)
+    assert model.breaking_categories == frozenset({"potential_breaking"})
+    assert model.breaking_severities == frozenset({"api_break"})
+    body = render_comment(model, sha="x")
+    assert "ABI BREAKING" not in body
+    assert "Source API break blocks this PR" in body
+
+
+def test_release_lib_row_zero_gated_additions_and_quality_add_no_category():
+    # add_err/qual_err gate a library with zero additions/quality findings —
+    # the count contribution is (correctly) zero, and it must not spuriously
+    # add "addition"/"quality_issues" to breaking_categories for an empty set.
+    report = {
+        "verdict": "BREAKING",
+        "old_dir": "/o",
+        "new_dir": "/n",
+        "libraries": [
+            {
+                "library": "lib.so",
+                "verdict": "BREAKING",
+                "breaking": 2,
+                "source_breaks": 0,
+                "risk_changes": 0,
+                "compatible_additions": 0,
+                "quality_issues": 0,
+            },
+        ],
+        "severity": {
+            "config": {"addition": "error", "quality_issues": "error"},
+            "exit_code": 1,
+        },
+        "unmatched_old": [],
+        "unmatched_new": [],
+    }
+    model = build_model(report)
+    assert model.counts == (2, 0, 0)
+    assert model.breaking_categories == frozenset({"abi_breaking"})
 
 
 def test_gate_api_break_release_source_breaks_count_as_breaking():
@@ -952,6 +1136,43 @@ def test_empty_model_renders_clean_verdict():
     body = render_comment(model, sha="")
     assert "No ABI changes" in body
     assert MARKER in body
+
+
+def test_header_potential_breaking_with_no_severity_falls_back_to_source_break():
+    # Defensive fallback: a "potential_breaking" bucket should always carry
+    # an "api_break" or "risk" severity in practice (every code path that
+    # sets the category sets the severity alongside it) — but if it somehow
+    # didn't, the header must still say something, not crash or go silent.
+    model = CommentModel(
+        mode="compare",
+        subject="lib",
+        old_label="o",
+        new_label="n",
+        policy="strict_abi",
+        breaking=[Finding(kind="k", symbol="s", category="potential_breaking")],
+        breaking_categories=frozenset({"potential_breaking"}),
+    )
+    body = render_comment(model, sha="x")
+    assert "Source API break blocks this PR" in body
+
+
+def test_header_untracked_category_falls_back_to_abi_breaking():
+    # Defensive fallback: every mode is supposed to populate
+    # breaking_categories from a known set ("abi_breaking" /
+    # "potential_breaking" / "addition" / "quality_issues") — if a bucket is
+    # non-empty with an unrecognised category, err conservative rather than
+    # silently rendering no headline at all.
+    model = CommentModel(
+        mode="compare",
+        subject="lib",
+        old_label="o",
+        new_label="n",
+        policy="strict_abi",
+        breaking=[Finding(kind="k", symbol="s")],
+        breaking_categories=frozenset({"unrecognised_category"}),
+    )
+    body = render_comment(model, sha="x")
+    assert "## ❌ abicheck — ABI BREAKING" in body
 
 
 # ---------------------------------------------------------------------------
