@@ -237,6 +237,52 @@ class TestBuildManifestBasics:
         with pytest.raises(SystemExit, match="whether source-fact evidence is present"):
             build_manifest_module.build_manifest(tmp_path, "", "", entries, None)
 
+    def test_fails_when_schema_version_missing(self, tmp_path: Path) -> None:
+        # Regression (CodeRabbit review): a snapshot with schema_version
+        # omitted entirely was silently skipped (never added to
+        # schema_versions), so a single library -- or every library -- with
+        # a missing schema_version passed with no error, publishing a
+        # manifest whose snapshot_schema silently lost that information.
+        path = tmp_path / "libfoo.abicheck.json"
+        data = {
+            "library": "libfoo",
+            "version": "1.0.0",
+            "schema_version": None,
+            "git_commit": None,
+            "git_tag": None,
+            "created_at": "2026-07-17T00:00:00+00:00",
+            "build_id": None,
+        }
+        path.write_text(json.dumps(data), encoding="utf-8")
+        entries = [{"name": "libfoo", "artifact": "a.so"}]
+        with pytest.raises(SystemExit, match="missing schema_version"):
+            build_manifest_module.build_manifest(tmp_path, "", "", entries, None)
+
+    def test_fails_when_fact_set_is_malformed(self, tmp_path: Path) -> None:
+        # Regression (CodeRabbit review): a present-but-malformed fact_set
+        # (e.g. missing "version") used to be silently reclassified as
+        # fact_set_absent -- collapsing corrupted evidence into "no
+        # evidence" instead of surfacing the corruption.
+        path = tmp_path / "libfoo.abicheck.json"
+        data = {
+            "library": "libfoo",
+            "version": "1.0.0",
+            "schema_version": 9,
+            "git_commit": None,
+            "git_tag": None,
+            "created_at": "2026-07-17T00:00:00+00:00",
+            "build_id": None,
+            "build_source": {
+                "source_abi": {
+                    "coverage": {"fact_set": {"name": "abicheck-clang-canonical"}}
+                }
+            },
+        }
+        path.write_text(json.dumps(data), encoding="utf-8")
+        entries = [{"name": "libfoo", "artifact": "a.so"}]
+        with pytest.raises(SystemExit, match="malformed fact_set identity"):
+            build_manifest_module.build_manifest(tmp_path, "", "", entries, None)
+
 
 class TestFreshness:
     def test_no_previous_manifest_means_not_required(self, tmp_path: Path) -> None:

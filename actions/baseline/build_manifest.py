@@ -128,10 +128,24 @@ def build_manifest(
                 f"this library must have failed silently."
             )
         meta = _read_snapshot_meta(snap_path)
-        if meta["schema_version"] is not None:
-            schema_versions.add(int(meta["schema_version"]))
+        # A missing schema_version is not a legitimate "unknown" state to
+        # silently tolerate -- every real `abicheck dump` snapshot carries
+        # one, so its absence means this snapshot is malformed/truncated,
+        # and letting it through would publish a manifest whose
+        # snapshot_schema silently lost that information (CodeRabbit review).
+        if meta["schema_version"] is None:
+            raise SystemExit(
+                f"snapshot for library {name!r} is missing schema_version "
+                f"-- the dump step for this library must have produced a "
+                f"malformed snapshot."
+            )
+        schema_versions.add(int(meta["schema_version"]))
         fact_set = meta["fact_set"]
-        if (
+        if fact_set is None:
+            # No build_source/source_abi/coverage.fact_set at all -- this
+            # library was legitimately dumped without --build-info/--sources.
+            fact_set_absent += 1
+        elif (
             isinstance(fact_set, dict)
             and fact_set.get("name")
             and fact_set.get("version") is not None
@@ -148,7 +162,16 @@ def build_manifest(
                 )
             )
         else:
-            fact_set_absent += 1
+            # A non-None fact_set that isn't a well-formed identity is
+            # corrupted evidence, not "no evidence" -- collapsing it into
+            # fact_set_absent (as before) silently published a lossy
+            # baseline identity instead of surfacing the corruption
+            # (CodeRabbit review).
+            raise SystemExit(
+                f"snapshot for library {name!r} has a malformed fact_set "
+                f"identity {fact_set!r} -- expected a dict with at least "
+                f"'name' and 'version' keys."
+            )
         artifacts.append(
             {
                 "library": name,
