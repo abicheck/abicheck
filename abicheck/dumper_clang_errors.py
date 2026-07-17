@@ -27,16 +27,17 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import subprocess
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
-from .dumper_cache import _atomic_write
+from . import deadline
+from .dumper_cache import _atomic_copy
 from .errors import SnapshotError
-
-if TYPE_CHECKING:
-    import subprocess
 
 log = logging.getLogger(__name__)
 
@@ -457,14 +458,49 @@ def retry_excluding_error_headers(
     return result
 
 
+def run_clang_to_ast_file(
+    cmd: list[str], *, timeout: float, on_created: Callable[[Path], None],
+) -> subprocess.CompletedProcess[str]:
+    """Run *cmd* with stdout spilled to a fresh temp file; return the result.
+
+    A pathological header's clang ``-ast-dump=json`` can be hundreds of MB to
+    multiple GB (P0 SVS field report), so this never buffers stdout into a
+    Python ``str`` the way ``subprocess.run(..., capture_output=True)`` would
+    — mirrors ``source_extractors/clang.py``'s ``_run_ast_to_file``. *on_created*
+    is called with the temp file's path as soon as it exists (before the
+    subprocess starts) so the caller can register it for cleanup even if the
+    run below raises — the caller owns the file on every path, this function
+    never unlinks it itself. Bounded by the active scan deadline via
+    :func:`deadline.run_bounded`; ``deadline.DeadlineExceeded`` and
+    ``subprocess.TimeoutExpired`` propagate uncaught for the caller to handle.
+    """
+    fd, name = tempfile.mkstemp(prefix="abicheck-l2-ast-", suffix=".json")
+    path = Path(name)
+    on_created(path)
+    with os.fdopen(fd, "wb") as out:
+        return deadline.run_bounded(
+            cmd, stdout=out, stderr=subprocess.PIPE, text=True, timeout=timeout,
+        )
+
+
 def _parse_clang_ast_result(
-    result: subprocess.CompletedProcess[str], cached: Path,
+    result: subprocess.CompletedProcess[str], cached: Path, ast_path: Path,
 ) -> dict[str, Any]:
     """Validate a completed clang AST-dump, parse its JSON, and cache the tree.
 
     A nonzero exit is a hard parse error: the L2 header AST must be complete to be
     authoritative (a truncated set → false removals/additions), so fail like the
     castxml path rather than cache a partial tree (Codex review).
+
+    *ast_path* holds clang's ``-ast-dump=json`` stdout, spilled straight to a
+    temp file by the caller instead of captured into a Python ``str`` — a
+    pathological header's AST dump can be hundreds of MB to multiple GB (P0
+    SVS field report), and buffering that in a subprocess pipe capture on top
+    of the dict this function builds would double peak memory for no reason.
+    The cache write below copies *ast_path* directly (streamed, via
+    :func:`_atomic_copy`) rather than re-serializing *root* with
+    ``json.dumps`` — same reasoning, plus it avoids a second (and generally
+    larger, due to whitespace/key-order differences) in-memory encoding pass.
     """
     if result.returncode != 0:
         raise SnapshotError(
@@ -474,17 +510,22 @@ def _parse_clang_ast_result(
             f"{result.stderr[:1000].strip()}"
             f"{diagnose_header_compile_failure(result.stderr) or ''}"
         )
-    if not result.stdout.strip():
+    try:
+        ast_size = ast_path.stat().st_size
+    except OSError:
+        ast_size = 0
+    if ast_size == 0:
         raise SnapshotError(
             f"clang produced no AST for the header(s) (exit {result.returncode}): "
             f"{result.stderr[:1000].strip()}"
         )
     try:
-        root = json.loads(result.stdout)
+        with open(ast_path, "rb") as fh:  # bytes: json detects encoding
+            root = json.load(fh)
     except ValueError as exc:
         raise SnapshotError(f"clang AST output was not valid JSON: {exc}") from exc
     try:
-        _atomic_write(cached, json.dumps(root).encode("utf-8"))
+        _atomic_copy(ast_path, cached)
     except OSError:
         pass
     return cast("dict[str, Any]", root)

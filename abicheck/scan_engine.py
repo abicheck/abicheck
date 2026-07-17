@@ -771,7 +771,15 @@ def run_scan_core(
         else None
     )
     _stage = time.monotonic()
-    preproc = run_preprocessor_scan(pp_build, _expand_public_headers(list(headers)))
+    # Unlike the candidate-snapshot/baseline-compare stages, a deadline
+    # overflow here is never re-raised as _BudgetOverflow: preprocessor_scan
+    # is advisory (ADR-028 D3) and already degrades per-TU internally
+    # (ClangPreprocessorExtractor._run catches deadline.DeadlineExceeded and
+    # records a diagnostic instead of propagating) — this scope just gives it
+    # the same shrinking, process-group-safe deadline the other stages get,
+    # so it can't run its own remaining compile units past the budget.
+    with deadline.deadline_scope(_remaining_budget_s(start, budget_s)):
+        preproc = run_preprocessor_scan(pp_build, _expand_public_headers(list(headers)))
     _record_stage("preprocessor_scan", _stage)
 
     # --- always-on tier: intra-version cross-source checks (D4) ---------------

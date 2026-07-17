@@ -384,17 +384,23 @@ itself (see "Extract minimal synthetic fixtures" guidance):
   compiler/castxml" — see its module docstring) and this concern is inherently
   compiler-driven.
 
-**Known remaining gap (not yet fixed):** the L2 path
-(`dumper._clang_header_dump`) still captures the whole AST-dump subprocess
-output into a Python `str` (`capture_output=True`), unlike the L4 per-TU replay
-(`source_extractors/clang.py`'s `_run_ast_to_file`), which spills clang's JSON
-AST to a temp file specifically to avoid buffering a multi-GiB payload in
-memory. The calibration above shows a *tiny* header can legitimately produce
-hundreds of MB to multiple GB of AST-dump output — for a sufficiently
-pathological header, the process could plausibly OOM before the deadline timer
-even fires. `--budget` bounds *wall time*; it does not yet bound *memory* on
-this path. A follow-up should switch the L2 aggregate parse to the same
-file-spilling pattern the L4 extractor already uses.
+**Fixed (follow-up):** the L2 path (`dumper._clang_header_dump`, via the new
+`dumper_clang_errors.run_clang_to_ast_file`) now spills clang's AST-dump
+stdout straight to a temp file, mirroring the L4 per-TU replay
+(`source_extractors/clang.py`'s `_run_ast_to_file`) instead of capturing it
+into a Python `str`. The calibration above showed a *tiny* header can
+legitimately produce hundreds of MB to multiple GB of AST-dump output, which
+`capture_output=True` would buffer on top of the parsed dict this code also
+builds; measured ~27% lower Python-heap peak (`tracemalloc`) on the depth-150
+fixture (364.5 MB → 267.1 MB) with the fix. The same `deadline.run_bounded`
+treatment (shrinking `--budget` deadline, process-group kill on timeout) was
+also extended to `preprocessor_scan.py`'s live extractor and both L4 source
+extractors (`source_extractors/clang.py`, `source_extractors/castxml.py`),
+which previously used the same fixed-timeout/no-process-group pattern the P0
+fix closed for L2 — and a --budget deadline expiring during a PE/Mach-O
+header-scoped dump (`service._try_header_scoped_dump`) is no longer silently
+swallowed by the broad `except Exception` that falls back to export-table
+mode for a merely-unavailable header backend.
 
 ## L4 source-replay (dump-side) performance
 

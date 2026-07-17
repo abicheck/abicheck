@@ -37,8 +37,25 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   a genuinely pathological header still costs whatever clang/castxml need, up
   to whatever `--budget` is given; see
   [performance.md § L2 header-scan deadline enforcement](docs/development/performance.md#l2-header-scan-deadline-enforcement-pathological-headers)
-  for the perf-tracking coverage and a known remaining gap (the L2 path does
-  not yet bound *memory* the way the L4 replay does).
+  for the perf-tracking coverage.
+- **The same deadline/process-group fix extended to every other clang/castxml
+  subprocess call site in the scan pipeline.** `abicheck.deadline.run_bounded`
+  now backs `preprocessor_scan.py`'s macro/include-leak pre-scan (degrades a
+  per-TU/per-header timeout to a diagnostic + skip rather than aborting the
+  advisory pre-scan, and stops iterating the rest of the compile DB once the
+  budget is gone) and the L4 source-replay extractors
+  (`source_extractors/clang.py`, `source_extractors/castxml.py` — a deadline
+  overflow folds into the same `SourceExtractionError`/partial-coverage
+  contract an ordinary timeout already used). Also: a `--budget` deadline
+  expiring while a PE/Mach-O binary's header-scoped dump was mid-parse used
+  to be silently swallowed by the same broad `except Exception` that falls
+  back to export-table mode for a merely-unavailable header backend — it now
+  propagates so `run_scan_core` reports the budget-overflow exit code instead
+  of a degraded-but-"successful" result. And the L2 clang header-AST
+  subprocess itself no longer buffers its (potentially multi-GiB) stdout into
+  a Python `str` — it streams to a temp file like the L4 replay already did,
+  closing the memory side of the same field report (measured ~27% lower
+  Python-heap peak on a real pathological-header fixture).
 
 ### Performance
 

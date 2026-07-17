@@ -5,11 +5,39 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import sys
 import tempfile
 from pathlib import Path
 
 log = logging.getLogger(__name__)
+
+
+def _atomic_copy(src: Path, dst: Path) -> None:
+    """Copy *src* into *dst* via a same-directory temp file + ``os.replace``.
+
+    Same atomicity rationale as :func:`_atomic_write` (a concurrent reader
+    never sees a torn file), but streams the copy (``shutil.copyfileobj``)
+    instead of reading *src* fully into a Python ``bytes`` object first — the
+    L2 clang AST-dump cache write is exactly the case this matters for: the
+    JSON tree it is caching can be hundreds of MB to multiple GB for a
+    pathological header (P0 SVS field report), and the caller already holds
+    one in-memory copy of it (the parsed dict) — a second full-size ``bytes``
+    copy just to write the cache would double peak memory for no reason.
+    """
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(dst.parent), prefix=f".{dst.name}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "wb") as out, open(src, "rb") as inp:
+            shutil.copyfileobj(inp, out)
+        os.replace(tmp_name, dst)
+    except OSError:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
 
 
 def _atomic_write(path: Path, data: bytes) -> None:

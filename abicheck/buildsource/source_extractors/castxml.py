@@ -37,6 +37,7 @@ from xml.etree.ElementTree import Element
 
 from defusedxml import ElementTree as DefusedET
 
+from ... import deadline
 from ..build_evidence import CompileUnit
 from ..source_abi import SourceAbiTu
 from ._argv import (
@@ -173,16 +174,22 @@ class CastxmlSourceExtractor:
             try:
                 # Run in the compile unit's directory so relative -I/-isystem
                 # and forced-include paths resolve exactly as the real build did
-                # (compile_commands.json `directory`).
-                result = subprocess.run(
+                # (compile_commands.json `directory`). deadline.run_bounded bounds
+                # this by the active scan --budget (not just self.timeout) and
+                # kills the whole process group on timeout instead of orphaning a
+                # compiler-driver grandchild (P0 follow-up, same fix as the L2
+                # header-AST subprocess). A deadline overflow is folded into the
+                # same SourceExtractionError contract as an ordinary timeout —
+                # this extractor's failures already degrade to partial per-TU
+                # coverage rather than aborting the scan.
+                result = deadline.run_bounded(
                     cmd,
                     capture_output=True,
                     text=True,
                     timeout=self.timeout,
-                    check=False,
                     cwd=directory or None,
                 )
-            except subprocess.TimeoutExpired as exc:
+            except (subprocess.TimeoutExpired, deadline.DeadlineExceeded) as exc:
                 raise SourceExtractionError(
                     f"castxml timed out after {self.timeout}s on {compile_unit.source}"
                 ) from exc

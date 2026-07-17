@@ -32,6 +32,7 @@ import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from . import deadline
 from .api_types import CompareRequest, InputSpec
 from .checker import compare
 from .checker_types import DiffResult, LibraryMetadata
@@ -1138,6 +1139,17 @@ def _try_header_scoped_dump(
                 header_backend=header_backend,
                 extra_hash_dirs=deferred_dirs,
             )
+    except deadline.DeadlineExceeded:
+        # A --budget deadline expiring mid-parse is not "this header backend is
+        # unavailable" — it's the scan's own budget guard firing. Falling back
+        # to export-table mode here would silently mask the overflow (the scan
+        # would report a degraded-but-"successful" result instead of the
+        # dedicated budget-overflow exit code) and, worse, let the scan
+        # continue doing more work after the point where it should have
+        # aborted (Codex review). Propagate so run_scan_core's
+        # except deadline.DeadlineExceeded -> _BudgetOverflow mapping applies,
+        # same as the ELF L2 path.
+        raise
     except Exception as exc:  # noqa: BLE001 — header backend/parse failure → fall back
         warnings.warn(
             f"Header-based ABI scoping unavailable for '{path.name}' "

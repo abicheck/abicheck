@@ -61,6 +61,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from ... import deadline
 from ...header_conditionals import _include_guard_macro, _strip_comments
 from ..build_evidence import CompileUnit
 from ..model import LayerConfidence
@@ -1883,17 +1884,24 @@ class ClangSourceExtractor:
         ``unredact_home`` only rewrites a ``~`` standing in for a home directory,
         so a literal ``~`` mid-token is left intact (mirrors castxml, PR #336).
         """
+        # P0 follow-up: bound by the active scan --budget deadline (not just the
+        # fixed self.timeout default) and run in its own process group so a
+        # timeout kills the whole tree (deadline.run_bounded) — same fix as the
+        # L2 header-AST subprocess. L4 extraction failures already degrade to
+        # partial per-TU coverage rather than aborting the scan (see module
+        # docstring / SourceExtractionError contract), so a deadline overflow
+        # here is folded into that same existing, caller-handled exception type
+        # rather than propagated as a distinct budget-overflow signal.
         cmd = [unredact_home(tok) for tok in cmd]
         try:
-            return subprocess.run(
+            return deadline.run_bounded(
                 cmd,
                 capture_output=True,
                 text=True,
                 timeout=self.timeout,
-                check=False,
                 cwd=directory or None,
             )
-        except subprocess.TimeoutExpired as exc:
+        except (subprocess.TimeoutExpired, deadline.DeadlineExceeded) as exc:
             raise SourceExtractionError(
                 f"clang timed out after {self.timeout}s on {source_label}"
             ) from exc
@@ -1915,22 +1923,25 @@ class ClangSourceExtractor:
         parse). ``stderr`` stays buffered (it is small). The temp file is removed on
         timeout/failure here; on success the caller's ``finally`` removes it.
         """
+        # See _run's P0 follow-up comment: deadline.run_bounded bounds this by
+        # the active scan --budget (not just self.timeout) and kills the whole
+        # process group on timeout instead of orphaning a compiler-driver
+        # grandchild.
         cmd = [unredact_home(tok) for tok in cmd]
         fd, name = tempfile.mkstemp(prefix="abicheck-l4-ast-", suffix=".json")
         path = Path(name)
         try:
             with os.fdopen(fd, "wb") as out:
-                proc = subprocess.run(
+                proc = deadline.run_bounded(
                     cmd,
                     stdout=out,
                     stderr=subprocess.PIPE,
                     timeout=self.timeout,
-                    check=False,
                     cwd=directory or None,
                 )
             stderr = proc.stderr.decode("utf-8", "replace") if proc.stderr else ""
             return path, stderr, proc.returncode
-        except subprocess.TimeoutExpired as exc:
+        except (subprocess.TimeoutExpired, deadline.DeadlineExceeded) as exc:
             path.unlink(missing_ok=True)
             raise SourceExtractionError(
                 f"clang timed out after {self.timeout}s on {source_label}"

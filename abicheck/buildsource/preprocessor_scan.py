@@ -50,8 +50,9 @@ import subprocess  # noqa: S404 - preprocessor scan shells out to clang (never s
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
+from .. import deadline
 from .model import CoverageStatus, LayerConfidence, LayerCoverage
 
 if TYPE_CHECKING:
@@ -412,6 +413,13 @@ class ClangPreprocessorExtractor:
     diagnostics: list[str] = field(default_factory=list)
     runs_attempted: int = 0
     runs_ok: int = 0
+    #: Set once an active scan --budget deadline is found already exhausted
+    #: (P0 SVS follow-up). Read by capture_macros/capture_header_includes to
+    #: stop iterating the remaining compile units/headers instead of calling
+    #: _run() (and hitting the same DeadlineExceeded) for every one of them —
+    #: cheap either way, but this keeps a large compile DB's degraded run from
+    #: piling up a diagnostic per skipped unit.
+    deadline_exhausted: bool = False
 
     def available(self) -> bool:
         return shutil.which(self.clang_bin) is not None
@@ -423,6 +431,8 @@ class ClangPreprocessorExtractor:
 
         out: dict[str, dict[str, str]] = {}
         for cu in build.compile_units:
+            if self.deadline_exhausted:
+                break
             if not cu.source:
                 continue
             argv = depfile_args_from_argv(cu.argv) if cu.argv else [cu.source]
@@ -445,16 +455,29 @@ class ClangPreprocessorExtractor:
         return out
 
     def _run(self, cmd: list[str], cwd: str | None, unit: str) -> str | None:
+        # P0 follow-up: bound by the active scan --budget deadline (not just a
+        # fixed 120s) and run in its own process group so a timeout kills the
+        # whole tree (deadline.run_bounded), same fix as the L2 header-AST
+        # subprocess. Unlike that path, a deadline overflow here degrades to a
+        # diagnostic + skip rather than aborting the scan — this pre-scan is
+        # advisory (ADR-028 D3): losing macro/leak coverage for the remaining
+        # compile units on a tight budget is acceptable, silently hanging or
+        # orphaning a clang process is not.
         self.runs_attempted += 1
         try:
-            proc = subprocess.run(  # noqa: S603 - fixed argv, never shell=True
+            proc = deadline.run_bounded(  # noqa: S603 - fixed argv, never shell=True
                 cmd,
                 cwd=cwd or None,
                 capture_output=True,
                 text=True,
                 timeout=120,
-                check=False,
             )
+        except deadline.DeadlineExceeded as exc:
+            self.deadline_exhausted = True
+            self.diagnostics.append(
+                f"clang -E skipped for {unit}: scan --budget exceeded ({exc})"
+            )
+            return None
         except (OSError, subprocess.SubprocessError) as exc:
             self.diagnostics.append(f"clang -E failed for {unit}: {exc}")
             return None
@@ -465,7 +488,7 @@ class ClangPreprocessorExtractor:
             )
             return None
         self.runs_ok += 1
-        return proc.stdout
+        return cast("str", proc.stdout)
 
     def capture_header_includes(
         self,
@@ -494,6 +517,8 @@ class ClangPreprocessorExtractor:
         run_cwd = unredact_home(cwd) if cwd else None
         out: dict[str, list[str]] = {}
         for hdr in public_headers:
+            if self.deadline_exhausted:
+                break
             if not hdr:
                 continue
             # The include context (-I flags) is relative to the build dir (run_cwd),

@@ -2175,13 +2175,14 @@ def _patch_run(monkeypatch, handler) -> ClangSourceExtractor:  # type: ignore[no
 
     extractor = ClangSourceExtractor()
     monkeypatch.setattr(extractor, "available", lambda: True)
-    monkeypatch.setattr(clang_mod.subprocess, "run", handler)
+    monkeypatch.setattr(clang_mod.deadline, "run_bounded", handler)
     return extractor
 
 
 def test_extract_runs_macro_pass(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     import json
 
+    from abicheck.buildsource.source_extractors import clang as clang_mod
     from abicheck.buildsource.source_extractors.clang import _clang_compiler_version
 
     # The compiler-version lookup (ADR-038 C.8 fact_set) is process-lifetime
@@ -2201,6 +2202,12 @@ def test_extract_runs_macro_pass(monkeypatch) -> None:  # type: ignore[no-untype
         return _Result(0, '# 1 "include/foo.h" 1\n#define FOO_SIZE 16\n')
 
     extractor = _patch_run(monkeypatch, handler)
+    # _clang_compiler_version's "clang -dumpversion" probe is a small, best-
+    # effort provenance lookup (like dumper.py's castxml --version note) and
+    # deliberately does NOT go through deadline.run_bounded — patch it here
+    # too so this test's call count stays deterministic without depending on
+    # a real clang install.
+    monkeypatch.setattr(clang_mod.subprocess, "run", handler)
     tu = extractor.extract(
         _cu(source="foo.cpp"), public_header_roots=["include/foo.h"], target_id="t"
     )
@@ -2284,6 +2291,22 @@ def test_extract_timeout_raises(monkeypatch) -> None:  # type: ignore[no-untyped
         extractor.extract(_cu(), public_header_roots=["include/foo.h"])
 
 
+def test_extract_deadline_exceeded_degrades_like_timeout(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    # P0 follow-up: an active scan --budget expiring mid-L4-extraction must
+    # degrade to the SAME SourceExtractionError contract as an ordinary
+    # subprocess timeout (this extractor's failures already fold into partial
+    # per-TU coverage rather than aborting the scan — ADR-030 D3), not
+    # propagate as a distinct, uncaught exception type.
+    from abicheck import deadline
+
+    def handler(cmd, **kw):  # type: ignore[no-untyped-def]
+        raise deadline.DeadlineExceeded(-1.0)
+
+    extractor = _patch_run(monkeypatch, handler)
+    with pytest.raises(SourceExtractionError, match="timed out"):
+        extractor.extract(_cu(), public_header_roots=["include/foo.h"])
+
+
 def test_extract_invalid_json_raises(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     extractor = _patch_run(monkeypatch, lambda cmd, **kw: _emit_ast(kw, "{not json"))
     with pytest.raises(SourceExtractionError, match="not valid JSON"):
@@ -2304,7 +2327,7 @@ def test_run_ast_to_file_unlinks_temp_on_unexpected_error(
     def _boom(cmd, **kw):  # type: ignore[no-untyped-def]
         raise OSError("disk full")
 
-    monkeypatch.setattr(clang_mod.subprocess, "run", _boom)
+    monkeypatch.setattr(clang_mod.deadline, "run_bounded", _boom)
     extractor = ClangSourceExtractor()
     with pytest.raises(OSError, match="disk full"):
         extractor._run_ast_to_file(["clang"], "", "x.cpp")
@@ -2361,7 +2384,7 @@ def test_extract_parses_fake_clang_json(tmp_path: Path, monkeypatch) -> None:  #
             return _Result(0, "", "")
         return _Result(0, "")  # macro pass (capture_output)
 
-    monkeypatch.setattr(clang_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(clang_mod.deadline, "run_bounded", _fake_run)
     cu = _cu(source="src/foo.cpp", directory=str(tmp_path))
     tu = extractor.extract(
         cu, public_header_roots=["include/foo.h"], target_id="target://x"
@@ -2408,7 +2431,7 @@ def test_extract_populates_source_edges_and_coverage(
             return _Result(0, "", "")
         return _Result(0, "")
 
-    monkeypatch.setattr(clang_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(clang_mod.deadline, "run_bounded", _fake_run)
     cu = _cu(source="src/foo.cpp", directory=str(tmp_path))
     tu = extractor.extract(
         cu, public_header_roots=["include/foo.h"], target_id="target://x"
@@ -2446,7 +2469,7 @@ def test_extract_source_edges_failure_reaches_tu_diagnostics_and_coverage(
             return _Result(0, "", "")
         return _Result(0, "")
 
-    monkeypatch.setattr(clang_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(clang_mod.deadline, "run_bounded", _fake_run)
     cu = _cu(source="src/foo.cpp", directory=str(tmp_path))
     tu = extractor.extract(
         cu, public_header_roots=["include/foo.h"], target_id="target://x"
@@ -2466,7 +2489,7 @@ def test_extract_raises_on_empty_clang_output(monkeypatch) -> None:  # type: ign
         # stderr is bytes (real subprocess PIPE without text=True).
         return _Result(1, "", b"fatal error: 'foo.h' file not found")
 
-    monkeypatch.setattr(clang_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(clang_mod.deadline, "run_bounded", _fake_run)
     with pytest.raises(SourceExtractionError, match="no AST"):
         extractor.extract(_cu(), public_header_roots=["include/foo.h"])
 

@@ -262,6 +262,83 @@ def test_coverage_partial_when_some_clang_runs_fail(monkeypatch) -> None:
     assert result.coverage().status.value == "partial"
 
 
+# ── P0 follow-up: deadline-bounded, process-group-safe subprocess ───────────
+
+
+def test_run_uses_deadline_bounded_not_raw_subprocess(monkeypatch) -> None:
+    # Same fix family as the L2 header-AST subprocess (abicheck/deadline.py):
+    # ClangPreprocessorExtractor._run must go through deadline.run_bounded
+    # (shrinking --budget deadline + process-group kill on timeout), not a
+    # bare subprocess.run(timeout=120) with no process-group isolation.
+    from abicheck import deadline
+    from abicheck.buildsource import preprocessor_scan as ps
+
+    class _P:
+        stdout = "#define NDEBUG 1\n"
+        stderr = ""
+        returncode = 0
+
+    seen: dict[str, object] = {}
+
+    def _fake_run_bounded(cmd, **kwargs):
+        seen.update(kwargs)
+        return _P()
+
+    monkeypatch.setattr(deadline, "run_bounded", _fake_run_bounded)
+    ex = ps.ClangPreprocessorExtractor()
+    text = ex._run(["clang++", "-E", "-dM", "a.cpp"], None, "cu://a")
+    assert text == "#define NDEBUG 1\n"
+    assert seen.get("timeout") == 120
+    assert ex.runs_ok == 1
+
+
+def test_deadline_exceeded_degrades_to_diagnostic_not_crash(monkeypatch) -> None:
+    # Unlike the L2 header path (authoritative evidence, must abort the scan),
+    # this pre-scan is advisory (ADR-028 D3): a --budget deadline expiring
+    # mid-preprocess must degrade to a diagnostic + skipped unit, never
+    # propagate and crash the whole `scan` command.
+    from abicheck import deadline
+    from abicheck.buildsource import preprocessor_scan as ps
+
+    def _raise(cmd, **kwargs):
+        raise deadline.DeadlineExceeded(-1.0)
+
+    monkeypatch.setattr(deadline, "run_bounded", _raise)
+    ex = ps.ClangPreprocessorExtractor()
+    text = ex._run(["clang++", "-E", "-dM", "a.cpp"], None, "cu://a")
+    assert text is None
+    assert ex.deadline_exhausted is True
+    assert any("budget" in d.lower() for d in ex.diagnostics)
+
+
+def test_capture_macros_stops_after_deadline_exhausted(monkeypatch) -> None:
+    # Once the budget is gone, capture_macros must stop iterating the
+    # remaining compile units rather than calling _run() (and hitting the
+    # same DeadlineExceeded) for every one of them.
+    from abicheck import deadline
+    from abicheck.buildsource import build_evidence as be, preprocessor_scan as ps
+
+    build = be.BuildEvidence(
+        compile_units=[
+            be.CompileUnit(id=f"cu://{i}", source=f"{i}.cpp", language="CXX", argv=["c++", f"{i}.cpp"])
+            for i in range(5)
+        ]
+    )
+    calls = {"n": 0}
+
+    def _raise_once(cmd, **kwargs):
+        calls["n"] += 1
+        raise deadline.DeadlineExceeded(-1.0)
+
+    monkeypatch.setattr(deadline, "run_bounded", _raise_once)
+    ex = ps.ClangPreprocessorExtractor()
+    out = ex.capture_macros(build)
+    assert out == {}
+    assert calls["n"] == 1, (
+        f"expected exactly one attempt before the loop stopped, got {calls['n']}"
+    )
+
+
 def test_run_passes_compile_unit_directory_as_cwd(monkeypatch) -> None:
     # Relative -I flags from a CMake/Ninja compile DB only resolve when the
     # depfile pass runs from the CU's directory — that dir must reach the live

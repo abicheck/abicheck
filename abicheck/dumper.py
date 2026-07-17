@@ -73,6 +73,7 @@ from .dumper_clang_errors import (
     _parse_clang_ast_result,
     diagnose_header_compile_failure,
     retry_excluding_error_headers,
+    run_clang_to_ast_file,
 )
 from .dumper_debug import (
     # DWARF/BTF/CTF format resolution + the kernel-binary heuristic live in the
@@ -378,6 +379,10 @@ def _clang_header_dump(
 
     _write_agg(active_headers)
 
+    # Each attempt's AST spills to its own temp file (multi-GiB-safe, P0 SVS);
+    # only the last is parsed, every one is cleaned up in `finally` below.
+    _ast_paths: list[Path] = []
+
     def _run_clang(fcpp: bool, fcpp20: bool, sysinc: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
         cmd = _build_clang_header_command(
             clang_bin, cc_id, extra_includes, agg_path,
@@ -386,13 +391,11 @@ def _clang_header_dump(
             force_cpp=fcpp, force_cpp20=fcpp20,
             system_includes=sysinc,
         )
-        # DeadlineExceeded propagates uncaught (see run_scan_core's _BudgetOverflow
-        # mapping) so a --budget overflow stays distinguishable from a parse timeout.
+        # DeadlineExceeded propagates uncaught so run_scan_core maps it to
+        # _BudgetOverflow, distinct from an ordinary parse timeout.
         deadline.check()
         try:
-            return deadline.run_bounded(
-                cmd, capture_output=True, text=True, timeout=120,
-            )
+            return run_clang_to_ast_file(cmd, timeout=120, on_created=_ast_paths.append)
         except subprocess.TimeoutExpired as exc:
             raise SnapshotError(
                 "clang timed out after 120 seconds parsing the header(s). The header "
@@ -431,9 +434,12 @@ def _clang_header_dump(
             agg_path=agg_path,
             active_headers=active_headers,
         )
-        return _parse_clang_ast_result(result, cached)
+        # Every retry re-invokes _run_clang, so _ast_paths[-1] matches `result`.
+        return _parse_clang_ast_result(result, cached, _ast_paths[-1])
     finally:
         agg_path.unlink(missing_ok=True)
+        for _p in _ast_paths:
+            _p.unlink(missing_ok=True)
 
 
 def _header_ast_parser(
