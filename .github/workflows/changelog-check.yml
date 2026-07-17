@@ -25,7 +25,12 @@ jobs:
           persist-credentials: false
 
       - name: Fetch PR base ref
-        run: git fetch --depth=1 origin "${{ github.event.pull_request.base.sha }}"
+        # No --depth here: fetch-depth: 0 above already gives a full,
+        # unshallow history, and the next step's `base...head` diff needs
+        # a real merge-base walk. A --depth=1 fetch of base.sha can mark
+        # it as a shallow-grafted boundary even in an already-unshallow
+        # repo, which breaks that merge-base computation.
+        run: git fetch origin "${{ github.event.pull_request.base.sha }}"
 
       - name: Check for a changelog fragment
         run: |
