@@ -509,6 +509,10 @@ class TestInlineNamespaceVersionBump:
         c = changes[0]
         assert c.kind == ChangeKind.INLINE_NAMESPACE_VERSION_BUMPED
         assert "_V2" in c.symbol
+        # Function-sourced entries are filtered to Visibility.PUBLIC by
+        # _collect_versioned_entries, so this bump is a reliable public break.
+        assert c.public_reachable is True
+        assert c.reachability_kind == "direct_public_symbol"
 
     def test_type_version_bumped(self) -> None:
         old = _snap(types=[_rec("ns::__1::queue")])
@@ -516,6 +520,9 @@ class TestInlineNamespaceVersionBump:
         changes = detect_inline_namespace_version_bump(old, new)
         assert len(changes) == 1
         assert changes[0].kind == ChangeKind.INLINE_NAMESPACE_VERSION_BUMPED
+        # RecordType has no visibility field — no reliable public signal.
+        assert changes[0].public_reachable is False
+        assert changes[0].reachability_kind is None
 
     def test_no_version_segment_no_finding(self) -> None:
         old = _snap(funcs=[_fn("ns::sort")])

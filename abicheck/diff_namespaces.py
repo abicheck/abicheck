@@ -614,12 +614,19 @@ def _emit_version_bumps(
             continue
         old_q = old_list[0][0]
         new_q = new_list[0][0]
+        # Only the function-sourced entries are filtered to Visibility.PUBLIC
+        # in `_collect_versioned_entries`; type entries carry no visibility
+        # signal at all (RecordType has no visibility field), so a bump whose
+        # reported declaration is a type must stay untagged.
+        subject_is_public = old_list[0][2] == "function" and new_list[0][2] == "function"
         changes.append(make_change(
             ChangeKind.INLINE_NAMESPACE_VERSION_BUMPED,
             symbol=new_q,
             old=old_q,
             new=new_q,
             detail=f"{sorted(old_versions)} to {sorted(new_versions)}",
+            public_reachable=subject_is_public,
+            reachability_kind="direct_public_symbol" if subject_is_public else None,
         ))
     return changes
 

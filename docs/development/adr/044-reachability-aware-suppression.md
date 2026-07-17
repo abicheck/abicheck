@@ -367,6 +367,26 @@ since JSON/SARIF/JUnit reporters already round-trip `Change` via
   open; scoped out of this round to avoid rushing verification of six more
   detectors across two large files without individually confirming each
   one's visibility-filtering the way every fix above required.
+- **A fifth late-detector gap, back in `diff_namespaces.py` itself
+  (Codex).** `detect_namespace_patterns()` also runs
+  `detect_inline_namespace_version_bump`, which was missed by the third
+  round's sweep of that same module (that round covered
+  `_emit_experimental_change`/`_build_std_reexport_change` only). It builds
+  `INLINE_NAMESPACE_VERSION_BUMPED` from `_emit_version_bumps`, which reads
+  `old_list[0]`/`new_list[0]` out of an index keyed by version-stripped
+  namespace segments — and that index's entries come from
+  `_collect_versioned_entries`, which merges public-function-sourced (`f.name`
+  filtered to `Visibility.PUBLIC`) and type-sourced (`t.name`, unfiltered —
+  `RecordType` has no visibility field) observations into one list per key,
+  same shape as `MANDATORY_TEMPLATE_PARAM_ADDED`'s arity index. The
+  difference here: each entry is a `(qualified_name, version, kind)` tuple
+  that already carries which source it came from, so — unlike the arity
+  index — the signal survives into `_emit_version_bumps` and just wasn't
+  read. Fixed by checking `old_list[0][2] == "function" and new_list[0][2]
+  == "function"` (both sides, since `old_q`/`new_q` both flow into the
+  emitted `Change`) before tagging `public_reachable=True`/
+  `reachability_kind="direct_public_symbol"` — a type-sourced bump stays
+  untagged for the same no-visibility-field reason as the arity index.
 
 ### D2. `Suppression` gains a reachability guard
 
