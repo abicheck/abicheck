@@ -26,6 +26,7 @@ from .diff_cxx_rules import itanium_qualified_name, vtable_slot_is_override_reus
 from .diff_helpers import make_change
 from .diff_symbols import (
     _PUBLIC_VIS,
+    _both_castxml_backed,
     _public_functions,
     _public_variables,
     _should_filter_transitive_runtime_symbols,
@@ -43,9 +44,46 @@ from .model import (
     TypeField,
     canonicalize_type_name,
     cv_qualifiers_only_differ,
+    func_signature_cv_only_differ,
     is_non_abi_surface_type as _is_non_abi_surface_type,
     stdlib_namespaces_excluded as _exclude_stdlib_namespaces,
 )
+
+
+def _field_type_genuinely_changed(
+    old_type: str, new_type: str, *, cv_facts_reliable: bool
+) -> bool:
+    """True when a struct/union field's type spelling differs in a way that
+    should be reported.
+
+    Layered on top of the existing pointer/reference cv neutralization
+    (``cv_qualifiers_only_differ``): when *either* snapshot in the pair
+    predates the CastXML CV-fact fix (``cv_facts_reliable=False``, see
+    ``AbiSnapshot.header_cv_facts_reliable``), a BY-VALUE cv-only difference
+    is *also* neutralized here — reusing ``func_signature_cv_only_differ``'s
+    strip-and-compare logic, even though its own docstring warns against
+    that for fields. That warning is about unconditionally neutralizing a
+    field's own cv change, which is a real, intentionally-visible,
+    breaking source change (``case30_field_qualifiers`` ground truth). This
+    is different: it only applies when the calling detector has already
+    established that this specific snapshot pair's cv facts cannot be
+    trusted, because a persisted pre-fix CastXML snapshot's field type
+    spelling may have silently dropped a real ``const``/``volatile`` token
+    — comparing it against a fresh dump of genuinely UNCHANGED headers
+    would otherwise misreport a false type change purely from the tool
+    upgrade. This intentionally also means a REAL by-value cv change goes
+    undetected in that mixed legacy/fresh pairing — the two are
+    indistinguishable, and (like ``_both_castxml_backed`` elsewhere) losing
+    that one axis of detection is the safer trade-off (Codex review, PR
+    #582).
+    """
+    if canonicalize_type_name(old_type) == canonicalize_type_name(new_type):
+        return False
+    if cv_qualifiers_only_differ(old_type, new_type):
+        return False
+    if not cv_facts_reliable and func_signature_cv_only_differ(old_type, new_type):
+        return False
+    return True
 
 
 def _exported_elf_symbol_names(snap: AbiSnapshot, *, symbol_types: Collection[str]) -> set[str]:
@@ -165,6 +203,8 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # own old_types/new_types for the identical virtual_method_addition() walk.
     old_types = {t.name: t for t in old.types}
     new_types = {t.name: t for t in new.types}
+    castxml_backed = _both_castxml_backed(old, new)
+    cv_facts_reliable = old.header_cv_facts_reliable and new.header_cv_facts_reliable
 
     for name, t_old in old_map.items():
         t_new = new_map.get(name)
@@ -178,7 +218,11 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             ))
             continue
         changes.extend(
-            _diff_type_pair(name, t_old, t_new, old_funcs, new_funcs, old_types, new_types)
+            _diff_type_pair(
+                name, t_old, t_new, old_funcs, new_funcs, old_types, new_types,
+                castxml_backed=castxml_backed,
+                cv_facts_reliable=cv_facts_reliable,
+            )
         )
 
     for name in new_map:
@@ -276,6 +320,9 @@ def _diff_type_pair(
     new_funcs: dict[str, Function],
     old_types: dict[str, RecordType],
     new_types: dict[str, RecordType],
+    *,
+    castxml_backed: bool = False,
+    cv_facts_reliable: bool = True,
 ) -> list[Change]:
     changes: list[Change] = []
 
@@ -292,13 +339,54 @@ def _diff_type_pair(
 
     _append_type_size_and_alignment_changes(changes, name, t_old, t_new)
     if not t_old.is_union:
-        changes.extend(_diff_type_fields(name, t_old, t_new))
+        changes.extend(
+            _diff_type_fields(name, t_old, t_new, cv_facts_reliable=cv_facts_reliable)
+        )
     changes.extend(_diff_type_bases(name, t_old, t_new))
     changes.extend(
         _diff_type_vtable(name, t_old, t_new, old_funcs, new_funcs, old_types, new_types)
     )
     _append_type_finality_changes(changes, name, t_old, t_new)
+    if castxml_backed:
+        _append_type_abstract_changes(changes, name, t_old, t_new)
     return changes
+
+
+def _append_type_abstract_changes(
+    changes: list[Change], name: str, t_old: RecordType, t_new: RecordType,
+) -> None:
+    """Detect `abstract` (>=1 pure virtual) transitions.
+
+    Tri-state, same rationale as ``_append_type_finality_changes``: only fire
+    when BOTH sides record it; ``None`` means the dumper couldn't determine
+    it (DWARF/symbols-only mode, older snapshots, or an opaque record with no
+    member list to have judged it from) rather than "not abstract". Unlike
+    ``is_final`` (populated by both the castxml and clang header backends),
+    ``is_abstract`` is castxml-only today — the caller (``_diff_type_pair``)
+    additionally gates this call on ``castxml_backed`` so a clang-parsed
+    side's unconditional ``None`` is never misread as "no longer abstract"
+    (Codex review, PR #582).
+    """
+    if t_old.is_abstract is None or t_new.is_abstract is None:
+        return
+    if t_old.is_abstract == t_new.is_abstract:
+        return
+    if t_new.is_abstract:
+        changes.append(make_change(
+            ChangeKind.TYPE_BECAME_ABSTRACT,
+            symbol=name,
+            name=name,
+            old_value="instantiable",
+            new_value="abstract",
+        ))
+    else:
+        changes.append(make_change(
+            ChangeKind.TYPE_LOST_ABSTRACT,
+            symbol=name,
+            name=name,
+            old_value="abstract",
+            new_value="instantiable",
+        ))
 
 
 def _append_type_finality_changes(
@@ -587,7 +675,9 @@ def _added_field_changes(
     return changes
 
 
-def _diff_type_fields(name: str, t_old: RecordType, t_new: RecordType) -> list[Change]:
+def _diff_type_fields(
+    name: str, t_old: RecordType, t_new: RecordType, *, cv_facts_reliable: bool = True
+) -> list[Change]:
     """Diff the field lists of two record types, emitting field-level changes."""
     changes: list[Change] = []
     old_fields = {f.name: f for f in t_old.fields}
@@ -620,7 +710,11 @@ def _diff_type_fields(name: str, t_old: RecordType, t_new: RecordType) -> list[C
         # Skip trailing FAM type changes — handled by _diff_flexible_array_member
         if fname == old_trailing_fam and fname == new_trailing_fam:
             continue
-        changes.extend(_diff_type_field_pair(name, fname, f_old, f_new))
+        changes.extend(
+            _diff_type_field_pair(
+                name, fname, f_old, f_new, cv_facts_reliable=cv_facts_reliable
+            )
+        )
 
     changes.extend(_added_field_changes(
         name, t_new, old_fields, new_fields,
@@ -634,17 +728,21 @@ def _diff_type_fields(name: str, t_old: RecordType, t_new: RecordType) -> list[C
     return changes
 
 
-def _diff_type_field_pair(name: str, fname: str, f_old: TypeField, f_new: TypeField) -> list[Change]:
+def _diff_type_field_pair(
+    name: str, fname: str, f_old: TypeField, f_new: TypeField,
+    *, cv_facts_reliable: bool = True,
+) -> list[Change]:
     changes: list[Change] = []
     # Use canonical form for type comparison to avoid false positives from
     # "struct Foo" vs "Foo" or "const int" vs "int const" differences.
     # A pointee/by-value cv-qualifier change (``char *`` -> ``const char *``)
     # leaves the field's size and offset unchanged — it is source-level churn,
     # not a binary layout break (ISSUE-30/35/65). Top-level field const/volatile
-    # is reported separately by the ``field_qualifiers`` detector.
-    if (
-        canonicalize_type_name(f_old.type) != canonicalize_type_name(f_new.type)
-        and not cv_qualifiers_only_differ(f_old.type, f_new.type)
+    # is reported separately by the ``field_qualifiers`` detector. See
+    # _field_type_genuinely_changed for the additional legacy-snapshot
+    # cv_facts_reliable handling.
+    if _field_type_genuinely_changed(
+        f_old.type, f_new.type, cv_facts_reliable=cv_facts_reliable
     ):
         changes.append(make_change(
             ChangeKind.TYPE_FIELD_TYPE_CHANGED,
@@ -863,6 +961,7 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # (case78). Emit it here, guarded by the same stripped-binary suppression
     # _diff_types uses so a stripped new side can't manufacture phantom removals.
     suppress_removed = _removals_are_unconfirmed(old, new)
+    castxml_backed = _both_castxml_backed(old, new)
 
     for name, e_old in old_map.items():
         if name not in new_map:
@@ -874,6 +973,8 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 ))
             continue
         e_new = new_map[name]
+        if castxml_backed:
+            _append_enum_scoped_changes(changes, name, e_old, e_new)
         old_members = {m.name: m.value for m in e_old.members}
         new_members = {m.name: m.value for m in e_new.members}
         # Sentinel detection is name-pattern based to avoid accidental
@@ -951,6 +1052,42 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 ))
 
     return changes
+
+
+def _append_enum_scoped_changes(
+    changes: list[Change], name: str, e_old: EnumType, e_new: EnumType,
+) -> None:
+    """Detect `enum class`/`enum struct` (C++11 scoped enum) transitions.
+
+    Tri-state, same rationale as ``_append_type_finality_changes``: only fire
+    when BOTH sides record it; ``None`` means the dumper couldn't determine
+    it (DWARF/symbols-only mode, older snapshots) rather than "not scoped".
+    Unlike ``is_final`` (populated by both the castxml and clang header
+    backends), ``is_scoped`` is castxml-only today — the caller
+    (``_diff_enums``) additionally gates the call on
+    ``_both_castxml_backed`` so a clang-parsed side's unconditional ``None``
+    is never misread as "scoping was removed" (Codex review, PR #582).
+    """
+    if e_old.is_scoped is None or e_new.is_scoped is None:
+        return
+    if e_old.is_scoped == e_new.is_scoped:
+        return
+    if e_new.is_scoped:
+        changes.append(make_change(
+            ChangeKind.ENUM_BECAME_SCOPED,
+            symbol=name,
+            name=name,
+            old_value="unscoped",
+            new_value="scoped",
+        ))
+    else:
+        changes.append(make_change(
+            ChangeKind.ENUM_LOST_SCOPED,
+            symbol=name,
+            name=name,
+            old_value="scoped",
+            new_value="unscoped",
+        ))
 
 
 def _sig_key(f: Function) -> tuple[str, tuple[str, ...]]:
@@ -1061,6 +1198,9 @@ def _diff_unions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     excl = _exclude_stdlib_namespaces(old, new)
     old_unions = {t.name: t for t in old.types if t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl)}
     new_unions = {t.name: t for t in new.types if t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl)}
+    # Same legacy-snapshot cv-fact concern as _diff_type_field_pair (Codex
+    # review, PR #582).
+    cv_facts_reliable = old.header_cv_facts_reliable and new.header_cv_facts_reliable
 
     for name, t_old in old_unions.items():
         if name not in new_unions:
@@ -1077,9 +1217,8 @@ def _diff_unions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     name=name, detail=fname,
                     old_value=f_old.type,
                 ))
-            elif (
-                canonicalize_type_name(f_old.type) != canonicalize_type_name(new_fields[fname].type)
-                and not cv_qualifiers_only_differ(f_old.type, new_fields[fname].type)
+            elif _field_type_genuinely_changed(
+                f_old.type, new_fields[fname].type, cv_facts_reliable=cv_facts_reliable
             ):
                 changes.append(make_change(
                     ChangeKind.UNION_FIELD_TYPE_CHANGED,
@@ -1300,7 +1439,19 @@ def _check_field_qualifier_pair(
 
 @registry.detector("field_qualifiers")
 def _diff_field_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Detect field-level const/volatile/mutable qualifier changes."""
+    """Detect field-level const/volatile/mutable qualifier changes.
+
+    Gated on ``header_cv_facts_reliable`` on both sides: a snapshot
+    persisted before the CastXML field-CV-fact fix has
+    ``is_const``/``is_volatile``/``is_mutable`` permanently False — real
+    (not absent) data that reads identically to a genuine "not const"
+    fact. Comparing such a snapshot against a fresh dump of unchanged
+    headers would otherwise misreport a false ``FIELD_BECAME_CONST``/
+    ``VOLATILE``/``MUTABLE`` purely from the tool upgrade (Codex review,
+    PR #582).
+    """
+    if not (old.header_cv_facts_reliable and new.header_cv_facts_reliable):
+        return []
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
     old_map = {t.name: t for t in old.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl)}
@@ -1318,6 +1469,205 @@ def _diff_field_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             if f_new is None:
                 continue
             changes.extend(_check_field_qualifier_pair(name, fname, f_old, f_new))
+
+    return changes
+
+
+@registry.detector("field_default_initializer")
+def _diff_field_default_initializer(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
+    """Detect a field's default member initializer being removed or changed.
+
+    Header-tier only (like ``param_defaults``): the initializer expression is
+    populated solely from castxml header parsing, and ``TypeField.default``
+    is ``None`` both for "no initializer" and "the dumper doesn't capture
+    this" — see its docstring in model.py. Gaining an initializer is not
+    tracked (matches ``PARAM_DEFAULT_VALUE_*``'s convention: an added default
+    is purely additive, never itself flagged).
+
+    Gates on ``_both_castxml_backed`` (not just ``_both_header_aware``): the
+    clang header backend does not populate ``TypeField.default`` yet, so a
+    castxml-vs-clang comparison would otherwise read as every initializer
+    having been removed (Codex review, PR #582).
+
+    Unions are NOT excluded (unlike most field-level detectors, which leave
+    them to ``_diff_unions``): a C++ union may have a default member
+    initializer on (at most) one of its variant members
+    (``union U { int x = 1; float y; };``), CastXML parses that member's
+    ``init`` attribute the same as an ordinary struct field, and
+    ``_diff_unions`` never looks at ``default`` at all — so without this,
+    a union variant's initializer being removed or changed went completely
+    undetected (Codex review, PR #582).
+    """
+    if not _both_castxml_backed(old, new):
+        return []
+    changes: list[Change] = []
+    excl = _exclude_stdlib_namespaces(old, new)
+    old_map = {t.name: t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl)}
+    new_map = {t.name: t for t in new.types if _is_abi_surface_type(t, exclude_stdlib=excl)}
+
+    for name, t_old in old_map.items():
+        t_new = new_map.get(name)
+        if t_new is None:
+            continue
+        old_fields = {f.name: f for f in t_old.fields}
+        new_fields = {f.name: f for f in t_new.fields}
+
+        for fname, f_old in old_fields.items():
+            f_new = new_fields.get(fname)
+            if f_new is None or f_old.default is None:
+                continue
+            if f_new.default is None:
+                changes.append(make_change(
+                    ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED,
+                    symbol=name,
+                    name=name, detail=fname,
+                    old_value=f_old.default,
+                ))
+            elif f_old.default != f_new.default:
+                changes.append(make_change(
+                    ChangeKind.FIELD_DEFAULT_INITIALIZER_CHANGED,
+                    symbol=name,
+                    name=name, detail=fname,
+                    old=f_old.default,
+                    new=f_new.default,
+                ))
+
+    return changes
+
+
+@registry.detector("field_deprecated")
+def _diff_field_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
+    """Detect a struct/class field gaining or losing `[[deprecated]]`.
+
+    ``TypeField.deprecated`` is populated and serialized (castxml's ``Field``
+    element carries the same ``deprecation``/bare-``attributes`` marker as
+    a function/variable/type/enum declaration), but — unlike those four
+    other surfaces, each of which already has its own dedicated detector —
+    nothing previously read it: a public field changing from `int x;` to
+    `[[deprecated]] int x;` (or losing the marker) went completely
+    undetected on a CastXML-backed header comparison (Codex review, PR
+    #582).
+
+    Header-tier only, gated on ``_both_castxml_backed`` like the other four
+    deprecated detectors (the clang backend doesn't populate
+    ``TypeField.deprecated`` yet). Unions are NOT excluded — matching
+    ``FIELD_DEFAULT_INITIALIZER_REMOVED``/``_CHANGED``'s reasoning: a union
+    variant can carry `[[deprecated]]` too, castxml parses that member's
+    marker the same as an ordinary field, and ``_diff_unions`` never checks
+    ``deprecated`` at all.
+    """
+    if not _both_castxml_backed(old, new):
+        return []
+    changes: list[Change] = []
+    excl = _exclude_stdlib_namespaces(old, new)
+    old_map = {t.name: t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl)}
+    new_map = {t.name: t for t in new.types if _is_abi_surface_type(t, exclude_stdlib=excl)}
+
+    for name, t_old in old_map.items():
+        t_new = new_map.get(name)
+        if t_new is None:
+            continue
+        old_fields = {f.name: f for f in t_old.fields}
+        new_fields = {f.name: f for f in t_new.fields}
+
+        for fname, f_old in old_fields.items():
+            f_new = new_fields.get(fname)
+            if f_new is None:
+                continue
+            if f_old.deprecated is None and f_new.deprecated is not None:
+                changes.append(make_change(
+                    ChangeKind.FIELD_DEPRECATED_ADDED,
+                    symbol=name,
+                    name=name, detail=fname,
+                    new=f_new.deprecated,
+                ))
+            elif f_old.deprecated is not None and f_new.deprecated is None:
+                changes.append(make_change(
+                    ChangeKind.FIELD_DEPRECATED_REMOVED,
+                    symbol=name,
+                    name=name, detail=fname,
+                    old_value=f_old.deprecated,
+                ))
+
+    return changes
+
+
+@registry.detector("type_deprecated")
+def _diff_type_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
+    """Detect a class/struct/union gaining or losing `[[deprecated]]`.
+
+    Header-tier only — see ``FIELD_DEFAULT_INITIALIZER_REMOVED``'s docstring
+    above / ``Function.deprecated``'s in model.py for why this gates on
+    ``_both_castxml_backed`` rather than a per-pair None check or plain
+    ``_both_header_aware`` (the clang backend doesn't populate
+    ``RecordType.deprecated`` yet — Codex review, PR #582).
+    """
+    if not _both_castxml_backed(old, new):
+        return []
+    changes: list[Change] = []
+    excl = _exclude_stdlib_namespaces(old, new)
+    old_map = {t.name: t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl)}
+    new_map = {t.name: t for t in new.types if _is_abi_surface_type(t, exclude_stdlib=excl)}
+
+    for name, t_old in old_map.items():
+        t_new = new_map.get(name)
+        if t_new is None:
+            continue
+        if t_old.deprecated is None and t_new.deprecated is not None:
+            changes.append(make_change(
+                ChangeKind.TYPE_DEPRECATED_ADDED,
+                symbol=name,
+                name=name, detail=t_new.deprecated,
+                new_value=t_new.deprecated,
+            ))
+        elif t_old.deprecated is not None and t_new.deprecated is None:
+            changes.append(make_change(
+                ChangeKind.TYPE_DEPRECATED_REMOVED,
+                symbol=name,
+                name=name,
+                old_value=t_old.deprecated,
+            ))
+
+    return changes
+
+
+@registry.detector("enum_deprecated")
+def _diff_enum_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
+    """Detect an enum gaining or losing `[[deprecated]]` (header-tier only).
+
+    Gates on ``_both_castxml_backed`` — see ``TYPE_DEPRECATED_ADDED``'s
+    docstring above (the clang backend doesn't populate
+    ``EnumType.deprecated`` yet).
+    """
+    if not _both_castxml_backed(old, new):
+        return []
+    changes: list[Change] = []
+    excl = _exclude_stdlib_namespaces(old, new)
+    old_map = {
+        e.name: e for e in old.enums if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
+    }
+    new_map = {
+        e.name: e for e in new.enums if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
+    }
+
+    for name, e_old in old_map.items():
+        e_new = new_map.get(name)
+        if e_new is None:
+            continue
+        if e_old.deprecated is None and e_new.deprecated is not None:
+            changes.append(make_change(
+                ChangeKind.ENUM_DEPRECATED_ADDED,
+                symbol=name,
+                name=name, detail=e_new.deprecated,
+                new_value=e_new.deprecated,
+            ))
+        elif e_old.deprecated is not None and e_new.deprecated is None:
+            changes.append(make_change(
+                ChangeKind.ENUM_DEPRECATED_REMOVED,
+                symbol=name,
+                name=name,
+                old_value=e_old.deprecated,
+            ))
 
     return changes
 

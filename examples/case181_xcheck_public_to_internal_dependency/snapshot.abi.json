@@ -1,4 +1,5 @@
 {
+  "ast_producer": null,
   "build_context_defines": [],
   "build_id": null,
   "build_mode": null,
@@ -99,6 +100,7 @@
   "functions": [],
   "git_commit": null,
   "git_tag": null,
+  "header_cv_facts_reliable": true,
   "kabi": null,
   "language_profile": null,
   "library": "libdemo.so",
@@ -109,7 +111,7 @@
   "platform": null,
   "python_api": null,
   "python_ext": null,
-  "schema_version": 8,
+  "schema_version": 9,
   "scope_fallback": null,
   "source_mtime": null,
   "source_mtime_epoch": false,

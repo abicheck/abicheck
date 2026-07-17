@@ -230,6 +230,10 @@ class ChangeKind(str, Enum):
     # breaks any consumer that derives from the class.
     TYPE_BECAME_FINAL = "type_became_final"  # gained `final` → derivation no longer compiles → API_BREAK
     TYPE_LOST_FINAL = "type_lost_final"      # lost `final` → devirtualization desync risk on old binaries → COMPATIBLE_WITH_RISK
+    # `abstract` (>=1 pure virtual) transitions (header/castxml only — DWARF
+    # and the binary carry no such trait directly).
+    TYPE_BECAME_ABSTRACT = "type_became_abstract"  # gained a pure virtual → direct instantiation no longer compiles → API_BREAK
+    TYPE_LOST_ABSTRACT = "type_lost_abstract"      # lost all pure virtuals → newly instantiable, purely additive → COMPATIBLE
     BASE_CLASS_POSITION_CHANGED = (
         "base_class_position_changed"  # base reorder → this-ptr offset change
     )
@@ -256,6 +260,15 @@ class ChangeKind(str, Enum):
     FIELD_LOST_VOLATILE = "field_lost_volatile"
     FIELD_BECAME_MUTABLE = "field_became_mutable"
     FIELD_LOST_MUTABLE = "field_lost_mutable"
+    # Default member initializer changes (header/castxml only). Gaining one is
+    # not tracked (matches PARAM_DEFAULT_VALUE_*'s convention: an added default
+    # is purely additive, never itself flagged).
+    FIELD_DEFAULT_INITIALIZER_REMOVED = (
+        "field_default_initializer_removed"  # lost implicit init → uninitialized-read risk → COMPATIBLE_WITH_RISK
+    )
+    FIELD_DEFAULT_INITIALIZER_CHANGED = (
+        "field_default_initializer_changed"  # value changed → silent behavior change → COMPATIBLE
+    )
 
     # Pointer level changes
     PARAM_POINTER_LEVEL_CHANGED = "param_pointer_level_changed"  # T* → T** or T** → T*
@@ -850,6 +863,31 @@ class ChangeKind(str, Enum):
     FUNC_CONTRACT_ATTRIBUTE_REMOVED = "func_contract_attribute_removed"  # function lost a semantic contract attribute callers may rely on → RISK
     VAR_ALIGNMENT_CHANGED = "var_alignment_changed"  # exported variable's declared alignment changed → BREAKING
     FUNC_EXCEPTION_SPEC_CHANGED = "func_exception_spec_changed"  # dynamic exception specification (throw(...)) changed in a way not covered by the noexcept kinds → RISK
+
+    # ── CastXML schema-completeness (deprecation, scoped enums, override) ────
+    # `enum class`/`enum struct` (C++11 scoped enumeration) transitions
+    # (header/castxml only).
+    ENUM_BECAME_SCOPED = "enum_became_scoped"  # unscoped → scoped: unqualified enumerator lookup and implicit-int conversions stop compiling → API_BREAK
+    ENUM_LOST_SCOPED = "enum_lost_scoped"      # scoped → unscoped: implicit-int conversions silently reappear → COMPATIBLE_WITH_RISK
+    # Explicit C++11 `override` specifier on a virtual method (header/castxml
+    # only — distinct from FUNC_VIRTUAL_REMOVED/vtable-slot kinds, which
+    # already catch an actual dispatch break; this is the source-level
+    # self-documentation marker alone).
+    FUNC_OVERRIDE_SPECIFIER_ADDED = "func_override_specifier_added"  # gained `override` → COMPATIBLE (quality: self-documents an existing override relationship)
+    FUNC_OVERRIDE_SPECIFIER_REMOVED = "func_override_specifier_removed"  # lost `override` while still virtual → COMPATIBLE_WITH_RISK (may signal the override relationship silently broke elsewhere)
+    # `[[deprecated]]`/`[[deprecated("msg")]]` transitions (header/castxml
+    # only). One pair per surface kind, matching the existing per-entity-kind
+    # convention (is_final on types, is_explicit on functions, ...).
+    FUNC_DEPRECATED_ADDED = "func_deprecated_added"  # function gained [[deprecated]] → COMPATIBLE (quality: advance notice)
+    FUNC_DEPRECATED_REMOVED = "func_deprecated_removed"  # function lost [[deprecated]] → COMPATIBLE (quality)
+    VAR_DEPRECATED_ADDED = "var_deprecated_added"  # variable gained [[deprecated]] → COMPATIBLE (quality)
+    VAR_DEPRECATED_REMOVED = "var_deprecated_removed"  # variable lost [[deprecated]] → COMPATIBLE (quality)
+    TYPE_DEPRECATED_ADDED = "type_deprecated_added"  # class/struct/union gained [[deprecated]] → COMPATIBLE (quality)
+    TYPE_DEPRECATED_REMOVED = "type_deprecated_removed"  # class/struct/union lost [[deprecated]] → COMPATIBLE (quality)
+    ENUM_DEPRECATED_ADDED = "enum_deprecated_added"  # enum gained [[deprecated]] → COMPATIBLE (quality)
+    ENUM_DEPRECATED_REMOVED = "enum_deprecated_removed"  # enum lost [[deprecated]] → COMPATIBLE (quality)
+    FIELD_DEPRECATED_ADDED = "field_deprecated_added"  # struct/class field gained [[deprecated]] → COMPATIBLE (quality)
+    FIELD_DEPRECATED_REMOVED = "field_deprecated_removed"  # struct/class field lost [[deprecated]] → COMPATIBLE (quality)
 
     # ── Composition compatibility (Wave A: runtime binding / loader / PE / wchar) ──
     RUNTIME_SYMBOL_PROVIDER_CHANGED = "runtime_symbol_provider_changed"  # a consumer's symbol reference resolves to a different provider DSO across environments → RISK

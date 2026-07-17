@@ -296,6 +296,9 @@ _LEADING_CONST_RE = re.compile(r"^const\s+([\w\s:]+?)(\s*[*&].*)?$")
 _MULTI_SPACE_RE = re.compile(r"\s{2,}")
 
 
+_PTR_REF_SIGIL_RE = re.compile(r"\s*([*&])\s*")
+
+
 def canonicalize_type_name(name: str) -> str:
     """Normalise a C/C++ type name for comparison.
 
@@ -304,10 +307,21 @@ def canonicalize_type_name(name: str) -> str:
     1. Strip leading ``struct ``/``class ``/``union ``/``enum `` elaborated-type-specifier.
     2. Normalise leading ``const T`` → ``T const`` (east-const canonical form),
        but only when the base type contains no angle brackets (templates).
-    3. Final whitespace cleanup.
+    3. Normalise pointer/reference sigil spacing to a single leading space
+       (``int*`` and ``int *`` both become ``int *``).
+    4. Final whitespace cleanup.
 
     This prevents false positives from dumpers that emit different
-    elaborated-type-specifier forms for the same type.
+    elaborated-type-specifier forms, or different pointer/reference sigil
+    spacing, for the same type — confirmed as a REAL, live discrepancy
+    between castxml (``"char const*"``, no space) and clang's
+    ``-ast-dump=json`` (``"char const *"``, with space) via the Phase 2
+    castxml↔clang parity gate (PR #582): without this step,
+    ``_params_differ``'s own ``canonicalize_type_name(...) ==
+    canonicalize_type_name(...)`` equality check — the very first thing it
+    tries — would treat a cross-producer (or cross-castxml-version)
+    comparison of an otherwise-unchanged pointer parameter as a real,
+    breaking type change purely from this spelling convention.
 
     >>> canonicalize_type_name("struct Foo")
     'Foo'
@@ -319,6 +333,10 @@ def canonicalize_type_name(name: str) -> str:
     'unsigned long long const'
     >>> canonicalize_type_name("const ns::Type &")
     'ns::Type const &'
+    >>> canonicalize_type_name("char const*")
+    'char const *'
+    >>> canonicalize_type_name("int*")
+    'int *'
     """
     # 0. Normalise whitespace early so anchored regexes work consistently.
     result = _MULTI_SPACE_RE.sub(" ", name.strip())
@@ -336,7 +354,10 @@ def canonicalize_type_name(name: str) -> str:
             # "const struct Foo" → base="struct Foo" → "Foo"
             base = _STRUCT_PREFIX_RE.sub("", base)
             result = base + " const" + suffix
-    # 3. Final cleanup.
+    # 3. Normalise pointer/reference sigil spacing (same technique already
+    #    used by _strip_cv_qualifiers below).
+    result = _PTR_REF_SIGIL_RE.sub(r" \1", result)
+    # 4. Final cleanup.
     result = _MULTI_SPACE_RE.sub(" ", result)
     return result.strip()
 
@@ -348,13 +369,41 @@ _CV_TOKEN_RE = re.compile(r"\b(?:const|volatile)\b")
 
 
 def _strip_cv_qualifiers(name: str) -> str:
-    """Return *name* with all ``const`` / ``volatile`` tokens removed.
+    """Return *name* with ``const`` / ``volatile`` tokens removed — but only
+    at bracket depth 0 (not nested inside a template argument list,
+    function-parameter list, or array subscript).
+
+    A cv qualifier nested inside a template argument
+    (``Box<const int>`` vs. ``Box<int>``) names a genuinely different,
+    unrelated C++ type, not a cv-qualified variant of the same type — two
+    distinct template instantiations, each with its own real mangled
+    identity. Stripping it unconditionally (as an earlier version of this
+    function did) made both of this module's callers —
+    ``cv_qualifiers_only_differ`` and ``func_signature_cv_only_differ`` —
+    misclassify a genuine, ABI-relevant type change (e.g. a function
+    parameter changing from ``Box<int, int>`` to ``Box<int, const int>``)
+    as a harmless cv-only difference, silently suppressing a real breaking
+    ``FUNC_PARAMS_CHANGED``/``FUNC_RETURN_CHANGED`` finding (Codex/
+    CodeRabbit review, PR #582). Depth tracking mirrors
+    :func:`_has_top_level_ptr_or_ref`.
 
     Whitespace introduced by the removal is collapsed, and spaces adjacent to
     pointer/reference sigils are normalised so that ``const char *`` and
     ``char *`` reduce to the same string.
     """
-    stripped = _CV_TOKEN_RE.sub(" ", name)
+    depth = 0
+    chars = list(name)
+    for m in _CV_TOKEN_RE.finditer(name):
+        depth = 0
+        for ch in name[: m.start()]:
+            if ch in "<([":
+                depth += 1
+            elif ch in ">)]":
+                depth = max(0, depth - 1)
+        if depth == 0:
+            for i in range(m.start(), m.end()):
+                chars[i] = " "
+    stripped = "".join(chars)
     stripped = _MULTI_SPACE_RE.sub(" ", stripped)
     # Normalise spacing around pointer/reference sigils so "char  *" == "char *".
     stripped = re.sub(r"\s*([*&])\s*", r" \1", stripped)
@@ -429,6 +478,48 @@ def cv_qualifiers_only_differ(old_type: str, new_type: str) -> bool:
     cn = canonicalize_type_name(new_type)
     if not (_has_top_level_ptr_or_ref(co) and _has_top_level_ptr_or_ref(cn)):
         return False
+    if co == cn:
+        return False
+    return _strip_cv_qualifiers(co) == _strip_cv_qualifiers(cn)
+
+
+def func_signature_cv_only_differ(old_type: str, new_type: str) -> bool:
+    """Return True when two *function-parameter or return-type* spellings
+    differ only by ``const``/``volatile`` tokens, including a top-level
+    BY-VALUE difference (``int`` -> ``volatile int``) that
+    :func:`cv_qualifiers_only_differ` deliberately excludes.
+
+    DO NOT use this for fields or variables — a top-level by-value cv change
+    on THOSE is intentionally treated as a source-level contract change (see
+    :func:`cv_qualifiers_only_differ`'s own docstring and the
+    ``case30_field_qualifiers`` example; confirmed by
+    ``test_top_level_field_const_is_not_neutralised``). This function exists
+    because that reasoning does NOT extend to a function's own parameter or
+    return type: per the C++ standard, a top-level cv-qualifier on a
+    by-value parameter or return type is dropped from the function's type
+    for linkage/mangling purposes — ``void f(int)`` and ``void f(const
+    int)`` name the very same function — so unlike a field, there is no
+    corresponding dedicated detector and no ABI-relevant meaning to escalate
+    (Codex review, PR #582: castxml's parser began spelling a by-value
+    ``volatile`` parameter as ``"volatile int"``, which without this check
+    misfired the generic, breaking ``FUNC_PARAMS_CHANGED``/return-type-
+    changed path for a change with zero ABI/mangling effect).
+
+    Returns False when the canonical forms are already identical (the
+    caller's own equality check already handles that), or when a genuine
+    non-cv difference remains after stripping.
+
+    >>> func_signature_cv_only_differ("int", "volatile int")
+    True
+    >>> func_signature_cv_only_differ("int", "const int")
+    True
+    >>> func_signature_cv_only_differ("int", "long")
+    False
+    >>> func_signature_cv_only_differ("char *", "const char *")
+    True
+    """
+    co = canonicalize_type_name(old_type)
+    cn = canonicalize_type_name(new_type)
     if co == cn:
         return False
     return _strip_cv_qualifiers(co) == _strip_cv_qualifiers(cn)

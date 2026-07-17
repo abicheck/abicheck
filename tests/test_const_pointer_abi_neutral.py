@@ -43,6 +43,7 @@ from abicheck.model import (
     TypeField,
     Visibility,
     cv_qualifiers_only_differ,
+    func_signature_cv_only_differ,
 )
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -268,3 +269,92 @@ def test_top_level_field_const_is_not_neutralised():
                 types=[_rec("Sensor", [TypeField(name="rate", type="const int", offset_bits=0)])])
     r = compare(old, new)
     assert ChangeKind.TYPE_FIELD_TYPE_CHANGED in _kinds(r)
+
+
+# ── top-level by-value param/return cv IS neutralised (unlike fields) ─────────
+#
+# Unlike a field/variable, a function's own by-value parameter or return-type
+# cv-qualifier has zero ABI/mangling effect (`void f(int)` and `void f(const
+# int)` name the same function) and no dedicated compatible-classified
+# detector to escalate through — so, in contrast to case30 above, these MUST
+# be neutralised (Codex review, PR #582).
+
+
+@pytest.mark.parametrize("old_t, new_t", [
+    ("int", "volatile int"),
+    ("int", "const int"),
+    ("volatile int", "int"),
+])
+def test_func_signature_cv_only_differ_detects_by_value_change(old_t, new_t):
+    assert func_signature_cv_only_differ(old_t, new_t) is True
+
+
+@pytest.mark.parametrize("old_t, new_t", [
+    ("int", "long"),
+    ("Foo", "Foo"),
+])
+def test_func_signature_cv_only_differ_rejects_non_cv_or_identical(old_t, new_t):
+    assert func_signature_cv_only_differ(old_t, new_t) is False
+
+
+def test_param_by_value_volatile_added_is_not_breaking():
+    old = _snap("1", functions=[_fn("f", "f", params=[Param(name="x", type="int")])])
+    new = _snap("2", functions=[_fn("f", "f", params=[Param(name="x", type="volatile int")])])
+    r = compare(old, new)
+    assert ChangeKind.FUNC_PARAMS_CHANGED not in _kinds(r)
+    assert r.verdict in (Verdict.NO_CHANGE, Verdict.COMPATIBLE)
+
+
+def test_param_by_value_const_added_is_not_breaking():
+    old = _snap("1", functions=[_fn("f", "f", params=[Param(name="x", type="int")])])
+    new = _snap("2", functions=[_fn("f", "f", params=[Param(name="x", type="const int")])])
+    r = compare(old, new)
+    assert ChangeKind.FUNC_PARAMS_CHANGED not in _kinds(r)
+
+
+def test_return_by_value_volatile_added_is_not_breaking():
+    old = _snap("1", functions=[_fn("get", "get", ret="int")])
+    new = _snap("2", functions=[_fn("get", "get", ret="volatile int")])
+    r = compare(old, new)
+    assert ChangeKind.FUNC_RETURN_CHANGED not in _kinds(r)
+    assert r.verdict in (Verdict.NO_CHANGE, Verdict.COMPATIBLE)
+
+
+def test_param_by_value_real_type_change_still_breaking():
+    """Negative control: a by-value cv change must be neutralised, but a
+    genuine by-value type substitution must still be reported."""
+    old = _snap("1", functions=[_fn("f", "f", params=[Param(name="x", type="int")])])
+    new = _snap("2", functions=[_fn("f", "f", params=[Param(name="x", type="long")])])
+    r = compare(old, new)
+    assert ChangeKind.FUNC_PARAMS_CHANGED in _kinds(r)
+
+
+@pytest.mark.parametrize("old_t, new_t", [
+    ("Box<const int>", "Box<int>"),
+    ("Box< const int >", "Box< int >"),
+    ("Box<int, const int>", "Box<int, int>"),
+    ("std::function<void(const int)>", "std::function<void(int)>"),
+])
+def test_nested_template_cv_qualifier_is_not_neutralised(old_t, new_t):
+    """Regression guard (Codex/CodeRabbit review, PR #582):
+    ``_strip_cv_qualifiers`` used to strip const/volatile tokens at ANY
+    nesting depth, so a cv qualifier hidden inside a template argument
+    (``Box<const int>`` vs ``Box<int>``) — a genuinely different,
+    unrelated C++ type, not a cv-qualified variant of the same type — was
+    misclassified as a harmless cv-only difference by both
+    ``cv_qualifiers_only_differ`` and ``func_signature_cv_only_differ``.
+    Depending on the exact spelling this could silently suppress a real
+    breaking ``FUNC_PARAMS_CHANGED``/``FUNC_RETURN_CHANGED`` finding."""
+    assert func_signature_cv_only_differ(old_t, new_t) is False
+    assert cv_qualifiers_only_differ(old_t + "*", new_t + "*") is False
+
+
+def test_nested_template_cv_change_still_reported_as_param_change():
+    """End-to-end: a function parameter changing from one template
+    instantiation to a different one (only distinguished by a nested cv
+    qualifier) must still report FUNC_PARAMS_CHANGED, not be silently
+    neutralised as cv-only churn."""
+    old = _snap("1", functions=[_fn("f", "f", params=[Param(name="x", type="Box<int, int>")])])
+    new = _snap("2", functions=[_fn("f", "f", params=[Param(name="x", type="Box<int, const int>")])])
+    r = compare(old, new)
+    assert ChangeKind.FUNC_PARAMS_CHANGED in _kinds(r)

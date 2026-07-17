@@ -356,6 +356,50 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   dependent public entries were ever flagged as impacted. Now walks every
   `SOURCE_DECLARES` edge directly instead of the single-file lookup (Codex
   review).
+- **CastXML ↔ Clang L2 parity gate** (`tests/test_castxml_clang_parity_gate.py`):
+  runs the live castxml and clang `-ast-dump=json` header backends over the
+  same compiled corpus (functions/overloads/constructors, variables/
+  constants, namespaced records, anonymous unions, multiple/virtual
+  inheritance, bitfields, templates, `[[deprecated]]`, plus a plain-C
+  corpus) and classifies every compared fact as `equal` /
+  `semantically_equal` / `expected_producer_difference` /
+  `unsupported_on_one_producer` / `unexpected_mismatch`. Building this
+  surfaced and fixed three real, previously-undiscovered bugs (see Fixed).
+- **CastXML schema-completeness: 16 new `ChangeKind`s.** CastXML's own XML
+  schema already exposes several facts the header parser previously
+  discarded; each is now normalized into the model and has a dedicated
+  detector:
+  - **Default member initializers**: `FIELD_DEFAULT_INITIALIZER_REMOVED`
+    (`COMPATIBLE_WITH_RISK` — implicit initialization silently lost) /
+    `FIELD_DEFAULT_INITIALIZER_CHANGED` (`COMPATIBLE`). Gaining one is not
+    flagged, matching `PARAM_DEFAULT_VALUE_*`'s existing convention.
+  - **`abstract` records** (`abstract="1"`, ≥1 pure virtual):
+    `TYPE_BECAME_ABSTRACT` (`API_BREAK`) / `TYPE_LOST_ABSTRACT`
+    (`COMPATIBLE`).
+  - **`enum class`/`enum struct` scoping** (`scoped="1"`):
+    `ENUM_BECAME_SCOPED` (`API_BREAK`) / `ENUM_LOST_SCOPED`
+    (`COMPATIBLE_WITH_RISK` — implicit int conversions silently reappear).
+  - **Explicit C++11 `override` specifier**:
+    `FUNC_OVERRIDE_SPECIFIER_ADDED` (`COMPATIBLE`) /
+    `FUNC_OVERRIDE_SPECIFIER_REMOVED` (`COMPATIBLE_WITH_RISK`).
+  - **`[[deprecated]]`/`[[deprecated("msg")]]`** on functions, variables,
+    types, and enums (`FUNC`/`VAR`/`TYPE`/`ENUM_DEPRECATED_ADDED`/
+    `_REMOVED`, all `COMPATIBLE`), using castxml's `deprecation` attribute
+    for the message text.
+
+  Also fixes a real, pre-existing gap surfaced along the way: CastXML's
+  field parser never populated `TypeField.is_const`/`is_volatile`/
+  `is_mutable`, so the existing `FIELD_BECAME_CONST`/`VOLATILE`/`MUTABLE`
+  detectors were silently dead on every header-parsed snapshot — CastXML
+  being the default L2 backend. Now derived by walking the real CastXML
+  type chain (following `Typedef` indirection), not by pattern-matching the
+  rendered type spelling — fixing a case a naive regex-based fix would have
+  missed (a field declared through a typedef to a cv-qualified type renders
+  as a bare alias name with no visible qualifier). `restrict` is
+  deliberately *not* folded into the type spelling (unlike const/volatile
+  it has no ABI/mangling effect) — it's tracked via the pre-existing
+  `Param.is_restrict`/`PARAM_RESTRICT_CHANGED` instead, now finally
+  populated on the castxml path too.
 
 - `compare --help-all`: a second-level `--help` disclosure tier (G21.8
   collapse M2). Plain `compare --help` now shows only a curated common
@@ -409,6 +453,222 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- **CastXML field qualifiers**: the CastXML L2 header parser never
+  populated `TypeField.is_const`/`is_volatile`/`is_mutable` — they stayed
+  permanently `False` regardless of the actual declaration, even though
+  `diff_types.py`'s `FIELD_BECAME_CONST`/`FIELD_LOST_CONST`/
+  `FIELD_BECAME_VOLATILE`/`FIELD_LOST_VOLATILE`/`FIELD_BECAME_MUTABLE`/
+  `FIELD_LOST_MUTABLE` detectors already read those booleans. Since
+  CastXML is the default L2 backend, those detectors were silently dead on
+  every header-parsed snapshot. Now derived from the field's referenced
+  `CvQualifiedType` (const/volatile) and its own `mutable="1"` attribute,
+  in both the ordinary-field and anonymous-struct/union-flattening paths.
+  Also extended `_type_name`'s `CvQualifiedType` handling to `volatile`
+  (previously only `const` was read), so that qualifier no longer silently
+  vanishes from a type's spelling. Two follow-up fixes from review:
+  `restrict` is deliberately *not* folded into the type spelling (unlike
+  const/volatile it has no ABI/mangling effect; folding it in made a
+  restrict-only parameter change misfire the generic BREAKING
+  `FUNC_PARAMS_CHANGED` path) — it's tracked via the pre-existing but
+  previously-dead `Param.is_restrict` / `PARAM_RESTRICT_CHANGED` (correctly
+  compatible-classified) instead. And field `is_const`/`is_volatile` are now
+  resolved by walking the real CastXML type chain (following through
+  `Typedef` indirection) rather than pattern-matching the rendered type
+  spelling, so a field declared through a typedef to a cv-qualified type
+  (`typedef const int T; struct S { T x; };`, which renders as the bare
+  alias `"T"`) is no longer missed. A third follow-up: unlike a field, a
+  function's own by-value parameter or return-type `const`/`volatile`
+  qualifier has zero ABI/mangling effect (`void f(int)` and `void f(const
+  int)` name the same function) and no dedicated compatible-classified
+  detector to escalate through — so a by-value `volatile`/`const` addition
+  there is now neutralized (`func_signature_cv_only_differ`) instead of
+  misfiring the generic breaking `FUNC_PARAMS_CHANGED`/
+  `FUNC_RETURN_CHANGED` path, in contrast to the intentionally-still-breaking
+  field case (`case30_field_qualifiers`). Also: a field's default member
+  initializer / `[[deprecated]]` inside an anonymous struct/union now
+  survives flattening — previously only a direct (non-anonymous) field
+  populated those. Two more follow-ups from a further review round: (1) a
+  castxml-unmangled constructor's synthesized snapshot key is now built
+  from a cv-normalized parameter spelling (`func_signature_identity_type`),
+  so a layout-neutral by-value qualifier change no longer changes the key
+  itself and misreports the constructor as removed-and-re-added before the
+  cv-neutral param comparison ever runs; (2) the eight `[[deprecated]]`
+  detectors and the `abstract`/scoped-enum/`override`-specifier/field-
+  default-initializer detectors now gate on a new `AbiSnapshot.ast_producer`
+  field (`"castxml"`/`"clang"`, set by the dumper) in addition to
+  `from_headers` — the clang L2 header backend also sets `from_headers`
+  but doesn't populate any of these facts yet, so comparing a castxml- and
+  a clang-parsed snapshot previously read as every one of them having been
+  removed, purely from the producer mismatch. A one-more-round follow-up to
+  that: `snapshot_to_dict()` wrote the new `ast_producer` field, but
+  `snapshot_from_dict()` never read it back — so on the realistic
+  dump-to-JSON-then-compare-files workflow (as opposed to an in-memory
+  `compare()` call), every persisted castxml snapshot silently lost the tag
+  on reload, permanently disabling all eight gated detectors for that
+  workflow specifically. Now round-trips correctly. Two more fixes from a
+  further round: (1) the constructor-key normalization above handled a
+  by-value cv qualifier but not a TOP-LEVEL qualifier on a pointer
+  parameter itself (``int*`` vs ``int* volatile`` — the pointer VALUE is
+  volatile, not its pointee); string-level normalization can't tell that
+  apart from a genuinely-distinct pointee-const overload (both render as
+  ``"volatile int*"``), so the key is now built by reading the real castxml
+  XML structure directly, stripping at most one outermost `CvQualifiedType`
+  layer while leaving any inner (pointee-position) qualifier untouched; (2)
+  `FIELD_DEFAULT_INITIALIZER_REMOVED`/`_CHANGED` excluded unions entirely
+  (matching most other field-level detectors' union exclusion), but a
+  union variant genuinely can carry a default member initializer
+  (`union U { int x = 1; float y; };`) and `_diff_unions` never checked
+  `default` — so a union variant's initializer change went completely
+  undetected. Now included. One more fix: castxml only emits the dedicated
+  `deprecation="..."` XML attribute when `[[deprecated("msg")]]` carries a
+  non-empty message — a BARE `[[deprecated]]`/`__attribute__((deprecated))`
+  with no message is recorded solely as a `"deprecated"` token in the
+  compound `attributes` string (confirmed against castxml's own
+  `GetDeclAttributes` source), so reading only the `deprecation` attribute
+  missed every messageless deprecation across all four surfaces (function,
+  variable, record, enum). Now falls back to the `attributes` token,
+  yielding `""` (deprecated, no message) instead of `None`. Three more real
+  bugs found and fixed by building the new castxml↔clang parity gate
+  (above), verified against a live castxml 0.4.5 + clang 18 install:
+  - **Virtual destructor visibility**: castxml's `<Destructor>` element
+    carries the bare CLASS name (identical to its own `<Constructor>`) and
+    (like a constructor) usually no `mangled` attribute — so its
+    synthesized key collapsed onto a string that could never match the
+    real exported destructor symbol, defaulting a genuinely PUBLIC virtual
+    destructor to HIDDEN and hiding it from `_public_functions()`. This
+    could silently mask a `FUNC_REMOVED`/`FUNC_ADDED` finding for a real
+    virtual-destructor change on any polymorphic base class. Fixed by
+    synthesizing a `"~ClassName"` display name (matching what the clang
+    backend already produced) and generalizing the existing constructor
+    visibility fallback (`_constructor_visibility` → renamed
+    `_ctor_or_dtor_visibility`) to destructors.
+  - **C-linkage variable identity**: castxml's ambiguous-language-mode
+    guess for a bare `.h` header emits a bogus C++-style pseudo-mangled
+    name (e.g. `_Z8c_global`) for a plain C-linkage variable that a real C
+    compilation never mangles at all — the same already-fixed "case141"
+    issue for functions, previously unaddressed for variables. Fixed by
+    extending the same real-ELF-export override to `parse_variables()`.
+  - **Pointer-sigil spacing in `canonicalize_type_name`**: castxml spells a
+    pointer type with no space before `*` (`"char const*"`) while clang's
+    `-ast-dump=json` includes one (`"char const *"`) — a real, systematic
+    spelling difference between the two producers that `_params_differ`'s
+    own equality check didn't normalize, so an unrelated, unchanged pointer
+    parameter could misreport as a breaking type change purely from this
+    convention (cross-producer, or even just a castxml version bump).
+    `canonicalize_type_name` now normalizes sigil spacing the same way
+    `_strip_cv_qualifiers` already did internally.
+  Two more real bugs found in a further Codex review round of the same
+  parity work:
+  - **Destructor ELF-filtering gap**: the virtual-destructor visibility fix
+    above was necessary but not sufficient. Whenever ELF metadata is
+    present (the normal case for a real `.so` dump), `_public_functions()`
+    additionally narrows to keys that match a real export, are
+    `is_deleted`, or are explicitly allow-listed via the existing
+    `is_synthetic_ctor_key()`. A synthesized `"~ClassName"` destructor key
+    matched none of those — so a genuinely PUBLIC virtual destructor was
+    still silently dropped before an added/removed destructor could ever
+    reach `FUNC_REMOVED`/`FUNC_ADDED`. Fixed by adding
+    `is_synthetic_dtor_key()` (mirroring the constructor exemption) and
+    wiring it into `_public_functions()`'s allow-list.
+  - **Blank old/new values in initializer-change descriptions**:
+    `FIELD_DEFAULT_INITIALIZER_CHANGED` passed its values as `old_value=`/
+    `new_value=` instead of `old=`/`new=`, so `make_change()`'s
+    `description_template` formatting (which only reads `old=`/`new=`, not
+    the structured `old_value`/`new_value` fields) rendered every
+    occurrence as `"...(None → None)"` instead of the real values (e.g.
+    `30 → 60`). `FIELD_DEFAULT_INITIALIZER_REMOVED`'s template does not
+    reference `{old}`/`{new}` and was unaffected.
+  - **Synthetic constructor/destructor keys were not namespace-qualified**:
+    when castxml omits a constructor's/destructor's real mangled name, the
+    synthesized snapshot key (`__abicheck_ctor__ClassName(...)` /
+    `~ClassName`) used only the class's bare leaf name. Two public classes
+    with the same leaf name in different namespaces (`ns1::Foo` /
+    `ns2::Foo`) therefore synthesized the identical key, silently colliding
+    in `AbiSnapshot.function_map` — one class's own constructor/destructor
+    additions or removals went undetected ("first-wins", confirmed via a
+    live castxml dump of two same-named-but-namespaced classes). Fixed by
+    qualifying the synthetic key with the enclosing class's fully-qualified
+    name (`_enclosing_class_qualified_name`, reusing the existing
+    `_qualified_name` context-walk); a non-namespaced class's qualified name
+    is just its bare name, so the common case's key is unchanged.
+  - **Legacy-snapshot CV-fact false positives** (the two remaining open
+    findings from this hardening round): a snapshot *persisted* before the
+    original field const/volatile/mutable fix has real-but-wrong data
+    (permanently `False` booleans, qualifier-less type spelling) — not
+    merely absent data — so it cannot be told apart from a genuine "not
+    const"/"not volatile" fact by value alone. Comparing such a snapshot
+    against a fresh dump of genuinely unchanged headers misreported false
+    `FIELD_BECAME_CONST`/`VOLATILE`/`MUTABLE` and `TYPE_FIELD_TYPE_CHANGED`/
+    `UNION_FIELD_TYPE_CHANGED` findings purely from a tool upgrade. Fixed
+    by a new `AbiSnapshot.header_cv_facts_reliable` flag, derived from
+    `schema_version` on deserialization (bumped to v9 for this fix; a
+    pre-v9 persisted snapshot loads as unreliable, a fresh in-memory
+    snapshot defaults reliable) and consulted by `_diff_field_qualifiers`
+    (full early-return gate — the booleans are meaningless when either
+    side is unreliable) and by a new `_field_type_genuinely_changed` helper
+    shared by the struct-field and union-variant type-change detectors
+    (neutralizes a by-value cv-only spelling difference only when the pair
+    is unreliable, leaving a genuine non-cv type change, and any change
+    between two current-generation snapshots, fully detected). Same
+    trade-off `_both_castxml_backed` already makes elsewhere: losing one
+    axis of detection on a legacy/fresh mixed pairing to avoid a
+    systematic false positive.
+  - **`header_cv_facts_reliable` was gated too broadly** (a follow-up Codex
+    finding on the fix directly above): the flag was derived purely from
+    `schema_version`, regardless of which extraction path actually produced
+    the snapshot's field data. A DWARF-only snapshot derives
+    `is_const`/`is_volatile` independently from
+    `DW_TAG_const_type`/`DW_TAG_volatile_type` (`dwarf_snapshot.py`), and the
+    clang L2 header backend derives them via its own regex-based qualifier
+    scan (`dumper_clang.py`) — neither was ever touched by the CastXML
+    parser bug, but the blanket `schema_version < 9` check marked a legacy
+    snapshot from *either* path unreliable too, silently swallowing a
+    genuine `FIELD_BECAME_CONST`/`VOLATILE` transition on, e.g., a legacy
+    DWARF-vs-DWARF compare. Now scoped: non-header snapshots
+    (`from_headers=False`) and clang-backend snapshots
+    (`ast_producer="clang"`) are always reliable regardless of
+    `schema_version`; only a CastXML-produced (or `ast_producer`-predating,
+    conservatively-treated-the-same) header snapshot still needs the v9
+    gate.
+  - **Cross-producer unmangled constructor/destructor identity is a known,
+    documented (not fixed) limitation**: comparing a castxml-produced
+    snapshot against a clang-produced snapshot of the same, unchanged
+    source reports a false `FUNC_REMOVED`+`FUNC_ADDED` pair for every
+    constructor/destructor whose synthetic key (built when castxml omits a
+    real mangled name) has no shared identity with the real Itanium-mangled
+    key clang uses for the same entity — confirmed symmetric with an
+    already-existing constructor-side gap, not a new regression from the
+    destructor work above. Deliberately left unfixed (needs real
+    cross-producer identity reconciliation, i.e. Phase 3 of
+    `docs/development/plans/g28-castxml-clang-l2-parity-hardening.md`) but
+    now has a documenting regression test
+    (`TestCrossProducerUnmangledIdentityKnownLimitation`) so it isn't
+    silently forgotten.
+  - **`header_cv_facts_reliable` didn't survive a reserialization
+    round-trip** (a follow-up Codex finding on the fix two above): a
+    load → `snapshot_to_dict` → save → load cycle always re-stamps
+    `schema_version` to the CURRENT `SCHEMA_VERSION` — it reflects the
+    writing tool's format capability, not the snapshot's true field-fact
+    origin — so re-deriving the flag purely from `schema_version` on a
+    reserialized legacy snapshot silently flipped an
+    already-known-unreliable snapshot's stale, real-but-wrong cv facts
+    back to "reliable" on the next load, reintroducing the exact false
+    `FIELD_BECAME_CONST`/`VOLATILE`/`TYPE_FIELD_TYPE_CHANGED` positives this
+    flag exists to prevent. `snapshot_from_dict` now trusts an explicit
+    `header_cv_facts_reliable` key in the dict over re-deriving from
+    `schema_version`, falling back to the schema_version-based derivation
+    only when the key is genuinely absent (a real legacy file predating
+    this whole mechanism).
+- **`TypeField.deprecated` was parsed and serialized but never diffed**:
+  unlike function/variable/type/enum deprecation (each with its own
+  detector), a struct/class field changing from `int x;` to
+  `[[deprecated]] int x;` (or losing the marker) went completely
+  undetected on a CastXML-backed header comparison. Added
+  `FIELD_DEPRECATED_ADDED`/`FIELD_DEPRECATED_REMOVED` (`COMPATIBLE`,
+  quality) with a dedicated detector, gated on `_both_castxml_backed` like
+  the other four deprecated detectors. Unions are not excluded, matching
+  `FIELD_DEFAULT_INITIALIZER_REMOVED`/`_CHANGED`'s precedent — a union
+  variant can carry `[[deprecated]]` too (Codex review, PR #582).
 - **MCP `abi_compare`**: a `--used-by`/`--required-symbol` response's
   `summary` (`total_changes`/`breaking`/`api_breaks`/`risk_changes`/
   `compatible`) is now recomputed after scoped-only changes and

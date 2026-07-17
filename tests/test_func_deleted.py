@@ -219,10 +219,13 @@ class TestFuncDeletedCastxmlMock:
         """Destructor tag must preserve deleted='1' marker."""
         from abicheck.dumper import _CastxmlParser
 
+        # castxml's real <Destructor name="..."> is the bare CLASS name (no
+        # "~"), confirmed against a live castxml dump (Phase 2 parity gate,
+        # PR #582) — the parser synthesizes the "~Foo" display name.
         root = self._make_xml_root(
             deleted="1",
             tag="Destructor",
-            name="~Foo",
+            name="Foo",
             mangled="_ZN3FooD1Ev",
         )
         parser = _CastxmlParser(
@@ -234,6 +237,19 @@ class TestFuncDeletedCastxmlMock:
         assert len(funcs) == 1
         assert funcs[0].name == "~Foo"
         assert funcs[0].is_deleted is True
+
+    def test_dumper_destructor_display_name_gets_tilde_synthesized(self) -> None:
+        """castxml emits the bare class name on <Destructor>; the parser
+        must synthesize the leading `~` rather than expecting it in the
+        XML (Phase 2 parity gate, PR #582)."""
+        from abicheck.dumper import _CastxmlParser
+
+        root = self._make_xml_root(tag="Destructor", name="Foo", mangled="")
+        parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+        funcs = parser.parse_functions()
+        assert len(funcs) == 1
+        assert funcs[0].name == "~Foo"
+        assert funcs[0].mangled == "~Foo"
 
 
 class TestFuncDeletedEdgeCases:

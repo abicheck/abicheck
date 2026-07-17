@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 366,
+  "count": 384,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -534,6 +534,33 @@
       "examples": ""
     },
     {
+      "kind": "enum_became_scoped",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "enum_became_scoped",
+      "examples": ""
+    },
+    {
+      "kind": "enum_deprecated_added",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "enum_deprecated_added",
+      "examples": ""
+    },
+    {
+      "kind": "enum_deprecated_removed",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "enum_deprecated_removed",
+      "examples": ""
+    },
+    {
       "kind": "enum_last_member_value_changed",
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
@@ -541,6 +568,15 @@
       "min_evidence": "L1",
       "doc_slug": "enum_last_member_value_changed",
       "examples": "case41_type_changes"
+    },
+    {
+      "kind": "enum_lost_scoped",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "enum_lost_scoped",
+      "examples": ""
     },
     {
       "kind": "enum_member_added",
@@ -723,6 +759,42 @@
       "examples": "case63_bitfield_changed"
     },
     {
+      "kind": "field_default_initializer_changed",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "field_default_initializer_changed",
+      "examples": ""
+    },
+    {
+      "kind": "field_default_initializer_removed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "field_default_initializer_removed",
+      "examples": ""
+    },
+    {
+      "kind": "field_deprecated_added",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "field_deprecated_added",
+      "examples": ""
+    },
+    {
+      "kind": "field_deprecated_removed",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "field_deprecated_removed",
+      "examples": ""
+    },
+    {
       "kind": "field_lost_const",
       "category": "quality",
       "default_verdict": "COMPATIBLE",
@@ -867,6 +939,24 @@
       "examples": ""
     },
     {
+      "kind": "func_deprecated_added",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "func_deprecated_added",
+      "examples": ""
+    },
+    {
+      "kind": "func_deprecated_removed",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "func_deprecated_removed",
+      "examples": ""
+    },
+    {
       "kind": "func_exception_spec_changed",
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
@@ -918,6 +1008,24 @@
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "func_noexcept_removed",
+      "examples": ""
+    },
+    {
+      "kind": "func_override_specifier_added",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "func_override_specifier_added",
+      "examples": ""
+    },
+    {
+      "kind": "func_override_specifier_removed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "func_override_specifier_removed",
       "examples": ""
     },
     {
@@ -2811,6 +2919,15 @@
       "examples": "case37_base_class,case72_covariant_return_changed"
     },
     {
+      "kind": "type_became_abstract",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "type_became_abstract",
+      "examples": ""
+    },
+    {
       "kind": "type_became_final",
       "category": "api_break",
       "default_verdict": "API_BREAK",
@@ -2827,6 +2944,24 @@
       "min_evidence": "L1",
       "doc_slug": "type_became_opaque",
       "examples": "case28_typedef_opaque"
+    },
+    {
+      "kind": "type_deprecated_added",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "type_deprecated_added",
+      "examples": ""
+    },
+    {
+      "kind": "type_deprecated_removed",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "type_deprecated_removed",
+      "examples": ""
     },
     {
       "kind": "type_field_added",
@@ -2881,6 +3016,15 @@
       "min_evidence": "L1",
       "doc_slug": "type_kind_changed",
       "examples": "case55_type_kind_changed"
+    },
+    {
+      "kind": "type_lost_abstract",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "type_lost_abstract",
+      "examples": ""
     },
     {
       "kind": "type_lost_final",
@@ -3088,6 +3232,24 @@
       "min_evidence": "L1",
       "doc_slug": "var_became_const",
       "examples": "case39_var_const"
+    },
+    {
+      "kind": "var_deprecated_added",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "var_deprecated_added",
+      "examples": ""
+    },
+    {
+      "kind": "var_deprecated_removed",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "var_deprecated_removed",
+      "examples": ""
     },
     {
       "kind": "var_lost_const",

@@ -13,6 +13,7 @@ from abicheck.serialization import (
     load_snapshot,
     save_snapshot,
     snapshot_from_dict,
+    snapshot_to_dict,
     snapshot_to_json,
 )
 
@@ -72,6 +73,147 @@ class TestElfOnlyModeRoundTrip:
     def test_truthy_int_coerces_to_bool_true(self) -> None:
         """Truthy non-bool values must coerce to bool True."""
         assert snapshot_from_dict(_minimal_dict(elf_only_mode=1)).elf_only_mode is True
+
+
+# ── ast_producer ────────────────────────────────────────────────────────────
+
+
+class TestAstProducerRoundTrip:
+    """ast_producer must survive JSON serialisation and deserialisation.
+
+    Regression guard (Codex review, PR #582): snapshot_to_dict() wrote the
+    field via the generic dataclasses.asdict() pass, but snapshot_from_dict()
+    never read it back into the reconstructed AbiSnapshot — every persisted
+    castxml snapshot silently lost its producer tag on the normal
+    dump-to-JSON-then-compare-files workflow, permanently disabling every
+    detector gated on _both_castxml_backed (field defaults, abstract records,
+    scoped enums, the override specifier, and all four deprecated kinds).
+    """
+
+    def test_castxml_survives_roundtrip(self) -> None:
+        snap = _make_snap(from_headers=True, ast_producer="castxml")
+        j = json.loads(snapshot_to_json(snap))
+        assert j.get("ast_producer") == "castxml"
+        assert snapshot_from_dict(j).ast_producer == "castxml"
+
+    def test_clang_survives_roundtrip(self) -> None:
+        snap = _make_snap(from_headers=True, ast_producer="clang")
+        j = json.loads(snapshot_to_json(snap))
+        restored = snapshot_from_dict(j)
+        assert restored.ast_producer == "clang"
+
+    def test_defaults_to_none_when_absent(self) -> None:
+        """Old snapshots without the key must deserialise to None (unknown
+        producer) — not silently assumed to be castxml."""
+        d = _minimal_dict()
+        assert "ast_producer" not in d
+        assert snapshot_from_dict(d).ast_producer is None
+
+
+class TestHeaderCvFactsReliableRoundTrip:
+    """AbiSnapshot.header_cv_facts_reliable must be derived from
+    schema_version, but SCOPED to the CastXML header path specifically —
+    not a blanket schema_version cutoff (Codex review, PR #582, second
+    round: the original blanket-by-schema_version derivation incorrectly
+    also marked legacy DWARF-only and legacy clang-backend snapshots
+    unreliable, even though neither was ever affected by the CastXML
+    parser bug this flag exists to guard against).
+
+    A pre-v9 *CastXML header-parsed* snapshot's
+    TypeField.is_const/is_volatile/is_mutable are permanently False and its
+    type spelling never carried a cv qualifier — real (not absent) data
+    indistinguishable from a genuine "not const" fact by value alone. But a
+    DWARF-only snapshot (``from_headers=False``) derives these independently
+    from DW_TAG_const_type/DW_TAG_volatile_type (dwarf_snapshot.py), and the
+    clang L2 header backend (``ast_producer="clang"``) derives them via its
+    own regex-based qualifier scan (dumper_clang.py) — neither code path was
+    ever touched by the CastXML bug, so both stay reliable regardless of
+    schema_version.
+    """
+
+    def test_fresh_in_memory_snapshot_defaults_reliable(self) -> None:
+        snap = _make_snap()
+        assert snap.header_cv_facts_reliable is True
+
+    def test_fresh_dump_serializes_current_schema_version(self) -> None:
+        from abicheck.serialization import SCHEMA_VERSION
+
+        snap = _make_snap()
+        j = json.loads(snapshot_to_json(snap))
+        assert j["schema_version"] == SCHEMA_VERSION == 9
+
+    def test_legacy_castxml_header_snapshot_loads_as_unreliable(self) -> None:
+        d = _minimal_dict(schema_version=8, from_headers=True, ast_producer="castxml")
+        restored = snapshot_from_dict(d)
+        assert restored.header_cv_facts_reliable is False
+
+    def test_current_castxml_header_snapshot_loads_as_reliable(self) -> None:
+        d = _minimal_dict(schema_version=9, from_headers=True, ast_producer="castxml")
+        restored = snapshot_from_dict(d)
+        assert restored.header_cv_facts_reliable is True
+
+    def test_legacy_header_snapshot_predating_ast_producer_is_conservatively_unreliable(
+        self,
+    ) -> None:
+        """A header-parsed snapshot with no ast_producer key at all predates
+        that field's introduction and cannot be told apart from a pre-fix
+        castxml dump — conservatively treated as unreliable, mirroring
+        ast_producer's own None-handling elsewhere."""
+        d = _minimal_dict(schema_version=8, from_headers=True)
+        assert "ast_producer" not in d
+        assert snapshot_from_dict(d).header_cv_facts_reliable is False
+
+    def test_legacy_dwarf_only_snapshot_stays_reliable(self) -> None:
+        """A DWARF-only snapshot's is_const/is_volatile were never derived
+        by CastXML at all — schema_version is irrelevant to their
+        reliability."""
+        d = _minimal_dict(schema_version=8, from_headers=False)
+        assert snapshot_from_dict(d).header_cv_facts_reliable is True
+
+    def test_legacy_clang_backend_snapshot_stays_reliable(self) -> None:
+        """The clang L2 header backend has always derived these facts via
+        its own code path — never affected by the CastXML parser bug."""
+        d = _minimal_dict(schema_version=8, from_headers=True, ast_producer="clang")
+        assert snapshot_from_dict(d).header_cv_facts_reliable is True
+
+    def test_missing_schema_version_key_on_castxml_header_snapshot_is_legacy(
+        self,
+    ) -> None:
+        """No schema_version key at all predates even the original
+        schema-versioning PR (#89) — necessarily older than the CV-fact fix
+        too, for a CastXML-parsed header snapshot."""
+        d = _minimal_dict(from_headers=True, ast_producer="castxml")
+        assert "schema_version" not in d
+        assert snapshot_from_dict(d).header_cv_facts_reliable is False
+
+    def test_round_trip_preserves_reliable_true(self) -> None:
+        snap = _make_snap()
+        j = json.loads(snapshot_to_json(snap))
+        assert snapshot_from_dict(j).header_cv_facts_reliable is True
+
+    def test_reserialized_legacy_snapshot_stays_unreliable(self) -> None:
+        """Regression guard (Codex review, PR #582): a load -> save -> load
+        round-trip always re-stamps schema_version to the CURRENT
+        SCHEMA_VERSION (it reflects the writing tool's format capability,
+        not the snapshot's true field-fact origin). Re-deriving
+        header_cv_facts_reliable purely from schema_version on a
+        reserialized legacy snapshot would silently flip an
+        already-known-unreliable snapshot's stale, real-but-wrong cv facts
+        back to "reliable" the next time it's loaded, reintroducing the
+        exact false-positive class this flag exists to prevent. An explicit
+        header_cv_facts_reliable key in the dict must be trusted over
+        re-deriving from schema_version."""
+        legacy = snapshot_from_dict(
+            _minimal_dict(schema_version=8, from_headers=True, ast_producer="castxml")
+        )
+        assert legacy.header_cv_facts_reliable is False
+
+        reserialized = snapshot_to_dict(legacy)
+        assert reserialized["schema_version"] == 9
+        assert reserialized["header_cv_facts_reliable"] is False
+
+        reloaded = snapshot_from_dict(reserialized)
+        assert reloaded.header_cv_facts_reliable is False
 
 
 # ── constants ─────────────────────────────────────────────────────────────

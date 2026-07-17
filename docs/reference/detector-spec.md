@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (366 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (384 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -65,7 +65,11 @@ One row per `ChangeKind` (366 total). Columns fuse the verdict partition (`check
 | `elf_init_fini_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `elf_init_fini_changed` | — |
 | `elf_machine_changed` | breaking | `BREAKING` | `error` | L0 | `elf_machine_changed` | — |
 | `elf_osabi_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `elf_osabi_changed` | — |
+| `enum_became_scoped` | api_break | `API_BREAK` | `warning` | L2 | `enum_became_scoped` | — |
+| `enum_deprecated_added` | quality | `COMPATIBLE` | `warning` | L2 | `enum_deprecated_added` | — |
+| `enum_deprecated_removed` | quality | `COMPATIBLE` | `warning` | L2 | `enum_deprecated_removed` | — |
 | `enum_last_member_value_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L1 | `enum_last_member_value_changed` | [case41](../examples/case41_type_changes.md) |
+| `enum_lost_scoped` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `enum_lost_scoped` | — |
 | `enum_member_added` | addition | `COMPATIBLE` | `warning` | L1 | `enum_member_added` | [case25](../examples/case25_enum_member_added.md), [case41](../examples/case41_type_changes.md) |
 | `enum_member_removed` | breaking | `BREAKING` | `error` | L1 | `enum_member_removed` | [case19](../examples/case19_enum_member_removed.md) |
 | `enum_member_renamed` | api_break | `API_BREAK` | `warning` | L1 | `enum_member_renamed` | [case31](../examples/case31_enum_rename.md) |
@@ -86,6 +90,10 @@ One row per `ChangeKind` (366 total). Columns fuse the verdict partition (`check
 | `field_became_mutable` | quality | `COMPATIBLE` | `warning` | unspecified | `field_became_mutable` | — |
 | `field_became_volatile` | quality | `COMPATIBLE` | `warning` | unspecified | `field_became_volatile` | — |
 | `field_bitfield_changed` | breaking | `BREAKING` | `error` | L1 | `field_bitfield_changed` | [case63](../examples/case63_bitfield_changed.md) |
+| `field_default_initializer_changed` | quality | `COMPATIBLE` | `warning` | L2 | `field_default_initializer_changed` | — |
+| `field_default_initializer_removed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `field_default_initializer_removed` | — |
+| `field_deprecated_added` | quality | `COMPATIBLE` | `warning` | L2 | `field_deprecated_added` | — |
+| `field_deprecated_removed` | quality | `COMPATIBLE` | `warning` | L2 | `field_deprecated_removed` | — |
 | `field_lost_const` | quality | `COMPATIBLE` | `warning` | unspecified | `field_lost_const` | — |
 | `field_lost_mutable` | quality | `COMPATIBLE` | `warning` | unspecified | `field_lost_mutable` | — |
 | `field_lost_volatile` | quality | `COMPATIBLE` | `warning` | unspecified | `field_lost_volatile` | — |
@@ -102,12 +110,16 @@ One row per `ChangeKind` (366 total). Columns fuse the verdict partition (`check
 | `func_deleted` | breaking | `BREAKING` | `error` | unspecified | `func_deleted` | — |
 | `func_deleted_dwarf` | breaking | `BREAKING` | `error` | unspecified | `func_deleted_dwarf` | — |
 | `func_deleted_elf_fallback` | breaking | `BREAKING` | `error` | unspecified | `func_deleted_elf_fallback` | — |
+| `func_deprecated_added` | quality | `COMPATIBLE` | `warning` | L2 | `func_deprecated_added` | — |
+| `func_deprecated_removed` | quality | `COMPATIBLE` | `warning` | L2 | `func_deprecated_removed` | — |
 | `func_exception_spec_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `func_exception_spec_changed` | — |
 | `func_language_linkage_changed` | breaking | `BREAKING` | `error` | L0 | `func_language_linkage_changed` | [case66](../examples/case66_language_linkage_changed.md) |
 | `func_likely_renamed` | breaking | `BREAKING` | `error` | unspecified | `func_likely_renamed` | — |
 | `func_lost_inline` | quality | `COMPATIBLE` | `warning` | unspecified | `func_lost_inline` | — |
 | `func_noexcept_added` | quality | `COMPATIBLE` | `warning` | unspecified | `func_noexcept_added` | — |
 | `func_noexcept_removed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `func_noexcept_removed` | — |
+| `func_override_specifier_added` | quality | `COMPATIBLE` | `warning` | L2 | `func_override_specifier_added` | — |
+| `func_override_specifier_removed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `func_override_specifier_removed` | — |
 | `func_params_changed` | breaking | `BREAKING` | `error` | L1 | `func_params_changed` | [case02](../examples/case02_param_type_change.md), [case102](../examples/case102_frozen_runtime_signature_changed.md), [case46](../examples/case46_pointer_chain_type_change.md) |
 | `func_pure_virtual_added` | breaking | `BREAKING` | `error` | L1 | `func_pure_virtual_added` | — |
 | `func_ref_qual_changed` | breaking | `BREAKING` | `error` | L2 | `func_ref_qual_changed` | [case166](../examples/case166_ref_qualifier_added.md) |
@@ -318,14 +330,18 @@ One row per `ChangeKind` (366 total). Columns fuse the verdict partition (`check
 | `type_added` | addition | `COMPATIBLE` | `warning` | unspecified | `type_added` | — |
 | `type_alignment_changed` | breaking | `BREAKING` | `error` | L1 | `type_alignment_changed` | [case42](../examples/case42_type_alignment_changed.md) |
 | `type_base_changed` | breaking | `BREAKING` | `error` | L1 | `type_base_changed` | [case37](../examples/case37_base_class.md), [case72](../examples/case72_covariant_return_changed.md) |
+| `type_became_abstract` | api_break | `API_BREAK` | `warning` | L2 | `type_became_abstract` | — |
 | `type_became_final` | api_break | `API_BREAK` | `warning` | L2 | `type_became_final` | [case125](../examples/case125_class_became_final.md) |
 | `type_became_opaque` | breaking | `BREAKING` | `error` | L1 | `type_became_opaque` | [case28](../examples/case28_typedef_opaque.md) |
+| `type_deprecated_added` | quality | `COMPATIBLE` | `warning` | L2 | `type_deprecated_added` | — |
+| `type_deprecated_removed` | quality | `COMPATIBLE` | `warning` | L2 | `type_deprecated_removed` | — |
 | `type_field_added` | breaking | `BREAKING` | `error` | L1 | `type_field_added` | [case43](../examples/case43_base_class_member_added.md) |
 | `type_field_added_compatible` | addition | `COMPATIBLE` | `warning` | L1 | `type_field_added_compatible` | [case94](../examples/case94_empty_tag_gained_state.md) |
 | `type_field_offset_changed` | breaking | `BREAKING` | `error` | L1 | `type_field_offset_changed` | [case117](../examples/case117_no_unique_address.md), [case140](../examples/case140_empty_base_optimization_lost.md), [case43](../examples/case43_base_class_member_added.md) |
 | `type_field_removed` | breaking | `BREAKING` | `error` | unspecified | `type_field_removed` | — |
 | `type_field_type_changed` | breaking | `BREAKING` | `error` | L1 | `type_field_type_changed` | [case30](../examples/case30_field_qualifiers.md), [case45](../examples/case45_multi_dim_array_change.md) |
 | `type_kind_changed` | breaking | `BREAKING` | `error` | L1 | `type_kind_changed` | [case55](../examples/case55_type_kind_changed.md) |
+| `type_lost_abstract` | quality | `COMPATIBLE` | `warning` | L2 | `type_lost_abstract` | — |
 | `type_lost_final` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `type_lost_final` | — |
 | `type_removed` | breaking | `BREAKING` | `error` | L1 | `type_removed` | [case107](../examples/case107_task_scheduler_init_removed.md), [case108](../examples/case108_task_class_removed.md), [case109](../examples/case109_flow_graph_policy_renames.md), [case41](../examples/case41_type_changes.md), +1 |
 | `type_size_changed` | breaking | `BREAKING` | `error` | L1 | `type_size_changed` | [case07](../examples/case07_struct_layout.md), [case117](../examples/case117_no_unique_address.md), [case140](../examples/case140_empty_base_optimization_lost.md), [case14](../examples/case14_cpp_class_size.md), +10 |
@@ -349,6 +365,8 @@ One row per `ChangeKind` (366 total). Columns fuse the verdict partition (`check
 | `var_added` | addition | `COMPATIBLE` | `warning` | L0 | `var_added` | [case61](../examples/case61_var_added.md) |
 | `var_alignment_changed` | breaking | `BREAKING` | `error` | L2 | `var_alignment_changed` | — |
 | `var_became_const` | breaking | `BREAKING` | `error` | L1 | `var_became_const` | [case39](../examples/case39_var_const.md) |
+| `var_deprecated_added` | quality | `COMPATIBLE` | `warning` | L2 | `var_deprecated_added` | — |
+| `var_deprecated_removed` | quality | `COMPATIBLE` | `warning` | L2 | `var_deprecated_removed` | — |
 | `var_lost_const` | breaking | `BREAKING` | `error` | unspecified | `var_lost_const` | — |
 | `var_removed` | breaking | `BREAKING` | `error` | L0 | `var_removed` | [case58](../examples/case58_var_removed.md) |
 | `var_type_changed` | breaking | `BREAKING` | `error` | L1 | `var_type_changed` | [case11](../examples/case11_global_var_type.md) |

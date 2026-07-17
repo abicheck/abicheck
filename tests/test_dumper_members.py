@@ -4,11 +4,14 @@ Covers the fallback path added in PR #63 where castxml serialises Field
 elements as space-separated IDs in the ``members`` attribute of a Struct
 instead of as inline child elements.
 """
+
 from __future__ import annotations
 
 from xml.etree.ElementTree import fromstring
 
+from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.dumper import _CastxmlParser
+from abicheck.model import AbiSnapshot
 
 # ── helpers ──────────────────────────────────────────────────────────────
 
@@ -63,6 +66,74 @@ _MEMBERS_CONST_XML = """<?xml version="1.0"?>
   <File id="f1" name="test.h"/>
 </CastXML>"""
 
+_QUALIFIED_FIELDS_XML = """<?xml version="1.0"?>
+<CastXML>
+  <Struct id="_2" name="Hw" context="_1" file="f1" line="1"
+          members="_4 _5 _6 _7" size="128" align="32">
+    <Field id="_4" name="status"   type="_10" offset="0"/>
+    <Field id="_5" name="port"     type="_11" offset="32"/>
+    <Field id="_6" name="cache"    type="_7"  offset="64" mutable="1"/>
+    <Field id="_7" name="plain"    type="_7"  offset="96"/>
+  </Struct>
+  <CvQualifiedType id="_10" type="_7" volatile="1"/>
+  <CvQualifiedType id="_11" type="_7" const="1" volatile="1"/>
+  <FundamentalType id="_7" name="int" size="32"/>
+  <Namespace id="_1" name="::"/>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+
+_ANON_UNION_QUALIFIED_XML = """<?xml version="1.0"?>
+<CastXML>
+  <Struct id="_2" name="Outer" context="_1" file="f1" line="1" size="64" align="32">
+    <Field id="_3" name="" type="_4" offset="0"/>
+  </Struct>
+  <Union id="_4" name="" context="_2" file="f1" line="1" size="32" align="32">
+    <Field id="_5" name="raw" type="_8" offset="0"/>
+    <Field id="_6" name="cached" type="_7" offset="0" mutable="1"/>
+  </Union>
+  <CvQualifiedType id="_8" type="_7" volatile="1"/>
+  <FundamentalType id="_7" name="int" size="32"/>
+  <Namespace id="_1" name="::"/>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+
+_ANON_UNION_INIT_XML = """<?xml version="1.0"?>
+<CastXML>
+  <Struct id="_2" name="C" context="_1" file="f1" line="1" size="32" align="32">
+    <Field id="_3" name="" type="_4" offset="0"/>
+  </Struct>
+  <Union id="_4" name="" context="_2" file="f1" line="1" size="32" align="32">
+    <Field id="_5" name="x" type="_7" offset="0" init="1" deprecation="use y"/>
+  </Union>
+  <FundamentalType id="_7" name="int" size="32"/>
+  <Namespace id="_1" name="::"/>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+
+_TYPEDEF_QUALIFIED_FIELD_XML = """<?xml version="1.0"?>
+<CastXML>
+  <Struct id="_2" name="Cfg" context="_1" file="f1" line="1"
+          members="_4" size="32" align="32"/>
+  <Field id="_4" name="x" type="_20" offset="0" context="_2"/>
+  <Typedef id="_20" name="T" type="_21" context="_1"/>
+  <CvQualifiedType id="_21" type="_7" const="1" volatile="1"/>
+  <FundamentalType id="_7" name="int" size="32"/>
+  <Namespace id="_1" name="::"/>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+
+_RESTRICT_PARAM_XML = """<?xml version="1.0"?>
+<CastXML>
+  <Function id="_2" name="fill" returns="_i" context="_1" mangled="_Z4fillPi" file="f1" line="1">
+    <Argument name="buf" type="_r"/>
+  </Function>
+  <CvQualifiedType id="_r" type="_p" restrict="1"/>
+  <PointerType id="_p" type="_i"/>
+  <FundamentalType id="_i" name="int" size="32"/>
+  <Namespace id="_1" name="::"/>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+
 _MIXED_XML = """<?xml version="1.0"?>
 <CastXML>
   <Struct id="_2" name="Mixed" context="_1" file="f1" line="1"
@@ -100,6 +171,90 @@ class TestInlineChildrenLayout:
         assert [f.name for f in fields] == ["width", "height", "depth"]
 
 
+class TestQualifiedFieldFacts:
+    """castxml's CvQualifiedType (volatile/const+volatile) and Field
+    ``mutable="1"`` must populate TypeField.is_volatile/is_const/is_mutable —
+    not just leak into the type-name spelling — since diff_types.py's
+    field_became_volatile/field_became_mutable detectors read the booleans.
+    """
+
+    def test_volatile_and_const_volatile_fields(self) -> None:
+        p = _make_parser(_QUALIFIED_FIELDS_XML)
+        fields = {f.name: f for f in p.parse_types()[0].fields}
+        assert fields["status"].is_volatile is True
+        assert fields["status"].is_const is False
+        assert fields["port"].is_volatile is True
+        assert fields["port"].is_const is True
+        assert fields["cache"].is_volatile is False
+        assert fields["plain"].is_volatile is False
+        assert fields["plain"].is_const is False
+
+    def test_mutable_field(self) -> None:
+        p = _make_parser(_QUALIFIED_FIELDS_XML)
+        fields = {f.name: f for f in p.parse_types()[0].fields}
+        assert fields["cache"].is_mutable is True
+        assert fields["plain"].is_mutable is False
+        assert fields["status"].is_mutable is False
+
+    def test_anonymous_union_flatten_preserves_qualifiers(self) -> None:
+        """Flattened anonymous-union members must carry the same real
+        volatile/mutable facts as an ordinary named field (not just the
+        type-name string)."""
+        p = _make_parser(_ANON_UNION_QUALIFIED_XML)
+        fields = {f.name: f for f in p.parse_types()[0].fields}
+        assert fields["raw"].is_volatile is True
+        assert fields["raw"].is_mutable is False
+        assert fields["cached"].is_mutable is True
+        assert fields["cached"].is_volatile is False
+
+    def test_anonymous_union_flatten_preserves_default_and_deprecated(self) -> None:
+        """A default member initializer / [[deprecated]] on a field inside
+        an anonymous union must survive flattening, not just on an ordinary
+        direct field (Codex review, PR #582): the direct-field path
+        populates ``default``/``deprecated`` from castxml's ``init``/
+        ``deprecation`` attributes, but the anonymous-flatten path
+        previously dropped them."""
+        p = _make_parser(_ANON_UNION_INIT_XML)
+        field = p.parse_types()[0].fields[0]
+        assert field.name == "x"
+        assert field.default == "1"
+        assert field.deprecated == "use y"
+
+    def test_const_volatile_through_typedef_indirection(self) -> None:
+        """A field declared through a typedef to a cv-qualified type
+        (``typedef const volatile int T; struct Cfg { T x; };``) renders as
+        the bare alias spelling ("T"), so is_const/is_volatile must be
+        resolved by walking the real XML type chain rather than pattern-
+        matching that spelling — a regex over "T" would never see the
+        qualifiers behind it (Codex review, PR #582)."""
+        p = _make_parser(_TYPEDEF_QUALIFIED_FIELD_XML)
+        field = p.parse_types()[0].fields[0]
+        assert field.type == "T"
+        assert field.is_const is True
+        assert field.is_volatile is True
+
+
+class TestRestrictParameter:
+    """`restrict` has no ABI/mangling effect (unlike const/volatile), so it
+    must never leak into the rendered type spelling — only into the
+    dedicated ``Param.is_restrict`` fact — or a restrict-only parameter
+    change would misfire the generic, BREAKING type-mismatch path instead of
+    the dedicated compatible ``PARAM_RESTRICT_CHANGED`` detector (Codex
+    review, PR #582).
+    """
+
+    def test_restrict_pointer_param_type_spelling_excludes_restrict(self) -> None:
+        p = _make_parser(_RESTRICT_PARAM_XML)
+        fn = p.parse_functions()[0]
+        assert fn.params[0].type == "int*"
+        assert "restrict" not in fn.params[0].type
+
+    def test_restrict_pointer_param_sets_is_restrict(self) -> None:
+        p = _make_parser(_RESTRICT_PARAM_XML)
+        fn = p.parse_functions()[0]
+        assert fn.params[0].is_restrict is True
+
+
 class TestMembersAttributeLayout:
     """castxml --castxml-output=1 layout: fields via ``members=`` attribute."""
 
@@ -120,9 +275,15 @@ class TestMembersAttributeLayout:
         types = p.parse_types()
         assert len(types) == 1
         fields = types[0].fields
-        assert "const" in fields[0].type.lower()   # sample_rate → const int
-        assert fields[1].type == "int"              # raw_value
-        assert fields[2].type == "int"              # cache_hits
+        assert "const" in fields[0].type.lower()  # sample_rate → const int
+        assert fields[1].type == "int"  # raw_value
+        assert fields[2].type == "int"  # cache_hits
+        # is_const must be a real structured fact, not just embedded in the
+        # type-name string (diff_types.py's field const/volatile/mutable
+        # detectors read these booleans, not the type spelling).
+        assert fields[0].is_const is True
+        assert fields[1].is_const is False
+        assert fields[2].is_const is False
 
     def test_non_field_ids_in_members_are_ignored(self) -> None:
         """Non-Field IDs referenced in members= must be silently skipped."""
@@ -183,7 +344,10 @@ class TestConstantExtraction:
         p = _make_parser(_CONSTANTS_XML, public_header_paths=["test.h"])
         consts = p.parse_constants()
         assert consts == {
-            "kLimit": "4", "A::kLimit": "1", "B::kLimit": "2", "C::kLimit": "3",
+            "kLimit": "4",
+            "A::kLimit": "1",
+            "B::kLimit": "2",
+            "C::kLimit": "3",
         }
 
     def test_no_public_set_skips_extraction(self) -> None:
@@ -251,3 +415,194 @@ _DEFAULT_ARG_XML = """<?xml version="1.0"?>
   <Namespace id="_1" name="::"/>
   <File id="f1" name="test.h"/>
 </CastXML>"""
+
+_FIELD_PLAIN_INT_XML = """<?xml version="1.0"?>
+<CastXML>
+  <Struct id="_2" name="Reg" context="_1" file="f1" line="1"
+          members="_4" size="32" align="32"/>
+  <Field id="_4" name="status" type="_7" offset="0" context="_2"/>
+  <FundamentalType id="_7" name="int" size="32"/>
+  <Namespace id="_1" name="::"/>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+
+_FIELD_VOLATILE_INT_XML = """<?xml version="1.0"?>
+<CastXML>
+  <Struct id="_2" name="Reg" context="_1" file="f1" line="1"
+          members="_4" size="32" align="32"/>
+  <Field id="_4" name="status" type="_8" offset="0" context="_2"/>
+  <CvQualifiedType id="_8" type="_7" volatile="1"/>
+  <FundamentalType id="_7" name="int" size="32"/>
+  <Namespace id="_1" name="::"/>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+
+# A single-argument, unmangled constructor (castxml omits `mangled` for some
+# user-declared overloaded constructors — see SYNTHETIC_CTOR_KEY_PREFIX):
+# three variants differing only in the argument's qualification/type.
+_CTOR_INT_ARG_XML = """<?xml version="1.0"?>
+<CastXML>
+  <Class id="_2" name="Widget" context="_1" file="f1" line="1"/>
+  <Constructor id="_3" name="Widget" context="_2" file="f1" line="2" access="public">
+    <Argument name="v" type="_7"/>
+  </Constructor>
+  <FundamentalType id="_7" name="int" size="32"/>
+  <Namespace id="_1" name="::"/>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+
+_CTOR_VOLATILE_INT_ARG_XML = """<?xml version="1.0"?>
+<CastXML>
+  <Class id="_2" name="Widget" context="_1" file="f1" line="1"/>
+  <Constructor id="_3" name="Widget" context="_2" file="f1" line="2" access="public">
+    <Argument name="v" type="_8"/>
+  </Constructor>
+  <CvQualifiedType id="_8" type="_7" volatile="1"/>
+  <FundamentalType id="_7" name="int" size="32"/>
+  <Namespace id="_1" name="::"/>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+
+_CTOR_LONG_ARG_XML = """<?xml version="1.0"?>
+<CastXML>
+  <Class id="_2" name="Widget" context="_1" file="f1" line="1"/>
+  <Constructor id="_3" name="Widget" context="_2" file="f1" line="2" access="public">
+    <Argument name="v" type="_9"/>
+  </Constructor>
+  <FundamentalType id="_9" name="long" size="64"/>
+  <Namespace id="_1" name="::"/>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+
+# Pointer-parameter ctor variants: plain, a TOP-LEVEL volatile-qualified
+# pointer (the pointer VALUE itself is volatile — CvQualifiedType directly
+# wrapping PointerType), and a POINTEE-const pointer (PointerType wrapping
+# CvQualifiedType — points to a const int, a genuinely distinct overload).
+_CTOR_PTR_ARG_XML = """<?xml version="1.0"?>
+<CastXML>
+  <Class id="_2" name="Widget" context="_1" file="f1" line="1"/>
+  <Constructor id="_3" name="Widget" context="_2" file="f1" line="2" access="public">
+    <Argument name="v" type="_10"/>
+  </Constructor>
+  <PointerType id="_10" type="_7"/>
+  <FundamentalType id="_7" name="int" size="32"/>
+  <Namespace id="_1" name="::"/>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+
+_CTOR_VOLATILE_PTR_ARG_XML = """<?xml version="1.0"?>
+<CastXML>
+  <Class id="_2" name="Widget" context="_1" file="f1" line="1"/>
+  <Constructor id="_3" name="Widget" context="_2" file="f1" line="2" access="public">
+    <Argument name="v" type="_11"/>
+  </Constructor>
+  <CvQualifiedType id="_11" type="_10" volatile="1"/>
+  <PointerType id="_10" type="_7"/>
+  <FundamentalType id="_7" name="int" size="32"/>
+  <Namespace id="_1" name="::"/>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+
+_CTOR_PTR_TO_CONST_ARG_XML = """<?xml version="1.0"?>
+<CastXML>
+  <Class id="_2" name="Widget" context="_1" file="f1" line="1"/>
+  <Constructor id="_3" name="Widget" context="_2" file="f1" line="2" access="public">
+    <Argument name="v" type="_12"/>
+  </Constructor>
+  <PointerType id="_12" type="_13"/>
+  <CvQualifiedType id="_13" type="_7" const="1"/>
+  <FundamentalType id="_7" name="int" size="32"/>
+  <Namespace id="_1" name="::"/>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+
+
+class TestByValueFieldQualifierEndToEndDiff:
+    """Full parser -> compare() pipeline: a by-value field gaining `volatile`
+    (castxml's real spelling embeds the qualifier in the type string, e.g.
+    "int" -> "volatile int") is a deliberate source-break escalation for a
+    BY-VALUE field (unlike a pointer/reference-position cv change, which is
+    genuinely ABI-neutral) — see case30_field_qualifiers' BREAKING ground
+    truth and test_top_level_field_const_is_not_neutralised in
+    test_const_pointer_abi_neutral.py. So both the compatible
+    FIELD_BECAME_VOLATILE and the breaking TYPE_FIELD_TYPE_CHANGED are
+    expected from the real parser output, and the verdict is BREAKING. (An
+    earlier attempt to suppress TYPE_FIELD_TYPE_CHANGED here, per a Codex
+    review comment on PR #582, was reverted — it silently regressed that
+    ground truth.)"""
+
+    def test_by_value_volatile_field_change_escalates_to_breaking(self) -> None:
+        old_types = _make_parser(_FIELD_PLAIN_INT_XML).parse_types()
+        new_types = _make_parser(_FIELD_VOLATILE_INT_XML).parse_types()
+        old_snap = AbiSnapshot(library="libtest.so.1", version="1.0", types=old_types)
+        new_snap = AbiSnapshot(library="libtest.so.1", version="2.0", types=new_types)
+
+        r = compare(old_snap, new_snap)
+        kinds = {c.kind for c in r.changes}
+        assert ChangeKind.FIELD_BECAME_VOLATILE in kinds
+        assert ChangeKind.TYPE_FIELD_TYPE_CHANGED in kinds
+        assert r.verdict == Verdict.BREAKING
+
+
+class TestUnmangledCtorSyntheticKeyCvStability:
+    """A castxml-unmangled constructor's synthesized snapshot key
+    (``_function_mangled_name``) must be stable across a top-level BY-VALUE
+    cv-only parameter change: ``Widget(int)`` -> ``Widget(volatile int)`` is
+    the very same real Itanium-mangled symbol (cv is dropped from a by-value
+    parameter's mangling), so the key must not change either — otherwise the
+    diff engine sees a removed constructor plus an added one instead of
+    reaching the cv-neutral param comparison at all (Codex review, PR #582).
+    A genuine parameter-type change must still produce a different key.
+    """
+
+    def test_by_value_volatile_change_keeps_same_synthetic_key(self) -> None:
+        plain = _make_parser(_CTOR_INT_ARG_XML).parse_functions()[0]
+        volatile = _make_parser(_CTOR_VOLATILE_INT_ARG_XML).parse_functions()[0]
+        assert plain.mangled == volatile.mangled
+        assert plain.mangled.startswith("__abicheck_ctor__")
+
+    def test_real_type_change_still_gets_a_different_key(self) -> None:
+        plain = _make_parser(_CTOR_INT_ARG_XML).parse_functions()[0]
+        long_arg = _make_parser(_CTOR_LONG_ARG_XML).parse_functions()[0]
+        assert plain.mangled != long_arg.mangled
+
+    def test_end_to_end_by_value_volatile_ctor_change_is_compatible(self) -> None:
+        """Full parser -> compare() pipeline: must report the cv-neutral
+        param change on the SAME (matched) constructor, not a
+        remove-and-add pair."""
+        old_snap = AbiSnapshot(
+            library="libtest.so.1", version="1.0",
+            functions=_make_parser(_CTOR_INT_ARG_XML).parse_functions(),
+        )
+        new_snap = AbiSnapshot(
+            library="libtest.so.1", version="2.0",
+            functions=_make_parser(_CTOR_VOLATILE_INT_ARG_XML).parse_functions(),
+        )
+        r = compare(old_snap, new_snap)
+        kinds = {c.kind for c in r.changes}
+        assert ChangeKind.FUNC_REMOVED not in kinds
+        assert ChangeKind.FUNC_ADDED not in kinds
+        assert ChangeKind.FUNC_PARAMS_CHANGED not in kinds
+
+    def test_top_level_pointer_volatile_keeps_same_synthetic_key(self) -> None:
+        """A TOP-LEVEL qualifier on a pointer PARAMETER itself (the pointer
+        VALUE is volatile — castxml's ``CvQualifiedType`` directly wrapping
+        ``PointerType``) must not change the key either: like a by-value
+        qualifier, it has zero effect on real Itanium mangling. This can't
+        be distinguished from a POINTEE-position qualifier by pattern-
+        matching the rendered spelling — both ``Widget(int*)`` and a
+        volatile pointer VALUE render identically as ``"volatile int*"`` —
+        so the fix must read the real XML structure (Codex review, PR #582,
+        fresh evidence beyond the earlier by-value-only case)."""
+        plain = _make_parser(_CTOR_PTR_ARG_XML).parse_functions()[0]
+        volatile_ptr = _make_parser(_CTOR_VOLATILE_PTR_ARG_XML).parse_functions()[0]
+        assert plain.mangled == volatile_ptr.mangled
+
+    def test_pointee_const_still_gets_a_different_key(self) -> None:
+        """Negative control: a POINTEE-position qualifier (``const int*`` —
+        ``PointerType`` wrapping ``CvQualifiedType``) DOES distinguish a
+        real overload (different Itanium mangling: ``PKi`` vs ``Pi``) and
+        must keep a different key."""
+        plain = _make_parser(_CTOR_PTR_ARG_XML).parse_functions()[0]
+        ptr_to_const = _make_parser(_CTOR_PTR_TO_CONST_ARG_XML).parse_functions()[0]
+        assert plain.mangled != ptr_to_const.mangled
