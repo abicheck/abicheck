@@ -1993,9 +1993,29 @@ class TestPlatformMachineFromWheelFilename:
     def test_unrecognized_linux_architecture_returns_none(self) -> None:
         assert (
             _platform_machine_from_wheel_filename(
-                "pkg-1.0-cp311-cp311-manylinux_2_17_riscv64.whl"
+                "pkg-1.0-cp311-cp311-manylinux_2_17_mips64.whl"
             )
             is None
+        )
+
+    def test_riscv64_linux_architecture_is_derived(self) -> None:
+        # Codex review #583: packaging's own _manylinux._ALLOWED_ARCHS
+        # includes riscv64/loongarch64 — omitting them here silently
+        # skipped wheel_tag_architecture_mismatch derivation entirely for
+        # otherwise valid single-arch manylinux/musllinux wheels.
+        assert (
+            _platform_machine_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-manylinux_2_39_riscv64.whl"
+            )
+            == "riscv64"
+        )
+
+    def test_loongarch64_linux_architecture_is_derived(self) -> None:
+        assert (
+            _platform_machine_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-manylinux_2_39_loongarch64.whl"
+            )
+            == "loongarch64"
         )
 
 

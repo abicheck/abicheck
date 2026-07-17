@@ -143,6 +143,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   behavior; also expanded `change_registry_wheel.py`'s impact text to
   document the direct glibc-SONAME/interpreter evidence path it previously
   omitted (Codex review).
+  `WHEEL_ARCH`/`parse_wheel_architecture_claim` now recognize `riscv64` and
+  `loongarch64`, matching `packaging`'s own `_manylinux._ALLOWED_ARCHS` —
+  both the wheel-filename parser and `check_wheel_tag_architecture_mismatch`'s
+  ELF `e_machine`/`EI_DATA` maps previously omitted them, so wrong-arch
+  binaries in otherwise-valid single-arch `riscv64`/`loongarch64` wheels
+  silently skipped the check entirely (Codex review).
+  `check_wheel_tag_architecture_mismatch` now also rejects a soft-float ARM
+  binary (`ElfMetadata.abi_flags` carrying `"float-soft"`) under an
+  `armv7l` claim — manylinux's `armv7l` tag specifically means the
+  hard-float ARM EABI, and a soft-float binary shares the same
+  `e_machine`/`EI_DATA` but isn't actually loadable under that tag's
+  runtime expectations (Codex review).
   Windows UCRT/runtime checks, CPU-ISA-baseline detection, the full
   per-tag closure policy, and end-to-end CLI auto-derivation from a
   compared wheel's own filename tag (every check above, including G10's

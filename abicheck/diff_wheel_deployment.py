@@ -151,6 +151,11 @@ _ARCH_CLAIM_TO_ELF_MACHINE: dict[str, frozenset[str]] = {
     "ppc64le": frozenset({"EM_PPC64"}),
     "ppc64": frozenset({"EM_PPC64"}),
     "s390x": frozenset({"EM_S390"}),
+    # riscv64/loongarch64 are valid manylinux/musllinux single-arch wheel
+    # tags too (Codex review #583, matching the package.py wheel-filename
+    # parser fix alongside this one).
+    "riscv64": frozenset({"EM_RISCV"}),
+    "loongarch64": frozenset({"EM_LOONGARCH"}),
 }
 
 #: Every wheel-tag architecture claim's expected ELF ``EI_DATA`` byte order
@@ -172,6 +177,11 @@ _ARCH_CLAIM_TO_ELF_EI_DATA: dict[str, str] = {
     "ppc64le": "LSB",
     "ppc64": "MSB",
     "s390x": "MSB",
+    # manylinux/musllinux riscv64 and loongarch64 wheels are both
+    # little-endian-only in practice (the big-endian RISC-V/LoongArch
+    # variants aren't a packaging target).
+    "riscv64": "LSB",
+    "loongarch64": "LSB",
 }
 
 #: Wheel-tag architecture claim -> the Mach-O ``cpu_type`` value(s) that
@@ -239,6 +249,13 @@ def check_wheel_tag_architecture_mismatch(
     The ELF ``EI_DATA`` byte order (:attr:`ElfMetadata.ei_data`) is checked
     against every claim's expected value in
     :data:`_ARCH_CLAIM_TO_ELF_EI_DATA` (Codex review #583).
+
+    An ``armv7l`` claim additionally requires the hard-float ARM EABI
+    (:attr:`ElfMetadata.abi_flags` carrying ``"float-soft"`` is flagged) —
+    manylinux's ``armv7l`` tag specifically means hard-float, and a
+    soft-float binary shares the same ``e_machine``/``EI_DATA`` but is not
+    actually loadable under that tag's runtime expectations (Codex review
+    #583).
     """
     if not runtime_floors:
         return []
@@ -279,6 +296,29 @@ def check_wheel_tag_architecture_mismatch(
                         detail="architecture",
                         old=claimed,
                         new=f"{elf_machine} ({elf_ei_data})",
+                    )
+                ]
+            if claimed == "armv7l" and "float-soft" in getattr(
+                elf, "abi_flags", frozenset()
+            ):
+                # manylinux's armv7l tag specifically means the hard-float
+                # ARM EABI (packaging._manylinux._is_linux_armhf checks
+                # EABI5 + EF_ARM_ABI_FLOAT_HARD) — a soft-float ARM binary
+                # shares the same e_machine/EI_DATA but cannot satisfy an
+                # armv7l-tagged wheel's runtime expectations. Only flags on
+                # the definite "float-soft" token (explicit contradicting
+                # evidence); an absent float-ABI token isn't itself proof of
+                # soft-float, so this degrades safely rather than
+                # false-positiving on incomplete evidence (Codex review
+                # #583).
+                return [
+                    make_change(
+                        ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH,
+                        symbol="<platform-baseline>",
+                        name=getattr(elf, "soname", "") or "<binary>",
+                        detail="architecture",
+                        old=claimed,
+                        new=f"{elf_machine} (soft-float)",
                     )
                 ]
             return []

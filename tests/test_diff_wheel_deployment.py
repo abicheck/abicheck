@@ -313,6 +313,83 @@ class TestWheelTagArchitectureMismatchUnit:
         )
         assert len(changes) == 1
 
+    def test_riscv64_claim_with_matching_binary_clean(self) -> None:
+        # Codex review #583: riscv64/loongarch64 are valid manylinux/
+        # musllinux single-arch wheel tags too.
+        elf = _elf(machine="EM_RISCV", ei_data="LSB")
+        assert (
+            check_wheel_tag_architecture_mismatch(
+                elf, None, {"WHEEL_ARCH": "riscv64"}
+            )
+            == []
+        )
+
+    def test_riscv64_claim_with_mismatched_binary_flagged(self) -> None:
+        elf = _elf(machine="EM_AARCH64", soname="libfoo.so.1")
+        changes = check_wheel_tag_architecture_mismatch(
+            elf, None, {"WHEEL_ARCH": "riscv64"}
+        )
+        assert len(changes) == 1
+        assert changes[0].new_value == "EM_AARCH64"
+
+    def test_loongarch64_claim_with_matching_binary_clean(self) -> None:
+        elf = _elf(machine="EM_LOONGARCH", ei_data="LSB")
+        assert (
+            check_wheel_tag_architecture_mismatch(
+                elf, None, {"WHEEL_ARCH": "loongarch64"}
+            )
+            == []
+        )
+
+    def test_loongarch64_claim_with_mismatched_binary_flagged(self) -> None:
+        elf = _elf(machine="EM_X86_64", soname="libfoo.so.1")
+        changes = check_wheel_tag_architecture_mismatch(
+            elf, None, {"WHEEL_ARCH": "loongarch64"}
+        )
+        assert len(changes) == 1
+
+    def test_armv7l_claim_with_hard_float_clean(self) -> None:
+        elf = _elf(
+            machine="EM_ARM",
+            ei_data="LSB",
+            abi_flags=frozenset({"float-hard", "eabi5"}),
+        )
+        assert (
+            check_wheel_tag_architecture_mismatch(
+                elf, None, {"WHEEL_ARCH": "armv7l"}
+            )
+            == []
+        )
+
+    def test_armv7l_claim_with_soft_float_flagged(self) -> None:
+        # Codex review #583: manylinux's armv7l tag specifically means the
+        # hard-float ARM EABI — a soft-float binary shares the same
+        # e_machine/EI_DATA but cannot satisfy the tag's runtime
+        # expectations.
+        elf = _elf(
+            machine="EM_ARM",
+            ei_data="LSB",
+            abi_flags=frozenset({"float-soft", "eabi5"}),
+            soname="libfoo.so.1",
+        )
+        changes = check_wheel_tag_architecture_mismatch(
+            elf, None, {"WHEEL_ARCH": "armv7l"}
+        )
+        assert len(changes) == 1
+        assert changes[0].kind is ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH
+        assert "soft-float" in changes[0].new_value
+
+    def test_armv7l_claim_with_no_abi_flags_degrades_safely(self) -> None:
+        # A legacy/undecoded snapshot without abi_flags captured must not
+        # false-positive purely from having no evidence to compare.
+        elf = _elf(machine="EM_ARM", ei_data="LSB", abi_flags=frozenset())
+        assert (
+            check_wheel_tag_architecture_mismatch(
+                elf, None, {"WHEEL_ARCH": "armv7l"}
+            )
+            == []
+        )
+
     def test_mismatched_elf_machine_flagged(self) -> None:
         elf = _elf(machine="EM_AARCH64", soname="libtest.so.1")
         changes = check_wheel_tag_architecture_mismatch(

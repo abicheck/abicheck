@@ -907,9 +907,13 @@ def _os_name_from_wheel_filename(filename: str) -> str | None:
 #: Single-architecture suffixes a Linux wheel platform tag can end in. Order
 #: doesn't matter for correctness (each is ``$``-anchored, so e.g. ``ppc64``
 #: can't spuriously match a ``...ppc64le`` tag), but longer/more-specific
-#: names are listed first for readability.
+#: names are listed first for readability. ``riscv64``/``loongarch64`` are
+#: valid ``manylinux``/``musllinux`` single-arch suffixes too (``packaging``'s
+#: own ``_manylinux._ALLOWED_ARCHS`` includes both) — omitting them silently
+#: skipped ``wheel_tag_architecture_mismatch`` derivation for those wheels
+#: entirely (Codex review #583).
 _WHEEL_LINUX_MACHINE_RE = re.compile(
-    r"(x86_64|aarch64|i686|armv7l|ppc64le|ppc64|s390x)$"
+    r"(x86_64|aarch64|i686|armv7l|ppc64le|ppc64|s390x|riscv64|loongarch64)$"
 )
 
 
