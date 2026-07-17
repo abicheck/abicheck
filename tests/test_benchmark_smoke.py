@@ -501,31 +501,43 @@ def test_collect_metadata_shape_and_accuracy():
 
 def test_source_enrichment_match_only_credits_abicheck_full():
     mod = _load_benchmark()
+    known_case = next(iter(mod._SOURCE_ENRICHMENT_CASES))
     # abicheck_full promoting COMPATIBLE -> COMPATIBLE_WITH_RISK on source
-    # evidence is enrichment (ADR-028 D3), not a false positive.
+    # evidence is enrichment (ADR-028 D3), not a false positive -- but only
+    # for the specific, individually-triaged cases in the allowlist.
     assert mod._is_source_enrichment_match(
-        "abicheck_full", "COMPATIBLE", "COMPATIBLE_WITH_RISK"
+        known_case, "abicheck_full", "COMPATIBLE", "COMPATIBLE_WITH_RISK"
     )
     # Same transition from a lane with no source evidence to justify it stays
     # a normal miss -- only abicheck_full's L4/L5 findings can produce it.
     assert not mod._is_source_enrichment_match(
-        "abicheck", "COMPATIBLE", "COMPATIBLE_WITH_RISK"
+        known_case, "abicheck", "COMPATIBLE", "COMPATIBLE_WITH_RISK"
     )
     assert not mod._is_source_enrichment_match(
-        "abidiff", "COMPATIBLE", "COMPATIBLE_WITH_RISK"
+        known_case, "abidiff", "COMPATIBLE", "COMPATIBLE_WITH_RISK"
     )
     # Any other transition (including a real over-call past RISK) is not
-    # exempted, even for abicheck_full.
-    assert not mod._is_source_enrichment_match("abicheck_full", "COMPATIBLE", "API_BREAK")
+    # exempted, even for abicheck_full on a known-enrichment case.
     assert not mod._is_source_enrichment_match(
-        "abicheck_full", "NO_CHANGE", "COMPATIBLE_WITH_RISK"
+        known_case, "abicheck_full", "COMPATIBLE", "API_BREAK"
+    )
+    assert not mod._is_source_enrichment_match(
+        known_case, "abicheck_full", "NO_CHANGE", "COMPATIBLE_WITH_RISK"
+    )
+    # The same verdict-shape transition on a case NOT in the allowlist is a
+    # real, uncredited miss -- crediting every COMPATIBLE ->
+    # COMPATIBLE_WITH_RISK transition regardless of case would silently hide
+    # a genuine future over-calling regression from the FP count.
+    assert not mod._is_source_enrichment_match(
+        "case999_hypothetical_new_case", "abicheck_full", "COMPATIBLE", "COMPATIBLE_WITH_RISK"
     )
 
 
 def test_source_enrichment_credited_in_accuracy_fp_and_coverage():
     mod = _load_benchmark()
+    known_case = next(iter(mod._SOURCE_ENRICHMENT_CASES))
     results = [
-        {"case": "case16", "expected": "COMPATIBLE", "abicheck_full": "COMPATIBLE_WITH_RISK"},
+        {"case": known_case, "expected": "COMPATIBLE", "abicheck_full": "COMPATIBLE_WITH_RISK"},
     ]
     correct, scored = mod._accuracy(results, "abicheck_full")
     assert (correct, scored) == (1, 1)
@@ -533,6 +545,23 @@ def test_source_enrichment_credited_in_accuracy_fp_and_coverage():
     assert (correct, total) == (1, 1)
     fp, fn = mod._fp_fn_counts(results, "abicheck_full")
     assert (fp, fn) == (0, 0)
+
+
+def test_source_enrichment_not_credited_for_unlisted_case():
+    mod = _load_benchmark()
+    results = [
+        {
+            "case": "case999_hypothetical_new_case",
+            "expected": "COMPATIBLE",
+            "abicheck_full": "COMPATIBLE_WITH_RISK",
+        },
+    ]
+    correct, scored = mod._accuracy(results, "abicheck_full")
+    assert (correct, scored) == (0, 1)
+    correct, total = mod._coverage_accuracy(results, "abicheck_full")
+    assert (correct, total) == (0, 1)
+    fp, fn = mod._fp_fn_counts(results, "abicheck_full")
+    assert (fp, fn) == (1, 0)
 
 
 def test_ground_truth_digest_is_stable():

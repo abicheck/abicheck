@@ -1170,7 +1170,8 @@ def _accuracy(results: list[dict], key: str) -> tuple[int, int]:
     scored = [r for r in results if r.get("expected", "?") != "?" and r[key] not in ("SKIP", "ERROR", "TIMEOUT", "NO_SOURCE")]
     correct = sum(
         1 for r in scored
-        if r[key] == r["expected"] or _is_source_enrichment_match(key, r["expected"], r[key])
+        if r[key] == r["expected"]
+        or _is_source_enrichment_match(r["case"], key, r["expected"], r[key])
     )
     return correct, len(scored)
 
@@ -1186,7 +1187,10 @@ def _coverage_accuracy(results: list[dict], key: str) -> tuple[int, int]:
     correct = sum(
         1 for r in results
         if r.get("expected", "?") != "?"
-        and (r[key] == r["expected"] or _is_source_enrichment_match(key, r["expected"], r[key]))
+        and (
+            r[key] == r["expected"]
+            or _is_source_enrichment_match(r["case"], key, r["expected"], r[key])
+        )
     )
     return correct, len(results)
 
@@ -1214,12 +1218,29 @@ _VERDICT_SEVERITY_RANK: dict[str, int] = {
 }
 
 
-def _is_source_enrichment_match(key: str, expected: str, got: str) -> bool:
+#: Cases where the L3-L5 lane's COMPATIBLE -> COMPATIBLE_WITH_RISK promotion
+#: is verified, case-by-case, to be genuine source-graph evidence enrichment
+#: (a declaration crossing the public export boundary, reserved-field reuse,
+#: a stale-inlined-body risk, symbol-binding/ownership drift) rather than an
+#: over-call. Keep this list in lockstep with the "fifth round" narrative in
+#: docs/reference/tool-comparison.md — a case only belongs here once its
+#: specific over-call has been individually triaged and justified, the same
+#: bar as any other benchmark ground-truth entry.
+_SOURCE_ENRICHMENT_CASES: frozenset[str] = frozenset({
+    "case16_inline_to_non_inline",
+    "case47_inline_to_outlined",
+    "case54_used_reserved_field",
+    "case62_type_field_added_compatible",
+    "case99_experimental_graduated",
+    "case185_inherited_override_reuses_slot",
+})
+
+
+def _is_source_enrichment_match(case: str, key: str, expected: str, got: str) -> bool:
     """True when *got* is the abicheck_full lane correctly promoting a
     COMPATIBLE verdict to COMPATIBLE_WITH_RISK on source-graph evidence a
-    binary/header-only lane structurally cannot see (a declaration crossing
-    the public export boundary, reserved-field reuse, a stale-inlined-body
-    risk, symbol-binding/ownership drift, ...).
+    binary/header-only lane structurally cannot see, for one of the
+    specific, individually-triaged cases in :data:`_SOURCE_ENRICHMENT_CASES`.
 
     Per ADR-028 D3, L3-L5 evidence may only ADD advisory RISK/API_BREAK
     findings on top of an artifact-proven verdict — it may explain,
@@ -1232,8 +1253,19 @@ def _is_source_enrichment_match(key: str, expected: str, got: str) -> bool:
     can produce this specific transition; a plain L2/competitor lane
     reporting COMPATIBLE_WITH_RISK where COMPATIBLE was expected has no such
     evidence-depth justification and stays scored as a normal miss.
+
+    Scoped to the named cases above, not the verdict shape alone: crediting
+    every COMPATIBLE -> COMPATIBLE_WITH_RISK transition regardless of case
+    would silently absorb a genuine future over-calling regression on an
+    unrelated case into this exemption instead of catching it as a new
+    false positive.
     """
-    return key == "abicheck_full" and expected == "COMPATIBLE" and got == "COMPATIBLE_WITH_RISK"
+    return (
+        key == "abicheck_full"
+        and expected == "COMPATIBLE"
+        and got == "COMPATIBLE_WITH_RISK"
+        and case in _SOURCE_ENRICHMENT_CASES
+    )
 
 
 def _fp_fn_counts(results: list[dict], key: str) -> tuple[int, int]:
@@ -1251,7 +1283,7 @@ def _fp_fn_counts(results: list[dict], key: str) -> tuple[int, int]:
         got_rank = _VERDICT_SEVERITY_RANK.get(got, -1)
         if got_rank == exp_rank:
             continue
-        if _is_source_enrichment_match(key, expected, got):
+        if _is_source_enrichment_match(r["case"], key, expected, got):
             continue
         if got_rank > exp_rank:
             fp += 1
