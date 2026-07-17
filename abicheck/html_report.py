@@ -791,6 +791,13 @@ def generate_html_report(
         scoped_exit_code = getattr(result, "scoped_exit_code", None)
         scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
         gate_exit_code: int
+        # blocking_categories only corresponds 1:1 to full_gate in the
+        # non-scoped branch below (gate_passed derives directly from
+        # full_gate.blocking there); the scoped exit code can fail for a
+        # reason full_gate's categories don't describe at all (e.g. a
+        # missing --required-symbol entrypoint), so it's left blank there
+        # rather than risk naming the wrong cause.
+        gate_blocking_categories: tuple[str, ...] = ()
         if scoped_exit_code is not None and scoped_exit_code_scheme == "severity":
             gate_passed = scoped_exit_code == 0
             gate_exit_code = scoped_exit_code
@@ -812,11 +819,26 @@ def generate_html_report(
                 "Compatibility verdict above (e.g. an addition promoted to "
                 "<code>error</code> still fails CI)."
             )
+            gate_blocking_categories = full_gate.blocking_categories
         gate_fg, gate_bg = (
             ("#1b5e20", "#e8f5e9") if gate_passed else ("#b71c1c", "#ffebee")
         )
         gate_label = "PASS" if gate_passed else f"FAIL (exit {gate_exit_code})"
         gate_icon = "✅" if gate_passed else "🛑"
+        # Names which severity category(ies) actually gated CI — without
+        # this, "FAIL" reads as an undifferentiated red box even when the
+        # cause is a policy-blocked COMPATIBLE addition rather than a
+        # genuine ABI/API break (same category-naming this PR already
+        # added to the sticky PR comment and the Action's Job Summary).
+        gate_categories_html = ""
+        if not gate_passed and gate_blocking_categories:
+            cats = ", ".join(
+                f"<code>{h(c)}</code>" for c in sorted(gate_blocking_categories)
+            )
+            gate_categories_html = (
+                f"<div class='bc-metric' style='font-size:0.85em; opacity:0.85;'>"
+                f"Blocked by: {cats}</div>"
+            )
         gate_html = (
             f"<div class='verdict-box' "
             f"style='background:{gate_bg}; color:{gate_fg}; "
@@ -824,7 +846,9 @@ def generate_html_report(
             f"<h2>{gate_icon} {h(gate_title)}: {h(gate_label)}</h2>"
             f"<div class='bc-metric' style='font-size:0.85em; opacity:0.85;'>"
             f"{gate_note}"
-            f"</div></div>"
+            f"</div>"
+            f"{gate_categories_html}"
+            f"</div>"
         )
 
     scoped_verdict = getattr(result, "scoped_verdict", None)

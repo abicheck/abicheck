@@ -84,7 +84,14 @@ abi-compliance-checker -lib fast_hash -v1 1.0 -v2 2.0 \
 
 ## Real Failure Demo
 
-**Severity: CRITICAL**
+**Severity: ⚠️ Requires coordinated deployment — not an ABI break**
+
+Existing binaries are unaffected (see "Why runtime result may differ from
+verdict" below) — the risk here is a *specific build-mismatch* scenario,
+not a break in any already-compiled consumer. See case47
+(`inline_to_outlined`) for the same mechanism on a class method, framed at
+the same severity, plus the compatibility matrix below spelling out
+exactly which of the four header/library combinations fails.
 
 **Scenario B — linker error:** compile app with v2.hpp (no inline), link against v1.so (no symbol).
 
@@ -104,11 +111,27 @@ g++ -std=c++17 -g app.cpp -I. -L. -lhash -Wl,-rpath,. -o app  # links OK
 # → fast_hash(42) = ...
 ```
 
-**Why CRITICAL:** Existing binaries compiled against v1 (inline) are unaffected —
-they have the inline body baked in. The break hits **new consumers**: any code compiled
-against v2.hpp (declaration only) that links against v1.so gets a hard linker error
-because the symbol doesn't exist in v1.so. This forces a coordinated upgrade:
-v2.hpp and v2.so must ship together.
+**Why this needs coordinated deployment (not a binary ABI break):**
+Existing binaries compiled against v1 (inline) are unaffected — they have
+the inline body baked in, and abicheck's COMPATIBLE verdict is correct
+for them. The failure hits **new consumers**: any code compiled against
+v2.hpp (declaration only) that links against v1.so gets a hard linker
+error because the symbol doesn't exist in v1.so. This forces v2.hpp and
+v2.so to ship together — a packaging/release-coordination requirement, not
+an ABI incompatibility abicheck's binary-vs-binary comparison would (or
+should) flag.
+
+## Compatibility matrix (consumer headers × runtime library)
+
+| Consumer built against | Runtime library | Result |
+|---|---|---|
+| v1 header (inline, no symbol) | v1.so | ✅ works — caller uses its own inlined copy |
+| v1 header (inline, no symbol) | v2.so (symbol exported) | ✅ works — caller's inlined copy is used; the new export is simply unused |
+| v2 header (declaration only) | v2.so (symbol exported) | ✅ works — caller resolves the exported symbol |
+| v2 header (declaration only) | v1.so (no symbol) | ❌ **link failure** — `fast_hash` was never exported by v1 |
+
+Only the last row fails, and it requires a specific build mismatch (new
+headers, old library) that a coordinated release naturally avoids.
 
 ## Why runtime result may differ from verdict
 Inline→non-inline: old binary uses inlined copy, runtime unaffected

@@ -53,3 +53,27 @@ abidiff v1.abi v2.abi
 While ABI-compatible, moving inline→outlined is a **source-level change**: any
 consumer that relied on the inlined body being optimized away (e.g. in `constexpr`
 contexts or LTO-heavy builds) may see different behavior. Document the change.
+
+There is also a build-coordination risk that abicheck's binary-vs-binary
+COMPATIBLE verdict does not itself flag, since it compares two libraries,
+not a specific consumer's header/library pairing: a consumer compiled
+against **v2's** header (declaration only, no inline body) but linked
+against **v1's** `.so` (which never exported `add` — it was inline) gets a
+hard linker error, `undefined reference to Calculator::add(int, int)`.
+That's not an ABI break in the usual sense (no *existing* binary stops
+working), but it does mean v2's header and v2's `.so` must ship together —
+see the compatibility matrix below and case16 (`inline_to_non_inline`),
+which demonstrates the same mechanism with a free function and spells out
+that failure mode end to end.
+
+## Compatibility matrix (consumer headers × runtime library)
+
+| Consumer built against | Runtime `.so` | Result |
+|---|---|---|
+| v1 header (inline, no symbol) | v1 `.so` | ✅ works — caller uses its own inlined copy |
+| v1 header (inline, no symbol) | v2 `.so` (symbol exported) | ✅ works — caller's inlined copy is used; the new export is simply unused |
+| v2 header (declaration only) | v2 `.so` (symbol exported) | ✅ works — caller resolves the exported symbol |
+| v2 header (declaration only) | v1 `.so` (no symbol) | ❌ **link failure** — `add` was never exported by v1 |
+
+Only the last row fails, and it requires a specific build mismatch (new
+headers, old library) that a coordinated release naturally avoids.

@@ -520,6 +520,61 @@ def test_gate_card_fails_for_addition_promoted_to_error() -> None:
     assert "FAIL (exit 1)" in out
 
 
+def test_gate_card_names_blocking_category_for_addition() -> None:
+    """The CI Gate card must name *which* category gated CI (`addition`
+    here), not just show an undifferentiated FAIL — same category-naming
+    already added to the sticky PR comment and the Action's Job Summary."""
+    from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
+    from abicheck.severity import resolve_severity_config
+
+    c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+    result = DiffResult(
+        old_version="1.0", new_version="2.0", library="libtest.so",
+        changes=[c], verdict=Verdict.COMPATIBLE,
+    )
+    cfg = resolve_severity_config("default", addition="error")
+    out = generate_html_report(result, severity_config=cfg)
+    assert "Blocked by:" in out
+    assert "<code>addition</code>" in out
+
+
+def test_gate_card_omits_blocking_categories_when_passing() -> None:
+    from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
+    from abicheck.severity import resolve_severity_config
+
+    c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+    result = DiffResult(
+        old_version="1.0", new_version="2.0", library="libtest.so",
+        changes=[c], verdict=Verdict.COMPATIBLE,
+    )
+    cfg = resolve_severity_config("default")
+    out = generate_html_report(result, severity_config=cfg)
+    assert "PASS" in out
+    assert "Blocked by:" not in out
+
+
+def test_gate_card_scoped_gate_omits_full_library_blocking_categories() -> None:
+    """Regression guard: the scoped gate's exit code can fail for a reason
+    unrelated to full_gate's categories (e.g. a missing --required-symbol
+    entrypoint), so the card must not name full-library categories next to
+    the scoped FAIL -- that would misattribute the cause."""
+    from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
+    from abicheck.severity import resolve_severity_config
+
+    c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+    result = DiffResult(
+        old_version="1.0", new_version="2.0", library="libtest.so",
+        changes=[c], verdict=Verdict.COMPATIBLE,
+    )
+    result.scoped_verdict = Verdict.BREAKING  # type: ignore[attr-defined]
+    result.scoped_exit_code = 4  # type: ignore[attr-defined]
+    result.scoped_exit_code_scheme = "severity"  # type: ignore[attr-defined]
+    cfg = resolve_severity_config("default", addition="error")
+    out = generate_html_report(result, severity_config=cfg)
+    assert "CI Gate (scoped)" in out
+    assert "Blocked by:" not in out
+
+
 def test_gate_card_passes_when_no_error_level_findings() -> None:
     from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
     from abicheck.severity import resolve_severity_config

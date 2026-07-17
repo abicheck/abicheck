@@ -3,9 +3,10 @@
 ## Status
 
 Accepted — implemented for the JSON/SARIF/`compare-release` gate summaries
-(`abicheck.severity.GateDecision`/`compute_gate_decision`). Other renderers
-(HTML's CI Gate card, the MCP server, JUnit) still compute an exit code
-inline via `compute_exit_code` — see "Rollout" below.
+and `html_report.py`'s CI Gate card (`abicheck.severity.GateDecision`/
+`compute_gate_decision`). `mcp_server.py` and `junit_report.py` still
+compute an exit code inline via `compute_exit_code` at some call sites —
+see "Rollout" below.
 
 ## Context
 
@@ -89,14 +90,18 @@ top of it once severity configuration is in play.
   category list computed from different inputs) is now structurally
   prevented at the three sites that were actually affected, rather than
   fixed one-off each time a new renderer reimplements the pattern.
-- `html_report.py`'s CI Gate card, `mcp_server.py`'s exit-code computation,
-  and `junit_report.py`'s per-change `_is_failure` still call
-  `compute_exit_code`/`classify_effective_change` directly rather than
-  `compute_gate_decision` — they only ever needed the exit code (or a
-  per-change category, not a whole-report `blocking_categories` list), so
-  there was no duplicated-computation bug to fix there. They are candidates
-  to adopt `GateDecision` for API consistency in a future pass, not because
-  they are currently wrong.
+- `html_report.py`'s CI Gate card already routes through
+  `compute_gate_decision` (from the same commit that introduced this ADR) —
+  an earlier draft of this document listed it as a remaining candidate,
+  which was corrected once the discrepancy was noticed. `mcp_server.py`
+  still has two exit-code call sites using `compute_exit_code` directly
+  (its severity-aware HTML/JSON tool path already uses
+  `compute_gate_decision`), and `junit_report.py`'s per-change
+  `_is_failure` still calls `classify_effective_change` directly — the
+  latter only ever needed a per-change category, not a whole-report
+  `blocking_categories` list, so there was no duplicated-computation bug to
+  fix there. They are candidates to adopt `GateDecision` for API
+  consistency in a future pass, not because they are currently wrong.
 - `compare-release`'s per-library `findings` projection
   (`_release_gating_buckets`) needs the actual `Change` objects per blocking
   category, not just `GateDecision`'s category names, so it calls
@@ -112,8 +117,9 @@ Not a phased rollout in the ADR-036 sense (no golden-snapshot risk — the
 JSON/SARIF/release-JSON shapes are unchanged). Remaining candidates to adopt
 `GateDecision` are opportunistic follow-ups, not required work:
 
-- `html_report.py`'s CI Gate card could expose `GateDecision.blocking`
-  instead of comparing `exit_code != 0` inline.
-- `mcp_server.py`'s severity-aware exit-code computation could return a
-  `GateDecision` instead of a bare int, if a future MCP tool surface wants
+- `mcp_server.py`'s two remaining `compute_exit_code` call sites could
+  switch to `compute_gate_decision`, matching its already-converted
+  severity-aware HTML/JSON path, if a future MCP tool surface wants
   `blocking_categories` too.
+- `junit_report.py`'s `_is_failure` could adopt `GateDecision` for API
+  consistency, though it only ever needed a per-change category.
