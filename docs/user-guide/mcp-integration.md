@@ -490,7 +490,7 @@ variables override defaults.
 Example invocation tuned for large libraries:
 
 ```bash
-ABICHECK_MCP_TIMEOUT=600 ABICHECK_MCP_MAX_FILE_SIZE=2147483668 \
+ABICHECK_MCP_TIMEOUT=600 ABICHECK_MCP_MAX_FILE_SIZE=2147483648 \
   abicheck-mcp --log-format json
 ```
 
@@ -503,7 +503,7 @@ Or via MCP config:
       "command": "abicheck-mcp",
       "args": ["--timeout", "600", "--log-format", "json"],
       "env": {
-        "ABICHECK_MCP_MAX_FILE_SIZE": "2147483668"
+        "ABICHECK_MCP_MAX_FILE_SIZE": "2147483648"
       }
     }
   }

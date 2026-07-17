@@ -205,6 +205,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   behind a stale, no-longer-consulted `$ORIGIN`-relative `DT_RPATH` entry,
   or conversely raise a false `wheel_rpath_not_portable` finding for an
   ignored absolute `DT_RPATH` entry (Codex review).
+  Fixed an accidental doc typo introduced earlier in this PR:
+  `docs/user-guide/mcp-integration.md`'s `ABICHECK_MCP_MAX_FILE_SIZE`
+  example value had drifted from `2147483648` (2 GiB) to `2147483668`
+  (`/review` finding).
   Windows UCRT/runtime checks, CPU-ISA-baseline detection, the full
   per-tag closure policy, and end-to-end CLI auto-derivation from a
   compared wheel's own filename tag (every check above, including G10's

@@ -550,7 +550,7 @@ def check_musllinux_glibc_dependency(
     worst_tuple: tuple[int, ...] = (0,)
     for lib, tags in (getattr(elf, "versions_required", None) or {}).items():
         for tag in tags:
-            if tag == "GLIBC_ABI_DT_RELR" or tag.startswith("GLIBC_"):
+            if tag.startswith("GLIBC_"):  # covers the literal GLIBC_ABI_DT_RELR marker too
                 offenders.add(lib)
                 parsed = _parse_abi_version_tag(tag)
                 if parsed != _UNPARSEABLE_VERSION and _version_gt(parsed, worst_tuple):

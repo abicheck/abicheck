@@ -193,6 +193,20 @@ class TestMacosDeploymentTargetFloorCliEndToEnd:
         assert ChangeKind.MACOS_DEPLOYMENT_TARGET_RAISED in _kinds(result.changes)
         assert result.verdict is Verdict.COMPATIBLE_WITH_RISK
 
+    def test_raised_floor_reaches_compare_via_from_dict(self) -> None:
+        # End-to-end through the documented --env-matrix/from_dict path,
+        # not just the direct-constructor path the test above uses — the
+        # same reachability gap WHEEL_ARCH previously had (Codex review
+        # #583) before EnvironmentMatrix._parse_runtime_floors was fixed to
+        # accept it at all.
+        old = _snap(_macho(min_os_version="12.3"))
+        new = _snap(_macho(min_os_version="12.3"))
+        matrix = EnvironmentMatrix.from_dict(
+            {"runtime_floors": {"MACOS_DEPLOYMENT_TARGET": "10.14"}}
+        )
+        result = compare(old, new, env_matrix=matrix)
+        assert ChangeKind.MACOS_DEPLOYMENT_TARGET_RAISED in _kinds(result.changes)
+
     def test_within_floor_clean(self) -> None:
         old = _snap(_macho(min_os_version="10.9"))
         new = _snap(_macho(min_os_version="10.9"))
@@ -589,6 +603,30 @@ class TestWheelTagArchitectureMismatchUnit:
         assert (
             check_wheel_tag_architecture_mismatch(
                 None, None, {"WHEEL_ARCH": "x86_64"}
+            )
+            == []
+        )
+
+    def test_elf_present_with_empty_machine_falls_through_to_macho(
+        self,
+    ) -> None:
+        # An ElfMetadata with no captured machine (falsy) must not shadow
+        # Mach-O evidence when both are somehow present on the same call —
+        # the ELF branch should fall through rather than returning early.
+        elf = _elf(machine="")
+        macho = _macho(cpu_type="ARM64")
+        assert (
+            check_wheel_tag_architecture_mismatch(
+                elf, macho, {"WHEEL_ARCH": "arm64"}
+            )
+            == []
+        )
+
+    def test_unrecognized_claim_with_macho_evidence_no_finding(self) -> None:
+        macho = _macho(cpu_type="ARM64", cpu_types=["ARM64"])
+        assert (
+            check_wheel_tag_architecture_mismatch(
+                None, macho, {"WHEEL_ARCH": "win_amd64"}
             )
             == []
         )
