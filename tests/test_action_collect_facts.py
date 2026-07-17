@@ -239,6 +239,32 @@ class TestInvalidInputsRejected:
         assert result.returncode == 1
         assert "not found on PATH" in result.stdout
 
+    def test_unknown_extractor_fails(self, tmp_path: Path) -> None:
+        result, _, _ = _run_action({"INPUT_EXTRACTOR": "bogus"}, tmp_path)
+        assert result.returncode == 1
+        assert "not recognized" in result.stdout
+
+    def test_unknown_install_deps_value_fails(self, tmp_path: Path) -> None:
+        # Regression (CodeRabbit review): a misspelled value like "True" or
+        # "yes" used to silently behave as false (every check is a literal
+        # `== "true"` string comparison) instead of being rejected.
+        result, _, _ = _run_action({"INPUT_INSTALL_DEPS": "yes"}, tmp_path)
+        assert result.returncode == 1
+        assert "not recognized" in result.stdout
+
+    def test_verify_with_producer_auto_fails(self, tmp_path: Path) -> None:
+        # Regression (CodeRabbit review): re-running auto-detection at
+        # phase: verify can silently resolve to a different producer than
+        # what phase: prepare resolved (e.g. the build step generated a
+        # compile_commands.json as a side effect, flipping auto from
+        # wrapper to replay) -- verify must be given the exact
+        # prepare-resolved producer, never producer: auto.
+        result, _, _ = _run_action(
+            {"INPUT_PHASE": "verify", "INPUT_PRODUCER": "auto"}, tmp_path
+        )
+        assert result.returncode == 1
+        assert "producer: auto" in result.stdout
+
 
 @pytest.mark.skipif(
     not RUN_SH.is_file(), reason="actions/collect-facts/run.sh not found"
@@ -427,6 +453,86 @@ class TestWrapperProducer:
         assert outputs["mode"] == "pack"
         assert outputs["pack-path"] == str(pack)
 
+    def test_verify_reemits_producer_version_persisted_by_prepare(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (CodeRabbit review): phase: verify used to
+        # unconditionally emit producer-version="" regardless of producer,
+        # clearing the clang-plugin identity phase: prepare had already
+        # computed and persisted via GITHUB_ENV (ABICHECK_PRODUCER_VERSION
+        # -- the same env-var persistence mechanism ABICHECK_PLUGIN_SO/
+        # FLAGS already rely on to cross the prepare -> build -> verify
+        # step boundary in a real workflow). A real clang-plugin build
+        # needs a matching libclang-<N>-dev toolchain not guaranteed here,
+        # so this simulates the persisted env var directly rather than
+        # exercising phase: prepare, producer: clang-plugin end-to-end.
+        pytest.importorskip("abicheck")
+        from abicheck.buildsource.inputs_emit import (
+            append_source_facts,
+            init_inputs_pack,
+        )
+        from abicheck.buildsource.source_abi import SourceAbiTu
+
+        pack = tmp_path / "abicheck_inputs"
+        init_inputs_pack(pack, library="libfoo")
+        append_source_facts(
+            pack,
+            [
+                SourceAbiTu(
+                    tu_id="cu://src/foo.cpp",
+                    target_id="target://libfoo",
+                    source="src/foo.cpp",
+                )
+            ],
+        )
+        result, _, github_output = _run_action(
+            {
+                "INPUT_PHASE": "verify",
+                "INPUT_PRODUCER": "clang-plugin",
+                "INPUT_OUTPUT": str(pack),
+                "ABICHECK_PRODUCER_VERSION": "llvm-18+plugin-sha256-abc123def456",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        outputs = _parse_kv_file(github_output)
+        assert outputs["producer-version"] == "llvm-18+plugin-sha256-abc123def456"
+
+    def test_verify_producer_version_empty_for_wrapper(self, tmp_path: Path) -> None:
+        # The wrapper producer has no ABICHECK_PRODUCER_VERSION to persist
+        # (nothing about which compiler the caller's build actually
+        # invoked is knowable from this side) -- verify must not invent one.
+        pytest.importorskip("abicheck")
+        from abicheck.buildsource.inputs_emit import (
+            append_source_facts,
+            init_inputs_pack,
+        )
+        from abicheck.buildsource.source_abi import SourceAbiTu
+
+        pack = tmp_path / "abicheck_inputs"
+        init_inputs_pack(pack, library="libfoo")
+        append_source_facts(
+            pack,
+            [
+                SourceAbiTu(
+                    tu_id="cu://src/foo.cpp",
+                    target_id="target://libfoo",
+                    source="src/foo.cpp",
+                )
+            ],
+        )
+        result, _, github_output = _run_action(
+            {
+                "INPUT_PHASE": "verify",
+                "INPUT_PRODUCER": "wrapper",
+                "INPUT_OUTPUT": str(pack),
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        outputs = _parse_kv_file(github_output)
+        assert outputs["producer-version"] == ""
+
 
 @pytest.mark.skipif(
     not RUN_SH.is_file(), reason="actions/collect-facts/run.sh not found"
@@ -458,4 +564,32 @@ class TestClangPluginSmokeTestIsolation:
             "smoke-test compile must not write into $OUTPUT -- the real pack "
             "directory -- or a smoke record could mask a real collection "
             "failure at phase: verify"
+        )
+
+
+@pytest.mark.skipif(
+    not RUN_SH.is_file(), reason="actions/collect-facts/run.sh not found"
+)
+class TestWrapperInstallDepsFailurePropagates:
+    """Regression guard (CodeRabbit review): _prepare_wrapper's
+    install-deps.sh call used to swallow a real installer failure with
+    `|| true`, reporting preparation success even though dependencies never
+    installed -- the caller's build would then fail later with a confusing
+    "command not found", or run uninstrumented and quietly produce an empty
+    pack. Can't force the real install-deps.sh (which shells out to
+    apt-get) to fail deterministically in a test environment, so assert the
+    invariant statically against the actual _prepare_wrapper source instead,
+    the same approach TestClangPluginSmokeTestIsolation uses."""
+
+    def test_install_deps_failure_is_not_swallowed(self) -> None:
+        text = RUN_SH.read_text(encoding="utf-8")
+        start = text.index("_prepare_wrapper() {")
+        end = text.index("_prepare_clang_plugin() {", start)
+        wrapper_block = text[start:end]
+        assert "install-deps.sh" in wrapper_block
+        assert "|| true" not in wrapper_block, (
+            "a failed install-deps.sh must not be silently treated as success"
+        )
+        assert "|| _fail" in wrapper_block, (
+            "install-deps.sh's failure must propagate via _fail"
         )

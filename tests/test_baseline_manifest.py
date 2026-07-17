@@ -110,6 +110,27 @@ class TestBuildManifestBasics:
         manifest = build_manifest_module.build_manifest(tmp_path, "", "", entries, None)
         assert manifest["snapshot_schema"] == 9
 
+    def test_fails_when_schema_version_inconsistent_across_libraries(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (CodeRabbit review): every dump in one baseline-set run
+        # goes through the same installed abicheck, so disagreeing
+        # schema_versions means something is structurally broken -- silently
+        # taking max() published a manifest whose declared schema didn't
+        # match what one of its own snapshots actually used.
+        _write_snapshot(
+            tmp_path / "libfoo.abicheck.json", library="libfoo", schema_version=9
+        )
+        _write_snapshot(
+            tmp_path / "libbar.abicheck.json", library="libbar", schema_version=10
+        )
+        entries = [
+            {"name": "libfoo", "artifact": "a.so"},
+            {"name": "libbar", "artifact": "b.so"},
+        ]
+        with pytest.raises(SystemExit, match="disagree on schema_version"):
+            build_manifest_module.build_manifest(tmp_path, "", "", entries, None)
+
     def test_fact_set_read_from_real_snapshot_shape(self, tmp_path: Path) -> None:
         # Regression (Codex review): SourceAbiSurface.to_dict() has no
         # top-level "fact_set" key -- link_source_abi() writes the rolled-up
@@ -171,7 +192,7 @@ class TestBuildManifestBasics:
         manifest = build_manifest_module.build_manifest(tmp_path, "", "", entries, None)
         assert manifest["fact_set"] is None
 
-    def test_fact_set_none_when_inconsistent_across_libraries(
+    def test_fails_when_fact_set_inconsistent_across_libraries(
         self, tmp_path: Path
     ) -> None:
         _write_snapshot(
@@ -188,10 +209,32 @@ class TestBuildManifestBasics:
             {"name": "libfoo", "artifact": "a.so"},
             {"name": "libbar", "artifact": "b.so"},
         ]
-        manifest = build_manifest_module.build_manifest(tmp_path, "", "", entries, None)
-        # Disagreement is reported (::warning:: to stderr) rather than
-        # silently picking one side's identity as if it applied to both.
-        assert manifest["fact_set"] is None
+        # Disagreement is a hard failure (CodeRabbit review) -- silently
+        # picking one side's identity, or discarding it to None, would let a
+        # later manifest with the *same* silently-discarded state compare
+        # equal and report no refresh, hiding a real recipe-identity drift.
+        with pytest.raises(SystemExit, match="disagree on fact_set identity"):
+            build_manifest_module.build_manifest(tmp_path, "", "", entries, None)
+
+    def test_fails_when_fact_set_present_on_only_some_libraries(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (CodeRabbit review): libfoo carries a fact_set, libbar
+        # carries none -- fact_set_ids only ever gets libfoo's one entry, so
+        # len(fact_set_ids) == 1 looked "consistent" even though libbar has
+        # no source-fact evidence at all.
+        _write_snapshot(
+            tmp_path / "libfoo.abicheck.json",
+            library="libfoo",
+            fact_set={"name": "abicheck-clang-canonical", "version": 1},
+        )
+        _write_snapshot(tmp_path / "libbar.abicheck.json", library="libbar")
+        entries = [
+            {"name": "libfoo", "artifact": "a.so"},
+            {"name": "libbar", "artifact": "b.so"},
+        ]
+        with pytest.raises(SystemExit, match="whether source-fact evidence is present"):
+            build_manifest_module.build_manifest(tmp_path, "", "", entries, None)
 
 
 class TestFreshness:
@@ -200,6 +243,21 @@ class TestFreshness:
         entries = [{"name": "libfoo", "artifact": "a.so"}]
         manifest = build_manifest_module.build_manifest(tmp_path, "", "", entries, None)
         assert manifest["freshness"] == {"refresh_required": False, "reasons": []}
+
+    def test_fails_when_previous_manifest_path_given_but_missing(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (CodeRabbit review): omitting --previous-manifest
+        # entirely is the documented way to say "no previous baseline"
+        # (action.yml). A caller that passes one pointing at a path that
+        # doesn't exist has a broken workflow (typo, failed artifact
+        # download) -- silently returning refresh_required=False as if the
+        # comparison ran and found nothing stale would hide that.
+        _write_snapshot(tmp_path / "libfoo.abicheck.json", library="libfoo")
+        entries = [{"name": "libfoo", "artifact": "a.so"}]
+        missing = tmp_path / "does-not-exist.json"
+        with pytest.raises(SystemExit, match="does not exist"):
+            build_manifest_module.build_manifest(tmp_path, "", "", entries, missing)
 
     def test_identical_manifest_is_not_stale(self, tmp_path: Path) -> None:
         _write_snapshot(
@@ -450,4 +508,68 @@ class TestMainCli:
 
         digest1 = manifest1["artifacts"][0]["sha256"]
         digest2 = manifest2["artifacts"][0]["sha256"]
+        assert digest1 != digest2
+
+    def _run_main_and_get_content_digest(
+        self, tmp_path: Path, libraries: list[dict[str, str]], capsys
+    ) -> str:
+        # Overwritten on every call -- only the printed content-digest= line
+        # matters to these tests, not the manifest file's own path/identity.
+        manifest_out = tmp_path / "manifest-out.json"
+        rc = build_manifest_module.main(
+            [
+                "--output-dir",
+                str(tmp_path),
+                "--libraries",
+                json.dumps(libraries),
+                "--manifest-out",
+                str(manifest_out),
+            ]
+        )
+        assert rc == 0
+        out = capsys.readouterr().out
+        (line,) = [ln for ln in out.splitlines() if ln.startswith("content-digest=")]
+        return line.removeprefix("content-digest=")
+
+    def test_content_digest_via_cli_stable_across_artifact_path_and_order(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        # CodeRabbit review: the aggregate content-digest output is
+        # documented as "library names + per-file digests" -- it must not
+        # move just because a matrix reordered entries or an artifact was
+        # built at a different path this run.
+        _write_snapshot(tmp_path / "libfoo.abicheck.json", library="libfoo")
+        _write_snapshot(tmp_path / "libbar.abicheck.json", library="libbar")
+
+        digest1 = self._run_main_and_get_content_digest(
+            tmp_path,
+            [
+                {"name": "libfoo", "artifact": "build/libfoo.so"},
+                {"name": "libbar", "artifact": "build/libbar.so"},
+            ],
+            capsys,
+        )
+        digest2 = self._run_main_and_get_content_digest(
+            tmp_path,
+            [
+                {"name": "libbar", "artifact": "elsewhere/libbar.so"},
+                {"name": "libfoo", "artifact": "elsewhere/libfoo.so"},
+            ],
+            capsys,
+        )
+        assert digest1 == digest2
+
+    def test_content_digest_via_cli_changes_when_snapshot_content_changes(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        _write_snapshot(
+            tmp_path / "libfoo.abicheck.json", library="libfoo", git_commit="aaa"
+        )
+        libraries = [{"name": "libfoo", "artifact": "a.so"}]
+        digest1 = self._run_main_and_get_content_digest(tmp_path, libraries, capsys)
+
+        _write_snapshot(
+            tmp_path / "libfoo.abicheck.json", library="libfoo", git_commit="bbb"
+        )
+        digest2 = self._run_main_and_get_content_digest(tmp_path, libraries, capsys)
         assert digest1 != digest2

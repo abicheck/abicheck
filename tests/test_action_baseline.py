@@ -194,8 +194,41 @@ class TestLibrariesJsonValidation:
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="actions/baseline/run.sh not found")
+class TestStaleOutputCleared:
+    def test_stale_snapshot_removed_before_dump(self, tmp_path: Path) -> None:
+        # Regression (Codex review): a library removed/renamed since an
+        # earlier run at this same output-dir used to leave its old
+        # *.abicheck.json sitting there -- invisible to the new run's
+        # manifest.json/content-digest, but still physically present for a
+        # caller that publishes/uploads the whole directory. Runs
+        # regardless of whether the dump itself succeeds (no abicheck
+        # needed on PATH): the cleanup happens before the dump loop starts.
+        output_dir = tmp_path / "out"
+        output_dir.mkdir()
+        (output_dir / "stale-lib.abicheck.json").write_text("{}")
+        (output_dir / "manifest.json").write_text("{}")
+
+        _run_action(
+            {
+                "INPUT_LIBRARIES": json.dumps(
+                    [{"name": "libfoo", "artifact": str(tmp_path / "no-such.so")}]
+                ),
+                "INPUT_OUTPUT_DIR": str(output_dir),
+            },
+            tmp_path,
+        )
+        assert not (output_dir / "stale-lib.abicheck.json").exists()
+        assert not (output_dir / "manifest.json").exists()
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="actions/baseline/run.sh not found")
 @pytest.mark.skipif(not _ABICHECK, reason="needs abicheck on PATH")
 class TestDumpFailurePaths:
+    # Shells out to the real abicheck CLI -- excluded from the default fast
+    # lane so it doesn't silently run just because abicheck happens to be
+    # installed in a dev environment (CodeRabbit review).
+    pytestmark = pytest.mark.integration
+
     def test_nonexistent_artifact_fails_with_library_name(self, tmp_path: Path) -> None:
         result, _ = _run_action(
             {

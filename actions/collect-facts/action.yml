@@ -113,9 +113,12 @@ outputs:
     value: ${{ steps.run-collect-facts.outputs.ready }}
   producer-version:
     description: >
-      Version identity of the producer used -- the compiler version for
-      replay/wrapper, or the plugin build's content digest + loading
-      Clang's version for clang-plugin. Empty until phase: verify.
+      Version identity of the producer used. Always empty for replay and
+      wrapper (this Action cannot know which compiler the caller's build
+      will actually invoke). For clang-plugin: the LLVM major plus a short
+      content digest of the built plugin binary, set at phase: prepare
+      (the plugin's identity is fixed the moment it's built, before your
+      build even runs) and re-emitted unchanged at phase: verify.
     value: ${{ steps.run-collect-facts.outputs.producer-version }}
 
 runs:

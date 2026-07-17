@@ -91,6 +91,8 @@ def build_manifest(
     # compiler_version comparability rules, which this mirrors so a refresh
     # is flagged for the same reasons.
     fact_set_ids: set[tuple[str, int, str, str, str, str]] = set()
+    fact_set_present = 0
+    fact_set_absent = 0
     for entry in entries:
         name = entry["name"]
         snap_path = output_dir / f"{name}.abicheck.json"
@@ -109,6 +111,7 @@ def build_manifest(
             and fact_set.get("name")
             and fact_set.get("version") is not None
         ):
+            fact_set_present += 1
             fact_set_ids.add(
                 (
                     str(fact_set["name"]),
@@ -119,6 +122,8 @@ def build_manifest(
                     str(fact_set.get("compiler_version") or ""),
                 )
             )
+        else:
+            fact_set_absent += 1
         artifacts.append(
             {
                 "library": name,
@@ -132,19 +137,33 @@ def build_manifest(
             }
         )
 
+    # Every check below is a self-consistency invariant of one baseline-set
+    # run (all libraries dumped in the same job, by the same installed
+    # abicheck, against the same shared --build-info pack per action.yml's
+    # contract) -- a violation means the invariant broke, not that there is
+    # a legitimate "mixed" state to represent, so this fails loudly rather
+    # than publishing a manifest whose identity silently dropped information
+    # a later comparison could have used to detect drift (CodeRabbit review).
     if len(schema_versions) > 1:
-        print(
-            f"::warning::baseline-set snapshots disagree on schema_version "
+        raise SystemExit(
+            f"baseline-set snapshots disagree on schema_version "
             f"{sorted(schema_versions)} -- they were dumped by different "
-            f"abicheck versions in the same run, which should not happen.",
-            file=sys.stderr,
+            f"abicheck versions in the same run, which should never happen."
+        )
+    if fact_set_present and fact_set_absent:
+        raise SystemExit(
+            f"baseline-set snapshots disagree on whether source-fact "
+            f"evidence is present: {fact_set_present} carry a fact_set "
+            f"identity, {fact_set_absent} do not -- each library should "
+            f"share the one build-info pack passed to every dump call "
+            f"(pass the same --build-info/--sources to every library, or "
+            f"none)."
         )
     if len(fact_set_ids) > 1:
-        print(
-            f"::warning::baseline-set snapshots disagree on fact_set "
-            f"identity {sorted(fact_set_ids)} -- each library should share "
-            f"the one build-info pack passed to every dump call.",
-            file=sys.stderr,
+        raise SystemExit(
+            f"baseline-set snapshots disagree on fact_set identity "
+            f"{sorted(fact_set_ids)} -- each library should share the one "
+            f"build-info pack passed to every dump call."
         )
 
     fact_set_out = None
@@ -188,8 +207,21 @@ def _compute_freshness(
     """Compare against a previous manifest (if given) and report what
     changed -- the structured input to an Action's refresh-required output.
     Absent a previous manifest, freshness cannot be assessed either way."""
-    if previous_manifest_path is None or not previous_manifest_path.is_file():
+    if previous_manifest_path is None:
         return {"refresh_required": False, "reasons": []}
+    if not previous_manifest_path.is_file():
+        # Omitting --previous-manifest entirely is the documented way to say
+        # "no previous baseline" (action.yml); a caller that *did* pass one
+        # pointing at a path that doesn't exist is a broken workflow (a typo,
+        # or an artifact download that silently failed) -- silently treating
+        # it the same as "omitted" would report refresh-required=false as if
+        # the comparison had actually run and found nothing stale (CodeRabbit
+        # review).
+        raise SystemExit(
+            f"--previous-manifest was given as {previous_manifest_path} but "
+            "that file does not exist -- omit the flag entirely for 'no "
+            "previous baseline', don't point it at a missing path."
+        )
 
     with previous_manifest_path.open(encoding="utf-8") as f:
         previous = json.load(f)
@@ -246,8 +278,25 @@ def main(argv: list[str] | None = None) -> int:
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
     )
 
+    # Only library name + snapshot sha256, sorted by library -- matches
+    # action.yml's documented contract ("library names + per-file digests").
+    # Hashing the full artifact list (as before) pulled in created_at, which
+    # dumper.py auto-stamps fresh on every dump call, so the digest changed
+    # on every run even when every snapshot's actual content was identical,
+    # defeating its purpose as a "did anything really change" signal
+    # (CodeRabbit review). Sorted by library so digest is independent of
+    # entry/matrix order too.
     content_digest = hashlib.sha256(
-        json.dumps(manifest["artifacts"], sort_keys=True).encode("utf-8")
+        json.dumps(
+            sorted(
+                (
+                    {"library": a["library"], "sha256": a["sha256"]}
+                    for a in manifest["artifacts"]
+                ),
+                key=lambda a: a["library"],
+            ),
+            sort_keys=True,
+        ).encode("utf-8")
     ).hexdigest()
 
     # key=value lines on stdout -- the caller (run.sh) forwards these to

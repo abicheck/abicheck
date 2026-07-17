@@ -55,6 +55,19 @@ for i, e in enumerate(entries):
     seen_names.add(name)
 ' "$LIBRARIES_JSON" 2>&1) || _fail "invalid libraries input: $LIBRARIES_ERROR"
 
+if [[ -d "$OUTPUT_DIR" ]]; then
+  # Clear stale per-library snapshots/manifest left by an earlier run at
+  # this same output-dir -- a library removed/renamed since that run would
+  # otherwise leave its old *.abicheck.json sitting here: invisible to this
+  # run's manifest.json/content-digest, but still physically present for a
+  # caller that publishes/uploads the whole directory rather than iterating
+  # manifest.json's artifact list (CodeRabbit review). Only removes the
+  # files this script itself writes, never the whole directory, so an
+  # output-dir that happens to already exist for an unrelated reason isn't
+  # blown away.
+  find "$OUTPUT_DIR" -maxdepth 1 -name '*.abicheck.json' -delete
+  rm -f "$OUTPUT_DIR/manifest.json"
+fi
 mkdir -p "$OUTPUT_DIR"
 
 echo "::group::Dump baseline-set into $OUTPUT_DIR"
@@ -93,7 +106,13 @@ for e in json.loads(sys.argv[1]):
         e.get("header", ""),
         e.get("include", ""),
     ]))
-' "$LIBRARIES_JSON")
+' "$LIBRARIES_JSON" | tr -d '\r')
+# ^ Windows CPython opens stdout in text mode, so `print()` translates \n to
+# \r\n there; bash `read` only strips the trailing \n, leaving a stray \r
+# glued onto the last field of every row. For a row whose last field is
+# meant to be empty (include omitted), that \r makes `[[ -n "$include" ]]`
+# true, so an empty -I flag was silently added on Windows runners even
+# though include was never set (caught by the windows-latest CI lane).
 echo "::endgroup::"
 
 if [[ "$VALIDATION" == "strict" ]]; then
@@ -108,7 +127,7 @@ if [[ "$VALIDATION" == "strict" ]]; then
 import json, sys
 for e in json.loads(sys.argv[1]):
     print(e["name"])
-' "$LIBRARIES_JSON")
+' "$LIBRARIES_JSON" | tr -d '\r')
   echo "all snapshots round-tripped cleanly."
   echo "::endgroup::"
 fi

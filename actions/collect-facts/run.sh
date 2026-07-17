@@ -91,6 +91,17 @@ _write_output() {
 # ---------------------------------------------------------------------------
 case "$PRODUCER_IN" in
   auto)
+    if [[ "$PHASE" == "verify" ]]; then
+      # Re-running auto-detection here can silently resolve to a different
+      # producer than the one your build was actually instrumented for --
+      # e.g. a wrapper prepare followed by a build step that (as a side
+      # effect) generates compile_commands.json would flip auto to replay,
+      # and phase: verify would report ready=true having never checked the
+      # wrapper's pack at all (CodeRabbit review). Every documented recipe
+      # already threads the prepare step's resolved producer through
+      # explicitly -- enforce that instead of trusting it.
+      _fail "phase: verify needs the exact producer phase: prepare resolved, not producer: auto -- pass producer: \${{ steps.<prepare-step-id>.outputs.producer }}."
+    fi
     PRODUCER=$(_detect_producer "$SOURCES")
     echo "producer: auto -> $PRODUCER (no compile database/build system found under '$SOURCES' means wrapper; found one means replay)"
     ;;
@@ -105,6 +116,20 @@ esac
 case "$PHASE" in
   auto | prepare | verify) ;;
   *) _fail "phase '$PHASE' is not recognized. Use 'auto', 'prepare', or 'verify'." ;;
+esac
+
+# Validate before any preparation/build work starts -- an unrecognized
+# extractor used to reach the wrapper env vars uncaught, and a misspelled
+# install-deps value (e.g. "True", "yes") silently behaved as false since
+# every check below is a literal `== "true"` string comparison
+# (CodeRabbit review).
+case "$EXTRACTOR" in
+  auto | castxml | clang) ;;
+  *) _fail "extractor '$EXTRACTOR' is not recognized. Use 'auto', 'castxml', or 'clang'." ;;
+esac
+case "$INSTALL_DEPS" in
+  true | false) ;;
+  *) _fail "install-deps '$INSTALL_DEPS' is not recognized. Use 'true' or 'false'." ;;
 esac
 
 if [[ "$PHASE" == "verify" && "$PRODUCER" == "replay" ]]; then
@@ -133,7 +158,13 @@ _prepare_replay() {
 
 _prepare_wrapper() {
   if [[ "$INSTALL_DEPS" == "true" ]]; then
-    bash "$(dirname "${BASH_SOURCE[0]}")/../../action/install-deps.sh" || true
+    # A failed installer used to still report preparation success here
+    # (a trailing "or true" swallowed it entirely), leaving the caller's
+    # build to fail later with a confusing "abicheck-cc: command not
+    # found", or -- worse -- to run uninstrumented and quietly produce an
+    # empty pack (CodeRabbit review).
+    bash "$(dirname "${BASH_SOURCE[0]}")/../../action/install-deps.sh" \
+      || _fail "failed to install dependencies required by producer: wrapper -- see the output above."
   fi
   mkdir -p "$OUTPUT"
   _write_env "ABICHECK_INPUTS_DIR" "$OUTPUT"
@@ -236,14 +267,30 @@ $version_output"
   fi
   [[ -n "$LIBRARY" ]] && plugin_flags="$plugin_flags -Xclang -plugin-arg-abicheck-facts -Xclang library=$LIBRARY"
 
+  # The plugin's identity is fully fixed the moment it's built here -- the
+  # caller's later build populates the *pack*, it never changes the plugin
+  # binary itself -- so compute the complete documented identity (LLVM major
+  # + a content digest of the built plugin) now rather than emitting a
+  # partial value at prepare and clearing it at verify (CodeRabbit review).
+  # Persisted via GITHUB_ENV so the separate phase: verify invocation of
+  # this script (a fresh process) can re-emit the same value instead of
+  # re-deriving or losing it.
+  local plugin_digest
+  plugin_digest=$(python3 -c '
+import hashlib, sys
+print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest()[:12])
+' "$plugin_so")
+  local producer_version="llvm-$major+plugin-sha256-$plugin_digest"
+
   _write_env "ABICHECK_PLUGIN_SO" "$plugin_so"
   _write_env "ABICHECK_PLUGIN_FLAGS" "$plugin_flags"
+  _write_env "ABICHECK_PRODUCER_VERSION" "$producer_version"
   echo "::notice::producer: clang-plugin ready at $plugin_so. Add these flags to your compile command (also exported as \$ABICHECK_PLUGIN_FLAGS): $plugin_flags -- run your build next, then call this Action again with phase: verify to check the collected pack at '$OUTPUT'."
   _write_output "producer" "clang-plugin"
   _write_output "mode" "pack"
   _write_output "pack-path" "$OUTPUT"
   _write_output "ready" "false"
-  _write_output "producer-version" "llvm-$major"
+  _write_output "producer-version" "$producer_version"
 }
 
 _verify_pack() {
@@ -294,7 +341,12 @@ print(f"pack at {sys.argv[1]!r} contains {report.tu_count} TU record(s).")
   _write_output "mode" "pack"
   _write_output "pack-path" "$OUTPUT"
   _write_output "ready" "true"
-  _write_output "producer-version" ""
+  # Re-emit whatever phase: prepare computed and persisted via GITHUB_ENV
+  # (clang-plugin only -- its identity is fixed at build time) instead of
+  # unconditionally clearing it here. Empty for wrapper: nothing about
+  # *which compiler* the caller's build actually invoked is knowable from
+  # this side (CodeRabbit review).
+  _write_output "producer-version" "${ABICHECK_PRODUCER_VERSION:-}"
 }
 
 if [[ "$PHASE" == "verify" ]]; then

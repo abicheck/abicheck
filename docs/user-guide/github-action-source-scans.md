@@ -315,13 +315,38 @@ jobs:
 # at compare time — both sides already have their facts embedded).
 jobs:
   build:
-    # same as above, no publish step
+    # Identical to the release workflow's `build` job above, just without
+    # its `publish-baselines` job at the end -- repeated in full here (not
+    # abbreviated) so this block is copy-pasteable on its own.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: abicheck/abicheck/actions/collect-facts@v0.3.0
+        id: facts
+        with: { phase: prepare, producer: wrapper, public-roots: "include" }
+      - name: Build
+        run: |
+          cmake -DCMAKE_CXX_COMPILER_LAUNCHER=abicheck-cc \
+                -DCMAKE_C_COMPILER_LAUNCHER=abicheck-cc -S . -B build
+          cmake --build build
+      - uses: abicheck/abicheck/actions/collect-facts@v0.3.0
+        id: facts-verify
+        with: { phase: verify, producer: ${{ steps.facts.outputs.producer }} }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-build
+          path: |
+            build/lib*.so
+            include/
+            abicheck_inputs/
 
   scan-candidates:
     needs: build
     strategy:
       matrix:
-        lib: [ ... same list as above ... ]
+        lib:
+          - { name: libfoo, so: build/libfoo.so, header: include/foo.h }
+          - { name: libbar, so: build/libbar.so, header: include/bar.h }
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
