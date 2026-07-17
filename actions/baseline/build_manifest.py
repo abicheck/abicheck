@@ -48,8 +48,25 @@ def _read_snapshot_meta(path: Path) -> dict[str, Any]:
     # therefore content-digest, which is built from these per-artifact
     # digests -- changed on every single run even when the actual ABI
     # content was byte-identical (Codex review).
+    #
+    # A snapshot dumped with --build-info/--sources also embeds a *second*,
+    # independently-stamped timestamp at build_source.manifest.created_at
+    # (BuildSourceManifest.created_at, written fresh by every collect-facts
+    # run -- see abicheck/buildsource/pack.py's own content_hash(), which
+    # excludes it for the same reason). Leaving it in place kept the digest
+    # unstable for any baseline with embedded source facts even after the
+    # top-level created_at was stripped (Codex review).
     stable = dict(raw)
     stable.pop("created_at", None)
+    build_source = stable.get("build_source")
+    if isinstance(build_source, dict):
+        manifest = build_source.get("manifest")
+        if isinstance(manifest, dict) and "created_at" in manifest:
+            build_source = dict(build_source)
+            manifest = dict(manifest)
+            manifest.pop("created_at", None)
+            build_source["manifest"] = manifest
+            stable["build_source"] = build_source
     sha256 = hashlib.sha256(
         json.dumps(stable, sort_keys=True).encode("utf-8")
     ).hexdigest()

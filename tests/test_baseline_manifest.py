@@ -522,6 +522,52 @@ class TestMainCli:
             manifest1["artifacts"][0]["sha256"] == manifest2["artifacts"][0]["sha256"]
         )
 
+    def test_sha256_stable_when_only_embedded_build_source_created_at_changes(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review): a snapshot dumped with --build-info/
+        # --sources embeds a *second*, independently-stamped timestamp at
+        # build_source.manifest.created_at (BuildSourceManifest.created_at,
+        # written fresh by every collect-facts run). Stripping only the
+        # top-level created_at (the fix above) left this nested one in
+        # place, so the digest was still unstable for any baseline with
+        # embedded source facts.
+        snap_path = tmp_path / "libfoo.abicheck.json"
+
+        def _write(build_source_created_at: str) -> None:
+            data = {
+                "library": "libfoo",
+                "version": "1.0.0",
+                "schema_version": 9,
+                "git_commit": "aaa",
+                "git_tag": None,
+                "created_at": "2026-07-17T00:00:00+00:00",
+                "build_id": None,
+                "build_source": {
+                    "manifest": {
+                        "build_source_pack_version": 1,
+                        "created_at": build_source_created_at,
+                    },
+                    "source_abi": {"coverage": {}},
+                },
+            }
+            snap_path.write_text(json.dumps(data), encoding="utf-8")
+
+        entries = [{"name": "libfoo", "artifact": "a.so"}]
+        _write("2026-07-17T00:00:00+00:00")
+        manifest1 = build_manifest_module.build_manifest(
+            tmp_path, "", "", entries, None
+        )
+
+        _write("2026-07-17T01:23:45+00:00")
+        manifest2 = build_manifest_module.build_manifest(
+            tmp_path, "", "", entries, None
+        )
+
+        assert (
+            manifest1["artifacts"][0]["sha256"] == manifest2["artifacts"][0]["sha256"]
+        )
+
     def test_content_digest_changes_when_snapshot_content_changes(
         self, tmp_path: Path
     ) -> None:
