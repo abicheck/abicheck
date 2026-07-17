@@ -28,7 +28,7 @@ import pytest
 
 from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change
-from abicheck.model import AbiSnapshot, Function, RecordType, Visibility
+from abicheck.model import AbiSnapshot, Function, Param, RecordType, Visibility
 from abicheck.post_processing import DEFAULT_PIPELINE
 from abicheck.suppression import Suppression, SuppressionList
 
@@ -109,7 +109,10 @@ def _unreachable_scenario():
 class TestMarkReachability:
     def test_tags_reachable_internal_change(self) -> None:
         old, new, raw_change = _reachable_scenario()
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new)
+        # MarkReachability is gated on a suppression object being configured
+        # (see test_skips_without_suppression) — an empty rule list is enough
+        # to trigger the tagging so it can be observed directly.
+        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=SuppressionList([]))
         found = [c for c in ctx.kept if c.kind == ChangeKind.TYPE_SIZE_CHANGED]
         assert len(found) == 1
         assert found[0].public_reachable is True
@@ -120,9 +123,58 @@ class TestMarkReachability:
         old, new, raw_change = _unreachable_scenario()
         # DemoteUnreachableInternalChurn removes truly-unreachable internal
         # churn from ctx.kept — check the tag directly on the object instead.
-        DEFAULT_PIPELINE.run([raw_change], old, new)
+        DEFAULT_PIPELINE.run([raw_change], old, new, suppression=SuppressionList([]))
         assert raw_change.public_reachable is False
         assert raw_change.reachability_kind is None
+
+    def test_skips_without_suppression(self) -> None:
+        """Perf guard (CI benchmark_scaling.py regression): MarkReachability
+        must not run its public-surface BFS when no suppression is configured
+        at all — the tags it produces have no other consumer in this slice,
+        and internal_leak.compute_leak_paths is expensive enough that running
+        it unconditionally on every compare() roughly doubled the cost
+        DetectInternalLeaks already pays (caught by CI's baseline-regression
+        gate)."""
+        old, new, raw_change = _reachable_scenario()
+        DEFAULT_PIPELINE.run([raw_change], old, new)  # no suppression passed
+        assert raw_change.public_reachable is False
+        assert raw_change.reachability_kind is None
+
+    def test_pointer_only_pure_layout_change_not_flagged_reachable(self) -> None:
+        """Codex review: DetectInternalLeaks does not treat a pure-layout
+        change reached only through a pointer as a leak (it is not
+        consumer-visible) — MarkReachability must not tag it reachable
+        either, or a broad suppression rule gets refused (and a
+        suppression_would_hide_public_break diagnostic appended) for churn
+        that was always going to be demoted as unreachable anyway."""
+        old = _snap(
+            functions=[Function(
+                name="use", mangled="use", return_type="void",
+                params=[Param(name="h", type="oneapi::dal::kmeans::detail::hidden*", pointer_depth=1)],
+                visibility=Visibility.PUBLIC,
+            )],
+            types=[RecordType(name="oneapi::dal::kmeans::detail::hidden", kind="struct", size_bits=32)],
+        )
+        new = _snap(
+            functions=[Function(
+                name="use", mangled="use", return_type="void",
+                params=[Param(name="h", type="oneapi::dal::kmeans::detail::hidden*", pointer_depth=1)],
+                visibility=Visibility.PUBLIC,
+            )],
+            types=[RecordType(name="oneapi::dal::kmeans::detail::hidden", kind="struct", size_bits=64)],
+        )
+        raw_change = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="oneapi::dal::kmeans::detail::hidden",
+            description="size changed",
+        )
+        suppression = SuppressionList([
+            Suppression(namespace="oneapi::dal::**::detail::**", reason="private")
+        ])
+        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        assert raw_change.public_reachable is False
+        assert raw_change in ctx.suppressed
+        assert ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK not in [c.kind for c in ctx.kept]
 
 
 class TestSuppressionPipelineOrderFix:
@@ -239,3 +291,30 @@ class TestSuppressionYamlRoundTrip:
         )
         with pytest.raises(ValueError, match="reachability"):
             SuppressionList.load(p)
+
+    def test_allow_public_break_string_value_rejected(self, tmp_path) -> None:
+        """Codex review: bool("false") is True in Python — a quoted string
+        must be rejected outright rather than silently coerced to True for
+        this safety-critical override."""
+        p = tmp_path / "suppressions.yaml"
+        p.write_text(
+            "version: 1\n"
+            "suppressions:\n"
+            '  - namespace: "a::*"\n'
+            '    allow_public_break: "false"\n'
+            '    reason: "x"\n'
+        )
+        with pytest.raises(ValueError, match="allow_public_break"):
+            SuppressionList.load(p)
+
+    def test_allow_public_break_true_bool_accepted(self, tmp_path) -> None:
+        p = tmp_path / "suppressions.yaml"
+        p.write_text(
+            "version: 1\n"
+            "suppressions:\n"
+            '  - namespace: "a::*"\n'
+            "    allow_public_break: true\n"
+            '    reason: "x"\n'
+        )
+        sl = SuppressionList.load(p)
+        assert sl._suppressions[0].allow_public_break is True

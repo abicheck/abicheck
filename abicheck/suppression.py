@@ -468,6 +468,28 @@ def _parse_expires(expires_raw: object, entry_index: int) -> date | None:
         ) from e
 
 
+def _parse_allow_public_break(raw: object, entry_index: int) -> bool:
+    """Parse and validate ``allow_public_break`` from a suppression entry.
+
+    ADR-044 D2 (Codex review): this is the explicit override for suppressing
+    a public-reachable BREAKING/API_BREAK change, so it must not silently
+    coerce a truthy-but-wrong value — ``bool("false")`` is ``True`` in Python,
+    so a stray quoted string in a hand- or template-generated YAML file
+    (``allow_public_break: "false"``) would otherwise silently enable the
+    exact override this safety gate exists to require an explicit, reviewed
+    ``true`` for. Only an actual YAML boolean (``true``/``false``, unquoted)
+    or an absent key (default ``False``) is accepted.
+    """
+    if raw is None:
+        return False
+    if isinstance(raw, bool):
+        return raw
+    raise ValueError(
+        f"Suppression entry {entry_index}: 'allow_public_break' must be a boolean "
+        f"(true/false), got {raw!r}"
+    )
+
+
 @dataclass
 class SuppressionOutcome:
     """Result of :meth:`SuppressionList.evaluate` for one change (ADR-044 D4)."""
@@ -532,6 +554,7 @@ class SuppressionList:
                 )
             # Parse expires date
             expires = _parse_expires(item.get("expires"), i)
+            allow_public_break = _parse_allow_public_break(item.get("allow_public_break"), i)
             try:
                 sup = Suppression(
                     symbol=item.get("symbol"),
@@ -546,7 +569,7 @@ class SuppressionList:
                     entity_namespace=item.get("entity_namespace"),
                     cause_namespace=item.get("cause_namespace"),
                     reachability=item.get("reachability"),
-                    allow_public_break=bool(item.get("allow_public_break", False)),
+                    allow_public_break=allow_public_break,
                     expires=expires,
                 )
             except ValueError as e:

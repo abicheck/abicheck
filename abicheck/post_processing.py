@@ -524,14 +524,29 @@ class MarkReachability:
     for a public-reachable internal change now survives ``ApplySuppression``
     by default, and ``DetectInternalLeaks`` (still running later in the
     pipeline, unchanged position) has real evidence to correlate.
+
+    Skipped entirely when no suppression rules are configured
+    (``ctx.suppression is None``, the common case, mirroring
+    ``ApplySuppression``'s own no-op check): the reachability tags this step
+    computes have no other consumer in this slice, and
+    :func:`internal_leak.compute_leak_paths` is a full public-surface BFS —
+    running it here unconditionally would duplicate the walk
+    ``DetectInternalLeaks`` always performs later, roughly doubling that cost
+    on every comparison even when nothing will ever read the tag (perf
+    regression caught by ``benchmark_scaling.py``'s CI gate).
     """
 
     name = "mark_reachability"
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        if ctx.suppression is None:
+            return changes
+
         from .internal_leak import (
+            _IDENTITY_VTABLE_KINDS,
             DEFAULT_INTERNAL_NAMESPACES,
             _format_path,
+            _path_has_indirection,
             _path_is_value_propagating,
             _root_type_name_for_change,
             compute_leak_paths,
@@ -551,6 +566,18 @@ class MarkReachability:
             new_pl = new_paths.get(root, [])
             paths = old_pl + [p for p in new_pl if p not in old_pl]
             if not paths:
+                continue
+            # Mirror DetectInternalLeaks's own value/indirection judgment
+            # (Codex review): a pure-layout change reached *only* through a
+            # pointer/reference is not consumer-visible and DetectInternalLeaks
+            # will not emit a leak finding for it either — tagging it
+            # public_reachable anyway would refuse a broad suppression rule
+            # and append a suppression_would_hide_public_break diagnostic for
+            # churn that was always going to be demoted as unreachable by
+            # DemoteUnreachableInternalChurn, a false alarm.
+            identity_or_vtable = c.kind in _IDENTITY_VTABLE_KINDS
+            all_indirect = all(_path_has_indirection(p) for p in paths)
+            if all_indirect and not identity_or_vtable:
                 continue
             c.public_reachable = True
             c.reachability_kind = (
