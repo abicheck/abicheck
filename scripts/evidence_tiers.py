@@ -170,6 +170,8 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "musllinux_glibc_dependency_detected": "L0",
     "macos_deployment_target_raised": "L0",
     "wheel_tag_architecture_mismatch": "L0",
+    "wheel_rpath_not_portable": "L0",
+    "wheel_closure_dependency_violation": "L0",
     # NumPy C-API compatibility envelope (G26) — pure binary-evidence
     # (rodata string) scans, no header/source/DWARF needed.
     "numpy_capi_consumption_added": "L0",

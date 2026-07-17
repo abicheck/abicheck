@@ -843,6 +843,43 @@ class TestEnvironmentMatrixRuntimeFloors:
         with pytest.raises(ValueError, match="digits and dots"):
             EnvironmentMatrix.from_dict({"runtime_floors": {"GLIBC": bad}})
 
+    def test_wheel_arch_non_numeric_value_accepted(self) -> None:
+        # Codex review #583: WHEEL_ARCH was unreachable via --env-matrix/
+        # from_dict at all — every non-numeric value was rejected before
+        # check_wheel_tag_architecture_mismatch ever ran.
+        m = EnvironmentMatrix.from_dict({"runtime_floors": {"WHEEL_ARCH": "x86_64"}})
+        assert m.runtime_floors == {"WHEEL_ARCH": "x86_64"}
+
+    def test_wheel_arch_lowercase_key_normalized_to_upper(self) -> None:
+        m = EnvironmentMatrix.from_dict({"runtime_floors": {"wheel_arch": "arm64"}})
+        assert m.runtime_floors == {"WHEEL_ARCH": "arm64"}
+
+    def test_musllinux_non_numeric_value_accepted(self) -> None:
+        m = EnvironmentMatrix.from_dict({"runtime_floors": {"MUSLLINUX": "yes"}})
+        assert m.runtime_floors == {"MUSLLINUX": "yes"}
+
+    def test_musllinux_dotted_numeric_value_still_accepted(self) -> None:
+        m = EnvironmentMatrix.from_dict({"runtime_floors": {"MUSLLINUX": "1.2"}})
+        assert m.runtime_floors == {"MUSLLINUX": "1.2"}
+
+    def test_glibc_still_rejects_non_numeric(self) -> None:
+        # The WHEEL_ARCH/MUSLLINUX exemption must not weaken validation for
+        # genuine numeric-floor keys.
+        with pytest.raises(ValueError, match="dotted numeric"):
+            EnvironmentMatrix.from_dict({"runtime_floors": {"GLIBC": "x86_64"}})
+
+    def test_wheel_arch_reaches_compare_via_from_dict(self) -> None:
+        # End-to-end: the documented --env-matrix/from_dict path must be
+        # able to actually enable wheel_tag_architecture_mismatch, not just
+        # the direct-constructor path the detector's own unit tests use.
+        old = _snap(_elf(machine="EM_AARCH64"))
+        new = _snap(_elf(machine="EM_AARCH64"))
+        matrix = EnvironmentMatrix.from_dict(
+            {"runtime_floors": {"WHEEL_ARCH": "x86_64"}}
+        )
+        result = compare(old, new, env_matrix=matrix)
+        assert ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH in _kinds(result.changes)
+
     def test_env_matrix_rejected_for_release_set_inputs(self, tmp_path) -> None:
         # Directory/package comparisons fan out through the release path,
         # which does not thread the runtime-floor contract; the flag must be

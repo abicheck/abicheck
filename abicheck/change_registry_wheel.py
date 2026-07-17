@@ -82,4 +82,31 @@ WHEEL_DEPLOYMENT_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
         "wrong tag).",
         description_template="Wheel tag claims architecture {old}, binary is {new} (required by: {name})",
     ),
+    _E(
+        "wheel_rpath_not_portable",
+        _R,
+        impact="The binary's RPATH/RUNPATH carries an entry that isn't "
+        "$ORIGIN-relative — almost always a build-machine artifact (the "
+        "build sysroot, a CI runner's checkout path, a developer's local "
+        "prefix) that will not exist once the wheel is installed to an "
+        "arbitrary per-user site-packages path. auditwheel/delocate exist "
+        "specifically to rewrite RPATH/RUNPATH to $ORIGIN-relative paths; "
+        "a wheel that skipped that repair step ships a search path that "
+        "resolves nothing on a clean install.",
+        description_template="RPATH/RUNPATH not $ORIGIN-relative: {new} (binary: {name})",
+    ),
+    _E(
+        "wheel_closure_dependency_violation",
+        _B,
+        impact="A DT_NEEDED entry matches the auditwheel/delocate vendored "
+        "content-hash naming convention (the same pattern G9's vendored-"
+        "library pairing recognizes) — a strong signal the binary is meant "
+        "to load a bundled dependency — but the binary carries no "
+        "$ORIGIN-relative RPATH/RUNPATH entry at all, so the dynamic "
+        "loader has no mechanism to ever find it. The vendored library is "
+        "not actually part of the wheel's resolvable dependency closure "
+        "regardless of whether the file itself was physically included; "
+        "the binary fails to load with an unresolved-dependency error.",
+        description_template="Vendored dependency unresolvable (no $ORIGIN-relative RPATH/RUNPATH): {new} (binary: {name})",
+    ),
 ]

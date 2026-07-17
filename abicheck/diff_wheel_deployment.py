@@ -17,21 +17,29 @@
 A wheel's platform tag makes explicit promises about where its binaries will
 run. ``diff_versioning.py`` already covers the Linux half (manylinux glibc
 floor — G10 — generalized to GLIBCXX/CXXABI, plus the musllinux
-glibc-dependency check, both G27). This module adds the macOS half: a
-``macosx_X_Y_<arch>`` platform tag promises a *maximum* deployment target
-(``MACOSX_DEPLOYMENT_TARGET``) a wheel's binaries may require — plus a
-cross-platform check, the wheel tag's claimed architecture against the
-binary's own recorded machine/cpu_type — see
+glibc-dependency check, both G27). This module adds: the macOS half (a
+``macosx_X_Y_<arch>`` platform tag promises a *maximum* deployment target,
+``MACOSX_DEPLOYMENT_TARGET``, a wheel's binaries may require); a
+cross-platform check (the wheel tag's claimed architecture against the
+binary's own recorded machine/cpu_type); and two RPATH/RUNPATH-hygiene
+checks scoped to a wheel-verification context — see
 docs/development/plans/g27-wheel-deployment-verification.md.
 
-Windows UCRT/runtime-requirement checking, RPATH/RUNPATH correctness,
-wheel-closure-dependency violations, and CPU-ISA-baseline detection are
+Windows UCRT/runtime-requirement checking and CPU-ISA-baseline detection are
 still planned (see the plan's "Out of scope" and the registry entry's
-``next_steps``) — not implemented here.
+``next_steps``) — not implemented here. The RPATH/RUNPATH checks here are
+deliberately narrow (ELF/Linux only, and gated on strong internal-evidence
+signals rather than an allowlist of "known-safe" system SONAMEs): a full
+per-manylinux/musllinux-tag allowed-dependency policy (mirroring
+``auditwheel``'s own versioned policy JSON) would be needed to check the
+*general* "is this DT_NEEDED entry permitted by the wheel's platform tag"
+question without a real risk of false positives on legitimately-present
+system libraries this module doesn't enumerate — see "Out of scope".
 """
 
 from __future__ import annotations
 
+from .binary_utils import strip_vendor_hash
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .diff_helpers import make_change
@@ -80,8 +88,22 @@ def check_macos_deployment_target_floor(
     ``10.9`` correctly but not necessarily against an ``11.0`` floor the way
     a human would expect. Real-world wheel tags and Mach-O load commands
     overwhelmingly agree on one scheme or the other in practice.
+
+    Also skipped for a fat/universal Mach-O (more than one entry in
+    :attr:`MachoMetadata.cpu_types`): ``min_os_version`` is only captured
+    for the *one* slice ``parse_macho_metadata`` selected for the host
+    running abicheck, not per slice — a universal binary's arm64 slice
+    commonly has a genuinely higher real minimum (11.0, since Apple Silicon
+    didn't exist before macOS 11) than its x86_64 slice, so attributing the
+    single captured value to whichever slice the wheel tag claims isn't
+    reliable (Codex review #583, the deployment-target counterpart to the
+    same fat-binary ambiguity already handled for
+    :func:`check_wheel_tag_architecture_mismatch` and
+    :func:`abicheck.package.parse_macos_deployment_target_floor`).
     """
     if macho is None or not runtime_floors:
+        return []
+    if len(getattr(macho, "cpu_types", None) or []) > 1:
         return []
     floors = {k.upper(): v for k, v in runtime_floors.items()}
     floor_raw = floors.get(_MACOS_DEPLOYMENT_TARGET_KEY)
@@ -166,6 +188,19 @@ def check_wheel_tag_architecture_mismatch(
     is declared, the claim isn't a recognized architecture token, neither
     *elf* nor *macho* carries a recorded machine/cpu_type, or the recorded
     value satisfies the claim.
+
+    For a fat/universal Mach-O, :attr:`MachoMetadata.cpu_type` is only the
+    *one* slice ``parse_macho_metadata`` selected for the host running
+    abicheck (arm64 preferred on Apple Silicon, x86_64 otherwise) — not
+    necessarily the slice the wheel tag actually claims. A single-arch wheel
+    tag whose binary happens to still be a fat/universal Mach-O (unusual,
+    but not impossible if a thinning step was skipped) would otherwise
+    false-positive here purely based on which host happened to run the
+    parse. This checks every slice in :attr:`MachoMetadata.cpu_types` (all
+    architectures the fat binary actually carries, always populated
+    alongside ``cpu_type``) rather than only the selected one, falling back
+    to ``cpu_type`` alone for a legacy snapshot predating that field
+    (Codex review #583).
     """
     if not runtime_floors:
         return []
@@ -194,7 +229,10 @@ def check_wheel_tag_architecture_mismatch(
         cpu_type = getattr(macho, "cpu_type", "")
         if cpu_type:
             expected = _ARCH_CLAIM_TO_MACHO_CPU_TYPE.get(claimed)
-            if expected is None or cpu_type.upper() in expected:
+            if expected is None:
+                return []
+            slices: list[str] = getattr(macho, "cpu_types", None) or [cpu_type]
+            if any(s.upper() in expected for s in slices):
                 return []
             return [
                 make_change(
@@ -203,7 +241,121 @@ def check_wheel_tag_architecture_mismatch(
                     name=macho.install_name or "<binary>",
                     detail="architecture",
                     old=claimed,
-                    new=cpu_type,
+                    new=", ".join(slices),
                 )
             ]
     return []
+
+
+def _elf_rpath_entries(elf: ElfMetadata) -> list[str]:
+    """The colon-joined ``DT_RPATH``/``DT_RUNPATH`` tag content, split into
+    individual path entries (empty entries dropped)."""
+    combined = ":".join(
+        p for p in (getattr(elf, "rpath", ""), getattr(elf, "runpath", "")) if p
+    )
+    return [entry for entry in combined.split(":") if entry]
+
+
+def _has_origin_relative_entry(entries: list[str]) -> bool:
+    """Whether any RPATH/RUNPATH entry is ``$ORIGIN``-relative (the portable
+    convention ``auditwheel``/``delocate`` rewrite to, so a wheel's binaries
+    find their bundled dependencies relative to their own install location
+    rather than a build-machine-specific absolute path)."""
+    return any(entry.startswith(("$ORIGIN", "${ORIGIN}")) for entry in entries)
+
+
+def check_wheel_rpath_not_portable(
+    elf: ElfMetadata | None, runtime_floors: dict[str, str] | None
+) -> list[Change]:
+    """Flag a non-``$ORIGIN``-relative (absolute) RPATH/RUNPATH entry (G27).
+
+    A wheel's binaries are installed to an unpredictable, per-user site-
+    packages path — any RPATH/RUNPATH entry that isn't ``$ORIGIN``-relative
+    is almost always a build-machine artifact (the build sysroot, a CI
+    runner's checkout path, a developer's local prefix) that will not exist
+    on the install target at all. This is exactly what ``auditwheel``/
+    ``delocate`` rewrite RPATH/RUNPATH to fix; a wheel that skipped that
+    repair step (or a hand-rolled build) ships with a search path that
+    resolves nothing on a clean install — the classic "works in CI,
+    `ImportError: lib not found` on the user's machine" wheel-packaging bug.
+
+    Gated on *runtime_floors* being non-empty (any declared G10/G27 key —
+    the same "this compare is a wheel-verification context" signal every
+    other check in this module and ``diff_versioning.py`` shares), since an
+    absolute RPATH is completely normal and not a bug for an ordinary
+    system-installed shared library outside the wheel-distribution context.
+    Returns ``[]`` when no wheel-verification context is declared, *elf* is
+    absent, or every RPATH/RUNPATH entry is ``$ORIGIN``-relative (or there
+    are none at all).
+    """
+    if not runtime_floors or elf is None:
+        return []
+    entries = _elf_rpath_entries(elf)
+    if not entries:
+        return []
+    absolute = [e for e in entries if not e.startswith(("$ORIGIN", "${ORIGIN}"))]
+    if not absolute:
+        return []
+    return [
+        make_change(
+            ChangeKind.WHEEL_RPATH_NOT_PORTABLE,
+            symbol="<platform-baseline>",
+            name=getattr(elf, "soname", "") or "<binary>",
+            detail="RPATH/RUNPATH",
+            old="$ORIGIN-relative",
+            new=":".join(absolute),
+        )
+    ]
+
+
+def check_wheel_closure_dependency_violation(
+    elf: ElfMetadata | None, runtime_floors: dict[str, str] | None
+) -> list[Change]:
+    """Flag a vendored dependency with no mechanism to ever be found (G27).
+
+    ``auditwheel``/``delocate`` vendor external dependencies *into* the
+    wheel and rename them with a content-hash suffix (recognized here via
+    the same :func:`abicheck.binary_utils.strip_vendor_hash` pattern G9's
+    vendored-library pairing uses) so a rebuild doesn't collide with the
+    system's own copy. A DT_NEEDED entry matching that hash-suffixed naming
+    convention is a strong signal the binary is *meant* to load a bundled
+    dependency — but if the binary carries no ``$ORIGIN``-relative RPATH/
+    RUNPATH entry at all, there is no mechanism for the dynamic loader to
+    ever find it: the vendored library is not actually part of the wheel's
+    resolvable dependency closure, regardless of whether the file itself was
+    physically included.
+
+    This is deliberately narrower than a general "dependency outside the
+    permitted manylinux/musllinux closure" check (which would need a real
+    per-tag allowed-SONAME policy, out of scope here — see this module's
+    docstring): it only fires on the *internal* inconsistency of "this looks
+    like your own vendored library, but nothing points at it," not on
+    whether an ordinary DT_NEEDED entry is a permitted system dependency.
+
+    Gated on *runtime_floors* being non-empty, the same wheel-verification-
+    context signal :func:`check_wheel_rpath_not_portable` uses. Returns
+    ``[]`` when no wheel-verification context is declared, *elf* is absent,
+    no DT_NEEDED entry matches the vendored-hash naming convention, or an
+    ``$ORIGIN``-relative RPATH/RUNPATH entry is present (even one — this
+    check does not attempt to verify that entry actually resolves to the
+    specific vendored library named, only that *some* bundling mechanism
+    exists at all).
+    """
+    if not runtime_floors or elf is None:
+        return []
+    needed: list[str] = getattr(elf, "needed", None) or []
+    vendored = [lib for lib in needed if strip_vendor_hash(lib) != lib]
+    if not vendored:
+        return []
+    if _has_origin_relative_entry(_elf_rpath_entries(elf)):
+        return []
+    return [
+        make_change(
+            ChangeKind.WHEEL_CLOSURE_DEPENDENCY_VIOLATION,
+            symbol="<platform-baseline>",
+            name=getattr(elf, "soname", "") or "<binary>",
+            detail="wheel closure",
+            old="$ORIGIN-relative RPATH/RUNPATH expected",
+            new=", ".join(sorted(vendored)),
+        )
+    ]

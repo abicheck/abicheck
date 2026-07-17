@@ -638,6 +638,33 @@ def compare(
         if arch_mismatch_changes:
             kept.extend(arch_mismatch_changes)
 
+    # RPATH/RUNPATH portability + vendored-dependency-closure checks (G27):
+    # same declared wheel-verification-context gate, ELF-only.
+    if env_matrix is not None and env_matrix.runtime_floors:
+        from .diff_wheel_deployment import (
+            check_wheel_closure_dependency_violation,
+            check_wheel_rpath_not_portable,
+        )
+
+        new_elf_for_rpath = getattr(new, "elf", None)
+        rpath_changes = check_wheel_rpath_not_portable(
+            new_elf_for_rpath, env_matrix.runtime_floors
+        )
+        rpath_changes = _filter_suppressed_changes(
+            rpath_changes, suppression, suppressed
+        )
+        if rpath_changes:
+            kept.extend(rpath_changes)
+
+        closure_changes = check_wheel_closure_dependency_violation(
+            new_elf_for_rpath, env_matrix.runtime_floors
+        )
+        closure_changes = _filter_suppressed_changes(
+            closure_changes, suppression, suppressed
+        )
+        if closure_changes:
+            kept.extend(closure_changes)
+
     # NumPy C-API compatibility-envelope delta (G26): needs only the two
     # snapshots' own numpy_capi field (no external wheel metadata), so this
     # runs unconditionally — unlike the wheel-metadata cross-check

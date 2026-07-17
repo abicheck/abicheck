@@ -76,11 +76,24 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `BREAKING` `wheel_tag_architecture_mismatch`, declared via
   `runtime_floors: {WHEEL_ARCH: "x86_64"}`. New
   `abicheck.package.parse_wheel_architecture_claim()` (public wrapper over
-  the existing internal wheel-tag arch derivation).
-  Windows UCRT/runtime checks, CPU-ISA-baseline detection, RPATH/RUNPATH
-  and wheel-closure-dependency checks, and end-to-end CLI auto-derivation
-  from a compared wheel's own filename tag (every check above, including
-  G10's original `GLIBC` one, still requires an explicit `--env-matrix`
+  the existing internal wheel-tag arch derivation). New
+  `diff_wheel_deployment.check_wheel_rpath_not_portable`: a non-
+  `$ORIGIN`-relative RPATH/RUNPATH entry in a declared wheel-verification
+  context — almost always a build-machine artifact that won't exist on the
+  install target — new `RISK` `wheel_rpath_not_portable`. New
+  `diff_wheel_deployment.check_wheel_closure_dependency_violation`: a
+  DT_NEEDED entry matching auditwheel/delocate's vendored content-hash
+  naming convention (reusing G9's `strip_vendor_hash` pattern) with no
+  `$ORIGIN`-relative RPATH/RUNPATH to ever find it — new `BREAKING`
+  `wheel_closure_dependency_violation`. Both deliberately narrower than a
+  general "is this dependency permitted by the wheel's platform tag" check
+  (which needs a real per-manylinux/musllinux-tag allowed-SONAME policy to
+  avoid false positives — out of scope, see the plan) — they key off
+  internally-inconsistent evidence instead of an external allowlist.
+  Windows UCRT/runtime checks, CPU-ISA-baseline detection, the full
+  per-tag closure policy, and end-to-end CLI auto-derivation from a
+  compared wheel's own filename tag (every check above, including G10's
+  original `GLIBC` one, still requires an explicit `--env-matrix`
   declaration) remain planned — see the G27 plan's "Out of scope"/status
   note.
 - `compare --help-all`: a second-level `--help` disclosure tier (G21.8

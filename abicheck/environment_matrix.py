@@ -152,6 +152,17 @@ def _parse_cuda_constraints(cuda_data: dict[str, Any]) -> CudaConstraints:
     )
 
 
+#: runtime_floors keys whose value is not a dotted-numeric version — they
+#: declare a presence flag (MUSLLINUX) or a non-version token
+#: (WHEEL_ARCH, e.g. "x86_64") rather than a floor, so the dotted-numeric
+#: validation below doesn't apply to them (Codex review #583: WHEEL_ARCH
+#: was unreachable via --env-matrix/from_dict entirely — every value was
+#: rejected before check_wheel_tag_architecture_mismatch ever ran, since
+#: only the direct-constructor path bypassing from_dict's validation could
+#: set a non-numeric runtime_floors value at all).
+_NON_NUMERIC_RUNTIME_FLOOR_KEYS = frozenset({"WHEEL_ARCH", "MUSLLINUX"})
+
+
 def _parse_runtime_floors(floors_raw: object) -> dict[str, str]:
     """Parse and validate the ``runtime_floors`` prefix → version mapping."""
     if not isinstance(floors_raw, dict):
@@ -173,16 +184,17 @@ def _parse_runtime_floors(floors_raw: object) -> dict[str, str]:
                 f"with the intended digits."
             )
         floor = str(value)
-        # Every dot-separated component must be purely numeric: the floor
-        # contract parses with int() per component, so a "2.28-1" or "2.x"
-        # would silently truncate to (2,) and flip verdicts. Reject
-        # malformed text here instead (Codex review #510).
-        if _parse_dotted_numeric_version(floor) is None:
-            raise ValueError(
-                f"'runtime_floors.{key}' must be a dotted numeric version "
-                f"(digits and dots only, e.g. '2.28'), with each component "
-                f"at most 9 digits, got {value!r}"
-            )
+        if str(key).upper() not in _NON_NUMERIC_RUNTIME_FLOOR_KEYS:
+            # Every dot-separated component must be purely numeric: the floor
+            # contract parses with int() per component, so a "2.28-1" or "2.x"
+            # would silently truncate to (2,) and flip verdicts. Reject
+            # malformed text here instead (Codex review #510).
+            if _parse_dotted_numeric_version(floor) is None:
+                raise ValueError(
+                    f"'runtime_floors.{key}' must be a dotted numeric version "
+                    f"(digits and dots only, e.g. '2.28'), with each component "
+                    f"at most 9 digits, got {value!r}"
+                )
         runtime_floors[str(key).upper()] = floor
     return runtime_floors
 

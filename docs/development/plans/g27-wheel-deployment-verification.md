@@ -10,15 +10,21 @@ hardening-flag capture.
 
 **Status note (delivered scope):** the Linux `GLIBCXX`/`CXXABI` floor
 extension, the musllinux glibc-dependency check, the macOS
-deployment-target check, and the wheel-tag architecture-mismatch check are
-done (all four reachable via the same `--env-matrix`/`runtime_floors`
+deployment-target check, the wheel-tag architecture-mismatch check, and a
+narrowly-scoped RPATH-portability / vendored-dependency-closure check pair
+are done (all reachable via the same `--env-matrix`/`runtime_floors`
 declared-constraint mechanism G10 already shipped for the plain `GLIBC`
 case — see `usecase-registry.yaml`'s `next_steps` for the full breakdown).
-Windows, CPU-ISA-baseline, RPATH/RUNPATH, wheel-closure-dependency checks,
-and end-to-end CLI auto-derivation from a compared wheel's own filename tag
-(still requires an explicit `--env-matrix` today, for every check including
-G10's original `GLIBC` one) remain planned — see "Out of scope" below and
-the registry entry.
+The RPATH/closure pair deliberately does not attempt the *general* "is this
+dependency permitted by the wheel's platform tag" question (that needs a
+real per-manylinux/musllinux-tag allowed-SONAME policy, out of scope here —
+see "Out of scope"); it only catches internally-inconsistent evidence
+(an absolute RPATH/RUNPATH entry; a vendored-looking dependency with no
+bundling mechanism at all). Windows, CPU-ISA-baseline, the full closure
+policy, and end-to-end CLI auto-derivation from a compared wheel's own
+filename tag (still requires an explicit `--env-matrix` today, for every
+check including G10's original `GLIBC` one) remain planned — see "Out of
+scope" below and the registry entry.
 
 ## Problem
 
@@ -69,13 +75,16 @@ no native-ABI signal at all.
 - [x] Compare claim vs. evidence and emit deployment-`RISK`/`BREAKING`
       findings on mismatch, each classified per the root `CLAUDE.md`
       four-step procedure — G10's `platform_baseline_floor_raised` kind now
-      also covers the `GLIBCXX`/`CXXABI` case, plus three new siblings:
+      also covers the `GLIBCXX`/`CXXABI` case, plus five new siblings:
       `musllinux_glibc_dependency_detected`, `macos_deployment_target_raised`,
-      and `wheel_tag_architecture_mismatch` (the wheel-tag-claim counterpart
+      `wheel_tag_architecture_mismatch` (the wheel-tag-claim counterpart
       to G13's `elf_machine_changed`/`macho_cpu_type_changed`, which compare
       two arbitrary binaries rather than a binary against its own wheel's
-      filename promise). `windows_runtime_requirement_added` and
-      `wheel_closure_dependency_violation` remain planned.
+      filename promise), `wheel_rpath_not_portable` (a non-`$ORIGIN`-relative
+      RPATH/RUNPATH entry), and `wheel_closure_dependency_violation` (a
+      vendored/hash-suffixed dependency — G9's `strip_vendor_hash` pattern —
+      with no `$ORIGIN`-relative RPATH/RUNPATH to find it).
+      `windows_runtime_requirement_added` remains planned.
 - [x] A within-claim binary (evidence at or below the tag's promised floor)
       stays clean on all new checks (unit-tested in
       `tests/test_environment_drift.py`/`tests/test_diff_wheel_deployment.py`).
@@ -157,3 +166,20 @@ runtime behavior, not a static wheel-claim check); conda package
 mechanism — see the "one-command PyPI/conda compare" item in the
 [SciPy roadmap](../scipy-scientific-python-roadmap.md#6-one-command-pypi-and-conda-release-comparison),
 not yet gap-plan-ified).
+
+A **general** "is this DT_NEEDED entry permitted by the wheel's platform
+tag" wheel-closure check — replicating `auditwheel`'s own versioned
+per-manylinux-tag allowed-SONAME policy JSON — is also out of scope for
+this increment: an incomplete allowlist risks false positives on
+legitimately-present system libraries this project doesn't enumerate,
+which this codebase's FP-rate gate (`scripts/check_fp_rate.py`, baseline
+0) treats as a real regression, not an acceptable cost of coverage. The
+narrower `wheel_closure_dependency_violation` check delivered here sidesteps
+that risk entirely by keying off *internal* evidence (G9's vendored-hash
+naming convention plus the absence of any `$ORIGIN`-relative RPATH/RUNPATH
+entry) rather than an external allowlist — it only fires on a class of
+binary that cannot possibly load, not on an ordinary-but-unenumerated
+system dependency. macOS's own RPATH/`@loader_path`/`@rpath` portability
+conventions (a different, more involved mechanism than Linux's `$ORIGIN`)
+are also deferred — `check_wheel_rpath_not_portable`/
+`check_wheel_closure_dependency_violation` are ELF/Linux only.

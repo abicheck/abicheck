@@ -232,7 +232,7 @@ from disk instead.
 
 ### `abi_list_changes` — List detectable change kinds
 
-Enumerates all 364 `ChangeKind` values with their impact classification. See
+Enumerates all 366 `ChangeKind` values with their impact classification. See
 the [Change Kinds Reference](../reference/change-kinds.md) for canonical
 documentation of each kind.
 
@@ -246,7 +246,7 @@ documentation of each kind.
 
 ```json
 {
-  "count": 364,
+  "count": 366,
   "change_kinds": [
     {
       "kind": "func_removed",
@@ -490,7 +490,7 @@ variables override defaults.
 Example invocation tuned for large libraries:
 
 ```bash
-ABICHECK_MCP_TIMEOUT=600 ABICHECK_MCP_MAX_FILE_SIZE=2147483648 \
+ABICHECK_MCP_TIMEOUT=600 ABICHECK_MCP_MAX_FILE_SIZE=2147483668 \
   abicheck-mcp --log-format json
 ```
 
@@ -503,7 +503,7 @@ Or via MCP config:
       "command": "abicheck-mcp",
       "args": ["--timeout", "600", "--log-format", "json"],
       "env": {
-        "ABICHECK_MCP_MAX_FILE_SIZE": "2147483648"
+        "ABICHECK_MCP_MAX_FILE_SIZE": "2147483668"
       }
     }
   }

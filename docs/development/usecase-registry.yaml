@@ -29,7 +29,7 @@ use_cases:
   # ── change_class ──────────────────────────────────────────────────────────
   - id: UC-CHANGE-taxonomy
     axis: change_class
-    name: ABI/API change taxonomy (364 ChangeKinds, 5-tier policy)
+    name: ABI/API change taxonomy (366 ChangeKinds, 5-tier policy)
     status: complete
     evidence:
       modules: [abicheck/change_registry.py, abicheck/checker_policy.py]
@@ -713,15 +713,31 @@ use_cases:
       new ChangeKind wheel_tag_architecture_mismatch (BREAKING, since a
       mismatch means the wheel cannot load on its claimed architecture at
       all, not merely a deployment risk).
+      check_wheel_rpath_not_portable flags a non-$ORIGIN-relative RPATH/
+      RUNPATH entry (RISK) in a declared wheel-verification context — the
+      classic "works in CI, ImportError on the user's machine" bug
+      auditwheel/delocate exist to fix. check_wheel_closure_dependency_violation
+      flags a DT_NEEDED entry matching auditwheel/delocate's vendored
+      content-hash naming convention (reusing G9's strip_vendor_hash
+      pattern) with no $ORIGIN-relative RPATH/RUNPATH to ever find it
+      (BREAKING) — deliberately narrower than a general "dependency outside
+      the permitted closure" check (which would need a real per-manylinux/
+      musllinux-tag allowed-SONAME policy to avoid false positives on
+      legitimately-present system libraries; see the plan's "Out of scope"
+      for why that full policy replication is deferred). Both ELF/Linux
+      only; both new ChangeKinds: wheel_rpath_not_portable,
+      wheel_closure_dependency_violation.
       STILL PLANNED: end-to-end CLI auto-derivation (a single
       `compare old.whl new.whl` deriving runtime_floors from the *new*
       wheel's own filename tag with no --env-matrix flag needed — today all
       of the checks above, including G10's original GLIBC one, still require
       an explicit --env-matrix declaration); Windows UCRT/MSVC-runtime
       requirement checking; CPU-ISA-baseline (dispatch-symbol-name
-      heuristic) detection; RPATH/RUNPATH and wheel-closure-dependency
-      checks; a compiled examples/ fixture pair. See the plan's "Out of
-      scope" and the SciPy/Scientific-Python Roadmap for full context.
+      heuristic) detection; the full per-tag allowed-dependency policy (the
+      general wheel-closure check, beyond the vendored-hash-specific case
+      above); macOS RPATH/@loader_path portability; a compiled examples/
+      fixture pair. See the plan's "Out of scope" and the
+      SciPy/Scientific-Python Roadmap for full context.
 
   - id: UC-TC-dual-abi
     axis: toolchain

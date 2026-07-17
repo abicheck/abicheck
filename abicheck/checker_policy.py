@@ -786,6 +786,16 @@ class ChangeKind(str, Enum):
     # wheel tag's own claim, unlike G13's two-snapshot elf_machine_changed/
     # macho_cpu_type_changed).
     WHEEL_TAG_ARCHITECTURE_MISMATCH = "wheel_tag_architecture_mismatch"  # binary's recorded machine/cpu_type disagrees with the wheel tag's claimed architecture → BREAKING
+    # A wheel's binaries install to an unpredictable per-user path; any
+    # RPATH/RUNPATH entry that isn't $ORIGIN-relative is almost always a
+    # build-machine artifact that won't exist on the install target
+    # (auditwheel/delocate exist specifically to rewrite these) (G27).
+    WHEEL_RPATH_NOT_PORTABLE = "wheel_rpath_not_portable"  # RPATH/RUNPATH carries a non-$ORIGIN-relative (absolute) entry in a declared wheel-verification context → RISK
+    # A DT_NEEDED entry matching auditwheel/delocate's vendored content-hash
+    # naming convention (G9's strip_vendor_hash pattern) with no
+    # $ORIGIN-relative RPATH/RUNPATH to ever find it — the vendored
+    # dependency isn't actually part of the resolvable closure (G27).
+    WHEEL_CLOSURE_DEPENDENCY_VIOLATION = "wheel_closure_dependency_violation"  # vendored/hash-suffixed dependency with no $ORIGIN-relative RPATH/RUNPATH mechanism to find it → BREAKING
     # Packed relative relocations (DT_RELR, `-z pack-relative-relocs`,
     # binutils ≥ 2.38 default on some distros). A DT_RELR binary requires
     # glibc ≥ 2.36 (or an equivalent loader) — glibc marks this with the

@@ -26,6 +26,8 @@ from __future__ import annotations
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.diff_wheel_deployment import (
     check_macos_deployment_target_floor,
+    check_wheel_closure_dependency_violation,
+    check_wheel_rpath_not_portable,
     check_wheel_tag_architecture_mismatch,
 )
 from abicheck.elf_metadata import ElfMetadata
@@ -141,6 +143,35 @@ class TestMacosDeploymentTargetFloorUnit:
     def test_unrelated_floor_key_ignored(self) -> None:
         macho = _macho(min_os_version="12.3")
         assert check_macos_deployment_target_floor(macho, {"GLIBC": "2.28"}) == []
+
+    def test_fat_universal_binary_skipped(self) -> None:
+        # Codex review #583: min_os_version is only captured for the ONE
+        # slice parse_macho_metadata selected for the host running abicheck
+        # — a universal binary's arm64 slice commonly has a genuinely higher
+        # real minimum than its x86_64 slice, so the single captured value
+        # can't be reliably attributed to whichever slice the wheel tag
+        # claims. Skip rather than risk a false positive.
+        macho = _macho(min_os_version="12.3", cpu_types=["X86_64", "ARM64"])
+        assert (
+            check_macos_deployment_target_floor(
+                macho, {"MACOS_DEPLOYMENT_TARGET": "10.14"}
+            )
+            == []
+        )
+
+    def test_single_slice_binary_still_checked(self) -> None:
+        macho = _macho(min_os_version="12.3", cpu_types=["X86_64"])
+        changes = check_macos_deployment_target_floor(
+            macho, {"MACOS_DEPLOYMENT_TARGET": "10.14"}
+        )
+        assert len(changes) == 1
+
+    def test_legacy_snapshot_without_cpu_types_still_checked(self) -> None:
+        macho = _macho(min_os_version="12.3", cpu_types=[])
+        changes = check_macos_deployment_target_floor(
+            macho, {"MACOS_DEPLOYMENT_TARGET": "10.14"}
+        )
+        assert len(changes) == 1
 
 
 class TestMacosDeploymentTargetFloorCliEndToEnd:
@@ -259,6 +290,45 @@ class TestWheelTagArchitectureMismatchUnit:
         )
         assert len(changes) == 1
 
+    def test_fat_macho_claimed_slice_present_not_flagged(self) -> None:
+        # Codex review #583: cpu_type is only the ONE slice
+        # parse_macho_metadata selected for the host running abicheck
+        # (arm64 preferred on Apple Silicon) — a single-arch x86_64 wheel
+        # tag whose binary still carries both slices must not false-positive
+        # just because an Apple Silicon host happened to parse it and select
+        # the arm64 slice.
+        macho = _macho(cpu_type="ARM64", cpu_types=["X86_64", "ARM64"])
+        assert (
+            check_wheel_tag_architecture_mismatch(
+                None, macho, {"WHEEL_ARCH": "x86_64"}
+            )
+            == []
+        )
+
+    def test_fat_macho_claimed_slice_absent_still_flagged(self) -> None:
+        macho = _macho(
+            cpu_type="ARM64",
+            cpu_types=["ARM64"],
+            install_name="@rpath/libfoo.dylib",
+        )
+        changes = check_wheel_tag_architecture_mismatch(
+            None, macho, {"WHEEL_ARCH": "x86_64"}
+        )
+        assert len(changes) == 1
+        assert "ARM64" in changes[0].new_value
+
+    def test_legacy_snapshot_without_cpu_types_falls_back_to_cpu_type(
+        self,
+    ) -> None:
+        # A snapshot predating the cpu_types field deserializes with
+        # cpu_types=[] — must still compare against the single cpu_type
+        # rather than treating an empty slice list as "no evidence."
+        macho = _macho(cpu_type="ARM64", cpu_types=[])
+        changes = check_wheel_tag_architecture_mismatch(
+            None, macho, {"WHEEL_ARCH": "x86_64"}
+        )
+        assert len(changes) == 1
+
 
 class TestWheelTagArchitectureMismatchCliEndToEnd:
     def test_elf_mismatch_surfaces_as_breaking(self) -> None:
@@ -286,3 +356,111 @@ class TestWheelTagArchitectureMismatchCliEndToEnd:
             old, new, env_matrix=EnvironmentMatrix(runtime_floors={"WHEEL_ARCH": "x86_64"})
         )
         assert ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH not in _kinds(result.changes)
+
+
+class TestWheelRpathNotPortableUnit:
+    def test_no_wheel_context_no_finding(self) -> None:
+        elf = _elf(rpath="/usr/local/lib")
+        assert check_wheel_rpath_not_portable(elf, None) == []
+        assert check_wheel_rpath_not_portable(elf, {}) == []
+
+    def test_no_rpath_no_finding(self) -> None:
+        elf = _elf(rpath="", runpath="")
+        assert check_wheel_rpath_not_portable(elf, {"GLIBC": "2.28"}) == []
+
+    def test_origin_relative_rpath_clean(self) -> None:
+        elf = _elf(rpath="$ORIGIN/../foo.libs")
+        assert check_wheel_rpath_not_portable(elf, {"GLIBC": "2.28"}) == []
+
+    def test_origin_relative_runpath_clean(self) -> None:
+        elf = _elf(runpath="$ORIGIN/../foo.libs")
+        assert check_wheel_rpath_not_portable(elf, {"GLIBC": "2.28"}) == []
+
+    def test_absolute_rpath_flagged(self) -> None:
+        elf = _elf(rpath="/usr/local/lib", soname="libfoo.so.1")
+        changes = check_wheel_rpath_not_portable(elf, {"GLIBC": "2.28"})
+        assert len(changes) == 1
+        assert changes[0].kind is ChangeKind.WHEEL_RPATH_NOT_PORTABLE
+        assert changes[0].new_value == "/usr/local/lib"
+
+    def test_mixed_absolute_and_origin_relative_flags_only_absolute(self) -> None:
+        elf = _elf(rpath="/usr/local/lib:$ORIGIN/../foo.libs")
+        changes = check_wheel_rpath_not_portable(elf, {"GLIBC": "2.28"})
+        assert len(changes) == 1
+        assert changes[0].new_value == "/usr/local/lib"
+
+    def test_no_elf_no_finding(self) -> None:
+        assert check_wheel_rpath_not_portable(None, {"GLIBC": "2.28"}) == []
+
+
+class TestWheelClosureDependencyViolationUnit:
+    def test_no_wheel_context_no_finding(self) -> None:
+        elf = _elf(needed=["libopenblas-a1b2c3d4.so.0"])
+        assert check_wheel_closure_dependency_violation(elf, None) == []
+        assert check_wheel_closure_dependency_violation(elf, {}) == []
+
+    def test_no_vendored_dependency_no_finding(self) -> None:
+        elf = _elf(needed=["libc.so.6"])
+        assert (
+            check_wheel_closure_dependency_violation(elf, {"GLIBC": "2.28"}) == []
+        )
+
+    def test_vendored_dependency_with_origin_rpath_clean(self) -> None:
+        elf = _elf(
+            needed=["libopenblas-a1b2c3d4.so.0"], rpath="$ORIGIN/../foo.libs"
+        )
+        assert (
+            check_wheel_closure_dependency_violation(elf, {"GLIBC": "2.28"}) == []
+        )
+
+    def test_vendored_dependency_without_origin_rpath_flagged(self) -> None:
+        elf = _elf(
+            needed=["libopenblas-a1b2c3d4.so.0"], rpath="", soname="libfoo.so.1"
+        )
+        changes = check_wheel_closure_dependency_violation(elf, {"MUSLLINUX": "1.2"})
+        assert len(changes) == 1
+        assert changes[0].kind is ChangeKind.WHEEL_CLOSURE_DEPENDENCY_VIOLATION
+        assert changes[0].new_value == "libopenblas-a1b2c3d4.so.0"
+
+    def test_vendored_dependency_with_absolute_rpath_only_flagged(self) -> None:
+        # An absolute (non-$ORIGIN) rpath doesn't count as a bundling
+        # mechanism for this check.
+        elf = _elf(needed=["libopenblas-a1b2c3d4.so.0"], rpath="/usr/local/lib")
+        changes = check_wheel_closure_dependency_violation(elf, {"GLIBC": "2.28"})
+        assert len(changes) == 1
+
+    def test_no_elf_no_finding(self) -> None:
+        assert (
+            check_wheel_closure_dependency_violation(None, {"GLIBC": "2.28"}) == []
+        )
+
+
+class TestWheelRpathAndClosureCliEndToEnd:
+    def test_absolute_rpath_surfaces_as_risk(self) -> None:
+        old = _elf_snap(_elf(rpath="/usr/local/lib"))
+        new = _elf_snap(_elf(rpath="/usr/local/lib"))
+        result = compare(
+            old, new, env_matrix=EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
+        )
+        assert ChangeKind.WHEEL_RPATH_NOT_PORTABLE in _kinds(result.changes)
+        assert result.verdict is Verdict.COMPATIBLE_WITH_RISK
+
+    def test_unresolvable_vendored_dependency_surfaces_as_breaking(self) -> None:
+        old = _elf_snap(_elf(needed=["libopenblas-a1b2c3d4.so.0"]))
+        new = _elf_snap(_elf(needed=["libopenblas-a1b2c3d4.so.0"]))
+        result = compare(
+            old, new, env_matrix=EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
+        )
+        assert ChangeKind.WHEEL_CLOSURE_DEPENDENCY_VIOLATION in _kinds(
+            result.changes
+        )
+        assert result.verdict is Verdict.BREAKING
+
+    def test_no_env_matrix_no_finding(self) -> None:
+        old = _elf_snap(_elf(rpath="/usr/local/lib"))
+        new = _elf_snap(_elf(rpath="/usr/local/lib"))
+        result = compare(old, new)
+        assert ChangeKind.WHEEL_RPATH_NOT_PORTABLE not in _kinds(result.changes)
+        assert ChangeKind.WHEEL_CLOSURE_DEPENDENCY_VIOLATION not in _kinds(
+            result.changes
+        )
