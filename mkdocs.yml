@@ -147,6 +147,7 @@ nav:
     - Roadmap & Status:
       - Goals: development/goals.md
       - SciPy / Scientific-Python Roadmap: development/scipy-scientific-python-roadmap.md
+      - Python Build Ecosystem Positioning: development/python-build-ecosystem-positioning.md
     - Parity & Reports:
       - ABICC Parity Status: development/abicc-parity-status.md
       - ABICC Test Coverage Comparison: development/abicc-test-coverage-comparison.md
