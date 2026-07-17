@@ -305,3 +305,142 @@ def test_run_bounded_kills_process_group_on_deadline_exceeded_mid_run(tmp_path) 
             break
         time.sleep(0.1)
     assert not _pid_alive(child_pid)
+
+
+# ── _kill_process_tree: fallback/escalation branches (mocked, no real subprocess) ──
+
+
+class _FakeProc:
+    def __init__(self, pid: int = 4321) -> None:
+        self.pid = pid
+        self.killed = 0
+        self.waits: list[float | None] = []
+        self._wait_raises = False
+
+    def kill(self) -> None:
+        self.killed += 1
+
+    def wait(self, timeout: float | None = None) -> None:
+        self.waits.append(timeout)
+        if self._wait_raises:
+            raise subprocess.TimeoutExpired(cmd=["x"], timeout=timeout)
+
+
+def test_kill_process_tree_without_pgroup_kills_direct_process_only() -> None:
+    # No process group to target (use_pgroup=False, e.g. non-POSIX) — fall
+    # back to killing just the direct child.
+    proc = _FakeProc()
+    deadline._kill_process_tree(proc, use_pgroup=False)
+    assert proc.killed == 1
+    assert proc.waits == [None]
+
+
+def test_kill_process_tree_getpgid_failure_falls_back_to_direct_kill(
+    monkeypatch,
+) -> None:
+    # A race: the process already exited between the timeout firing and this
+    # call — os.getpgid raises. Fall back to killing the direct child rather
+    # than erroring.
+    proc = _FakeProc()
+    monkeypatch.setattr(
+        os, "getpgid", lambda _pid: (_ for _ in ()).throw(ProcessLookupError())
+    )
+    deadline._kill_process_tree(proc, use_pgroup=True)
+    assert proc.killed == 1
+    assert proc.waits == [None]
+
+
+def test_kill_process_tree_sigterm_killpg_failure_falls_back_to_direct_kill(
+    monkeypatch,
+) -> None:
+    proc = _FakeProc()
+    monkeypatch.setattr(os, "getpgid", lambda _pid: 999)
+
+    def _boom(_pgid: int, _sig: int) -> None:
+        raise PermissionError("no permission to signal that group")
+
+    monkeypatch.setattr(os, "killpg", _boom)
+    deadline._kill_process_tree(proc, use_pgroup=True)
+    assert proc.killed == 1
+    assert proc.waits == [None]
+
+
+def test_kill_process_tree_escalates_to_sigkill_after_double_wait_timeout(
+    monkeypatch,
+) -> None:
+    # Full escalation path: SIGTERM, a grace-period wait that itself times out
+    # (a group member survives it), an unconditional SIGKILL sweep regardless,
+    # then a final drain wait that also times out — both wait timeouts must be
+    # swallowed, not propagated, and SIGKILL must still fire.
+    proc = _FakeProc()
+    proc._wait_raises = True
+    monkeypatch.setattr(os, "getpgid", lambda _pid: 999)
+    signals: list[tuple[int, int]] = []
+    monkeypatch.setattr(os, "killpg", lambda pgid, sig: signals.append((pgid, sig)))
+
+    deadline._kill_process_tree(proc, use_pgroup=True)  # must not raise
+
+    import signal
+
+    assert (999, signal.SIGTERM) in signals
+    assert (999, signal.SIGKILL) in signals
+    assert proc.waits == [5, 5]  # both grace-period waits attempted
+
+
+# ── run_bounded: its own exception-handling edges (mocked Popen) ────────────
+
+
+class _FakePopen:
+    """Stand-in for subprocess.Popen whose .communicate() raises on demand."""
+
+    def __init__(self, cmd, **_kwargs) -> None:
+        del cmd
+        self.pid = 4321
+        self.returncode = 0
+
+    def communicate(self, input=None, timeout=None):  # noqa: A002
+        del input
+        effect = _POPEN_COMMUNICATE_EFFECTS.pop(0)
+        if isinstance(effect, BaseException):
+            raise effect
+        return effect
+
+    def kill(self) -> None:
+        pass
+
+    def wait(self, timeout: float | None = None) -> None:
+        pass
+
+
+_POPEN_COMMUNICATE_EFFECTS: list[BaseException | tuple[str, str]] = []
+
+
+def test_run_bounded_swallows_second_timeout_while_draining(monkeypatch) -> None:
+    # The drain communicate() after a kill can itself time out (a stubborn
+    # group member is still holding the pipe open) — that must be swallowed,
+    # not left to replace/mask the original TimeoutExpired being raised.
+    global _POPEN_COMMUNICATE_EFFECTS
+    _POPEN_COMMUNICATE_EFFECTS = [
+        subprocess.TimeoutExpired(cmd=["x"], timeout=1),
+        subprocess.TimeoutExpired(cmd=["x"], timeout=5),
+    ]
+    monkeypatch.setattr(deadline.subprocess, "Popen", _FakePopen)
+    monkeypatch.setattr(deadline, "_kill_process_tree", lambda *a, **k: None)
+    with pytest.raises(subprocess.TimeoutExpired):
+        deadline.run_bounded(["x"], timeout=1)
+
+
+def test_run_bounded_kills_tree_on_unexpected_communicate_error(monkeypatch) -> None:
+    # An error other than TimeoutExpired (e.g. an OSError mid-communicate)
+    # must still trigger the process-tree cleanup before propagating, not
+    # leak the child/group.
+    global _POPEN_COMMUNICATE_EFFECTS
+    _POPEN_COMMUNICATE_EFFECTS = [OSError("pipe broke")]
+    monkeypatch.setattr(deadline.subprocess, "Popen", _FakePopen)
+    killed: list[bool] = []
+    monkeypatch.setattr(
+        deadline, "_kill_process_tree", lambda *a, **k: killed.append(True)
+    )
+    with pytest.raises(OSError, match="pipe broke"):
+        deadline.run_bounded(["x"], timeout=1)
+    assert killed == [True]

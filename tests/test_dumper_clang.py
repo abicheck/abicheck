@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 
-from abicheck import dumper, dumper_clang
+from abicheck import dumper, dumper_clang, dumper_clang_errors
 from abicheck.dumper import (
     _auto_system_includes_enabled,
     _build_clang_header_command,
@@ -46,6 +46,7 @@ from abicheck.dumper_clang import (
     _pointer_depth,
     _return_type,
 )
+from abicheck.dumper_clang_errors import _parse_clang_ast_result
 from abicheck.errors import SnapshotError
 from abicheck.model import AccessLevel, Visibility
 
@@ -1230,6 +1231,34 @@ def test_clang_header_dump_rechecks_deadline_on_cache_hit(
         with pytest.raises(dumper.deadline.DeadlineExceeded):
             _clang_header_dump([header], [])
     assert calls["n"] == 1  # never reached the subprocess path — cache hit
+
+
+def test_parse_clang_ast_result_missing_ast_file_reports_no_ast(tmp_path: Path) -> None:
+    # ast_path.stat() itself can fail (the temp file vanished/was never
+    # created) — that must degrade to the same "no AST" error as an empty
+    # file, not an unhandled OSError.
+    result = _fake_proc(stdout="", stderr="boom", returncode=0)
+    missing = tmp_path / "does-not-exist.json"
+    with pytest.raises(SnapshotError, match="no AST"):
+        _parse_clang_ast_result(result, tmp_path / "cache.json", missing)
+
+
+def test_parse_clang_ast_result_swallows_cache_write_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # The cache write (_atomic_copy) is best-effort: a failure there (e.g. an
+    # unwritable cache dir) must not turn a successful parse into an error —
+    # the caller already has the parsed root; only the cache population is lost.
+    ast_path = tmp_path / "ast.json"
+    ast_path.write_text('{"kind": "TranslationUnitDecl", "inner": []}', encoding="utf-8")
+    result = _fake_proc(stdout="", stderr="", returncode=0)
+
+    def _boom(_src, _dst):
+        raise OSError("cache dir unwritable")
+
+    monkeypatch.setattr(dumper_clang_errors, "_atomic_copy", _boom)
+    root = _parse_clang_ast_result(result, tmp_path / "cache.json", ast_path)
+    assert root == {"kind": "TranslationUnitDecl", "inner": []}
 
 
 def test_clang_header_dump_streams_stdout_to_file_not_memory(

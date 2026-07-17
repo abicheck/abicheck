@@ -339,6 +339,29 @@ def test_capture_macros_stops_after_deadline_exhausted(monkeypatch) -> None:
     )
 
 
+def test_capture_header_includes_stops_after_deadline_exhausted(monkeypatch) -> None:
+    # Same stop-early contract as capture_macros, for the sibling per-header
+    # -M depfile pass.
+    from abicheck import deadline
+    from abicheck.buildsource import preprocessor_scan as ps
+
+    calls = {"n": 0}
+
+    def _raise_once(cmd, **kwargs):
+        calls["n"] += 1
+        raise deadline.DeadlineExceeded(-1.0)
+
+    monkeypatch.setattr(deadline, "run_bounded", _raise_once)
+    ex = ps.ClangPreprocessorExtractor()
+    out = ex.capture_header_includes(
+        ["include/a.h", "include/b.h", "include/c.h"], ["-Iinclude"]
+    )
+    assert out == {}
+    assert calls["n"] == 1, (
+        f"expected exactly one attempt before the loop stopped, got {calls['n']}"
+    )
+
+
 def test_run_passes_compile_unit_directory_as_cwd(monkeypatch) -> None:
     # Relative -I flags from a CMake/Ninja compile DB only resolve when the
     # depfile pass runs from the CU's directory — that dir must reach the live

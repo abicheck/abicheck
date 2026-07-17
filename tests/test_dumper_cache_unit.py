@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.dumper_cache import _atomic_write, _cache_path
+from abicheck.dumper_cache import _atomic_copy, _atomic_write, _cache_path
 
 
 def test_posix_uses_xdg_cache_home(monkeypatch, tmp_path) -> None:
@@ -160,3 +160,92 @@ def test_write_failure_cleans_up_temp_file_and_reraises(
 
     assert list(target.parent.iterdir()) == []
     assert not target.exists()
+
+
+# ── _atomic_copy() ────────────────────────────────────────────────────────────
+#
+# Streams src -> dst via a same-directory temp file, like _atomic_write but for
+# an already-on-disk source (the L2 clang AST cache write, P0 SVS memory fix):
+# same atomicity/no-torn-file guarantee, without a second full in-memory copy.
+
+
+def test_atomic_copy_copies_content_and_leaves_no_temp_file(tmp_path: Path) -> None:
+    src = tmp_path / "src.json"
+    src.write_bytes(b'{"a": 1}')
+    dst = tmp_path / "cache" / "abcd.json"
+    dst.parent.mkdir(parents=True)
+
+    _atomic_copy(src, dst)
+
+    assert dst.read_bytes() == b'{"a": 1}'
+    assert list(dst.parent.iterdir()) == [dst]
+
+
+def test_atomic_copy_replace_failure_cleans_up_temp_file_and_reraises(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    src = tmp_path / "src.json"
+    src.write_bytes(b"data")
+    dst = tmp_path / "cache" / "abcd.json"
+    dst.parent.mkdir(parents=True)
+
+    def _raise_oserror(*_args, **_kwargs):
+        raise OSError("simulated cross-device rename failure")
+
+    monkeypatch.setattr(os, "replace", _raise_oserror)
+
+    with pytest.raises(OSError, match="simulated cross-device rename failure"):
+        _atomic_copy(src, dst)
+
+    assert list(dst.parent.iterdir()) == []
+
+
+def test_atomic_copy_swallows_unlink_failure_during_cleanup(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # The doubly-defensive path: os.replace() fails, and the cleanup
+    # os.unlink() of the staging file *also* fails. The unlink failure must be
+    # swallowed — the caller still sees the original replace error, not a
+    # masking unlink error.
+    src = tmp_path / "src.json"
+    src.write_bytes(b"data")
+    dst = tmp_path / "cache" / "abcd.json"
+    dst.parent.mkdir(parents=True)
+
+    monkeypatch.setattr(
+        os, "replace", lambda *_a, **_k: (_ for _ in ()).throw(OSError("replace failed"))
+    )
+    monkeypatch.setattr(
+        os, "unlink", lambda *_a, **_k: (_ for _ in ()).throw(OSError("unlink failed"))
+    )
+
+    with pytest.raises(OSError, match="replace failed"):
+        _atomic_copy(src, dst)
+
+
+def test_atomic_copy_write_failure_cleans_up_temp_file_and_reraises(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    src = tmp_path / "src.json"
+    src.write_bytes(b"data")
+    dst = tmp_path / "cache" / "abcd.json"
+    dst.parent.mkdir(parents=True)
+
+    real_fdopen = os.fdopen
+
+    def _flaky_fdopen(fd, *args, **kwargs):
+        f = real_fdopen(fd, *args, **kwargs)
+
+        def _boom(_data):
+            raise OSError("simulated disk full")
+
+        f.write = _boom
+        return f
+
+    monkeypatch.setattr(os, "fdopen", _flaky_fdopen)
+
+    with pytest.raises(OSError, match="simulated disk full"):
+        _atomic_copy(src, dst)
+
+    assert list(dst.parent.iterdir()) == []
+    assert not dst.exists()

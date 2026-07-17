@@ -2231,6 +2231,27 @@ def test_extract_macro_pass_failure_is_diagnostic(monkeypatch) -> None:  # type:
     assert any("macro pass" in d for d in tu.diagnostics)
 
 
+def test_extract_macro_pass_timeout_is_diagnostic_not_crash(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    # The macro pass's own _run() (distinct from the AST-dump pass's
+    # _run_ast_to_file) must also be bounded/process-group-safe (Codex review,
+    # PR #591) — and since this second pass is best-effort (ADR-028 D7), a
+    # timeout there degrades to a diagnostic, not a crash of the whole extract.
+    import json
+    import subprocess as sp
+
+    def handler(cmd, **kw):  # type: ignore[no-untyped-def]
+        if "-ast-dump=json" in cmd:
+            return _emit_ast(kw, json.dumps(_ast()))
+        raise sp.TimeoutExpired(cmd, 5)
+
+    extractor = _patch_run(monkeypatch, handler)
+    tu = extractor.extract(_cu(), public_header_roots=["include/foo.h"])
+    assert tu.macros == []
+    assert any(
+        "macro pass skipped" in d and "timed out" in d for d in tu.diagnostics
+    )
+
+
 def test_extract_recovered_ast_exit_downgrades_edges_and_read_files_coverage(
     monkeypatch,
 ) -> None:  # type: ignore[no-untyped-def]
