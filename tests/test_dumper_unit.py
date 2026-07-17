@@ -27,6 +27,7 @@ from abicheck.dumper import (
     _vt_sort_key,
 )
 from abicheck.model import Visibility
+from abicheck.name_classification import canonicalize_type_name
 
 # ── _castxml_available ──────────────────────────────────────────────────
 
@@ -719,6 +720,27 @@ class TestCastxmlParserTypeName:
         root = _xml_root(ft, cv, ptr)
         p = _CastxmlParser(root, set(), set())
         assert p._type_name("t3") == "volatile int*"
+
+    def test_cv_qualified_pointee_and_value_both_const_matches_clang(self):
+        # `const int * const p` — a const pointer to const int: BOTH the
+        # prefix (pointee) and suffix (pointer-value) branches fire on the
+        # same declarator. Verified against real clang (`-ast-dump=json`
+        # on `const int * const g;`, clang 18): clang spells this
+        # "const int *const". canonicalize_type_name (already used to
+        # compare cross-producer/cross-backend spellings before any
+        # equality check) normalizes both castxml's and clang's spelling
+        # to the identical string, confirming this combined case doesn't
+        # newly diverge the way the Codex-caught typedef case did.
+        ft = _fund_type("t1", "int")
+        pointee_cv = Element("CvQualifiedType", id="t2", type="t1", const="1")
+        ptr = Element("PointerType", id="t3", type="t2")
+        value_cv = Element("CvQualifiedType", id="t4", type="t3", const="1")
+        root = _xml_root(ft, pointee_cv, ptr, value_cv)
+        p = _CastxmlParser(root, set(), set())
+        assert p._type_name("t4") == "const int* const"
+        assert canonicalize_type_name(p._type_name("t4")) == canonicalize_type_name(
+            "const int *const"
+        )
 
     def test_cv_qualified_reference_value_const_is_suffix(self):
         # A CvQualifiedType directly wrapping a ReferenceType is likewise a
