@@ -251,16 +251,21 @@ class TargetOutcome:
 
 @dataclass(frozen=True)
 class CoveragePolicy:
-    """Repository policy for how a missing *required* target is graded.
+    """Repository policy for how coverage gaps are graded.
 
-    A missing optional target is always :attr:`CoverageVerdict.NEUTRAL`; this
-    only controls the required-target case, which reasonable repositories
-    disagree on (fail the gate vs. warn-only). Defaults to ``FAILURE`` — the
-    stricter choice — since silently downgrading a missing required target
-    to neutral is how a coverage gap goes unnoticed.
+    ``missing_required_target`` controls the case where at least one target
+    was analyzed but a required one was not — reasonable repositories
+    disagree on this (fail the gate vs. warn-only). ``no_analyzed_targets``
+    separately controls a full outage (not one target could be analyzed,
+    e.g. every build failed); it applies regardless of whether any of the
+    unanalyzed targets were required, so an optional-only manifest is
+    governed by it too. Both default to ``FAILURE`` — the stricter choice —
+    since silently downgrading a coverage gap to neutral is how it goes
+    unnoticed.
     """
 
     missing_required_target: CoverageVerdict = CoverageVerdict.FAILURE
+    no_analyzed_targets: CoverageVerdict = CoverageVerdict.FAILURE
 
 
 @dataclass(frozen=True)
@@ -347,7 +352,7 @@ class AssessmentResult:
     def coverage_verdict(self, policy: CoveragePolicy | None = None) -> CoverageVerdict:
         policy = policy or CoveragePolicy()
         if not self.analyzed_target_ids:
-            return CoverageVerdict.FAILURE
+            return policy.no_analyzed_targets
         if self.manifest.required_target_ids & self.unavailable_target_ids:
             return policy.missing_required_target
         if self.unavailable_target_ids:

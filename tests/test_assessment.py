@@ -297,6 +297,33 @@ class TestCoveragePolicy:
 
         assert result.coverage_verdict() is CoverageVerdict.NEUTRAL
 
+    def test_no_analyzed_targets_defaults_to_failure_even_with_lenient_required_policy(
+        self,
+    ):
+        # A full outage must not slip through just because missing_required_target
+        # was relaxed — it is governed by the separate no_analyzed_targets knob.
+        assessment = Assessment(_manifest())
+        assessment.record(TargetOutcome.unavailable(LINUX, TargetState.BUILD_FAILED))
+        assessment.record(TargetOutcome.unavailable(WINDOWS, TargetState.BUILD_FAILED))
+        result = assessment.finalize()
+
+        lenient = CoveragePolicy(missing_required_target=CoverageVerdict.NEUTRAL)
+        assert result.coverage_verdict(lenient) is CoverageVerdict.FAILURE
+
+    def test_no_analyzed_targets_policy_can_downgrade_to_neutral(self):
+        # Optional-only manifest, nothing analyzed: no required coverage is
+        # missing, so this must be governed by no_analyzed_targets, not a
+        # hardcoded failure.
+        manifest = _manifest(required=(), optional=(LINUX, WINDOWS))
+        assessment = Assessment(manifest)
+        assessment.record(TargetOutcome.unavailable(LINUX, TargetState.BUILD_FAILED))
+        assessment.record(TargetOutcome.unavailable(WINDOWS, TargetState.BUILD_FAILED))
+        result = assessment.finalize()
+
+        assert result.coverage_verdict() is CoverageVerdict.FAILURE
+        lenient = CoveragePolicy(no_analyzed_targets=CoverageVerdict.NEUTRAL)
+        assert result.coverage_verdict(lenient) is CoverageVerdict.NEUTRAL
+
 
 class TestUnbaselinedTarget:
     def test_target_not_in_manifest_is_tracked_separately(self):
