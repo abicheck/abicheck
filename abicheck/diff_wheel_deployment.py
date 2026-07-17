@@ -441,14 +441,26 @@ def check_wheel_tag_architecture_mismatch(
 
 
 def _elf_rpath_entries(elf: ElfMetadata) -> list[str]:
-    """The colon-joined ``DT_RPATH``/``DT_RUNPATH`` tag content, split into
-    individual path entries. Empty components are preserved: an empty
-    RPATH/RUNPATH entry (a leading/trailing/doubled ``:``) is not a no-op —
-    the dynamic loader treats it as the current working directory, itself a
+    """The *effective* RPATH/RUNPATH tag content, split into individual
+    path entries. Empty components are preserved: an empty RPATH/RUNPATH
+    entry (a leading/trailing/doubled ``:``) is not a no-op — the dynamic
+    loader treats it as the current working directory, itself a
     non-portable (and unsafe) search-path entry, not something to silently
-    drop (Codex review #583)."""
-    values = [p for p in (getattr(elf, "rpath", ""), getattr(elf, "runpath", "")) if p]
-    return ":".join(values).split(":") if values else []
+    drop (Codex review #583).
+
+    Prefers ``DT_RUNPATH`` over ``DT_RPATH`` rather than combining both:
+    the dynamic loader consults ``DT_RPATH`` only when the *same* object
+    carries no ``DT_RUNPATH`` at all (see :mod:`abicheck.resolver`'s own
+    loader-accurate precedence modeling) — when both are present,
+    ``DT_RPATH`` is entirely ignored. Combining them unconditionally could
+    either mask a genuine non-portable/closure-violation finding behind a
+    stale, no-longer-consulted ``$ORIGIN``-relative ``DT_RPATH`` entry, or
+    conversely flag an ignored absolute ``DT_RPATH`` entry the loader never
+    actually uses (Codex review #583, follow-up).
+    """
+    runpath = getattr(elf, "runpath", "") or ""
+    effective = runpath or (getattr(elf, "rpath", "") or "")
+    return effective.split(":") if effective else []
 
 
 def _is_origin_relative_entry(entry: str) -> bool:

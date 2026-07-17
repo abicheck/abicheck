@@ -196,6 +196,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   field for `EM_ARM`, so its absence means the real value is exactly 0
   (GNU/bare EABI), definitively not 5, not merely undecoded (Codex
   review, four rounds).
+  `_elf_rpath_entries` now prefers `DT_RUNPATH` over `DT_RPATH` rather
+  than combining both — the dynamic loader consults `DT_RPATH` only when
+  the same object carries no `DT_RUNPATH` at all (matching
+  `abicheck.resolver`'s own loader-accurate precedence modeling); when
+  both are present, `DT_RPATH` is entirely ignored. Combining them
+  unconditionally could mask a genuine `wheel_closure_dependency_violation`
+  behind a stale, no-longer-consulted `$ORIGIN`-relative `DT_RPATH` entry,
+  or conversely raise a false `wheel_rpath_not_portable` finding for an
+  ignored absolute `DT_RPATH` entry (Codex review).
   Windows UCRT/runtime checks, CPU-ISA-baseline detection, the full
   per-tag closure policy, and end-to-end CLI auto-derivation from a
   compared wheel's own filename tag (every check above, including G10's

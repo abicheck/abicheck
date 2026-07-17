@@ -725,6 +725,29 @@ class TestWheelRpathNotPortableUnit:
             check_wheel_rpath_not_portable(elf, {"WHEEL_CONTEXT": "1"}) == []
         )
 
+    def test_runpath_present_ignores_stale_absolute_rpath(self) -> None:
+        # Codex review #583, follow-up: DT_RPATH is only consulted by the
+        # dynamic loader when the same object carries no DT_RUNPATH at all
+        # (see resolver.py's own loader-accurate precedence modeling) — a
+        # stale absolute DT_RPATH alongside a portable DT_RUNPATH is never
+        # actually used, so it must not be flagged.
+        elf = _elf(rpath="/build/sysroot/lib", runpath="$ORIGIN/../foo.libs")
+        assert (
+            check_wheel_rpath_not_portable(elf, {"WHEEL_CONTEXT": "1"}) == []
+        )
+
+    def test_runpath_present_flags_its_own_absolute_entry_not_rpath(
+        self,
+    ) -> None:
+        elf = _elf(
+            rpath="$ORIGIN/../ignored.libs",
+            runpath="/build/sysroot/lib",
+            soname="libfoo.so.1",
+        )
+        changes = check_wheel_rpath_not_portable(elf, {"WHEEL_CONTEXT": "1"})
+        assert len(changes) == 1
+        assert changes[0].new_value == "/build/sysroot/lib"
+
     def test_absolute_rpath_flagged(self) -> None:
         elf = _elf(rpath="/usr/local/lib", soname="libfoo.so.1")
         changes = check_wheel_rpath_not_portable(elf, {"WHEEL_CONTEXT": "1"})
@@ -808,6 +831,26 @@ class TestWheelClosureDependencyViolationUnit:
             )
             == []
         )
+
+    def test_vendored_dependency_with_stale_origin_rpath_still_flagged(
+        self,
+    ) -> None:
+        # Codex review #583, follow-up: DT_RPATH is entirely ignored by the
+        # loader once the same object also carries DT_RUNPATH — a stale
+        # $ORIGIN-relative DT_RPATH alongside an absolute DT_RUNPATH must
+        # not mask a genuine closure-violation finding, since the loader
+        # never actually consults that DT_RPATH entry.
+        elf = _elf(
+            needed=["libopenblas-a1b2c3d4.so.0"],
+            rpath="$ORIGIN/../ignored.libs",
+            runpath="/build/sysroot/lib",
+            soname="libfoo.so.1",
+        )
+        changes = check_wheel_closure_dependency_violation(
+            elf, {"WHEEL_CONTEXT": "1"}
+        )
+        assert len(changes) == 1
+        assert changes[0].kind is ChangeKind.WHEEL_CLOSURE_DEPENDENCY_VIOLATION
 
     def test_vendored_dependency_without_origin_rpath_flagged(self) -> None:
         elf = _elf(
