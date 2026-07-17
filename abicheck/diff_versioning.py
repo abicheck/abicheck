@@ -678,6 +678,24 @@ def detect_version_script_missing(
     ]
 
 
+#: BREAKING kinds a SONAME bump cannot remedy — deployment/wheel-packaging
+#: failures rather than an ABI-incompatible symbol-table change. Bumping
+#: DT_SONAME tells consumers "relink against the new major version"; it does
+#: nothing for "your wheel claims x86_64 but the binary is aarch64"
+#: (wheel_tag_architecture_mismatch), "this musllinux-tagged binary actually
+#: needs glibc" (musllinux_glibc_dependency_detected), or "a vendored
+#: dependency has no RPATH to ever be found" (wheel_closure_dependency_violation)
+#: — recommending a bump for these is actively misleading remediation advice
+#: (Codex review #583).
+_SONAME_BUMP_CANNOT_FIX_KINDS = frozenset(
+    {
+        ChangeKind.MUSLLINUX_GLIBC_DEPENDENCY_DETECTED,
+        ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH,
+        ChangeKind.WHEEL_CLOSURE_DEPENDENCY_VIOLATION,
+    }
+)
+
+
 def check_soname_bump_policy(
     changes: list[Change],
     old_elf: ElfMetadata,
@@ -695,6 +713,11 @@ def check_soname_bump_policy(
     breaking_kinds = BREAKING_KINDS
 
     def _is_effectively_breaking(c: Change) -> bool:
+        # Deployment/wheel-packaging BREAKING kinds a SONAME bump cannot fix
+        # never count toward this policy's recommendation, regardless of
+        # effective_verdict (Codex review #583).
+        if c.kind in _SONAME_BUMP_CANNOT_FIX_KINDS:
+            return False
         # Honor a per-finding ``effective_verdict`` override (ADR-025): a change
         # demoted to COMPATIBLE_WITH_RISK — e.g. one confined to an internal/
         # private version-node symbol — must not count as a break here, or it

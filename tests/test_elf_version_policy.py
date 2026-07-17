@@ -325,6 +325,55 @@ class TestSonameBumpRecommended:
         assert result[0].kind == ChangeKind.SONAME_BUMP_RECOMMENDED
         assert "1 binary-incompatible" in result[0].description
 
+    def test_wheel_closure_violation_alone_does_not_recommend_bump(self):
+        # Codex review #583: a SONAME bump doesn't fix an unresolvable
+        # vendored dependency — recommending one is misleading remediation.
+        old_elf = ElfMetadata(soname="libfoo.so.1")
+        new_elf = ElfMetadata(soname="libfoo.so.1")
+        change = Change(
+            kind=ChangeKind.WHEEL_CLOSURE_DEPENDENCY_VIOLATION,
+            symbol="<platform-baseline>",
+            description="Vendored dependency unresolvable",
+        )
+        assert check_soname_bump_policy([change], old_elf, new_elf) == []
+
+    def test_musllinux_glibc_dependency_alone_does_not_recommend_bump(self):
+        old_elf = ElfMetadata(soname="libfoo.so.1")
+        new_elf = ElfMetadata(soname="libfoo.so.1")
+        change = Change(
+            kind=ChangeKind.MUSLLINUX_GLIBC_DEPENDENCY_DETECTED,
+            symbol="<platform-baseline>",
+            description="musllinux-tagged binary requires glibc",
+        )
+        assert check_soname_bump_policy([change], old_elf, new_elf) == []
+
+    def test_wheel_tag_architecture_mismatch_alone_does_not_recommend_bump(self):
+        old_elf = ElfMetadata(soname="libfoo.so.1")
+        new_elf = ElfMetadata(soname="libfoo.so.1")
+        change = Change(
+            kind=ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH,
+            symbol="<platform-baseline>",
+            description="Wheel tag claims a different architecture",
+        )
+        assert check_soname_bump_policy([change], old_elf, new_elf) == []
+
+    def test_wheel_closure_violation_does_not_suppress_genuine_break(self):
+        # A real ABI break alongside an unrelated wheel-closure finding must
+        # still recommend the bump for the real break.
+        old_elf = ElfMetadata(soname="libfoo.so.1")
+        new_elf = ElfMetadata(soname="libfoo.so.1")
+        wheel_change = Change(
+            kind=ChangeKind.WHEEL_CLOSURE_DEPENDENCY_VIOLATION,
+            symbol="<platform-baseline>",
+            description="Vendored dependency unresolvable",
+        )
+        result = check_soname_bump_policy(
+            [wheel_change, _breaking_change()], old_elf, new_elf
+        )
+        assert len(result) == 1
+        assert result[0].kind == ChangeKind.SONAME_BUMP_RECOMMENDED
+        assert "1 binary-incompatible" in result[0].description
+
 
 # ===========================================================================
 # SONAME bump unnecessary

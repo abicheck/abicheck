@@ -164,6 +164,16 @@ _NON_NUMERIC_RUNTIME_FLOOR_KEYS = frozenset(
     {"WHEEL_ARCH", "MUSLLINUX", "WHEEL_CONTEXT"}
 )
 
+#: Presence-flag keys (MUSLLINUX, WHEEL_CONTEXT — unlike WHEEL_ARCH, which
+#: expects an actual architecture string, not a yes/no flag) where a YAML
+#: boolean is meaningful and must be honored as one, not silently
+#: stringified: ``str(False)`` is the non-empty string ``"False"``, which
+#: the downstream checks' plain ``floors.get(...)`` truthiness test reads as
+#: *enabled* — the exact opposite of a user writing
+#: ``runtime_floors: {WHEEL_CONTEXT: false}`` to explicitly disable it
+#: (Codex review #583).
+_PRESENCE_FLAG_RUNTIME_FLOOR_KEYS = frozenset({"MUSLLINUX", "WHEEL_CONTEXT"})
+
 
 def _parse_runtime_floors(floors_raw: object) -> dict[str, str]:
     """Parse and validate the ``runtime_floors`` prefix → version mapping."""
@@ -174,6 +184,16 @@ def _parse_runtime_floors(floors_raw: object) -> dict[str, str]:
         )
     runtime_floors: dict[str, str] = {}
     for key, value in floors_raw.items():
+        key_upper = str(key).upper()
+        if key_upper in _PRESENCE_FLAG_RUNTIME_FLOOR_KEYS and isinstance(
+            value, bool
+        ):
+            # False means "explicitly disabled" — omit the key entirely so
+            # downstream `floors.get(...)` truthiness checks see it as not
+            # declared, rather than storing the truthy string "False".
+            if value:
+                runtime_floors[key_upper] = "1"
+            continue
         if isinstance(value, float):
             # An unquoted YAML floor has already been lossily parsed:
             # `GLIBC: 2.40` reaches us as the float 2.4, which would
@@ -186,7 +206,7 @@ def _parse_runtime_floors(floors_raw: object) -> dict[str, str]:
                 f"with the intended digits."
             )
         floor = str(value)
-        if str(key).upper() not in _NON_NUMERIC_RUNTIME_FLOOR_KEYS:
+        if key_upper not in _NON_NUMERIC_RUNTIME_FLOOR_KEYS:
             # Every dot-separated component must be purely numeric: the floor
             # contract parses with int() per component, so a "2.28-1" or "2.x"
             # would silently truncate to (2,) and flip verdicts. Reject
@@ -197,7 +217,7 @@ def _parse_runtime_floors(floors_raw: object) -> dict[str, str]:
                     f"(digits and dots only, e.g. '2.28'), with each component "
                     f"at most 9 digits, got {value!r}"
                 )
-        runtime_floors[str(key).upper()] = floor
+        runtime_floors[key_upper] = floor
     return runtime_floors
 
 

@@ -94,7 +94,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   any declared floor being present: `GLIBC`/`GLIBCXX`/`CXXABI` are a
   general-purpose ADR-020b symbol-version-floor mechanism unrelated to
   wheel packaging, so an ordinary non-wheel DSO declaring one must not get
-  wheel-portability findings it never opted into (Codex review).
+  wheel-portability findings it never opted into (Codex review). A
+  `runtime_floors` boolean value for a presence-flag key (`MUSLLINUX`,
+  `WHEEL_CONTEXT`) is now honored as a boolean instead of stringified —
+  `str(False)` is the truthy string `"False"`, which would otherwise let
+  `{WHEEL_CONTEXT: false}` silently *enable* the checks it was meant to
+  disable (Codex review). `check_soname_bump_policy` no longer recommends a
+  SONAME bump for the three new deployment/wheel-packaging `BREAKING`
+  kinds (`musllinux_glibc_dependency_detected`,
+  `wheel_tag_architecture_mismatch`, `wheel_closure_dependency_violation`)
+  — bumping `DT_SONAME` doesn't fix any of them, so recommending one was
+  misleading remediation advice (Codex review).
   Windows UCRT/runtime checks, CPU-ISA-baseline detection, the full
   per-tag closure policy, and end-to-end CLI auto-derivation from a
   compared wheel's own filename tag (every check above, including G10's

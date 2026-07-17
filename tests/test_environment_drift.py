@@ -868,6 +868,39 @@ class TestEnvironmentMatrixRuntimeFloors:
         )
         assert m.runtime_floors == {"WHEEL_CONTEXT": "1"}
 
+    def test_wheel_context_false_boolean_disables_not_stringified(self) -> None:
+        # Codex review #583: str(False) == "False", a non-empty string the
+        # downstream checks' plain truthiness test would read as *enabled* —
+        # the opposite of a user explicitly disabling the key.
+        m = EnvironmentMatrix.from_dict(
+            {"runtime_floors": {"WHEEL_CONTEXT": False}}
+        )
+        assert m.runtime_floors == {}
+        assert not m.runtime_floors.get("WHEEL_CONTEXT")
+
+    def test_wheel_context_true_boolean_enables(self) -> None:
+        m = EnvironmentMatrix.from_dict(
+            {"runtime_floors": {"WHEEL_CONTEXT": True}}
+        )
+        assert m.runtime_floors.get("WHEEL_CONTEXT")
+
+    def test_musllinux_false_boolean_disables_not_stringified(self) -> None:
+        m = EnvironmentMatrix.from_dict({"runtime_floors": {"MUSLLINUX": False}})
+        assert m.runtime_floors == {}
+
+    def test_musllinux_true_boolean_enables(self) -> None:
+        m = EnvironmentMatrix.from_dict({"runtime_floors": {"MUSLLINUX": True}})
+        assert m.runtime_floors.get("MUSLLINUX")
+
+    def test_wheel_context_false_end_to_end_does_not_enable_check(self) -> None:
+        old = _snap(_elf(rpath="/usr/local/lib"))
+        new = _snap(_elf(rpath="/usr/local/lib"))
+        matrix = EnvironmentMatrix.from_dict(
+            {"runtime_floors": {"WHEEL_CONTEXT": False, "GLIBC": "2.28"}}
+        )
+        result = compare(old, new, env_matrix=matrix)
+        assert ChangeKind.WHEEL_RPATH_NOT_PORTABLE not in _kinds(result.changes)
+
     def test_glibc_still_rejects_non_numeric(self) -> None:
         # The WHEEL_ARCH/MUSLLINUX exemption must not weaken validation for
         # genuine numeric-floor keys.
