@@ -682,7 +682,13 @@ def run_abicheck_full(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | 
                 # dump() -- castxml's bundled Clang frontend can't parse C23
                 # _BitInt(N); this lane now dumps the same real binary that
                 # lane does (case180 fix above), so it hits the same gap.
+                # --gcc-path pins the actual discovered clang binary --
+                # --ast-frontend alone falls back to a bare "clang" on PATH,
+                # absent on hosts that only ship a versioned clang-18.
+                case115_clang = _first_available_tool("clang-18", "clang")
                 dump += ["--ast-frontend", "clang"]
+                if case115_clang:
+                    dump += ["--gcc-path", case115_clang]
             if header and header.exists():
                 # -H alone only feeds castxml which headers to parse; it does
                 # NOT mark them public for provenance classification (that's
@@ -773,7 +779,14 @@ def _run_abicheck_dump_compare(
             # shells out to the installed system clang instead of castxml's
             # bundled one). This is the one case in the catalog where the
             # castxml frontend itself is the bottleneck, not the compiler.
+            # --gcc-path pins the actual discovered clang binary: --ast-frontend
+            # only selects the clang backend, it does not resolve which clang to
+            # run, and that resolution falls back to a bare "clang" on PATH --
+            # absent on hosts that only ship a versioned clang-18.
+            case115_clang = _first_available_tool("clang-18", "clang")
             cmd += ["--ast-frontend", "clang"]
+            if case115_clang:
+                cmd += ["--gcc-path", case115_clang]
         run = subprocess.run(cmd, capture_output=True, text=True,
                              timeout=timeout, env=_ABICHECK_ENV)
         return run.returncode == 0 and snap.exists(), run.stderr or run.stdout
@@ -1325,7 +1338,17 @@ FROZEN_COMPETITOR_PATH = REPO_DIR / "scripts" / "frozen_competitor_results.json"
 
 
 def _freeze_tools(results: list[dict], tool_names: list[str], out_path: Path) -> None:
-    """Persist *tool_names*' per-case verdict + timing to a committed JSON file."""
+    """Persist *tool_names*' per-case verdict + timing to a committed JSON file.
+
+    Merges into any existing frozen data at *out_path* rather than replacing
+    it wholesale: freezing ``abicc_xml`` after a prior ``abicc_dumper`` freeze
+    (the documented one-mode-at-a-time workflow, since ABICC hangs on some
+    cases when both modes run concurrently) must not drop the earlier tool's
+    columns. Only *tool_names*' own columns are overwritten per case; other
+    tools' previously-frozen entries for that case are left untouched.
+    """
+    existing = _load_frozen(out_path) or {}
+    tools = list(dict.fromkeys([*existing.get("tools", []), *tool_names]))
     frozen: dict[str, Any] = {
         "schema": "abicheck-frozen-competitor/1.0",
         "frozen_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -1335,8 +1358,8 @@ def _freeze_tools(results: list[dict], tool_names: list[str], out_path: Path) ->
             "abidiff": _tool_version(["abidiff", "--version"]),
             "abi-compliance-checker": _tool_version(["abi-compliance-checker", "-dumpversion"]),
         },
-        "tools": tool_names,
-        "results_by_case": {},
+        "tools": tools,
+        "results_by_case": dict(existing.get("results_by_case", {})),
     }
     for r in results:
         entry = {
@@ -1346,7 +1369,9 @@ def _freeze_tools(results: list[dict], tool_names: list[str], out_path: Path) ->
             if k in r
         }
         if entry:
-            frozen["results_by_case"][r["case"]] = entry
+            case_entry = dict(frozen["results_by_case"].get(r["case"], {}))
+            case_entry.update(entry)
+            frozen["results_by_case"][r["case"]] = case_entry
     out_path.write_text(json.dumps(frozen, indent=2, sort_keys=True) + "\n")
 
 
