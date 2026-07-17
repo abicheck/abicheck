@@ -93,6 +93,18 @@ class TestAssessmentManifest:
         with pytest.raises(ValueError):
             AssessmentManifest.from_dict({"targets": [{"id": LINUX}]})
 
+    def test_direct_construction_rejects_empty_targets(self):
+        with pytest.raises(ValueError):
+            AssessmentManifest(assessment_id="a", head_sha="s", targets=())
+
+    def test_direct_construction_rejects_duplicate_target_id(self):
+        with pytest.raises(ValueError):
+            AssessmentManifest(
+                assessment_id="a",
+                head_sha="s",
+                targets=(TargetSpec(LINUX), TargetSpec(LINUX)),
+            )
+
 
 class TestTargetOutcome:
     def test_analyzed_requires_findings(self):
@@ -258,6 +270,23 @@ class TestAcceptanceCases:
         assessment = Assessment(_manifest())
         assessment.record(
             TargetOutcome.analyzed(LINUX, _diff(Verdict.BREAKING), head_sha="stale-sha")
+        )
+        result = assessment.finalize()
+
+        assert result.outcomes[LINUX].state is TargetState.INCOMPLETE
+
+    def test_outcome_for_a_different_assessment_on_the_same_commit_is_dropped(self):
+        # A rerun of the same commit under a new assessment id (e.g. after
+        # the target matrix changed) must not let a delayed outcome from the
+        # superseded assessment win just because the head_sha still matches.
+        assessment = Assessment(_manifest())  # assessment_id="abc123"
+        assessment.record(
+            TargetOutcome.analyzed(
+                LINUX,
+                _diff(Verdict.BREAKING),
+                head_sha=HEAD_SHA,
+                assessment_id="stale-assessment-id",
+            )
         )
         result = assessment.finalize()
 

@@ -118,6 +118,19 @@ class AssessmentManifest:
     head_sha: str
     targets: tuple[TargetSpec, ...]
 
+    def __post_init__(self) -> None:
+        # Enforced here (not just in from_dict) so a manifest built directly
+        # via the constructor can't smuggle in an empty or duplicate-id
+        # target set that would silently desync target_ids from len(targets)
+        # (progress()/render_text() key off the latter).
+        if not self.targets:
+            raise ValueError("'targets' must be non-empty")
+        seen: set[str] = set()
+        for t in self.targets:
+            if t.id in seen:
+                raise ValueError(f"duplicate target id: {t.id!r}")
+            seen.add(t.id)
+
     @property
     def target_ids(self) -> frozenset[str]:
         return frozenset(t.id for t in self.targets)
@@ -145,22 +158,20 @@ class AssessmentManifest:
             raise ValueError("'assessment_id' and 'head_sha' are required")
 
         raw_targets = data.get("targets", [])
-        if not isinstance(raw_targets, list) or not raw_targets:
-            raise ValueError("'targets' must be a non-empty list")
+        if not isinstance(raw_targets, list):
+            raise ValueError("'targets' must be a list")
 
         targets: list[TargetSpec] = []
-        seen: set[str] = set()
         for entry in raw_targets:
             if not isinstance(entry, dict) or not entry.get("id"):
                 raise ValueError(f"each target needs an 'id': {entry!r}")
-            target_id = str(entry["id"])
-            if target_id in seen:
-                raise ValueError(f"duplicate target id: {target_id!r}")
-            seen.add(target_id)
             targets.append(
-                TargetSpec(id=target_id, required=bool(entry.get("required", True)))
+                TargetSpec(
+                    id=str(entry["id"]), required=bool(entry.get("required", True))
+                )
             )
 
+        # __post_init__ enforces non-empty/unique-id invariants uniformly.
         return cls(
             assessment_id=str(assessment_id),
             head_sha=str(head_sha),
@@ -190,6 +201,11 @@ class TargetOutcome:
     state: TargetState
     required: bool = True
     attempt: int = 1
+    #: When set, must match the recording Assessment's manifest on both
+    #: fields — an outcome from a different commit *or* a different
+    #: assessment for the same commit (e.g. a rerun with a changed target
+    #: matrix) is stale and must not contaminate the current fan-in result.
+    assessment_id: str | None = None
     head_sha: str | None = None
     reason: str | None = None
     job_url: str | None = None
@@ -213,6 +229,7 @@ class TargetOutcome:
         *,
         required: bool = True,
         attempt: int = 1,
+        assessment_id: str | None = None,
         head_sha: str | None = None,
     ) -> TargetOutcome:
         return cls(
@@ -220,6 +237,7 @@ class TargetOutcome:
             state=TargetState.ANALYZED,
             required=required,
             attempt=attempt,
+            assessment_id=assessment_id,
             head_sha=head_sha,
             findings=findings,
         )
@@ -232,6 +250,7 @@ class TargetOutcome:
         *,
         required: bool = True,
         attempt: int = 1,
+        assessment_id: str | None = None,
         head_sha: str | None = None,
         reason: str | None = None,
         job_url: str | None = None,
@@ -243,6 +262,7 @@ class TargetOutcome:
             state=state,
             required=required,
             attempt=attempt,
+            assessment_id=assessment_id,
             head_sha=head_sha,
             reason=reason,
             job_url=job_url,
@@ -431,13 +451,20 @@ class Assessment:
         """Record a target outcome.
 
         Outcomes for a different commit (``outcome.head_sha`` set and not
-        matching ``manifest.head_sha``) are dropped — stale data from a
-        superseded commit must never contaminate the current assessment. A
-        lower ``attempt`` than one already recorded for the same target is
-        also dropped, so a late-arriving retry of an old attempt can't
-        clobber a newer result.
+        matching ``manifest.head_sha``) or a different assessment for the
+        *same* commit (``outcome.assessment_id`` set and not matching
+        ``manifest.assessment_id`` — e.g. a delayed result from a superseded
+        rerun with a changed target matrix) are dropped, since stale data
+        must never contaminate the current assessment. A lower ``attempt``
+        than one already recorded for the same target is also dropped, so a
+        late-arriving retry of an old attempt can't clobber a newer result.
         """
         if outcome.head_sha is not None and outcome.head_sha != self.manifest.head_sha:
+            return
+        if (
+            outcome.assessment_id is not None
+            and outcome.assessment_id != self.manifest.assessment_id
+        ):
             return
         bucket = (
             self._outcomes
