@@ -86,6 +86,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- `--depth source`/`--sources` findings from the L5 source graph
+  (`SOURCE_TO_BINARY_MAPPING_CHANGED`, `EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED`)
+  now localize `source_location` to the declaration's actual declaring file
+  when the graph resolves one, instead of always carrying the generic
+  `[L5_SOURCE_GRAPH]` evidence-tier tag (CLI audit finding). The graph's
+  `SOURCE_DECLARES` edges already had the real file; these two families
+  simply weren't using it.
 - **GitHub Action**: `dry-run: true` no longer hard-fails (`exit 1`) when
   combined with `abi-baseline` and the release/token/`*.abicheck.json` asset
   is unavailable — the baseline auto-fetch ran before the mode branch ever

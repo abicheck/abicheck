@@ -755,6 +755,12 @@ def _mapping_drift_findings(
     old_map, new_map = _decl_to_symbol(old), _decl_to_symbol(new)
     old_decls = {n.id for n in old.nodes if n.kind == "source_decl"}
     new_decls = {n.id for n in new.nodes if n.kind == "source_decl"}
+    # The declaring file for each decl (CLI audit finding: reports for this
+    # family used to carry only the generic "[L5_SOURCE_GRAPH]" evidence-tier
+    # tag as `source_location`, never an actual file -- decl_declaring_files
+    # already resolves the real declaring file via SOURCE_DECLARES edges, so
+    # there was no need to leave it as a bare provenance tag.
+    new_decl_files = decl_declaring_files(new)
     for decl in sorted(old_decls & new_decls):
         old_sym, new_sym = old_map.get(decl, ""), new_map.get(decl, "")
         if old_sym != new_sym:
@@ -771,7 +777,7 @@ def _mapping_drift_findings(
                     ),
                     old_value=old_labels.get(old_sym, old_sym),
                     new_value=new_labels.get(new_sym, new_sym),
-                    source_location=boundary,
+                    source_location=new_decl_files.get(decl, boundary),
                 )
             )
     return findings
@@ -1358,9 +1364,14 @@ def _symbol_owner_findings(
     new: SourceGraphSummary,
     old_labels: dict[str, str],
     new_labels: dict[str, str],
-    boundary: str,
+    boundary: str,  # unused here; kept for signature parity with sibling _*_findings helpers
 ) -> list[Change]:
-    """An exported symbol whose *declaring* file moved between versions."""
+    """An exported symbol whose *declaring* file moved between versions.
+
+    Unlike its siblings this family always has a concrete new declaring file
+    on hand, so it uses that as ``source_location`` instead of the generic
+    ``boundary`` evidence-tier tag every other family falls back to.
+    """
     from ..checker_policy import ChangeKind
     from ..checker_types import Change
 
@@ -1384,6 +1395,12 @@ def _symbol_owner_findings(
         new_key = _root_relative_key(new_owner[symbol], new_prefix_len)
         if old_key != new_key:
             label = new_labels.get(symbol, symbol)
+            # The symbol's new declaring file, already resolved as new_value
+            # below -- reuse it as source_location instead of the generic
+            # evidence-tier tag (CLI audit finding: this family reports a
+            # concrete file that moved, so the location shouldn't be a bare
+            # "[L5_SOURCE_GRAPH]" placeholder when the real one is on hand).
+            new_owner_label = new_labels.get(new_owner[symbol], new_owner[symbol])
             findings.append(
                 Change(
                     kind=ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED,
@@ -1391,14 +1408,14 @@ def _symbol_owner_findings(
                     description=(
                         f"Exported symbol {label!r} is now declared by a different "
                         f"file ({old_labels.get(old_owner[symbol], old_owner[symbol])} "
-                        f"→ {new_labels.get(new_owner[symbol], new_owner[symbol])}). The "
+                        f"→ {new_owner_label}). The "
                         "name and signature are unchanged, so the artifact diff is "
                         "quiet, but the file owning the declaration moved — review for "
                         "include-path, inlining, or ODR effects. Source-graph evidence."
                     ),
                     old_value=old_labels.get(old_owner[symbol], old_owner[symbol]),
-                    new_value=new_labels.get(new_owner[symbol], new_owner[symbol]),
-                    source_location=boundary,
+                    new_value=new_owner_label,
+                    source_location=new_owner_label,
                 )
             )
     return findings
