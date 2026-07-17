@@ -621,6 +621,23 @@ def compare(
         if macos_floor_changes:
             kept.extend(macos_floor_changes)
 
+    # Wheel-tag architecture-mismatch check (G27): same declared-claim gate,
+    # checked against whichever of ELF/Mach-O evidence the new snapshot
+    # carries.
+    if env_matrix is not None and env_matrix.runtime_floors:
+        from .diff_wheel_deployment import check_wheel_tag_architecture_mismatch
+
+        arch_mismatch_changes = check_wheel_tag_architecture_mismatch(
+            getattr(new, "elf", None),
+            getattr(new, "macho", None),
+            env_matrix.runtime_floors,
+        )
+        arch_mismatch_changes = _filter_suppressed_changes(
+            arch_mismatch_changes, suppression, suppressed
+        )
+        if arch_mismatch_changes:
+            kept.extend(arch_mismatch_changes)
+
     # NumPy C-API compatibility-envelope delta (G26): needs only the two
     # snapshots' own numpy_capi field (no external wheel metadata), so this
     # runs unconditionally — unlike the wheel-metadata cross-check

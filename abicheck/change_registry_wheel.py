@@ -69,4 +69,17 @@ WHEEL_DEPLOYMENT_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
         "into SDK symbols introduced after the promised floor.",
         description_template="macOS deployment target exceeded: binary requires {new}, declared target promises at most {old} (required by: {name})",
     ),
+    _E(
+        "wheel_tag_architecture_mismatch",
+        _B,
+        impact="The wheel's platform tag names exactly one CPU architecture "
+        "(e.g. manylinux_2_17_x86_64, macosx_11_0_arm64), but the contained "
+        "binary's own ELF e_machine / Mach-O cpu_type records a different "
+        "one. This is not a deployment-envelope risk — the wheel simply "
+        "cannot be loaded on the architecture it claims to support at all. "
+        "Typically a packaging/CI mistake (wrong cross-compilation target, "
+        "mismatched build matrix leg, or a stale artifact reused under the "
+        "wrong tag).",
+        description_template="Wheel tag claims architecture {old}, binary is {new} (required by: {name})",
+    ),
 ]

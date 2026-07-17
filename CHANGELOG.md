@@ -67,12 +67,22 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   three share the extracted `_wheel_platform_tag_segment()` helper); the
   macOS parser is arch-aware and returns `None` rather than collapsing a
   fat/universal wheel's per-architecture deployment targets into one
-  (possibly wrong) number when they disagree (Codex review).
-  Windows UCRT/runtime checks, CPU-ISA-baseline detection, and end-to-end
-  CLI auto-derivation from a compared wheel's own filename tag (every check
-  above, including G10's original `GLIBC` one, still requires an explicit
-  `--env-matrix` declaration) remain planned — see the G27 plan's "Out of
-  scope"/status note.
+  (possibly wrong) number when they disagree (Codex review). New
+  `diff_wheel_deployment.check_wheel_tag_architecture_mismatch`: a wheel
+  tag naming exactly one CPU architecture (e.g. `manylinux_2_17_x86_64`,
+  `macosx_11_0_arm64`) vs. the binary's own ELF `e_machine`/Mach-O
+  `cpu_type` — the wheel-tag-claim counterpart to the existing
+  two-snapshot `elf_machine_changed`/`macho_cpu_type_changed` (G13) — new
+  `BREAKING` `wheel_tag_architecture_mismatch`, declared via
+  `runtime_floors: {WHEEL_ARCH: "x86_64"}`. New
+  `abicheck.package.parse_wheel_architecture_claim()` (public wrapper over
+  the existing internal wheel-tag arch derivation).
+  Windows UCRT/runtime checks, CPU-ISA-baseline detection, RPATH/RUNPATH
+  and wheel-closure-dependency checks, and end-to-end CLI auto-derivation
+  from a compared wheel's own filename tag (every check above, including
+  G10's original `GLIBC` one, still requires an explicit `--env-matrix`
+  declaration) remain planned — see the G27 plan's "Out of scope"/status
+  note.
 - `compare --help-all`: a second-level `--help` disclosure tier (G21.8
   collapse M2). Plain `compare --help` now shows only a curated common
   subset of the ~62 options (inputs, output/format, `--show-only`, policy,

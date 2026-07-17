@@ -778,6 +778,14 @@ class ChangeKind(str, Enum):
     # binary's own actual minimum (G27, the macOS half of G10's manylinux
     # glibc-floor idea).
     MACOS_DEPLOYMENT_TARGET_RAISED = "macos_deployment_target_raised"  # binary's own Mach-O minimum OS exceeds the declared/derived macOS deployment-target floor → RISK
+    # A wheel's platform tag names exactly one CPU architecture
+    # (manylinux_2_17_x86_64, macosx_11_0_arm64, ...); the contained
+    # binary's own ELF e_machine/Mach-O cpu_type is the ground truth. A
+    # mismatch means the wheel cannot even be loaded on the architecture it
+    # claims to support — worse than a version-floor risk (G27, tied to the
+    # wheel tag's own claim, unlike G13's two-snapshot elf_machine_changed/
+    # macho_cpu_type_changed).
+    WHEEL_TAG_ARCHITECTURE_MISMATCH = "wheel_tag_architecture_mismatch"  # binary's recorded machine/cpu_type disagrees with the wheel tag's claimed architecture → BREAKING
     # Packed relative relocations (DT_RELR, `-z pack-relative-relocs`,
     # binutils ≥ 2.38 default on some distros). A DT_RELR binary requires
     # glibc ≥ 2.36 (or an equivalent loader) — glibc marks this with the

@@ -958,6 +958,27 @@ def _platform_machine_from_wheel_filename(filename: str) -> str | None:
     return machines.pop() if len(machines) == 1 else None
 
 
+def parse_wheel_architecture_claim(filename: str) -> str | None:
+    """Public wrapper around :func:`_platform_machine_from_wheel_filename`
+    for G27's wheel-tag-vs-binary architecture-mismatch check (the
+    "wheel tag vs. the binary's actual recorded architecture" item from the
+    SciPy/Scientific-Python Roadmap §3, tied to the wheel tag's *own* claim
+    — as opposed to G13's existing ``elf_machine_changed``/
+    ``macho_cpu_type_changed``, which compare two arbitrary binaries against
+    each other, not a binary against its own wheel's filename promise).
+
+    See that function's docstring for exactly which tags this safely
+    derives a single architecture from: single-architecture Linux
+    (``manylinux``/``musllinux``) and macOS tags only. Returns ``None`` for
+    Windows tags, fat/universal macOS tags, ambiguous compressed multi-tag
+    segments, or an unrecognized platform tag — a caller declaring
+    ``runtime_floors["WHEEL_ARCH"]`` from this value therefore never
+    declares a wrong-but-confident claim for those cases; the
+    architecture-mismatch check simply doesn't run.
+    """
+    return _platform_machine_from_wheel_filename(filename)
+
+
 # G26: a wheel's *.dist-info/METADATA declares its runtime dependencies —
 # the "declared" side of the NumPy C-API compatibility-envelope check (the
 # binary-evidence "required" side comes from numpy_capi.py). Mirrors

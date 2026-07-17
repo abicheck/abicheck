@@ -451,6 +451,7 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     # and tests/test_diff_wheel_deployment.py (G27)
     ChangeKind.MUSLLINUX_GLIBC_DEPENDENCY_DETECTED,
     ChangeKind.MACOS_DEPLOYMENT_TARGET_RAISED,
+    ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH,
 }
 
 

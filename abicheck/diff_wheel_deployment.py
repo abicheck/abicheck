@@ -19,13 +19,15 @@ run. ``diff_versioning.py`` already covers the Linux half (manylinux glibc
 floor — G10 — generalized to GLIBCXX/CXXABI, plus the musllinux
 glibc-dependency check, both G27). This module adds the macOS half: a
 ``macosx_X_Y_<arch>`` platform tag promises a *maximum* deployment target
-(``MACOSX_DEPLOYMENT_TARGET``) a wheel's binaries may require — see
+(``MACOSX_DEPLOYMENT_TARGET``) a wheel's binaries may require — plus a
+cross-platform check, the wheel tag's claimed architecture against the
+binary's own recorded machine/cpu_type — see
 docs/development/plans/g27-wheel-deployment-verification.md.
 
-Windows UCRT/runtime-requirement checking, wheel-tag architecture-mismatch
-detection, and CPU-ISA-baseline detection are still planned (see the plan's
-"Out of scope" and the registry entry's ``next_steps``) — not implemented
-here.
+Windows UCRT/runtime-requirement checking, RPATH/RUNPATH correctness,
+wheel-closure-dependency violations, and CPU-ISA-baseline detection are
+still planned (see the plan's "Out of scope" and the registry entry's
+``next_steps``) — not implemented here.
 """
 
 from __future__ import annotations
@@ -34,6 +36,7 @@ from .checker_policy import ChangeKind
 from .checker_types import Change
 from .diff_helpers import make_change
 from .diff_versioning import _parse_dotted_numeric_version, _version_le
+from .elf_metadata import ElfMetadata
 from .macho_metadata import MachoMetadata
 
 #: Declared-floor key for :func:`check_macos_deployment_target_floor`, in the
@@ -103,3 +106,104 @@ def check_macos_deployment_target_floor(
             new=required_raw,
         )
     ]
+
+
+#: Declared-claim key for :func:`check_wheel_tag_architecture_mismatch`, in
+#: the same ``runtime_floors``/``EnvironmentMatrix`` mapping G10/G27's other
+#: platform-baseline checks read. Populated from
+#: ``package.parse_wheel_architecture_claim()``.
+_WHEEL_ARCH_KEY = "WHEEL_ARCH"
+
+#: Wheel-tag architecture claim (as returned by
+#: ``package.parse_wheel_architecture_claim()``) -> the ELF ``e_machine``
+#: value(s) that satisfy it. ``ppc64``/``ppc64le`` share one ``e_machine``
+#: enum value (the difference is endianness, ``EI_DATA`` — a separate,
+#: existing check, not this one) so both map to the same entry; that pair is
+#: a known limitation, not a false-negative gap this check newly introduces.
+_ARCH_CLAIM_TO_ELF_MACHINE: dict[str, frozenset[str]] = {
+    "x86_64": frozenset({"EM_X86_64"}),
+    "aarch64": frozenset({"EM_AARCH64"}),
+    "i686": frozenset({"EM_386"}),
+    "armv7l": frozenset({"EM_ARM"}),
+    "ppc64le": frozenset({"EM_PPC64"}),
+    "ppc64": frozenset({"EM_PPC64"}),
+    "s390x": frozenset({"EM_S390"}),
+}
+
+#: Wheel-tag architecture claim -> the Mach-O ``cpu_type`` value(s) that
+#: satisfy it. ``ARM64E`` (the pointer-authenticating arm64e ABI variant) is
+#: still an ``arm64`` claim as far as the wheel tag is concerned.
+_ARCH_CLAIM_TO_MACHO_CPU_TYPE: dict[str, frozenset[str]] = {
+    "x86_64": frozenset({"X86_64"}),
+    "arm64": frozenset({"ARM64", "ARM64E"}),
+}
+
+
+def check_wheel_tag_architecture_mismatch(
+    elf: ElfMetadata | None,
+    macho: MachoMetadata | None,
+    runtime_floors: dict[str, str] | None,
+) -> list[Change]:
+    """Check a binary's own recorded architecture against the wheel tag's
+    claimed architecture (G27).
+
+    A wheel's platform tag names exactly one CPU architecture for the
+    single-architecture Linux/macOS tags (e.g. ``manylinux_2_17_x86_64``,
+    ``macosx_11_0_arm64`` — see
+    ``package.parse_wheel_architecture_claim()`` for exactly which tags this
+    is safe to derive from). The contained binary's own ELF ``e_machine`` /
+    Mach-O ``cpu_type`` is ground truth; a mismatch means the wheel cannot
+    even be loaded on the architecture it claims to support — a hard
+    failure, not a version-floor risk. This is the wheel-tag-claim
+    counterpart to G13's ``elf_machine_changed``/``macho_cpu_type_changed``,
+    which compare two arbitrary binaries against each other rather than a
+    binary against its own wheel's filename promise.
+
+    *runtime_floors* is read via the ``WHEEL_ARCH`` key (case-insensitive,
+    same normalization as the other G10/G27 checks) — a
+    :func:`abicheck.package.parse_wheel_architecture_claim` value (e.g.
+    ``"x86_64"``, ``"aarch64"``, ``"arm64"``). Returns ``[]`` when no claim
+    is declared, the claim isn't a recognized architecture token, neither
+    *elf* nor *macho* carries a recorded machine/cpu_type, or the recorded
+    value satisfies the claim.
+    """
+    if not runtime_floors:
+        return []
+    floors = {k.upper(): v for k, v in runtime_floors.items()}
+    claimed = floors.get(_WHEEL_ARCH_KEY)
+    if not claimed:
+        return []
+    claimed = claimed.lower()
+    if elf is not None:
+        elf_machine = getattr(elf, "machine", "")
+        if elf_machine:
+            expected = _ARCH_CLAIM_TO_ELF_MACHINE.get(claimed)
+            if expected is None or elf_machine in expected:
+                return []
+            return [
+                make_change(
+                    ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH,
+                    symbol="<platform-baseline>",
+                    name=getattr(elf, "soname", "") or "<binary>",
+                    detail="architecture",
+                    old=claimed,
+                    new=elf_machine,
+                )
+            ]
+    if macho is not None:
+        cpu_type = getattr(macho, "cpu_type", "")
+        if cpu_type:
+            expected = _ARCH_CLAIM_TO_MACHO_CPU_TYPE.get(claimed)
+            if expected is None or cpu_type.upper() in expected:
+                return []
+            return [
+                make_change(
+                    ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH,
+                    symbol="<platform-baseline>",
+                    name=macho.install_name or "<binary>",
+                    detail="architecture",
+                    old=claimed,
+                    new=cpu_type,
+                )
+            ]
+    return []

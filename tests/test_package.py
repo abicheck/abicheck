@@ -42,6 +42,7 @@ from abicheck.package import (
     parse_manylinux_glibc_floor,
     parse_musllinux_floor,
     parse_numpy_requirement_from_metadata,
+    parse_wheel_architecture_claim,
     parse_wheel_numpy_requirement,
     resolve_debug_info,
 )
@@ -988,6 +989,46 @@ class TestParseMacosDeploymentTargetFloor:
         self, name: str, expected: str | None
     ) -> None:
         assert parse_macos_deployment_target_floor(name) == expected
+
+
+class TestParseWheelArchitectureClaim:
+    """G27: public wrapper for the wheel-tag architecture-mismatch check —
+    thin delegation to _platform_machine_from_wheel_filename."""
+
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [
+            pytest.param(
+                "scipy-1.18.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+                "x86_64",
+                id="manylinux_x86_64",
+            ),
+            pytest.param(
+                "scipy-1.18.0-cp312-cp312-manylinux_2_17_aarch64.whl",
+                "aarch64",
+                id="manylinux_aarch64",
+            ),
+            pytest.param(
+                "scipy-1.18.0-cp312-cp312-macosx_11_0_arm64.whl",
+                "arm64",
+                id="macosx_arm64",
+            ),
+            pytest.param(
+                "scipy-1.18.0-cp312-cp312-macosx_10_9_universal2.whl",
+                None,
+                id="macosx_universal2_ambiguous",
+            ),
+            pytest.param(
+                "pkg-1.0-cp311-cp311-win_amd64.whl",
+                None,
+                id="windows_not_derived",
+            ),
+        ],
+    )
+    def test_parse_wheel_architecture_claim(
+        self, name: str, expected: str | None
+    ) -> None:
+        assert parse_wheel_architecture_claim(name) == expected
 
 
 class TestParseNumpyRequirementFromMetadata:

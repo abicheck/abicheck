@@ -9,16 +9,16 @@ architecture-guard machinery and [G12](g12-security-hardening.md)'s
 hardening-flag capture.
 
 **Status note (delivered scope):** the Linux `GLIBCXX`/`CXXABI` floor
-extension, the musllinux glibc-dependency check, and the macOS
-deployment-target check are done (all three reachable via the same
-`--env-matrix`/`runtime_floors` declared-constraint mechanism G10 already
-shipped for the plain `GLIBC` case — see `usecase-registry.yaml`'s
-`next_steps` for the full breakdown). Windows, CPU-ISA-baseline, RPATH/
-RUNPATH, wheel-closure-dependency checks, wheel-tag architecture-mismatch
-detection, and end-to-end CLI auto-derivation from a compared wheel's own
-filename tag (still requires an explicit `--env-matrix` today, for every
-check including G10's original `GLIBC` one) remain planned — see "Out of
-scope" below and the registry entry.
+extension, the musllinux glibc-dependency check, the macOS
+deployment-target check, and the wheel-tag architecture-mismatch check are
+done (all four reachable via the same `--env-matrix`/`runtime_floors`
+declared-constraint mechanism G10 already shipped for the plain `GLIBC`
+case — see `usecase-registry.yaml`'s `next_steps` for the full breakdown).
+Windows, CPU-ISA-baseline, RPATH/RUNPATH, wheel-closure-dependency checks,
+and end-to-end CLI auto-derivation from a compared wheel's own filename tag
+(still requires an explicit `--env-matrix` today, for every check including
+G10's original `GLIBC` one) remain planned — see "Out of scope" below and
+the registry entry.
 
 ## Problem
 
@@ -69,10 +69,12 @@ no native-ABI signal at all.
 - [x] Compare claim vs. evidence and emit deployment-`RISK`/`BREAKING`
       findings on mismatch, each classified per the root `CLAUDE.md`
       four-step procedure — G10's `platform_baseline_floor_raised` kind now
-      also covers the `GLIBCXX`/`CXXABI` case, plus two new siblings:
-      `musllinux_glibc_dependency_detected` and
-      `macos_deployment_target_raised`. `windows_runtime_requirement_added`,
-      `wheel_tag_architecture_mismatch`, and
+      also covers the `GLIBCXX`/`CXXABI` case, plus three new siblings:
+      `musllinux_glibc_dependency_detected`, `macos_deployment_target_raised`,
+      and `wheel_tag_architecture_mismatch` (the wheel-tag-claim counterpart
+      to G13's `elf_machine_changed`/`macho_cpu_type_changed`, which compare
+      two arbitrary binaries rather than a binary against its own wheel's
+      filename promise). `windows_runtime_requirement_added` and
       `wheel_closure_dependency_violation` remain planned.
 - [x] A within-claim binary (evidence at or below the tag's promised floor)
       stays clean on all new checks (unit-tested in
