@@ -466,14 +466,27 @@ _GLIBC_ONLY_SONAMES = frozenset(
 )
 
 
+#: Basename substrings that identify glibc's own dynamic-linker interpreter
+#: across architectures. Most use the "ld-linux[-ARCH]" family (x86,
+#: aarch64, armhf, riscv64, loongarch64, i686's bare "ld-linux.so.2", ...),
+#: but glibc's ppc64le/ppc64/s390x interpreters use a distinct "ld64.so"
+#: naming instead (``/lib64/ld64.so.2`` on ppc64le, ``ld64.so.1`` on
+#: ppc64/s390x) that the "ld-linux" substring alone misses entirely. musl's
+#: own interpreter naming (``ld-musl-<arch>.so.1``) never overlaps either
+#: pattern, so there's no risk of misclassifying a musl loader as glibc's
+#: (Codex review #583).
+_GLIBC_INTERPRETER_MARKERS = ("ld-linux", "ld64.so")
+
+
 def _direct_glibc_dependency_evidence(elf: ElfMetadata) -> str | None:
     """Non-verneed evidence that *elf* depends on glibc specifically (G27).
 
     Covers a snapshot where symbol-version requirements weren't captured (or
     the binary genuinely calls no versioned symbol) but still directly names
     a glibc-only artifact: a :data:`_GLIBC_ONLY_SONAMES` entry in DT_NEEDED,
-    or a glibc-style dynamic-linker interpreter path (PT_INTERP, e.g.
-    ``/lib64/ld-linux-x86-64.so.2`` — distinct from musl's own
+    or a glibc-style dynamic-linker interpreter path (PT_INTERP — see
+    :data:`_GLIBC_INTERPRETER_MARKERS` for the full set of glibc loader
+    naming conventions this recognizes, distinct from musl's own
     ``ld-musl-*.so.1`` interpreter naming). Returns the offending value, or
     ``None``.
     """
@@ -482,7 +495,7 @@ def _direct_glibc_dependency_evidence(elf: ElfMetadata) -> str | None:
         if lib in _GLIBC_ONLY_SONAMES:
             return lib
     interpreter = getattr(elf, "interpreter", "") or ""
-    if "ld-linux" in interpreter:
+    if any(marker in interpreter for marker in _GLIBC_INTERPRETER_MARKERS):
         return interpreter
     return None
 

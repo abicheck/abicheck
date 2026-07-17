@@ -164,6 +164,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   EABI version 5 specifically (not just any hard-float EABI) — manylinux's
   armhf contract requires EABI5, so an `abi_flags` token like `"eabi4"`
   (with hard-float) previously still passed (Codex review, two rounds).
+  `check_musllinux_glibc_dependency`'s direct-interpreter-evidence check now
+  also recognizes glibc's `ld64.so` loader naming (`ld64.so.2` on ppc64le,
+  `ld64.so.1` on ppc64/s390x) alongside the `ld-linux` family — the bare
+  `"ld-linux" in interpreter` substring check previously missed those
+  architectures' glibc loaders entirely, silently passing a musllinux
+  claim on a binary whose PT_INTERP still names a glibc dynamic linker
+  (Codex review).
   Windows UCRT/runtime checks, CPU-ISA-baseline detection, the full
   per-tag closure policy, and end-to-end CLI auto-derivation from a
   compared wheel's own filename tag (every check above, including G10's

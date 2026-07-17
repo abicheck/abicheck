@@ -723,6 +723,45 @@ class TestMusllinuxGlibcDependency:
         )
         assert check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"}) == []
 
+    def test_ppc64le_glibc_interpreter_flagged(self) -> None:
+        # Codex review #583: glibc's ppc64le interpreter is spelled
+        # "ld64.so.2", not the "ld-linux" family — a bare "ld-linux"
+        # substring check missed it entirely.
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(
+            needed=[],
+            versions_required={},
+            interpreter="/lib64/ld64.so.2",
+        )
+        changes = check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"})
+        assert len(changes) == 1
+        assert changes[0].new_value == "/lib64/ld64.so.2"
+
+    def test_s390x_glibc_interpreter_flagged(self) -> None:
+        # glibc's s390x (and big-endian ppc64) interpreter is "ld64.so.1".
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(
+            needed=[],
+            versions_required={},
+            interpreter="/lib/ld64.so.1",
+        )
+        changes = check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"})
+        assert len(changes) == 1
+
+    def test_musl_ppc64le_interpreter_not_flagged(self) -> None:
+        # musl's own interpreter naming (ld-musl-<arch>.so.1) never
+        # overlaps the "ld64.so" glibc pattern, even on ppc64le/s390x.
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(
+            needed=["libc.musl-ppc64le.so.1"],
+            versions_required={},
+            interpreter="/lib/ld-musl-powerpc64le.so.1",
+        )
+        assert check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"}) == []
+
     def test_lowercase_key_still_matches(self) -> None:
         from abicheck.diff_versioning import check_musllinux_glibc_dependency
 
