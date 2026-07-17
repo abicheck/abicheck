@@ -227,6 +227,66 @@ class TestWheelTagArchitectureMismatchUnit:
             == []
         )
 
+    def test_ppc64le_claim_with_big_endian_binary_flagged(self) -> None:
+        # Codex review #583: ppc64/ppc64le share one e_machine value
+        # (EM_PPC64) — the tag distinction is byte order (EI_DATA). A
+        # ppc64le-tagged wheel containing a big-endian ppc64 binary must
+        # not pass just because e_machine matches.
+        elf = _elf(machine="EM_PPC64", ei_data="MSB", soname="libfoo.so.1")
+        changes = check_wheel_tag_architecture_mismatch(
+            elf, None, {"WHEEL_ARCH": "ppc64le"}
+        )
+        assert len(changes) == 1
+        assert changes[0].kind is ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH
+        assert "MSB" in changes[0].new_value
+
+    def test_ppc64_claim_with_little_endian_binary_flagged(self) -> None:
+        elf = _elf(machine="EM_PPC64", ei_data="LSB")
+        changes = check_wheel_tag_architecture_mismatch(
+            elf, None, {"WHEEL_ARCH": "ppc64"}
+        )
+        assert len(changes) == 1
+
+    def test_ppc64le_claim_with_little_endian_binary_clean(self) -> None:
+        elf = _elf(machine="EM_PPC64", ei_data="LSB")
+        assert (
+            check_wheel_tag_architecture_mismatch(
+                elf, None, {"WHEEL_ARCH": "ppc64le"}
+            )
+            == []
+        )
+
+    def test_ppc64_claim_with_big_endian_binary_clean(self) -> None:
+        elf = _elf(machine="EM_PPC64", ei_data="MSB")
+        assert (
+            check_wheel_tag_architecture_mismatch(
+                elf, None, {"WHEEL_ARCH": "ppc64"}
+            )
+            == []
+        )
+
+    def test_ppc64_claim_with_missing_ei_data_degrades_safely(self) -> None:
+        # A legacy snapshot without ei_data captured must not false-positive
+        # purely from the endianness check having no evidence to compare.
+        elf = _elf(machine="EM_PPC64", ei_data="")
+        assert (
+            check_wheel_tag_architecture_mismatch(
+                elf, None, {"WHEEL_ARCH": "ppc64le"}
+            )
+            == []
+        )
+
+    def test_x86_64_claim_unaffected_by_ei_data(self) -> None:
+        # x86_64 has no byte-order ambiguity in _ARCH_CLAIM_TO_ELF_MACHINE,
+        # so ei_data must not factor into its check at all.
+        elf = _elf(machine="EM_X86_64", ei_data="MSB")
+        assert (
+            check_wheel_tag_architecture_mismatch(
+                elf, None, {"WHEEL_ARCH": "x86_64"}
+            )
+            == []
+        )
+
     def test_mismatched_elf_machine_flagged(self) -> None:
         elf = _elf(machine="EM_AARCH64", soname="libtest.so.1")
         changes = check_wheel_tag_architecture_mismatch(

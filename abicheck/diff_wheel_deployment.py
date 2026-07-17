@@ -139,9 +139,10 @@ _WHEEL_ARCH_KEY = "WHEEL_ARCH"
 #: Wheel-tag architecture claim (as returned by
 #: ``package.parse_wheel_architecture_claim()``) -> the ELF ``e_machine``
 #: value(s) that satisfy it. ``ppc64``/``ppc64le`` share one ``e_machine``
-#: enum value (the difference is endianness, ``EI_DATA`` — a separate,
-#: existing check, not this one) so both map to the same entry; that pair is
-#: a known limitation, not a false-negative gap this check newly introduces.
+#: enum value — the tag distinction is byte order (``EI_DATA``), checked
+#: separately via :data:`_ARCH_CLAIM_TO_ELF_EI_DATA` below, since
+#: ``e_machine`` alone would accept a ``ppc64le``-claimed wheel containing a
+#: big-endian ``ppc64`` binary (Codex review #583).
 _ARCH_CLAIM_TO_ELF_MACHINE: dict[str, frozenset[str]] = {
     "x86_64": frozenset({"EM_X86_64"}),
     "aarch64": frozenset({"EM_AARCH64"}),
@@ -150,6 +151,17 @@ _ARCH_CLAIM_TO_ELF_MACHINE: dict[str, frozenset[str]] = {
     "ppc64le": frozenset({"EM_PPC64"}),
     "ppc64": frozenset({"EM_PPC64"}),
     "s390x": frozenset({"EM_S390"}),
+}
+
+#: For the wheel-tag claims whose ``e_machine`` value is ambiguous between
+#: two architectures (``ppc64``/``ppc64le``, both ``EM_PPC64``), the ELF
+#: ``EI_DATA`` byte order (``"LSB"``/``"MSB"``, :attr:`ElfMetadata.ei_data`)
+#: that claim actually requires. Claims not listed here (e.g. ``x86_64``)
+#: have no byte-order ambiguity — their ``e_machine`` value alone is
+#: unambiguous, so no entry is needed.
+_ARCH_CLAIM_TO_ELF_EI_DATA: dict[str, str] = {
+    "ppc64le": "LSB",
+    "ppc64": "MSB",
 }
 
 #: Wheel-tag architecture claim -> the Mach-O ``cpu_type`` value(s) that
@@ -201,6 +213,13 @@ def check_wheel_tag_architecture_mismatch(
     alongside ``cpu_type``) rather than only the selected one, falling back
     to ``cpu_type`` alone for a legacy snapshot predating that field
     (Codex review #583).
+
+    ``ppc64``/``ppc64le`` share one ``e_machine`` value — a matching
+    ``e_machine`` alone isn't sufficient to confirm the claim, since a
+    ``ppc64le``-tagged wheel containing a big-endian ``ppc64`` binary (or
+    vice versa) would otherwise pass. For these two claims, the ELF
+    ``EI_DATA`` byte order (:attr:`ElfMetadata.ei_data`) is also checked
+    against :data:`_ARCH_CLAIM_TO_ELF_EI_DATA` (Codex review #583).
     """
     if not runtime_floors:
         return []
@@ -213,18 +232,37 @@ def check_wheel_tag_architecture_mismatch(
         elf_machine = getattr(elf, "machine", "")
         if elf_machine:
             expected = _ARCH_CLAIM_TO_ELF_MACHINE.get(claimed)
-            if expected is None or elf_machine in expected:
+            if expected is None:
                 return []
-            return [
-                make_change(
-                    ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH,
-                    symbol="<platform-baseline>",
-                    name=getattr(elf, "soname", "") or "<binary>",
-                    detail="architecture",
-                    old=claimed,
-                    new=elf_machine,
-                )
-            ]
+            if elf_machine not in expected:
+                return [
+                    make_change(
+                        ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH,
+                        symbol="<platform-baseline>",
+                        name=getattr(elf, "soname", "") or "<binary>",
+                        detail="architecture",
+                        old=claimed,
+                        new=elf_machine,
+                    )
+                ]
+            expected_ei_data = _ARCH_CLAIM_TO_ELF_EI_DATA.get(claimed)
+            elf_ei_data = getattr(elf, "ei_data", "")
+            if (
+                expected_ei_data is not None
+                and elf_ei_data
+                and elf_ei_data != expected_ei_data
+            ):
+                return [
+                    make_change(
+                        ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH,
+                        symbol="<platform-baseline>",
+                        name=getattr(elf, "soname", "") or "<binary>",
+                        detail="architecture",
+                        old=claimed,
+                        new=f"{elf_machine} ({elf_ei_data})",
+                    )
+                ]
+            return []
     if macho is not None:
         cpu_type = getattr(macho, "cpu_type", "")
         if cpu_type:

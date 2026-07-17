@@ -105,6 +105,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `wheel_tag_architecture_mismatch`, `wheel_closure_dependency_violation`)
   — bumping `DT_SONAME` doesn't fix any of them, so recommending one was
   misleading remediation advice (Codex review).
+  `check_wheel_tag_architecture_mismatch` now also checks ELF `EI_DATA`
+  byte order for the `ppc64`/`ppc64le` claims, which share one `e_machine`
+  value (`EM_PPC64`) — a `ppc64le`-tagged wheel containing a big-endian
+  `ppc64` binary previously passed since `e_machine` alone matched
+  (Codex review).
   Windows UCRT/runtime checks, CPU-ISA-baseline detection, the full
   per-tag closure policy, and end-to-end CLI auto-derivation from a
   compared wheel's own filename tag (every check above, including G10's
