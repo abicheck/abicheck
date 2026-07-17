@@ -7,6 +7,8 @@ fact_provenance.py reader-side helpers every migrated detector now uses.
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
 from abicheck.dumper_hybrid import merge_snapshots
 from abicheck.fact_provenance import (
@@ -174,6 +176,90 @@ class TestFunctionFactBackfill:
 class TestCtorDtorReconciliation:
     """The concrete motivating bug: a castxml synthetic ctor/dtor key has no
     shared identity with the same entity's real clang-mangled key."""
+
+    def test_template_class_constructor_scope_normalized_across_producers(self):
+        # Codex review: castxml spells a template's scope in SOURCE form
+        # ("ns::Widget<int>"), while itanium_scope_components (real clang
+        # mangled name) spells the identical class "ns::WidgetIiE" (the raw
+        # Itanium <template-args> encoding) -- an exact scope-string
+        # comparison never matched ANY templated class's ctor, even for
+        # unchanged source.
+        synthetic = f"{SYNTHETIC_CTOR_KEY_PREFIX}ns::Widget<int>(int)"
+        castxml_ctor = Function(
+            name="Widget",
+            mangled=synthetic,
+            return_type="void",
+            params=[Param(name="n", type="int")],
+            access=AccessLevel.PUBLIC,
+        )
+        real_mangled = "_ZN2ns6WidgetIiEC1Ei"
+        clang_ctor = Function(
+            name="Widget",
+            mangled=real_mangled,
+            return_type="void",
+            params=[Param(name="n", type="int")],
+            access=AccessLevel.PUBLIC,
+        )
+        castxml = _snap(functions=[castxml_ctor], ast_producer="castxml")
+        clang = _snap(functions=[clang_ctor], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+
+        assert merged.func_by_mangled(synthetic) is None
+        assert merged.func_by_mangled(real_mangled) is not None
+
+    def test_template_class_destructor_scope_normalized_across_producers(self):
+        synthetic = "~ns::Widget<int>"
+        castxml_dtor = Function(
+            name="~Widget", mangled=synthetic, return_type="void",
+            is_virtual=True, access=AccessLevel.PUBLIC,
+        )
+        real_mangled = "_ZN2ns6WidgetIiED1Ev"
+        clang_dtor = Function(
+            name="~Widget", mangled=real_mangled, return_type="void",
+            is_virtual=True, access=AccessLevel.PUBLIC,
+        )
+        castxml = _snap(functions=[castxml_dtor], ast_producer="castxml")
+        clang = _snap(functions=[clang_dtor], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+
+        assert merged.func_by_mangled(synthetic) is None
+        assert merged.func_by_mangled(real_mangled) is not None
+
+    def test_different_template_instantiations_disambiguated_by_param_type(self):
+        # Two distinct instantiations (Widget<int>, Widget<double>) share the
+        # SAME normalized scope ("ns::Widget") once template args are
+        # stripped -- their own (type-dependent) constructor parameter must
+        # still tell them apart, not a false match to the wrong one.
+        int_synthetic = f"{SYNTHETIC_CTOR_KEY_PREFIX}ns::Widget<int>(int)"
+        int_castxml = Function(
+            name="Widget", mangled=int_synthetic, return_type="void",
+            params=[Param(name="n", type="int")], access=AccessLevel.PUBLIC,
+        )
+        int_real = "_ZN2ns6WidgetIiEC1Ei"
+        int_clang = Function(
+            name="Widget", mangled=int_real, return_type="void",
+            params=[Param(name="n", type="int")], access=AccessLevel.PUBLIC,
+        )
+        double_synthetic = f"{SYNTHETIC_CTOR_KEY_PREFIX}ns::Widget<double>(double)"
+        double_castxml = Function(
+            name="Widget", mangled=double_synthetic, return_type="void",
+            params=[Param(name="n", type="double")], access=AccessLevel.PUBLIC,
+        )
+        double_real = "_ZN2ns6WidgetIdEC1Ed"
+        double_clang = Function(
+            name="Widget", mangled=double_real, return_type="void",
+            params=[Param(name="n", type="double")], access=AccessLevel.PUBLIC,
+        )
+        castxml = _snap(
+            functions=[int_castxml, double_castxml], ast_producer="castxml"
+        )
+        clang = _snap(functions=[int_clang, double_clang], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+
+        assert merged.func_by_mangled(int_real) is not None
+        assert merged.func_by_mangled(double_real) is not None
+        assert merged.func_by_mangled(int_synthetic) is None
+        assert merged.func_by_mangled(double_synthetic) is None
 
     def test_constructor_synthetic_key_reconciled_to_real_mangled_name(self):
         synthetic = f"{SYNTHETIC_CTOR_KEY_PREFIX}ns::Widget(int)"
@@ -441,3 +527,49 @@ class TestFactProvenanceHelpers:
         new_unbacked = _snap(ast_producer="hybrid", fact_provenance={})
         assert both_castxml_backed_fact(old, new_backed, key)
         assert not both_castxml_backed_fact(old, new_unbacked, key)
+
+
+class TestDumpHybridDispatch:
+    """Codex review: `abicheck dump -H ... --ast-frontend hybrid` on an ELF
+    binary reaches ``dumper.dump()`` directly (``cli_dump_helpers.
+    perform_elf_dump`` imports and calls it, bypassing ``service.run_dump``
+    entirely) -- so ``dump()`` itself must resolve "hybrid" rather than
+    falling through to ``_header_ast_parser``'s single-backend guard.
+    """
+
+    def test_dump_hybrid_delegates_to_run_hybrid_dump(self, tmp_path):
+        from abicheck.dumper import dump
+
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        sentinel = AbiSnapshot(library="test", version="1.0", ast_producer="hybrid")
+        calls = []
+
+        def fake_run_hybrid_dump(dump_fn, so_path, headers, **kwargs):
+            calls.append((dump_fn, so_path, headers))
+            return sentinel
+
+        with patch(
+            "abicheck.dumper_hybrid.run_hybrid_dump", side_effect=fake_run_hybrid_dump
+        ):
+            result = dump(p, [], header_backend="hybrid")
+
+        assert result is sentinel
+        assert len(calls) == 1
+        assert calls[0][0] is dump
+        assert calls[0][1] == p
+
+    def test_dump_hybrid_case_insensitive(self, tmp_path):
+        from abicheck.dumper import dump
+
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        sentinel = AbiSnapshot(library="test", version="1.0", ast_producer="hybrid")
+
+        with patch(
+            "abicheck.dumper_hybrid.run_hybrid_dump", return_value=sentinel
+        ) as mock_run:
+            result = dump(p, [], header_backend="HYBRID")
+
+        assert result is sentinel
+        assert mock_run.call_count == 1

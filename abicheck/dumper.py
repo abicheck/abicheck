@@ -1312,13 +1312,16 @@ def dump(
             origin stays UNKNOWN and behaviour is unchanged.
         public_header_dirs: Directories whose headers are treated as public
             for provenance classification.
-        header_backend: "auto"/"castxml"/"clang" only — "hybrid" (G28 Phase 3)
-            has no single parser here; use ``dumper_hybrid.run_hybrid_dump``
-            or ``service.run_dump``/the CLI instead.
+        header_backend: "auto"/"castxml"/"clang"/"hybrid" (G28 Phase 3: runs
+            both real backends and merges them via dumper_hybrid).
 
     Returns:
         AbiSnapshot with functions, variables, and types populated.
     """
+    if _resolve_header_backend(header_backend) == "hybrid":
+        from .dumper_hybrid import run_hybrid_dump
+        return run_hybrid_dump(dump, so_path, headers, extra_includes=extra_includes, version=version, compiler=compiler, gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options, gcc_option_tokens=gcc_option_tokens, sysroot=sysroot, nostdinc=nostdinc, lang=lang, dwarf_only=dwarf_only, debug_format=debug_format, symbols_only=symbols_only, debug_presence_only=debug_presence_only, public_headers=public_headers, public_header_dirs=public_header_dirs, extra_hash_dirs=extra_hash_dirs, debug_info_path=debug_info_path)
+
     fmt = _detect_format(so_path)
     handler = _HANDLERS_BY_NAME.get(fmt)
     if handler is None:

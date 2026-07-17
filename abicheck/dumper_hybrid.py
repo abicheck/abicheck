@@ -59,7 +59,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from .diff_cxx_rules import itanium_scope_components
+from .diff_cxx_rules import _skip_template_args, itanium_scope_components
 from .dumper_castxml import (
     SYNTHETIC_CTOR_KEY_PREFIX,
     is_synthetic_ctor_key,
@@ -141,6 +141,42 @@ def _split_top_level_commas(s: str) -> list[str]:
     return parts
 
 
+def _strip_itanium_template_suffix(component: str) -> str:
+    """Strip a trailing Itanium ``<template-args>`` (``I...E``) block from a
+    single mangled scope component, recovering the base template name
+    (``"Widget"`` from ``"WidgetIiE"``)."""
+    idx = component.find("I")
+    if idx == -1:
+        return component
+    end = _skip_template_args(component, idx)
+    if end == len(component):
+        return component[:idx]
+    return component
+
+
+def _normalize_scope_for_matching(scope: str) -> str:
+    """Reduce a qualified ctor/dtor scope to a template-argument-free form
+    comparable across both producers.
+
+    castxml's own qualified-name resolution spells a template's scope in
+    SOURCE form (``"ns::Widget<int>"``); the SAME class's scope from a real
+    Itanium-mangled ctor/dtor (``itanium_scope_components``) is spelled
+    ``"ns::WidgetIiE"`` — the raw mangled template-argument encoding. These
+    are two different alphabets for the identical class, so an exact string
+    comparison never matched any templated class's ctor/dtor even when
+    nothing changed (Codex review). Stripping each side's own
+    template-argument spelling down to the bare base name here makes them
+    comparable; the constructor's own (already cv-normalized) parameter
+    signature — not the scope — is what disambiguates distinct instantiations
+    that happen to share a base template name (e.g. ``Box<int>`` vs.
+    ``Box<double>``, whose constructors almost always differ in exactly the
+    template-dependent parameter that this scope normalization discards).
+    """
+    head, sep, last = scope.rpartition("::")
+    last = last.split("<", 1)[0] if "<" in last else _strip_itanium_template_suffix(last)
+    return f"{head}{sep}{last}"
+
+
 def _synthetic_ctor_dtor_scope(key: str) -> tuple[str, str, str] | None:
     """``(marker, qualified_scope, param_sig)`` parsed back out of a castxml
     synthetic ctor/dtor key (the exact inverse of
@@ -176,7 +212,9 @@ def _match_synthetic_ctor_dtor(
     if parsed is None:
         return None
     marker, scope, param_sig = parsed
-    candidates = clang_ctor_dtor.get((marker, scope), [])
+    candidates = clang_ctor_dtor.get(
+        (marker, _normalize_scope_for_matching(scope)), []
+    )
     if marker == _DTOR_MARKER:
         if len(candidates) == 1 and candidates[0].access == castxml_f.access:
             return candidates[0]
@@ -219,7 +257,9 @@ def _merge_functions(
     for cf in clang_funcs:
         scope = _ctor_dtor_scope(cf.mangled)
         if scope is not None:
-            clang_ctor_dtor.setdefault(scope, []).append(cf)
+            marker, scope_str = scope
+            key = (marker, _normalize_scope_for_matching(scope_str))
+            clang_ctor_dtor.setdefault(key, []).append(cf)
 
     merged: list[Function] = []
     for f in castxml_funcs:
