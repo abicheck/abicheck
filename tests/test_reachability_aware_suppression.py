@@ -365,6 +365,32 @@ class TestSuppressionPipelineOrderFix:
         )
         assert reachable_change in ctx.suppressed
         assert unreachable_change not in ctx.suppressed
+        # Codex review: a public-only rule correctly declining to match
+        # genuinely unreachable churn is not "hiding a public break" — no
+        # diagnostic should be emitted for it (the change is simply kept,
+        # for the ordinary reason that no rule suppressed it).
+        assert ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK not in [c.kind for c in ctx.kept]
+
+    def test_broad_default_declining_a_risk_only_reachable_change_has_no_diagnostic(
+        self,
+    ) -> None:
+        """Codex review: the unreachable-only default correctly declining to
+        match a public-reachable but merely RISK-classified change is not
+        "hiding a public break" either — emitting the diagnostic here would
+        wrongly claim the symbol needs allow_public_break, which would not
+        even change the outcome for a non-breaking kind (allow_public_break
+        only ever bypasses the reachability gate for a BREAKING/API_BREAK
+        change)."""
+        old, new, raw_change = _reachable_scenario()
+        raw_change.kind = ChangeKind.FUNC_NOEXCEPT_REMOVED  # COMPATIBLE_WITH_RISK
+        suppression = SuppressionList([
+            Suppression(namespace="oneapi::dal::**::detail::**", reason="private")
+        ])
+        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        assert raw_change.public_reachable is True
+        assert raw_change not in ctx.suppressed
+        assert raw_change in ctx.kept
+        assert ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK not in [c.kind for c in ctx.kept]
 
 
 class TestSuppressionYamlRoundTrip:

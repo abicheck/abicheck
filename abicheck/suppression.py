@@ -467,13 +467,30 @@ class Suppression:
         return self._passes_reachability_gate(change) and self._passes_public_break_gate(change)
 
     def would_withhold(self, change: Change, today: date | None = None) -> bool:
-        """True if this rule's selectors match *change* but the reachability /
-        ``allow_public_break`` gate withheld the suppression (ADR-044 D2/D4)."""
+        """True if this rule's selectors match *change*, *change* is a
+        public-reachable ``BREAKING``/``API_BREAK`` finding, and the
+        ``allow_public_break`` gate is the reason this rule does not suppress
+        it (ADR-044 D2/D4) — i.e. exactly the case the
+        ``suppression_would_hide_public_break`` diagnostic describes.
+
+        Deliberately narrower than "any gate failure" (Codex review): a rule
+        correctly declining to match for an unrelated reachability-scoping
+        reason — e.g. ``reachability: public-only`` correctly skipping a
+        genuinely unreachable change, or the ``unreachable-only`` default
+        correctly skipping a public-reachable but merely ``RISK``-classified
+        change — is the rule intentionally not applying, not an overreach.
+        The original, broader definition produced a diagnostic claiming "the
+        symbol is public-reachable" and suggesting ``allow_public_break``
+        even when the change was not public-reachable at all, or when
+        ``allow_public_break`` would not have changed the outcome (it only
+        ever bypasses the reachability gate for a ``BREAKING``/``API_BREAK``
+        change — see :meth:`_passes_reachability_gate`).
+        """
         if not self._selector_match(change, today):
             return False
-        return not (
-            self._passes_reachability_gate(change) and self._passes_public_break_gate(change)
-        )
+        if not (change.public_reachable and (change.kind in BREAKING_KINDS or change.kind in API_BREAK_KINDS)):
+            return False
+        return not self._passes_public_break_gate(change)
 
 
 def _parse_expires(expires_raw: object, entry_index: int) -> date | None:
