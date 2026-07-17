@@ -172,6 +172,26 @@ class TestLibrariesJsonValidation:
         assert result.returncode == 1
         assert "entry 1" in result.stdout
 
+    def test_duplicate_library_name_fails(self, tmp_path: Path) -> None:
+        # A generated matrix producing two entries with the same name would
+        # otherwise have the second dump silently overwrite the first's
+        # $OUTPUT_DIR/$name.abicheck.json while the manifest still lists two
+        # artifact rows for it (Codex review).
+        result, _ = _run_action(
+            {
+                "INPUT_LIBRARIES": json.dumps(
+                    [
+                        {"name": "libfoo", "artifact": "a.so"},
+                        {"name": "libfoo", "artifact": "b.so"},
+                    ]
+                )
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "duplicate library name" in result.stdout
+        assert "libfoo" in result.stdout
+
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="actions/baseline/run.sh not found")
 @pytest.mark.skipif(not _ABICHECK, reason="needs abicheck on PATH")

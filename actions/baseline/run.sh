@@ -42,9 +42,17 @@ except json.JSONDecodeError as exc:
     sys.exit(f"not valid JSON: {exc}")
 if not isinstance(entries, list) or not entries:
     sys.exit("must be a non-empty JSON array")
+seen_names = set()
 for i, e in enumerate(entries):
     if not isinstance(e, dict) or "name" not in e or "artifact" not in e:
         sys.exit(f"entry {i} must be an object with at least \"name\" and \"artifact\"")
+    name = e["name"]
+    if name in seen_names:
+        # A repeated name would otherwise have its dump silently overwrite
+        # the first entry at $OUTPUT_DIR/$name.abicheck.json while the
+        # manifest still lists two artifact rows for it (Codex review).
+        sys.exit(f"duplicate library name {name!r} (entry {i}) -- each entry needs a unique \"name\"")
+    seen_names.add(name)
 ' "$LIBRARIES_JSON" 2>&1) || _fail "invalid libraries input: $LIBRARIES_ERROR"
 
 mkdir -p "$OUTPUT_DIR"

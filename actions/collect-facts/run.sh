@@ -253,7 +253,43 @@ _verify_pack() {
   if [[ "$file_count" -eq 0 ]]; then
     _fail "phase: verify found pack directory '$OUTPUT' but it is empty -- see the producing-source-facts.md 'public-roots must match how headers resolve' trap: a wrong ABICHECK_CC_HEADERS/public-roots= silently yields nothing to collect from, even though the build otherwise looked fine."
   fi
-  echo "pack at '$OUTPUT' contains $file_count file(s)."
+  # A nonzero file count alone is not proof of real facts: init_inputs_pack()
+  # writes manifest.json up front, before any TU is ever appended, so a build
+  # that never actually routed through the wrapper/plugin (or whose every
+  # extraction failed) still leaves a nonempty directory here -- only
+  # source_facts/*.jsonl proves a TU was collected (Codex review). Run the
+  # same validator dump --build-info uses downstream, so this is a real
+  # pre-flight check instead of a bash reimplementation of it, and fail hard
+  # on zero TU records instead of the silent warning the downstream consumer
+  # gives a mis-instrumented build.
+  local validate_out
+  if ! validate_out=$(python3 -c '
+import sys
+from abicheck.buildsource.inputs_validate import validate_inputs_pack
+
+try:
+    report = validate_inputs_pack(sys.argv[1])
+except (FileNotFoundError, ValueError) as exc:
+    print(f"not a readable abicheck_inputs pack: {exc}")
+    sys.exit(1)
+if report.errors:
+    print("pack validation error(s): " + "; ".join(report.errors))
+    sys.exit(1)
+if report.tu_count == 0:
+    print(
+        "pack directory exists (manifest.json present) but contains zero "
+        "readable TU records under source_facts/ -- no translation unit "
+        "ever appended facts to it (wrong extractor, the build never "
+        "actually invoked the wrapper/plugin, or every extraction failed)."
+    )
+    sys.exit(1)
+for w in report.warnings:
+    print(f"::warning::{w}")
+print(f"pack at {sys.argv[1]!r} contains {report.tu_count} TU record(s).")
+' "$OUTPUT"); then
+    _fail "$validate_out"
+  fi
+  echo "pack at '$OUTPUT' contains $file_count file(s). $validate_out"
   _write_output "producer" "$PRODUCER"
   _write_output "mode" "pack"
   _write_output "pack-path" "$OUTPUT"

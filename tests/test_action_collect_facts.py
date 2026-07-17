@@ -369,10 +369,50 @@ class TestWrapperProducer:
         assert result.returncode == 1
         assert "empty" in result.stdout
 
-    def test_verify_succeeds_on_populated_pack_dir(self, tmp_path: Path) -> None:
+    def test_verify_fails_on_manifest_only_pack_with_no_tu_records(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression (Codex review): init_inputs_pack() writes manifest.json
+        up front, before any TU is appended, so a build that never actually
+        routed through the wrapper/plugin (or whose every extraction failed)
+        still leaves a nonempty pack directory -- the old file-count check
+        alone would have called this pack "ready"."""
+        pytest.importorskip("abicheck")
+        from abicheck.buildsource.inputs_emit import init_inputs_pack
+
         pack = tmp_path / "abicheck_inputs"
-        pack.mkdir()
-        (pack / "foo.jsonl").write_text('{"kind": "function"}\n')
+        init_inputs_pack(pack, library="libfoo")
+        result, _, _ = _run_action(
+            {
+                "INPUT_PHASE": "verify",
+                "INPUT_PRODUCER": "wrapper",
+                "INPUT_OUTPUT": str(pack),
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "zero" in result.stdout and "TU record" in result.stdout
+
+    def test_verify_succeeds_on_populated_pack_dir(self, tmp_path: Path) -> None:
+        pytest.importorskip("abicheck")
+        from abicheck.buildsource.inputs_emit import (
+            append_source_facts,
+            init_inputs_pack,
+        )
+        from abicheck.buildsource.source_abi import SourceAbiTu
+
+        pack = tmp_path / "abicheck_inputs"
+        init_inputs_pack(pack, library="libfoo")
+        append_source_facts(
+            pack,
+            [
+                SourceAbiTu(
+                    tu_id="cu://src/foo.cpp",
+                    target_id="target://libfoo",
+                    source="src/foo.cpp",
+                )
+            ],
+        )
         result, _, github_output = _run_action(
             {
                 "INPUT_PHASE": "verify",

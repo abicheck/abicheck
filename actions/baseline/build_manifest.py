@@ -185,6 +185,16 @@ def _compute_freshness(
         previous = json.load(f)
 
     reasons = []
+    if previous.get("profile") != manifest["profile"]:
+        # profile is the platform/compiler build-profile identity the action
+        # itself records (e.g. linux-x86_64-gcc vs linux-x86_64-clang) -- a
+        # previous-manifest from a different profile is not a stale copy of
+        # this one, it is a baseline for a different target entirely, and
+        # comparing schema/fact_set/library-set alone can't tell the two
+        # apart (Codex review).
+        reasons.append(
+            f"profile {previous.get('profile')!r} -> {manifest['profile']!r}"
+        )
     if previous.get("snapshot_schema") != manifest["snapshot_schema"]:
         reasons.append(
             f"snapshot_schema {previous.get('snapshot_schema')} -> {manifest['snapshot_schema']}"

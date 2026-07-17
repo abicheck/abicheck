@@ -254,6 +254,35 @@ class TestFreshness:
             "removed" in r and "libbar" in r for r in manifest["freshness"]["reasons"]
         )
 
+    def test_profile_change_requires_refresh(self, tmp_path: Path) -> None:
+        # previous-manifest from a different build profile (e.g.
+        # linux-x86_64-gcc vs linux-x86_64-clang) is a baseline for a
+        # different target entirely, not a stale copy of this one -- even
+        # when schema/fact_set/library-set all otherwise match (Codex
+        # review).
+        _write_snapshot(
+            tmp_path / "libfoo.abicheck.json", library="libfoo", schema_version=9
+        )
+        entries = [{"name": "libfoo", "artifact": "a.so"}]
+        previous_path = tmp_path / "previous.json"
+        previous_path.write_text(
+            json.dumps(
+                {
+                    "manifest_version": 1,
+                    "project_ref": "",
+                    "profile": "linux-x86_64-gcc",
+                    "snapshot_schema": 9,
+                    "fact_set": None,
+                    "artifacts": [{"library": "libfoo"}],
+                }
+            )
+        )
+        manifest = build_manifest_module.build_manifest(
+            tmp_path, "", "linux-x86_64-clang", entries, previous_path
+        )
+        assert manifest["freshness"]["refresh_required"] is True
+        assert any("profile" in r for r in manifest["freshness"]["reasons"])
+
     def test_fact_set_change_requires_refresh(self, tmp_path: Path) -> None:
         _write_snapshot(
             tmp_path / "libfoo.abicheck.json",
