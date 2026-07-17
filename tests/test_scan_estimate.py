@@ -619,11 +619,72 @@ def test_estimate_header_seconds_falls_back_when_unstattable(tmp_path: Path) -> 
     from abicheck.service_scan import _COST_PER_HEADER_PARSE, _estimate_header_seconds
 
     missing = tmp_path / "gone.h"  # never created
-    assert _estimate_header_seconds([missing]) == _COST_PER_HEADER_PARSE
+    seconds, high_risk = _estimate_header_seconds([missing])
+    assert seconds == _COST_PER_HEADER_PARSE
+    assert high_risk is False
     real = tmp_path / "real.h"
     real.write_text("void f(void);\n" * 1000, encoding="utf-8")
     # A real, sizeable header costs strictly more than the bare base anchor.
-    assert _estimate_header_seconds([real]) > _COST_PER_HEADER_PARSE
+    seconds, high_risk = _estimate_header_seconds([real])
+    assert seconds > _COST_PER_HEADER_PARSE
+    assert high_risk is False
+
+
+def test_estimate_header_seconds_flags_include_heavy_header(tmp_path: Path) -> None:
+    """Many local #includes signal fan-out a flat size estimate can't see —
+    P0 SVS field report: a small, pathological 3-header set dry-ran at 0.51s
+    then took over 15,000s for real. The estimate must flag, not just size,
+    such a header, and price it well above the plain size-based cost."""
+    from abicheck.service_scan import _estimate_header_seconds
+
+    heavy = tmp_path / "heavy.h"
+    heavy.write_text(
+        "".join(f'#include "dep{i}.h"\n' for i in range(20)), encoding="utf-8"
+    )
+    plain = tmp_path / "plain.h"
+    plain.write_text("void f(void);\n", encoding="utf-8")
+
+    heavy_seconds, heavy_risk = _estimate_header_seconds([heavy])
+    plain_seconds, plain_risk = _estimate_header_seconds([plain])
+    assert heavy_risk is True
+    assert plain_risk is False
+    assert heavy_seconds > plain_seconds * 10
+
+
+def test_estimate_header_seconds_flags_template_heavy_header(tmp_path: Path) -> None:
+    """Heavy template/concept usage is flagged even in a tiny header (no size
+    signal at all) — the SVS pathological headers were small on disk."""
+    from abicheck.service_scan import _estimate_header_seconds
+
+    heavy = tmp_path / "heavy.h"
+    heavy.write_text(
+        "template <class T> struct A { template <class U> requires true "
+        "constexpr U f(); };\n"
+        "template <class T> concept C = requires(T t) { t.f(); };\n"
+        "template <class T> constexpr bool enable_if_v = true;\n",
+        encoding="utf-8",
+    )
+    _seconds, high_risk = _estimate_header_seconds([heavy])
+    assert high_risk is True
+
+
+def test_estimate_scan_l2_note_flags_high_risk_headers(
+    snap_path: Path, tmp_path: Path
+) -> None:
+    """The dry-run's L2_header note must say so — not just a bare number —
+    when a header trips the complexity signal (P0 acceptance: no falsely
+    precise ETA for a pathological header)."""
+    d = tmp_path / "inc"
+    d.mkdir()
+    (d / "heavy.h").write_text(
+        "".join(f'#include "dep{i}.h"\n' for i in range(20)), encoding="utf-8"
+    )
+    est = estimate_scan(
+        ScanRequest(binaries=[snap_path], depth="headers", headers=[d], mode="audit")
+    )
+    l2 = next(e for e in est if e.layer == "L2_header")
+    assert "conservative" in l2.note
+    assert "--budget" in l2.note
 
 
 def _minimal_compile_db(tmp_path: Path) -> Path:

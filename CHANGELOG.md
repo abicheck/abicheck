@@ -9,6 +9,27 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Fixed
+
+- **P0: `scan --depth headers` no longer ignores `--budget` while parsing a
+  pathological header, and no longer orphans clang/castxml child processes on
+  timeout.** Real-world field report (Intel SVS): a 3-header scan with heavy
+  template/include complexity ran over 15,000s and 3+ GiB RSS before an
+  *external* `SIGKILL`, because (1) `--budget` was only checked once, after
+  the whole scan had already finished, and (2) the internal clang/castxml
+  `subprocess.run(..., timeout=120)` call had no process-group isolation, so
+  on a timeout only the direct child was killed — a compiler-driver
+  grandchild could survive as an orphan indefinitely. New `abicheck.deadline`
+  module threads a shrinking scan-wide deadline down to the L2 header-parse
+  subprocess boundary (checked *before* each clang/castxml invocation, not
+  only at the end) and runs that subprocess in its own process group so a
+  timeout kills the whole tree via SIGTERM→SIGKILL escalation. A user-set
+  `--budget` is honored up to its full value rather than silently re-capped
+  to the old fixed 120s. `scan --dry-run`'s L2 header cost estimate also no
+  longer reports a falsely precise number for a small-but-pathological
+  header: headers with deep `#include`/template complexity are flagged and
+  priced conservatively instead.
+
 ### Performance
 
 - **Faster L2 header-tier parsing on large public surfaces** (e.g. Intel

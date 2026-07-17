@@ -54,6 +54,7 @@ if TYPE_CHECKING:
 
 from defusedxml import ElementTree as DefusedET
 
+from . import deadline
 from ._compiler_options import has_explicit_cpp_std, has_explicit_std
 from .dumper_cache import _atomic_write, _cache_path
 from .dumper_castxml import (
@@ -385,12 +386,18 @@ def _clang_header_dump(
             force_cpp=fcpp, force_cpp20=fcpp20,
             system_includes=sysinc,
         )
+        # DeadlineExceeded propagates uncaught (see run_scan_core's _BudgetOverflow
+        # mapping) so a --budget overflow stays distinguishable from a parse timeout.
+        deadline.check()
         try:
-            return subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
+            return deadline.run_bounded(
+                cmd, capture_output=True, text=True, timeout=120,
+            )
         except subprocess.TimeoutExpired as exc:
             raise SnapshotError(
                 "clang timed out after 120 seconds parsing the header(s). The header "
-                "may contain syntax that causes the frontend to hang."
+                "may contain syntax that causes the frontend to hang. The clang "
+                "process (and any child processes) has been terminated."
             ) from exc
 
     try:
@@ -1174,8 +1181,12 @@ def _run_castxml_attempt(
     )
 
     try:
+        # See _clang_header_dump._run_clang: DeadlineExceeded propagates uncaught.
+        deadline.check()
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
+            result = deadline.run_bounded(
+                cmd, capture_output=True, text=True, timeout=120,
+            )
         except subprocess.TimeoutExpired as exc:
             stderr_snippet = ""
             if exc.stderr:
@@ -1184,7 +1195,8 @@ def _run_castxml_attempt(
             raise SnapshotError(
                 f"castxml timed out after 120 seconds. The header file may contain "
                 f"syntax that causes the compiler to hang. Check that the header "
-                f"is valid and can be compiled with gcc/g++.{stderr_snippet}"
+                f"is valid and can be compiled with gcc/g++. The castxml process "
+                f"(and any child processes) has been terminated.{stderr_snippet}"
             ) from exc
         return _validate_castxml_output(result, out_xml, headers, force_cpp)
     finally:

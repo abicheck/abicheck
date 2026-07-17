@@ -557,7 +557,7 @@ class TestCastxmlDump:
                 args=[], returncode=1, stdout="", stderr="castxml stub error"
             )
 
-        monkeypatch.setattr("abicheck.dumper.subprocess.run", fake_run)
+        monkeypatch.setattr("abicheck.dumper.deadline.run_bounded", fake_run)
 
         with pytest.raises(RuntimeError, match="castxml failed"):
             _castxml_dump([Path("h.h")], [])
@@ -580,7 +580,7 @@ class TestCastxmlDump:
             # Do NOT write out_xml — simulate castxml exiting 0 with no output
             return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
 
-        monkeypatch.setattr("abicheck.dumper.subprocess.run", fake_run)
+        monkeypatch.setattr("abicheck.dumper.deadline.run_bounded", fake_run)
         with pytest.raises(RuntimeError, match="no output file"):
             _castxml_dump([Path("h.h")], [])
 
@@ -600,7 +600,7 @@ class TestCastxmlDump:
                             Path(part).write_text("<<<not xml>>>")
             return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
 
-        monkeypatch.setattr("abicheck.dumper.subprocess.run", fake_run)
+        monkeypatch.setattr("abicheck.dumper.deadline.run_bounded", fake_run)
         with pytest.raises(RuntimeError, match="invalid XML|no output file"):
             _castxml_dump([Path("h.h")], [])
 
@@ -622,7 +622,7 @@ class TestCastxmlDump:
                             ElementTree(root).write(str(part))
             return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
 
-        monkeypatch.setattr("abicheck.dumper.subprocess.run", fake_run)
+        monkeypatch.setattr("abicheck.dumper.deadline.run_bounded", fake_run)
         with pytest.raises(RuntimeError, match="empty XML|no output file"):
             _castxml_dump([Path("h.h")], [])
 

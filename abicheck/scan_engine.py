@@ -50,6 +50,7 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
+from . import deadline
 from .buildsource.crosscheck import CrosscheckConfig, run_crosschecks
 from .buildsource.pattern_scan import scan_files
 from .buildsource.poi import (
@@ -697,24 +698,45 @@ def run_scan_core(
         advisories.append(_query_advisory)
 
     _stage = time.monotonic()
-    new_snap, eff_includes = _build_new_snapshot(
-        binary,
-        list(headers),
-        list(includes),
-        sources,
-        collect_mode,
-        lang,
-        effective_allow_query,
-        changed_paths=replay_seed,
-        build_info=effective_build_info,
-        build_config=build_config,
-        public_headers=list(public_headers),
-        public_header_dirs=list(public_header_dirs),
-        compile_context=compile_context,
-        defer_cleanup=defer_cleanup,
-        symbols_only=eff_depth_enum is EvidenceDepth.BINARY,
-        debug_presence_only=_uses_debug_presence_only(eff_depth_enum),
+    # P0 fix: give the expensive L2-L5 collection a *shrinking* deadline (whatever
+    # is left of --budget, from *now*, not from `start`) instead of the previous
+    # behaviour of only checking `elapsed > budget_s` once the whole scan had
+    # already finished. Subprocess call sites reached from _build_new_snapshot
+    # (dumper.py's clang/castxml header parse today; future L3/L4 call sites can
+    # opt in the same way) read this via deadline.bounded_timeout()/deadline.check()
+    # so a pathological header stops itself mid-parse rather than running to
+    # completion (or hanging) regardless of --budget.
+    _remaining_budget = (
+        budget_s - (time.monotonic() - start) if budget_s is not None else None
     )
+    try:
+        with deadline.deadline_scope(_remaining_budget):
+            new_snap, eff_includes = _build_new_snapshot(
+                binary,
+                list(headers),
+                list(includes),
+                sources,
+                collect_mode,
+                lang,
+                effective_allow_query,
+                changed_paths=replay_seed,
+                build_info=effective_build_info,
+                build_config=build_config,
+                public_headers=list(public_headers),
+                public_header_dirs=list(public_header_dirs),
+                compile_context=compile_context,
+                defer_cleanup=defer_cleanup,
+                symbols_only=eff_depth_enum is EvidenceDepth.BINARY,
+                debug_presence_only=_uses_debug_presence_only(eff_depth_enum),
+            )
+    except deadline.DeadlineExceeded as exc:
+        elapsed = time.monotonic() - start
+        raise _BudgetOverflow(
+            f"error: --budget {budget} exceeded ({elapsed:.1f}s > {budget_s:.0f}s) "
+            "while collecting the candidate snapshot (header/build/source parse). "
+            "Pin a shallower level or raise the budget; a budget never silently "
+            "shrinks the pinned scope."
+        ) from exc
     _record_stage("candidate_snapshot", _stage)
     l4_cov = _source_abi_coverage(new_snap)
     advisories.extend(l4_coverage_advisories(l4_cov))

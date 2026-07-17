@@ -730,7 +730,7 @@ def _stub_clang_self_heal(monkeypatch: pytest.MonkeyPatch) -> None:
         calls["n"] += 1
         return fail if calls["n"] == 1 else ok
 
-    monkeypatch.setattr("abicheck.dumper.subprocess.run", _run)
+    monkeypatch.setattr("abicheck.dumper.deadline.run_bounded", _run)
 
 
 def test_clang_self_heal_explicit_c_warns(
@@ -1181,7 +1181,7 @@ def test_clang_header_dump_success_and_cache(
         calls["n"] += 1
         return _fake_proc(stdout=ast_json)
 
-    monkeypatch.setattr(dumper.subprocess, "run", _run)
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
 
     root = _clang_header_dump([header], [])
     assert root == {"kind": "TranslationUnitDecl", "inner": []}
@@ -1202,7 +1202,7 @@ def test_clang_header_dump_no_output_raises(
     # Exit 0 but empty stdout → the "no AST" path (a nonzero exit is the
     # earlier branch, covered by test_clang_header_dump_nonzero_exit_raises).
     monkeypatch.setattr(
-        dumper.subprocess, "run",
+        dumper.deadline, "run_bounded",
         lambda *a, **k: _fake_proc(stdout="", stderr="boom", returncode=0),
     )
     with pytest.raises(SnapshotError, match="no AST"):
@@ -1217,7 +1217,7 @@ def test_clang_header_dump_bad_json_raises(
     monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
     monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
     monkeypatch.setattr(
-        dumper.subprocess, "run",
+        dumper.deadline, "run_bounded",
         lambda *a, **k: _fake_proc(stdout="not json", returncode=0),
     )
     with pytest.raises(SnapshotError, match="not valid JSON"):
@@ -1275,7 +1275,7 @@ def test_clang_header_dump_retries_cpp_on_missing_cpp_stdlib_header(
             return _fake_proc(stderr="fatal error: 'cstddef' file not found", returncode=1)
         return _fake_proc(stdout=ast_json, returncode=0)
 
-    monkeypatch.setattr(dumper.subprocess, "run", _run)
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
     root = _clang_header_dump([header], [])
     assert root == {"kind": "TranslationUnitDecl", "inner": []}
     assert len(cmds) == 2  # one C attempt + one C++ retry
@@ -1299,7 +1299,7 @@ def test_clang_header_dump_no_retry_on_other_error(
         calls["n"] += 1
         return _fake_proc(stderr="error: undeclared identifier 'x'", returncode=1)
 
-    monkeypatch.setattr(dumper.subprocess, "run", _run)
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
     with pytest.raises(SnapshotError, match="failed to parse"):
         _clang_header_dump([header], [])
     assert calls["n"] == 1  # no retry
@@ -1777,7 +1777,7 @@ def test_clang_header_dump_nonzero_exit_raises(
         stderr = "error: use of undeclared identifier"
         returncode = 1
 
-    monkeypatch.setattr(dumper.subprocess, "run", lambda *a, **k: _P())
+    monkeypatch.setattr(dumper.deadline, "run_bounded", lambda *a, **k: _P())
     with pytest.raises(SnapshotError, match="failed to parse"):
         _clang_header_dump([header], [])
 
@@ -1922,7 +1922,7 @@ def test_clang_header_dump_timeout_raises(
     def _boom(*a, **k):
         raise _sp.TimeoutExpired(cmd="clang", timeout=120)
 
-    monkeypatch.setattr(dumper.subprocess, "run", _boom)
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _boom)
     with pytest.raises(SnapshotError, match="timed out"):
         _clang_header_dump([header], [])
 
@@ -1939,7 +1939,7 @@ def test_clang_header_dump_corrupt_cache_is_discarded(
     monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
     monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
     monkeypatch.setattr(
-        dumper.subprocess, "run",
+        dumper.deadline, "run_bounded",
         lambda *a, **k: _fake_proc(stdout=ast, returncode=0),
     )
     # The corrupt cache is unlinked and the fresh clang run repopulates it.

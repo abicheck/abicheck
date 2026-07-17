@@ -187,6 +187,11 @@ class TestProbeGating:
 
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
+            # The main castxml dump now runs through deadline.run_bounded (P0
+            # deadline propagation); the `castxml --version` probe still goes
+            # through the plain subprocess.run _castxml_version_note always
+            # used — both patched to the same fake so either call routes here.
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
         ):
@@ -209,6 +214,7 @@ class TestProbeGating:
 
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
         ):
@@ -256,7 +262,7 @@ class TestLangCFallsBackToCpp:
         header.write_text("namespace ns { int f(int); }\n", encoding="utf-8")
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
             caplog.at_level("WARNING"),
         ):
@@ -287,7 +293,7 @@ class TestLangCFallsBackToCpp:
         )
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
             pytest.raises(SnapshotError) as exc,
         ):
@@ -315,7 +321,7 @@ class TestLangCFallsBackToCpp:
         header.write_text("class Widget { int x; };\n", encoding="utf-8")
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
             pytest.raises(SnapshotError) as exc,
         ):
@@ -336,7 +342,7 @@ class TestLangCFallsBackToCpp:
         header.write_text("int plain_c(void);\n", encoding="utf-8")
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
             pytest.raises(SnapshotError),
         ):
@@ -364,7 +370,7 @@ class TestHeaderToolchainErrorClass:
         header.write_text("int f(void);\n", encoding="utf-8")
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
             pytest.raises(HeaderToolchainError) as exc,
         ):
@@ -383,7 +389,7 @@ class TestHeaderToolchainErrorClass:
         header.write_text("int f(void);\n", encoding="utf-8")
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
             pytest.raises(SnapshotError) as exc,
         ):
@@ -410,7 +416,7 @@ class TestHeaderToolchainErrorClass:
         header.write_text("int f(void);\n", encoding="utf-8")
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
             pytest.raises(SnapshotError) as exc,
         ):

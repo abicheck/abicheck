@@ -411,7 +411,7 @@ class TestBug8CppHintOnCFailure:
     def test_lang_c_with_cpp_header_shows_hint(self, tmp_path: Path):
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run",
+            patch("abicheck.dumper.deadline.run_bounded",
                   return_value=self._failed_process("error: use of undeclared identifier 'class'")),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"),
         ):
@@ -425,7 +425,7 @@ class TestBug8CppHintOnCFailure:
     def test_lang_c_with_pure_c_header_no_hint(self, tmp_path: Path):
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run",
+            patch("abicheck.dumper.deadline.run_bounded",
                   return_value=self._failed_process("error: something else")),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"),
         ):
@@ -456,7 +456,7 @@ class TestBug9CastxmlTimeout:
         timeout_exc = subprocess.TimeoutExpired(cmd=["castxml"], timeout=120)
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=timeout_exc),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=timeout_exc),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"),
         ):
             from abicheck.dumper import _castxml_dump
@@ -469,7 +469,7 @@ class TestBug9CastxmlTimeout:
         timeout_exc = subprocess.TimeoutExpired(cmd=["castxml"], timeout=120)
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=timeout_exc),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=timeout_exc),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"),
         ):
             from abicheck.dumper import _castxml_dump
@@ -484,7 +484,7 @@ class TestBug9CastxmlTimeout:
         )
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=timeout_exc),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=timeout_exc),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"),
         ):
             from abicheck.dumper import _castxml_dump
@@ -498,7 +498,7 @@ class TestBug9CastxmlTimeout:
         timeout_exc = subprocess.TimeoutExpired(cmd=["castxml"], timeout=120)
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=timeout_exc),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=timeout_exc),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"),
         ):
             from abicheck.dumper import _castxml_dump

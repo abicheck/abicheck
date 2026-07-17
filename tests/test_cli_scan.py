@@ -23,6 +23,7 @@ exit codes, the budget guard, and the coverage report. Default lane.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -320,6 +321,47 @@ def test_budget_overflow_fails(runner, new_snap_compatible):
     )
     assert res.exit_code == 5, res.output
     assert "budget" in res.output.lower()
+
+
+def test_budget_checked_mid_snapshot_build_not_only_at_end(
+    monkeypatch, runner, new_snap_compatible
+):
+    # P0 regression (Intel SVS field report): --budget must propagate to the
+    # subprocess/worker boundary, not just be checked once after the whole scan
+    # finishes. A fake, slow "header worker" standing in for dumper.py's clang/
+    # castxml call loops calling deadline.check() between units of work — if
+    # run_scan_core's deadline_scope around _build_new_snapshot were missing
+    # (the old behaviour), deadline.check() would never see an active deadline
+    # and the fake worker would run to completion (10s of simulated work)
+    # before the *end-of-scan* _check_scan_budget finally caught the overflow.
+    # With the fix, it must abort after only a couple of iterations.
+    import abicheck.scan_engine as cs
+    from abicheck import deadline
+
+    iterations = {"n": 0}
+
+    def _slow_worker(*args, **kwargs):
+        for _ in range(1000):
+            iterations["n"] += 1
+            time.sleep(0.01)
+            deadline.check()
+        raise AssertionError("fake worker ran to completion — budget never propagated")
+
+    monkeypatch.setattr(cs, "_build_new_snapshot", _slow_worker)
+    start = time.monotonic()
+    res = runner.invoke(
+        main,
+        ["scan", str(new_snap_compatible), "--budget", "0.05s"],
+    )
+    elapsed = time.monotonic() - start
+    assert res.exit_code == 5, res.output
+    assert "budget" in res.output.lower()
+    assert iterations["n"] < 20, (
+        f"fake worker ran {iterations['n']} iterations before the budget check "
+        "fired — it should have stopped after a couple, proving the deadline "
+        "is live *inside* the stage, not only checked after it finishes"
+    )
+    assert elapsed < 2.0
 
 
 def test_invalid_crosscheck_key_is_usage_error(runner, new_snap_compatible):

@@ -28,6 +28,7 @@ backward compatibility.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -265,23 +266,71 @@ _COST_PER_TU_REPLAY = 7.5  # L4 per-TU semantic AST replay, cold-cache default
 _COST_PER_TU_GRAPH = 0.02  # L5 per-TU graph fold/edge
 
 
-def _estimate_header_seconds(headers: list[Path]) -> float:
-    """Size-aware L2 cost: a fixed per-header parse/preprocess base plus a
-    marginal per-KB term over each header's on-disk size.
+#: A flat size-based estimate prices a one-line ``#include`` umbrella and a
+#: heavily-templated header identically per KB — real-world field evidence (the
+#: SVS ``datatype.h``/``float16.h``/``meta.h`` trio) showed a dry-run estimate
+#: of 0.51s for headers whose actual parse ran over 15,000s before an external
+#: SIGKILL: none of that cost is visible in on-disk bytes, it comes from
+#: template/include fan-out the compiler has to instantiate. These are a cheap,
+#: local (no compiler invocation) peek for that signal so the dry-run estimate
+#: can flag it instead of reporting a falsely precise number.
+_COMPLEXITY_PEEK_BYTES = 512 * 1024
+_COMPLEXITY_INCLUDE_THRESHOLD = 8  # local #include lines
+_COMPLEXITY_TEMPLATE_THRESHOLD = 5  # template/concept/requires/SFINAE hits
+_COMPLEXITY_MULTIPLIER = 25.0  # conservative floor-raising factor, not a promise
+_INCLUDE_RE = re.compile(rb"^[ \t]*#[ \t]*include\b", re.MULTILINE)
+_TEMPLATE_RE = re.compile(
+    rb"\btemplate[ \t]*<|\bconcept\b|\brequires\b|\benable_if\b|\bconstexpr\b"
+)
 
-    A large templated header (an ICU/hdf5 umbrella) is ranked above a one-line
-    shim instead of every header costing the same flat anchor. Falls back to the
-    base alone when a path can't be stat'd (a symlink/glob that no longer
-    resolves) so the estimate never raises mid-dry-run.
+
+def _header_complexity_signal(path: Path) -> bool:
+    """Best-effort local peek: many ``#include``s or heavy template/concept/
+    constexpr usage in *path* signal a header whose real parse time a flat
+    size-based estimate systematically under-prices (recursive template
+    instantiation is not linear in header bytes — the SVS pathological case had
+    small headers and a near-unbounded real parse time). Never raises; an
+    unreadable header is treated as unknown risk (not flagged), matching the
+    size estimate's own fall back to the base cost alone.
+    """
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read(_COMPLEXITY_PEEK_BYTES)
+    except OSError:
+        return False
+    return (
+        len(_INCLUDE_RE.findall(data)) >= _COMPLEXITY_INCLUDE_THRESHOLD
+        or len(_TEMPLATE_RE.findall(data)) >= _COMPLEXITY_TEMPLATE_THRESHOLD
+    )
+
+
+def _estimate_header_seconds(headers: list[Path]) -> tuple[float, bool]:
+    """Size-aware L2 cost, plus a complexity-risk flag.
+
+    Returns ``(seconds, high_risk)``: *seconds* is a fixed per-header parse/
+    preprocess base plus a marginal per-KB term over each header's on-disk
+    size — inflated by :data:`_COMPLEXITY_MULTIPLIER` for any header that trips
+    :func:`_header_complexity_signal`, so a small-but-pathological header no
+    longer prices as a fraction of a second. *high_risk* is True when any
+    header tripped the signal — callers surface this as an explicit caveat
+    instead of a falsely precise point estimate (P0 SVS field report).
+
+    Falls back to the base alone when a path can't be stat'd (a symlink/glob
+    that no longer resolves) so the estimate never raises mid-dry-run.
     """
     total = 0.0
+    high_risk = False
     for h in headers:
-        total += _COST_PER_HEADER_PARSE
+        cost = _COST_PER_HEADER_PARSE
         try:
-            total += _COST_PER_HEADER_KB * (h.stat().st_size / 1024.0)
+            cost += _COST_PER_HEADER_KB * (h.stat().st_size / 1024.0)
         except OSError:
-            continue
-    return total
+            pass
+        if _header_complexity_signal(h):
+            high_risk = True
+            cost *= _COMPLEXITY_MULTIPLIER
+        total += cost
+    return total, high_risk
 
 
 def _count_compile_db_tus(compile_db: Path) -> int:
@@ -564,7 +613,18 @@ def _intrinsic_layer_estimates(
     eff_req_headers = [] if eff_depth is EvidenceDepth.BINARY else list(req.headers)
     expanded_headers = expand_header_inputs(eff_req_headers) if eff_req_headers else []
     n_headers = len(expanded_headers)
-    l2_seconds = _estimate_header_seconds(expanded_headers)
+    l2_seconds, l2_high_risk = _estimate_header_seconds(expanded_headers)
+    if not n_headers:
+        l2_note = "no headers supplied"
+    elif l2_high_risk:
+        l2_note = (
+            "public-header AST (needs castxml or clang); deep #include/template "
+            "complexity detected — this is a conservative floor, not a precise "
+            "ETA, actual parse time can be far higher (unbounded in pathological "
+            "cases); pass --budget to cap it"
+        )
+    else:
+        l2_note = "public-header AST (needs castxml or clang)"
     return [
         CostEstimate(
             None,
@@ -575,16 +635,7 @@ def _intrinsic_layer_estimates(
             "binary export table parse",
         ),
         CostEstimate(None, "L1_debug", 0, 0.05, 0.0, "debug info (if present)"),
-        CostEstimate(
-            None,
-            "L2_header",
-            n_headers,
-            l2_seconds,
-            0.0,
-            "public-header AST (needs castxml or clang)"
-            if n_headers
-            else "no headers supplied",
-        ),
+        CostEstimate(None, "L2_header", n_headers, l2_seconds, 0.0, l2_note),
     ]
 
 
