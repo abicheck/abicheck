@@ -363,9 +363,12 @@ def test_nested_template_cv_change_still_reported_as_param_change():
 @pytest.mark.parametrize("old_t, new_t", [
     ("void (*)(int)", "void (*)(const int)"),
     ("void (*)(int, int)", "void (*)(int, const int)"),
-    ("void (*)(int*)", "void (*)(const int*)"),
     ("void (*)(int* const)", "void (*)(int*)"),
     ("void (*)(int* volatile)", "void (*)(int*)"),
+    ("void (*)(void (*)(int))", "void (*)(void (*)(const int))"),
+    ("void (*)(int*, int)", "void (*)(int*, const int)"),
+    ("void (*)(int, int*)", "void (*)(const int, int*)"),
+    ("void (*)(int*, int*)", "void (*)(int* const, int*)"),
 ])
 def test_callback_by_value_cv_qualifier_is_neutralised(old_t, new_t):
     """Regression guard (Codex review, PR #582): the fix for nested TEMPLATE
@@ -375,18 +378,33 @@ def test_callback_by_value_cv_qualifier_is_neutralised(old_t, new_t):
     ``void (*)(int)`` and ``void (*)(const int)`` are the identical function
     pointer type: top-level cv on a by-value (or pointer-own, trailing
     ``* const``/``* volatile``) parameter is dropped for mangling purposes at
-    every nesting level of a function type, not just the outermost. Blocking
-    the callback's own cv this way made an ABI-neutral header edit misfire
-    the breaking FUNC_PARAMS_CHANGED path."""
+    every nesting level of a function type, not just the outermost — at
+    every level of nesting (a callback-of-a-callback), and independently per
+    comma-separated parameter within one callback's own parameter list (a
+    later/earlier sibling parameter's unrelated pointer sigil must not affect
+    this one's own verdict). Blocking the callback's own cv this way made an
+    ABI-neutral header edit misfire the breaking FUNC_PARAMS_CHANGED path."""
     assert func_signature_cv_only_differ(old_t, new_t) is True
 
 
-def test_callback_pointee_cv_qualifier_is_not_neutralised():
-    """Negative control: a callback parameter's POINTEE cv IS a genuinely
-    different type (confirmed against real mangling: ``void(*)(int*)`` and
-    ``void(*)(const int*)`` are different overloads) — only the callback's
-    own by-value/pointer-value cv (above) is neutral, not its pointee's."""
-    assert func_signature_cv_only_differ("void (*)(int*)", "void (*)(long*)") is False
+@pytest.mark.parametrize("old_t, new_t", [
+    ("void (*)(int*)", "void (*)(long*)"),
+    ("void (*)(int*)", "void (*)(const int*)"),
+    ("void (*)(void (*)(int*))", "void (*)(void (*)(const int*))"),
+    ("void (*)(int*, int*)", "void (*)(int*, const int*)"),
+])
+def test_callback_pointee_cv_qualifier_is_not_neutralised(old_t, new_t):
+    """Negative control (Codex review, PR #589): a callback parameter's
+    POINTEE cv IS a genuinely different type (confirmed against real
+    mangling: ``void(*)(int*)`` and ``void(*)(const int*)`` are different,
+    non-interchangeable function pointer types — unlike an ordinary
+    top-level parameter, where ``T*`` implicitly converts to ``const T*``,
+    a callback supplied by the caller with one pointee-cv signature can't be
+    passed where the other is expected) — only the callback's own by-value/
+    pointer-value cv is neutral, not its pointee's, at any nesting depth or
+    parameter position. An earlier version of the fix above stripped cv
+    indiscriminately inside any paren, wrongly neutralizing this case too."""
+    assert func_signature_cv_only_differ(old_t, new_t) is False
 
 
 def test_callback_cv_change_still_reported_as_param_change():

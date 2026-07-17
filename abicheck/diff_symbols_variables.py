@@ -55,6 +55,7 @@ def _check_variable_alignment(
 
 _TRAILING_CONST_RE = re.compile(r"\s*\bconst\b\s*$")
 _LEADING_CONST_TOKEN_RE = re.compile(r"^\s*\bconst\b\s*")
+_CV_TOKEN_RE = re.compile(r"\b(?:const|volatile)\b")
 
 
 def _has_top_level_pointer_or_ref(canonical_type: str) -> bool:
@@ -79,6 +80,56 @@ def _has_top_level_pointer_or_ref(canonical_type: str) -> bool:
     return False
 
 
+def _last_top_level_sigil_pos(canonical_type: str) -> int | None:
+    """Index of the last ``*``/``&`` outside any ``<...>`` bracket, or None.
+
+    Same "top-level" definition as ``_has_top_level_pointer_or_ref``, just
+    reporting the position instead of a boolean.
+    """
+    depth = 0
+    pos = None
+    for i, ch in enumerate(canonical_type):
+        if ch == "<":
+            depth += 1
+        elif ch == ">":
+            depth = max(0, depth - 1)
+        elif ch in "*&" and depth == 0:
+            pos = i
+    return pos
+
+
+def _strip_trailing_declarator_const(canonical_type: str) -> str:
+    """Strip a top-level pointer/reference declarator's own trailing
+    ``const`` — whether at the absolute end of the string (a bare pointer,
+    ``"int * const"``) or immediately before the closing paren/bracket of a
+    function- or array-pointer declarator (``"void ( *const)()"``, ``"int
+    ( *const)[5]"`` — a variable whose type itself is a function or array
+    pointer, canonicalized with the qualifier directly after the ``*``, not
+    at the string's end). Only a run of pure cv tokens between the sigil and
+    that close counts; anything else there (a real parameter/element type)
+    means this isn't the simple ``"(*quals)"`` declarator shape, so fall
+    back to the plain end-of-string case rather than risk stripping
+    something that isn't actually this declarator's own qualifier
+    (CodeRabbit review, PR #589).
+    """
+    pos = _last_top_level_sigil_pos(canonical_type)
+    if pos is not None:
+        span_end = len(canonical_type)
+        for k in range(pos + 1, len(canonical_type)):
+            if canonical_type[k] in ")]":
+                span_end = k
+                break
+        span = canonical_type[pos + 1 : span_end]
+        if (
+            span_end < len(canonical_type)
+            and re.fullmatch(r"(?:\s|const|volatile)*", span)
+            and _CV_TOKEN_RE.search(span)
+        ):
+            new_span = re.sub(r"\bconst\b", "", span)
+            return canonical_type[: pos + 1] + new_span + canonical_type[span_end:]
+    return _TRAILING_CONST_RE.sub("", canonical_type)
+
+
 def _without_top_level_const(canonical_type: str) -> str:
     """Strip the *top-level* ``const`` from an already-canonicalized type name.
 
@@ -98,7 +149,9 @@ def _without_top_level_const(canonical_type: str) -> str:
       — strip whichever is present.
     - A ``*``/``&`` present: the top-level (pointer-itself) qualifier is
       always the trailing token (``"int * const"``, or ``"std::vector<int>
-      * const"``) regardless of template-ness. A *leading* const there
+      * const"``) regardless of template-ness — see
+      ``_strip_trailing_declarator_const`` for the function-/array-pointer
+      declarator's own variant of "trailing". A *leading* const there
       (``"int const *"``, ``"const std::vector<int> *"``) qualifies the
       pointee, not the pointer, and must NOT be stripped — collapsing it
       would hide a real type change (the pointer itself is still writable;
@@ -107,6 +160,6 @@ def _without_top_level_const(canonical_type: str) -> str:
       case, and the templated-base variant of the same issue).
     """
     if _has_top_level_pointer_or_ref(canonical_type):
-        return _TRAILING_CONST_RE.sub("", canonical_type)
+        return _strip_trailing_declarator_const(canonical_type)
     stripped = _LEADING_CONST_TOKEN_RE.sub("", canonical_type)
     return _TRAILING_CONST_RE.sub("", stripped)

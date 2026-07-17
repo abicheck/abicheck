@@ -597,6 +597,37 @@ class TestVarConstChanged:
         assert ChangeKind.VAR_TYPE_CHANGED in _kinds(r)
         assert ChangeKind.VAR_BECAME_CONST not in _kinds(r)
 
+    def test_function_pointer_own_const_is_var_became_const(self):
+        """`void (*)()` -> `void (* const)()`: the function-pointer VARIABLE
+        itself became const (CodeRabbit review, PR #589) — the qualifier
+        sits directly before the declarator's closing `)`, not at the
+        string's end, unlike a bare pointer's `"int * const"`. Must still
+        report VAR_BECAME_CONST, not VAR_TYPE_CHANGED."""
+        v_v1 = _pub_var("fp", "_Z2fp", "void (*)()", is_const=False)
+        v_v2 = _pub_var("fp", "_Z2fp", "void (* const)()", is_const=True)
+        r = compare(_snap(variables=[v_v1]), _snap(variables=[v_v2]))
+        assert ChangeKind.VAR_BECAME_CONST in _kinds(r)
+        assert ChangeKind.VAR_TYPE_CHANGED not in _kinds(r)
+
+    def test_array_pointer_own_const_is_var_became_const(self):
+        """`int (*)[5]` -> `int (* const)[5]`: same as the function-pointer
+        case above, but the declarator closes with `]` instead of `)`."""
+        v_v1 = _pub_var("ap", "_Z2ap", "int (*)[5]", is_const=False)
+        v_v2 = _pub_var("ap", "_Z2ap", "int (* const)[5]", is_const=True)
+        r = compare(_snap(variables=[v_v1]), _snap(variables=[v_v2]))
+        assert ChangeKind.VAR_BECAME_CONST in _kinds(r)
+        assert ChangeKind.VAR_TYPE_CHANGED not in _kinds(r)
+
+    def test_function_pointer_return_type_const_is_type_changed(self):
+        """Negative control: `void (*)()` -> `const void (*)()` — the
+        POINTEE (the function's return type) became const, not the pointer
+        variable itself. Must report VAR_TYPE_CHANGED, not VAR_BECAME_CONST."""
+        v_v1 = _pub_var("fp", "_Z2fp", "void (*)()", is_const=False)
+        v_v2 = _pub_var("fp", "_Z2fp", "const void (*)()", is_const=True)
+        r = compare(_snap(variables=[v_v1]), _snap(variables=[v_v2]))
+        assert ChangeKind.VAR_TYPE_CHANGED in _kinds(r)
+        assert ChangeKind.VAR_BECAME_CONST not in _kinds(r)
+
 
 # ── legacy CastXML volatile-variable noise (Codex review, PR #582) ──────────
 
