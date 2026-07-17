@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Mode-aware validation of the Action's `mode`/`new-library`/`format`/
-# `upload-sarif` inputs, run as the very first composite-action step —
+# Mode-aware validation of the Action's `mode`/`new-library`/`old-library`/
+# `format`/`upload-sarif` inputs, run as the very first composite-action step —
 # before Python setup, system-dependency installation (castxml/gcc/clang,
 # action/install-deps.sh), or `pip install abicheck`.
 #
@@ -25,6 +25,7 @@ set -uo pipefail
 MODE="${INPUT_MODE:-compare}"
 FORMAT="${INPUT_FORMAT:-}"
 NEW_LIBRARY="${INPUT_NEW_LIBRARY:-}"
+OLD_LIBRARY="${INPUT_OLD_LIBRARY:-}"
 UPLOAD_SARIF="${INPUT_UPLOAD_SARIF:-false}"
 
 # A directory, or a file whose name/magic bytes match a recognized package
@@ -69,13 +70,29 @@ case "$MODE" in
     if [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; then
       _fail "mode: scan does not accept a directory or package for new-library ('$NEW_LIBRARY') — scan analyses exactly one artifact (a binary or a JSON snapshot), it has no per-library fan-out. Point new-library at a single library, or use mode: compare against a directory/package for a multi-library binary comparison."
     fi
-    if [[ "$FORMAT" == "sarif" || "$FORMAT" == "html" ]]; then
-      _fail "mode: scan does not support format: $FORMAT — only 'text' and 'json' are supported. (This used to silently fall back to 'text', which is especially misleading paired with upload-sarif: you would get neither an error nor a SARIF report.) Set format to 'text' or 'json', or switch to mode: compare for SARIF output."
+    # Allowlist, not a denylist: any value other than scan's two real
+    # formats (including a typo like 'xml', not just the known-bad
+    # sarif/html) must be caught here too, not just downstream in the CLI.
+    if [[ -n "$FORMAT" && "$FORMAT" != "text" && "$FORMAT" != "json" ]]; then
+      _fail "mode: scan does not support format: $FORMAT — only 'text' and 'json' are supported. (An unsupported format used to silently fall back to 'text', which is especially misleading paired with upload-sarif: you would get neither an error nor a SARIF report.) Set format to 'text' or 'json', or switch to mode: compare for SARIF output."
     fi
     ;;
   deps-tree | deps-compare)
-    if [[ "$FORMAT" == "sarif" ]]; then
+    if [[ -n "$FORMAT" && "$FORMAT" != "markdown" && "$FORMAT" != "json" && "$FORMAT" != "html" ]]; then
       _fail "mode: $MODE does not support format: $FORMAT — only 'markdown', 'json', and 'html' are supported."
+    fi
+    ;;
+  compare)
+    # sarif/html require a single-pair comparison; the CLI itself already
+    # rejects a directory/package operand for them (a clear UsageError,
+    # surfaced as VERDICT=ERROR by run.sh) but only after Python/deps are
+    # installed. Catch it here too so it's free, like every other check in
+    # this script.
+    if [[ "$FORMAT" == "sarif" || "$FORMAT" == "html" ]]; then
+      if { [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; } \
+         || { [[ -n "$OLD_LIBRARY" ]] && _is_release_style_operand "$OLD_LIBRARY"; }; then
+        _fail "mode: compare does not support format: $FORMAT with a directory/package operand (old-library='$OLD_LIBRARY', new-library='$NEW_LIBRARY') — $FORMAT requires a single-pair comparison. Use format: markdown or json for a directory/package compare."
+      fi
     fi
     ;;
 esac

@@ -61,8 +61,25 @@ def _bash_executable() -> str:
     return "bash"
 
 
+_VALIDATOR_INPUT_VARS = (
+    "INPUT_MODE",
+    "INPUT_NEW_LIBRARY",
+    "INPUT_OLD_LIBRARY",
+    "INPUT_FORMAT",
+    "INPUT_UPLOAD_SARIF",
+)
+
+
 def _run_validate(env_extra: dict[str, str]) -> subprocess.CompletedProcess[str]:
-    env = {**os.environ, **env_extra}
+    # Strip any of validate-inputs.sh's own INPUT_* vars the *test process*
+    # inherited (e.g. if pytest itself ran inside a composite-action step)
+    # before layering env_extra back on top -- otherwise a test that
+    # deliberately omits an input (e.g. test_no_inputs_at_all_passes) could
+    # pick up an ambient value instead of a true unset.
+    env = os.environ.copy()
+    for name in _VALIDATOR_INPUT_VARS:
+        env.pop(name, None)
+    env.update(env_extra)
     return subprocess.run(
         [_bash_executable(), str(VALIDATE_SH)],
         capture_output=True,
@@ -150,8 +167,11 @@ class TestScanRejectsDirectoryOrPackage:
     not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"
 )
 class TestFormatIsHardErrorNotSilentFallback:
-    @pytest.mark.parametrize("fmt", ["sarif", "html"])
+    @pytest.mark.parametrize("fmt", ["sarif", "html", "xml", "csv"])
     def test_scan_rejects_unsupported_format(self, fmt: str) -> None:
+        # An allowlist, not a denylist of known-bad values (CodeRabbit
+        # review, PR #594): a typo/garbage value like 'xml' must be caught
+        # here too, not just sarif/html specifically.
         result = _run_validate({"INPUT_MODE": "scan", "INPUT_FORMAT": fmt})
         assert result.returncode == 1
         assert "does not support format" in result.stdout
@@ -163,8 +183,9 @@ class TestFormatIsHardErrorNotSilentFallback:
         assert result.returncode == 0, result.stdout + result.stderr
 
     @pytest.mark.parametrize("mode", ["deps-tree", "deps-compare"])
-    def test_deps_modes_reject_sarif(self, mode: str) -> None:
-        result = _run_validate({"INPUT_MODE": mode, "INPUT_FORMAT": "sarif"})
+    @pytest.mark.parametrize("fmt", ["sarif", "xml"])
+    def test_deps_modes_reject_unsupported_format(self, mode: str, fmt: str) -> None:
+        result = _run_validate({"INPUT_MODE": mode, "INPUT_FORMAT": fmt})
         assert result.returncode == 1
         assert "does not support format" in result.stdout
 
@@ -180,6 +201,72 @@ class TestFormatIsHardErrorNotSilentFallback:
 
     def test_compare_still_allows_sarif(self) -> None:
         result = _run_validate({"INPUT_MODE": "compare", "INPUT_FORMAT": "sarif"})
+        assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(
+    not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"
+)
+class TestCompareRejectsSarifHtmlWithDirectoryOperand:
+    """compare's sarif/html require a single-pair operand; the CLI itself
+    already rejects a directory/package operand for them (surfaced as
+    VERDICT=ERROR), but only after Python/deps are installed. CodeRabbit
+    review, PR #594: catch it here too, checking BOTH old-library and
+    new-library, not just new-library."""
+
+    @pytest.mark.parametrize("fmt", ["sarif", "html"])
+    def test_directory_new_library_is_rejected(self, tmp_path: Path, fmt: str) -> None:
+        lib_dir = tmp_path / "release"
+        lib_dir.mkdir()
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": "old.so",
+                "INPUT_NEW_LIBRARY": str(lib_dir),
+                "INPUT_FORMAT": fmt,
+            }
+        )
+        assert result.returncode == 1
+        assert "single-pair comparison" in result.stdout
+
+    @pytest.mark.parametrize("fmt", ["sarif", "html"])
+    def test_directory_old_library_is_rejected(self, tmp_path: Path, fmt: str) -> None:
+        lib_dir = tmp_path / "release"
+        lib_dir.mkdir()
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": str(lib_dir),
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_FORMAT": fmt,
+            }
+        )
+        assert result.returncode == 1
+        assert "single-pair comparison" in result.stdout
+
+    def test_directory_operand_with_markdown_still_passes(self, tmp_path: Path) -> None:
+        lib_dir = tmp_path / "release"
+        lib_dir.mkdir()
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": str(lib_dir),
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_FORMAT": "markdown",
+            }
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    @pytest.mark.parametrize("fmt", ["sarif", "html"])
+    def test_single_pair_operands_still_pass(self, fmt: str) -> None:
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": "old.so",
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_FORMAT": fmt,
+            }
+        )
         assert result.returncode == 0, result.stdout + result.stderr
 
 

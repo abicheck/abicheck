@@ -462,6 +462,7 @@ runs:
       env:
         INPUT_MODE: ${{ inputs.mode }}
         INPUT_NEW_LIBRARY: ${{ inputs.new-library }}
+        INPUT_OLD_LIBRARY: ${{ inputs.old-library }}
         INPUT_FORMAT: ${{ inputs.format }}
         INPUT_UPLOAD_SARIF: ${{ inputs.upload-sarif }}
       run: bash "${{ github.action_path }}/action/validate-inputs.sh"

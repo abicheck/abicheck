@@ -290,7 +290,7 @@ should behave differently when a PR is labeled as an intentional break:
 
 Conflating them causes a specific, recurring failure: if CI only keeps a
 *fixed* release baseline and skips the whole check whenever a PR carries an
-"intentional API/ABI break" label, the break lands on the default branch
+`intentional-breaking-change` label, the break lands on the default branch
 still relative to the old release. Every subsequent, unrelated PR then
 diffs against that same stale release baseline, sees the same break again,
 and fails too — even though the break was already reviewed and accepted.
@@ -298,24 +298,28 @@ The label suppressed the *check*, not just the *gate*, so nothing ever
 re-baselines.
 
 **The fix is to keep both baselines running, and let the label only relax
-which one gates the build:**
+their gates — never whether either comparison runs:**
 
 - Always run and publish **both** comparisons — the release-contract report
   stays visible even when its gate is relaxed, so "compatible with the last
   release" doesn't silently go unreported.
-- The label affects only the **gate** for that specific PR (e.g. downgrade
-  `fail-on-breaking`/`fail-on-api-break` for the release-contract job), never
-  whether the comparison **runs**.
-- The accepted-main baseline is what should ordinarily gate merges: refresh
-  it from the default branch after every merge (a lightweight `dump` step on
-  a `push` trigger, [Recipe C](#recipe-c-github-actions-cache) or a
+- On the PR that introduces the break, the label relaxes **both** jobs'
+  `fail-on-breaking` — that PR is, by construction, the one case where the
+  accepted-main comparison is *expected* to report a break (that's what it's
+  for), and the label plus its review is what makes the break "accepted."
+  Neither job's *comparison* is skipped, only its gate, for that one PR.
+- The accepted-main baseline is what ordinarily gates every other PR:
+  refresh it from the default branch after every merge (a lightweight `dump`
+  step on a `push` trigger, [Recipe C](#recipe-c-github-actions-cache) or a
   git-committed file work well for this since it churns on every merge).
+  Once refreshed, the gate is strict again for the *next* PR — the label
+  only ever excuses the PR that carries it, not the ones that follow.
 - The release-contract baseline advances deliberately, only when you cut a
   new release — treat that refresh as part of the release process, not
   something a regular PR should touch.
 
 ```yaml
-# PR workflow — both baselines compared, only one gates by default
+# PR workflow — both baselines compared, both share the same label-relaxed gate
 jobs:
   release-contract:
     steps:
@@ -324,7 +328,7 @@ jobs:
           abi-baseline: latest-release       # fixed until the next release
           new-library: build/libfoo.so
           new-header: include/foo.h
-          fail-on-breaking: ${{ !contains(github.event.pull_request.labels.*.name, 'intentional-api-break') }}
+          fail-on-breaking: ${{ !contains(github.event.pull_request.labels.*.name, 'intentional-breaking-change') }}
 
   accepted-main:
     steps:
@@ -333,7 +337,11 @@ jobs:
           old-library: main-baseline.json     # refreshed on every merge to main
           new-library: build/libfoo.so
           new-header: include/foo.h
-          fail-on-breaking: true               # never relaxed by a label
+          # Same label relaxes this gate too — this comparison is *expected*
+          # to report a break for the one PR that introduces it. Once merged
+          # and main-baseline.json is refreshed, every subsequent PR is
+          # gated strictly again (the label doesn't carry over).
+          fail-on-breaking: ${{ !contains(github.event.pull_request.labels.*.name, 'intentional-breaking-change') }}
 ```
 
 ### Baseline identity is more than a version number

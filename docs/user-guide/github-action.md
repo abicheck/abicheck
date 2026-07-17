@@ -157,8 +157,9 @@ scan degrades gracefully and L0–L2 stay authoritative.
 | `risk-rules` | scan | Path to a YAML file overriding the `risk_rules` profile. |
 
 !!! note "format in scan mode"
-    `scan` supports `format: text` (default) or `json`; other values fall back
-    to `text` with a warning.
+    `scan` supports `format: text` (default) or `json`; any other value is a
+    hard error raised before any dependency install (see [Mode/input
+    compatibility](#modeinput-compatibility)).
 
 !!! tip "Consuming build-emitted source facts (wrapper / Clang plugin)"
     If your **product build** emits its own `abicheck_inputs/` pack — via the
