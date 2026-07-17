@@ -369,6 +369,7 @@ def test_nested_template_cv_change_still_reported_as_param_change():
     ("void (*)(int*, int)", "void (*)(int*, const int)"),
     ("void (*)(int, int*)", "void (*)(const int, int*)"),
     ("void (*)(int*, int*)", "void (*)(int* const, int*)"),
+    ("void (*)(int (*)[3])", "void (*)(int (* const)[3])"),
 ])
 def test_callback_by_value_cv_qualifier_is_neutralised(old_t, new_t):
     """Regression guard (Codex review, PR #582): the fix for nested TEMPLATE
@@ -383,7 +384,14 @@ def test_callback_by_value_cv_qualifier_is_neutralised(old_t, new_t):
     comma-separated parameter within one callback's own parameter list (a
     later/earlier sibling parameter's unrelated pointer sigil must not affect
     this one's own verdict). Blocking the callback's own cv this way made an
-    ABI-neutral header edit misfire the breaking FUNC_PARAMS_CHANGED path."""
+    ABI-neutral header edit misfire the breaking FUNC_PARAMS_CHANGED path.
+    A further review round (Codex, PR #589) found a pointer-to-array
+    parameter's own cv (``int (*)[3]`` vs. ``int (* const)[3]``) wrongly
+    treated as non-neutral: real g++ rejects the two as a redefinition
+    (not distinct overloads), confirming they're the identical type — the
+    ``[3]`` here is the POINTEE's array bound (after an already-seen
+    pointer sigil), not a decaying array parameter, and must not move the
+    declarator's own trailing-cv boundary past it."""
     assert func_signature_cv_only_differ(old_t, new_t) is True
 
 
@@ -394,9 +402,11 @@ def test_callback_by_value_cv_qualifier_is_neutralised(old_t, new_t):
     ("void (*)(int*, int*)", "void (*)(int*, const int*)"),
     ("void (*)(int[3])", "void (*)(const int[3])"),
     ("void (*)(int[3], int)", "void (*)(const int[3], int)"),
+    ("void (*)(int (*)[3])", "void (*)(const int (*)[3])"),
     ("void (*)(int (*)())", "void (*)(const int (*)())"),
     ("void (C::*)(int)", "void (C::*)(int) const"),
     ("void (C::*)(int)", "void (C::*)(int) volatile"),
+    ("void (C::*)(int)", "void (C::*)(int) const volatile"),
     ("void (*)(void (C::*)())", "void (*)(void (C::*)() const)"),
 ])
 def test_callback_pointee_cv_qualifier_is_not_neutralised(old_t, new_t):

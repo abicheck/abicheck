@@ -93,6 +93,14 @@
     always immediately followed by another top-level paren/bracket (the
     real parameter list or array dimensions) — regardless of what's inside
     it (a bare sigil, or a class-qualified `Class::*`).
+  - A pointer-to-array callback parameter's own cv (`int (*)[3]` vs.
+    `int (* const)[3]` — real g++ rejects the two as a redefinition, not
+    distinct overloads, confirming they're the identical type) was wrongly
+    treated as non-neutral: the array-decay handling above also fired for
+    the pointee's array bound after an already-seen pointer sigil, moving
+    the boundary past the declarator's own trailing qualifier. Now only
+    treats a `[...]` as decay when no pointer sigil has been seen yet in
+    the current parameter.
   - `abicheck/diff_symbols.py` was already at the 2000-line AI-readiness
     hard cap, so the pre-existing variable-alignment/const-normalization
     helpers moved into a new leaf module (`diff_symbols_variables.py`),

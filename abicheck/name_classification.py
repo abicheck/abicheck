@@ -441,17 +441,31 @@ def _strip_cv_in_segment(name: str, chars: list[str], start: int, end: int, *, s
             i = j + 1
             continue
         if ch == "[":
-            # An array-typed function PARAMETER decays to a pointer, so a cv
-            # qualifier before it is pointee-position, not by-value — same
-            # non-strippable treatment as a real pointer sigil (confirmed
-            # against real clang/gcc mangling: void(*)(int[3]) and
-            # void(*)(const int[3]) are different, non-interchangeable
-            # function pointer types, same as the int*/const int* case
-            # above). Only matters in strict mode; harmless otherwise since
-            # non-strict stripping ignores last_ptr_pos entirely (Codex
-            # review, PR #589).
-            last_ptr_pos = i
             j = min(_find_matching_close(name, i), end - 1)
+            if last_ptr_pos is None:
+                # An array-typed function PARAMETER (no preceding pointer
+                # sigil in this segment yet) decays to a pointer, so a cv
+                # qualifier before it is pointee-position, not by-value —
+                # same non-strippable treatment as a real pointer sigil
+                # (confirmed against real clang/gcc mangling: void(*)(int[3])
+                # and void(*)(const int[3]) are different, non-
+                # interchangeable function pointer types, same as the
+                # int*/const int* case above). Only matters in strict mode;
+                # harmless otherwise since non-strict stripping ignores
+                # last_ptr_pos entirely (Codex review, PR #589).
+                last_ptr_pos = i
+            # else: a "[...]" AFTER an already-seen pointer sigil is the
+            # POINTEE's array bound (e.g. "int (*)[3]" — a pointer to an
+            # array, not a decaying array parameter), analogous to a
+            # callback's own parameter list: it doesn't move last_ptr_pos,
+            # so the declarator's own preceding qualifier (e.g. "int (*
+            # const)[3]") stays recognized as its own trailing cv, dropped
+            # for mangling (confirmed identical types by real g++: two
+            # same-named overloads differing only in that const are a
+            # hard redefinition error, not distinct overloads) — treating
+            # this "[" the same as the decay case above wrongly moved the
+            # boundary past the declarator's own const, leaving it
+            # unstrippable (Codex review, PR #589, round 3).
             i = j + 1
             continue
         if ch == "(":
