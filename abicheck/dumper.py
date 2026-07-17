@@ -362,6 +362,8 @@ def _clang_header_dump(
     )
     cached = _cache_path(key, backend="clang")
     if cached.exists():
+        # A cache hit still costs time parsing a potentially huge AST (Codex review).
+        deadline.check()
         try:
             return cast("dict[str, Any]", json.loads(cached.read_text(encoding="utf-8")))
         except (ValueError, OSError):
@@ -379,8 +381,7 @@ def _clang_header_dump(
 
     _write_agg(active_headers)
 
-    # Each attempt's AST spills to its own temp file, cleaned up in `finally` below.
-    _ast_paths: list[Path] = []
+    _ast_paths: list[Path] = []  # each attempt's AST, cleaned up in `finally` below
 
     def _run_clang(fcpp: bool, fcpp20: bool, sysinc: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
         cmd = _build_clang_header_command(
@@ -432,7 +433,6 @@ def _clang_header_dump(
             agg_path=agg_path,
             active_headers=active_headers,
         )
-        # Every retry re-invokes _run_clang, so _ast_paths[-1] matches `result`.
         return _parse_clang_ast_result(result, cached, _ast_paths[-1])
     finally:
         agg_path.unlink(missing_ok=True)
@@ -1072,6 +1072,8 @@ def _castxml_dump(
     )
     cached = _cache_path(key)
     if cached.exists():
+        # Same reasoning as the clang cache-hit path (_clang_header_dump, Codex review).
+        deadline.check()
         try:
             _cached_root = DefusedET.parse(str(cached)).getroot()
         except Exception:
@@ -1188,9 +1190,7 @@ def _run_castxml_attempt(
         # See _clang_header_dump._run_clang: DeadlineExceeded propagates uncaught.
         deadline.check()
         try:
-            result = deadline.run_bounded(
-                cmd, capture_output=True, text=True, timeout=120,
-            )
+            result = deadline.run_bounded(cmd, capture_output=True, text=True, timeout=120)
         except subprocess.TimeoutExpired as exc:
             stderr_snippet = ""
             if exc.stderr:

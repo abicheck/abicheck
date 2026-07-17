@@ -537,6 +537,24 @@ class TestCastxmlDump:
         result = _castxml_dump([Path("h.h")], [])
         assert result.tag == "GCC_XML"
 
+    def test_cache_hit_rechecks_deadline(self, tmp_path, monkeypatch):
+        """Codex review (PR #591): a warm XML cache hit still costs real time
+        parsing a potentially large cached AST — deadline.check() must fire
+        on that path too, not just once before castxml would be spawned."""
+        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/castxml")
+        cache_xml = tmp_path / "cached.xml"
+        from xml.etree.ElementTree import ElementTree
+
+        ElementTree(Element("GCC_XML")).write(str(cache_xml))
+        monkeypatch.setattr("abicheck.dumper._cache_key", lambda *a, **kw: "testkey")
+        monkeypatch.setattr("abicheck.dumper._cache_path", lambda k: cache_xml)
+
+        from abicheck import deadline
+
+        with deadline.deadline_scope(-1):  # already expired
+            with pytest.raises(deadline.DeadlineExceeded):
+                _castxml_dump([Path("h.h")], [])
+
     def test_corrupt_cache_is_discarded(self, tmp_path, monkeypatch):
         """Corrupt cache entry is removed before castxml is re-invoked."""
         import subprocess

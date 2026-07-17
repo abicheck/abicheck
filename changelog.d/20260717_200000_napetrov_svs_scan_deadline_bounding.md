@@ -74,3 +74,8 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   multiple GB, so loading and walking it costs real time on its own.
   `deadline.check()` now re-fires right after the subprocess returns, before
   that load starts.
+- **A warm L2 AST cache hit now re-checks the deadline too, not just the
+  subprocess path.** Reading and parsing a cached clang/castxml AST costs
+  real time on its own for a large cached header set; both cache-hit
+  branches (`_clang_header_dump`, `_castxml_dump`) now call
+  `deadline.check()` before consuming the cache entry.

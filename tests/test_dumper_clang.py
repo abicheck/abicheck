@@ -1203,6 +1203,35 @@ def test_clang_header_dump_success_and_cache(
     assert calls["n"] == 1
 
 
+def test_clang_header_dump_rechecks_deadline_on_cache_hit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Codex review (PR #591): a warm AST cache hit still costs real time
+    reading/parsing a potentially huge cached AST — deadline.check() must
+    fire on that path too, not just on the cache-miss subprocess path."""
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    cache = tmp_path / "cache.json"
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+    calls = {"n": 0}
+
+    def _run(cmd, **kwargs):
+        calls["n"] += 1
+        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
+        return _fake_proc()
+
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
+    _clang_header_dump([header], [])  # warms the cache
+    assert cache.exists() and calls["n"] == 1
+
+    with dumper.deadline.deadline_scope(-1):  # already expired
+        with pytest.raises(dumper.deadline.DeadlineExceeded):
+            _clang_header_dump([header], [])
+    assert calls["n"] == 1  # never reached the subprocess path — cache hit
+
+
 def test_clang_header_dump_streams_stdout_to_file_not_memory(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
