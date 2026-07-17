@@ -109,6 +109,54 @@ class TestAstProducerRoundTrip:
         assert snapshot_from_dict(d).ast_producer is None
 
 
+class TestHeaderCvFactsReliableRoundTrip:
+    """AbiSnapshot.header_cv_facts_reliable must be derived from
+    schema_version on load, not merely round-tripped as an opaque key
+    (Codex review, PR #582).
+
+    A pre-v9 persisted snapshot's TypeField.is_const/is_volatile/is_mutable
+    are permanently False and its type spelling never carried a cv
+    qualifier — real (not absent) data indistinguishable from a genuine
+    "not const" fact by value alone. Only the schema_version boundary can
+    tell a legacy snapshot's data apart from a snapshot written by the
+    fixed parser.
+    """
+
+    def test_fresh_in_memory_snapshot_defaults_reliable(self) -> None:
+        snap = _make_snap()
+        assert snap.header_cv_facts_reliable is True
+
+    def test_fresh_dump_serializes_current_schema_version(self) -> None:
+        from abicheck.serialization import SCHEMA_VERSION
+
+        snap = _make_snap()
+        j = json.loads(snapshot_to_json(snap))
+        assert j["schema_version"] == SCHEMA_VERSION == 9
+
+    def test_legacy_schema_version_8_loads_as_unreliable(self) -> None:
+        d = _minimal_dict(schema_version=8)
+        restored = snapshot_from_dict(d)
+        assert restored.header_cv_facts_reliable is False
+
+    def test_current_schema_version_9_loads_as_reliable(self) -> None:
+        d = _minimal_dict(schema_version=9)
+        restored = snapshot_from_dict(d)
+        assert restored.header_cv_facts_reliable is True
+
+    def test_missing_schema_version_key_treated_as_legacy(self) -> None:
+        """A snapshot with no schema_version key at all predates even the
+        original schema-versioning PR (#89) — necessarily older than the
+        CV-fact fix too."""
+        d = _minimal_dict()
+        assert "schema_version" not in d
+        assert snapshot_from_dict(d).header_cv_facts_reliable is False
+
+    def test_round_trip_preserves_reliable_true(self) -> None:
+        snap = _make_snap()
+        j = json.loads(snapshot_to_json(snap))
+        assert snapshot_from_dict(j).header_cv_facts_reliable is True
+
+
 # ── constants ─────────────────────────────────────────────────────────────
 
 

@@ -567,6 +567,97 @@ class TestFieldDefaultInitializerChanged:
         assert "None" not in changed[0].description
 
 
+class TestLegacyCvFactsReliableGating:
+    """A persisted pre-CV-fact-fix CastXML snapshot must not misreport a
+    false FIELD_BECAME_CONST/VOLATILE/MUTABLE or TYPE_FIELD_TYPE_CHANGED
+    purely from a tool upgrade, when compared against a fresh dump of
+    genuinely unchanged headers (Codex review, PR #582 — the two open
+    findings following the destructor/namespace-qualification fixes).
+
+    The pre-fix parser left TypeField.is_const/is_volatile/is_mutable
+    permanently False and never included the qualifier in the field's type
+    spelling; a legacy snapshot's False/qualifier-less values are
+    real-but-wrong data, not absent data, so only a snapshot-level
+    ``header_cv_facts_reliable`` marker (derived from schema_version on
+    deserialization) can distinguish them from a genuine "not const" fact.
+    """
+
+    def _legacy_snap(self, version, **type_kwargs):
+        t = RecordType(name="Cfg", kind="struct", size_bits=32,
+                       fields=[TypeField("flag", **type_kwargs)])
+        return AbiSnapshot(
+            library="libtest.so.1", version=version, types=[t],
+            from_headers=True, ast_producer="castxml",
+            header_cv_facts_reliable=False,
+        )
+
+    def _fresh_snap(self, version, **type_kwargs):
+        t = RecordType(name="Cfg", kind="struct", size_bits=32,
+                       fields=[TypeField("flag", **type_kwargs)])
+        return AbiSnapshot(
+            library="libtest.so.1", version=version, types=[t],
+            from_headers=True, ast_producer="castxml",
+            header_cv_facts_reliable=True,
+        )
+
+    def test_legacy_vs_fresh_suppresses_false_field_became_volatile(self):
+        old = self._legacy_snap("1.0", type="int", offset_bits=0,
+                                is_const=False, is_volatile=False)
+        new = self._fresh_snap("2.0", type="volatile int", offset_bits=0,
+                               is_const=False, is_volatile=True)
+        r = compare(old, new)
+        kinds = _kinds(r)
+        assert ChangeKind.FIELD_BECAME_VOLATILE not in kinds
+        assert ChangeKind.TYPE_FIELD_TYPE_CHANGED not in kinds
+        assert r.verdict == Verdict.NO_CHANGE
+
+    def test_legacy_vs_fresh_suppresses_false_field_became_const(self):
+        old = self._legacy_snap("1.0", type="int", offset_bits=0,
+                                is_const=False, is_volatile=False)
+        new = self._fresh_snap("2.0", type="const int", offset_bits=0,
+                               is_const=True, is_volatile=False)
+        r = compare(old, new)
+        kinds = _kinds(r)
+        assert ChangeKind.FIELD_BECAME_CONST not in kinds
+        assert ChangeKind.TYPE_FIELD_TYPE_CHANGED not in kinds
+
+    def test_both_reliable_still_detects_genuine_volatile_addition(self):
+        """The gate must not neutralize a REAL change between two
+        current-generation snapshots — only the mixed legacy/fresh pairing."""
+        old = self._fresh_snap("1.0", type="int", offset_bits=0,
+                               is_const=False, is_volatile=False)
+        new = self._fresh_snap("2.0", type="volatile int", offset_bits=0,
+                               is_const=False, is_volatile=True)
+        r = compare(old, new)
+        kinds = _kinds(r)
+        assert ChangeKind.FIELD_BECAME_VOLATILE in kinds
+        assert ChangeKind.TYPE_FIELD_TYPE_CHANGED in kinds
+        assert r.verdict == Verdict.BREAKING
+
+    def test_unrelated_type_change_still_detected_when_legacy(self):
+        """A genuine non-cv type change (int -> double) must still fire
+        even when the pair is legacy/unreliable for cv facts specifically —
+        the gate only neutralizes the cv axis, not the whole detector."""
+        old = self._legacy_snap("1.0", type="int", offset_bits=0)
+        new = self._fresh_snap("2.0", type="double", offset_bits=0)
+        r = compare(old, new)
+        assert ChangeKind.TYPE_FIELD_TYPE_CHANGED in _kinds(r)
+
+    def test_union_variant_legacy_vs_fresh_suppresses_false_positive(self):
+        u_old = RecordType(name="Value", kind="union", size_bits=32, is_union=True,
+                           fields=[TypeField("val", "int", 0)])
+        u_new = RecordType(name="Value", kind="union", size_bits=32, is_union=True,
+                           fields=[TypeField("val", "volatile int", 0)])
+        old = AbiSnapshot(library="libtest.so.1", version="1.0", types=[u_old],
+                          from_headers=True, ast_producer="castxml",
+                          header_cv_facts_reliable=False)
+        new = AbiSnapshot(library="libtest.so.1", version="2.0", types=[u_new],
+                          from_headers=True, ast_producer="castxml",
+                          header_cv_facts_reliable=True)
+        r = compare(old, new)
+        assert ChangeKind.UNION_FIELD_TYPE_CHANGED not in _kinds(r)
+
+
 # ── Base class changes ──────────────────────────────────────────────────
 
 class TestBaseClassChanges:

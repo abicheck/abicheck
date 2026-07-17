@@ -29,6 +29,7 @@ Initiative plans (cross-cutting, not tied to a single registry gap):
 |---|---|---|
 | **G19** | [PR-tier source intelligence & cross-source validation](g19-pr-source-intelligence.md) | [ADR-035](../adr/035-pr-tier-source-intelligence-and-crosscheck.md) · XL (phased) |
 | **G24** | [Linux ABI/API detection gap closure](g24-linux-abi-gap-closure.md) | — · L (phased: ELF facts → vtable machinery → clang flag extraction → kABI/ecosystem; macOS/Windows gaps recorded as deferred) |
+| **G28** | [CastXML/Clang L2 parity: hardening & remaining phases](g28-castxml-clang-l2-parity-hardening.md) | [ADR-001](../adr/001-technology-stack.md), [ADR-003](../adr/003-data-source-architecture.md) D8/D9, [ADR-037](../adr/037-cli-interface-contract.md) D8 · Phase 0–2 done; Phase 3 L, Phase 4 XL, Phase 5 M (overlaps [G4](g4-header-ast-extractor.md)) |
 
 Completed or decided plans are retained for implementation history:
 

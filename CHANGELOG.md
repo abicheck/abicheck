@@ -591,6 +591,28 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
     name (`_enclosing_class_qualified_name`, reusing the existing
     `_qualified_name` context-walk); a non-namespaced class's qualified name
     is just its bare name, so the common case's key is unchanged.
+  - **Legacy-snapshot CV-fact false positives** (the two remaining open
+    findings from this hardening round): a snapshot *persisted* before the
+    original field const/volatile/mutable fix has real-but-wrong data
+    (permanently `False` booleans, qualifier-less type spelling) — not
+    merely absent data — so it cannot be told apart from a genuine "not
+    const"/"not volatile" fact by value alone. Comparing such a snapshot
+    against a fresh dump of genuinely unchanged headers misreported false
+    `FIELD_BECAME_CONST`/`VOLATILE`/`MUTABLE` and `TYPE_FIELD_TYPE_CHANGED`/
+    `UNION_FIELD_TYPE_CHANGED` findings purely from a tool upgrade. Fixed
+    by a new `AbiSnapshot.header_cv_facts_reliable` flag, derived from
+    `schema_version` on deserialization (bumped to v9 for this fix; a
+    pre-v9 persisted snapshot loads as unreliable, a fresh in-memory
+    snapshot defaults reliable) and consulted by `_diff_field_qualifiers`
+    (full early-return gate — the booleans are meaningless when either
+    side is unreliable) and by a new `_field_type_genuinely_changed` helper
+    shared by the struct-field and union-variant type-change detectors
+    (neutralizes a by-value cv-only spelling difference only when the pair
+    is unreliable, leaving a genuine non-cv type change, and any change
+    between two current-generation snapshots, fully detected). Same
+    trade-off `_both_castxml_backed` already makes elsewhere: losing one
+    axis of detection on a legacy/fresh mixed pairing to avoid a
+    systematic false positive.
 - **MCP `abi_compare`**: a `--used-by`/`--required-symbol` response's
   `summary` (`total_changes`/`breaking`/`api_breaks`/`risk_changes`/
   `compatible`) is now recomputed after scoped-only changes and

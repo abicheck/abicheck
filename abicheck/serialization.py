@@ -55,7 +55,22 @@ from .model import (
 #     a v7-only reader knows only the old evidence_pack key, so without it a v8
 #     snapshot's renamed provenance would be silently dropped — bumping makes such
 #     readers reject the format (forward-version error) instead of misreading it.
-SCHEMA_VERSION: int = 8
+# v9: CastXML field const/volatile/mutable facts (TypeField.is_const/
+#     is_volatile/is_mutable) and full CV-qualifier type spelling became
+#     reliably populated (previously silently dead — see CHANGELOG). Unlike
+#     earlier bumps, a pre-v9 snapshot is not merely missing a key — it has
+#     real but WRONG data (permanently False booleans, qualifier-less type
+#     spelling) that reads identically to a genuine "not const"/"not
+#     volatile" fact. `snapshot_from_dict` marks such a snapshot's
+#     `AbiSnapshot.header_cv_facts_reliable` False so the affected detectors
+#     in diff_types.py can skip it, instead of misreporting a false
+#     FIELD_BECAME_CONST/VOLATILE/MUTABLE or TYPE_FIELD_TYPE_CHANGED purely
+#     from a tool upgrade comparing a legacy snapshot to a fresh dump of
+#     unchanged headers (Codex review, PR #582).
+SCHEMA_VERSION: int = 9
+
+# Schema version at which CastXML field CV facts became reliable (see v9 above).
+_MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
 
 
 def _sets_to_lists(obj: Any) -> Any:
@@ -814,6 +829,12 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         # castxml snapshot silently lost the tag and permanently disabled
         # all 8 detectors gated on it).
         ast_producer=d.get("ast_producer"),
+        # Derived purely from schema_version, not read back from the dict:
+        # the fact this flag encodes (whether CastXML field CV facts are
+        # reliable) is entirely determined by which parser generation wrote
+        # this snapshot, which schema_version already identifies (Codex
+        # review, PR #582; see SCHEMA_VERSION's v9 entry above).
+        header_cv_facts_reliable=_schema_version >= _MIN_SCHEMA_VERSION_FOR_CV_FACTS,
         constants=d.get("constants", {}),
         platform=d.get("platform"),
         language_profile=d.get("language_profile"),

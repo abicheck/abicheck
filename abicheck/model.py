@@ -486,6 +486,20 @@ class AbiSnapshot:
     # snapshots predating this field.
     ast_producer: str | None = None
 
+    # True when TypeField.is_const/is_volatile/is_mutable and CV-qualifier
+    # type spelling are known-reliable for this snapshot's fields. The
+    # castxml parser silently left these permanently False/unqualified
+    # before a fix (see CHANGELOG); a *persisted* snapshot dumped before
+    # that fix has real "false" data, not merely absent data, so it cannot
+    # be told apart from a genuine "not const" field by the value alone —
+    # only a snapshot-level marker can. False only for a snapshot rehydrated
+    # from a persisted schema_version predating the fix (see
+    # serialization.SCHEMA_VERSION); a freshly-built in-memory snapshot
+    # (dump(), or any snapshot never round-tripped through JSON) defaults
+    # True, since it was necessarily produced by the current, fixed parser
+    # (Codex review, PR #582).
+    header_cv_facts_reliable: bool = True
+
     # Phase 3: binary format platform — detected from ELF/PE/MachO metadata.
     # None = unknown / not yet detected.
     # Populated by detect_platform() in pipeline or by the dumper.
