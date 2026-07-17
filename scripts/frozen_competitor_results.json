@@ -1,7 +1,7 @@
 {
-  "frozen_at": "2026-07-17T06:50:58Z",
-  "git_commit": "c5b5f6ef95e984e46ae83ec81ab8dce570459183",
-  "ground_truth_sha256": "e2575aa963a9cb012af053131816ca821457650de1a86619066a34985ece759d",
+  "frozen_at": "2026-07-17T13:56:10Z",
+  "git_commit": "95581db822ce1f712c8ace561410ba5673d0127d",
+  "ground_truth_sha256": "164a517d66f308991eacf1d84fb02659e0c8ec1b633d04d26033b0467f8569a4",
   "results_by_case": {
     "case01_symbol_removal": {
       "abicc_dumper": "BREAKING",
@@ -617,11 +617,41 @@
       "abicc_xml": "COMPATIBLE",
       "abicc_xml_ms": 7651
     },
+    "case187_public_struct_private_field_type": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0
+    },
+    "case188_public_class_private_base_class": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0
+    },
+    "case189_public_function_private_parameter_type": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0
+    },
     "case18_dependency_leak": {
       "abicc_dumper": "COMPATIBLE",
       "abicc_dumper_ms": 1184,
       "abicc_xml": "COMPATIBLE",
       "abicc_xml_ms": 8681
+    },
+    "case190_public_inline_function_references_internal_constant": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0
+    },
+    "case191_header_only_graph_field_type": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0,
+      "abicc_xml": "SKIP",
+      "abicc_xml_ms": 0
     },
     "case19_enum_member_removed": {
       "abicc_dumper": "COMPATIBLE",
