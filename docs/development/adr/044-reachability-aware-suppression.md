@@ -387,6 +387,37 @@ since JSON/SARIF/JUnit reporters already round-trip `Change` via
   emitted `Change`) before tagging `public_reachable=True`/
   `reachability_kind="direct_public_symbol"` — a type-sourced bump stays
   untagged for the same no-visibility-field reason as the arity index.
+- **The `diff_cpp_patterns.py` sweep the fourth round deliberately
+  deferred (Codex).** Fresh evidence named `TAG_TYPE_RENAMED` specifically:
+  `detect_tag_type_renamed` builds its `Change` from a *type* pairing, but
+  gates the finding on symbol evidence (`only_removed`/`only_added`)
+  explicitly scoped to `_PUBLIC_VIS` per its own docstring — the finding
+  only exists when real public-surface mangled symbols embed the tag's
+  leaf name, the same "finding's mere existence already proves public
+  reachability" signal the earlier leak-finding and namespace/template
+  fixes rely on. Rather than fix only the named kind, finished the sweep
+  the fourth round scoped out: `detect_sycl_overload_set_removal`
+  (`SYCL_OVERLOAD_SET_REMOVED`) and `detect_cpu_dispatch_isa_dropped`
+  (`CPU_DISPATCH_ISA_DROPPED`) both build their grouped findings
+  exclusively from `_PUBLIC_VIS`-filtered `old_funcs`/`new_funcs` (plus, for
+  the ISA detector, the raw PE/Mach-O export table — public by
+  definition), so both got the same construction-time tag.
+  `detect_default_template_arg_changed` (`DEFAULT_TEMPLATE_ARG_CHANGED`)
+  is the same shape (`old_funcs`/`new_funcs` scoped to `_PUBLIC_VIS`), also
+  tagged. `detect_inline_body_renamed_member`
+  (`INLINE_BODY_REFERENCES_RENAMED_MEMBER`) was audited and deliberately
+  left **untagged**: its `_find_public_pimpl_holders` helper infers
+  "public" from `not is_internal_type(name)` — a naming/namespace
+  heuristic, not a `Visibility.PUBLIC` filter — the exact shape of the
+  heuristic that was tried and reverted earlier in this cycle (see the
+  D1 "directly-public subjects" entry above); tagging it here would
+  reintroduce that reverted bug through a different detector.
+  `detect_bundle_soname_skew` (`BUNDLE_SONAME_SKEW`) turned out to be a
+  false alarm on the original P2 list: it is invoked from `bundle.py`'s
+  separate `compare-release`/bundle-cohort command, never from
+  `DetectCppPatterns` or any path that runs through `MarkReachability`/
+  `ApplySuppression` at all, so the pipeline-order bug this ADR closes
+  does not apply to it.
 
 ### D2. `Suppression` gains a reachability guard
 
