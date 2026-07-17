@@ -2555,6 +2555,22 @@ def run_suite(args: argparse.Namespace) -> tuple[list[dict], list[Any], set[str]
     include tools beyond ``selected_tools`` when frozen data was merged in for
     a tool not actively run this session.
     """
+    if args.freeze and (args.cases or args.suite != "all"):
+        # Freezing a filtered run would merge its few fresh rows with old rows
+        # for every untouched case, then stamp the WHOLE file with a new
+        # frozen_at/git_commit -- silently presenting stale verdicts as if
+        # they were produced by this run (caught in review on this exact
+        # merge). Only a full-catalog run's results are trustworthy to
+        # freeze; a scoped rerun of one tool must still cover the full
+        # catalog to update the committed cache. Checked before any case
+        # processing so a filtered --freeze fails fast, not after the run.
+        raise SystemExit(
+            "ERROR: --freeze requires a full-catalog run (no --cases, "
+            "--suite all) -- a filtered freeze would silently mix fresh rows "
+            "for the filtered cases with stale rows for every case left "
+            "untouched, all under one new provenance stamp."
+        )
+
     REPORT_DIR.mkdir(exist_ok=True)
     BUILD_DIR.mkdir(exist_ok=True)
 

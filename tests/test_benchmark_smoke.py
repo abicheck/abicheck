@@ -750,6 +750,31 @@ def test_freeze_tools_discards_stale_cache_instead_of_merging(tmp_path):
     assert entry == {"abicc_dumper": "BREAKING", "abicc_dumper_ms": 2}
 
 
+def test_run_suite_rejects_freeze_with_cases_filter():
+    """--freeze on a --cases-filtered run would merge a few fresh rows with
+    stale rows for every untouched case, then stamp the whole file as if it
+    were all freshly generated -- refuse before doing any case processing."""
+    mod = _load_benchmark()
+    with patch("sys.argv", [
+        "benchmark_comparison.py", "--cases", "case01",
+        "--tools", "abicc_xml", "--freeze", "abicc_xml",
+    ]):
+        args = mod.parse_args()
+    with pytest.raises(SystemExit):
+        mod.run_suite(args)
+
+
+def test_run_suite_rejects_freeze_with_pinned_suite():
+    mod = _load_benchmark()
+    with patch("sys.argv", [
+        "benchmark_comparison.py", "--suite", "pinned74",
+        "--tools", "abicc_xml", "--freeze", "abicc_xml",
+    ]):
+        args = mod.parse_args()
+    with pytest.raises(SystemExit):
+        mod.run_suite(args)
+
+
 def test_ground_truth_digest_is_stable():
     mod = _load_benchmark()
     first = mod._ground_truth_digest()
