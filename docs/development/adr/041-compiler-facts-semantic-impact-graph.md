@@ -904,14 +904,33 @@ resolution and the buildsource merge/collect paths (`cli_resolve.py`,
 `cli_buildsource_helpers.py`). **Update:** the standalone `abicheck dump`
 command now also exposes `--header-graph`/`--header-graph-includes` (the
 shared `header_graph_options` decorator in `cli_options.py`, applied to both
-`compare` and `dump` so the two flags can't drift). `dump` still calls
-`dumper.dump()` via its own legacy `cli_dump_helpers.py` path, not
+`compare` and `dump` so the two flags can't drift). On the ELF path `dump`
+still calls `dumper.dump()` via its own legacy `cli_dump_helpers.py` path, not
 `service.run_dump` — the resolution avoids `dumper.py`'s line-count cap
 entirely: `perform_elf_dump` calls `service._attach_header_graph` directly as
 a post-processing step on the snapshot `dumper.dump()` already returned, the
 exact same wrapper `service.run_dump` itself uses, so `dumper.py` needed no
-change at all. Not yet on `scan`, and the ELF path only — `handle_non_elf_dump`
-(PE/Mach-O) does not thread the flag through yet.
+change at all. On the PE/Mach-O path `handle_non_elf_dump` now threads
+`header_graph`/`header_graph_includes` straight through
+`_dump_native_binary` into `service.run_dump`, which already applied the
+same attach step uniformly across all three formats — the flags previously
+reached `service.run_dump`'s own default (`False`), so `--header-graph`
+silently no-opped on `.dll`/`.dylib` input (Codex review, now fixed). Not yet
+on `scan`.
+
+**Fix: header graph vs. `--build-info`/`--sources` on the same `dump`.**
+`cli_dump_helpers` attaches the header graph to `snap.build_source` *before*
+`write_snapshot_output` runs the `--build-info`/`--sources` embed
+(`cli_buildsource.embed_build_source`). That embed step always replaces
+`snap.build_source` with a freshly `_combine_packs`-merged pack built from
+only the build-info/sources inputs — under a collect mode that requests no
+L4/L5 collection (e.g. the L3-only `build` mode), that merged pack carries no
+`source_graph` of its own, so a plain overwrite silently discarded the
+header-only graph the caller explicitly asked for with `--header-graph`. Fixed
+by having `embed_build_source` backfill the merged pack's `source_graph` (and
+its L5 coverage row) from the pre-existing header-only pack, but only when the
+merge produced none of its own — a genuine `--sources` L4/L5 collection still
+always wins (Codex review).
 
 No new `ChangeKind` — same convention as every other graph slice in this ADR:
 this reuses `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` and the intra-version

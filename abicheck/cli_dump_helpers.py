@@ -367,6 +367,8 @@ def handle_non_elf_dump(
     header_backend: str = "auto",
     compile_context: Any = None,
     inputs_pack: Path | None = None,
+    header_graph: bool = False,
+    header_graph_includes: bool = False,
 ) -> None:
     """Handle the PE/Mach-O native dump path and output writing (split from cli.py).
 
@@ -377,6 +379,13 @@ def handle_non_elf_dump(
     so importing them here would close a ``cli → cli_dump_helpers → … → cli``
     cycle. ``compile_context`` is typed ``Any`` for the same reason (its concrete
     ``CompileContext`` lives in ``service_scan``).
+
+    ``header_graph``/``header_graph_includes`` (ADR-041 addendum) forward
+    straight into ``dump_native_binary`` (``_dump_native_binary`` →
+    ``service.run_dump``), which attaches the header-only graph uniformly
+    across ELF/PE/Mach-O — previously only the ELF ``perform_elf_dump`` path
+    forwarded these, so ``dump --header-graph`` silently no-opped on PE/Mach-O
+    input (Codex review).
     """
     if follow_deps:
         click.echo("Warning: --follow-deps is only supported for ELF binaries.", err=True)
@@ -411,6 +420,8 @@ def handle_non_elf_dump(
             public_header_dirs=list(public_header_dirs),
             header_backend=header_backend,
             compile=compile_context,
+            header_graph=header_graph,
+            header_graph_includes=header_graph_includes,
         )
     except click.ClickException:
         raise

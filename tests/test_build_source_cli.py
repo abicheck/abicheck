@@ -1501,6 +1501,55 @@ def test_embed_build_info_compile_db_inline(tmp_path):
     assert cov is not None and cov.status.value == "present"
 
 
+def test_embed_build_info_preserves_preexisting_header_only_graph(tmp_path):
+    """A `dump --header-graph` pass attaches a header-only L5 pack to
+    `snap.build_source` before `embed_build_source` runs (mirrors
+    `service._attach_header_graph`, called ahead of `write_snapshot_output`).
+    Combining `--header-graph` with `--build-info` under the L3-only
+    `collect_mode="build"` (no L4/L5 attempted at all) must not silently drop
+    that graph just because this embed step's own merged pack carries no L5 of
+    its own (Codex review)."""
+    from pathlib import Path
+
+    from abicheck.buildsource.model import (
+        CoverageStatus,
+        DataLayer,
+        LayerConfidence,
+        LayerCoverage,
+    )
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
+    from abicheck.cli_buildsource import embed_build_source
+
+    cdb = _write_cdb(tmp_path, "c++17")
+    snap = AbiSnapshot(library="libfoo.so", version="1")
+
+    graph = SourceGraphSummary(nodes=[GraphNode(id="d:foo", kind="function")])
+    header_pack = BuildSourcePack(root=Path(""), source_graph=graph)
+    header_pack.manifest.coverage = [
+        LayerCoverage(layer=DataLayer.L3_BUILD.value, status=CoverageStatus.NOT_COLLECTED),
+        LayerCoverage(layer=DataLayer.L4_SOURCE_ABI.value, status=CoverageStatus.NOT_COLLECTED),
+        LayerCoverage(
+            layer=DataLayer.L5_SOURCE_GRAPH.value,
+            status=CoverageStatus.PARTIAL,
+            confidence=LayerConfidence.UNKNOWN,
+        ),
+    ]
+    snap.build_source = header_pack
+
+    embed_build_source(snap, cdb, None, collect_mode="build")
+
+    # L3 facts from --build-info landed as normal ...
+    assert snap.build_source is not None
+    assert snap.build_source.build_evidence is not None
+    assert len(snap.build_source.build_evidence.compile_units) == 1
+    # ... and the pre-existing header-only graph survived instead of being
+    # silently overwritten by the merged (graph-less) pack.
+    assert snap.build_source.source_graph is graph
+    cov = snap.build_source.manifest.coverage_for("L5_source_graph")
+    assert cov is not None and cov.status == CoverageStatus.PARTIAL
+
+
 def test_embed_build_info_autodiscovers_compile_db_in_tree(tmp_path):
     """A compile DB inside the --sources tree is auto-discovered for L3."""
     from abicheck.cli_buildsource import embed_build_source

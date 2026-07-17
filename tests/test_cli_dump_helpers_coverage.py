@@ -211,6 +211,77 @@ def test_non_elf_dump_success_stamps_and_writes(tmp_path: Path) -> None:
     assert written[3] == "clang"  # extractor threaded through
 
 
+def test_non_elf_dump_forwards_header_graph_flags(tmp_path: Path) -> None:
+    """--header-graph/--header-graph-includes reach dump_native_binary on the
+    PE/Mach-O path — previously only perform_elf_dump forwarded them, so
+    `dump --header-graph` silently no-opped on non-ELF input (Codex review)."""
+    so = tmp_path / "lib.dylib"
+    snap = AbiSnapshot(library="lib.dylib", version="1.0")
+
+    calls: dict[str, object] = {}
+
+    def _dump_native(*a, **k):  # noqa: ANN002, ANN003
+        calls["dump_kwargs"] = k
+        return snap
+
+    handle_non_elf_dump(
+        so,
+        "macho",
+        (),
+        (),
+        "1.0",
+        "c++",
+        None,
+        False,
+        None,
+        None,
+        False,
+        None,
+        _dump_native,
+        _noop_stamp,
+        _record_write,
+        header_graph=True,
+        header_graph_includes=True,
+    )
+    kwargs = calls["dump_kwargs"]
+    assert kwargs["header_graph"] is True
+    assert kwargs["header_graph_includes"] is True
+
+
+def test_non_elf_dump_defaults_header_graph_off(tmp_path: Path) -> None:
+    """Without --header-graph, dump_native_binary sees the flag as False (default),
+    matching the ELF path's default-off behavior."""
+    so = tmp_path / "lib.dll"
+    snap = AbiSnapshot(library="lib.dll", version="1.0")
+
+    calls: dict[str, object] = {}
+
+    def _dump_native(*a, **k):  # noqa: ANN002, ANN003
+        calls["dump_kwargs"] = k
+        return snap
+
+    handle_non_elf_dump(
+        so,
+        "pe",
+        (),
+        (),
+        "1.0",
+        "c++",
+        None,
+        False,
+        None,
+        None,
+        False,
+        None,
+        _dump_native,
+        _noop_stamp,
+        _record_write,
+    )
+    kwargs = calls["dump_kwargs"]
+    assert kwargs["header_graph"] is False
+    assert kwargs["header_graph_includes"] is False
+
+
 def test_non_elf_dump_follow_deps_warns(tmp_path: Path, capsys) -> None:
     """--follow-deps is ELF-only; the native path emits a stderr warning (line 244)."""
     so = tmp_path / "lib.dylib"

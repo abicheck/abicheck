@@ -88,8 +88,21 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `header_graph_options` decorator `compare` uses (so the two flags and
   their help text can never drift) and the same `service._attach_header_graph`
   post-processing step `service.run_dump` already applied — `dumper.py`
-  itself needed no change. ELF only for now; `scan` and the PE/Mach-O `dump`
-  path are not yet wired.
+  itself needed no change. Now wired uniformly across ELF, PE, and Mach-O
+  (the PE/Mach-O `dump` path forwards the flags into `service.run_dump` the
+  same way ELF does — previously only ELF forwarded them, so `--header-graph`
+  silently no-opped on `.dll`/`.dylib` input, Codex review); `scan` is not yet
+  wired.
+- **Fix**: `dump --header-graph` combined with `--build-info`/`--sources`
+  under an L3-only collect mode (no L4/L5 source collection attempted) no
+  longer silently drops the just-attached header-only graph. The build/source
+  embed step (`embed_build_source`) previously always overwrote
+  `snap.build_source` with its own merged pack, which carries no L5 graph of
+  its own in the L3-only case — the written snapshot would then lack the very
+  graph `--header-graph` was asked to produce. The embed step now backfills
+  its merged pack's `source_graph` (and L5 coverage row) from the pre-existing
+  header-only pack only when the merge produced none of its own, never
+  overriding a genuine `--sources` L5 collection (Codex review).
 
 ### Documentation
 

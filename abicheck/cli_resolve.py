@@ -203,6 +203,8 @@ def _dump_native_binary(
     public_header_dirs: list[Path] | None = None,
     header_backend: str = "auto",
     compile: CompileContext | None = None,
+    header_graph: bool = False,
+    header_graph_includes: bool = False,
 ) -> AbiSnapshot:
     """Dump an ABI snapshot from a native binary (ELF, PE, or Mach-O).
 
@@ -218,6 +220,10 @@ def _dump_native_binary(
     (ADR-024 Phase 1) on PE/Mach-O snapshots; a no-op for ELF and when empty.
     ``compile`` carries the L2 cross-toolchain context (ADR-037 D3); ``run_dump``
     threads it into the PE/Mach-O header-scoping path (``_try_header_scoped_dump``).
+    ``header_graph``/``header_graph_includes`` (ADR-041 addendum) forward to
+    ``run_dump``'s own header-only-graph attach, which applies uniformly across
+    ELF/PE/Mach-O — the sole reason this wrapper exists is to route through
+    ``run_dump`` rather than duplicate its per-format dispatch.
     """
     from . import service
     from .errors import SnapshotError, ValidationError
@@ -237,6 +243,8 @@ def _dump_native_binary(
             public_header_dirs=public_header_dirs,
             header_backend=header_backend,
             compile=compile,
+            header_graph=header_graph,
+            header_graph_includes=header_graph_includes,
             notify=_click_notify,
         )
     except ValidationError as exc:

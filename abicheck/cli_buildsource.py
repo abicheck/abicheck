@@ -33,7 +33,9 @@ import click
 from .buildsource.merge_support import (
     _combine_packs,
     _filter_pack_layers,
+    _layer_value,
 )
+from .buildsource.model import DataLayer
 from .buildsource.pack import BuildSourcePack
 from .cli_buildsource_helpers import (  # noqa: F401  (re-exported for API stability / tests)
     _build_coverage as _build_coverage,
@@ -251,6 +253,43 @@ def embed_build_source(
     merged = _combine_packs(bi_pack, src_pack, inline_pack)
     if merged is None:
         return
+    # ADR-041 addendum: a `dump --header-graph` pass already attached a
+    # header-only L5 pack to `snap.build_source` before this function ran
+    # (see service._attach_header_graph, called from cli_dump_helpers before
+    # write_snapshot_output). `_combine_packs` above only sees bi_pack/
+    # src_pack/inline_pack, so a plain `snap.build_source = merged` would
+    # silently drop that graph whenever this embed step supplies any L3/L4/L5
+    # facts of its own (even build-only facts with no graph) — a `dump
+    # --header-graph --build-info ...` snapshot would then serialize without
+    # the very graph the user asked for (Codex review). Backfill only: a
+    # genuine --sources L5 collection in `merged` always wins; the header-only
+    # graph fills the gap only when `merged` carries none. Patched in field-by-
+    # field (not via a chained _combine_packs(merged, None, existing) call)
+    # because the coverage-row lookup there keys off *pack identity*, first
+    # non-None pack in supplier order wins regardless of whether that pack
+    # actually supplied the fact — `merged` always carries its own (stale,
+    # not_collected) L5 row even when its source_graph is None, so a chained
+    # combine would silently keep reporting L5 as not collected despite the
+    # backfilled facts now being present.
+    existing = snap.build_source
+    if merged.source_graph is None and existing is not None and existing.source_graph is not None:
+        import dataclasses
+
+        graph_layer = DataLayer.L5_SOURCE_GRAPH.value
+        graph_row = next(
+            (c for c in existing.manifest.coverage if _layer_value(c.layer) == graph_layer),
+            None,
+        )
+        coverage = [
+            c for c in merged.manifest.coverage if _layer_value(c.layer) != graph_layer
+        ]
+        if graph_row is not None:
+            coverage.append(graph_row)
+        merged = dataclasses.replace(
+            merged,
+            source_graph=existing.source_graph,
+            manifest=dataclasses.replace(merged.manifest, coverage=coverage),
+        )
     snap.build_source = merged
     # Provenance hint: prefer the source input, else build-info.
     hint = str(sources) if sources is not None else str(build_info)

@@ -634,6 +634,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             public_headers, public_header_dirs, build_info, sources, build_config,
             allow_build_query, collect_mode, build_query, build_compile_db,
             header_backend=header_backend, compile_context=_cc,
+            header_graph=header_graph, header_graph_includes=header_graph_includes,
         )
         return
 
