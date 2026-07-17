@@ -285,10 +285,23 @@ def embed_build_source(
         ]
         if graph_row is not None:
             coverage.append(graph_row)
+        # merged.manifest.artifacts (if any) was precomputed from the
+        # pre-backfill payloads and does not include a digest for the
+        # newly-adopted source_graph. BuildSourcePack.content_hash() prefers
+        # a non-empty manifest.artifacts over recomputing it, so a stale list
+        # here would let two packs with genuinely different header-only
+        # graphs (but identical L3 facts) hash identically. Clear it so
+        # content_hash() falls back to _artifact_digests(), which hashes the
+        # current in-memory payloads including the backfilled graph — the
+        # same "mutating payloads invalidates precomputed digests" rule
+        # cli_buildsource_merge.py's own merge step already follows (Codex
+        # review).
         merged = dataclasses.replace(
             merged,
             source_graph=existing.source_graph,
-            manifest=dataclasses.replace(merged.manifest, coverage=coverage),
+            manifest=dataclasses.replace(
+                merged.manifest, coverage=coverage, artifacts=[]
+            ),
         )
     snap.build_source = merged
     # Provenance hint: prefer the source input, else build-info.

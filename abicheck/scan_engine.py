@@ -312,12 +312,16 @@ def _resolve_public_impact_tus(
     Best-effort, mirroring ``resolve_symbol_tus``'s degrade contract: returns
     ``()`` whenever the baseline carries no L5 graph or nothing resolves —
     this only ever *adds* to the replay seed, never narrows the existing
-    changed-path floor. Resolves each impacted decl's file the same two ways
-    ``resolve_symbol_tus`` does — a ``SOURCE_DECLARES`` edge from a header
-    node, or the decl node's own ``def_file``/``source_location`` attr (the
-    call/type-graph-only shape with no declaring-header edge at all) — so an
-    impacted decl that only carries the latter is not silently dropped
-    (Codex review).
+    changed-path floor. Resolves each impacted decl's file(s) the same way
+    ``resolve_symbol_tus`` does: every ``SOURCE_DECLARES`` edge into it (a
+    decl can be declared/defined from more than one file), *plus* its own
+    ``def_file``/``source_location`` attr — unconditionally, not only as a
+    fallback when no edge exists. A decl declared in a public header but
+    defined out-of-line in a separate implementation file needs the L4 seed
+    to cover *both*; stopping at the first-found path (via the single-file
+    ``decl_declaring_files`` lookup, then skipping the attr check entirely)
+    silently dropped the implementation TU whenever a declaring edge also
+    existed (Codex review).
     """
     pack = getattr(poi_baseline, "build_source", None)
     graph = getattr(pack, "source_graph", None) if pack is not None else None
@@ -327,16 +331,15 @@ def _resolve_public_impact_tus(
     if not impacted:
         return ()
     from .buildsource.poi import _path_of_location
-    from .buildsource.source_graph import decl_declaring_files
 
-    decl_to_file = decl_declaring_files(graph)
     node_by_id = {n.id: n for n in graph.nodes}
     files: dict[str, None] = {}
+    for e in graph.edges:
+        if e.kind == "SOURCE_DECLARES" and e.dst in impacted:
+            fn = node_by_id.get(e.src)
+            if fn is not None and fn.label:
+                files.setdefault(fn.label, None)
     for d in sorted(impacted):
-        declared = decl_to_file.get(d)
-        if declared:
-            files.setdefault(declared, None)
-            continue
         node = node_by_id.get(d)
         attrs = getattr(node, "attrs", None) or {} if node is not None else {}
         loc = attrs.get("def_file") or attrs.get("source_location")

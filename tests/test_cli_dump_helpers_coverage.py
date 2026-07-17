@@ -794,6 +794,55 @@ def test_perform_elf_dump_defers_l2_cleanup_until_after_header_graph(
     assert events == ["dump", "attach", "cleanup"]
 
 
+def test_perform_elf_dump_cleans_up_when_enrichment_raises_before_header_graph(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """An exception from a post-dump enrichment step (python_ext/python_api/
+    numpy_capi/build-context) that runs BEFORE the --header-graph attach must
+    still release the seeded temp build dir -- deferring cleanup only until
+    "right after dump()" isn't enough; nothing between dump() and the
+    header-graph attach may leak it either (Codex review)."""
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "h.h"
+    hdr.write_text("struct S { int x; };\n", encoding="utf-8")
+    seeded = tmp_path / "buildinc"
+    seeded.mkdir()
+
+    events: list[str] = []
+    plain_snap = AbiSnapshot(library="lib.so", version="1.0")
+
+    def fake_seed(**kwargs):
+        return [seeded], [lambda: events.append("cleanup")]
+
+    def fake_dump(**kw):
+        events.append("dump")
+        return plain_snap
+
+    def _raise_ext(_snap):
+        events.append("python_ext")
+        raise RuntimeError("boom in python_ext detection")
+
+    def fake_attach(*a, **k):  # noqa: ANN002, ANN003
+        raise AssertionError("_attach_header_graph must not be reached")
+
+    monkeypatch.setattr("abicheck.buildsource.l2_seed.seed_l2_includes", fake_seed)
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
+    monkeypatch.setattr("abicheck.python_ext.detect_python_extension", _raise_ext)
+    monkeypatch.setattr("abicheck.service._attach_header_graph", fake_attach)
+
+    _events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+
+    with pytest.raises(RuntimeError, match="boom in python_ext detection"):
+        perform_elf_dump(
+            so, (hdr,), (), "1.0", "c", None, None, None, (), None, True, False, None,
+            (), (), None, False, (), "", None, None, False, None, None, tmp_path, None,
+            False, "build", _expand, _populate, _stamp, _write,
+            header_graph=True, header_graph_includes=False,
+        )
+
+    assert events == ["dump", "python_ext", "cleanup"]
+
+
 def test_perform_elf_dump_no_header_graph_cleans_up_right_after_dump(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -1022,6 +1071,45 @@ def test_perform_elf_dump_wraps_dump_errors(tmp_path: Path, monkeypatch) -> None
             _write,
         )
     assert "written" not in events
+
+
+def test_perform_elf_dump_wraps_dump_errors_still_cleans_up_seeded_dirs(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """When dump() itself raises, any L2-seeded temp build dir must still be
+    released immediately in the except path -- the header-graph attach that
+    would otherwise justify deferring cleanup is never reached on a failed
+    parse, so holding the directory open would leak it."""
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "h.h"
+    hdr.write_text("struct S { int x; };\n", encoding="utf-8")
+    seeded = tmp_path / "buildinc"
+    seeded.mkdir()
+
+    events: list[str] = []
+
+    def fake_seed(**kwargs):
+        return [seeded], [lambda: events.append("cleanup")]
+
+    def _raise(**_kw):
+        events.append("dump")
+        raise AbicheckError("castxml exploded")
+
+    monkeypatch.setattr("abicheck.buildsource.l2_seed.seed_l2_includes", fake_seed)
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", _raise)
+
+    _events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+
+    with pytest.raises(click.ClickException, match="castxml exploded"):
+        perform_elf_dump(
+            so, (hdr,), (), "1.0", "c", None, None, None, (), None, True, False, None,
+            (), (), None, False, (), "", None, None, False, None, None, None, None,
+            False, "off", _expand, _populate, _stamp, _write,
+            header_graph=True,  # even with a header-graph request, the failed
+            # parse never reaches the attach, so cleanup must not be deferred.
+        )
+
+    assert events == ["dump", "cleanup"]
 
 
 # ── evidence_depth_label (CLI-audit P2 self-describing output) ──────────────

@@ -131,6 +131,36 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   header-graph attach has consumed the seeded dirs, only cleaning up
   immediately when there is no header-graph pass to wait for, or the main
   parse itself failed (Codex review).
+- **Fix**: the deferred `--header-graph` cleanup above only protected the
+  window up to the header-graph attach itself — an exception from the
+  build-context/Python-extension/Python-API/NumPy-C-API enrichment steps that
+  run *before* it (all part of the same post-dump pipeline) still leaked the
+  seeded temp build dir, since neither the main `dump()` `finally` nor the
+  header-graph attach's own cleanup would ever run. `perform_elf_dump` now
+  wraps the entire post-dump pipeline in one outer `try`/`finally` that drains
+  the cleanup exactly once, on every exit path (CodeRabbit review).
+- **Fix**: `embed_build_source`'s backfill of a pre-existing header-only
+  `source_graph` (see the L3-only fix above) left `manifest.artifacts`
+  pointing at the pre-backfill digests. `BuildSourcePack.content_hash()`
+  prefers a non-empty `manifest.artifacts` over recomputing it, so two packs
+  with identical L3 facts but genuinely different backfilled graphs could
+  hash identically — silently breaking the content-addressed reference
+  `dump`/`compare` rely on to tell distinct evidence packs apart. The backfill
+  now clears `manifest.artifacts` so `content_hash()` recomputes it from the
+  current payloads, including the adopted graph (CodeRabbit review).
+- **Fix**: `scan`'s public-entry impact closure (`_resolve_public_impact_tus`,
+  the ADR-041 P1 #3 replay-seed extension) only ever contributed *one* file
+  per impacted declaration — its single declaring header via a shared
+  first-match lookup, falling back to its `def_file`/`source_location` attr
+  only when no declaring edge existed at all. A declaration that is both
+  declared in a public header *and* defined out-of-line in a separate
+  implementation file therefore only ever seeded the header, silently
+  dropping the implementation TU from the replay scope whenever a declaring
+  edge also existed — so a body-only change in that TU would never get
+  replayed for this public entry. Now accumulates every `SOURCE_DECLARES`
+  edge into the impacted set *and* unconditionally checks each entry's own
+  `def_file`/`source_location` attr, exactly mirroring
+  `resolve_symbol_tus`'s own accumulation (CodeRabbit review).
 
 ### Documentation
 

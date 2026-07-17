@@ -1550,6 +1550,73 @@ def test_public_impact_closure_uses_def_file_fallback_with_no_source_declares():
     assert "src/api.cpp" in tus
 
 
+def test_public_impact_closure_covers_both_declaring_header_and_def_file():
+    # Codex review: a decl declared in a public header (SOURCE_DECLARES edge)
+    # AND defined out-of-line in a separate implementation file (its own
+    # def_file attr) must contribute BOTH paths to the replay seed, not just
+    # the header -- the previous implementation's `continue` after finding a
+    # declaring edge silently dropped the implementation TU whenever a
+    # declaring edge also existed, so a change to only the .cpp body would
+    # never get replayed for this public entry.
+    from types import SimpleNamespace
+
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_graph import (
+        GraphEdge,
+        GraphNode,
+        SourceGraphSummary,
+    )
+    from abicheck.scan_engine import _resolve_public_impact_tus
+
+    graph = SourceGraphSummary(
+        nodes=[
+            GraphNode(
+                id="decl://pub",
+                kind="source_decl",
+                label="pub",
+                attrs={
+                    "visibility": "public_header",
+                    "def_file": "src/api.cpp",  # out-of-line implementation
+                },
+            ),
+            GraphNode(
+                id="decl://internal",
+                kind="record_type",
+                label="Internal",
+                attrs={"visibility": "private_header"},
+            ),
+            GraphNode(
+                id="header://include/api.h", kind="header", label="include/api.h"
+            ),
+            GraphNode(
+                id="header://src/detail/cache.cpp",
+                kind="header",
+                label="src/detail/cache.cpp",
+            ),
+        ],
+        edges=[
+            # pub is declared in include/api.h ...
+            GraphEdge(
+                src="header://include/api.h", dst="decl://pub", kind="SOURCE_DECLARES"
+            ),
+            GraphEdge(
+                src="header://src/detail/cache.cpp",
+                dst="decl://internal",
+                kind="SOURCE_DECLARES",
+            ),
+            # ... and also reaches the changed internal decl.
+            GraphEdge(
+                src="decl://pub", dst="decl://internal", kind="TYPE_HAS_FIELD_TYPE"
+            ),
+        ],
+    )
+    poi_baseline = SimpleNamespace(
+        build_source=BuildSourcePack(root="", source_graph=graph)
+    )
+    tus = _resolve_public_impact_tus(poi_baseline, ["src/detail/cache.cpp"])
+    assert set(tus) == {"include/api.h", "src/api.cpp"}
+
+
 def test_public_impact_closure_skips_decls_with_no_resolvable_location():
     # Two more impacted-but-unresolvable shapes alongside the working
     # def_file fallback: a decl with neither a SOURCE_DECLARES edge nor any

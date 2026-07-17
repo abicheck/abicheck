@@ -1550,6 +1550,35 @@ def test_embed_build_info_preserves_preexisting_header_only_graph(tmp_path):
     assert cov is not None and cov.status == CoverageStatus.PARTIAL
 
 
+def test_embed_build_info_backfilled_graph_changes_content_hash(tmp_path):
+    """The backfilled source_graph must actually be reflected in
+    build_source.content_hash() (via snap.build_source_pack), not silently
+    excluded because merged.manifest.artifacts still lists only the
+    pre-backfill (graph-less) digests. BuildSourcePack.content_hash() prefers
+    a non-empty manifest.artifacts over recomputing it, so two otherwise-
+    identical embeds that backfill genuinely different graphs must not
+    collide on the same content hash (Codex review)."""
+    from pathlib import Path
+
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
+    from abicheck.cli_buildsource import embed_build_source
+
+    def _embed_with_graph(node_id: str) -> str:
+        cdb = _write_cdb(tmp_path, "c++17")
+        snap = AbiSnapshot(library="libfoo.so", version="1")
+        graph = SourceGraphSummary(nodes=[GraphNode(id=node_id, kind="function")])
+        snap.build_source = BuildSourcePack(root=Path(""), source_graph=graph)
+        embed_build_source(snap, cdb, None, collect_mode="build")
+        assert snap.build_source is not None
+        assert snap.build_source.source_graph is graph
+        return snap.build_source.content_hash()
+
+    hash_a = _embed_with_graph("d:foo")
+    hash_b = _embed_with_graph("d:bar")
+    assert hash_a != hash_b
+
+
 def test_embed_build_info_backfills_graph_with_no_preexisting_coverage_row(tmp_path):
     """Same backfill as test_embed_build_info_preserves_preexisting_header_only_graph,
     but the pre-existing pack carries source_graph with no matching L5 coverage
