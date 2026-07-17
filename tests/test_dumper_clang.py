@@ -2168,3 +2168,81 @@ def test_resolve_clang_system_includes_probes_without_passthrough(
         "c++", gcc_path=None, gcc_prefix=None, sysroot=None, nostdinc=False,
         force_cpp=True, gcc_options="-DFOO=1", gcc_option_tokens=("-O2",),
     ) == ("/usr/x",)
+
+
+# ── field CV facts through a typedef indirection (Codex review, PR #582) ────
+#
+# clang's ``qualType`` renders a field's typedef'd type as the bare alias
+# name (e.g. "T"), so a regex over that spelling alone can never see a
+# qualifier the typedef's target carries. The real spelling is only visible
+# via the separate ``desugaredQualType`` key. But scanning the WHOLE
+# desugared spelling is itself wrong for a pointer typedef: a qualifier
+# before the ``*`` belongs to the pointee, not the field's own pointer
+# value — only a trailing, no-space qualifier after the ``*``
+# (``int *const``, confirmed against real clang output) describes the
+# field itself.
+
+
+def _field_via_typedef(desugared: str) -> dict:
+    return _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "tagUsed": "struct",
+            "name": "S",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+            "inner": [
+                {
+                    "kind": "FieldDecl",
+                    "name": "x",
+                    "type": {"qualType": "T", "desugaredQualType": desugared},
+                }
+            ],
+        }
+    )
+
+
+def test_scalar_typedef_hides_const_in_qualtype_but_desugared_reveals_it() -> None:
+    # typedef const int T; struct S { T x; };
+    root = _field_via_typedef("const int")
+    (t,) = _ClangAstParser(root, set(), set()).parse_types()
+    (field,) = t.fields
+    assert field.type == "T"
+    assert field.is_const is True
+
+
+def test_pointer_typedef_pointee_const_does_not_mark_field_const() -> None:
+    # typedef const int *P; struct S { P x; }; — P is a plain, non-const
+    # pointer; only its pointee is const. The earlier fix for the scalar
+    # case above scanned the whole desugared spelling and wrongly marked
+    # the field itself const here too.
+    root = _field_via_typedef("const int *")
+    (t,) = _ClangAstParser(root, set(), set()).parse_types()
+    (field,) = t.fields
+    assert field.is_const is False
+
+
+def test_pointer_typedef_own_const_marks_field_const() -> None:
+    # typedef int * const P; struct S { P x; }; — the pointer VALUE itself
+    # is const this time (trailing, no-space "*const").
+    root = _field_via_typedef("int *const")
+    (t,) = _ClangAstParser(root, set(), set()).parse_types()
+    (field,) = t.fields
+    assert field.is_const is True
+
+
+def test_pointer_typedef_both_pointer_and_pointee_const() -> None:
+    # typedef const int * const P; — pointer itself const AND pointee
+    # const; only the trailing "*const" should count toward the field's
+    # own is_const.
+    root = _field_via_typedef("const int *const")
+    (t,) = _ClangAstParser(root, set(), set()).parse_types()
+    (field,) = t.fields
+    assert field.is_const is True
+
+
+def test_pointer_typedef_own_volatile_marks_field_volatile() -> None:
+    root = _field_via_typedef("int *volatile")
+    (t,) = _ClangAstParser(root, set(), set()).parse_types()
+    (field,) = t.fields
+    assert field.is_volatile is True

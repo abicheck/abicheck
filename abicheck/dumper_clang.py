@@ -846,7 +846,7 @@ class _ClangAstParser:
 
     def _make_field(self, child: dict[str, Any], access: str) -> TypeField:
         ftype = _qualtype(child)
-        cv_type = _desugared_qualtype(child)
+        cv_type = _field_own_cv_source(_desugared_qualtype(child))
         bits, is_bitfield = _bitfield_width(child)
         return TypeField(
             name=str(child.get("name", "")),
@@ -994,6 +994,47 @@ def _desugared_qualtype(node: dict[str, Any]) -> str:
             return desugared
         return str(type_obj.get("qualType", ""))
     return ""
+
+
+def _last_top_level_ptr_end(type_str: str) -> int:
+    """Index just past the last depth-0 ``*`` in *type_str*, or -1 if none.
+
+    A ``*`` nested inside a template argument list, function-parameter
+    list, or array subscript doesn't count — the value itself isn't a
+    pointer at that syntactic position. Depth tracking mirrors
+    ``name_classification._has_top_level_ptr_or_ref``.
+    """
+    depth = 0
+    last = -1
+    for i, ch in enumerate(type_str):
+        if ch in "<([":
+            depth += 1
+        elif ch in ">)]":
+            depth = max(0, depth - 1)
+        elif ch == "*" and depth == 0:
+            last = i + 1
+    return last
+
+
+def _field_own_cv_source(desugared: str) -> str:
+    """Substring of *desugared* that describes the FIELD's OWN const/
+    volatile qualifier, as opposed to its pointee's.
+
+    A pointer typedef's desugared spelling puts a POINTEE qualifier before
+    the ``*`` (``const int *`` — pointer to const int, the pointer itself
+    is NOT const) and the pointer VALUE's own qualifier as a suffix after
+    it, with no space (``int *const`` — confirmed against real clang
+    output). Scanning the whole string for ``const``/``volatile`` (as an
+    earlier version of ``_make_field`` did) misread the pointee's
+    qualifier as the field's own, so a field typed through
+    ``typedef const int *P;`` was wrongly marked ``is_const=True`` even
+    though ``P`` itself is a plain, non-const pointer (Codex review, PR
+    #582 — a pointer-typedef sibling of the scalar-typedef case
+    ``_desugared_qualtype`` already handles). A non-pointer type has no
+    such ambiguity — the whole spelling describes the field itself.
+    """
+    end = _last_top_level_ptr_end(desugared)
+    return desugared[end:] if end >= 0 else desugared
 
 
 def _node_file(node: dict[str, Any], current: str) -> str:
