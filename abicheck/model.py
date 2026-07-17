@@ -30,6 +30,7 @@ from .name_classification import (
     canonicalize_type_name as canonicalize_type_name,
     cv_qualifiers_only_differ as cv_qualifiers_only_differ,
     func_signature_cv_only_differ as func_signature_cv_only_differ,
+    func_signature_identity_type as func_signature_identity_type,
     is_abi_surface_type_name as is_abi_surface_type_name,
     is_compiler_internal_type as is_compiler_internal_type,
     is_cxx_runtime_library as is_cxx_runtime_library,
@@ -475,6 +476,16 @@ class AbiSnapshot:
     )  # #define / constexpr name -> value string
     elf_only_mode: bool = False  # True when dumped without headers (all functions are ELF_ONLY provenance)
     from_headers: bool = False  # True when the ABI surface was parsed from public headers (castxml/AST), as opposed to DWARF debug info or the symbol table. Drives the HEADER_AWARE evidence tier — DWARF-derived declarations populate the same functions/types lists but must NOT be mistaken for header-level evidence.
+    # Which L2 header-AST backend produced this snapshot ("castxml" | "clang"),
+    # set only when from_headers is True. Some facts are captured by only one
+    # backend today (e.g. TypeField.default/deprecated, RecordType.is_abstract,
+    # EnumType.is_scoped, Function.is_override/deprecated — castxml-only as of
+    # this field's introduction); detectors for those must gate on BOTH sides
+    # sharing the SAME producer, not merely on from_headers, or a producer
+    # mismatch reads as every such fact being silently removed (Codex review,
+    # PR #582). None for non-header snapshots (DWARF/symbols-only) and for
+    # snapshots predating this field.
+    ast_producer: str | None = None
 
     # Phase 3: binary format platform — detected from ELF/PE/MachO metadata.
     # None = unknown / not yet detected.

@@ -478,7 +478,19 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   field case (`case30_field_qualifiers`). Also: a field's default member
   initializer / `[[deprecated]]` inside an anonymous struct/union now
   survives flattening — previously only a direct (non-anonymous) field
-  populated those.
+  populated those. Two more follow-ups from a further review round: (1) a
+  castxml-unmangled constructor's synthesized snapshot key is now built
+  from a cv-normalized parameter spelling (`func_signature_identity_type`),
+  so a layout-neutral by-value qualifier change no longer changes the key
+  itself and misreports the constructor as removed-and-re-added before the
+  cv-neutral param comparison ever runs; (2) the eight `[[deprecated]]`
+  detectors and the `abstract`/scoped-enum/`override`-specifier/field-
+  default-initializer detectors now gate on a new `AbiSnapshot.ast_producer`
+  field (`"castxml"`/`"clang"`, set by the dumper) in addition to
+  `from_headers` — the clang L2 header backend also sets `from_headers`
+  but doesn't populate any of these facts yet, so comparing a castxml- and
+  a clang-parsed snapshot previously read as every one of them having been
+  removed, purely from the producer mismatch.
 - **MCP `abi_compare`**: a `--used-by`/`--required-symbol` response's
   `summary` (`total_changes`/`breaking`/`api_breaks`/`risk_changes`/
   `compatible`) is now recomputed after scoped-only changes and

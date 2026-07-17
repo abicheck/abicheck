@@ -474,3 +474,41 @@ def func_signature_cv_only_differ(old_type: str, new_type: str) -> bool:
     if co == cn:
         return False
     return _strip_cv_qualifiers(co) == _strip_cv_qualifiers(cn)
+
+
+def func_signature_identity_type(type_name: str) -> str:
+    """Normalize *type_name* for use as a stable function-signature identity
+    key (e.g. a synthesized overload key when no real mangled name is
+    available), by dropping a top-level BY-VALUE ``const``/``volatile``
+    qualifier — mirroring what the real Itanium mangling would do (see
+    :func:`func_signature_cv_only_differ`'s docstring: such a qualifier is
+    absent from the mangled name entirely).
+
+    Deliberately does NOT touch a pointer/reference-position qualifier
+    (``const char *`` stays ``const char *``): that one DOES participate in
+    real Itanium mangling (``PKc`` vs ``Pc``), so two overloads differing
+    only there are genuinely distinct signatures and must keep distinct
+    identity keys — unlike :func:`func_signature_cv_only_differ` (a boolean
+    *is this compatible* check), which is deliberately insensitive to
+    pointee-position cv too because a *paired* comparison already reached
+    that point via a real, unchanged mangled name (Codex review, PR #582:
+    a castxml constructor with no real mangled name had its synthesized key
+    built from the raw, now-volatile-inclusive ``Param.type`` spelling, so
+    ``Widget(int)`` -> ``Widget(volatile int)`` produced two DIFFERENT keys
+    and was reported as the constructor being removed and a new one added,
+    rather than reaching ``_params_differ``/``func_signature_cv_only_differ``
+    at all).
+
+    >>> func_signature_identity_type("volatile int")
+    'int'
+    >>> func_signature_identity_type("const int")
+    'int'
+    >>> func_signature_identity_type("const char *")
+    'char const *'
+    >>> func_signature_identity_type("int")
+    'int'
+    """
+    canon = canonicalize_type_name(type_name)
+    if _has_top_level_ptr_or_ref(canon):
+        return canon
+    return _strip_cv_qualifiers(canon)

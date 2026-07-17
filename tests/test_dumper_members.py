@@ -437,6 +437,43 @@ _FIELD_VOLATILE_INT_XML = """<?xml version="1.0"?>
   <File id="f1" name="test.h"/>
 </CastXML>"""
 
+# A single-argument, unmangled constructor (castxml omits `mangled` for some
+# user-declared overloaded constructors — see SYNTHETIC_CTOR_KEY_PREFIX):
+# three variants differing only in the argument's qualification/type.
+_CTOR_INT_ARG_XML = """<?xml version="1.0"?>
+<CastXML>
+  <Class id="_2" name="Widget" context="_1" file="f1" line="1"/>
+  <Constructor id="_3" name="Widget" context="_2" file="f1" line="2" access="public">
+    <Argument name="v" type="_7"/>
+  </Constructor>
+  <FundamentalType id="_7" name="int" size="32"/>
+  <Namespace id="_1" name="::"/>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+
+_CTOR_VOLATILE_INT_ARG_XML = """<?xml version="1.0"?>
+<CastXML>
+  <Class id="_2" name="Widget" context="_1" file="f1" line="1"/>
+  <Constructor id="_3" name="Widget" context="_2" file="f1" line="2" access="public">
+    <Argument name="v" type="_8"/>
+  </Constructor>
+  <CvQualifiedType id="_8" type="_7" volatile="1"/>
+  <FundamentalType id="_7" name="int" size="32"/>
+  <Namespace id="_1" name="::"/>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+
+_CTOR_LONG_ARG_XML = """<?xml version="1.0"?>
+<CastXML>
+  <Class id="_2" name="Widget" context="_1" file="f1" line="1"/>
+  <Constructor id="_3" name="Widget" context="_2" file="f1" line="2" access="public">
+    <Argument name="v" type="_9"/>
+  </Constructor>
+  <FundamentalType id="_9" name="long" size="64"/>
+  <Namespace id="_1" name="::"/>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+
 
 class TestByValueFieldQualifierEndToEndDiff:
     """Full parser -> compare() pipeline: a by-value field gaining `volatile`
@@ -463,3 +500,44 @@ class TestByValueFieldQualifierEndToEndDiff:
         assert ChangeKind.FIELD_BECAME_VOLATILE in kinds
         assert ChangeKind.TYPE_FIELD_TYPE_CHANGED in kinds
         assert r.verdict == Verdict.BREAKING
+
+
+class TestUnmangledCtorSyntheticKeyCvStability:
+    """A castxml-unmangled constructor's synthesized snapshot key
+    (``_function_mangled_name``) must be stable across a top-level BY-VALUE
+    cv-only parameter change: ``Widget(int)`` -> ``Widget(volatile int)`` is
+    the very same real Itanium-mangled symbol (cv is dropped from a by-value
+    parameter's mangling), so the key must not change either — otherwise the
+    diff engine sees a removed constructor plus an added one instead of
+    reaching the cv-neutral param comparison at all (Codex review, PR #582).
+    A genuine parameter-type change must still produce a different key.
+    """
+
+    def test_by_value_volatile_change_keeps_same_synthetic_key(self) -> None:
+        plain = _make_parser(_CTOR_INT_ARG_XML).parse_functions()[0]
+        volatile = _make_parser(_CTOR_VOLATILE_INT_ARG_XML).parse_functions()[0]
+        assert plain.mangled == volatile.mangled
+        assert plain.mangled.startswith("__abicheck_ctor__")
+
+    def test_real_type_change_still_gets_a_different_key(self) -> None:
+        plain = _make_parser(_CTOR_INT_ARG_XML).parse_functions()[0]
+        long_arg = _make_parser(_CTOR_LONG_ARG_XML).parse_functions()[0]
+        assert plain.mangled != long_arg.mangled
+
+    def test_end_to_end_by_value_volatile_ctor_change_is_compatible(self) -> None:
+        """Full parser -> compare() pipeline: must report the cv-neutral
+        param change on the SAME (matched) constructor, not a
+        remove-and-add pair."""
+        old_snap = AbiSnapshot(
+            library="libtest.so.1", version="1.0",
+            functions=_make_parser(_CTOR_INT_ARG_XML).parse_functions(),
+        )
+        new_snap = AbiSnapshot(
+            library="libtest.so.1", version="2.0",
+            functions=_make_parser(_CTOR_VOLATILE_INT_ARG_XML).parse_functions(),
+        )
+        r = compare(old_snap, new_snap)
+        kinds = {c.kind for c in r.changes}
+        assert ChangeKind.FUNC_REMOVED not in kinds
+        assert ChangeKind.FUNC_ADDED not in kinds
+        assert ChangeKind.FUNC_PARAMS_CHANGED not in kinds

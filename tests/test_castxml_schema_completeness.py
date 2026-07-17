@@ -46,7 +46,14 @@ def _snap(
     types=None,
     enums=None,
     from_headers=True,
+    ast_producer="castxml",
 ):
+    # ast_producer defaults to "castxml" (not None): every detector under
+    # test here gates on _both_castxml_backed, since these facts are
+    # castxml-only today (the clang header backend doesn't populate them
+    # yet) — a bare from_headers=True snapshot with ast_producer=None would
+    # otherwise fail that gate and every test below would see zero changes
+    # (Codex review, PR #582).
     return AbiSnapshot(
         library="libtest.so.1",
         version=version,
@@ -55,6 +62,7 @@ def _snap(
         types=types or [],
         enums=enums or [],
         from_headers=from_headers,
+        ast_producer=ast_producer if from_headers else None,
     )
 
 
@@ -331,6 +339,93 @@ class TestEnumDeprecatedChanged:
         e_new = EnumType(name="OldMode", members=[EnumMember("A", 0)], deprecated=None)
         r = compare(_snap(enums=[e_old]), _snap(enums=[e_new]))
         assert ChangeKind.ENUM_DEPRECATED_REMOVED in _kinds(r)
+
+
+# ── producer-mismatch regression (Codex review, PR #582) ───────────────────
+#
+# Every fact above is castxml-only today: the clang header backend
+# (--ast-frontend clang) also sets from_headers=True but never populates
+# TypeField.default/deprecated, RecordType.is_abstract/deprecated,
+# EnumType.is_scoped/deprecated, or Function.is_override/deprecated. Without
+# gating on ast_producer specifically, comparing a castxml-parsed old
+# snapshot to a clang-parsed new snapshot would read as every one of these
+# facts having been removed, purely because the new side's parser doesn't
+# capture them — never because anything really changed.
+
+
+def _clang_snap(**kwargs):
+    """Same shape as _snap, but tagged as if produced by the clang backend
+    (which never sets any of the six castxml-only facts under test)."""
+    return _snap(ast_producer="clang", **kwargs)
+
+
+class TestProducerMismatchDoesNotFalsePositive:
+    def test_type_abstract_producer_mismatch(self):
+        t_old = RecordType(name="Shape", kind="class", size_bits=64, is_abstract=True)
+        t_new = RecordType(name="Shape", kind="class", size_bits=64, is_abstract=None)
+        r = compare(_snap(types=[t_old]), _clang_snap(types=[t_new]))
+        assert ChangeKind.TYPE_LOST_ABSTRACT not in _kinds(r)
+
+    def test_enum_scoped_producer_mismatch(self):
+        e_old = EnumType(name="Color", members=[EnumMember("Red", 0)], is_scoped=True)
+        e_new = EnumType(name="Color", members=[EnumMember("Red", 0)], is_scoped=None)
+        r = compare(_snap(enums=[e_old]), _clang_snap(enums=[e_new]))
+        assert ChangeKind.ENUM_LOST_SCOPED not in _kinds(r)
+
+    def test_func_override_producer_mismatch(self):
+        f_old = _pub_func(
+            "Derived::draw", "_ZN7Derived4drawEv", is_virtual=True, is_override=True
+        )
+        f_new = _pub_func(
+            "Derived::draw", "_ZN7Derived4drawEv", is_virtual=True, is_override=None
+        )
+        r = compare(_snap(functions=[f_old]), _clang_snap(functions=[f_new]))
+        assert ChangeKind.FUNC_OVERRIDE_SPECIFIER_REMOVED not in _kinds(r)
+
+    def test_field_default_initializer_producer_mismatch(self):
+        t_old = RecordType(
+            name="Cfg", kind="struct", size_bits=32,
+            fields=[TypeField("timeout", "int", 0, default="30")],
+        )
+        t_new = RecordType(
+            name="Cfg", kind="struct", size_bits=32,
+            fields=[TypeField("timeout", "int", 0, default=None)],
+        )
+        r = compare(_snap(types=[t_old]), _clang_snap(types=[t_new]))
+        assert ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED not in _kinds(r)
+
+    def test_func_deprecated_producer_mismatch(self):
+        f_old = _pub_func("old_api", "_Z7old_apiv", deprecated="use new_api")
+        f_new = _pub_func("old_api", "_Z7old_apiv", deprecated=None)
+        r = compare(_snap(functions=[f_old]), _clang_snap(functions=[f_new]))
+        assert ChangeKind.FUNC_DEPRECATED_REMOVED not in _kinds(r)
+
+    def test_var_deprecated_producer_mismatch(self):
+        v_old = _pub_var("kOld", "kOld", deprecated="use kNew")
+        v_new = _pub_var("kOld", "kOld", deprecated=None)
+        r = compare(_snap(variables=[v_old]), _clang_snap(variables=[v_new]))
+        assert ChangeKind.VAR_DEPRECATED_REMOVED not in _kinds(r)
+
+    def test_type_deprecated_producer_mismatch(self):
+        t_old = RecordType(name="OldWidget", kind="class", size_bits=32, deprecated="x")
+        t_new = RecordType(name="OldWidget", kind="class", size_bits=32, deprecated=None)
+        r = compare(_snap(types=[t_old]), _clang_snap(types=[t_new]))
+        assert ChangeKind.TYPE_DEPRECATED_REMOVED not in _kinds(r)
+
+    def test_enum_deprecated_producer_mismatch(self):
+        e_old = EnumType(name="OldMode", members=[EnumMember("A", 0)], deprecated="x")
+        e_new = EnumType(name="OldMode", members=[EnumMember("A", 0)], deprecated=None)
+        r = compare(_snap(enums=[e_old]), _clang_snap(enums=[e_new]))
+        assert ChangeKind.ENUM_DEPRECATED_REMOVED not in _kinds(r)
+
+    def test_castxml_both_sides_still_fires(self):
+        """Sanity check: the gate must not be so strict it also blocks the
+        genuine castxml-vs-castxml case (already covered per-kind above, but
+        asserted once more here right next to the mismatch tests)."""
+        f_old = _pub_func("old_api", "_Z7old_apiv", deprecated="use new_api")
+        f_new = _pub_func("old_api", "_Z7old_apiv", deprecated=None)
+        r = compare(_snap(functions=[f_old]), _snap(functions=[f_new]))
+        assert ChangeKind.FUNC_DEPRECATED_REMOVED in _kinds(r)
 
 
 # ── Real castxml XML → model field population ───────────────────────────────

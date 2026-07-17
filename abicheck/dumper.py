@@ -1707,6 +1707,7 @@ def _dump_elf(
         # Reached only when headers were supplied and castxml ran (the no-header
         # and DWARF-only branches return earlier): this surface is header-parsed.
         from_headers=True,
+        ast_producer="clang" if isinstance(parser, _ClangAstParser) else "castxml",
         platform="elf",
         language_profile=profile_hint,
     )
@@ -1847,6 +1848,7 @@ def _dump_macho(
         # Reached only when headers were supplied and castxml ran (the no-header
         # branch returns earlier): this surface is header-parsed.
         from_headers=True,
+        ast_producer="clang" if isinstance(parser, _ClangAstParser) else "castxml",
         platform="macho",
         language_profile=profile_hint,
     )
@@ -1940,6 +1942,7 @@ def _dump_pe(
         # Reached only when headers were supplied and castxml ran (the no-header
         # branch returns earlier): this surface is header-parsed.
         from_headers=True,
+        ast_producer="clang" if isinstance(parser, _ClangAstParser) else "castxml",
         platform="pe",
         language_profile=profile_hint,
     )

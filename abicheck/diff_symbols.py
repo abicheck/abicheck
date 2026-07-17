@@ -1274,6 +1274,31 @@ def _both_header_aware(old: AbiSnapshot, new: AbiSnapshot) -> bool:
     )
 
 
+def _both_castxml_backed(old: AbiSnapshot, new: AbiSnapshot) -> bool:
+    """True only when BOTH snapshots are confirmed header-aware AND were
+    produced by the castxml L2 backend specifically.
+
+    Stricter than :func:`_both_header_aware`: the clang header backend
+    (``--ast-frontend clang``) ALSO sets ``from_headers=True``, but its
+    parser (``dumper_clang._ClangAstParser``) does not yet populate several
+    facts this gate protects — ``TypeField.default``/``deprecated``,
+    ``RecordType.is_abstract``/``deprecated``, ``EnumType.is_scoped``/
+    ``deprecated``, ``Function.is_override``/``deprecated``,
+    ``Variable.deprecated``. Gating on ``_both_header_aware`` alone would let
+    a castxml-parsed old snapshot compared against a clang-parsed new
+    snapshot read as "every one of these facts was removed", since the new
+    side is always ``None`` for a reason unrelated to the actual source
+    (Codex review, PR #582). ``ast_producer`` is ``None`` for snapshots
+    predating this field, which correctly fails this gate too (unknown
+    producer, not assumed castxml).
+    """
+    return (
+        _both_header_aware(old, new)
+        and old.ast_producer == "castxml"
+        and new.ast_producer == "castxml"
+    )
+
+
 @registry.detector("param_defaults")
 def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect parameter default value changes/removals.
@@ -1727,9 +1752,13 @@ def _diff_func_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     ``Function.deprecated`` is ``None`` both for "not deprecated" and "the
     dumper doesn't capture this" (see its docstring in model.py), so a
     per-pair None check would silently miss every real transition (one side
-    of a real add/remove is always None by construction).
+    of a real add/remove is always None by construction). Gates on
+    ``_both_castxml_backed`` rather than plain ``_both_header_aware``: the
+    clang header backend doesn't populate ``Function.deprecated`` yet, so a
+    castxml-vs-clang comparison would otherwise read as every deprecation
+    having been removed (Codex review, PR #582).
     """
-    if not _both_header_aware(old, new):
+    if not _both_castxml_backed(old, new):
         return []
     changes: list[Change] = []
     old_map = _public_functions(old)
@@ -1761,11 +1790,16 @@ def _diff_func_override_specifier(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
     """Detect a virtual method gaining or losing the explicit `override` specifier.
 
     Tri-state, same rationale as the vtable-index/explicit checks elsewhere:
-    only fire when BOTH sides record it (header/castxml mode, and only for a
-    member-function form that can carry the specifier at all — see
-    ``Function.is_override``'s docstring); ``None`` means not applicable /
-    not determined, not "no override".
+    only fire when BOTH sides record it (and only for a member-function form
+    that can carry the specifier at all — see ``Function.is_override``'s
+    docstring); ``None`` means not applicable / not determined, not "no
+    override". Also gated on ``_both_castxml_backed``: unlike ``is_final``,
+    ``is_override`` is castxml-only today, so a clang-parsed side's
+    unconditional ``None`` must not be misread as "override was removed"
+    (Codex review, PR #582).
     """
+    if not _both_castxml_backed(old, new):
+        return []
     changes: list[Change] = []
     old_map = _public_functions(old)
     new_map = _public_functions(new)
@@ -1799,8 +1833,13 @@ def _diff_func_override_specifier(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
 
 @registry.detector("var_deprecated")
 def _diff_var_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Detect a variable gaining or losing `[[deprecated]]` (header-tier only)."""
-    if not _both_header_aware(old, new):
+    """Detect a variable gaining or losing `[[deprecated]]` (header-tier only).
+
+    Gates on ``_both_castxml_backed`` — see ``FUNC_DEPRECATED_ADDED``'s
+    docstring above (the clang backend doesn't populate
+    ``Variable.deprecated`` yet).
+    """
+    if not _both_castxml_backed(old, new):
         return []
     changes: list[Change] = []
     old_map = _public_variables(old)

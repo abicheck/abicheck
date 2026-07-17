@@ -40,6 +40,7 @@ from .model import (
     TypeField,
     Variable,
     Visibility,
+    func_signature_identity_type,
 )
 from .provenance import build_public_set, classify_origin, header_from_location
 
@@ -753,7 +754,14 @@ class _CastxmlParser:
             # deterministic internal identity from the display name and
             # normalized parameter types; it is intentionally not an ABI
             # symbol, only a stable snapshot key for source-level overloads.
-            param_sig = ",".join(p.type for p in params)
+            # func_signature_identity_type (not the raw p.type) drops a
+            # top-level BY-VALUE cv qualifier the same way real Itanium
+            # mangling would: without it, a layout-neutral declaration
+            # change like ``Widget(int)`` -> ``Widget(volatile int)``
+            # produced two different synthetic keys, so the diff engine saw
+            # a removed + added constructor instead of the same overload
+            # reaching the cv-neutral param comparison (Codex review, PR #582).
+            param_sig = ",".join(func_signature_identity_type(p.type) for p in params)
             return f"{SYNTHETIC_CTOR_KEY_PREFIX}{name}({param_sig})"
         return name  # C functions: use plain name
 
