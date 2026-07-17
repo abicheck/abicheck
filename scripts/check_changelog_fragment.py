@@ -131,14 +131,20 @@ def has_changelog_fragment(changed: list[ChangedFile]) -> bool:
 
 
 def fragment_has_content(text: str) -> bool:
-    """True if text has any real content once HTML comments are stripped.
+    """True if text has real body text once HTML comments and headings are stripped.
 
     `fragment_template.md.j2` leaves every category/bullet commented out;
     a PR that runs `scriv create` and commits the file without uncommenting
-    anything would otherwise pass a path-only check while contributing zero
-    changelog text.
+    anything (or uncomments only the `### Category` heading and leaves no
+    bullet under it — scriv's own Markdown parser drops a section whose
+    only paragraph is empty) would otherwise pass a naive non-blank check
+    while contributing zero visible changelog text at `scriv collect` time.
     """
-    return bool(_HTML_COMMENT_RE.sub("", text).strip())
+    for line in _HTML_COMMENT_RE.sub("", text).splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            return True
+    return False
 
 
 def has_nonempty_changelog_fragment(changed: list[ChangedFile], root: Path) -> bool:

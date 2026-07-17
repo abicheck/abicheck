@@ -123,6 +123,11 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
         ("### Added\n\n- Real entry.\n", True),
         ("<!-- intro -->\n\n### Added\n\n- Real entry.\n", True),
         ("Freeform text with no headings at all.", True),
+        # A category heading uncommented but no bullet under it: scriv's
+        # parser drops the empty paragraph, so this must count as empty too.
+        ("### Fixed\n", False),
+        ("### Added\n\n### Fixed\n", False),
+        ("### Added\n\n### Fixed\n\n- Real entry under the second heading.\n", True),
     ],
 )
 def test_fragment_has_content(text: str, expected: bool) -> None:
@@ -137,7 +142,7 @@ def test_has_nonempty_changelog_fragment_rejects_unedited_template(
 ) -> None:
     changelog_d = tmp_path / "changelog.d"
     changelog_d.mkdir()
-    (changelog_d / "20260101_me.md").write_text(_UNEDITED_TEMPLATE)
+    (changelog_d / "20260101_me.md").write_text(_UNEDITED_TEMPLATE, encoding="utf-8")
 
     changed = [("A", "changelog.d/20260101_me.md")]
     assert gate.has_changelog_fragment(changed) is True  # path-only check
@@ -149,7 +154,9 @@ def test_has_nonempty_changelog_fragment_accepts_edited_fragment(
 ) -> None:
     changelog_d = tmp_path / "changelog.d"
     changelog_d.mkdir()
-    (changelog_d / "20260101_me.md").write_text("### Added\n\n- Real entry.\n")
+    (changelog_d / "20260101_me.md").write_text(
+        "### Added\n\n- Real entry.\n", encoding="utf-8"
+    )
 
     changed = [("A", "changelog.d/20260101_me.md")]
     assert gate.has_nonempty_changelog_fragment(changed, tmp_path) is True
@@ -188,7 +195,7 @@ def test_changed_files_reports_move_out_of_abicheck_as_delete_and_add(
 ) -> None:
     """A rename must not hide the old, now-deleted abicheck/ path (--no-renames)."""
     (repo / "abicheck").mkdir()
-    (repo / "abicheck" / "foo.py").write_text("def f():\n    pass\n")
+    (repo / "abicheck" / "foo.py").write_text("def f():\n    pass\n", encoding="utf-8")
     _git("add", "-A", cwd=repo)
     _git("commit", "-q", "-m", "base", cwd=repo)
     base = _git("rev-parse", "HEAD", cwd=repo)
@@ -208,7 +215,7 @@ def test_changed_files_reports_move_out_of_abicheck_as_delete_and_add(
 
 def test_changed_files_includes_pure_deletion(repo: Path) -> None:
     (repo / "abicheck").mkdir()
-    (repo / "abicheck" / "gone.py").write_text("x = 1\n")
+    (repo / "abicheck" / "gone.py").write_text("x = 1\n", encoding="utf-8")
     _git("add", "-A", cwd=repo)
     _git("commit", "-q", "-m", "base", cwd=repo)
     base = _git("rev-parse", "HEAD", cwd=repo)
@@ -224,12 +231,12 @@ def test_changed_files_includes_pure_deletion(repo: Path) -> None:
 
 def test_changed_files_no_source_change(repo: Path) -> None:
     (repo / "abicheck").mkdir()
-    (repo / "abicheck" / "mod.py").write_text("x = 1\n")
+    (repo / "abicheck" / "mod.py").write_text("x = 1\n", encoding="utf-8")
     _git("add", "-A", cwd=repo)
     _git("commit", "-q", "-m", "base", cwd=repo)
     base = _git("rev-parse", "HEAD", cwd=repo)
 
-    (repo / "README.md").write_text("docs only\n")
+    (repo / "README.md").write_text("docs only\n", encoding="utf-8")
     _git("add", "-A", cwd=repo)
     _git("commit", "-q", "-m", "docs", cwd=repo)
     head = _git("rev-parse", "HEAD", cwd=repo)
@@ -253,12 +260,12 @@ def test_main_fails_when_source_changed_without_fragment(
     repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     (repo / "abicheck").mkdir()
-    (repo / "abicheck" / "mod.py").write_text("x = 1\n")
+    (repo / "abicheck" / "mod.py").write_text("x = 1\n", encoding="utf-8")
     _git("add", "-A", cwd=repo)
     _git("commit", "-q", "-m", "base", cwd=repo)
     base = _git("rev-parse", "HEAD", cwd=repo)
 
-    (repo / "abicheck" / "mod.py").write_text("x = 2\n")
+    (repo / "abicheck" / "mod.py").write_text("x = 2\n", encoding="utf-8")
     _git("commit", "-q", "-am", "change behavior", cwd=repo)
     head = _git("rev-parse", "HEAD", cwd=repo)
 
@@ -273,14 +280,16 @@ def test_main_passes_when_fragment_present(
     repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     (repo / "abicheck").mkdir()
-    (repo / "abicheck" / "mod.py").write_text("x = 1\n")
+    (repo / "abicheck" / "mod.py").write_text("x = 1\n", encoding="utf-8")
     _git("add", "-A", cwd=repo)
     _git("commit", "-q", "-m", "base", cwd=repo)
     base = _git("rev-parse", "HEAD", cwd=repo)
 
-    (repo / "abicheck" / "mod.py").write_text("x = 2\n")
+    (repo / "abicheck" / "mod.py").write_text("x = 2\n", encoding="utf-8")
     (repo / "changelog.d").mkdir()
-    (repo / "changelog.d" / "20260101_me.md").write_text("### Changed\n\n- Bumped x.\n")
+    (repo / "changelog.d" / "20260101_me.md").write_text(
+        "### Changed\n\n- Bumped x.\n", encoding="utf-8"
+    )
     _git("add", "-A", cwd=repo)
     _git("commit", "-q", "-m", "change behavior + fragment", cwd=repo)
     head = _git("rev-parse", "HEAD", cwd=repo)
@@ -297,14 +306,16 @@ def test_main_fails_when_fragment_is_unedited_template(
 ) -> None:
     """`scriv create`d and committed as-is, nobody uncommented a category."""
     (repo / "abicheck").mkdir()
-    (repo / "abicheck" / "mod.py").write_text("x = 1\n")
+    (repo / "abicheck" / "mod.py").write_text("x = 1\n", encoding="utf-8")
     _git("add", "-A", cwd=repo)
     _git("commit", "-q", "-m", "base", cwd=repo)
     base = _git("rev-parse", "HEAD", cwd=repo)
 
-    (repo / "abicheck" / "mod.py").write_text("x = 2\n")
+    (repo / "abicheck" / "mod.py").write_text("x = 2\n", encoding="utf-8")
     (repo / "changelog.d").mkdir()
-    (repo / "changelog.d" / "20260101_me.md").write_text(_UNEDITED_TEMPLATE)
+    (repo / "changelog.d" / "20260101_me.md").write_text(
+        _UNEDITED_TEMPLATE, encoding="utf-8"
+    )
     _git("add", "-A", cwd=repo)
     _git("commit", "-q", "-m", "change behavior + empty fragment", cwd=repo)
     head = _git("rev-parse", "HEAD", cwd=repo)
