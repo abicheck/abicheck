@@ -533,7 +533,11 @@ def run_dump(
             debug_format=debug_format, symbols_only=symbols_only,
             debug_presence_only=debug_presence_only,
             public_headers=public_headers, public_header_dirs=public_header_dirs,
-            header_graph=header_graph, header_graph_includes=header_graph_includes,
+            # header_graph is deliberately NOT forwarded to either recursive
+            # sub-dump below (each would attach its OWN graph, seeded from
+            # only ITS OWN backend's declarations) — attached once, after the
+            # merge, to the union of both backends' declarations instead (see
+            # the _attach_header_graph call below; Codex review).
             notify=notify,
         )
         castxml_snap = run_dump(
@@ -544,7 +548,12 @@ def run_dump(
             path, binary_fmt, header_backend="clang",
             compile=_forced_compile("clang"), **common_kwargs,
         )
-        return merge_snapshots(castxml_snap, clang_snap)
+        merged = merge_snapshots(castxml_snap, clang_snap)
+        return _attach_header_graph(
+            merged, header_graph, header_graph_includes,
+            _headers, _includes, lang, compile,
+            public_headers, public_header_dirs,
+        )
 
     if binary_fmt == "elf":
         snap = _dump_elf(
