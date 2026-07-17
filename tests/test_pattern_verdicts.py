@@ -253,6 +253,28 @@ def test_lost_opaqueness_emits_break_not_silent_demotion() -> None:
     assert any(m["rule_id"] == "lost-opaque-invariant" for m in ledger)
 
 
+def test_lost_opaqueness_withheld_broad_rule_gets_diagnostic() -> None:
+    """Codex review (fresh evidence): checker._filter_pattern_synthetic used
+    the plain is_suppressed() boolean, silently dropping the withheld-rule
+    diagnostic ApplySuppression itself produces for the same shape of match.
+    A broad default (unreachable-only) rule matching this public-reachable
+    OPAQUE_INVARIANT_BROKEN finding is correctly kept but must also explain
+    why via SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK."""
+    old = _opaque_snapshot(opaque=True, size=None)
+    new = _opaque_snapshot(opaque=False, size=128)
+    suppression = SuppressionList([
+        Suppression(namespace="Ctx", reason="pretend private churn")
+    ])
+    result = checker.compare(
+        old, new, suppression=suppression,
+        scope_to_public_surface=False, pattern_verdicts=True,
+    )
+    assert ChangeKind.OPAQUE_INVARIANT_BROKEN in {c.kind for c in result.changes}
+    assert ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK in {
+        c.kind for c in result.changes
+    }
+
+
 def test_removed_opaque_with_same_short_name_not_flagged() -> None:
     # Codex P2: old ns1::Ctx is opaque and removed; new has an unrelated
     # ns2::Ctx (single, same short name). The lost-invariant transition must

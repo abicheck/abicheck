@@ -649,6 +649,43 @@ since JSON/SARIF/JUnit reporters already round-trip `Change` via
   tag, not a naming guess. Added `test_public_header_type_own_change_is_reachable`/
   `test_non_public_header_type_own_change_stays_untagged` to
   `test_reachability_aware_suppression.py`.
+- **The public-header direct-tag above only looked at `RecordType` (Codex,
+  fresh evidence).** `Function`/`Variable`/`EnumType` all carry the same
+  `ScopeOrigin` field — a public-header function/variable/enum's own change
+  had the identical gap the `RecordType` fix above closes. Extended the
+  direct-tag lookup to all four declaration kinds via a small
+  `_public_header_names()` helper, plus owner-stripping for
+  `ENUM_MEMBER_REMOVED`/`ENUM_MEMBER_ADDED`/`ENUM_MEMBER_VALUE_CHANGED`/
+  `ENUM_LAST_MEMBER_VALUE_CHANGED` — `diff_types.py` builds these findings'
+  `symbol` as `"EnumName::member"`, and unlike `STRUCT_FIELD_*` kinds this
+  isn't stripped by the shared `_root_type_name_for_change` (deliberately
+  left that shared helper alone rather than changing its existing behavior
+  for the unrelated leak-path check). Added
+  `test_public_header_variable_own_change_is_reachable`/
+  `test_public_header_enum_member_change_is_reachable` to
+  `test_reachability_aware_suppression.py`.
+- **`checker._filter_pattern_synthetic` had the exact `is_suppressed()` vs.
+  `evaluate()` diagnostic gap the `post_processing.py` late-detector fix
+  above closed (Codex, fresh evidence) — this is the ADR-027
+  `--pattern-verdicts` path (D3 above), a separate module invoked from
+  `checker._apply_pattern_verdicts_step` well after `MarkReachability`
+  runs, so its `OPAQUE_INVARIANT_BROKEN`/`HANDLE_TYPE_CHANGED` synthetics
+  never got the withheld-rule diagnostic either.** Unlike the four
+  `post_processing.py` detectors, this function's signature doesn't take
+  `PipelineContext` (a plain `SuppressionList` + `suppressed: list[Change]`
+  instead) — the exact reason this call site was left as an open P1 roadmap
+  item in the round above. Fixed anyway since the change was small and
+  self-contained: `_filter_pattern_synthetic` now calls `evaluate()` and
+  appends the same `_build_suppression_overreach_change()` diagnostic
+  (imported from `post_processing.py`; no import cycle — `post_processing`
+  does not import `checker`). Added
+  `test_lost_opaqueness_withheld_broad_rule_gets_diagnostic` to
+  `test_pattern_verdicts.py`. Narrows P1 roadmap item 6 to just the
+  remaining two `checker.py` call sites (`_filter_suppressed_changes`,
+  `_apply_surface_metrics`) — neither builds a fresh synthetic finding a
+  suppression rule could plausibly want to match-but-withhold the same way
+  (they filter pre-existing/aggregate findings, not late detector output),
+  so closing them is lower priority than this one was.
 
 ### D2. `Suppression` gains a reachability guard
 
@@ -845,13 +882,13 @@ Numbering mirrors the review's own priority tiers.
    step in this list, including the reachability tag this ADR's own
    suppression gate depends on.
 6. Route `checker.py`'s remaining `is_suppressed()` call sites
-   (`_filter_suppressed_changes`, `_apply_surface_metrics`,
-   `_filter_pattern_synthetic`) through an `evaluate()`-based helper too, so
-   a broad rule matched-but-withheld on those paths also produces the
-   `SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK` diagnostic — the same fix this
-   round's changelog entry applied to `post_processing.py`'s four late
-   detectors, deliberately not extended to `checker.py`'s different call
-   signature in the same round.
+   (`_filter_suppressed_changes`, `_apply_surface_metrics`) through an
+   `evaluate()`-based helper too, so a broad rule matched-but-withheld on
+   those paths also produces the `SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`
+   diagnostic. Lower priority than the now-closed `_filter_pattern_synthetic`
+   case: neither builds a fresh synthetic finding a suppression rule could
+   plausibly want to match-but-withhold the same way — they filter
+   pre-existing/aggregate findings, not late detector output.
 
 ### P2 — empirical validation
 

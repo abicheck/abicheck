@@ -30,6 +30,8 @@ from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change
 from abicheck.model import (
     AbiSnapshot,
+    EnumMember,
+    EnumType,
     Function,
     Param,
     RecordType,
@@ -165,6 +167,66 @@ class TestMarkReachability:
             [raw_change], old, new, suppression=_needs_evidence_suppression()
         )
         found = [c for c in ctx.kept if c.kind == ChangeKind.TYPE_SIZE_CHANGED]
+        assert len(found) == 1
+        assert found[0].public_reachable is True
+        assert found[0].reachability_kind == "direct_public_symbol"
+
+    def test_public_header_variable_own_change_is_reachable(self) -> None:
+        """Codex review (fresh evidence): Variable/Function/EnumType all
+        carry ScopeOrigin too, not just RecordType — a public-header
+        variable's own change needs the same direct tag."""
+        old = AbiSnapshot(
+            library="libtest.so", version="1.0",
+            variables=[Variable(
+                name="lib::kFlag", mangled="lib::kFlag", type="int",
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            )],
+        )
+        new = AbiSnapshot(
+            library="libtest.so", version="1.0",
+            variables=[Variable(
+                name="lib::kFlag", mangled="lib::kFlag", type="long",
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            )],
+        )
+        raw_change = Change(
+            kind=ChangeKind.VAR_TYPE_CHANGED,
+            symbol="lib::kFlag",
+            description="type changed",
+        )
+        ctx = DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        found = [c for c in ctx.kept if c.kind == ChangeKind.VAR_TYPE_CHANGED]
+        assert len(found) == 1
+        assert found[0].public_reachable is True
+        assert found[0].reachability_kind == "direct_public_symbol"
+
+    def test_public_header_enum_member_change_is_reachable(self) -> None:
+        """Codex review (fresh evidence): an ENUM_MEMBER_* finding's symbol
+        is "EnumName::member" (diff_types.py), not the plain enum name —
+        needs owner-stripping before the public-header origin check."""
+        old = AbiSnapshot(
+            library="libtest.so", version="1.0",
+            enums=[EnumType(
+                name="lib::Color",
+                members=[EnumMember(name="RED", value=0)],
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            )],
+        )
+        new = AbiSnapshot(
+            library="libtest.so", version="1.0",
+            enums=[EnumType(name="lib::Color", members=[], origin=ScopeOrigin.PUBLIC_HEADER)],
+        )
+        raw_change = Change(
+            kind=ChangeKind.ENUM_MEMBER_REMOVED,
+            symbol="lib::Color::RED",
+            description="member removed",
+        )
+        ctx = DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        found = [c for c in ctx.kept if c.kind == ChangeKind.ENUM_MEMBER_REMOVED]
         assert len(found) == 1
         assert found[0].public_reachable is True
         assert found[0].reachability_kind == "direct_public_symbol"

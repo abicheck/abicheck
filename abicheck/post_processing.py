@@ -26,6 +26,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
+from .checker_policy import ChangeKind
+
 if TYPE_CHECKING:
     from .checker_types import Change
     from .model import AbiSnapshot
@@ -499,6 +501,19 @@ class DemoteOffPythonSurface:
         return kept
 
 
+# diff_types.py builds ENUM_MEMBER_*/ENUM_LAST_MEMBER_VALUE_CHANGED's symbol
+# as "EnumName::member" (unlike TYPE_FIELD_* kinds, which carry the
+# containing type name directly) — MarkReachability.run needs this set to
+# know when to peel the member suffix before checking the owning EnumType's
+# public-header origin.
+_ENUM_MEMBER_KINDS = frozenset({
+    ChangeKind.ENUM_MEMBER_REMOVED,
+    ChangeKind.ENUM_MEMBER_ADDED,
+    ChangeKind.ENUM_MEMBER_VALUE_CHANGED,
+    ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED,
+})
+
+
 class MarkReachability:
     """Tag each change with public-reachability metadata, before suppression runs.
 
@@ -588,7 +603,6 @@ class MarkReachability:
         if ctx.suppression is None or not ctx.suppression.needs_reachability_evidence():
             return changes
 
-        from .diff_namespaces import _origin_by_name
         from .internal_leak import (
             _IDENTITY_VTABLE_KINDS,
             DEFAULT_INTERNAL_NAMESPACES,
@@ -600,37 +614,51 @@ class MarkReachability:
         )
         from .model import ScopeOrigin
 
+        def _public_header_names(snap: AbiSnapshot) -> set[str]:
+            """Names of every declaration ADR-024's opt-in ``--public-header``/
+            ``--public-header-dir`` scoping marked ``ScopeOrigin.PUBLIC_HEADER``
+            — ``Function``/``Variable``/``RecordType``/``EnumType`` all carry
+            this field. Without that flag every origin is ``ScopeOrigin.UNKNOWN``,
+            so this returns empty and degrades to the prior behavior."""
+            names: set[str] = set()
+            names.update(f.name for f in snap.functions if f.origin == ScopeOrigin.PUBLIC_HEADER)
+            names.update(v.name for v in snap.variables if v.origin == ScopeOrigin.PUBLIC_HEADER)
+            names.update(t.name for t in snap.types if t.origin == ScopeOrigin.PUBLIC_HEADER)
+            names.update(e.name for e in snap.enums if e.origin == ScopeOrigin.PUBLIC_HEADER)
+            return names
+
         namespaces = self._namespaces or DEFAULT_INTERNAL_NAMESPACES
         old_paths = compute_leak_paths(ctx.old, namespaces)
         new_paths = compute_leak_paths(ctx.new, namespaces)
         reachable_types = set(old_paths) | set(new_paths)
-        # RecordType.origin == ScopeOrigin.PUBLIC_HEADER (Codex review, fresh
-        # evidence): compute_leak_paths only ever records *internal* types
-        # reached while walking from the public surface — a type that is
+        # ScopeOrigin.PUBLIC_HEADER (Codex review, fresh evidence):
+        # compute_leak_paths only ever records *internal* types reached
+        # while walking from the public surface — a declaration that is
         # itself the public surface (e.g. a header-only type never
         # referenced by an exported function/variable) never becomes a key
-        # in its result, so a raw change on that type's own layout got no
-        # tag at all from the walk above. ADR-024's opt-in public-header
-        # scoping is the same reliable direct signal already used for the
-        # late-detector findings in diff_namespaces.py/diff_templates.py —
-        # apply it here too. Without --public-header every origin is
-        # ScopeOrigin.UNKNOWN, so both maps are empty of real signal and
-        # this degrades to the prior behavior automatically.
-        old_origins = _origin_by_name(ctx.old.types)
-        new_origins = _origin_by_name(ctx.new.types)
-        public_header_types = {
-            name for name, origin in old_origins.items()
-            if origin == ScopeOrigin.PUBLIC_HEADER
-        } | {
-            name for name, origin in new_origins.items()
-            if origin == ScopeOrigin.PUBLIC_HEADER
-        }
-        if not reachable_types and not public_header_types:
+        # in its result, so a raw change on that declaration's own layout
+        # got no tag at all from the walk above. ADR-024's opt-in
+        # public-header scoping is the same reliable direct signal already
+        # used for the late-detector findings in diff_namespaces.py/
+        # diff_templates.py — apply it here too, across every declaration
+        # kind that carries the field (function/variable/type/enum), not
+        # just RecordType.
+        public_header_names = _public_header_names(ctx.old) | _public_header_names(ctx.new)
+        if not reachable_types and not public_header_names:
             return changes
 
         for c in changes:
             root = _root_type_name_for_change(c)
-            if root in public_header_types:
+            # An enum-member finding's symbol is "EnumName::member" (diff_types.py),
+            # not stripped by _root_type_name_for_change (that stripping is
+            # scoped to STRUCT_FIELD_* kinds only) — peel it here so a
+            # public-header-scoped EnumType's own member churn is found too.
+            enum_owner = (
+                root.rsplit("::", 1)[0]
+                if "::" in root and c.kind in _ENUM_MEMBER_KINDS
+                else None
+            )
+            if root in public_header_names or enum_owner in public_header_names:
                 c.public_reachable = True
                 c.reachability_kind = "direct_public_symbol"
                 continue
