@@ -165,6 +165,10 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "symbol_version_defined_added": "L0",
     "dt_relr_introduced": "L0",
     "dt_relr_removed": "L0",
+    # Wheel tag / deployment-claim checks (G27) — ELF verneed and Mach-O
+    # load-command reads, same evidence class as platform_baseline_floor_raised.
+    "musllinux_glibc_dependency_detected": "L0",
+    "macos_deployment_target_raised": "L0",
     # NumPy C-API compatibility envelope (G26) — pure binary-evidence
     # (rodata string) scans, no header/source/DWARF needed.
     "numpy_capi_consumption_added": "L0",

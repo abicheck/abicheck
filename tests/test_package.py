@@ -38,7 +38,9 @@ from abicheck.package import (
     detect_extractor,
     discover_shared_libraries,
     is_package,
+    parse_macos_deployment_target_floor,
     parse_manylinux_glibc_floor,
+    parse_musllinux_floor,
     parse_numpy_requirement_from_metadata,
     parse_wheel_numpy_requirement,
     resolve_debug_info,
@@ -848,6 +850,109 @@ class TestParseManylinuxGlibcFloor:
         self, name: str, expected: str | None
     ) -> None:
         assert parse_manylinux_glibc_floor(name) == expected
+
+
+class TestParseMusllinuxFloor:
+    """G27: PEP 656 musllinux platform-tag parsing."""
+
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [
+            pytest.param(
+                "scipy-1.18.0-cp312-cp312-musllinux_1_2_x86_64.whl",
+                "1.2",
+                id="basic_tag",
+            ),
+            pytest.param(
+                "pkg-1.0-cp311-cp311-musllinux_1_1_aarch64.whl",
+                "1.1",
+                id="different_arch",
+            ),
+            # A compressed multi-tag segment claims compatibility with every
+            # listed baseline — the strictest (lowest) applies.
+            pytest.param(
+                "pkg-1.0-cp311-cp311-musllinux_1_2_x86_64.musllinux_1_1_x86_64.whl",
+                "1.1",
+                id="compressed_multi_tag_picks_strictest",
+            ),
+            pytest.param(
+                "pkg-1.0-cp311-cp311-manylinux_2_17_x86_64.whl",
+                None,
+                id="no_musllinux_tag_manylinux",
+            ),
+            pytest.param(
+                "pkg-1.0-py3-none-any.whl", None, id="no_musllinux_tag_any",
+            ),
+            pytest.param(
+                "pkg-1.0-cp311-cp311-musllinux_bogus_x86_64.whl",
+                None,
+                id="malformed_tag_no_crash",
+            ),
+            # Distribution name prefix trap, same as manylinux's equivalent.
+            pytest.param(
+                "musllinux_1_2_helper-1.0-cp312-cp312-linux_x86_64.whl",
+                None,
+                id="musllinux_prefixed_distribution_name_not_mistaken_for_tag",
+            ),
+        ],
+    )
+    def test_parse_musllinux_floor(self, name: str, expected: str | None) -> None:
+        assert parse_musllinux_floor(name) == expected
+
+
+class TestParseMacosDeploymentTargetFloor:
+    """G27: macOS wheel platform-tag deployment-target parsing."""
+
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [
+            pytest.param(
+                "scipy-1.18.0-cp312-cp312-macosx_11_0_arm64.whl",
+                "11.0",
+                id="arm64",
+            ),
+            pytest.param(
+                "pkg-1.0-cp311-cp311-macosx_10_9_x86_64.whl",
+                "10.9",
+                id="x86_64_underscore_arch",
+            ),
+            pytest.param(
+                "pkg-1.0-cp311-cp311-macosx_10_9_universal2.whl",
+                "10.9",
+                id="universal2",
+            ),
+            # A fat/universal wheel's compressed segment claims compatibility
+            # with every listed baseline — the strictest (lowest) applies.
+            pytest.param(
+                "pkg-1.0-cp311-cp311-macosx_10_9_x86_64.macosx_11_0_arm64.whl",
+                "10.9",
+                id="compressed_multi_tag_picks_strictest",
+            ),
+            pytest.param(
+                "pkg-1.0-cp311-cp311-manylinux_2_17_x86_64.whl",
+                None,
+                id="no_macos_tag_manylinux",
+            ),
+            pytest.param(
+                "pkg-1.0-py3-none-any.whl", None, id="no_macos_tag_any",
+            ),
+            pytest.param(
+                "pkg-1.0-cp311-cp311-macosx_11_arm64.whl",
+                None,
+                id="malformed_tag_missing_minor_no_crash",
+            ),
+            # Distribution name prefix trap, same as manylinux's equivalent.
+            pytest.param(
+                "macosx_11_0_helper-1.0-cp312-cp312-linux_x86_64.whl",
+                None,
+                id="macosx_prefixed_distribution_name_not_mistaken_for_tag",
+            ),
+        ],
+    )
+    def test_parse_macos_deployment_target_floor(
+        self, name: str, expected: str | None
+    ) -> None:
+        assert parse_macos_deployment_target_floor(name) == expected
 
 
 class TestParseNumpyRequirementFromMetadata:

@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (361 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (363 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -164,8 +164,10 @@ One row per `ChangeKind` (361 total). Columns fuse the verdict partition (`check
 | `macho_filetype_changed` | breaking | `BREAKING` | `error` | L0 | `macho_filetype_changed` | — |
 | `macho_linkage_flags_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `macho_linkage_flags_changed` | — |
 | `macho_reexport_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `macho_reexport_changed` | — |
+| `macos_deployment_target_raised` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `macos_deployment_target_raised` | — |
 | `mandatory_template_param_added` | api_break | `API_BREAK` | `warning` | unspecified | `mandatory_template_param_added` | — |
 | `method_access_changed` | api_break | `API_BREAK` | `warning` | L2 | `method_access_changed` | [case34](../examples/case34_access_level.md) |
+| `musllinux_glibc_dependency_detected` | breaking | `BREAKING` | `error` | L0 | `musllinux_glibc_dependency_detected` | — |
 | `needed_added` | quality | `COMPATIBLE` | `warning` | L0 | `needed_added` | [case138](../examples/case138_needed_added.md) |
 | `needed_order_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `needed_order_changed` | — |
 | `needed_removed` | quality | `COMPATIBLE` | `warning` | L0 | `needed_removed` | — |

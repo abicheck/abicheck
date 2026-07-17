@@ -3,8 +3,8 @@
 **Status:** Proposed — vision/roadmap doc. The three highest-priority items
 (§1 Cython API/ABI frontend, §2 NumPy C-API envelope, §3 wheel/deployment
 verification) are now gap-plan-ified as **G25**, **G26**, and **G27**
-(`usecase-registry.yaml` entries; G25/G27 status `planned`, G26 `partial` —
-see its plan's "Out of scope" for what's deferred and why,
+(`usecase-registry.yaml` entries; G25 status `planned`, G26/G27 `partial` —
+see each plan's "Out of scope"/status note for what's deferred and why,
 [plans/g25-cython-api-abi-frontend.md](plans/g25-cython-api-abi-frontend.md) /
 [plans/g26-numpy-capi-envelope.md](plans/g26-numpy-capi-envelope.md) /
 [plans/g27-wheel-deployment-verification.md](plans/g27-wheel-deployment-verification.md)) —
@@ -636,7 +636,7 @@ problems faced by SciPy and compiled scientific Python.
 | §0 Wheel foundations | [G9](plans/g9-wheel-vendored-matching.md) ✅, [G10](plans/g10-glibc-floor-check.md) ✅, [G16](plans/g16-header-scope-toolchain-robustness.md) ✅ / [G4](plans/g4-header-ast-extractor.md) (still planned, XL) | G9, G10, and G16 are now done. G4 (the libclang frontend) remains the large, separate, high-risk piece — a new heavy optional dependency and a second full parser backend, deliberately not attempted alongside G9/G10/G16. |
 | §1 Cython API/ABI frontend | **[G25](plans/g25-cython-api-abi-frontend.md)** (`UC-ARCH-cython-api`, `planned`) | Gap-plan-ified. Same shape as G23's `.pyi` surface work; narrower than [ADR-034](adr/034-managed-runtime-and-non-c-abi-frontends.md)'s general non-native-language scope. |
 | §2 NumPy C-API envelope | **[G26](plans/g26-numpy-capi-envelope.md)** (`UC-TC-numpy-capi-envelope`, `partial`) | Consumption detection, NPY_TARGET_VERSION extraction, and the wheel-metadata cross-check are done; the raw NPY_ABI_VERSION/NPY_API_VERSION hex constants need disassembly to recover (out of scope, same reasoning as G4) — see the plan's "Out of scope". New provider; extends the existing CPython-extension recognition ([G14](plans/g14-stable-abi-subset.md)) to NumPy's own capsule-based API. |
-| §3 Wheel/deployment verification | **[G27](plans/g27-wheel-deployment-verification.md)** (`UC-TC-wheel-deployment-claims`, `planned`) | Gap-plan-ified. Generalizes [G10](plans/g10-glibc-floor-check.md) across platforms/toolchains; reuses [G13](plans/g13-arch-mismatch-guard.md)/[G12](plans/g12-security-hardening.md) machinery. |
+| §3 Wheel/deployment verification | **[G27](plans/g27-wheel-deployment-verification.md)** (`UC-TC-wheel-deployment-claims`, `partial`) | Linux GLIBCXX/CXXABI floor extension, musllinux glibc-dependency check, and macOS deployment-target check are done; Windows, CPU-ISA, RPATH/closure checks, and CLI auto-derivation from a wheel's own tag remain planned. Generalizes [G10](plans/g10-glibc-floor-check.md) across platforms/toolchains; reuses [G13](plans/g13-arch-mismatch-guard.md)/[G12](plans/g12-security-hardening.md) machinery. |
 | §4 Release-matrix parity | [G2](plans/g2-build-config-and-bundle.md) (build matrix), [ADR-002](adr/002-multi-binary-release-compare.md) | Extends multi-binary release compare from "verdict" to "support-set delta." |
 | §5 Downstream-impact analysis | `abicheck/appcompat.py`, [ADR-005](adr/005-application-compat-check.md) | Extends existing app-compat checking into a scientific-Python consumer graph. |
 | §6 One-command PyPI/conda compare | none yet | New CLI surface; would need a package-resolution/caching layer not currently in scope. |

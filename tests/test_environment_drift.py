@@ -509,6 +509,152 @@ class TestPlatformBaselineFloorRaised:
         assert changes[0].kind is ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED
         assert changes[0].new_value == "GLIBC_2.36"
 
+    def test_glibcxx_floor_checked_independently_of_glibc(self) -> None:
+        # G27: GLIBCXX/CXXABI extend the same mechanism as GLIBC, each
+        # against its own declared floor.
+        from abicheck.diff_versioning import check_platform_baseline_floor
+
+        elf = _elf(
+            needed=["libstdc++.so.6"],
+            versions_required={
+                "libstdc++.so.6": ["GLIBCXX_3.4.28", "GLIBCXX_3.4.30"]
+            },
+        )
+        assert check_platform_baseline_floor(elf, {"GLIBCXX": "3.4.30"}) == []
+        changes = check_platform_baseline_floor(elf, {"GLIBCXX": "3.4.28"})
+        assert len(changes) == 1
+        assert changes[0].kind is ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED
+        assert changes[0].new_value == "GLIBCXX_3.4.30"
+        assert "GLIBCXX" in changes[0].description
+
+    def test_cxxabi_floor_checked_independently(self) -> None:
+        from abicheck.diff_versioning import check_platform_baseline_floor
+
+        elf = _elf(
+            needed=["libstdc++.so.6"],
+            versions_required={"libstdc++.so.6": ["CXXABI_1.3.13"]},
+        )
+        changes = check_platform_baseline_floor(elf, {"CXXABI": "1.3.11"})
+        assert len(changes) == 1
+        assert changes[0].new_value == "CXXABI_1.3.13"
+
+    def test_glibc_and_glibcxx_floors_both_declared_and_violated(self) -> None:
+        # Each prefix produces its own finding — a binary can violate one
+        # without violating the other.
+        from abicheck.diff_versioning import check_platform_baseline_floor
+
+        elf = _elf(
+            needed=["libc.so.6", "libstdc++.so.6"],
+            versions_required={
+                "libc.so.6": ["GLIBC_2.34"],
+                "libstdc++.so.6": ["GLIBCXX_3.4.30"],
+            },
+        )
+        changes = check_platform_baseline_floor(
+            elf, {"GLIBC": "2.28", "GLIBCXX": "3.4.28"}
+        )
+        assert len(changes) == 2
+        new_values = {c.new_value for c in changes}
+        assert new_values == {"GLIBC_2.34", "GLIBCXX_3.4.30"}
+
+    def test_glibcxx_tag_not_mistaken_for_glibc_prefix(self) -> None:
+        # "GLIBCXX_..." must not satisfy the "GLIBC_" prefix check (and vice
+        # versa) — the two namespaces don't overlap.
+        from abicheck.diff_versioning import check_platform_baseline_floor
+
+        elf = _elf(
+            needed=["libstdc++.so.6"],
+            versions_required={"libstdc++.so.6": ["GLIBCXX_3.4.30"]},
+        )
+        assert check_platform_baseline_floor(elf, {"GLIBC": "2.0"}) == []
+
+    def test_dt_relr_implied_floor_is_glibc_specific(self) -> None:
+        # DT_RELR only implies a GLIBC floor, not a GLIBCXX/CXXABI one.
+        from abicheck.diff_versioning import check_platform_baseline_floor
+
+        elf = _elf(needed=["libc.so.6"], has_dt_relr=True)
+        assert check_platform_baseline_floor(elf, {"GLIBCXX": "3.4.20"}) == []
+
+
+class TestMusllinuxGlibcDependency:
+    """G27: a musllinux-tagged binary must carry no glibc-flavoured
+    symbol-versioning requirement at all — musl has no version-floor concept
+    to compare against numerically, unlike the manylinux GLIBC check."""
+
+    def test_no_declared_musllinux_no_finding(self) -> None:
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(
+            needed=["libc.so.6"],
+            versions_required={"libc.so.6": ["GLIBC_2.34"]},
+        )
+        assert check_musllinux_glibc_dependency(elf, None) == []
+        assert check_musllinux_glibc_dependency(elf, {}) == []
+        assert check_musllinux_glibc_dependency(elf, {"GLIBC": "2.28"}) == []
+
+    def test_clean_musl_binary_no_finding(self) -> None:
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(needed=["libc.musl-x86_64.so.1"], versions_required={})
+        assert check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"}) == []
+
+    def test_glibc_symbol_flagged_for_musllinux_tagged_binary(self) -> None:
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(
+            needed=["libc.so.6"],
+            versions_required={"libc.so.6": ["GLIBC_2.34"]},
+        )
+        changes = check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"})
+        assert len(changes) == 1
+        assert changes[0].kind is ChangeKind.MUSLLINUX_GLIBC_DEPENDENCY_DETECTED
+        assert changes[0].new_value == "GLIBC_2.34"
+
+    def test_glibcxx_symbol_also_flagged(self) -> None:
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(
+            needed=["libstdc++.so.6"],
+            versions_required={"libstdc++.so.6": ["GLIBCXX_3.4.30"]},
+        )
+        changes = check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"})
+        assert len(changes) == 1
+
+    def test_dt_relr_flagged_for_musllinux_tagged_binary(self) -> None:
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(needed=["libc.so.6"], has_dt_relr=True)
+        changes = check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"})
+        assert len(changes) == 1
+
+    def test_lowercase_key_still_matches(self) -> None:
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(
+            needed=["libc.so.6"],
+            versions_required={"libc.so.6": ["GLIBC_2.34"]},
+        )
+        changes = check_musllinux_glibc_dependency(elf, {"musllinux": "1.2"})
+        assert len(changes) == 1
+
+    def test_cli_end_to_end_via_env_matrix(self) -> None:
+        def _make() -> ElfMetadata:
+            return _elf(
+                needed=["libc.so.6"],
+                versions_required={"libc.so.6": ["GLIBC_2.34"]},
+            )
+
+        old, new = _snap(_make()), _snap(_make())
+        result = compare(
+            old,
+            new,
+            env_matrix=EnvironmentMatrix(runtime_floors={"MUSLLINUX": "1.2"}),
+        )
+        assert ChangeKind.MUSLLINUX_GLIBC_DEPENDENCY_DETECTED in _kinds(
+            result.changes
+        )
+        assert result.verdict is Verdict.BREAKING
+
 
 class TestPlatformBaselineFloorCliEndToEnd:
     """G10: the check reaches exit code / JSON through the real ``compare``

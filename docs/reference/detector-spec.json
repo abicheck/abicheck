@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 361,
+  "count": 363,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -1425,6 +1425,15 @@
       "examples": ""
     },
     {
+      "kind": "macos_deployment_target_raised",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "macos_deployment_target_raised",
+      "examples": ""
+    },
+    {
       "kind": "mandatory_template_param_added",
       "category": "api_break",
       "default_verdict": "API_BREAK",
@@ -1441,6 +1450,15 @@
       "min_evidence": "L2",
       "doc_slug": "method_access_changed",
       "examples": "case34_access_level"
+    },
+    {
+      "kind": "musllinux_glibc_dependency_detected",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "musllinux_glibc_dependency_detected",
+      "examples": ""
     },
     {
       "kind": "needed_added",

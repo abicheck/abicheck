@@ -588,6 +588,39 @@ def compare(
         if floor_changes:
             kept.extend(floor_changes)
 
+    # musllinux glibc-dependency check (G27): same declared-floor gate as the
+    # platform-baseline check above, but a yes/no compatibility check rather
+    # than a numeric floor comparison — see check_musllinux_glibc_dependency's
+    # docstring for why musl has no version-floor concept to compare against.
+    if env_matrix is not None and env_matrix.runtime_floors:
+        from .diff_versioning import check_musllinux_glibc_dependency
+        from .elf_metadata import ElfMetadata as _ElfMetadataMusl
+
+        new_elf_for_musl = getattr(new, "elf", None) or _ElfMetadataMusl()
+        musllinux_changes = check_musllinux_glibc_dependency(
+            new_elf_for_musl, env_matrix.runtime_floors
+        )
+        musllinux_changes = _filter_suppressed_changes(
+            musllinux_changes, suppression, suppressed
+        )
+        if musllinux_changes:
+            kept.extend(musllinux_changes)
+
+    # macOS deployment-target floor check (G27, the macOS half of G10's
+    # manylinux glibc-floor idea): same declared-floor gate, checked against
+    # the new snapshot's Mach-O evidence instead of ELF.
+    if env_matrix is not None and env_matrix.runtime_floors:
+        from .diff_wheel_deployment import check_macos_deployment_target_floor
+
+        macos_floor_changes = check_macos_deployment_target_floor(
+            getattr(new, "macho", None), env_matrix.runtime_floors
+        )
+        macos_floor_changes = _filter_suppressed_changes(
+            macos_floor_changes, suppression, suppressed
+        )
+        if macos_floor_changes:
+            kept.extend(macos_floor_changes)
+
     # NumPy C-API compatibility-envelope delta (G26): needs only the two
     # snapshots' own numpy_capi field (no external wheel metadata), so this
     # runs unconditionally — unlike the wheel-metadata cross-check

@@ -43,6 +43,29 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **Wheel tag / deployment-claim verification (G27, partial).**
+  `diff_versioning.check_platform_baseline_floor` (G10) now checks the
+  `GLIBCXX_*`/`CXXABI_*` symbol-version floor independently of `GLIBC`, each
+  against its own declared `--env-matrix` `runtime_floors` entry. New
+  `diff_versioning.check_musllinux_glibc_dependency`: flags a
+  `musllinux`-declared binary (`runtime_floors: {MUSLLINUX: "1.2"}`) that
+  requires any glibc-flavoured versioned symbol at all — a yes/no
+  compatibility check rather than a numeric floor, since musl carries no
+  symbol-versioning namespace to compare against — new `BREAKING`
+  `musllinux_glibc_dependency_detected`. New
+  `diff_wheel_deployment.check_macos_deployment_target_floor`: the macOS
+  half of G10's idea, comparing a Mach-O binary's own
+  `LC_VERSION_MIN_MACOSX`/`LC_BUILD_VERSION` minimum-OS against a declared
+  `MACOS_DEPLOYMENT_TARGET` floor — new `RISK`
+  `macos_deployment_target_raised`. New `abicheck.package`
+  `parse_musllinux_floor()`/`parse_macos_deployment_target_floor()` wheel
+  platform-tag parsers alongside G10's `parse_manylinux_glibc_floor()` (all
+  three share the extracted `_wheel_platform_tag_segment()` helper).
+  Windows UCRT/runtime checks, CPU-ISA-baseline detection, and end-to-end
+  CLI auto-derivation from a compared wheel's own filename tag (every check
+  above, including G10's original `GLIBC` one, still requires an explicit
+  `--env-matrix` declaration) remain planned — see the G27 plan's "Out of
+  scope"/status note.
 - `compare --help-all`: a second-level `--help` disclosure tier (G21.8
   collapse M2). Plain `compare --help` now shows only a curated common
   subset of the ~62 options (inputs, output/format, `--show-only`, policy,

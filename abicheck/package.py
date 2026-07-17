@@ -521,16 +521,100 @@ def parse_manylinux_glibc_floor(name: str) -> str | None:
     ``EnvironmentMatrix.runtime_floors["GLIBC"]``, or ``None`` if *name*
     carries no recognizable manylinux tag.
     """
-    tag_segment = name
-    if name.lower().endswith(".whl"):
-        stem = name[: -len(".whl")]
-        tag_segment = stem.rsplit("-", 1)[-1]
+    tag_segment = _wheel_platform_tag_segment(name)
     best: tuple[int, int] | None = None
     for m in _MANYLINUX_TAG_RE.finditer(tag_segment):
         if m.group("legacy"):
             version = _MANYLINUX_LEGACY_FLOORS[f"manylinux{m.group('legacy')}"]
         else:
             version = (int(m.group("major")), int(m.group("minor")))
+        if best is None or version < best:
+            best = version
+    return f"{best[0]}.{best[1]}" if best is not None else None
+
+
+def _wheel_platform_tag_segment(name: str) -> str:
+    """The platform-tag segment of a wheel filename.
+
+    When *name* ends in ``.whl``, only its platform-tag segment (the last
+    ``-``-delimited component before the extension, per the PEP 427 wheel
+    filename spec ``{distribution}-{version}(-{build})?-{python}-{abi}-
+    {platform}.whl``) is returned — not the whole filename. Otherwise a
+    platform-tag-prefixed *distribution* name (e.g.
+    ``manylinux_2_17_helper-1.0-cp312-cp312-linux_x86_64.whl``, whose
+    platform tag makes no manylinux promise at all) would be misread as
+    carrying that tag. Shared by :func:`parse_manylinux_glibc_floor`,
+    :func:`parse_musllinux_floor`, and
+    :func:`parse_macos_deployment_target_floor` — see the first for the full
+    rationale. Returns *name* unchanged when it isn't a ``.whl`` filename.
+    """
+    if name.lower().endswith(".whl"):
+        stem = name[: -len(".whl")]
+        return stem.rsplit("-", 1)[-1]
+    return name
+
+
+#: PEP 656 musllinux platform-tag -> the musl libc major.minor version it
+#: names, e.g. ``musllinux_1_2_x86_64``. Unlike manylinux/glibc, musl carries
+#: no symbol-versioning scheme, so there is no binary-evidence floor to check
+#: this version *against* — its presence is a yes/no "this wheel targets
+#: musl" signal for check_musllinux_glibc_dependency (G27). See
+#: docs/development/plans/g27-wheel-deployment-verification.md.
+_MUSLLINUX_TAG_RE = re.compile(r"musllinux_(?P<major>\d+)_(?P<minor>\d+)(?=_|$)")
+
+
+def parse_musllinux_floor(name: str) -> str | None:
+    """Derive the strictest declared musl libc version from a musllinux tag
+    string (G27).
+
+    *name* follows the same wheel-filename/platform-tag-segment handling as
+    :func:`parse_manylinux_glibc_floor` (via :func:`_wheel_platform_tag_segment`),
+    including strictest-of-multi-tag resolution for a compressed PEP 600-style
+    multi-platform segment.
+
+    Returns a dotted ``"X.Y"`` string suitable for
+    ``EnvironmentMatrix.runtime_floors["MUSLLINUX"]`` (read as a presence
+    check, not a numeric floor, by
+    :func:`abicheck.diff_versioning.check_musllinux_glibc_dependency`), or
+    ``None`` if *name* carries no recognizable musllinux tag.
+    """
+    tag_segment = _wheel_platform_tag_segment(name)
+    best: tuple[int, int] | None = None
+    for m in _MUSLLINUX_TAG_RE.finditer(tag_segment):
+        version = (int(m.group("major")), int(m.group("minor")))
+        if best is None or version < best:
+            best = version
+    return f"{best[0]}.{best[1]}" if best is not None else None
+
+
+#: PEP 425 macOS platform-tag -> the deployment target it promises as a
+#: ceiling, e.g. ``macosx_10_9_x86_64`` or ``macosx_11_0_universal2``. The
+#: arch component may contain digits and underscores (``x86_64``,
+#: ``universal2``); the trailing ``(?=[._]|$)`` boundary keeps a multi-tag
+#: compressed segment's dot separator from being swallowed into the match.
+_MACOSX_TAG_RE = re.compile(
+    r"macosx_(?P<major>\d+)_(?P<minor>\d+)_(?P<arch>[a-zA-Z0-9_]+?)(?=[.]|$)"
+)
+
+
+def parse_macos_deployment_target_floor(name: str) -> str | None:
+    """Derive the strictest declared macOS deployment target from a
+    ``macosx_X_Y_<arch>`` wheel platform tag (G27, the macOS half of
+    :func:`parse_manylinux_glibc_floor`'s manylinux/glibc idea).
+
+    *name* follows the same wheel-filename/platform-tag-segment handling as
+    :func:`parse_manylinux_glibc_floor`, including strictest-of-multi-tag
+    resolution for a fat/universal2 wheel whose compressed segment lists
+    more than one baseline.
+
+    Returns a dotted ``"X.Y"`` string suitable for
+    ``EnvironmentMatrix.runtime_floors["MACOS_DEPLOYMENT_TARGET"]``, or
+    ``None`` if *name* carries no recognizable ``macosx_*`` tag.
+    """
+    tag_segment = _wheel_platform_tag_segment(name)
+    best: tuple[int, int] | None = None
+    for m in _MACOSX_TAG_RE.finditer(tag_segment):
+        version = (int(m.group("major")), int(m.group("minor")))
         if best is None or version < best:
             best = version
     return f"{best[0]}.{best[1]}" if best is not None else None

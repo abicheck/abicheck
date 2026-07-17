@@ -315,11 +315,21 @@ def apply_runtime_floor_contract(
     return changes
 
 
+#: Versioned-symbol namespaces a platform-baseline floor can be declared for.
+#: GLIBC is G10's original scope; GLIBCXX (libstdc++) and CXXABI (the C++
+#: Itanium ABI runtime, also shipped by libstdc++) are G27's extension — a
+#: wheel's binaries can pick up a newer C++ runtime floor independently of
+#: their glibc floor (e.g. a newer GCC bundled in the build image), and a
+#: manylinux tag makes no promise about either, so they need their own
+#: independently-declarable ``runtime_floors`` entries.
+_BASELINE_FLOOR_PREFIXES = ("GLIBC", "GLIBCXX", "CXXABI")
+
+
 def check_platform_baseline_floor(
     elf: ElfMetadata, runtime_floors: dict[str, str] | None
 ) -> list[Change]:
-    """Check a binary's own required GLIBC floor against a declared
-    platform-baseline promise (e.g. a manylinux wheel tag) (G10).
+    """Check a binary's own required GLIBC/GLIBCXX/CXXABI floor against a
+    declared platform-baseline promise (e.g. a manylinux wheel tag) (G10, G27).
 
     A manylinux tag (``manylinux_2_27``, …) is a promise about the *maximum*
     glibc symbol version a wheel's binaries may require. Unlike
@@ -331,39 +341,62 @@ def check_platform_baseline_floor(
     shipped under a ``manylinux_2_27`` tag is broken on day one, with no
     old→new delta for a diff to key on. This is the classic "works on my box,
     `GLIBC_2.x not found` on the user's older system" failure going
-    undetected.
+    undetected. The same reasoning applies independently to the C++ runtime
+    floor (``GLIBCXX_*``/``CXXABI_*``, e.g. a binary rebuilt with a newer GCC
+    picking up a newer libstdc++ symbol without the manylinux glibc floor
+    itself moving at all).
 
     *runtime_floors* is the same ``{prefix: "X.Y"}`` mapping consumed by
     :func:`apply_runtime_floor_contract` (ADR-020b ``EnvironmentMatrix`` /
     ``--env-matrix``) — keys are matched case-insensitively (normalized to
     upper), same as that function, since a direct API caller can construct
     ``EnvironmentMatrix(runtime_floors={"glibc": ...})`` bypassing
-    ``from_dict``'s uppercasing. Only the ``GLIBC`` entry is read here; other
-    prefixes have no platform-tag concept yet. Returns ``[]`` when no
-    ``GLIBC`` floor is declared, the floor is malformed, or the binary's own
-    requirement is at or below it.
+    ``from_dict``'s uppercasing. Only the entries in
+    :data:`_BASELINE_FLOOR_PREFIXES` are read here; other prefixes have no
+    platform-tag concept yet. Each declared prefix is checked independently —
+    a binary can violate the GLIBCXX floor while staying within the GLIBC
+    one, and vice versa, each producing its own finding. Returns ``[]`` when
+    none of the recognized prefixes are declared, every declared floor is
+    malformed, or the binary's own requirement is at or below each declared
+    floor.
 
     A binary built with packed relative relocations (``DT_RELR``) implicitly
     requires glibc >= 2.36 to load even when no ``GLIBC_ABI_DT_RELR``-tagged
     symbol version happens to appear in ``versions_required`` — the same
     implied floor :func:`apply_runtime_floor_contract` folds in for the delta
-    case via ``_DT_RELR_GLIBC_FLOOR_TAG``, so it is folded in here too.
+    case via ``_DT_RELR_GLIBC_FLOOR_TAG``, so it is folded in here too. This
+    implied floor is GLIBC-specific and does not apply to the GLIBCXX/CXXABI
+    checks.
     """
     if not runtime_floors:
         return []
-    floor_raw = {k.upper(): v for k, v in runtime_floors.items()}.get("GLIBC")
-    if not floor_raw:
-        return []
+    floors = {k.upper(): v for k, v in runtime_floors.items()}
+    changes: list[Change] = []
+    for prefix in _BASELINE_FLOOR_PREFIXES:
+        floor_raw = floors.get(prefix)
+        if not floor_raw:
+            continue
+        change = _check_baseline_floor_for_prefix(elf, prefix, floor_raw)
+        if change is not None:
+            changes.append(change)
+    return changes
+
+
+def _check_baseline_floor_for_prefix(
+    elf: ElfMetadata, prefix: str, floor_raw: str
+) -> Change | None:
+    """The single-prefix worker behind :func:`check_platform_baseline_floor`."""
     floor_tuple = _parse_dotted_numeric_version(floor_raw)
     if floor_tuple is None:
-        return []
+        return None
     best: tuple[int, ...] = (0,)
     best_tag = ""
     providers: set[str] = set()
     relr_tuple = _parse_abi_version_tag(_DT_RELR_GLIBC_FLOOR_TAG)
+    tag_prefix = f"{prefix}_"
     for lib, tags in (getattr(elf, "versions_required", None) or {}).items():
         for tag in tags:
-            if tag == "GLIBC_ABI_DT_RELR":
+            if prefix == "GLIBC" and tag == "GLIBC_ABI_DT_RELR":
                 # Legacy snapshots predating the has_dt_relr field may still
                 # carry this synthetic verneed marker directly — treat it as
                 # implying the same floor the has_dt_relr fallback below
@@ -374,7 +407,7 @@ def check_platform_baseline_floor(
                 if _version_gt(relr_tuple, floor_tuple):
                     providers.add(lib)
                 continue
-            if not tag.startswith("GLIBC_"):
+            if not tag.startswith(tag_prefix):
                 continue
             parsed = _parse_abi_version_tag(tag)
             if parsed == _UNPARSEABLE_VERSION:
@@ -383,21 +416,85 @@ def check_platform_baseline_floor(
                 best, best_tag = parsed, tag
             if _version_gt(parsed, floor_tuple):
                 providers.add(lib)
-    if getattr(elf, "has_dt_relr", False):
+    if prefix == "GLIBC" and getattr(elf, "has_dt_relr", False):
         if _version_gt(relr_tuple, best):
             best, best_tag = relr_tuple, _DT_RELR_GLIBC_FLOOR_TAG
         if _version_gt(relr_tuple, floor_tuple):
             providers.add(getattr(elf, "soname", "") or "<binary>")
     if best == (0,) or _version_le(best, floor_tuple):
+        return None
+    return make_change(
+        ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED,
+        symbol="<platform-baseline>",
+        name=", ".join(sorted(providers)) or "(no provider evidence captured)",
+        detail=prefix,
+        old=f"{prefix}_{floor_raw}",
+        new=best_tag,
+    )
+
+
+#: Sentinel key: presence in ``runtime_floors`` (any truthy value; the value
+#: itself is not parsed as a version, since musllinux compatibility is a
+#: yes/no claim, not a numeric floor) declares "this artifact is tagged
+#: musllinux-compatible", the same way ``GLIBC``/``GLIBCXX``/``CXXABI``
+#: declare a numeric floor for :func:`check_platform_baseline_floor`.
+_MUSLLINUX_DECLARED_KEY = "MUSLLINUX"
+
+
+def check_musllinux_glibc_dependency(
+    elf: ElfMetadata, runtime_floors: dict[str, str] | None
+) -> list[Change]:
+    """Flag a musllinux-tagged binary that actually requires glibc (G27).
+
+    musllinux wheels (PEP 656) target Alpine's musl libc, which has no
+    symbol-versioning scheme at all — unlike a manylinux glibc floor, there
+    is no numeric ceiling to check: *any* ``GLIBC_*``/``GLIBCXX_*``/
+    ``CXXABI_*`` version requirement (or an implied ``DT_RELR`` floor) means
+    the binary was linked against glibc's C/C++ runtime and will fail to
+    even resolve its dependencies on a musl system — "error loading shared
+    library: No such file or directory" for the missing glibc-flavoured
+    ``.so``, not merely a symbol-version mismatch. This is entirely new
+    coverage: :func:`check_platform_baseline_floor` only asks "is the
+    required version too high for the declared floor," which is meaningless
+    for musl (there is no glibc version to be "too high" relative to — the
+    dependency itself doesn't exist there).
+
+    Declared via ``runtime_floors["MUSLLINUX"]`` (any truthy value, e.g. the
+    musllinux tag's own ``"1.2"`` version string — only presence is
+    checked). Returns ``[]`` when musllinux compatibility isn't declared, or
+    when the binary carries no glibc-flavoured version requirement at all.
+    """
+    if not runtime_floors:
+        return []
+    floors = {k.upper(): v for k, v in runtime_floors.items()}
+    if not floors.get(_MUSLLINUX_DECLARED_KEY):
+        return []
+    offenders: set[str] = set()
+    worst_tag = ""
+    worst_tuple: tuple[int, ...] = (0,)
+    for lib, tags in (getattr(elf, "versions_required", None) or {}).items():
+        for tag in tags:
+            if tag == "GLIBC_ABI_DT_RELR" or any(
+                tag.startswith(f"{p}_") for p in _BASELINE_FLOOR_PREFIXES
+            ):
+                offenders.add(lib)
+                parsed = _parse_abi_version_tag(tag)
+                if parsed != _UNPARSEABLE_VERSION and _version_gt(parsed, worst_tuple):
+                    worst_tuple, worst_tag = parsed, tag
+    if getattr(elf, "has_dt_relr", False):
+        offenders.add(getattr(elf, "soname", "") or "<binary>")
+        if _version_gt(_parse_abi_version_tag(_DT_RELR_GLIBC_FLOOR_TAG), worst_tuple):
+            worst_tag = _DT_RELR_GLIBC_FLOOR_TAG
+    if not offenders:
         return []
     return [
         make_change(
-            ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED,
+            ChangeKind.MUSLLINUX_GLIBC_DEPENDENCY_DETECTED,
             symbol="<platform-baseline>",
-            name=", ".join(sorted(providers)) or "(no provider evidence captured)",
-            detail="GLIBC",
-            old=f"GLIBC_{floor_raw}",
-            new=best_tag,
+            name=", ".join(sorted(offenders)),
+            detail="musllinux",
+            old="musllinux (no glibc symbol-versioning namespace)",
+            new=worst_tag or "glibc-versioned dependency",
         )
     ]
 
