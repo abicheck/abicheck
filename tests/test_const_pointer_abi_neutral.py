@@ -392,6 +392,8 @@ def test_callback_by_value_cv_qualifier_is_neutralised(old_t, new_t):
     ("void (*)(int*)", "void (*)(const int*)"),
     ("void (*)(void (*)(int*))", "void (*)(void (*)(const int*))"),
     ("void (*)(int*, int*)", "void (*)(int*, const int*)"),
+    ("void (*)(int[3])", "void (*)(const int[3])"),
+    ("void (*)(int[3], int)", "void (*)(const int[3], int)"),
 ])
 def test_callback_pointee_cv_qualifier_is_not_neutralised(old_t, new_t):
     """Negative control (Codex review, PR #589): a callback parameter's
@@ -402,8 +404,13 @@ def test_callback_pointee_cv_qualifier_is_not_neutralised(old_t, new_t):
     a callback supplied by the caller with one pointee-cv signature can't be
     passed where the other is expected) — only the callback's own by-value/
     pointer-value cv is neutral, not its pointee's, at any nesting depth or
-    parameter position. An earlier version of the fix above stripped cv
-    indiscriminately inside any paren, wrongly neutralizing this case too."""
+    parameter position. An array-typed parameter decays to a pointer too
+    (``void(*)(int[3])`` and ``void(*)(const int[3])`` are confirmed by real
+    mangling to be equally non-interchangeable, Codex review round 2) — the
+    ``[...]`` handling must treat it the same as a real pointer sigil rather
+    than as an opaque, ptr-blind skip. An earlier version of the fix above
+    stripped cv indiscriminately inside any paren, wrongly neutralizing this
+    case too."""
     assert func_signature_cv_only_differ(old_t, new_t) is False
 
 

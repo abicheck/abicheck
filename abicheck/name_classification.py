@@ -436,7 +436,21 @@ def _strip_cv_in_segment(name: str, chars: list[str], start: int, end: int, *, s
     i = start
     while i < end:
         ch = name[i]
-        if ch in "<[":
+        if ch == "<":
+            j = min(_find_matching_close(name, i), end - 1)
+            i = j + 1
+            continue
+        if ch == "[":
+            # An array-typed function PARAMETER decays to a pointer, so a cv
+            # qualifier before it is pointee-position, not by-value — same
+            # non-strippable treatment as a real pointer sigil (confirmed
+            # against real clang/gcc mangling: void(*)(int[3]) and
+            # void(*)(const int[3]) are different, non-interchangeable
+            # function pointer types, same as the int*/const int* case
+            # above). Only matters in strict mode; harmless otherwise since
+            # non-strict stripping ignores last_ptr_pos entirely (Codex
+            # review, PR #589).
+            last_ptr_pos = i
             j = min(_find_matching_close(name, i), end - 1)
             i = j + 1
             continue

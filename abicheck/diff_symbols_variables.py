@@ -28,6 +28,7 @@ from .checker_policy import ChangeKind
 from .checker_types import Change
 from .diff_helpers import make_change
 from .model import Variable
+from .name_classification import _find_matching_close
 
 
 def _check_variable_alignment(
@@ -80,15 +81,16 @@ def _has_top_level_pointer_or_ref(canonical_type: str) -> bool:
     return False
 
 
-def _last_top_level_sigil_pos(canonical_type: str) -> int | None:
-    """Index of the last ``*``/``&`` outside any ``<...>`` bracket, or None.
-
-    Same "top-level" definition as ``_has_top_level_pointer_or_ref``, just
-    reporting the position instead of a boolean.
+def _last_sigil_in_range(canonical_type: str, start: int, end: int) -> int | None:
+    """Index of the last ``*``/``&`` in ``canonical_type[start:end]`` outside
+    any ``<...>`` bracket, or None. Same "top-level" definition as
+    ``_has_top_level_pointer_or_ref``, just reporting a position within a
+    sub-range instead of a whole-string boolean.
     """
     depth = 0
     pos = None
-    for i, ch in enumerate(canonical_type):
+    for i in range(start, end):
+        ch = canonical_type[i]
         if ch == "<":
             depth += 1
         elif ch == ">":
@@ -96,6 +98,47 @@ def _last_top_level_sigil_pos(canonical_type: str) -> int | None:
         elif ch in "*&" and depth == 0:
             pos = i
     return pos
+
+
+def _first_top_level_paren_span(canonical_type: str) -> tuple[int, int] | None:
+    """``(open_idx, close_idx)`` of the first top-level (non-``<...>``-
+    nested) ``(...)`` group, or None if there is none."""
+    depth = 0
+    for i, ch in enumerate(canonical_type):
+        if ch == "<":
+            depth += 1
+        elif ch == ">":
+            depth = max(0, depth - 1)
+        elif ch == "(" and depth == 0:
+            close = _find_matching_close(canonical_type, i)
+            return i, min(close, len(canonical_type) - 1)
+    return None
+
+
+def _declarator_sigil_pos(canonical_type: str) -> int | None:
+    """Index of the variable's OWN declarator ``*``/``&``, as opposed to one
+    belonging to a parameter or array size nested further in the spelling.
+
+    A function-/array-pointer variable's canonical spelling is always
+    ``BaseType ( *quals)(...)``/``BaseType ( *quals)[...]`` — the FIRST
+    top-level ``(...)`` group is structurally this declarator (the actual
+    parameter list or array dimensions, if present, always comes after it).
+    Searching the whole string for the LAST top-level sigil instead (as an
+    earlier version of this function did) picks up a parameter's own
+    pointer sigil for a callback/function-pointer parameter (``"void (
+    *const)(int *)"`` — the last ``*`` is the parameter's, not the outer
+    declarator's), so its trailing ``const`` never gets recognized as the
+    variable's own (Codex review, PR #589). Falls back to the whole
+    string's last top-level sigil for a bare pointer with no parens at all
+    (``"int * const"``).
+    """
+    span = _first_top_level_paren_span(canonical_type)
+    if span is not None:
+        open_idx, close_idx = span
+        pos = _last_sigil_in_range(canonical_type, open_idx + 1, close_idx)
+        if pos is not None:
+            return pos
+    return _last_sigil_in_range(canonical_type, 0, len(canonical_type))
 
 
 def _strip_trailing_declarator_const(canonical_type: str) -> str:
@@ -112,7 +155,7 @@ def _strip_trailing_declarator_const(canonical_type: str) -> str:
     something that isn't actually this declarator's own qualifier
     (CodeRabbit review, PR #589).
     """
-    pos = _last_top_level_sigil_pos(canonical_type)
+    pos = _declarator_sigil_pos(canonical_type)
     if pos is not None:
         span_end = len(canonical_type)
         for k in range(pos + 1, len(canonical_type)):

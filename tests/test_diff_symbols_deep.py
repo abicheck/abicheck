@@ -628,6 +628,20 @@ class TestVarConstChanged:
         assert ChangeKind.VAR_TYPE_CHANGED in _kinds(r)
         assert ChangeKind.VAR_BECAME_CONST not in _kinds(r)
 
+    def test_function_pointer_with_pointer_param_own_const_is_var_became_const(self):
+        """`void (*)(int *)` -> `void (* const)(int *)` (Codex review, PR
+        #589): the OUTER declarator's own sigil must be found even when a
+        PARAMETER is itself a pointer — the last top-level `*` in the whole
+        string belongs to the parameter (`int *`), not the outer `(*
+        const)` declarator, so picking "the last one" alone misses the
+        variable's own trailing const. Must report VAR_BECAME_CONST, not
+        VAR_TYPE_CHANGED."""
+        v_v1 = _pub_var("fp", "_Z2fp", "void (*)(int *)", is_const=False)
+        v_v2 = _pub_var("fp", "_Z2fp", "void (* const)(int *)", is_const=True)
+        r = compare(_snap(variables=[v_v1]), _snap(variables=[v_v2]))
+        assert ChangeKind.VAR_BECAME_CONST in _kinds(r)
+        assert ChangeKind.VAR_TYPE_CHANGED not in _kinds(r)
+
 
 # ── legacy CastXML volatile-variable noise (Codex review, PR #582) ──────────
 
