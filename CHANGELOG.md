@@ -171,6 +171,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   architectures' glibc loaders entirely, silently passing a musllinux
   claim on a binary whose PT_INTERP still names a glibc dynamic linker
   (Codex review).
+  The `armv7l` check now also requires the explicit hard-float e_flags bit
+  itself, not just absence of an explicit soft-float marker — once
+  `abi_flags` is non-empty at all (decode ran), a set naming `eabi5` but
+  no `"float-hard"` token (e.g. neither float-ABI bit set) previously
+  still passed, even though manylinux's armhf contract requires that bit
+  specifically (Codex review, three rounds).
   Windows UCRT/runtime checks, CPU-ISA-baseline detection, the full
   per-tag closure policy, and end-to-end CLI auto-derivation from a
   compared wheel's own filename tag (every check above, including G10's

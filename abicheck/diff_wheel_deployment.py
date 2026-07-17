@@ -280,12 +280,15 @@ def check_wheel_tag_architecture_mismatch(
     value in :data:`_ARCH_CLAIM_TO_ELF_CLASS` (Codex review #583).
 
     An ``armv7l`` claim additionally requires the hard-float armhf ABI —
-    EABI version 5 *and* hard-float (``abi_flags`` carrying ``"float-soft"``,
-    or an ``"eabiN"`` token where N != 5, is flagged) — manylinux's
-    ``armv7l`` tag specifically means armhf, and a soft-float or
-    older-EABI binary shares the same ``e_machine``/``EI_DATA`` but is not
-    actually loadable under that tag's runtime expectations (Codex review
-    #583, two rounds).
+    EABI version 5 *and* the explicit hard-float e_flags bit. Once
+    ``abi_flags`` is non-empty at all, a missing ``"float-hard"`` token
+    (soft-float, or neither float-ABI bit set) or an ``"eabiN"`` token
+    where N != 5 is flagged — manylinux's ``armv7l`` tag specifically means
+    armhf, and any of those binaries shares the same ``e_machine``/
+    ``EI_DATA`` but is not actually loadable under that tag's runtime
+    expectations. A fully empty ``abi_flags`` (no decode ran — a legacy/
+    undecoded snapshot) still degrades safely rather than false-positiving
+    on missing evidence (Codex review #583, three rounds).
     """
     if not runtime_floors:
         return []
@@ -350,23 +353,31 @@ def check_wheel_tag_architecture_mismatch(
                 # manylinux's armv7l tag specifically means the hard-float
                 # armhf ABI: EABI version 5 AND EF_ARM_ABI_FLOAT_HARD
                 # (packaging._manylinux._is_linux_armhf) — a soft-float
-                # binary or a hard-float binary built against an older EABI
-                # (e.g. eabi4) shares the same e_machine/EI_DATA but cannot
+                # binary, a binary with neither float-ABI e_flags bit set,
+                # or a hard-float binary built against an older EABI (e.g.
+                # eabi4) all share the same e_machine/EI_DATA but cannot
                 # satisfy an armv7l-tagged wheel's runtime expectations.
-                # Only flags on definite contradicting evidence (an actual
-                # "float-soft" token, or an "eabiN" token naming a version
-                # other than 5); an absent float/EABI token isn't itself
-                # proof of a violation, so this degrades safely rather than
-                # false-positiving on incomplete/undecoded evidence (Codex
-                # review #583, two rounds).
+                # _decode_abi_flags always evaluates both float e_flags bits
+                # for EM_ARM, so once abi_flags is non-empty at all (decode
+                # actually ran), a missing "float-hard" token is definitive
+                # contradicting evidence, not merely an absence of
+                # confirming evidence — only a fully empty abi_flags (no
+                # decode ran at all, e.g. a legacy/undecoded snapshot)
+                # degrades safely and skips the check entirely (Codex
+                # review #583, three rounds).
                 abi_flags: frozenset[str] = getattr(elf, "abi_flags", frozenset())
                 violation: str | None = None
-                if "float-soft" in abi_flags:
-                    violation = "soft-float"
-                else:
-                    eabi_tokens = sorted(t for t in abi_flags if t.startswith("eabi"))
-                    if eabi_tokens and "eabi5" not in eabi_tokens:
-                        violation = eabi_tokens[0]
+                if abi_flags:
+                    if "float-hard" in abi_flags:
+                        eabi_tokens = sorted(
+                            t for t in abi_flags if t.startswith("eabi")
+                        )
+                        if eabi_tokens and "eabi5" not in eabi_tokens:
+                            violation = eabi_tokens[0]
+                    elif "float-soft" in abi_flags:
+                        violation = "soft-float"
+                    else:
+                        violation = "no hard-float ABI marker"
                 if violation is not None:
                     return [
                         make_change(

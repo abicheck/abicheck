@@ -437,6 +437,25 @@ class TestWheelTagArchitectureMismatchUnit:
         assert len(changes) == 1
         assert "eabi4" in changes[0].new_value
 
+    def test_armv7l_claim_with_eabi5_but_no_hard_float_marker_flagged(self) -> None:
+        # Codex review #583, follow-up: manylinux's armhf contract requires
+        # the explicit EF_ARM_ABI_FLOAT_HARD e_flags bit, not merely EABI5
+        # — _decode_abi_flags always evaluates both float bits for EM_ARM,
+        # so a non-empty abi_flags set naming eabi5 but no "float-hard"
+        # token means the real e_flags genuinely lacks that bit.
+        elf = _elf(
+            machine="EM_ARM",
+            ei_data="LSB",
+            elf_class=32,
+            abi_flags=frozenset({"eabi5"}),
+            soname="libfoo.so.1",
+        )
+        changes = check_wheel_tag_architecture_mismatch(
+            elf, None, {"WHEEL_ARCH": "armv7l"}
+        )
+        assert len(changes) == 1
+        assert "hard-float" in changes[0].new_value
+
     def test_armv7l_claim_with_no_abi_flags_degrades_safely(self) -> None:
         # A legacy/undecoded snapshot without abi_flags captured must not
         # false-positive purely from having no evidence to compare.
