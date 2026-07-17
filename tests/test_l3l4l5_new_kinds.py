@@ -277,6 +277,47 @@ def test_l4_removed_export_backed_body_is_not_an_inline_removal() -> None:
     )
 
 
+def test_l4_c_function_signature_change_is_not_a_removal() -> None:
+    # case186 regression: C has no name mangling, so mangled_name is always
+    # empty for a plain C function. Without a plain-name fallback, ANY
+    # signature-only change (even a cv-qualifier-only const addition) read as
+    # a genuine removal even though the function is still exported under its
+    # own unmangled name on both sides.
+    old = _surf(
+        reachable_inline_bodies=[_ent("inline", "send_buffer", body_hash="h1")],
+        reachable_declarations=[_keeper()],
+        roots={"exported_symbols": ["send_buffer"]},
+    )
+    new = _surf(
+        reachable_declarations=[_keeper()],
+        roots={"exported_symbols": ["send_buffer"]},
+    )
+    assert ChangeKind.INLINE_FUNCTION_REMOVED.value not in _kinds(
+        diff_source_abi(old, new)
+    )
+
+
+def test_l4_scoped_cxx_name_without_mangled_name_still_reports_removal() -> None:
+    # Guards the case186 fix from over-suppressing: a "::"-scoped C++ name is
+    # never itself the real (mangled) export symbol, so an entity missing its
+    # mangled_name (e.g. an extraction gap) must NOT fall back to matching
+    # its bare qualified_name against exported_symbols -- that could mask a
+    # genuine removal (ADR-028 D3: L3-L5 evidence must never silently delete
+    # an artifact-provable break).
+    old = _surf(
+        reachable_inline_bodies=[_ent("inline", "Widget::helper", body_hash="h1")],
+        reachable_declarations=[_keeper()],
+        roots={"exported_symbols": ["Widget::helper"]},
+    )
+    new = _surf(
+        reachable_declarations=[_keeper()],
+        roots={"exported_symbols": ["Widget::helper"]},
+    )
+    assert ChangeKind.INLINE_FUNCTION_REMOVED.value in _kinds(
+        diff_source_abi(old, new)
+    )
+
+
 def test_l4_inline_to_out_of_line_is_not_a_removal() -> None:
     # A header inline turned into an out-of-line exported function leaves the
     # inline bucket but stays a callable declaration — not a source break.

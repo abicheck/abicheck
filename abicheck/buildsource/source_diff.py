@@ -720,6 +720,26 @@ def _diff_declarations(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Cha
 # -- inline bodies -----------------------------------------------------------
 
 
+def _export_identity(entity: SourceEntity) -> str:
+    """The identifier this entity would appear under in ``exported_symbols``.
+
+    Prefer the mangled name — present for anything actually name-mangled. C
+    has no mangling, so a plain C function's ``mangled_name`` is always
+    empty; without a fallback its export identity is unrecoverable and a
+    signature-only change (e.g. a parameter gaining ``const``, case186) reads
+    as a genuine removal even though the plain, unmangled name still exports
+    unchanged. Guarded to *unscoped* names only: a ``"::"``-qualified C++
+    name is never itself the real (mangled) export symbol, so falling back
+    to it there would risk masking an actual removal instead (ADR-028 D3 —
+    L3-L5 evidence must never silently delete an artifact-provable break).
+    """
+    if entity.mangled_name:
+        return entity.mangled_name
+    if "::" not in entity.qualified_name:
+        return entity.qualified_name
+    return ""
+
+
 def _diff_inline_bodies(
     old: SourceAbiSurface, new: SourceAbiSurface, compat: FactCompatibility
 ) -> list[Change]:
@@ -779,9 +799,10 @@ def _diff_inline_bodies(
     )
     for key in inline_removals:
         ov = old_i[key]
-        if key in new_decl_ids or (ov.mangled_name and ov.mangled_name in new_exports):
+        export_id = _export_identity(ov)
+        if key in new_decl_ids or (export_id and export_id in new_exports):
             continue
-        if ov.mangled_name and ov.mangled_name in old_exports:
+        if export_id and export_id in old_exports:
             continue
         name = ov.qualified_name
         changes.append(
