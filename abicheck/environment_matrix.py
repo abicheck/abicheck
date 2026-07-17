@@ -166,11 +166,13 @@ _NON_NUMERIC_RUNTIME_FLOOR_KEYS = frozenset(
 
 #: Presence-flag keys (MUSLLINUX, WHEEL_CONTEXT — unlike WHEEL_ARCH, which
 #: expects an actual architecture string, not a yes/no flag) where a YAML
-#: boolean is meaningful and must be honored as one, not silently
-#: stringified: ``str(False)`` is the non-empty string ``"False"``, which
-#: the downstream checks' plain ``floors.get(...)`` truthiness test reads as
-#: *enabled* — the exact opposite of a user writing
-#: ``runtime_floors: {WHEEL_CONTEXT: false}`` to explicitly disable it
+#: boolean or blank value is meaningful and must be honored as "disabled",
+#: not silently stringified: ``str(False)`` is the non-empty string
+#: ``"False"`` and ``str(None)`` is ``"None"`` — a blank YAML entry
+#: (``WHEEL_CONTEXT:`` with no value, which PyYAML loads as ``None``) or an
+#: explicit ``false`` both parse to a truthy string, which the downstream
+#: checks' plain ``floors.get(...)`` truthiness test reads as *enabled* —
+#: the exact opposite of what a blank or explicitly-disabled entry means
 #: (Codex review #583).
 _PRESENCE_FLAG_RUNTIME_FLOOR_KEYS = frozenset({"MUSLLINUX", "WHEEL_CONTEXT"})
 
@@ -185,12 +187,13 @@ def _parse_runtime_floors(floors_raw: object) -> dict[str, str]:
     runtime_floors: dict[str, str] = {}
     for key, value in floors_raw.items():
         key_upper = str(key).upper()
-        if key_upper in _PRESENCE_FLAG_RUNTIME_FLOOR_KEYS and isinstance(
-            value, bool
+        if key_upper in _PRESENCE_FLAG_RUNTIME_FLOOR_KEYS and (
+            isinstance(value, bool) or value is None
         ):
-            # False means "explicitly disabled" — omit the key entirely so
-            # downstream `floors.get(...)` truthiness checks see it as not
-            # declared, rather than storing the truthy string "False".
+            # False/blank (None) both mean "not enabled" — omit the key
+            # entirely so downstream `floors.get(...)` truthiness checks see
+            # it as not declared, rather than storing the truthy string
+            # "False"/"None".
             if value:
                 runtime_floors[key_upper] = "1"
             continue

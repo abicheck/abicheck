@@ -892,6 +892,30 @@ class TestEnvironmentMatrixRuntimeFloors:
         m = EnvironmentMatrix.from_dict({"runtime_floors": {"MUSLLINUX": True}})
         assert m.runtime_floors.get("MUSLLINUX")
 
+    def test_wheel_context_blank_value_disables_not_stringified(self) -> None:
+        # Codex review #583, follow-up: a blank YAML entry (`WHEEL_CONTEXT:`
+        # with no value) loads as None. str(None) == "None", a non-empty
+        # string the downstream truthiness check would read as *enabled* —
+        # a blank entry must not silently turn a check on.
+        m = EnvironmentMatrix.from_dict({"runtime_floors": {"WHEEL_CONTEXT": None}})
+        assert m.runtime_floors == {}
+
+    def test_musllinux_blank_value_disables_not_stringified(self) -> None:
+        m = EnvironmentMatrix.from_dict({"runtime_floors": {"MUSLLINUX": None}})
+        assert m.runtime_floors == {}
+
+    def test_wheel_context_blank_value_end_to_end_does_not_enable_check(
+        self,
+    ) -> None:
+        import yaml
+
+        old = _snap(_elf(rpath="/usr/local/lib"))
+        new = _snap(_elf(rpath="/usr/local/lib"))
+        data = yaml.safe_load("runtime_floors:\n  WHEEL_CONTEXT:\n  GLIBC: \"2.28\"\n")
+        matrix = EnvironmentMatrix.from_dict(data)
+        result = compare(old, new, env_matrix=matrix)
+        assert ChangeKind.WHEEL_RPATH_NOT_PORTABLE not in _kinds(result.changes)
+
     def test_wheel_context_false_end_to_end_does_not_enable_check(self) -> None:
         old = _snap(_elf(rpath="/usr/local/lib"))
         new = _snap(_elf(rpath="/usr/local/lib"))
