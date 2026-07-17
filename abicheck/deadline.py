@@ -100,11 +100,40 @@ def deadline_scope(seconds: float | None) -> Iterator[None]:
     Any subprocess call reached while this scope is active — however deep the
     call stack — can read the shrinking deadline via :func:`bounded_timeout`
     without the caller threading a parameter through every function in
-    between (``contextvars`` cross thread-pool boundaries only when the pool
-    explicitly copies the context; the current callers are all synchronous,
-    single-threaded call chains, so that limitation does not apply here).
+    between, *as long as the call stays on the same OS thread*.
+    ``contextvars`` do **not** cross a ``ThreadPoolExecutor``/
+    ``ProcessPoolExecutor`` boundary — a worker submitted from inside this
+    scope starts with a fresh, empty context and sees no active deadline. A
+    caller that dispatches work to such a pool must capture
+    :func:`current_deadline_ts` beforehand and re-enter it inside each worker
+    via :func:`with_deadline_ts` (see ``buildsource/source_replay.py``'s
+    ``_deadline_bound_worker`` for the pattern).
     """
     deadline_ts = time.monotonic() + seconds if seconds is not None else None
+    with with_deadline_ts(deadline_ts):
+        yield
+
+
+def current_deadline_ts() -> float | None:
+    """The active deadline as an absolute ``time.monotonic()`` timestamp, or ``None``.
+
+    Unlike :func:`remaining`, this value is stable to capture once (e.g. just
+    before dispatching work to a ``ThreadPoolExecutor``/``ProcessPoolExecutor``,
+    whose workers don't inherit the calling thread's ``ContextVar`` state) and
+    pass explicitly into a worker, which re-establishes it with
+    :func:`with_deadline_ts`.
+    """
+    return _deadline.get()
+
+
+@contextmanager
+def with_deadline_ts(deadline_ts: float | None) -> Iterator[None]:
+    """Like :func:`deadline_scope`, but takes an absolute timestamp already
+    captured via :func:`current_deadline_ts` rather than a duration from now.
+
+    Use this inside a pool worker to re-establish a deadline captured on the
+    submitting thread — see :func:`deadline_scope` for why that's necessary.
+    """
     token = _deadline.set(deadline_ts)
     try:
         yield

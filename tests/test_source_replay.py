@@ -25,6 +25,7 @@ from pathlib import Path
 
 import pytest
 
+from abicheck import deadline
 from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit, Target
 from abicheck.buildsource.source_abi import SourceAbiTu, SourceEntity, SourceLocation
 from abicheck.buildsource.source_extractors.base import SourceExtractionError
@@ -32,6 +33,7 @@ from abicheck.buildsource.source_replay import (
     CI_MODE_TO_SCOPE,
     REPLAY_SCOPES,
     SourceAbiCache,
+    _extract_cache_misses,
     compute_tu_cache_key,
     public_header_roots_for,
     run_source_replay,
@@ -42,6 +44,15 @@ from abicheck.buildsource.source_replay import (
 
 def _cu(cu_id: str, source: str, target_id: str = "", **kw: object) -> CompileUnit:
     return CompileUnit(id=cu_id, source=source, target_id=target_id, language="CXX", **kw)  # type: ignore[arg-type]
+
+
+_seen_remaining: list[float | None] = []
+
+
+def _worker_records_remaining_deadline(cu: CompileUnit) -> tuple[None, None]:
+    """Module-level so it stays picklable if run under a process pool."""
+    _seen_remaining.append(deadline.remaining())
+    return None, None
 
 
 def _build() -> BuildEvidence:
@@ -912,3 +923,22 @@ def test_parallel_l4_is_deterministic(monkeypatch):
     ids_serial = [e.id for e in s_serial.reachable_declarations]
     ids_par = [e.id for e in s_par.reachable_declarations]
     assert ids_serial == ids_par                  # same linked surface, same order
+
+
+def test_extract_cache_misses_propagates_deadline_into_pool_workers() -> None:
+    """Codex review (PR #591): contextvars don't cross a ThreadPoolExecutor
+    boundary, so a worker submitted from inside deadline.deadline_scope() used
+    to see no active deadline at all and silently fall back to the extractor's
+    fixed default timeout regardless of --budget. _extract_cache_misses must
+    capture the deadline before dispatching and re-establish it in each
+    worker."""
+    _seen_remaining.clear()
+    units = [_cu(f"cu://u{i}", f"src/u{i}.cpp") for i in range(4)]
+    with deadline.deadline_scope(30.0):
+        _extract_cache_misses(_worker_records_remaining_deadline, units, jobs=4)
+    assert len(_seen_remaining) == 4
+    assert all(r is not None for r in _seen_remaining), (
+        "pool worker saw no active deadline (remaining()=None) — the scan "
+        "deadline did not cross the executor boundary"
+    )
+    assert all(0 < r <= 30.0 for r in _seen_remaining)
