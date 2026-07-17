@@ -365,6 +365,57 @@ class TestRunDump:
         assert result is snap
 
 
+class TestRunDumpHybridNormalization:
+    """G28 Phase 3 (Codex review): eff_backend == "hybrid" was a raw string
+    comparison, so an indirectly-selected hybrid request (case-insensitive
+    value, or the documented ABICHECK_AST_FRONTEND=hybrid pin with auto)
+    fell through to the single-backend path instead of triggering the merge
+    recursion -- fixed by resolving through dumper._resolve_header_backend.
+    """
+
+    def _fake_dump_elf(self, castxml_snap, clang_snap):
+        def _fake(*args, **kwargs):
+            compile_ctx = kwargs.get("compile")
+            if compile_ctx is not None and compile_ctx.frontend == "clang":
+                return clang_snap
+            return castxml_snap
+
+        return _fake
+
+    def test_case_insensitive_header_backend_triggers_hybrid(self, tmp_path):
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        castxml_snap = AbiSnapshot(
+            library="test", version="1.0", from_headers=True, ast_producer="castxml"
+        )
+        clang_snap = AbiSnapshot(
+            library="test", version="1.0", from_headers=True, ast_producer="clang"
+        )
+        with patch(
+            "abicheck.service._dump_elf",
+            side_effect=self._fake_dump_elf(castxml_snap, clang_snap),
+        ):
+            result = run_dump(p, "elf", header_backend="HYBRID")
+        assert result.ast_producer == "hybrid"
+
+    def test_env_var_pin_with_auto_triggers_hybrid(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("ABICHECK_AST_FRONTEND", "hybrid")
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        castxml_snap = AbiSnapshot(
+            library="test", version="1.0", from_headers=True, ast_producer="castxml"
+        )
+        clang_snap = AbiSnapshot(
+            library="test", version="1.0", from_headers=True, ast_producer="clang"
+        )
+        with patch(
+            "abicheck.service._dump_elf",
+            side_effect=self._fake_dump_elf(castxml_snap, clang_snap),
+        ):
+            result = run_dump(p, "elf")  # header_backend defaults to "auto"
+        assert result.ast_producer == "hybrid"
+
+
 # ── _implicit_header_includes() (P3: -H umbrella resolves without -I) ────────
 
 

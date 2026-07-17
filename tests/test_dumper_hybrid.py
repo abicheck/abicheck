@@ -52,6 +52,29 @@ class TestMergeSnapshotsBasics:
         )
         assert merged.ast_producer == "hybrid"
 
+    def test_no_headers_returns_castxml_snap_unchanged(self):
+        # Codex review: neither backend parsed headers (no headers supplied,
+        # or dwarf_only/symbols_only) -- must NOT be falsely upgraded to
+        # confirmed header-aware "hybrid" provenance, or a header-tier
+        # detector (param defaults, constants, param renames) misreads a
+        # real header-aware comparison side as having lost data.
+        castxml = _snap(ast_producer=None, from_headers=False)
+        clang = _snap(ast_producer=None, from_headers=False)
+        merged = merge_snapshots(castxml, clang)
+        assert merged is castxml
+        assert merged.from_headers is False
+        assert merged.ast_producer is None
+
+    def test_from_headers_inferred_preserved_when_true(self):
+        castxml = _snap(
+            ast_producer="castxml", from_headers=True, from_headers_inferred=True
+        )
+        clang = _snap(ast_producer="clang", from_headers=True)
+        merged = merge_snapshots(castxml, clang)
+        # from_headers=True here, so the merge proceeds; from_headers_inferred
+        # must come through from castxml_snap unchanged, not be forced False.
+        assert merged.from_headers_inferred is True
+
     def test_layout_facts_come_from_castxml_unchanged(self):
         t = RecordType(name="Foo", kind="struct", size_bits=64, alignment_bits=32)
         castxml = _snap(types=[t], ast_producer="castxml")

@@ -284,7 +284,19 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
     actually reconciled/backfilled. The result's ``ast_producer`` is
     ``"hybrid"`` and its ``fact_provenance`` records, per declaration, which
     backend's value was used for each of those facts.
+
+    If *castxml_snap* itself never got confirmed header-AST evidence (no
+    headers were supplied, or the dump ran ``dwarf_only``/``symbols_only``),
+    both recursive sub-dumps are DWARF/symbols-only snapshots with nothing
+    header-derived to merge — returns *castxml_snap* unchanged rather than
+    falsely upgrading it to ``ast_producer="hybrid"``/confirmed
+    header-aware provenance, which would make header-tier detectors (param
+    defaults, constants, param renames) misread a real header-aware snapshot
+    compared against this one as having lost data (Codex review).
     """
+    if not castxml_snap.from_headers:
+        return castxml_snap
+
     provenance: dict[str, str] = {}
 
     clang_types_by_name = {t.name: t for t in clang_snap.types}
@@ -326,8 +338,9 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
         enums=merged_enums,
         ast_producer="hybrid",
         fact_provenance=provenance,
-        from_headers=True,
-        from_headers_inferred=False,
+        # from_headers/from_headers_inferred are inherited from castxml_snap
+        # as-is via replace() (both already True/False here — the early
+        # return above handles the case where they aren't).
         # Invalidate the lazy lookup caches (dataclasses.replace() otherwise
         # carries the OLD castxml-only indexes forward unchanged, since these
         # are ordinary fields with defaults, not something replace() knows to

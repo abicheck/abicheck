@@ -507,7 +507,9 @@ def run_dump(
         else header_backend
     )
 
-    if eff_backend == "hybrid":
+    from .dumper import _resolve_header_backend
+
+    if _resolve_header_backend(eff_backend) == "hybrid":
         # G28 Phase 3: this is the real Tier-2 entry point the CLI routes
         # through (unlike dumper.dump(), which has its own, simpler hybrid
         # recursion for direct Python-API callers) — recurse into run_dump()
