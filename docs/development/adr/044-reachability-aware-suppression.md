@@ -282,6 +282,22 @@ since JSON/SARIF/JUnit reporters already round-trip `Change` via
   dependency evidence — the L5 call-graph / consumer-import work already on
   the P1/P2 roadmap below — not a heuristic on the symbol's own spelling.
 
+- **Skip the walk for narrow-only suppression files too, not just no
+  suppression at all (Codex).** The `ctx.suppression is None` skip above
+  only covers the *no suppression configured* case — but a suppression file
+  containing only narrow rules (`symbol`/`symbol_pattern`/`type_pattern`,
+  the common case: a handful of exact waivers) with the default (or
+  explicit `"any"`) `reachability` is *also* provably indifferent to the
+  tag: both `_passes_reachability_gate` (short-circuits on
+  `resolved == "any"`) and `_passes_public_break_gate` (short-circuits on
+  `not self._is_broad_selector`) return without ever reading
+  `Change.public_reachable` for such a rule. Running the public-surface
+  walk for that file is exactly the same waste the `ctx.suppression is
+  None` fix targets. Added `SuppressionList.needs_reachability_evidence()`
+  — true iff at least one rule is broad or has an explicit non-`"any"`
+  `reachability` — and gated `MarkReachability` on it alongside the
+  existing `None` check.
+
 ### D2. `Suppression` gains a reachability guard
 
 New `Suppression` fields:

@@ -106,13 +106,23 @@ def _unreachable_scenario():
     return old, new, raw_change
 
 
+def _needs_evidence_suppression() -> SuppressionList:
+    """A minimal suppression whose one rule is broad, so
+    SuppressionList.needs_reachability_evidence() is True and
+    MarkReachability actually runs its walk — used by tests that want to
+    observe the tag directly without a specific rule's matching semantics
+    being the point of the test."""
+    return SuppressionList([
+        Suppression(namespace="__never_matches__::*", reason="evidence trigger only")
+    ])
+
+
 class TestMarkReachability:
     def test_tags_reachable_internal_change(self) -> None:
         old, new, raw_change = _reachable_scenario()
-        # MarkReachability is gated on a suppression object being configured
-        # (see test_skips_without_suppression) — an empty rule list is enough
-        # to trigger the tagging so it can be observed directly.
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=SuppressionList([]))
+        ctx = DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
         found = [c for c in ctx.kept if c.kind == ChangeKind.TYPE_SIZE_CHANGED]
         assert len(found) == 1
         assert found[0].public_reachable is True
@@ -123,9 +133,61 @@ class TestMarkReachability:
         old, new, raw_change = _unreachable_scenario()
         # DemoteUnreachableInternalChurn removes truly-unreachable internal
         # churn from ctx.kept — check the tag directly on the object instead.
-        DEFAULT_PIPELINE.run([raw_change], old, new, suppression=SuppressionList([]))
+        DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
         assert raw_change.public_reachable is False
         assert raw_change.reachability_kind is None
+
+    def test_skips_when_suppression_has_only_narrow_rules(self) -> None:
+        """Codex review: a suppression file containing only narrow rules with
+        the default (or explicit "any") reachability can never actually
+        consult Change.public_reachable — both of Suppression's reachability
+        gates short-circuit before reading it. Running the public-surface
+        walk for such a file is pure waste; SuppressionList.
+        needs_reachability_evidence() proves it and MarkReachability must
+        skip. This is the common case: a handful of exact symbol: waivers."""
+        old, new, raw_change = _reachable_scenario()
+        suppression = SuppressionList([
+            Suppression(symbol="something_unrelated", reason="exact waiver"),
+            Suppression(symbol_pattern=".*_unrelated", reason="pattern waiver"),
+            Suppression(
+                symbol="something_else", reachability="any", reason="explicit any, still narrow"
+            ),
+        ])
+        assert suppression.needs_reachability_evidence() is False
+        DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        assert raw_change.public_reachable is False
+        assert raw_change.reachability_kind is None
+
+    def test_runs_when_any_rule_is_broad_even_amongst_narrow_ones(self) -> None:
+        old, new, raw_change = _reachable_scenario()
+        suppression = SuppressionList([
+            Suppression(symbol="something_unrelated", reason="exact waiver"),
+            Suppression(namespace="oneapi::dal::**::detail::**", reason="broad rule"),
+        ])
+        assert suppression.needs_reachability_evidence() is True
+        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        found = [c for c in ctx.kept if c.kind == ChangeKind.TYPE_SIZE_CHANGED]
+        assert len(found) == 1
+        assert found[0].public_reachable is True
+
+    def test_runs_for_narrow_rule_with_explicit_non_any_reachability(self) -> None:
+        old, new, raw_change = _reachable_scenario()
+        suppression = SuppressionList([
+            Suppression(
+                symbol="oneapi::dal::kmeans::detail::descriptor_base",
+                reachability="unreachable-only",
+                reason="narrow but explicitly reachability-gated",
+            )
+        ])
+        assert suppression.needs_reachability_evidence() is True
+        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        found = [c for c in ctx.kept if c.kind == ChangeKind.TYPE_SIZE_CHANGED]
+        assert len(found) == 1
+        assert found[0].public_reachable is True
+        # And the rule correctly declines to suppress a reachable change.
+        assert raw_change not in ctx.suppressed
 
     def test_skips_without_suppression(self) -> None:
         """Perf guard (CI benchmark_scaling.py regression): MarkReachability

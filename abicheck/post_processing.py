@@ -552,13 +552,18 @@ class MarkReachability:
     running it here unconditionally would duplicate the walk
     ``DetectInternalLeaks`` always performs later, roughly doubling that cost
     on every comparison even when nothing will ever read the tag (perf
-    regression caught by ``benchmark_scaling.py``'s CI gate).
+    regression caught by ``benchmark_scaling.py``'s CI gate). Likewise
+    skipped when a suppression *is* configured but every rule in it is
+    narrow with the default (or explicit ``"any"``) reachability (Codex
+    review) — :meth:`SuppressionList.needs_reachability_evidence` proves
+    such a file's rules can never actually consult the tag either, which is
+    the common case (a handful of exact ``symbol:`` waivers).
     """
 
     name = "mark_reachability"
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
-        if ctx.suppression is None:
+        if ctx.suppression is None or not ctx.suppression.needs_reachability_evidence():
             return changes
 
         from .internal_leak import (

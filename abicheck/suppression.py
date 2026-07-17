@@ -656,6 +656,28 @@ class SuppressionList:
         """Return True if any active (non-expired) suppression rule matches the given change."""
         return any(s.matches(change, today=today) for s in self._suppressions)
 
+    def needs_reachability_evidence(self) -> bool:
+        """ADR-044 D1 (Codex review): True if at least one rule could ever
+        actually consult ``Change.public_reachable`` when matching.
+
+        A rule that is narrow (not :attr:`Suppression._is_broad_selector`)
+        with the default (or an explicit ``"any"``) :attr:`reachability
+        <Suppression.reachability>` short-circuits both
+        ``_passes_reachability_gate`` and ``_passes_public_break_gate``
+        without ever reading the tag. A suppression file containing only
+        such rules — the common case, e.g. a handful of exact ``symbol:``
+        waivers — gains nothing from ``MarkReachability``'s public-surface
+        walk; ``compute_leak_paths`` is expensive enough (the exact walk
+        ``DetectInternalLeaks`` already performs) that running it for
+        evidence nothing will ever consult is pure waste on every
+        comparison. False only when *every* rule is provably indifferent to
+        reachability.
+        """
+        return any(
+            s._is_broad_selector or s._resolved_reachability != "any"
+            for s in self._suppressions
+        )
+
     def evaluate(self, change: Change, today: date | None = None) -> SuppressionOutcome:
         """Like :meth:`is_suppressed`, but also reports a withheld match.
 
