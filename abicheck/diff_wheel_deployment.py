@@ -139,10 +139,10 @@ _WHEEL_ARCH_KEY = "WHEEL_ARCH"
 #: Wheel-tag architecture claim (as returned by
 #: ``package.parse_wheel_architecture_claim()``) -> the ELF ``e_machine``
 #: value(s) that satisfy it. ``ppc64``/``ppc64le`` share one ``e_machine``
-#: enum value — the tag distinction is byte order (``EI_DATA``), checked
-#: separately via :data:`_ARCH_CLAIM_TO_ELF_EI_DATA` below, since
-#: ``e_machine`` alone would accept a ``ppc64le``-claimed wheel containing a
-#: big-endian ``ppc64`` binary (Codex review #583).
+#: enum value; every claim's expected byte order is checked separately via
+#: :data:`_ARCH_CLAIM_TO_ELF_EI_DATA` below, since ``e_machine`` alone
+#: proves neither the ppc64/ppc64le distinction nor, e.g., that a claimed
+#: ``x86_64`` binary is actually little-endian (Codex review #583).
 _ARCH_CLAIM_TO_ELF_MACHINE: dict[str, frozenset[str]] = {
     "x86_64": frozenset({"EM_X86_64"}),
     "aarch64": frozenset({"EM_AARCH64"}),
@@ -153,15 +153,25 @@ _ARCH_CLAIM_TO_ELF_MACHINE: dict[str, frozenset[str]] = {
     "s390x": frozenset({"EM_S390"}),
 }
 
-#: For the wheel-tag claims whose ``e_machine`` value is ambiguous between
-#: two architectures (``ppc64``/``ppc64le``, both ``EM_PPC64``), the ELF
-#: ``EI_DATA`` byte order (``"LSB"``/``"MSB"``, :attr:`ElfMetadata.ei_data`)
-#: that claim actually requires. Claims not listed here (e.g. ``x86_64``)
-#: have no byte-order ambiguity — their ``e_machine`` value alone is
-#: unambiguous, so no entry is needed.
+#: Every wheel-tag architecture claim's expected ELF ``EI_DATA`` byte order
+#: (``"LSB"``/``"MSB"``, :attr:`ElfMetadata.ei_data`) — not just the
+#: ``ppc64``/``ppc64le`` pair whose ``e_machine`` values collide.
+#: ``e_machine`` alone doesn't prove endianness for *any* claim: a claimed
+#: ``x86_64`` ELF captured with ``ei_data="MSB"`` is equally impossible (x86
+#: is always little-endian) and would otherwise pass since ``EM_X86_64``
+#: matched, the same false-negative shape as the ppc64 case (Codex review
+#: #583, follow-up). ``aarch64``/``i686``/``armv7l`` (the trailing ``l``
+#: itself denotes little-endian — a big-endian ARM uses a distinct
+#: ``armv7b``-style name) are little-endian; ``s390x`` (IBM Z) is always
+#: big-endian.
 _ARCH_CLAIM_TO_ELF_EI_DATA: dict[str, str] = {
+    "x86_64": "LSB",
+    "aarch64": "LSB",
+    "i686": "LSB",
+    "armv7l": "LSB",
     "ppc64le": "LSB",
     "ppc64": "MSB",
+    "s390x": "MSB",
 }
 
 #: Wheel-tag architecture claim -> the Mach-O ``cpu_type`` value(s) that
@@ -214,12 +224,15 @@ def check_wheel_tag_architecture_mismatch(
     to ``cpu_type`` alone for a legacy snapshot predating that field
     (Codex review #583).
 
-    ``ppc64``/``ppc64le`` share one ``e_machine`` value — a matching
-    ``e_machine`` alone isn't sufficient to confirm the claim, since a
-    ``ppc64le``-tagged wheel containing a big-endian ``ppc64`` binary (or
-    vice versa) would otherwise pass. For these two claims, the ELF
-    ``EI_DATA`` byte order (:attr:`ElfMetadata.ei_data`) is also checked
-    against :data:`_ARCH_CLAIM_TO_ELF_EI_DATA` (Codex review #583).
+    A matching ``e_machine`` alone isn't sufficient to confirm any claim's
+    byte order: ``ppc64``/``ppc64le`` share one ``e_machine`` value, but even
+    an architecture with an unambiguous ``e_machine`` (e.g. ``x86_64``, which
+    is always little-endian) could otherwise pass a claim it doesn't
+    actually satisfy if the captured evidence carries the opposite
+    endianness (a strong signal of a corrupted or misidentified snapshot).
+    The ELF ``EI_DATA`` byte order (:attr:`ElfMetadata.ei_data`) is checked
+    against every claim's expected value in
+    :data:`_ARCH_CLAIM_TO_ELF_EI_DATA` (Codex review #583).
     """
     if not runtime_floors:
         return []

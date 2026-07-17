@@ -276,16 +276,42 @@ class TestWheelTagArchitectureMismatchUnit:
             == []
         )
 
-    def test_x86_64_claim_unaffected_by_ei_data(self) -> None:
-        # x86_64 has no byte-order ambiguity in _ARCH_CLAIM_TO_ELF_MACHINE,
-        # so ei_data must not factor into its check at all.
-        elf = _elf(machine="EM_X86_64", ei_data="MSB")
+    def test_x86_64_claim_with_wrong_endianness_flagged(self) -> None:
+        # Codex review #583, follow-up: e_machine alone doesn't prove
+        # endianness for *any* claim, not just the ppc64 pair — x86_64 is
+        # always little-endian, so a captured "MSB" is impossible evidence
+        # (a corrupted/misidentified snapshot) and must be flagged.
+        elf = _elf(machine="EM_X86_64", ei_data="MSB", soname="libfoo.so.1")
+        changes = check_wheel_tag_architecture_mismatch(
+            elf, None, {"WHEEL_ARCH": "x86_64"}
+        )
+        assert len(changes) == 1
+        assert "MSB" in changes[0].new_value
+
+    def test_x86_64_claim_with_correct_endianness_clean(self) -> None:
+        elf = _elf(machine="EM_X86_64", ei_data="LSB")
         assert (
             check_wheel_tag_architecture_mismatch(
                 elf, None, {"WHEEL_ARCH": "x86_64"}
             )
             == []
         )
+
+    def test_s390x_claim_with_correct_big_endian_clean(self) -> None:
+        elf = _elf(machine="EM_S390", ei_data="MSB")
+        assert (
+            check_wheel_tag_architecture_mismatch(
+                elf, None, {"WHEEL_ARCH": "s390x"}
+            )
+            == []
+        )
+
+    def test_s390x_claim_with_wrong_endianness_flagged(self) -> None:
+        elf = _elf(machine="EM_S390", ei_data="LSB")
+        changes = check_wheel_tag_architecture_mismatch(
+            elf, None, {"WHEEL_ARCH": "s390x"}
+        )
+        assert len(changes) == 1
 
     def test_mismatched_elf_machine_flagged(self) -> None:
         elf = _elf(machine="EM_AARCH64", soname="libtest.so.1")

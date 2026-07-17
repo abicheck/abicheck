@@ -109,10 +109,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   — bumping `DT_SONAME` doesn't fix any of them, so recommending one was
   misleading remediation advice (Codex review).
   `check_wheel_tag_architecture_mismatch` now also checks ELF `EI_DATA`
-  byte order for the `ppc64`/`ppc64le` claims, which share one `e_machine`
-  value (`EM_PPC64`) — a `ppc64le`-tagged wheel containing a big-endian
-  `ppc64` binary previously passed since `e_machine` alone matched
-  (Codex review).
+  byte order for every architecture claim, not just the `ppc64`/`ppc64le`
+  pair that shares one `e_machine` value (`EM_PPC64`) — `e_machine` alone
+  doesn't prove endianness for any claim: a claimed `x86_64` binary
+  captured with `ei_data="MSB"` is equally impossible (x86 is always
+  little-endian) and previously passed since `EM_X86_64` matched
+  (Codex review, two rounds).
   Windows UCRT/runtime checks, CPU-ISA-baseline detection, the full
   per-tag closure policy, and end-to-end CLI auto-derivation from a
   compared wheel's own filename tag (every check above, including G10's
