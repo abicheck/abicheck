@@ -208,6 +208,32 @@ class TestCtorDtorReconciliation:
         assert merged.func_by_mangled(synthetic) is None
         assert merged.func_by_mangled(real_mangled) is not None
 
+    def test_template_class_base_name_containing_uppercase_i_still_normalized(self):
+        # Codex review: a base name that itself contains an uppercase "I"
+        # (e.g. "Image") has its OWN "I" appear before the real
+        # template-argument-opening one in the Itanium component
+        # ("ImageIiE") -- the naive first-"I" search tried to skip template
+        # args starting at the wrong "I" and never reached the end of the
+        # string, so the component came back UNCHANGED ("ImageIiE") instead
+        # of stripped to "Image", permanently mismatching against castxml's
+        # own "ns::Image<int>" -> "Image" normalization.
+        synthetic = f"{SYNTHETIC_CTOR_KEY_PREFIX}ns::Image<int>(int)"
+        castxml_ctor = Function(
+            name="Image", mangled=synthetic, return_type="void",
+            params=[Param(name="n", type="int")], access=AccessLevel.PUBLIC,
+        )
+        real_mangled = "_ZN2ns5ImageIiEC1Ei"
+        clang_ctor = Function(
+            name="Image", mangled=real_mangled, return_type="void",
+            params=[Param(name="n", type="int")], access=AccessLevel.PUBLIC,
+        )
+        castxml = _snap(functions=[castxml_ctor], ast_producer="castxml")
+        clang = _snap(functions=[clang_ctor], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+
+        assert merged.func_by_mangled(synthetic) is None
+        assert merged.func_by_mangled(real_mangled) is not None
+
     def test_template_class_destructor_scope_normalized_across_producers(self):
         synthetic = "~ns::Widget<int>"
         castxml_dtor = Function(

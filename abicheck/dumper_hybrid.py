@@ -144,14 +144,29 @@ def _split_top_level_commas(s: str) -> list[str]:
 def _strip_itanium_template_suffix(component: str) -> str:
     """Strip a trailing Itanium ``<template-args>`` (``I...E``) block from a
     single mangled scope component, recovering the base template name
-    (``"Widget"`` from ``"WidgetIiE"``)."""
-    idx = component.find("I")
-    if idx == -1:
-        return component
-    end = _skip_template_args(component, idx)
-    if end == len(component):
-        return component[:idx]
-    return component
+    (``"Widget"`` from ``"WidgetIiE"``).
+
+    Tries EVERY ``"I"`` occurrence in turn, not just the first: a base name
+    that itself contains an uppercase ``"I"`` (``"Image"``, ``"Iterator"``,
+    ``"MultiIndex"``) has its own ``"I"`` appear before the real
+    template-argument-opening one, e.g. ``"ImageIiE"``'s first ``"I"`` is
+    from ``"Image"`` itself. Starting ``_skip_template_args`` there consumes
+    the wrong span and never reaches the end of the string, so the naive
+    first-match returned the component UNCHANGED instead of stripping
+    anything (Codex review) — silently leaving it un-normalized and
+    mismatched against castxml's ``"Image"``. The correct template-argument
+    boundary is the first ``"I"`` whose matching skip exhausts the ENTIRE
+    remaining string (nothing follows a component's template-args block).
+    """
+    start = 0
+    while True:
+        idx = component.find("I", start)
+        if idx == -1:
+            return component
+        end = _skip_template_args(component, idx)
+        if end == len(component):
+            return component[:idx]
+        start = idx + 1
 
 
 def _split_top_level_scope(scope: str) -> list[str]:
