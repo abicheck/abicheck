@@ -862,6 +862,12 @@ class TestEnvironmentMatrixRuntimeFloors:
         m = EnvironmentMatrix.from_dict({"runtime_floors": {"MUSLLINUX": "1.2"}})
         assert m.runtime_floors == {"MUSLLINUX": "1.2"}
 
+    def test_wheel_context_non_numeric_value_accepted(self) -> None:
+        m = EnvironmentMatrix.from_dict(
+            {"runtime_floors": {"WHEEL_CONTEXT": "1"}}
+        )
+        assert m.runtime_floors == {"WHEEL_CONTEXT": "1"}
+
     def test_glibc_still_rejects_non_numeric(self) -> None:
         # The WHEEL_ARCH/MUSLLINUX exemption must not weaken validation for
         # genuine numeric-floor keys.

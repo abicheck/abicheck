@@ -364,33 +364,56 @@ class TestWheelRpathNotPortableUnit:
         assert check_wheel_rpath_not_portable(elf, None) == []
         assert check_wheel_rpath_not_portable(elf, {}) == []
 
+    def test_declared_floor_without_wheel_context_not_flagged(self) -> None:
+        # Codex review #583: GLIBC/GLIBCXX/CXXABI are a general-purpose
+        # ADR-020b symbol-version-floor mechanism, unrelated to wheel
+        # packaging — an ordinary non-wheel DSO declaring one must not get
+        # a wheel-portability finding it never opted into.
+        elf = _elf(rpath="/usr/local/lib")
+        assert check_wheel_rpath_not_portable(elf, {"GLIBC": "2.28"}) == []
+
     def test_no_rpath_no_finding(self) -> None:
         elf = _elf(rpath="", runpath="")
-        assert check_wheel_rpath_not_portable(elf, {"GLIBC": "2.28"}) == []
+        assert (
+            check_wheel_rpath_not_portable(elf, {"WHEEL_CONTEXT": "1"}) == []
+        )
 
     def test_origin_relative_rpath_clean(self) -> None:
         elf = _elf(rpath="$ORIGIN/../foo.libs")
-        assert check_wheel_rpath_not_portable(elf, {"GLIBC": "2.28"}) == []
+        assert (
+            check_wheel_rpath_not_portable(elf, {"WHEEL_CONTEXT": "1"}) == []
+        )
 
     def test_origin_relative_runpath_clean(self) -> None:
         elf = _elf(runpath="$ORIGIN/../foo.libs")
-        assert check_wheel_rpath_not_portable(elf, {"GLIBC": "2.28"}) == []
+        assert (
+            check_wheel_rpath_not_portable(elf, {"WHEEL_CONTEXT": "1"}) == []
+        )
 
     def test_absolute_rpath_flagged(self) -> None:
         elf = _elf(rpath="/usr/local/lib", soname="libfoo.so.1")
-        changes = check_wheel_rpath_not_portable(elf, {"GLIBC": "2.28"})
+        changes = check_wheel_rpath_not_portable(elf, {"WHEEL_CONTEXT": "1"})
         assert len(changes) == 1
         assert changes[0].kind is ChangeKind.WHEEL_RPATH_NOT_PORTABLE
         assert changes[0].new_value == "/usr/local/lib"
 
     def test_mixed_absolute_and_origin_relative_flags_only_absolute(self) -> None:
         elf = _elf(rpath="/usr/local/lib:$ORIGIN/../foo.libs")
-        changes = check_wheel_rpath_not_portable(elf, {"GLIBC": "2.28"})
+        changes = check_wheel_rpath_not_portable(elf, {"WHEEL_CONTEXT": "1"})
         assert len(changes) == 1
         assert changes[0].new_value == "/usr/local/lib"
 
     def test_no_elf_no_finding(self) -> None:
-        assert check_wheel_rpath_not_portable(None, {"GLIBC": "2.28"}) == []
+        assert (
+            check_wheel_rpath_not_portable(None, {"WHEEL_CONTEXT": "1"}) == []
+        )
+
+    def test_wheel_context_combined_with_other_floors_still_flags(self) -> None:
+        elf = _elf(rpath="/usr/local/lib")
+        changes = check_wheel_rpath_not_portable(
+            elf, {"GLIBC": "2.28", "WHEEL_CONTEXT": "1"}
+        )
+        assert len(changes) == 1
 
 
 class TestWheelClosureDependencyViolationUnit:
@@ -399,10 +422,23 @@ class TestWheelClosureDependencyViolationUnit:
         assert check_wheel_closure_dependency_violation(elf, None) == []
         assert check_wheel_closure_dependency_violation(elf, {}) == []
 
+    def test_declared_floor_without_wheel_context_not_flagged(self) -> None:
+        elf = _elf(needed=["libopenblas-a1b2c3d4.so.0"])
+        assert (
+            check_wheel_closure_dependency_violation(elf, {"GLIBC": "2.28"}) == []
+        )
+        assert (
+            check_wheel_closure_dependency_violation(elf, {"MUSLLINUX": "1.2"})
+            == []
+        )
+
     def test_no_vendored_dependency_no_finding(self) -> None:
         elf = _elf(needed=["libc.so.6"])
         assert (
-            check_wheel_closure_dependency_violation(elf, {"GLIBC": "2.28"}) == []
+            check_wheel_closure_dependency_violation(
+                elf, {"WHEEL_CONTEXT": "1"}
+            )
+            == []
         )
 
     def test_vendored_dependency_with_origin_rpath_clean(self) -> None:
@@ -410,14 +446,19 @@ class TestWheelClosureDependencyViolationUnit:
             needed=["libopenblas-a1b2c3d4.so.0"], rpath="$ORIGIN/../foo.libs"
         )
         assert (
-            check_wheel_closure_dependency_violation(elf, {"GLIBC": "2.28"}) == []
+            check_wheel_closure_dependency_violation(
+                elf, {"WHEEL_CONTEXT": "1"}
+            )
+            == []
         )
 
     def test_vendored_dependency_without_origin_rpath_flagged(self) -> None:
         elf = _elf(
             needed=["libopenblas-a1b2c3d4.so.0"], rpath="", soname="libfoo.so.1"
         )
-        changes = check_wheel_closure_dependency_violation(elf, {"MUSLLINUX": "1.2"})
+        changes = check_wheel_closure_dependency_violation(
+            elf, {"WHEEL_CONTEXT": "1"}
+        )
         assert len(changes) == 1
         assert changes[0].kind is ChangeKind.WHEEL_CLOSURE_DEPENDENCY_VIOLATION
         assert changes[0].new_value == "libopenblas-a1b2c3d4.so.0"
@@ -426,12 +467,17 @@ class TestWheelClosureDependencyViolationUnit:
         # An absolute (non-$ORIGIN) rpath doesn't count as a bundling
         # mechanism for this check.
         elf = _elf(needed=["libopenblas-a1b2c3d4.so.0"], rpath="/usr/local/lib")
-        changes = check_wheel_closure_dependency_violation(elf, {"GLIBC": "2.28"})
+        changes = check_wheel_closure_dependency_violation(
+            elf, {"WHEEL_CONTEXT": "1"}
+        )
         assert len(changes) == 1
 
     def test_no_elf_no_finding(self) -> None:
         assert (
-            check_wheel_closure_dependency_violation(None, {"GLIBC": "2.28"}) == []
+            check_wheel_closure_dependency_violation(
+                None, {"WHEEL_CONTEXT": "1"}
+            )
+            == []
         )
 
 
@@ -440,7 +486,11 @@ class TestWheelRpathAndClosureCliEndToEnd:
         old = _elf_snap(_elf(rpath="/usr/local/lib"))
         new = _elf_snap(_elf(rpath="/usr/local/lib"))
         result = compare(
-            old, new, env_matrix=EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
+            old,
+            new,
+            env_matrix=EnvironmentMatrix(
+                runtime_floors={"WHEEL_CONTEXT": "1"}
+            ),
         )
         assert ChangeKind.WHEEL_RPATH_NOT_PORTABLE in _kinds(result.changes)
         assert result.verdict is Verdict.COMPATIBLE_WITH_RISK
@@ -449,12 +499,35 @@ class TestWheelRpathAndClosureCliEndToEnd:
         old = _elf_snap(_elf(needed=["libopenblas-a1b2c3d4.so.0"]))
         new = _elf_snap(_elf(needed=["libopenblas-a1b2c3d4.so.0"]))
         result = compare(
-            old, new, env_matrix=EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
+            old,
+            new,
+            env_matrix=EnvironmentMatrix(
+                runtime_floors={"WHEEL_CONTEXT": "1"}
+            ),
         )
         assert ChangeKind.WHEEL_CLOSURE_DEPENDENCY_VIOLATION in _kinds(
             result.changes
         )
         assert result.verdict is Verdict.BREAKING
+
+    def test_glibc_alone_does_not_trigger_wheel_checks(self) -> None:
+        # Codex review #583: the exact scenario the finding raised — an
+        # ordinary non-wheel DSO declaring a GLIBC floor for unrelated
+        # deployment-floor reasons must not suddenly get wheel-portability/
+        # closure findings.
+        old = _elf_snap(
+            _elf(rpath="/usr/local/lib", needed=["libopenblas-a1b2c3d4.so.0"])
+        )
+        new = _elf_snap(
+            _elf(rpath="/usr/local/lib", needed=["libopenblas-a1b2c3d4.so.0"])
+        )
+        result = compare(
+            old, new, env_matrix=EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
+        )
+        assert ChangeKind.WHEEL_RPATH_NOT_PORTABLE not in _kinds(result.changes)
+        assert ChangeKind.WHEEL_CLOSURE_DEPENDENCY_VIOLATION not in _kinds(
+            result.changes
+        )
 
     def test_no_env_matrix_no_finding(self) -> None:
         old = _elf_snap(_elf(rpath="/usr/local/lib"))

@@ -639,7 +639,13 @@ def compare(
             kept.extend(arch_mismatch_changes)
 
     # RPATH/RUNPATH portability + vendored-dependency-closure checks (G27):
-    # same declared wheel-verification-context gate, ELF-only.
+    # ELF-only; each check function requires the dedicated
+    # runtime_floors["WHEEL_CONTEXT"] key itself (not just any declared
+    # floor — GLIBC/GLIBCXX/CXXABI are a general-purpose ADR-020b mechanism
+    # unrelated to wheel packaging, so an ordinary non-wheel DSO declaring
+    # one of those must not get wheel-portability findings it never opted
+    # into; Codex review #583). This outer check is just the cheap
+    # "any floors declared at all" pre-filter.
     if env_matrix is not None and env_matrix.runtime_floors:
         from .diff_wheel_deployment import (
             check_wheel_closure_dependency_violation,

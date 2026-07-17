@@ -153,14 +153,16 @@ def _parse_cuda_constraints(cuda_data: dict[str, Any]) -> CudaConstraints:
 
 
 #: runtime_floors keys whose value is not a dotted-numeric version — they
-#: declare a presence flag (MUSLLINUX) or a non-version token
+#: declare a presence flag (MUSLLINUX, WHEEL_CONTEXT) or a non-version token
 #: (WHEEL_ARCH, e.g. "x86_64") rather than a floor, so the dotted-numeric
 #: validation below doesn't apply to them (Codex review #583: WHEEL_ARCH
 #: was unreachable via --env-matrix/from_dict entirely — every value was
 #: rejected before check_wheel_tag_architecture_mismatch ever ran, since
 #: only the direct-constructor path bypassing from_dict's validation could
 #: set a non-numeric runtime_floors value at all).
-_NON_NUMERIC_RUNTIME_FLOOR_KEYS = frozenset({"WHEEL_ARCH", "MUSLLINUX"})
+_NON_NUMERIC_RUNTIME_FLOOR_KEYS = frozenset(
+    {"WHEEL_ARCH", "MUSLLINUX", "WHEEL_CONTEXT"}
+)
 
 
 def _parse_runtime_floors(floors_raw: object) -> dict[str, str]:

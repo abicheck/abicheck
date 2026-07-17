@@ -78,9 +78,9 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `abicheck.package.parse_wheel_architecture_claim()` (public wrapper over
   the existing internal wheel-tag arch derivation). New
   `diff_wheel_deployment.check_wheel_rpath_not_portable`: a non-
-  `$ORIGIN`-relative RPATH/RUNPATH entry in a declared wheel-verification
-  context — almost always a build-machine artifact that won't exist on the
-  install target — new `RISK` `wheel_rpath_not_portable`. New
+  `$ORIGIN`-relative RPATH/RUNPATH entry — almost always a build-machine
+  artifact that won't exist on the install target — new `RISK`
+  `wheel_rpath_not_portable`. New
   `diff_wheel_deployment.check_wheel_closure_dependency_violation`: a
   DT_NEEDED entry matching auditwheel/delocate's vendored content-hash
   naming convention (reusing G9's `strip_vendor_hash` pattern) with no
@@ -89,7 +89,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   general "is this dependency permitted by the wheel's platform tag" check
   (which needs a real per-manylinux/musllinux-tag allowed-SONAME policy to
   avoid false positives — out of scope, see the plan) — they key off
-  internally-inconsistent evidence instead of an external allowlist.
+  internally-inconsistent evidence instead of an external allowlist. Both
+  gated on a dedicated `runtime_floors["WHEEL_CONTEXT"]` opt-in key, not on
+  any declared floor being present: `GLIBC`/`GLIBCXX`/`CXXABI` are a
+  general-purpose ADR-020b symbol-version-floor mechanism unrelated to
+  wheel packaging, so an ordinary non-wheel DSO declaring one must not get
+  wheel-portability findings it never opted into (Codex review).
   Windows UCRT/runtime checks, CPU-ISA-baseline detection, the full
   per-tag closure policy, and end-to-end CLI auto-derivation from a
   compared wheel's own filename tag (every check above, including G10's

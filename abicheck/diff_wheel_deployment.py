@@ -264,6 +264,19 @@ def _has_origin_relative_entry(entries: list[str]) -> bool:
     return any(entry.startswith(("$ORIGIN", "${ORIGIN}")) for entry in entries)
 
 
+#: Explicit opt-in key for :func:`check_wheel_rpath_not_portable`/
+#: :func:`check_wheel_closure_dependency_violation`. Deliberately a
+#: *dedicated* marker rather than "any declared runtime_floors key": unlike
+#: WHEEL_ARCH/MUSLLINUX/MACOS_DEPLOYMENT_TARGET, the pre-existing GLIBC/
+#: GLIBCXX/CXXABI keys are a general-purpose ADR-020b symbol-version-floor
+#: declaration usable for *any* deployment scenario — an ordinary,
+#: non-wheel shared library with a perfectly normal absolute RPATH and a
+#: declared `runtime_floors: {GLIBC: "2.28"}` for unrelated reasons must
+#: not suddenly get wheel-packaging findings it never asked for (Codex
+#: review #583).
+_WHEEL_CONTEXT_KEY = "WHEEL_CONTEXT"
+
+
 def check_wheel_rpath_not_portable(
     elf: ElfMetadata | None, runtime_floors: dict[str, str] | None
 ) -> list[Change]:
@@ -279,16 +292,19 @@ def check_wheel_rpath_not_portable(
     resolves nothing on a clean install — the classic "works in CI,
     `ImportError: lib not found` on the user's machine" wheel-packaging bug.
 
-    Gated on *runtime_floors* being non-empty (any declared G10/G27 key —
-    the same "this compare is a wheel-verification context" signal every
-    other check in this module and ``diff_versioning.py`` shares), since an
-    absolute RPATH is completely normal and not a bug for an ordinary
-    system-installed shared library outside the wheel-distribution context.
-    Returns ``[]`` when no wheel-verification context is declared, *elf* is
-    absent, or every RPATH/RUNPATH entry is ``$ORIGIN``-relative (or there
-    are none at all).
+    Gated on the dedicated ``runtime_floors["WHEEL_CONTEXT"]`` key (any
+    truthy value), *not* on any declared floor being present: an absolute
+    RPATH is completely normal for an ordinary system-installed shared
+    library declaring, say, a `GLIBC` floor for unrelated deployment-floor
+    reasons — that must not suddenly get a wheel-portability finding it
+    never opted into (Codex review #583). Returns ``[]`` when
+    ``WHEEL_CONTEXT`` isn't declared, *elf* is absent, or every RPATH/
+    RUNPATH entry is ``$ORIGIN``-relative (or there are none at all).
     """
     if not runtime_floors or elf is None:
+        return []
+    floors = {k.upper(): v for k, v in runtime_floors.items()}
+    if not floors.get(_WHEEL_CONTEXT_KEY):
         return []
     entries = _elf_rpath_entries(elf)
     if not entries:
@@ -332,9 +348,11 @@ def check_wheel_closure_dependency_violation(
     like your own vendored library, but nothing points at it," not on
     whether an ordinary DT_NEEDED entry is a permitted system dependency.
 
-    Gated on *runtime_floors* being non-empty, the same wheel-verification-
-    context signal :func:`check_wheel_rpath_not_portable` uses. Returns
-    ``[]`` when no wheel-verification context is declared, *elf* is absent,
+    Gated on the same dedicated ``runtime_floors["WHEEL_CONTEXT"]`` key
+    :func:`check_wheel_rpath_not_portable` uses — *not* on any declared
+    floor being present, since GLIBC/GLIBCXX/CXXABI are a general-purpose
+    ADR-020b mechanism unrelated to wheel packaging (Codex review #583).
+    Returns ``[]`` when ``WHEEL_CONTEXT`` isn't declared, *elf* is absent,
     no DT_NEEDED entry matches the vendored-hash naming convention, or an
     ``$ORIGIN``-relative RPATH/RUNPATH entry is present (even one — this
     check does not attempt to verify that entry actually resolves to the
@@ -342,6 +360,9 @@ def check_wheel_closure_dependency_violation(
     exists at all).
     """
     if not runtime_floors or elf is None:
+        return []
+    floors = {k.upper(): v for k, v in runtime_floors.items()}
+    if not floors.get(_WHEEL_CONTEXT_KEY):
         return []
     needed: list[str] = getattr(elf, "needed", None) or []
     vendored = [lib for lib in needed if strip_vendor_hash(lib) != lib]
