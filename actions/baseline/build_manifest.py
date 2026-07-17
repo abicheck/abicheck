@@ -69,6 +69,26 @@ _VOLATILE_COVERAGE_KEYS = (
 # "layer"/"status"/"confidence" are the semantic identity; "detail" is by
 # its own docstring presentational, so both are dropped rather than parsed.
 _VOLATILE_MANIFEST_COVERAGE_ROW_KEYS = ("detail", "elapsed_s")
+# ExtractorRecord rows (abicheck/buildsource/model.py) embedded at
+# build_source.manifest.extractors: inline_graph_fold.py appends
+# "N.NNs, jobs=M" (last_elapsed_s/last_jobs) to a row's "detail", and
+# started_at/finished_at are ISO 8601 wall-clock bounds -- runner
+# load/CPU count and collection time, not source-fact content, so a
+# fourth leak of the same volatile-info-in-a-row-field shape. name/
+# version/status/inputs/artifacts/command/command_hash/capabilities/
+# diagnostics are the semantic identity and stay.
+_VOLATILE_MANIFEST_EXTRACTOR_ROW_KEYS = ("detail", "started_at", "finished_at")
+
+
+def _strip_row_keys(rows: Any, volatile_keys: tuple[str, ...]) -> Any:
+    if not isinstance(rows, list):
+        return rows
+    return [
+        {k: v for k, v in row.items() if k not in volatile_keys}
+        if isinstance(row, dict)
+        else row
+        for row in rows
+    ]
 
 
 def _strip_volatile_fields(raw: dict[str, Any]) -> dict[str, Any]:
@@ -85,18 +105,14 @@ def _strip_volatile_fields(raw: dict[str, Any]) -> dict[str, Any]:
             manifest = dict(manifest)
             for key in _VOLATILE_BUILD_SOURCE_MANIFEST_KEYS:
                 manifest.pop(key, None)
-            coverage_rows = manifest.get("coverage")
-            if isinstance(coverage_rows, list):
-                manifest["coverage"] = [
-                    {
-                        k: v
-                        for k, v in row.items()
-                        if k not in _VOLATILE_MANIFEST_COVERAGE_ROW_KEYS
-                    }
-                    if isinstance(row, dict)
-                    else row
-                    for row in coverage_rows
-                ]
+            if "coverage" in manifest:
+                manifest["coverage"] = _strip_row_keys(
+                    manifest["coverage"], _VOLATILE_MANIFEST_COVERAGE_ROW_KEYS
+                )
+            if "extractors" in manifest:
+                manifest["extractors"] = _strip_row_keys(
+                    manifest["extractors"], _VOLATILE_MANIFEST_EXTRACTOR_ROW_KEYS
+                )
             build_source["manifest"] = manifest
 
         source_abi = build_source.get("source_abi")

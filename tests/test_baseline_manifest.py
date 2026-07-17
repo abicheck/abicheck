@@ -752,6 +752,65 @@ class TestMainCli:
             manifest1["artifacts"][0]["sha256"] == manifest2["artifacts"][0]["sha256"]
         )
 
+    def test_sha256_stable_when_only_manifest_extractor_row_changes(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review): inline_graph_fold.py appends
+        # "N.NNs, jobs=M" (last_elapsed_s/last_jobs) to a
+        # build_source.manifest.extractors row's "detail", and
+        # started_at/finished_at are ISO 8601 wall-clock bounds -- runner
+        # load/CPU count and collection time, not source-fact content, so a
+        # fourth place the same volatile-info-in-a-row-field shape leaked
+        # into the digest.
+        snap_path = tmp_path / "libfoo.abicheck.json"
+
+        def _write(detail: str, started_at: str, finished_at: str) -> None:
+            data = {
+                "library": "libfoo",
+                "version": "1.0.0",
+                "schema_version": 9,
+                "git_commit": "aaa",
+                "git_tag": None,
+                "created_at": "2026-07-17T00:00:00+00:00",
+                "build_id": None,
+                "build_source": {
+                    "manifest": {
+                        "build_source_pack_version": 1,
+                        "extractors": [
+                            {
+                                "name": "compile_commands",
+                                "version": "1.0",
+                                "status": "ok",
+                                "inputs": [],
+                                "artifacts": [],
+                                "detail": detail,
+                                "started_at": started_at,
+                                "finished_at": finished_at,
+                            }
+                        ],
+                    },
+                    "source_abi": {"coverage": {}},
+                },
+            }
+            snap_path.write_text(json.dumps(data), encoding="utf-8")
+
+        entries = [{"name": "libfoo", "artifact": "a.so"}]
+        _write(
+            "1.80s, jobs=4", "2026-07-17T00:00:00+00:00", "2026-07-17T00:00:02+00:00"
+        )
+        manifest1 = build_manifest_module.build_manifest(
+            tmp_path, "", "", entries, None
+        )
+        _write(
+            "3.40s, jobs=8", "2026-07-17T01:00:00+00:00", "2026-07-17T01:00:04+00:00"
+        )
+        manifest2 = build_manifest_module.build_manifest(
+            tmp_path, "", "", entries, None
+        )
+        assert (
+            manifest1["artifacts"][0]["sha256"] == manifest2["artifacts"][0]["sha256"]
+        )
+
     def test_content_digest_changes_when_snapshot_content_changes(
         self, tmp_path: Path
     ) -> None:
