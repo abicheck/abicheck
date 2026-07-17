@@ -543,6 +543,36 @@ class TestParamDefaultChanged:
         r = compare(old, new)
         assert ChangeKind.PARAM_DEFAULT_VALUE_REMOVED in _kinds(r)
 
+    def test_legacy_pre_provenance_baseline_vs_hybrid_still_compared(self):
+        # Codex review: a persisted castxml baseline predating ast_producer
+        # entirely (ast_producer=None, no fact_provenance) has
+        # fact_producer(old, key) return None -- unknown, not "known and
+        # different". Comparing it against a genuinely castxml-backed
+        # function on a hybrid `new` side is a legitimate same-producer
+        # comparison and must still fire, exactly as it did before hybrid
+        # existed (when only _both_header_aware gated this detector at all).
+        f_old = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="30")],
+        )
+        f_new = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default=None)],
+        )
+        old = AbiSnapshot(
+            library="libtest.so.1", version="1.0", functions=[f_old],
+            from_headers=True, ast_producer=None,
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1", version="1.0", functions=[f_new],
+            from_headers=True, ast_producer="hybrid",
+            fact_provenance={"func:_Z7connectv:param_defaults": "castxml"},
+        )
+        r = compare(old, new)
+        assert ChangeKind.PARAM_DEFAULT_VALUE_REMOVED in _kinds(r)
+
 
 # ── param_renamed ────────────────────────────────────────────────────────
 

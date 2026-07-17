@@ -1256,6 +1256,17 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     castxml-vs-castxml or clang-vs-clang comparison that never set the field —
     a behavior change entirely unrelated to the hybrid-mixing bug this exists
     to fix.
+
+    The per-pair skip itself only fires when BOTH producers are POSITIVELY
+    known and DIFFER — never merely because one side's producer is unknown.
+    A persisted castxml baseline predating ``ast_producer`` entirely (or any
+    other snapshot that never recorded it) has ``fact_producer(...) is
+    None``; comparing it against a genuinely castxml-backed function on a
+    hybrid ``new`` side is a perfectly legitimate same-producer comparison
+    that must not be silently dropped just because the OLD side lacks
+    metadata it never had a chance to record — that would regress a
+    previously-working legacy-baseline comparison into a silent miss (Codex
+    review).
     """
     if not _both_header_aware(old, new):
         return []
@@ -1272,7 +1283,11 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             key = func_fact_key(mangled, "param_defaults")
             old_producer = fact_producer(old, key)
             new_producer = fact_producer(new, key)
-            if old_producer is None or old_producer != new_producer:
+            if (
+                old_producer is not None
+                and new_producer is not None
+                and old_producer != new_producer
+            ):
                 continue
         # Compare parameter defaults pairwise
         for i, (p_old, p_new) in enumerate(zip(f_old.params, f_new.params)):
