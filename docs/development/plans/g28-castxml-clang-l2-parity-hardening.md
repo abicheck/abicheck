@@ -139,6 +139,36 @@ fix folded into an already-large hardening pass.
 
 ---
 
+## Known, deferred limitation: legacy C-variable mangled-key identity across the upgrade boundary
+
+**Confirmed real** (Codex review): `_CastxmlParser.parse_variables` reassigns
+a C-linkage global's bogus castxml-fabricated `_Z<len><name>` "mangled" key
+to the real bare export name — but only when corroborated by real ELF export
+evidence (`mangled not in self._exported_dynamic/static` and `name in`
+either). A snapshot persisted with an abicheck version *before* this
+reassignment existed still keys that same variable by the old bogus `_Z...`
+name. `_diff_variables` matches old/new variable maps by that key
+(`diff_by_key`) with no reconciliation path, so re-running abicheck against
+such a legacy baseline reports an unchanged `extern int g;` as
+`VAR_REMOVED _Z1g` plus `VAR_ADDED g` — a false breaking pair from the tool
+upgrade, not a real header edit.
+
+**Deliberately not fixed here**: unlike the CV-fact case above (gated by the
+schema-versioned `header_cv_facts_reliable` flag, itself narrowly scoped to
+CV comparisons), a safe fix here needs to *reconcile two dict keys* rather
+than just neutralize a comparison. The bogus old key (`_Z1g`) and a
+genuinely, separately-mangled real C++ global that happens to also be a
+simple one-character identifier are textually indistinguishable from the old
+snapshot's side alone — the only real corroborating signal (does the *new*
+snapshot's variable list contain an unmatched bare-name entry that the old
+side's bogus key would explain) requires new pre-pass reconciliation logic in
+or around `_diff_variables`/`diff_by_key`, plus new golden/regression
+coverage proving it can't silently merge two genuinely-different variables
+that happen to share a short name. Scope this as its own follow-up rather
+than bolting an ambiguous heuristic onto an already-large hardening pass.
+
+---
+
 ## Phase 3 — hybrid multi-producer snapshot with per-field provenance
 
 **Problem.** Today a snapshot is parsed by exactly one L2 backend

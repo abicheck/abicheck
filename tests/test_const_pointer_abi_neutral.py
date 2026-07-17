@@ -358,3 +358,55 @@ def test_nested_template_cv_change_still_reported_as_param_change():
     new = _snap("2", functions=[_fn("f", "f", params=[Param(name="x", type="Box<int, const int>")])])
     r = compare(old, new)
     assert ChangeKind.FUNC_PARAMS_CHANGED in _kinds(r)
+
+
+@pytest.mark.parametrize("old_t, new_t", [
+    ("void (*)(int)", "void (*)(const int)"),
+    ("void (*)(int, int)", "void (*)(int, const int)"),
+    ("void (*)(int*)", "void (*)(const int*)"),
+    ("void (*)(int* const)", "void (*)(int*)"),
+    ("void (*)(int* volatile)", "void (*)(int*)"),
+])
+def test_callback_by_value_cv_qualifier_is_neutralised(old_t, new_t):
+    """Regression guard (Codex review, PR #582): the fix for nested TEMPLATE
+    cv (``Box<const int>``, above) over-corrected by also blocking stripping
+    inside a nested PAREN — a callback/function-pointer parameter's own
+    by-value cv qualifier. But confirmed against real clang/gcc mangling,
+    ``void (*)(int)`` and ``void (*)(const int)`` are the identical function
+    pointer type: top-level cv on a by-value (or pointer-own, trailing
+    ``* const``/``* volatile``) parameter is dropped for mangling purposes at
+    every nesting level of a function type, not just the outermost. Blocking
+    the callback's own cv this way made an ABI-neutral header edit misfire
+    the breaking FUNC_PARAMS_CHANGED path."""
+    assert func_signature_cv_only_differ(old_t, new_t) is True
+
+
+def test_callback_pointee_cv_qualifier_is_not_neutralised():
+    """Negative control: a callback parameter's POINTEE cv IS a genuinely
+    different type (confirmed against real mangling: ``void(*)(int*)`` and
+    ``void(*)(const int*)`` are different overloads) — only the callback's
+    own by-value/pointer-value cv (above) is neutral, not its pointee's."""
+    assert func_signature_cv_only_differ("void (*)(int*)", "void (*)(long*)") is False
+
+
+def test_callback_cv_change_still_reported_as_param_change():
+    """End-to-end: an outer function whose callback parameter's own by-value
+    cv changed must NOT report FUNC_PARAMS_CHANGED (ABI-neutral), but a
+    genuine callback signature change must still be reported."""
+    neutral_old = _snap(
+        "1", functions=[_fn("f", "f", params=[Param(name="cb", type="void (*)(int)")])]
+    )
+    neutral_new = _snap(
+        "2", functions=[_fn("f", "f", params=[Param(name="cb", type="void (*)(const int)")])]
+    )
+    r = compare(neutral_old, neutral_new)
+    assert ChangeKind.FUNC_PARAMS_CHANGED not in _kinds(r)
+
+    breaking_old = _snap(
+        "1", functions=[_fn("f", "f", params=[Param(name="cb", type="void (*)(int)")])]
+    )
+    breaking_new = _snap(
+        "2", functions=[_fn("f", "f", params=[Param(name="cb", type="void (*)(long)")])]
+    )
+    r2 = compare(breaking_old, breaking_new)
+    assert ChangeKind.FUNC_PARAMS_CHANGED in _kinds(r2)

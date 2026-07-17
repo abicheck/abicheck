@@ -62,6 +62,7 @@ from .diff_symbols_scalar import (  # noqa: F401  (public-surface re-exports)
     _canonical_int_spelling as _canonical_int_spelling,
     _scalar_repr as _scalar_repr,
 )
+from .diff_symbols_variables import _check_variable_alignment, _without_top_level_const
 from .dumper_castxml import is_synthetic_ctor_key, is_synthetic_dtor_key
 from .elf_symbol_filter import (
     FUNCTION_SYMBOL_TYPES,
@@ -1102,90 +1103,17 @@ def _diff_inline_hidden_friends(
     return changes
 
 
-def _check_variable_alignment(
-    mangled: str, v_old: Variable, v_new: Variable
+def _check_variable(
+    mangled: str, v_old: Variable, v_new: Variable, *, cv_facts_reliable: bool = True
 ) -> list[Change]:
-    """Emit a change when a variable's declared alignment changed.
+    """Compare a matched pair of public variables.
 
-    Tri-state: None = not captured (older snapshots / dumpers without
-    alignment support) — skip rather than compare.
+    *cv_facts_reliable* mirrors ``diff_types._field_type_genuinely_changed``:
+    a pre-v9 CastXML snapshot silently dropped ``volatile`` from a variable's
+    type spelling (no dedicated ``is_volatile`` fact to fall back on, unlike
+    ``TypeField``), so an unchanged legacy-vs-fresh pair would otherwise
+    misreport a breaking ``VAR_TYPE_CHANGED`` (Codex review, PR #582).
     """
-    if v_old.alignment_bits is None or v_new.alignment_bits is None:
-        return []
-    if v_old.alignment_bits == v_new.alignment_bits:
-        return []
-    return [
-        make_change(
-            ChangeKind.VAR_ALIGNMENT_CHANGED,
-            symbol=mangled,
-            name=v_old.name,
-            old=str(v_old.alignment_bits),
-            new=str(v_new.alignment_bits),
-        )
-    ]
-
-
-_TRAILING_CONST_RE = re.compile(r"\s*\bconst\b\s*$")
-_LEADING_CONST_TOKEN_RE = re.compile(r"^\s*\bconst\b\s*")
-
-
-def _has_top_level_pointer_or_ref(canonical_type: str) -> bool:
-    """True if *canonical_type* has a ``*``/``&`` outside any ``<...>``
-    template-argument bracket.
-
-    A plain substring search for ``*``/``&`` would also match one nested
-    *inside* a template argument (e.g. ``std::vector<int *>`` — a by-value
-    vector of pointers, not itself a pointer), wrongly routing a pure
-    top-level const flip on that by-value variable into the
-    pointer/reference branch below, which only strips a *trailing* const —
-    but the top-level const here is leading (Codex review).
-    """
-    depth = 0
-    for ch in canonical_type:
-        if ch == "<":
-            depth += 1
-        elif ch == ">":
-            depth = max(0, depth - 1)
-        elif ch in "*&" and depth == 0:
-            return True
-    return False
-
-
-def _without_top_level_const(canonical_type: str) -> str:
-    """Strip the *top-level* ``const`` from an already-canonicalized type name.
-
-    ``canonicalize_type_name`` normalizes a leading ``const T`` to ``T
-    const`` (moving the qualifier immediately after what it qualifies) —
-    but only when the base type has no template args (``"<...>"``); for a
-    templated base it deliberately leaves the spelling untouched, so a
-    top-level const on e.g. ``std::vector<int>`` stays leading
-    (``"const std::vector<int>"``), not trailing.
-
-    So which end is "top-level" depends on whether a pointer/reference
-    sigil is present, not on template-ness:
-
-    - No ``*``/``&`` at all: the *whole object* is what's qualified, so a
-      const at *either* end (leading, for a templated base; trailing, the
-      east-const form for a non-template base) is the top-level qualifier
-      — strip whichever is present.
-    - A ``*``/``&`` present: the top-level (pointer-itself) qualifier is
-      always the trailing token (``"int * const"``, or ``"std::vector<int>
-      * const"``) regardless of template-ness. A *leading* const there
-      (``"int const *"``, ``"const std::vector<int> *"``) qualifies the
-      pointee, not the pointer, and must NOT be stripped — collapsing it
-      would hide a real type change (the pointer itself is still writable;
-      only what it points to changed) behind a misleading "variable became
-      const" (Codex review, x2: the original non-template pointee-const
-      case, and the templated-base variant of the same issue).
-    """
-    if _has_top_level_pointer_or_ref(canonical_type):
-        return _TRAILING_CONST_RE.sub("", canonical_type)
-    stripped = _LEADING_CONST_TOKEN_RE.sub("", canonical_type)
-    return _TRAILING_CONST_RE.sub("", stripped)
-
-
-def _check_variable(mangled: str, v_old: Variable, v_new: Variable) -> list[Change]:
-    """Compare a matched pair of public variables."""
     changes = _check_variable_alignment(mangled, v_old, v_new)
     # RD2-5: a stripped side reports type "?"; unknown is not a type change.
     if _type_unknown(v_old.type) or _type_unknown(v_new.type):
@@ -1204,7 +1132,8 @@ def _check_variable(mangled: str, v_old: Variable, v_new: Variable) -> list[Chan
             v_old.is_const != v_new.is_const
             and _without_top_level_const(canon_old) == _without_top_level_const(canon_new)
         )
-        if not is_pure_const_flip:
+        legacy_cv_noise = not cv_facts_reliable and func_signature_cv_only_differ(canon_old, canon_new)
+        if not is_pure_const_flip and not legacy_cv_noise:
             return changes + [
                 make_change(
                     ChangeKind.VAR_TYPE_CHANGED,
@@ -1254,12 +1183,13 @@ def _var_added(mangled: str, v_new: Variable) -> list[Change]:
 
 @registry.detector("variables")
 def _diff_variables(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
+    cv_facts_reliable = old.header_cv_facts_reliable and new.header_cv_facts_reliable
     return diff_by_key(
         _public_variables(old),
         _public_variables(new),
         on_removed=_var_removed,
         on_added=_var_added,
-        on_common=_check_variable,
+        on_common=lambda m, o, n: _check_variable(m, o, n, cv_facts_reliable=cv_facts_reliable),
     )
 
 

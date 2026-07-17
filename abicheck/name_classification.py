@@ -370,8 +370,7 @@ _CV_TOKEN_RE = re.compile(r"\b(?:const|volatile)\b")
 
 def _strip_cv_qualifiers(name: str) -> str:
     """Return *name* with ``const`` / ``volatile`` tokens removed — but only
-    at bracket depth 0 (not nested inside a template argument list,
-    function-parameter list, or array subscript).
+    outside a template-argument list or array subscript.
 
     A cv qualifier nested inside a template argument
     (``Box<const int>`` vs. ``Box<int>``) names a genuinely different,
@@ -384,21 +383,32 @@ def _strip_cv_qualifiers(name: str) -> str:
     parameter changing from ``Box<int, int>`` to ``Box<int, const int>``)
     as a harmless cv-only difference, silently suppressing a real breaking
     ``FUNC_PARAMS_CHANGED``/``FUNC_RETURN_CHANGED`` finding (Codex/
-    CodeRabbit review, PR #582). Depth tracking mirrors
-    :func:`_has_top_level_ptr_or_ref`.
+    CodeRabbit review, PR #582).
 
-    Whitespace introduced by the removal is collapsed, and spaces adjacent to
-    pointer/reference sigils are normalised so that ``const char *`` and
-    ``char *`` reduce to the same string.
+    ``(...)`` is NOT one of the blocking brackets: it spells a function
+    type's parameter list (a plain function-pointer type, or a nested
+    callback parameter of one), and a top-level/by-value cv qualifier
+    there is dropped from the function type for mangling purposes at
+    *every* nesting level, not just the outermost — confirmed against real
+    clang/gcc output (``void f(void (*)(int))`` and ``void g(void (*)(const
+    int))`` mangle identically). An earlier version of this depth tracking
+    also blocked on ``(``/``)``, which made a cv-neutral callback parameter
+    (e.g. ``const`` added to a callback's own by-value ``int`` parameter)
+    misfire the same breaking ``FUNC_PARAMS_CHANGED`` path this function
+    exists to prevent (Codex review, PR #582).
+
+    Whitespace introduced by the removal is collapsed; spaces adjacent to
+    pointer/reference sigils and parentheses are normalised so that
+    ``const char *`` / ``char *`` and ``void (*)(int)`` / ``void (*)( int
+    )`` each reduce to the same string.
     """
-    depth = 0
     chars = list(name)
     for m in _CV_TOKEN_RE.finditer(name):
         depth = 0
         for ch in name[: m.start()]:
-            if ch in "<([":
+            if ch in "<[":
                 depth += 1
-            elif ch in ">)]":
+            elif ch in ">]":
                 depth = max(0, depth - 1)
         if depth == 0:
             for i in range(m.start(), m.end()):
@@ -407,6 +417,11 @@ def _strip_cv_qualifiers(name: str) -> str:
     stripped = _MULTI_SPACE_RE.sub(" ", stripped)
     # Normalise spacing around pointer/reference sigils so "char  *" == "char *".
     stripped = re.sub(r"\s*([*&])\s*", r" \1", stripped)
+    # Normalise spacing around parens so removing a token flush against "("
+    # or ")" doesn't leave a stray space a non-stripped spelling never had.
+    stripped = re.sub(r"\(\s+", "(", stripped)
+    stripped = re.sub(r"\s+\)", ")", stripped)
+    stripped = re.sub(r"\s+,", ",", stripped)
     return _MULTI_SPACE_RE.sub(" ", stripped).strip()
 
 

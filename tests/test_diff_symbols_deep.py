@@ -597,6 +597,45 @@ class TestVarConstChanged:
         assert ChangeKind.VAR_TYPE_CHANGED in _kinds(r)
         assert ChangeKind.VAR_BECAME_CONST not in _kinds(r)
 
+
+# ── legacy CastXML volatile-variable noise (Codex review, PR #582) ──────────
+
+
+class TestVarLegacyVolatileNoise:
+    """A pre-v9 CastXML snapshot's ``_type_name()`` silently dropped
+    ``volatile`` from a variable's type spelling — there is no dedicated
+    ``Variable.is_volatile`` fact (unlike ``TypeField``) to fall back on, so
+    an unchanged ``volatile`` variable compared against a legacy baseline
+    would otherwise misreport a breaking VAR_TYPE_CHANGED purely from an
+    abicheck upgrade, not a real header edit."""
+
+    def test_legacy_snapshot_volatile_drop_is_not_reported(self):
+        v_old = _pub_var("g", "g", "int")
+        v_new = _pub_var("g", "g", "volatile int")
+        old = _snap(variables=[v_old])
+        old.header_cv_facts_reliable = False
+        new = _snap(variables=[v_new])
+        r = compare(old, new)
+        assert ChangeKind.VAR_TYPE_CHANGED not in _kinds(r)
+
+    def test_real_volatile_change_between_reliable_snapshots_is_reported(self):
+        v_old = _pub_var("g", "g", "int")
+        v_new = _pub_var("g", "g", "volatile int")
+        r = compare(_snap(variables=[v_old]), _snap(variables=[v_new]))
+        assert ChangeKind.VAR_TYPE_CHANGED in _kinds(r)
+
+    def test_genuine_type_change_still_reported_even_when_unreliable(self):
+        """The legacy-noise suppression only neutralizes a cv-only spelling
+        difference — a genuinely different base type must still be caught
+        even when cv facts aren't trustworthy for this pair."""
+        v_old = _pub_var("g", "g", "int")
+        v_new = _pub_var("g", "g", "long")
+        old = _snap(variables=[v_old])
+        old.header_cv_facts_reliable = False
+        new = _snap(variables=[v_new])
+        r = compare(old, new)
+        assert ChangeKind.VAR_TYPE_CHANGED in _kinds(r)
+
     def test_pointer_inside_template_arg_is_not_top_level(self):
         """`std::vector<int *>` -> `const std::vector<int *>`: the variable
         itself is a by-value templated type (not a pointer) — the `*` lives
