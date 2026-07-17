@@ -78,6 +78,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- `compare --used-by`/`--required-symbol(s)`'s default markdown/text/review
+  report now names the actual missing symbol/version/entrypoint and any
+  scoped-only change (e.g. `PE_ORDINAL_RETARGETED`) that failed the gate,
+  instead of only printing a bare count — matching the detail already present
+  in JSON/SARIF/JUnit output (Codex review).
 - `compare` no longer silently discards explicit `--sources`/`--build-info`
   when `--depth` is omitted: the collect mode is now inferred from those
   inputs (`--depth` > `.abicheck.yml` `source.method` > inferred from

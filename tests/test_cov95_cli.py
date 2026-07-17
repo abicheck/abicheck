@@ -1192,6 +1192,37 @@ class TestUsedByScoping:
         assert out.exists()
         assert "Report written to" in result.output
 
+    def test_default_markdown_names_uncovered_missing_symbol(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Codex review: the default (markdown) report must name the actual
+        missing symbol, not just its count -- otherwise a human reading the
+        default output has no way to tell which symbol broke the gate."""
+        res = self._result(verdict=Verdict.BREAKING, missing=["foo_removed"])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke("compare", str(old), str(new), "--used-by", str(app))
+        assert result.exit_code == 4
+        assert "missing symbol: `foo_removed`" in result.output
+        assert "## Additional scoped-gate findings" in result.output
+        assert "`foo_removed` is required but missing from the new library" in result.output
+
+    def test_default_markdown_names_scoped_only_change(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Codex review: a scoped-only Change (e.g. PE_ORDINAL_RETARGETED,
+        relevant to the gate but never added to result.changes) must be named
+        in the default text report too, mirroring the JSON/SARIF/JUnit fold-in."""
+        scoped_change = Change(
+            ChangeKind.PE_ORDINAL_RETARGETED, "MyExport", "ordinal changed from 5 to 7",
+        )
+        res = self._result(verdict=Verdict.BREAKING, breaking_for_app=[scoped_change])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke("compare", str(old), str(new), "--used-by", str(app))
+        assert "## Additional scoped-gate findings" in result.output
+        assert "pe_ordinal_retargeted: ordinal changed from 5 to 7" in result.output
+
     def test_severity_missing_symbols_default_preset_floors_at_4(
         self, tmp_path, monkeypatch
     ) -> None:

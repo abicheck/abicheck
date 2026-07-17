@@ -1544,6 +1544,66 @@ def _fold_evidence_depth_into_json(
     return json.dumps(payload, indent=2)
 
 
+def _resolve_scoped_gate_findings(
+    result: Any, severity_config: Any, show_only: str | None,
+) -> tuple[list[Any], list[str], bool, str]:
+    """Resolve the scoped-only ``Change``s and missing-contract labels relevant
+    to the ``--used-by``/``--required-symbol`` gate, deduped against
+    ``result.changes`` and filtered by ``--show-only``.
+
+    Factored out of the JSON branch below so markdown/text/review output can
+    render the identical actionable findings instead of only a bare count
+    (Codex review: a scoped run whose only gated issue was a missing contract
+    member or a scoped-only change like ``PE_ORDINAL_RETARGETED`` didn't name
+    either one in the default text report, unlike JSON/SARIF/JUnit).
+
+    Returns ``(scoped_only_changes, missing_labels, blocks, missing_kind)``.
+    """
+    from .reporter import _finding_id, apply_show_only
+    from .reporter_markdown import ShowOnlyFilter
+    from .severity import missing_contract_exit_code
+
+    existing_ids = {_finding_id(c) for c in result.changes}
+    eff_sets = result._effective_kind_sets()
+    scoped_only = list(getattr(result, "scoped_only_changes", ()) or ())
+    if show_only and scoped_only:
+        scoped_only = apply_show_only(
+            scoped_only,
+            show_only,
+            policy=result.policy,
+            kind_sets=eff_sets,
+            policy_file=result.policy_file,
+        )
+    scoped_only = [c for c in scoped_only if _finding_id(c) not in existing_ids]
+
+    gate_scope = getattr(result, "gate_scope", None)
+    missing_kind = (
+        "used_by_missing_symbol" if gate_scope == "used_by"
+        else "required_symbol_missing"
+    )
+    blocks = (
+        severity_config is None
+        or missing_contract_exit_code(severity_config) != 0
+    )
+    # A missing-contract label has no backing Change/ChangeKind, so it can't
+    # run through apply_show_only -- but --show-only's severity dimension
+    # still applies: without this, a --show-only run that excludes breaking
+    # findings would still include a blocking missing-contract entry the
+    # filter was meant to exclude (Codex review, mirrors the identical
+    # sarif.to_sarif fix). Element/action tokens don't cleanly apply to "a
+    # symbol is simply absent", so only the severity dimension is checked.
+    missing_severity_label = "breaking" if blocks else "compatible"
+    show_only_severities = (
+        ShowOnlyFilter.parse(show_only).severities if show_only else frozenset()
+    )
+    missing_labels = list(
+        getattr(result, "scoped_missing_labels", ()) or ()
+        if not show_only_severities or missing_severity_label in show_only_severities
+        else ()
+    )
+    return scoped_only, missing_labels, blocks, missing_kind
+
+
 def _fold_scoped_compat_into_text(
     text: str, fmt: str, result: Any, severity_config: Any = None,
     show_only: str | None = None,
@@ -1648,57 +1708,21 @@ def _fold_scoped_compat_into_text(
         # sarif.to_sarif/junit_report._build_testsuite's identical fold-in).
         changes_list = payload.get("changes")
         if isinstance(changes_list, list):
-            from .reporter import _change_to_dict, _finding_id, apply_show_only
-            from .reporter_markdown import ShowOnlyFilter
-            from .severity import missing_contract_exit_code
+            from .reporter import _change_to_dict
 
-            existing_ids = {_finding_id(c) for c in result.changes}
             eff_sets = result._effective_kind_sets()
-            scoped_only = list(getattr(result, "scoped_only_changes", ()) or ())
-            if show_only and scoped_only:
-                scoped_only = apply_show_only(
-                    scoped_only,
-                    show_only,
-                    policy=result.policy,
-                    kind_sets=eff_sets,
-                    policy_file=result.policy_file,
-                )
+            scoped_only, missing_labels, blocks, missing_kind = (
+                _resolve_scoped_gate_findings(result, severity_config, show_only)
+            )
             for c in scoped_only:
-                if _finding_id(c) not in existing_ids:
-                    changes_list.append(
-                        _change_to_dict(
-                            c,
-                            policy=result.policy or "strict_abi",
-                            kind_sets=eff_sets,
-                            policy_file=result.policy_file,
-                        )
+                changes_list.append(
+                    _change_to_dict(
+                        c,
+                        policy=result.policy or "strict_abi",
+                        kind_sets=eff_sets,
+                        policy_file=result.policy_file,
                     )
-            gate_scope = getattr(result, "gate_scope", None)
-            missing_kind = (
-                "used_by_missing_symbol" if gate_scope == "used_by"
-                else "required_symbol_missing"
-            )
-            blocks = (
-                severity_config is None
-                or missing_contract_exit_code(severity_config) != 0
-            )
-            # A missing-contract label has no backing Change/ChangeKind, so
-            # it can't run through apply_show_only -- but --show-only's
-            # severity dimension still applies: without this, a --show-only
-            # run that excludes breaking findings would still include a
-            # blocking missing-contract entry the filter was meant to
-            # exclude (Codex review, mirrors the identical sarif.to_sarif
-            # fix). Element/action tokens don't cleanly apply to "a symbol is
-            # simply absent", so only the severity dimension is checked.
-            missing_severity_label = "breaking" if blocks else "compatible"
-            show_only_severities = (
-                ShowOnlyFilter.parse(show_only).severities if show_only else frozenset()
-            )
-            missing_labels = (
-                getattr(result, "scoped_missing_labels", ()) or ()
-                if not show_only_severities or missing_severity_label in show_only_severities
-                else ()
-            )
+                )
             for label in missing_labels:
                 changes_list.append(
                     {
@@ -1760,6 +1784,14 @@ def _fold_scoped_compat_into_text(
                     f"{len(summary['missing_versions'])} version(s), "
                     f"{summary['relevant_change_count']} relevant change(s))"
                 )
+                # Name the actual missing symbols/versions, not just their
+                # count (Codex review) -- a human reading the default text
+                # report otherwise has no way to tell *which* symbol broke
+                # this app without re-running with --format json.
+                for sym in summary["missing_symbols"]:
+                    lines.append(f"  - missing symbol: `{sym}`")
+                for ver in summary["missing_versions"]:
+                    lines.append(f"  - missing version: `{ver}`")
         if required_symbols is not None:
             lines.append("## Scoped to --required-symbol(s) contract")
             lines.append(
@@ -1768,6 +1800,26 @@ def _fold_scoped_compat_into_text(
                 f"{len(required_symbols['required_entrypoints'])} required "
                 f"entrypoint(s))"
             )
+            for entrypoint in required_symbols["missing_entrypoints"]:
+                lines.append(f"  - missing entrypoint: `{entrypoint}`")
+        # Scoped-only changes (e.g. PE_ORDINAL_RETARGETED) and uncovered
+        # missing-contract labels are relevant to the scoped gate but never
+        # land in `result.changes` -- name them here too, mirroring the
+        # JSON/SARIF/JUnit fold-in, so a text/markdown/review reader sees the
+        # same actionable findings a JSON consumer would (Codex review).
+        scoped_only, missing_labels, blocks, _missing_kind = (
+            _resolve_scoped_gate_findings(result, severity_config, show_only)
+        )
+        if scoped_only or missing_labels:
+            lines.append("## Additional scoped-gate findings")
+            severity_tag = "breaking" if blocks else "compatible"
+            for label in missing_labels:
+                lines.append(
+                    f"- `{label}` is required but missing from the new "
+                    f"library ({severity_tag})"
+                )
+            for c in scoped_only:
+                lines.append(f"- {c.kind.value}: {c.description}")
         return "\n".join(lines)
 
     return text
