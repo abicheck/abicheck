@@ -32,6 +32,7 @@ fixtures; ``--check`` fails if they drift. The per-case ``expected_kinds`` live
 in ``examples/ground_truth.json`` (the catalog's single source of truth); this
 script only owns the fixture *bytes*.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -68,7 +69,9 @@ EXAMPLES = _REPO / "examples"
 # L3 — build-evidence pairs
 # ---------------------------------------------------------------------------
 def _build_evidence(flags: list[str]) -> dict[str, Any]:
-    cu = CompileUnit(id="tu0", source="src/lib.cpp", language="CXX", abi_relevant_flags=flags)
+    cu = CompileUnit(
+        id="tu0", source="src/lib.cpp", language="CXX", abi_relevant_flags=flags
+    )
     ev = BuildEvidence(
         targets=[Target(id="libdemo", name="demo", kind=TargetKind.SHARED_LIBRARY)],
         compile_units=[cu],
@@ -90,8 +93,11 @@ def _loc(path: str, line: int) -> SourceLocation:
 #: source bucket (not a relinked exported-symbol root) is what marks L4 coverage.
 def _keeper_decl() -> SourceEntity:
     return SourceEntity(
-        id="demo::keep", kind="function", qualified_name="demo::keep",
-        mangled_name="_ZN4demo4keepEv", visibility="public_header",
+        id="demo::keep",
+        kind="function",
+        qualified_name="demo::keep",
+        mangled_name="_ZN4demo4keepEv",
+        visibility="public_header",
         source_location=_loc("include/demo/keep.h", 3),
     )
 
@@ -112,7 +118,9 @@ def _graph(nodes: list[GraphNode], edges: list[GraphEdge]) -> dict[str, Any]:
     return SourceGraphSummary(nodes=nodes, edges=edges).to_dict()
 
 
-def _N(nid: str, kind: str, label: str, attrs: dict[str, Any] | None = None) -> GraphNode:
+def _N(
+    nid: str, kind: str, label: str, attrs: dict[str, Any] | None = None
+) -> GraphNode:
     return GraphNode(id=nid, kind=kind, label=label, attrs=dict(attrs or {}))
 
 
@@ -128,47 +136,81 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
 
     # ---- L3 ----------------------------------------------------------------
     cases["case152_enum_size_flag_flip"] = (
-        "L3", _build_evidence([]), _build_evidence(["-fshort-enums"]),
+        "L3",
+        _build_evidence([]),
+        _build_evidence(["-fshort-enums"]),
     )
     # Struct packing's compiler default is target-dependent (GCC/Clang natural
     # vs MSVC /Zp8), so a flip is only reported when both sides are explicit —
     # here pack width 8 vs 1.
     cases["case153_struct_packing_flip"] = (
-        "L3", _build_evidence(["-fpack-struct=8"]), _build_evidence(["-fpack-struct=1"]),
+        "L3",
+        _build_evidence(["-fpack-struct=8"]),
+        _build_evidence(["-fpack-struct=1"]),
     )
     cases["case154_lto_mode_flip"] = (
-        "L3", _build_evidence([]), _build_evidence(["-flto"]),
+        "L3",
+        _build_evidence([]),
+        _build_evidence(["-flto"]),
     )
     cases["case155_char_signedness_flip"] = (
-        "L3", _build_evidence(["-fsigned-char"]), _build_evidence(["-funsigned-char"]),
+        "L3",
+        _build_evidence(["-fsigned-char"]),
+        _build_evidence(["-funsigned-char"]),
     )
 
     # ---- L4 ----------------------------------------------------------------
     hdr = "include/demo/config.h"
     cases["case156_public_macro_removed"] = (
         "L4",
-        _surface(keeper=True, reachable_macros=[
-            SourceEntity(id="DEMO_MAX_ITEMS", kind="macro", qualified_name="DEMO_MAX_ITEMS",
-                         value="64", visibility="public_header", source_location=_loc(hdr, 12)),
-        ]),
+        _surface(
+            keeper=True,
+            reachable_macros=[
+                SourceEntity(
+                    id="DEMO_MAX_ITEMS",
+                    kind="macro",
+                    qualified_name="DEMO_MAX_ITEMS",
+                    value="64",
+                    visibility="public_header",
+                    source_location=_loc(hdr, 12),
+                ),
+            ],
+        ),
         _surface(keeper=True),
     )
     cases["case157_inline_function_removed"] = (
         "L4",
-        _surface(keeper=True, reachable_inline_bodies=[
-            SourceEntity(id="demo::clamp", kind="inline", qualified_name="demo::clamp",
-                         body_hash="sha256:clampv1", visibility="public_header",
-                         source_location=_loc("include/demo/math.h", 20)),
-        ]),
+        _surface(
+            keeper=True,
+            reachable_inline_bodies=[
+                SourceEntity(
+                    id="demo::clamp",
+                    kind="inline",
+                    qualified_name="demo::clamp",
+                    body_hash="sha256:clampv1",
+                    visibility="public_header",
+                    source_location=_loc("include/demo/math.h", 20),
+                ),
+            ],
+        ),
         _surface(keeper=True),
     )
     cases["case158_public_typedef_removed"] = (
         "L4",
-        _surface(keeper=True, reachable_types=[
-            SourceEntity(id="demo::handle_t", kind="typedef", qualified_name="demo::handle_t",
-                         type_hash="sha256:h1", value="int", visibility="public_header",
-                         source_location=_loc("include/demo/handle.h", 8)),
-        ]),
+        _surface(
+            keeper=True,
+            reachable_types=[
+                SourceEntity(
+                    id="demo::handle_t",
+                    kind="typedef",
+                    qualified_name="demo::handle_t",
+                    type_hash="sha256:h1",
+                    value="int",
+                    visibility="public_header",
+                    source_location=_loc("include/demo/handle.h", 8),
+                ),
+            ],
+        ),
         _surface(keeper=True),
     )
 
@@ -177,7 +219,9 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
     l5_nodes = [
         _N("decl:demo::parse", "source_decl", "demo::parse()"),
         _N(
-            "decl:detail::validate", "source_decl", "detail::validate()",
+            "decl:detail::validate",
+            "source_decl",
+            "detail::validate()",
             attrs={"visibility": "private_header"},
         ),
         _N("sym:_ZN4demo5parseEv", "binary_symbol", "demo::parse"),
@@ -191,9 +235,13 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
     cases["case160_public_api_internal_dep_added"] = (
         "L5",
         _graph(l5_nodes, l5_base),
-        _graph(l5_nodes, l5_base + [
-            _E("decl:demo::parse", "decl:detail::validate", "DECL_CALLS_DECL"),
-        ]),
+        _graph(
+            l5_nodes,
+            l5_base
+            + [
+                _E("decl:demo::parse", "decl:detail::validate", "DECL_CALLS_DECL"),
+            ],
+        ),
     )
 
     # case161: the library gains an inter-target build/link dependency.
@@ -204,7 +252,9 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
     cases["case161_target_dependency_added"] = (
         "L5",
         _graph(l5b_nodes, []),
-        _graph(l5b_nodes, [_E("target:libdemo", "target:libcrypto", "TARGET_DEPENDS_ON")]),
+        _graph(
+            l5b_nodes, [_E("target:libdemo", "target:libcrypto", "TARGET_DEPENDS_ON")]
+        ),
     )
 
     # case162: an exported symbol's declaring file moved. Production graphs attach
@@ -219,14 +269,73 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
     l5c_map = _E("decl:demo::init", "sym:_ZN4demo4initEv", "SOURCE_DECL_MAPS_TO_SYMBOL")
     cases["case162_symbol_source_owner_changed"] = (
         "L5",
-        _graph(l5c_nodes, [l5c_map, _E("hdr:include/demo/legacy.h", "decl:demo::init", "SOURCE_DECLARES")]),
-        _graph(l5c_nodes, [l5c_map, _E("hdr:include/demo/init.h", "decl:demo::init", "SOURCE_DECLARES")]),
+        _graph(
+            l5c_nodes,
+            [
+                l5c_map,
+                _E("hdr:include/demo/legacy.h", "decl:demo::init", "SOURCE_DECLARES"),
+            ],
+        ),
+        _graph(
+            l5c_nodes,
+            [
+                l5c_map,
+                _E("hdr:include/demo/init.h", "decl:demo::init", "SOURCE_DECLARES"),
+            ],
+        ),
+    )
+
+    # case187: a public struct newly gains a private field type — ADR-041 P0
+    # slice 1's own headline "not a call at all" example
+    # (`struct Public { detail::PrivateType* p; };`). Unlike case160 (a
+    # DECL_CALLS_DECL addition), this exercises the type-graph edge family
+    # (type_graph.py's TYPE_HAS_FIELD_TYPE/TYPE_INHERITS/DECL_HAS_TYPE/
+    # DECL_REFERENCES_DECL) that ADR-041 added alongside the pre-existing call
+    # graph. A self-loop TYPE_HAS_FIELD_TYPE edge on the public type is present
+    # on *both* sides (mirroring case160's self-loop DECL_CALLS_DECL trick) so
+    # `_common_dependency_edge_kinds` has per-kind edge-presence coverage for
+    # the family on the old side without needing extractor_passes bookkeeping.
+    l5d_nodes = [
+        _N(
+            "type:demo::Public",
+            "record_type",
+            "demo::Public",
+            attrs={"visibility": "public_header"},
+        ),
+        _N(
+            "type:detail::PrivateType",
+            "record_type",
+            "detail::PrivateType",
+            attrs={"visibility": "private_header"},
+        ),
+        _N("hdr:include/demo/api.h", "header", "demo/api.h"),
+    ]
+    l5d_base = [
+        _E("hdr:include/demo/api.h", "type:demo::Public", "SOURCE_DECLARES"),
+        _E("type:demo::Public", "type:demo::Public", "TYPE_HAS_FIELD_TYPE"),
+    ]
+    cases["case187_public_struct_private_field_type"] = (
+        "L5",
+        _graph(l5d_nodes, l5d_base),
+        _graph(
+            l5d_nodes,
+            l5d_base
+            + [
+                _E(
+                    "type:demo::Public",
+                    "type:detail::PrivateType",
+                    "TYPE_HAS_FIELD_TYPE",
+                ),
+            ],
+        ),
     )
 
     return cases
 
 
-def _write_or_check(case_name: str, side: str, data: dict[str, Any], *, check: bool) -> bool:
+def _write_or_check(
+    case_name: str, side: str, data: dict[str, Any], *, check: bool
+) -> bool:
     path = EXAMPLES / case_name / f"{side}.json"
     rendered = json.dumps(data, indent=2, sort_keys=True) + "\n"
     if check:
@@ -244,7 +353,9 @@ def _write_or_check(case_name: str, side: str, data: dict[str, Any], *, check: b
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--check", action="store_true", help="verify committed fixtures are in sync")
+    ap.add_argument(
+        "--check", action="store_true", help="verify committed fixtures are in sync"
+    )
     args = ap.parse_args()
 
     ok = True

@@ -97,7 +97,7 @@
    "api_break": false,
    "bad_practice": true,
    "category": "breaking",
-   "description": "internal_helper's default→hidden visibility change is a DWARF-only (no headers, no castxml) L0/L1 fixture. Detected via func_visibility_changed: dwarf_snapshot.py's _process_subprogram no longer unconditionally drops a non-exported function — when DW_AT_external shows real external linkage (not a genuine C `static`) but the symbol is absent from .dynsym, the function is kept as Visibility.HIDDEN (mirroring the header/castxml backend's existing hidden-retention behaviour) instead of vanishing from the snapshot, so the hidden-visibility transition is distinguishable from an outright removal.",
+   "description": "internal_helper's default\u2192hidden visibility change is a DWARF-only (no headers, no castxml) L0/L1 fixture. Detected via func_visibility_changed: dwarf_snapshot.py's _process_subprogram no longer unconditionally drops a non-exported function \u2014 when DW_AT_external shows real external linkage (not a genuine C `static`) but the symbol is absent from .dynsym, the function is kept as Visibility.HIDDEN (mirroring the header/castxml backend's existing hidden-retention behaviour) instead of vanishing from the snapshot, so the hidden-visibility transition is distinguishable from an outright removal.",
    "expected": "BREAKING",
    "expected_kinds": [
     "func_visibility_changed"
@@ -398,7 +398,7 @@
     "windows"
    ],
    "runtime_baseline_exit": 1,
-   "policy_note": "The .so files are byte-identical between v1 and v2 (deliberately — no template instantiations in v1.cpp/v2.cpp), so an already-built consumer binary keeps linking and running unmodified. The underlying compatibility fact is API_BREAK (recompilation-only failure: the renamed policy tags and dropped instantiation-anchor typedef stop resolving against v2 headers). `expected` stays BREAKING because `typedef_removed`/`type_removed` are generic detectors that conservatively classify every such removal as BREAKING by default policy, without distinguishing 'this symbol never existed in the binary to begin with' from an actual layout/link break."
+   "policy_note": "The .so files are byte-identical between v1 and v2 (deliberately \u2014 no template instantiations in v1.cpp/v2.cpp), so an already-built consumer binary keeps linking and running unmodified. The underlying compatibility fact is API_BREAK (recompilation-only failure: the renamed policy tags and dropped instantiation-anchor typedef stop resolving against v2 headers). `expected` stays BREAKING because `typedef_removed`/`type_removed` are generic detectors that conservatively classify every such removal as BREAKING by default policy, without distinguishing 'this symbol never existed in the binary to begin with' from an actual layout/link break."
   },
   "case10_return_type": {
    "abi_break": true,
@@ -543,7 +543,7 @@
    "api_break": false,
    "bad_practice": false,
    "category": "breaking",
-   "description": "A public struct field and a return type gained the C11 _Atomic qualifier. Per WG14 the size/alignment of an _Atomic-qualified type may differ from the unqualified type and varies across compilers, so layout and the return ABI diverge. Detected via atomic_qualifier_changed: both metadata layers now spell the qualifier as the literal string \"_Atomic\" instead of losing it — dwarf_metadata.py/dwarf_snapshot.py special-case DW_TAG_atomic_type (previously unhandled, falling through to a generic fallback), and dumper_castxml.py recognises castxml's Unimplemented/type_class=\"Atomic\" node (castxml cannot model _Atomic at all and exposes no reference to the wrapped inner type) and renders it as \"_Atomic\" rather than the literal tag name \"Unimplemented\".",
+   "description": "A public struct field and a return type gained the C11 _Atomic qualifier. Per WG14 the size/alignment of an _Atomic-qualified type may differ from the unqualified type and varies across compilers, so layout and the return ABI diverge. Detected via atomic_qualifier_changed: both metadata layers now spell the qualifier as the literal string \"_Atomic\" instead of losing it \u2014 dwarf_metadata.py/dwarf_snapshot.py special-case DW_TAG_atomic_type (previously unhandled, falling through to a generic fallback), and dumper_castxml.py recognises castxml's Unimplemented/type_class=\"Atomic\" node (castxml cannot model _Atomic at all and exposes no reference to the wrapped inner type) and renders it as \"_Atomic\" rather than the literal tag name \"Unimplemented\".",
    "expected": "BREAKING",
    "expected_kinds": [
     "atomic_qualifier_changed"
@@ -1033,7 +1033,7 @@
    "api_break": false,
    "bad_practice": true,
    "category": "breaking",
-   "description": "Library carries its major version as a suffix on every exported symbol (ICU u_<name>_<major>); v2 bumps the whole API _3 -> _4 at once. Source using a version macro keeps compiling, but the .so renames all symbols, so consumers linked at the same SONAME fail with undefined symbol. abicheck reports the removals (BREAKING) and adds one advisory versioned_symbol_scheme_detected finding; opt-in --collapse-versioned-symbols reclassifies the version-rename pairs to show the real delta. Detected via versioned_symbol_scheme_detected: dumper_castxml.py now reconciles a function's mangled identity against the real ELF export table before it reaches the detector — these are plain C functions with no extern \"C\", so castxml (parsing the header in ambiguous/C++ mode) previously pseudo-mangled them (e.g. 'mylib_init_3' -> '_Z12mylib_init_3'); when that guessed mangling matches no real export while the bare declared name does, the bare name is now used as the canonical symbol identity instead, so the digit-collapse path in versioned_symbol_scheme.py's _scheme_key sees the real plain names and pairs them correctly.",
+   "description": "Library carries its major version as a suffix on every exported symbol (ICU u_<name>_<major>); v2 bumps the whole API _3 -> _4 at once. Source using a version macro keeps compiling, but the .so renames all symbols, so consumers linked at the same SONAME fail with undefined symbol. abicheck reports the removals (BREAKING) and adds one advisory versioned_symbol_scheme_detected finding; opt-in --collapse-versioned-symbols reclassifies the version-rename pairs to show the real delta. Detected via versioned_symbol_scheme_detected: dumper_castxml.py now reconciles a function's mangled identity against the real ELF export table before it reaches the detector \u2014 these are plain C functions with no extern \"C\", so castxml (parsing the header in ambiguous/C++ mode) previously pseudo-mangled them (e.g. 'mylib_init_3' -> '_Z12mylib_init_3'); when that guessed mangling matches no real export while the bare declared name does, the bare name is now used as the canonical symbol identity instead, so the digit-collapse path in versioned_symbol_scheme.py's _scheme_key sees the real plain names and pairs them correctly.",
    "expected": "BREAKING",
    "expected_kinds": [
     "func_removed",
@@ -2016,6 +2016,25 @@
     "linux"
    ]
   },
+  "case187_public_struct_private_field_type": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": true,
+   "category": "risk",
+   "description": "In the derived L5 source graph the public type demo::Public newly carries a TYPE_HAS_FIELD_TYPE edge to the internal (non-public-header) type detail::PrivateType that it did not reach in v1 \u2014 ADR-041's own headline 'not a call at all' example (a public struct gaining a private field type). The public surface takes on an undeclared structural dependency, so a later change to the internal type becomes a hidden risk to the API. Sibling of case160 (which exercises the same finding via a DECL_CALLS_DECL edge instead); a source-graph risk, never on its own an artifact-proven break.",
+   "expected": "COMPATIBLE_WITH_RISK",
+   "expected_kinds": [
+    "public_api_internal_dependency_added"
+   ],
+   "fixtures": [
+    "old.json",
+    "new.json"
+   ],
+   "min_evidence": "L5",
+   "platforms": [
+    "linux"
+   ]
+  },
   "case18_dependency_leak": {
    "abi_break": true,
    "api_break": false,
@@ -2119,7 +2138,7 @@
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
-   "description": "An existing concrete virtual method (Processor::process()) becomes pure virtual. diff_types.py picks between two kinds sharing the same detection code based on the old function's is_virtual flag: FUNC_VIRTUAL_BECAME_PURE (old function was already virtual — this case) vs. FUNC_PURE_VIRTUAL_ADDED (old function was not virtual at all). This case is the former.",
+   "description": "An existing concrete virtual method (Processor::process()) becomes pure virtual. diff_types.py picks between two kinds sharing the same detection code based on the old function's is_virtual flag: FUNC_VIRTUAL_BECAME_PURE (old function was already virtual \u2014 this case) vs. FUNC_PURE_VIRTUAL_ADDED (old function was not virtual at all). This case is the former.",
    "expected": "BREAKING",
    "expected_kinds": [
     "func_virtual_became_pure"
@@ -2256,7 +2275,7 @@
    "expected_kinds": [
     "type_field_type_changed"
    ],
-   "policy_note": "By-value cv-qualifier changes (adding const/volatile to a field) are binary-layout-neutral — size, alignment, and offsets are unchanged, so an already-built consumer binary keeps linking and running. The underlying compatibility fact is API_BREAK (recompilation-only failure: a const write becomes a compile error, a missing volatile risks stale-cache reads). `expected` stays BREAKING because the project's default policy conservatively routes field-qualifier changes through the same contract detector as other field-type changes, treating the semantic-divergence risk as release-blocking rather than recompile-only. This is a deliberate policy choice, not a claim that the binary itself is incompatible."
+   "policy_note": "By-value cv-qualifier changes (adding const/volatile to a field) are binary-layout-neutral \u2014 size, alignment, and offsets are unchanged, so an already-built consumer binary keeps linking and running. The underlying compatibility fact is API_BREAK (recompilation-only failure: a const write becomes a compile error, a missing volatile risks stale-cache reads). `expected` stays BREAKING because the project's default policy conservatively routes field-qualifier changes through the same contract detector as other field-type changes, treating the semantic-divergence risk as release-blocking rather than recompile-only. This is a deliberate policy choice, not a claim that the binary itself is incompatible."
   },
   "case31_enum_rename": {
    "abi_break": false,
@@ -3073,7 +3092,7 @@
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
-   "description": "Internal-namespace leak: mylib::detail::descriptor_base gains a field; public mylib::knn_descriptor inherits from it, so sizeof/layout of the public class changes. Detected via internal_type_leaks_via_public_api, escalating the existing type_size_changed/struct_field_added findings: dumper_castxml.py's _build_record_type now also records a namespace-qualified RecordType.qualified_name (e.g. \"mylib::detail::descriptor_base\") alongside the bare RecordType.name, and internal_leak.py consults it whenever the bare spelling alone carries no namespace segment — RecordType.name itself stays bare so it keeps matching the DWARF backend's equally-bare struct names.",
+   "description": "Internal-namespace leak: mylib::detail::descriptor_base gains a field; public mylib::knn_descriptor inherits from it, so sizeof/layout of the public class changes. Detected via internal_type_leaks_via_public_api, escalating the existing type_size_changed/struct_field_added findings: dumper_castxml.py's _build_record_type now also records a namespace-qualified RecordType.qualified_name (e.g. \"mylib::detail::descriptor_base\") alongside the bare RecordType.name, and internal_leak.py consults it whenever the bare spelling alone carries no namespace segment \u2014 RecordType.name itself stays bare so it keeps matching the DWARF backend's equally-bare struct names.",
    "expected": "BREAKING",
    "expected_kinds": [
     "internal_type_leaks_via_public_api"
@@ -3090,7 +3109,7 @@
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
-   "description": "Internal-namespace leak: mylib::detail::table_impl gains a field; public mylib::table embeds it by value, so sizeof(table) grows. Detected via internal_type_leaks_via_public_api, escalating the existing struct_size_changed/type_field_added_compatible findings — same fix as case74/case76: dumper_castxml.py records a namespace-qualified RecordType.qualified_name that internal_leak.py consults when the bare type spelling carries no namespace segment.",
+   "description": "Internal-namespace leak: mylib::detail::table_impl gains a field; public mylib::table embeds it by value, so sizeof(table) grows. Detected via internal_type_leaks_via_public_api, escalating the existing struct_size_changed/type_field_added_compatible findings \u2014 same fix as case74/case76: dumper_castxml.py records a namespace-qualified RecordType.qualified_name that internal_leak.py consults when the bare type spelling carries no namespace segment.",
    "expected": "BREAKING",
    "expected_kinds": [
     "internal_type_leaks_via_public_api"
@@ -3129,7 +3148,7 @@
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
-   "description": "Internal-namespace leak through a templated detail:: base: mylib::detail::descriptor_base<Task> gains a field, growing every knn_descriptor<Task> instantiation. The leak is templated, so the sibling mangled-name-based detect_internal_template_leaks (diff_templates.py) — not the plain non-template internal_type_leaks_via_public_api — is the kind that actually fires and correctly captures this: it works from fully-qualified mangled names rather than castxml's bare RecordType.name (RecordType.qualified_name, added for case74/75/76, does not cover template instantiations — castxml's context-chain walk only reaches the enclosing namespace/class path, not per-instantiation template args).",
+   "description": "Internal-namespace leak through a templated detail:: base: mylib::detail::descriptor_base<Task> gains a field, growing every knn_descriptor<Task> instantiation. The leak is templated, so the sibling mangled-name-based detect_internal_template_leaks (diff_templates.py) \u2014 not the plain non-template internal_type_leaks_via_public_api \u2014 is the kind that actually fires and correctly captures this: it works from fully-qualified mangled names rather than castxml's bare RecordType.name (RecordType.qualified_name, added for case74/75/76, does not cover template instantiations \u2014 castxml's context-chain walk only reaches the enclosing namespace/class path, not per-instantiation template args).",
    "expected": "BREAKING",
    "expected_kinds": [
     "internal_template_leaks_via_public_api"
@@ -3512,7 +3531,7 @@
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
-   "description": "An empty tag struct (mirrors tbb::auto_partitioner) gains a member; sizeof grows from 1 to 8. Any consumer that passed the tag by value into a header-inline algorithm interface now writes an undersized argument into a wider slot. type_size_changed captures the breaking size growth; the field addition itself is correctly classified type_field_added_compatible (non-polymorphic struct, existing-field offsets unaffected) rather than type_field_added — the two are not the same claim, and the by-value-parameter risk this case demonstrates is carried entirely by type_size_changed.",
+   "description": "An empty tag struct (mirrors tbb::auto_partitioner) gains a member; sizeof grows from 1 to 8. Any consumer that passed the tag by value into a header-inline algorithm interface now writes an undersized argument into a wider slot. type_size_changed captures the breaking size growth; the field addition itself is correctly classified type_field_added_compatible (non-polymorphic struct, existing-field offsets unaffected) rather than type_field_added \u2014 the two are not the same claim, and the by-value-parameter risk this case demonstrates is carried entirely by type_size_changed.",
    "expected": "BREAKING",
    "expected_kinds": [
     "type_size_changed",
@@ -3545,7 +3564,7 @@
     "linux",
     "macos"
    ],
-   "policy_note": "Exported member symbols are unchanged, so an already-built consumer binary keeps linking and running against v2 — the underlying compatibility fact is API_BREAK (recompilation-only failure: `typename Alloc::value_type` and friends stop resolving). `expected` stays BREAKING because `typedef_removed` is a generic detector that conservatively classifies every nested-typedef removal as BREAKING by default policy, regardless of whether the removed alias is reachable only from source (never encoded in the binary). The catalog's `public_typedef_removed` (L4) case is the API_BREAK-classified sibling for source-ABI-replay evidence of the same removal pattern; the two differ in detector, not in the underlying fact."
+   "policy_note": "Exported member symbols are unchanged, so an already-built consumer binary keeps linking and running against v2 \u2014 the underlying compatibility fact is API_BREAK (recompilation-only failure: `typename Alloc::value_type` and friends stop resolving). `expected` stays BREAKING because `typedef_removed` is a generic detector that conservatively classifies every nested-typedef removal as BREAKING by default policy, regardless of whether the removed alias is reachable only from source (never encoded in the binary). The catalog's `public_typedef_removed` (L4) case is the API_BREAK-classified sibling for source-ABI-replay evidence of the same removal pattern; the two differ in detector, not in the underlying fact."
   },
   "case96_hidden_friend_removed": {
    "abi_break": false,

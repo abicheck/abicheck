@@ -49,7 +49,7 @@ _VALID_CATEGORIES = frozenset(
 _VALID_VERDICTS = frozenset(
     {"BREAKING", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "NO_CHANGE", "API_BREAK"}
 )
-_EXPECTED_CASE_COUNT = 186
+_EXPECTED_CASE_COUNT = 187
 
 
 def test_source_smoke_run_mode_skips_without_trusted_env(
@@ -162,7 +162,9 @@ class TestKnownGapToolchainScope:
 
     def test_real_cases_are_scoped(self):
         gt = json.loads(_GROUND_TRUTH.read_text())["verdicts"]
-        assert gt["case64_calling_convention_changed"]["known_gap_toolchains"] == ["gcc"]
+        assert gt["case64_calling_convention_changed"]["known_gap_toolchains"] == [
+            "gcc"
+        ]
         assert gt["case103_toolchain_flag_drift"]["known_gap_toolchains"] == ["clang"]
         case98 = gt["case98_cxx_standard_floor_raised"]
         assert case98["expected"] == "COMPATIBLE_WITH_RISK"
@@ -312,7 +314,9 @@ class TestBuildWithCmake:
             is_build = "--build" in cmd
             returncode = build_returncode if is_build else 0
             stderr = build_stderr if is_build else ""
-            return subprocess.CompletedProcess(cmd, returncode, stdout="", stderr=stderr)
+            return subprocess.CompletedProcess(
+                cmd, returncode, stdout="", stderr=stderr
+            )
 
         monkeypatch.setattr(ve.subprocess, "run", _fake_run)
         return calls
@@ -432,7 +436,10 @@ class TestBuildInfoPath:
 
     def test_present_file_returned(self, tmp_path: Path) -> None:
         (tmp_path / "v1.compile_commands.json").write_text("[]")
-        assert _build_info_path(tmp_path, "v1", True) == tmp_path / "v1.compile_commands.json"
+        assert (
+            _build_info_path(tmp_path, "v1", True)
+            == tmp_path / "v1.compile_commands.json"
+        )
 
     def test_opt_out_ignores_present_file(self, tmp_path: Path) -> None:
         # Without the ground_truth build_info flag, a stray compile DB must not
@@ -446,7 +453,9 @@ class TestBuildInfoPath:
         assert _build_info_path(tmp_path, "v1", True) is None
         assert _build_info_path(tmp_path, "v2", True) is not None
 
-    def test_real_build_info_cases_have_explicit_or_generated_build_context(self) -> None:
+    def test_real_build_info_cases_have_explicit_or_generated_build_context(
+        self,
+    ) -> None:
         # Every ground_truth case flagged build_info must either ship both
         # per-side compile DBs or have a CMake fixture whose generated
         # compile_commands.json supplies the real build flags.
@@ -539,7 +548,9 @@ class TestMainCategoryFilter:
             variant: str = DEFAULT_ARTIFACT_VARIANT,
         ) -> CaseResult:
             captured.append(name)
-            return CaseResult(name, "PASS", entry.get("expected"), entry.get("expected"), "", variant)
+            return CaseResult(
+                name, "PASS", entry.get("expected"), entry.get("expected"), "", variant
+            )
 
         with patch.object(ve, "run_case", side_effect=fake_run):
             main(["--category", "breaking", "--json"])
@@ -607,7 +618,9 @@ class TestMainExitCodes:
 
 class TestArtifactVariants:
     def test_default_variant_selector(self) -> None:
-        assert _selected_variants(DEFAULT_ARTIFACT_VARIANT) == (DEFAULT_ARTIFACT_VARIANT,)
+        assert _selected_variants(DEFAULT_ARTIFACT_VARIANT) == (
+            DEFAULT_ARTIFACT_VARIANT,
+        )
 
     def test_all_variant_selector(self) -> None:
         assert _selected_variants("all") == ARTIFACT_VARIANTS
@@ -635,7 +648,9 @@ class TestArtifactVariants:
             variant: str = DEFAULT_ARTIFACT_VARIANT,
         ) -> CaseResult:
             captured.append(variant)
-            return CaseResult(name, "PASS", entry.get("expected"), entry.get("expected"), "", variant)
+            return CaseResult(
+                name, "PASS", entry.get("expected"), entry.get("expected"), "", variant
+            )
 
         with patch.object(ve, "run_case", side_effect=fake_run):
             rc = main(["--artifact-variant", "stripped-headers", "--json"])
@@ -650,14 +665,23 @@ class TestArtifactVariants:
         cmake_build = tmp_path / "cmake_build"
         cmake_build.mkdir()
         compile_db = cmake_build / "compile_commands.json"
-        compile_db.write_text(json.dumps([{
-            "directory": str(cmake_build),
-            "file": str(src),
-            "arguments": [
-                "c++", "-D_GLIBCXX_USE_CXX11_ABI=0", "-std=c++20",
-                "-c", str(src),
-            ],
-        }]))
+        compile_db.write_text(
+            json.dumps(
+                [
+                    {
+                        "directory": str(cmake_build),
+                        "file": str(src),
+                        "arguments": [
+                            "c++",
+                            "-D_GLIBCXX_USE_CXX11_ABI=0",
+                            "-std=c++20",
+                            "-c",
+                            str(src),
+                        ],
+                    }
+                ]
+            )
+        )
 
         out = _write_source_compile_db(
             tmp_path,
@@ -670,8 +694,11 @@ class TestArtifactVariants:
 
         entries = json.loads(out.read_text())
         assert entries[0]["arguments"] == [
-            "c++", "-D_GLIBCXX_USE_CXX11_ABI=0", "-std=c++20",
-            "-c", str(src),
+            "c++",
+            "-D_GLIBCXX_USE_CXX11_ABI=0",
+            "-std=c++20",
+            "-c",
+            str(src),
         ]
 
     def test_result_json_includes_remeasurement_metadata(self) -> None:
@@ -755,11 +782,22 @@ class TestArtifactVariants:
         # Codex: a degraded `dump --sources` embeds source_abi coverage as
         # partial/not_collected — only `present` rows count as real L4/L5.
         snap = tmp_path / "snap.json"
-        snap.write_text(json.dumps({"build_source": {"manifest": {"coverage": [
-            {"layer": "L3_build", "status": "present"},
-            {"layer": "L4_source_abi", "status": "present"},
-            {"layer": "L5_source_graph", "status": "partial"},
-        ]}}}), encoding="utf-8")
+        snap.write_text(
+            json.dumps(
+                {
+                    "build_source": {
+                        "manifest": {
+                            "coverage": [
+                                {"layer": "L3_build", "status": "present"},
+                                {"layer": "L4_source_abi", "status": "present"},
+                                {"layer": "L5_source_graph", "status": "partial"},
+                            ]
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
         assert _embedded_present_layers(snap) == {"L3", "L4"}
 
         # No build_source / missing file → no layers claimed.

@@ -1,0 +1,72 @@
+{
+  "coverage": {},
+  "degraded_passes": {},
+  "edges": [
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "dst": "type:demo::Public",
+      "edge": "SOURCE_DECLARES",
+      "provenance": "",
+      "src": "hdr:include/demo/api.h"
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "dst": "type:demo::Public",
+      "edge": "TYPE_HAS_FIELD_TYPE",
+      "provenance": "",
+      "src": "type:demo::Public"
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "dst": "type:detail::PrivateType",
+      "edge": "TYPE_HAS_FIELD_TYPE",
+      "provenance": "",
+      "src": "type:demo::Public"
+    }
+  ],
+  "external_graph_refs": [],
+  "extractor_passes": {},
+  "graph_id": "sha256:70f0f719263c4b9dd8322ac3696229abe03c0943fe3214ba7e7a8661e587858c",
+  "indexes": {
+    "by_binary_symbol": {},
+    "by_file": {},
+    "by_source_decl": {},
+    "by_target": {}
+  },
+  "narrowed_passes": {},
+  "narrowed_scope": {},
+  "nodes": [
+    {
+      "attrs": {
+        "visibility": "public_header"
+      },
+      "confidence": "unknown",
+      "id": "type:demo::Public",
+      "kind": "record_type",
+      "label": "demo::Public",
+      "provenance": ""
+    },
+    {
+      "attrs": {
+        "visibility": "private_header"
+      },
+      "confidence": "unknown",
+      "id": "type:detail::PrivateType",
+      "kind": "record_type",
+      "label": "detail::PrivateType",
+      "provenance": ""
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "id": "hdr:include/demo/api.h",
+      "kind": "header",
+      "label": "demo/api.h",
+      "provenance": ""
+    }
+  ],
+  "schema_version": 1
+}
