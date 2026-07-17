@@ -313,3 +313,83 @@ class TestEndToEndBaselineSet:
         )
         assert result.returncode == 0, result.stdout + result.stderr
         assert "Self-compare validation" not in result.stdout
+
+
+_DUMP_LOOP_START = 'echo "::group::Dump baseline-set into $OUTPUT_DIR"'
+_DUMP_LOOP_END = 'echo "::endgroup::"'
+
+
+def _dump_loop_region() -> str:
+    """The per-library dump loop, extracted verbatim from run.sh -- the same
+    "parse the real file, don't hand-copy it" discipline as
+    ``test_action_run_sh_legacy_aliases.py`` / ``..._dry_run_baseline.py``."""
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_DUMP_LOOP_START)
+    end = text.index(_DUMP_LOOP_END, start) + len(_DUMP_LOOP_END)
+    return text[start:end]
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="actions/baseline/run.sh not found")
+class TestDumpLoopFieldSplitting:
+    """Regression: a library entry with `include` set but `header` omitted
+    (an empty field between two non-empty ones) used to have its `include`
+    value shift into `header` -- bash's word-splitting always treats a
+    literal tab in IFS as whitespace and collapses the adjacent empty field,
+    no matter what IFS is set to. run.sh now delimits with ASCII Unit
+    Separator (\\x1f) instead, which bash does not treat as whitespace."""
+
+    def _run_dump_loop(self, libraries: list[dict[str, str]]) -> str:
+        script = (
+            '_fail() { echo "::error::$1"; exit 1; }\n'
+            'abicheck() { echo "CMD_ARGS:$*"; return 0; }\n'
+            f"LIBRARIES_JSON='{json.dumps(libraries)}'\n"
+            'OUTPUT_DIR="$PWD"\n'
+            'BUILD_INFO=""\n'
+            'DEPTH=""\n'
+            'PROJECT_REF=""\n' + _dump_loop_region()
+        )
+        result = subprocess.run(
+            [_bash_executable(), "-c", script],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        return result.stdout
+
+    def test_include_without_header_stays_include(self) -> None:
+        stdout = self._run_dump_loop(
+            [{"name": "libfoo", "artifact": "a.so", "include": "include"}]
+        )
+        [cmd_line] = [
+            line for line in stdout.splitlines() if line.startswith("CMD_ARGS:")
+        ]
+        assert "-I include" in cmd_line
+        assert "-H" not in cmd_line.split()
+
+    def test_header_without_include_stays_header(self) -> None:
+        stdout = self._run_dump_loop(
+            [{"name": "libfoo", "artifact": "a.so", "header": "include/foo.h"}]
+        )
+        [cmd_line] = [
+            line for line in stdout.splitlines() if line.startswith("CMD_ARGS:")
+        ]
+        assert "-H include/foo.h" in cmd_line
+        assert "-I" not in cmd_line.split()
+
+    def test_both_header_and_include_are_kept_separate(self) -> None:
+        stdout = self._run_dump_loop(
+            [
+                {
+                    "name": "libfoo",
+                    "artifact": "a.so",
+                    "header": "include/foo.h",
+                    "include": "include",
+                }
+            ]
+        )
+        [cmd_line] = [
+            line for line in stdout.splitlines() if line.startswith("CMD_ARGS:")
+        ]
+        assert "-H include/foo.h" in cmd_line
+        assert "-I include" in cmd_line

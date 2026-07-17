@@ -50,10 +50,16 @@ for i, e in enumerate(entries):
 mkdir -p "$OUTPUT_DIR"
 
 echo "::group::Dump baseline-set into $OUTPUT_DIR"
-# Emit one TSV row per library (name, artifact, header, include -- header/
+# Emit one row per library (name, artifact, header, include -- header/
 # include default to empty, never absent, so the bash read below always
-# gets four fields). Python does the JSON parsing; bash just loops.
-while IFS=$'\t' read -r name artifact header include; do
+# gets four fields), delimited by ASCII Unit Separator (\x1f) rather than a
+# tab: bash's word-splitting always treats a literal tab in IFS as "IFS
+# whitespace" and collapses adjacent/empty fields regardless of what IFS is
+# set to, so a library with `include` set but `header` omitted (an adjacent
+# empty field) would silently shift include's value into header. \x1f is not
+# whitespace to bash, so empty fields between delimiters are preserved.
+# Python does the JSON parsing; bash just loops.
+while IFS=$'\x1f' read -r name artifact header include; do
   [[ -z "$name" ]] && continue
   echo "-- $name ($artifact)"
   CMD=(abicheck dump "$artifact")
@@ -73,7 +79,7 @@ while IFS=$'\t' read -r name artifact header include; do
 done < <(python3 -c '
 import json, sys
 for e in json.loads(sys.argv[1]):
-    print("\t".join([
+    print("\x1f".join([
         e["name"],
         e["artifact"],
         e.get("header", ""),
@@ -84,7 +90,7 @@ echo "::endgroup::"
 
 if [[ "$VALIDATION" == "strict" ]]; then
   echo "::group::Self-compare validation (each snapshot against itself)"
-  while IFS=$'\t' read -r name _artifact _header _include; do
+  while IFS=$'\x1f' read -r name _artifact _header _include; do
     [[ -z "$name" ]] && continue
     snap="$OUTPUT_DIR/$name.abicheck.json"
     if ! abicheck compare "$snap" "$snap" --format json > /dev/null; then

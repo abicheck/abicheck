@@ -281,6 +281,51 @@ class TestFreshness:
         assert manifest["freshness"]["refresh_required"] is True
         assert any("fact_set" in r for r in manifest["freshness"]["reasons"])
 
+    def test_fact_set_producer_change_requires_refresh(self, tmp_path: Path) -> None:
+        # Same fact_set name/version, but a different producer_version (e.g.
+        # a rebuilt Clang plugin) -- the recipe identity changed even though
+        # the two-field identity alone would look unchanged.
+        _write_snapshot(
+            tmp_path / "libfoo.abicheck.json",
+            library="libfoo",
+            schema_version=9,
+            fact_set={
+                "name": "abicheck-clang-canonical",
+                "version": 1,
+                "compiler_family": "clang",
+                "producer": "clang-plugin",
+                "producer_version": "2.0",
+                "compiler_version": "18.1.0",
+            },
+        )
+        entries = [{"name": "libfoo", "artifact": "a.so"}]
+        previous_path = tmp_path / "previous.json"
+        previous_path.write_text(
+            json.dumps(
+                {
+                    "manifest_version": 1,
+                    "project_ref": "",
+                    "profile": "",
+                    "snapshot_schema": 9,
+                    "fact_set": {
+                        "name": "abicheck-clang-canonical",
+                        "version": 1,
+                        "compiler_family": "clang",
+                        "producer": "clang-plugin",
+                        "producer_version": "1.0",
+                        "compiler_version": "18.1.0",
+                    },
+                    "artifacts": [{"library": "libfoo"}],
+                }
+            )
+        )
+        manifest = build_manifest_module.build_manifest(
+            tmp_path, "", "", entries, previous_path
+        )
+        assert manifest["fact_set"]["producer_version"] == "2.0"
+        assert manifest["freshness"]["refresh_required"] is True
+        assert any("fact_set" in r for r in manifest["freshness"]["reasons"])
+
 
 class TestMainCli:
     def test_main_writes_manifest_and_prints_outputs(

@@ -73,7 +73,14 @@ def build_manifest(
 ) -> dict[str, Any]:
     artifacts = []
     schema_versions: set[int] = set()
-    fact_set_ids: set[tuple[str, int]] = set()
+    # The full source-fact recipe identity, not just (name, version): two
+    # snapshots can share fact_set.version while a producer/compiler upgrade
+    # (e.g. a new Clang plugin build, or a different loading Clang) silently
+    # changed the opaque body/template hash recipe underneath it -- see
+    # abicheck/buildsource/fact_set.py's own producer/producer_version/
+    # compiler_version comparability rules, which this mirrors so a refresh
+    # is flagged for the same reasons.
+    fact_set_ids: set[tuple[str, int, str, str, str, str]] = set()
     for entry in entries:
         name = entry["name"]
         snap_path = output_dir / f"{name}.abicheck.json"
@@ -92,7 +99,16 @@ def build_manifest(
             and fact_set.get("name")
             and fact_set.get("version") is not None
         ):
-            fact_set_ids.add((str(fact_set["name"]), int(fact_set["version"])))
+            fact_set_ids.add(
+                (
+                    str(fact_set["name"]),
+                    int(fact_set["version"]),
+                    str(fact_set.get("compiler_family") or ""),
+                    str(fact_set.get("producer") or ""),
+                    str(fact_set.get("producer_version") or ""),
+                    str(fact_set.get("compiler_version") or ""),
+                )
+            )
         artifacts.append(
             {
                 "library": name,
@@ -123,8 +139,26 @@ def build_manifest(
 
     fact_set_out = None
     if len(fact_set_ids) == 1:
-        name, version = next(iter(fact_set_ids))
+        (
+            name,
+            version,
+            compiler_family,
+            producer,
+            producer_version,
+            compiler_version,
+        ) = next(iter(fact_set_ids))
         fact_set_out = {"name": name, "version": version}
+        # Only recorded when present, so a fact_set with no producer identity
+        # (a pre-C.8 producer, or a hand-written one) keeps the same
+        # {"name", "version"}-only shape as before.
+        if compiler_family:
+            fact_set_out["compiler_family"] = compiler_family
+        if producer:
+            fact_set_out["producer"] = producer
+        if producer_version:
+            fact_set_out["producer_version"] = producer_version
+        if compiler_version:
+            fact_set_out["compiler_version"] = compiler_version
 
     manifest: dict[str, Any] = {
         "manifest_version": 1,
