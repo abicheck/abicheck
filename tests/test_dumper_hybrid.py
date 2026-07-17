@@ -420,6 +420,30 @@ class TestCtorDtorReconciliation:
         merged = merge_snapshots(castxml, clang)
         assert merged.func_by_mangled("_Z3foov") is not None
 
+    def test_nested_class_inside_template_scope_normalized(self):
+        # Codex review: a last-component-only normalization leaves an
+        # ENCLOSING template argument untouched — castxml spells the nested
+        # class's scope "ns::Outer<int>::Inner" (only "Inner" has no
+        # template args), while the real mangled scope encodes the template
+        # arg on the ENCLOSING component: "ns::OuterIiE::Inner". Every
+        # component must be normalized, not just the innermost one.
+        synthetic = f"{SYNTHETIC_CTOR_KEY_PREFIX}ns::Outer<int>::Inner()"
+        castxml_ctor = Function(
+            name="Inner", mangled=synthetic, return_type="void",
+            access=AccessLevel.PUBLIC,
+        )
+        real_mangled = "_ZN2ns5OuterIiE5InnerC1Ev"
+        clang_ctor = Function(
+            name="Inner", mangled=real_mangled, return_type="void",
+            access=AccessLevel.PUBLIC,
+        )
+        castxml = _snap(functions=[castxml_ctor], ast_producer="castxml")
+        clang = _snap(functions=[clang_ctor], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+
+        assert merged.func_by_mangled(synthetic) is None
+        assert merged.func_by_mangled(real_mangled) is not None
+
 
 class TestVariableFactBackfill:
     def test_deprecated_backfill_and_provenance(self):
@@ -431,6 +455,59 @@ class TestVariableFactBackfill:
         v = merged.var_by_mangled("g")
         assert v.deprecated == "msg"
         assert merged.fact_provenance[var_fact_key("g", "deprecated")] == "clang"
+
+
+class TestParamDefaultsProvenance:
+    """Codex review: a clang-only function (castxml never produced it) must
+    be tagged so ``_diff_param_defaults`` can skip it — clang never
+    populates ``Param.default``, so treating such a function as
+    castxml-backed would misread the coverage gap as every default having
+    been removed."""
+
+    def test_castxml_sourced_function_tagged_castxml(self):
+        f = Function(name="foo", mangled="_Z3fooi", return_type="void")
+        castxml = _snap(functions=[f], ast_producer="castxml")
+        clang = _snap(ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+        assert (
+            merged.fact_provenance[func_fact_key("_Z3fooi", "param_defaults")]
+            == "castxml"
+        )
+
+    def test_clang_only_function_tagged_clang(self):
+        cf = Function(name="bar", mangled="_Z3bari", return_type="void")
+        castxml = _snap(ast_producer="castxml")
+        clang = _snap(functions=[cf], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+        assert (
+            merged.fact_provenance[func_fact_key("_Z3bari", "param_defaults")]
+            == "clang"
+        )
+        assert not both_castxml_backed_fact(
+            merged, merged, func_fact_key("_Z3bari", "param_defaults")
+        )
+
+    def test_ctor_dtor_reconciled_function_still_tagged_castxml(self):
+        # The declaration is castxml's even though its key got rewritten to
+        # the real clang mangled name during ctor/dtor reconciliation.
+        synthetic = f"{SYNTHETIC_CTOR_KEY_PREFIX}ns::Widget(int)"
+        castxml_ctor = Function(
+            name="Widget", mangled=synthetic, return_type="void",
+            params=[Param(name="n", type="int", default="5")],
+            access=AccessLevel.PUBLIC,
+        )
+        real_mangled = "_ZN2ns6WidgetC1Ei"
+        clang_ctor = Function(
+            name="Widget", mangled=real_mangled, return_type="void",
+            params=[Param(name="n", type="int")], access=AccessLevel.PUBLIC,
+        )
+        castxml = _snap(functions=[castxml_ctor], ast_producer="castxml")
+        clang = _snap(functions=[clang_ctor], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+        assert (
+            merged.fact_provenance[func_fact_key(real_mangled, "param_defaults")]
+            == "castxml"
+        )
 
 
 class TestTypeAndFieldFactBackfill:

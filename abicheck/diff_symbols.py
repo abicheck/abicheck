@@ -1234,16 +1234,35 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     ``Param.default`` is ``None`` only because the value is *unavailable*, not
     removed — comparing would report every defaulted parameter as
     ``PARAM_DEFAULT_VALUE_REMOVED``. Skip unless both sides are header-aware.
+
+    Additionally gated per-function-pair, but ONLY when either side is a
+    ``--ast-frontend hybrid`` snapshot (G28 Phase 3): a hybrid snapshot can
+    carry a mix of castxml-backed functions and clang-only functions castxml
+    never produced at all, and clang never populates ``Param.default``.
+    Without this extra check, a function present via castxml on one side and
+    only via clang (a coverage gap, not a real change) on the other would
+    misread as every default having been removed (Codex review). Scoped to
+    ``ast_producer == "hybrid"`` rather than routing through
+    ``both_castxml_backed_fact`` unconditionally: that helper treats an
+    unset/``None`` ``ast_producer`` (e.g. a hand-built snapshot in a test, or
+    a legacy pre-provenance one) as "not castxml-backed", which would
+    silently skip every plain castxml-vs-castxml comparison that never set
+    the field — a real behavior change entirely unrelated to the hybrid bug.
     """
     if not _both_header_aware(old, new):
         return []
     changes: list[Change] = []
     old_map = _public_functions(old)
     new_map = _public_functions(new)
+    check_hybrid_provenance = "hybrid" in (old.ast_producer, new.ast_producer)
 
     for mangled, f_old in old_map.items():
         f_new = new_map.get(mangled)
         if f_new is None:
+            continue
+        if check_hybrid_provenance and not both_castxml_backed_fact(
+            old, new, func_fact_key(mangled, "param_defaults")
+        ):
             continue
         # Compare parameter defaults pairwise
         for i, (p_old, p_new) in enumerate(zip(f_old.params, f_new.params)):

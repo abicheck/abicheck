@@ -482,6 +482,36 @@ class TestParamDefaultChanged:
         r = compare(_snap(functions=[f_v1]), _snap(functions=[f_v2]))
         assert ChangeKind.PARAM_DEFAULT_VALUE_REMOVED in _kinds(r)
 
+    def test_clang_only_hybrid_function_not_reported_as_removed(self):
+        # Codex review (G28 Phase 3 hybrid merge): a hybrid snapshot's
+        # per-function "param_defaults" provenance can be "clang" for a
+        # function castxml never produced at all — clang doesn't populate
+        # Param.default, so every one of its params looks default-less. That
+        # must NOT read as "the default was removed" against an unrelated
+        # castxml-backed declaration of the same function on the other side.
+        f_v1 = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="30")],
+        )
+        f_v2 = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default=None)],
+        )
+        old = AbiSnapshot(
+            library="libtest.so.1", version="1.0", functions=[f_v1],
+            from_headers=True, ast_producer="hybrid",
+            fact_provenance={"func:_Z7connectv:param_defaults": "castxml"},
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1", version="1.0", functions=[f_v2],
+            from_headers=True, ast_producer="hybrid",
+            fact_provenance={"func:_Z7connectv:param_defaults": "clang"},
+        )
+        r = compare(old, new)
+        assert ChangeKind.PARAM_DEFAULT_VALUE_REMOVED not in _kinds(r)
+
 
 # ── param_renamed ────────────────────────────────────────────────────────
 

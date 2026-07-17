@@ -154,6 +154,40 @@ def _strip_itanium_template_suffix(component: str) -> str:
     return component
 
 
+def _split_top_level_scope(scope: str) -> list[str]:
+    """Split *scope* on ``::`` at bracket depth 0 only.
+
+    A source-form scope for a nested class inside a template
+    (``"ns::Outer<int>::Inner"``) must split into ``["ns", "Outer<int>",
+    "Inner"]``, not further — but a template argument can itself contain a
+    namespace-qualified type (``"ns::Widget<std::vector<int>>::Inner"``),
+    whose ``std::vector`` would wrongly split the scope in two if ``::``
+    were matched unconditionally. Mirrors the bracket-depth-aware convention
+    already used by ``_split_top_level_commas``.
+    """
+    parts = []
+    depth = 0
+    start = 0
+    i = 0
+    n = len(scope)
+    while i < n:
+        ch = scope[i]
+        if ch in "<([":
+            depth += 1
+            i += 1
+        elif ch in ">)]":
+            depth = max(0, depth - 1)
+            i += 1
+        elif depth == 0 and scope[i : i + 2] == "::":
+            parts.append(scope[start:i])
+            start = i + 2
+            i += 2
+        else:
+            i += 1
+    parts.append(scope[start:])
+    return parts
+
+
 def _normalize_scope_for_matching(scope: str) -> str:
     """Reduce a qualified ctor/dtor scope to a template-argument-free form
     comparable across both producers.
@@ -171,10 +205,21 @@ def _normalize_scope_for_matching(scope: str) -> str:
     that happen to share a base template name (e.g. ``Box<int>`` vs.
     ``Box<double>``, whose constructors almost always differ in exactly the
     template-dependent parameter that this scope normalization discards).
+
+    Every scope component is normalized, not just the innermost one: a
+    nested class inside a template (``"ns::Outer<int>::Inner"`` vs. the
+    mangled ``"ns::OuterIiE::Inner"``) has its template argument on an
+    ENCLOSING component, which a last-component-only normalization would
+    leave untouched on the castxml side while the clang side always encodes
+    every enclosing level — permanently blocking reconciliation for any
+    nested class inside a template (Codex review).
     """
-    head, sep, last = scope.rpartition("::")
-    last = last.split("<", 1)[0] if "<" in last else _strip_itanium_template_suffix(last)
-    return f"{head}{sep}{last}"
+    components = _split_top_level_scope(scope)
+    normalized = [
+        c.split("<", 1)[0] if "<" in c else _strip_itanium_template_suffix(c)
+        for c in components
+    ]
+    return "::".join(normalized)
 
 
 def _synthetic_ctor_dtor_scope(key: str) -> tuple[str, str, str] | None:
@@ -274,9 +319,27 @@ def _merge_functions(
         _backfill_function_facts(f, clang_by_mangled.get(f.mangled), provenance)
         for f in merged
     ]
+    # Param.default is populated solely from castxml (dumper_clang.py never
+    # sets it), so every function actually present in castxml_funcs is
+    # castxml-backed for that fact — even one whose synthetic ctor/dtor key
+    # got rewritten to a clang mangled name above, since the *declaration*
+    # itself is still castxml's.
+    for f in merged:
+        provenance[func_fact_key(f.mangled, "param_defaults")] = "castxml"
 
     merged_mangled = {f.mangled for f in merged}
-    merged.extend(cf for cf in clang_funcs if cf.mangled not in merged_mangled)
+    clang_only = [cf for cf in clang_funcs if cf.mangled not in merged_mangled]
+    # A clang-only function (castxml never produced it at all) carries no
+    # real default-argument data — every Param.default is None because
+    # dumper_clang.py doesn't capture them, not because the source has no
+    # defaults. Tagging it "clang" here (rather than leaving it unmarked,
+    # which is_castxml_backed_fact would treat as "unknown") makes
+    # _diff_param_defaults skip this function pair via
+    # both_castxml_backed_fact instead of misreading the coverage gap as a
+    # removed default (Codex review).
+    for cf in clang_only:
+        provenance[func_fact_key(cf.mangled, "param_defaults")] = "clang"
+    merged.extend(clang_only)
     return merged
 
 
