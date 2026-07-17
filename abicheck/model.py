@@ -216,6 +216,25 @@ class Function:
     # "" = captured, no dynamic spec; None = not captured. `noexcept` is NOT
     # folded in here — it keeps its dedicated is_noexcept field and kinds.
     exception_spec: str | None = None
+    # `[[deprecated]]`/`[[deprecated("msg")]]` (or castxml's `deprecation`
+    # attribute, which carries the same message text): a non-empty string is
+    # the message, "" is a bare `[[deprecated]]` with no message. Unlike most
+    # other tri-state fields here, None does NOT unambiguously mean
+    # "unsupported" — castxml also reports None for a genuinely
+    # non-deprecated declaration (there is no separate "deprecated with no
+    # info" state to distinguish it from). So the diff detector gates on
+    # header-tier confirmation at the *snapshot* level (mirroring
+    # Param.default/param_defaults's own header-tier-only gate), not by
+    # skipping a None on either side of a single pair — that would silently
+    # miss every real "gained/lost deprecated" transition, since one side of
+    # a real transition is always None (not-deprecated) by construction.
+    deprecated: str | None = None
+    # Explicit C++11 `override` specifier on a virtual method declaration.
+    # Tri-state like is_explicit/is_hidden_friend: True/False = captured;
+    # None = dumper/loader does not know (older snapshots, non-castxml
+    # producers, or a non-virtual/non-method declaration for which the
+    # specifier is not applicable).
+    is_override: bool | None = None
 
 
 @dataclass
@@ -235,6 +254,8 @@ class Variable:
     # Declared alignment in bits (alignas / __attribute__((aligned))).
     # None = not captured (older snapshots / dumpers without support).
     alignment_bits: int | None = None
+    # See Function.deprecated for the message-string convention.
+    deprecated: str | None = None
 
 
 @dataclass
@@ -248,6 +269,17 @@ class TypeField:
     is_volatile: bool = False
     is_mutable: bool = False
     access: AccessLevel = AccessLevel.PUBLIC
+    # Default member initializer expression, verbatim (value not evaluated).
+    # None = no initializer, or the dumper does not capture this (older
+    # snapshots / non-castxml producers). As with Function.deprecated, None
+    # is not unambiguously "unsupported" here — a real "gained/lost
+    # initializer" transition has one side genuinely None by construction —
+    # so the detector gates on header-tier confirmation at the *snapshot*
+    # level (mirroring Param.default/param_defaults) rather than skipping
+    # per-pair on either side being None.
+    default: str | None = None
+    # See Function.deprecated for the message-string convention.
+    deprecated: str | None = None
 
 
 @dataclass
@@ -340,6 +372,14 @@ class RecordType:
     # matching) that need to see the real namespace path. None when the type
     # is at global scope or the dumper couldn't determine it (e.g. DWARF-only).
     qualified_name: str | None = None
+    # Whether the class/struct declares at least one pure virtual function
+    # (making it abstract — cannot be instantiated). Tri-state like
+    # ``is_final``: True/False = captured (castxml's `abstract` attribute);
+    # None = dumper/loader could not determine (DWARF/symbols-only mode,
+    # older snapshots). The diff skips comparison when either side is None.
+    is_abstract: bool | None = None
+    # See Function.deprecated for the message-string convention.
+    deprecated: str | None = None
 
 
 @dataclass
@@ -357,6 +397,14 @@ class EnumType:
     # Provenance (ADR-015, schema v6) — see Function.source_header.
     source_header: str | None = None
     origin: ScopeOrigin = ScopeOrigin.UNKNOWN
+    # `enum class` / `enum struct` (C++11 scoped enumeration) versus a plain
+    # C-style enum. Tri-state like RecordType.is_final: True/False = captured
+    # (castxml's `scoped` attribute); None = dumper/loader could not
+    # determine (DWARF/symbols-only mode, older snapshots, non-castxml
+    # header producers). The diff skips comparison when either side is None.
+    is_scoped: bool | None = None
+    # See Function.deprecated for the message-string convention.
+    deprecated: str | None = None
 
 
 @dataclass

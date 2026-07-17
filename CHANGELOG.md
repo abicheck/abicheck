@@ -356,6 +356,41 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   dependent public entries were ever flagged as impacted. Now walks every
   `SOURCE_DECLARES` edge directly instead of the single-file lookup (Codex
   review).
+- **CastXML schema-completeness: 16 new `ChangeKind`s.** CastXML's own XML
+  schema already exposes several facts the header parser previously
+  discarded; each is now normalized into the model and has a dedicated
+  detector:
+  - **Default member initializers**: `FIELD_DEFAULT_INITIALIZER_REMOVED`
+    (`COMPATIBLE_WITH_RISK` — implicit initialization silently lost) /
+    `FIELD_DEFAULT_INITIALIZER_CHANGED` (`COMPATIBLE`). Gaining one is not
+    flagged, matching `PARAM_DEFAULT_VALUE_*`'s existing convention.
+  - **`abstract` records** (`abstract="1"`, ≥1 pure virtual):
+    `TYPE_BECAME_ABSTRACT` (`API_BREAK`) / `TYPE_LOST_ABSTRACT`
+    (`COMPATIBLE`).
+  - **`enum class`/`enum struct` scoping** (`scoped="1"`):
+    `ENUM_BECAME_SCOPED` (`API_BREAK`) / `ENUM_LOST_SCOPED`
+    (`COMPATIBLE_WITH_RISK` — implicit int conversions silently reappear).
+  - **Explicit C++11 `override` specifier**:
+    `FUNC_OVERRIDE_SPECIFIER_ADDED` (`COMPATIBLE`) /
+    `FUNC_OVERRIDE_SPECIFIER_REMOVED` (`COMPATIBLE_WITH_RISK`).
+  - **`[[deprecated]]`/`[[deprecated("msg")]]`** on functions, variables,
+    types, and enums (`FUNC`/`VAR`/`TYPE`/`ENUM_DEPRECATED_ADDED`/
+    `_REMOVED`, all `COMPATIBLE`), using castxml's `deprecation` attribute
+    for the message text.
+
+  Also fixes a real, pre-existing gap surfaced along the way: CastXML's
+  field parser never populated `TypeField.is_const`/`is_volatile`/
+  `is_mutable`, so the existing `FIELD_BECAME_CONST`/`VOLATILE`/`MUTABLE`
+  detectors were silently dead on every header-parsed snapshot — CastXML
+  being the default L2 backend. Now derived by walking the real CastXML
+  type chain (following `Typedef` indirection), not by pattern-matching the
+  rendered type spelling — fixing a case a naive regex-based fix would have
+  missed (a field declared through a typedef to a cv-qualified type renders
+  as a bare alias name with no visible qualifier). `restrict` is
+  deliberately *not* folded into the type spelling (unlike const/volatile
+  it has no ABI/mangling effect) — it's tracked via the pre-existing
+  `Param.is_restrict`/`PARAM_RESTRICT_CHANGED` instead, now finally
+  populated on the castxml path too.
 
 - `compare --help-all`: a second-level `--help` disclosure tier (G21.8
   collapse M2). Plain `compare --help` now shows only a curated common

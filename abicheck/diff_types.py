@@ -26,6 +26,7 @@ from .diff_cxx_rules import itanium_qualified_name, vtable_slot_is_override_reus
 from .diff_helpers import make_change
 from .diff_symbols import (
     _PUBLIC_VIS,
+    _both_header_aware,
     _public_functions,
     _public_variables,
     _should_filter_transitive_runtime_symbols,
@@ -298,7 +299,41 @@ def _diff_type_pair(
         _diff_type_vtable(name, t_old, t_new, old_funcs, new_funcs, old_types, new_types)
     )
     _append_type_finality_changes(changes, name, t_old, t_new)
+    _append_type_abstract_changes(changes, name, t_old, t_new)
     return changes
+
+
+def _append_type_abstract_changes(
+    changes: list[Change], name: str, t_old: RecordType, t_new: RecordType,
+) -> None:
+    """Detect `abstract` (>=1 pure virtual) transitions.
+
+    Tri-state, same rationale as ``_append_type_finality_changes``: only fire
+    when BOTH sides record it (header/castxml mode); ``None`` means the
+    dumper couldn't determine it (DWARF/symbols-only mode, older snapshots,
+    or an opaque record with no member list to have judged it from) rather
+    than "not abstract".
+    """
+    if t_old.is_abstract is None or t_new.is_abstract is None:
+        return
+    if t_old.is_abstract == t_new.is_abstract:
+        return
+    if t_new.is_abstract:
+        changes.append(make_change(
+            ChangeKind.TYPE_BECAME_ABSTRACT,
+            symbol=name,
+            name=name,
+            old_value="instantiable",
+            new_value="abstract",
+        ))
+    else:
+        changes.append(make_change(
+            ChangeKind.TYPE_LOST_ABSTRACT,
+            symbol=name,
+            name=name,
+            old_value="abstract",
+            new_value="instantiable",
+        ))
 
 
 def _append_type_finality_changes(
@@ -874,6 +909,7 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 ))
             continue
         e_new = new_map[name]
+        _append_enum_scoped_changes(changes, name, e_old, e_new)
         old_members = {m.name: m.value for m in e_old.members}
         new_members = {m.name: m.value for m in e_new.members}
         # Sentinel detection is name-pattern based to avoid accidental
@@ -951,6 +987,38 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 ))
 
     return changes
+
+
+def _append_enum_scoped_changes(
+    changes: list[Change], name: str, e_old: EnumType, e_new: EnumType,
+) -> None:
+    """Detect `enum class`/`enum struct` (C++11 scoped enum) transitions.
+
+    Tri-state, same rationale as ``_append_type_finality_changes``: only fire
+    when BOTH sides record it (header/castxml mode); ``None`` means the
+    dumper couldn't determine it (DWARF/symbols-only mode, older snapshots)
+    rather than "not scoped".
+    """
+    if e_old.is_scoped is None or e_new.is_scoped is None:
+        return
+    if e_old.is_scoped == e_new.is_scoped:
+        return
+    if e_new.is_scoped:
+        changes.append(make_change(
+            ChangeKind.ENUM_BECAME_SCOPED,
+            symbol=name,
+            name=name,
+            old_value="unscoped",
+            new_value="scoped",
+        ))
+    else:
+        changes.append(make_change(
+            ChangeKind.ENUM_LOST_SCOPED,
+            symbol=name,
+            name=name,
+            old_value="scoped",
+            new_value="unscoped",
+        ))
 
 
 def _sig_key(f: Function) -> tuple[str, tuple[str, ...]]:
@@ -1318,6 +1386,127 @@ def _diff_field_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             if f_new is None:
                 continue
             changes.extend(_check_field_qualifier_pair(name, fname, f_old, f_new))
+
+    return changes
+
+
+@registry.detector("field_default_initializer")
+def _diff_field_default_initializer(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
+    """Detect a field's default member initializer being removed or changed.
+
+    Header-tier only (like ``param_defaults``): the initializer expression is
+    populated solely from castxml header parsing, and ``TypeField.default``
+    is ``None`` both for "no initializer" and "the dumper doesn't capture
+    this" — see its docstring in model.py. Gaining an initializer is not
+    tracked (matches ``PARAM_DEFAULT_VALUE_*``'s convention: an added default
+    is purely additive, never itself flagged).
+    """
+    if not _both_header_aware(old, new):
+        return []
+    changes: list[Change] = []
+    excl = _exclude_stdlib_namespaces(old, new)
+    old_map = {t.name: t for t in old.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl)}
+    new_map = {t.name: t for t in new.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl)}
+
+    for name, t_old in old_map.items():
+        t_new = new_map.get(name)
+        if t_new is None:
+            continue
+        old_fields = {f.name: f for f in t_old.fields}
+        new_fields = {f.name: f for f in t_new.fields}
+
+        for fname, f_old in old_fields.items():
+            f_new = new_fields.get(fname)
+            if f_new is None or f_old.default is None:
+                continue
+            if f_new.default is None:
+                changes.append(make_change(
+                    ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED,
+                    symbol=name,
+                    name=name, detail=fname,
+                    old_value=f_old.default,
+                ))
+            elif f_old.default != f_new.default:
+                changes.append(make_change(
+                    ChangeKind.FIELD_DEFAULT_INITIALIZER_CHANGED,
+                    symbol=name,
+                    name=name, detail=fname,
+                    old_value=f_old.default,
+                    new_value=f_new.default,
+                ))
+
+    return changes
+
+
+@registry.detector("type_deprecated")
+def _diff_type_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
+    """Detect a class/struct/union gaining or losing `[[deprecated]]`.
+
+    Header-tier only — see ``FIELD_DEFAULT_INITIALIZER_REMOVED``'s docstring
+    above / ``Function.deprecated``'s in model.py for why this gates on
+    snapshot-level header-awareness rather than a per-pair None check.
+    """
+    if not _both_header_aware(old, new):
+        return []
+    changes: list[Change] = []
+    excl = _exclude_stdlib_namespaces(old, new)
+    old_map = {t.name: t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl)}
+    new_map = {t.name: t for t in new.types if _is_abi_surface_type(t, exclude_stdlib=excl)}
+
+    for name, t_old in old_map.items():
+        t_new = new_map.get(name)
+        if t_new is None:
+            continue
+        if t_old.deprecated is None and t_new.deprecated is not None:
+            changes.append(make_change(
+                ChangeKind.TYPE_DEPRECATED_ADDED,
+                symbol=name,
+                name=name, detail=t_new.deprecated,
+                new_value=t_new.deprecated,
+            ))
+        elif t_old.deprecated is not None and t_new.deprecated is None:
+            changes.append(make_change(
+                ChangeKind.TYPE_DEPRECATED_REMOVED,
+                symbol=name,
+                name=name,
+                old_value=t_old.deprecated,
+            ))
+
+    return changes
+
+
+@registry.detector("enum_deprecated")
+def _diff_enum_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
+    """Detect an enum gaining or losing `[[deprecated]]` (header-tier only)."""
+    if not _both_header_aware(old, new):
+        return []
+    changes: list[Change] = []
+    excl = _exclude_stdlib_namespaces(old, new)
+    old_map = {
+        e.name: e for e in old.enums if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
+    }
+    new_map = {
+        e.name: e for e in new.enums if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
+    }
+
+    for name, e_old in old_map.items():
+        e_new = new_map.get(name)
+        if e_new is None:
+            continue
+        if e_old.deprecated is None and e_new.deprecated is not None:
+            changes.append(make_change(
+                ChangeKind.ENUM_DEPRECATED_ADDED,
+                symbol=name,
+                name=name, detail=e_new.deprecated,
+                new_value=e_new.deprecated,
+            ))
+        elif e_old.deprecated is not None and e_new.deprecated is None:
+            changes.append(make_change(
+                ChangeKind.ENUM_DEPRECATED_REMOVED,
+                symbol=name,
+                name=name,
+                old_value=e_old.deprecated,
+            ))
 
     return changes
 

@@ -199,6 +199,8 @@ def _enum_type_from_dict(e: dict[str, Any]) -> EnumType:
         source_location=e.get("source_location"),
         source_header=e.get("source_header"),
         origin=_scope_origin_or_unknown(e.get("origin")),
+        is_scoped=e.get("is_scoped"),
+        deprecated=e.get("deprecated"),
     )
 
 
@@ -595,6 +597,8 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             is_variadic=f.get("is_variadic"),
             contract_attributes=f.get("contract_attributes"),
             exception_spec=f.get("exception_spec"),
+            deprecated=f.get("deprecated"),
+            is_override=f.get("is_override"),
         )
         for f in d.get("functions", [])
     ]
@@ -614,6 +618,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             source_header=v.get("source_header"),
             origin=_scope_origin_or_unknown(v.get("origin")),
             alignment_bits=v.get("alignment_bits"),
+            deprecated=v.get("deprecated"),
         )
         for v in d.get("variables", [])
     ]
@@ -634,6 +639,8 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
                     is_volatile=f.get("is_volatile", False),
                     is_mutable=f.get("is_mutable", False),
                     access=AccessLevel(f.get("access", "public")),
+                    default=f.get("default"),
+                    deprecated=f.get("deprecated"),
                 )
                 for f in t.get("fields", [])
             ],
@@ -656,6 +663,8 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             vptr_offset_bits=t.get("vptr_offset_bits"),
             base_offsets=t.get("base_offsets", {}),
             qualified_name=t.get("qualified_name"),
+            is_abstract=t.get("is_abstract"),
+            deprecated=t.get("deprecated"),
         )
         for t in d.get("types", [])
     ]

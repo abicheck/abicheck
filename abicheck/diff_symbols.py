@@ -1706,6 +1706,114 @@ def _diff_param_restrict(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     return changes
 
 
+@registry.detector("func_deprecated")
+def _diff_func_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
+    """Detect a function gaining or losing `[[deprecated]]`.
+
+    Header-tier only, gated at the snapshot level like ``param_defaults``:
+    ``Function.deprecated`` is ``None`` both for "not deprecated" and "the
+    dumper doesn't capture this" (see its docstring in model.py), so a
+    per-pair None check would silently miss every real transition (one side
+    of a real add/remove is always None by construction).
+    """
+    if not _both_header_aware(old, new):
+        return []
+    changes: list[Change] = []
+    old_map = _public_functions(old)
+    new_map = _public_functions(new)
+
+    for mangled, f_old in old_map.items():
+        f_new = new_map.get(mangled)
+        if f_new is None:
+            continue
+        if f_old.deprecated is None and f_new.deprecated is not None:
+            changes.append(make_change(
+                ChangeKind.FUNC_DEPRECATED_ADDED,
+                symbol=mangled,
+                name=f_old.name, detail=f_new.deprecated,
+                new_value=f_new.deprecated,
+            ))
+        elif f_old.deprecated is not None and f_new.deprecated is None:
+            changes.append(make_change(
+                ChangeKind.FUNC_DEPRECATED_REMOVED,
+                symbol=mangled,
+                name=f_old.name,
+                old_value=f_old.deprecated,
+            ))
+    return changes
+
+
+@registry.detector("func_override_specifier")
+def _diff_func_override_specifier(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
+    """Detect a virtual method gaining or losing the explicit `override` specifier.
+
+    Tri-state, same rationale as the vtable-index/explicit checks elsewhere:
+    only fire when BOTH sides record it (header/castxml mode, and only for a
+    member-function form that can carry the specifier at all — see
+    ``Function.is_override``'s docstring); ``None`` means not applicable /
+    not determined, not "no override".
+    """
+    changes: list[Change] = []
+    old_map = _public_functions(old)
+    new_map = _public_functions(new)
+
+    for mangled, f_old in old_map.items():
+        f_new = new_map.get(mangled)
+        if f_new is None:
+            continue
+        if f_old.is_override is None or f_new.is_override is None:
+            continue
+        if f_old.is_override == f_new.is_override:
+            continue
+        if f_new.is_override:
+            changes.append(make_change(
+                ChangeKind.FUNC_OVERRIDE_SPECIFIER_ADDED,
+                symbol=mangled,
+                name=f_old.name,
+                old_value="no override",
+                new_value="override",
+            ))
+        else:
+            changes.append(make_change(
+                ChangeKind.FUNC_OVERRIDE_SPECIFIER_REMOVED,
+                symbol=mangled,
+                name=f_old.name,
+                old_value="override",
+                new_value="no override",
+            ))
+    return changes
+
+
+@registry.detector("var_deprecated")
+def _diff_var_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
+    """Detect a variable gaining or losing `[[deprecated]]` (header-tier only)."""
+    if not _both_header_aware(old, new):
+        return []
+    changes: list[Change] = []
+    old_map = _public_variables(old)
+    new_map = _public_variables(new)
+
+    for mangled, v_old in old_map.items():
+        v_new = new_map.get(mangled)
+        if v_new is None:
+            continue
+        if v_old.deprecated is None and v_new.deprecated is not None:
+            changes.append(make_change(
+                ChangeKind.VAR_DEPRECATED_ADDED,
+                symbol=mangled,
+                name=v_old.name, detail=v_new.deprecated,
+                new_value=v_new.deprecated,
+            ))
+        elif v_old.deprecated is not None and v_new.deprecated is None:
+            changes.append(make_change(
+                ChangeKind.VAR_DEPRECATED_REMOVED,
+                symbol=mangled,
+                name=v_old.name,
+                old_value=v_old.deprecated,
+            ))
+    return changes
+
+
 @registry.detector("param_va_list")
 def _diff_param_va_list(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect va_list parameter changes (ABICC: Parameter_Became_VaList/Non_VaList)."""

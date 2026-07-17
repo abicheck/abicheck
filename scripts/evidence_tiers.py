@@ -313,6 +313,23 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "constant_changed": "L2",
     "param_default_value_changed": "L2",
     "param_default_value_removed": "L2",
+    # ── L2: CastXML schema-completeness (all castxml/header-only facts) ──
+    "field_default_initializer_removed": "L2",
+    "field_default_initializer_changed": "L2",
+    "type_became_abstract": "L2",
+    "type_lost_abstract": "L2",
+    "enum_became_scoped": "L2",
+    "enum_lost_scoped": "L2",
+    "func_override_specifier_added": "L2",
+    "func_override_specifier_removed": "L2",
+    "func_deprecated_added": "L2",
+    "func_deprecated_removed": "L2",
+    "var_deprecated_added": "L2",
+    "var_deprecated_removed": "L2",
+    "type_deprecated_added": "L2",
+    "type_deprecated_removed": "L2",
+    "enum_deprecated_added": "L2",
+    "enum_deprecated_removed": "L2",
     # ── L2: ADR-035 D4 cross-source validation that needs binary exports ↔
     # header decls ↔ header provenance (no compile DB) ──
     "exported_not_public": "L2",

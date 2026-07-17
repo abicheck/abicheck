@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from xml.etree.ElementTree import fromstring
 
+from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.dumper import _CastxmlParser
+from abicheck.model import AbiSnapshot
 
 # ── helpers ──────────────────────────────────────────────────────────────
 
@@ -387,3 +389,51 @@ _DEFAULT_ARG_XML = """<?xml version="1.0"?>
   <Namespace id="_1" name="::"/>
   <File id="f1" name="test.h"/>
 </CastXML>"""
+
+_FIELD_PLAIN_INT_XML = """<?xml version="1.0"?>
+<CastXML>
+  <Struct id="_2" name="Reg" context="_1" file="f1" line="1"
+          members="_4" size="32" align="32"/>
+  <Field id="_4" name="status" type="_7" offset="0" context="_2"/>
+  <FundamentalType id="_7" name="int" size="32"/>
+  <Namespace id="_1" name="::"/>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+
+_FIELD_VOLATILE_INT_XML = """<?xml version="1.0"?>
+<CastXML>
+  <Struct id="_2" name="Reg" context="_1" file="f1" line="1"
+          members="_4" size="32" align="32"/>
+  <Field id="_4" name="status" type="_8" offset="0" context="_2"/>
+  <CvQualifiedType id="_8" type="_7" volatile="1"/>
+  <FundamentalType id="_7" name="int" size="32"/>
+  <Namespace id="_1" name="::"/>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+
+
+class TestByValueFieldQualifierEndToEndDiff:
+    """Full parser -> compare() pipeline: a by-value field gaining `volatile`
+    (castxml's real spelling embeds the qualifier in the type string, e.g.
+    "int" -> "volatile int") is a deliberate source-break escalation for a
+    BY-VALUE field (unlike a pointer/reference-position cv change, which is
+    genuinely ABI-neutral) — see case30_field_qualifiers' BREAKING ground
+    truth and test_top_level_field_const_is_not_neutralised in
+    test_const_pointer_abi_neutral.py. So both the compatible
+    FIELD_BECAME_VOLATILE and the breaking TYPE_FIELD_TYPE_CHANGED are
+    expected from the real parser output, and the verdict is BREAKING. (An
+    earlier attempt to suppress TYPE_FIELD_TYPE_CHANGED here, per a Codex
+    review comment on PR #582, was reverted — it silently regressed that
+    ground truth.)"""
+
+    def test_by_value_volatile_field_change_escalates_to_breaking(self) -> None:
+        old_types = _make_parser(_FIELD_PLAIN_INT_XML).parse_types()
+        new_types = _make_parser(_FIELD_VOLATILE_INT_XML).parse_types()
+        old_snap = AbiSnapshot(library="libtest.so.1", version="1.0", types=old_types)
+        new_snap = AbiSnapshot(library="libtest.so.1", version="2.0", types=new_types)
+
+        r = compare(old_snap, new_snap)
+        kinds = {c.kind for c in r.changes}
+        assert ChangeKind.FIELD_BECAME_VOLATILE in kinds
+        assert ChangeKind.TYPE_FIELD_TYPE_CHANGED in kinds
+        assert r.verdict == Verdict.BREAKING

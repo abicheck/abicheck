@@ -933,6 +933,22 @@ class _CastxmlParser:
             # the compound ``attributes`` string (same channel as noexcept).
             contract_attributes=_extract_contract_attributes(el.get("attributes", "")),
             exception_spec=self._function_exception_spec(el),
+            # castxml's `deprecation` attribute carries the `[[deprecated]]`/
+            # `[[deprecated("msg")]]` message text verbatim; absent → None.
+            deprecated=el.get("deprecation"),
+            # Explicit C++11 `override` specifier: castxml has no dedicated
+            # boolean for it (distinct from `overrides`, the id-reference
+            # list used for vtable-slot dedup) — the `override` token is
+            # embedded in the same compound `attributes` string as
+            # `noexcept`/`final`. Only member-function forms that can
+            # actually be virtual may carry it; a free function/operator or
+            # a constructor never can, so those stay None (not merely
+            # False) rather than asserting a fact that's not applicable.
+            is_override=(
+                bool(re.search(r"\boverride\b", el.get("attributes", "")))
+                if el.tag in ("Method", "Destructor", "Converter", "OperatorMethod")
+                else None
+            ),
         )
 
     def parse_variables(self) -> list[Variable]:
@@ -967,6 +983,8 @@ class _CastxmlParser:
                     # Explicit alignas/aligned attribute when castxml emits an
                     # ``align`` attribute on the Variable; None = unknown.
                     alignment_bits=self._optional_int_attr(el, "align"),
+                    # See RecordType.deprecated for the message-text convention.
+                    deprecated=el.get("deprecation"),
                 )
             )
         return variables
@@ -1208,6 +1226,17 @@ class _CastxmlParser:
             # model default of None since the binary carries no `final` info.
             is_final=bool(re.search(r"\bfinal\b", el.get("attributes", ""))),
             source_location=self._source_location(el),
+            # castxml's `abstract="1"` marks a class/struct with at least one
+            # pure virtual function (cannot be instantiated). Header mode
+            # always knows the answer for a complete type, matching the
+            # `is_final` convention above; left None for an opaque/incomplete
+            # record (no member list to have judged it from).
+            is_abstract=None if is_opaque else el.get("abstract") == "1",
+            # castxml's `deprecation` attribute carries the `[[deprecated]]`/
+            # `[[deprecated("msg")]]` message text verbatim (empty string for
+            # a bare `[[deprecated]]` with no message); absent → None (not
+            # deprecated).
+            deprecated=el.get("deprecation"),
         )
 
     def _source_location(self, el: Any) -> str | None:
@@ -1287,6 +1316,12 @@ class _CastxmlParser:
                     # deriving it from the referenced type like const/volatile.
                     is_mutable=child.get("mutable") == "1",
                     access=self._access_level(child),
+                    # Default member initializer expression, verbatim
+                    # (castxml's Field ``init`` attribute — the same channel
+                    # already used for Variable/constant initializers).
+                    default=child.get("init"),
+                    # See RecordType.deprecated for the message-text convention.
+                    deprecated=child.get("deprecation"),
                 )
             )
         return fields
@@ -1556,6 +1591,13 @@ class _CastxmlParser:
                     name=name,
                     members=members,
                     source_location=self._source_location(el),
+                    # castxml's `scoped="1"` marks a C++11 `enum class`/`enum
+                    # struct` (as opposed to a plain C-style enum). Header
+                    # mode always knows the answer, so this is a concrete
+                    # bool (never None on the castxml path).
+                    is_scoped=el.get("scoped") == "1",
+                    # See RecordType.deprecated for the message-text convention.
+                    deprecated=el.get("deprecation"),
                 )
             )
         return enums

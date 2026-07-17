@@ -119,6 +119,27 @@ class TestFieldBecameConst:
         r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
         assert ChangeKind.FIELD_BECAME_CONST in _kinds(r)
 
+    def test_field_became_const_with_type_spelling_change_also_reports_type_changed(self):
+        """A real dumper (castxml) spells the qualifier into `type` too
+        ("int" -> "const int"), not just the boolean — and unlike a
+        pointer/reference cv change, a BY-VALUE field's own const/volatile
+        change is a deliberate source-break escalation (case30_field_qualifiers
+        ground truth; see test_top_level_field_const_is_not_neutralised in
+        test_const_pointer_abi_neutral.py), so both the compatible
+        FIELD_BECAME_CONST and the breaking TYPE_FIELD_TYPE_CHANGED are
+        expected together here — a prior attempt to suppress the latter
+        (Codex review, PR #582) was reverted because it silently regressed
+        that ground truth."""
+        t_old = RecordType(name="Cfg", kind="struct", size_bits=32,
+                           fields=[TypeField("val", "int", 0, is_const=False)])
+        t_new = RecordType(name="Cfg", kind="struct", size_bits=32,
+                           fields=[TypeField("val", "const int", 0, is_const=True)])
+        r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
+        kinds = _kinds(r)
+        assert ChangeKind.FIELD_BECAME_CONST in kinds
+        assert ChangeKind.TYPE_FIELD_TYPE_CHANGED in kinds
+        assert r.verdict == Verdict.BREAKING
+
 
 class TestFieldLostConst:
     """Field const qualifier removed."""
@@ -150,6 +171,23 @@ class TestFieldVolatileChanged:
                            fields=[TypeField("status", "int", 0, is_volatile=False)])
         r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
         assert ChangeKind.FIELD_LOST_VOLATILE in _kinds(r)
+
+    def test_field_became_volatile_with_type_spelling_change_also_reports_type_changed(self):
+        """Same as the by-value const case above: a field changing from
+        "int" to "volatile int" (castxml's real spelling) is a deliberate
+        source-break escalation, so both FIELD_BECAME_VOLATILE and
+        TYPE_FIELD_TYPE_CHANGED fire, and the verdict is BREAKING — not
+        merely COMPATIBLE (a prior attempt to suppress the latter, per
+        Codex review on PR #582, was reverted as an incorrect regression)."""
+        t_old = RecordType(name="Reg", kind="struct", size_bits=32,
+                           fields=[TypeField("status", "int", 0, is_volatile=False)])
+        t_new = RecordType(name="Reg", kind="struct", size_bits=32,
+                           fields=[TypeField("status", "volatile int", 0, is_volatile=True)])
+        r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
+        kinds = _kinds(r)
+        assert ChangeKind.FIELD_BECAME_VOLATILE in kinds
+        assert ChangeKind.TYPE_FIELD_TYPE_CHANGED in kinds
+        assert r.verdict == Verdict.BREAKING
 
 
 class TestFieldMutableChanged:
