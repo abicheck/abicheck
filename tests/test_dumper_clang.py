@@ -23,6 +23,7 @@ the live ``clang -ast-dump=json`` run live in the integration lane
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -1246,6 +1247,38 @@ def test_clang_header_dump_no_output_raises(
     )
     with pytest.raises(SnapshotError, match="no AST"):
         _clang_header_dump([header], [])
+
+
+def test_clang_header_dump_rechecks_deadline_before_loading_ast(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Codex review (PR #591): a --budget that expires exactly as clang exits
+    successfully must not silently let the (potentially huge) AST JSON load +
+    walk run well past it. deadline.check() must fire again right after the
+    subprocess returns, before json.load — not just once before it was
+    spawned."""
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
+    # Isolate the single clang AST-dump call from the setup/prep work leading
+    # up to it (same as test_clang_header_dump_success_and_cache): disable the
+    # castxml↔clang system-include probe, a separate best-effort subprocess
+    # whose own variable cost would otherwise eat into the tight budget below
+    # before the call under test even starts.
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+
+    def _run(cmd, **kwargs):
+        # Simulate the budget running out while clang was still parsing: by
+        # the time it exits successfully, the deadline has already passed.
+        time.sleep(0.05)
+        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
+        return _fake_proc()
+
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
+    with dumper.deadline.deadline_scope(0.03):
+        with pytest.raises(dumper.deadline.DeadlineExceeded):
+            _clang_header_dump([header], [])
 
 
 def test_clang_header_dump_bad_json_raises(

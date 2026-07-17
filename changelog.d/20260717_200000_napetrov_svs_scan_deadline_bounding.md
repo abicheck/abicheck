@@ -67,3 +67,10 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   fix set out to close, just one layer further out. The outer watchdog now
   walks the live process tree by PPID (`_descendant_pgids`) to find and kill
   every such detached group too, not just the worker's own.
+- **A `--budget` that expired exactly as clang finished successfully no
+  longer silently lets the AST JSON load and walk run well past it.** The L2
+  clang header-AST result parser only checked the deadline before spawning
+  the subprocess; a pathological header's AST can be hundreds of MB to
+  multiple GB, so loading and walking it costs real time on its own.
+  `deadline.check()` now re-fires right after the subprocess returns, before
+  that load starts.

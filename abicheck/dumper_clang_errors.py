@@ -519,6 +519,12 @@ def _parse_clang_ast_result(
             f"clang produced no AST for the header(s) (exit {result.returncode}): "
             f"{result.stderr[:1000].strip()}"
         )
+    # A pathological header's AST can be hundreds of MB to multiple GB, so
+    # loading and walking it costs real time on its own, on top of the
+    # subprocess wall-clock run_bounded already bounded. Re-check here (before
+    # sinking that cost) so a budget that expired while clang was still
+    # exiting successfully doesn't silently run well past it (Codex review).
+    deadline.check()
     try:
         with open(ast_path, "rb") as fh:  # bytes: json detects encoding
             root = json.load(fh)
