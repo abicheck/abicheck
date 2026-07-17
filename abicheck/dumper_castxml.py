@@ -337,21 +337,28 @@ class _CastxmlParser:
             return self._type_name(el.get("type", ""), depth + 1) + "&&"
         if tag == "CvQualifiedType":
             base = self._type_name(el.get("type", ""), depth + 1)
-            # castxml's CvQualifiedType carries const/volatile/restrict
-            # independently (any combination); only `const` was read here
-            # previously, so a volatile- or restrict-qualified field's type
-            # name silently dropped those qualifiers instead of just missing
-            # a dedicated attribute (unlike the genuinely-unmodelable
-            # Atomic case below). Order matches the "const volatile" spelling
-            # convention already used by the DWARF backend's own qualifier
-            # stripping (dwarf_snapshot._strip_type_decorators).
+            # castxml's CvQualifiedType also carries `volatile`; only `const`
+            # was read here previously, so a volatile-qualified type's name
+            # silently dropped it instead of just missing a dedicated
+            # attribute (unlike the genuinely-unmodelable Atomic case below).
+            # Order matches the "const volatile" spelling convention already
+            # used by the DWARF backend's own qualifier stripping
+            # (dwarf_snapshot._strip_type_decorators).
+            #
+            # Deliberately NOT `restrict` here (Codex review, PR #582):
+            # unlike const/volatile — which are real signature-level
+            # qualifiers on a pointee position and participate in mangling —
+            # `restrict` has zero ABI/mangling effect and is already tracked
+            # as its own compatible-classified fact (Param.is_restrict /
+            # PARAM_RESTRICT_CHANGED, populated in _parse_function_params
+            # via _resolve_cv_restrict below). Folding it into the generic
+            # type-name spelling would make a restrict-only parameter change
+            # look like an ordinary type mismatch and misfire the BREAKING
+            # ``FUNC_PARAMS_CHANGED`` generic-type-diff path instead of the
+            # dedicated compatible one.
             quals = [
                 q
-                for q, attr in (
-                    ("const", "const"),
-                    ("volatile", "volatile"),
-                    ("restrict", "restrict"),
-                )
+                for q, attr in (("const", "const"), ("volatile", "volatile"))
                 if el.get(attr) == "1"
             ]
             prefix = f"{' '.join(quals)} " if quals else ""
@@ -380,6 +387,44 @@ class _CastxmlParser:
             # detect the qualifier being added/removed on this slot.
             return "_Atomic"
         return el.get("name", tag)
+
+    def _resolve_cv_restrict(self, id_: str, depth: int = 0) -> tuple[bool, bool, bool]:
+        """Whether *id_*'s own (top-level) qualification is const/volatile/restrict.
+
+        Walks the real XML type chain rather than pattern-matching the
+        rendered ``_type_name`` spelling: a field or parameter declared
+        through a ``Typedef`` whose target is itself cv-qualified (``typedef
+        const int T; struct S { T x; };``) renders as the bare alias name
+        ("T"), so a regex over the spelling can never see the qualifier
+        behind it (Codex review, PR #582). ``ElaboratedType`` is followed for
+        the same reason ``_type_name`` follows it. A further ``CvQualifiedType``
+        or ``Typedef`` reached *through* one already-seen ``CvQualifiedType``
+        combines in (rare, but e.g. two typedefs each adding one qualifier);
+        any other tag (``PointerType`` chief among them) stops the walk so a
+        *pointee*'s qualification is never attributed to the pointer/field
+        itself — ``const int *`` is a non-const pointer to const int, not a
+        const pointer.
+        """
+        if depth > 20 or not id_:
+            return (False, False, False)
+        el = self._resolve(id_)
+        if el is None:
+            return (False, False, False)
+        if el.tag == "CvQualifiedType":
+            const = el.get("const") == "1"
+            volatile = el.get("volatile") == "1"
+            restrict = el.get("restrict") == "1"
+            inner_const, inner_volatile, inner_restrict = self._resolve_cv_restrict(
+                el.get("type", ""), depth + 1
+            )
+            return (
+                const or inner_const,
+                volatile or inner_volatile,
+                restrict or inner_restrict,
+            )
+        if el.tag in ("Typedef", "ElaboratedType"):
+            return self._resolve_cv_restrict(el.get("type", ""), depth + 1)
+        return (False, False, False)
 
     def _is_global_scope(self, el: Any) -> bool:
         """True if *el*'s immediate lexical context is the root ``::``
@@ -668,6 +713,7 @@ class _CastxmlParser:
                 p_type_id = arg.get("type", "")
                 p_type = self._type_name(p_type_id)
                 p_depth = self._pointer_depth(p_type_id)
+                _, _, p_restrict = self._resolve_cv_restrict(p_type_id)
                 # castxml emits default="<expr>" on Arguments that carry a
                 # default value. Removing/changing a default is a source-API
                 # (and silent-behaviour) concern even though the mangled name
@@ -679,6 +725,12 @@ class _CastxmlParser:
                         type=p_type,
                         pointer_depth=p_depth,
                         default=arg.get("default"),
+                        # restrict has no ABI/mangling effect (unlike
+                        # const/volatile) — tracked as its own compatible-
+                        # classified fact via the dedicated param_restrict
+                        # detector rather than folded into `type` (see
+                        # _type_name's CvQualifiedType handling above).
+                        is_restrict=p_restrict,
                     )
                 )
             elif arg.tag == "Ellipsis":
@@ -1212,7 +1264,15 @@ class _CastxmlParser:
                 fields.extend(self._expand_anonymous_field(child))
                 continue
             bitfield_bits, is_bitfield = self._parse_bitfield_bits(child.get("bits"))
-            field_type = self._type_name(child.get("type", ""))
+            field_type_id = child.get("type", "")
+            field_type = self._type_name(field_type_id)
+            # Resolved from the real XML type chain (following through any
+            # Typedef indirection), not a regex over `field_type`: a field
+            # declared through a typedef to a cv-qualified type (`typedef
+            # const int T; struct S { T x; };`) renders as the bare alias
+            # name ("T"), which a spelling-based regex could never see
+            # through (Codex review, PR #582).
+            field_const, field_volatile, _ = self._resolve_cv_restrict(field_type_id)
             fields.append(
                 TypeField(
                     name=child_name,
@@ -1220,8 +1280,8 @@ class _CastxmlParser:
                     offset_bits=self._optional_int_attr(child, "offset"),
                     is_bitfield=is_bitfield,
                     bitfield_bits=bitfield_bits,
-                    is_const=bool(re.search(r"\bconst\b", field_type)),
-                    is_volatile=bool(re.search(r"\bvolatile\b", field_type)),
+                    is_const=field_const,
+                    is_volatile=field_volatile,
                     # castxml's Field element carries its own `mutable="1"`
                     # attribute (fixed xs:int, per castxml.xsd) rather than
                     # deriving it from the referenced type like const/volatile.
@@ -1278,7 +1338,9 @@ class _CastxmlParser:
                 continue
             inner_offset = self._optional_int_attr(inner, "offset") or 0
             bitfield_bits, is_bitfield = self._parse_bitfield_bits(inner.get("bits"))
-            inner_type = self._type_name(inner.get("type", ""))
+            inner_type_id = inner.get("type", "")
+            inner_type = self._type_name(inner_type_id)
+            inner_const, inner_volatile, _ = self._resolve_cv_restrict(inner_type_id)
             result.append(
                 TypeField(
                     name=inner_name,
@@ -1286,8 +1348,8 @@ class _CastxmlParser:
                     offset_bits=this_offset + inner_offset,
                     is_bitfield=is_bitfield,
                     bitfield_bits=bitfield_bits,
-                    is_const=bool(re.search(r"\bconst\b", inner_type)),
-                    is_volatile=bool(re.search(r"\bvolatile\b", inner_type)),
+                    is_const=inner_const,
+                    is_volatile=inner_volatile,
                     is_mutable=inner.get("mutable") == "1",
                     access=self._access_level(inner),
                 )

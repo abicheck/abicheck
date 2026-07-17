@@ -419,9 +419,20 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   every header-parsed snapshot. Now derived from the field's referenced
   `CvQualifiedType` (const/volatile) and its own `mutable="1"` attribute,
   in both the ordinary-field and anonymous-struct/union-flattening paths.
-  Also extended `_type_name`'s `CvQualifiedType` handling to `volatile`/
-  `restrict` (previously only `const` was read), so those qualifiers no
-  longer silently vanish from a type's spelling.
+  Also extended `_type_name`'s `CvQualifiedType` handling to `volatile`
+  (previously only `const` was read), so that qualifier no longer silently
+  vanishes from a type's spelling. Two follow-up fixes from review:
+  `restrict` is deliberately *not* folded into the type spelling (unlike
+  const/volatile it has no ABI/mangling effect; folding it in made a
+  restrict-only parameter change misfire the generic BREAKING
+  `FUNC_PARAMS_CHANGED` path) — it's tracked via the pre-existing but
+  previously-dead `Param.is_restrict` / `PARAM_RESTRICT_CHANGED` (correctly
+  compatible-classified) instead. And field `is_const`/`is_volatile` are now
+  resolved by walking the real CastXML type chain (following through
+  `Typedef` indirection) rather than pattern-matching the rendered type
+  spelling, so a field declared through a typedef to a cv-qualified type
+  (`typedef const int T; struct S { T x; };`, which renders as the bare
+  alias `"T"`) is no longer missed.
 - **MCP `abi_compare`**: a `--used-by`/`--required-symbol` response's
   `summary` (`total_changes`/`breaking`/`api_breaks`/`risk_changes`/
   `compatible`) is now recomputed after scoped-only changes and

@@ -95,6 +95,30 @@ _ANON_UNION_QUALIFIED_XML = """<?xml version="1.0"?>
   <File id="f1" name="test.h"/>
 </CastXML>"""
 
+_TYPEDEF_QUALIFIED_FIELD_XML = """<?xml version="1.0"?>
+<CastXML>
+  <Struct id="_2" name="Cfg" context="_1" file="f1" line="1"
+          members="_4" size="32" align="32"/>
+  <Field id="_4" name="x" type="_20" offset="0" context="_2"/>
+  <Typedef id="_20" name="T" type="_21" context="_1"/>
+  <CvQualifiedType id="_21" type="_7" const="1" volatile="1"/>
+  <FundamentalType id="_7" name="int" size="32"/>
+  <Namespace id="_1" name="::"/>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+
+_RESTRICT_PARAM_XML = """<?xml version="1.0"?>
+<CastXML>
+  <Function id="_2" name="fill" returns="_i" context="_1" mangled="_Z4fillPi" file="f1" line="1">
+    <Argument name="buf" type="_r"/>
+  </Function>
+  <CvQualifiedType id="_r" type="_p" restrict="1"/>
+  <PointerType id="_p" type="_i"/>
+  <FundamentalType id="_i" name="int" size="32"/>
+  <Namespace id="_1" name="::"/>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+
 _MIXED_XML = """<?xml version="1.0"?>
 <CastXML>
   <Struct id="_2" name="Mixed" context="_1" file="f1" line="1"
@@ -167,6 +191,40 @@ class TestQualifiedFieldFacts:
         assert fields["raw"].is_mutable is False
         assert fields["cached"].is_mutable is True
         assert fields["cached"].is_volatile is False
+
+    def test_const_volatile_through_typedef_indirection(self) -> None:
+        """A field declared through a typedef to a cv-qualified type
+        (``typedef const volatile int T; struct Cfg { T x; };``) renders as
+        the bare alias spelling ("T"), so is_const/is_volatile must be
+        resolved by walking the real XML type chain rather than pattern-
+        matching that spelling — a regex over "T" would never see the
+        qualifiers behind it (Codex review, PR #582)."""
+        p = _make_parser(_TYPEDEF_QUALIFIED_FIELD_XML)
+        field = p.parse_types()[0].fields[0]
+        assert field.type == "T"
+        assert field.is_const is True
+        assert field.is_volatile is True
+
+
+class TestRestrictParameter:
+    """`restrict` has no ABI/mangling effect (unlike const/volatile), so it
+    must never leak into the rendered type spelling — only into the
+    dedicated ``Param.is_restrict`` fact — or a restrict-only parameter
+    change would misfire the generic, BREAKING type-mismatch path instead of
+    the dedicated compatible ``PARAM_RESTRICT_CHANGED`` detector (Codex
+    review, PR #582).
+    """
+
+    def test_restrict_pointer_param_type_spelling_excludes_restrict(self) -> None:
+        p = _make_parser(_RESTRICT_PARAM_XML)
+        fn = p.parse_functions()[0]
+        assert fn.params[0].type == "int*"
+        assert "restrict" not in fn.params[0].type
+
+    def test_restrict_pointer_param_sets_is_restrict(self) -> None:
+        p = _make_parser(_RESTRICT_PARAM_XML)
+        fn = p.parse_functions()[0]
+        assert fn.params[0].is_restrict is True
 
 
 class TestMembersAttributeLayout:
