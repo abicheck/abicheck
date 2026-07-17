@@ -9,6 +9,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+Pending changes for the next release now accumulate as fragment files in
+[`changelog.d/`](changelog.d/) (see `changelog.d/README.md`) instead of
+being hand-added below — that shared editing pattern was causing frequent
+merge conflicts. `scriv collect` compiles the fragments into a dated
+section here at release time. Entries already written directly below
+predate that switch and remain part of the pending release.
+
 ### Performance
 
 - **Faster L2 header-tier parsing on large public surfaces** (e.g. Intel
@@ -809,6 +816,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   remain functional (scan-only) deprecated aliases — see below.
 
 ---
+
+<!-- scriv-insert-here -->
 
 ## [0.5.0] — 2026-07-16
 

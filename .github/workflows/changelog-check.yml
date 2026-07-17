@@ -1,0 +1,33 @@
+name: Changelog Fragment Check
+
+# Requires PRs that touch abicheck/**/*.py to add a changelog.d/ fragment
+# (scriv-managed, see changelog.d/README.md) instead of hand-editing
+# CHANGELOG.md's shared "Unreleased" section — that pattern was causing
+# near-constant merge conflicts (most PRs touched the same few lines).
+# Bypass with the `skip-changelog` label for changes with no user-facing
+# effect (internal refactors, test-only PRs).
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  changelog-fragment:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Fetch PR base ref
+        run: git fetch --depth=1 origin "${{ github.event.pull_request.base.sha }}"
+
+      - name: Check for a changelog fragment
+        run: |
+          python3 scripts/check_changelog_fragment.py \
+            --base "${{ github.event.pull_request.base.sha }}" \
+            --head "${{ github.event.pull_request.head.sha }}" \
+            ${{ contains(github.event.pull_request.labels.*.name, 'skip-changelog') && '--skip-label' || '' }}
