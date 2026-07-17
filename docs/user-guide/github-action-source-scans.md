@@ -252,7 +252,16 @@ jobs:
         id: facts
         with: { phase: prepare, producer: wrapper, public-roots: "include" }
       - name: Build
-        run: cmake -B build -S . && cmake --build build   # picks up the wrapper/plugin env vars collect-facts exported
+        # phase: prepare only *exports* the ABICHECK_CC_* env vars
+        # abicheck-cc reads (see its own ::notice::) -- nothing invokes
+        # abicheck-cc for you, so front every compile with it explicitly via
+        # CMake's compiler-launcher hooks. Swap this line for
+        # `-DCMAKE_CXX_FLAGS="$ABICHECK_PLUGIN_FLAGS"` if you pin
+        # `producer: clang-plugin` instead.
+        run: |
+          cmake -DCMAKE_CXX_COMPILER_LAUNCHER=abicheck-cc \
+                -DCMAKE_C_COMPILER_LAUNCHER=abicheck-cc -S . -B build
+          cmake --build build
       - uses: abicheck/abicheck/actions/collect-facts@v0.3.0
         id: facts-verify
         with: { phase: verify, producer: ${{ steps.facts.outputs.producer }} }
@@ -261,6 +270,7 @@ jobs:
           name: release-build
           path: |
             build/lib*.so
+            include/
             abicheck_inputs/
 
   dump-baselines:
