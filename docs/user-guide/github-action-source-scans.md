@@ -381,10 +381,16 @@ jobs:
           output-file: report-${{ matrix.lib.name }}.json
           fail-on-breaking: false   # let the post-matrix gate job decide
           fail-on-api-break: false
+      - name: Upload this library's report
+        uses: actions/upload-artifact@v4
+        with:
+          name: report-${{ matrix.lib.name }}
+          path: report-${{ matrix.lib.name }}.json
 
   abi-gate:
     needs: scan-candidates
-    # same aggregation job as "Post-matrix ABI gate (unified verdict)"
+    # same aggregation job as "Post-matrix ABI gate (unified verdict)" --
+    # downloads with `pattern: report-*`, `merge-multiple: true`
 ```
 
 **Layering onto an existing binary-ABI tool** (the common reason to reach for

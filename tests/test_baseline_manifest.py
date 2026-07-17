@@ -614,6 +614,91 @@ class TestMainCli:
             manifest1["artifacts"][0]["sha256"] == manifest2["artifacts"][0]["sha256"]
         )
 
+    def test_sha256_stable_when_only_source_mtime_changes(self, tmp_path: Path) -> None:
+        # Regression (Codex review): AbiSnapshot.source_mtime/source_mtime_epoch
+        # (abicheck/model.py) reflect the dumped binary's filesystem mtime at
+        # dump time -- a fresh CI checkout of byte-identical source gets a new
+        # mtime every run, so hashing these made the digest unstable even
+        # though the actual ABI content never changed.
+        snap_path = tmp_path / "libfoo.abicheck.json"
+
+        def _write(source_mtime: float) -> None:
+            data = {
+                "library": "libfoo",
+                "version": "1.0.0",
+                "schema_version": 9,
+                "git_commit": "aaa",
+                "git_tag": None,
+                "created_at": "2026-07-17T00:00:00+00:00",
+                "build_id": None,
+                "source_mtime": source_mtime,
+                "source_mtime_epoch": False,
+            }
+            snap_path.write_text(json.dumps(data), encoding="utf-8")
+
+        entries = [{"name": "libfoo", "artifact": "a.so"}]
+        _write(1000.0)
+        manifest1 = build_manifest_module.build_manifest(
+            tmp_path, "", "", entries, None
+        )
+        _write(2000.0)
+        manifest2 = build_manifest_module.build_manifest(
+            tmp_path, "", "", entries, None
+        )
+        assert (
+            manifest1["artifacts"][0]["sha256"] == manifest2["artifacts"][0]["sha256"]
+        )
+
+    def test_sha256_stable_when_only_replay_timing_counters_change(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review): source_replay.py's replay producer
+        # stamps wall-clock durations and cache hit/miss counts into
+        # build_source.source_abi.coverage (cache_lookup_s, extract_s,
+        # link_s, elapsed_s, cache_misses, cache_hits) -- these depend on the
+        # runner's cache warmth/load, not on the source-fact content, so
+        # hashing them made the digest unstable across reruns of identical
+        # source facts.
+        snap_path = tmp_path / "libfoo.abicheck.json"
+
+        def _write(elapsed_s: float, cache_misses: int) -> None:
+            data = {
+                "library": "libfoo",
+                "version": "1.0.0",
+                "schema_version": 9,
+                "git_commit": "aaa",
+                "git_tag": None,
+                "created_at": "2026-07-17T00:00:00+00:00",
+                "build_id": None,
+                "build_source": {
+                    "source_abi": {
+                        "coverage": {
+                            "cache_lookup_s": 0.1,
+                            "extract_s": 1.5,
+                            "link_s": 0.2,
+                            "elapsed_s": elapsed_s,
+                            "cache_misses": cache_misses,
+                            "cache_hits": 3,
+                            "compile_units_parsed": 12,
+                        }
+                    }
+                },
+            }
+            snap_path.write_text(json.dumps(data), encoding="utf-8")
+
+        entries = [{"name": "libfoo", "artifact": "a.so"}]
+        _write(1.8, 0)
+        manifest1 = build_manifest_module.build_manifest(
+            tmp_path, "", "", entries, None
+        )
+        _write(3.4, 5)
+        manifest2 = build_manifest_module.build_manifest(
+            tmp_path, "", "", entries, None
+        )
+        assert (
+            manifest1["artifacts"][0]["sha256"] == manifest2["artifacts"][0]["sha256"]
+        )
+
     def test_content_digest_changes_when_snapshot_content_changes(
         self, tmp_path: Path
     ) -> None:

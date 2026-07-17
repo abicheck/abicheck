@@ -38,35 +38,70 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# Keys that vary between two dumps/replays of otherwise ABI-identical
+# content -- timestamps, source-file mtimes, and wall-clock/cache-state
+# counters -- so a stable content hash must strip all of them, not hash raw
+# file bytes. This started as a single `created_at` pop and grew by three
+# separate review rounds (top-level created_at, then the nested
+# build_source.manifest.created_at, then this fuller set) as each left
+# something volatile behind; kept as one explicit list instead of another
+# one-off pop so the next volatile field lands here too (Codex review).
+_VOLATILE_TOP_LEVEL_KEYS = ("created_at", "source_mtime", "source_mtime_epoch")
+_VOLATILE_BUILD_SOURCE_MANIFEST_KEYS = ("created_at",)
+# Populated by abicheck/buildsource/source_replay.py's replay producer (and
+# inline.py's cache bookkeeping) -- wall-clock durations and cache hit/miss
+# counts that depend on the runner's cache warmth and load, not on the
+# semantic source-fact content itself.
+_VOLATILE_COVERAGE_KEYS = (
+    "cache_lookup_s",
+    "extract_s",
+    "link_s",
+    "elapsed_s",
+    "cache_misses",
+    "cache_hits",
+)
+
+
+def _strip_volatile_fields(raw: dict[str, Any]) -> dict[str, Any]:
+    stable = dict(raw)
+    for key in _VOLATILE_TOP_LEVEL_KEYS:
+        stable.pop(key, None)
+
+    build_source = stable.get("build_source")
+    if isinstance(build_source, dict):
+        build_source = dict(build_source)
+
+        manifest = build_source.get("manifest")
+        if isinstance(manifest, dict):
+            manifest = dict(manifest)
+            for key in _VOLATILE_BUILD_SOURCE_MANIFEST_KEYS:
+                manifest.pop(key, None)
+            build_source["manifest"] = manifest
+
+        source_abi = build_source.get("source_abi")
+        if isinstance(source_abi, dict):
+            source_abi = dict(source_abi)
+            coverage = source_abi.get("coverage")
+            if isinstance(coverage, dict):
+                coverage = dict(coverage)
+                for key in _VOLATILE_COVERAGE_KEYS:
+                    coverage.pop(key, None)
+                source_abi["coverage"] = coverage
+            build_source["source_abi"] = source_abi
+
+        stable["build_source"] = build_source
+
+    return stable
+
 
 def _read_snapshot_meta(path: Path) -> dict[str, Any]:
     with path.open(encoding="utf-8") as f:
         raw = json.load(f)
-    # Hash the snapshot with created_at removed, not the raw file bytes:
-    # dumper.py auto-stamps created_at fresh on every dump call (absent
-    # SOURCE_DATE_EPOCH, the normal CI case), so a raw-bytes hash -- and
-    # therefore content-digest, which is built from these per-artifact
-    # digests -- changed on every single run even when the actual ABI
-    # content was byte-identical (Codex review).
-    #
-    # A snapshot dumped with --build-info/--sources also embeds a *second*,
-    # independently-stamped timestamp at build_source.manifest.created_at
-    # (BuildSourceManifest.created_at, written fresh by every collect-facts
-    # run -- see abicheck/buildsource/pack.py's own content_hash(), which
-    # excludes it for the same reason). Leaving it in place kept the digest
-    # unstable for any baseline with embedded source facts even after the
-    # top-level created_at was stripped (Codex review).
-    stable = dict(raw)
-    stable.pop("created_at", None)
-    build_source = stable.get("build_source")
-    if isinstance(build_source, dict):
-        manifest = build_source.get("manifest")
-        if isinstance(manifest, dict) and "created_at" in manifest:
-            build_source = dict(build_source)
-            manifest = dict(manifest)
-            manifest.pop("created_at", None)
-            build_source["manifest"] = manifest
-            stable["build_source"] = build_source
+    # Hash the snapshot with volatile fields removed, not the raw file
+    # bytes: dumper.py/collect-facts stamp several fields fresh on every run
+    # (absent SOURCE_DATE_EPOCH) even when the actual ABI/source-fact
+    # content is identical -- see _strip_volatile_fields above.
+    stable = _strip_volatile_fields(raw)
     sha256 = hashlib.sha256(
         json.dumps(stable, sort_keys=True).encode("utf-8")
     ).hexdigest()
