@@ -167,9 +167,9 @@ class TestEvidenceStatusInJson:
         d = json.loads(to_json(r))
         assert d["changes"][0]["evidence_status"] == "not_checkable"
 
-    def test_report_schema_version_is_2_5(self):
+    def test_report_schema_version_is_2_6(self):
         d = json.loads(to_json(_result(Verdict.NO_CHANGE)))
-        assert d["report_schema_version"] == "2.5"
+        assert d["report_schema_version"] == "2.6"
 
     def test_change_operation_field(self):
         added = Change(ChangeKind.FUNC_ADDED, "s1", "added")
@@ -225,6 +225,52 @@ class TestEvidenceStatusInJson:
         # func_removed is not itself an addition kind -> quality issue, not
         # "no action required".
         assert d["changes"][0]["recommended_action"] == "review_recommended"
+
+    def test_reviewer_action_present_only_for_additions(self):
+        # reviewer_action refines the ambiguous "no_action_required" bucket
+        # with what a *reviewer* (not the old binary consumer) should check;
+        # every other verdict already has reviewer-actionable guidance via
+        # recommended_action itself, so the key is omitted there.
+        breaking = Change(ChangeKind.FUNC_REMOVED, "s1", "removed")
+        api_break = Change(ChangeKind.FIELD_RENAMED, "s2", "renamed")
+        risk = Change(ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED, "s3", "version req added")
+        quality = Change(ChangeKind.VISIBILITY_LEAK, "s4", "visibility leak")
+        addition = Change(ChangeKind.FUNC_ADDED, "s5", "added")
+        r = _result(
+            Verdict.BREAKING,
+            changes=[breaking, api_break, risk, quality, addition],
+        )
+        d = json.loads(to_json(r))
+        by_symbol = {c["symbol"]: c for c in d["changes"]}
+        for sym in ("s1", "s2", "s3", "s4"):
+            assert "reviewer_action" not in by_symbol[sym]
+        assert by_symbol["s5"]["reviewer_action"] == "confirm_public_api_intent"
+
+    def test_reviewer_action_per_kind_overrides(self):
+        enum_member = Change(ChangeKind.ENUM_MEMBER_ADDED, "E::X", "added")
+        graduated = Change(ChangeKind.EXPERIMENTAL_GRADUATED, "foo_v2", "graduated")
+        r = _result(Verdict.COMPATIBLE, changes=[enum_member, graduated])
+        d = json.loads(to_json(r))
+        by_symbol = {c["symbol"]: c["reviewer_action"] for c in d["changes"]}
+        assert by_symbol == {
+            "E::X": "review_exhaustive_switches",
+            "foo_v2": "document_stable_replacement",
+        }
+
+    def test_reviewer_action_honours_policy_file_override(self):
+        """A kind demoted to COMPATIBLE by a policy override, and classified
+        as an addition, must still get reviewer_action — same effective-
+        verdict/category resolver recommended_action uses."""
+        from abicheck.policy_file import PolicyFile
+
+        c = Change(ChangeKind.FUNC_ADDED, "s", "added")
+        pf = PolicyFile(overrides={ChangeKind.FUNC_ADDED: Verdict.COMPATIBLE})
+        r = DiffResult(
+            old_version="1.0", new_version="2.0", library="libtest.so",
+            changes=[c], verdict=Verdict.COMPATIBLE, policy_file=pf,
+        )
+        d = json.loads(to_json(r))
+        assert d["changes"][0]["reviewer_action"] == "confirm_public_api_intent"
 
     def test_finding_id_is_stable_and_deterministic(self):
         """Same underlying finding -> same finding_id across independent runs."""
@@ -369,6 +415,17 @@ class TestEvidenceStatusInJson:
         d = json.loads(to_json(r, report_mode="leaf"))
         assert d["leaf_changes"][0]["recommended_action"] == "recompile_and_relink_required"
         assert d["changes"][0]["recommended_action"] == "recompile_and_relink_required"
+
+    def test_leaf_mode_root_type_change_carries_reviewer_action(self):
+        # enum_member_added is both a root-type-change kind (routed through
+        # _leaf_entry, which builds its own dict rather than reusing
+        # _change_to_dict) and an addition -- must carry reviewer_action in
+        # both leaf_changes[] and changes[], matching full-mode entries.
+        c = Change(ChangeKind.ENUM_MEMBER_ADDED, "E::X", "added")
+        r = _result(Verdict.COMPATIBLE, changes=[c])
+        d = json.loads(to_json(r, report_mode="leaf"))
+        assert d["leaf_changes"][0]["reviewer_action"] == "review_exhaustive_switches"
+        assert d["changes"][0]["reviewer_action"] == "review_exhaustive_switches"
 
     def test_leaf_mode_root_type_change_honours_frozen_namespace_floor(self):
         """Codex review on #549: a policy-file override that demotes a root

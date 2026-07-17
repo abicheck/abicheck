@@ -290,6 +290,15 @@
         "correlated_change_kind": {
           "type": "string",
           "description": "ADR-041 P0 roadmap item 2: for a public_api_internal_dependency_added finding correlated with the same public entry's own body/type-hash change this version, the correlated finding's ChangeKind value (e.g. 'inline_body_changed') — the structured sibling to the correlation already carried in the description prose."
+        },
+        "reviewer_action": {
+          "type": "string",
+          "description": "Finer-grained reviewer guidance, present only when recommended_action is 'no_action_required' (a COMPATIBLE addition). recommended_action alone only answers whether the old binary consumer needs to do anything (no); this answers whether a human reviewing the change has anything to check.",
+          "enum": [
+            "review_exhaustive_switches",
+            "document_stable_replacement",
+            "confirm_public_api_intent"
+          ]
         }
       }
     }

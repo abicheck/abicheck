@@ -394,6 +394,32 @@ already use — so it can never disagree with them for the same finding:
 }
 ```
 
+### Reviewer guidance for additions (`reviewer_action`)
+
+`recommended_action: "no_action_required"` is accurate for the *old binary
+consumer* — nothing to recompile, nothing to relink — but collapses every
+addition to the same value even though a reviewer approving new public API
+surface almost always has something to check. Findings with
+`recommended_action: "no_action_required"` also carry a `reviewer_action`
+key with that finer-grained guidance; every other finding omits the key,
+since `recommended_action` itself is already reviewer-actionable there.
+
+| `reviewer_action` | When | Meaning |
+|---|---|---|
+| `review_exhaustive_switches` | kind `enum_member_added` | Old binaries are unaffected, but a source consumer's exhaustive `switch`/sentinel-value pattern may silently miss the new value. |
+| `document_stable_replacement` | kind `experimental_graduated` | An unstable API just became part of the stable support contract — document the change, don't just ship it. |
+| `confirm_public_api_intent` | every other addition | Confirm the new export was intentional (not an accidental symbol leak) and consider a release note. |
+
+```json
+{
+  "kind": "enum_member_added",
+  "symbol": "Color::PURPLE",
+  "severity": "compatible",
+  "recommended_action": "no_action_required",
+  "reviewer_action": "review_exhaustive_switches"
+}
+```
+
 ### Typed gate summary (`severity.blocking`, `severity.blocking_categories`)
 
 When `--severity-*` configuration is active, the top-level `severity` object

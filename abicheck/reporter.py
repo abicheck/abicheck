@@ -296,6 +296,11 @@ def _to_json_leaf(
             "old_value": getattr(c, "old_value", None),
             "new_value": getattr(c, "new_value", None),
         }
+        reviewer_action = _reviewer_action_for_change(
+            c, policy=result.policy, kind_sets=eff_sets, policy_file=result.policy_file,
+        )
+        if reviewer_action is not None:
+            entry["reviewer_action"] = reviewer_action
         evidence_status = evidence_status_for_change(cast(HasKind, c))
         if evidence_status is not None:
             entry["evidence_status"] = evidence_status.value
@@ -722,6 +727,52 @@ def _recommended_action_for_change(
     return "no_action_required" if category == IssueCategory.ADDITION else "review_recommended"
 
 
+#: Per-kind reviewer guidance for a COMPATIBLE addition, keyed by
+#: ``ChangeKind.value``. Falls back to ``_DEFAULT_ADDITION_REVIEWER_ACTION``
+#: for any addition kind not listed here.
+_ADDITION_REVIEWER_ACTION: dict[str, str] = {
+    # Old binaries are unaffected, but exhaustive `switch`/sentinel-value
+    # patterns in *source* consumers can miss the new case silently.
+    "enum_member_added": "review_exhaustive_switches",
+    # A semantic addition with no new symbol: the API existed but was
+    # unstable; graduating it is a documentation/support-contract change,
+    # not a binary one.
+    "experimental_graduated": "document_stable_replacement",
+}
+_DEFAULT_ADDITION_REVIEWER_ACTION = "confirm_public_api_intent"
+
+
+def _reviewer_action_for_change(
+    c: object,
+    *,
+    policy: str | None,
+    kind_sets: KindSets | None,
+    policy_file: object | None,
+) -> str | None:
+    """Finer-grained reviewer guidance for a COMPATIBLE addition (additive).
+
+    ``recommended_action`` collapses every addition to one value,
+    ``no_action_required`` — accurate for the *old binary consumer*
+    (nothing to recompile, nothing to relink), but a reviewer approving a
+    new public export almost always has something to check: was it
+    intentional, does it need a release note, do exhaustive switches need
+    the new case. This field carries that reviewer-facing nuance without
+    changing ``recommended_action``'s existing meaning or schema enum.
+    Returns ``None`` for every non-addition finding, since those already
+    have reviewer-actionable guidance via ``recommended_action`` itself.
+    """
+    from .severity import IssueCategory, classify_effective_change
+
+    category = classify_effective_change(
+        cast(HasKind, c), policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+    )
+    if category != IssueCategory.ADDITION:
+        return None
+    kind = getattr(c, "kind", None)
+    kind_val = kind.value if kind else ""
+    return _ADDITION_REVIEWER_ACTION.get(kind_val, _DEFAULT_ADDITION_REVIEWER_ACTION)
+
+
 def _change_to_dict(
     c: object,
     *,
@@ -776,6 +827,11 @@ def _change_to_dict(
         d["recommended_action"] = _recommended_action_for_change(
             c, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
         )
+        reviewer_action = _reviewer_action_for_change(
+            c, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+        )
+        if reviewer_action is not None:
+            d["reviewer_action"] = reviewer_action
     if evidence_status is not None:
         d["evidence_status"] = evidence_status.value
     # Impact explanation
