@@ -213,6 +213,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   vector-math library (glibc 2.22+), which has no musl equivalent; a
   binary that only needs it (no `libc.so.6` DT_NEEDED entry) previously
   passed a musllinux claim unflagged (Codex review).
+  `check_macos_deployment_target_floor` no longer unconditionally skips
+  every fat/universal Mach-O: when `runtime_floors` also declares
+  `WHEEL_ARCH` and the selected slice (`MachoMetadata.cpu_type`) matches
+  that claim, the captured `min_os_version` unambiguously belongs to the
+  exact slice the wheel tag itself promises, so a real deployment-target
+  violation is no longer silently skipped just because the binary happens
+  to also carry other architecture slices (Codex review).
   Windows UCRT/runtime checks, CPU-ISA-baseline detection, the full
   per-tag closure policy, and end-to-end CLI auto-derivation from a
   compared wheel's own filename tag (every check above, including G10's

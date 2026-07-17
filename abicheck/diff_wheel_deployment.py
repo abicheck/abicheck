@@ -96,16 +96,28 @@ def check_macos_deployment_target_floor(
     commonly has a genuinely higher real minimum (11.0, since Apple Silicon
     didn't exist before macOS 11) than its x86_64 slice, so attributing the
     single captured value to whichever slice the wheel tag claims isn't
-    reliable (Codex review #583, the deployment-target counterpart to the
-    same fat-binary ambiguity already handled for
+    reliable in general (Codex review #583, the deployment-target
+    counterpart to the same fat-binary ambiguity already handled for
     :func:`check_wheel_tag_architecture_mismatch` and
     :func:`abicheck.package.parse_macos_deployment_target_floor`).
+
+    Exception: when ``runtime_floors`` also declares a ``WHEEL_ARCH``
+    claim (see :func:`check_wheel_tag_architecture_mismatch`) *and* the
+    selected slice (:attr:`MachoMetadata.cpu_type`) matches that claim,
+    the captured ``min_os_version`` unambiguously belongs to the exact
+    slice the wheel tag itself promises — that's no longer a guess, so the
+    check still runs instead of skipping a real violation (Codex review
+    #583, follow-up).
     """
     if macho is None or not runtime_floors:
         return []
-    if len(getattr(macho, "cpu_types", None) or []) > 1:
-        return []
     floors = {k.upper(): v for k, v in runtime_floors.items()}
+    if len(getattr(macho, "cpu_types", None) or []) > 1:
+        claimed = (floors.get(_WHEEL_ARCH_KEY) or "").lower()
+        expected_cpu_types = _ARCH_CLAIM_TO_MACHO_CPU_TYPE.get(claimed)
+        selected_slice = (getattr(macho, "cpu_type", "") or "").upper()
+        if expected_cpu_types is None or selected_slice not in expected_cpu_types:
+            return []
     floor_raw = floors.get(_MACOS_DEPLOYMENT_TARGET_KEY)
     if not floor_raw:
         return []
