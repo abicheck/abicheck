@@ -60,6 +60,15 @@ _VOLATILE_COVERAGE_KEYS = (
     "cache_misses",
     "cache_hits",
 )
+# LayerCoverage rows (abicheck/buildsource/model.py) embedded at
+# build_source.manifest.coverage: build_inline_coverage() (buildsource/
+# inline.py) copies the same cache/timing state into each row's "detail"
+# (a free-form human string that can embed "cache X/Y hit (Z%)" and
+# "N.NNs") and "elapsed_s" -- a *third* place the same volatile info
+# leaks into, after source_abi.coverage and build_source.manifest itself.
+# "layer"/"status"/"confidence" are the semantic identity; "detail" is by
+# its own docstring presentational, so both are dropped rather than parsed.
+_VOLATILE_MANIFEST_COVERAGE_ROW_KEYS = ("detail", "elapsed_s")
 
 
 def _strip_volatile_fields(raw: dict[str, Any]) -> dict[str, Any]:
@@ -76,6 +85,18 @@ def _strip_volatile_fields(raw: dict[str, Any]) -> dict[str, Any]:
             manifest = dict(manifest)
             for key in _VOLATILE_BUILD_SOURCE_MANIFEST_KEYS:
                 manifest.pop(key, None)
+            coverage_rows = manifest.get("coverage")
+            if isinstance(coverage_rows, list):
+                manifest["coverage"] = [
+                    {
+                        k: v
+                        for k, v in row.items()
+                        if k not in _VOLATILE_MANIFEST_COVERAGE_ROW_KEYS
+                    }
+                    if isinstance(row, dict)
+                    else row
+                    for row in coverage_rows
+                ]
             build_source["manifest"] = manifest
 
         source_abi = build_source.get("source_abi")

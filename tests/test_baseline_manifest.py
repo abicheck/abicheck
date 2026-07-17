@@ -699,6 +699,59 @@ class TestMainCli:
             manifest1["artifacts"][0]["sha256"] == manifest2["artifacts"][0]["sha256"]
         )
 
+    def test_sha256_stable_when_only_manifest_coverage_row_changes(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review): build_inline_coverage()
+        # (abicheck/buildsource/inline.py) copies the same cache/timing
+        # state that source_abi.coverage carries into each
+        # build_source.manifest.coverage row's "detail" (a free-form string
+        # like "cache 2/3 hit (67%), 1.80s") and "elapsed_s" -- a third
+        # place the same volatile info leaks into, so stripping only
+        # source_abi.coverage's volatile keys still left the digest
+        # unstable.
+        snap_path = tmp_path / "libfoo.abicheck.json"
+
+        def _write(detail: str, elapsed_s: float) -> None:
+            data = {
+                "library": "libfoo",
+                "version": "1.0.0",
+                "schema_version": 9,
+                "git_commit": "aaa",
+                "git_tag": None,
+                "created_at": "2026-07-17T00:00:00+00:00",
+                "build_id": None,
+                "build_source": {
+                    "manifest": {
+                        "build_source_pack_version": 1,
+                        "coverage": [
+                            {
+                                "layer": "L4_source_abi",
+                                "status": "present",
+                                "confidence": "high",
+                                "detail": detail,
+                                "elapsed_s": elapsed_s,
+                            }
+                        ],
+                    },
+                    "source_abi": {"coverage": {}},
+                },
+            }
+            snap_path.write_text(json.dumps(data), encoding="utf-8")
+
+        entries = [{"name": "libfoo", "artifact": "a.so"}]
+        _write("cache 2/3 hit (67%), 1.80s", 1.8)
+        manifest1 = build_manifest_module.build_manifest(
+            tmp_path, "", "", entries, None
+        )
+        _write("cache 0/3 hit (0%), 3.40s", 3.4)
+        manifest2 = build_manifest_module.build_manifest(
+            tmp_path, "", "", entries, None
+        )
+        assert (
+            manifest1["artifacts"][0]["sha256"] == manifest2["artifacts"][0]["sha256"]
+        )
+
     def test_content_digest_changes_when_snapshot_content_changes(
         self, tmp_path: Path
     ) -> None:
