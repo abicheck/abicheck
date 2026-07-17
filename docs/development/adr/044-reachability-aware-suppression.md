@@ -298,6 +298,46 @@ since JSON/SARIF/JUnit reporters already round-trip `Change` via
   `reachability` — and gated `MarkReachability` on it alongside the
   existing `None` check.
 
+- **A third late-detector synthetic-finding gap, this time for genuinely
+  public (not internal-leak) findings (Codex).** The two already-fixed
+  cases (`internal_leak._build_leak_change`,
+  `diff_templates._leak_change`) cover findings whose subject is an
+  *internal* type reached via a public entry point. `diff_namespaces.py`'s
+  `DetectNamespacePatterns` — also running after `ApplySuppression` — has a
+  different shape: `EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT`/
+  `EXPERIMENTAL_GRADUATED` (function path) and `STD_REEXPORT_REMOVED` build
+  fresh `Change`s for a subject that is *itself* public (an `experimental::`/
+  re-exported function graduating or vanishing), not merely reachable from
+  one. Untagged, a broad `namespace: "lib::experimental::*"` rule's default
+  `unreachable-only` reachability silently suppressed the API-break finding
+  with no diagnostic — the same failure mode this ADR exists to close, one
+  detector later than the two already-fixed cases. Fixed the same way:
+  tagged `public_reachable=True`/`reachability_kind="direct_public_symbol"`
+  at construction time in `_emit_experimental_change`/
+  `_build_std_reexport_change` — but **only** for the function-sourced path.
+  `_index_funcs_by_stable_key`/`detect_std_reexport_removed` filter on
+  `Visibility.PUBLIC` before ever building a `Change`, so those findings'
+  mere existence already proves the subject is public — the same reliable
+  signal the two already-fixed cases have. The *type*-sourced path
+  (`_index_types_by_stable_key`) has no such signal: `RecordType` carries no
+  visibility field at all (unlike `Function`/`Variable`), and that index
+  walks every type in `snap.types` regardless of whether it is genuinely
+  public or an internal type that merely happens to have an
+  "experimental"-segment name — tagging it too would reintroduce exactly the
+  unreliable-heuristic problem that got the broader `MarkReachability`
+  broadening reverted earlier in this same review cycle, just via a
+  different code path. `_emit_experimental_change`/`_findings_for` gained an
+  explicit `subject_is_public` parameter so the two call sites (funcs vs.
+  types) state their own reliability instead of the function silently
+  assuming one for both. Unlike a raw pre-existing change (suppressed via
+  `ApplySuppression`, which can attach `suppression_would_hide_public_break`),
+  these late-detector findings suppress inline via their own
+  `ctx.suppression.is_suppressed(c)` call and have no diagnostic path — the
+  same established scope boundary the two already-fixed cases also have;
+  not being silently suppressed is the fix, a diagnostic for this whole
+  class of finding is a separate, pre-existing gap this change does not
+  newly introduce or attempt to close.
+
 ### D2. `Suppression` gains a reachability guard
 
 New `Suppression` fields:

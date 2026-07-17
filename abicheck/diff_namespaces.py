@@ -253,8 +253,30 @@ def _emit_experimental_change(
     old_exp: list[str],
     new_stable: list[str],
     kind_label: str,
+    *,
+    subject_is_public: bool,
 ) -> Change:
-    """Build the ``Change`` record for one classified event."""
+    """Build the ``Change`` record for one classified event.
+
+    ADR-044 D1 (Codex review): the function-sourced path (``kind_label ==
+    "declaration"``) is only ever built from ``_index_funcs_by_stable_key``,
+    which indexes public functions only — so unlike the reverted "any
+    non-internal-namespaced subject" heuristic (which had to guess at a raw
+    symbol's visibility with no reliable signal), a function finding's mere
+    existence already proves its subject is public, and *subject_is_public*
+    is tagged directly at construction time, mirroring
+    ``internal_leak._build_leak_change``/``diff_templates._leak_change`` —
+    these run via ``DetectNamespacePatterns``, *after* ``MarkReachability``,
+    so nothing else would ever tag them.
+
+    The type-sourced path (``kind_label == "type"``, ``subject_is_public=
+    False``) has no such signal: ``RecordType`` carries no visibility field
+    at all (unlike ``Function``/``Variable``), and ``_index_types_by_stable_key``
+    indexes every type in ``snap.types`` regardless of whether it is
+    genuinely public or an internal type that merely happens to have an
+    "experimental"-segment name — tagging it here would be exactly the
+    unreliable heuristic the revert was about, just for a different index.
+    """
     old_q = old_exp[0]
     if event == "graduated":
         new_q = new_stable[0]
@@ -264,6 +286,8 @@ def _emit_experimental_change(
             detail=kind_label,
             old=old_q,
             new=new_q,
+            public_reachable=subject_is_public,
+            reachability_kind="direct_public_symbol" if subject_is_public else None,
         )
     return make_change(
         ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT,
@@ -272,6 +296,8 @@ def _emit_experimental_change(
         detail=kind_label,
         old=old_q,
         new_value=None,
+        public_reachable=subject_is_public,
+        reachability_kind="direct_public_symbol" if subject_is_public else None,
     )
 
 
@@ -280,6 +306,8 @@ def _findings_for(
     new_index: dict[tuple[str, str], list[str]],
     experimental_namespaces: tuple[str, ...],
     kind_label: str,
+    *,
+    subject_is_public: bool,
 ) -> list[Change]:
     """Walk old/new indices, emitting one finding per classified event."""
     out: list[Change] = []
@@ -298,6 +326,7 @@ def _findings_for(
             continue
         out.append(_emit_experimental_change(
             event, leaf, old_exp, new_stable, kind_label,
+            subject_is_public=subject_is_public,
         ))
     return out
 
@@ -333,12 +362,14 @@ def detect_experimental_namespace_changes(
         _index_funcs_by_stable_key(new, experimental_namespaces),
         experimental_namespaces,
         "declaration",
+        subject_is_public=True,
     ))
     out.extend(_findings_for(
         _index_types_by_stable_key(old, experimental_namespaces),
         _index_types_by_stable_key(new, experimental_namespaces),
         experimental_namespaces,
         "type",
+        subject_is_public=False,
     ))
     return out
 
@@ -416,7 +447,13 @@ def _batch_demangle_public(snap: AbiSnapshot) -> dict[str, str]:
 
 
 def _build_std_reexport_change(declared: str, underlying: str) -> Change:
-    """Build a single ``STD_REEXPORT_REMOVED`` finding."""
+    """Build a single ``STD_REEXPORT_REMOVED`` finding.
+
+    ADR-044 D1 (Codex review): only ever emitted for a declaration that was a
+    *public* function (``detect_std_reexport_removed`` filters on
+    ``Visibility.PUBLIC`` before calling this) — same construction-time
+    tagging rationale as ``_emit_experimental_change``.
+    """
     return make_change(
         ChangeKind.STD_REEXPORT_REMOVED,
         symbol=declared,
@@ -424,6 +461,8 @@ def _build_std_reexport_change(declared: str, underlying: str) -> Change:
         detail=underlying,
         old_value=f"{declared} → {underlying}",
         new_value=None,
+        public_reachable=True,
+        reachability_kind="direct_public_symbol",
     )
 
 

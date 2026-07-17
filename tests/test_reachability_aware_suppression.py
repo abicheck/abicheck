@@ -575,3 +575,37 @@ class TestSuppressionYamlRoundTrip:
         safety-critical override."""
         with pytest.raises(ValueError, match="allow_public_break"):
             Suppression(namespace="a::*", allow_public_break="false", reason="x")
+
+
+class TestLateDetectorSyntheticFindings:
+    """Codex review: a detector that runs *after* ApplySuppression (e.g.
+    DetectNamespacePatterns) builds brand-new Change objects that
+    MarkReachability never had a chance to tag — if the finding's own
+    construction doesn't set public_reachable, a broad suppression rule
+    silently hides it with no diagnostic, since it defaults to False."""
+
+    def test_experimental_removed_without_replacement_survives_broad_suppression(
+        self,
+    ) -> None:
+        old = _snap(functions=[_public_fn("lib::experimental::foo", "int")])
+        new = _snap(functions=[])
+        suppression = SuppressionList([
+            Suppression(namespace="lib::experimental::*", reason="experimental churn")
+        ])
+        ctx = DEFAULT_PIPELINE.run([], old, new, suppression=suppression)
+        found = [
+            c for c in ctx.kept
+            if c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        ]
+        assert len(found) == 1
+        assert found[0].public_reachable is True
+        assert found[0] not in ctx.suppressed
+        # Note: unlike a raw pre-existing change (suppressed via
+        # ApplySuppression, which can attach the diagnostic), a finding
+        # DetectNamespacePatterns builds fresh and suppresses inline via its
+        # own ctx.suppression.is_suppressed(c) call has no diagnostic path —
+        # same established scope boundary as the other late-detector
+        # synthetic findings (DetectTemplatePatterns/DetectInternalLeaks's
+        # own leak findings). Not suppressed at all is the fix; a
+        # diagnostic for this class of finding is a separate, pre-existing
+        # limitation, not something this fix regresses or is scoped to close.

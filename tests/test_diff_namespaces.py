@@ -152,6 +152,7 @@ class TestExperimentalGraduated:
         assert c.kind == ChangeKind.EXPERIMENTAL_GRADUATED
         assert c.symbol == "ns::sort"
         assert "graduated" in c.description.lower()
+        assert c.public_reachable is True
 
     def test_type_graduated_with_alias_kept(self) -> None:
         old = _snap(types=[_rec("ns::experimental::queue")])
@@ -164,6 +165,7 @@ class TestExperimentalGraduated:
         c = changes[0]
         assert c.kind == ChangeKind.EXPERIMENTAL_GRADUATED
         assert c.symbol == "ns::queue"
+        assert c.public_reachable is False
 
     def test_no_graduation_when_stable_existed_before(self) -> None:
         # Stable name already existed in old → not a graduation event
@@ -222,6 +224,14 @@ class TestExperimentalRemovedWithoutReplacement:
         c = changes[0]
         assert c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
         assert c.symbol == "ns::experimental::bar"
+        # ADR-044 D1 (Codex review): _index_funcs_by_stable_key only ever
+        # indexes Visibility.PUBLIC functions, so this finding's mere
+        # existence already proves its subject is public — tagged directly
+        # so a broad namespace: "ns::experimental::*" suppression rule
+        # doesn't silently hide it (this detector runs after
+        # ApplySuppression, so nothing else would ever tag it).
+        assert c.public_reachable is True
+        assert c.reachability_kind == "direct_public_symbol"
 
     def test_silent_type_removal(self) -> None:
         old = _snap(types=[_rec("ns::experimental::queue")])
@@ -231,6 +241,13 @@ class TestExperimentalRemovedWithoutReplacement:
         c = changes[0]
         assert c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
         assert c.symbol == "ns::experimental::queue"
+        # Unlike the function path, RecordType carries no visibility field at
+        # all and snap.types is not filtered to public-only, so this path
+        # must NOT claim public_reachable — there is no reliable signal here
+        # (this is exactly the ambiguity that made the broader
+        # "any non-internal-namespaced subject" heuristic get reverted).
+        assert c.public_reachable is False
+        assert c.reachability_kind is None
 
     def test_replacement_at_stable_name_suppresses(self) -> None:
         old = _snap(funcs=[_fn("ns::experimental::bar")])
@@ -330,6 +347,10 @@ class TestStdReexportRemoved:
         assert c.kind == ChangeKind.STD_REEXPORT_REMOVED
         assert c.symbol == "lib::execution::par"
         assert "std::execution::par" in c.description
+        # ADR-044 D1 (Codex review): only ever emitted for a Visibility.PUBLIC
+        # function, so tagged directly at construction time.
+        assert c.public_reachable is True
+        assert c.reachability_kind == "direct_public_symbol"
 
     def test_reexport_kept_does_not_fire(self) -> None:
         import abicheck.demangle as dm
