@@ -394,6 +394,10 @@ def test_callback_by_value_cv_qualifier_is_neutralised(old_t, new_t):
     ("void (*)(int*, int*)", "void (*)(int*, const int*)"),
     ("void (*)(int[3])", "void (*)(const int[3])"),
     ("void (*)(int[3], int)", "void (*)(const int[3], int)"),
+    ("void (*)(int (*)())", "void (*)(const int (*)())"),
+    ("void (C::*)(int)", "void (C::*)(int) const"),
+    ("void (C::*)(int)", "void (C::*)(int) volatile"),
+    ("void (*)(void (C::*)())", "void (*)(void (C::*)() const)"),
 ])
 def test_callback_pointee_cv_qualifier_is_not_neutralised(old_t, new_t):
     """Negative control (Codex review, PR #589): a callback parameter's
@@ -410,7 +414,26 @@ def test_callback_pointee_cv_qualifier_is_not_neutralised(old_t, new_t):
     ``[...]`` handling must treat it the same as a real pointer sigil rather
     than as an opaque, ptr-blind skip. An earlier version of the fix above
     stripped cv indiscriminately inside any paren, wrongly neutralizing this
-    case too."""
+    case too. Two more real bugs from a further review round: a callback
+    parameter that is itself a function pointer with a cv-qualified RETURN
+    type (``void(*)(int (*)())`` vs. ``void(*)(const int (*)())``) had that
+    return-type cv wrongly treated as the callback's own neutral by-value
+    qualifier, because the recursive paren-handling hid the inner
+    declarator's ``*`` from the enclosing scope's own pointer-position
+    tracking; and a member-function-POINTER's own trailing cv (``void
+    (C::*)(int) const`` — the pointer points to a const member function,
+    confirmed by real g++ mangling to be a genuinely different,
+    non-interchangeable type, matching the existing FUNC_CV_CHANGED
+    precedent for a member function's own const/volatile) was stripped like
+    an ordinary disposable trailing qualifier. The fix for the first of
+    those two also had to generalize beyond "this paren contains only
+    sigils/cv tokens" — that heuristic missed a class-qualified
+    pointer-to-member declarator (``(C::*)``, real text besides the sigil)
+    nested as a callback's own parameter (``void(*)(void (C::*)())`` vs.
+    ``void(*)(void (C::*)() const)``); the general, content-independent
+    signal is structural: a declarator-grouping paren is always
+    immediately followed by another top-level paren/bracket (the real
+    parameter list or array dimensions)."""
     assert func_signature_cv_only_differ(old_t, new_t) is False
 
 

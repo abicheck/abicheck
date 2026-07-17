@@ -70,6 +70,29 @@
     known, deliberately deferred limitation (needs dict-key reconciliation,
     not just a comparison gate) — documented in
     `docs/development/plans/g28-castxml-clang-l2-parity-hardening.md`.
+  - A callback parameter that is itself a function pointer with a
+    cv-qualified RETURN type (`void(*)(int (*)())` vs. `void(*)(const int
+    (*)())` — confirmed distinct, non-interchangeable types by real g++
+    mangling) had that return-type cv wrongly treated as the callback
+    parameter's own neutral by-value qualifier: the recursive paren
+    handling hid the inner declarator's `*` inside an isolated recursive
+    call whose own pointer-position tracking never reached the enclosing
+    scope.
+  - A member-function-POINTER's own trailing cv (`void (C::*)(int) const`
+    — the pointer points to a const member function; `void (* const)()`'s
+    own trailing const is dropped for mangling, but a member function's is
+    NOT, matching the existing `FUNC_CV_CHANGED` precedent — confirmed
+    distinct, non-interchangeable types by real g++ mangling: two
+    same-named overloads differing only in this trailing const compile as
+    distinct symbols) was stripped like an ordinary disposable trailing
+    qualifier, both as a callback parameter and as a variable's own type
+    (`_without_top_level_const`'s end-of-string fallback didn't know a real
+    parameter list preceded the trailing cv). Fixed in both
+    `_strip_cv_qualifiers` and `_without_top_level_const` by recognizing a
+    pointer/pointer-to-member declarator-grouping paren structurally — it's
+    always immediately followed by another top-level paren/bracket (the
+    real parameter list or array dimensions) — regardless of what's inside
+    it (a bare sigil, or a class-qualified `Class::*`).
   - `abicheck/diff_symbols.py` was already at the 2000-line AI-readiness
     hard cap, so the pre-existing variable-alignment/const-normalization
     helpers moved into a new leaf module (`diff_symbols_variables.py`),

@@ -665,6 +665,22 @@ class TestVarConstChanged:
         r = compare(_snap(variables=[v_v1]), _snap(variables=[v_v2]))
         assert ChangeKind.VAR_TYPE_CHANGED in _kinds(r)
 
+    def test_member_function_pointer_own_const_is_type_changed_not_var_became_const(self):
+        """`void (C::*)(int)` -> `void (C::*)(int) const` (CodeRabbit
+        review, PR #589): the trailing `const` here is the member-function-
+        POINTER's own cv-qualification (it points to a const member
+        function) — a genuinely different, non-interchangeable type
+        (confirmed by real g++ mangling: two same-named overloads differing
+        only in this trailing const compile as distinct symbols, matching
+        the existing FUNC_CV_CHANGED precedent for a member function's own
+        const/volatile), NOT a pure top-level pointer-value const flip. Must
+        report VAR_TYPE_CHANGED, not VAR_BECAME_CONST."""
+        v_v1 = _pub_var("mp", "_Z2mp", "void (C::*)(int)", is_const=False)
+        v_v2 = _pub_var("mp", "_Z2mp", "void (C::*)(int) const", is_const=True)
+        r = compare(_snap(variables=[v_v1]), _snap(variables=[v_v2]))
+        assert ChangeKind.VAR_TYPE_CHANGED in _kinds(r)
+        assert ChangeKind.VAR_BECAME_CONST not in _kinds(r)
+
 
 # ── legacy CastXML volatile-variable noise (Codex review, PR #582) ──────────
 

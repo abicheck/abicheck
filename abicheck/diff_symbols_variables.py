@@ -141,6 +141,25 @@ def _declarator_sigil_pos(canonical_type: str) -> int | None:
     return _last_sigil_in_range(canonical_type, 0, len(canonical_type))
 
 
+def _has_real_trailing_group(canonical_type: str, after: int) -> bool:
+    """True if a top-level ``(...)``/``[...]`` group (skipping only
+    whitespace) starts at or after index *after*.
+
+    Used to recognize a member-function-POINTER's own trailing cv (``"void
+    (C:: *)(int) const"`` — the pointer points to a const member function):
+    once a REAL parameter list or array-dimension group follows the
+    declarator, anything trailing after IT is that group's own business
+    (member-function cv-qualification, a genuinely different, non-
+    interchangeable type — confirmed against real g++ mangling), never the
+    bare-pointer "trailing own const" case the end-of-string fallback below
+    exists for (CodeRabbit review, PR #589).
+    """
+    k = after
+    while k < len(canonical_type) and canonical_type[k].isspace():
+        k += 1
+    return k < len(canonical_type) and canonical_type[k] in "(["
+
+
 def _strip_trailing_declarator_const(canonical_type: str) -> str:
     """Strip a top-level pointer/reference declarator's own trailing
     ``const`` — whether at the absolute end of the string (a bare pointer,
@@ -151,9 +170,13 @@ def _strip_trailing_declarator_const(canonical_type: str) -> str:
     at the string's end). Only a run of pure cv tokens between the sigil and
     that close counts; anything else there (a real parameter/element type)
     means this isn't the simple ``"(*quals)"`` declarator shape, so fall
-    back to the plain end-of-string case rather than risk stripping
-    something that isn't actually this declarator's own qualifier
-    (CodeRabbit review, PR #589).
+    back to the plain end-of-string case — UNLESS a real parameter list or
+    array-dimension group follows the declarator (see
+    :func:`_has_real_trailing_group`), in which case a trailing end-of-string
+    ``const``/``volatile`` belongs to THAT group, not this declarator, and
+    must be left untouched entirely rather than risk stripping something
+    that isn't actually this declarator's own qualifier (CodeRabbit review,
+    PR #589, x2).
     """
     pos = _declarator_sigil_pos(canonical_type)
     if pos is not None:
@@ -179,6 +202,8 @@ def _strip_trailing_declarator_const(canonical_type: str) -> str:
             # compare unequal (Codex review, PR #589).
             new_span = re.sub(r"\bconst\b", "", span).strip()
             return canonical_type[: pos + 1] + new_span + canonical_type[span_end:]
+        if span_end < len(canonical_type) and _has_real_trailing_group(canonical_type, span_end + 1):
+            return canonical_type
     return _TRAILING_CONST_RE.sub("", canonical_type)
 
 

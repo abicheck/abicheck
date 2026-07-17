@@ -456,8 +456,62 @@ def _strip_cv_in_segment(name: str, chars: list[str], start: int, end: int, *, s
             continue
         if ch == "(":
             j = min(_find_matching_close(name, i), end - 1)
+            k = j + 1
+            while k < end and name[k].isspace():
+                k += 1
+            if k < end and name[k] in "([":
+                # A pointer/pointer-to-member DECLARATOR-GROUPING paren --
+                # e.g. the "(*)"/"(*const)"/"(C::*)" in "RetType
+                # (*)(Params)"/"RetType (C::*)(Params)" -- recognized
+                # structurally by being immediately followed by ANOTHER
+                # top-level paren/bracket (the real parameter list or array
+                # dimensions), regardless of what's inside it (a bare
+                # sigil, or a qualified pointer-to-member "Class::*" —
+                # deliberately NOT restricted to "only sigils/cv tokens
+                # inside", since that missed the class-qualified case:
+                # Codex review, PR #589, round 2). It is NOT itself a
+                # nested parameter list, so don't open a fresh strict scope
+                # for it: its "*" is the CURRENT (possibly
+                # nested-callback-parameter's own) declarator's top-level
+                # sigil and must stay visible to it. Recursing here would
+                # hide that "*" inside an isolated call whose own
+                # last_ptr_pos never reaches this scope's tracking, so a
+                # callback parameter that is itself a function pointer with
+                # a cv-qualified return type (``void(*)(int (*)())`` vs.
+                # ``void(*)(const int (*)())`` — confirmed distinct,
+                # non-interchangeable types by real g++ mangling) had its
+                # return-type cv wrongly treated as the callback
+                # parameter's own neutral by-value qualifier instead. Just
+                # step past the "(" and let this same scan process the
+                # interior in place.
+                i += 1
+                continue
             _strip_cv_in_segment(name, chars, i + 1, j, strict=True)
             i = j + 1
+            # A cv qualifier immediately following a REAL parameter list's
+            # closing paren is a member-function-POINTER's own
+            # cv-qualification (e.g. "void (C::*)(int) const" — the pointer
+            # points to a const member function) — a genuinely different,
+            # non-interchangeable type (confirmed against real g++
+            # mangling: two same-named overloads differing only in this
+            # trailing const compile as distinct symbols, matching the
+            # existing FUNC_CV_CHANGED precedent for a member function's
+            # own const/volatile). Never neutral, regardless of strict/
+            # non-strict context or position relative to any pointer
+            # sigil — leave it completely untouched rather than stripping
+            # it (permissive/non-strict mode) or treating it as a
+            # stripping candidate (strict mode) (CodeRabbit review, PR
+            # #589).
+            k = i
+            while k < end and name[k].isspace():
+                k += 1
+            m = _CV_TOKEN_RE.match(name, k)
+            while m and m.end() <= end:
+                k = m.end()
+                while k < end and name[k].isspace():
+                    k += 1
+                m = _CV_TOKEN_RE.match(name, k)
+            i = k
             continue
         if strict and ch == ",":
             _flush()
