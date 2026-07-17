@@ -515,6 +515,51 @@ since JSON/SARIF/JUnit reporters already round-trip `Change` via
   ADR-027/pattern-verdict-adjacent modules construct late synthetic findings
   the same way remains open — this round only confirmed the two kinds
   Codex's fresh evidence named.
+- **`RecordType.origin` was a real, overlooked signal — closes three
+  "deliberately untagged" cases from earlier rounds (Codex).** Every prior
+  round asserted "`RecordType` carries no visibility field, so a
+  type-sourced finding has no reliable public/internal signal" —
+  `MANDATORY_TEMPLATE_PARAM_ADDED`, the type-sourced path of
+  `_emit_experimental_change`/`EXPERIMENTAL_GRADUATED`/
+  `EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT`, and the type-sourced path of
+  `_emit_version_bumps`/`INLINE_NAMESPACE_VERSION_BUMPED` were all left
+  untagged on that basis. That premise was incomplete: `RecordType` does
+  carry `origin: ScopeOrigin` (ADR-024 D1's Linkage × Origin surface
+  model), and `ScopeOrigin.PUBLIC_HEADER` — set only under ADR-024's opt-in
+  `--public-header`/`--public-header-dir` scoping — is exactly the reliable
+  signal these three sites were missing. Without that flag every type's
+  `origin` is `ScopeOrigin.UNKNOWN` (per `ScopeOrigin`'s own docstring),
+  so this degrades to the prior untagged behavior automatically for the
+  common (no public-header set) case — not a regression, purely additive.
+  Fixed all three:
+  - `diff_namespaces._emit_experimental_change`/`_findings_for`: replaced
+    the static `subject_is_public: bool` parameter with `old_origins`/
+    `new_origins` maps (`None` for the always-public function path,
+    `{qualified_name: ScopeOrigin}` for the type path), looked up per
+    finding against the specific `old_q`/`new_q` subject.
+  - `diff_namespaces._emit_version_bumps`/`_collect_versioned_entries`:
+    the per-entry `"function"|"type"` string became a plain `is_public: bool`
+    (`True` for a `Visibility.PUBLIC` function, `origin ==
+    ScopeOrigin.PUBLIC_HEADER` for a type) — no other caller read the old
+    string value.
+  - `diff_templates.detect_mandatory_template_param_added`/`_arities`: now
+    returns a second `{stem: bool}` map alongside the arity-set map,
+    `True` when *any* contributing observation for that stem (function or
+    type) was reliably public. Deliberately "any observation" rather than
+    "the specific min-arity-driving one" — a stem with genuine public
+    evidence should not be treated as safe-to-hide by a broad suppression
+    rule even if a sibling internal instantiation also happened to share
+    the stem name; this stays conservative in the direction this ADR
+    cares about (never *hides* a real public break), unlike the reverted
+    D1 heuristic which risked the opposite (falsely claiming public
+    reachability with zero real evidence).
+  Added `_rec_public()`/`ScopeOrigin.PUBLIC_HEADER` regression tests
+  alongside each existing `ScopeOrigin.UNKNOWN`-default case in
+  `test_diff_namespaces.py`/`test_diff_templates.py`. Left
+  `INLINE_BODY_REFERENCES_RENAMED_MEMBER` (`diff_cpp_patterns.py`)
+  untouched — its untagged reasoning is a different shape (a namespace
+  heuristic risking *false* public claims, not a missing origin signal),
+  not something `ScopeOrigin` fixes.
 
 ### D2. `Suppression` gains a reachability guard
 

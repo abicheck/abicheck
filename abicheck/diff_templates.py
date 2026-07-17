@@ -561,10 +561,18 @@ def detect_mandatory_template_param_added(
     removal is also caught by ``func_removed`` so the user does see a
     finding even when this detector misses.
     """
-    from .model import Visibility
+    from .model import ScopeOrigin, Visibility
 
-    def _arities(snap: AbiSnapshot) -> dict[str, set[int]]:
+    def _arities(snap: AbiSnapshot) -> tuple[dict[str, set[int]], dict[str, bool]]:
         out: dict[str, set[int]] = defaultdict(set)
+        # ADR-044 (Codex review): tracks, per stem, whether *any* contributing
+        # observation is reliably public — a Visibility.PUBLIC function, or a
+        # type explicitly scoped to the public-header set (ADR-024's opt-in
+        # ScopeOrigin.PUBLIC_HEADER, --public-header/--public-header-dir).
+        # Without that flag every type's origin is ScopeOrigin.UNKNOWN, so
+        # this degrades to "public only if a public function contributed"
+        # automatically for the common case.
+        is_public: dict[str, bool] = defaultdict(bool)
         for f in snap.functions:
             if f.visibility != Visibility.PUBLIC:
                 continue
@@ -575,6 +583,7 @@ def detect_mandatory_template_param_added(
             arity = _count_top_level_template_args(qname)
             if arity is not None:
                 out[stem].add(arity)
+                is_public[stem] = True
         # Types are also indexed.
         for t in snap.types:
             if "<" not in t.name:
@@ -583,10 +592,12 @@ def detect_mandatory_template_param_added(
             arity = _count_top_level_template_args(t.name)
             if arity is not None:
                 out[stem].add(arity)
-        return out
+                if t.origin == ScopeOrigin.PUBLIC_HEADER:
+                    is_public[stem] = True
+        return out, is_public
 
-    old_ar = _arities(old)
-    new_ar = _arities(new)
+    old_ar, old_public = _arities(old)
+    new_ar, new_public = _arities(new)
 
     changes: list[Change] = []
     for stem in sorted(set(old_ar) & set(new_ar)):
@@ -594,23 +605,20 @@ def detect_mandatory_template_param_added(
         new_min = min(new_ar[stem])
         if new_min <= old_min:
             continue
-        # ADR-044 D1: deliberately NOT tagged public_reachable here, unlike
-        # the other detectors in this module. _arities() above merges arity
-        # observations from both Visibility.PUBLIC functions *and*
-        # snap.types under one shared stem key — a type contributes to this
-        # finding with no visibility signal at all (RecordType carries none,
-        # and this walk doesn't filter one), so a given finding may be driven
-        # entirely by an internal type whose name happens to share a stem
-        # with an unrelated public function. Tagging it here would
-        # reintroduce the exact unreliable-heuristic problem that got the
-        # broader MarkReachability change reverted earlier in this ADR's
-        # review cycle — see diff_namespaces._emit_experimental_change's
-        # subject_is_public split for the same distinction made explicit.
+        # ADR-044 D1: public_reachable is set only when at least one
+        # contributing observation for this stem was reliably public (see
+        # _arities above) — a stem whose only evidence is an internal type
+        # with no public-header scoping stays untagged, the same
+        # no-reliable-signal reasoning as before, now narrowed to exactly
+        # the cases that do have one.
+        subject_is_public = old_public.get(stem, False) or new_public.get(stem, False)
         changes.append(make_change(
             ChangeKind.MANDATORY_TEMPLATE_PARAM_ADDED,
             symbol=stem,
             name=stem,
             old=str(old_min),
+            public_reachable=subject_is_public,
+            reachability_kind="direct_public_symbol" if subject_is_public else None,
             new=str(new_min),
             old_value=f"min_arity={old_min}",
             new_value=f"min_arity={new_min}",

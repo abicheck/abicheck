@@ -28,6 +28,7 @@ from abicheck.model import (
     Function,
     Param,
     RecordType,
+    ScopeOrigin,
     Variable,
     Visibility,
 )
@@ -69,6 +70,13 @@ def _var(name: str, type_: str = "int",
 
 def _rec(name: str) -> RecordType:
     return RecordType(name=name, kind="class")
+
+
+def _rec_public(name: str) -> RecordType:
+    """A type explicitly scoped to the public-header set (ADR-024
+    --public-header), the one reliable public-reachability signal
+    RecordType carries."""
+    return RecordType(name=name, kind="class", origin=ScopeOrigin.PUBLIC_HEADER)
 
 
 # ---------------------------------------------------------------------------
@@ -409,12 +417,23 @@ class TestMandatoryTemplateParamAdded:
         new = _snap(types=[_rec("Bar<int, float>")])
         changes = detect_mandatory_template_param_added(old, new)
         assert len(changes) == 1
-        # ADR-044 D1: deliberately NOT tagged reachable — RecordType carries
-        # no visibility field, so a type-sourced finding has no reliable
-        # public/internal signal, unlike the function-sourced findings in
-        # this module (see the detector's own comment for the full
-        # rationale).
+        # RecordType carries no visibility field, and this type's origin
+        # defaults to ScopeOrigin.UNKNOWN (no --public-header scoping used)
+        # — no reliable signal in that (common) case.
         assert changes[0].public_reachable is False
+        assert changes[0].reachability_kind is None
+
+    def test_public_header_type_is_reachable(self) -> None:
+        """Codex review: RecordType.origin == ScopeOrigin.PUBLIC_HEADER (set
+        only under ADR-024's opt-in --public-header scoping) IS a reliable
+        public-reachability signal, unlike the default ScopeOrigin.UNKNOWN
+        case above."""
+        old = _snap(types=[_rec_public("Bar<int>")])
+        new = _snap(types=[_rec_public("Bar<int, float>")])
+        changes = detect_mandatory_template_param_added(old, new)
+        assert len(changes) == 1
+        assert changes[0].public_reachable is True
+        assert changes[0].reachability_kind == "direct_public_symbol"
 
 
 # ---------------------------------------------------------------------------

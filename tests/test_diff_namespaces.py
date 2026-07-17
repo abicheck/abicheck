@@ -32,6 +32,7 @@ from abicheck.model import (
     AbiSnapshot,
     Function,
     RecordType,
+    ScopeOrigin,
     Visibility,
 )
 
@@ -62,6 +63,13 @@ def _fn(name: str, mangled: str | None = None,
 
 def _rec(name: str) -> RecordType:
     return RecordType(name=name, kind="class")
+
+
+def _rec_public(name: str) -> RecordType:
+    """A type explicitly scoped to the public-header set (ADR-024
+    `--public-header`), the one reliable public-reachability signal
+    RecordType carries (Codex review)."""
+    return RecordType(name=name, kind="class", origin=ScopeOrigin.PUBLIC_HEADER)
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +175,23 @@ class TestExperimentalGraduated:
         assert c.symbol == "ns::queue"
         assert c.public_reachable is False
 
+    def test_public_header_type_graduated_is_reachable(self) -> None:
+        """Codex review: RecordType.origin == ScopeOrigin.PUBLIC_HEADER (set
+        only under ADR-024's opt-in --public-header scoping) is a reliable
+        public signal for the type-sourced path, unlike the default
+        ScopeOrigin.UNKNOWN case above."""
+        old = _snap(types=[_rec_public("ns::experimental::queue")])
+        new = _snap(types=[
+            _rec_public("ns::experimental::queue"),
+            _rec_public("ns::queue"),
+        ])
+        changes = detect_experimental_namespace_changes(old, new)
+        assert len(changes) == 1
+        c = changes[0]
+        assert c.kind == ChangeKind.EXPERIMENTAL_GRADUATED
+        assert c.public_reachable is True
+        assert c.reachability_kind == "direct_public_symbol"
+
     def test_no_graduation_when_stable_existed_before(self) -> None:
         # Stable name already existed in old → not a graduation event
         # (just deletion of a redundant alias, which is a separate signal).
@@ -241,13 +266,24 @@ class TestExperimentalRemovedWithoutReplacement:
         c = changes[0]
         assert c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
         assert c.symbol == "ns::experimental::queue"
-        # Unlike the function path, RecordType carries no visibility field at
-        # all and snap.types is not filtered to public-only, so this path
-        # must NOT claim public_reachable — there is no reliable signal here
-        # (this is exactly the ambiguity that made the broader
-        # "any non-internal-namespaced subject" heuristic get reverted).
+        # RecordType has no Visibility field, and this type's origin defaults
+        # to ScopeOrigin.UNKNOWN (no --public-header scoping used) — no
+        # reliable signal in that (common) case.
         assert c.public_reachable is False
         assert c.reachability_kind is None
+
+    def test_public_header_type_removal_is_reachable(self) -> None:
+        """Codex review: unlike the default ScopeOrigin.UNKNOWN case above,
+        ScopeOrigin.PUBLIC_HEADER (ADR-024 opt-in --public-header scoping)
+        IS a reliable public signal, so this must be tagged reachable."""
+        old = _snap(types=[_rec_public("ns::experimental::queue")])
+        new = _snap(types=[])
+        changes = detect_experimental_namespace_changes(old, new)
+        assert len(changes) == 1
+        c = changes[0]
+        assert c.kind == ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT
+        assert c.public_reachable is True
+        assert c.reachability_kind == "direct_public_symbol"
 
     def test_replacement_at_stable_name_suppresses(self) -> None:
         old = _snap(funcs=[_fn("ns::experimental::bar")])
@@ -520,9 +556,22 @@ class TestInlineNamespaceVersionBump:
         changes = detect_inline_namespace_version_bump(old, new)
         assert len(changes) == 1
         assert changes[0].kind == ChangeKind.INLINE_NAMESPACE_VERSION_BUMPED
-        # RecordType has no visibility field — no reliable public signal.
+        # Origin defaults to ScopeOrigin.UNKNOWN without --public-header — no
+        # reliable public signal in that (common) case.
         assert changes[0].public_reachable is False
         assert changes[0].reachability_kind is None
+
+    def test_public_header_type_version_bumped(self) -> None:
+        """Codex review: RecordType.origin == ScopeOrigin.PUBLIC_HEADER (set
+        only under ADR-024's opt-in --public-header scoping) IS a reliable
+        public-reachability signal for a type-sourced bump, unlike the
+        default ScopeOrigin.UNKNOWN case above."""
+        old = _snap(types=[_rec_public("ns::__1::queue")])
+        new = _snap(types=[_rec_public("ns::__2::queue")])
+        changes = detect_inline_namespace_version_bump(old, new)
+        assert len(changes) == 1
+        assert changes[0].public_reachable is True
+        assert changes[0].reachability_kind == "direct_public_symbol"
 
     def test_no_version_segment_no_finding(self) -> None:
         old = _snap(funcs=[_fn("ns::sort")])

@@ -254,32 +254,40 @@ def _emit_experimental_change(
     new_stable: list[str],
     kind_label: str,
     *,
-    subject_is_public: bool,
+    old_origins: dict[str, object] | None,
+    new_origins: dict[str, object] | None,
 ) -> Change:
     """Build the ``Change`` record for one classified event.
 
     ADR-044 D1 (Codex review): the function-sourced path (``kind_label ==
-    "declaration"``) is only ever built from ``_index_funcs_by_stable_key``,
-    which indexes public functions only — so unlike the reverted "any
-    non-internal-namespaced subject" heuristic (which had to guess at a raw
-    symbol's visibility with no reliable signal), a function finding's mere
-    existence already proves its subject is public, and *subject_is_public*
-    is tagged directly at construction time, mirroring
-    ``internal_leak._build_leak_change``/``diff_templates._leak_change`` —
-    these run via ``DetectNamespacePatterns``, *after* ``MarkReachability``,
+    "declaration"``, ``old_origins``/``new_origins`` both ``None``) is only
+    ever built from ``_index_funcs_by_stable_key``, which indexes public
+    functions only — so unlike the reverted "any non-internal-namespaced
+    subject" heuristic (which had to guess at a raw symbol's visibility with
+    no reliable signal), a function finding's mere existence already proves
+    its subject is public, and is tagged directly at construction time,
+    mirroring ``internal_leak._build_leak_change``/``diff_templates._leak_change``
+    — these run via ``DetectNamespacePatterns``, *after* ``MarkReachability``,
     so nothing else would ever tag them.
 
-    The type-sourced path (``kind_label == "type"``, ``subject_is_public=
-    False``) has no such signal: ``RecordType`` carries no visibility field
-    at all (unlike ``Function``/``Variable``), and ``_index_types_by_stable_key``
-    indexes every type in ``snap.types`` regardless of whether it is
-    genuinely public or an internal type that merely happens to have an
-    "experimental"-segment name — tagging it here would be exactly the
-    unreliable heuristic the revert was about, just for a different index.
+    The type-sourced path (``kind_label == "type"``, origins dicts provided)
+    has no ``Visibility`` field to fall back on — ``RecordType`` carries
+    none (unlike ``Function``/``Variable``) — but it *does* carry ``origin``
+    (ADR-024's ``ScopeOrigin``, opt-in via ``--public-header``/
+    ``--public-header-dir``): a type explicitly scoped to the public-header
+    set (``ScopeOrigin.PUBLIC_HEADER``) is a reliable public-reachability
+    signal Codex review pointed out was overlooked. Without that opt-in flag
+    every type's origin is ``ScopeOrigin.UNKNOWN``, so this degrades to the
+    prior untagged behavior automatically for the common case.
     """
+    from .model import ScopeOrigin
+
     old_q = old_exp[0]
     if event == "graduated":
         new_q = new_stable[0]
+        subject_is_public = (
+            new_origins is None or new_origins.get(new_q) == ScopeOrigin.PUBLIC_HEADER
+        )
         return make_change(
             ChangeKind.EXPERIMENTAL_GRADUATED,
             symbol=new_q,
@@ -289,6 +297,9 @@ def _emit_experimental_change(
             public_reachable=subject_is_public,
             reachability_kind="direct_public_symbol" if subject_is_public else None,
         )
+    subject_is_public = (
+        old_origins is None or old_origins.get(old_q) == ScopeOrigin.PUBLIC_HEADER
+    )
     return make_change(
         ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT,
         symbol=old_q,
@@ -307,9 +318,15 @@ def _findings_for(
     experimental_namespaces: tuple[str, ...],
     kind_label: str,
     *,
-    subject_is_public: bool,
+    old_origins: dict[str, object] | None = None,
+    new_origins: dict[str, object] | None = None,
 ) -> list[Change]:
-    """Walk old/new indices, emitting one finding per classified event."""
+    """Walk old/new indices, emitting one finding per classified event.
+
+    *old_origins*/*new_origins* are ``None`` for the function-sourced path
+    (always reliably public) or a ``{qualified_name: ScopeOrigin}`` map for
+    the type-sourced path (public only when ``ScopeOrigin.PUBLIC_HEADER``).
+    """
     out: list[Change] = []
     for (stable_key, leaf), qnames in old_index.items():
         old_exp, old_stable = _split_experimental(qnames, experimental_namespaces)
@@ -326,7 +343,7 @@ def _findings_for(
             continue
         out.append(_emit_experimental_change(
             event, leaf, old_exp, new_stable, kind_label,
-            subject_is_public=subject_is_public,
+            old_origins=old_origins, new_origins=new_origins,
         ))
     return out
 
@@ -362,14 +379,14 @@ def detect_experimental_namespace_changes(
         _index_funcs_by_stable_key(new, experimental_namespaces),
         experimental_namespaces,
         "declaration",
-        subject_is_public=True,
     ))
     out.extend(_findings_for(
         _index_types_by_stable_key(old, experimental_namespaces),
         _index_types_by_stable_key(new, experimental_namespaces),
         experimental_namespaces,
         "type",
-        subject_is_public=False,
+        old_origins={t.name: t.origin for t in old.types},
+        new_origins={t.name: t.origin for t in new.types},
     ))
     return out
 
@@ -567,39 +584,49 @@ def detect_inline_namespace_version_bump(
 
 
 def _index_versioned(
-    items: list[tuple[str, str]],
-) -> dict[tuple[str, ...], list[tuple[str, int, str]]]:
-    """Map version-stripped segments → list of ``(qualified, version_int, kind)``."""
-    out: dict[tuple[str, ...], list[tuple[str, int, str]]] = {}
-    for qname, kind in items:
+    items: list[tuple[str, bool]],
+) -> dict[tuple[str, ...], list[tuple[str, int, bool]]]:
+    """Map version-stripped segments → list of ``(qualified, version_int, is_public)``."""
+    out: dict[tuple[str, ...], list[tuple[str, int, bool]]] = {}
+    for qname, is_public in items:
         segs = _segments(qname)
         stripped, ver = _version_strip_segments(segs)
         if ver is None:
             continue
-        out.setdefault(stripped, []).append((qname, ver, kind))
+        out.setdefault(stripped, []).append((qname, ver, is_public))
     return out
 
 
-def _collect_versioned_entries(snap: AbiSnapshot) -> list[tuple[str, str]]:
-    """Return ``[(qualified_name, "function"|"type"), …]`` for *snap*."""
-    from .model import Visibility
+def _collect_versioned_entries(snap: AbiSnapshot) -> list[tuple[str, bool]]:
+    """Return ``[(qualified_name, is_reliably_public), …]`` for *snap*.
+
+    A function entry is reliably public because it was filtered to
+    ``Visibility.PUBLIC`` above. A type entry is reliably public only when
+    ``RecordType.origin == ScopeOrigin.PUBLIC_HEADER`` (ADR-024's opt-in
+    public-header scoping, ``--public-header``/``--public-header-dir``) —
+    the one signal that *does* exist for a type in the absence of a
+    visibility field (Codex review). Without that opt-in flag every type's
+    ``origin`` is ``ScopeOrigin.UNKNOWN``, so this degrades to the prior
+    untagged behavior automatically, not a regression for the common case.
+    """
+    from .model import ScopeOrigin, Visibility
     demangled = _batch_demangle_public(snap)
-    items: list[tuple[str, str]] = []
+    items: list[tuple[str, bool]] = []
     for f in snap.functions:
         if f.visibility != Visibility.PUBLIC:
             continue
         qname = _qualified_function_name(f.name, f.mangled, demangled)
         if qname:
-            items.append((qname, "function"))
+            items.append((qname, True))
     for t in snap.types:
         if t.name:
-            items.append((t.name, "type"))
+            items.append((t.name, t.origin == ScopeOrigin.PUBLIC_HEADER))
     return items
 
 
 def _emit_version_bumps(
-    old_idx: dict[tuple[str, ...], list[tuple[str, int, str]]],
-    new_idx: dict[tuple[str, ...], list[tuple[str, int, str]]],
+    old_idx: dict[tuple[str, ...], list[tuple[str, int, bool]]],
+    new_idx: dict[tuple[str, ...], list[tuple[str, int, bool]]],
 ) -> list[Change]:
     changes: list[Change] = []
     for stripped, old_list in old_idx.items():
@@ -614,11 +641,12 @@ def _emit_version_bumps(
             continue
         old_q = old_list[0][0]
         new_q = new_list[0][0]
-        # Only the function-sourced entries are filtered to Visibility.PUBLIC
-        # in `_collect_versioned_entries`; type entries carry no visibility
-        # signal at all (RecordType has no visibility field), so a bump whose
-        # reported declaration is a type must stay untagged.
-        subject_is_public = old_list[0][2] == "function" and new_list[0][2] == "function"
+        # `_collect_versioned_entries` marks a function entry reliably
+        # public (Visibility.PUBLIC filter) and a type entry reliably
+        # public only when its origin is ScopeOrigin.PUBLIC_HEADER (Codex
+        # review) — untagged otherwise, same as before public-header
+        # scoping is used.
+        subject_is_public = old_list[0][2] and new_list[0][2]
         changes.append(make_change(
             ChangeKind.INLINE_NAMESPACE_VERSION_BUMPED,
             symbol=new_q,
