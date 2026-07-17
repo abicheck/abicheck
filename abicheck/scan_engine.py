@@ -312,7 +312,12 @@ def _resolve_public_impact_tus(
     Best-effort, mirroring ``resolve_symbol_tus``'s degrade contract: returns
     ``()`` whenever the baseline carries no L5 graph or nothing resolves —
     this only ever *adds* to the replay seed, never narrows the existing
-    changed-path floor.
+    changed-path floor. Resolves each impacted decl's file the same two ways
+    ``resolve_symbol_tus`` does — a ``SOURCE_DECLARES`` edge from a header
+    node, or the decl node's own ``def_file``/``source_location`` attr (the
+    call/type-graph-only shape with no declaring-header edge at all) — so an
+    impacted decl that only carries the latter is not silently dropped
+    (Codex review).
     """
     pack = getattr(poi_baseline, "build_source", None)
     graph = getattr(pack, "source_graph", None) if pack is not None else None
@@ -321,12 +326,25 @@ def _resolve_public_impact_tus(
     impacted = resolve_changed_paths_public_impact(changed, graph)
     if not impacted:
         return ()
+    from .buildsource.poi import _path_of_location
     from .buildsource.source_graph import decl_declaring_files
 
     decl_to_file = decl_declaring_files(graph)
-    return tuple(
-        dict.fromkeys(decl_to_file[d] for d in sorted(impacted) if d in decl_to_file)
-    )
+    node_by_id = {n.id: n for n in graph.nodes}
+    files: dict[str, None] = {}
+    for d in sorted(impacted):
+        declared = decl_to_file.get(d)
+        if declared:
+            files.setdefault(declared, None)
+            continue
+        node = node_by_id.get(d)
+        attrs = getattr(node, "attrs", None) or {} if node is not None else {}
+        loc = attrs.get("def_file") or attrs.get("source_location")
+        if loc:
+            path = _path_of_location(str(loc))
+            if path:
+                files.setdefault(path, None)
+    return tuple(files)
 
 
 def _crosscheck_severity_exit(findings: list[Any], severities: dict[str, str]) -> int:

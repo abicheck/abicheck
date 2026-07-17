@@ -81,6 +81,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   *did* change, is now also replayed — closing a gap where a narrowed
   PR-scoped replay could silently skip such an entry.
 
+- **`dump --header-graph`/`--header-graph-includes`**: the header-only
+  semantic graph (ADR-041 addendum) was previously only reachable from
+  `compare`'s implicit dump-from-binary path; the standalone `dump` command
+  now embeds it directly in the written snapshot too, via the same shared
+  `header_graph_options` decorator `compare` uses (so the two flags and
+  their help text can never drift) and the same `service._attach_header_graph`
+  post-processing step `service.run_dump` already applied — `dumper.py`
+  itself needed no change. ELF only for now; `scan` and the PE/Mach-O `dump`
+  path are not yet wired.
+
 ### Documentation
 
 - `docs/concepts/build-source-data.md` now documents the ADR-041 P0

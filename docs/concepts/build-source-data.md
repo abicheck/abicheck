@@ -89,9 +89,15 @@ the five, not calls alone. Each kind has a dedicated example:
 
 **Header-only graph, no build integration (ADR-041 addendum).** `header_graph.py`
 builds the same node/edge shapes straight from a header-only dump — no
-`compile_commands.json`, no `--sources` checkout — via `service.run_dump(...,
-header_graph=True)` (a Python-API opt-in; not yet wired into the standalone
-`dump`/`scan` CLI). With a clang header AST (`--ast-frontend clang`) it reuses
+`compile_commands.json`, no `--sources` checkout — via `dump --header-graph`
+(embeds the graph in the written snapshot) or `compare --header-graph`
+(embeds it for both sides in-process); `--header-graph-includes` additionally
+adds `COMPILE_UNIT_INCLUDES_FILE` edges (one extra `clang -M` invocation per
+top-level header). Declaration provenance (public vs. internal) still needs
+`--public-header`/`--public-header-dir`, same as any other dump — without it
+every declaration's visibility is `unknown` and the internal-dependency
+findings below have nothing to classify against. Not yet available on `scan`.
+With a clang header AST (`--ast-frontend clang`) it reuses
 the same Clang-AST extractors for real `TYPE_INHERITS`/`TYPE_HAS_FIELD_TYPE`/
 `DECL_HAS_TYPE`/`DECL_REFERENCES_DECL` edges (plus `DECL_CALLS_DECL` for
 in-header bodies — inline/template/constexpr functions only, since the flat

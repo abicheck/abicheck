@@ -1489,6 +1489,67 @@ def test_public_impact_closure_resolves_tu_into_replay_seed(
     assert "src/api.cpp" in seed
 
 
+def test_public_impact_closure_uses_def_file_fallback_with_no_source_declares():
+    # Codex review: an impacted public entry may carry no SOURCE_DECLARES
+    # edge at all (the call/type-graph-only shape resolve_symbol_tus already
+    # falls back for) and instead only its own def_file/source_location attr
+    # names its declaring file. _resolve_public_impact_tus must not silently
+    # drop such an entry just because decl_declaring_files (SOURCE_DECLARES-
+    # only) has nothing for it.
+    from types import SimpleNamespace
+
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_graph import (
+        GraphEdge,
+        GraphNode,
+        SourceGraphSummary,
+    )
+    from abicheck.scan_engine import _resolve_public_impact_tus
+
+    graph = SourceGraphSummary(
+        nodes=[
+            # `pub` is impacted (reaches the internal decl declared in the
+            # changed file) but has NO SOURCE_DECLARES edge of its own —
+            # only a def_file attr names where it lives.
+            GraphNode(
+                id="decl://pub",
+                kind="source_decl",
+                label="pub",
+                attrs={
+                    "visibility": "public_header",
+                    "def_file": "src/api.cpp",
+                },
+            ),
+            GraphNode(
+                id="decl://internal",
+                kind="record_type",
+                label="Internal",
+                attrs={"visibility": "private_header"},
+            ),
+            GraphNode(
+                id="header://src/detail/cache.cpp",
+                kind="header",
+                label="src/detail/cache.cpp",
+            ),
+        ],
+        edges=[
+            GraphEdge(
+                src="header://src/detail/cache.cpp",
+                dst="decl://internal",
+                kind="SOURCE_DECLARES",
+            ),
+            GraphEdge(
+                src="decl://pub", dst="decl://internal", kind="TYPE_HAS_FIELD_TYPE"
+            ),
+        ],
+    )
+    poi_baseline = SimpleNamespace(
+        build_source=BuildSourcePack(root="", source_graph=graph)
+    )
+    tus = _resolve_public_impact_tus(poi_baseline, ["src/detail/cache.cpp"])
+    assert "src/api.cpp" in tus
+
+
 def test_depth_binary_clears_headers_in_scan(
     monkeypatch, runner, new_snap_compatible, tmp_path
 ):

@@ -346,6 +346,141 @@ def test_perform_elf_dump_stamps_build_context_and_attaches(
     assert "populated" not in events  # follow_deps was False
 
 
+def test_perform_elf_dump_attaches_header_graph_when_requested(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """ADR-041 addendum: with header_graph=True, perform_elf_dump calls
+    service._attach_header_graph (the same wrapper service.run_dump uses for
+    `compare`'s implicit-dump path) with the raw headers/includes/lang/
+    compile_context/public_headers/public_header_dirs it was given, and
+    writes the wrapper's returned (possibly different) snapshot object."""
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "h.h"
+    hdr.write_text("struct S { int x; };\n", encoding="utf-8")
+
+    plain_snap = AbiSnapshot(library="lib.so", version="1.0")
+    graphed_snap = AbiSnapshot(library="lib.so", version="1.0")
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", lambda **_kw: plain_snap)
+
+    captured: dict[str, object] = {}
+
+    def fake_attach(
+        snap,
+        header_graph,
+        header_graph_includes,
+        headers,
+        includes,
+        lang,
+        compile_context,
+        public_headers,
+        public_header_dirs,
+    ):
+        captured["snap"] = snap
+        captured["header_graph"] = header_graph
+        captured["header_graph_includes"] = header_graph_includes
+        captured["headers"] = headers
+        captured["includes"] = includes
+        captured["lang"] = lang
+        captured["compile_context"] = compile_context
+        captured["public_headers"] = public_headers
+        captured["public_header_dirs"] = public_header_dirs
+        return graphed_snap
+
+    monkeypatch.setattr("abicheck.service._attach_header_graph", fake_attach)
+
+    events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+
+    def _write_and_capture(snap, *a, **k):  # noqa: ANN001, ANN002, ANN003
+        captured["written_snap"] = snap
+        _write(snap, *a, **k)
+
+    sentinel_cc = object()
+
+    perform_elf_dump(
+        so,
+        (hdr,),
+        (),
+        "1.0",
+        "c++",
+        None,
+        None,
+        None,
+        (),
+        None,
+        True,
+        False,
+        None,
+        (),
+        (),
+        None,
+        False,
+        (),
+        "",
+        None,
+        None,
+        False,
+        None,
+        None,
+        None,
+        None,
+        False,
+        "off",
+        _expand,
+        _populate,
+        _stamp,
+        _write_and_capture,
+        header_graph=True,
+        header_graph_includes=True,
+        compile_context=sentinel_cc,  # type: ignore[arg-type]
+    )
+
+    assert captured["header_graph"] is True
+    assert captured["header_graph_includes"] is True
+    assert captured["headers"] == [hdr]
+    assert captured["lang"] == "c++"
+    assert captured["compile_context"] is sentinel_cc
+    assert captured["snap"] is plain_snap
+    # The wrapper's returned snapshot (not the original) is what gets written.
+    assert captured["written_snap"] is graphed_snap
+
+
+def test_perform_elf_dump_skips_header_graph_by_default(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """header_graph defaults to False: _attach_header_graph must not be called
+    at all, and the plain snapshot from dump() is written unmodified."""
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "h.h"
+    hdr.write_text("struct S { int x; };\n", encoding="utf-8")
+
+    plain_snap = AbiSnapshot(library="lib.so", version="1.0")
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", lambda **_kw: plain_snap)
+
+    called = {"attach": False}
+
+    def fake_attach(*a, **k):  # noqa: ANN002, ANN003
+        called["attach"] = True
+        raise AssertionError("_attach_header_graph must not be called")
+
+    monkeypatch.setattr("abicheck.service._attach_header_graph", fake_attach)
+
+    events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+    written: dict[str, object] = {}
+
+    def _write_and_capture(snap, *a, **k):  # noqa: ANN001, ANN002, ANN003
+        written["snap"] = snap
+        _write(snap, *a, **k)
+
+    perform_elf_dump(
+        so, (hdr,), (), "1.0", "c", None, None, None, (), None, True, False, None,
+        (), (), None, False, (), "", None, None, False, None, None, None, None,
+        False, "off", _expand, _populate, _stamp, _write_and_capture,
+    )
+
+    assert called["attach"] is False
+    assert written["snap"] is plain_snap
+
+
 def test_perform_elf_dump_seeds_l2_includes_and_runs_cleanup(
     tmp_path: Path, monkeypatch
 ) -> None:

@@ -1108,6 +1108,48 @@ def build_source_dump_options(func: F) -> F:
     return func
 
 
+def header_graph_options(func: F) -> F:
+    """The shared ``--header-graph``/``--header-graph-includes`` pair.
+
+    ADR-041 addendum: opts into the L2 header-only semantic graph
+    (:func:`~abicheck.buildsource.header_graph.build_header_only_graph`) for a
+    run — no build system needed, just the parsed header AST — so the
+    build-source-pack graph diff (declaration reachability / internal-
+    dependency risk findings, previously only reachable from L3-L5
+    build-integrated evidence) fires on a plain binary+headers run. Shared by
+    ``compare`` (embeds the graph on both sides internally, via
+    :func:`~abicheck.service.resolve_input`) and ``dump`` (embeds it in the
+    written snapshot, ADR-028's single-artifact UX) so the two flags and their
+    help text can never drift (CLAUDE.md "canonical primary spelling"; enforced
+    by ``tests/test_cli_contract.py``). Applied bottom-up, so listed in reverse
+    of display.
+    """
+    func = click.option(
+        "--header-graph-includes",
+        "header_graph_includes",
+        is_flag=True,
+        default=False,
+        help="With --header-graph, additionally run a per-header 'clang -M' pass to "
+        "add include-file edges from each top-level header to everything it "
+        "transitively includes. One extra clang invocation per top-level header, "
+        "so opt-in separately from --header-graph. Ignored without --header-graph.",
+    )(func)
+    func = click.option(
+        "--header-graph",
+        "header_graph",
+        is_flag=True,
+        default=False,
+        help="Build and embed a header-only semantic graph (ADR-041 addendum) "
+        "for both sides from the parsed header AST alone (no build system "
+        "needed); the existing build-source-pack graph diff picks it up "
+        "automatically, so declaration reachability / internal-dependency "
+        "risk findings become available on an ordinary binary+headers compare, "
+        "not just --depth build/source runs. Degrades to declaration-visibility "
+        "nodes only (no type/call edges) when clang is unavailable.",
+    )(func)
+    return func
+
+
 def evidence_options(func: F) -> F:
     """The shared two-sided evidence family (ADR-037 D3's ``@evidence_options``).
 

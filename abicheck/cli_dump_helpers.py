@@ -567,12 +567,24 @@ def perform_elf_dump(
     compile_db_filter: str | None = None,
     inputs_pack: Path | None = None,
     debug_info_path: Path | None = None,
+    header_graph: bool = False,
+    header_graph_includes: bool = False,
+    compile_context: CompileContext | None = None,
 ) -> None:
     """Run the ELF dump pipeline and write output.
 
     ``debug_info_path`` (P1.1, ADR-021a): a resolved detached debug artifact
     (``--debug-root``/``--debuginfod``) to read DWARF sections from instead of
     ``so_path`` itself — threaded straight into :func:`dumper.dump`.
+
+    ``header_graph``/``header_graph_includes`` (ADR-041 addendum): builds and
+    embeds the header-only (L2) semantic graph via
+    :func:`~abicheck.service._attach_header_graph` — the same post-processing
+    step ``service.run_dump`` already applies for `compare`'s implicit-dump
+    path, reused here rather than duplicated (``dumper.py`` sits at its
+    2000-line hard cap, so this stays a wrapper around the already-built
+    snapshot instead of a new parameter on :func:`dumper.dump` itself). A
+    no-op when ``header_graph`` was not requested or no headers were parsed.
 
     All helper callables (expand_header_inputs, populate_dependency_info,
     stamp_provenance, write_snapshot_output) are passed in from cli.py to avoid
@@ -717,6 +729,27 @@ def perform_elf_dump(
         from .numpy_capi import extract_numpy_capi_surface
 
         snap.numpy_capi = extract_numpy_capi_surface(so_path)
+
+    # ADR-041 addendum: same "this ELF dump CLI path reaches dumper.dump
+    # directly, not service.run_dump" attach point as G14/G23/G26 above —
+    # service._attach_header_graph is the exact wrapper service.run_dump uses
+    # for `compare`'s implicit-dump path, reused verbatim so a written
+    # snapshot's embedded graph is identical either way. A no-op unless
+    # --header-graph was passed and headers were parsed.
+    if header_graph:
+        from .service import _attach_header_graph
+
+        snap = _attach_header_graph(
+            snap,
+            header_graph,
+            header_graph_includes,
+            list(headers),
+            list(includes),
+            lang,
+            compile_context,
+            list(public_headers),
+            list(public_header_dirs),
+        )
 
     if follow_deps:
         populate_dependency_info(
