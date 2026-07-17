@@ -296,6 +296,9 @@ _LEADING_CONST_RE = re.compile(r"^const\s+([\w\s:]+?)(\s*[*&].*)?$")
 _MULTI_SPACE_RE = re.compile(r"\s{2,}")
 
 
+_PTR_REF_SIGIL_RE = re.compile(r"\s*([*&])\s*")
+
+
 def canonicalize_type_name(name: str) -> str:
     """Normalise a C/C++ type name for comparison.
 
@@ -304,10 +307,21 @@ def canonicalize_type_name(name: str) -> str:
     1. Strip leading ``struct ``/``class ``/``union ``/``enum `` elaborated-type-specifier.
     2. Normalise leading ``const T`` → ``T const`` (east-const canonical form),
        but only when the base type contains no angle brackets (templates).
-    3. Final whitespace cleanup.
+    3. Normalise pointer/reference sigil spacing to a single leading space
+       (``int*`` and ``int *`` both become ``int *``).
+    4. Final whitespace cleanup.
 
     This prevents false positives from dumpers that emit different
-    elaborated-type-specifier forms for the same type.
+    elaborated-type-specifier forms, or different pointer/reference sigil
+    spacing, for the same type — confirmed as a REAL, live discrepancy
+    between castxml (``"char const*"``, no space) and clang's
+    ``-ast-dump=json`` (``"char const *"``, with space) via the Phase 2
+    castxml↔clang parity gate (PR #582): without this step,
+    ``_params_differ``'s own ``canonicalize_type_name(...) ==
+    canonicalize_type_name(...)`` equality check — the very first thing it
+    tries — would treat a cross-producer (or cross-castxml-version)
+    comparison of an otherwise-unchanged pointer parameter as a real,
+    breaking type change purely from this spelling convention.
 
     >>> canonicalize_type_name("struct Foo")
     'Foo'
@@ -319,6 +333,10 @@ def canonicalize_type_name(name: str) -> str:
     'unsigned long long const'
     >>> canonicalize_type_name("const ns::Type &")
     'ns::Type const &'
+    >>> canonicalize_type_name("char const*")
+    'char const *'
+    >>> canonicalize_type_name("int*")
+    'int *'
     """
     # 0. Normalise whitespace early so anchored regexes work consistently.
     result = _MULTI_SPACE_RE.sub(" ", name.strip())
@@ -336,7 +354,10 @@ def canonicalize_type_name(name: str) -> str:
             # "const struct Foo" → base="struct Foo" → "Foo"
             base = _STRUCT_PREFIX_RE.sub("", base)
             result = base + " const" + suffix
-    # 3. Final cleanup.
+    # 3. Normalise pointer/reference sigil spacing (same technique already
+    #    used by _strip_cv_qualifiers below).
+    result = _PTR_REF_SIGIL_RE.sub(r" \1", result)
+    # 4. Final cleanup.
     result = _MULTI_SPACE_RE.sub(" ", result)
     return result.strip()
 

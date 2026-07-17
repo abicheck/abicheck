@@ -555,7 +555,7 @@ class _CastxmlParser:
             return Visibility.ELF_ONLY
         return Visibility.HIDDEN
 
-    def _constructor_visibility(
+    def _ctor_or_dtor_visibility(
         self,
         raw_mangled: str,
         name: str,
@@ -563,7 +563,8 @@ class _CastxmlParser:
         is_deleted: bool,
         is_artificial: bool,
     ) -> Visibility:
-        """Visibility for a Constructor element, with a source-access fallback.
+        """Visibility for a Constructor or Destructor element, with a
+        source-access fallback.
 
         ``_visibility()`` is an ELF-symbol-table lookup: it needs a real
         mangled name to check. When castxml omits the mangled name for a
@@ -579,18 +580,28 @@ class _CastxmlParser:
         never fired for the new ``std::function<int()>`` overload) behind
         `_public_functions()`'s PUBLIC/ELF_ONLY filter.
 
+        castxml ALSO omits the mangled name for every ``<Destructor>``
+        (never just user-declared/overloaded ones — a class has at most one
+        destructor, so there's no overload-collision risk the way there is
+        for constructors), so the exact same problem applies there: a
+        removed or added virtual destructor would silently classify HIDDEN
+        (Phase 2 castxml↔clang parity gate, PR #582 — discovered by
+        comparing real castxml/clang dumps of a multiple/virtual-inheritance
+        hierarchy: clang correctly reports a base's virtual destructor as
+        PUBLIC while castxml reported it HIDDEN).
+
         Falls back to the real ELF lookup first (it stays authoritative
         whenever it can actually resolve something); only when that lookup
         has no mangled name to work with does a public, non-deleted,
-        **user-declared** (``is_artificial`` false) constructor default to
-        PUBLIC — the same "declared public in a public header, without
-        contrary evidence" principle already used for source-graph
+        **user-declared** (``is_artificial`` false) constructor/destructor
+        default to PUBLIC — the same "declared public in a public header,
+        without contrary evidence" principle already used for source-graph
         public-surface classification
         (:data:`abicheck.buildsource.source_graph.PUBLIC_VISIBILITIES`).
-        Compiler-generated implicit constructors (default/copy/move, marked
+        Compiler-generated implicit constructors/destructors (marked
         ``artificial="1"``) are excluded: they have no source declaration of
         their own to compare across versions, so promoting them would treat
-        every trivial aggregate's synthesized ctors as a churny "added"/
+        every trivial aggregate's synthesized ctor/dtor as a churny "added"/
         "removed" API surface instead of staying silent like the clang
         header backend already does for them.
         """
@@ -622,7 +633,7 @@ class _CastxmlParser:
         ``constexpr`` variable with no ``extern`` — internal linkage by
         default, mangled with an ``L`` marker rather than exported) — the
         same "declared public, without contrary evidence" principle already
-        applied to constructors (:meth:`_constructor_visibility`).
+        applied to constructors/destructors (:meth:`_ctor_or_dtor_visibility`).
         """
         vis = self._visibility(mangled, name)
         if vis is not Visibility.HIDDEN:
@@ -713,6 +724,17 @@ class _CastxmlParser:
             ret_id = el.get("returns", "")
             ret_type_for_name = self._type_name(ret_id) if ret_id else "?"
             name = f"operator {ret_type_for_name}"
+        if name and el.tag == "Destructor":
+            # castxml's <Destructor name="..."> is the bare CLASS name (e.g.
+            # "Base1"), identical to its own Constructor's — unlike clang's
+            # `-ast-dump=json`, which already names a CXXDestructorDecl
+            # "~Base1" (confirmed against a live clang 18 dump; Phase 2
+            # parity gate, PR #582). Synthesizing the same "~ClassName" form
+            # here both matches clang's convention and gives
+            # _function_mangled_name's no-mangled-name fallback (`return
+            # name`) a key that can never collide with the class's own
+            # constructor/type entries.
+            name = f"~{name}"
         # castxml emits operator name as the bare symbol (e.g. "==", "+").
         # Normalize to the canonical "operator==" form for readability and
         # to match how the rest of the pipeline (and human reports)
@@ -958,10 +980,10 @@ class _CastxmlParser:
         access = self._access_level(el)
         is_deleted = el.get("deleted") == "1"
         visibility = (
-            self._constructor_visibility(
+            self._ctor_or_dtor_visibility(
                 raw_mangled, name, access, is_deleted, el.get("artificial") == "1"
             )
-            if el.tag == "Constructor"
+            if el.tag in ("Constructor", "Destructor")
             else self._visibility(raw_mangled, name)
         )
 
@@ -1024,6 +1046,26 @@ class _CastxmlParser:
             mangled = el.get("mangled", "") or name
             if not mangled:
                 continue
+            # Real ELF export evidence overrides castxml's language-mode guess
+            # — the same "case141" fallback already applied to functions
+            # above (_parse_function_element): castxml ALWAYS emits a
+            # pseudo-Itanium `mangled` attribute for a Variable too, even
+            # when the header is actually a plain C API compiled with a C
+            # linkage that never mangles at all (confirmed empirically —
+            # Phase 2 castxml↔clang parity gate, PR #582: a `.c`-compiled
+            # `extern int g;` got a bogus `_Z1g`-style key from castxml
+            # while clang correctly reported the real bare-name export).
+            # Restricted to global scope for the same reason as the function
+            # override: a namespaced C++ variable's bare leaf could
+            # coincidentally match an unrelated global export.
+            if (
+                mangled.startswith("_Z")
+                and mangled not in self._exported_dynamic
+                and mangled not in self._exported_static
+                and name in (self._exported_dynamic | self._exported_static)
+                and self._is_global_scope(el)
+            ):
+                mangled = name
             # Skip compiler built-ins and command-line synthetic declarations
             if self._is_builtin_element(el):
                 continue

@@ -356,6 +356,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   dependent public entries were ever flagged as impacted. Now walks every
   `SOURCE_DECLARES` edge directly instead of the single-file lookup (Codex
   review).
+- **CastXML ↔ Clang L2 parity gate** (`tests/test_castxml_clang_parity_gate.py`):
+  runs the live castxml and clang `-ast-dump=json` header backends over the
+  same compiled corpus (functions/overloads/constructors, variables/
+  constants, namespaced records, anonymous unions, multiple/virtual
+  inheritance, bitfields, templates, `[[deprecated]]`, plus a plain-C
+  corpus) and classifies every compared fact as `equal` /
+  `semantically_equal` / `expected_producer_difference` /
+  `unsupported_on_one_producer` / `unexpected_mismatch`. Building this
+  surfaced and fixed three real, previously-undiscovered bugs (see Fixed).
 - **CastXML schema-completeness: 16 new `ChangeKind`s.** CastXML's own XML
   schema already exposes several facts the header parser previously
   discarded; each is now normalized into the model and has a dedicated
@@ -518,7 +527,36 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `GetDeclAttributes` source), so reading only the `deprecation` attribute
   missed every messageless deprecation across all four surfaces (function,
   variable, record, enum). Now falls back to the `attributes` token,
-  yielding `""` (deprecated, no message) instead of `None`.
+  yielding `""` (deprecated, no message) instead of `None`. Three more real
+  bugs found and fixed by building the new castxml↔clang parity gate
+  (above), verified against a live castxml 0.4.5 + clang 18 install:
+  - **Virtual destructor visibility**: castxml's `<Destructor>` element
+    carries the bare CLASS name (identical to its own `<Constructor>`) and
+    (like a constructor) usually no `mangled` attribute — so its
+    synthesized key collapsed onto a string that could never match the
+    real exported destructor symbol, defaulting a genuinely PUBLIC virtual
+    destructor to HIDDEN and hiding it from `_public_functions()`. This
+    could silently mask a `FUNC_REMOVED`/`FUNC_ADDED` finding for a real
+    virtual-destructor change on any polymorphic base class. Fixed by
+    synthesizing a `"~ClassName"` display name (matching what the clang
+    backend already produced) and generalizing the existing constructor
+    visibility fallback (`_constructor_visibility` → renamed
+    `_ctor_or_dtor_visibility`) to destructors.
+  - **C-linkage variable identity**: castxml's ambiguous-language-mode
+    guess for a bare `.h` header emits a bogus C++-style pseudo-mangled
+    name (e.g. `_Z8c_global`) for a plain C-linkage variable that a real C
+    compilation never mangles at all — the same already-fixed "case141"
+    issue for functions, previously unaddressed for variables. Fixed by
+    extending the same real-ELF-export override to `parse_variables()`.
+  - **Pointer-sigil spacing in `canonicalize_type_name`**: castxml spells a
+    pointer type with no space before `*` (`"char const*"`) while clang's
+    `-ast-dump=json` includes one (`"char const *"`) — a real, systematic
+    spelling difference between the two producers that `_params_differ`'s
+    own equality check didn't normalize, so an unrelated, unchanged pointer
+    parameter could misreport as a breaking type change purely from this
+    convention (cross-producer, or even just a castxml version bump).
+    `canonicalize_type_name` now normalizes sigil spacing the same way
+    `_strip_cv_qualifiers` already did internally.
 - **MCP `abi_compare`**: a `--used-by`/`--required-symbol` response's
   `summary` (`total_changes`/`breaking`/`api_breaks`/`risk_changes`/
   `compatible`) is now recomputed after scoped-only changes and

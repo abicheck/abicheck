@@ -27,7 +27,7 @@ That silently hid:
   since ``_public_functions()`` filters to PUBLIC/ELF_ONLY visibility only;
 - an *added* one (case111: the new ``int_factory_t`` overload).
 
-``_constructor_visibility`` restores this signal from source access when
+``_ctor_or_dtor_visibility`` restores this signal from source access when
 castxml gives no mangled name to check — but only for a genuinely
 user-declared constructor (not compiler-generated default/copy/move ctors,
 which carry no source declaration of their own to compare and would
