@@ -71,7 +71,11 @@ def _write_snapshot(
         "build_id": None,
     }
     if fact_set is not None:
-        data["build_source"] = {"source_abi": {"fact_set": fact_set}}
+        # Matches the real SourceAbiSurface.to_dict() shape
+        # (abicheck/buildsource/source_abi.py): there is no top-level
+        # "fact_set" key, only "coverage": {"fact_set": ...}, written by
+        # source_link.link_source_abi() (Codex review).
+        data["build_source"] = {"source_abi": {"coverage": {"fact_set": fact_set}}}
     path.write_text(json.dumps(data), encoding="utf-8")
 
 
@@ -105,6 +109,46 @@ class TestBuildManifestBasics:
         entries = [{"name": "libfoo", "artifact": "build/libfoo.so"}]
         manifest = build_manifest_module.build_manifest(tmp_path, "", "", entries, None)
         assert manifest["snapshot_schema"] == 9
+
+    def test_fact_set_read_from_real_snapshot_shape(self, tmp_path: Path) -> None:
+        # Regression (Codex review): SourceAbiSurface.to_dict() has no
+        # top-level "fact_set" key -- link_source_abi() writes the rolled-up
+        # identity to surface.coverage["fact_set"]. Written directly (not via
+        # the _write_snapshot helper) to pin the exact real production
+        # schema, so this can't pass merely because the helper and the reader
+        # drifted together.
+        snap_path = tmp_path / "libfoo.abicheck.json"
+        snap_path.write_text(
+            json.dumps(
+                {
+                    "library": "libfoo",
+                    "version": "1.0.0",
+                    "schema_version": 9,
+                    "git_commit": None,
+                    "git_tag": None,
+                    "created_at": None,
+                    "build_id": None,
+                    "build_source": {
+                        "source_abi": {
+                            "coverage": {
+                                "fact_set": {
+                                    "name": "abicheck-clang-canonical",
+                                    "version": 1,
+                                },
+                                "exported_symbols": 3,
+                            }
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        entries = [{"name": "libfoo", "artifact": "a.so"}]
+        manifest = build_manifest_module.build_manifest(tmp_path, "", "", entries, None)
+        assert manifest["fact_set"] == {
+            "name": "abicheck-clang-canonical",
+            "version": 1,
+        }
 
     def test_fact_set_recorded_when_consistent(self, tmp_path: Path) -> None:
         fact_set = {"name": "abicheck-clang-canonical", "version": 1}

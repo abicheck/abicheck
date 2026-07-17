@@ -51,7 +51,17 @@ def _read_snapshot_meta(path: Path) -> dict[str, Any]:
     if isinstance(build_source, dict):
         source_abi = build_source.get("source_abi")
         if isinstance(source_abi, dict):
-            fact_set = source_abi.get("fact_set")
+            # SourceAbiSurface.to_dict() (abicheck/buildsource/source_abi.py)
+            # has no top-level "fact_set" key -- the rolled-up identity is
+            # written to surface.coverage["fact_set"] by
+            # source_link.link_source_abi() (abicheck/buildsource/
+            # source_link.py). Reading source_abi["fact_set"] directly always
+            # returned None for a real dump --sources/--build-info baseline,
+            # silently disabling the freshness recipe-identity check this
+            # manifest exists to provide (Codex review).
+            coverage = source_abi.get("coverage")
+            if isinstance(coverage, dict):
+                fact_set = coverage.get("fact_set")
     return {
         "schema_version": raw.get("schema_version"),
         "library": raw.get("library"),
