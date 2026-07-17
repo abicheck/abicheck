@@ -86,6 +86,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- **GitHub Action**: `dry-run: true` no longer hard-fails (`exit 1`) when
+  combined with `abi-baseline` and the release/token/`*.abicheck.json` asset
+  is unavailable — the baseline auto-fetch ran before the mode branch ever
+  consulted `INPUT_DRY_RUN`, contradicting `dry-run`'s documented "always
+  exits 0" preview contract (Codex review). A fetch failure now reports a
+  warning and continues under `--dry-run`; if no other `old-library`/
+  `against` was independently given (nothing left to preview), the step
+  exits 0 with a notice instead of falling through to a hard failure.
+  Non-`--dry-run` behavior is unchanged.
 - `compare --used-by`/`--required-symbol(s)`'s default markdown/text/review
   report now names the actual missing symbol/version/entrypoint and any
   scoped-only change (e.g. `PE_ORDINAL_RETARGETED`) that failed the gate,
