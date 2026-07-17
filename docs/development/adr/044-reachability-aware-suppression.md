@@ -418,6 +418,37 @@ since JSON/SARIF/JUnit reporters already round-trip `Change` via
   `DetectCppPatterns` or any path that runs through `MarkReachability`/
   `ApplySuppression` at all, so the pipeline-order bug this ADR closes
   does not apply to it.
+- **Self-review: `entity_namespace` missing from the D4 diagnostic's own
+  selector display.** With CI green and Codex quiet, an independent
+  self-review pass (prompted by "is this a full implementation, what's
+  left") re-read the diff cold rather than re-trusting the prior rounds'
+  conclusions, and found `_build_suppression_overreach_change`
+  (`post_processing.py`) still fell back through `rule.namespace or
+  rule.cause_namespace or rule.source_location or rule.symbol or
+  rule.symbol_pattern or rule.type_pattern or "?"` — `entity_namespace`,
+  the canonical spelling introduced by D3's namespace/cause split, was
+  never added to this chain, even though the equivalent string-building in
+  `SuppressionAudit` (`suppression.py`) already includes it. A rule written
+  with `entity_namespace:` (not the legacy `namespace:` alias) that
+  triggers `suppression_would_hide_public_break` would render as `"?"` (or
+  whichever unrelated field happened to be set) in the diagnostic instead
+  of naming the actual rule — undermining D4's whole stated purpose of
+  "explaining why and how to override it." No test caught this: the
+  existing regression test used the `namespace` alias and asserted only
+  that `"allow_public_break"` appeared in the message, never the selector
+  text itself. Also noticed while fixing it: `rule.symbol`/
+  `rule.symbol_pattern`/`rule.type_pattern` in that same fallback chain are
+  unreachable dead code — `would_withhold()` requires
+  `not self._passes_public_break_gate(change)`, and that gate returns
+  `True` unconditionally whenever `_is_broad_selector` is `False`, which is
+  exactly the case whenever any of those three (primary narrow selectors)
+  is set — so a rule naming one can never reach this diagnostic at all.
+  Fixed by adding `rule.entity_namespace` to the chain and dropping the
+  three dead branches (only the four broad-shaped fields — `namespace`,
+  `entity_namespace`, `cause_namespace`, `source_location` — can ever
+  actually appear here), plus a new regression test using `entity_namespace`
+  only and asserting the rendered selector text, not just a substring of
+  the fixed suffix.
 
 ### D2. `Suppression` gains a reachability guard
 

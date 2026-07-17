@@ -343,7 +343,29 @@ class TestSuppressionPipelineOrderFix:
         assert ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK in kinds
         diag = next(c for c in ctx.kept if c.kind == ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK)
         assert "allow_public_break" in diag.description
+        # The diagnostic must name the actual rule that was withheld, not a
+        # fallback placeholder (self-review finding: entity_namespace was
+        # missing from _build_suppression_overreach_change's selector chain).
+        assert "oneapi::dal::**::detail::**" in diag.description
         assert ctx.suppressed == []
+
+    def test_entity_namespace_only_rule_named_in_diagnostic(self) -> None:
+        """Same scenario, but using the canonical ``entity_namespace`` spelling
+        instead of the legacy ``namespace`` alias — regression test for a
+        self-review finding where the diagnostic fell back to ``"?"`` because
+        ``entity_namespace`` was missing from the selector fallback chain."""
+        old, new, raw_change = _reachable_scenario()
+        suppression = SuppressionList([
+            Suppression(
+                entity_namespace="oneapi::dal::**::detail::**",
+                reason="Private implementation details",
+            )
+        ])
+        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        diag = next(
+            c for c in ctx.kept if c.kind == ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK
+        )
+        assert "Suppression rule 'oneapi::dal::**::detail::**' matched" in diag.description
 
     def test_broad_namespace_suppression_still_suppresses_unreachable_churn(self) -> None:
         """Unreachable internal churn is unaffected — no regression for the

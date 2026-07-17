@@ -654,13 +654,20 @@ def _build_suppression_overreach_change(change: Change, rule: Suppression) -> Ch
     from .checker_policy import ChangeKind
     from .checker_types import Change
 
+    # would_withhold() only ever returns True for a *broad* rule (namespace/
+    # entity_namespace/cause_namespace/source_location, no primary narrow
+    # selector — see Suppression._is_broad_selector): a rule with symbol/
+    # symbol_pattern/type_pattern set has _is_broad_selector=False, so
+    # _passes_public_break_gate short-circuits True and would_withhold can
+    # never fire for it. The selector fallback below only needs the three
+    # broad-shaped fields; entity_namespace is the canonical spelling of
+    # namespace (self-review finding: it was missing here even though the
+    # equivalent SuppressionAudit string-building was already fixed).
     selector = (
         rule.namespace
+        or rule.entity_namespace
         or rule.cause_namespace
         or rule.source_location
-        or rule.symbol
-        or rule.symbol_pattern
-        or rule.type_pattern
         or "?"
     )
     proof = (
