@@ -1,6 +1,8 @@
 """Tests for the whole-snapshot cache wiring (service_dump_cache.py)."""
 from __future__ import annotations
 
+from pathlib import Path
+
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.service_dump_cache import (
     _dump_cache_extra_key,
@@ -107,6 +109,18 @@ class TestDumpCacheExtraKey:
         k1 = _dump_cache_extra_key("elf", "auto", [a, b], None)
         k2 = _dump_cache_extra_key("elf", "auto", [b, a], None)
         assert k1 == k2
+
+    def test_one_path_with_embedded_comma_does_not_collide_with_two_paths(self):
+        # A regression guard for a real (if narrow) collision: joining with a
+        # printable delimiter like "," means one path literally named "a,b"
+        # and two separate paths "a"/"b" both stringify+sort+join to "a,b" —
+        # indistinguishable. NUL can't appear in a filesystem path, so the two
+        # inputs must produce different keys.
+        one_path_with_comma = [Path("a,b")]
+        two_paths = [Path("a"), Path("b")]
+        k1 = _dump_cache_extra_key("elf", "auto", one_path_with_comma, None)
+        k2 = _dump_cache_extra_key("elf", "auto", two_paths, None)
+        assert k1 != k2
 
 
 class TestCachedRunDump:

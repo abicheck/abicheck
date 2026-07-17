@@ -86,13 +86,22 @@ def _dump_cache_extra_key(
     """Build the ``extra`` cache-key material for a cacheable dump — every
     input to ``run_dump`` that affects its output besides the binary content
     / headers / includes / version / lang that
-    :func:`abicheck.snapshot_cache._cache_key` already hashes directly."""
-    return "|".join(
+    :func:`abicheck.snapshot_cache._cache_key` already hashes directly.
+
+    Joined with NUL (``\\x00``) rather than a printable delimiter like
+    ``,``/``|``: a path may legally contain a comma or pipe on POSIX, so a
+    printable-delimiter join risks two different inputs — e.g. one path
+    ``"a,b"`` vs. two paths ``"a"``/``"b"`` — collapsing to the same key. NUL
+    can't appear in a filesystem path on any supported platform, so it can't
+    collide regardless of what the caller's paths contain.
+    """
+    sep = "\x00"
+    return sep.join(
         [
             binary_fmt,
             header_backend,
-            ",".join(sorted(str(p) for p in (public_headers or []))),
-            ",".join(sorted(str(p) for p in (public_header_dirs or []))),
+            sep.join(sorted(str(p) for p in (public_headers or []))),
+            sep.join(sorted(str(p) for p in (public_header_dirs or []))),
         ]
     )
 

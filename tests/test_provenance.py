@@ -26,12 +26,14 @@ from abicheck.model import (
     RecordType,
     ScopeOrigin,
     Variable,
+    Visibility,
 )
 from abicheck.provenance import (
     apply_provenance,
     build_public_set,
     classify_origin,
     header_from_location,
+    tag_provenance,
 )
 from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
 
@@ -231,6 +233,159 @@ def test_apply_provenance_no_set_keeps_unknown_but_fills_header():
     assert snap.functions[0].source_header == "/build/include/api.h"
     assert snap.functions[0].origin is ScopeOrigin.UNKNOWN
     assert snap.types[0].origin is ScopeOrigin.UNKNOWN
+
+
+# ── origin_cache (tag_provenance / apply_provenance memoization) ─────────────
+#
+# apply_provenance() and the buildsource castxml extractor share one
+# classify_origin() result across every declaration produced by the same
+# header — these tests prove the cache actually gets *hit* (not just that
+# overall output happens to be unchanged), and that it never conflates
+# declarations under a different (source_header, export_only) key.
+
+
+def _tag(decl, header_segs, dir_segs, have_set, *, origin_cache=None):
+    tag_provenance(decl, header_segs, dir_segs, have_set, origin_cache=origin_cache)
+    return decl
+
+
+def test_origin_cache_hit_reuses_prior_classification(monkeypatch):
+    """Two declarations sharing one header must classify_origin() only once."""
+    calls = []
+    real_classify_origin = classify_origin
+
+    def _spy(*args, **kwargs):
+        calls.append((args, tuple(sorted(kwargs.items()))))
+        return real_classify_origin(*args, **kwargs)
+
+    monkeypatch.setattr("abicheck.provenance.classify_origin", _spy)
+
+    header_segs, dir_segs, have_set = build_public_set(["include/api.h"], None)
+    origin_cache: dict = {}
+    a = Function(
+        name="a", mangled="a", return_type="void",
+        source_location="/build/include/api.h:10",
+    )
+    b = Function(
+        name="b", mangled="b", return_type="void",
+        source_location="/build/include/api.h:99",  # same header, different line
+    )
+    _tag(a, header_segs, dir_segs, have_set, origin_cache=origin_cache)
+    _tag(b, header_segs, dir_segs, have_set, origin_cache=origin_cache)
+
+    assert a.origin is ScopeOrigin.PUBLIC_HEADER
+    assert b.origin is ScopeOrigin.PUBLIC_HEADER
+    assert len(calls) == 1  # the second call was served from origin_cache
+
+
+def test_origin_cache_distinguishes_different_headers(monkeypatch):
+    """Declarations from different headers must not share a cached result."""
+    calls = []
+    real_classify_origin = classify_origin
+
+    def _spy(*args, **kwargs):
+        calls.append(1)
+        return real_classify_origin(*args, **kwargs)
+
+    monkeypatch.setattr("abicheck.provenance.classify_origin", _spy)
+
+    header_segs, dir_segs, have_set = build_public_set(["include/api.h"], None)
+    origin_cache: dict = {}
+    pub = Function(
+        name="pub", mangled="pub", return_type="void",
+        source_location="/build/include/api.h:10",
+    )
+    priv = Function(
+        name="priv", mangled="priv", return_type="void",
+        source_location="/build/src/impl.h:20",
+    )
+    _tag(pub, header_segs, dir_segs, have_set, origin_cache=origin_cache)
+    _tag(priv, header_segs, dir_segs, have_set, origin_cache=origin_cache)
+
+    assert pub.origin is ScopeOrigin.PUBLIC_HEADER
+    assert priv.origin is ScopeOrigin.PRIVATE_HEADER
+    assert len(calls) == 2  # distinct headers never share a cache entry
+
+
+def test_origin_cache_distinguishes_export_only_from_same_header(monkeypatch):
+    """Same (missing) header, different export_only, must not collide.
+
+    ``export_only`` comes from ``Visibility.ELF_ONLY`` and only matters when
+    there's no source_location at all — the cache key is
+    ``(source_header, export_only)``, so two no-location declarations that
+    differ only in visibility must classify independently.
+    """
+    header_segs, dir_segs, have_set = build_public_set(["include/api.h"], None)
+    origin_cache: dict = {}
+    exported = Function(
+        name="exported", mangled="exported", return_type="void",
+        visibility=Visibility.ELF_ONLY,
+    )
+    hidden = Function(
+        name="hidden", mangled="hidden", return_type="void",
+        visibility=Visibility.HIDDEN,
+    )
+    _tag(exported, header_segs, dir_segs, have_set, origin_cache=origin_cache)
+    _tag(hidden, header_segs, dir_segs, have_set, origin_cache=origin_cache)
+
+    assert exported.origin is ScopeOrigin.EXPORT_ONLY
+    assert hidden.origin is ScopeOrigin.UNKNOWN
+    assert len(origin_cache) == 2  # (None, True) and (None, False) both cached
+
+
+def test_origin_cache_matches_uncached_result():
+    """The cached and uncached (origin_cache=None) paths must agree exactly —
+    the cache must be a pure optimization, never a behavior change."""
+    header_segs, dir_segs, have_set = build_public_set(["include/api.h"], None)
+
+    cached_decls = [
+        Function(
+            name=n, mangled=n, return_type="void",
+            source_location=f"/build/include/api.h:{i}",
+        )
+        for i, n in enumerate(["a", "b", "c"])
+    ]
+    uncached_decls = [
+        Function(
+            name=n, mangled=n, return_type="void",
+            source_location=f"/build/include/api.h:{i}",
+        )
+        for i, n in enumerate(["a", "b", "c"])
+    ]
+
+    origin_cache: dict = {}
+    for d in cached_decls:
+        _tag(d, header_segs, dir_segs, have_set, origin_cache=origin_cache)
+    for d in uncached_decls:
+        _tag(d, header_segs, dir_segs, have_set, origin_cache=None)
+
+    assert [d.origin for d in cached_decls] == [d.origin for d in uncached_decls]
+    assert [d.source_header for d in cached_decls] == [
+        d.source_header for d in uncached_decls
+    ]
+
+
+def test_apply_provenance_shares_one_cache_across_all_declaration_kinds(monkeypatch):
+    """apply_provenance() builds one origin_cache and threads it through
+    functions/variables/types/enums — declarations of different *kinds*
+    sharing api.h must still hit the same cache entry, not one per kind."""
+    calls = []
+    real_classify_origin = classify_origin
+
+    def _spy(*args, **kwargs):
+        calls.append(1)
+        return real_classify_origin(*args, **kwargs)
+
+    monkeypatch.setattr("abicheck.provenance.classify_origin", _spy)
+
+    # _snapshot()'s pub/variable/type/enum all declare source_location
+    # "/build/include/api.h:<n>" (public, non-export-only) — one shared key.
+    apply_provenance(_snapshot(), public_headers=["include/api.h"])
+
+    # api.h contributes 4 same-key declarations (pub func, var, type, enum) +
+    # impl.h contributes 1 (priv func) + no-location contributes 1 (noloc
+    # func, sh=None) = 3 distinct (source_header, export_only) keys total.
+    assert len(calls) == 3
 
 
 # ── serialization round-trip (schema v6) ──────────────────────────────────────

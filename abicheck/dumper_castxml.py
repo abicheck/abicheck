@@ -1055,8 +1055,11 @@ class _CastxmlParser:
         for el in self._record_els:
             if self._is_public_record_type(el):
                 types.append(self._build_record_type(el))
-            elif el.tag in ("Struct", "Class", "Union"):
-                # Check if this is an anonymous struct reachable via typedef
+            else:
+                # self._record_els is already pre-filtered to Struct/Class/
+                # Union (see _build_id_map), so this is every record type
+                # _is_public_record_type rejected. Check if it's an
+                # anonymous struct reachable via typedef.
                 eid = el.get("id", "")
                 override_name = typedef_name_for.get(eid)
                 if override_name and not self._is_builtin_element(el):

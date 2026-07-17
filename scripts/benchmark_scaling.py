@@ -1148,6 +1148,29 @@ def _run_compare_verify_scoped_non_breaking(
     return len(result.changes)
 
 
+def _run_compare_verify_breaking(prepared: tuple[AbiSnapshot, AbiSnapshot]) -> int:
+    """Time ``compare()`` for the mass-removal scenario AND assert the result
+    stays breaking — the correctness counterpart to
+    ``_run_compare_verify_scoped_non_breaking``.
+
+    These removals are genuinely public (``Visibility.PUBLIC``), unlike
+    ``onedal_packaging_noise``'s bundled/ELF-only exports, so a regression
+    that caused public-surface scoping to over-suppress them (the opposite
+    failure mode) would otherwise go undetected by this benchmark — it would
+    just silently report a smaller, faster, and wrong result.
+    """
+    old, new = prepared
+    result = compare(old, new)
+    if result.verdict != Verdict.BREAKING:
+        raise AssertionError(
+            "onedal_mass_removal must classify as BREAKING: removed exports "
+            "here are all Visibility.PUBLIC (genuine API removals), so "
+            f"public-surface scoping must not suppress them — got verdict "
+            f"{result.verdict!r} with {len(result.breaking)} breaking change(s)"
+        )
+    return len(result.changes)
+
+
 def _run_suppression_audit(prepared: tuple[list[Change], SuppressionList]) -> int:
     """Time ``SuppressionList.audit``; return the number of findings audited."""
     changes, supp = prepared
@@ -1268,6 +1291,7 @@ SCENARIOS: dict[str, Scenario] = {
     ),
     "onedal_mass_removal": Scenario(
         _build_onedal_mass_removal,
+        run=_run_compare_verify_breaking,
         sizes=(500, 1000, 2000),
         max_size=5000,
     ),
