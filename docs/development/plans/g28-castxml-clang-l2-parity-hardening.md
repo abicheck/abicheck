@@ -128,18 +128,35 @@ reading the real XML structure directly (`_ctor_param_identity_type`)
 rather than fixing the renderer itself.
 
 **Fixed** as its own follow-up investigation: a new
-`_cv_qualifies_pointer_value()` helper decides, by walking the real XML
-structure (following `Typedef`/`ElaboratedType` aliasing, e.g. `typedef int
-*IntPtr; IntPtr const p;`), whether a `CvQualifiedType` directly wraps a
-`Pointer`/`Reference`/`RValueReferenceType` — i.e. qualifies the pointer/
-reference *value* — as opposed to a pointee position. The value case now
-renders as a suffix (`int* const`), matching the `"T * const"` convention
+`_cv_qualifies_pointer_value()` helper decides, by inspecting the real XML
+structure, whether a `CvQualifiedType` **directly** wraps a `Pointer`/
+`Reference`/`RValueReferenceType` — i.e. qualifies the pointer/reference
+*value* — as opposed to a pointee position. The value case now renders as a
+suffix (`int* const`), matching the `"T * const"` convention
 `cv_qualifiers_only_differ`/`canonicalize_type_name` already treat as
 canonical; the pointee case (`PointerType` wrapping `CvQualifiedType`) is
-untouched and still renders as a prefix (`const int*`). Verified against the
-full fast test suite, `mypy`, and `ruff` with no regressions — field/
-variable-level CV *facts* (`TypeField.is_const`/`is_volatile`, populated by
-Phase 0's `_resolve_cv_restrict`, which already reads the same real XML
+untouched and still renders as a prefix (`const int*`).
+
+Deliberately does **not** follow `Typedef`/`ElaboratedType` aliasing to reach
+a pointer one level down (`typedef int *IntPtr; volatile IntPtr x;` still
+renders as the prefix `"volatile IntPtr"`) — an initial version did follow
+the alias, but Codex review caught a real cross-producer regression: the
+clang backend's type spelling is clang's own `qualType` pretty-print taken
+verbatim (`dumper_clang.py` has no custom recursive renderer), and clang's
+printer does not relocate a qualifier through a typedef to an
+implicit/textually-absent `*` either — it also spells this
+`"volatile IntPtr"`, never `"IntPtr volatile"`. Following the alias here
+would have made castxml newly diverge from clang specifically on this case
+(both backends agreed, by prefixing, before this fix existed at all). Since
+the alias name itself carries no visible `*`/`&` to relocate a qualifier
+around, there is no real prefix-vs-suffix ambiguity to resolve for it
+anyway — only a *direct*, syntactically-visible pointer/reference wrap is
+unambiguous and worth fixing.
+
+Verified against the full fast test suite, `mypy`, and `ruff` with no
+regressions — field/variable-level CV *facts* (`TypeField.is_const`/
+`is_volatile`, populated by Phase 0's `_resolve_cv_restrict`, which already
+reads the same real XML
 structure directly rather than the rendered spelling) were already immune
 to this ambiguity; the fix closes the gap in the generic type-name
 *string* other detectors and cross-producer/cross-tool comparisons read.

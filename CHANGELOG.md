@@ -784,12 +784,19 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `"volatile int*"` — a real declarator-binding change (which side of the
   `*` the qualifier attaches to) was invisible to any string-spelling
   comparison. Now a qualifier directly wrapping a `PointerType`/
-  `ReferenceType`/`RValueReferenceType` (following through `Typedef`/
-  `ElaboratedType` aliasing, e.g. `typedef int *IntPtr; IntPtr const p;`)
-  renders as a suffix (`int* const`) instead, matching the `"T * const"`
-  convention `cv_qualifiers_only_differ`/`canonicalize_type_name` already
-  treat as canonical for this case. A pointee-position qualifier
-  (`const int *`) is unaffected and still renders as a prefix.
+  `ReferenceType`/`RValueReferenceType` renders as a suffix (`int* const`)
+  instead, matching the `"T * const"` convention
+  `cv_qualifiers_only_differ`/`canonicalize_type_name` already treat as
+  canonical for this case. A pointee-position qualifier (`const int *`) is
+  unaffected and still renders as a prefix. Deliberately does **not**
+  follow `Typedef`/`ElaboratedType` aliasing to a pointer one level down
+  (`typedef int *IntPtr; volatile IntPtr x;` still renders as the prefix
+  `"volatile IntPtr"`) — an initial version did follow the alias, but Codex
+  review caught that this would make castxml diverge from the clang
+  backend specifically on this case: `dumper_clang.py` takes clang's own
+  `qualType` spelling verbatim, and clang's printer does not relocate a
+  qualifier through a typedef to an implicit `*` either (it also spells
+  this `"volatile IntPtr"`).
 
 ### Added
 

@@ -731,17 +731,23 @@ class TestCastxmlParserTypeName:
         p = _CastxmlParser(root, set(), set())
         assert p._type_name("t3") == "int& const"
 
-    def test_cv_qualified_pointer_value_const_through_typedef_is_suffix(self):
-        # `typedef int *IntPtr; IntPtr const p;` — the qualifier binds to
-        # the pointer value even though it wraps a Typedef, not a
-        # PointerType, directly.
+    def test_cv_qualified_through_typedef_stays_prefix(self):
+        # `typedef int *IntPtr; IntPtr const p;` — deliberately NOT treated
+        # as a suffix-position qualifier, even though IntPtr aliases a
+        # pointer: the clang backend takes clang's own `qualType` spelling
+        # verbatim, and clang's printer does not relocate a qualifier
+        # through a typedef to an implicit, textually-absent `*` either
+        # (it spells this "const IntPtr", never "IntPtr const") — following
+        # the alias here would newly diverge from clang on this exact case
+        # (Codex review). Since "IntPtr" itself carries no visible sigil,
+        # there is no real prefix-vs-suffix ambiguity to resolve for it.
         ft = _fund_type("t1", "int")
         ptr = Element("PointerType", id="t2", type="t1")
         td = Element("Typedef", id="t3", name="IntPtr", type="t2")
         cv = Element("CvQualifiedType", id="t4", type="t3", const="1")
         root = _xml_root(ft, ptr, td, cv)
         p = _CastxmlParser(root, set(), set())
-        assert p._type_name("t4") == "IntPtr const"
+        assert p._type_name("t4") == "const IntPtr"
 
     def test_cv_qualified_restrict_only_has_no_spelling_effect(self):
         # `int * restrict` — CvQualifiedType with ONLY `restrict` set (no
