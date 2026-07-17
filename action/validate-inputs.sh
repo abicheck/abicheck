@@ -83,15 +83,26 @@ case "$MODE" in
     fi
     ;;
   compare)
-    # sarif/html require a single-pair comparison; the CLI itself already
-    # rejects a directory/package operand for them (a clear UsageError,
-    # surfaced as VERDICT=ERROR by run.sh) but only after Python/deps are
-    # installed. Catch it here too so it's free, like every other check in
-    # this script.
-    if [[ "$FORMAT" == "sarif" || "$FORMAT" == "html" ]]; then
+    # compare's full --format choice set is json|markdown|sarif|html|junit|
+    # review (`abicheck compare --help-all`); a directory/package operand
+    # fans out through the release engine, which narrows that to
+    # cli.py's _RELEASE_FORMATS = {json, markdown, junit} (sarif/html/review
+    # rejected — a clear UsageError, surfaced as VERDICT=ERROR by run.sh —
+    # but only after Python/deps are installed). Mirror both allowlists
+    # here so a bad value (a typo, or a release-only-invalid format like
+    # sarif/html/review on a directory/package) is caught before that
+    # install, not just downstream in the CLI.
+    # tests/test_action_validate_inputs.py cross-checks these two sets
+    # against the live CLI to catch drift.
+    if [[ -n "$FORMAT" ]]; then
       if { [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; } \
          || { [[ -n "$OLD_LIBRARY" ]] && _is_release_style_operand "$OLD_LIBRARY"; }; then
-        _fail "mode: compare does not support format: $FORMAT with a directory/package operand (old-library='$OLD_LIBRARY', new-library='$NEW_LIBRARY') — $FORMAT requires a single-pair comparison. Use format: markdown or json for a directory/package compare."
+        if [[ "$FORMAT" != "json" && "$FORMAT" != "markdown" && "$FORMAT" != "junit" ]]; then
+          _fail "mode: compare does not support format: $FORMAT with a directory/package operand (old-library='$OLD_LIBRARY', new-library='$NEW_LIBRARY') — only 'json', 'markdown', and 'junit' are available for a directory/package comparison."
+        fi
+      elif [[ "$FORMAT" != "json" && "$FORMAT" != "markdown" && "$FORMAT" != "sarif" \
+            && "$FORMAT" != "html" && "$FORMAT" != "junit" && "$FORMAT" != "review" ]]; then
+        _fail "mode: compare does not support format: $FORMAT — only 'json', 'markdown', 'sarif', 'html', 'junit', and 'review' are supported."
       fi
     fi
     ;;

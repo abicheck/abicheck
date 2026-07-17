@@ -32,6 +32,7 @@ class checks its duplicated ``_is_release_style_operand`` copy against
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -207,15 +208,22 @@ class TestFormatIsHardErrorNotSilentFallback:
 @pytest.mark.skipif(
     not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"
 )
-class TestCompareRejectsSarifHtmlWithDirectoryOperand:
-    """compare's sarif/html require a single-pair operand; the CLI itself
-    already rejects a directory/package operand for them (surfaced as
-    VERDICT=ERROR), but only after Python/deps are installed. CodeRabbit
-    review, PR #594: catch it here too, checking BOTH old-library and
-    new-library, not just new-library."""
+class TestCompareFormatAllowlists:
+    """compare's full --format choice set (`abicheck compare --help-all`) is
+    json|markdown|sarif|html|junit|review; a directory/package operand fans
+    out through the release engine, which narrows that to cli.py's
+    _RELEASE_FORMATS = {json, markdown, junit} (sarif/html/review rejected
+    -- a clear UsageError, surfaced as VERDICT=ERROR by run.sh -- but only
+    after Python/deps are installed). Codex + CodeRabbit review, PR #594:
+    catch both restrictions here too, checking BOTH old-library and
+    new-library for the release-style case, and any garbage value (not
+    just sarif/html) for both cases. See TestCompareFormatAllowlistMatchesCli
+    for the drift guard against the live CLI."""
 
-    @pytest.mark.parametrize("fmt", ["sarif", "html"])
-    def test_directory_new_library_is_rejected(self, tmp_path: Path, fmt: str) -> None:
+    @pytest.mark.parametrize("fmt", ["sarif", "html", "review", "xml"])
+    def test_directory_new_library_rejects_non_release_format(
+        self, tmp_path: Path, fmt: str
+    ) -> None:
         lib_dir = tmp_path / "release"
         lib_dir.mkdir()
         result = _run_validate(
@@ -227,10 +235,12 @@ class TestCompareRejectsSarifHtmlWithDirectoryOperand:
             }
         )
         assert result.returncode == 1
-        assert "single-pair comparison" in result.stdout
+        assert "directory/package comparison" in result.stdout
 
-    @pytest.mark.parametrize("fmt", ["sarif", "html"])
-    def test_directory_old_library_is_rejected(self, tmp_path: Path, fmt: str) -> None:
+    @pytest.mark.parametrize("fmt", ["sarif", "html", "review", "xml"])
+    def test_directory_old_library_rejects_non_release_format(
+        self, tmp_path: Path, fmt: str
+    ) -> None:
         lib_dir = tmp_path / "release"
         lib_dir.mkdir()
         result = _run_validate(
@@ -242,9 +252,12 @@ class TestCompareRejectsSarifHtmlWithDirectoryOperand:
             }
         )
         assert result.returncode == 1
-        assert "single-pair comparison" in result.stdout
+        assert "directory/package comparison" in result.stdout
 
-    def test_directory_operand_with_markdown_still_passes(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("fmt", ["json", "markdown", "junit"])
+    def test_directory_operand_accepts_release_formats(
+        self, tmp_path: Path, fmt: str
+    ) -> None:
         lib_dir = tmp_path / "release"
         lib_dir.mkdir()
         result = _run_validate(
@@ -252,13 +265,15 @@ class TestCompareRejectsSarifHtmlWithDirectoryOperand:
                 "INPUT_MODE": "compare",
                 "INPUT_OLD_LIBRARY": str(lib_dir),
                 "INPUT_NEW_LIBRARY": "new.so",
-                "INPUT_FORMAT": "markdown",
+                "INPUT_FORMAT": fmt,
             }
         )
         assert result.returncode == 0, result.stdout + result.stderr
 
-    @pytest.mark.parametrize("fmt", ["sarif", "html"])
-    def test_single_pair_operands_still_pass(self, fmt: str) -> None:
+    @pytest.mark.parametrize(
+        "fmt", ["json", "markdown", "sarif", "html", "junit", "review"]
+    )
+    def test_single_pair_operands_accept_full_format_set(self, fmt: str) -> None:
         result = _run_validate(
             {
                 "INPUT_MODE": "compare",
@@ -268,6 +283,76 @@ class TestCompareRejectsSarifHtmlWithDirectoryOperand:
             }
         )
         assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_single_pair_operands_reject_garbage_format(self) -> None:
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": "old.so",
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_FORMAT": "xml",
+            }
+        )
+        assert result.returncode == 1
+        assert "does not support format" in result.stdout
+
+
+@pytest.mark.skipif(
+    not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"
+)
+class TestCompareFormatAllowlistMatchesCli:
+    """Drift guard: validate-inputs.sh hardcodes two format allowlists for
+    compare (single-pair, and directory/package). Parse them out of the
+    script and cross-check against the live CLI's actual choices -- click's
+    own Choice.choices for the single-pair set (introspected directly rather
+    than scraped from --help-all's output, which rich-click hard-wraps
+    mid-word inside its option table at this terminal width) and
+    abicheck/cli.py's _RELEASE_FORMATS constant for the release-style set --
+    so a future CLI format addition/removal doesn't silently desync the
+    Action's fail-fast validator from what the CLI really accepts."""
+
+    def _extract_allowlist(self, fail_marker: str) -> set[str]:
+        """The `"$FORMAT" != "x"` chain in the `if`/`elif [[ ... ]]` block
+        that guards the `_fail` call containing *fail_marker* -- scanned
+        backward from that line to its nearest preceding `if`/`elif` line so
+        two adjacent blocks (release-style vs. single-pair) aren't conflated."""
+        lines = VALIDATE_SH.read_text(encoding="utf-8").splitlines()
+        fail_idx = next(i for i, line in enumerate(lines) if fail_marker in line)
+        start = fail_idx
+        while start > 0 and not re.search(r"\b(if|elif)\s*\[\[", lines[start]):
+            start -= 1
+        condition_text = " ".join(lines[start : fail_idx + 1])
+        return set(re.findall(r'"\$FORMAT" != "([a-z]+)"', condition_text))
+
+    def test_single_pair_allowlist_matches_cli(self) -> None:
+        validator_formats = self._extract_allowlist(
+            "only 'json', 'markdown', 'sarif', 'html', 'junit', and 'review'"
+        )
+        from abicheck.cli import main as abicheck_main
+
+        fmt_param = next(
+            p for p in abicheck_main.commands["compare"].params if p.name == "fmt"
+        )
+        cli_formats = set(fmt_param.type.choices)
+        assert validator_formats == cli_formats, (
+            f"validate-inputs.sh's single-pair compare allowlist {sorted(validator_formats)} "
+            f"has drifted from the live CLI's {sorted(cli_formats)}"
+        )
+
+    def test_release_style_allowlist_matches_cli_constant(self) -> None:
+        validator_formats = self._extract_allowlist(
+            "only 'json', 'markdown', and 'junit' are available"
+        )
+        cli_source = (
+            Path(__file__).resolve().parents[1] / "abicheck" / "cli.py"
+        ).read_text(encoding="utf-8")
+        m = re.search(r"_RELEASE_FORMATS = frozenset\(\{([^}]+)\}\)", cli_source)
+        assert m, "could not find _RELEASE_FORMATS in abicheck/cli.py"
+        cli_formats = {f.strip().strip('"') for f in m.group(1).split(",")}
+        assert validator_formats == cli_formats, (
+            f"validate-inputs.sh's release-style compare allowlist {sorted(validator_formats)} "
+            f"has drifted from abicheck/cli.py's _RELEASE_FORMATS {sorted(cli_formats)}"
+        )
 
 
 @pytest.mark.skipif(
