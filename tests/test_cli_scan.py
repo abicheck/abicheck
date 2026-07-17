@@ -1369,6 +1369,126 @@ def test_export_delta_resolves_tu_into_replay_seed(monkeypatch, runner, tmp_path
     assert "src/bar.cpp" in seed
 
 
+def test_public_impact_closure_resolves_tu_into_replay_seed(
+    monkeypatch, runner, tmp_path
+):
+    # ADR-041 P1 #3 (the mirror-image focusing half): a baseline L5 graph
+    # where the public entry `foo` (unrelated export, unchanged between old
+    # and new) has a TYPE_HAS_FIELD_TYPE edge to an internal decl declared in
+    # src/detail/cache.cpp. Changing *only* src/detail/cache.cpp — never
+    # foo's own file — must still pull foo's declaring file into the replay
+    # seed, since foo transitively depends on what changed even though its
+    # own export/declaration did not move at all (isolates
+    # resolve_changed_paths_public_impact from resolve_symbol_tus, which
+    # this scenario deliberately gives nothing to do — no export delta).
+    import abicheck.scan_engine as cs
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_graph import (
+        GraphEdge,
+        GraphNode,
+        SourceGraphSummary,
+    )
+
+    graph = SourceGraphSummary(
+        nodes=[
+            GraphNode(
+                id="binary_symbol://_Z3foov", kind="binary_symbol", label="_Z3foov"
+            ),
+            GraphNode(id="decl://pub", kind="source_decl", label="foo"),
+            GraphNode(
+                id="decl://internal",
+                kind="record_type",
+                label="Internal",
+                attrs={"visibility": "private_header"},
+            ),
+            GraphNode(id="header://src/api.cpp", kind="header", label="src/api.cpp"),
+            GraphNode(
+                id="header://src/detail/cache.cpp",
+                kind="header",
+                label="src/detail/cache.cpp",
+            ),
+        ],
+        edges=[
+            GraphEdge(
+                src="decl://pub",
+                dst="binary_symbol://_Z3foov",
+                kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+            ),
+            GraphEdge(
+                src="header://src/api.cpp", dst="decl://pub", kind="SOURCE_DECLARES"
+            ),
+            GraphEdge(
+                src="header://src/detail/cache.cpp",
+                dst="decl://internal",
+                kind="SOURCE_DECLARES",
+            ),
+            GraphEdge(
+                src="decl://pub", dst="decl://internal", kind="TYPE_HAS_FIELD_TYPE"
+            ),
+        ],
+    )
+    base = AbiSnapshot(
+        library="libfoo.so",
+        version="1.0",
+        from_headers=True,
+        functions=[_func("foo", "_Z3foov")],
+        elf=_elf("_Z3foov"),
+    )
+    base.build_source = BuildSourcePack(root="", source_graph=graph)
+    base_path = _write_snapshot(tmp_path / "old.abi.json", base)
+    # Candidate's export table is byte-identical to the baseline's — no
+    # export delta, so resolve_symbol_tus contributes nothing here.
+    cand = AbiSnapshot(
+        library="libfoo.so",
+        version="2.0",
+        from_headers=True,
+        functions=[_func("foo", "_Z3foov")],
+        elf=_elf("_Z3foov"),
+    )
+    cand_path = _write_snapshot(tmp_path / "new.abi.json", cand)
+
+    captured: dict[str, object] = {}
+    original = cs._build_new_snapshot
+
+    def _spy(*args, **kwargs):
+        captured["changed_paths"] = kwargs.get("changed_paths")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cs, "_build_new_snapshot", _spy)
+    src = tmp_path / "u.c"
+    src.write_text("int u(void){return 0;}\n", encoding="utf-8")
+    cdb = tmp_path / "compile_commands.json"
+    cdb.write_text(
+        json.dumps(
+            [{"directory": str(tmp_path), "file": str(src), "command": "cc -c u.c"}]
+        ),
+        encoding="utf-8",
+    )
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(cand_path),
+            "--against",
+            str(base_path),
+            "--depth",
+            "source",
+            "--build-info",
+            str(cdb),
+            "--changed-path",
+            "src/detail/cache.cpp",
+        ],
+    )
+    assert res.exit_code in (0, 4), res.output
+    seed = captured["changed_paths"]
+    assert seed is not None
+    # The git-changed file (floor) AND the impact-closure-resolved public
+    # entry's own declaring file are both in, even though foo's export never
+    # changed and its own file was never directly touched.
+    assert "src/detail/cache.cpp" in seed
+    assert "src/api.cpp" in seed
+
+
 def test_depth_binary_clears_headers_in_scan(
     monkeypatch, runner, new_snap_compatible, tmp_path
 ):

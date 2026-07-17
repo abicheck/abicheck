@@ -75,7 +75,14 @@ from typing import Any
 #:       (COMPATIBLE_WITH_RISK), ``review_recommended`` (COMPATIBLE quality
 #:       issue), or ``no_action_required`` (COMPATIBLE addition). Additive
 #:       optional key.
-REPORT_SCHEMA_VERSION = "2.4"
+#: 2.5 — added the optional per-finding ``correlated_change_kind`` key
+#:       (ADR-041 P0 roadmap item 2): for a ``public_api_internal_dependency_added``
+#:       finding correlated with the same public entry's own body/type-hash
+#:       change this version, the correlated finding's ``ChangeKind`` value
+#:       (e.g. ``"inline_body_changed"``) — the structured sibling to the
+#:       correlation ``description`` already carried in prose. Additive
+#:       optional key.
+REPORT_SCHEMA_VERSION = "2.5"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

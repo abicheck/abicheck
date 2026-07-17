@@ -65,7 +65,21 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   P0 roadmap item 2) — carries the correlated body/type-hash change's
   `ChangeKind` value (e.g. `"inline_body_changed"`) so a JSON/SARIF/
   policy-file consumer can act on the correlation without parsing it out of
-  `description` text. Surfaced in the `--format json` report.
+  `description` text. Surfaced in both the `--format json` report
+  (`report_schema_version` 2.5) and `--format sarif`
+  (`properties.correlatedChangeKind`).
+
+- **PR-scoped scans now also replay a public entry impacted only through
+  the L5 dependency graph.** `scan`'s replay-seed focusing
+  (`--since`/`--changed-path`) previously resolved only the export-delta
+  half of ADR-035 D7 (`resolve_symbol_tus`: a changed export → its
+  declaring TU). It now also resolves the mirror-image half (ADR-041 P1
+  #3, `resolve_changed_paths_public_impact`, previously implemented and
+  unit-tested but unused by any scan path): a public entry whose own
+  export/declaration is untouched by the diff, but whose struct field/
+  base/parameter type or inline body transitively reaches a file the diff
+  *did* change, is now also replayed — closing a gap where a narrowed
+  PR-scoped replay could silently skip such an entry.
 
 ### Documentation
 

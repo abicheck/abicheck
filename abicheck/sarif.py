@@ -265,6 +265,8 @@ def _result_for(
         properties["causedByType"] = change.caused_by_type
     if change.caused_count > 0:
         properties["causedCount"] = change.caused_count
+    if change.correlated_change_kind:
+        properties["correlatedChangeKind"] = change.correlated_change_kind
     evidence_status = evidence_status_for_change(change)
     if evidence_status is not None:
         properties["evidenceStatus"] = evidence_status.value

@@ -52,7 +52,11 @@ import click
 
 from .buildsource.crosscheck import CrosscheckConfig, run_crosschecks
 from .buildsource.pattern_scan import scan_files
-from .buildsource.poi import build_points_of_interest, resolve_symbol_tus
+from .buildsource.poi import (
+    build_points_of_interest,
+    resolve_changed_paths_public_impact,
+    resolve_symbol_tus,
+)
 from .buildsource.preprocessor_scan import run_preprocessor_scan
 from .buildsource.risk import RiskScore
 from .buildsource.scan_levels import EvidenceDepth, ScanMode, SourceMethod
@@ -284,6 +288,45 @@ def _load_exports_for_poi(path: Path | None, lang: str) -> Any | None:
         return resolve_input(path, [], [], version="", lang=lang, symbols_only=True)
     except Exception:  # noqa: BLE001 - best-effort focusing input, never fatal
         return None
+
+
+def _resolve_public_impact_tus(
+    poi_baseline: Any, changed: list[str]
+) -> tuple[str, ...]:
+    """Resolve ADR-041 P1 #3's public-entry impact closure to declaring TUs.
+
+    The complement of :func:`~abicheck.buildsource.poi.resolve_symbol_tus`
+    (export delta -> declaring TU, the *forward* focusing half): a public
+    entry whose own export/declaration is untouched by this diff can still
+    transitively depend (via a call, a non-call reference, or a field/base/
+    parameter type — the ``DEPENDENCY_EDGE_KINDS`` family) on something the
+    diff *did* change. Reading the baseline's cached L5 graph (the same one
+    ``resolve_symbol_tus`` reads),
+    :func:`~abicheck.buildsource.poi.resolve_changed_paths_public_impact`
+    names those impacted public entries; this resolves each back to its own
+    declaring file, so the L4 replay + L5 fold seed also covers it — without
+    which a narrowed/PR-scoped replay could miss the entry entirely (never
+    parsing its TU at all, let alone detecting a body/type-hash correlation
+    or a newly-added ``public_api_internal_dependency_added`` on it).
+
+    Best-effort, mirroring ``resolve_symbol_tus``'s degrade contract: returns
+    ``()`` whenever the baseline carries no L5 graph or nothing resolves —
+    this only ever *adds* to the replay seed, never narrows the existing
+    changed-path floor.
+    """
+    pack = getattr(poi_baseline, "build_source", None)
+    graph = getattr(pack, "source_graph", None) if pack is not None else None
+    if graph is None or not getattr(graph, "nodes", None):
+        return ()
+    impacted = resolve_changed_paths_public_impact(changed, graph)
+    if not impacted:
+        return ()
+    from .buildsource.source_graph import decl_declaring_files
+
+    decl_to_file = decl_declaring_files(graph)
+    return tuple(
+        dict.fromkeys(decl_to_file[d] for d in sorted(impacted) if d in decl_to_file)
+    )
 
 
 def _crosscheck_severity_exit(findings: list[Any], severities: dict[str, str]) -> int:
@@ -605,10 +648,18 @@ def run_scan_core(
     # work-list is the changed-path floor *plus* the TUs resolved from changed
     # exports via the baseline's L5 graph (resolve_symbol_tus) — so a changed
     # export with an unchanged header still points the replay at the one TU that
-    # emits it (ADR-035 D7, the focusing half).
+    # emits it (ADR-035 D7, the focusing half) — *plus* the declaring TUs of any
+    # public entry the baseline's L5 graph shows transitively depends on a
+    # changed file (resolve_changed_paths_public_impact, ADR-041 P1 #3) — the
+    # mirror-image walk: an untouched public export whose struct field/base/
+    # parameter type or inline body reaches something the diff changed still
+    # gets replayed, instead of silently falling outside a narrowed PR scope.
     symbol_tus = resolve_symbol_tus(poi, poi_baseline) if seeded else ()
+    impact_tus = _resolve_public_impact_tus(poi_baseline, changed) if seeded else ()
     replay_seed = (
-        tuple(dict.fromkeys((*poi.changed_paths(), *symbol_tus))) if seeded else ()
+        tuple(dict.fromkeys((*poi.changed_paths(), *symbol_tus, *impact_tus)))
+        if seeded
+        else ()
     )
     # ADR-035 P3: an unseeded s5/pr run cannot narrow 'source-changed' to a diff,
     # so the L4 replay falls back to the public-API 'headers-only' surface
