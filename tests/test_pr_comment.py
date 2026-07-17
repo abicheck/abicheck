@@ -656,6 +656,38 @@ def test_severity_addition_error_files_additions_as_breaking():
     assert build_model(plain).counts == (0, 0, 1)
 
 
+def test_severity_addition_error_with_ungated_review_finding_scopes_gate_note():
+    # A gated addition (policy-only Breaking bucket) alongside a separate,
+    # *ungated* api_break sitting in "Needs review" must not claim whole-
+    # report "Compatibility: COMPATIBLE" — that overstates it, since the
+    # review finding may itself be an incompatibility (Codex review, #595).
+    report = _compare_report(
+        [
+            {
+                "kind": "func_added",
+                "symbol": "foo_new",
+                "description": "new",
+                "severity": "compatible",
+            },
+            {
+                "kind": "enum_member_added",
+                "symbol": "E::X",
+                "description": "d",
+                "severity": "api_break",
+            },
+        ]
+    )
+    report["severity"] = {"config": {"addition": "error"}, "exit_code": 1}
+    model = build_model(report)
+    assert model.counts == (1, 1, 0)  # addition → breaking, api_break → review
+    body = render_comment(model, sha="x")
+    assert "Public API expansion requires approval" in body
+    assert "Compatibility: COMPATIBLE" not in body
+    assert "Gate: BLOCKED" in body
+    assert "`addition` is configured as `error`" in body
+    assert "Needs review" in body
+
+
 def test_severity_addition_error_classifies_non_added_kinds():
     # Addition kinds that don't end in "_added" must still be treated as
     # additions (sourced from ADDITION_KINDS), so severity-addition: error files

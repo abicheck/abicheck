@@ -971,11 +971,23 @@ def _gate_note(model: CommentModel) -> list[str]:
     """
     if model.removed_libraries or model.scoped_verdict is not None:
         return []
-    b, _, _ = model.counts
+    b, r, _ = model.counts
     cats = model.breaking_categories
     if not b or "abi_breaking" in cats or "potential_breaking" in cats or not cats:
         return []
     names = ", ".join(f"`{_CATEGORY_LABEL.get(c, c)}`" for c in sorted(cats))
+    if r:
+        # A separate, ungated api_break/risk finding sits in "Needs review" —
+        # asserting whole-report "Compatibility: COMPATIBLE" here would
+        # overstate it (Codex review, PR #595), so scope the claim to just
+        # the Breaking bucket's own entries and point at the other section.
+        return [
+            f"> ℹ️ **Gate: BLOCKED** by severity policy — {names} is "
+            f"configured as `error`. These entries are themselves COMPATIBLE "
+            f"(not an ABI/API break) — see \"Needs review\" below for other "
+            f"findings that may affect compatibility.",
+            "",
+        ]
     return [
         f"> ℹ️ **Compatibility: COMPATIBLE** — existing binaries/consumers are "
         f"unaffected; this is not an ABI/API break. **Gate: BLOCKED** by "
