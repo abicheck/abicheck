@@ -324,6 +324,47 @@ class TestSuppressionPipelineOrderFix:
         assert raw_change in ctx.suppressed
         assert ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK not in [c.kind for c in ctx.kept]
 
+    def test_narrow_symbol_plus_source_location_filter_stays_narrow(self) -> None:
+        """Codex review: adding source_location/namespace as an *additional*
+        filter alongside an exact symbol selector can only narrow which
+        changes match (AND semantics) — it can never introduce a match the
+        bare symbol: selector wouldn't already have matched, so it must not
+        lose the narrow-selector "unchanged behavior" guarantee and start
+        requiring allow_public_break."""
+        old, new, raw_change = _reachable_scenario()
+        raw_change.kind = ChangeKind.TYPE_ALIGNMENT_CHANGED  # still BREAKING
+        raw_change.source_location = "/project/internal/descriptor_base.h:1"
+        suppression = SuppressionList([
+            Suppression(
+                symbol="oneapi::dal::kmeans::detail::descriptor_base",
+                source_location="*/internal/*",
+                reason="exact symbol, scoped to internal headers",
+            )
+        ])
+        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        assert raw_change in ctx.suppressed
+        assert ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK not in [c.kind for c in ctx.kept]
+
+    def test_member_name_plus_namespace_stays_broad(self) -> None:
+        """Unlike symbol/symbol_pattern/type_pattern, member_name alone
+        matches a bare trailing name across *any* containing type/namespace
+        — combined with a namespace filter, that filter is still doing the
+        real scoping work, not merely narrowing an already-pinned-down
+        match, so this combination must stay broad (require
+        allow_public_break for a public-reachable BREAKING change)."""
+        old, new, raw_change = _reachable_scenario()
+        raw_change.kind = ChangeKind.TYPE_ALIGNMENT_CHANGED  # still BREAKING
+        suppression = SuppressionList([
+            Suppression(
+                namespace="oneapi::dal::**::detail::**",
+                member_name="descriptor_base",
+                reason="broad namespace + bare member name",
+            )
+        ])
+        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        assert raw_change not in ctx.suppressed
+        assert ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK in [c.kind for c in ctx.kept]
+
     def test_broad_rule_with_reachability_any_suppresses_non_breaking_reachable_change(
         self,
     ) -> None:

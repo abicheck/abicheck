@@ -325,21 +325,41 @@ class Suppression:
                 f"{self.allow_public_break!r}"
             )
         # ADR-044 D2: a rule with no explicit reachability defaults to
-        # "unreachable-only" when its only selectors are broad (pattern-shaped,
-        # not naming one specific symbol/type the author already reasoned
-        # about) — namespace/entity_namespace/cause_namespace/source_location.
-        # Presence of a broad selector makes the match unaudited even when a
-        # narrow selector is also present on the same rule. The same
-        # broad/narrow split also decides whether allow_public_break is
-        # required at all (_passes_public_break_gate) — a narrow selector
-        # naming one exact symbol/type is already the deliberate, audited
-        # case suppression exists for, regardless of whether that symbol
-        # happens to be public or an internal type that leaks.
-        self._is_broad_selector = bool(
+        # "unreachable-only" when it has a broad selector (namespace/
+        # entity_namespace/cause_namespace/source_location) and no *primary*
+        # narrow selector (symbol/symbol_pattern/type_pattern — the mutually
+        # exclusive trio `_validate_selectors` already treats as the rule's
+        # main selector). The same broad/narrow split also decides whether
+        # allow_public_break is required at all (_passes_public_break_gate).
+        #
+        # A primary narrow selector present alongside a broad one exempts the
+        # rule from "broad" (Codex review): `symbol="ns::detail::T",
+        # source_location="*/internal/*"` already names the exact audited
+        # entity — the source_location addition can only *narrow* which
+        # changes on that one entity match (AND semantics), never introduce
+        # an unaudited match the bare `symbol:` selector wouldn't already
+        # have matched, so it must not lose the narrow-selector "unchanged
+        # behavior" guarantee.
+        #
+        # member_name is deliberately NOT a primary selector for this
+        # purpose, unlike symbol/symbol_pattern/type_pattern: by itself it
+        # matches a bare trailing name across *any* containing type/
+        # namespace (its own docstring: "independent of the containing
+        # type"), so combined with a namespace/source_location filter, that
+        # filter is still doing the real scoping work, not merely narrowing
+        # an already-pinned-down match — `namespace: "**::detail::**",
+        # member_name: "value_type"` stays broad.
+        has_primary_narrow_selector = bool(
+            self.symbol is not None
+            or self.symbol_pattern is not None
+            or self.type_pattern is not None
+        )
+        has_broad_shaped_selector = bool(
             effective_entity_ns is not None
             or self.cause_namespace is not None
             or self.source_location is not None
         )
+        self._is_broad_selector = has_broad_shaped_selector and not has_primary_narrow_selector
         self._resolved_reachability = self.reachability or (
             "unreachable-only" if self._is_broad_selector else "any"
         )

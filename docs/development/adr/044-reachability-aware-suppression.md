@@ -294,18 +294,31 @@ New `Suppression` fields:
 
 - `reachability: "unreachable-only" | "any" | "public-only"`.
   - **Default** is selector-dependent, not a single global default: a rule
-    whose *only* selectors are `namespace`/`entity_namespace`/
-    `cause_namespace`/`source_location` (the broad, pattern-shaped
-    selectors a user did not write with one specific symbol in mind)
-    defaults to `"unreachable-only"`. A rule using `symbol`,
-    `symbol_pattern`, `type_pattern`, or `member_name` (the narrow,
-    author-knows-exactly-what-they're-naming selectors) defaults to
-    `"any"` — unchanged behavior; an explicit `symbol:` suppression for a
-    symbol the author knows is public and intentionally waived must keep
-    working exactly as before. Mixing a broad and a narrow selector on the
-    same rule (`namespace` + `member_name`) still counts as broad — the
-    presence of any pattern-shaped selector is what makes the match
-    unaudited.
+    is broad (defaults `"unreachable-only"`) when it has a broad,
+    pattern-shaped selector (`namespace`/`entity_namespace`/
+    `cause_namespace`/`source_location`) **and no primary narrow selector**
+    (`symbol`/`symbol_pattern`/`type_pattern` — the mutually-exclusive trio
+    the loader already treats as a rule's main selector). Otherwise it
+    defaults `"any"` — unchanged behavior.
+  - A primary narrow selector present alongside a broad one **exempts** the
+    rule from "broad" (post-review correction, Codex): `symbol:
+    "ns::detail::T", source_location: "*/internal/*"` already names the
+    exact audited entity — the `source_location` addition can only
+    *narrow* which changes on that one entity match (selectors combine with
+    AND semantics), never introduce an unaudited match the bare `symbol:`
+    selector wouldn't already have matched, so it keeps the narrow-selector
+    "unchanged behavior" guarantee rather than suddenly requiring
+    `allow_public_break`.
+  - `member_name` is deliberately **not** a primary selector for this
+    purpose: alone it matches a bare trailing name across *any* containing
+    type/namespace (per its own docstring, "independent of the containing
+    type"), so `namespace: "**::detail::**", member_name: "value_type"`
+    still counts as broad — the namespace filter there is doing the real
+    scoping work, not merely narrowing an already-pinned-down match. This
+    is the one case the ADR's first-shipped, coarser "any broad selector
+    present makes the whole rule broad" rule was actually protecting
+    against; narrowing the rule to exempt only the primary trio preserves
+    that protection while fixing the `symbol` + `source_location` case.
   - `"unreachable-only"`: the rule does not match a change with
     `public_reachable=True`.
   - `"any"`: no reachability filtering (today's behavior).
