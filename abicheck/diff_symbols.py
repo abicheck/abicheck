@@ -77,6 +77,7 @@ from .model import (
     Visibility,
     canonicalize_type_name,
     cv_qualifiers_only_differ,
+    func_signature_cv_only_differ,
     is_abi_surface_type_name,
     stdlib_namespaces_excluded,
 )
@@ -283,6 +284,12 @@ def _check_return_type_change(
     # binary ABI break (ISSUE-29/52: libuv/Wayland const-pointer churn).
     if cv_qualifiers_only_differ(f_old.return_type, f_new.return_type):
         return []
+    # A top-level BY-VALUE cv change on the return type (``int`` -> ``volatile
+    # int``) is absent from the function's mangled name entirely, unlike the
+    # equivalent field/variable case — see func_signature_cv_only_differ's
+    # docstring (Codex review, PR #582).
+    if func_signature_cv_only_differ(f_old.return_type, f_new.return_type):
+        return []
     # A name-only change between ABI-equivalent integer spellings (e.g.
     # long -> long long, size_t -> unsigned long on LP64) is not a binary ABI
     # break: same width, signedness, and calling convention.
@@ -312,6 +319,12 @@ def _params_differ(p_old: Param, p_new: Param, is_llp64: bool) -> bool:
     # calling convention and binary layout identical — it is source/API churn,
     # not a binary ABI break (ISSUE-29/52).
     if cv_qualifiers_only_differ(p_old.type, p_new.type):
+        return False
+    # A top-level BY-VALUE cv change (``int`` -> ``volatile int``) is, unlike
+    # the equivalent field/variable case, not merely layout-neutral but
+    # genuinely absent from the function's type/mangled name — see
+    # func_signature_cv_only_differ's docstring (Codex review, PR #582).
+    if func_signature_cv_only_differ(p_old.type, p_new.type):
         return False
     # Same kind, different spelling: not a change if the integer types are
     # ABI-equivalent (long -> long long, size_t -> unsigned long on LP64).

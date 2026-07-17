@@ -97,6 +97,19 @@ _ANON_UNION_QUALIFIED_XML = """<?xml version="1.0"?>
   <File id="f1" name="test.h"/>
 </CastXML>"""
 
+_ANON_UNION_INIT_XML = """<?xml version="1.0"?>
+<CastXML>
+  <Struct id="_2" name="C" context="_1" file="f1" line="1" size="32" align="32">
+    <Field id="_3" name="" type="_4" offset="0"/>
+  </Struct>
+  <Union id="_4" name="" context="_2" file="f1" line="1" size="32" align="32">
+    <Field id="_5" name="x" type="_7" offset="0" init="1" deprecation="use y"/>
+  </Union>
+  <FundamentalType id="_7" name="int" size="32"/>
+  <Namespace id="_1" name="::"/>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+
 _TYPEDEF_QUALIFIED_FIELD_XML = """<?xml version="1.0"?>
 <CastXML>
   <Struct id="_2" name="Cfg" context="_1" file="f1" line="1"
@@ -193,6 +206,19 @@ class TestQualifiedFieldFacts:
         assert fields["raw"].is_mutable is False
         assert fields["cached"].is_mutable is True
         assert fields["cached"].is_volatile is False
+
+    def test_anonymous_union_flatten_preserves_default_and_deprecated(self) -> None:
+        """A default member initializer / [[deprecated]] on a field inside
+        an anonymous union must survive flattening, not just on an ordinary
+        direct field (Codex review, PR #582): the direct-field path
+        populates ``default``/``deprecated`` from castxml's ``init``/
+        ``deprecation`` attributes, but the anonymous-flatten path
+        previously dropped them."""
+        p = _make_parser(_ANON_UNION_INIT_XML)
+        field = p.parse_types()[0].fields[0]
+        assert field.name == "x"
+        assert field.default == "1"
+        assert field.deprecated == "use y"
 
     def test_const_volatile_through_typedef_indirection(self) -> None:
         """A field declared through a typedef to a cv-qualified type

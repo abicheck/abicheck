@@ -432,3 +432,45 @@ def cv_qualifiers_only_differ(old_type: str, new_type: str) -> bool:
     if co == cn:
         return False
     return _strip_cv_qualifiers(co) == _strip_cv_qualifiers(cn)
+
+
+def func_signature_cv_only_differ(old_type: str, new_type: str) -> bool:
+    """Return True when two *function-parameter or return-type* spellings
+    differ only by ``const``/``volatile`` tokens, including a top-level
+    BY-VALUE difference (``int`` -> ``volatile int``) that
+    :func:`cv_qualifiers_only_differ` deliberately excludes.
+
+    DO NOT use this for fields or variables — a top-level by-value cv change
+    on THOSE is intentionally treated as a source-level contract change (see
+    :func:`cv_qualifiers_only_differ`'s own docstring and the
+    ``case30_field_qualifiers`` example; confirmed by
+    ``test_top_level_field_const_is_not_neutralised``). This function exists
+    because that reasoning does NOT extend to a function's own parameter or
+    return type: per the C++ standard, a top-level cv-qualifier on a
+    by-value parameter or return type is dropped from the function's type
+    for linkage/mangling purposes — ``void f(int)`` and ``void f(const
+    int)`` name the very same function — so unlike a field, there is no
+    corresponding dedicated detector and no ABI-relevant meaning to escalate
+    (Codex review, PR #582: castxml's parser began spelling a by-value
+    ``volatile`` parameter as ``"volatile int"``, which without this check
+    misfired the generic, breaking ``FUNC_PARAMS_CHANGED``/return-type-
+    changed path for a change with zero ABI/mangling effect).
+
+    Returns False when the canonical forms are already identical (the
+    caller's own equality check already handles that), or when a genuine
+    non-cv difference remains after stripping.
+
+    >>> func_signature_cv_only_differ("int", "volatile int")
+    True
+    >>> func_signature_cv_only_differ("int", "const int")
+    True
+    >>> func_signature_cv_only_differ("int", "long")
+    False
+    >>> func_signature_cv_only_differ("char *", "const char *")
+    True
+    """
+    co = canonicalize_type_name(old_type)
+    cn = canonicalize_type_name(new_type)
+    if co == cn:
+        return False
+    return _strip_cv_qualifiers(co) == _strip_cv_qualifiers(cn)

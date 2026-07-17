@@ -1387,6 +1387,12 @@ class _CastxmlParser:
                     is_volatile=inner_volatile,
                     is_mutable=inner.get("mutable") == "1",
                     access=self._access_level(inner),
+                    # Same channel as the direct-field path in
+                    # _parse_record_fields — a field inside an anonymous
+                    # struct/union must not lose its initializer/deprecation
+                    # just because it was flattened (Codex review, PR #582).
+                    default=inner.get("init"),
+                    deprecated=inner.get("deprecation"),
                 )
             )
         return result

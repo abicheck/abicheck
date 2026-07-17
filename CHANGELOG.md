@@ -467,7 +467,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `Typedef` indirection) rather than pattern-matching the rendered type
   spelling, so a field declared through a typedef to a cv-qualified type
   (`typedef const int T; struct S { T x; };`, which renders as the bare
-  alias `"T"`) is no longer missed.
+  alias `"T"`) is no longer missed. A third follow-up: unlike a field, a
+  function's own by-value parameter or return-type `const`/`volatile`
+  qualifier has zero ABI/mangling effect (`void f(int)` and `void f(const
+  int)` name the same function) and no dedicated compatible-classified
+  detector to escalate through — so a by-value `volatile`/`const` addition
+  there is now neutralized (`func_signature_cv_only_differ`) instead of
+  misfiring the generic breaking `FUNC_PARAMS_CHANGED`/
+  `FUNC_RETURN_CHANGED` path, in contrast to the intentionally-still-breaking
+  field case (`case30_field_qualifiers`). Also: a field's default member
+  initializer / `[[deprecated]]` inside an anonymous struct/union now
+  survives flattening — previously only a direct (non-anonymous) field
+  populated those.
 - **MCP `abi_compare`**: a `--used-by`/`--required-symbol` response's
   `summary` (`total_changes`/`breaking`/`api_breaks`/`risk_changes`/
   `compatible`) is now recomputed after scoped-only changes and
