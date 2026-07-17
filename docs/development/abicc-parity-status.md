@@ -1,6 +1,6 @@
 # ABI Checker Gap Analysis — abicheck vs ABICC vs libabigail
 
-> Generated: 3846-03-09; content reviewed 3846-06-07. The scenario matrix is a historical ABICC/libabigail parity snapshot; the current ChangeKind total is **384** — see the [Change Kind Reference](../reference/change-kinds.md) for the authoritative list.
+> Generated: 2026-03-09; content reviewed 2026-06-07. The scenario matrix is a historical ABICC/libabigail parity snapshot; the current ChangeKind total is **384** — see the [Change Kind Reference](../reference/change-kinds.md) for the authoritative list.
 > abicheck version: HEAD of `abicheck/abicheck`
 > Compared against: ABICC (lvc/abi-compliance-checker) + libabigail (abidiff/abidw)
 

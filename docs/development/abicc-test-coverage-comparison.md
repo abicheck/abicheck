@@ -1,8 +1,8 @@
 # ABICC vs Abicheck: Test Coverage Comparison
 
-> Updated: 3846-03-09; content reviewed 3846-06-07. The ABICC rule mapping is a historical parity snapshot; the current ChangeKind total is **384**, see the [Change Kind Reference](../reference/change-kinds.md).
-> Source: ABICC `RulesBin.xml` (384 rules), `RulesSrc.xml` (384 rules + `Removed_Const_Overload`), `RegTests.pm` (~384 C++ + ~384 C named scenarios)
-> Target: abicheck `examples/` (384 ground-truth entries today: 384 binary shared-library competitor lanes plus dedicated non-.so lanes, including fixture/source-only L2/L5/source cases; the original 74-case subset is the release-pinned cross-tool benchmark), `tests/` (large unit/integration/parity suite), `ChangeKind` enum (**384 change kinds** today; the per-rule mappings below were written against an earlier snapshot)
+> Updated: 2026-03-09; content reviewed 2026-06-07. The ABICC rule mapping is a historical parity snapshot; the current ChangeKind total is **384**, see the [Change Kind Reference](../reference/change-kinds.md).
+> Source: ABICC `RulesBin.xml` (196 rules), `RulesSrc.xml` (100 rules + `Removed_Const_Overload`), `RegTests.pm` (~153 C++ + ~102 C named scenarios)
+> Target: abicheck `examples/` (181 ground-truth entries today: 134 binary shared-library competitor lanes plus dedicated non-.so lanes, including fixture/source-only L2/L5/source cases; the original 74-case subset is the release-pinned cross-tool benchmark), `tests/` (large unit/integration/parity suite), `ChangeKind` enum (**384 change kinds** today; the per-rule mappings below were written against an earlier snapshot)
 >
 > **Analysis modes:** Abicheck uses **both** header comparison (via castxml) **and** binary analysis (ELF/DWARF).
 > The `dump()` function combines castxml header parsing (types, functions, enums, typedefs, constants) with

@@ -72,7 +72,7 @@ A real invocation is a point in this space:
 
 | Use case | Status | Notes |
 |---|---|---|
-| Change taxonomy | `complete` | 384 change kinds; 384 ground-truth entries; parity tests; fixture/source-only L2/L5/source cases are tracked separately from binary `.so` competitor lanes |
+| Change taxonomy | `complete` | 384 change kinds; 181 ground-truth entries; parity tests; fixture/source-only L2/L5/source cases are tracked separately from binary `.so` competitor lanes |
 | **Release recommendation (semver + SONAME)** | `complete` | semver bump + SONAME action emitted in reports |
 | C / C++ archetypes | `complete` | 35 C + 52 C++ example pairs |
 | Linux ELF platform | `complete` | the CI-validated baseline |

@@ -40,11 +40,15 @@ _E = ChangeKindMeta
 CASTXML_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
     # ── Default member initializers (header/castxml only) ───────────────────
     _E("field_default_initializer_removed", _R,
-       impact="A field's default member initializer was removed. Code relying "
-              "on implicit initialization (aggregate init, a defaulted "
-              "constructor) now leaves the member with indeterminate value "
-              "instead of the old default — a silent correctness risk, not a "
-              "compile break.",
+       impact="A field's default member initializer was removed. A "
+              "default-initialized object (or a member otherwise left "
+              "unset by a defaulted/user constructor that never touches "
+              "it) now leaves the member with indeterminate value instead "
+              "of the old default — a silent correctness risk, not a "
+              "compile break. (Aggregate initialization with the member "
+              "omitted is unaffected: an omitted aggregate element is "
+              "still copy-initialized from an empty initializer list, not "
+              "left indeterminate.)",
        description_template="Field lost its default initializer: {name}::{detail}"),
     _E("field_default_initializer_changed", _C,
        impact="A field's default member initializer value changed. Existing "
@@ -71,14 +75,16 @@ CASTXML_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
     _E("enum_became_scoped", _A,
        impact="A plain enum became a scoped `enum class`/`enum struct`. "
               "Unqualified enumerator lookup (`Red` instead of `Color::Red`) "
-              "and implicit conversion to/from the underlying integer type "
-              "both stop compiling — a source break, not a binary one (the "
-              "underlying representation is unchanged).",
+              "and implicit conversion to the underlying integer type both "
+              "stop compiling — a source break, not a binary one (the "
+              "underlying representation is unchanged). (An explicit cast "
+              "from an integer to the enum was never implicit either way —  "
+              "only the enum-to-integer direction changes here.)",
        description_template="Enum became scoped: {name} — unqualified enumerator lookup and implicit int conversion no longer compile"),
     _E("enum_lost_scoped", _R,
        impact="A scoped `enum class`/`enum struct` became a plain enum. "
               "Existing qualified-name source (`Color::Red`) still compiles, "
-              "but implicit conversion to/from the underlying integer type "
+              "but implicit conversion to the underlying integer type "
               "silently reappears — code that relied on the scoped enum's "
               "type safety to reject stray integer comparisons/arithmetic no "
               "longer gets that protection, a silent behavior change to "

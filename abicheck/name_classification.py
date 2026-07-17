@@ -369,13 +369,41 @@ _CV_TOKEN_RE = re.compile(r"\b(?:const|volatile)\b")
 
 
 def _strip_cv_qualifiers(name: str) -> str:
-    """Return *name* with all ``const`` / ``volatile`` tokens removed.
+    """Return *name* with ``const`` / ``volatile`` tokens removed — but only
+    at bracket depth 0 (not nested inside a template argument list,
+    function-parameter list, or array subscript).
+
+    A cv qualifier nested inside a template argument
+    (``Box<const int>`` vs. ``Box<int>``) names a genuinely different,
+    unrelated C++ type, not a cv-qualified variant of the same type — two
+    distinct template instantiations, each with its own real mangled
+    identity. Stripping it unconditionally (as an earlier version of this
+    function did) made both of this module's callers —
+    ``cv_qualifiers_only_differ`` and ``func_signature_cv_only_differ`` —
+    misclassify a genuine, ABI-relevant type change (e.g. a function
+    parameter changing from ``Box<int, int>`` to ``Box<int, const int>``)
+    as a harmless cv-only difference, silently suppressing a real breaking
+    ``FUNC_PARAMS_CHANGED``/``FUNC_RETURN_CHANGED`` finding (Codex/
+    CodeRabbit review, PR #582). Depth tracking mirrors
+    :func:`_has_top_level_ptr_or_ref`.
 
     Whitespace introduced by the removal is collapsed, and spaces adjacent to
     pointer/reference sigils are normalised so that ``const char *`` and
     ``char *`` reduce to the same string.
     """
-    stripped = _CV_TOKEN_RE.sub(" ", name)
+    depth = 0
+    chars = list(name)
+    for m in _CV_TOKEN_RE.finditer(name):
+        depth = 0
+        for ch in name[: m.start()]:
+            if ch in "<([":
+                depth += 1
+            elif ch in ">)]":
+                depth = max(0, depth - 1)
+        if depth == 0:
+            for i in range(m.start(), m.end()):
+                chars[i] = " "
+    stripped = "".join(chars)
     stripped = _MULTI_SPACE_RE.sub(" ", stripped)
     # Normalise spacing around pointer/reference sigils so "char  *" == "char *".
     stripped = re.sub(r"\s*([*&])\s*", r" \1", stripped)

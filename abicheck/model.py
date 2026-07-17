@@ -484,7 +484,12 @@ class AbiSnapshot:
     # mismatch reads as every such fact being silently removed (Codex review,
     # PR #582). None for non-header snapshots (DWARF/symbols-only) and for
     # snapshots predating this field.
-    ast_producer: str | None = None
+    # Keyword-only (Codex review, PR #582): both this and the next field were
+    # inserted ahead of several existing positional fields (platform,
+    # language_profile, ...) — without kw_only, an existing positional
+    # caller shifts silently, e.g. binding "elf" to ast_producer instead of
+    # platform, corrupting provenance rather than failing loudly.
+    ast_producer: str | None = field(default=None, kw_only=True)
 
     # True when TypeField.is_const/is_volatile/is_mutable and CV-qualifier
     # type spelling are known-reliable for this snapshot's fields. The
@@ -498,7 +503,7 @@ class AbiSnapshot:
     # (dump(), or any snapshot never round-tripped through JSON) defaults
     # True, since it was necessarily produced by the current, fixed parser
     # (Codex review, PR #582).
-    header_cv_facts_reliable: bool = True
+    header_cv_facts_reliable: bool = field(default=True, kw_only=True)
 
     # Phase 3: binary format platform — detected from ELF/PE/MachO metadata.
     # None = unknown / not yet detected.

@@ -52,10 +52,10 @@ Clang version matrix" is a CI/infrastructure concern (installing and running
 against multiple pinned versions), not a test-content concern, and is out of
 scope here.
 
-Gated on clang + g++ + castxml being present; skipped otherwise (same pattern
-as ``test_clang_header_backend_integration.py``, which this file complements
-with a much deeper field-level corpus — that file's own parity test stays as
-a quick top-level smoke check).
+Gated on clang + gcc + g++ + castxml being present; skipped otherwise (same
+pattern as ``test_clang_header_backend_integration.py``, which this file
+complements with a much deeper field-level corpus — that file's own parity
+test stays as a quick top-level smoke check). Marked ``integration``.
 """
 
 from __future__ import annotations
@@ -75,10 +75,20 @@ from abicheck.name_classification import canonicalize_type_name
 # Scoped to Linux/ELF for the same reason as test_clang_header_backend_integration.py:
 # a clang-built AST and a g++-built binary only share a mangling scheme on this
 # platform (see that module's docstring for the macOS/Windows divergence detail).
-pytestmark = pytest.mark.skipif(
-    not sys.platform.startswith("linux"),
-    reason="castxml/clang parity gate is ELF/Linux-scoped (see module docstring)",
-)
+# Also marked integration (CodeRabbit review, PR #582): it shells out to real
+# clang/g++/gcc/castxml, so per the root CLAUDE.md's own rule ("if a test needs
+# castxml, mark it @pytest.mark.integration") it must not run in the default
+# fast lane merely because it happens to self-skip when a tool is absent — on
+# a host where the tools ARE installed (e.g. this dev container), skipping the
+# marker would silently add real compiler subprocess overhead to every "fast"
+# run.
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        not sys.platform.startswith("linux"),
+        reason="castxml/clang parity gate is ELF/Linux-scoped (see module docstring)",
+    ),
+]
 
 
 class Parity(str, Enum):
@@ -118,8 +128,13 @@ def _have(tool: str) -> bool:
 
 
 def _require_tools() -> None:
-    if not (_have("clang") and _have("g++") and _have("castxml")):
-        pytest.skip("clang, g++, and castxml are all required for the L2 parity gate")
+    # gcc is required too (CodeRabbit review, PR #582): the C-corpus fixture
+    # (c_snapshots) shells out to plain `gcc`, distinct from `g++`, so
+    # checking only g++ let that fixture reach a missing-tool subprocess
+    # failure instead of a clean pytest.skip.
+    required = ("clang", "gcc", "g++", "castxml")
+    if not all(_have(tool) for tool in required):
+        pytest.skip("clang, gcc, g++, and castxml are all required for the L2 parity gate")
 
 
 # ── C++ corpus: functions/ctors/dtors, variables/constants, namespaced ──────
@@ -511,6 +526,10 @@ class TestNamespacedAndCompositeRecords:
         castxml_snap, clang_snap = cpp_snapshots
         c_flags = _types_by_name(castxml_snap)["Flags"]
         d_flags = _types_by_name(clang_snap)["Flags"]
+        # zip() silently truncates to the shorter list — without this, a
+        # producer dropping or adding a bitfield would still pass the
+        # per-field comparisons below (CodeRabbit review, PR #582).
+        assert len(c_flags.fields) == len(d_flags.fields) == 3
         for cf, df in zip(c_flags.fields, d_flags.fields):
             assert cf.name == df.name
             assert classify(cf.type, df.type) in (Parity.EQUAL, Parity.SEMANTICALLY_EQUAL)

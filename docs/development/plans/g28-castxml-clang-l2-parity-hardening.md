@@ -35,14 +35,16 @@ only).
 ## Done — Phase 1: CastXML schema-completeness
 
 CastXML's own XML schema already exposed several facts the header parser
-discarded. Landed as 16 new `ChangeKind`s + detectors:
+discarded. Landed as 18 new `ChangeKind`s + detectors (2 initializer, 2
+abstractness, 2 scoped-enum, 2 override, 10 deprecation):
 
 - Default member initializers (`FIELD_DEFAULT_INITIALIZER_REMOVED`/`_CHANGED`).
 - `abstract` records, `enum class` scoping, explicit `override`.
-- `[[deprecated]]` on functions/variables/types/enums (including the bare,
-  message-less form — castxml only emits the dedicated `deprecation="..."`
-  attribute for a non-empty message; a bare `[[deprecated]]` is recorded
-  solely as a token in the compound `attributes` string).
+- `[[deprecated]]` on functions/variables/types/enums/**fields** (including
+  the bare, message-less form — castxml only emits the dedicated
+  `deprecation="..."` attribute for a non-empty message; a bare
+  `[[deprecated]]` is recorded solely as a token in the compound
+  `attributes` string).
 - `Param.is_restrict` wired up (previously dead code).
 - `func_signature_cv_only_differ`: a function's own by-value parameter/
   return-type cv qualifier is neutralized (zero ABI/mangling effect),
@@ -109,6 +111,31 @@ found and fixed real, previously-undiscovered bugs:
    false positive" trade-off `_both_castxml_backed` already makes elsewhere.
 
 Full detail for each fix: `CHANGELOG.md`'s Fixed section under this PR.
+
+## Known, deferred limitation: pointer-vs-pointee CV qualifier position
+
+**Confirmed real** (CodeRabbit review): `_CastxmlParser._type_name`'s
+`CvQualifiedType` rendering always emits the qualifier as a *prefix*, so a
+volatile pointer *value* (`int * volatile`) and a pointer to a volatile
+*pointee* (`volatile int *`) both render as the identical string
+`"volatile int*"` — a real transformation between the two (changing which
+side of the declarator the qualifier binds to) is invisible to any
+string-spelling comparison. This predates this PR's work (`_type_name` is a
+general-purpose recursive renderer used everywhere — return types, params,
+fields — not something newly introduced here); the constructor-identity
+code added earlier in this PR works around the SAME ambiguity for its own
+narrow purpose by reading the real XML structure directly
+(`_ctor_param_identity_type`) rather than fixing the renderer itself.
+
+**Deliberately not fixed here**: correctly distinguishing the two forms
+means rendering an outer pointer-value qualifier as a suffix (`int*
+volatile`) while keeping a pointee qualifier prefixed — a change to
+`_type_name`'s core recursion touching every call site that spells a
+pointer type (params, returns, fields), with real regression risk across
+the parity gate's golden comparisons and the `examples/` ground truth. Scope
+this as its own follow-up investigation (verify no downstream code depends
+on the current collapsed spelling before changing it) rather than a rushed
+fix folded into an already-large hardening pass.
 
 ---
 

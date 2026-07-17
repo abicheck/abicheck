@@ -846,6 +846,7 @@ class _ClangAstParser:
 
     def _make_field(self, child: dict[str, Any], access: str) -> TypeField:
         ftype = _qualtype(child)
+        cv_type = _desugared_qualtype(child)
         bits, is_bitfield = _bitfield_width(child)
         return TypeField(
             name=str(child.get("name", "")),
@@ -853,8 +854,8 @@ class _ClangAstParser:
             offset_bits=None,
             is_bitfield=is_bitfield,
             bitfield_bits=bits,
-            is_const=bool(re.search(r"\bconst\b", ftype)),
-            is_volatile=bool(re.search(r"\bvolatile\b", ftype)),
+            is_const=bool(re.search(r"\bconst\b", cv_type)),
+            is_volatile=bool(re.search(r"\bvolatile\b", cv_type)),
             is_mutable=bool(child.get("mutable")),
             access=self._access_level(access),
         )
@@ -966,6 +967,31 @@ class _Decl:
 def _qualtype(node: dict[str, Any]) -> str:
     type_obj = node.get("type")
     if isinstance(type_obj, dict):
+        return str(type_obj.get("qualType", ""))
+    return ""
+
+
+def _desugared_qualtype(node: dict[str, Any]) -> str:
+    """The fully-desugared type spelling, when clang provides one.
+
+    A field declared through a typedef to a cv-qualified type
+    (``typedef const int T; struct S { T x; };``) renders ``qualType`` as
+    the bare alias ``"T"`` — the real ``"const int"`` is only visible via
+    the separate ``desugaredQualType`` key clang emits precisely when a
+    type alias needs unwrapping. A plain (non-aliased) field carries no
+    ``desugaredQualType`` key at all (confirmed empirically), so falling
+    back to ``qualType`` is exact, not merely a guess, for every other
+    case. Used only for the const/volatile regex check below — the
+    field's own displayed ``type`` spelling stays the sugared form users
+    actually wrote (Codex review, PR #582: mirrors dumper_castxml's
+    Typedef-indirection walk for the identical reason — a regex on the
+    display spelling alone misses a qualifier hidden behind an alias).
+    """
+    type_obj = node.get("type")
+    if isinstance(type_obj, dict):
+        desugared = type_obj.get("desugaredQualType")
+        if isinstance(desugared, str) and desugared:
+            return desugared
         return str(type_obj.get("qualType", ""))
     return ""
 

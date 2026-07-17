@@ -327,3 +327,34 @@ def test_param_by_value_real_type_change_still_breaking():
     new = _snap("2", functions=[_fn("f", "f", params=[Param(name="x", type="long")])])
     r = compare(old, new)
     assert ChangeKind.FUNC_PARAMS_CHANGED in _kinds(r)
+
+
+@pytest.mark.parametrize("old_t, new_t", [
+    ("Box<const int>", "Box<int>"),
+    ("Box< const int >", "Box< int >"),
+    ("Box<int, const int>", "Box<int, int>"),
+    ("std::function<void(const int)>", "std::function<void(int)>"),
+])
+def test_nested_template_cv_qualifier_is_not_neutralised(old_t, new_t):
+    """Regression guard (Codex/CodeRabbit review, PR #582):
+    ``_strip_cv_qualifiers`` used to strip const/volatile tokens at ANY
+    nesting depth, so a cv qualifier hidden inside a template argument
+    (``Box<const int>`` vs ``Box<int>``) — a genuinely different,
+    unrelated C++ type, not a cv-qualified variant of the same type — was
+    misclassified as a harmless cv-only difference by both
+    ``cv_qualifiers_only_differ`` and ``func_signature_cv_only_differ``.
+    Depending on the exact spelling this could silently suppress a real
+    breaking ``FUNC_PARAMS_CHANGED``/``FUNC_RETURN_CHANGED`` finding."""
+    assert func_signature_cv_only_differ(old_t, new_t) is False
+    assert cv_qualifiers_only_differ(old_t + "*", new_t + "*") is False
+
+
+def test_nested_template_cv_change_still_reported_as_param_change():
+    """End-to-end: a function parameter changing from one template
+    instantiation to a different one (only distinguished by a nested cv
+    qualifier) must still report FUNC_PARAMS_CHANGED, not be silently
+    neutralised as cv-only churn."""
+    old = _snap("1", functions=[_fn("f", "f", params=[Param(name="x", type="Box<int, int>")])])
+    new = _snap("2", functions=[_fn("f", "f", params=[Param(name="x", type="Box<int, const int>")])])
+    r = compare(old, new)
+    assert ChangeKind.FUNC_PARAMS_CHANGED in _kinds(r)
