@@ -78,9 +78,14 @@ for a non-call reference (e.g. reading an internal constant). Together with
 `DECL_CALLS_DECL` these five kinds form the **dependency-edge family** that
 `public_api_internal_dependency_added` (below) and the intra-version
 `public_to_internal_dependency` cross-check both walk — "reaches" means any of
-the five, not calls alone. See [case160](../examples/case160_public_api_internal_dep_added.md)
-for the call-edge shape and [case187](../examples/case187_public_struct_private_field_type.md)
-for the non-call, field-type shape (the ADR's own headline example).
+the five, not calls alone. Each kind has a dedicated example:
+[case160](../examples/case160_public_api_internal_dep_added.md) (`DECL_CALLS_DECL`),
+[case187](../examples/case187_public_struct_private_field_type.md)
+(`TYPE_HAS_FIELD_TYPE`, the ADR's own headline example),
+[case188](../examples/case188_public_class_private_base_class.md)
+(`TYPE_INHERITS`), [case189](../examples/case189_public_function_private_parameter_type.md)
+(`DECL_HAS_TYPE`), and [case190](../examples/case190_public_inline_function_references_internal_constant.md)
+(`DECL_REFERENCES_DECL`, the ADR's *other* headline example, verbatim).
 
 **Header-only graph, no build integration (ADR-041 addendum).** `header_graph.py`
 builds the same node/edge shapes straight from a header-only dump — no
@@ -99,6 +104,9 @@ Its own `extractor_passes` names (`header_call_graph`/`header_type_graph`) are
 tracked separately from the build-integrated passes so a header-only
 confirmation is never mistaken for a full per-TU pass when judging whether an
 edge kind's absence is a real zero or missing coverage.
+[case191](../examples/case191_header_only_graph_field_type.md) demonstrates
+the same `public_api_internal_dependency_added` finding as case187, proven
+entirely through this no-build-integration path.
 
 > **Source ABI replay (L4) requires clang** (or castxml for the declaration
 > subset, or a pre-captured Android dump). It is the one tier gated on a C++
@@ -545,7 +553,7 @@ graph-derived **risk** findings (ADR-031 D6):
 | `call_graph_public_entry_reachability_changed` | compatible (quality) | The implementation statically reachable from an exported entry point changed (approximate Clang call graph; needs `--source-abi` + `--source-graph summary`, folded automatically) |
 | `include_graph_public_header_drift` | risk | A public header entered/left the compiled include graph (needs `--source-abi` + `--source-graph summary`, folded automatically) |
 | `build_option_reaches_public_symbol` | risk | A changed ABI-relevant build option feeds a compile unit producing an exported symbol |
-| `public_api_internal_dependency_added` | risk | A public entry newly reaches an internal (non-public) declaration/type via a call, a non-call reference, or a field/base/parameter type ([case160](../examples/case160_public_api_internal_dep_added.md): call edge; [case187](../examples/case187_public_struct_private_field_type.md): field-type edge) |
+| `public_api_internal_dependency_added` | risk | A public entry newly reaches an internal (non-public) declaration/type via a call, a non-call reference, or a field/base/parameter type ([case160](../examples/case160_public_api_internal_dep_added.md): call edge; [case187](../examples/case187_public_struct_private_field_type.md): field type; [case188](../examples/case188_public_class_private_base_class.md): base class; [case189](../examples/case189_public_function_private_parameter_type.md): parameter type; [case190](../examples/case190_public_inline_function_references_internal_constant.md): non-call reference; [case191](../examples/case191_header_only_graph_field_type.md): same finding via the header-only graph, no build integration) |
 | `target_dependency_added` | risk | The library gained an inter-target build/link dependency (new `DT_NEEDED` risk) ([case161](../examples/case161_target_dependency_added.md)) |
 | `exported_symbol_source_owner_changed` | risk | An exported symbol's owning source file/TU moved — implementation relocated behind a stable symbol ([case162](../examples/case162_symbol_source_owner_changed.md)) |
 

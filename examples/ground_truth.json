@@ -2035,6 +2035,82 @@
     "linux"
    ]
   },
+  "case188_public_class_private_base_class": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": true,
+   "category": "risk",
+   "description": "In the derived L5 source graph the public class demo::PublicHandle newly carries a TYPE_INHERITS edge to the internal (non-public-header) type detail::InternalBase that it did not reach in v1 -- a public class privately inheriting from an internal base. Sibling of case187 (TYPE_HAS_FIELD_TYPE) and case189 (DECL_HAS_TYPE); a source-graph risk, never on its own an artifact-proven break.",
+   "expected": "COMPATIBLE_WITH_RISK",
+   "expected_kinds": [
+    "public_api_internal_dependency_added"
+   ],
+   "fixtures": [
+    "old.json",
+    "new.json"
+   ],
+   "min_evidence": "L5",
+   "platforms": [
+    "linux"
+   ]
+  },
+  "case189_public_function_private_parameter_type": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": true,
+   "category": "risk",
+   "description": "In the derived L5 source graph the public function demo::configure() newly carries a DECL_HAS_TYPE edge to the internal (non-public-header) type detail::Options that it did not reach in v1 -- a public function taking an internal type in its signature. Sibling of case187 (TYPE_HAS_FIELD_TYPE) and case188 (TYPE_INHERITS); a source-graph risk, never on its own an artifact-proven break.",
+   "expected": "COMPATIBLE_WITH_RISK",
+   "expected_kinds": [
+    "public_api_internal_dependency_added"
+   ],
+   "fixtures": [
+    "old.json",
+    "new.json"
+   ],
+   "min_evidence": "L5",
+   "platforms": [
+    "linux"
+   ]
+  },
+  "case190_public_inline_function_references_internal_constant": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": true,
+   "category": "risk",
+   "description": "In the derived L5 source graph the public inline function demo::compute() newly carries a DECL_REFERENCES_DECL edge to the internal (non-public-header) declaration detail::kInternalLimit that it did not reach in v1 -- ADR-041's other headline 'not a call at all' example verbatim (inline int f() { return DETAIL_CONSTANT + 1; }). Fourth and last of the DEPENDENCY_EDGE_KINDS family alongside case187/188/189; a source-graph risk, never on its own an artifact-proven break.",
+   "expected": "COMPATIBLE_WITH_RISK",
+   "expected_kinds": [
+    "public_api_internal_dependency_added"
+   ],
+   "fixtures": [
+    "old.json",
+    "new.json"
+   ],
+   "min_evidence": "L5",
+   "platforms": [
+    "linux"
+   ]
+  },
+  "case191_header_only_graph_field_type": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": true,
+   "category": "risk",
+   "description": "Demonstrates the same public-struct-gains-a-private-field-type scenario as case187, but proven entirely through the header-only-graph addendum (header_graph.py, ADR-041 addendum, service.run_dump(header_graph=True)) with no build integration at all -- extractor_passes['header_type_graph'] is trusted for the structural TYPE_HAS_FIELD_TYPE/TYPE_INHERITS/DECL_HAS_TYPE kinds without needing an edge-presence coverage trick, distinct from case187's build-integrated-style fixture. A source-graph risk, never on its own an artifact-proven break.",
+   "expected": "COMPATIBLE_WITH_RISK",
+   "expected_kinds": [
+    "public_api_internal_dependency_added"
+   ],
+   "fixtures": [
+    "old.json",
+    "new.json"
+   ],
+   "min_evidence": "L5",
+   "platforms": [
+    "linux"
+   ]
+  },
   "case18_dependency_leak": {
    "abi_break": true,
    "api_break": false,

@@ -3,7 +3,7 @@
 
 Listed in `RISK_KINDS` — symbol-compatible but behaviorally risky.
 
-_27 case(s)._ [← back to all examples](../index.md)
+_31 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -34,3 +34,7 @@ _27 case(s)._ [← back to all examples](../index.md)
 | [case180_symbol_binding_lost_unique](../case180_symbol_binding_lost_unique.md) | Symbol Binding Lost GNU_UNIQUE | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case183_internal_version_node_churn](../case183_internal_version_node_churn.md) | Internal ELF symbol-version node churn | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case187_public_struct_private_field_type](../case187_public_struct_private_field_type.md) | _public_struct_private_field_type — Public struct newly gains a private field type | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case188_public_class_private_base_class](../case188_public_class_private_base_class.md) | _public_class_private_base_class — Public class newly gains a private base class | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case189_public_function_private_parameter_type](../case189_public_function_private_parameter_type.md) | _public_function_private_parameter_type — Public function newly gains a private parameter type | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case190_public_inline_function_references_internal_constant](../case190_public_inline_function_references_internal_constant.md) | _public_inline_function_references_internal_constant — Public inline function newly reads an internal constant | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case191_header_only_graph_field_type](../case191_header_only_graph_field_type.md) | _header_only_graph_field_type — Same finding, proven with no build integration at all | 🟡 COMPATIBLE_WITH_RISK | Risk |

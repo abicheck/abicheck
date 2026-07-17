@@ -1,7 +1,7 @@
 # ABI Scenario Catalog
 
 <!-- BEGIN GENERATED: catalog-headline (keep counts in sync with examples/ground_truth.json) -->
-This directory contains **187 cases** (182 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
+This directory contains **191 cases** (186 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
 <!-- END GENERATED: catalog-headline -->
 
 - Paired `v1/` and `v2/` source + headers.
@@ -22,7 +22,7 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 |---------|-------|-------------------------|------|
 | BREAKING | 101 | `BREAKING_KINDS` | 🔴 |
 | API_BREAK | 17 | `API_BREAK_KINDS` | 🟠 |
-| COMPATIBLE_WITH_RISK | 27 | `RISK_KINDS` | 🟡 |
+| COMPATIBLE_WITH_RISK | 31 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 9 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 21 | `QUALITY_KINDS` | 🟡 |
 | NO_CHANGE | 7 | — | ✅ |
@@ -428,6 +428,10 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [185](case185_inherited_override_reuses_slot/README.md) | Inherited override reuses the base's vtable slot | Addition | 🟢 COMPATIBLE |
 | [186](case186_c_api_pointee_const_abi_neutral/README.md) | C API pointee const-qualification is ABI-neutral | No Change | ✅ NO_CHANGE |
 | [187](case187_public_struct_private_field_type/README.md) | _public_struct_private_field_type — Public struct newly gains a private field type | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [188](case188_public_class_private_base_class/README.md) | _public_class_private_base_class — Public class newly gains a private base class | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [189](case189_public_function_private_parameter_type/README.md) | _public_function_private_parameter_type — Public function newly gains a private parameter type | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [190](case190_public_inline_function_references_internal_constant/README.md) | _public_inline_function_references_internal_constant — Public inline function newly reads an internal constant | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [191](case191_header_only_graph_field_type/README.md) | _header_only_graph_field_type — Same finding, proven with no build integration at all | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 <!-- END GENERATED: case-index -->
 
 ---
