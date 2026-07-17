@@ -960,31 +960,116 @@ def _scan_subprocess_worker(req: ScanRequest, q: Any) -> None:
         q.put(("err", f"{type(exc).__name__}: {exc}"))
 
 
+def _descendant_pgids(root_pid: int) -> set[int]:
+    """Every process-group id in *root_pid*'s live process tree (POSIX, best-effort).
+
+    A clang/castxml child spawned via ``deadline.run_bounded`` detaches into its
+    *own* new session/group (needed so its own inner-timeout ``killpg`` can't
+    self-kill the caller) — a plain ``killpg(root_pgid)`` from an ancestor no
+    longer reaches it even though the PPID chain still leads back to *root_pid*,
+    until *root_pid* itself dies and severs that link. Walking a live
+    ``ps -eo pid,ppid`` snapshot while *root_pid* is still alive finds every such
+    descendant's own pgid too, so it can be killed alongside the worker's own
+    group instead of surviving as an orphan (Codex review, PR #591). Returns an
+    empty set on any failure (missing ``ps``, non-POSIX, ...) — never raises.
+    """
+    import os
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["ps", "-eo", "pid=,ppid="],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    children: dict[int, list[int]] = {}
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) != 2:
+            continue
+        try:
+            pid, ppid = int(parts[0]), int(parts[1])
+        except ValueError:
+            continue
+        children.setdefault(ppid, []).append(pid)
+    pgids: set[int] = set()
+    stack, seen = [root_pid], set()
+    while stack:
+        pid = stack.pop()
+        if pid in seen:
+            continue
+        seen.add(pid)
+        try:
+            pgids.add(os.getpgid(pid))
+        except (ProcessLookupError, PermissionError, AttributeError, OSError):
+            pass
+        stack.extend(children.get(pid, []))
+    return pgids
+
+
 def _kill_process_tree(proc: Any) -> None:
-    """Terminate *proc* and its process group (best-effort, never raises)."""
+    """Terminate *proc* and every group in its process tree (best-effort, never raises).
+
+    Killing only ``proc``'s own group used to miss a clang/castxml child that
+    had detached into its own session via ``deadline.run_bounded``'s
+    ``start_new_session=True`` — that isolation is needed so *its* inner-timeout
+    ``killpg`` can't self-kill the worker, but it also made the child invisible
+    to this outer, worker-level ``killpg``. :func:`_descendant_pgids` finds it
+    (and any other detached descendant) by PPID while ``proc`` is still alive, so
+    it gets killed here too instead of surviving as an orphan (Codex review,
+    PR #591).
+    """
     import os
     import signal
 
     if not proc.is_alive():
         return
     try:
-        pgid = os.getpgid(proc.pid)
-        # Only kill the *group* when the child actually detached into its own
-        # (``os.setsid`` ran). If it timed out before that, its pgid still equals
-        # the parent's group — killpg would then terminate the MCP server itself,
-        # so fall back to killing just the worker process (Codex review).
         own_pgid = os.getpgrp()
-        if pgid != own_pgid:
-            os.killpg(pgid, signal.SIGTERM)
-            proc.join(3)
-            if proc.is_alive():
-                os.killpg(pgid, signal.SIGKILL)
-        else:
-            proc.terminate()
-    except (ProcessLookupError, PermissionError, AttributeError, OSError):
+    except (AttributeError, OSError):
         try:
             proc.terminate()
         except (OSError, AttributeError):
+            pass
+        proc.join(5)
+        return
+    pgids: set[int] = set()
+    try:
+        pgids.add(os.getpgid(proc.pid))
+    except (ProcessLookupError, PermissionError, AttributeError, OSError):
+        pass
+    pgids |= _descendant_pgids(proc.pid)
+    # Only kill *proc*'s own group when it actually detached into its own (``os.
+    # setsid`` ran). If it timed out before that, its pgid still equals the
+    # parent's group — killpg would then terminate the MCP server itself, so
+    # that group is excluded and only its (already-detached) descendants, if
+    # any, are targeted (Codex review).
+    pgids.discard(own_pgid)
+    if not pgids:
+        try:
+            proc.terminate()
+        except (OSError, AttributeError):
+            pass
+        proc.join(5)
+        return
+    for pgid in pgids:
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+    proc.join(3)
+    # Unconditional SIGKILL sweep, not gated on proc's own exit: a detached
+    # clang/castxml session or a SIGTERM-ignoring grandchild can outlive the
+    # grace period even once the direct worker has already exited (mirrors
+    # deadline._kill_process_tree's same escalation fix).
+    for pgid in pgids:
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
             pass
     proc.join(5)
 

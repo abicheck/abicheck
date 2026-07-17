@@ -49,3 +49,21 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   a Python `str` — it streams to a temp file like the L4 replay already did,
   closing the memory side of the same field report (measured ~27% lower
   Python-heap peak on a real pathological-header fixture).
+- **The scan deadline now propagates into L4 replay's thread/process-pool
+  workers, and the MCP `run_scan_subprocess` watchdog can now reach a
+  clang/castxml child that detached into its own process group.**
+  `contextvars` (which carry the active `--budget` deadline) don't cross a
+  `ThreadPoolExecutor`/`ProcessPoolExecutor` boundary, so `source_replay`'s
+  parallel L4 extraction workers used to see no active deadline at all and
+  silently fall back to each extractor's fixed default timeout regardless of
+  `--budget`; `deadline.py` gained `current_deadline_ts()`/`with_deadline_ts()`
+  to capture and re-establish it explicitly across that boundary. Separately,
+  `run_bounded`'s own process-group isolation (needed so its *inner* timeout
+  can kill a compiler subtree without risking a self-kill of the calling
+  process) had an unintended side effect for the MCP scan path: a clang/
+  castxml child now detaches into its *own* session, invisible to the outer
+  worker-level `killpg` in `service_scan.run_scan_subprocess` if *that*
+  timeout fires first — an orphaned-compiler regression of the very bug this
+  fix set out to close, just one layer further out. The outer watchdog now
+  walks the live process tree by PPID (`_descendant_pgids`) to find and kill
+  every such detached group too, not just the worker's own.

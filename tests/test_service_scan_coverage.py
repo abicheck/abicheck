@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -356,6 +357,42 @@ def test_kill_process_tree_kills_detached_group(
     assert (999, signal.SIGTERM) in signals
     assert (999, signal.SIGKILL) in signals
     assert 3 in proc.joins and 5 in proc.joins
+
+
+@_posix_process_groups
+def test_kill_process_tree_kills_detached_descendant_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Codex review (PR #591): a clang/castxml child spawned via
+    deadline.run_bounded's start_new_session=True detaches into its OWN
+    session/pgid, distinct from the worker's own group — killing only
+    proc.pid's own group used to leave that child running as an orphan once
+    the worker's group-kill fired. _descendant_pgids must find it by walking
+    the live PPID tree, and _kill_process_tree must killpg it too."""
+    signals: list[tuple[int, int]] = []
+    # Worker pid 4321 is a detached group leader (pgid 4321, distinct from
+    # this test's own group 111); its child 5555 (standing in for a clang/
+    # castxml invocation) further detached into ITS OWN group (pgid 5555) —
+    # exactly what deadline.run_bounded's start_new_session=True produces.
+    monkeypatch.setattr(
+        os, "getpgid", lambda pid: {4321: 4321, 5555: 5555}.get(pid, pid)
+    )
+    monkeypatch.setattr(os, "getpgrp", lambda: 111)
+    monkeypatch.setattr(os, "killpg", lambda pgid, sig: signals.append((pgid, sig)))
+
+    def _fake_ps(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert cmd[0] == "ps"
+        return subprocess.CompletedProcess(cmd, 0, stdout="4321 100\n5555 4321\n", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _fake_ps)
+    proc = _FakeProc(pid=4321)  # stays alive → triggers the SIGKILL escalation
+    _kill_process_tree(proc)
+    import signal
+
+    assert (4321, signal.SIGTERM) in signals
+    assert (5555, signal.SIGTERM) in signals
+    assert (4321, signal.SIGKILL) in signals
+    assert (5555, signal.SIGKILL) in signals
 
 
 @_posix_process_groups
