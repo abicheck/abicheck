@@ -33,6 +33,7 @@ from .change_registry_castxml import CASTXML_EXTENSION_ENTRIES
 from .change_registry_composition import COMPOSITION_EXTENSION_ENTRIES
 from .change_registry_coverage import COVERAGE_EXTENSION_ENTRIES
 from .change_registry_numpy import NUMPY_EXTENSION_ENTRIES
+from .change_registry_suppression import SUPPRESSION_EXTENSION_ENTRIES
 from .change_registry_types import (  # noqa: F401
     ChangeKindMeta as ChangeKindMeta,
     ChangeKindRegistry as ChangeKindRegistry,
@@ -1983,16 +1984,15 @@ REGISTRY = ChangeKindRegistry([
               "limit). The Python API surface is therefore untrusted and must "
               "fail closed rather than disabling Python-level API checks.",
        description_template="Invalid Python API stub for extension module: {detail}"),
-    # Coverage-extension (dynamic loader/PE/Mach-O/language contracts),
-    # composition-compatibility (runtime binding/ordered loader/PE/wchar_t),
-    # build-source (L3/L4/L5 evidence), NumPy C-API (G26), wheel tag
-    # deployment-claim (G27), and CastXML schema-completeness kinds each
-    # live in their own change_registry_*.py file to keep this file under
-    # the 2000-line cap; all are part of this same single registry.
+    # Coverage-extension, composition-compatibility, build-source (L3/L4/L5),
+    # NumPy C-API (G26), wheel deployment-claim (G27), CastXML schema-
+    # completeness, and suppression reachability (ADR-044) kinds each live in
+    # their own change_registry_*.py file to keep this file under the cap.
     *COVERAGE_EXTENSION_ENTRIES,
     *COMPOSITION_EXTENSION_ENTRIES,
     *BUILDSOURCE_EXTENSION_ENTRIES,
     *NUMPY_EXTENSION_ENTRIES,
     *WHEEL_DEPLOYMENT_EXTENSION_ENTRIES,
     *CASTXML_EXTENSION_ENTRIES,
+    *SUPPRESSION_EXTENSION_ENTRIES,
 ])

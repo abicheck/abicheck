@@ -104,6 +104,26 @@ class Change:
     # it out of ``description`` prose. ``None`` when there is no correlated
     # change, or for every finding kind that does not compute one.
     correlated_change_kind: str | None = None
+    # ADR-044 D1 — set by the MarkReachability pipeline step, which runs before
+    # ApplySuppression so a broad namespace/source_location suppression rule can
+    # tell a truly-unreachable internal change apart from one that is part of the
+    # effective public ABI. True either when this change's own subject is not
+    # internal-namespaced at all (a directly public symbol/type), or when its
+    # root type (resolved the same way internal_leak.DetectInternalLeaks
+    # resolves it) is an internal type reachable from the public surface in
+    # either snapshot per internal_leak.compute_leak_paths.
+    public_reachable: bool = False
+    # "direct_public_symbol" when the change's own subject is not
+    # internal-namespaced at all; "value_embedding" when at least one
+    # reachability path embeds an internal type by value or inheritance
+    # (internal_leak._path_is_value_propagating); "pointer_or_signature" when
+    # reachable only through a pointer/reference/template-argument path. None
+    # when public_reachable is False.
+    reachability_kind: str | None = None
+    # Human-readable rendering (internal_leak._format_path) of the shortest
+    # matched reachability path, e.g. "fn:pub → base:detail::Base". None when
+    # public_reachable is False.
+    reachability_proof_path: str | None = None
 
 
 @dataclass

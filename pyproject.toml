@@ -67,6 +67,7 @@ dev = [
     "mypy==1.19.1",
     "types-PyYAML",
     "jsonschema>=4.0",
+    "scriv[toml]>=1.5",  # changelog-fragment tool, see changelog.d/README.md
 ]
 # Real-world validation harness (validation/): fetches + extracts conda-forge
 # packages. Modern conda-forge ships `.conda` (zstd-compressed) artifacts, so a
@@ -205,6 +206,18 @@ source = ["abicheck"]
 [tool.coverage.report]
 show_missing = true
 skip_covered = false
+
+[tool.scriv]
+# Changelog-fragment tool (avoids everyone editing the same CHANGELOG.md
+# "Unreleased" section — see changelog.d/README.md and CONTRIBUTING.md).
+format = "md"
+fragment_directory = "changelog.d"
+new_fragment_template = "file: fragment_template.md.j2"
+categories = ["Added", "Changed", "Deprecated", "Removed", "Fixed", "Performance", "Security", "Documentation"]
+output_file = "CHANGELOG.md"
+md_header_level = "2"
+entry_title_template = "[{{ version }}] — {{ date.strftime('%Y-%m-%d') }}"
+version = "literal: pyproject.toml: project.version"
 
 [tool.mutmut]
 # Mutmut v3 config — mutation testing for core detector logic.

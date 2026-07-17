@@ -140,9 +140,30 @@ Both must pass before submitting a PR. CI enforces both.
 1. Branch: `git checkout -b feat/<name>` or `fix/<name>`
 2. Make changes, add tests
 3. `ruff check` + `mypy` + `pytest` all green locally
-4. Push and open PR — CodeRabbit will review automatically
-5. Address all review comments before merge
-6. CI must be fully green (all checks)
+4. If your change touches `abicheck/**/*.py`, add a changelog fragment (see
+   below) — CI rejects such PRs without one
+5. Push and open PR — CodeRabbit will review automatically
+6. Address all review comments before merge
+7. CI must be fully green (all checks)
+
+## Changelog entries
+
+`CHANGELOG.md`'s `## [Unreleased]` section used to be hand-edited by every
+PR, which caused frequent merge conflicts on that same handful of lines.
+Instead, each PR that changes `abicheck`'s behavior adds its own fragment
+file:
+
+```bash
+scriv create   # writes changelog.d/<timestamp>_<you>_<branch>.md
+```
+
+Uncomment one `### <Category>` section in the generated file, write your
+entry (bold lead-in phrase, full sentences, backticked identifiers — match
+the existing `CHANGELOG.md` style), and commit the fragment alongside your
+code. See `changelog.d/README.md` for the full workflow and category list.
+PRs that only touch tests, docs, or scripts don't need one; PRs that touch
+`abicheck/**/*.py` without one are blocked by CI unless labeled
+`skip-changelog`.
 
 ## Commit style
 

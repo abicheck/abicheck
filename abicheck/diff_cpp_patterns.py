@@ -274,6 +274,11 @@ def detect_sycl_overload_set_removal(
                     f"{'…' if len(affected_unq) > 10 else ''})"
                 ),
                 affected_symbols=affected_mangled,
+                # ADR-044: old_funcs/new_funcs are scoped to _PUBLIC_VIS above,
+                # so every mangled name grouped into this finding is a real
+                # public-surface removal.
+                public_reachable=True,
+                reachability_kind="direct_public_symbol",
             )
         )
     else:
@@ -469,6 +474,12 @@ def _emit_isa_dropped_finding(
             f"{'…' if len(stems_sorted) > 8 else ''})"
         ),
         affected_symbols=affected_mangled,
+        # ADR-044: overlapping's mangled names come from old_funcs (scoped to
+        # _PUBLIC_VIS) merged with the raw PE/Mach-O export table (which is,
+        # by definition, the public export surface) — both sources are
+        # reliably public.
+        public_reachable=True,
+        reachability_kind="direct_public_symbol",
     )
 
 
@@ -595,6 +606,15 @@ def _find_tag_rename_for_removed(
                 f"new name)"
             ),
             affected_symbols=removed_with_token,
+            # ADR-044: only_removed/only_added (and thus removed_with_token/
+            # added_with_token above) are scoped to _PUBLIC_VIS before this
+            # function is ever called — the finding fires only when actual
+            # public-surface mangled symbols embed the tag's leaf name, so
+            # its mere existence already proves public reachability, the
+            # same reliable signal the other Visibility.PUBLIC-filtered
+            # late-detector findings have.
+            public_reachable=True,
+            reachability_kind="direct_public_symbol",
         )
     return None
 
@@ -845,6 +865,11 @@ def detect_default_template_arg_changed(
                     detail=cand.name,
                     old_value=old_args,
                     new_value=new_args,
+                    # ADR-044: old_funcs/new_funcs are scoped to _PUBLIC_VIS
+                    # above, so both the removed and added instantiation
+                    # symbols are reliably public.
+                    public_reachable=True,
+                    reachability_kind="direct_public_symbol",
                 )
             )
             break  # one pairing per removed symbol

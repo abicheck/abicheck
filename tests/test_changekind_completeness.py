@@ -45,6 +45,8 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.EVIDENCE_REQUIRED_MISSING,
     # exercised by tests/test_versioned_symbol_scheme.py (P08 advisory recogniser)
     ChangeKind.VERSIONED_SYMBOL_SCHEME_DETECTED,
+    # exercised by tests/test_reachability_aware_suppression.py (ADR-044 D4)
+    ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK,
     ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED,
     ChangeKind.ENUM_MEMBER_ADDED,
     ChangeKind.ENUM_MEMBER_REMOVED,

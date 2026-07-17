@@ -254,6 +254,15 @@ def _leak_change(
         detail=f"removed={removed_names}, added={added_names}",
         old_value=str(sorted({n for n, _ in old_sigs})[:3]),
         new_value=str(sorted({n for n, _ in new_sigs})[:3]),
+        # ADR-044 D1/D2 (Codex review): this finding exists *because* a public
+        # signature instantiates an internal-namespace template — mark it
+        # reachable so it can't be suppressed by a broad namespace/
+        # source_location rule the same way internal_leak._build_leak_change
+        # already does for INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API. Runs after
+        # ApplySuppression (DetectTemplatePatterns), so MarkReachability never
+        # sees this Change to tag it itself.
+        public_reachable=True,
+        reachability_kind="value_embedding",
     )
 
 
@@ -369,6 +378,14 @@ def detect_cpo_kind_changed(
 
     changes: list[Change] = []
 
+    # ADR-044 D1 (Codex review): _func_names/_var_names above both filter to
+    # Visibility.PUBLIC before contributing a name, so a CPO_KIND_CHANGED
+    # finding's mere existence already proves its subject is public — same
+    # reliable-signal tagging as detect_experimental_namespace_changes'
+    # function path / diff_namespaces._emit_experimental_change. This
+    # detector runs via DetectTemplatePatterns, after ApplySuppression, so
+    # nothing else would ever tag these.
+
     # function → variable
     for name in sorted((old_funcs - old_vars) & (new_vars - new_funcs)):
         changes.append(make_change(
@@ -378,6 +395,8 @@ def detect_cpo_kind_changed(
             old="function",
             new="variable (function-object / CPO)",
             new_value="variable",
+            public_reachable=True,
+            reachability_kind="direct_public_symbol",
         ))
 
     # variable → function
@@ -389,6 +408,8 @@ def detect_cpo_kind_changed(
             old="variable (function-object / CPO)",
             new="function",
             old_value="variable",
+            public_reachable=True,
+            reachability_kind="direct_public_symbol",
         ))
 
     return changes
@@ -478,6 +499,12 @@ def detect_overload_set_rerouted(
             detail=f"{len(removed)} overload(s) removed and {len(added)} added in the same revision",
             old_value=str(sorted(_fmt_key(k) for k in old_sigs)),
             new_value=str(sorted(_fmt_key(k) for k in new_sigs)),
+            # ADR-044 D1 (Codex review): _by_stem above filters to
+            # Visibility.PUBLIC, so this finding's mere existence already
+            # proves its subject is public — same reliable-signal tagging as
+            # CPO_KIND_CHANGED above.
+            public_reachable=True,
+            reachability_kind="direct_public_symbol",
         ))
 
     return changes
@@ -534,10 +561,18 @@ def detect_mandatory_template_param_added(
     removal is also caught by ``func_removed`` so the user does see a
     finding even when this detector misses.
     """
-    from .model import Visibility
+    from .model import ScopeOrigin, Visibility
 
-    def _arities(snap: AbiSnapshot) -> dict[str, set[int]]:
+    def _arities(snap: AbiSnapshot) -> tuple[dict[str, set[int]], dict[str, bool]]:
         out: dict[str, set[int]] = defaultdict(set)
+        # ADR-044 (Codex review): tracks, per stem, whether *any* contributing
+        # observation is reliably public — a Visibility.PUBLIC function, or a
+        # type explicitly scoped to the public-header set (ADR-024's opt-in
+        # ScopeOrigin.PUBLIC_HEADER, --public-header/--public-header-dir).
+        # Without that flag every type's origin is ScopeOrigin.UNKNOWN, so
+        # this degrades to "public only if a public function contributed"
+        # automatically for the common case.
+        is_public: dict[str, bool] = defaultdict(bool)
         for f in snap.functions:
             if f.visibility != Visibility.PUBLIC:
                 continue
@@ -548,6 +583,7 @@ def detect_mandatory_template_param_added(
             arity = _count_top_level_template_args(qname)
             if arity is not None:
                 out[stem].add(arity)
+                is_public[stem] = True
         # Types are also indexed.
         for t in snap.types:
             if "<" not in t.name:
@@ -556,10 +592,12 @@ def detect_mandatory_template_param_added(
             arity = _count_top_level_template_args(t.name)
             if arity is not None:
                 out[stem].add(arity)
-        return out
+                if t.origin == ScopeOrigin.PUBLIC_HEADER:
+                    is_public[stem] = True
+        return out, is_public
 
-    old_ar = _arities(old)
-    new_ar = _arities(new)
+    old_ar, old_public = _arities(old)
+    new_ar, new_public = _arities(new)
 
     changes: list[Change] = []
     for stem in sorted(set(old_ar) & set(new_ar)):
@@ -567,11 +605,20 @@ def detect_mandatory_template_param_added(
         new_min = min(new_ar[stem])
         if new_min <= old_min:
             continue
+        # ADR-044 D1: public_reachable is set only when at least one
+        # contributing observation for this stem was reliably public (see
+        # _arities above) — a stem whose only evidence is an internal type
+        # with no public-header scoping stays untagged, the same
+        # no-reliable-signal reasoning as before, now narrowed to exactly
+        # the cases that do have one.
+        subject_is_public = old_public.get(stem, False) or new_public.get(stem, False)
         changes.append(make_change(
             ChangeKind.MANDATORY_TEMPLATE_PARAM_ADDED,
             symbol=stem,
             name=stem,
             old=str(old_min),
+            public_reachable=subject_is_public,
+            reachability_kind="direct_public_symbol" if subject_is_public else None,
             new=str(new_min),
             old_value=f"min_arity={old_min}",
             new_value=f"min_arity={new_min}",
@@ -663,6 +710,11 @@ def detect_unspecified_return_now_named(
             description=desc,
             old_value=old_rt,
             new_value=new_rt,
+            # ADR-044 D1 (Codex review): _index() above filters to
+            # Visibility.PUBLIC functions only, so this finding's mere
+            # existence already proves its subject is public.
+            public_reachable=True,
+            reachability_kind="direct_public_symbol",
         ))
 
     return changes
@@ -733,6 +785,13 @@ def detect_missing_instantiations(
             detail=stem,
             old_value=fn.mangled,
             new_value=None,
+            # ADR-044 D1: both loops above filter to Visibility.PUBLIC, so
+            # this finding's mere existence already proves its subject is
+            # public — same reliable-signal tagging as the detectors in
+            # detect_template_patterns. Runs via DetectCppPatterns, also
+            # after ApplySuppression.
+            public_reachable=True,
+            reachability_kind="direct_public_symbol",
         ))
     return findings
 

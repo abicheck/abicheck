@@ -242,10 +242,37 @@ def test_lost_opaqueness_emits_break_not_silent_demotion() -> None:
     assert ChangeKind.OPAQUE_INVARIANT_BROKEN in kinds
     broken = next(c for c in changes if c.kind == ChangeKind.OPAQUE_INVARIANT_BROKEN)
     assert broken.effective_verdict is None  # a real BREAKING kind, not demoted
+    # ADR-044: OPAQUE_POINTER tagging requires a genuine Visibility.PUBLIC
+    # function reference (idioms._recognise_opaque/_public_pointer_only), so
+    # this finding's mere existence already proves its subject is public.
+    assert broken.public_reachable is True
+    assert broken.reachability_kind == "direct_public_symbol"
     # The layout change itself must NOT have been silently demoted.
     layout = next(c for c in changes if c.kind == ChangeKind.TYPE_SIZE_CHANGED)
     assert layout.effective_verdict is None
     assert any(m["rule_id"] == "lost-opaque-invariant" for m in ledger)
+
+
+def test_lost_opaqueness_withheld_broad_rule_gets_diagnostic() -> None:
+    """Codex review (fresh evidence): checker._filter_pattern_synthetic used
+    the plain is_suppressed() boolean, silently dropping the withheld-rule
+    diagnostic ApplySuppression itself produces for the same shape of match.
+    A broad default (unreachable-only) rule matching this public-reachable
+    OPAQUE_INVARIANT_BROKEN finding is correctly kept but must also explain
+    why via SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK."""
+    old = _opaque_snapshot(opaque=True, size=None)
+    new = _opaque_snapshot(opaque=False, size=128)
+    suppression = SuppressionList([
+        Suppression(namespace="Ctx", reason="pretend private churn")
+    ])
+    result = checker.compare(
+        old, new, suppression=suppression,
+        scope_to_public_surface=False, pattern_verdicts=True,
+    )
+    assert ChangeKind.OPAQUE_INVARIANT_BROKEN in {c.kind for c in result.changes}
+    assert ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK in {
+        c.kind for c in result.changes
+    }
 
 
 def test_removed_opaque_with_same_short_name_not_flagged() -> None:
@@ -599,6 +626,11 @@ def test_handle_token_change_emits_break() -> None:
     )
     assert any(c.kind == ChangeKind.HANDLE_TYPE_CHANGED for c in changes)
     assert any(m["rule_id"] == "handle-token-changed" for m in ledger)
+    # ADR-044: deliberately untagged — typedefs carry no Visibility field, so
+    # there is no reliable signal that the alias itself is public.
+    handle = next(c for c in changes if c.kind == ChangeKind.HANDLE_TYPE_CHANGED)
+    assert handle.public_reachable is False
+    assert handle.reachability_kind is None
 
 
 def test_builtin_pointer_typedef_is_not_a_handle() -> None:

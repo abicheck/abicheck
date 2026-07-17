@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (384 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (385 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -282,6 +282,7 @@ One row per `ChangeKind` (384 total). Columns fuse the verdict partition (`check
 | `struct_packing_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `struct_packing_mode_changed` | [case153](../examples/case153_struct_packing_flip.md) |
 | `struct_return_convention_changed` | breaking | `BREAKING` | `error` | L1 | `struct_return_convention_changed` | [case129](../examples/case129_struct_return_convention.md) |
 | `struct_size_changed` | breaking | `BREAKING` | `error` | L1 | `struct_size_changed` | [case121](../examples/case121_kernel_btf_struct_field_added.md), [case126](../examples/case126_sycl_device_impl_ptr.md), [case80](../examples/case80_pimpl_shared_to_unique.md) |
+| `suppression_would_hide_public_break` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L1 | `suppression_would_hide_public_break` | — |
 | `sycl_backend_driver_req_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `sycl_backend_driver_req_changed` | — |
 | `sycl_implementation_changed` | breaking | `BREAKING` | `error` | unspecified | `sycl_implementation_changed` | — |
 | `sycl_overload_set_removed` | breaking | `BREAKING` | `error` | L0 | `sycl_overload_set_removed` | [case82](../examples/case82_sycl_overload_set_removed.md) |

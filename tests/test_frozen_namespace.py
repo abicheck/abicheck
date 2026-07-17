@@ -318,7 +318,12 @@ class TestSuppressionNamespaceSelector:
         sup = Suppression(namespace="**::detail::r1::*", reason="known")
         assert sup.matches(c)
 
-    def test_namespace_suppresses_caused_by_type_match(self) -> None:
+    def test_namespace_does_not_match_caused_by_type(self) -> None:
+        """ADR-044 D3: ``namespace``/``entity_namespace`` matches only the
+        change's own symbol/qualified_name — never ``caused_by_type``. A
+        finding whose *subject* (``symbol``) is outside the namespace must
+        survive a namespace rule even when its documented *cause* is inside
+        it; use ``cause_namespace`` for that instead (see below)."""
         c = Change(
             kind=ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API,
             symbol="overlay_id",
@@ -326,7 +331,32 @@ class TestSuppressionNamespaceSelector:
             caused_by_type="ns::detail::r1::registry",
         )
         sup = Suppression(namespace="**::detail::r1::*", reason="known")
+        assert not sup.matches(c)
+
+    def test_cause_namespace_matches_caused_by_type(self) -> None:
+        """ADR-044 D3: ``cause_namespace`` is the counterpart selector that
+        matches only ``caused_by_type``."""
+        c = Change(
+            kind=ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API,
+            symbol="overlay_id",
+            description="x",
+            caused_by_type="ns::detail::r1::registry",
+        )
+        sup = Suppression(cause_namespace="**::detail::r1::*", reason="known")
         assert sup.matches(c)
+
+    def test_cause_namespace_does_not_match_symbol(self) -> None:
+        c = Change(
+            kind=ChangeKind.FUNC_PARAMS_CHANGED,
+            symbol="ns::detail::r1::dispatch",
+            description="x",
+        )
+        sup = Suppression(cause_namespace="**::detail::r1::*", reason="known")
+        assert not sup.matches(c)
+
+    def test_namespace_and_entity_namespace_are_exclusive_aliases(self) -> None:
+        with pytest.raises(ValueError, match="aliases"):
+            Suppression(namespace="a::*", entity_namespace="b::*", reason="x")
 
     def test_namespace_does_not_match_other_ns(self) -> None:
         c = Change(

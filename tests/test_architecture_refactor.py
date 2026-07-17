@@ -269,6 +269,7 @@ class TestPostProcessingPipeline:
             "enrich_source_locations",
             "filter_non_public_surface",
             "demote_off_python_surface",
+            "mark_reachability",
             "apply_suppression",
             "suppress_renamed_pairs",
             "filter_redundant",
