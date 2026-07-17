@@ -358,3 +358,11 @@ baseline's path or filename (e.g.
 `linux-x86_64-icx-avx2-debug/2.0.0.abicheck.json`), not just the version —
 otherwise a baseline dumped on one profile can silently get compared against
 a candidate built on another.
+
+For a project that ships several libraries from one build, apply this per
+library rather than trying to fold them into a single baseline file — see
+[Source Scans → Recommended flow: a multi-library release with one shared
+facts
+pack](github-action-source-scans.md#recommended-flow-a-multi-library-release-with-one-shared-facts-pack)
+for a concrete per-library baseline-set walkthrough (build once, one facts
+pack, one baseline file per library).

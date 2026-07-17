@@ -192,3 +192,145 @@ directly with the CLI (`pip install abicheck`) instead of through this Action,
 or embed inline at dump time as in Section A. See
 [Build Info & Sources](../concepts/build-source-data.md) for the underlying
 CLI-level flows.
+
+## Recommended flow: a multi-library release with one shared facts pack
+
+This is the concrete, Action-supported answer to a specific, recurring shape
+of project: several libraries built from one source tree, one facts pack
+collected **once** for the whole build (via [source
+replay](producing-source-facts.md#full-source-scan--replay-from-a-compile-database),
+the [`abicheck-cc` wrapper](producing-source-facts.md#wrapper-injection--the-abicheck-cc-compiler-wrapper),
+or the [Clang plugin](producing-source-facts.md#plugin-injection--the-clang-facts-plugin)),
+and no single ".so that represents the release" to hand `scan`/`dump` — which,
+per [Mode/input compatibility](github-action.md#modeinput-compatibility), only
+accept **one** artifact each; there is no `scan`/`dump` equivalent of
+`compare`'s directory/package fan-out.
+
+The fix is not a new Action feature — it's composing three recipes this page
+and [More Recipes](github-action-recipes.md) already document individually,
+which is easy to miss without seeing them chained together:
+
+1. **[Matrix over libraries](github-action-recipes.md#matrix-multiple-libraries)** —
+   one matrix row per library, not per platform.
+2. **[Inline embedding at dump time](#a-inline-at-dump-time-simplest)** — each
+   matrix row's `dump` step points `build-info` at the *same* shared facts
+   pack; `-H`/`header` scopes the L2 declared surface to that row's own public
+   headers, and the embedded L3/L4/L5 facts are matched against it — the pack
+   is collected once per build, not once per library.
+3. **[Post-matrix ABI gate](github-action-recipes.md#post-matrix-abi-gate-unified-verdict)** —
+   aggregates the per-library verdicts into one exit code, since there is no
+   single combined verdict from a fan-out this page's `dump`/`scan` don't do
+   natively.
+
+```yaml
+# Release workflow — build once, produce a per-library baseline set from the
+# one shared facts pack (matches "Recipe A" in Baseline Management, but with a
+# manifest row per library instead of a single baseline file).
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (source-fact collection wired into this step)
+        run: ./ci/build.sh --with-source-facts   # emits abicheck_inputs/ once
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-build
+          path: |
+            build/lib*.so
+            abicheck_inputs/
+
+  dump-baselines:
+    needs: build
+    strategy:
+      matrix:
+        lib:
+          - { name: libfoo, so: build/libfoo.so, header: include/foo.h }
+          - { name: libbar, so: build/libbar.so, header: include/bar.h }
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: release-build }
+      - uses: abicheck/abicheck@v0.3.0
+        with:
+          mode: dump
+          new-library: ${{ matrix.lib.so }}
+          header: ${{ matrix.lib.header }}
+          build-info: abicheck_inputs/       # the one shared pack, every row
+          depth: source
+          new-version: ${{ github.ref_name }}
+          output-file: ${{ matrix.lib.name }}.abicheck.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: baseline-${{ matrix.lib.name }}
+          path: ${{ matrix.lib.name }}.abicheck.json
+
+  publish-baselines:
+    needs: dump-baselines
+    runs-on: ubuntu-latest
+    permissions: { contents: write }
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { pattern: baseline-*, merge-multiple: true, path: baselines/ }
+      - run: gh release upload ${{ github.ref_name }} baselines/*.abicheck.json --clobber
+        env: { GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} }
+```
+
+```yaml
+# PR workflow — same matrix, dumping the candidate build instead of publishing,
+# then comparing two JSON snapshots per library (no headers/build-info needed
+# at compare time — both sides already have their facts embedded).
+jobs:
+  build:
+    # same as above, no publish step
+
+  scan-candidates:
+    needs: build
+    strategy:
+      matrix:
+        lib: [ ... same list as above ... ]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: release-build }
+      - name: Dump candidate with build/source evidence
+        uses: abicheck/abicheck@v0.3.0
+        with:
+          mode: dump
+          new-library: ${{ matrix.lib.so }}
+          header: ${{ matrix.lib.header }}
+          build-info: abicheck_inputs/
+          depth: source
+          output-file: candidate.json
+      - name: Download this library's baseline
+        run: gh release download --pattern '${{ matrix.lib.name }}.abicheck.json' -D baselines/
+        env: { GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} }
+      - name: Compare two snapshots (source/API + binary evidence together)
+        uses: abicheck/abicheck@v0.3.0
+        with:
+          old-library: baselines/${{ matrix.lib.name }}.abicheck.json
+          new-library: candidate.json
+          format: json
+          output-file: report-${{ matrix.lib.name }}.json
+          fail-on-breaking: false   # let the post-matrix gate job decide
+          fail-on-api-break: false
+
+  abi-gate:
+    needs: scan-candidates
+    # same aggregation job as "Post-matrix ABI gate (unified verdict)"
+```
+
+**Layering onto an existing binary-ABI tool** (the common reason to reach for
+this pattern at all): keep that tool's job exactly as-is for the binary ABI
+gate, and add the above as a second, independent job for the source/API
+surface — don't try to make one job do both. Start the second job **advisory**
+(`fail-on-breaking: false`, `fail-on-api-break: false`, report only) while you
+build confidence in the new source/API signal on real history; flip on
+`fail-on-api-break: true` once it's been quiet for a burn-in period. This
+mirrors [Choose Your Workflow](choose-your-workflow.md)'s guidance to not make
+one step prove more than its evidence actually supports.
+
+This pattern produces one baseline *file* per library, which is a per-library
+instance of the [release-contract baseline](baseline-management.md#two-kinds-of-baseline-release-contract-vs-accepted-main) —
+apply that page's release-vs-accepted-main split and refresh discipline to
+each file the same way you would to a single-library baseline.

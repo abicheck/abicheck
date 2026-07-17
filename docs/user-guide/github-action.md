@@ -48,7 +48,11 @@ individually (one step per binary, or a matrix), and scan one representative
 artifact at a time, or run `compare` for the binary side and `scan --sources`
 separately for the source/API side (see [Choose Your
 Workflow](choose-your-workflow.md) for weighing that split against a single
-combined step).
+combined step). If the release also carries build-emitted source facts (a
+shared `abicheck_inputs/` pack from one build), see [Source Scans →
+Recommended flow: a multi-library release with one shared facts
+pack](github-action-source-scans.md#recommended-flow-a-multi-library-release-with-one-shared-facts-pack)
+for the full matrix-dump-then-compare walkthrough.
 
 ## Inputs
 
