@@ -23,6 +23,17 @@ lightly reformatted), 2026-07. Recorded here per the pattern in
 this document is the detailed counterpart for the scientific-Python-specific
 half of that review; `backlog.md` keeps the short summary and links here.
 
+**Relationship to the Python Build Ecosystem Positioning doc:** three
+sections here are the canonical design for proposals that
+[that doc](python-build-ecosystem-positioning.md) also needs, generalized
+past the scientific stack — §4 (release-matrix/support-set delta, reused for
+cibuildwheel's wheelhouse matrix aggregation), §6 (automatic previous-release
+resolution, reused for conda-forge/`run_exports` verification), and
+"Recommended architecture" (the `SurfaceProvider` interface, which that
+doc's proposed `BindingAbiProvider` for pybind11/nanobind should implement
+rather than inventing a second plugin shape). Any future work on these three
+should be designed once, from here, with both consumers in mind.
+
 ---
 
 ## Overall assessment
@@ -260,6 +271,12 @@ too-new glibc symbol can make an otherwise API-compatible wheel unusable.
 
 ### 4. Release-matrix parity and a generalized compatibility envelope
 
+This section is not scientific-Python-specific in its mechanics — the
+[Python Build Ecosystem Positioning doc](python-build-ecosystem-positioning.md)
+needs the identical support-set delta for cibuildwheel wheelhouse-matrix
+aggregation. Design and build it once against this section, with both
+callers in mind, rather than twice.
+
 abicheck currently has useful build-matrix machinery, but scientific Python
 needs a higher-level artifact-matrix model.
 
@@ -344,6 +361,14 @@ This separates:
 That is potentially the largest ecosystem-level differentiator.
 
 ### 6. One-command PyPI and conda release comparison
+
+The resolver this section specifies is shared infrastructure, not a
+SciPy-only need — the
+[Python Build Ecosystem Positioning doc](python-build-ecosystem-positioning.md)
+needs the same PyPI/conda-forge artifact matching (name, platform, arch,
+Python ABI, build variant, content-hash caching) for its own
+`run_exports`/pin-verification and automatic-baseline-selection proposals.
+Build one resolver, not two.
 
 Technical coverage alone will not drive adoption. The normal workflow should
 require almost no setup:
@@ -500,7 +525,13 @@ explicitly treats dtype-loop stability as a hard contract.
 ## Recommended architecture
 
 Avoid embedding all of this directly into the core binary parser. Introduce
-a common provider interface:
+a common provider interface — and treat it as shared, not scientific-Python-
+private: the
+[Python Build Ecosystem Positioning doc](python-build-ecosystem-positioning.md)'s
+proposed `BindingAbiProvider` (pybind11/nanobind) should implement this same
+interface as a sibling of `CythonApiProvider`/`NumPyCapiProvider` below,
+rather than the two docs specifying incompatible plugin shapes for the same
+concept:
 
 ```
 SurfaceProvider

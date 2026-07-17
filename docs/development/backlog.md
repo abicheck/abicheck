@@ -57,6 +57,7 @@ strategy decisions rather than engineering tasks.
 |------|-------|
 | Parser/fuzzer safety checks | Add a fuzz/parser-safety harness for ELF/PE/Mach-O/XML/YAML inputs (the security docs already warn that untrusted binaries deserve sandboxing). |
 | Scientific-Python (SciPy/NumPy) positioning | See the detailed [SciPy / Scientific-Python Roadmap](scipy-scientific-python-roadmap.md) — Cython API/ABI frontend, NumPy C-API compatibility envelope, wheel/deployment-claim verification, release-matrix parity, downstream-impact analysis, and a BLAS/LAPACK/Fortran policy profile. Recorded separately because it is large enough to need its own document. Top-3 items gap-plan-ified as [G25](plans/g25-cython-api-abi-frontend.md)/[G26](plans/g26-numpy-capi-envelope.md)/[G27](plans/g27-wheel-deployment-verification.md) (`usecase-registry.yaml`, `status: planned`); the remaining seven are still vision-only. |
+| Python build-ecosystem positioning | See the detailed [Python Build Ecosystem Positioning](python-build-ecosystem-positioning.md) — where abicheck sits relative to scikit-build-core, cibuildwheel, auditwheel/delocate/delvewheel, abi3audit, and rattler-build/conda-forge, plus a proposed pybind11/nanobind `BindingAbiProvider`. Recorded separately from the SciPy roadmap because it targets build/packaging tooling rather than the scientific stack. No registry entries yet — everything here is vision-only. |
 
 ### Done
 
