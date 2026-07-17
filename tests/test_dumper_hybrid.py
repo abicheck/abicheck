@@ -525,6 +525,92 @@ class TestVariableFactBackfill:
         assert merged.fact_provenance[var_fact_key("g", "deprecated")] == "clang"
 
 
+class TestMachoMangledNormalization:
+    """Codex review: on Mach-O, clang's ``mangledName`` carries the extra
+    Darwin linker-symbol leading underscore (``__ZN...``) while castxml's own
+    ``mangled`` is prefix-free (``_ZN...``) for the SAME function -- without
+    normalizing this before the merge, EVERY Mach-O C++ function/variable
+    would mismatch and get treated as clang-only, duplicating the entire
+    function/variable list."""
+
+    def test_function_not_duplicated_when_mangled_differs_by_darwin_underscore(self):
+        castxml_f = Function(
+            name="foo", mangled="_ZN2ns3fooEv", return_type="void",
+            access=AccessLevel.PUBLIC,
+        )
+        clang_f = Function(
+            name="foo", mangled="__ZN2ns3fooEv", return_type="void",
+            access=AccessLevel.PUBLIC,
+        )
+        castxml = _snap(
+            functions=[castxml_f], ast_producer="castxml", platform="macho"
+        )
+        clang = _snap(functions=[clang_f], ast_producer="clang", platform="macho")
+        merged = merge_snapshots(castxml, clang)
+
+        assert len(merged.functions) == 1
+        assert merged.func_by_mangled("_ZN2ns3fooEv") is not None
+        assert merged.func_by_mangled("__ZN2ns3fooEv") is None
+
+    def test_plain_c_function_not_duplicated_when_mangled_differs_by_underscore(self):
+        castxml_f = Function(name="foo", mangled="foo", return_type="void")
+        clang_f = Function(name="foo", mangled="_foo", return_type="void")
+        castxml = _snap(
+            functions=[castxml_f], ast_producer="castxml", platform="macho"
+        )
+        clang = _snap(functions=[clang_f], ast_producer="clang", platform="macho")
+        merged = merge_snapshots(castxml, clang)
+
+        assert len(merged.functions) == 1
+        assert merged.func_by_mangled("foo") is not None
+
+    def test_variable_not_duplicated_when_mangled_differs_by_darwin_underscore(self):
+        castxml_v = Variable(name="g", mangled="_ZN2ns1gE", type="int")
+        clang_v = Variable(name="g", mangled="__ZN2ns1gE", type="int")
+        castxml = _snap(
+            variables=[castxml_v], ast_producer="castxml", platform="macho"
+        )
+        clang = _snap(variables=[clang_v], ast_producer="clang", platform="macho")
+        merged = merge_snapshots(castxml, clang)
+
+        assert len(merged.variables) == 1
+        assert merged.var_by_mangled("_ZN2ns1gE") is not None
+        assert merged.var_by_mangled("__ZN2ns1gE") is None
+
+    def test_ctor_reconciled_across_darwin_underscore(self):
+        synthetic = f"{SYNTHETIC_CTOR_KEY_PREFIX}ns::Widget(int)"
+        castxml_ctor = Function(
+            name="Widget", mangled=synthetic, return_type="void",
+            params=[Param(name="n", type="int")], access=AccessLevel.PUBLIC,
+        )
+        real_mangled = "__ZN2ns6WidgetC1Ei"
+        clang_ctor = Function(
+            name="Widget", mangled=real_mangled, return_type="void",
+            params=[Param(name="n", type="int")], access=AccessLevel.PUBLIC,
+        )
+        castxml = _snap(
+            functions=[castxml_ctor], ast_producer="castxml", platform="macho"
+        )
+        clang = _snap(functions=[clang_ctor], ast_producer="clang", platform="macho")
+        merged = merge_snapshots(castxml, clang)
+
+        assert merged.func_by_mangled(synthetic) is None
+        assert merged.func_by_mangled("_ZN2ns6WidgetC1Ei") is not None
+
+    def test_elf_functions_untouched_by_macho_normalization(self):
+        # Sanity: the normalization must be platform-gated -- an ELF/PE
+        # mangled name that happens to start with "_" (any Itanium name)
+        # must NOT be stripped.
+        castxml_f = Function(name="foo", mangled="_Z3foov", return_type="void")
+        clang_f = Function(name="foo", mangled="_Z3foov", return_type="void")
+        castxml = _snap(functions=[castxml_f], ast_producer="castxml", platform="elf")
+        clang = _snap(functions=[clang_f], ast_producer="clang", platform="elf")
+        merged = merge_snapshots(castxml, clang)
+
+        assert len(merged.functions) == 1
+        assert merged.func_by_mangled("_Z3foov") is not None
+
+
 class TestParamDefaultsProvenance:
     """Codex review: every merged function needs a "param_defaults" producer
     tag so ``_diff_param_defaults`` can require the SAME producer on both

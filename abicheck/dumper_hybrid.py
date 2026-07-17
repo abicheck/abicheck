@@ -141,6 +141,29 @@ def _split_top_level_commas(s: str) -> list[str]:
     return parts
 
 
+def _macho_normalize_mangled(mangled: str) -> str:
+    """Strip the single Darwin linker-symbol leading underscore clang's
+    Mach-O ``mangledName`` carries, matching castxml's prefix-free
+    convention on the same platform.
+
+    Darwin prepends exactly one underscore to every global symbol's
+    compiler-computed name (a C function ``foo`` -> ``_foo``; a C++ Itanium
+    name, which itself starts with ``_Z``, -> ``__ZN...``). clang's
+    ``-ast-dump=json`` ``mangledName`` field reports the real, platform-
+    accurate linker symbol (WITH that extra underscore), while castxml's own
+    ``mangled`` XML attribute is the "pure" Itanium name (WITHOUT it) — see
+    ``dumper_clang._ClangAstParser._visibility``'s docstring, which already
+    handles this same mismatch for export-table matching via
+    ``_symbol_candidates``. Without normalizing it here too, EVERY Mach-O
+    C++ function/variable's clang-side mangled key differs from its
+    castxml-side key, so the hybrid merge's ``cf.mangled not in
+    merged_mangled`` dedup check is always true — treating every function
+    castxml already emitted as "clang-only" and duplicating the entire
+    function list (Codex review).
+    """
+    return mangled[1:] if mangled.startswith("_") else mangled
+
+
 def _strip_itanium_template_suffix(component: str) -> str:
     """Strip a trailing Itanium ``<template-args>`` (``I...E``) block from a
     single mangled scope component, recovering the base template name
@@ -468,12 +491,29 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
 
     provenance: dict[str, str] = {}
 
+    # Mach-O: normalize clang's mangled names to castxml's prefix-free
+    # convention BEFORE any mangled-keyed matching/dedup below (functions AND
+    # variables) -- see _macho_normalize_mangled's docstring. Type/enum
+    # merges key on the source-level NAME, not a mangled linker symbol, so
+    # they carry no such platform-specific decoration and need no change.
+    clang_functions = clang_snap.functions
+    clang_variables = clang_snap.variables
+    if castxml_snap.platform == "macho":
+        clang_functions = [
+            replace(cf, mangled=_macho_normalize_mangled(cf.mangled))
+            for cf in clang_functions
+        ]
+        clang_variables = [
+            replace(cv, mangled=_macho_normalize_mangled(cv.mangled))
+            for cv in clang_variables
+        ]
+
     clang_types_by_name = {t.name: t for t in clang_snap.types}
     clang_enums_by_name = {e.name: e for e in clang_snap.enums}
-    clang_vars_by_mangled = {v.mangled: v for v in clang_snap.variables}
+    clang_vars_by_mangled = {v.mangled: v for v in clang_variables}
 
     merged_functions = _merge_functions(
-        castxml_snap.functions, clang_snap.functions, provenance
+        castxml_snap.functions, clang_functions, provenance
     )
 
     merged_types = [
@@ -496,7 +536,7 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
     ]
     castxml_var_mangled = {v.mangled for v in castxml_snap.variables}
     merged_variables.extend(
-        v for v in clang_snap.variables if v.mangled not in castxml_var_mangled
+        v for v in clang_variables if v.mangled not in castxml_var_mangled
     )
 
     return replace(
