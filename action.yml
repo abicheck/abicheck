@@ -293,8 +293,10 @@ inputs:
   # ── Output & policy ─────────────────────────────────────────────────────────
   format:
     description: >
-      Output format: markdown (default), json, sarif, html. sarif and html
-      are only supported in compare mode with a single-pair (non-directory,
+      Output format: json, sarif, html, or markdown/text (each mode's
+      default when this input is left unset — markdown for compare/
+      deps-tree/deps-compare, text for scan). sarif and html are only
+      supported in compare mode with a single-pair (non-directory,
       non-package) operand — a directory/package compare rejects them with
       an error. scan supports text (its default) and json only.
       deps-tree/deps-compare support markdown and json only. dump ignores
@@ -302,9 +304,13 @@ inputs:
       unsupported format for the mode is a hard error raised before any
       dependency install (it used to silently fall back to a supported
       format with only a warning, which is unsafe for CI — see
-      upload-sarif).
+      upload-sarif). Deliberately has no Action-level default (unlike most
+      inputs): a single default here would resolve to the wrong value for
+      scan regardless of mode, since GitHub Actions has no way to tell
+      "left unset" from "explicitly set to the default" apart once a
+      default is declared — each mode branch in action/run.sh supplies its
+      own correct default instead.
     required: false
-    default: 'markdown'
   output-file:
     description: 'Path to write the report file. If not set, output goes to stdout and job summary.'
     required: false

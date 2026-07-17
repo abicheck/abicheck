@@ -183,6 +183,45 @@ class TestFormatIsHardErrorNotSilentFallback:
 @pytest.mark.skipif(
     not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"
 )
+class TestUnsetFormatUsesEachModesOwnDefault:
+    """Regression (Codex review, PR #594): action.yml's `format` input must
+    NOT declare a static top-level default. GitHub Actions applies a
+    declared default to `inputs.format` even when the caller's workflow
+    never sets `format:` at all, so a single 'markdown' default would reach
+    run.sh as INPUT_FORMAT=markdown for every mode -- including scan, whose
+    own default is 'text' -- and this validator would then hard-reject the
+    ordinary, most common scan invocation that never touches `format`.
+    Leaving the input's default unset means an un-set `format:` reaches
+    here as an empty string, and each run.sh mode branch already supplies
+    its own correct per-mode default (`${INPUT_FORMAT:-text}` for scan,
+    `${INPUT_FORMAT:-markdown}` elsewhere)."""
+
+    @pytest.mark.parametrize(
+        "mode", ["scan", "compare", "dump", "deps-tree", "deps-compare"]
+    )
+    def test_format_left_completely_unset_passes(self, mode: str) -> None:
+        result = _run_validate({"INPUT_MODE": mode})
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_action_yml_format_input_has_no_static_default(self) -> None:
+        """The actual regression: action.yml declaring `default: 'markdown'`
+        on `format` would silently populate INPUT_FORMAT=markdown for scan
+        runs that never set it, defeating the empty-string sentinel every
+        mode branch's `${INPUT_FORMAT:-...}` relies on."""
+        import yaml
+
+        action_yml = ACTION_DIR.parent / "action.yml"
+        data = yaml.safe_load(action_yml.read_text(encoding="utf-8"))
+        assert "default" not in data["inputs"]["format"], (
+            "action.yml's `format` input must not declare a default — see "
+            "this class's docstring for why a single default breaks scan's "
+            "own 'text' default."
+        )
+
+
+@pytest.mark.skipif(
+    not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"
+)
 class TestUploadSarif:
     def test_upload_sarif_with_compare_and_sarif_format_passes(self) -> None:
         result = _run_validate(
