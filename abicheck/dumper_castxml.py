@@ -93,6 +93,28 @@ def _extract_contract_attributes(attributes: str) -> list[str]:
     return sorted(tokens)
 
 
+def _deprecation_marker(el: Element) -> str | None:
+    """Deprecation message for *el*, or ``None`` if not deprecated.
+
+    castxml's ``GetDeclAttributes`` (``Output.cxx``) always adds a bare
+    ``"deprecated"`` token to the compound ``attributes`` string when
+    ``DeprecatedAttr`` is present, but only emits the dedicated
+    ``deprecation="..."`` XML attribute when the attribute carries a
+    non-empty message. A BARE ``[[deprecated]]``/
+    ``__attribute__((deprecated))`` (no message) therefore has NO
+    ``deprecation`` attribute at all — reading only ``el.get("deprecation")``
+    missed every messageless deprecation (Codex review, PR #582, confirmed
+    against castxml's own source). Falls back to ``""`` (deprecated, no
+    message) when the bare token is present in ``attributes`` instead.
+    """
+    msg = el.get("deprecation")
+    if msg is not None:
+        return msg
+    if re.search(r"\bdeprecated\b", el.get("attributes", "")):
+        return ""
+    return None
+
+
 def _parse_vtable_index(vi_str: str | None) -> int | None:
     """Parse vtable_index attribute, returning None for missing/invalid values."""
     if vi_str is None:
@@ -974,9 +996,9 @@ class _CastxmlParser:
             # the compound ``attributes`` string (same channel as noexcept).
             contract_attributes=_extract_contract_attributes(el.get("attributes", "")),
             exception_spec=self._function_exception_spec(el),
-            # castxml's `deprecation` attribute carries the `[[deprecated]]`/
-            # `[[deprecated("msg")]]` message text verbatim; absent → None.
-            deprecated=el.get("deprecation"),
+            # See _deprecation_marker for why this isn't a plain
+            # el.get("deprecation") read.
+            deprecated=_deprecation_marker(el),
             # Explicit C++11 `override` specifier: castxml has no dedicated
             # boolean for it (distinct from `overrides`, the id-reference
             # list used for vtable-slot dedup) — the `override` token is
@@ -1025,7 +1047,7 @@ class _CastxmlParser:
                     # ``align`` attribute on the Variable; None = unknown.
                     alignment_bits=self._optional_int_attr(el, "align"),
                     # See RecordType.deprecated for the message-text convention.
-                    deprecated=el.get("deprecation"),
+                    deprecated=_deprecation_marker(el),
                 )
             )
         return variables
@@ -1273,11 +1295,12 @@ class _CastxmlParser:
             # `is_final` convention above; left None for an opaque/incomplete
             # record (no member list to have judged it from).
             is_abstract=None if is_opaque else el.get("abstract") == "1",
-            # castxml's `deprecation` attribute carries the `[[deprecated]]`/
-            # `[[deprecated("msg")]]` message text verbatim (empty string for
-            # a bare `[[deprecated]]` with no message); absent → None (not
-            # deprecated).
-            deprecated=el.get("deprecation"),
+            # `[[deprecated("msg")]]` -> the message text verbatim; a bare
+            # `[[deprecated]]` with no message -> "" (see _deprecation_marker:
+            # castxml only emits the `deprecation` XML attribute when there
+            # IS a message, so a bare marker must be read from the
+            # compound `attributes` string instead); not deprecated -> None.
+            deprecated=_deprecation_marker(el),
         )
 
     def _source_location(self, el: Any) -> str | None:
@@ -1362,7 +1385,7 @@ class _CastxmlParser:
                     # already used for Variable/constant initializers).
                     default=child.get("init"),
                     # See RecordType.deprecated for the message-text convention.
-                    deprecated=child.get("deprecation"),
+                    deprecated=_deprecation_marker(child),
                 )
             )
         return fields
@@ -1433,7 +1456,7 @@ class _CastxmlParser:
                     # struct/union must not lose its initializer/deprecation
                     # just because it was flattened (Codex review, PR #582).
                     default=inner.get("init"),
-                    deprecated=inner.get("deprecation"),
+                    deprecated=_deprecation_marker(inner),
                 )
             )
         return result
@@ -1644,7 +1667,7 @@ class _CastxmlParser:
                     # bool (never None on the castxml path).
                     is_scoped=el.get("scoped") == "1",
                     # See RecordType.deprecated for the message-text convention.
-                    deprecated=el.get("deprecation"),
+                    deprecated=_deprecation_marker(el),
                 )
             )
         return enums

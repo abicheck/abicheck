@@ -510,7 +510,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   union variant genuinely can carry a default member initializer
   (`union U { int x = 1; float y; };`) and `_diff_unions` never checked
   `default` — so a union variant's initializer change went completely
-  undetected. Now included.
+  undetected. Now included. One more fix: castxml only emits the dedicated
+  `deprecation="..."` XML attribute when `[[deprecated("msg")]]` carries a
+  non-empty message — a BARE `[[deprecated]]`/`__attribute__((deprecated))`
+  with no message is recorded solely as a `"deprecated"` token in the
+  compound `attributes` string (confirmed against castxml's own
+  `GetDeclAttributes` source), so reading only the `deprecation` attribute
+  missed every messageless deprecation across all four surfaces (function,
+  variable, record, enum). Now falls back to the `attributes` token,
+  yielding `""` (deprecated, no message) instead of `None`.
 - **MCP `abi_compare`**: a `--used-by`/`--required-symbol` response's
   `summary` (`total_changes`/`breaking`/`api_breaks`/`risk_changes`/
   `compatible`) is now recomputed after scoped-only changes and

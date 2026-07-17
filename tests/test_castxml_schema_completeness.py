@@ -308,6 +308,17 @@ class TestFuncDeprecatedChanged:
         r = compare(_snap(functions=[f_old]), _snap(functions=[f_new]))
         assert ChangeKind.FUNC_DEPRECATED_REMOVED in _kinds(r)
 
+    def test_bare_deprecated_marker_still_reports_added(self):
+        """`deprecated=""` (a bare marker with no message, e.g. from
+        castxml's `attributes="deprecated"` fallback) is NOT None and must
+        still report ADDED — the detector's `is not None` check must not
+        be confused with a truthiness check that would treat "" like
+        "not deprecated" (Codex review, PR #582)."""
+        f_old = _pub_func("legacy_api", "_Z10legacy_apiv", deprecated=None)
+        f_new = _pub_func("legacy_api", "_Z10legacy_apiv", deprecated="")
+        r = compare(_snap(functions=[f_old]), _snap(functions=[f_new]))
+        assert ChangeKind.FUNC_DEPRECATED_ADDED in _kinds(r)
+
     def test_skipped_when_not_header_aware(self):
         f_old = _pub_func("legacy_api", "_Z10legacy_apiv", deprecated="msg")
         f_new = _pub_func("legacy_api", "_Z10legacy_apiv", deprecated=None)
@@ -508,13 +519,27 @@ _DEPRECATED_XML = """<?xml version="1.0"?>
   <Function id="_2" name="old_api" returns="_v" context="_1" mangled="_Z7old_apiv"
             file="f1" line="1" deprecation="use new_api instead"/>
   <Variable id="_3" name="g_old" type="_i" context="_1" mangled="g_old" file="f1" line="2"
-            deprecation=""/>
+            attributes="deprecated"/>
   <Class id="_4" name="OldWidget" context="_1" file="f1" line="3" size="32" align="32"
          deprecation="use Widget2"/>
   <Typedef id="_5" name="MyInt" type="_i" context="_1" file="f1" line="4"
            deprecation="use int directly"/>
   <FundamentalType id="_v" name="void" size="0"/>
   <FundamentalType id="_i" name="int" size="32"/>
+  <Namespace id="_1" name="::"/>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+
+_BARE_DEPRECATED_XML = """<?xml version="1.0"?>
+<CastXML>
+  <Function id="_2" name="old_fn" returns="_v" context="_1" mangled="_Z6old_fnv"
+            file="f1" line="1" attributes="deprecated"/>
+  <Class id="_3" name="OldRec" context="_1" file="f1" line="2" size="32" align="32"
+         attributes="deprecated"/>
+  <Enumeration id="_4" name="OldEnum" context="_1" file="f1" line="3" attributes="deprecated">
+    <EnumValue name="A" init="0"/>
+  </Enumeration>
+  <FundamentalType id="_v" name="void" size="0"/>
   <Namespace id="_1" name="::"/>
   <File id="f1" name="test.h"/>
 </CastXML>"""
@@ -573,6 +598,24 @@ class TestCastxmlParserPopulatesNewAttributes:
         assert var.deprecated == ""
         rec = p.parse_types()[0]
         assert rec.deprecated == "use Widget2"
+
+    def test_bare_deprecated_marker_with_no_message(self) -> None:
+        """castxml's GetDeclAttributes (Output.cxx) ALWAYS pushes a bare
+        "deprecated" token into the compound `attributes` string when
+        DeprecatedAttr is present, but only emits the dedicated
+        `deprecation="..."` XML attribute when there IS a non-empty
+        message. Reading only `el.get("deprecation")` therefore missed
+        every bare `[[deprecated]]`/`__attribute__((deprecated))` with no
+        message (Codex review, PR #582, confirmed against castxml's own
+        source) — must fall back to the `attributes` token, yielding ""
+        (deprecated, no message) rather than None (not deprecated)."""
+        p = _make_parser(_BARE_DEPRECATED_XML)
+        fn = p.parse_functions()[0]
+        assert fn.deprecated == ""
+        rec = p.parse_types()[0]
+        assert rec.deprecated == ""
+        enum = p.parse_enums()[0]
+        assert enum.deprecated == ""
 
     def test_field_default_initializer(self) -> None:
         p = _make_parser(_FIELD_INIT_XML)
