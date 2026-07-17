@@ -597,6 +597,155 @@ class TestVarConstChanged:
         assert ChangeKind.VAR_TYPE_CHANGED in _kinds(r)
         assert ChangeKind.VAR_BECAME_CONST not in _kinds(r)
 
+    def test_function_pointer_own_const_is_var_became_const(self):
+        """`void (*)()` -> `void (* const)()`: the function-pointer VARIABLE
+        itself became const (CodeRabbit review, PR #589) — the qualifier
+        sits directly before the declarator's closing `)`, not at the
+        string's end, unlike a bare pointer's `"int * const"`. Must still
+        report VAR_BECAME_CONST, not VAR_TYPE_CHANGED."""
+        v_v1 = _pub_var("fp", "_Z2fp", "void (*)()", is_const=False)
+        v_v2 = _pub_var("fp", "_Z2fp", "void (* const)()", is_const=True)
+        r = compare(_snap(variables=[v_v1]), _snap(variables=[v_v2]))
+        assert ChangeKind.VAR_BECAME_CONST in _kinds(r)
+        assert ChangeKind.VAR_TYPE_CHANGED not in _kinds(r)
+
+    def test_array_pointer_own_const_is_var_became_const(self):
+        """`int (*)[5]` -> `int (* const)[5]`: same as the function-pointer
+        case above, but the declarator closes with `]` instead of `)`."""
+        v_v1 = _pub_var("ap", "_Z2ap", "int (*)[5]", is_const=False)
+        v_v2 = _pub_var("ap", "_Z2ap", "int (* const)[5]", is_const=True)
+        r = compare(_snap(variables=[v_v1]), _snap(variables=[v_v2]))
+        assert ChangeKind.VAR_BECAME_CONST in _kinds(r)
+        assert ChangeKind.VAR_TYPE_CHANGED not in _kinds(r)
+
+    def test_function_pointer_return_type_const_is_type_changed(self):
+        """Negative control: `void (*)()` -> `const void (*)()` — the
+        POINTEE (the function's return type) became const, not the pointer
+        variable itself. Must report VAR_TYPE_CHANGED, not VAR_BECAME_CONST."""
+        v_v1 = _pub_var("fp", "_Z2fp", "void (*)()", is_const=False)
+        v_v2 = _pub_var("fp", "_Z2fp", "const void (*)()", is_const=True)
+        r = compare(_snap(variables=[v_v1]), _snap(variables=[v_v2]))
+        assert ChangeKind.VAR_TYPE_CHANGED in _kinds(r)
+        assert ChangeKind.VAR_BECAME_CONST not in _kinds(r)
+
+    def test_function_pointer_with_pointer_param_own_const_is_var_became_const(self):
+        """`void (*)(int *)` -> `void (* const)(int *)` (Codex review, PR
+        #589): the OUTER declarator's own sigil must be found even when a
+        PARAMETER is itself a pointer — the last top-level `*` in the whole
+        string belongs to the parameter (`int *`), not the outer `(*
+        const)` declarator, so picking "the last one" alone misses the
+        variable's own trailing const. Must report VAR_BECAME_CONST, not
+        VAR_TYPE_CHANGED."""
+        v_v1 = _pub_var("fp", "_Z2fp", "void (*)(int *)", is_const=False)
+        v_v2 = _pub_var("fp", "_Z2fp", "void (* const)(int *)", is_const=True)
+        r = compare(_snap(variables=[v_v1]), _snap(variables=[v_v2]))
+        assert ChangeKind.VAR_BECAME_CONST in _kinds(r)
+        assert ChangeKind.VAR_TYPE_CHANGED not in _kinds(r)
+
+    def test_function_pointer_already_volatile_gaining_const_is_var_became_const(self):
+        """`void (* volatile)()` -> `void (* const volatile)()` (Codex
+        review, PR #589): volatile stays unchanged on both sides, only
+        const is newly added — a pure const-only flip. Removing "const"
+        from the combined "const volatile" span left a stray separator
+        space, so the stripped old/new spellings compared spuriously
+        unequal and misreported VAR_TYPE_CHANGED instead of the correct
+        VAR_BECAME_CONST."""
+        v_v1 = _pub_var("fp", "_Z2fp", "void (* volatile)()", is_const=False)
+        v_v2 = _pub_var("fp", "_Z2fp", "void (* const volatile)()", is_const=True)
+        r = compare(_snap(variables=[v_v1]), _snap(variables=[v_v2]))
+        assert ChangeKind.VAR_BECAME_CONST in _kinds(r)
+        assert ChangeKind.VAR_TYPE_CHANGED not in _kinds(r)
+
+    def test_function_pointer_gaining_both_const_and_volatile_is_type_changed(self):
+        """Negative control: unlike the test above, here volatile is ALSO
+        newly added (not just const) — that's not a pure const-only flip,
+        so it must still report VAR_TYPE_CHANGED."""
+        v_v1 = _pub_var("fp", "_Z2fp", "void (*)()", is_const=False)
+        v_v2 = _pub_var("fp", "_Z2fp", "void (* const volatile)()", is_const=True)
+        r = compare(_snap(variables=[v_v1]), _snap(variables=[v_v2]))
+        assert ChangeKind.VAR_TYPE_CHANGED in _kinds(r)
+
+    def test_member_function_pointer_own_const_is_type_changed_not_var_became_const(self):
+        """`void (C::*)(int)` -> `void (C::*)(int) const` (CodeRabbit
+        review, PR #589): the trailing `const` here is the member-function-
+        POINTER's own cv-qualification (it points to a const member
+        function) — a genuinely different, non-interchangeable type
+        (confirmed by real g++ mangling: two same-named overloads differing
+        only in this trailing const compile as distinct symbols, matching
+        the existing FUNC_CV_CHANGED precedent for a member function's own
+        const/volatile), NOT a pure top-level pointer-value const flip. Must
+        report VAR_TYPE_CHANGED, not VAR_BECAME_CONST."""
+        v_v1 = _pub_var("mp", "_Z2mp", "void (C::*)(int)", is_const=False)
+        v_v2 = _pub_var("mp", "_Z2mp", "void (C::*)(int) const", is_const=True)
+        r = compare(_snap(variables=[v_v1]), _snap(variables=[v_v2]))
+        assert ChangeKind.VAR_TYPE_CHANGED in _kinds(r)
+        assert ChangeKind.VAR_BECAME_CONST not in _kinds(r)
+
+
+# ── legacy CastXML volatile-variable noise (Codex review, PR #582) ──────────
+
+
+class TestVarLegacyVolatileNoise:
+    """A pre-v9 CastXML snapshot's ``_type_name()`` silently dropped
+    ``volatile`` from a variable's type spelling — there is no dedicated
+    ``Variable.is_volatile`` fact (unlike ``TypeField``) to fall back on, so
+    an unchanged ``volatile`` variable compared against a legacy baseline
+    would otherwise misreport a breaking VAR_TYPE_CHANGED purely from an
+    abicheck upgrade, not a real header edit."""
+
+    def test_legacy_snapshot_volatile_drop_is_not_reported(self):
+        v_old = _pub_var("g", "g", "int")
+        v_new = _pub_var("g", "g", "volatile int")
+        old = _snap(variables=[v_old])
+        old.header_cv_facts_reliable = False
+        new = _snap(variables=[v_new])
+        r = compare(old, new)
+        assert ChangeKind.VAR_TYPE_CHANGED not in _kinds(r)
+
+    def test_real_volatile_change_between_reliable_snapshots_is_reported(self):
+        v_old = _pub_var("g", "g", "int")
+        v_new = _pub_var("g", "g", "volatile int")
+        r = compare(_snap(variables=[v_old]), _snap(variables=[v_new]))
+        assert ChangeKind.VAR_TYPE_CHANGED in _kinds(r)
+
+    def test_genuine_type_change_still_reported_even_when_unreliable(self):
+        """The legacy-noise suppression only neutralizes a cv-only spelling
+        difference — a genuinely different base type must still be caught
+        even when cv facts aren't trustworthy for this pair."""
+        v_old = _pub_var("g", "g", "int")
+        v_new = _pub_var("g", "g", "long")
+        old = _snap(variables=[v_old])
+        old.header_cv_facts_reliable = False
+        new = _snap(variables=[v_new])
+        r = compare(old, new)
+        assert ChangeKind.VAR_TYPE_CHANGED in _kinds(r)
+
+    def test_legacy_pointee_const_noise_does_not_resurface_as_var_became_const(self):
+        """Codex review, PR #589: suppressing VAR_TYPE_CHANGED for legacy cv
+        noise isn't enough on its own — ``is_const`` (a raw dumper-populated
+        bool, unconditionally checked below the type-string branch) still
+        differs for this same pointee-const-in-a-legacy-snapshot case, so an
+        earlier version of the fix let the SAME false positive resurface as
+        the more specific VAR_BECAME_CONST instead of being genuinely
+        suppressed. Neither should fire when the pair is legacy noise."""
+        v_old = _pub_var("g", "g", "int *", is_const=False)
+        v_new = _pub_var("g", "g", "const int *", is_const=True)
+        old = _snap(variables=[v_old])
+        old.header_cv_facts_reliable = False
+        new = _snap(variables=[v_new])
+        r = compare(old, new)
+        assert ChangeKind.VAR_TYPE_CHANGED not in _kinds(r)
+        assert ChangeKind.VAR_BECAME_CONST not in _kinds(r)
+
+    def test_real_pointee_const_change_between_reliable_snapshots_still_reported(self):
+        """Negative control for the test above: the same pointee-const type
+        change between two fully-reliable (non-legacy) snapshots is a real
+        change and must still report VAR_TYPE_CHANGED."""
+        v_old = _pub_var("g", "g", "int *", is_const=False)
+        v_new = _pub_var("g", "g", "const int *", is_const=True)
+        r = compare(_snap(variables=[v_old]), _snap(variables=[v_new]))
+        assert ChangeKind.VAR_TYPE_CHANGED in _kinds(r)
+
     def test_pointer_inside_template_arg_is_not_top_level(self):
         """`std::vector<int *>` -> `const std::vector<int *>`: the variable
         itself is a by-value templated type (not a pointer) — the `*` lives

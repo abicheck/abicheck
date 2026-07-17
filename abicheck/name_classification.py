@@ -368,45 +368,209 @@ def canonicalize_type_name(name: str) -> str:
 _CV_TOKEN_RE = re.compile(r"\b(?:const|volatile)\b")
 
 
+def _find_matching_close(name: str, open_idx: int) -> int:
+    """Index of the bracket matching the opener at *open_idx*.
+
+    Tracks combined ``<([``/``>)]`` depth rather than per-family matching —
+    real compiler-produced type spellings are always well-nested, so this is
+    sufficient and mirrors the depth-counting already used elsewhere in this
+    module (e.g. ``_has_top_level_ptr_or_ref``).
+    """
+    depth = 1
+    i = open_idx + 1
+    while i < len(name):
+        if name[i] in "<([":
+            depth += 1
+        elif name[i] in ">)]":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return len(name) - 1
+
+
+def _strip_cv_in_segment(name: str, chars: list[str], start: int, end: int, *, strict: bool) -> None:
+    """Blank out strippable ``const``/``volatile`` tokens in ``name[start:end]``.
+
+    A ``<...>``/``[...]`` sub-range is always fully skipped (a cv qualifier
+    inside a template-argument list or array subscript names a genuinely
+    different type — ``Box<const int>`` vs. ``Box<int>``, Codex/CodeRabbit
+    review, PR #582). A ``(...)`` sub-range recurses with ``strict=True``.
+
+    When *strict* (i.e. we're inside a function-parameter list, spelling a
+    callback/function-pointer type's own parameters), only a token that is
+    NOT in pointee position is strippable: dropped from a function type for
+    mangling purposes is the parameter's own by-value or pointer-own
+    (trailing, ``"int * const"``) cv, at every nesting level of a function
+    type — confirmed against real clang/gcc output. But a callback
+    parameter's POINTEE cv (``"const int *"`` — leading, before a top-level
+    ``*``/``&``) is NOT mangling-equivalent (``void(*)(int*)`` and
+    ``void(*)(const int*)`` are different, non-interchangeable function
+    pointer types, unlike an ordinary top-level parameter where ``T*``
+    implicitly converts to ``const T*``) — an earlier version of this
+    function stripped indiscriminately inside a paren, wrongly neutralizing
+    that case too (Codex review, PR #589).
+
+    When not strict (the true top level, i.e. not nested in anything), a cv
+    token is strippable regardless of pointee/pointer-own position — this
+    intentionally more permissive rule for a plain top-level parameter/
+    return/field-adjacent type spelling predates this function and is left
+    unchanged (``cv_qualifiers_only_differ``'s own docstring).
+
+    In strict mode, the pointee-vs-pointer-own position is resolved
+    independently PER comma-separated parameter within this paren (a
+    callback can itself take multiple parameters, e.g. ``void
+    (*)(int*, const int)`` — the second parameter's own by-value cv must
+    not be judged against the FIRST parameter's unrelated pointer sigil).
+    """
+    last_ptr_pos: int | None = None
+    candidates: list[tuple[int, int]] = []
+
+    def _flush() -> None:
+        for tok_start, tok_end in candidates:
+            if last_ptr_pos is None or tok_start > last_ptr_pos:
+                for k in range(tok_start, tok_end):
+                    chars[k] = " "
+        candidates.clear()
+
+    i = start
+    while i < end:
+        ch = name[i]
+        if ch == "<":
+            j = min(_find_matching_close(name, i), end - 1)
+            i = j + 1
+            continue
+        if ch == "[":
+            j = min(_find_matching_close(name, i), end - 1)
+            if last_ptr_pos is None:
+                # An array-typed function PARAMETER (no preceding pointer
+                # sigil in this segment yet) decays to a pointer, so a cv
+                # qualifier before it is pointee-position, not by-value —
+                # same non-strippable treatment as a real pointer sigil
+                # (confirmed against real clang/gcc mangling: void(*)(int[3])
+                # and void(*)(const int[3]) are different, non-
+                # interchangeable function pointer types, same as the
+                # int*/const int* case above). Only matters in strict mode;
+                # harmless otherwise since non-strict stripping ignores
+                # last_ptr_pos entirely (Codex review, PR #589).
+                last_ptr_pos = i
+            # else: a "[...]" AFTER an already-seen pointer sigil is the
+            # POINTEE's array bound (e.g. "int (*)[3]" — a pointer to an
+            # array, not a decaying array parameter), analogous to a
+            # callback's own parameter list: it doesn't move last_ptr_pos,
+            # so the declarator's own preceding qualifier (e.g. "int (*
+            # const)[3]") stays recognized as its own trailing cv, dropped
+            # for mangling (confirmed identical types by real g++: two
+            # same-named overloads differing only in that const are a
+            # hard redefinition error, not distinct overloads) — treating
+            # this "[" the same as the decay case above wrongly moved the
+            # boundary past the declarator's own const, leaving it
+            # unstrippable (Codex review, PR #589, round 3).
+            i = j + 1
+            continue
+        if ch == "(":
+            j = min(_find_matching_close(name, i), end - 1)
+            k = j + 1
+            while k < end and name[k].isspace():
+                k += 1
+            if k < end and name[k] in "([":
+                # A pointer/pointer-to-member DECLARATOR-GROUPING paren --
+                # e.g. the "(*)"/"(*const)"/"(C::*)" in "RetType
+                # (*)(Params)"/"RetType (C::*)(Params)" -- recognized
+                # structurally by being immediately followed by ANOTHER
+                # top-level paren/bracket (the real parameter list or array
+                # dimensions), regardless of what's inside it (a bare
+                # sigil, or a qualified pointer-to-member "Class::*" —
+                # deliberately NOT restricted to "only sigils/cv tokens
+                # inside", since that missed the class-qualified case:
+                # Codex review, PR #589, round 2). It is NOT itself a
+                # nested parameter list, so don't open a fresh strict scope
+                # for it: its "*" is the CURRENT (possibly
+                # nested-callback-parameter's own) declarator's top-level
+                # sigil and must stay visible to it. Recursing here would
+                # hide that "*" inside an isolated call whose own
+                # last_ptr_pos never reaches this scope's tracking, so a
+                # callback parameter that is itself a function pointer with
+                # a cv-qualified return type (``void(*)(int (*)())`` vs.
+                # ``void(*)(const int (*)())`` — confirmed distinct,
+                # non-interchangeable types by real g++ mangling) had its
+                # return-type cv wrongly treated as the callback
+                # parameter's own neutral by-value qualifier instead. Just
+                # step past the "(" and let this same scan process the
+                # interior in place.
+                i += 1
+                continue
+            _strip_cv_in_segment(name, chars, i + 1, j, strict=True)
+            i = j + 1
+            # A cv qualifier immediately following a REAL parameter list's
+            # closing paren is a member-function-POINTER's own
+            # cv-qualification (e.g. "void (C::*)(int) const" — the pointer
+            # points to a const member function) — a genuinely different,
+            # non-interchangeable type (confirmed against real g++
+            # mangling: two same-named overloads differing only in this
+            # trailing const compile as distinct symbols, matching the
+            # existing FUNC_CV_CHANGED precedent for a member function's
+            # own const/volatile). Never neutral, regardless of strict/
+            # non-strict context or position relative to any pointer
+            # sigil — leave it completely untouched rather than stripping
+            # it (permissive/non-strict mode) or treating it as a
+            # stripping candidate (strict mode) (CodeRabbit review, PR
+            # #589).
+            k = i
+            while k < end and name[k].isspace():
+                k += 1
+            m = _CV_TOKEN_RE.match(name, k)
+            while m and m.end() <= end:
+                k = m.end()
+                while k < end and name[k].isspace():
+                    k += 1
+                m = _CV_TOKEN_RE.match(name, k)
+            i = k
+            continue
+        if strict and ch == ",":
+            _flush()
+            last_ptr_pos = None
+            i += 1
+            continue
+        if ch in "*&":
+            last_ptr_pos = i
+            i += 1
+            continue
+        m = _CV_TOKEN_RE.match(name, i)
+        if m and m.end() <= end:
+            if strict:
+                candidates.append((m.start(), m.end()))
+            else:
+                for k in range(m.start(), m.end()):
+                    chars[k] = " "
+            i = m.end()
+            continue
+        i += 1
+    _flush()
+
+
 def _strip_cv_qualifiers(name: str) -> str:
     """Return *name* with ``const`` / ``volatile`` tokens removed — but only
-    at bracket depth 0 (not nested inside a template argument list,
-    function-parameter list, or array subscript).
+    where doing so can't hide a genuinely different type (see
+    ``_strip_cv_in_segment`` for the exact top-level vs. nested-callback-
+    parameter rules).
 
-    A cv qualifier nested inside a template argument
-    (``Box<const int>`` vs. ``Box<int>``) names a genuinely different,
-    unrelated C++ type, not a cv-qualified variant of the same type — two
-    distinct template instantiations, each with its own real mangled
-    identity. Stripping it unconditionally (as an earlier version of this
-    function did) made both of this module's callers —
-    ``cv_qualifiers_only_differ`` and ``func_signature_cv_only_differ`` —
-    misclassify a genuine, ABI-relevant type change (e.g. a function
-    parameter changing from ``Box<int, int>`` to ``Box<int, const int>``)
-    as a harmless cv-only difference, silently suppressing a real breaking
-    ``FUNC_PARAMS_CHANGED``/``FUNC_RETURN_CHANGED`` finding (Codex/
-    CodeRabbit review, PR #582). Depth tracking mirrors
-    :func:`_has_top_level_ptr_or_ref`.
-
-    Whitespace introduced by the removal is collapsed, and spaces adjacent to
-    pointer/reference sigils are normalised so that ``const char *`` and
-    ``char *`` reduce to the same string.
+    Whitespace introduced by the removal is collapsed; spaces adjacent to
+    pointer/reference sigils and parentheses are normalised so that
+    ``const char *`` / ``char *`` and ``void (*)(int)`` / ``void (*)( int
+    )`` each reduce to the same string.
     """
-    depth = 0
     chars = list(name)
-    for m in _CV_TOKEN_RE.finditer(name):
-        depth = 0
-        for ch in name[: m.start()]:
-            if ch in "<([":
-                depth += 1
-            elif ch in ">)]":
-                depth = max(0, depth - 1)
-        if depth == 0:
-            for i in range(m.start(), m.end()):
-                chars[i] = " "
+    _strip_cv_in_segment(name, chars, 0, len(name), strict=False)
     stripped = "".join(chars)
     stripped = _MULTI_SPACE_RE.sub(" ", stripped)
     # Normalise spacing around pointer/reference sigils so "char  *" == "char *".
     stripped = re.sub(r"\s*([*&])\s*", r" \1", stripped)
+    # Normalise spacing around parens so removing a token flush against "("
+    # or ")" doesn't leave a stray space a non-stripped spelling never had.
+    stripped = re.sub(r"\(\s+", "(", stripped)
+    stripped = re.sub(r"\s+\)", ")", stripped)
+    stripped = re.sub(r"\s+,", ",", stripped)
     return _MULTI_SPACE_RE.sub(" ", stripped).strip()
 
 
@@ -489,12 +653,19 @@ def func_signature_cv_only_differ(old_type: str, new_type: str) -> bool:
     BY-VALUE difference (``int`` -> ``volatile int``) that
     :func:`cv_qualifiers_only_differ` deliberately excludes.
 
-    DO NOT use this for fields or variables — a top-level by-value cv change
-    on THOSE is intentionally treated as a source-level contract change (see
-    :func:`cv_qualifiers_only_differ`'s own docstring and the
-    ``case30_field_qualifiers`` example; confirmed by
-    ``test_top_level_field_const_is_not_neutralised``). This function exists
-    because that reasoning does NOT extend to a function's own parameter or
+DO NOT use this for an ordinary field/variable comparison — a top-level
+    by-value cv change on THOSE is intentionally treated as a source-level
+    contract change (see :func:`cv_qualifiers_only_differ`'s own docstring
+    and the ``case30_field_qualifiers`` example; confirmed by
+    ``test_top_level_field_const_is_not_neutralised``). The one deliberate
+    exception is a *legacy-snapshot* fallback (``header_cv_facts_reliable``
+    is False): both ``diff_types._field_type_genuinely_changed`` and
+    ``diff_symbols._check_variable`` reuse this function there specifically
+    because a pre-fix CastXML snapshot's spelling may have silently dropped
+    the real qualifier, making a genuine field/variable cv change
+    indistinguishable from tool-upgrade noise — see those callers' own
+    docstrings. This function exists in the first place because the field/
+    variable reasoning does NOT extend to a function's own parameter or
     return type: per the C++ standard, a top-level cv-qualifier on a
     by-value parameter or return type is dropped from the function's type
     for linkage/mangling purposes — ``void f(int)`` and ``void f(const
