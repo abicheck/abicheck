@@ -138,6 +138,13 @@ Core pipeline (in order of data flow):
 - **Python**: 3.10+ syntax, type annotations, `from __future__ import annotations`
 - **No line length limit** (ruff E501 ignored)
 - **Tests**: use `assert` freely; parametrize when possible
+- **Changelog**: if your change touches `abicheck/**/*.py`, add a fragment
+  with `scriv create` — writes `changelog.d/<name>.md`; uncomment one
+  `### <Category>` section and describe the change (see
+  `changelog.d/README.md`). Do **not** hand-edit `CHANGELOG.md`'s
+  `## [Unreleased]` section — CI (`changelog-check.yml`) rejects a PR that
+  touches `abicheck/**/*.py` without a fragment, and every PR editing that
+  shared section directly was the reason it kept conflicting.
 
 ## Known mypy issues
 
@@ -265,6 +272,7 @@ Pick the right home:
 
 ## What NOT to do
 
+- Don't hand-edit `CHANGELOG.md`'s `## [Unreleased]` section directly — add a `changelog.d/` fragment instead (see Conventions above); CI enforces this
 - Don't modify `examples/` test cases without understanding the ground truth they encode
 - Don't add dependencies without strong justification (this is a lightweight tool)
 - Don't skip test markers — if a test needs `castxml`, mark it `@pytest.mark.integration`
