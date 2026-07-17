@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Progressive-disclosure ``--help`` grouping (G21.8 / collapse M1).
+"""Progressive-disclosure ``--help`` grouping (G21.8 / collapse M1 + M2).
 
 The big commands carry dozens of options (``compare`` ~62, ``dump`` ~39); a flat
 list is the dominant source of perceived CLI complexity. rich-click renders the
@@ -27,11 +27,22 @@ render regardless of the program name — ``abicheck compare``, ``python -m
 abicheck compare``, or the ``main`` prog click uses under test. Unlisted options
 fall through to a default panel, and an unmatched command renders ungrouped — so
 this can never break a command, only prettify it.
+
+``compare`` additionally gets a second, orthogonal disclosure axis (M2): plain
+``compare --help`` shows only a curated common subset (see
+:data:`COMPARE_COMMON_OPTION_NAMES`), folding the long tail behind
+``compare --help-all``. See :func:`compare_help_options`.
 """
 
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
+from typing import TypeVar
+
+import click
+
+F = TypeVar("F", bound=Callable[..., object])
 
 # Per-command option panels. Options not listed here land in rich-click's
 # default trailing panel, so a new flag never has to be added here to work.
@@ -300,3 +311,133 @@ def configure_rich_help() -> None:
     # grouping panels (the actual M1 win) are unaffected; only colour is dropped,
     # so help text is deterministic everywhere.
     rich_click.rich_click.COLOR_SYSTEM = None
+
+
+# ── `compare --help-all` second-level disclosure (G21.8 / collapse M2) ───────
+#
+# The panels above (M1) already regroup all ~62 ``compare`` options so the flat
+# list isn't the whole story, but a first-time user still sees all ~62 in one
+# ``--help`` screen. This is a second axis, orthogonal to panels: a curated
+# subset of the everyday options stays on plain ``compare --help``; the long
+# tail (per-side toolchain overrides, build-config matrix idioms, release
+# knobs, …) is folded behind ``compare --help-all``. Purely presentational —
+# every option keeps working unqualified; only its default *visibility* in the
+# help screen changes.
+#
+# Dest names (``click.Option.name``), not flag strings: a few options share
+# aliases (``-o``/``--output``) or are on/off pairs (``--demangle``/
+# ``--no-demangle``) where only one dest exists either way.
+COMPARE_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
+    {
+        # Inputs
+        "header",
+        "include",
+        "lang",
+        # Output & reporting
+        "output",
+        "fmt",
+        "show_only",
+        "stat",
+        "demangle",
+        # Policy & severity
+        "config",
+        "policy",
+        "policy_file_path",
+        "suppress",
+        "severity_preset",
+        # Scoped comparison (ADR-043) — headline feature, not a long-tail knob
+        "used_by_apps",
+        "required_symbols_opt",
+        "required_symbols_file",
+        # Build & source evidence
+        "depth",
+        "sources",
+        "build_info",
+        # Public-surface scoping
+        "scope_public_headers",
+        # Debug info -- only the coarse per-run override stays visible; the
+        # format/debuginfod/dwarf-only knobs are demoted to the `debug:`
+        # config block (ADR-040 L2) and already hidden regardless of tier.
+        "debug_root",
+        # Per-side overrides -- version labelling is routine for bare .so
+        # inputs; --pdb-path stays in the advanced tier.
+        "version",
+        # Universal
+        "verbose",
+        "dry_run",
+        # The help options themselves always stay visible
+        "help",
+        "help_all",
+    }
+)
+
+
+def _compare_help_callback(ctx: click.Context, _param: click.Parameter, value: bool) -> None:
+    if not value or ctx.resilient_parsing:
+        return
+    cmd = ctx.command
+    original_params = cmd.params
+    # Filter the *params list* itself rather than flipping each Option's
+    # ``hidden`` flag: rich-click's OPTION_GROUPS panels (M1) resolve their
+    # members by name against ``command.get_params(ctx)`` at render time and
+    # include them regardless of ``hidden`` — that flag only affects options
+    # that fall through to the default catch-all panel, which is nearly none
+    # of compare's options once M1 grouped them all. Removing the advanced
+    # options from ``params`` for the duration of this render means the named
+    # panels simply can't find them, so they resolve to zero rows and rich-click
+    # drops the (now-empty) panel entirely. Arguments always stay.
+    common = [
+        p
+        for p in original_params
+        if isinstance(p, click.Argument) or p.name in COMPARE_COMMON_OPTION_NAMES
+    ]
+    hidden_count = len(original_params) - len(common)
+    cmd.params = common
+    try:
+        help_text = ctx.get_help()
+    finally:
+        cmd.params = original_params
+    click.echo(help_text, color=ctx.color)
+    click.echo(
+        f"\n{hidden_count} advanced option(s) hidden. "
+        "Run 'abicheck compare --help-all' to see every option."
+    )
+    ctx.exit()
+
+
+def _compare_help_all_callback(ctx: click.Context, _param: click.Parameter, value: bool) -> None:
+    if not value or ctx.resilient_parsing:
+        return
+    click.echo(ctx.get_help(), color=ctx.color)
+    ctx.exit()
+
+
+def compare_help_options(func: F) -> F:
+    """Replace ``compare``'s automatic ``--help`` with the curated/full pair.
+
+    Declaring our own ``--help`` here (rather than adding a *second* option)
+    is deliberate: Click only auto-adds its default help option when no
+    existing param already claims the ``--help`` flag string, so this one
+    decorator both replaces the default (curated) behaviour and adds the new
+    ``--help-all`` (full) escape hatch, with no risk of two competing
+    ``--help`` options.
+    """
+    func = click.option(
+        "--help-all",
+        is_flag=True,
+        default=False,
+        expose_value=False,
+        is_eager=True,
+        callback=_compare_help_all_callback,
+        help="Show every option, including advanced/less-common ones.",
+    )(func)
+    func = click.option(
+        "--help",
+        is_flag=True,
+        default=False,
+        expose_value=False,
+        is_eager=True,
+        callback=_compare_help_callback,
+        help="Show common options and exit. Use --help-all to see every option.",
+    )(func)
+    return func

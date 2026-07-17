@@ -1387,10 +1387,20 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
 COMPARE_FLAG_BUDGET = COMPARE_FLAG_BUDGET_BASE + len(COMPARE_FLAG_BUDGET_RAISES)
 
 
+#: Navigational meta-options excluded from the flag-count budget: they are
+#: not a per-run analysis input the ADR-037 D10.5 budget is bounding, just a
+#: help-screen escape hatch (G21.8 collapse M2's curated/full `compare --help`
+#: split, mirroring how Click's own auto-added ``--help`` was never a real
+#: ``cmd.params`` entry and so never counted either).
+_HELP_META_OPTION_NAMES = frozenset({"help", "help_all"})
+
+
 def count_visible_options(cmd: object) -> int:
     """Count a Click command's user-visible (non-hidden) options (ADR-037 D10.5)."""
     n = 0
     for p in getattr(cmd, "params", []):
+        if getattr(p, "name", None) in _HELP_META_OPTION_NAMES:
+            continue
         if getattr(p, "param_type_name", None) == "option" and not getattr(
             p, "hidden", False
         ):

@@ -41,6 +41,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   bundled-dependency packaging noise that must stay non-breaking once
   scoped, and mass export removal at oneDAL's reported scale).
 
+### Added
+
+- `compare --help-all`: a second-level `--help` disclosure tier (G21.8
+  collapse M2). Plain `compare --help` now shows only a curated common
+  subset of the ~62 options (inputs, output/format, `--show-only`, policy,
+  the `--used-by`/`--required-symbol` scoped gate, `--depth`/`--sources`/
+  `--build-info`, `--scope-public-headers`, `--verbose`, `--dry-run`, …),
+  with a footer noting how many advanced options are hidden and pointing to
+  `--help-all` for the full surface. Every option keeps working unqualified
+  either way — this only changes default help-screen visibility, not
+  behavior.
+
 ### Changed
 
 - `--depth`/`--sources`/`--build-info`/`--header-graph`/`--dry-run` `--help`

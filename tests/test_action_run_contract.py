@@ -81,8 +81,13 @@ def _valid_flags(subcommand: str) -> set[str]:
     # would otherwise encode stdout as cp1252 and crash (exit 1) on those chars,
     # so force UTF-8 in the child too — not just in our decode.
     env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
+    # `compare --help` only shows its curated common subset (G21.8 collapse
+    # M2); `--help-all` is the full surface and is what this test needs to
+    # validate action/run.sh's flags against. Other subcommands don't have
+    # the curated/full split, so they keep plain --help.
+    help_flag = "--help-all" if subcommand == "compare" else "--help"
     out = subprocess.run(
-        [sys.executable, "-m", "abicheck", *parts, "--help"],
+        [sys.executable, "-m", "abicheck", *parts, help_flag],
         capture_output=True, text=True, check=True,
         encoding="utf-8", errors="replace", env=env,
     ).stdout

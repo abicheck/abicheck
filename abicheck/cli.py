@@ -45,7 +45,7 @@ from .cli_dump_helpers import (
     resolve_dump_compile_db,
     resolve_dump_debug_format,
 )
-from .cli_help import configure_rich_help
+from .cli_help import compare_help_options, configure_rich_help
 from .cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli import sites stable
     _build_match_map as _build_match_map,
     _canonical_library_key as _canonical_library_key,
@@ -1221,6 +1221,7 @@ def _embed_inline_source_side(
 
 
 @main.command("compare")
+@compare_help_options  # curated --help + full --help-all (G21.8 collapse M2)
 @click.argument("old_input", type=click.Path(exists=True, path_type=Path))
 @click.argument("new_input", type=click.Path(exists=True, path_type=Path))
 # Set-input fan-out (ADR-037 D7): -j/--jobs, --dso-only, --output-dir only bite

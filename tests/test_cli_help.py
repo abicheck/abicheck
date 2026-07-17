@@ -10,9 +10,14 @@ from __future__ import annotations
 
 import io
 
+import click
 import pytest
+from click.testing import CliRunner
 
 from abicheck import cli_help
+from abicheck.cli import main
+from abicheck.model import AbiSnapshot
+from abicheck.serialization import snapshot_to_json
 
 
 def _cp1252_stream() -> io.TextIOWrapper:
@@ -75,3 +80,105 @@ def test_configure_rich_help_calls_ensure_utf8_streams(
     monkeypatch.setattr(cli_help, "_ensure_utf8_streams", lambda: calls.append(True))
     cli_help.configure_rich_help()
     assert calls == [True]
+
+
+# ── `compare --help-all` second-level disclosure (G21.8 / collapse M2) ───────
+
+
+class TestCompareHelpAllDisclosure:
+    def test_common_option_names_are_real_params(self) -> None:
+        """Every dest name in the curated set must be a real ``compare`` option.
+
+        Guards against typos/drift: a stale name here would silently mean that
+        option is no longer protected from being hidden in the curated view
+        (it would just vanish from ``--help`` instead of erroring loudly).
+        """
+        real_names = {
+            p.name for p in main.commands["compare"].params if isinstance(p, click.Option)
+        }
+        assert cli_help.COMPARE_COMMON_OPTION_NAMES <= real_names
+
+    def test_curated_help_hides_advanced_options(self) -> None:
+        out = CliRunner().invoke(main, ["compare", "--help"]).output
+        # A representative long-tail option from each folded panel.
+        for advanced_flag in (
+            "--gcc-path",
+            "--ast-frontend",
+            "--jobs",
+            "--severity-abi-breaking",
+            "--report-mode",
+            "--pdb-path",
+        ):
+            assert advanced_flag not in out, f"{advanced_flag} leaked into curated --help"
+
+    def test_curated_help_keeps_common_options(self) -> None:
+        out = CliRunner().invoke(main, ["compare", "--help"]).output
+        for common_flag in (
+            "--header",
+            "--include",
+            "--lang",
+            "--output",
+            "--format",
+            "--show-only",
+            "--config",
+            "--severity-preset",
+            "--used-by",
+            "--required-symbol",
+            "--depth",
+            "--sources",
+            "--build-info",
+            "--scope-public-headers",
+            "--verbose",
+            "--dry-run",
+        ):
+            assert common_flag in out, f"{common_flag} missing from curated --help"
+
+    def test_curated_help_reports_hidden_count_and_points_to_help_all(self) -> None:
+        result = CliRunner().invoke(main, ["compare", "--help"])
+        assert result.exit_code == 0
+        assert "advanced option(s) hidden" in result.output
+        assert "compare --help-all" in result.output
+
+    def test_help_all_shows_everything_curated_hides(self) -> None:
+        out = CliRunner().invoke(main, ["compare", "--help-all"]).output
+        for advanced_flag in (
+            "--gcc-path",
+            "--ast-frontend",
+            "--jobs",
+            "--severity-abi-breaking",
+            "--report-mode",
+            "--pdb-path",
+        ):
+            assert advanced_flag in out
+
+    def test_help_all_has_no_hidden_count_footer(self) -> None:
+        result = CliRunner().invoke(main, ["compare", "--help-all"])
+        assert result.exit_code == 0
+        assert "advanced option(s) hidden" not in result.output
+
+    def test_params_restored_after_curated_help(self) -> None:
+        """Rendering curated help must not permanently shrink ``compare``'s params."""
+        cmd = main.commands["compare"]
+        before = list(cmd.params)
+        CliRunner().invoke(main, ["compare", "--help"])
+        assert cmd.params == before
+
+    def test_advanced_option_still_functional_after_curated_help_render(
+        self, tmp_path
+    ) -> None:
+        """An option hidden from curated --help must still work when actually passed.
+
+        Renders curated help once first (which temporarily shrinks
+        ``compare``'s params list) to prove the restore in the ``finally``
+        block leaves the command fully functional for a real invocation.
+        """
+        CliRunner().invoke(main, ["compare", "--help"])
+        old = tmp_path / "old.json"
+        new = tmp_path / "new.json"
+        snap_json = snapshot_to_json(AbiSnapshot(library="x", version="1"))
+        old.write_text(snap_json, encoding="utf-8")
+        new.write_text(snap_json, encoding="utf-8")
+        result = CliRunner().invoke(
+            main, ["compare", str(old), str(new), "--gcc-path", "/usr/bin/gcc"]
+        )
+        assert result.exit_code == 0, result.output
