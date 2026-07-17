@@ -678,6 +678,71 @@ class TestCastxmlParserTypeName:
         p = _CastxmlParser(root, set(), set())
         assert p._type_name("t2") == "const int"
 
+    def test_cv_qualified_pointee_const_is_prefix(self):
+        # `const int *` — PointerType wrapping a CvQualifiedType: the
+        # POINTEE is const, not the pointer value. Prefix form is correct.
+        ft = _fund_type("t1", "int")
+        cv = Element("CvQualifiedType", id="t2", type="t1", const="1")
+        ptr = Element("PointerType", id="t3", type="t2")
+        root = _xml_root(ft, cv, ptr)
+        p = _CastxmlParser(root, set(), set())
+        assert p._type_name("t3") == "const int*"
+
+    def test_cv_qualified_pointer_value_const_is_suffix(self):
+        # `int * const` — CvQualifiedType directly wrapping a PointerType:
+        # the pointer VALUE is const, not what it points to. Must render as
+        # a suffix so it's distinguishable from the pointee-const case above
+        # (G28 "known, deferred limitation" — both used to collapse to the
+        # identical string "const int*").
+        ft = _fund_type("t1", "int")
+        ptr = Element("PointerType", id="t2", type="t1")
+        cv = Element("CvQualifiedType", id="t3", type="t2", const="1")
+        root = _xml_root(ft, ptr, cv)
+        p = _CastxmlParser(root, set(), set())
+        assert p._type_name("t3") == "int* const"
+
+    def test_cv_qualified_pointer_value_volatile_is_suffix(self):
+        # Same distinction with `volatile`, the exact ambiguous case from
+        # the deferred-limitation writeup: `int * volatile` vs.
+        # `volatile int *` both used to render as "volatile int*".
+        ft = _fund_type("t1", "int")
+        ptr = Element("PointerType", id="t2", type="t1")
+        cv = Element("CvQualifiedType", id="t3", type="t2", volatile="1")
+        root = _xml_root(ft, ptr, cv)
+        p = _CastxmlParser(root, set(), set())
+        assert p._type_name("t3") == "int* volatile"
+
+    def test_cv_qualified_pointee_volatile_is_prefix(self):
+        ft = _fund_type("t1", "int")
+        cv = Element("CvQualifiedType", id="t2", type="t1", volatile="1")
+        ptr = Element("PointerType", id="t3", type="t2")
+        root = _xml_root(ft, cv, ptr)
+        p = _CastxmlParser(root, set(), set())
+        assert p._type_name("t3") == "volatile int*"
+
+    def test_cv_qualified_reference_value_const_is_suffix(self):
+        # A CvQualifiedType directly wrapping a ReferenceType is likewise a
+        # value-position qualifier (rare/ill-formed to declare directly, but
+        # can arise via a reference typedef), not a pointee one.
+        ft = _fund_type("t1", "int")
+        ref = Element("ReferenceType", id="t2", type="t1")
+        cv = Element("CvQualifiedType", id="t3", type="t2", const="1")
+        root = _xml_root(ft, ref, cv)
+        p = _CastxmlParser(root, set(), set())
+        assert p._type_name("t3") == "int& const"
+
+    def test_cv_qualified_pointer_value_const_through_typedef_is_suffix(self):
+        # `typedef int *IntPtr; IntPtr const p;` — the qualifier binds to
+        # the pointer value even though it wraps a Typedef, not a
+        # PointerType, directly.
+        ft = _fund_type("t1", "int")
+        ptr = Element("PointerType", id="t2", type="t1")
+        td = Element("Typedef", id="t3", name="IntPtr", type="t2")
+        cv = Element("CvQualifiedType", id="t4", type="t3", const="1")
+        root = _xml_root(ft, ptr, td, cv)
+        p = _CastxmlParser(root, set(), set())
+        assert p._type_name("t4") == "IntPtr const"
+
     def test_struct_type(self):
         s = Element("Struct", id="t1", name="Point")
         root = _xml_root(s)

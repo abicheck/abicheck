@@ -112,30 +112,37 @@ found and fixed real, previously-undiscovered bugs:
 
 Full detail for each fix: `CHANGELOG.md`'s Fixed section under this PR.
 
-## Known, deferred limitation: pointer-vs-pointee CV qualifier position
+## Done — pointer-vs-pointee CV qualifier position
 
 **Confirmed real** (CodeRabbit review): `_CastxmlParser._type_name`'s
-`CvQualifiedType` rendering always emits the qualifier as a *prefix*, so a
+`CvQualifiedType` rendering always emitted the qualifier as a *prefix*, so a
 volatile pointer *value* (`int * volatile`) and a pointer to a volatile
-*pointee* (`volatile int *`) both render as the identical string
+*pointee* (`volatile int *`) both rendered as the identical string
 `"volatile int*"` — a real transformation between the two (changing which
-side of the declarator the qualifier binds to) is invisible to any
-string-spelling comparison. This predates this PR's work (`_type_name` is a
-general-purpose recursive renderer used everywhere — return types, params,
-fields — not something newly introduced here); the constructor-identity
-code added earlier in this PR works around the SAME ambiguity for its own
-narrow purpose by reading the real XML structure directly
-(`_ctor_param_identity_type`) rather than fixing the renderer itself.
+side of the declarator the qualifier binds to) was invisible to any
+string-spelling comparison. This predated the rest of this PR's work
+(`_type_name` is a general-purpose recursive renderer used everywhere —
+return types, params, fields); the constructor-identity code elsewhere in
+this PR works around the SAME ambiguity for its own narrow purpose by
+reading the real XML structure directly (`_ctor_param_identity_type`)
+rather than fixing the renderer itself.
 
-**Deliberately not fixed here**: correctly distinguishing the two forms
-means rendering an outer pointer-value qualifier as a suffix (`int*
-volatile`) while keeping a pointee qualifier prefixed — a change to
-`_type_name`'s core recursion touching every call site that spells a
-pointer type (params, returns, fields), with real regression risk across
-the parity gate's golden comparisons and the `examples/` ground truth. Scope
-this as its own follow-up investigation (verify no downstream code depends
-on the current collapsed spelling before changing it) rather than a rushed
-fix folded into an already-large hardening pass.
+**Fixed** as its own follow-up investigation: a new
+`_cv_qualifies_pointer_value()` helper decides, by walking the real XML
+structure (following `Typedef`/`ElaboratedType` aliasing, e.g. `typedef int
+*IntPtr; IntPtr const p;`), whether a `CvQualifiedType` directly wraps a
+`Pointer`/`Reference`/`RValueReferenceType` — i.e. qualifies the pointer/
+reference *value* — as opposed to a pointee position. The value case now
+renders as a suffix (`int* const`), matching the `"T * const"` convention
+`cv_qualifiers_only_differ`/`canonicalize_type_name` already treat as
+canonical; the pointee case (`PointerType` wrapping `CvQualifiedType`) is
+untouched and still renders as a prefix (`const int*`). Verified against the
+full fast test suite, `mypy`, and `ruff` with no regressions — field/
+variable-level CV *facts* (`TypeField.is_const`/`is_volatile`, populated by
+Phase 0's `_resolve_cv_restrict`, which already reads the same real XML
+structure directly rather than the rendered spelling) were already immune
+to this ambiguity; the fix closes the gap in the generic type-name
+*string* other detectors and cross-producer/cross-tool comparisons read.
 
 ---
 

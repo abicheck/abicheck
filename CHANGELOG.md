@@ -776,6 +776,20 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `--show-only` run excluding breaking findings previously still uploaded,
   serialized, or failed the testsuite on the (by-default-blocking) synthetic
   result regardless.
+- **CastXML pointer-value vs. pointee CV qualifier spelling** (G28,
+  deferred limitation from PR #582): `_type_name`'s `CvQualifiedType`
+  rendering always emitted the qualifier as a prefix, so a volatile
+  pointer *value* (`int * volatile`) and a pointer to a volatile *pointee*
+  (`volatile int *`) both rendered as the identical string
+  `"volatile int*"` — a real declarator-binding change (which side of the
+  `*` the qualifier attaches to) was invisible to any string-spelling
+  comparison. Now a qualifier directly wrapping a `PointerType`/
+  `ReferenceType`/`RValueReferenceType` (following through `Typedef`/
+  `ElaboratedType` aliasing, e.g. `typedef int *IntPtr; IntPtr const p;`)
+  renders as a suffix (`int* const`) instead, matching the `"T * const"`
+  convention `cv_qualifiers_only_differ`/`canonicalize_type_name` already
+  treat as canonical for this case. A pointee-position qualifier
+  (`const int *`) is unaffected and still renders as a prefix.
 
 ### Added
 
