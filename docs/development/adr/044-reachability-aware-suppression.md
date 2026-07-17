@@ -594,6 +594,61 @@ since JSON/SARIF/JUnit reporters already round-trip `Change` via
   tagged reachable when *any* reliable evidence exists, never require all of
   it). Added `test_old_side_public_alone_is_reachable`/
   `test_new_side_public_alone_is_reachable` to `test_diff_namespaces.py`.
+- **Late detectors dropped the withheld-rule diagnostic even after their
+  findings were correctly kept (Codex, fresh evidence).** `DetectCppPatterns`,
+  `DetectTemplatePatterns`, and `DetectNamespacePatterns` each build fresh
+  `Change` objects *after* `ApplySuppression` already ran, so they filter
+  their own findings through suppression by hand — but did so via the plain
+  `SuppressionList.is_suppressed()` boolean, which silently discards the
+  "matched but withheld by the reachability gate" information
+  `SuppressionList.evaluate()` reports. The finding stayed correctly kept
+  (not suppressed — that part of the D1/D3 fixes above was never wrong), but
+  the `SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK` diagnostic `ApplySuppression`
+  would have produced for the same rule never appeared, leaving users with
+  no explanation of why their matching rule didn't apply. Audited every
+  post-`ApplySuppression` step with the same shape and found a fourth,
+  `DetectInternalLeaks` (not named in the report but the identical bug).
+  Fixed all four via a new shared `_merge_findings_respecting_suppression()`
+  helper that calls `evaluate()` and appends the same
+  `_build_suppression_overreach_change()` diagnostic `ApplySuppression`
+  itself builds, replacing each detector's own hand-rolled dedup-and-filter
+  loop. Added `TestLateDetectorSuppressionDiagnostic` (`test_diff_templates`'s
+  CPO case, plus a new `DetectInternalLeaks` case) and updated the two
+  existing late-detector tests (`test_experimental_removed_without_replacement_survives_broad_suppression`,
+  `test_cpo_kind_changed_survives_broad_suppression`) to assert the
+  diagnostic now appears — their prior comments explicitly called this out
+  as a documented, not-yet-closed limitation; this round closes it.
+  **Deliberately left open**: `checker.py`'s own `is_suppressed()` call
+  sites (`_filter_suppressed_changes`, `_apply_surface_metrics`,
+  `_filter_pattern_synthetic` — the last being the ADR-027
+  `--pattern-verdicts` path D3 above already partially audited) have the
+  same shape but a different call signature (`SuppressionList` +
+  `suppressed: list[Change]` directly, not `PipelineContext`) and were not
+  part of Codex's report; converting them needs its own signature-compatible
+  helper and individual verification, not a blind find-and-replace — tracked
+  as a follow-up, not fixed in this round.
+- **`MarkReachability` itself never tagged a directly-public-header type's
+  own change (Codex, fresh evidence).** `internal_leak.compute_leak_paths`
+  only ever records *internal* types found while walking outward from the
+  public surface — a type that IS the public surface (e.g. a header-only
+  type never referenced by an exported function/variable, so nothing walks
+  "into" it from elsewhere) never becomes a key in its result, so a raw
+  change on that type's own layout got no tag at all, even though
+  `RecordType.origin == ScopeOrigin.PUBLIC_HEADER` (ADR-024's opt-in
+  `--public-header` scoping) is exactly the reliable signal already
+  consulted for the late-detector findings in `diff_namespaces.py`/
+  `diff_templates.py`. Fixed by building an origin-by-name map (reusing
+  `diff_namespaces._origin_by_name`) alongside the existing leak-path walk
+  and tagging `public_reachable=True`/`reachability_kind="direct_public_symbol"`
+  directly for a change whose root type carries that origin, before falling
+  back to the leak-path check. Without `--public-header` every origin is
+  `ScopeOrigin.UNKNOWN`, so this degrades to the prior behavior
+  automatically — purely additive, not a regression. Explicitly *not* the
+  reverted "any non-internal-namespaced subject" heuristic this class's own
+  docstring warns against: `ScopeOrigin.PUBLIC_HEADER` is an explicit opt-in
+  tag, not a naming guess. Added `test_public_header_type_own_change_is_reachable`/
+  `test_non_public_header_type_own_change_stays_untagged` to
+  `test_reachability_aware_suppression.py`.
 
 ### D2. `Suppression` gains a reachability guard
 
@@ -789,6 +844,14 @@ Numbering mirrors the review's own priority tiers.
    (`detail`/`impl`/`internal`/`__detail`/`_impl`) is invisible to every
    step in this list, including the reachability tag this ADR's own
    suppression gate depends on.
+6. Route `checker.py`'s remaining `is_suppressed()` call sites
+   (`_filter_suppressed_changes`, `_apply_surface_metrics`,
+   `_filter_pattern_synthetic`) through an `evaluate()`-based helper too, so
+   a broad rule matched-but-withheld on those paths also produces the
+   `SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK` diagnostic — the same fix this
+   round's changelog entry applied to `post_processing.py`'s four late
+   detectors, deliberately not extended to `checker.py`'s different call
+   signature in the same round.
 
 ### P2 — empirical validation
 

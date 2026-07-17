@@ -33,6 +33,7 @@ from abicheck.model import (
     Function,
     Param,
     RecordType,
+    ScopeOrigin,
     Variable,
     Visibility,
 )
@@ -135,6 +136,57 @@ class TestMarkReachability:
         assert found[0].public_reachable is True
         assert found[0].reachability_kind == "value_embedding"
         assert found[0].reachability_proof_path
+
+    def test_public_header_type_own_change_is_reachable(self) -> None:
+        """Codex review (fresh evidence): a header-only type never referenced
+        by an exported function/variable (so compute_leak_paths's walk never
+        reaches it) still needs its OWN change tagged reachable when it
+        carries RecordType.origin == ScopeOrigin.PUBLIC_HEADER — that walk
+        only ever records *internal* types found while walking from the
+        public surface, never the public seed types themselves."""
+        old = _snap(
+            types=[RecordType(
+                name="lib::Widget", kind="class", size_bits=64,
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            )],
+        )
+        new = _snap(
+            types=[RecordType(
+                name="lib::Widget", kind="class", size_bits=128,
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            )],
+        )
+        raw_change = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="lib::Widget",
+            description="size changed",
+        )
+        ctx = DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        found = [c for c in ctx.kept if c.kind == ChangeKind.TYPE_SIZE_CHANGED]
+        assert len(found) == 1
+        assert found[0].public_reachable is True
+        assert found[0].reachability_kind == "direct_public_symbol"
+
+    def test_non_public_header_type_own_change_stays_untagged(self) -> None:
+        """Without --public-header (ScopeOrigin.UNKNOWN, the common case),
+        a type not reached via the leak-path walk gets no signal — same as
+        before this fix, not a regression."""
+        old = _snap(types=[RecordType(name="lib::Widget", kind="class", size_bits=64)])
+        new = _snap(types=[RecordType(name="lib::Widget", kind="class", size_bits=128)])
+        raw_change = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="lib::Widget",
+            description="size changed",
+        )
+        ctx = DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        found = [c for c in ctx.kept if c.kind == ChangeKind.TYPE_SIZE_CHANGED]
+        assert len(found) == 1
+        assert found[0].public_reachable is False
+        assert found[0].reachability_kind is None
 
     def test_custom_namespaces_constructor_override(self) -> None:
         """Codex review (P2): DEFAULT_INTERNAL_NAMESPACES only covers
@@ -676,15 +728,16 @@ class TestLateDetectorSyntheticFindings:
         assert len(found) == 1
         assert found[0].public_reachable is True
         assert found[0] not in ctx.suppressed
-        # Note: unlike a raw pre-existing change (suppressed via
-        # ApplySuppression, which can attach the diagnostic), a finding
-        # DetectNamespacePatterns builds fresh and suppresses inline via its
-        # own ctx.suppression.is_suppressed(c) call has no diagnostic path —
-        # same established scope boundary as the other late-detector
-        # synthetic findings (DetectTemplatePatterns/DetectInternalLeaks's
-        # own leak findings). Not suppressed at all is the fix; a
-        # diagnostic for this class of finding is a separate, pre-existing
-        # limitation, not something this fix regresses or is scoped to close.
+        # Codex review (fresh evidence): DetectNamespacePatterns now routes
+        # its late findings through the same evaluate()-based helper
+        # ApplySuppression uses, so the matched-but-withheld broad rule
+        # produces the same diagnostic here too.
+        diag = [
+            c for c in ctx.kept
+            if c.kind == ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK
+        ]
+        assert len(diag) == 1
+        assert "lib::experimental::foo" in diag[0].symbol
 
     def test_cpo_kind_changed_survives_broad_suppression(self) -> None:
         """Codex review: DetectTemplatePatterns's CPO_KIND_CHANGED (a
@@ -718,3 +771,53 @@ class TestLateDetectorSyntheticFindings:
         assert len(found) == 1
         assert found[0].public_reachable is True
         assert found[0] not in ctx.suppressed
+        diag = [
+            c for c in ctx.kept
+            if c.kind == ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK
+        ]
+        assert len(diag) == 1
+
+
+class TestLateDetectorSuppressionDiagnostic:
+    """Codex review (fresh evidence, post-construction-time-tagging round):
+    DetectCppPatterns/DetectTemplatePatterns/DetectNamespacePatterns/
+    DetectInternalLeaks all build findings *after* ApplySuppression and
+    filtered them via the plain SuppressionList.is_suppressed() boolean,
+    which silently drops the SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK diagnostic
+    ApplySuppression itself would have produced for a broad rule that
+    matched but was withheld by the reachability gate. All four now route
+    through the shared _merge_findings_respecting_suppression() helper
+    (post_processing.py), which uses evaluate() instead."""
+
+    def test_internal_leak_finding_gets_withheld_diagnostic(self) -> None:
+        """DetectInternalLeaks's own INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API
+        finding is tagged public_reachable=True at construction — a broad
+        default (unreachable-only) rule matching its namespace is withheld,
+        and must now produce the diagnostic like any other withheld rule."""
+        old, new, raw_change = _reachable_scenario()
+        suppression = SuppressionList([
+            Suppression(
+                namespace="oneapi::dal::**::detail::**",
+                reason="detail namespace churn",
+            )
+        ])
+        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        found = [
+            c for c in ctx.kept
+            if c.kind == ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API
+        ]
+        assert len(found) == 1
+        assert found[0] not in ctx.suppressed
+        # Two distinct changes are each withheld by the same broad rule here
+        # — the raw TYPE_SIZE_CHANGED (tagged reachable by MarkReachability,
+        # withheld by ApplySuppression) and the synthetic leak finding
+        # DetectInternalLeaks builds afterwards (withheld by the fix under
+        # test) — so two diagnostics are expected, one per withheld change.
+        diag = [
+            c for c in ctx.kept
+            if c.kind == ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK
+        ]
+        assert len(diag) == 2
+        assert any(
+            "descriptor_base" in (d.symbol or "") for d in diag
+        )

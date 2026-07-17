@@ -538,6 +538,14 @@ class MarkReachability:
     (the L5 call-graph / consumer-import work already on this ADR's P1/P2
     roadmap), not a heuristic on the symbol's own spelling.
 
+    ``RecordType.origin == ScopeOrigin.PUBLIC_HEADER`` (ADR-024's opt-in
+    ``--public-header``/``--public-header-dir`` scoping) is a *different*
+    signal from the naming heuristic just described — an explicit, reliable
+    tag, not a guess — and is consulted directly below for a change whose
+    own subject type carries it, since :func:`internal_leak.compute_leak_paths`
+    only ever records *internal* types reached while walking from the public
+    surface, never the public seed types themselves (Codex review).
+
     ``Suppression.matches()`` (ADR-044 D2) consults ``public_reachable`` to
     decide whether a broad rule may apply at all — so the underlying evidence
     for a public-reachable internal change now survives ``ApplySuppression``
@@ -580,6 +588,7 @@ class MarkReachability:
         if ctx.suppression is None or not ctx.suppression.needs_reachability_evidence():
             return changes
 
+        from .diff_namespaces import _origin_by_name
         from .internal_leak import (
             _IDENTITY_VTABLE_KINDS,
             DEFAULT_INTERNAL_NAMESPACES,
@@ -589,16 +598,42 @@ class MarkReachability:
             _root_type_name_for_change,
             compute_leak_paths,
         )
+        from .model import ScopeOrigin
 
         namespaces = self._namespaces or DEFAULT_INTERNAL_NAMESPACES
         old_paths = compute_leak_paths(ctx.old, namespaces)
         new_paths = compute_leak_paths(ctx.new, namespaces)
         reachable_types = set(old_paths) | set(new_paths)
-        if not reachable_types:
+        # RecordType.origin == ScopeOrigin.PUBLIC_HEADER (Codex review, fresh
+        # evidence): compute_leak_paths only ever records *internal* types
+        # reached while walking from the public surface — a type that is
+        # itself the public surface (e.g. a header-only type never
+        # referenced by an exported function/variable) never becomes a key
+        # in its result, so a raw change on that type's own layout got no
+        # tag at all from the walk above. ADR-024's opt-in public-header
+        # scoping is the same reliable direct signal already used for the
+        # late-detector findings in diff_namespaces.py/diff_templates.py —
+        # apply it here too. Without --public-header every origin is
+        # ScopeOrigin.UNKNOWN, so both maps are empty of real signal and
+        # this degrades to the prior behavior automatically.
+        old_origins = _origin_by_name(ctx.old.types)
+        new_origins = _origin_by_name(ctx.new.types)
+        public_header_types = {
+            name for name, origin in old_origins.items()
+            if origin == ScopeOrigin.PUBLIC_HEADER
+        } | {
+            name for name, origin in new_origins.items()
+            if origin == ScopeOrigin.PUBLIC_HEADER
+        }
+        if not reachable_types and not public_header_types:
             return changes
 
         for c in changes:
             root = _root_type_name_for_change(c)
+            if root in public_header_types:
+                c.public_reachable = True
+                c.reachability_kind = "direct_public_symbol"
+                continue
             if root not in reachable_types:
                 continue
             old_pl = old_paths.get(root, [])
@@ -701,6 +736,48 @@ def _build_suppression_overreach_change(change: Change, rule: Suppression) -> Ch
         ),
         caused_by_type=change.symbol,
     )
+
+
+def _merge_findings_respecting_suppression(
+    changes: list[Change],
+    new_findings: list[Change],
+    ctx: PipelineContext,
+) -> None:
+    """Append deduplicated ``new_findings`` to ``changes``, respecting suppression.
+
+    Mutates ``changes`` in place. Shared by every post-``ApplySuppression``
+    detector that builds fresh ``Change`` objects (``DetectCppPatterns``,
+    ``DetectTemplatePatterns``, ``DetectNamespacePatterns``) — those findings
+    never passed through ``ApplySuppression`` itself, so they must run their
+    own suppression check here.
+
+    Uses :meth:`SuppressionList.evaluate` (not the cheaper ``is_suppressed``)
+    so a broad rule whose selectors matched but was withheld by the
+    reachability/``allow_public_break`` gate still emits the same
+    ``SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`` diagnostic ``ApplySuppression``
+    produces for changes it sees directly (ADR-044 D4; Codex review, fresh
+    evidence) — otherwise a late finding that a broad rule *would* have
+    hidden, had it been reachable earlier, is silently kept with no
+    explanation of why the matching rule didn't apply.
+    """
+    seen_keys = {(c.kind, c.symbol) for c in changes}
+    diagnostics: list[Change] = []
+    for c in new_findings:
+        if ctx.suppression is not None:
+            outcome = ctx.suppression.evaluate(c)
+            if outcome.suppressed:
+                ctx.suppressed.append(c)
+                continue
+            if outcome.withheld_rule is not None:
+                diagnostics.append(
+                    _build_suppression_overreach_change(c, outcome.withheld_rule)
+                )
+        key = (c.kind, c.symbol)
+        if key in seen_keys:
+            continue
+        changes.append(c)
+        seen_keys.add(key)
+    changes.extend(diagnostics)
 
 
 class SuppressRenamedPairs:
@@ -942,24 +1019,6 @@ class DetectCppPatterns:
             to_keep.append(ch)
         changes[:] = to_keep
 
-    @staticmethod
-    def _merge_new_findings(
-        changes: list[Change],
-        new_findings: list[Change],
-        ctx: PipelineContext,
-    ) -> None:
-        """Append deduplicated ``new_findings`` to ``changes``, respecting suppression."""
-        seen_keys = {(c.kind, c.symbol) for c in changes}
-        for c in new_findings:
-            if ctx.suppression is not None and ctx.suppression.is_suppressed(c):
-                ctx.suppressed.append(c)
-                continue
-            key = (c.kind, c.symbol)
-            if key in seen_keys:
-                continue
-            changes.append(c)
-            seen_keys.add(key)
-
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         new_findings, suppressed_keys = self._run_all_detectors(ctx, changes)
 
@@ -967,7 +1026,7 @@ class DetectCppPatterns:
             self._suppress_grouped_children(changes, suppressed_keys, ctx)
 
         if new_findings:
-            self._merge_new_findings(changes, new_findings, ctx)
+            _merge_findings_respecting_suppression(changes, new_findings, ctx)
 
         return changes
 
@@ -989,16 +1048,7 @@ class DetectTemplatePatterns:
         new_findings = detect_template_patterns(ctx.old, ctx.new)
         if not new_findings:
             return changes
-        seen_keys = {(c.kind, c.symbol) for c in changes}
-        for c in new_findings:
-            if ctx.suppression is not None and ctx.suppression.is_suppressed(c):
-                ctx.suppressed.append(c)
-                continue
-            key = (c.kind, c.symbol)
-            if key in seen_keys:
-                continue
-            changes.append(c)
-            seen_keys.add(key)
+        _merge_findings_respecting_suppression(changes, new_findings, ctx)
         return changes
 
 
@@ -1033,16 +1083,7 @@ class DetectNamespacePatterns:
         )
         if not new_findings:
             return changes
-        seen_keys = {(c.kind, c.symbol) for c in changes}
-        for c in new_findings:
-            if ctx.suppression is not None and ctx.suppression.is_suppressed(c):
-                ctx.suppressed.append(c)
-                continue
-            key = (c.kind, c.symbol)
-            if key in seen_keys:
-                continue
-            changes.append(c)
-            seen_keys.add(key)
+        _merge_findings_respecting_suppression(changes, new_findings, ctx)
         return changes
 
 
@@ -1070,19 +1111,12 @@ class DetectInternalLeaks:
         extra = detect_internal_leaks(changes, ctx.old, ctx.new, namespaces)
         if not extra:
             return changes
-        # Avoid duplicates if the pipeline is re-run.
-        seen_symbols = {(c.kind, c.symbol) for c in changes}
-        # Synthetic leak findings must respect user suppression rules
-        # too. ``ApplySuppression`` ran earlier in the pipeline, so we
-        # apply the same predicate by hand here rather than re-running
-        # the whole step.
-        for c in extra:
-            if ctx.suppression is not None and ctx.suppression.is_suppressed(c):
-                ctx.suppressed.append(c)
-                continue
-            if (c.kind, c.symbol) not in seen_symbols:
-                changes.append(c)
-                seen_symbols.add((c.kind, c.symbol))
+        # Synthetic leak findings must respect user suppression rules too.
+        # ``ApplySuppression`` ran earlier in the pipeline, so we apply the
+        # same check by hand here (via the shared helper, which also emits
+        # the withheld-rule diagnostic ``ApplySuppression`` would have)
+        # rather than re-running the whole step.
+        _merge_findings_respecting_suppression(changes, extra, ctx)
         return changes
 
 
