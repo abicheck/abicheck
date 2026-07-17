@@ -341,7 +341,7 @@ correct verdict — derived by
 `scripts/evidence_tiers.py`
 and validated by `tests/test_evidence_tiers.py`. Aggregated over the 153 compare-style cases, that yields the cumulative minimum-evidence coverage. The binary competitor `.so` lane is narrower (134 built shared-library pairs); fixture/source-only L2/L5/source cases are listed here by evidence tier instead of being treated as missing competitor binaries:
 
-> **Freshness note.** `examples/ground_truth.json` now has 187 total entries
+> **Freshness note.** `examples/ground_truth.json` now has 191 total entries
 > (verified via `len(json.load(open("examples/ground_truth.json"))["verdicts"])`),
 > not the 153/134 cited above — this table's per-tier breakdown predates
 > case growth since it was last regenerated and has not been re-derived from

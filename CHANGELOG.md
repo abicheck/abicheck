@@ -59,6 +59,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   complements the existing hand-picked example tests in
   `test_l3l4l5_new_kinds.py`, which each fix one combination at a time.
 
+- **`Change.correlated_change_kind`**: a structured, machine-readable
+  sibling to the description-prose correlation
+  `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` findings already carried (ADR-041
+  P0 roadmap item 2) — carries the correlated body/type-hash change's
+  `ChangeKind` value (e.g. `"inline_body_changed"`) so a JSON/SARIF/
+  policy-file consumer can act on the correlation without parsing it out of
+  `description` text. Surfaced in the `--format json` report.
+
 ### Documentation
 
 - `docs/concepts/build-source-data.md` now documents the ADR-041 P0
