@@ -367,6 +367,8 @@ def handle_non_elf_dump(
     header_backend: str = "auto",
     compile_context: Any = None,
     inputs_pack: Path | None = None,
+    header_graph: bool = False,
+    header_graph_includes: bool = False,
 ) -> None:
     """Handle the PE/Mach-O native dump path and output writing (split from cli.py).
 
@@ -377,6 +379,13 @@ def handle_non_elf_dump(
     so importing them here would close a ``cli → cli_dump_helpers → … → cli``
     cycle. ``compile_context`` is typed ``Any`` for the same reason (its concrete
     ``CompileContext`` lives in ``service_scan``).
+
+    ``header_graph``/``header_graph_includes`` (ADR-041 addendum) forward
+    straight into ``dump_native_binary`` (``_dump_native_binary`` →
+    ``service.run_dump``), which attaches the header-only graph uniformly
+    across ELF/PE/Mach-O — previously only the ELF ``perform_elf_dump`` path
+    forwarded these, so ``dump --header-graph`` silently no-opped on PE/Mach-O
+    input (Codex review).
     """
     if follow_deps:
         click.echo("Warning: --follow-deps is only supported for ELF binaries.", err=True)
@@ -411,6 +420,8 @@ def handle_non_elf_dump(
             public_header_dirs=list(public_header_dirs),
             header_backend=header_backend,
             compile=compile_context,
+            header_graph=header_graph,
+            header_graph_includes=header_graph_includes,
         )
     except click.ClickException:
         raise
@@ -567,12 +578,24 @@ def perform_elf_dump(
     compile_db_filter: str | None = None,
     inputs_pack: Path | None = None,
     debug_info_path: Path | None = None,
+    header_graph: bool = False,
+    header_graph_includes: bool = False,
+    compile_context: CompileContext | None = None,
 ) -> None:
     """Run the ELF dump pipeline and write output.
 
     ``debug_info_path`` (P1.1, ADR-021a): a resolved detached debug artifact
     (``--debug-root``/``--debuginfod``) to read DWARF sections from instead of
     ``so_path`` itself — threaded straight into :func:`dumper.dump`.
+
+    ``header_graph``/``header_graph_includes`` (ADR-041 addendum): builds and
+    embeds the header-only (L2) semantic graph via
+    :func:`~abicheck.service._attach_header_graph` — the same post-processing
+    step ``service.run_dump`` already applies for `compare`'s implicit-dump
+    path, reused here rather than duplicated (``dumper.py`` sits at its
+    2000-line hard cap, so this stays a wrapper around the already-built
+    snapshot instead of a new parameter on :func:`dumper.dump` itself). A
+    no-op when ``header_graph`` was not requested or no headers were parsed.
 
     All helper callables (expand_header_inputs, populate_dependency_info,
     stamp_provenance, write_snapshot_output) are passed in from cli.py to avoid
@@ -653,70 +676,136 @@ def perform_elf_dump(
             debug_info_path=debug_info_path,
         )
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
-        raise click.ClickException(str(exc)) from exc
-    finally:
-        # The header parse has consumed the build-seeded include dirs (success or
-        # failure), so release any inferred-CMake temp build dir now.
+        # The header parse itself failed -- nothing downstream (including a
+        # requested --header-graph pass) will run, so the seeded temp build
+        # dir is no longer needed by anything; release it now rather than
+        # leaking it.
         if _l2_pending_cleanups:
             _run_cleanups(_l2_pending_cleanups)
+        raise click.ClickException(str(exc)) from exc
 
-    # Record that the header AST was parsed with the real build context (ADR-029)
-    if effective_compile_db and resolved_headers:
-        snap.parsed_with_build_context = True
+    try:
+        # Record that the header AST was parsed with the real build context (ADR-029)
+        if effective_compile_db and resolved_headers:
+            snap.parsed_with_build_context = True
 
-    # ADR-039 collection layer — when a compile DB is available, harvest the
-    # build's active ``-D`` set and scan the public headers for ``#ifdef``-guarded
-    # record fields, so the reconciler can clear a context-free header-parse false
-    # positive (a guarded field the context-free castxml parse pruned). Best-effort
-    # and additive: absent/empty on a plain context-free dump.
-    if effective_compile_db and resolved_headers:
-        # Augment the sound per-command compile-DB intersection with the user's
-        # *global* flags only: the repeatable ``--gcc-option`` tokens and the
-        # ``-D``/``-U`` in the ``--gcc-options`` string (``user_gcc_options``).
-        # A user ``--gcc-options=-UKEEP`` must override a DB ``-DKEEP`` (Codex
-        # review #498). We deliberately do NOT feed ``effective_gcc_options``,
-        # which also carries the *first* resolved header's auto-derived build
-        # context — unioning that snapshot-wide would mark one TU's ``-DKEEP``
-        # active for every scanned header.
-        _attach_build_context(
-            snap,
-            effective_compile_db,
-            resolved_headers,
-            _user_define_flags(gcc_option_tokens, user_gcc_options),
-            source_filter=compile_db_filter,
-        )
+        # ADR-039 collection layer — when a compile DB is available, harvest the
+        # build's active ``-D`` set and scan the public headers for ``#ifdef``-guarded
+        # record fields, so the reconciler can clear a context-free header-parse false
+        # positive (a guarded field the context-free castxml parse pruned). Best-effort
+        # and additive: absent/empty on a plain context-free dump.
+        if effective_compile_db and resolved_headers:
+            # Augment the sound per-command compile-DB intersection with the user's
+            # *global* flags only: the repeatable ``--gcc-option`` tokens and the
+            # ``-D``/``-U`` in the ``--gcc-options`` string (``user_gcc_options``).
+            # A user ``--gcc-options=-UKEEP`` must override a DB ``-DKEEP`` (Codex
+            # review #498). We deliberately do NOT feed ``effective_gcc_options``,
+            # which also carries the *first* resolved header's auto-derived build
+            # context — unioning that snapshot-wide would mark one TU's ``-DKEEP``
+            # active for every scanned header.
+            _attach_build_context(
+                snap,
+                effective_compile_db,
+                resolved_headers,
+                _user_define_flags(gcc_option_tokens, user_gcc_options),
+                source_filter=compile_db_filter,
+            )
 
-    # G14: recognise a CPython extension module and attach its metadata so the
-    # written snapshot carries the abi3 / imported-C-API surface. The ELF `dump`
-    # CLI reaches `dumper.dump` directly (not `service.run_dump`), so this is the
-    # attach point for that path; `detect_python_extension` is a leaf import (no
-    # cycle) and a no-op for ordinary libraries. `compare` also derives it on
-    # load as a backstop for snapshots written without it.
-    if snap.python_ext is None:
-        from .python_ext import detect_python_extension
+        # G14: recognise a CPython extension module and attach its metadata so the
+        # written snapshot carries the abi3 / imported-C-API surface. The ELF `dump`
+        # CLI reaches `dumper.dump` directly (not `service.run_dump`), so this is the
+        # attach point for that path; `detect_python_extension` is a leaf import (no
+        # cycle) and a no-op for ordinary libraries. `compare` also derives it on
+        # load as a backstop for snapshots written without it.
+        if snap.python_ext is None:
+            from .python_ext import detect_python_extension
 
-        snap.python_ext = detect_python_extension(snap)
+            snap.python_ext = detect_python_extension(snap)
 
-    # G23: recover the Python-visible API surface from a sibling `.pyi` stub, so
-    # the snapshot also carries the function/class/method signatures a consumer
-    # `import`s — the surface the C-ABI export view cannot see. A no-op when no
-    # stub is found alongside the binary.
-    if snap.python_api is None:
-        from .python_api import detect_python_api
+        # G23: recover the Python-visible API surface from a sibling `.pyi` stub, so
+        # the snapshot also carries the function/class/method signatures a consumer
+        # `import`s — the surface the C-ABI export view cannot see. A no-op when no
+        # stub is found alongside the binary.
+        if snap.python_api is None:
+            from .python_api import detect_python_api
 
-        snap.python_api = detect_python_api(snap)
+            snap.python_api = detect_python_api(snap)
 
-    # G26: attach NumPy C-API consumption evidence for the same reason as
-    # G14/G23 above — this ELF `dump` CLI path reaches `dumper.dump` directly,
-    # not `service.run_dump` (whose `_try_attach_numpy_capi_surface` only
-    # covers the in-process compare path), so without this a snapshot written
-    # via `abicheck dump` never carries `numpy_capi` and every G26 delta in a
-    # later `compare` on the written JSON stays silently disabled (Codex
-    # review).
-    if snap.numpy_capi is None:
-        from .numpy_capi import extract_numpy_capi_surface
+        # G26: attach NumPy C-API consumption evidence for the same reason as
+        # G14/G23 above — this ELF `dump` CLI path reaches `dumper.dump` directly,
+        # not `service.run_dump` (whose `_try_attach_numpy_capi_surface` only
+        # covers the in-process compare path), so without this a snapshot written
+        # via `abicheck dump` never carries `numpy_capi` and every G26 delta in a
+        # later `compare` on the written JSON stays silently disabled (Codex
+        # review).
+        if snap.numpy_capi is None:
+            from .numpy_capi import extract_numpy_capi_surface
 
-        snap.numpy_capi = extract_numpy_capi_surface(so_path)
+            snap.numpy_capi = extract_numpy_capi_surface(so_path)
+
+        # ADR-041 addendum: same "this ELF dump CLI path reaches dumper.dump
+        # directly, not service.run_dump" attach point as G14/G23/G26 above —
+        # service._attach_header_graph is the exact wrapper service.run_dump uses
+        # for `compare`'s implicit-dump path, reused verbatim so a written
+        # snapshot's embedded graph is identical either way. A no-op unless
+        # --header-graph was passed and headers were parsed. Pass eff_includes
+        # (seed_l2_includes' output), not the raw includes argument: when
+        # --sources/--build-info seeded build-derived include dirs above (no
+        # explicit -I given) the main dump() call already sees them via
+        # `eff_includes + inc_extra`, but this second, independent clang pass
+        # would otherwise resolve headers with only the user's explicit -I,
+        # silently degrading to a declaration-only graph (no type/call edges)
+        # even though the main snapshot parsed cleanly (Codex review).
+        if header_graph:
+            from .service import _attach_header_graph
+
+            # effective_gcc_options folds in the -p/--compile-db-derived -D/-I/
+            # -std flags (_merge_gcc_options, above the main dump() call) that
+            # `compile_context` itself does not carry -- it was resolved earlier,
+            # from the plain --gcc-options CLI value only. Without this, a header
+            # that only parses successfully with those compile-DB flags would
+            # produce a valid main snapshot while this second clang pass parses
+            # it without them and silently degrades to a declaration-only graph
+            # (Codex review).
+            header_graph_compile_context = compile_context
+            if effective_gcc_options != (
+                compile_context.gcc_options if compile_context is not None else None
+            ):
+                import dataclasses
+
+                if compile_context is not None:
+                    header_graph_compile_context = dataclasses.replace(
+                        compile_context, gcc_options=effective_gcc_options
+                    )
+                else:
+                    from .service_scan import CompileContext
+
+                    header_graph_compile_context = CompileContext(
+                        gcc_options=effective_gcc_options
+                    )
+
+            snap = _attach_header_graph(
+                snap,
+                header_graph,
+                header_graph_includes,
+                list(headers),
+                list(eff_includes),
+                lang,
+                header_graph_compile_context,
+                list(public_headers),
+                list(public_header_dirs),
+            )
+    finally:
+        # The header-graph pass above (when requested) reuses the same seeded
+        # include dirs the main dump() parse used, so cleanup must wait until
+        # it (and everything else in this post-dump pipeline that could raise
+        # first) has run — releasing right after dump() alone would leak the
+        # temp dir on an exception from build-context/Python/NumPy enrichment
+        # before the header-graph pass is ever reached (Codex review). One
+        # try/finally around the whole pipeline drains the cleanup exactly
+        # once, on every exit path.
+        if _l2_pending_cleanups:
+            _run_cleanups(_l2_pending_cleanups)
 
     if follow_deps:
         populate_dependency_info(

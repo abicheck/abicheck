@@ -1,0 +1,80 @@
+{
+  "coverage": {},
+  "degraded_passes": {},
+  "edges": [
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "dst": "decl:demo::compute",
+      "edge": "SOURCE_DECLARES",
+      "provenance": "",
+      "src": "hdr:include/demo/api.h"
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "dst": "decl:demo::compute",
+      "edge": "DECL_REFERENCES_DECL",
+      "provenance": "",
+      "src": "decl:demo::compute"
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "dst": "decl:detail::kInternalLimit",
+      "edge": "DECL_REFERENCES_DECL",
+      "provenance": "",
+      "src": "decl:demo::compute"
+    }
+  ],
+  "external_graph_refs": [],
+  "extractor_passes": {},
+  "graph_id": "sha256:d767284742fc4dd40aaaa0d003e4401ce2b571f78570c71b1200a558ae494581",
+  "indexes": {
+    "by_binary_symbol": {},
+    "by_file": {},
+    "by_source_decl": {
+      "decl:demo::compute": [
+        "decl:demo::compute",
+        "hdr:include/demo/api.h"
+      ],
+      "decl:detail::kInternalLimit": [
+        "decl:demo::compute"
+      ]
+    },
+    "by_target": {}
+  },
+  "narrowed_passes": {},
+  "narrowed_scope": {},
+  "nodes": [
+    {
+      "attrs": {
+        "visibility": "public_header"
+      },
+      "confidence": "unknown",
+      "id": "decl:demo::compute",
+      "kind": "source_decl",
+      "label": "demo::compute()",
+      "provenance": ""
+    },
+    {
+      "attrs": {
+        "visibility": "private_header"
+      },
+      "confidence": "unknown",
+      "id": "decl:detail::kInternalLimit",
+      "kind": "source_decl",
+      "label": "detail::kInternalLimit",
+      "provenance": ""
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "id": "hdr:include/demo/api.h",
+      "kind": "header",
+      "label": "demo/api.h",
+      "provenance": ""
+    }
+  ],
+  "schema_version": 1
+}

@@ -279,7 +279,7 @@ def test_special_cli_cases_require_direct_cli_results() -> None:
         runtime=None,
     )
     rows = [row for row in result["results"] if row["case_id"] in special.CASE_IDS]
-    assert len(rows) == 26
+    assert len(rows) == len(special.CASE_IDS)
     assert all(row["status"] == "COVERED" for row in rows)
     assert all(row["proof_lane"] == "special-abicheck-cli" for row in rows)
     assert all(row["provenance"] == "abicheck-cli-workflow" for row in rows)

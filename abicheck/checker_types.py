@@ -93,6 +93,17 @@ class Change:
     # bucket so the D9 split partitions the reported findings. ``None`` for
     # ordinary artifact-backed findings.
     evidence_category: str | None = None
+    # ADR-041 P0 roadmap item 2 — set by
+    # source_graph_findings._internal_dependency_findings when this
+    # PUBLIC_API_INTERNAL_DEPENDENCY_ADDED finding correlates with the *same*
+    # public entry's own body/type-hash change this version (an
+    # inline_body_changed/template_body_changed/public_typedef_target_changed
+    # finding from source_diff.diff_source_abi). Carries that correlated
+    # finding's ChangeKind value (e.g. "inline_body_changed") so a JSON/SARIF/
+    # policy consumer can act on the correlation directly instead of parsing
+    # it out of ``description`` prose. ``None`` when there is no correlated
+    # change, or for every finding kind that does not compute one.
+    correlated_change_kind: str | None = None
 
 
 @dataclass

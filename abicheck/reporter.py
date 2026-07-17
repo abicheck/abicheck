@@ -806,6 +806,13 @@ def _change_to_dict(
         eff = getattr(c, "effective_verdict", None)
         if isinstance(eff, Verdict):
             d["effective_verdict"] = eff.value
+    # ADR-041 P0 roadmap item 2 — this finding correlates with another
+    # finding (currently: PUBLIC_API_INTERNAL_DEPENDENCY_ADDED correlating
+    # with the same entry's own body/type-hash change), named by ChangeKind
+    # value so a machine consumer can act on it without parsing description.
+    correlated = getattr(c, "correlated_change_kind", None)
+    if correlated:
+        d["correlated_change_kind"] = correlated
     return d
 
 

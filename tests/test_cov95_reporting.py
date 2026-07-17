@@ -204,6 +204,28 @@ class TestReporterChangeToDict:
         assert d["severity"] == "unknown"
         assert d["kind"] == ""
 
+    def test_change_to_dict_surfaces_correlated_change_kind(self) -> None:
+        # ADR-041 P0 roadmap item 2: a structured, machine-readable sibling
+        # to the description-prose correlation source_graph_findings emits.
+        from abicheck.reporter import _change_to_dict
+
+        c = _change(
+            ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED,
+            "demo::compute",
+            correlated_change_kind=ChangeKind.INLINE_BODY_CHANGED.value,
+        )
+        d = _change_to_dict(c, policy="strict_abi")
+        assert d["correlated_change_kind"] == "inline_body_changed"
+
+    def test_change_to_dict_omits_correlated_change_kind_when_unset(self) -> None:
+        from abicheck.reporter import _change_to_dict
+
+        d = _change_to_dict(
+            _change(ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED, "demo::compute"),
+            policy="strict_abi",
+        )
+        assert "correlated_change_kind" not in d
+
 
 class TestReporterJsonLeaf:
     def test_leaf_json_severity_from_sets(self) -> None:

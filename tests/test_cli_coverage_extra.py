@@ -88,6 +88,35 @@ class TestDumpNativeBinary:
                 "--follow-deps on PE should emit a warning"
             )
 
+    def test_dump_pe_header_graph_flag_reaches_native_dump(self, tmp_path: Path) -> None:
+        """--header-graph/--header-graph-includes on a PE `dump` reach
+        _dump_native_binary (-> service.run_dump), which is the single place
+        that attaches the header-only graph uniformly across ELF/PE/Mach-O.
+        Regression for a bug where only the ELF dump path forwarded these
+        flags and PE/Mach-O silently ignored --header-graph (Codex review)."""
+        from abicheck.model import AbiSnapshot
+
+        pe_file = tmp_path / "test.dll"
+        pe_file.write_bytes(_make_pe_bytes())
+        mock_snap = AbiSnapshot(library="test.dll", version="1.0", platform="pe")
+
+        captured: dict[str, object] = {}
+
+        def _fake_dump_native(*args, **kwargs):
+            captured.update(kwargs)
+            return mock_snap
+
+        with patch("abicheck.cli._detect_binary_format", return_value="pe"), \
+             patch("abicheck.cli._dump_native_binary", side_effect=_fake_dump_native):
+            runner = CliRunner()
+            result = runner.invoke(main, [
+                "dump", str(pe_file), "--version", "1.0",
+                "--header-graph", "--header-graph-includes",
+            ])
+            assert result.exit_code == 0, result.output
+            assert captured.get("header_graph") is True
+            assert captured.get("header_graph_includes") is True
+
     def test_dump_pe_to_file(self, tmp_path: Path) -> None:
         """PE dump with --output writes JSON file."""
         pe_file = tmp_path / "test.dll"

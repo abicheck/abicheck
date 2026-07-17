@@ -219,6 +219,137 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   original `GLIBC` one, still requires an explicit `--env-matrix`
   declaration) remain planned — see the G27 plan's "Out of scope"/status
   note.
+
+- **`examples/case187`–`case191`**: five new L5 fixture cases covering the
+  full `DEPENDENCY_EDGE_KINDS` family behind `public_api_internal_dependency_added`
+  — `TYPE_HAS_FIELD_TYPE` (case187, ADR-041's own headline example),
+  `TYPE_INHERITS` (case188), `DECL_HAS_TYPE` (case189),
+  `DECL_REFERENCES_DECL` (case190, ADR-041's other headline example,
+  verbatim), and the same case187 finding proven entirely through the
+  header-only-graph addendum with no build integration (case191).
+
+- **`tests/test_dependency_edge_coverage_properties.py`**: Hypothesis-driven
+  metamorphic property tests for `_common_dependency_edge_kinds`'s
+  coverage-honesty bookkeeping (pass-confirmation / narrowed-scope-matching /
+  identical-edges-never-fabricate-a-finding), randomizing the combination
+  space against an oracle derived independently from the documented rules —
+  complements the existing hand-picked example tests in
+  `test_l3l4l5_new_kinds.py`, which each fix one combination at a time.
+
+- **`Change.correlated_change_kind`**: a structured, machine-readable
+  sibling to the description-prose correlation
+  `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` findings already carried (ADR-041
+  P0 roadmap item 2) — carries the correlated body/type-hash change's
+  `ChangeKind` value (e.g. `"inline_body_changed"`) so a JSON/SARIF/
+  policy-file consumer can act on the correlation without parsing it out of
+  `description` text. Surfaced in both the `--format json` report
+  (`report_schema_version` 2.5) and `--format sarif`
+  (`properties.correlatedChangeKind`).
+
+- **PR-scoped scans now also replay a public entry impacted only through
+  the L5 dependency graph.** `scan`'s replay-seed focusing
+  (`--since`/`--changed-path`) previously resolved only the export-delta
+  half of ADR-035 D7 (`resolve_symbol_tus`: a changed export → its
+  declaring TU). It now also resolves the mirror-image half (ADR-041 P1
+  #3, `resolve_changed_paths_public_impact`, previously implemented and
+  unit-tested but unused by any scan path): a public entry whose own
+  export/declaration is untouched by the diff, but whose struct field/
+  base/parameter type or inline body transitively reaches a file the diff
+  *did* change, is now also replayed — closing a gap where a narrowed
+  PR-scoped replay could silently skip such an entry.
+
+- **`dump --header-graph`/`--header-graph-includes`**: the header-only
+  semantic graph (ADR-041 addendum) was previously only reachable from
+  `compare`'s implicit dump-from-binary path; the standalone `dump` command
+  now embeds it directly in the written snapshot too, via the same shared
+  `header_graph_options` decorator `compare` uses (so the two flags and
+  their help text can never drift) and the same `service._attach_header_graph`
+  post-processing step `service.run_dump` already applied — `dumper.py`
+  itself needed no change. Now wired uniformly across ELF, PE, and Mach-O
+  (the PE/Mach-O `dump` path forwards the flags into `service.run_dump` the
+  same way ELF does — previously only ELF forwarded them, so `--header-graph`
+  silently no-opped on `.dll`/`.dylib` input, Codex review); `scan` is not yet
+  wired.
+- **Fix**: `dump --header-graph` combined with `--build-info`/`--sources`
+  under an L3-only collect mode (no L4/L5 source collection attempted) no
+  longer silently drops the just-attached header-only graph. The build/source
+  embed step (`embed_build_source`) previously always overwrote
+  `snap.build_source` with its own merged pack, which carries no L5 graph of
+  its own in the L3-only case — the written snapshot would then lack the very
+  graph `--header-graph` was asked to produce. The embed step now backfills
+  its merged pack's `source_graph` (and L5 coverage row) from the pre-existing
+  header-only pack only when the merge produced none of its own, never
+  overriding a genuine `--sources` L5 collection (Codex review).
+- **Fix**: `dump --header-graph` on the ELF path silently degraded to a
+  declaration-only graph (no type/call edges) whenever `--sources`/
+  `--build-info` seeded build-derived include dirs with no explicit `-I`
+  given — the main snapshot parse already sees those seeded dirs, but the
+  separate `--header-graph` clang pass previously only received the raw
+  `--include` argument, missing the seeded dirs a dependency-SDK header
+  might need to resolve. `perform_elf_dump` now passes the same effective
+  include list to both passes (Codex review).
+- **Fix**: `dump --header-graph` combined with `-p`/`--compile-db` on the ELF
+  path silently dropped the compile database's derived `-D`/`-I`/`-std`
+  flags from the header-graph pass. The main header parse folds those flags
+  into `effective_gcc_options`, but the `--header-graph` clang pass reused
+  the unmerged `compile_context` (resolved earlier from the plain
+  `--gcc-options` CLI value only), so a header that only parses successfully
+  with the compile-DB flags produced a valid main snapshot while the graph
+  pass silently degraded to declaration-only. `perform_elf_dump` now builds
+  a `compile_context` with `effective_gcc_options` for the header-graph
+  attach when the two differ (Codex review).
+- **Fix**: `dump --header-graph` on the ELF path could still silently degrade
+  to a declaration-only graph for a `--sources`/`--build-info`-seeded
+  inferred-build temp directory: `seed_l2_includes`'s temp build dir was
+  cleaned up in a `finally` right after the main `dump()` parse, before the
+  separate `--header-graph` clang pass (which reuses the same seeded include
+  dirs) ever ran — so that second pass could be handed a directory that no
+  longer existed. `perform_elf_dump` now defers that cleanup until after the
+  header-graph attach has consumed the seeded dirs, only cleaning up
+  immediately when there is no header-graph pass to wait for, or the main
+  parse itself failed (Codex review).
+- **Fix**: the deferred `--header-graph` cleanup above only protected the
+  window up to the header-graph attach itself — an exception from the
+  build-context/Python-extension/Python-API/NumPy-C-API enrichment steps that
+  run *before* it (all part of the same post-dump pipeline) still leaked the
+  seeded temp build dir, since neither the main `dump()` `finally` nor the
+  header-graph attach's own cleanup would ever run. `perform_elf_dump` now
+  wraps the entire post-dump pipeline in one outer `try`/`finally` that drains
+  the cleanup exactly once, on every exit path (CodeRabbit review).
+- **Fix**: `embed_build_source`'s backfill of a pre-existing header-only
+  `source_graph` (see the L3-only fix above) left `manifest.artifacts`
+  pointing at the pre-backfill digests. `BuildSourcePack.content_hash()`
+  prefers a non-empty `manifest.artifacts` over recomputing it, so two packs
+  with identical L3 facts but genuinely different backfilled graphs could
+  hash identically — silently breaking the content-addressed reference
+  `dump`/`compare` rely on to tell distinct evidence packs apart. The backfill
+  now clears `manifest.artifacts` so `content_hash()` recomputes it from the
+  current payloads, including the adopted graph (CodeRabbit review).
+- **Fix**: `scan`'s public-entry impact closure (`_resolve_public_impact_tus`,
+  the ADR-041 P1 #3 replay-seed extension) only ever contributed *one* file
+  per impacted declaration — its single declaring header via a shared
+  first-match lookup, falling back to its `def_file`/`source_location` attr
+  only when no declaring edge existed at all. A declaration that is both
+  declared in a public header *and* defined out-of-line in a separate
+  implementation file therefore only ever seeded the header, silently
+  dropping the implementation TU from the replay scope whenever a declaring
+  edge also existed — so a body-only change in that TU would never get
+  replayed for this public entry. Now accumulates every `SOURCE_DECLARES`
+  edge into the impacted set *and* unconditionally checks each entry's own
+  `def_file`/`source_location` attr, exactly mirroring
+  `resolve_symbol_tus`'s own accumulation (CodeRabbit review).
+- **Fix**: `resolve_changed_paths_public_impact` (the *input* side of the
+  impact closure above — which internal decls count as "changed") judged a
+  decl "changed" via `decl_declaring_files()`, which keeps only the *first*
+  `SOURCE_DECLARES` edge per decl. A decl declared/defined from more than one
+  file (e.g. a forward declaration in one header and the full definition in
+  another) was therefore only recognized as changed when its first-recorded
+  declaring file happened to be in `--changed-path` — a change to a *different*
+  one of its declaring files was silently invisible to the whole walk, so no
+  dependent public entries were ever flagged as impacted. Now walks every
+  `SOURCE_DECLARES` edge directly instead of the single-file lookup (Codex
+  review).
+
 - `compare --help-all`: a second-level `--help` disclosure tier (G21.8
   collapse M2). Plain `compare --help` now shows only a curated common
   subset of the ~62 options (inputs, output/format, `--show-only`, policy,
@@ -228,6 +359,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `--help-all` for the full surface. Every option keeps working unqualified
   either way — this only changes default help-screen visibility, not
   behavior.
+
+### Documentation
+
+- `docs/concepts/build-source-data.md` now documents the ADR-041 P0
+  type-graph edge family (`TYPE_INHERITS`/`TYPE_HAS_FIELD_TYPE`/
+  `DECL_HAS_TYPE`/`DECL_REFERENCES_DECL`, folded by `type_graph.py`
+  alongside the call graph) and the header-only-graph addendum
+  (`header_graph.py`, `service.run_dump(header_graph=True)`) — previously
+  documented only in the ADR text and module docstrings.
 
 ### Changed
 

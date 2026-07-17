@@ -167,9 +167,9 @@ class TestEvidenceStatusInJson:
         d = json.loads(to_json(r))
         assert d["changes"][0]["evidence_status"] == "not_checkable"
 
-    def test_report_schema_version_is_2_4(self):
+    def test_report_schema_version_is_2_5(self):
         d = json.loads(to_json(_result(Verdict.NO_CHANGE)))
-        assert d["report_schema_version"] == "2.4"
+        assert d["report_schema_version"] == "2.5"
 
     def test_change_operation_field(self):
         added = Change(ChangeKind.FUNC_ADDED, "s1", "added")

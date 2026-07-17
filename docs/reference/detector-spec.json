@@ -1764,7 +1764,7 @@
       "severity": "warning",
       "min_evidence": "L5",
       "doc_slug": "public_api_internal_dependency_added",
-      "examples": "case160_public_api_internal_dep_added"
+      "examples": "case160_public_api_internal_dep_added,case187_public_struct_private_field_type,case188_public_class_private_base_class,case189_public_function_private_parameter_type,case190_public_inline_function_references_internal_constant,case191_header_only_graph_field_type"
     },
     {
       "kind": "public_macro_removed",

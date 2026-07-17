@@ -1,0 +1,66 @@
+{
+  "coverage": {},
+  "degraded_passes": {},
+  "edges": [
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "dst": "type:demo::Config",
+      "edge": "SOURCE_DECLARES",
+      "provenance": "",
+      "src": "hdr:include/demo/config.h"
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "dst": "type:detail::RawConfig",
+      "edge": "TYPE_HAS_FIELD_TYPE",
+      "provenance": "",
+      "src": "type:demo::Config"
+    }
+  ],
+  "external_graph_refs": [],
+  "extractor_passes": {
+    "header_type_graph": true
+  },
+  "graph_id": "sha256:96bb79e92895f1bfaa269c6292129aa562091dbb4b522a0588d98b522b32d704",
+  "indexes": {
+    "by_binary_symbol": {},
+    "by_file": {},
+    "by_source_decl": {},
+    "by_target": {}
+  },
+  "narrowed_passes": {},
+  "narrowed_scope": {},
+  "nodes": [
+    {
+      "attrs": {
+        "visibility": "public_header"
+      },
+      "confidence": "unknown",
+      "id": "type:demo::Config",
+      "kind": "record_type",
+      "label": "demo::Config",
+      "provenance": ""
+    },
+    {
+      "attrs": {
+        "visibility": "private_header"
+      },
+      "confidence": "unknown",
+      "id": "type:detail::RawConfig",
+      "kind": "record_type",
+      "label": "detail::RawConfig",
+      "provenance": ""
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "id": "hdr:include/demo/config.h",
+      "kind": "header",
+      "label": "demo/config.h",
+      "provenance": ""
+    }
+  ],
+  "schema_version": 1
+}

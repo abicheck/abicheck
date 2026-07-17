@@ -211,6 +211,77 @@ def test_non_elf_dump_success_stamps_and_writes(tmp_path: Path) -> None:
     assert written[3] == "clang"  # extractor threaded through
 
 
+def test_non_elf_dump_forwards_header_graph_flags(tmp_path: Path) -> None:
+    """--header-graph/--header-graph-includes reach dump_native_binary on the
+    PE/Mach-O path — previously only perform_elf_dump forwarded them, so
+    `dump --header-graph` silently no-opped on non-ELF input (Codex review)."""
+    so = tmp_path / "lib.dylib"
+    snap = AbiSnapshot(library="lib.dylib", version="1.0")
+
+    calls: dict[str, object] = {}
+
+    def _dump_native(*a, **k):  # noqa: ANN002, ANN003
+        calls["dump_kwargs"] = k
+        return snap
+
+    handle_non_elf_dump(
+        so,
+        "macho",
+        (),
+        (),
+        "1.0",
+        "c++",
+        None,
+        False,
+        None,
+        None,
+        False,
+        None,
+        _dump_native,
+        _noop_stamp,
+        _record_write,
+        header_graph=True,
+        header_graph_includes=True,
+    )
+    kwargs = calls["dump_kwargs"]
+    assert kwargs["header_graph"] is True
+    assert kwargs["header_graph_includes"] is True
+
+
+def test_non_elf_dump_defaults_header_graph_off(tmp_path: Path) -> None:
+    """Without --header-graph, dump_native_binary sees the flag as False (default),
+    matching the ELF path's default-off behavior."""
+    so = tmp_path / "lib.dll"
+    snap = AbiSnapshot(library="lib.dll", version="1.0")
+
+    calls: dict[str, object] = {}
+
+    def _dump_native(*a, **k):  # noqa: ANN002, ANN003
+        calls["dump_kwargs"] = k
+        return snap
+
+    handle_non_elf_dump(
+        so,
+        "pe",
+        (),
+        (),
+        "1.0",
+        "c++",
+        None,
+        False,
+        None,
+        None,
+        False,
+        None,
+        _dump_native,
+        _noop_stamp,
+        _record_write,
+    )
+    kwargs = calls["dump_kwargs"]
+    assert kwargs["header_graph"] is False
+    assert kwargs["header_graph_includes"] is False
+
+
 def test_non_elf_dump_follow_deps_warns(tmp_path: Path, capsys) -> None:
     """--follow-deps is ELF-only; the native path emits a stderr warning (line 244)."""
     so = tmp_path / "lib.dylib"
@@ -346,6 +417,294 @@ def test_perform_elf_dump_stamps_build_context_and_attaches(
     assert "populated" not in events  # follow_deps was False
 
 
+def test_perform_elf_dump_attaches_header_graph_when_requested(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """ADR-041 addendum: with header_graph=True, perform_elf_dump calls
+    service._attach_header_graph (the same wrapper service.run_dump uses for
+    `compare`'s implicit-dump path) with the raw headers, the L2-seeded
+    includes (see test_perform_elf_dump_header_graph_receives_seeded_includes
+    for the seeded-vs-raw distinction), lang/compile_context/public_headers/
+    public_header_dirs it was given, and writes the wrapper's returned
+    (possibly different) snapshot object. compile_context is passed through
+    unmodified here because effective_gcc_options (None, no -p/--compile-db
+    in this call) already matches compile_context.gcc_options — see
+    test_perform_elf_dump_header_graph_gets_compile_db_flags for the case
+    where they differ and a replacement context is built."""
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "h.h"
+    hdr.write_text("struct S { int x; };\n", encoding="utf-8")
+
+    plain_snap = AbiSnapshot(library="lib.so", version="1.0")
+    graphed_snap = AbiSnapshot(library="lib.so", version="1.0")
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", lambda **_kw: plain_snap)
+
+    captured: dict[str, object] = {}
+
+    def fake_attach(
+        snap,
+        header_graph,
+        header_graph_includes,
+        headers,
+        includes,
+        lang,
+        compile_context,
+        public_headers,
+        public_header_dirs,
+    ):
+        captured["snap"] = snap
+        captured["header_graph"] = header_graph
+        captured["header_graph_includes"] = header_graph_includes
+        captured["headers"] = headers
+        captured["includes"] = includes
+        captured["lang"] = lang
+        captured["compile_context"] = compile_context
+        captured["public_headers"] = public_headers
+        captured["public_header_dirs"] = public_header_dirs
+        return graphed_snap
+
+    monkeypatch.setattr("abicheck.service._attach_header_graph", fake_attach)
+
+    events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+
+    def _write_and_capture(snap, *a, **k):  # noqa: ANN001, ANN002, ANN003
+        captured["written_snap"] = snap
+        _write(snap, *a, **k)
+
+    from abicheck.service_scan import CompileContext
+
+    sentinel_cc = CompileContext()
+
+    perform_elf_dump(
+        so,
+        (hdr,),
+        (),
+        "1.0",
+        "c++",
+        None,
+        None,
+        None,
+        (),
+        None,
+        True,
+        False,
+        None,
+        (),
+        (),
+        None,
+        False,
+        (),
+        "",
+        None,
+        None,
+        False,
+        None,
+        None,
+        None,
+        None,
+        False,
+        "off",
+        _expand,
+        _populate,
+        _stamp,
+        _write_and_capture,
+        header_graph=True,
+        header_graph_includes=True,
+        compile_context=sentinel_cc,
+    )
+
+    assert captured["header_graph"] is True
+    assert captured["header_graph_includes"] is True
+    assert captured["headers"] == [hdr]
+    assert captured["lang"] == "c++"
+    assert captured["compile_context"] is sentinel_cc
+    assert captured["snap"] is plain_snap
+    # The wrapper's returned snapshot (not the original) is what gets written.
+    assert captured["written_snap"] is graphed_snap
+
+
+def test_perform_elf_dump_header_graph_receives_seeded_includes(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """When --sources/--build-info seeds build-derived L2 include dirs (no
+    explicit -I given), the header-graph attach must see those seeded dirs
+    too, not just the raw --include argument. The main dump() call already
+    gets `eff_includes + inc_extra`; previously `_attach_header_graph` only
+    received the raw `includes` tuple, so its independent second clang pass
+    could silently degrade to a declaration-only graph on a header that
+    needs a build-seeded -I (e.g. a dependency SDK), even though the main
+    snapshot parsed cleanly (Codex review)."""
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "h.h"
+    hdr.write_text("struct S { int x; };\n", encoding="utf-8")
+    seeded = tmp_path / "buildinc"
+    seeded.mkdir()
+
+    plain_snap = AbiSnapshot(library="lib.so", version="1.0")
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", lambda **_kw: plain_snap)
+    monkeypatch.setattr(
+        "abicheck.buildsource.l2_seed.seed_l2_includes",
+        lambda **_kw: ([seeded], []),
+    )
+
+    captured: dict[str, object] = {}
+
+    def fake_attach(
+        snap, header_graph, header_graph_includes, headers, includes,
+        lang, compile_context, public_headers, public_header_dirs,
+    ):  # noqa: ANN001
+        captured["includes"] = includes
+        return snap
+
+    monkeypatch.setattr("abicheck.service._attach_header_graph", fake_attach)
+
+    events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+
+    perform_elf_dump(
+        so, (hdr,), (), "1.0", "c++", None, None, None, (), None, True, False, None,
+        (), (), None, False, (), "", None, None, False, None, None, None, None,
+        False, "build", _expand, _populate, _stamp, _write,
+        header_graph=True, header_graph_includes=False,
+    )
+
+    assert seeded in captured["includes"]
+
+
+def test_perform_elf_dump_header_graph_gets_compile_db_flags(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """When -p/--compile-db derives extra -D/-I/-std flags, effective_gcc_options
+    (folded from those flags, above the main dump() call) must reach the
+    header-graph attach's compile_context too. compile_context itself was
+    resolved earlier from the plain --gcc-options CLI value only, so without
+    this fix a header that only parses with the compile-DB flags would produce
+    a valid main snapshot while the second, independent clang pass building
+    the header graph parsed without them and silently degraded to a
+    declaration-only graph (Codex review)."""
+    from abicheck.service_scan import CompileContext
+
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "h.h"
+    hdr.write_text("struct S { int x; };\n", encoding="utf-8")
+
+    plain_snap = AbiSnapshot(library="lib.so", version="1.0")
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", lambda **_kw: plain_snap)
+
+    captured: dict[str, object] = {}
+
+    def fake_attach(
+        snap, header_graph, header_graph_includes, headers, includes,
+        lang, compile_context, public_headers, public_header_dirs,
+    ):  # noqa: ANN001
+        captured["compile_context"] = compile_context
+        return snap
+
+    monkeypatch.setattr("abicheck.service._attach_header_graph", fake_attach)
+
+    events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+    original_cc = CompileContext(gcc_options="-DFOO")
+
+    perform_elf_dump(
+        so, (hdr,), (), "1.0", "c++", None, None,
+        "-DFROM_COMPILE_DB -DFOO",  # effective_gcc_options (compile-db-merged)
+        (), None, True, False, None, (), (), None, False, (), "", None, None,
+        False, None, None, None, None, False, "off", _expand, _populate,
+        _stamp, _write,
+        header_graph=True, header_graph_includes=False,
+        compile_context=original_cc,
+    )
+
+    got = captured["compile_context"]
+    assert got is not original_cc  # a new context was built, not mutated in place
+    assert got.gcc_options == "-DFROM_COMPILE_DB -DFOO"
+    # Every other field carries over from the original context unchanged.
+    assert got.gcc_path == original_cc.gcc_path
+    assert got.frontend == original_cc.frontend
+    # The original passed-in context itself must stay untouched (frozen dataclass).
+    assert original_cc.gcc_options == "-DFOO"
+
+
+def test_perform_elf_dump_header_graph_builds_context_when_none_given(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Same compile-DB-flags scenario as
+    test_perform_elf_dump_header_graph_gets_compile_db_flags, but with no
+    compile_context at all (None) -- e.g. a caller that never resolved one.
+    effective_gcc_options must still reach the header-graph attach by
+    constructing a fresh CompileContext, not silently dropping the flags
+    because there was nothing to dataclasses.replace()."""
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "h.h"
+    hdr.write_text("struct S { int x; };\n", encoding="utf-8")
+
+    plain_snap = AbiSnapshot(library="lib.so", version="1.0")
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", lambda **_kw: plain_snap)
+
+    captured: dict[str, object] = {}
+
+    def fake_attach(
+        snap, header_graph, header_graph_includes, headers, includes,
+        lang, compile_context, public_headers, public_header_dirs,
+    ):  # noqa: ANN001
+        captured["compile_context"] = compile_context
+        return snap
+
+    monkeypatch.setattr("abicheck.service._attach_header_graph", fake_attach)
+
+    events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+
+    perform_elf_dump(
+        so, (hdr,), (), "1.0", "c++", None, None,
+        "-DFROM_COMPILE_DB",  # effective_gcc_options, no compile_context given
+        (), None, True, False, None, (), (), None, False, (), "", None, None,
+        False, None, None, None, None, False, "off", _expand, _populate,
+        _stamp, _write,
+        header_graph=True, header_graph_includes=False,
+        # compile_context defaults to None
+    )
+
+    got = captured["compile_context"]
+    assert got is not None
+    assert got.gcc_options == "-DFROM_COMPILE_DB"
+
+
+def test_perform_elf_dump_skips_header_graph_by_default(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """header_graph defaults to False: _attach_header_graph must not be called
+    at all, and the plain snapshot from dump() is written unmodified."""
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "h.h"
+    hdr.write_text("struct S { int x; };\n", encoding="utf-8")
+
+    plain_snap = AbiSnapshot(library="lib.so", version="1.0")
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", lambda **_kw: plain_snap)
+
+    called = {"attach": False}
+
+    def fake_attach(*a, **k):  # noqa: ANN002, ANN003
+        called["attach"] = True
+        raise AssertionError("_attach_header_graph must not be called")
+
+    monkeypatch.setattr("abicheck.service._attach_header_graph", fake_attach)
+
+    events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+    written: dict[str, object] = {}
+
+    def _write_and_capture(snap, *a, **k):  # noqa: ANN001, ANN002, ANN003
+        written["snap"] = snap
+        _write(snap, *a, **k)
+
+    perform_elf_dump(
+        so, (hdr,), (), "1.0", "c", None, None, None, (), None, True, False, None,
+        (), (), None, False, (), "", None, None, False, None, None, None, None,
+        False, "off", _expand, _populate, _stamp, _write_and_capture,
+    )
+
+    assert called["attach"] is False
+    assert written["snap"] is plain_snap
+
+
 def test_perform_elf_dump_seeds_l2_includes_and_runs_cleanup(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -387,6 +746,141 @@ def test_perform_elf_dump_seeds_l2_includes_and_runs_cleanup(
     assert captured["allow"] is True  # collect_mode "build" → inferred query allowed
     assert seeded in captured["extra_includes"]  # build dir reached the header parse
     assert events == ["dump", "cleanup"]  # cleanup drained after the parse
+
+
+def test_perform_elf_dump_defers_l2_cleanup_until_after_header_graph(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """With --header-graph, the seeded temp build dir must survive past the main
+    dump() parse: _attach_header_graph reuses the same seeded include dirs for
+    its own independent clang pass, so cleaning up right after dump() (the
+    plain seeds_l2_includes_and_runs_cleanup ordering above) would hand that
+    second pass a directory that is already gone, silently degrading the
+    graph for inferred-build cases with generated/dependency headers (Codex
+    review). Cleanup must instead run after the header-graph attach."""
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "h.h"
+    hdr.write_text("struct S { int x; };\n", encoding="utf-8")
+    seeded = tmp_path / "buildinc"
+    seeded.mkdir()
+
+    events: list[str] = []
+    plain_snap = AbiSnapshot(library="lib.so", version="1.0")
+
+    def fake_seed(**kwargs):
+        return [seeded], [lambda: events.append("cleanup")]
+
+    def fake_dump(**kw):
+        events.append("dump")
+        return plain_snap
+
+    def fake_attach(*a, **k):  # noqa: ANN002, ANN003
+        events.append("attach")
+        return plain_snap
+
+    monkeypatch.setattr("abicheck.buildsource.l2_seed.seed_l2_includes", fake_seed)
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
+    monkeypatch.setattr("abicheck.service._attach_header_graph", fake_attach)
+
+    _events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+
+    perform_elf_dump(
+        so, (hdr,), (), "1.0", "c", None, None, None, (), None, True, False, None,
+        (), (), None, False, (), "", None, None, False, None, None, tmp_path, None,
+        False, "build", _expand, _populate, _stamp, _write,
+        header_graph=True, header_graph_includes=False,
+    )
+
+    assert events == ["dump", "attach", "cleanup"]
+
+
+def test_perform_elf_dump_cleans_up_when_enrichment_raises_before_header_graph(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """An exception from a post-dump enrichment step (python_ext/python_api/
+    numpy_capi/build-context) that runs BEFORE the --header-graph attach must
+    still release the seeded temp build dir -- deferring cleanup only until
+    "right after dump()" isn't enough; nothing between dump() and the
+    header-graph attach may leak it either (Codex review)."""
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "h.h"
+    hdr.write_text("struct S { int x; };\n", encoding="utf-8")
+    seeded = tmp_path / "buildinc"
+    seeded.mkdir()
+
+    events: list[str] = []
+    plain_snap = AbiSnapshot(library="lib.so", version="1.0")
+
+    def fake_seed(**kwargs):
+        return [seeded], [lambda: events.append("cleanup")]
+
+    def fake_dump(**kw):
+        events.append("dump")
+        return plain_snap
+
+    def _raise_ext(_snap):
+        events.append("python_ext")
+        raise RuntimeError("boom in python_ext detection")
+
+    def fake_attach(*a, **k):  # noqa: ANN002, ANN003
+        raise AssertionError("_attach_header_graph must not be reached")
+
+    monkeypatch.setattr("abicheck.buildsource.l2_seed.seed_l2_includes", fake_seed)
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
+    monkeypatch.setattr("abicheck.python_ext.detect_python_extension", _raise_ext)
+    monkeypatch.setattr("abicheck.service._attach_header_graph", fake_attach)
+
+    _events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+
+    with pytest.raises(RuntimeError, match="boom in python_ext detection"):
+        perform_elf_dump(
+            so, (hdr,), (), "1.0", "c", None, None, None, (), None, True, False, None,
+            (), (), None, False, (), "", None, None, False, None, None, tmp_path, None,
+            False, "build", _expand, _populate, _stamp, _write,
+            header_graph=True, header_graph_includes=False,
+        )
+
+    assert events == ["dump", "python_ext", "cleanup"]
+
+
+def test_perform_elf_dump_no_header_graph_cleans_up_right_after_dump(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Without --header-graph there is no second pass to hold the seeded temp
+    build dir open for, so cleanup must run immediately after dump() as
+    before -- confirms the deferral above is conditional, not a blanket
+    delay."""
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "h.h"
+    hdr.write_text("struct S { int x; };\n", encoding="utf-8")
+    seeded = tmp_path / "buildinc"
+    seeded.mkdir()
+
+    events: list[str] = []
+
+    def fake_seed(**kwargs):
+        return [seeded], [lambda: events.append("cleanup")]
+
+    def fake_dump(**kw):
+        events.append("dump")
+        return AbiSnapshot(library="lib.so", version="1.0")
+
+    def fake_attach(*a, **k):  # noqa: ANN002, ANN003
+        raise AssertionError("_attach_header_graph must not be called")
+
+    monkeypatch.setattr("abicheck.buildsource.l2_seed.seed_l2_includes", fake_seed)
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
+    monkeypatch.setattr("abicheck.service._attach_header_graph", fake_attach)
+
+    _events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+
+    perform_elf_dump(
+        so, (hdr,), (), "1.0", "c", None, None, None, (), None, True, False, None,
+        (), (), None, False, (), "", None, None, False, None, None, tmp_path, None,
+        False, "build", _expand, _populate, _stamp, _write,
+    )
+
+    assert events == ["dump", "cleanup"]
 
 
 def test_perform_elf_dump_detects_python_surfaces_and_follow_deps(
@@ -577,6 +1071,45 @@ def test_perform_elf_dump_wraps_dump_errors(tmp_path: Path, monkeypatch) -> None
             _write,
         )
     assert "written" not in events
+
+
+def test_perform_elf_dump_wraps_dump_errors_still_cleans_up_seeded_dirs(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """When dump() itself raises, any L2-seeded temp build dir must still be
+    released immediately in the except path -- the header-graph attach that
+    would otherwise justify deferring cleanup is never reached on a failed
+    parse, so holding the directory open would leak it."""
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "h.h"
+    hdr.write_text("struct S { int x; };\n", encoding="utf-8")
+    seeded = tmp_path / "buildinc"
+    seeded.mkdir()
+
+    events: list[str] = []
+
+    def fake_seed(**kwargs):
+        return [seeded], [lambda: events.append("cleanup")]
+
+    def _raise(**_kw):
+        events.append("dump")
+        raise AbicheckError("castxml exploded")
+
+    monkeypatch.setattr("abicheck.buildsource.l2_seed.seed_l2_includes", fake_seed)
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", _raise)
+
+    _events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+
+    with pytest.raises(click.ClickException, match="castxml exploded"):
+        perform_elf_dump(
+            so, (hdr,), (), "1.0", "c", None, None, None, (), None, True, False, None,
+            (), (), None, False, (), "", None, None, False, None, None, None, None,
+            False, "off", _expand, _populate, _stamp, _write,
+            header_graph=True,  # even with a header-graph request, the failed
+            # parse never reaches the attach, so cleanup must not be deferred.
+        )
+
+    assert events == ["dump", "cleanup"]
 
 
 # ── evidence_depth_label (CLI-audit P2 self-describing output) ──────────────

@@ -65,6 +65,55 @@ further, independent layer folds pre-captured Kythe/CodeQL backends
 through `graph compare` and the verdict pipeline, and `graph explain`
 localizes a single finding through the graph.
 
+**Beyond calls: non-call type/decl dependencies (ADR-041 P0).** A call graph
+alone misses a real class of risk — a public struct with a private base class
+or private field type, or a public inline function reading an internal
+constant, none of which are *calls*. `type_graph.py`'s Clang-AST pass folds
+in automatically alongside the call graph (same `--source-abi` trigger, no
+extra flag) and populates three further edge kinds the L5 schema had reserved
+since ADR-031 but nothing produced before ADR-041: `TYPE_INHERITS` (a private
+base class), `TYPE_HAS_FIELD_TYPE` (a private field/member type), and
+`DECL_HAS_TYPE` (a private parameter/return type) — plus `DECL_REFERENCES_DECL`
+for a non-call reference (e.g. reading an internal constant). Together with
+`DECL_CALLS_DECL` these five kinds form the **dependency-edge family** that
+`public_api_internal_dependency_added` (below) and the intra-version
+`public_to_internal_dependency` cross-check both walk — "reaches" means any of
+the five, not calls alone. Each kind has a dedicated example:
+[case160](../examples/case160_public_api_internal_dep_added.md) (`DECL_CALLS_DECL`),
+[case187](../examples/case187_public_struct_private_field_type.md)
+(`TYPE_HAS_FIELD_TYPE`, the ADR's own headline example),
+[case188](../examples/case188_public_class_private_base_class.md)
+(`TYPE_INHERITS`), [case189](../examples/case189_public_function_private_parameter_type.md)
+(`DECL_HAS_TYPE`), and [case190](../examples/case190_public_inline_function_references_internal_constant.md)
+(`DECL_REFERENCES_DECL`, the ADR's *other* headline example, verbatim).
+
+**Header-only graph, no build integration (ADR-041 addendum).** `header_graph.py`
+builds the same node/edge shapes straight from a header-only dump — no
+`compile_commands.json`, no `--sources` checkout — via `dump --header-graph`
+(embeds the graph in the written snapshot) or `compare --header-graph`
+(embeds it for both sides in-process); `--header-graph-includes` additionally
+adds `COMPILE_UNIT_INCLUDES_FILE` edges (one extra `clang -M` invocation per
+top-level header). Declaration provenance (public vs. internal) still needs
+`--public-header`/`--public-header-dir`, same as any other dump — without it
+every declaration's visibility is `unknown` and the internal-dependency
+findings below have nothing to classify against. Not yet available on `scan`.
+With a clang header AST (`--ast-frontend clang`) it reuses
+the same Clang-AST extractors for real `TYPE_INHERITS`/`TYPE_HAS_FIELD_TYPE`/
+`DECL_HAS_TYPE`/`DECL_REFERENCES_DECL` edges (plus `DECL_CALLS_DECL` for
+in-header bodies — inline/template/constexpr functions only, since the flat
+model never records out-of-line bodies); without a clang AST (the default
+castxml backend, or clang unavailable) it falls back to deriving the three
+structural type edges directly from the parsed `AbiSnapshot`'s
+`RecordType.bases`/`.fields`/`Function.params` — weaker resolution (bare
+unqualified names, always reduced confidence) but works with any L2 backend.
+Its own `extractor_passes` names (`header_call_graph`/`header_type_graph`) are
+tracked separately from the build-integrated passes so a header-only
+confirmation is never mistaken for a full per-TU pass when judging whether an
+edge kind's absence is a real zero or missing coverage.
+[case191](../examples/case191_header_only_graph_field_type.md) demonstrates
+the same `public_api_internal_dependency_added` finding as case187, proven
+entirely through this no-build-integration path.
+
 > **Source ABI replay (L4) requires clang** (or castxml for the declaration
 > subset, or a pre-captured Android dump). It is the one tier gated on a C++
 > front-end. If the tool is missing, abicheck **fails gracefully**: L4 is marked
@@ -510,7 +559,7 @@ graph-derived **risk** findings (ADR-031 D6):
 | `call_graph_public_entry_reachability_changed` | compatible (quality) | The implementation statically reachable from an exported entry point changed (approximate Clang call graph; needs `--source-abi` + `--source-graph summary`, folded automatically) |
 | `include_graph_public_header_drift` | risk | A public header entered/left the compiled include graph (needs `--source-abi` + `--source-graph summary`, folded automatically) |
 | `build_option_reaches_public_symbol` | risk | A changed ABI-relevant build option feeds a compile unit producing an exported symbol |
-| `public_api_internal_dependency_added` | risk | A public entry newly reaches an internal (non-public) declaration via the call graph ([case160](../examples/case160_public_api_internal_dep_added.md)) |
+| `public_api_internal_dependency_added` | risk | A public entry newly reaches an internal (non-public) declaration/type via a call, a non-call reference, or a field/base/parameter type ([case160](../examples/case160_public_api_internal_dep_added.md): call edge; [case187](../examples/case187_public_struct_private_field_type.md): field type; [case188](../examples/case188_public_class_private_base_class.md): base class; [case189](../examples/case189_public_function_private_parameter_type.md): parameter type; [case190](../examples/case190_public_inline_function_references_internal_constant.md): non-call reference; [case191](../examples/case191_header_only_graph_field_type.md): same finding via the header-only graph, no build integration) |
 | `target_dependency_added` | risk | The library gained an inter-target build/link dependency (new `DT_NEEDED` risk) ([case161](../examples/case161_target_dependency_added.md)) |
 | `exported_symbol_source_owner_changed` | risk | An exported symbol's owning source file/TU moved — implementation relocated behind a stable symbol ([case162](../examples/case162_symbol_source_owner_changed.md)) |
 

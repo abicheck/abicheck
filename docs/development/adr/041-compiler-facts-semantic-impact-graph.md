@@ -4,13 +4,14 @@
 **Status:** Accepted — P0 slice 1 (`type_graph.py`), P0 slice 2 (semantic
 graph diff over the full dependency-edge family), P0 slice 3 (`graph
 explain` proof paths), P0 slice 4 (body/type-hash-change correlation), the
-header-only-graph addendum (`header_graph.py`, no build integration required),
-and P1 items 1, 2, 4, 5 (plugin injection, object/link provenance graph,
+header-only-graph addendum (`header_graph.py`, no build integration required,
+now also reachable from the standalone `dump --header-graph` CLI, not just
+`compare`), and P1 items 1, 2, 3, 4, 5 (plugin injection, object/link
+provenance graph, public-entry impact closure — now wired into `scan`'s
+PR-scoped replay-seed focusing via `resolve_changed_paths_public_impact` —
 per-edge confidence/provenance, and stable cross-clang-version identity)
-implemented; P1 item 3 (public-entry impact closure) has its pure helper
-implemented and tested but not yet wired into any scan/replay path (see that
-item for the open follow-up); the rest of this ADR is a roadmap, not a
-commitment to ship on any timeline.
+implemented; the rest of this ADR is a roadmap, not a commitment to ship on
+any timeline.
 **Decision maker:** Nikolay Petrov (@napetrov)
 
 ---
@@ -900,15 +901,36 @@ declaration-visibility nodes only (no type/call edges) when clang is
 unavailable or the header parse fails — never aborts the dump (ADR-028 D3).
 `service.run_dump` is reachable from `compare`'s implicit dump-from-binary
 resolution and the buildsource merge/collect paths (`cli_resolve.py`,
-`cli_buildsource_helpers.py`), but **not** from the standalone `abicheck dump`
-command, which still calls `dumper.dump()` via its own legacy
-`cli_dump_helpers.py` path rather than `service.run_dump`. Adding a
-`--header-graph` flag to the standalone `dump`/`scan` CLI commands is a
-follow-up, deliberately deferred: `cli.py` and `dumper.py` are both at or near
-their line-count caps (`dumper.py` at 1995/2000 — five lines of margin — is
-where the header AST is produced), so threading a new flag through
-`cli_dump_helpers.perform_elf_dump`/`handle_non_elf_dump` needs its own
-reviewed slice rather than a rushed addition risking the hard cap.
+`cli_buildsource_helpers.py`). **Update:** the standalone `abicheck dump`
+command now also exposes `--header-graph`/`--header-graph-includes` (the
+shared `header_graph_options` decorator in `cli_options.py`, applied to both
+`compare` and `dump` so the two flags can't drift). On the ELF path `dump`
+still calls `dumper.dump()` via its own legacy `cli_dump_helpers.py` path, not
+`service.run_dump` — the resolution avoids `dumper.py`'s line-count cap
+entirely: `perform_elf_dump` calls `service._attach_header_graph` directly as
+a post-processing step on the snapshot `dumper.dump()` already returned, the
+exact same wrapper `service.run_dump` itself uses, so `dumper.py` needed no
+change at all. On the PE/Mach-O path `handle_non_elf_dump` now threads
+`header_graph`/`header_graph_includes` straight through
+`_dump_native_binary` into `service.run_dump`, which already applied the
+same attach step uniformly across all three formats — the flags previously
+reached `service.run_dump`'s own default (`False`), so `--header-graph`
+silently no-opped on `.dll`/`.dylib` input (Codex review, now fixed). Not yet
+on `scan`.
+
+**Fix: header graph vs. `--build-info`/`--sources` on the same `dump`.**
+`cli_dump_helpers` attaches the header graph to `snap.build_source` *before*
+`write_snapshot_output` runs the `--build-info`/`--sources` embed
+(`cli_buildsource.embed_build_source`). That embed step always replaces
+`snap.build_source` with a freshly `_combine_packs`-merged pack built from
+only the build-info/sources inputs — under a collect mode that requests no
+L4/L5 collection (e.g. the L3-only `build` mode), that merged pack carries no
+`source_graph` of its own, so a plain overwrite silently discarded the
+header-only graph the caller explicitly asked for with `--header-graph`. Fixed
+by having `embed_build_source` backfill the merged pack's `source_graph` (and
+its L5 coverage row) from the pre-existing header-only pack, but only when the
+merge produced none of its own — a genuine `--sources` L4/L5 collection still
+always wins (Codex review).
 
 No new `ChangeKind` — same convention as every other graph slice in this ADR:
 this reuses `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` and the intra-version
@@ -1227,21 +1249,23 @@ there is no equivalent "should this be automatic" question for them.
    edges stay reserved (schema-only): true archive-member/per-object-symbol
    enumeration needs a real `ar`/`nm`-equivalent introspection extractor this
    increment does not add.
-3. **Public-entry impact closure.** — **done (pure helper only), this
-   change.** `poi.resolve_changed_paths_public_impact(changed_paths, graph)`
+3. ~~**Public-entry impact closure.**~~ — **done, this change.**
+   `poi.resolve_changed_paths_public_impact(changed_paths, graph)`
    is the reverse of `resolve_symbol_tus` (export delta → declaring TU): given
    a set of changed source paths, it resolves which declarations live in those
    files (via `decl_declaring_files` plus a `def_file`/`source_location`
    fallback) and returns every public entry that either declares directly in
    a changed file or reaches one through `_dependency_reachability`'s forward
-   closure. Unit-tested (`tests/test_poi.py`), but — unlike `resolve_symbol_tus`,
-   which `scan_engine.py` already calls to build the L4 replay seed — **nothing
-   calls this one yet** (Codex review): no scan/source-replay/crosscheck path
-   consumes the returned public-entry set, so the PR-scoped-deep-scan behavior
-   this item originally described ("this PR touches `src/detail/cache.cpp`;
-   only 3 public entries are reachable from it; replay only those") does not
-   actually happen today. Wiring it into `scan_engine.py` alongside
-   `resolve_symbol_tus` (or into a report/advisory surface) remains open.
+   closure. Unit-tested (`tests/test_poi.py`), and now, like `resolve_symbol_tus`,
+   wired into `scan_engine.py`'s replay-seed focusing
+   (`_resolve_public_impact_tus`, mirroring `resolve_symbol_tus`'s own
+   `SOURCE_DECLARES`-edge-or-`def_file`-attr fallback resolution) — the
+   PR-scoped-deep-scan behavior this item originally described ("this PR
+   touches `src/detail/cache.cpp`; only 3 public entries are reachable from
+   it; replay only those") now actually happens: a `--changed-path`/`--since`
+   seeded `scan` also replays any public entry whose own export/declaration
+   is untouched but which transitively depends (a field/base/parameter type
+   or inline body) on a changed file.
 4. ~~**Explicit per-edge confidence/provenance model.**~~ — **done, this
    change.** `type_graph.py`'s `DECL_REFERENCES_DECL` edge (the one edge
    family whose resolution was a same-confidence guess regardless of how the
