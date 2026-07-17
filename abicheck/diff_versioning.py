@@ -462,6 +462,9 @@ _GLIBC_ONLY_SONAMES = frozenset(
         "libnsl.so.1",
         "libutil.so.1",
         "libanl.so.1",
+        # glibc's SIMD vector-math library (glibc 2.22+) — no musl
+        # equivalent (Codex review #583, follow-up).
+        "libmvec.so.1",
     }
 )
 

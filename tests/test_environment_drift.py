@@ -701,6 +701,18 @@ class TestMusllinuxGlibcDependency:
         changes = check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"})
         assert len(changes) == 1
 
+    def test_needed_libmvec_flagged(self) -> None:
+        # Codex review #583, follow-up: glibc's SIMD vector-math library
+        # (libmvec.so.1, glibc 2.22+) has no musl equivalent — a binary
+        # that only needs it (no libc.so.6 DT_NEEDED entry) must still be
+        # flagged.
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(needed=["libmvec.so.1"], versions_required={})
+        changes = check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"})
+        assert len(changes) == 1
+        assert changes[0].new_value == "libmvec.so.1"
+
     def test_glibc_style_interpreter_flagged_without_captured_verneed(self) -> None:
         from abicheck.diff_versioning import check_musllinux_glibc_dependency
 

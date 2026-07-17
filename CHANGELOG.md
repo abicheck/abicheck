@@ -209,6 +209,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `docs/user-guide/mcp-integration.md`'s `ABICHECK_MCP_MAX_FILE_SIZE`
   example value had drifted from `2147483648` (2 GiB) to `2147483668`
   (`/review` finding).
+  `_GLIBC_ONLY_SONAMES` now also includes `libmvec.so.1` — glibc's SIMD
+  vector-math library (glibc 2.22+), which has no musl equivalent; a
+  binary that only needs it (no `libc.so.6` DT_NEEDED entry) previously
+  passed a musllinux claim unflagged (Codex review).
   Windows UCRT/runtime checks, CPU-ISA-baseline detection, the full
   per-tag closure policy, and end-to-end CLI auto-derivation from a
   compared wheel's own filename tag (every check above, including G10's
