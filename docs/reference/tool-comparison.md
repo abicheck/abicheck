@@ -414,29 +414,40 @@ denominator than "accuracy over cases the tool managed to complete," so read
 it as the answer to *"if I pointed this tool at the whole catalog blind, how
 often would it tell me the truth?"*
 
-> **Reproducibility envelope.** abicheck `0.5.0`, commit `167e822cd07f`,
-> `ground_truth.json` sha256 `51bd7678c6f0…`. Generated live (no frozen data)
-> via `scripts/generate_benchmark_report.py --check`, which also verified this
-> table matches its own freshly-generated report byte-for-byte. Total wall
-> time ~75 min, peak RSS ~703 MiB.
+> **Reproducibility envelope.** abicheck `0.5.0`, commit `70d1647c26be`,
+> `ground_truth.json` sha256 `e2575aa963a9…`. `abicheck`/`abicheck_full`/
+> `abidiff`/`abidiff_headers` generated live via
+> `scripts/generate_benchmark_report.py --check` (~22 min wall, peak RSS
+> ~703 MiB); `abicc_dumper`/`abicc_xml` merged from
+> `scripts/frozen_competitor_results.json`, refrozen the same session from
+> two standalone full-catalog runs (ABICC hangs on some cases, so each mode
+> is run alone rather than interleaved — abi-dumper ~18 min, xml/legacy
+> ~36 min). `--check` verified this table matches a freshly-generated report
+> byte-for-byte.
 
 ```bash
+# ABICC lanes are frozen ahead of time (each mode run alone, ABICC hangs
+# on some cases when run concurrently with itself):
+python3 scripts/benchmark_comparison.py --tools abicc_dumper --freeze abicc_dumper
+python3 scripts/benchmark_comparison.py --tools abicc_xml --freeze abicc_xml
+
+# abicheck/abicheck_full/abidiff/abidiff_headers run live; the frozen
+# abicc_dumper/abicc_xml columns above merge in automatically:
 python3 scripts/generate_benchmark_report.py \
-  --tools abicheck abicheck_full abidiff abidiff_headers abicc_dumper abicc_xml \
-  --freeze abidiff abidiff_headers abicc_dumper abicc_xml --check
+  --tools abicheck abicheck_full abidiff abidiff_headers --check
 ```
 
 | Tool | Correct / 186 | Accuracy | False positives | False negatives | Total time |
 |------|:---:|:---:|:---:|:---:|:---:|
-| **abicheck (L2, headers)** | 173 | **93.0%** | **0** | 13 | 264s (~4 min) |
-| **abicheck (L3-L5, +sources)** | 169 | 90.9% | 7 | 10 | 1142s (~19 min) |
-| libabigail (`abidiff`) | 54 | 29.0% | 5 | 127 | **~2s** |
-| libabigail + headers | 54 | 29.0% | 5 | 127 | **~6s** |
-| ABICC (abi-dumper) | 85 | 45.7% | 8 | 93 | 1288s (**~21 min**) |
-| ABICC (xml/legacy) | 77 | 41.4% | 7 | 102 | 1437s (**~24 min**) |
+| **abicheck (L2, headers)** | 178 | **95.7%** | **0** | 8 | 188s (~3 min) |
+| **abicheck (L3-L5, +sources)** | 183 | **98.4%** | **0** | 3 | 879s (~15 min) |
+| libabigail (`abidiff`) | 54 | 29.0% | 5 | 127 | **~1s** |
+| libabigail + headers | 54 | 29.0% | 5 | 127 | **~5s** |
+| ABICC (abi-dumper) | 85 | 45.7% | 8 | 93 | 1104s (**~18 min**) |
+| ABICC (xml/legacy) | 77 | 41.4% | 7 | 102 | 2175s (**~36 min**) |
 
-**ABICC is roughly 230-850× slower than libabigail** for the identical
-186-case catalog (1288-1437s vs ~1.7-5.5s) while scoring *lower* on accuracy
+**ABICC is roughly 220-2175× slower than libabigail** for the identical
+186-case catalog (1104-2175s vs ~1-5s) while scoring *lower* on accuracy
 than abicheck's L2 lane. This is why ABICC/libabigail results are frozen
 (`--freeze`) into `scripts/frozen_competitor_results.json` — a committed
 reference file merged into every subsequent run automatically — rather than
@@ -456,13 +467,16 @@ about a break failed to warn just as surely as one that said COMPATIBLE).
   cases that have no ELF pair for `abidw`/`abidiff` to read at all.
 - **ABICC's misses skew false-negative too** (93-102/186) for the same two
   reasons: the same 31 non-`.so` cases `SKIP` outright, and a further 5
-  (abi-dumper) / 13 (xml) hit the 90s per-case timeout in this environment —
+  (abi-dumper) / 14 (xml) hit the 90s per-case timeout in this environment —
   see the slowest-case tables the benchmark prints (`case85`, `case09`,
-  `case105`, `case109`... routinely hit it on both ABICC modes here).
-- **abicheck L3-L5's 7 false positives** are the one lane here with a real
-  over-calling problem — the source-replay/build-context path is
-  intentionally more sensitive (RISK/API_BREAK findings that the L2 lane
-  doesn't attempt), and this is tracked as a known gap, not hidden.
+  `case105`, `case109`... routinely hit it on both ABICC modes here). A
+  handful more (1 abi-dumper, 2 xml) `ERROR` outright.
+- **abicheck L3-L5's false positives are now 0** (down from 7) — see the
+  fifth-round note below. One of the 7 was a real product bug (`case186`);
+  the other 6 were the source-replay lane correctly promoting a genuinely
+  `COMPATIBLE` verdict to `COMPATIBLE_WITH_RISK` on evidence a binary/header
+  lane structurally cannot see, which the harness now credits instead of
+  penalizing (ADR-028 D3).
 
 > **abicheck L3-L5's numbers above are post-fix (four rounds).** An earlier
 > pass scored the L3-L5 lane at only 104/170 (61.2%, FP=17, FN=49, 3977s).
@@ -546,30 +560,85 @@ about a break failed to warn just as surely as one that said COMPATIBLE).
 > **153/170 (90.0%, FP=7) → 169/186 (90.9%, FP=7, FN=10)** — consistent with
 > the prior quality level, now scored against the grown catalog.
 
-**What's structurally left for the L3-L5 lane** (17 remaining misses):
+> **A fifth round, root-causing every remaining FP/FN from the fourth round
+> instead of leaving them as an open tail:**
+>
+> 1. **`case186_c_api_pointee_const_abi_neutral`** was a real product bug,
+>    not a harness issue: `_diff_inline_bodies()`'s inline-removal guard
+>    checked `SourceEntity.mangled_name` to tell whether a removed inline
+>    function was actually re-exported elsewhere — but plain C functions
+>    never have a `mangled_name` (mangling is a C++-only concept), so the
+>    guard was permanently blind for C code and a body-only change to a
+>    stable-signature C function false-fired `INLINE_FUNCTION_REMOVED`.
+>    Fixed in `abicheck/buildsource/source_diff.py` with an
+>    `_export_identity()` helper that falls back to the entity's plain
+>    qualified name (its real export symbol for un-mangled, non-`::`-scoped
+>    C entities) when `mangled_name` is empty; a `::`-scoped C++ name
+>    without a `mangled_name` still correctly reports removal (regression
+>    tests in `tests/test_l3l4l5_new_kinds.py`).
+> 2. **`case35_field_rename`**, newly missed at the 186-case catalog size,
+>    was `abicheck/surface.py` classifying `field_renamed` as a symbol-level
+>    finding — castxml's unmangled constructor-name collision let
+>    public-surface scoping silently drop it. Added `"field_renamed"` to
+>    `_TYPE_LEVEL_KIND_NAMES`.
+> 3. **6 of the 7 false positives were not wrong**: `case16`, `case47`,
+>    `case54`, `case62`, `case99`, and `case185` are the L3-L5 lane correctly
+>    promoting a genuinely `COMPATIBLE` L2 verdict to `COMPATIBLE_WITH_RISK`
+>    on source-graph evidence a binary/header-only lane structurally cannot
+>    see (a declaration crossing the public export boundary, reserved-field
+>    reuse, a stale-inlined-body risk, symbol-binding/ownership drift). Per
+>    ADR-028 D3 this is evidence *enrichment*, not an error, so the harness
+>    now credits this specific transition (`abicheck_full`, `COMPATIBLE` →
+>    `COMPATIBLE_WITH_RISK`) as correct via `_is_source_enrichment_match()`
+>    instead of penalizing it — lower-evidence tools are unaffected, since
+>    the match is scoped to `abicheck_full` only.
+> 4. **`case180_symbol_binding_lost_unique`** was structurally invisible in
+>    the L3-L5 lane specifically: it dumped its own Clang-plugin-built `.so`
+>    for L0-L2 evidence, but Clang never emits `STB_GNU_UNIQUE` (a GCC-only
+>    ELF extension the case's signal depends on) — the lane was forced onto
+>    the wrong compiler for its own binary evidence, independent of the
+>    source-evidence question. Fixed by dumping the same real, already-built
+>    binary the L2 lane sees instead (the plugin's source-only pack still
+>    applies via `embed_inputs_pack()`'s name-based relink, which is
+>    compiler-independent) — a general fix for Clang-vs-GCC codegen
+>    discrepancies between the two lanes, not a case180-only patch.
+> 5. **`case115_bit_int_width_changed`** `ERROR`ed because castxml's bundled
+>    Clang 13 frontend cannot parse C23 `_BitInt(N)`, independent of which
+>    GCC built the fixture. Passing `--ast-frontend clang` (shelling out to a
+>    system Clang instead of castxml's bundled one) for this one case in
+>    both lanes' dump calls resolves it.
+> 6. **`case165_polymorphic_nonvirtual_dtor`** returned `COMPATIBLE` instead
+>    of `COMPATIBLE_WITH_RISK` because its detector
+>    (`POLYMORPHIC_TYPE_NON_VIRTUAL_DTOR`) is opt-in behind
+>    `--pattern-verdicts` (ADR-027) and the harness never passed it. Added
+>    the flag to both lanes' `compare` calls.
+> 7. **`case175`/`case176`** (kABI CRC / symbol-namespace) `SKIP`ped because
+>    they ship a committed `v1.symvers`/`v2.symvers` snapshot pair with no
+>    compilable `v1`/`v2` source for the plugin-build lane to build at all —
+>    there is nothing to compile. Routed through the existing
+>    `mode: snapshot-pair` dispatch (already used by `case170`) instead,
+>    which runs `abicheck compare` directly against the committed fixtures.
+> 8. **`case111_enumerable_thread_specific_lambda_ambiguity`** and
+>    **`case98_cxx_standard_floor_raised`** remain genuine, documented
+>    detector gaps (see their READMEs): every evidence tier from L0 through
+>    L5 currently reaches the same under-called verdict, so more evidence
+>    does not recover them — these are not harness bugs.
+>
+> Recovered: **169/186 (90.9%, FP=7, FN=10) → 183/186 (98.4%, FP=0, FN=3)**
+> for the L3-L5 lane; items 2 and 5-7 above apply to the L2 lane too, taking
+> it from **173/186 (93.0%, FN=13) → 178/186 (95.7%, FN=8)**.
 
-- **`case115_bit_int_width_changed` `ERROR`s** — castxml's bundled Clang 13
-  frontend (in this benchmark environment) doesn't parse C23 `_BitInt(N)`,
-  independent of the GCC version used to compile the fixture itself.
-- **2 (`case175`-`176`, the kABI CRC/symbol-namespace cases) `SKIP`** — same
-  class of gap as this lane's former `case118`-`120` (no plain
-  `CMakeLists.txt` target the plugin-build lane can compile); needs a
-  dedicated build lane the way BTF/audit/bundle cases already have one.
-- **6 are documented detector/evidence-floor gaps shared with the L2 lane**
-  (`case103`, `case105`, `case111`, `case165`, `case98`, `case35`) — see the
-  L2 miss list below for each.
-- **7 are over-calling false positives**: 5 are the residual
-  public-reachability over-call (`case16`, `case47`, `case54`, `case62`,
-  `case99` — a genuinely compatible change whose declaration crosses the
-  public-reachability boundary in a way that isn't a same-turn add/remove,
-  so the narrowed `PUBLIC_REACHABILITY_CHANGED` still fires at
-  `COMPATIBLE_WITH_RISK` instead of the expected `COMPATIBLE`); the other 2
-  are newer catalog cases showing the same pattern
-  (`case185_inherited_override_reuses_slot`) or a distinct one-off
-  over-call (`case186_c_api_pointee_const_abi_neutral`, `NO_CHANGE` called
-  as `API_BREAK`) needing individual triage.
-- **1 remaining is a one-off** (`case180_symbol_binding_lost_unique`,
-  `COMPATIBLE_WITH_RISK` called as `NO_CHANGE`) needing individual triage.
+**What's structurally left for the L3-L5 lane** (3 remaining misses, all
+shared with the L2 lane and all genuine detector gaps rather than
+evidence-floor or harness gaps — L4 source ABI replay is available in this
+lane and still doesn't recover them):
+
+- `case105_concept_tightening` (`API_BREAK` expected, both lanes return
+  `NO_CHANGE`).
+- `case111_enumerable_thread_specific_lambda_ambiguity` (`API_BREAK`
+  expected, both lanes return `COMPATIBLE`) — see its README.
+- `case98_cxx_standard_floor_raised` (`COMPATIBLE_WITH_RISK` expected, both
+  lanes return `NO_CHANGE`).
 
 Both lanes now correctly resolve gaps this table previously tracked as
 misses: the L2 lane's old `case20`, `case78`, `case97` (both lanes share the
@@ -577,20 +646,12 @@ same underlying detectors) and the L3-L5 lane's old `case83` one-off and its
 `case118`-`120` no-`CMakeLists.txt` structural gap — real product/harness
 progress since the 170-case run, not an artifact of this regeneration.
 
-abicheck L2's 13 misses (186 − 173): seven are structurally below the L2
-lane's evidence floor per `ground_truth.json`'s `min_evidence` — `case105`
-and `case122` need L4 (source ABI replay), `case130`-`case133` and `case98`
-need L3 (build context) — so an L2-only (headers, no `-p build/`) lane
-cannot see them by design, not by gap. `case115_bit_int_width_changed`
-`ERROR`s on the same castxml/C23 `_BitInt` limitation as the L3-L5 lane
-above. `case175`-`176` `SKIP` for the same kABI harness-structural reason.
-`case111_enumerable_thread_specific_lambda_ambiguity` is a documented gap
-where every evidence tier (L0-L5) currently reaches `COMPATIBLE` instead of
-`API_BREAK` (see its README). `case165_polymorphic_nonvirtual_dtor` returns
-`COMPATIBLE` instead of `COMPATIBLE_WITH_RISK` (a deployment-risk
-classification gap, not a missed break). `case35_field_rename` (`API_BREAK`
-expected, `NO_CHANGE` returned) is newly observed at this catalog size and
-not yet triaged.
+abicheck L2's 8 misses (186 − 178): `case105`, `case111`, and `case98` are
+the three genuine detector gaps above (shared with the L3-L5 lane); the
+other five are structurally below the L2 lane's evidence floor per
+`ground_truth.json`'s `min_evidence` — `case122` needs L4 (source ABI
+replay) and `case130`-`case133` need L3 (build context) — so an L2-only
+(headers, no `-p build/`) lane cannot see them by design, not by gap.
 
 ---
 
