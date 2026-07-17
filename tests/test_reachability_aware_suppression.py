@@ -176,6 +176,85 @@ class TestMarkReachability:
         assert raw_change in ctx.suppressed
         assert ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK not in [c.kind for c in ctx.kept]
 
+    def test_source_location_suppression_does_not_hide_direct_public_break(self) -> None:
+        """Codex review: the internal-type leak walk (compute_leak_paths) only
+        ever records *internal-namespaced* type names, so a directly public
+        symbol matched by a broad source_location glob purely by file path
+        (not by name) was never covered by the reachability gate at all —
+        MarkReachability must also mark a non-internal-namespaced subject
+        reachable directly, with no leak-path walk needed."""
+        old = _snap(functions=[_public_fn("foo", "int")])
+        new = _snap(functions=[])
+        raw_change = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="foo",
+            description="function removed",
+            source_location="/project/internal/detail.h:10",
+        )
+        suppression = SuppressionList([
+            Suppression(source_location="*/internal/*", reason="internal headers")
+        ])
+        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        assert raw_change.public_reachable is True
+        assert raw_change.reachability_kind == "direct_public_symbol"
+        assert raw_change not in ctx.suppressed
+        assert raw_change in ctx.kept
+        assert ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK in [c.kind for c in ctx.kept]
+
+    def test_mangled_symbol_in_internal_namespace_not_flagged_direct_public(self) -> None:
+        """A change's own Change.symbol can be an Itanium-mangled name or an
+        unqualified extern "C" export with no "::" segments at all — the bare
+        internal-namespace check on such a symbol would never recognize it as
+        internal even though it genuinely is one, wrongly treating it as
+        directly public. MarkReachability must also consult
+        Change.qualified_name (set by EnrichSourceLocations, which runs
+        earlier in the pipeline) the same way Suppression._ns_match does at
+        match time, or a namespace rule matching the qualified form would be
+        refused by a phantom direct_public_symbol tag."""
+        old, new, _ = _reachable_scenario()
+        raw_change = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="_ZN6oneapi3dal6kmeans6detail6helperEv",
+            description="function removed",
+            qualified_name="oneapi::dal::kmeans::detail::helper",
+        )
+        suppression = SuppressionList([
+            Suppression(namespace="oneapi::dal::**::detail::**", reason="private")
+        ])
+        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        assert raw_change.public_reachable is False
+        assert raw_change in ctx.suppressed
+        assert ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK not in [c.kind for c in ctx.kept]
+
+    def test_mangled_symbol_with_no_qualified_name_resolves_via_demangling(self) -> None:
+        """Same as above, but with no Change.qualified_name at all (e.g. a
+        snapshot with no source-location enrichment) — MarkReachability must
+        fall back to demangling the raw symbol itself, mirroring
+        Suppression._ns_match's own demangling fallback."""
+        old, new, _ = _reachable_scenario()
+        raw_change = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="_ZN6oneapi3dal6kmeans6detail6helperEv",
+            description="function removed",
+        )
+        suppression = SuppressionList([
+            Suppression(namespace="oneapi::dal::**::detail::**", reason="private")
+        ])
+        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        assert raw_change.public_reachable is False
+        assert raw_change in ctx.suppressed
+
+    def test_empty_symbol_change_skipped(self) -> None:
+        """A change with no symbol at all (e.g. a loader/dynamic pseudo-symbol
+        finding) is left untagged rather than guessed at."""
+        old, new, _ = _reachable_scenario()
+        raw_change = Change(kind=ChangeKind.SONAME_MISSING, symbol="", description="x")
+        suppression = SuppressionList([
+            Suppression(namespace="oneapi::dal::**::detail::**", reason="private")
+        ])
+        DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        assert raw_change.public_reachable is False
+
 
 class TestSuppressionPipelineOrderFix:
     """The ADR's headline regression: example B from the review report."""
@@ -231,22 +310,67 @@ class TestSuppressionPipelineOrderFix:
         assert ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK not in [c.kind for c in ctx.kept]
 
     def test_narrow_symbol_suppression_unaffected_by_default(self) -> None:
-        """A narrow symbol selector still suppresses a non-breaking reachable
-        change with no extra ceremony — only the breaking+reachable
-        combination needs allow_public_break."""
+        """A narrow (exact symbol/type) selector suppresses a public-reachable
+        BREAKING change with no extra ceremony — allow_public_break is only
+        required for a *broad* (namespace/source_location) rule (ADR-044 D2).
+        Naming one exact symbol is already the deliberate, audited action;
+        requiring allow_public_break there too would make it impossible to
+        suppress an ordinary, intentional public API removal without
+        ceremony — the failure mode this ADR targets is a *glob*
+        over-matching something its author never reasoned about, not this."""
         old, new, raw_change = _reachable_scenario()
-        raw_change.kind = ChangeKind.TYPE_ALIGNMENT_CHANGED  # still BREAKING; keep coverage of the gate
+        raw_change.kind = ChangeKind.TYPE_ALIGNMENT_CHANGED  # still BREAKING
         suppression = SuppressionList([
             Suppression(
                 symbol="oneapi::dal::kmeans::detail::descriptor_base",
                 reason="exact symbol, known safe",
             )
         ])
-        # Exact-symbol rule still requires allow_public_break for a BREAKING
-        # public-reachable change — this is intentional (ADR-044 D2): naming
-        # one symbol doesn't by itself prove the author reviewed reachability.
         ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
-        assert raw_change not in ctx.suppressed
+        assert raw_change in ctx.suppressed
+        assert ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK not in [c.kind for c in ctx.kept]
+
+    def test_broad_rule_with_reachability_any_suppresses_non_breaking_reachable_change(
+        self,
+    ) -> None:
+        """The allow_public_break gate only concerns BREAKING/API_BREAK kinds
+        (ADR-044 D2) — once a broad rule's reachability is explicitly widened
+        to "any" (opting back into pre-ADR-044 matching), a public-reachable
+        but merely RISK-classified change still suppresses with no
+        allow_public_break needed; only a BREAKING/API_BREAK kind would."""
+        old, new, raw_change = _reachable_scenario()
+        raw_change.kind = ChangeKind.FUNC_NOEXCEPT_REMOVED  # COMPATIBLE_WITH_RISK, not BREAKING
+        raw_change.symbol = "oneapi::dal::kmeans::detail::descriptor_base"
+        suppression = SuppressionList([
+            Suppression(
+                namespace="oneapi::dal::**::detail::**", reachability="any", reason="private"
+            )
+        ])
+        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        assert raw_change.public_reachable is True
+        assert raw_change in ctx.suppressed
+
+    def test_public_only_reachability_matches_only_reachable_changes(self) -> None:
+        """reachability: public-only is the inverse of the unreachable-only
+        default — useful for isolating leak findings while investigating.
+        Uses a non-BREAKING kind so the allow_public_break short-circuit
+        doesn't mask the plain public-only fallthrough for either side."""
+        old, new, reachable_change = _reachable_scenario()
+        reachable_change.kind = ChangeKind.FUNC_NOEXCEPT_REMOVED
+        _, _, unreachable_change = _unreachable_scenario()
+        unreachable_change.kind = ChangeKind.FUNC_NOEXCEPT_REMOVED
+        suppression = SuppressionList([
+            Suppression(
+                namespace="oneapi::dal::**::detail::**",
+                reachability="public-only",
+                reason="isolate leaks under investigation",
+            )
+        ])
+        ctx = DEFAULT_PIPELINE.run(
+            [reachable_change, unreachable_change], old, new, suppression=suppression
+        )
+        assert reachable_change in ctx.suppressed
+        assert unreachable_change not in ctx.suppressed
 
 
 class TestSuppressionYamlRoundTrip:

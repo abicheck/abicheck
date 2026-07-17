@@ -273,6 +273,7 @@ class Suppression:
         default=None, init=False, repr=False
     )
     _resolved_reachability: str = field(default="any", init=False, repr=False)
+    _is_broad_selector: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.namespace is not None and self.entity_namespace is not None:
@@ -317,14 +318,19 @@ class Suppression:
         # not naming one specific symbol/type the author already reasoned
         # about) — namespace/entity_namespace/cause_namespace/source_location.
         # Presence of a broad selector makes the match unaudited even when a
-        # narrow selector is also present on the same rule.
-        is_broad = bool(
+        # narrow selector is also present on the same rule. The same
+        # broad/narrow split also decides whether allow_public_break is
+        # required at all (_passes_public_break_gate) — a narrow selector
+        # naming one exact symbol/type is already the deliberate, audited
+        # case suppression exists for, regardless of whether that symbol
+        # happens to be public or an internal type that leaks.
+        self._is_broad_selector = bool(
             effective_entity_ns is not None
             or self.cause_namespace is not None
             or self.source_location is not None
         )
         self._resolved_reachability = self.reachability or (
-            "unreachable-only" if is_broad else "any"
+            "unreachable-only" if self._is_broad_selector else "any"
         )
 
     def is_expired(self, today: date | None = None) -> bool:
@@ -415,8 +421,22 @@ class Suppression:
         return change.public_reachable  # "public-only"
 
     def _passes_public_break_gate(self, change: Change) -> bool:
-        """ADR-044 D2: a public-reachable BREAKING/API_BREAK change needs
-        ``allow_public_break: true`` regardless of :attr:`reachability`."""
+        """ADR-044 D2: a *broad* rule (namespace/entity_namespace/
+        cause_namespace/source_location) suppressing a public-reachable
+        BREAKING/API_BREAK change needs ``allow_public_break: true``,
+        regardless of its resolved :attr:`reachability`.
+
+        A *narrow* rule (``symbol``/``symbol_pattern``/``type_pattern``/
+        ``member_name`` — naming one exact symbol/type) is exempt from this
+        gate entirely: it is already the deliberate, audited case suppression
+        exists for, independent of whether that symbol happens to be public
+        or an internal type that leaks — this is the ADR's own "unchanged
+        behavior for narrow selectors" guarantee. The failure mode this gate
+        exists to prevent is a *glob* over-matching something its author
+        never reasoned about, not an author explicitly naming one symbol.
+        """
+        if not self._is_broad_selector:
+            return True
         if self.allow_public_break:
             return True
         if not change.public_reachable:

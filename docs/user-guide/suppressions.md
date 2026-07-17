@@ -61,7 +61,7 @@ suppressions:
 | `namespace` (alias: `entity_namespace`) | glob string | Match the change's own `symbol`/qualified name against a `::`-namespace glob (`**` = any depth) |
 | `cause_namespace` | glob string | Match the change's `caused_by_type` (its documented *cause*, when different from its own subject) against a namespace glob |
 | `reachability` | `unreachable-only` \| `any` \| `public-only` | Gates whether this rule may match a change that is part of the effective public ABI — see below. Default depends on the selector shape. |
-| `allow_public_break` | bool | Required, in addition to `reachability`, for a rule to suppress a change that is both public-reachable and classified `BREAKING`/`API_BREAK` |
+| `allow_public_break` | bool | Required, for a **broad** rule (`namespace`/`source_location`), to suppress a change that is both public-reachable and classified `BREAKING`/`API_BREAK`. Not required for a narrow rule (`symbol`/`symbol_pattern`/`type_pattern`/`member_name`) — naming one exact symbol is already the deliberate, audited action. |
 | `label` | string | Optional grouping tag |
 | `expires` | date/datetime | Expiry date; expired rule is ignored |
 | `reason` | string | Human-readable rationale |
@@ -124,11 +124,16 @@ whether it may still apply:
 | `any` | No reachability filtering — matches regardless. **Default** for a rule using a narrow selector (`symbol`, `symbol_pattern`, `type_pattern`, `member_name`) — naming one exact symbol/type is already an audited decision, so behavior is unchanged from before this feature existed. |
 | `public-only` | Inverse of `unreachable-only` — matches only a public-reachable change. Mainly useful for temporarily isolating leak findings while investigating them. |
 
-Independently of `reachability`, a rule that would suppress a change that is
-**both** public-reachable **and** classified `BREAKING`/`API_BREAK` is
-refused unless the rule also sets `allow_public_break: true` — making that
-specific, higher-risk suppression explicit and reviewable rather than an
-accident of a broad glob:
+Independently of `reachability`, a **broad** rule (`namespace`/
+`entity_namespace`/`cause_namespace`/`source_location`) that would suppress a
+change that is **both** public-reachable **and** classified `BREAKING`/
+`API_BREAK` is refused unless the rule also sets `allow_public_break: true` —
+making that specific, higher-risk suppression explicit and reviewable rather
+than an accident of a broad glob. A narrow rule (`symbol`/`symbol_pattern`/
+`type_pattern`/`member_name`) is exempt from this check — naming one exact
+symbol/type for suppression is already the deliberate action this mechanism
+exists to require, regardless of whether that symbol happens to be public or
+an internal type that leaks:
 
 ```yaml
 - namespace: "oneapi::dal::**::detail::**"

@@ -216,6 +216,58 @@ and `surface_exclusion_reason`, no schema/serialization version bump needed
 since JSON/SARIF/JUnit reporters already round-trip `Change` via
 `dataclasses.asdict`-style field enumeration.
 
+**Post-merge review rounds (Codex + CI), same change:**
+
+- **Perf regression.** The first-shipped `MarkReachability` ran
+  `compute_leak_paths` unconditionally on every `compare()` call — CI's
+  `benchmark_scaling.py` baseline-regression gate caught up to +5075% on
+  type/struct-heavy scenarios, since this duplicated the identical walk
+  `DetectInternalLeaks` already performs later, on every comparison, even
+  when no suppression file is configured to ever consult the tag. Fixed by
+  skipping the step entirely when `ctx.suppression is None` (mirroring
+  `ApplySuppression`'s own no-op check) and, within a run, computing the
+  leak-path walk lazily — only the first time a change whose subject is
+  internal-namespaced is actually seen.
+- **Pointer-only layout churn false-flagged.** `MarkReachability` originally
+  marked *any* internal type reachable via *any* path (including a pure
+  pointer/reference indirection) as `public_reachable`. But
+  `DetectInternalLeaks` deliberately does **not** treat a pure-layout change
+  reached only through a pointer as a leak (it is not consumer-visible), and
+  `DemoteUnreachableInternalChurn` would still correctly demote such churn
+  later — so tagging it reachable only refused a broad suppression rule and
+  appended a spurious `suppression_would_hide_public_break` diagnostic for
+  churn that was always going to be demoted anyway. Fixed by mirroring
+  `DetectInternalLeaks`'s own `_IDENTITY_VTABLE_KINDS`/`_path_has_indirection`
+  judgment inside `MarkReachability` before tagging.
+- **Directly-public subjects were never covered at all.** The
+  internal-type-leak walk (`compute_leak_paths`) only ever records *internal*
+  type names — it has no notion of "this change's own subject is already
+  public." A broad `source_location`/`namespace` rule matching a genuinely
+  public function purely by file path (e.g. a public function physically
+  declared under a path a `source_location: "*/internal/*"` glob matches,
+  with no internal-namespaced name at all) was therefore never protected by
+  the reachability gate — the exact class of silent-hiding failure this ADR
+  exists to close, just missed by the P0 slice's initial scope. Fixed by
+  broadening `MarkReachability`: a change whose subject is **not**
+  internal-namespaced at all is now marked `public_reachable = True` directly
+  (`reachability_kind = "direct_public_symbol"`, no leak-path proof needed),
+  with the leak-path walk only consulted for a subject that *is*
+  internal-namespaced. The internal-namespace check itself also had to widen
+  to match what `Suppression._ns_match` actually checks at match time — a
+  function/variable's `Change.symbol` can be Itanium-mangled or an
+  unqualified `extern "C"` export with no `::` segments at all, which would
+  never read as internal by a bare namespace-segment check even when the
+  entity genuinely lives in one; `MarkReachability` now also consults
+  `Change.qualified_name` (set earlier in the pipeline by
+  `EnrichSourceLocations`) and a demangled form of the raw symbol, the same
+  two fallbacks `_ns_match` already uses. This fix is what exposed the
+  `allow_public_break` scoping bug documented in D2: broadening
+  `public_reachable` to cover ordinary public symbols meant the
+  then-universal `allow_public_break` requirement suddenly applied to every
+  narrow, exact-`symbol:` suppression too, regressing `test_suppression.py`'s
+  basic suppression tests — corrected by scoping that gate to broad selectors
+  only, per D2.
+
 ### D2. `Suppression` gains a reachability guard
 
 New `Suppression` fields:
@@ -247,19 +299,28 @@ New `Suppression` fields:
     the review's own "unusual, mainly debugging" case (e.g. temporarily
     silencing an in-progress leak investigation without touching genuinely
     private noise).
-- `allow_public_break: bool = False`. When a rule (broad or narrow) would
-  suppress a change that is both `public_reachable=True` **and** a member of
+- `allow_public_break: bool = False`. When a **broad** rule would suppress a
+  change that is both `public_reachable=True` **and** a member of
   `BREAKING_KINDS | API_BREAK_KINDS`, the match is refused — the change
   stays in the report — **unless** `allow_public_break: true` is set on that
-  rule. This is deliberately independent of the `reachability` field: a
-  narrow `symbol:` rule with the default `reachability: "any"` can still be
-  blocked here, because naming one exact symbol does not by itself prove the
-  author confirmed it is safe to hide a *breaking* public dependency — only
-  `allow_public_break: true` does. A rule matching a non-breaking
-  (`COMPATIBLE`/`RISK`) public-reachable change is unaffected — this gate
-  exists for exactly the failure mode the review reports (a `BREAKING`
-  finding silently disappearing), not to relitigate ordinary suppression of
-  a `RISK` finding.
+  rule. This gate is scoped to broad selectors only, matching
+  `reachability`'s own broad/narrow split (post-review correction — the
+  first-shipped version applied it to every rule regardless of selector
+  shape, which meant an ordinary, deliberate `symbol: "_ZN3foo..."` waiver of
+  a known, intentional removal would *also* need `allow_public_break: true`
+  the moment that symbol happened to read as public-reachable — defeating
+  the basic "suppress one exact symbol I already reasoned about" use case
+  suppression exists for in the first place; caught by `test_suppression.py`
+  regressing when `MarkReachability` was broadened per D1's note below). A
+  narrow rule (`symbol`/`symbol_pattern`/`type_pattern`/`member_name`) is
+  exempt from this gate entirely — naming one exact symbol/type is already
+  the deliberate, audited action, independent of whether that symbol turns
+  out to be public or an internal type that leaks. A rule matching a
+  non-breaking (`COMPATIBLE`/`RISK`) public-reachable change is also
+  unaffected regardless of selector shape — this gate exists for exactly the
+  failure mode the review reports (a `BREAKING` finding silently
+  disappearing behind an unaudited glob), not to relitigate ordinary
+  suppression of a `RISK` finding or of a symbol the author named exactly.
 - A match refused by either gate is recorded (D4) rather than silently
   dropped, so a suppression author sees *why* their rule did not apply.
 
