@@ -116,7 +116,7 @@ that keeps casual invocations short without adding one flag per knob.
 
 ```text
 --profile ci-gate     # depth=headers, format=review, exit=severity
---profile release     # depth=full, recommend, format=markdown
+--profile release-cut # depth=full, recommend, format=markdown
 --profile quick       # depth=binary, stat
 ```
 
@@ -212,3 +212,14 @@ half-migrated with red tests.
 Each phase updates `COMPARE_FLAG_BUDGET_BASE` downward and the
 `_OPTION_SET_SNAPSHOT`; the `TestFlagBudget` ledger tests keep the count and
 its rationale in lockstep.
+
+* **Post-rollout rename (CLI audit finding).** The `release` profile was
+  renamed to `release-cut`: `compare`'s directory/package fan-out mode is
+  *also* informally branded "release" throughout (`compare_release_cmd`,
+  `release_options`, the "Release (directory/package inputs)" help panel) —
+  an unrelated concept that happened to share the same word. A user skimming
+  `--help` could reasonably assume `--profile release` targets that fan-out
+  mode, when it's actually the single-pair "should I bump semver?" bundle.
+  `_profile_targets_set_input` already rejected the combination with a clear
+  usage error, so this was never a live bug — just a naming collision worth
+  disambiguating while the profile vocabulary is still young.

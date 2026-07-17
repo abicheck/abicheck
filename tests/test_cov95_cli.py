@@ -1136,7 +1136,10 @@ class TestUsedByScoping:
 
         monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", lambda *a, **k: result)
 
-    def _result(self, *, verdict=Verdict.COMPATIBLE, missing=None, breaking_for_app=None):
+    def _result(
+        self, *, verdict=Verdict.COMPATIBLE, missing=None, missing_versions=None,
+        breaking_for_app=None,
+    ):
         from abicheck.appcompat import AppCompatResult
 
         return AppCompatResult(
@@ -1147,7 +1150,7 @@ class TestUsedByScoping:
             required_symbol_count=1,
             breaking_for_app=breaking_for_app or [],
             missing_symbols=missing or [],
-            missing_versions=[],
+            missing_versions=missing_versions or [],
             verdict=verdict,
             symbol_coverage=100.0,
         )
@@ -1198,12 +1201,16 @@ class TestUsedByScoping:
         """Codex review: the default (markdown) report must name the actual
         missing symbol, not just its count -- otherwise a human reading the
         default output has no way to tell which symbol broke the gate."""
-        res = self._result(verdict=Verdict.BREAKING, missing=["foo_removed"])
+        res = self._result(
+            verdict=Verdict.BREAKING, missing=["foo_removed"],
+            missing_versions=["FOO_1.2"],
+        )
         app, old, new = self._setup(tmp_path, monkeypatch)
         self._patch_scope(monkeypatch, res)
         result = _invoke("compare", str(old), str(new), "--used-by", str(app))
         assert result.exit_code == 4
         assert "missing symbol: `foo_removed`" in result.output
+        assert "missing version: `FOO_1.2`" in result.output
         assert "## Additional scoped-gate findings" in result.output
         assert "`foo_removed` is required but missing from the new library" in result.output
 

@@ -1427,8 +1427,16 @@ COMPARE_PROFILES: dict[str, dict[str, object]] = {
         "exit_code_scheme": "severity",
     },
     # Release cut: deepest evidence, full Markdown report with a semver/SONAME
-    # recommendation appended — the "should I bump?" flow.
-    "release": {
+    # recommendation appended — the "should I bump?" flow. Named "release-cut"
+    # rather than bare "release" (CLI audit finding): compare's directory/
+    # package fan-out mode is *also* informally branded "release" throughout
+    # (compare_release_cmd, release_options, the "Release (directory/package
+    # inputs)" help panel) -- an unrelated concept that shares only the word.
+    # `_profile_targets_set_input` already rejects `--profile` on a directory/
+    # package operand with a clear error, so the collision was never a live
+    # bug, but a user skimming --help could reasonably (and wrongly) assume
+    # the two are related.
+    "release-cut": {
         "depth": "source",
         "fmt": "markdown",
         "recommend": True,
@@ -1478,9 +1486,12 @@ def profile_option(func: F) -> F:
         default=None,
         help="Run-profile preset bundling workflow defaults (ADR-040): "
         "'ci-gate' (headers depth, review digest, severity exit codes), "
-        "'release' (source depth, recommendation, Markdown), 'quick' "
-        "(symbols-only, one-line summary). Explicit flags override the profile; "
-        "single-pair compares only (configure release defaults in .abicheck.yml).",
+        "'release-cut' (source depth, recommendation, Markdown -- the "
+        "'should I bump semver?' flow; distinct from directory/package "
+        "'release' comparisons, which this profile does not apply to), "
+        "'quick' (symbols-only, one-line summary). Explicit flags override "
+        "the profile; single-pair compares only (configure release defaults "
+        "in .abicheck.yml).",
     )(func)
     return func
 

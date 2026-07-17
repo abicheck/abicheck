@@ -100,13 +100,13 @@ class TestApplyProfileUnit:
             apply_compare_profile(_FakeCtx(explicit=set()), kwargs)
 
     def test_set_input_reject_is_usage_error_end_to_end(self, tmp_path: Path) -> None:
-        """`compare dir dir --profile release` exits as a usage error (64)."""
+        """`compare dir dir --profile release-cut` exits as a usage error (64)."""
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
         new_dir.mkdir()
         result = CliRunner().invoke(
-            main, ["compare", str(old_dir), str(new_dir), "--profile", "release"]
+            main, ["compare", str(old_dir), str(new_dir), "--profile", "release-cut"]
         )
         assert result.exit_code == 64, result.output
         assert "single-pair" in result.output

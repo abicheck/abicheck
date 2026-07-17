@@ -150,7 +150,7 @@ not a straitjacket.
 | Profile | Expands to | Use when |
 |---------|-----------|----------|
 | `ci-gate` | `--depth headers --format review --exit-code-scheme severity` | Blocking a PR in CI |
-| `release` | `--depth source --format markdown --recommend` | Deciding a version bump at release time |
+| `release-cut` | `--depth source --format markdown --recommend` | Deciding a version bump at release time |
 | `quick` | `--depth binary --stat` | A fast "just tell me" look |
 
 Precedence is **explicit flag > profile > project config > default**: a
@@ -168,8 +168,8 @@ usage error; configure release defaults (format, severity, scheme) in
 # CI gate — equivalent to the three flags in the table
 abicheck compare old.json new.json --profile ci-gate
 
-# Start from the release profile but force JSON output (explicit flag wins)
-abicheck compare old.json new.json --profile release --format json
+# Start from the release-cut profile but force JSON output (explicit flag wins)
+abicheck compare old.json new.json --profile release-cut --format json
 ```
 
 > `--show-only` filtering, `--show-redundant`, `--stat`, `--report-mode leaf`,

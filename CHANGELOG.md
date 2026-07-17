@@ -55,6 +55,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Changed
 
+- **Breaking:** `compare --profile release` renamed to `--profile
+  release-cut` (CLI audit finding). `compare`'s directory/package fan-out
+  mode is *also* informally branded "release" throughout
+  (`compare_release_cmd`, the "Release (directory/package inputs)" help
+  panel) — an unrelated concept that only shared the word. `--profile` was
+  already rejected outright on directory/package operands with a clear
+  usage error, so this was never a live bug, just a naming collision worth
+  disambiguating. Update any script/CI config using `--profile release`.
 - `--depth`/`--sources`/`--build-info`/`--header-graph`/`--dry-run` `--help`
   text on `dump`/`compare`/`scan`, and their rich-click option-panel titles,
   no longer reference the internal ADR-033 evidence-layer vocabulary
