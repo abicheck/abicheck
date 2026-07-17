@@ -48,7 +48,7 @@ from .checker_types import Change
 from .diff_helpers import make_change
 
 if TYPE_CHECKING:
-    from .model import AbiSnapshot
+    from .model import AbiSnapshot, RecordType, ScopeOrigin
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -226,6 +226,24 @@ def _index_types_by_stable_key(
     return out
 
 
+def _origin_by_name(types: list[RecordType]) -> dict[str, ScopeOrigin]:
+    """Map qualified type name -> ``ScopeOrigin``, first occurrence wins.
+
+    Mirrors ``pattern_verdicts._exact_record``'s exact-identity lookup (which
+    takes the first match for a given name via a linear scan) rather than a
+    plain ``{t.name: t.origin for t in types}`` dict comprehension, which
+    would silently let a later duplicate-named entry overwrite an earlier
+    one. Two ``RecordType`` entries sharing one exact qualified name in a
+    single snapshot is unusual input, but staying consistent with the
+    established "first occurrence is authoritative" convention costs
+    nothing here.
+    """
+    out: dict[str, ScopeOrigin] = {}
+    for t in types:
+        out.setdefault(t.name, t.origin)
+    return out
+
+
 def _classify_experimental_event(
     old_exp: list[str],
     old_stable: list[str],
@@ -254,8 +272,8 @@ def _emit_experimental_change(
     new_stable: list[str],
     kind_label: str,
     *,
-    old_origins: dict[str, object] | None,
-    new_origins: dict[str, object] | None,
+    old_origins: dict[str, ScopeOrigin] | None,
+    new_origins: dict[str, ScopeOrigin] | None,
 ) -> Change:
     """Build the ``Change`` record for one classified event.
 
@@ -318,8 +336,8 @@ def _findings_for(
     experimental_namespaces: tuple[str, ...],
     kind_label: str,
     *,
-    old_origins: dict[str, object] | None = None,
-    new_origins: dict[str, object] | None = None,
+    old_origins: dict[str, ScopeOrigin] | None = None,
+    new_origins: dict[str, ScopeOrigin] | None = None,
 ) -> list[Change]:
     """Walk old/new indices, emitting one finding per classified event.
 
@@ -385,8 +403,8 @@ def detect_experimental_namespace_changes(
         _index_types_by_stable_key(new, experimental_namespaces),
         experimental_namespaces,
         "type",
-        old_origins={t.name: t.origin for t in old.types},
-        new_origins={t.name: t.origin for t in new.types},
+        old_origins=_origin_by_name(old.types),
+        new_origins=_origin_by_name(new.types),
     ))
     return out
 

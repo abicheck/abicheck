@@ -20,6 +20,7 @@ from abicheck.checker_policy import ChangeKind
 from abicheck.diff_namespaces import (
     DEFAULT_EXPERIMENTAL_NAMESPACES,
     _looks_like_std_reexport,
+    _origin_by_name,
     _segments,
     _strip_experimental,
     _version_strip_segments,
@@ -140,6 +141,28 @@ class TestStripExperimental:
         stripped, matched = _strip_experimental("a::experimental::experimental::x")
         assert matched == "experimental"
         assert stripped == "a::experimental::x"
+
+
+# ---------------------------------------------------------------------------
+# _origin_by_name
+# ---------------------------------------------------------------------------
+
+
+class TestOriginByName:
+    def test_simple_lookup(self) -> None:
+        types = [_rec_public("ns::Widget"), _rec("ns::Internal")]
+        origins = _origin_by_name(types)
+        assert origins["ns::Widget"] == ScopeOrigin.PUBLIC_HEADER
+        assert origins["ns::Internal"] == ScopeOrigin.UNKNOWN
+
+    def test_duplicate_name_first_occurrence_wins(self) -> None:
+        """Self-review finding: a plain dict comprehension keyed by name
+        would silently let a later duplicate overwrite an earlier one.
+        Mirrors pattern_verdicts._exact_record's "first match wins" exact-
+        identity lookup instead."""
+        types = [_rec_public("ns::Widget"), _rec("ns::Widget")]
+        origins = _origin_by_name(types)
+        assert origins["ns::Widget"] == ScopeOrigin.PUBLIC_HEADER
 
 
 # ---------------------------------------------------------------------------

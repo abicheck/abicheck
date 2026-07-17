@@ -560,6 +560,24 @@ since JSON/SARIF/JUnit reporters already round-trip `Change` via
   untouched — its untagged reasoning is a different shape (a namespace
   heuristic risking *false* public claims, not a missing origin signal),
   not something `ScopeOrigin` fixes.
+- **Self-review follow-up on the `RecordType.origin` fix above (two minor
+  findings).** `_emit_experimental_change`/`_findings_for`'s new
+  `old_origins`/`new_origins` parameters were typed `dict[str, object] |
+  None` — loose enough to accept any value type and lose the point of
+  adding a typed lookup in the first place; narrowed to `dict[str,
+  ScopeOrigin] | None`. Separately, `detect_experimental_namespace_changes`
+  built those maps with a plain `{t.name: t.origin for t in old.types}`
+  comprehension, which silently lets a later `RecordType` sharing an exact
+  qualified name overwrite an earlier one's origin — inconsistent with
+  `pattern_verdicts._exact_record`'s established "first match wins"
+  exact-identity convention elsewhere in the reachability code. Replaced
+  with a new `_origin_by_name()` helper using `dict.setdefault` for
+  first-occurrence-wins semantics, with a docstring citing the
+  `_exact_record` precedent. Two duplicate-named `RecordType`s in one
+  snapshot is unusual input either way; this is a consistency fix, not a
+  response to an observed bug. Added `TestOriginByName` regression tests
+  (`test_simple_lookup`, `test_duplicate_name_first_occurrence_wins`) to
+  `test_diff_namespaces.py`.
 
 ### D2. `Suppression` gains a reachability guard
 
