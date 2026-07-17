@@ -1,0 +1,69 @@
+{
+  "coverage": {},
+  "degraded_passes": {},
+  "edges": [
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "dst": "decl:demo::configure",
+      "edge": "SOURCE_DECLARES",
+      "provenance": "",
+      "src": "hdr:include/demo/api.h"
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "dst": "decl:demo::configure",
+      "edge": "DECL_HAS_TYPE",
+      "provenance": "",
+      "src": "decl:demo::configure"
+    }
+  ],
+  "external_graph_refs": [],
+  "extractor_passes": {},
+  "graph_id": "sha256:2507480fb6637e76cb56fa5c071544a0ce253f641253a11474c950229122c16c",
+  "indexes": {
+    "by_binary_symbol": {},
+    "by_file": {},
+    "by_source_decl": {
+      "decl:demo::configure": [
+        "decl:demo::configure",
+        "hdr:include/demo/api.h"
+      ]
+    },
+    "by_target": {}
+  },
+  "narrowed_passes": {},
+  "narrowed_scope": {},
+  "nodes": [
+    {
+      "attrs": {
+        "visibility": "public_header"
+      },
+      "confidence": "unknown",
+      "id": "decl:demo::configure",
+      "kind": "source_decl",
+      "label": "demo::configure()",
+      "provenance": ""
+    },
+    {
+      "attrs": {
+        "visibility": "private_header"
+      },
+      "confidence": "unknown",
+      "id": "type:detail::Options",
+      "kind": "record_type",
+      "label": "detail::Options",
+      "provenance": ""
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "id": "hdr:include/demo/api.h",
+      "kind": "header",
+      "label": "demo/api.h",
+      "provenance": ""
+    }
+  ],
+  "schema_version": 1
+}

@@ -1260,6 +1260,9 @@ def _internal_dependency_findings(
                 old_value="no internal dependency",
                 new_value=f"reaches {len(targets)} internal decl(s)/type(s)",
                 source_location=boundary,
+                correlated_change_kind=(
+                    own_change.kind.value if own_change is not None else None
+                ),
             )
         )
     return findings

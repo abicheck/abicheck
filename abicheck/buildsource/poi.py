@@ -493,14 +493,28 @@ def resolve_changed_paths_public_impact(
 
     from .source_graph import (
         DEPENDENCY_EDGE_KINDS,
-        decl_declaring_files,
         is_public_dependency_node,
     )
     from .source_graph_findings import _dependency_reachability
 
-    decl_to_file = decl_declaring_files(graph)
+    # A public entry declared directly in a changed file is impacted even with
+    # zero outgoing dependency edges — computed independently of
+    # _dependency_reachability (which returns {} outright when the graph
+    # carries no DEPENDENCY_EDGE_KINDS edges at all, losing this case).
+    node_by_id = {n.id: n for n in graph.nodes}
+    # Walk every SOURCE_DECLARES edge directly rather than through
+    # decl_declaring_files() -- that helper keeps only the *first* declaring
+    # file per decl (via setdefault), so a decl declared/defined from more
+    # than one file (e.g. a forward declaration in one header and the full
+    # definition in another) would be judged "changed" only when its
+    # first-recorded file happens to match, silently missing it when a
+    # *different* declaring file is the one actually in changed_paths
+    # (Codex review).
     changed_decls = {
-        decl for decl, path in decl_to_file.items() if _path_matches(path, changed)
+        e.dst
+        for e in graph.edges
+        if e.kind == "SOURCE_DECLARES"
+        and _path_matches(getattr(node_by_id.get(e.src), "label", ""), changed)
     }
     # A call/type-graph-only decl (no SOURCE_DECLARES edge) still carries its
     # own def_file/source_location attr — the same fallback resolve_symbol_tus
@@ -512,11 +526,6 @@ def resolve_changed_paths_public_impact(
     if not changed_decls:
         return frozenset()
 
-    # A public entry declared directly in a changed file is impacted even with
-    # zero outgoing dependency edges — computed independently of
-    # _dependency_reachability (which returns {} outright when the graph
-    # carries no DEPENDENCY_EDGE_KINDS edges at all, losing this case).
-    node_by_id = {n.id: n for n in graph.nodes}
     exported_decls = {
         e.src for e in graph.edges if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL"
     }

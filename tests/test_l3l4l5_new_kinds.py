@@ -1729,6 +1729,9 @@ def test_l5_internal_dependency_correlates_with_own_body_hash_change() -> None:
     assert "own implementation also changed" in dep_finding.description
     assert "'h1'" in dep_finding.description
     assert "'h2'" in dep_finding.description
+    # ADR-041 P0 roadmap item 2, structured half: the correlation is also
+    # carried as a machine-readable field, not only in the description prose.
+    assert dep_finding.correlated_change_kind == ChangeKind.INLINE_BODY_CHANGED.value
 
 
 def test_l5_internal_dependency_uncorrelated_without_source_diff_changes() -> None:
@@ -1742,6 +1745,7 @@ def test_l5_internal_dependency_uncorrelated_without_source_diff_changes() -> No
         f for f in findings if f.kind == ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED
     )
     assert "own implementation also changed" not in dep_finding.description
+    assert dep_finding.correlated_change_kind is None
 
 
 def test_l5_internal_dependency_not_correlated_with_unrelated_decls_change() -> None:
@@ -1765,6 +1769,7 @@ def test_l5_internal_dependency_not_correlated_with_unrelated_decls_change() -> 
         f for f in findings if f.kind == ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED
     )
     assert "own implementation also changed" not in dep_finding.description
+    assert dep_finding.correlated_change_kind is None
 
 
 def test_common_dependency_edge_kinds_header_only_confirmed_pass_widens_family() -> (

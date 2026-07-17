@@ -25,6 +25,7 @@ findings it must produce) and ``min_evidence`` (which routes it to the L3 build
 diff, the L4 source diff, or the L5 graph diff). This module asserts the emitted
 kinds and keeps the committed fixtures in sync with their generator.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -82,7 +83,7 @@ def _emitted_kinds(case_name: str) -> list[str]:
 def test_corpus_is_non_empty() -> None:
     # Guards against the discovery query silently matching nothing (which would
     # turn every parametrized assertion below into a vacuous pass).
-    assert len(_CASES) == 10, f"expected the 10 L3/L4/L5 cases, found {_CASES}"
+    assert len(_CASES) == 15, f"expected the 15 L3/L4/L5 cases, found {_CASES}"
 
 
 @pytest.mark.parametrize("case_name", _CASES)

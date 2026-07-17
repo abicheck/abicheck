@@ -101,6 +101,21 @@ EVIDENCE_CASES: dict[str, EvidenceSpec] = {
     "case162_symbol_source_owner_changed": EvidenceSpec(
         "graph/source_graph_summary.json", "--sources"
     ),
+    "case187_public_struct_private_field_type": EvidenceSpec(
+        "graph/source_graph_summary.json", "--sources"
+    ),
+    "case188_public_class_private_base_class": EvidenceSpec(
+        "graph/source_graph_summary.json", "--sources"
+    ),
+    "case189_public_function_private_parameter_type": EvidenceSpec(
+        "graph/source_graph_summary.json", "--sources"
+    ),
+    "case190_public_inline_function_references_internal_constant": EvidenceSpec(
+        "graph/source_graph_summary.json", "--sources"
+    ),
+    "case191_header_only_graph_field_type": EvidenceSpec(
+        "graph/source_graph_summary.json", "--sources"
+    ),
 }
 
 PYTHON_CASE = "case163_python_kwarg_renamed"

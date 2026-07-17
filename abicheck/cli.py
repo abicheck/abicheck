@@ -69,6 +69,7 @@ from .cli_options import (
     debug_resolution_options,
     env_matrix_option,
     evidence_options,
+    header_graph_options,
     lang_option,
     normalize_sided_options,
     output_options,
@@ -533,6 +534,7 @@ def main() -> None:
 @click.option("--no-git", "no_git", is_flag=True, default=False,
               help="Do not auto-detect git commit SHA.")
 @build_source_dump_options  # --build-info / --sources (embed inline)
+@header_graph_options  # --header-graph / --header-graph-includes (shared with `compare`)
 @compile_context_options  # --ast-frontend + cross-toolchain (shared with `scan`)
 def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Path, ...],
              public_headers: tuple[Path, ...], public_header_dirs: tuple[Path, ...],
@@ -554,6 +556,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              build_config: Path | None = None, allow_build_query: bool = False,
              build_query: str | None = None, build_compile_db: str | None = None,
              depth: str | None = None,
+             header_graph: bool = False, header_graph_includes: bool = False,
              _resolved_compile_context: CompileContext | None = None,
              _resolved_collect_mode: str | None = None) -> None:
     """Dump ABI snapshot of a shared library to JSON.
@@ -631,6 +634,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             public_headers, public_header_dirs, build_info, sources, build_config,
             allow_build_query, collect_mode, build_query, build_compile_db,
             header_backend=header_backend, compile_context=_cc,
+            header_graph=header_graph, header_graph_includes=header_graph_includes,
         )
         return
 
@@ -692,6 +696,9 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         write_snapshot_output=_write_snapshot_output,
         build_query=build_query,
         build_compile_db=build_compile_db,
+        header_graph=header_graph,
+        header_graph_includes=header_graph_includes,
+        compile_context=_cc,
     )
 
 
@@ -1335,19 +1342,7 @@ def _embed_inline_source_side(
               help="Additional directory to search for shared libraries (with --follow-deps).")
 @click.option("--ld-library-path", "ld_library_path", default="",
               help="Simulated LD_LIBRARY_PATH (with --follow-deps).")
-@click.option("--header-graph", is_flag=True, default=False,
-              help="Build and embed a header-only semantic graph (ADR-041 addendum) "
-                   "for both sides from the parsed header AST alone (no build system "
-                   "needed); the existing build-source-pack graph diff picks it up "
-                   "automatically, so declaration reachability / internal-dependency "
-                   "risk findings become available on an ordinary binary+headers compare, "
-                   "not just --depth build/source runs. Degrades to declaration-visibility "
-                   "nodes only (no type/call edges) when clang is unavailable.")
-@click.option("--header-graph-includes", is_flag=True, default=False,
-              help="With --header-graph, additionally run a per-header 'clang -M' pass to "
-                   "add include-file edges from each top-level header to everything it "
-                   "transitively includes. One extra clang invocation per top-level header, "
-                   "so opt-in separately from --header-graph. Ignored without --header-graph.")
+@header_graph_options  # --header-graph / --header-graph-includes (shared with `dump`)
 @click.option("--show-redundant/--no-show-redundant", "show_redundant", default=False,
               hidden=True,
               help="Disable redundancy filtering and show all changes including those "

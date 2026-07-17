@@ -282,6 +282,25 @@ class TestResultContent:
         assert props["oldVersion"] == "1.0"
         assert props["newVersion"] == "2.0"
 
+    def test_result_correlated_change_kind(self) -> None:
+        # ADR-041 P0 roadmap item 2: the structured correlation sibling to the
+        # description prose must also reach SARIF's properties bag, not only
+        # the JSON report's _change_to_dict.
+        c = Change(
+            kind=ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED,
+            symbol="demo::compute",
+            description="reaches an internal decl",
+            correlated_change_kind=ChangeKind.INLINE_BODY_CHANGED.value,
+        )
+        doc = to_sarif(_make_result([c]))
+        props = doc["runs"][0]["results"][0]["properties"]
+        assert props["correlatedChangeKind"] == "inline_body_changed"
+
+    def test_result_correlated_change_kind_absent_when_unset(self) -> None:
+        doc = to_sarif(_make_result([_breaking_change()]))
+        props = doc["runs"][0]["results"][0]["properties"]
+        assert "correlatedChangeKind" not in props
+
     def test_result_evidence_status_breaking(self) -> None:
         doc = to_sarif(_make_result([_breaking_change()], verdict=Verdict.BREAKING))
         props = doc["runs"][0]["results"][0]["properties"]

@@ -286,6 +286,10 @@
             "review_recommended",
             "no_action_required"
           ]
+        },
+        "correlated_change_kind": {
+          "type": "string",
+          "description": "ADR-041 P0 roadmap item 2: for a public_api_internal_dependency_added finding correlated with the same public entry's own body/type-hash change this version, the correlated finding's ChangeKind value (e.g. 'inline_body_changed') — the structured sibling to the correlation already carried in the description prose."
         }
       }
     }
