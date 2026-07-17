@@ -509,3 +509,36 @@ class TestBug9CastxmlTimeout:
         # No stale temp files left behind
         leftover = list(tmp_path.glob("tmp*"))
         assert len(leftover) == 0 or all(f.name == "test.h" for f in leftover)
+
+
+def test_castxml_rechecks_deadline_before_parsing_xml(tmp_path: Path) -> None:
+    """Codex review follow-up (PR #591): the same 'check deadline before
+    loading a large parse result' gap fixed on the clang L2 AST path also
+    existed on the castxml L2 XML-parsing path — a budget that expires
+    exactly as castxml exits successfully must not silently let the XML
+    parse run past it."""
+    import time
+
+    from abicheck import deadline
+
+    def _fake_run(cmd, **kw):
+        time.sleep(0.05)
+        out = Path(cmd[cmd.index("-o") + 1])
+        out.write_text('<GCC_XML><File id="f1" name="foo.h"/></GCC_XML>')
+        proc: subprocess.CompletedProcess = MagicMock(spec=subprocess.CompletedProcess)
+        proc.returncode = 0
+        proc.stderr = ""
+        proc.stdout = ""
+        return proc
+
+    with (
+        patch("abicheck.dumper._castxml_available", return_value=True),
+        patch("abicheck.dumper.deadline.run_bounded", side_effect=_fake_run),
+        patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"),
+    ):
+        from abicheck.dumper import _castxml_dump
+        header = tmp_path / "test.h"
+        header.write_text("int x;", encoding="utf-8")
+        with deadline.deadline_scope(0.01):
+            with pytest.raises(deadline.DeadlineExceeded):
+                _castxml_dump([header], [])

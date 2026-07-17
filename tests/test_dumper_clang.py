@@ -1245,6 +1245,10 @@ def test_clang_header_dump_streams_stdout_to_file_not_memory(
     header.write_text("int foo(void);\n")
     monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
     monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
+    # Isolate the single clang AST-dump call from the (also run_bounded-based,
+    # Codex review follow-up) system-include probe — otherwise its capture_
+    # output=True call leaks into `seen` alongside the AST-dump call's kwargs.
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
     seen: dict[str, object] = {}
 
     def _run(cmd, **kwargs):

@@ -194,8 +194,15 @@ def run_bounded(
     text: bool = False,
     stdout: Any = None,
     stderr: Any = None,
+    input: Any = None,
 ) -> subprocess.CompletedProcess[Any]:
     """``subprocess.run``, but bounded by the active deadline and safe to kill.
+
+    *input*, like ``subprocess.run``'s, feeds the child's stdin and implies a
+    piped stdin — without it the child inherits this process's stdin, which
+    would hang a probe that reads from ``-`` (e.g. ``cc -E -x c++ -v -``)
+    under an interactive terminal instead of the empty/redirected stdin
+    ``subprocess.run(input=...)`` gives it.
 
     The child is started in its own process group on POSIX
     (``start_new_session=True``), so a timeout kills the *whole* tree via
@@ -226,13 +233,14 @@ def run_bounded(
     proc = subprocess.Popen(  # noqa: S603 — cmd is caller-built argv, never shell text
         cmd,
         cwd=cwd,
+        stdin=subprocess.PIPE if input is not None else None,
         stdout=stdout,
         stderr=stderr,
         text=text,
         start_new_session=use_pgroup,
     )
     try:
-        out, err = proc.communicate(timeout=effective_timeout)
+        out, err = proc.communicate(input=input, timeout=effective_timeout)
     except subprocess.TimeoutExpired as exc:
         _kill_process_tree(proc, use_pgroup)
         # Drain the now-dead process's pipes so it doesn't linger as a zombie;

@@ -79,3 +79,19 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   real time on its own for a large cached header set; both cache-hit
   branches (`_clang_header_dump`, `_castxml_dump`) now call
   `deadline.check()` before consuming the cache entry.
+- **Three more "check the deadline before sinking real time into a large
+  parse" gaps closed, same shape as the two above.** The L2 castxml path
+  (`_validate_castxml_output`) now re-checks before parsing a freshly
+  produced (not cached) XML tree. The L4 clang source extractor
+  (`ClangSourceExtractor.extract`) had the identical AST-load gap as the L2
+  clang path — now closed, folded into the existing `SourceExtractionError`
+  contract (L4 failures degrade to partial coverage, never abort the scan,
+  ADR-028 D3). And the castxml↔clang system-include parity probe
+  (`_probe_gnu_system_includes`, up to two `gcc`/`g++ -E -v` calls per L2
+  clang dump) used a fixed 15s `subprocess.run` with no process-group
+  isolation and no deadline awareness at all — a tight `--budget` could lose
+  up to ~30s to a slow/hung probe before the budget-aware clang invocation
+  was ever reached. It now goes through `deadline.run_bounded` like every
+  other subprocess call in this pipeline (gained an `input=` parameter to
+  support the probe's stdin-fed invocation), degrading to its existing
+  best-effort `[]` fallback on a `DeadlineExceeded` exactly like a timeout.

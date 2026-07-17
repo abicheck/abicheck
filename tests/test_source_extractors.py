@@ -381,6 +381,40 @@ def test_extract_deadline_exceeded_degrades_like_timeout(monkeypatch) -> None:
         extractor.extract(_cu(source="foo.cpp"), public_header_roots=["foo.h"])
 
 
+def test_extract_rechecks_deadline_before_parsing_xml(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Codex review follow-up (PR #591): the 'check deadline before loading
+    cached/output data' gap fixed in the L2 dumper.py path and the L4 clang
+    extractor also existed here — a budget that expires exactly as castxml
+    exits successfully must not silently let the XML parse run past it, and
+    must degrade to SourceExtractionError (L4 never aborts the scan), not a
+    raw DeadlineExceeded."""
+    import time
+
+    from abicheck import deadline
+    from abicheck.buildsource.source_extractors import (
+        SourceExtractionError,
+        castxml as castxml_mod,
+    )
+
+    extractor = CastxmlSourceExtractor()
+    monkeypatch.setattr(extractor, "available", lambda: True)
+
+    class _Result:
+        returncode = 0
+        stderr = ""
+
+    def _fake_run(cmd, **kw):  # type: ignore[no-untyped-def]
+        time.sleep(0.05)
+        out = cmd[cmd.index("-o") + 1]
+        Path(out).write_text('<GCC_XML><File id="f1" name="foo.h"/></GCC_XML>')
+        return _Result()
+
+    monkeypatch.setattr(castxml_mod.deadline, "run_bounded", _fake_run)
+    with deadline.deadline_scope(0.01):
+        with pytest.raises(SourceExtractionError, match="deadline exceeded"):
+            extractor.extract(_cu(source="foo.cpp"), public_header_roots=["foo.h"])
+
+
 def test_unredact_home_expands_tilde() -> None:
     # The evidence redaction policy rewrites the home prefix to `~`; the replay
     # must expand it back since subprocess does not (Codex review #335, P2).

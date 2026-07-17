@@ -37,6 +37,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from . import deadline
+
 #: Env knob to disable the castxml↔clang system-include auto-detection. On by
 #: default; set to a falsey value to suppress the host-compiler probe (e.g. for a
 #: hermetic build that supplies its own ``-isystem``/``--sysroot``).
@@ -116,24 +118,30 @@ def _is_gnu_compiler_resource_dir(path: str) -> bool:
 def _probe_gnu_system_includes(cc_bin: str, *, cpp: bool) -> list[str]:
     """Probe *cc_bin* for the system include dirs it would search (best-effort).
 
-    Best-effort: any probe failure (no compiler, timeout) yields ``[]`` so the
-    dump still runs on clang's own detection. Only existing directories are
-    returned, in the compiler's own search order. GCC's own compiler resource
-    dir is filtered out (see :func:`_is_gnu_compiler_resource_dir`): feeding it
-    to clang as ``-isystem`` makes clang use GCC's intrinsics headers, which
-    reference GCC-only builtins clang does not implement and the parse fails.
+    Best-effort: any probe failure (no compiler, timeout, or an already-
+    exhausted scan --budget) yields ``[]`` so the dump still runs on clang's
+    own detection. Only existing directories are returned, in the compiler's
+    own search order. GCC's own compiler resource dir is filtered out (see
+    :func:`_is_gnu_compiler_resource_dir`): feeding it to clang as
+    ``-isystem`` makes clang use GCC's intrinsics headers, which reference
+    GCC-only builtins clang does not implement and the parse fails.
+
+    Bounded by the active deadline (not just the fixed 15s) and process-
+    group-safe on timeout, same as the main clang/castxml subprocess calls —
+    otherwise a tight ``--budget`` could still spend up to ~15s per probe (two
+    probes: C and C++) in a slow/hung compiler before the budget-aware parse
+    is ever reached (Codex review).
     """
     lang = "c++" if cpp else "c"
     try:
-        proc = subprocess.run(
+        proc = deadline.run_bounded(
             [cc_bin, "-E", "-x", lang, "-v", "-"],
             input="",
             capture_output=True,
             text=True,
             timeout=15,
-            check=False,
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, deadline.DeadlineExceeded):
         return []
     return [
         d

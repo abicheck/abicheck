@@ -1770,6 +1770,15 @@ class ClangSourceExtractor:
                     f"(exit {ast_rc}): {ast_stderr[:1000]}"
                     + _missing_generated_header_hint(ast_stderr)
                 )
+            # Re-check the deadline before loading a potentially huge AST (Codex
+            # review); folded into SourceExtractionError like an ordinary
+            # timeout — L4 failures degrade to partial coverage, never abort.
+            try:
+                deadline.check()
+            except deadline.DeadlineExceeded as exc:
+                raise SourceExtractionError(
+                    f"scan deadline exceeded before loading AST for {compile_unit.source}"
+                ) from exc
             try:
                 with open(ast_path, "rb") as fh:  # bytes: json detects encoding
                     ast_root = json.load(fh)
@@ -1884,14 +1893,8 @@ class ClangSourceExtractor:
         ``unredact_home`` only rewrites a ``~`` standing in for a home directory,
         so a literal ``~`` mid-token is left intact (mirrors castxml, PR #336).
         """
-        # P0 follow-up: bound by the active scan --budget deadline (not just the
-        # fixed self.timeout default) and run in its own process group so a
-        # timeout kills the whole tree (deadline.run_bounded) — same fix as the
-        # L2 header-AST subprocess. L4 extraction failures already degrade to
-        # partial per-TU coverage rather than aborting the scan (see module
-        # docstring / SourceExtractionError contract), so a deadline overflow
-        # here is folded into that same existing, caller-handled exception type
-        # rather than propagated as a distinct budget-overflow signal.
+        # Bound by the active --budget deadline (not just self.timeout) and
+        # process-group-safe on timeout, same fix as the L2 header-AST subprocess.
         cmd = [unredact_home(tok) for tok in cmd]
         try:
             return deadline.run_bounded(
@@ -1923,10 +1926,7 @@ class ClangSourceExtractor:
         parse). ``stderr`` stays buffered (it is small). The temp file is removed on
         timeout/failure here; on success the caller's ``finally`` removes it.
         """
-        # See _run's P0 follow-up comment: deadline.run_bounded bounds this by
-        # the active scan --budget (not just self.timeout) and kills the whole
-        # process group on timeout instead of orphaning a compiler-driver
-        # grandchild.
+        # See _run: deadline.run_bounded bounds this the same way.
         cmd = [unredact_home(tok) for tok in cmd]
         fd, name = tempfile.mkstemp(prefix="abicheck-l4-ast-", suffix=".json")
         path = Path(name)

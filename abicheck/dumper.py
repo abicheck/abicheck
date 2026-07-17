@@ -1007,6 +1007,7 @@ def _validate_castxml_output(
         raise SnapshotError(
             f"castxml exited 0 but produced no output file (or empty file).{detail}"
         )
+    deadline.check()  # before parsing; outside the try below (Exception would swallow it)
     try:
         root = cast(Element, DefusedET.parse(str(out_xml)).getroot())
     except Exception as xml_exc:
@@ -1187,8 +1188,7 @@ def _run_castxml_attempt(
     )
 
     try:
-        # See _clang_header_dump._run_clang: DeadlineExceeded propagates uncaught.
-        deadline.check()
+        deadline.check()  # propagates uncaught, like _clang_header_dump._run_clang
         try:
             result = deadline.run_bounded(cmd, capture_output=True, text=True, timeout=120)
         except subprocess.TimeoutExpired as exc:

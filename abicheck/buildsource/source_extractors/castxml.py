@@ -202,6 +202,17 @@ class CastxmlSourceExtractor:
                     f"castxml failed on {compile_unit.source} "
                     f"(exit {result.returncode}): {result.stderr[:1000]}"
                 )
+            # Re-check the deadline before parsing a potentially large XML
+            # tree — same reasoning as the clang L4 extractor and the L2
+            # dumper.py path (Codex review); folded into SourceExtractionError
+            # since L4 failures must degrade to partial coverage, not abort.
+            try:
+                deadline.check()
+            except deadline.DeadlineExceeded as exc:
+                raise SourceExtractionError(
+                    f"scan deadline exceeded before parsing castxml output for "
+                    f"{compile_unit.source}"
+                ) from exc
             root = cast(Element, DefusedET.parse(str(out_xml)).getroot())
         finally:
             out_xml.unlink(missing_ok=True)

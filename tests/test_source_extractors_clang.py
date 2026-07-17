@@ -2307,6 +2307,28 @@ def test_extract_deadline_exceeded_degrades_like_timeout(monkeypatch) -> None:  
         extractor.extract(_cu(), public_header_roots=["include/foo.h"])
 
 
+def test_extract_rechecks_deadline_before_loading_ast(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Codex review follow-up (PR #591): the 'check deadline before loading
+    the AST file' gap fixed in the L2 dumper.py path also existed in this L4
+    extractor — a budget that expires exactly as clang exits successfully
+    must not silently let the AST JSON load run past it, and must degrade to
+    SourceExtractionError (L4 never aborts the scan), not a raw
+    DeadlineExceeded escaping past _extract_one's except clause."""
+    import json
+    import time
+
+    from abicheck import deadline
+
+    def handler(cmd, **kw):  # type: ignore[no-untyped-def]
+        time.sleep(0.05)
+        return _emit_ast(kw, json.dumps(_ast()))
+
+    extractor = _patch_run(monkeypatch, handler)
+    with deadline.deadline_scope(0.01):
+        with pytest.raises(SourceExtractionError, match="deadline exceeded"):
+            extractor.extract(_cu(), public_header_roots=["include/foo.h"])
+
+
 def test_extract_invalid_json_raises(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     extractor = _patch_run(monkeypatch, lambda cmd, **kw: _emit_ast(kw, "{not json"))
     with pytest.raises(SourceExtractionError, match="not valid JSON"):
