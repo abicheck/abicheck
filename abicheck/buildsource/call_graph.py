@@ -827,6 +827,16 @@ class ClangCallGraphExtractor:
                 f"clang exited {proc.returncode} (stderr: {proc.stderr[:200]})"
             )
         try:
+            # clang can exit successfully right as the budget expires; recheck
+            # before the CPU/RSS-heavy parse+walk, same as the L2/L4 post-run
+            # checks (Codex review, PR #591).
+            deadline.check()
+        except deadline.DeadlineExceeded as exc:
+            self.diagnostics.append(
+                f"scan deadline exceeded before parsing clang AST: {exc}"
+            )
+            return []
+        try:
             # Both json.loads and the recursive AST walk can hit Python's
             # recursion limit on a pathologically deep TU; guard so a degenerate
             # AST degrades to "no call edges" rather than aborting collection.

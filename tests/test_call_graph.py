@@ -901,7 +901,9 @@ def test_extract_from_build_propagates_deadline_into_pool_workers(monkeypatch) -
     assert all(0 < r <= 30.0 for r in seen_remaining)
 
 
-def test_extract_from_args_deadline_exceeded_degrades_to_diagnostic(monkeypatch) -> None:
+def test_extract_from_args_deadline_exceeded_degrades_to_diagnostic(
+    monkeypatch,
+) -> None:
     # Codex review (PR #591): this pass is advisory (ADR-028 D3) — a
     # DeadlineExceeded from the now-bounded clang subprocess must degrade to
     # the same diagnostic+[] contract as any other probe failure, not
@@ -919,6 +921,36 @@ def test_extract_from_args_deadline_exceeded_degrades_to_diagnostic(monkeypatch)
     edges = ext.extract_from_args(["x.cpp"])
     assert edges == []
     assert any("clang invocation failed" in d for d in ext.diagnostics)
+
+
+def test_extract_from_args_rechecks_deadline_before_parsing_ast(monkeypatch) -> None:
+    """Codex review (PR #591): the same post-subprocess gap as the L2/L4
+    clang paths — clang can exit successfully right as the budget expires,
+    but json.loads()+parse_clang_ast_calls() used to run unbounded. Must
+    degrade to the advisory diagnostic+[] contract (ADR-028 D3), not raise."""
+    import json as _json
+    import time
+
+    import abicheck.buildsource.call_graph as cg
+    from abicheck import deadline
+
+    monkeypatch.setattr(cg.shutil, "which", lambda _b: "/usr/bin/clang++")
+    ast = {"kind": "TranslationUnitDecl", "inner": []}
+
+    def fake_run(*_a, **_k):
+        # Simulate the budget running out while clang was still parsing: by
+        # the time it exits successfully, the deadline has already passed.
+        time.sleep(0.05)
+        return _FakeProc(_json.dumps(ast))
+
+    monkeypatch.setattr(cg.deadline, "run_bounded", fake_run)
+    ext = ClangCallGraphExtractor()
+    with deadline.deadline_scope(0.03):
+        edges = ext.extract_from_args(["x.cpp"])
+    assert edges == []
+    assert any(
+        "scan deadline exceeded before parsing clang AST" in d for d in ext.diagnostics
+    )
 
 
 # ── collect: call-graph folds automatically (inline_graph_fold.fold_call_graph) ──

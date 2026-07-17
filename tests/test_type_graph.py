@@ -1549,6 +1549,39 @@ def test_extract_from_safe_args_deadline_exceeded_degrades_to_diagnostic(
     assert any("clang invocation failed" in d for d in extractor.diagnostics)
 
 
+def test_extract_from_safe_args_rechecks_deadline_before_parsing_ast(
+    monkeypatch,
+) -> None:
+    """Codex review (PR #591): the same post-subprocess gap as call_graph's
+    identical fix — clang can exit successfully right as the budget expires,
+    but json.loads()+parse_clang_ast_types() used to run unbounded. Must
+    degrade to the advisory diagnostic+[] contract (ADR-028 D3), not raise."""
+    import json as _json
+    import time
+
+    import abicheck.buildsource.type_graph as tg
+    from abicheck import deadline
+
+    ast = _tu(_record("Widget", inner=[_field("x", "int")]))
+
+    def fake_run(*_a, **_k):
+        # Simulate the budget running out while clang was still parsing: by
+        # the time it exits successfully, the deadline has already passed.
+        time.sleep(0.05)
+        return _FakeProc(_json.dumps(ast))
+
+    monkeypatch.setattr(tg.shutil, "which", lambda _b: "/usr/bin/clang++")
+    monkeypatch.setattr(tg.deadline, "run_bounded", fake_run)
+    extractor = ClangTypeGraphExtractor(clang_bin="clang++")
+    with deadline.deadline_scope(0.03):
+        edges = extractor._extract_from_safe_args(["--", "foo.cpp"])
+    assert edges == []
+    assert any(
+        "scan deadline exceeded before parsing clang AST" in d
+        for d in extractor.diagnostics
+    )
+
+
 # ── ClangTypeGraphExtractor: graceful degrade ────────────────────────────────
 
 
@@ -1906,9 +1939,7 @@ def test_real_mangled_function_identity_stays_the_mangled_name() -> None:
         {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Config")]},
         _record(
             "Widget",
-            inner=[
-                _method("bar", "_ZN6Widget3barE", [_param("x", "detail::Config")])
-            ],
+            inner=[_method("bar", "_ZN6Widget3barE", [_param("x", "detail::Config")])],
         ),
     )
     edges = parse_clang_ast_types(ast)

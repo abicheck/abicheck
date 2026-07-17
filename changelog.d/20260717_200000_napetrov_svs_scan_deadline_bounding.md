@@ -106,3 +106,11 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   share a `_deadline_bound_worker` helper (`call_graph.py`) to re-establish
   the captured deadline inside each `ThreadPoolExecutor` worker, the same
   pattern `source_replay._deadline_bound_worker` uses for L4.
+- Closed the last L5 gap Codex found on the same subprocess: the L5 clang
+  invocation could exit successfully right as `--budget` expired, and
+  `ClangCallGraphExtractor`/`ClangTypeGraphExtractor` would then still run
+  `json.loads()` plus the full AST walk (`parse_clang_ast_calls`/
+  `parse_clang_ast_types`) with no deadline check, mirroring the L2/L4
+  post-run gap already fixed elsewhere. Both now re-check `deadline.check()`
+  right after the subprocess returns and before parsing, degrading to the
+  same advisory diagnostic+`[]` contract (ADR-028 D3) on overflow.
