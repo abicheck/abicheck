@@ -143,6 +143,76 @@ def test_run_bounded_raises_timeout_expired_on_overrun() -> None:
         )
 
 
+def test_run_bounded_raises_deadline_exceeded_for_inflight_timeout_under_budget() -> None:
+    # Codex review finding: a subprocess that is already *running* when an
+    # active --budget's deadline hits must still be reported as a budget
+    # overflow (DeadlineExceeded -> _BudgetOverflow/exit 5), not a generic
+    # subprocess.TimeoutExpired/parse-timeout (SnapshotError/exit 1) — the two
+    # mean very different things to a caller like scan_engine.run_scan_core.
+    # Distinct from test_bounded_timeout_raises_once_deadline_has_passed
+    # (deadline already gone *before* spawning): here the deadline expires
+    # *while* the process is running, which is the actual clang/castxml case
+    # (a `--budget 5s` header parse that overruns mid-parse, not one that
+    # never got to start).
+    with deadline.deadline_scope(0.2):
+        with pytest.raises(deadline.DeadlineExceeded):
+            deadline.run_bounded(
+                [sys.executable, "-c", "import time; time.sleep(10)"],
+                # A generous per-call default: the *active budget* (0.2s), not
+                # this default, is what actually bounds the call.
+                timeout=120,
+                capture_output=True,
+                text=True,
+            )
+
+
+def test_run_bounded_kills_group_member_that_ignores_sigterm(tmp_path) -> None:
+    # Codex review finding: the old escalation only sent SIGKILL when
+    # proc.wait() (the *direct* child) itself timed out. A grandchild that
+    # traps/ignores SIGTERM while the direct child exits promptly on SIGTERM
+    # (the common case — most processes don't override the default handler)
+    # would then dodge SIGKILL entirely: proc.wait() succeeds quickly, so the
+    # escalation guarded on its TimeoutExpired never ran. Reproduce exactly
+    # that shape: a direct child with default SIGTERM handling that spawns a
+    # grandchild which explicitly ignores SIGTERM.
+    pid_file = tmp_path / "ignorer.pid"
+    grandchild_src = (
+        "import signal, time\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        "time.sleep(60)\n"
+    )
+    parent_src = (
+        "import subprocess, sys, time\n"
+        f"gc = subprocess.Popen([sys.executable, '-c', {grandchild_src!r}])\n"
+        f"open({str(pid_file)!r}, 'w').write(str(gc.pid))\n"
+        "time.sleep(60)\n"  # direct child: default SIGTERM handling -> dies promptly
+    )
+    cmd = [sys.executable, "-c", parent_src]
+    with pytest.raises(subprocess.TimeoutExpired):
+        deadline.run_bounded(cmd, timeout=0.3, capture_output=True, text=True)
+
+    deadline_check = time.monotonic() + 5
+    child_pid = None
+    while time.monotonic() < deadline_check:
+        if pid_file.exists():
+            text = pid_file.read_text().strip()
+            if text:
+                child_pid = int(text)
+                break
+        time.sleep(0.05)
+    assert child_pid is not None, "grandchild never recorded its PID"
+
+    for _ in range(50):
+        if not _pid_alive(child_pid):
+            break
+        time.sleep(0.1)
+    assert not _pid_alive(child_pid), (
+        f"SIGTERM-ignoring grandchild {child_pid} survived — the SIGKILL "
+        "escalation must run unconditionally after the grace period, not "
+        "only when the direct child itself fails to exit in time"
+    )
+
+
 def test_run_bounded_kills_entire_process_group_on_timeout(tmp_path) -> None:
     # The actual root cause: a bare `subprocess.run(cmd, timeout=N)` only kills
     # the *direct* child on TimeoutExpired. A compiler driver's grandchildren
@@ -184,11 +254,13 @@ def test_run_bounded_kills_process_group_on_deadline_exceeded_mid_run(tmp_path) 
     # Same orphan-proof as above, but triggered through an active
     # deadline_scope (the --budget path) rather than a bare `timeout=` kwarg —
     # proves the scan-wide deadline, not just a per-call timeout, also cleans
-    # up the whole tree.
+    # up the whole tree. An in-flight timeout under an active deadline raises
+    # DeadlineExceeded (not TimeoutExpired) — see
+    # test_run_bounded_raises_deadline_exceeded_for_inflight_timeout_under_budget.
     pid_file = tmp_path / "child2.pid"
     cmd = ["sh", "-c", f"sleep 60 & echo $! > {pid_file}; wait"]
     with deadline.deadline_scope(0.3):
-        with pytest.raises(subprocess.TimeoutExpired):
+        with pytest.raises(deadline.DeadlineExceeded):
             deadline.run_bounded(cmd, timeout=120, capture_output=True, text=True)
 
     deadline_check = time.monotonic() + 5

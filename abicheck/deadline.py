@@ -175,12 +175,20 @@ def run_bounded(
     ``Popen.kill()`` on the single process (best effort; process-group
     semantics don't exist the same way there).
 
-    Re-raises ``subprocess.TimeoutExpired`` on an in-flight timeout — same
-    contract as ``subprocess.run``, so existing ``except
-    subprocess.TimeoutExpired`` handlers keep working unmodified. Raises
-    :class:`DeadlineExceeded` up front when the remaining budget is already
-    <= 0 (never spawns in that case).
+    Re-raises ``subprocess.TimeoutExpired`` on an in-flight timeout **only**
+    when no deadline is active — same contract as ``subprocess.run``, so
+    existing ``except subprocess.TimeoutExpired`` handlers keep working
+    unmodified for the unbudgeted case. When a deadline *is* active,
+    :func:`bounded_timeout` already capped ``effective_timeout`` to exactly
+    what was left of it, so any in-flight timeout under that scope is by
+    construction the budget running out, not an ordinary parse hang — this
+    raises :class:`DeadlineExceeded` instead, so a caller that (like
+    ``dumper.py``) deliberately leaves ``DeadlineExceeded`` uncaught gets a
+    budget-overflow signal instead of a plain-timeout one even when the
+    subprocess was already running when the deadline hit (not just when it
+    was already exhausted before spawning).
     """
+    had_deadline = remaining() is not None
     effective_timeout = bounded_timeout(timeout)
     use_pgroup = os.name == "posix"
     if capture_output:
@@ -206,6 +214,9 @@ def run_bounded(
             exc.stderr = drained_err
         except subprocess.TimeoutExpired:
             pass
+        if had_deadline:
+            left = remaining()
+            raise DeadlineExceeded(left if left is not None else 0.0) from exc
         raise
     except BaseException:
         _kill_process_tree(proc, use_pgroup)
@@ -220,6 +231,16 @@ def _kill_process_tree(proc: subprocess.Popen[Any], use_pgroup: bool) -> None:
     MCP-path watchdog (``service_scan._kill_process_tree``) so the CLI header-
     scan path gets the same no-orphans guarantee. Best-effort: a process that
     already exited between the timeout firing and this call is not an error.
+
+    The SIGKILL escalation runs unconditionally after the grace period —
+    **not** only when ``proc.wait()`` itself times out. ``proc.wait()``
+    tracks just the *direct* child; a grandchild that traps/ignores SIGTERM
+    (or a wrapper that backgrounds a job and exits itself) can leave the
+    direct child reaped while a sibling/child in the same group is still
+    alive, and gating SIGKILL on the direct child's own exit would let that
+    survivor dodge it. ``killpg(SIGKILL)`` on an already-fully-dead group is
+    a harmless ``ProcessLookupError``, so escalating unconditionally costs
+    nothing on the common case where SIGTERM was enough.
     """
     if not use_pgroup:
         proc.kill()
@@ -229,20 +250,23 @@ def _kill_process_tree(proc: subprocess.Popen[Any], use_pgroup: bool) -> None:
         pgid = os.getpgid(proc.pid)
     except (ProcessLookupError, OSError):
         proc.kill()
+        proc.wait()
         return
     try:
         os.killpg(pgid, signal.SIGTERM)
     except (ProcessLookupError, PermissionError, OSError):
         proc.kill()
+        proc.wait()
         return
     try:
         proc.wait(timeout=5)
     except subprocess.TimeoutExpired:
-        try:
-            os.killpg(pgid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError, OSError):
-            pass
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            pass
+        pass
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
