@@ -159,6 +159,57 @@ class TestMacosDeploymentTargetFloorUnit:
             == []
         )
 
+    def test_fat_binary_still_checked_when_selected_slice_matches_wheel_arch(
+        self,
+    ) -> None:
+        # Codex review #583, follow-up: when WHEEL_ARCH is also declared and
+        # matches the selected slice, min_os_version is no longer a guess —
+        # it unambiguously belongs to the exact slice the wheel tag claims,
+        # so a real violation must still be flagged rather than skipped.
+        macho = _macho(
+            cpu_type="X86_64",
+            cpu_types=["X86_64", "ARM64"],
+            min_os_version="11.0",
+        )
+        changes = check_macos_deployment_target_floor(
+            macho,
+            {"MACOS_DEPLOYMENT_TARGET": "10.9", "WHEEL_ARCH": "x86_64"},
+        )
+        assert len(changes) == 1
+        assert changes[0].kind is ChangeKind.MACOS_DEPLOYMENT_TARGET_RAISED
+
+    def test_fat_binary_skipped_when_selected_slice_does_not_match_wheel_arch(
+        self,
+    ) -> None:
+        # The selected slice (arm64, host-preferred) does not match the
+        # claimed x86_64 arch — its min_os_version can't be attributed to
+        # the x86_64 slice the wheel tag actually promises, so still skip.
+        macho = _macho(
+            cpu_type="ARM64",
+            cpu_types=["X86_64", "ARM64"],
+            min_os_version="11.0",
+        )
+        assert (
+            check_macos_deployment_target_floor(
+                macho,
+                {"MACOS_DEPLOYMENT_TARGET": "10.9", "WHEEL_ARCH": "x86_64"},
+            )
+            == []
+        )
+
+    def test_fat_binary_skipped_when_no_wheel_arch_declared(self) -> None:
+        macho = _macho(
+            cpu_type="X86_64",
+            cpu_types=["X86_64", "ARM64"],
+            min_os_version="11.0",
+        )
+        assert (
+            check_macos_deployment_target_floor(
+                macho, {"MACOS_DEPLOYMENT_TARGET": "10.9"}
+            )
+            == []
+        )
+
     def test_single_slice_binary_still_checked(self) -> None:
         macho = _macho(min_os_version="12.3", cpu_types=["X86_64"])
         changes = check_macos_deployment_target_floor(
