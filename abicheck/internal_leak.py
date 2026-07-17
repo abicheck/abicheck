@@ -883,6 +883,14 @@ def _build_leak_change(
             f"{'; '.join(path_strs)}{more}."
         ),
         caused_by_type=tname,
+        # ADR-044 D1/D2: this finding exists *because* tname is reachable from
+        # the public surface — mark it so a broad suppression rule's default
+        # reachability gate (which would otherwise see an untagged synthetic
+        # Change and wrongly treat it as unreachable) cannot suppress it
+        # either, mirroring the raw trigger changes MarkReachability tags.
+        public_reachable=True,
+        reachability_kind="value_embedding" if embedded_by_value else "pointer_or_signature",
+        reachability_proof_path=path_strs[0] if path_strs else None,
     )
 
 

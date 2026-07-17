@@ -234,19 +234,36 @@ def _filter_pattern_synthetic(
     Moves suppressed synthetics from *kept* to *suppressed* and prunes them
     from *pattern_modulations*.  Returns the updated (kept, pattern_modulations)
     pair.  Called only when suppression is active and new synthetic items exist.
+
+    Uses :meth:`SuppressionList.evaluate` (not the cheaper ``is_suppressed``)
+    so a broad rule whose selectors matched a public-reachable pattern
+    finding (e.g. ``OPAQUE_INVARIANT_BROKEN``) but was withheld by the
+    reachability/``allow_public_break`` gate still gets the same
+    ``SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`` diagnostic ``ApplySuppression``
+    produces for changes it sees directly (ADR-044 D4; Codex review, fresh
+    evidence) — this ADR-027 pattern-verdict path builds its findings well
+    after ``post_processing.DEFAULT_PIPELINE`` runs, so nothing else would
+    ever emit that diagnostic for them.
     """
+    from .post_processing import _build_suppression_overreach_change
+
     retained = kept[:pre_pattern_count]
+    diagnostics: list[Change] = []
     suppressed_synthetic: set[tuple[str, str | None]] = set()
     for c in kept[pre_pattern_count:]:
-        if suppression.is_suppressed(c):
+        outcome = suppression.evaluate(c)
+        if outcome.suppressed:
             suppressed.append(c)
             # Drop this synthetic finding's disclosure row too, so a
             # fully-suppressed handle/opaque/anti-pattern transition does
             # not linger in the pattern_modulations ledger while it is
             # absent from `changes` and the verdict (ADR-027 review).
             suppressed_synthetic.add((c.symbol, c.modulation_rule))
-        else:
-            retained.append(c)
+            continue
+        retained.append(c)
+        if outcome.withheld_rule is not None:
+            diagnostics.append(_build_suppression_overreach_change(c, outcome.withheld_rule))
+    retained.extend(diagnostics)
     if suppressed_synthetic:
         pattern_modulations = [
             m
