@@ -386,3 +386,36 @@ class TestWrapperProducer:
         assert outputs["ready"] == "true"
         assert outputs["mode"] == "pack"
         assert outputs["pack-path"] == str(pack)
+
+
+@pytest.mark.skipif(
+    not RUN_SH.is_file(), reason="actions/collect-facts/run.sh not found"
+)
+class TestClangPluginSmokeTestIsolation:
+    """Regression guard (Codex review): the plugin smoke-test compile used
+    to pass `out=$OUTPUT` -- the real pack directory the caller's build
+    populates next -- so a smoke-test record could sit in the pack and mask
+    a real collection failure (phase: verify only checks "the pack has at
+    least one file"). The smoke compile must target an isolated scratch
+    directory instead. This can't be exercised end-to-end without a real
+    matching libclang-<N>-dev toolchain, so assert the invariant statically
+    against the actual _prepare_clang_plugin source instead."""
+
+    def test_smoke_compile_never_targets_output_dir(self) -> None:
+        text = RUN_SH.read_text(encoding="utf-8")
+        # Isolate just the smoke-test compiler invocation (between the
+        # smoke.cpp printf and its own "smoke test passed" echo) -- the
+        # *real* plugin_flags built further down legitimately reference
+        # $OUTPUT for the caller's actual build, so a whole-function check
+        # would false-positive on that unrelated, correct line.
+        start = text.index("printf 'int abicheck_smoke_test")
+        end = text.index("smoke test passed", start)
+        smoke_block = text[start:end]
+        assert "out=$smoke_out" in smoke_block, (
+            "smoke-test compile must target the isolated $smoke_out scratch dir"
+        )
+        assert "out=$OUTPUT" not in smoke_block, (
+            "smoke-test compile must not write into $OUTPUT -- the real pack "
+            "directory -- or a smoke record could mask a real collection "
+            "failure at phase: verify"
+        )

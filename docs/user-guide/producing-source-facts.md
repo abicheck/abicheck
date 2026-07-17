@@ -183,6 +183,16 @@ variables before your build runs. `abicheck/abicheck/actions/collect-facts`
 does that wiring once, so an integration doesn't need its own shell scripts
 or a separately pinned plugin version:
 
+Branch on `steps.facts.outputs.mode` rather than hard-coding a producer:
+`replay` needs nothing further (pass `sources:` straight to `dump`/`scan`),
+while `wrapper`/`clang-plugin` need the `phase: verify` step and
+`build-info: <pack-path>`. Skipping the branch and always wiring
+`build-info: ${{ steps.facts.outputs.pack-path }}` is a trap — for
+`producer: auto` resolving to `replay` (the common case on a project with a
+`compile_commands.json` or a CMake/Bazel build), `pack-path` is empty, so
+`build-info` silently receives nothing and the dump proceeds with **no**
+source facts at all, not an error:
+
 ```yaml
 - uses: abicheck/abicheck/actions/collect-facts@<same-sha-as-below>
   id: facts
@@ -195,10 +205,14 @@ or a separately pinned plugin version:
     output: abicheck_inputs
 
 - name: Build (wrapper/clang-plugin producers pick this up via env vars)
+  if: steps.facts.outputs.mode == 'pack'
   run: cmake -B build -S . && cmake --build build
+# producer: replay needs no build step here at all -- it collects inline at
+# dump/scan time below, from `sources:` directly.
 
 - uses: abicheck/abicheck/actions/collect-facts@<same-sha-as-below>
   id: facts-verify
+  if: steps.facts.outputs.mode == 'pack'
   with:
     phase: verify
     producer: ${{ steps.facts.outputs.producer }}
@@ -209,6 +223,10 @@ or a separately pinned plugin version:
     mode: dump
     new-library: build/libfoo.so
     header: include/
+    # mode: inline (replay) -> pass sources directly; mode: pack (wrapper/
+    # clang-plugin) -> pass the verified pack path. Never pass an empty
+    # build-info -- that's the silent-no-facts trap above.
+    sources: ${{ steps.facts.outputs.mode == 'inline' && '.' || '' }}
     build-info: ${{ steps.facts-verify.outputs.pack-path }}
 ```
 

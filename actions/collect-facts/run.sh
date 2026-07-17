@@ -203,20 +203,27 @@ $version_output"
 
   # Smoke-test: the plugin must at least load into the compiler without
   # crashing, on a trivial translation unit, before we hand its path to the
-  # caller's real build.
-  local smoke_dir smoke_src
+  # caller's real build. Writes its facts to an isolated scratch directory,
+  # NOT $OUTPUT -- that is the real pack the caller's build populates next,
+  # and phase: verify only checks "the pack has at least one file", so a
+  # smoke-test record left sitting in $OUTPUT would make a pack that never
+  # received real facts (build step skipped, wrong flags, wrong TU) look
+  # ready anyway.
+  local smoke_dir smoke_src smoke_out
   smoke_dir=$(mktemp -d)
   smoke_src="$smoke_dir/smoke.cpp"
+  smoke_out="$smoke_dir/out"
   printf 'int abicheck_smoke_test() { return 0; }\n' > "$smoke_src"
-  mkdir -p "$OUTPUT"
+  mkdir -p "$smoke_out"
   if ! "$COMPILER" -std=c++17 \
       -fplugin="$plugin_so" \
-      -Xclang -plugin-arg-abicheck-facts -Xclang "out=$OUTPUT" \
+      -Xclang -plugin-arg-abicheck-facts -Xclang "out=$smoke_out" \
       -fsyntax-only "$smoke_src" 2>"$smoke_dir/stderr.log"; then
     cat "$smoke_dir/stderr.log" >&2
     _fail "the built Clang plugin failed to load on a smoke-test translation unit -- see the compiler output above. This usually means '$COMPILER' is not the same LLVM major ($major) the plugin was built against."
   fi
   echo "Clang plugin smoke test passed ($plugin_so loads into $COMPILER)."
+  mkdir -p "$OUTPUT"
 
   # Assemble the exact flags the caller's build needs to add, one -Xclang
   # pair per public root (public-roots= is repeatable per the plugin docs).
