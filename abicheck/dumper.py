@@ -903,11 +903,11 @@ def _castxml_version_note() -> str:
     incurred rarely.
     """
     try:
-        proc = subprocess.run(
-            ["castxml", "--version"],
-            capture_output=True, text=True, timeout=15, check=False,
+        # Bound by the active --budget too (Codex review, PR #591).
+        proc = deadline.run_bounded(
+            ["castxml", "--version"], capture_output=True, text=True, timeout=15
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, deadline.DeadlineExceeded):
         return ""
     raw, clang = _parse_castxml_version(f"{proc.stdout}\n{proc.stderr}")
     if clang is not None and clang[0] < _RECOMMENDED_CLANG_MAJOR:

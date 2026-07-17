@@ -126,3 +126,10 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   respectively), never the `ContextVar` deadline. All three now go through
   `deadline.run_bounded`, degrading to their existing failed/diagnostic
   contract on a `DeadlineExceeded` instead of running past the budget.
+- Closed the last castxml-side probe gap: `_castxml_version_note()` (the
+  `castxml --version` probe on a frontend-too-old failure, folding an
+  upgrade note into the diagnostic) used a bare 15s `subprocess.run`,
+  reached on the castxml-*failure* path before `_validate_castxml_output`'s
+  existing post-success `deadline.check()`. Now goes through
+  `deadline.run_bounded`, degrading to its existing best-effort `""`
+  fallback on `DeadlineExceeded` like any other probe failure.

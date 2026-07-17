@@ -58,7 +58,9 @@ _ASSUME_STDERR = (
 )
 
 
-def _completed(stdout: str = "", stderr: str = "", returncode: int = 0) -> subprocess.CompletedProcess:
+def _completed(
+    stdout: str = "", stderr: str = "", returncode: int = 0
+) -> subprocess.CompletedProcess:
     result: subprocess.CompletedProcess = MagicMock(spec=subprocess.CompletedProcess)
     result.returncode = returncode
     result.stdout = stdout
@@ -80,7 +82,9 @@ class TestParseCastxmlVersion:
 
     def test_parses_llvm_version_spelling(self) -> None:
         # castxml builds that print "LLVM version" rather than "clang version".
-        raw, clang = _parse_castxml_version("castxml version 0.6.8\nLLVM version 18.1.8\n")
+        raw, clang = _parse_castxml_version(
+            "castxml version 0.6.8\nLLVM version 18.1.8\n"
+        )
         assert raw == "0.6.8"
         assert clang == (18, 1)
 
@@ -92,8 +96,10 @@ class TestParseCastxmlVersion:
 class TestVersionNote:
     def test_old_clang_recommends_upgrade(self) -> None:
         with patch(
-            "abicheck.dumper.subprocess.run",
-            return_value=_completed(stdout="castxml version 0.5.1\nclang version 14.0.0\n"),
+            "abicheck.dumper.deadline.run_bounded",
+            return_value=_completed(
+                stdout="castxml version 0.5.1\nclang version 14.0.0\n"
+            ),
         ):
             note = _castxml_version_note()
         assert "clang 14" in note
@@ -102,15 +108,17 @@ class TestVersionNote:
 
     def test_new_clang_gives_no_note(self) -> None:
         with patch(
-            "abicheck.dumper.subprocess.run",
-            return_value=_completed(stdout="castxml version 0.6.8\nclang version 18.1.8\n"),
+            "abicheck.dumper.deadline.run_bounded",
+            return_value=_completed(
+                stdout="castxml version 0.6.8\nclang version 18.1.8\n"
+            ),
         ):
             assert _castxml_version_note() == ""
 
     def test_castxml_version_without_clang_line(self) -> None:
         # castxml version is reported but no parseable clang line — still nudge.
         with patch(
-            "abicheck.dumper.subprocess.run",
+            "abicheck.dumper.deadline.run_bounded",
             return_value=_completed(stdout="castxml version 0.4.5\n"),
         ):
             note = _castxml_version_note()
@@ -119,13 +127,29 @@ class TestVersionNote:
 
     def test_no_version_info_is_silent(self) -> None:
         with patch(
-            "abicheck.dumper.subprocess.run",
+            "abicheck.dumper.deadline.run_bounded",
             return_value=_completed(stdout="unrelated output\n"),
         ):
             assert _castxml_version_note() == ""
 
     def test_probe_failure_is_silent(self) -> None:
-        with patch("abicheck.dumper.subprocess.run", side_effect=OSError("not found")):
+        with patch(
+            "abicheck.dumper.deadline.run_bounded", side_effect=OSError("not found")
+        ):
+            assert _castxml_version_note() == ""
+
+    def test_probe_deadline_exceeded_is_silent(self) -> None:
+        # Codex review (PR #591): the version probe used to be a bare
+        # subprocess.run, ignoring an active scan --budget entirely — a
+        # DeadlineExceeded from the now-bounded probe must degrade like any
+        # other probe failure (best-effort note), never propagate and abort
+        # the castxml failure-diagnosis path.
+        from abicheck import deadline
+
+        with patch(
+            "abicheck.dumper.deadline.run_bounded",
+            side_effect=deadline.DeadlineExceeded(-1.0),
+        ):
             assert _castxml_version_note() == ""
 
 
@@ -139,7 +163,9 @@ class TestFailureHint:
 
     def test_floatn_hint_includes_version_note(self) -> None:
         hint = _castxml_failure_hint(
-            _FLOATN_STDERR, force_cpp=True, headers=[],
+            _FLOATN_STDERR,
+            force_cpp=True,
+            headers=[],
             version_note=" Detected castxml 0.5.1 (clang 14.0); upgrade.",
         )
         assert "Detected castxml 0.5.1" in hint
@@ -182,17 +208,18 @@ class TestProbeGating:
         def fake_run(cmd, **kwargs):  # noqa: ANN001
             calls.append(list(cmd))
             if "--version" in cmd:
-                return _completed(stdout="castxml version 0.5.1\nclang version 14.0.0\n")
+                return _completed(
+                    stdout="castxml version 0.5.1\nclang version 14.0.0\n"
+                )
             return _completed(returncode=1, stderr=_FLOATN_STDERR)
 
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            # The main castxml dump now runs through deadline.run_bounded (P0
-            # deadline propagation); the `castxml --version` probe still goes
-            # through the plain subprocess.run _castxml_version_note always
-            # used — both patched to the same fake so either call routes here.
+            # Both the main castxml dump and the `castxml --version` probe
+            # (_castxml_version_note) now go through deadline.run_bounded
+            # (Codex review, PR #591) — patched to the same fake so either
+            # call routes here.
             patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
-            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
         ):
             header = tmp_path / "api.hpp"
@@ -201,7 +228,7 @@ class TestProbeGating:
                 _castxml_dump([header], [])
 
         msg = str(exc.value)
-        assert "newer castxml" in msg          # base sized-float hint
+        assert "newer castxml" in msg  # base sized-float hint
         assert "Detected castxml 0.5.1" in msg  # folded-in version note
         assert any("--version" in c for c in calls)  # probe happened
 
@@ -210,12 +237,13 @@ class TestProbeGating:
 
         def fake_run(cmd, **kwargs):  # noqa: ANN001
             calls.append(list(cmd))
-            return _completed(returncode=1, stderr="fatal error: missing.h: No such file")
+            return _completed(
+                returncode=1, stderr="fatal error: missing.h: No such file"
+            )
 
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
             patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
-            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
         ):
             header = tmp_path / "api.hpp"
@@ -282,11 +310,13 @@ class TestLangCFallsBackToCpp:
 
         def fake_run(cmd, **kwargs):  # noqa: ANN001
             modes.append(_in_c_mode(cmd))
-            return _completed(returncode=1, stderr="fatal error: 'cfg.h' file not found")
+            return _completed(
+                returncode=1, stderr="fatal error: 'cfg.h' file not found"
+            )
 
         header = tmp_path / "zlib.h"
         header.write_text(
-            "#ifndef __cplusplus\n#include \"cfg.h\"\n#endif\n"
+            '#ifndef __cplusplus\n#include "cfg.h"\n#endif\n'
             '#ifdef __cplusplus\nextern "C" {\n#endif\nint f(void);\n'
             "#ifdef __cplusplus\n}\n#endif\n",
             encoding="utf-8",
@@ -313,7 +343,9 @@ class TestLangCFallsBackToCpp:
     def test_both_modes_fail_surfaces_requested_c_error(self, tmp_path: Path) -> None:
         def fake_run(cmd, **kwargs):  # noqa: ANN001
             if "--version" in cmd:
-                return _completed(stdout="castxml version 0.6.8\nclang version 18.1.8\n")
+                return _completed(
+                    stdout="castxml version 0.6.8\nclang version 18.1.8\n"
+                )
             return _completed(returncode=1, stderr="error: expected ';'")
 
         # A genuine C++-only construct triggers the retry; both modes fail here.
@@ -336,7 +368,9 @@ class TestLangCFallsBackToCpp:
 
         def fake_run(cmd, **kwargs):  # noqa: ANN001
             modes.append(_in_c_mode(cmd))
-            return _completed(returncode=1, stderr="fatal error: missing.h: No such file")
+            return _completed(
+                returncode=1, stderr="fatal error: missing.h: No such file"
+            )
 
         header = tmp_path / "api.h"
         header.write_text("int plain_c(void);\n", encoding="utf-8")
