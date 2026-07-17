@@ -119,6 +119,30 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   non-interchangeable ABI third-party wheels are never actually built for)
   no longer silently satisfies a plain `arm64` wheel-tag claim
   (Codex review).
+  `check_wheel_tag_architecture_mismatch`'s Mach-O branch now checks
+  `cpu_types` even when the selected `cpu_type` is empty (a snapshot with
+  `cpu_type=""` but a populated `cpu_types` list previously bypassed the
+  check entirely) (Codex review).
+  `_elf_rpath_entries` now preserves empty RPATH/RUNPATH components — an
+  empty component means "current working directory" to the dynamic loader,
+  a non-portable (and unsafe) entry that was previously silently dropped —
+  and the `$ORIGIN`-relative check now requires the complete `$ORIGIN`/
+  `${ORIGIN}` token (optionally followed by a path separator) rather than a
+  bare prefix match, so a malformed entry like `$ORIGIN_BACKUP` (which
+  `ld.so`'s substring token substitution expands to an unrelated sibling
+  path, not a subdirectory of the binary's own directory) is correctly
+  flagged as non-portable instead of accepted (Codex review).
+  `EnvironmentMatrix._parse_runtime_floors`'s presence-flag handling
+  (`WHEEL_CONTEXT`/`MUSLLINUX`) now also honors numeric zero (`0`/`0.0`) as
+  "disabled" — previously only `False`/`None` were recognized, so
+  `WHEEL_CONTEXT: 0` reached `str(0) == "0"`, a truthy string that silently
+  enabled the wheel-only checks (Codex review).
+  Fixed a stale comment on `ChangeKind.MUSLLINUX_GLIBC_DEPENDENCY_DETECTED`
+  in `checker_policy.py` that claimed `GLIBCXX_*`/`CXXABI_*` alone are
+  disqualifying evidence, contradicting the detector's actual (correct)
+  behavior; also expanded `change_registry_wheel.py`'s impact text to
+  document the direct glibc-SONAME/interpreter evidence path it previously
+  omitted (Codex review).
   Windows UCRT/runtime checks, CPU-ISA-baseline detection, the full
   per-tag closure policy, and end-to-end CLI auto-derivation from a
   compared wheel's own filename tag (every check above, including G10's

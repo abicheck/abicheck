@@ -188,12 +188,16 @@ def _parse_runtime_floors(floors_raw: object) -> dict[str, str]:
     for key, value in floors_raw.items():
         key_upper = str(key).upper()
         if key_upper in _PRESENCE_FLAG_RUNTIME_FLOOR_KEYS and (
-            isinstance(value, bool) or value is None
+            isinstance(value, (bool, int, float)) or value is None
         ):
-            # False/blank (None) both mean "not enabled" — omit the key
-            # entirely so downstream `floors.get(...)` truthiness checks see
-            # it as not declared, rather than storing the truthy string
-            # "False"/"None".
+            # False/blank (None)/numeric zero all mean "not enabled" — omit
+            # the key entirely so downstream `floors.get(...)` truthiness
+            # checks see it as not declared, rather than storing a truthy
+            # string ("False"/"None"/"0") that would silently enable the
+            # gate. `WHEEL_CONTEXT: 0`/`MUSLLINUX: 0` reach here as the
+            # plain int 0 (not a bool), which `str(0) == "0"` — a non-empty,
+            # truthy string — would otherwise pass through untouched (Codex
+            # review #583).
             if value:
                 runtime_floors[key_upper] = "1"
             continue

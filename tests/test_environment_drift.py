@@ -904,6 +904,26 @@ class TestEnvironmentMatrixRuntimeFloors:
         m = EnvironmentMatrix.from_dict({"runtime_floors": {"MUSLLINUX": None}})
         assert m.runtime_floors == {}
 
+    def test_wheel_context_zero_int_disables_not_stringified(self) -> None:
+        # Codex review #583, follow-up: `WHEEL_CONTEXT: 0` loads as the
+        # plain int 0 (not a bool), so the earlier bool/None-only check
+        # missed it — str(0) == "0" is a non-empty, truthy string the
+        # downstream `floors.get(...)` check would read as *enabled*.
+        m = EnvironmentMatrix.from_dict({"runtime_floors": {"WHEEL_CONTEXT": 0}})
+        assert m.runtime_floors == {}
+
+    def test_musllinux_zero_int_disables_not_stringified(self) -> None:
+        m = EnvironmentMatrix.from_dict({"runtime_floors": {"MUSLLINUX": 0}})
+        assert m.runtime_floors == {}
+
+    def test_wheel_context_zero_float_disables_not_stringified(self) -> None:
+        m = EnvironmentMatrix.from_dict({"runtime_floors": {"WHEEL_CONTEXT": 0.0}})
+        assert m.runtime_floors == {}
+
+    def test_wheel_context_nonzero_int_enables(self) -> None:
+        m = EnvironmentMatrix.from_dict({"runtime_floors": {"WHEEL_CONTEXT": 1}})
+        assert m.runtime_floors.get("WHEEL_CONTEXT")
+
     def test_wheel_context_blank_value_end_to_end_does_not_enable_check(
         self,
     ) -> None:

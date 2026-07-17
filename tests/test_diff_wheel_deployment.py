@@ -418,6 +418,31 @@ class TestWheelTagArchitectureMismatchUnit:
         )
         assert len(changes) == 1
 
+    def test_empty_cpu_type_with_populated_cpu_types_still_checked(
+        self,
+    ) -> None:
+        # Codex review #583: cpu_types (all slices) is the primary evidence;
+        # gating the whole check on `cpu_type` truthiness first bypassed a
+        # snapshot with cpu_type="" but cpu_types populated — a mismatched
+        # claim would silently pass with no finding at all.
+        macho = _macho(
+            cpu_type="", cpu_types=["ARM64"], install_name="@rpath/libfoo.dylib"
+        )
+        changes = check_wheel_tag_architecture_mismatch(
+            None, macho, {"WHEEL_ARCH": "x86_64"}
+        )
+        assert len(changes) == 1
+        assert "ARM64" in changes[0].new_value
+
+    def test_empty_cpu_type_and_empty_cpu_types_no_finding(self) -> None:
+        macho = _macho(cpu_type="", cpu_types=[])
+        assert (
+            check_wheel_tag_architecture_mismatch(
+                None, macho, {"WHEEL_ARCH": "x86_64"}
+            )
+            == []
+        )
+
 
 class TestWheelTagArchitectureMismatchCliEndToEnd:
     def test_elf_mismatch_surfaces_as_breaking(self) -> None:
@@ -491,6 +516,28 @@ class TestWheelRpathNotPortableUnit:
         changes = check_wheel_rpath_not_portable(elf, {"WHEEL_CONTEXT": "1"})
         assert len(changes) == 1
         assert changes[0].new_value == "/usr/local/lib"
+
+    def test_origin_prefixed_but_not_token_bounded_flagged(self) -> None:
+        # Codex review #583: ld.so substitutes $ORIGIN as a raw substring
+        # wherever it occurs, so "$ORIGIN_BACKUP" expands to an unrelated
+        # sibling path (<origin-dir>_BACKUP), not a subdirectory of the
+        # binary's own directory — a startswith("$ORIGIN") check wrongly
+        # treated it as the portable token.
+        elf = _elf(rpath="$ORIGIN_BACKUP", soname="libfoo.so.1")
+        changes = check_wheel_rpath_not_portable(elf, {"WHEEL_CONTEXT": "1"})
+        assert len(changes) == 1
+        assert changes[0].new_value == "$ORIGIN_BACKUP"
+
+    def test_empty_rpath_component_flagged_as_cwd(self) -> None:
+        # Codex review #583: an empty RPATH/RUNPATH component (e.g. a
+        # doubled ":") means "current working directory" to the dynamic
+        # loader — a non-portable (and unsafe) entry, not a no-op to
+        # silently drop.
+        elf = _elf(rpath="$ORIGIN/../foo.libs::/usr/lib", soname="libfoo.so.1")
+        changes = check_wheel_rpath_not_portable(elf, {"WHEEL_CONTEXT": "1"})
+        assert len(changes) == 1
+        assert "current working directory" in changes[0].new_value
+        assert "/usr/lib" in changes[0].new_value
 
     def test_no_elf_no_finding(self) -> None:
         assert (

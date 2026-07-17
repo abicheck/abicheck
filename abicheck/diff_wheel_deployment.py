@@ -284,11 +284,18 @@ def check_wheel_tag_architecture_mismatch(
             return []
     if macho is not None:
         cpu_type = getattr(macho, "cpu_type", "")
-        if cpu_type:
+        # cpu_types (all slices) is the primary evidence; cpu_type (the
+        # single host-selected slice) is only a fallback for a snapshot
+        # predating that field. Checking `cpu_type` truthiness first would
+        # bypass a snapshot that has `cpu_types` populated but an empty
+        # `cpu_type` (Codex review #583).
+        slices: list[str] = getattr(macho, "cpu_types", None) or (
+            [cpu_type] if cpu_type else []
+        )
+        if slices:
             expected = _ARCH_CLAIM_TO_MACHO_CPU_TYPE.get(claimed)
             if expected is None:
                 return []
-            slices: list[str] = getattr(macho, "cpu_types", None) or [cpu_type]
             if any(s.upper() in expected for s in slices):
                 return []
             return [
@@ -306,11 +313,27 @@ def check_wheel_tag_architecture_mismatch(
 
 def _elf_rpath_entries(elf: ElfMetadata) -> list[str]:
     """The colon-joined ``DT_RPATH``/``DT_RUNPATH`` tag content, split into
-    individual path entries (empty entries dropped)."""
-    combined = ":".join(
-        p for p in (getattr(elf, "rpath", ""), getattr(elf, "runpath", "")) if p
+    individual path entries. Empty components are preserved: an empty
+    RPATH/RUNPATH entry (a leading/trailing/doubled ``:``) is not a no-op —
+    the dynamic loader treats it as the current working directory, itself a
+    non-portable (and unsafe) search-path entry, not something to silently
+    drop (Codex review #583)."""
+    values = [p for p in (getattr(elf, "rpath", ""), getattr(elf, "runpath", "")) if p]
+    return ":".join(values).split(":") if values else []
+
+
+def _is_origin_relative_entry(entry: str) -> bool:
+    """Whether *entry* is exactly the ``$ORIGIN``/``${ORIGIN}`` dynamic
+    string token (optionally followed by a path separator) rather than
+    merely prefixed by it. ``ld.so`` substitutes the token as a raw
+    substring wherever it occurs, so a malformed entry like
+    ``$ORIGIN_BACKUP`` does not expand to a subdirectory of the binary's own
+    directory — it expands to an unrelated sibling path
+    (``<origin-dir>_BACKUP``) that almost certainly doesn't exist. Treating
+    it as portable would hide a broken RPATH entry (Codex review #583)."""
+    return entry in {"$ORIGIN", "${ORIGIN}"} or entry.startswith(
+        ("$ORIGIN/", "${ORIGIN}/")
     )
-    return [entry for entry in combined.split(":") if entry]
 
 
 def _has_origin_relative_entry(entries: list[str]) -> bool:
@@ -318,7 +341,7 @@ def _has_origin_relative_entry(entries: list[str]) -> bool:
     convention ``auditwheel``/``delocate`` rewrite to, so a wheel's binaries
     find their bundled dependencies relative to their own install location
     rather than a build-machine-specific absolute path)."""
-    return any(entry.startswith(("$ORIGIN", "${ORIGIN}")) for entry in entries)
+    return any(_is_origin_relative_entry(entry) for entry in entries)
 
 
 #: Explicit opt-in key for :func:`check_wheel_rpath_not_portable`/
@@ -366,8 +389,12 @@ def check_wheel_rpath_not_portable(
     entries = _elf_rpath_entries(elf)
     if not entries:
         return []
-    absolute = [e for e in entries if not e.startswith(("$ORIGIN", "${ORIGIN}"))]
-    if not absolute:
+    nonportable = [
+        entry or "<empty path: current working directory>"
+        for entry in entries
+        if not _is_origin_relative_entry(entry)
+    ]
+    if not nonportable:
         return []
     return [
         make_change(
@@ -376,7 +403,7 @@ def check_wheel_rpath_not_portable(
             name=getattr(elf, "soname", "") or "<binary>",
             detail="RPATH/RUNPATH",
             old="$ORIGIN-relative",
-            new=":".join(absolute),
+            new=":".join(nonportable),
         )
     ]
 

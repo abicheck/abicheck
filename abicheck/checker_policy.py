@@ -767,10 +767,13 @@ class ChangeKind(str, Enum):
     # simply exceeds what the artifact's own tag promises (G10).
     PLATFORM_BASELINE_FLOOR_RAISED = "platform_baseline_floor_raised"  # max required GLIBC_2.x/GLIBCXX_x/CXXABI_x exceeds the declared/derived platform-baseline floor → RISK
     # musllinux (PEP 656) wheels target Alpine's musl libc, which has no
-    # symbol-versioning namespace at all — any GLIBC_*/GLIBCXX_*/CXXABI_*
-    # requirement means the binary won't even resolve its dependencies there,
-    # not merely a version mismatch (G27, generalizes G10 beyond glibc-floor
-    # comparison to a musl compatibility yes/no check).
+    # symbol-versioning namespace at all — a GLIBC_* requirement (or other
+    # direct glibc-loader/SONAME evidence) means the binary won't even
+    # resolve its dependencies there, not merely a version mismatch (G27,
+    # generalizes G10 beyond glibc-floor comparison to a musl compatibility
+    # yes/no check). GLIBCXX_*/CXXABI_* alone are NOT disqualifying — a musl
+    # system's own libstdc++ can legitimately carry such verneed entries;
+    # see diff_versioning.check_musllinux_glibc_dependency's docstring.
     MUSLLINUX_GLIBC_DEPENDENCY_DETECTED = "musllinux_glibc_dependency_detected"  # binary tagged musllinux-compatible actually requires a glibc-versioned symbol → BREAKING
     # A wheel's macosx_X_Y_<arch> platform tag promises a *maximum* macOS
     # deployment target its binaries may require; the Mach-O
