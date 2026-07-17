@@ -387,7 +387,11 @@ def test_gate_api_break_files_api_break_as_breaking():
     gated = build_model(report, gate_api_break=True)
     assert gated.counts == (1, 1, 0)  # api_break → breaking, risk stays review
     body = render_comment(gated, sha="x")
-    assert "ABI BREAKING" in body
+    # A gated *source* API break is not a binary ABI break — it gets its own
+    # headline rather than being folded into "ABI BREAKING" (ADR-042: the
+    # compatibility and gate axes are independent).
+    assert "ABI BREAKING" not in body
+    assert "Source API break blocks this PR" in body
     # default (ungated) keeps api_break in review
     ungated = build_model(report)
     assert ungated.counts == (0, 2, 0)
@@ -443,7 +447,17 @@ def test_severity_addition_error_files_additions_as_breaking():
     }
     gated = build_model(report)
     assert gated.counts == (1, 0, 0)  # addition → breaking
-    assert "ABI BREAKING" in render_comment(gated, sha="x")
+    assert gated.breaking_categories == frozenset({"addition"})
+    body = render_comment(gated, sha="x")
+    # A policy-gated COMPATIBLE addition is not an ABI break: the checker
+    # still reports COMPATIBLE, only the CI *gate* is blocked (ADR-042).
+    # "ABI BREAKING" would tell the reviewer the wrong thing.
+    assert "ABI BREAKING" not in body
+    assert "Public API expansion requires approval" in body
+    assert "Compatibility: COMPATIBLE" in body
+    assert "Gate: BLOCKED" in body
+    assert "`addition` is configured as `error`" in body
+    assert "foo_new" in body
     # without the severity config, the same addition stays safe
     plain = _compare_report(
         [
@@ -503,7 +517,12 @@ def test_severity_quality_error_release_quality_breaking():
         "unmatched_new": [],
     }
     # quality (2) → breaking, additions (5-2=3) → safe
-    assert build_model(report).counts == (2, 0, 3)
+    model = build_model(report)
+    assert model.counts == (2, 0, 3)
+    assert model.breaking_categories == frozenset({"quality_issues"})
+    body = render_comment(model, sha="x")
+    assert "ABI BREAKING" not in body
+    assert "Quality policy violation" in body
 
 
 def test_severity_addition_error_release_additions_breaking():
@@ -525,7 +544,74 @@ def test_severity_addition_error_release_additions_breaking():
         "unmatched_old": [],
         "unmatched_new": [],
     }
-    assert build_model(report).counts == (4, 0, 0)
+    model = build_model(report)
+    assert model.counts == (4, 0, 0)
+    assert model.breaking_categories == frozenset({"addition"})
+    body = render_comment(model, sha="x")
+    # Release-mode rows don't carry per-finding detail, but the headline must
+    # still avoid "ABI BREAKING" for a policy-gated COMPATIBLE release.
+    assert "ABI BREAKING" not in body
+    assert "Public API expansion requires approval" in body
+
+
+def test_severity_addition_and_quality_both_gated_mixed_headline():
+    # Both categories gated and both contribute findings → neither
+    # single-category headline fits; use the generic policy-violation one
+    # (still never "ABI BREAKING").
+    report = _compare_report(
+        [
+            {
+                "kind": "func_added",
+                "symbol": "foo_new",
+                "description": "new",
+                "severity": "compatible",
+            },
+            {
+                "kind": "soname_bump_unnecessary",
+                "symbol": "libfoo",
+                "description": "unnecessary bump",
+                "severity": "compatible",
+            },
+        ]
+    )
+    report["severity"] = {
+        "config": {"addition": "error", "quality_issues": "error"},
+        "exit_code": 1,
+    }
+    model = build_model(report)
+    assert model.breaking_categories == frozenset({"addition", "quality_issues"})
+    body = render_comment(model, sha="x")
+    assert "ABI BREAKING" not in body
+    assert "Policy violation blocks this PR" in body
+
+
+def test_severity_addition_error_mixed_with_real_break_stays_abi_breaking():
+    # A real ABI break alongside a gated addition must still headline as
+    # "ABI BREAKING" — the addition doesn't dilute a genuine incompatibility.
+    report = _compare_report(
+        [
+            {
+                "kind": "func_removed",
+                "symbol": "foo_gone",
+                "description": "removed",
+                "severity": "breaking",
+            },
+            {
+                "kind": "func_added",
+                "symbol": "foo_new",
+                "description": "new",
+                "severity": "compatible",
+            },
+        ]
+    )
+    report["severity"] = {"config": {"addition": "error"}, "exit_code": 1}
+    model = build_model(report)
+    assert model.breaking_categories == frozenset({"abi_breaking", "addition"})
+    body = render_comment(model, sha="x")
+    assert "ABI BREAKING" in body
+    # The genuine break takes priority; no policy-only gate note is shown
+    # since the bucket isn't policy-only.
+    assert "Gate: BLOCKED" not in body
 
 
 def test_malformed_changes_are_skipped():

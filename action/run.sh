@@ -691,7 +691,26 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         echo "> **Verdict: COMPATIBLE** — No binary ABI break detected."
         ;;
       SEVERITY_ERROR)
-        echo "> **Verdict: SEVERITY_ERROR** ⚠️ — Severity-level issue detected (see severity configuration)."
+        # SEVERITY_ERROR (exit code 1) means a severity-config category is
+        # gating the check — it does NOT mean the checker found an ABI/API
+        # break (that's BREAKING/API_BREAK above, different exit codes).
+        # e.g. `severity-addition: error` blocks CI on a COMPATIBLE new
+        # public API entry; naming the category here (via the JSON report's
+        # `severity.blocking_categories`, ADR-042) tells the reader that up
+        # front instead of leaving a bare "severity-level issue" that reads
+        # like an unspecified break. Best-effort: only available when a JSON
+        # report was produced (FORMAT=json) and jq is on PATH; falls back to
+        # the generic message otherwise.
+        _blocking_categories=""
+        if [[ "${FORMAT:-}" == "json" && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]] \
+          && command -v jq >/dev/null 2>&1; then
+          _blocking_categories=$(jq -r '(.severity.blocking_categories // []) | join(", ")' "$OUTPUT_FILE" 2>/dev/null)
+        fi
+        if [[ -n "$_blocking_categories" ]]; then
+          echo "> **Verdict: SEVERITY_ERROR** ⚠️ — Blocked by severity policy: \`$_blocking_categories\` configured as \`error\`. This is a policy gate, not necessarily an ABI/API break — see the report below for each finding's actual compatibility."
+        else
+          echo "> **Verdict: SEVERITY_ERROR** ⚠️ — Severity-level issue detected (see severity configuration)."
+        fi
         ;;
       API_BREAK)
         echo "> **Verdict: API_BREAK** — Source-level API break detected. Recompilation required."
