@@ -369,6 +369,35 @@ class TestWrapperProducer:
             _parse_kv_file(github_env)["ABICHECK_CC_HEADERS"] == "include:gen/include"
         )
 
+    def test_multiple_public_roots_joined_with_semicolon_on_windows(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review): cc_wrapper.py splits ABICHECK_CC_HEADERS
+        # with Python's os.pathsep, which is ';' on Windows and ':'
+        # everywhere else -- a hardcoded ':' join glued every root into one
+        # unsplit string on a Windows runner instead of scoping to each of
+        # them. Stubs `uname` (via a PATH-prepended fake binary) to report a
+        # Windows-style value, since this test environment is Linux.
+        fake_bin = tmp_path / "fakebin"
+        fake_bin.mkdir()
+        uname_stub = fake_bin / "uname"
+        uname_stub.write_text('#!/bin/sh\necho "MINGW64_NT-10.0-x86_64"\n')
+        uname_stub.chmod(0o755)
+        result, github_env, _ = _run_action(
+            {
+                "INPUT_PHASE": "prepare",
+                "INPUT_PRODUCER": "wrapper",
+                "INPUT_PUBLIC_ROOTS": "include\ngen/include",
+                "INPUT_INSTALL_DEPS": "false",
+                "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (
+            _parse_kv_file(github_env)["ABICHECK_CC_HEADERS"] == "include;gen/include"
+        )
+
     def test_verify_fails_on_missing_pack_dir(self, tmp_path: Path) -> None:
         result, _, _ = _run_action(
             {

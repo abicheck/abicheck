@@ -220,6 +220,32 @@ class TestStaleOutputCleared:
         assert not (output_dir / "stale-lib.abicheck.json").exists()
         assert not (output_dir / "manifest.json").exists()
 
+    def test_previous_manifest_pointing_at_output_dir_survives_cleanup(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review): a workflow that restores the previous
+        # baseline set into output-dir before regenerating (an in-place
+        # refresh) points previous-manifest at output-dir/manifest.json --
+        # the stale-snapshot cleanup must not delete that same file out from
+        # under build_manifest.py before it gets a chance to read it.
+        output_dir = tmp_path / "out"
+        output_dir.mkdir()
+        previous_manifest = output_dir / "manifest.json"
+        previous_manifest.write_text('{"sentinel": "keep-me"}')
+
+        _run_action(
+            {
+                "INPUT_LIBRARIES": json.dumps(
+                    [{"name": "libfoo", "artifact": str(tmp_path / "no-such.so")}]
+                ),
+                "INPUT_OUTPUT_DIR": str(output_dir),
+                "INPUT_PREVIOUS_MANIFEST": str(previous_manifest),
+            },
+            tmp_path,
+        )
+        assert previous_manifest.is_file()
+        assert previous_manifest.read_text() == '{"sentinel": "keep-me"}'
+
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="actions/baseline/run.sh not found")
 @pytest.mark.skipif(not _ABICHECK, reason="needs abicheck on PATH")

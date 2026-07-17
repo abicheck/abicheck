@@ -39,13 +39,20 @@ from pathlib import Path
 from typing import Any
 
 
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
 def _read_snapshot_meta(path: Path) -> dict[str, Any]:
     with path.open(encoding="utf-8") as f:
         raw = json.load(f)
+    # Hash the snapshot with created_at removed, not the raw file bytes:
+    # dumper.py auto-stamps created_at fresh on every dump call (absent
+    # SOURCE_DATE_EPOCH, the normal CI case), so a raw-bytes hash -- and
+    # therefore content-digest, which is built from these per-artifact
+    # digests -- changed on every single run even when the actual ABI
+    # content was byte-identical (Codex review).
+    stable = dict(raw)
+    stable.pop("created_at", None)
+    sha256 = hashlib.sha256(
+        json.dumps(stable, sort_keys=True).encode("utf-8")
+    ).hexdigest()
     fact_set = None
     build_source = raw.get("build_source")
     if isinstance(build_source, dict):
@@ -71,6 +78,7 @@ def _read_snapshot_meta(path: Path) -> dict[str, Any]:
         "created_at": raw.get("created_at"),
         "build_id": raw.get("build_id"),
         "fact_set": fact_set,
+        "sha256": sha256,
     }
 
 
@@ -129,7 +137,7 @@ def build_manifest(
                 "library": name,
                 "artifact": entry.get("artifact", ""),
                 "snapshot": snap_path.name,
-                "sha256": _sha256(snap_path),
+                "sha256": meta["sha256"],
                 "git_commit": meta["git_commit"],
                 "git_tag": meta["git_tag"],
                 "created_at": meta["created_at"],

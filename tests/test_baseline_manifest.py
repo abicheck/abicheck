@@ -60,6 +60,7 @@ def _write_snapshot(
     schema_version: int = 9,
     git_commit: str | None = None,
     fact_set: dict | None = None,
+    created_at: str = "2026-07-17T00:00:00+00:00",
 ) -> None:
     data = {
         "library": library,
@@ -67,7 +68,7 @@ def _write_snapshot(
         "schema_version": schema_version,
         "git_commit": git_commit,
         "git_tag": None,
-        "created_at": "2026-07-17T00:00:00+00:00",
+        "created_at": created_at,
         "build_id": None,
     }
     if fact_set is not None:
@@ -487,6 +488,39 @@ class TestMainCli:
         assert "library-count=1" in out
         assert "refresh-required=false" in out
         assert "content-digest=" in out
+
+    def test_sha256_stable_when_only_created_at_changes(self, tmp_path: Path) -> None:
+        # Regression (Codex review): the per-artifact sha256 used to be a raw
+        # file hash, so it changed on every dump call even when the actual
+        # ABI content was identical -- dumper.py auto-stamps created_at fresh
+        # each time (absent SOURCE_DATE_EPOCH, the normal CI case). This
+        # rippled into content-digest too, since that's built from these
+        # per-artifact digests.
+        snap_path = tmp_path / "libfoo.abicheck.json"
+        _write_snapshot(
+            snap_path,
+            library="libfoo",
+            git_commit="aaa",
+            created_at="2026-07-17T00:00:00+00:00",
+        )
+        entries = [{"name": "libfoo", "artifact": "a.so"}]
+        manifest1 = build_manifest_module.build_manifest(
+            tmp_path, "", "", entries, None
+        )
+
+        _write_snapshot(
+            snap_path,
+            library="libfoo",
+            git_commit="aaa",
+            created_at="2026-07-17T01:23:45+00:00",
+        )
+        manifest2 = build_manifest_module.build_manifest(
+            tmp_path, "", "", entries, None
+        )
+
+        assert (
+            manifest1["artifacts"][0]["sha256"] == manifest2["artifacts"][0]["sha256"]
+        )
 
     def test_content_digest_changes_when_snapshot_content_changes(
         self, tmp_path: Path

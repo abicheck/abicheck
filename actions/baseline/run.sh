@@ -66,7 +66,18 @@ if [[ -d "$OUTPUT_DIR" ]]; then
   # output-dir that happens to already exist for an unrelated reason isn't
   # blown away.
   find "$OUTPUT_DIR" -maxdepth 1 -name '*.abicheck.json' -delete
-  rm -f "$OUTPUT_DIR/manifest.json"
+  # Don't delete manifest.json if it IS the caller's previous-manifest -- a
+  # workflow that restores the previous baseline set into output-dir before
+  # regenerating (an in-place refresh) points previous-manifest at that same
+  # file; deleting it here would make build_manifest.py unable to read it,
+  # and since a provided-but-missing previous-manifest is now a hard failure,
+  # that valid workflow would break instead of just losing freshness
+  # detection like before (Codex review). `-ef` compares by inode, so it
+  # works regardless of relative/absolute paths or symlinks, and is false
+  # (safe to delete) whenever either side doesn't exist yet.
+  if [[ -z "$PREVIOUS_MANIFEST" ]] || ! [[ "$OUTPUT_DIR/manifest.json" -ef "$PREVIOUS_MANIFEST" ]]; then
+    rm -f "$OUTPUT_DIR/manifest.json"
+  fi
 fi
 mkdir -p "$OUTPUT_DIR"
 

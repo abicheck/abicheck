@@ -172,10 +172,16 @@ _prepare_wrapper() {
   [[ -n "$LIBRARY" ]] && _write_env "ABICHECK_CC_LIBRARY" "$LIBRARY"
   if [[ -n "$PUBLIC_ROOTS" ]]; then
     # ABICHECK_CC_HEADERS takes one root; the wrapper docs show a single
-    # value -- join multiple lines with ':' (PATH-style), the wrapper's own
-    # documented convention for multi-root scoping.
+    # value -- join multiple lines PATH-style. cc_wrapper.py splits this
+    # with Python's os.pathsep, which is ';' on Windows and ':' everywhere
+    # else -- a hardcoded ':' glued every root into one unsplit string on a
+    # Windows runner instead of scoping to each of them (Codex review).
+    local sep=':'
+    case "$(uname -s)" in
+      MINGW* | MSYS* | CYGWIN*) sep=';' ;;
+    esac
     local roots_joined
-    roots_joined=$(printf '%s' "$PUBLIC_ROOTS" | tr '\n' ':' | sed 's/:$//')
+    roots_joined=$(printf '%s' "$PUBLIC_ROOTS" | tr '\n' "$sep" | sed "s/${sep}\$//")
     _write_env "ABICHECK_CC_HEADERS" "$roots_joined"
   fi
   echo "::notice::producer: wrapper prepared -- front your build command with 'abicheck-cc' (e.g. CC=\"abicheck-cc gcc\" CXX=\"abicheck-cc g++\", or CMAKE_CXX_COMPILER_LAUNCHER=abicheck-cc), run your build next, then call this Action again with phase: verify to check the collected pack at '$OUTPUT'."
