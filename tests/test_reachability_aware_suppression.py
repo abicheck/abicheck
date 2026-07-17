@@ -136,6 +136,53 @@ class TestMarkReachability:
         assert found[0].reachability_kind == "value_embedding"
         assert found[0].reachability_proof_path
 
+    def test_custom_namespaces_constructor_override(self) -> None:
+        """Codex review (P2): DEFAULT_INTERNAL_NAMESPACES only covers
+        detail/impl/internal/__detail/_impl — a project using a different
+        convention (e.g. "priv") is invisible to the reachability walk unless
+        MarkReachability accepts the same namespaces override
+        DetectInternalLeaks/DemoteUnreachableInternalChurn already do. No
+        caller wires a non-default value through DEFAULT_PIPELINE today
+        (see ADR-044's changelog for why closing this for real needs a new
+        policy-level config surface); this only pins the constructor
+        contract so a future override reaches this step too."""
+        from abicheck.post_processing import MarkReachability, PipelineContext
+
+        old = _snap(
+            functions=[_public_fn("make", "ns::Widget*")],
+            types=[
+                RecordType(name="ns::Widget", kind="class", bases=["ns::priv::Base"]),
+                RecordType(name="ns::priv::Base", kind="class", size_bits=64),
+            ],
+        )
+        new = _snap(
+            functions=[_public_fn("make", "ns::Widget*")],
+            types=[
+                RecordType(name="ns::Widget", kind="class", bases=["ns::priv::Base"]),
+                RecordType(name="ns::priv::Base", kind="class", size_bits=128),
+            ],
+        )
+        raw_change = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="ns::priv::Base",
+            description="size changed",
+        )
+        ctx = PipelineContext(old=old, new=new, suppression=_needs_evidence_suppression())
+
+        # Default namespaces: "priv" is not recognized as internal, so the
+        # walk never sees ns::priv::Base as a leak root.
+        MarkReachability().run([raw_change], ctx)
+        assert raw_change.public_reachable is False
+
+        # Custom namespaces: "priv" is now recognized, closing the gap.
+        raw_change2 = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="ns::priv::Base",
+            description="size changed",
+        )
+        MarkReachability(namespaces=("priv",)).run([raw_change2], ctx)
+        assert raw_change2.public_reachable is True
+
     def test_does_not_tag_unreachable_internal_change(self) -> None:
         old, new, raw_change = _unreachable_scenario()
         # DemoteUnreachableInternalChurn removes truly-unreachable internal

@@ -449,6 +449,44 @@ since JSON/SARIF/JUnit reporters already round-trip `Change` via
   actually appear here), plus a new regression test using `entity_namespace`
   only and asserting the rendered selector text, not just a substring of
   the fixed suffix.
+- **`DEFAULT_INTERNAL_NAMESPACES` is a hard-coded convention list; a
+  project using a different one is invisible to `MarkReachability`
+  (Codex, P2).** `MarkReachability` called `compute_leak_paths(ctx.old/new,
+  DEFAULT_INTERNAL_NAMESPACES)` with the walk's own hard-coded default
+  (`detail`/`impl`/`internal`/`__detail`/`_impl`) with no way to override
+  it. A project whose internal-implementation convention uses a different
+  segment — Codex's example: `ns::priv::*` — is never recognized as
+  "internal" by the walk at all, so a change on a type in that namespace
+  never gets `public_reachable` tagged, regardless of whether it is
+  genuinely reachable from a public type. A broad `namespace: "ns::priv::*"`
+  suppression rule (default `reachability="unreachable-only"`) then
+  suppresses the change with **no diagnostic** — exactly the failure mode
+  this ADR exists to close, just for any internal-namespace convention
+  outside the default five tokens. Verified this is not a heuristic gap
+  like the reverted D1 "directly-public subjects" fix above — sibling
+  pipeline steps `DetectInternalLeaks` and `DemoteUnreachableInternalChurn`
+  (both pre-dating this ADR) already accept a `namespaces: tuple[str, ...]
+  | None` constructor override for exactly this reason; `MarkReachability`
+  was simply the odd one out, hard-coding the default with no override
+  hook at all. Fixed by giving `MarkReachability` the identical constructor
+  parameter, so it is at least structurally consistent with its siblings.
+  This does **not** fully close the gap: `DEFAULT_PIPELINE` still
+  constructs all three steps with no arguments (confirmed — no caller
+  anywhere threads a non-default value today), so every project is still
+  limited to the same five-token default until a real configuration
+  surface exists. Deliberately did not attempt to auto-derive "the"
+  internal segment from a suppression rule's own namespace glob (e.g.
+  extracting literal segments from `"ns::priv::*"`) — a pattern's leading
+  segments are often shared with unrelated *public* types (e.g.
+  `"oneapi::dal::**::priv::**"` — "oneapi"/"dal" are not internal markers),
+  so blindly harvesting them would misclassify public types as internal
+  project-wide, the same unreliable-heuristic failure mode as the reverted
+  D1 fix, just reached from the opposite direction. Closing this for real
+  needs a genuine project-level configuration surface (e.g. a
+  `PolicyFile.internal_namespaces:` key) threaded consistently through
+  `MarkReachability`/`DetectInternalLeaks`/`DemoteUnreachableInternalChurn`/
+  `DetectNamespacePatterns` — added to the P1 roadmap below as a concrete,
+  scoped follow-up rather than attempted reactively in this round.
 
 ### D2. `Suppression` gains a reachability guard
 
@@ -633,6 +671,17 @@ Numbering mirrors the review's own priority tiers.
 4. Surface `reachability_proof_path`/graph proof paths in every report
    format (currently `Change.description`-only, per ADR-041 P0 slice 3's
    convention) as first-class structured fields in JSON/SARIF.
+5. Project-configurable internal-namespace conventions: a
+   `PolicyFile.internal_namespaces:` key (or CLI flag), threaded
+   consistently through `MarkReachability`/`DetectInternalLeaks`/
+   `DemoteUnreachableInternalChurn`/`DetectNamespacePatterns`'s existing
+   `namespaces` constructor parameters (all four already accept one; none
+   are wired to real user config today). Closes the gap named in this
+   ADR's changelog where a project using an internal-namespace convention
+   outside the hard-coded `DEFAULT_INTERNAL_NAMESPACES` five-token default
+   (`detail`/`impl`/`internal`/`__detail`/`_impl`) is invisible to every
+   step in this list, including the reachability tag this ADR's own
+   suppression gate depends on.
 
 ### P2 — empirical validation
 

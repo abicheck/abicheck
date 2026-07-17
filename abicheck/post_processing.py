@@ -562,6 +562,20 @@ class MarkReachability:
 
     name = "mark_reachability"
 
+    def __init__(self, namespaces: tuple[str, ...] | None = None) -> None:
+        # Mirrors DetectInternalLeaks/DemoteUnreachableInternalChurn's own
+        # constructor (Codex review, P2): those two steps already accept an
+        # internal-namespace override, so MarkReachability must too, or a
+        # project whose internal-namespace convention isn't in
+        # DEFAULT_INTERNAL_NAMESPACES (e.g. "priv" instead of "detail") would
+        # be recognized by the leak detector but invisible to the
+        # reachability tag that gates suppression — reintroducing this ADR's
+        # own failure mode for exactly that convention. No caller wires a
+        # non-default value through DEFAULT_PIPELINE today (see ADR-044's
+        # changelog); this only removes the structural inconsistency so a
+        # future policy-level override reaches this step too.
+        self._namespaces = namespaces
+
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         if ctx.suppression is None or not ctx.suppression.needs_reachability_evidence():
             return changes
@@ -576,8 +590,9 @@ class MarkReachability:
             compute_leak_paths,
         )
 
-        old_paths = compute_leak_paths(ctx.old, DEFAULT_INTERNAL_NAMESPACES)
-        new_paths = compute_leak_paths(ctx.new, DEFAULT_INTERNAL_NAMESPACES)
+        namespaces = self._namespaces or DEFAULT_INTERNAL_NAMESPACES
+        old_paths = compute_leak_paths(ctx.old, namespaces)
+        new_paths = compute_leak_paths(ctx.new, namespaces)
         reachable_types = set(old_paths) | set(new_paths)
         if not reachable_types:
             return changes
