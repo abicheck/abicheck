@@ -596,6 +596,30 @@ class TestInlineNamespaceVersionBump:
         assert changes[0].public_reachable is True
         assert changes[0].reachability_kind == "direct_public_symbol"
 
+    def test_old_side_public_alone_is_reachable(self) -> None:
+        """Codex review (fresh evidence): old-side public-header evidence
+        alone is enough to prove an old-consumer break — an application
+        linked against the old public symbol breaks regardless of whether
+        the new symbol also carries public-header evidence. Public-header
+        scoping can be asymmetric between two snapshots (the type moved out
+        of the scoped header set, or the flag only covers one side), so
+        requiring both sides tagged public (the old ``and``) let this case
+        stay silently untagged and suppressible."""
+        old = _snap(types=[_rec_public("ns::__1::queue")])
+        new = _snap(types=[_rec("ns::__2::queue")])
+        changes = detect_inline_namespace_version_bump(old, new)
+        assert len(changes) == 1
+        assert changes[0].public_reachable is True
+        assert changes[0].reachability_kind == "direct_public_symbol"
+
+    def test_new_side_public_alone_is_reachable(self) -> None:
+        old = _snap(types=[_rec("ns::__1::queue")])
+        new = _snap(types=[_rec_public("ns::__2::queue")])
+        changes = detect_inline_namespace_version_bump(old, new)
+        assert len(changes) == 1
+        assert changes[0].public_reachable is True
+        assert changes[0].reachability_kind == "direct_public_symbol"
+
     def test_no_version_segment_no_finding(self) -> None:
         old = _snap(funcs=[_fn("ns::sort")])
         new = _snap(funcs=[_fn("ns::sort")])

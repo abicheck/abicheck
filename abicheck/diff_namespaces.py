@@ -663,8 +663,15 @@ def _emit_version_bumps(
         # public (Visibility.PUBLIC filter) and a type entry reliably
         # public only when its origin is ScopeOrigin.PUBLIC_HEADER (Codex
         # review) — untagged otherwise, same as before public-header
-        # scoping is used.
-        subject_is_public = old_list[0][2] and new_list[0][2]
+        # scoping is used. `or`, not `and` (Codex review, fresh evidence):
+        # old-side public evidence alone already proves an old-consumer
+        # break (an application linked against the old public symbol),
+        # regardless of whether the new symbol also has public-header
+        # evidence — public-header scoping can be asymmetric between two
+        # snapshots (a type moved out of the scoped header set, or the flag
+        # only covers one side), so requiring both sides publicly-tagged
+        # let a genuine old-consumer break stay untagged and suppressible.
+        subject_is_public = old_list[0][2] or new_list[0][2]
         changes.append(make_change(
             ChangeKind.INLINE_NAMESPACE_VERSION_BUMPED,
             symbol=new_q,

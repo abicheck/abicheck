@@ -578,6 +578,22 @@ since JSON/SARIF/JUnit reporters already round-trip `Change` via
   response to an observed bug. Added `TestOriginByName` regression tests
   (`test_simple_lookup`, `test_duplicate_name_first_occurrence_wins`) to
   `test_diff_namespaces.py`.
+- **`_emit_version_bumps` required BOTH sides public-header-tagged, silently
+  hiding an asymmetric old-consumer break (Codex, fresh evidence).**
+  `subject_is_public = old_list[0][2] and new_list[0][2]` meant a type
+  version bump (`ns::__1::queue` → `ns::__2::queue`) stayed untagged
+  whenever only one side carried `ScopeOrigin.PUBLIC_HEADER` evidence — e.g.
+  the type moved out of the scoped public-header set, or `--public-header`
+  scoping only covered one snapshot. But the old side alone already proves
+  the break: an application linked against the old public symbol breaks
+  regardless of whether the new symbol also has public-header evidence —
+  the same "old-side-only" reasoning `EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT`
+  already uses (checks only `old_origins`, D1 above). Changed `and` to `or` —
+  either side's public-header evidence is now sufficient, matching
+  `MANDATORY_TEMPLATE_PARAM_ADDED`'s "any observation" conservatism (stay
+  tagged reachable when *any* reliable evidence exists, never require all of
+  it). Added `test_old_side_public_alone_is_reachable`/
+  `test_new_side_public_alone_is_reachable` to `test_diff_namespaces.py`.
 
 ### D2. `Suppression` gains a reachability guard
 
