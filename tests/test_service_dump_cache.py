@@ -1,0 +1,194 @@
+"""Tests for the whole-snapshot cache wiring (service_dump_cache.py)."""
+from __future__ import annotations
+
+from pathlib import Path
+
+from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.service_dump_cache import (
+    _dump_cache_extra_key,
+    _dump_is_cacheable,
+    cached_run_dump,
+)
+
+
+def _sample_snap(name: str = "foo") -> AbiSnapshot:
+    return AbiSnapshot(
+        library="libfoo.so.1",
+        version="1.0",
+        functions=[
+            Function(
+                name=name,
+                mangled=f"_Z{len(name)}{name}v",
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            ),
+        ],
+    )
+
+
+def _cacheable_kwargs(**overrides):
+    base = dict(
+        pdb_path=None,
+        dwarf_only=False,
+        debug_roots=None,
+        enable_debuginfod=False,
+        debug_format=None,
+        symbols_only=False,
+        debug_presence_only=False,
+        compile=None,
+        header_graph=False,
+        header_graph_includes=False,
+    )
+    base.update(overrides)
+    return base
+
+
+class TestDumpIsCacheable:
+    def test_plain_shape_is_cacheable(self):
+        assert _dump_is_cacheable(**_cacheable_kwargs()) is True
+
+    def test_pdb_path_not_cacheable(self, tmp_path):
+        kwargs = _cacheable_kwargs(pdb_path=tmp_path / "x.pdb")
+        assert _dump_is_cacheable(**kwargs) is False
+
+    def test_dwarf_only_not_cacheable(self):
+        assert _dump_is_cacheable(**_cacheable_kwargs(dwarf_only=True)) is False
+
+    def test_debug_roots_not_cacheable(self, tmp_path):
+        kwargs = _cacheable_kwargs(debug_roots=[tmp_path])
+        assert _dump_is_cacheable(**kwargs) is False
+
+    def test_enable_debuginfod_not_cacheable(self):
+        kwargs = _cacheable_kwargs(enable_debuginfod=True)
+        assert _dump_is_cacheable(**kwargs) is False
+
+    def test_debug_format_not_cacheable(self):
+        kwargs = _cacheable_kwargs(debug_format="dwarf")
+        assert _dump_is_cacheable(**kwargs) is False
+
+    def test_symbols_only_not_cacheable(self):
+        kwargs = _cacheable_kwargs(symbols_only=True)
+        assert _dump_is_cacheable(**kwargs) is False
+
+    def test_debug_presence_only_not_cacheable(self):
+        kwargs = _cacheable_kwargs(debug_presence_only=True)
+        assert _dump_is_cacheable(**kwargs) is False
+
+    def test_compile_context_not_cacheable(self):
+        kwargs = _cacheable_kwargs(compile=object())
+        assert _dump_is_cacheable(**kwargs) is False
+
+    def test_header_graph_not_cacheable(self):
+        kwargs = _cacheable_kwargs(header_graph=True)
+        assert _dump_is_cacheable(**kwargs) is False
+
+    def test_header_graph_includes_not_cacheable(self):
+        kwargs = _cacheable_kwargs(header_graph_includes=True)
+        assert _dump_is_cacheable(**kwargs) is False
+
+
+class TestDumpCacheExtraKey:
+    def test_differs_by_binary_fmt(self):
+        k1 = _dump_cache_extra_key("elf", "auto", None, None)
+        k2 = _dump_cache_extra_key("pe", "auto", None, None)
+        assert k1 != k2
+
+    def test_differs_by_header_backend(self):
+        k1 = _dump_cache_extra_key("elf", "auto", None, None)
+        k2 = _dump_cache_extra_key("elf", "clang", None, None)
+        assert k1 != k2
+
+    def test_differs_by_public_headers(self, tmp_path):
+        k1 = _dump_cache_extra_key("elf", "auto", None, None)
+        k2 = _dump_cache_extra_key("elf", "auto", [tmp_path / "pub.h"], None)
+        assert k1 != k2
+
+    def test_order_independent_for_public_headers(self, tmp_path):
+        a = tmp_path / "a.h"
+        b = tmp_path / "b.h"
+        k1 = _dump_cache_extra_key("elf", "auto", [a, b], None)
+        k2 = _dump_cache_extra_key("elf", "auto", [b, a], None)
+        assert k1 == k2
+
+    def test_one_path_with_embedded_comma_does_not_collide_with_two_paths(self):
+        # A regression guard for a real (if narrow) collision: joining with a
+        # printable delimiter like "," means one path literally named "a,b"
+        # and two separate paths "a"/"b" both stringify+sort+join to "a,b" —
+        # indistinguishable. NUL can't appear in a filesystem path, so the two
+        # inputs must produce different keys.
+        one_path_with_comma = [Path("a,b")]
+        two_paths = [Path("a"), Path("b")]
+        k1 = _dump_cache_extra_key("elf", "auto", one_path_with_comma, None)
+        k2 = _dump_cache_extra_key("elf", "auto", two_paths, None)
+        assert k1 != k2
+
+
+class TestCachedRunDump:
+    def test_cache_hit_skips_run_dump(self, tmp_path):
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF fake content")
+        calls = []
+
+        def fake_run_dump(path, binary_fmt, headers, includes, version, lang, **kwargs):
+            calls.append(1)
+            return _sample_snap()
+
+        snap1 = cached_run_dump(fake_run_dump, binary, "elf", [], [], "1.0", "c++")
+        snap2 = cached_run_dump(fake_run_dump, binary, "elf", [], [], "1.0", "c++")
+
+        assert len(calls) == 1
+        assert snap1.functions[0].name == snap2.functions[0].name == "foo"
+
+    def test_binary_content_change_invalidates_cache(self, tmp_path):
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"content A")
+        calls: list[int] = []
+
+        def fake_run_dump(path, binary_fmt, headers, includes, version, lang, **kwargs):
+            calls.append(1)
+            return _sample_snap(name=f"foo{len(calls)}")
+
+        cached_run_dump(fake_run_dump, binary, "elf", [], [], "1.0", "c++")
+        binary.write_bytes(b"content B - genuinely different")
+        cached_run_dump(fake_run_dump, binary, "elf", [], [], "1.0", "c++")
+
+        assert len(calls) == 2
+
+    def test_different_binary_fmt_is_a_different_cache_entry(self, tmp_path):
+        # Same on-disk bytes, but resolve_input would only ever call
+        # cached_run_dump with one binary_fmt per real file — this asserts
+        # the `extra` key material (added specifically for binary_fmt) really
+        # is folded in, guarding against a PE/Mach-O snapshot ever being
+        # served back for an ELF request that happens to share a cache key.
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"shared content")
+        calls: list[str] = []
+
+        def fake_run_dump(path, binary_fmt, headers, includes, version, lang, **kwargs):
+            calls.append(binary_fmt)
+            return _sample_snap(name=binary_fmt)
+
+        snap_elf = cached_run_dump(fake_run_dump, binary, "elf", [], [], "1.0", "c++")
+        snap_pe = cached_run_dump(fake_run_dump, binary, "pe", [], [], "1.0", "c++")
+
+        assert calls == ["elf", "pe"]
+        assert snap_elf.functions[0].name == "elf"
+        assert snap_pe.functions[0].name == "pe"
+
+    def test_uncacheable_shape_always_calls_run_dump(self, tmp_path):
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF fake content")
+        calls = []
+
+        def fake_run_dump(path, binary_fmt, headers, includes, version, lang, **kwargs):
+            calls.append(1)
+            return _sample_snap()
+
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dwarf_only=True
+        )
+        cached_run_dump(
+            fake_run_dump, binary, "elf", [], [], "1.0", "c++", dwarf_only=True
+        )
+
+        assert len(calls) == 2

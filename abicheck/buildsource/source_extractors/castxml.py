@@ -247,8 +247,11 @@ class CastxmlSourceExtractor:
             *enums,
             *variables,
         ]
+        origin_cache: dict[tuple[str | None, bool], ScopeOrigin] = {}
         for decl in decls:
-            tag_provenance(decl, header_segs, dir_segs, have_set)
+            tag_provenance(
+                decl, header_segs, dir_segs, have_set, origin_cache=origin_cache
+            )
             if decl.origin == ScopeOrigin.PUBLIC_HEADER and is_generated_header(
                 decl.source_header
             ):

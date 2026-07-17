@@ -36,6 +36,14 @@ _logger = logging.getLogger("abicheck.cache")
 #: Maximum number of cached snapshots (LRU eviction by mtime).
 MAX_ENTRIES: int = 100
 
+#: Bumped whenever a change to the dumping/provenance pipeline could alter a
+#: snapshot's content without changing any of the caller-supplied cache-key
+#: inputs (headers/includes/version/lang/``extra``) — folding it into every
+#: key invalidates all previously-cached entries on upgrade rather than risk
+#: serving a stale snapshot computed by an older, behaviorally-different
+#: abicheck version.
+_SNAPSHOT_CACHE_VERSION: str = "1"
+
 
 def _get_cache_dir() -> Path:
     """Return the cache directory, deferring Path.home() to call time."""
@@ -61,8 +69,17 @@ def _cache_key(
     includes: list[Path],
     version: str,
     lang: str,
+    *,
+    extra: str = "",
 ) -> str:
-    """Compute a deterministic cache key from all inputs that affect the snapshot."""
+    """Compute a deterministic cache key from all inputs that affect the snapshot.
+
+    ``extra`` is an opaque, caller-assembled string folding in any additional
+    inputs that affect the resulting snapshot but aren't one of this
+    function's named parameters (e.g. the binary format, header-AST backend,
+    or public-header scoping set) — kept generic here so this module doesn't
+    need to know every option a caller's dump pipeline exposes.
+    """
     h = hashlib.sha256()
     # Binary content hash — chunked to avoid loading huge files into memory
     try:
@@ -84,6 +101,8 @@ def _cache_key(
     # Compiler params
     h.update(version.encode())
     h.update(lang.encode())
+    h.update(extra.encode())
+    h.update(_SNAPSHOT_CACHE_VERSION.encode())
     return h.hexdigest()
 
 
@@ -93,9 +112,11 @@ def lookup(
     includes: list[Path],
     version: str,
     lang: str,
+    *,
+    extra: str = "",
 ) -> AbiSnapshot | None:
     """Look up a cached snapshot. Returns None on miss."""
-    key = _cache_key(binary_path, headers, includes, version, lang)
+    key = _cache_key(binary_path, headers, includes, version, lang, extra=extra)
     if not key:
         return None
     cache_file = _CACHE_DIR / f"{key}.json"
@@ -118,9 +139,11 @@ def store(
     includes: list[Path],
     version: str,
     lang: str,
+    *,
+    extra: str = "",
 ) -> None:
     """Store a snapshot in the cache (atomic write via rename)."""
-    key = _cache_key(binary_path, headers, includes, version, lang)
+    key = _cache_key(binary_path, headers, includes, version, lang, extra=extra)
     if not key:
         return
     try:
@@ -138,7 +161,13 @@ def store(
             raise
         _logger.debug("Cache store: %s → %s", binary_path.name, key[:12])
         _evict_if_needed()
-    except OSError as exc:
+    except Exception as exc:
+        # Caching is a pure optimization layered on top of a real dump that
+        # already succeeded — any failure here (disk full, an unserializable
+        # field, ...) must never surface as a caller-visible error. Broad
+        # except is deliberate (mirrors lookup()'s "any read problem is a
+        # miss" stance): a write-time TypeError from an unusual snapshot is
+        # exactly as harmless to swallow as an OSError.
         _logger.debug("Cache write failed: %s", exc)
 
 

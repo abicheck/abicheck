@@ -1251,9 +1251,12 @@ class TestRunCompare:
             new_headers=[new_h],
         )
         assert len(calls) == 2
-        old_call, new_call = calls
-        assert old_call["public_headers"] == [old_h]
-        assert new_call["public_headers"] == [new_h]
+        # Matched by path rather than unpacked positionally: old/new resolution
+        # runs concurrently on two threads (service.run_compare_request), so
+        # the order the spy observes calls in is not guaranteed.
+        calls_by_path = {c["path"]: c for c in calls}
+        assert calls_by_path[old_p]["public_headers"] == [old_h]
+        assert calls_by_path[new_p]["public_headers"] == [new_h]
 
     def test_debuginfod_url_appended_last_preserves_positional_order(self):
         # Codex review (PR #551): debuginfod_url was originally inserted right
@@ -1268,6 +1271,83 @@ class TestRunCompare:
         assert params.index("scope_to_public_surface") == (
             params.index("enable_debuginfod") + 1
         )
+
+
+class TestParallelOldNewExtraction:
+    """run_compare_request resolves old/new concurrently (two threads) since
+    neither side depends on the other until compare_snapshots(). These tests
+    guard the concurrency itself, exception propagation, and the
+    ABICHECK_PARALLEL_EXTRACTION=0 escape hatch."""
+
+    def _snap_files(self, tmp_path):
+        from abicheck.serialization import save_snapshot
+
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        save_snapshot(AbiSnapshot(library="l", version="1.0"), old_p)
+        save_snapshot(AbiSnapshot(library="l", version="2.0"), new_p)
+        return old_p, new_p
+
+    def test_both_sides_extracted_concurrently(self, tmp_path, monkeypatch):
+        import threading
+
+        from abicheck import service as service_mod
+
+        old_p, new_p = self._snap_files(tmp_path)
+        original_resolve = service_mod.resolve_input
+        # A 2-party barrier: this call only returns once BOTH old and new
+        # resolution have reached it. If run_compare_request serialized them
+        # (regressing to the old sequential behavior) this would deadlock —
+        # the second call can never start until the first returns, but the
+        # first is stuck waiting on the barrier — surfacing as a
+        # BrokenBarrierError after the timeout rather than a flaky race.
+        barrier = threading.Barrier(2, timeout=5)
+
+        def _synced_resolve(path, headers, includes, version, lang, **kwargs):
+            barrier.wait()
+            return original_resolve(path, headers, includes, version, lang, **kwargs)
+
+        monkeypatch.setattr(service_mod, "resolve_input", _synced_resolve)
+
+        result, old, new = run_compare(old_p, new_p)
+        assert isinstance(result, DiffResult)
+
+    def test_exception_from_one_side_propagates(self, tmp_path, monkeypatch):
+        from abicheck import service as service_mod
+
+        old_p, new_p = self._snap_files(tmp_path)
+        original_resolve = service_mod.resolve_input
+
+        def _boom(path, headers, includes, version, lang, **kwargs):
+            if Path(path) == Path(old_p):
+                raise SnapshotError("boom - old side failed")
+            return original_resolve(path, headers, includes, version, lang, **kwargs)
+
+        monkeypatch.setattr(service_mod, "resolve_input", _boom)
+
+        with pytest.raises(SnapshotError, match="boom - old side failed"):
+            run_compare(old_p, new_p)
+
+    def test_env_var_disables_parallel_extraction(self, tmp_path, monkeypatch):
+        import threading
+
+        from abicheck import service as service_mod
+
+        old_p, new_p = self._snap_files(tmp_path)
+        original_resolve = service_mod.resolve_input
+        threads_seen: set[int] = set()
+
+        def _spy(path, headers, includes, version, lang, **kwargs):
+            threads_seen.add(threading.get_ident())
+            return original_resolve(path, headers, includes, version, lang, **kwargs)
+
+        monkeypatch.setattr(service_mod, "resolve_input", _spy)
+        monkeypatch.setenv("ABICHECK_PARALLEL_EXTRACTION", "0")
+
+        run_compare(old_p, new_p)
+
+        # Both calls ran on the current (main) thread — no pool was used.
+        assert threads_seen == {threading.get_ident()}
 
 
 # ── render_output() ─────────────────────────────────────────────────────────

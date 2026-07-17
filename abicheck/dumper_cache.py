@@ -12,6 +12,32 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 
+def _atomic_write(path: Path, data: bytes) -> None:
+    """Write *data* to *path* via a same-directory temp file + ``os.replace``.
+
+    Plain ``open(path, "wb")``/``shutil.copy2`` can leave a torn file behind if
+    two processes race to populate the same cache key (e.g. comparing two
+    releases that share an unchanged header tree, with old/new extracted
+    concurrently) — a reader would then see a partially-written file instead
+    of a clean cache miss. ``os.replace`` is atomic on both POSIX and Windows,
+    so a concurrent reader always sees either the old (absent) or the new
+    (complete) file, never something in between.
+    """
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.replace(tmp_name, path)
+    except OSError:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
 def _cache_path(key: str, backend: str = "castxml") -> Path:
     # One sub-directory + file extension per backend so castxml XML and clang
     # JSON caches live side by side without clashing.

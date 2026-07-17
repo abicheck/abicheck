@@ -211,6 +211,18 @@ class _CastxmlParser:
         self._id_map: dict[str, Element] = {}
         self._virtual_methods_by_class: dict[str, list[Element]] = {}
         self._source_lines_cache: dict[str, list[str]] = {}
+        # Tag-grouped elements populated by the single pass in _build_id_map()
+        # below, so parse_functions()/parse_types()/etc. below don't each
+        # re-scan every top-level element themselves.
+        self._function_els: list[Element] = []
+        self._variable_els: list[Element] = []
+        self._record_els: list[Element] = []
+        self._enum_els: list[Element] = []
+        self._typedef_els: list[Element] = []
+        # Per-id memoization for the recursive type-graph resolvers below;
+        # safe since the XML tree is immutable for this parser instance.
+        self._type_name_cache: dict[str, str] = {}
+        self._pointer_depth_cache: dict[str, int] = {}
         # method element id -> canonical vtable-slot key, resolved through any
         # `overrides` chain. Populated lazily by _collect_virtual_methods(); see
         # its docstring for why this is needed alongside vtable_index.
@@ -224,17 +236,27 @@ class _CastxmlParser:
         self._build_id_map()
 
     def _build_id_map(self) -> None:
+        # Single pass building the id map, the virtual-method index, and the
+        # tag-grouped element lists parse_functions()/parse_types()/etc. use.
         for el in self._root:
             eid = el.get("id")
             if eid:
                 self._id_map[eid] = el
-        # Build class_id → list of virtual Method/Destructor elements
-        # In castxml output, methods are top-level elements with a "context" attribute
-        for el in self._root:
-            if el.tag in ("Method", "Destructor") and el.get("virtual") == "1":
+            tag = el.tag
+            if tag in ("Method", "Destructor") and el.get("virtual") == "1":
                 ctx = el.get("context")
                 if ctx:
                     self._virtual_methods_by_class.setdefault(ctx, []).append(el)
+            if tag in self._FUNCTION_TAGS:
+                self._function_els.append(el)
+            elif tag == "Variable":
+                self._variable_els.append(el)
+            elif tag in ("Struct", "Class", "Union"):
+                self._record_els.append(el)
+            elif tag == "Enumeration":
+                self._enum_els.append(el)
+            elif tag == "Typedef":
+                self._typedef_els.append(el)
 
     def _resolve(self, id_: str) -> Element | None:
         return self._id_map.get(id_)
@@ -286,6 +308,19 @@ class _CastxmlParser:
         return bool(re.search(r"\bexplicit\b", prefix[declaration_start + 1 :]))
 
     def _type_name(self, id_: str, depth: int = 0) -> str:
+        # Memoized by id alone (not depth): the same type id is commonly
+        # resolved from thousands of call sites on a large ABI surface. A
+        # depth-capped ("?") result is never cached, so reaching the same id
+        # again within budget still resolves it properly.
+        cached = self._type_name_cache.get(id_)
+        if cached is not None:
+            return cached
+        result = self._type_name_uncached(id_, depth)
+        if depth <= 10:
+            self._type_name_cache[id_] = result
+        return result
+
+    def _type_name_uncached(self, id_: str, depth: int = 0) -> str:
         if depth > 10:
             return "?"
         el = self._resolve(id_)
@@ -391,6 +426,16 @@ class _CastxmlParser:
 
     def _pointer_depth(self, id_: str, depth: int = 0) -> int:
         """Count pointer nesting depth: T=0, T*=1, T**=2, etc."""
+        # Memoized by id alone, same rationale/safety as _type_name above.
+        cached = self._pointer_depth_cache.get(id_)
+        if cached is not None:
+            return cached
+        result = self._pointer_depth_uncached(id_, depth)
+        if depth <= 10:
+            self._pointer_depth_cache[id_] = result
+        return result
+
+    def _pointer_depth_uncached(self, id_: str, depth: int = 0) -> int:
         if depth > 10:
             return 0
         el = self._resolve(id_)
@@ -539,7 +584,7 @@ class _CastxmlParser:
         corresponding ``Function`` objects as hidden friends downstream.
         """
         ids: set[str] = set()
-        for el in self._root:
+        for el in self._record_els:
             if el.tag not in ("Class", "Struct"):
                 continue
             befriending = el.get("befriending", "")
@@ -566,9 +611,7 @@ class _CastxmlParser:
     def parse_functions(self) -> list[Function]:
         funcs: list[Function] = []
         hidden_friend_ids = self._build_hidden_friend_ids()
-        for el in self._root:
-            if el.tag not in self._FUNCTION_TAGS:
-                continue
+        for el in self._function_els:
             func = self._parse_function_element(el, hidden_friend_ids)
             if func is not None:
                 funcs.append(func)
@@ -825,9 +868,7 @@ class _CastxmlParser:
 
     def parse_variables(self) -> list[Variable]:
         variables = []
-        for el in self._root:
-            if el.tag != "Variable":
-                continue
+        for el in self._variable_els:
             name = el.get("name", "")
             # C-mode castxml does not emit a mangled attribute for C-linkage variables
             # (C has no name mangling); fall back to plain name as the symbol key,
@@ -902,9 +943,7 @@ class _CastxmlParser:
         if not self._have_public_set:
             return []
         out: list[tuple[str, str, str]] = []
-        for el in self._root:
-            if el.tag != "Variable":
-                continue
+        for el in self._variable_els:
             init = el.get("init")
             if not init:
                 continue
@@ -988,9 +1027,7 @@ class _CastxmlParser:
         # This allows us to include `typedef struct { ... } Foo;` where the struct
         # itself is anonymous (name="") but reachable via the typedef.
         typedef_name_for: dict[str, str] = {}
-        for el in self._root:
-            if el.tag != "Typedef":
-                continue
+        for el in self._typedef_els:
             td_name = el.get("name", "")
             if not td_name:
                 continue
@@ -1015,11 +1052,14 @@ class _CastxmlParser:
                         typedef_name_for[struct_id] = td_name
 
         types = []
-        for el in self._root:
+        for el in self._record_els:
             if self._is_public_record_type(el):
                 types.append(self._build_record_type(el))
-            elif el.tag in ("Struct", "Class", "Union"):
-                # Check if this is an anonymous struct reachable via typedef
+            else:
+                # self._record_els is already pre-filtered to Struct/Class/
+                # Union (see _build_id_map), so this is every record type
+                # _is_public_record_type rejected. Check if it's an
+                # anonymous struct reachable via typedef.
                 eid = el.get("id", "")
                 override_name = typedef_name_for.get(eid)
                 if override_name and not self._is_builtin_element(el):
@@ -1402,9 +1442,7 @@ class _CastxmlParser:
 
     def parse_enums(self) -> list[EnumType]:
         enums = []
-        for el in self._root:
-            if el.tag != "Enumeration":
-                continue
+        for el in self._enum_els:
             name = el.get("name", "")
             if not name or name.startswith("__"):
                 continue
@@ -1445,9 +1483,7 @@ class _CastxmlParser:
 
     def parse_typedefs(self) -> dict[str, str]:
         typedefs: dict[str, str] = {}
-        for el in self._root:
-            if el.tag != "Typedef":
-                continue
+        for el in self._typedef_els:
             name = el.get("name", "")
             if not name:
                 continue
@@ -1471,9 +1507,7 @@ class _CastxmlParser:
         if not self._have_public_set:
             return []
         out: list[tuple[str, str, str]] = []
-        for el in self._root:
-            if el.tag != "Typedef":
-                continue
+        for el in self._typedef_els:
             name = el.get("name", "")
             if not name:
                 continue

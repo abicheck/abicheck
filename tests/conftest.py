@@ -17,6 +17,25 @@ except ImportError:
     filelock = None  # type: ignore[assignment]
 
 
+@pytest.fixture(autouse=True)
+def _isolate_snapshot_cache(tmp_path_factory: pytest.TempPathFactory, monkeypatch):
+    """Redirect the whole-snapshot cache (``snapshot_cache.py``) to a fresh
+    per-test directory instead of the real ``~/.cache/abi_check/snapshots/``.
+
+    Without this, two tests that happen to dump byte-identical synthetic
+    fixture binaries with the same (empty) headers/version/lang would collide
+    on the same cache key and one could silently serve the other's cached
+    snapshot — a test-isolation hazard, not a real-world one (this only
+    matters because unrelated tests share one persistent on-disk cache
+    directory across the whole run).
+    """
+    from abicheck import snapshot_cache
+
+    monkeypatch.setattr(
+        snapshot_cache, "_CACHE_DIR", tmp_path_factory.mktemp("snapshot_cache")
+    )
+
+
 @pytest.fixture
 def source_tree_with_compile_db(tmp_path: Path) -> Path:
     """A minimal source tree with a compile_commands.json for L3/L4 scan tests.
