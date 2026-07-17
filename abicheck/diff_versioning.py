@@ -441,13 +441,29 @@ def _check_baseline_floor_for_prefix(
 _MUSLLINUX_DECLARED_KEY = "MUSLLINUX"
 
 
-#: The canonical glibc ``libc`` SONAME (DT_NEEDED evidence) — musl's own libc
-#: is never named this (Alpine's musl libc.so is e.g.
-#: ``libc.musl-x86_64.so.1``, and musl is usually the process's own
-#: interpreter rather than a separate DT_NEEDED entry at all), so a binary
-#: that directly depends on it cannot resolve that dependency on a musl
-#: system regardless of whether any ``GLIBC_*`` verneed tag was captured.
-_GLIBC_LIBC_SONAME = "libc.so.6"
+#: Canonical glibc-only SONAMEs (DT_NEEDED evidence) — musl's own libc is
+#: never named any of these (Alpine's musl libc.so is e.g.
+#: ``libc.musl-x86_64.so.1``, folding everything glibc historically split
+#: out — math, threading, dl, realtime, resolver, NSS, async-lookup — into
+#: that one file; musl is also usually the process's own interpreter rather
+#: than a separate DT_NEEDED entry at all), so a binary that directly
+#: depends on any of these cannot resolve that dependency on a musl system
+#: regardless of whether any ``GLIBC_*`` verneed tag was captured (Codex
+#: review #583: a glibc-built ``sin()`` wrapper can need only ``libm.so.6``
+#: with no ``libc.so.6`` DT_NEEDED entry at all).
+_GLIBC_ONLY_SONAMES = frozenset(
+    {
+        "libc.so.6",
+        "libm.so.6",
+        "libpthread.so.0",
+        "libdl.so.2",
+        "librt.so.1",
+        "libresolv.so.2",
+        "libnsl.so.1",
+        "libutil.so.1",
+        "libanl.so.1",
+    }
+)
 
 
 def _direct_glibc_dependency_evidence(elf: ElfMetadata) -> str | None:
@@ -455,15 +471,16 @@ def _direct_glibc_dependency_evidence(elf: ElfMetadata) -> str | None:
 
     Covers a snapshot where symbol-version requirements weren't captured (or
     the binary genuinely calls no versioned symbol) but still directly names
-    a glibc-only artifact: the ``libc.so.6`` SONAME in DT_NEEDED, or a
-    glibc-style dynamic-linker interpreter path (PT_INTERP, e.g.
+    a glibc-only artifact: a :data:`_GLIBC_ONLY_SONAMES` entry in DT_NEEDED,
+    or a glibc-style dynamic-linker interpreter path (PT_INTERP, e.g.
     ``/lib64/ld-linux-x86-64.so.2`` — distinct from musl's own
     ``ld-musl-*.so.1`` interpreter naming). Returns the offending value, or
     ``None``.
     """
-    needed = getattr(elf, "needed", None) or []
-    if _GLIBC_LIBC_SONAME in needed:
-        return _GLIBC_LIBC_SONAME
+    needed: list[str] = getattr(elf, "needed", None) or []
+    for lib in needed:
+        if lib in _GLIBC_ONLY_SONAMES:
+            return lib
     interpreter = getattr(elf, "interpreter", "") or ""
     if "ld-linux" in interpreter:
         return interpreter
@@ -480,23 +497,30 @@ def check_musllinux_glibc_dependency(
     symbols — a binary requiring one was linked against glibc itself and
     will fail to even resolve that dependency on a musl system, not merely
     hit a symbol-version mismatch. This check is deliberately scoped to
-    *just* the ``GLIBC_*`` namespace (plus the implied ``DT_RELR`` loader
-    floor, which is glibc's own loader convention): unlike glibc, a musl
-    system's libstdc++ can legitimately carry ``GLIBCXX_*``/``CXXABI_*``
-    verneed entries of its own — musl's FAQ explicitly documents using gcc's
+    *just* the ``GLIBC_*`` namespace: unlike glibc, a musl system's
+    libstdc++ can legitimately carry ``GLIBCXX_*``/``CXXABI_*`` verneed
+    entries of its own — musl's FAQ explicitly documents using gcc's
     libstdc++ alongside musl — so those namespaces alone do not prove a
     glibc dependency and must not be flagged here (Codex review #583).
     :func:`check_platform_baseline_floor`'s generalized ``GLIBCXX``/
     ``CXXABI`` floor check is the right tool for that C++-runtime-versioning
     case; it is orthogonal to musl compatibility.
 
+    The literal ``GLIBC_ABI_DT_RELR`` synthetic verneed marker *is* flagged
+    (it is glibc's own marker name, unambiguous regardless of loader
+    feature support elsewhere), but a bare ``has_dt_relr`` flag on its own
+    is deliberately **not** treated as glibc evidence: packed relative
+    relocations (DT_RELR) are not glibc-specific — musl's own dynamic
+    linker gained RELR support in musl 1.2.4 — so a clean musl-built binary
+    using DT_RELR would otherwise false-positive here (Codex review #583).
+
     Also checks :func:`_direct_glibc_dependency_evidence`: a snapshot can
-    depend on glibc's ``libc.so.6``/dynamic linker directly without any
+    depend on a glibc-only SONAME or its dynamic linker directly without any
     ``GLIBC_*`` verneed tag ever having been captured (e.g. incomplete
     verneed extraction, or a binary that calls no versioned symbol at all) —
     the DT_NEEDED SONAME or PT_INTERP path alone is still disqualifying
-    evidence, since musl provides neither under those names (Codex review
-    #583).
+    evidence, since musl provides none of them under those names (Codex
+    review #583).
 
     Declared via ``runtime_floors["MUSLLINUX"]`` (any truthy value, e.g. the
     musllinux tag's own ``"1.2"`` version string — only presence is
@@ -518,10 +542,6 @@ def check_musllinux_glibc_dependency(
                 parsed = _parse_abi_version_tag(tag)
                 if parsed != _UNPARSEABLE_VERSION and _version_gt(parsed, worst_tuple):
                     worst_tuple, worst_tag = parsed, tag
-    if getattr(elf, "has_dt_relr", False):
-        offenders.add(getattr(elf, "soname", "") or "<binary>")
-        if _version_gt(_parse_abi_version_tag(_DT_RELR_GLIBC_FLOOR_TAG), worst_tuple):
-            worst_tag = _DT_RELR_GLIBC_FLOOR_TAG
     direct_evidence = _direct_glibc_dependency_evidence(elf)
     if direct_evidence is not None:
         offenders.add(direct_evidence)

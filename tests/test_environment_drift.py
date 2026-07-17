@@ -639,7 +639,31 @@ class TestMusllinuxGlibcDependency:
         assert len(changes) == 1
         assert changes[0].new_value == "GLIBC_2.34"
 
-    def test_dt_relr_flagged_for_musllinux_tagged_binary(self) -> None:
+    def test_bare_dt_relr_flag_alone_not_flagged(self) -> None:
+        # Codex review #583: DT_RELR (packed relative relocations) is not
+        # glibc-specific — musl's own dynamic linker gained RELR support in
+        # musl 1.2.4 — so a clean musl-built binary using it must not
+        # false-positive here.
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(needed=["libc.musl-x86_64.so.1"], has_dt_relr=True)
+        assert check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"}) == []
+
+    def test_glibc_abi_dt_relr_marker_tag_still_flagged(self) -> None:
+        # Unlike the bare has_dt_relr flag, the literal GLIBC_ABI_DT_RELR
+        # verneed marker name is unambiguous glibc evidence.
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(
+            needed=["libc.so.6"],
+            versions_required={"libc.so.6": ["GLIBC_ABI_DT_RELR"]},
+        )
+        changes = check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"})
+        assert len(changes) == 1
+
+    def test_dt_relr_plus_glibc_dt_needed_still_flagged(self) -> None:
+        # Direct DT_NEEDED evidence (libc.so.6) still flags regardless of
+        # DT_RELR's presence.
         from abicheck.diff_versioning import check_musllinux_glibc_dependency
 
         elf = _elf(needed=["libc.so.6"], has_dt_relr=True)
@@ -658,6 +682,24 @@ class TestMusllinuxGlibcDependency:
         assert len(changes) == 1
         assert changes[0].kind is ChangeKind.MUSLLINUX_GLIBC_DEPENDENCY_DETECTED
         assert changes[0].new_value == "libc.so.6"
+
+    def test_needed_libm_flagged_without_libc_dt_needed(self) -> None:
+        # Codex review #583, follow-up: a glibc-built sin() wrapper can need
+        # only libm.so.6 (pre-2.34 split library) with no libc.so.6
+        # DT_NEEDED entry at all — must still be flagged.
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(needed=["libm.so.6"], versions_required={})
+        changes = check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"})
+        assert len(changes) == 1
+        assert changes[0].new_value == "libm.so.6"
+
+    def test_needed_libpthread_flagged(self) -> None:
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(needed=["libpthread.so.0"], versions_required={})
+        changes = check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"})
+        assert len(changes) == 1
 
     def test_glibc_style_interpreter_flagged_without_captured_verneed(self) -> None:
         from abicheck.diff_versioning import check_musllinux_glibc_dependency
