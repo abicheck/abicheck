@@ -921,12 +921,32 @@ class TestParseMacosDeploymentTargetFloor:
                 "10.9",
                 id="universal2",
             ),
-            # A fat/universal wheel's compressed segment claims compatibility
-            # with every listed baseline — the strictest (lowest) applies.
+            # A compressed segment naming two DIFFERENT architectures with
+            # DIFFERENT targets cannot be collapsed to one number without
+            # losing the fact that the floor is arch-specific — the arm64
+            # slice's own Mach-O minimum OS is legitimately 11.0, so
+            # reducing to x86_64's lower 10.9 would falsely flag it as
+            # exceeding the floor (Codex review #583). No single floor is
+            # derivable, so this returns None rather than guess.
             pytest.param(
                 "pkg-1.0-cp311-cp311-macosx_10_9_x86_64.macosx_11_0_arm64.whl",
+                None,
+                id="compressed_multi_tag_different_archs_unresolvable",
+            ),
+            # Same architecture named twice with different targets (redundant
+            # aliasing, the manylinux-legacy-tag analog) still resolves to
+            # the strictest within that one arch.
+            pytest.param(
+                "pkg-1.0-cp311-cp311-macosx_10_9_x86_64.macosx_10_12_x86_64.whl",
                 "10.9",
-                id="compressed_multi_tag_picks_strictest",
+                id="compressed_multi_tag_same_arch_picks_strictest",
+            ),
+            # Two tags for different architectures that happen to agree on
+            # the same target resolve to that shared value.
+            pytest.param(
+                "pkg-1.0-cp311-cp311-macosx_11_0_x86_64.macosx_11_0_arm64.whl",
+                "11.0",
+                id="compressed_multi_tag_different_archs_same_floor",
             ),
             pytest.param(
                 "pkg-1.0-cp311-cp311-manylinux_2_17_x86_64.whl",

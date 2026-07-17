@@ -598,26 +598,42 @@ _MACOSX_TAG_RE = re.compile(
 
 
 def parse_macos_deployment_target_floor(name: str) -> str | None:
-    """Derive the strictest declared macOS deployment target from a
+    """Derive the declared macOS deployment target from a
     ``macosx_X_Y_<arch>`` wheel platform tag (G27, the macOS half of
     :func:`parse_manylinux_glibc_floor`'s manylinux/glibc idea).
 
     *name* follows the same wheel-filename/platform-tag-segment handling as
-    :func:`parse_manylinux_glibc_floor`, including strictest-of-multi-tag
-    resolution for a fat/universal2 wheel whose compressed segment lists
-    more than one baseline.
+    :func:`parse_manylinux_glibc_floor`. Unlike the glibc floor, resolution
+    is **not** simply "strictest across every tag in the segment": the
+    deployment target is architecture-specific, so multiple tags naming
+    *different* architectures with *different* targets (e.g. a fat wheel's
+    ``macosx_10_9_x86_64.macosx_11_0_arm64``) cannot be collapsed into one
+    number without losing that per-arch distinction — the arm64 slice's own
+    Mach-O minimum OS is legitimately 11.0, and reducing the pair to the
+    x86_64 slice's lower 10.9 would falsely flag that valid arm64 slice as
+    exceeding the floor (Codex review #583). Such tags return ``None``
+    (no single floor derivable) rather than guess. A single-architecture
+    tag, or a compressed multi-tag segment where every listed architecture
+    agrees on the same target (redundant aliasing, the manylinux-legacy-tag
+    analog), still resolves to that shared value.
 
     Returns a dotted ``"X.Y"`` string suitable for
     ``EnvironmentMatrix.runtime_floors["MACOS_DEPLOYMENT_TARGET"]``, or
-    ``None`` if *name* carries no recognizable ``macosx_*`` tag.
+    ``None`` if *name* carries no recognizable ``macosx_*`` tag, or its tags
+    disagree across architectures.
     """
     tag_segment = _wheel_platform_tag_segment(name)
-    best: tuple[int, int] | None = None
+    floor_by_arch: dict[str, tuple[int, int]] = {}
     for m in _MACOSX_TAG_RE.finditer(tag_segment):
         version = (int(m.group("major")), int(m.group("minor")))
-        if best is None or version < best:
-            best = version
-    return f"{best[0]}.{best[1]}" if best is not None else None
+        arch = m.group("arch")
+        if arch not in floor_by_arch or version < floor_by_arch[arch]:
+            floor_by_arch[arch] = version
+    distinct_floors = set(floor_by_arch.values())
+    if len(distinct_floors) != 1:
+        return None
+    best = next(iter(distinct_floors))
+    return f"{best[0]}.{best[1]}"
 
 
 #: Matches a PEP 425 Python tag: an implementation abbreviation (``cp``

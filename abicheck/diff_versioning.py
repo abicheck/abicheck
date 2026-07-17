@@ -441,6 +441,35 @@ def _check_baseline_floor_for_prefix(
 _MUSLLINUX_DECLARED_KEY = "MUSLLINUX"
 
 
+#: The canonical glibc ``libc`` SONAME (DT_NEEDED evidence) — musl's own libc
+#: is never named this (Alpine's musl libc.so is e.g.
+#: ``libc.musl-x86_64.so.1``, and musl is usually the process's own
+#: interpreter rather than a separate DT_NEEDED entry at all), so a binary
+#: that directly depends on it cannot resolve that dependency on a musl
+#: system regardless of whether any ``GLIBC_*`` verneed tag was captured.
+_GLIBC_LIBC_SONAME = "libc.so.6"
+
+
+def _direct_glibc_dependency_evidence(elf: ElfMetadata) -> str | None:
+    """Non-verneed evidence that *elf* depends on glibc specifically (G27).
+
+    Covers a snapshot where symbol-version requirements weren't captured (or
+    the binary genuinely calls no versioned symbol) but still directly names
+    a glibc-only artifact: the ``libc.so.6`` SONAME in DT_NEEDED, or a
+    glibc-style dynamic-linker interpreter path (PT_INTERP, e.g.
+    ``/lib64/ld-linux-x86-64.so.2`` — distinct from musl's own
+    ``ld-musl-*.so.1`` interpreter naming). Returns the offending value, or
+    ``None``.
+    """
+    needed = getattr(elf, "needed", None) or []
+    if _GLIBC_LIBC_SONAME in needed:
+        return _GLIBC_LIBC_SONAME
+    interpreter = getattr(elf, "interpreter", "") or ""
+    if "ld-linux" in interpreter:
+        return interpreter
+    return None
+
+
 def check_musllinux_glibc_dependency(
     elf: ElfMetadata, runtime_floors: dict[str, str] | None
 ) -> list[Change]:
@@ -461,10 +490,18 @@ def check_musllinux_glibc_dependency(
     ``CXXABI`` floor check is the right tool for that C++-runtime-versioning
     case; it is orthogonal to musl compatibility.
 
+    Also checks :func:`_direct_glibc_dependency_evidence`: a snapshot can
+    depend on glibc's ``libc.so.6``/dynamic linker directly without any
+    ``GLIBC_*`` verneed tag ever having been captured (e.g. incomplete
+    verneed extraction, or a binary that calls no versioned symbol at all) —
+    the DT_NEEDED SONAME or PT_INTERP path alone is still disqualifying
+    evidence, since musl provides neither under those names (Codex review
+    #583).
+
     Declared via ``runtime_floors["MUSLLINUX"]`` (any truthy value, e.g. the
     musllinux tag's own ``"1.2"`` version string — only presence is
     checked). Returns ``[]`` when musllinux compatibility isn't declared, or
-    when the binary carries no glibc-flavoured version requirement at all.
+    when the binary carries no glibc-flavoured evidence at all.
     """
     if not runtime_floors:
         return []
@@ -485,6 +522,9 @@ def check_musllinux_glibc_dependency(
         offenders.add(getattr(elf, "soname", "") or "<binary>")
         if _version_gt(_parse_abi_version_tag(_DT_RELR_GLIBC_FLOOR_TAG), worst_tuple):
             worst_tag = _DT_RELR_GLIBC_FLOOR_TAG
+    direct_evidence = _direct_glibc_dependency_evidence(elf)
+    if direct_evidence is not None:
+        offenders.add(direct_evidence)
     if not offenders:
         return []
     return [
@@ -494,7 +534,7 @@ def check_musllinux_glibc_dependency(
             name=", ".join(sorted(offenders)),
             detail="musllinux",
             old="musllinux (no glibc symbol-versioning namespace)",
-            new=worst_tag or "glibc-versioned dependency",
+            new=worst_tag or direct_evidence or "glibc-versioned dependency",
         )
     ]
 

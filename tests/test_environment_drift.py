@@ -646,6 +646,41 @@ class TestMusllinuxGlibcDependency:
         changes = check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"})
         assert len(changes) == 1
 
+    def test_needed_libc_so_6_flagged_without_captured_verneed(self) -> None:
+        # Codex review #583: direct DT_NEEDED evidence of glibc's own libc
+        # SONAME must be flagged even when versions_required never captured
+        # a GLIBC_* tag (incomplete verneed extraction, or a binary calling
+        # no versioned symbol at all) — musl provides no libc.so.6.
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(needed=["libc.so.6"], versions_required={})
+        changes = check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"})
+        assert len(changes) == 1
+        assert changes[0].kind is ChangeKind.MUSLLINUX_GLIBC_DEPENDENCY_DETECTED
+        assert changes[0].new_value == "libc.so.6"
+
+    def test_glibc_style_interpreter_flagged_without_captured_verneed(self) -> None:
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(
+            needed=[],
+            versions_required={},
+            interpreter="/lib64/ld-linux-x86-64.so.2",
+        )
+        changes = check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"})
+        assert len(changes) == 1
+        assert changes[0].new_value == "/lib64/ld-linux-x86-64.so.2"
+
+    def test_musl_interpreter_not_flagged(self) -> None:
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(
+            needed=["libc.musl-x86_64.so.1"],
+            versions_required={},
+            interpreter="/lib/ld-musl-x86_64.so.1",
+        )
+        assert check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"}) == []
+
     def test_lowercase_key_still_matches(self) -> None:
         from abicheck.diff_versioning import check_musllinux_glibc_dependency
 

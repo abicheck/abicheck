@@ -52,15 +52,22 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   requires any glibc-flavoured versioned symbol at all — a yes/no
   compatibility check rather than a numeric floor, since musl carries no
   symbol-versioning namespace to compare against — new `BREAKING`
-  `musllinux_glibc_dependency_detected`. New
+  `musllinux_glibc_dependency_detected` — scoped to the true `GLIBC_*`
+  namespace plus direct `libc.so.6`/glibc-style-interpreter evidence, since
+  a musl system's own libstdc++ can legitimately carry `GLIBCXX_*`/
+  `CXXABI_*` verneed entries (Codex review). New
   `diff_wheel_deployment.check_macos_deployment_target_floor`: the macOS
   half of G10's idea, comparing a Mach-O binary's own
-  `LC_VERSION_MIN_MACOSX`/`LC_BUILD_VERSION` minimum-OS against a declared
+  `LC_VERSION_MIN_MACOSX`/`LC_BUILD_VERSION` minimum-OS (padded version
+  comparison, so `"11"` and `"11.0"` compare equal) against a declared
   `MACOS_DEPLOYMENT_TARGET` floor — new `RISK`
   `macos_deployment_target_raised`. New `abicheck.package`
   `parse_musllinux_floor()`/`parse_macos_deployment_target_floor()` wheel
   platform-tag parsers alongside G10's `parse_manylinux_glibc_floor()` (all
-  three share the extracted `_wheel_platform_tag_segment()` helper).
+  three share the extracted `_wheel_platform_tag_segment()` helper); the
+  macOS parser is arch-aware and returns `None` rather than collapsing a
+  fat/universal wheel's per-architecture deployment targets into one
+  (possibly wrong) number when they disagree (Codex review).
   Windows UCRT/runtime checks, CPU-ISA-baseline detection, and end-to-end
   CLI auto-derivation from a compared wheel's own filename tag (every check
   above, including G10's original `GLIBC` one, still requires an explicit
