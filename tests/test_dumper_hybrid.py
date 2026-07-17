@@ -65,6 +65,23 @@ class TestMergeSnapshotsBasics:
         assert merged.from_headers is False
         assert merged.ast_producer is None
 
+    def test_clang_side_non_header_fallback_returns_castxml_snap_unchanged(self):
+        # Codex review: the ORIGINAL guard only checked castxml_snap.
+        # from_headers -- if the clang side alone degraded to a non-header
+        # fallback (e.g. the PE/Mach-O header-scoped path falling back to
+        # export-table mode), the merge still unioned clang_snap's much
+        # broader, non-header-scoped declarations into a result falsely
+        # marked confirmed header-aware.
+        clang_only_func = Function(name="bar", mangled="_Z3barv", return_type="void")
+        castxml = _snap(ast_producer="castxml", from_headers=True)
+        clang = _snap(
+            functions=[clang_only_func], ast_producer=None, from_headers=False
+        )
+        merged = merge_snapshots(castxml, clang)
+        assert merged is castxml
+        assert merged.func_by_mangled("_Z3barv") is None
+        assert merged.ast_producer == "castxml"
+
     def test_from_headers_inferred_preserved_when_true(self):
         castxml = _snap(
             ast_producer="castxml", from_headers=True, from_headers_inferred=True
@@ -183,6 +200,60 @@ class TestCtorDtorReconciliation:
         reconciled = merged.func_by_mangled(real_mangled)
         assert reconciled is not None
         assert reconciled.name == "Widget"
+
+    def test_constructor_with_comma_in_single_param_type_still_matches(self):
+        # Codex review: the synthetic key's embedded param signature is a
+        # bare "," join with no escaping. A single parameter whose OWN type
+        # contains a comma (a multi-argument template) must not be split
+        # into two -- that would understate the ctor's arity and block
+        # reconciliation forever, keeping the synthetic key around and
+        # reintroducing the false FUNC_REMOVED/FUNC_ADDED pair.
+        synthetic = f"{SYNTHETIC_CTOR_KEY_PREFIX}ns::Widget(Box<int, int>)"
+        castxml_ctor = Function(
+            name="Widget",
+            mangled=synthetic,
+            return_type="void",
+            params=[Param(name="b", type="Box<int, int>")],
+            access=AccessLevel.PUBLIC,
+        )
+        real_mangled = "_ZN2ns6WidgetC1E3BoxIiiE"
+        clang_ctor = Function(
+            name="Widget",
+            mangled=real_mangled,
+            return_type="void",
+            params=[Param(name="b", type="Box<int, int>")],
+            access=AccessLevel.PUBLIC,
+        )
+        castxml = _snap(functions=[castxml_ctor], ast_producer="castxml")
+        clang = _snap(functions=[clang_ctor], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+
+        assert merged.func_by_mangled(synthetic) is None
+        assert merged.func_by_mangled(real_mangled) is not None
+
+    def test_constructor_with_two_comma_bearing_params_still_matches(self):
+        # Two distinct parameters, each itself comma-bearing -- makes sure
+        # the fix splits exactly at the two top-level commas, not more.
+        synthetic = f"{SYNTHETIC_CTOR_KEY_PREFIX}ns::Widget(Box<int, int>,Pair<int, int>)"
+        params = [
+            Param(name="a", type="Box<int, int>"),
+            Param(name="b", type="Pair<int, int>"),
+        ]
+        castxml_ctor = Function(
+            name="Widget", mangled=synthetic, return_type="void",
+            params=params, access=AccessLevel.PUBLIC,
+        )
+        real_mangled = "_ZN2ns6WidgetC1E3BoxIiiE4PairIiiE"
+        clang_ctor = Function(
+            name="Widget", mangled=real_mangled, return_type="void",
+            params=params, access=AccessLevel.PUBLIC,
+        )
+        castxml = _snap(functions=[castxml_ctor], ast_producer="castxml")
+        clang = _snap(functions=[clang_ctor], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+
+        assert merged.func_by_mangled(synthetic) is None
+        assert merged.func_by_mangled(real_mangled) is not None
 
     def test_destructor_synthetic_key_reconciled_to_real_mangled_name(self):
         synthetic = "~ns::Base1"

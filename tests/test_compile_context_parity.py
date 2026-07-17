@@ -220,6 +220,19 @@ def test_buildconfig_rejects_bad_compile_frontend() -> None:
         BuildConfig.from_dict({"compile": {"frontend": "gcc"}})
 
 
+def test_buildconfig_accepts_hybrid_compile_frontend() -> None:
+    # G28 Phase 3 (Codex review): docs/reference/config-file.md documents
+    # `compile.frontend: hybrid`, and BuildConfig.from_dict feeds the SAME
+    # CompileContext.frontend the L2 dump/compare/scan path already resolves
+    # "hybrid" through (cli_options._merge_compile_config) -- a config
+    # loader that still rejected it would break an otherwise-valid
+    # .abicheck.yml for anyone following that reference.
+    from abicheck.buildsource.inline import BuildConfig
+
+    bc = BuildConfig.from_dict({"compile": {"frontend": "hybrid"}})
+    assert bc.compile_frontend == "hybrid"
+
+
 def test_merge_compile_config_cli_wins_over_config(tmp_path: Path) -> None:
     from abicheck.cli_scan import _merge_compile_config
 

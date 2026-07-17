@@ -465,10 +465,11 @@ class BuildConfig:
             "auto",
             "castxml",
             "clang",
+            "hybrid",
         ):
             raise ValueError(
-                "compile.frontend must be one of ('auto', 'castxml', 'clang'), "
-                f"got {compile_frontend!r}"
+                "compile.frontend must be one of ('auto', 'castxml', 'clang', "
+                f"'hybrid'), got {compile_frontend!r}"
             )
 
         return cls(

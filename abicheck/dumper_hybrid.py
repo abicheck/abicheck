@@ -111,6 +111,36 @@ def _ctor_dtor_scope(mangled: str) -> tuple[str, str] | None:
     return comps[-1], "::".join(comps[:-1])
 
 
+def _split_top_level_commas(s: str) -> list[str]:
+    """Split *s* on commas at bracket depth 0 only.
+
+    A castxml synthetic ctor key joins its parameter types with ``,``
+    (``dumper_castxml._function_mangled_name``'s ``",".join(ctor_identity_types)``)
+    with no escaping, so a single parameter type that itself contains a
+    comma (``std::pair<int, int>``, any other multi-argument template) must
+    not be split into two — that would understate the constructor's real
+    arity and permanently block reconciliation against the clang side,
+    reintroducing the false ``FUNC_REMOVED``/``FUNC_ADDED`` pair for every
+    such constructor (Codex review). Mirrors the same depth-tracking
+    convention already used in ``name_classification._has_top_level_ptr_or_ref``.
+    """
+    if not s:
+        return []
+    parts = []
+    depth = 0
+    start = 0
+    for i, ch in enumerate(s):
+        if ch in "<([":
+            depth += 1
+        elif ch in ">)]":
+            depth = max(0, depth - 1)
+        elif ch == "," and depth == 0:
+            parts.append(s[start:i])
+            start = i + 1
+    parts.append(s[start:])
+    return parts
+
+
 def _synthetic_ctor_dtor_scope(key: str) -> tuple[str, str, str] | None:
     """``(marker, qualified_scope, param_sig)`` parsed back out of a castxml
     synthetic ctor/dtor key (the exact inverse of
@@ -155,7 +185,7 @@ def _match_synthetic_ctor_dtor(
     # key's own identity (dumper_castxml._ctor_param_identity_type already
     # strips a top-level cv qualifier the same way real mangling would).
     wanted_sig = tuple(
-        canonicalize_type_name(t) for t in (param_sig.split(",") if param_sig else [])
+        canonicalize_type_name(t) for t in _split_top_level_commas(param_sig)
     )
     matches = [
         c
@@ -285,16 +315,21 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
     ``"hybrid"`` and its ``fact_provenance`` records, per declaration, which
     backend's value was used for each of those facts.
 
-    If *castxml_snap* itself never got confirmed header-AST evidence (no
-    headers were supplied, or the dump ran ``dwarf_only``/``symbols_only``),
-    both recursive sub-dumps are DWARF/symbols-only snapshots with nothing
-    header-derived to merge — returns *castxml_snap* unchanged rather than
-    falsely upgrading it to ``ast_producer="hybrid"``/confirmed
-    header-aware provenance, which would make header-tier detectors (param
-    defaults, constants, param renames) misread a real header-aware snapshot
-    compared against this one as having lost data (Codex review).
+    If EITHER side never got confirmed header-AST evidence — no headers were
+    supplied, the dump ran ``dwarf_only``/``symbols_only``, or one backend
+    degraded to a non-header fallback (e.g. the PE/Mach-O header-scoped path
+    falling back to export-table mode when clang is unavailable or nothing
+    matched) — returns *castxml_snap* unchanged rather than unioning the
+    other side's declarations into a falsely-upgraded, confirmed
+    header-aware ``ast_producer="hybrid"`` result. A one-sided fallback is
+    not just missing data to merge: unioning a non-header snapshot's much
+    broader export-table-derived functions/types into a header-scoped result
+    would also pull that noise back in, and header-tier detectors (param
+    defaults, constants, param renames) would misread the merge's forced
+    header-aware provenance when compared against a genuinely header-aware
+    snapshot (Codex review, x2).
     """
-    if not castxml_snap.from_headers:
+    if not (castxml_snap.from_headers and clang_snap.from_headers):
         return castxml_snap
 
     provenance: dict[str, str] = {}
