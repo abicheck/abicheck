@@ -677,11 +677,19 @@ def _collect_ast_build_source_pack(
         return None, f"{case}/{version}: no compile_commands.json entry for {src}"
     side_db = root / f"{version}.ast_compile_commands.json"
     side_db.write_text(json.dumps(matching))
+    # The "clang" extractor shells out to a bare "clang" by default
+    # (collect_inline_pack's clang_bin default) -- absent on hosts that only
+    # ship a versioned clang-18, same gap as the case115/case64 overrides
+    # elsewhere in this file. Pin the actual discovered clang binary so the
+    # replay doesn't silently no-op (and this case's finding doesn't
+    # regress) on such hosts (Codex review on PR #588).
+    clang_bin = _first_available_tool("clang-18", "clang") or "clang"
     try:
         pack = collect_inline_pack(
             sources=case_dir,
             build_info=side_db,
             extractor=extractor,
+            clang_bin=clang_bin,
             scope=scope,
             layers=("L3", "L4", "L5"),
             public_header_roots=(str(header),) if header and header.exists() else (),
