@@ -426,7 +426,11 @@ def test_perform_elf_dump_attaches_header_graph_when_requested(
     includes (see test_perform_elf_dump_header_graph_receives_seeded_includes
     for the seeded-vs-raw distinction), lang/compile_context/public_headers/
     public_header_dirs it was given, and writes the wrapper's returned
-    (possibly different) snapshot object."""
+    (possibly different) snapshot object. compile_context is passed through
+    unmodified here because effective_gcc_options (None, no -p/--compile-db
+    in this call) already matches compile_context.gcc_options — see
+    test_perform_elf_dump_header_graph_gets_compile_db_flags for the case
+    where they differ and a replacement context is built."""
     so = tmp_path / "lib.so"
     hdr = tmp_path / "h.h"
     hdr.write_text("struct S { int x; };\n", encoding="utf-8")
@@ -467,7 +471,9 @@ def test_perform_elf_dump_attaches_header_graph_when_requested(
         captured["written_snap"] = snap
         _write(snap, *a, **k)
 
-    sentinel_cc = object()
+    from abicheck.service_scan import CompileContext
+
+    sentinel_cc = CompileContext()
 
     perform_elf_dump(
         so,
@@ -504,7 +510,7 @@ def test_perform_elf_dump_attaches_header_graph_when_requested(
         _write_and_capture,
         header_graph=True,
         header_graph_includes=True,
-        compile_context=sentinel_cc,  # type: ignore[arg-type]
+        compile_context=sentinel_cc,
     )
 
     assert captured["header_graph"] is True
@@ -562,6 +568,60 @@ def test_perform_elf_dump_header_graph_receives_seeded_includes(
     )
 
     assert seeded in captured["includes"]
+
+
+def test_perform_elf_dump_header_graph_gets_compile_db_flags(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """When -p/--compile-db derives extra -D/-I/-std flags, effective_gcc_options
+    (folded from those flags, above the main dump() call) must reach the
+    header-graph attach's compile_context too. compile_context itself was
+    resolved earlier from the plain --gcc-options CLI value only, so without
+    this fix a header that only parses with the compile-DB flags would produce
+    a valid main snapshot while the second, independent clang pass building
+    the header graph parsed without them and silently degraded to a
+    declaration-only graph (Codex review)."""
+    from abicheck.service_scan import CompileContext
+
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "h.h"
+    hdr.write_text("struct S { int x; };\n", encoding="utf-8")
+
+    plain_snap = AbiSnapshot(library="lib.so", version="1.0")
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", lambda **_kw: plain_snap)
+
+    captured: dict[str, object] = {}
+
+    def fake_attach(
+        snap, header_graph, header_graph_includes, headers, includes,
+        lang, compile_context, public_headers, public_header_dirs,
+    ):  # noqa: ANN001
+        captured["compile_context"] = compile_context
+        return snap
+
+    monkeypatch.setattr("abicheck.service._attach_header_graph", fake_attach)
+
+    events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+    original_cc = CompileContext(gcc_options="-DFOO")
+
+    perform_elf_dump(
+        so, (hdr,), (), "1.0", "c++", None, None,
+        "-DFROM_COMPILE_DB -DFOO",  # effective_gcc_options (compile-db-merged)
+        (), None, True, False, None, (), (), None, False, (), "", None, None,
+        False, None, None, None, None, False, "off", _expand, _populate,
+        _stamp, _write,
+        header_graph=True, header_graph_includes=False,
+        compile_context=original_cc,
+    )
+
+    got = captured["compile_context"]
+    assert got is not original_cc  # a new context was built, not mutated in place
+    assert got.gcc_options == "-DFROM_COMPILE_DB -DFOO"
+    # Every other field carries over from the original context unchanged.
+    assert got.gcc_path == original_cc.gcc_path
+    assert got.frontend == original_cc.frontend
+    # The original passed-in context itself must stay untouched (frozen dataclass).
+    assert original_cc.gcc_options == "-DFOO"
 
 
 def test_perform_elf_dump_skips_header_graph_by_default(

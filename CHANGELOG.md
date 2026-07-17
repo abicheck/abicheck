@@ -111,6 +111,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `--include` argument, missing the seeded dirs a dependency-SDK header
   might need to resolve. `perform_elf_dump` now passes the same effective
   include list to both passes (Codex review).
+- **Fix**: `dump --header-graph` combined with `-p`/`--compile-db` on the ELF
+  path silently dropped the compile database's derived `-D`/`-I`/`-std`
+  flags from the header-graph pass. The main header parse folds those flags
+  into `effective_gcc_options`, but the `--header-graph` clang pass reused
+  the unmerged `compile_context` (resolved earlier from the plain
+  `--gcc-options` CLI value only), so a header that only parses successfully
+  with the compile-DB flags produced a valid main snapshot while the graph
+  pass silently degraded to declaration-only. `perform_elf_dump` now builds
+  a `compile_context` with `effective_gcc_options` for the header-graph
+  attach when the two differ (Codex review).
 
 ### Documentation
 
