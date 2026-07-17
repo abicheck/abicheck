@@ -378,6 +378,14 @@ def detect_cpo_kind_changed(
 
     changes: list[Change] = []
 
+    # ADR-044 D1 (Codex review): _func_names/_var_names above both filter to
+    # Visibility.PUBLIC before contributing a name, so a CPO_KIND_CHANGED
+    # finding's mere existence already proves its subject is public — same
+    # reliable-signal tagging as detect_experimental_namespace_changes'
+    # function path / diff_namespaces._emit_experimental_change. This
+    # detector runs via DetectTemplatePatterns, after ApplySuppression, so
+    # nothing else would ever tag these.
+
     # function → variable
     for name in sorted((old_funcs - old_vars) & (new_vars - new_funcs)):
         changes.append(make_change(
@@ -387,6 +395,8 @@ def detect_cpo_kind_changed(
             old="function",
             new="variable (function-object / CPO)",
             new_value="variable",
+            public_reachable=True,
+            reachability_kind="direct_public_symbol",
         ))
 
     # variable → function
@@ -398,6 +408,8 @@ def detect_cpo_kind_changed(
             old="variable (function-object / CPO)",
             new="function",
             old_value="variable",
+            public_reachable=True,
+            reachability_kind="direct_public_symbol",
         ))
 
     return changes
@@ -487,6 +499,12 @@ def detect_overload_set_rerouted(
             detail=f"{len(removed)} overload(s) removed and {len(added)} added in the same revision",
             old_value=str(sorted(_fmt_key(k) for k in old_sigs)),
             new_value=str(sorted(_fmt_key(k) for k in new_sigs)),
+            # ADR-044 D1 (Codex review): _by_stem above filters to
+            # Visibility.PUBLIC, so this finding's mere existence already
+            # proves its subject is public — same reliable-signal tagging as
+            # CPO_KIND_CHANGED above.
+            public_reachable=True,
+            reachability_kind="direct_public_symbol",
         ))
 
     return changes
@@ -576,6 +594,18 @@ def detect_mandatory_template_param_added(
         new_min = min(new_ar[stem])
         if new_min <= old_min:
             continue
+        # ADR-044 D1: deliberately NOT tagged public_reachable here, unlike
+        # the other detectors in this module. _arities() above merges arity
+        # observations from both Visibility.PUBLIC functions *and*
+        # snap.types under one shared stem key — a type contributes to this
+        # finding with no visibility signal at all (RecordType carries none,
+        # and this walk doesn't filter one), so a given finding may be driven
+        # entirely by an internal type whose name happens to share a stem
+        # with an unrelated public function. Tagging it here would
+        # reintroduce the exact unreliable-heuristic problem that got the
+        # broader MarkReachability change reverted earlier in this ADR's
+        # review cycle — see diff_namespaces._emit_experimental_change's
+        # subject_is_public split for the same distinction made explicit.
         changes.append(make_change(
             ChangeKind.MANDATORY_TEMPLATE_PARAM_ADDED,
             symbol=stem,
@@ -672,6 +702,11 @@ def detect_unspecified_return_now_named(
             description=desc,
             old_value=old_rt,
             new_value=new_rt,
+            # ADR-044 D1 (Codex review): _index() above filters to
+            # Visibility.PUBLIC functions only, so this finding's mere
+            # existence already proves its subject is public.
+            public_reachable=True,
+            reachability_kind="direct_public_symbol",
         ))
 
     return changes
@@ -742,6 +777,13 @@ def detect_missing_instantiations(
             detail=stem,
             old_value=fn.mangled,
             new_value=None,
+            # ADR-044 D1: both loops above filter to Visibility.PUBLIC, so
+            # this finding's mere existence already proves its subject is
+            # public — same reliable-signal tagging as the detectors in
+            # detect_template_patterns. Runs via DetectCppPatterns, also
+            # after ApplySuppression.
+            public_reachable=True,
+            reachability_kind="direct_public_symbol",
         ))
     return findings
 

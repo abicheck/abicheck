@@ -28,7 +28,14 @@ import pytest
 
 from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change
-from abicheck.model import AbiSnapshot, Function, Param, RecordType, Visibility
+from abicheck.model import (
+    AbiSnapshot,
+    Function,
+    Param,
+    RecordType,
+    Variable,
+    Visibility,
+)
 from abicheck.post_processing import DEFAULT_PIPELINE
 from abicheck.suppression import Suppression, SuppressionList
 
@@ -609,3 +616,36 @@ class TestLateDetectorSyntheticFindings:
         # own leak findings). Not suppressed at all is the fix; a
         # diagnostic for this class of finding is a separate, pre-existing
         # limitation, not something this fix regresses or is scoped to close.
+
+    def test_cpo_kind_changed_survives_broad_suppression(self) -> None:
+        """Codex review: DetectTemplatePatterns's CPO_KIND_CHANGED (a
+        function-to-variable CPO flip for a public name) has the same gap as
+        EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT above."""
+        old = AbiSnapshot(
+            library="libtest.so", version="1.0",
+            functions=[Function(
+                name="lib::detail::foo", mangled="lib::detail::foo",
+                return_type="int", params=[], visibility=Visibility.PUBLIC,
+            )],
+        )
+        new = AbiSnapshot(
+            library="libtest.so", version="1.0",
+            # Variable.name set already-qualified (unrealistic for a real
+            # castxml dump, which never namespace-qualifies it — see
+            # test_diff_templates.py's TestCpoKindChanged docstring — but
+            # sidesteps needing a real Itanium-mangled string here; the
+            # detector's _qualified_function_name returns name unchanged
+            # whenever it already contains "::").
+            variables=[Variable(
+                name="lib::detail::foo", mangled="lib::detail::foo",
+                type="lib::detail::__foo_fn", visibility=Visibility.PUBLIC,
+            )],
+        )
+        suppression = SuppressionList([
+            Suppression(namespace="lib::detail::*", reason="detail namespace churn")
+        ])
+        ctx = DEFAULT_PIPELINE.run([], old, new, suppression=suppression)
+        found = [c for c in ctx.kept if c.kind == ChangeKind.CPO_KIND_CHANGED]
+        assert len(found) == 1
+        assert found[0].public_reachable is True
+        assert found[0] not in ctx.suppressed

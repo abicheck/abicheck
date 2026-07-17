@@ -338,6 +338,36 @@ since JSON/SARIF/JUnit reporters already round-trip `Change` via
   class of finding is a separate, pre-existing gap this change does not
   newly introduce or attempt to close.
 
+- **A fourth late-detector sweep, this time the whole `diff_templates.py`
+  module (Codex).** Fresh evidence beyond the namespace-detector fix above:
+  `DetectTemplatePatterns` (also running after `ApplySuppression`) has the
+  identical gap for `CPO_KIND_CHANGED` — a public name flipping between
+  function and CPO-variable form. Rather than fix that one kind and wait for
+  a further round to find its siblings, audited every detector
+  `detect_template_patterns` calls: `CPO_KIND_CHANGED`,
+  `OVERLOAD_SET_REROUTED`, and `UNSPECIFIED_RETURN_NOW_NAMED` all filter
+  their source snapshot walk to `Visibility.PUBLIC` before ever building a
+  `Change`, so all three got the same construction-time
+  `public_reachable=True`/`reachability_kind="direct_public_symbol"` tag as
+  the namespace-detector fix. `MANDATORY_TEMPLATE_PARAM_ADDED` was
+  deliberately left **untagged** — its arity index merges observations from
+  both public functions *and* `snap.types` under one shared stem key with no
+  way to tell which contributed a given finding, the same
+  no-reliable-signal problem the type-sourced namespace-detector path has;
+  tagging it would reintroduce the reverted heuristic bug one level deeper.
+  Also swept `detect_missing_instantiations` (`INSTANTIATION_MISSING_FROM_BINARY`,
+  runs via `DetectCppPatterns`, same after-`ApplySuppression` position,
+  same `Visibility.PUBLIC`-filtered construction) even though Codex's report
+  didn't name it, since it is the same reliable-signal shape found while
+  already auditing the module. A broader sweep of `diff_cpp_patterns.py`'s
+  remaining detectors (`SYCL_OVERLOAD_SET_REMOVED`,
+  `CPU_DISPATCH_ISA_DROPPED`, `TAG_TYPE_RENAMED`,
+  `DEFAULT_TEMPLATE_ARG_CHANGED`, `INLINE_BODY_REFERENCES_RENAMED_MEMBER`,
+  `BUNDLE_SONAME_SKEW` — several `BREAKING`) for the same pattern remains
+  open; scoped out of this round to avoid rushing verification of six more
+  detectors across two large files without individually confirming each
+  one's visibility-filtering the way every fix above required.
+
 ### D2. `Suppression` gains a reachability guard
 
 New `Suppression` fields:

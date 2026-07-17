@@ -186,6 +186,12 @@ class TestCpoKindChanged:
         assert c.kind == ChangeKind.CPO_KIND_CHANGED
         assert c.old_value == "function"
         assert c.new_value == "variable"
+        # ADR-044 D1 (Codex review): _func_names/_var_names filter to
+        # Visibility.PUBLIC, so this finding must be tagged reachable at
+        # construction time — DetectTemplatePatterns runs after
+        # ApplySuppression, so nothing else would ever tag it.
+        assert c.public_reachable is True
+        assert c.reachability_kind == "direct_public_symbol"
 
     def test_variable_became_function(self) -> None:
         old = _snap(vars_=[_var("sort", type_="lib::__sort_fn", mangled="_ZN3lib4sortE")])
@@ -282,6 +288,8 @@ class TestOverloadSetRerouted:
         assert len(changes) == 1
         assert changes[0].kind == ChangeKind.OVERLOAD_SET_REROUTED
         assert changes[0].symbol == "lib::sort"
+        assert changes[0].public_reachable is True
+        assert changes[0].reachability_kind == "direct_public_symbol"
 
     def test_pure_addition_no_finding(self) -> None:
         old = _snap(funcs=[
@@ -401,6 +409,12 @@ class TestMandatoryTemplateParamAdded:
         new = _snap(types=[_rec("Bar<int, float>")])
         changes = detect_mandatory_template_param_added(old, new)
         assert len(changes) == 1
+        # ADR-044 D1: deliberately NOT tagged reachable — RecordType carries
+        # no visibility field, so a type-sourced finding has no reliable
+        # public/internal signal, unlike the function-sourced findings in
+        # this module (see the detector's own comment for the full
+        # rationale).
+        assert changes[0].public_reachable is False
 
 
 # ---------------------------------------------------------------------------
@@ -418,6 +432,8 @@ class TestUnspecifiedReturnNowNamed:
         assert c.kind == ChangeKind.UNSPECIFIED_RETURN_NOW_NAMED
         assert c.old_value == "auto"
         assert c.new_value == "lib::Foo"
+        assert c.public_reachable is True
+        assert c.reachability_kind == "direct_public_symbol"
 
     def test_named_to_lambda(self) -> None:
         old = _snap(funcs=[_fn("lib::make", return_type="lib::Foo")])

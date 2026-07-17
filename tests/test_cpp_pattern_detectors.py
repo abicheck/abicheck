@@ -334,6 +334,12 @@ class TestMissingInstantiationDetector:
         assert len(findings) == 1
         assert findings[0].kind == ChangeKind.INSTANTIATION_MISSING_FROM_BINARY
         assert "descriptor<double>" in findings[0].description
+        # ADR-044 D1 (Codex review): both loops in detect_missing_instantiations
+        # filter to Visibility.PUBLIC, so this finding must be tagged
+        # reachable at construction time — DetectCppPatterns runs after
+        # ApplySuppression, so nothing else would ever tag it.
+        assert findings[0].public_reachable is True
+        assert findings[0].reachability_kind == "direct_public_symbol"
 
     def test_whole_template_removed_not_flagged_here(self) -> None:
         # If no descriptor<*> survives, this is plain func_removed, not
