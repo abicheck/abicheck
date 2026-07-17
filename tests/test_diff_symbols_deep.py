@@ -681,6 +681,32 @@ class TestVarLegacyVolatileNoise:
         r = compare(old, new)
         assert ChangeKind.VAR_TYPE_CHANGED in _kinds(r)
 
+    def test_legacy_pointee_const_noise_does_not_resurface_as_var_became_const(self):
+        """Codex review, PR #589: suppressing VAR_TYPE_CHANGED for legacy cv
+        noise isn't enough on its own — ``is_const`` (a raw dumper-populated
+        bool, unconditionally checked below the type-string branch) still
+        differs for this same pointee-const-in-a-legacy-snapshot case, so an
+        earlier version of the fix let the SAME false positive resurface as
+        the more specific VAR_BECAME_CONST instead of being genuinely
+        suppressed. Neither should fire when the pair is legacy noise."""
+        v_old = _pub_var("g", "g", "int *", is_const=False)
+        v_new = _pub_var("g", "g", "const int *", is_const=True)
+        old = _snap(variables=[v_old])
+        old.header_cv_facts_reliable = False
+        new = _snap(variables=[v_new])
+        r = compare(old, new)
+        assert ChangeKind.VAR_TYPE_CHANGED not in _kinds(r)
+        assert ChangeKind.VAR_BECAME_CONST not in _kinds(r)
+
+    def test_real_pointee_const_change_between_reliable_snapshots_still_reported(self):
+        """Negative control for the test above: the same pointee-const type
+        change between two fully-reliable (non-legacy) snapshots is a real
+        change and must still report VAR_TYPE_CHANGED."""
+        v_old = _pub_var("g", "g", "int *", is_const=False)
+        v_new = _pub_var("g", "g", "const int *", is_const=True)
+        r = compare(_snap(variables=[v_old]), _snap(variables=[v_new]))
+        assert ChangeKind.VAR_TYPE_CHANGED in _kinds(r)
+
     def test_pointer_inside_template_arg_is_not_top_level(self):
         """`std::vector<int *>` -> `const std::vector<int *>`: the variable
         itself is a by-value templated type (not a pointer) — the `*` lives

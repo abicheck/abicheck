@@ -1132,8 +1132,16 @@ def _check_variable(
             v_old.is_const != v_new.is_const
             and _without_top_level_const(canon_old) == _without_top_level_const(canon_new)
         )
-        legacy_cv_noise = not cv_facts_reliable and func_signature_cv_only_differ(canon_old, canon_new)
-        if not is_pure_const_flip and not legacy_cv_noise:
+        if not is_pure_const_flip:
+            if not cv_facts_reliable and func_signature_cv_only_differ(canon_old, canon_new):
+                # Legacy-snapshot cv noise: the type-string difference itself
+                # is untrustworthy (see this function's docstring), so don't
+                # fall through to the const-transition check below either —
+                # is_const may be equally unreliable for the same reason,
+                # and falling through would just resurface the same false
+                # positive as VAR_BECAME_CONST/VAR_LOST_CONST instead of
+                # VAR_TYPE_CHANGED (Codex review, PR #589).
+                return changes
             return changes + [
                 make_change(
                     ChangeKind.VAR_TYPE_CHANGED,
