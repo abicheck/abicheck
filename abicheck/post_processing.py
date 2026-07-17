@@ -509,20 +509,34 @@ class MarkReachability:
     detector ever got a chance to see it — silently hiding a genuine leak
     through the public ABI with no trace in the report.
 
-    A change's subject is ``public_reachable`` in one of two ways (Codex
-    review): either it is **directly public** — its own name is not
-    internal-namespaced at all, e.g. a genuinely public function that a
-    ``source_location`` glob happens to match by file path rather than by
-    name — or it is an **internal-namespaced type that leaks** through the
-    public surface, discovered via the same reachability walk
-    (:func:`internal_leak.compute_leak_paths`) ``DetectInternalLeaks`` uses.
-    Only the second case needs that walk at all; it is computed lazily, at
-    most once per run. ``compute_leak_paths`` is a pure function of the
-    snapshot (function/variable/type declarations), not of the change list,
-    so computing it here does not depend on pipeline position and does not
-    need to be recomputed by ``DetectInternalLeaks`` later (which still runs
-    after redundancy filtering to decide which *triggering* changes produce a
-    synthetic leak finding).
+    This step computes the same public-surface reachability walk
+    (:func:`internal_leak.compute_leak_paths`) that ``DetectInternalLeaks``
+    uses, but up front — before any filtering — and tags every matching change
+    with ``public_reachable``/``reachability_kind``/``reachability_proof_path``.
+    ``compute_leak_paths`` is a pure function of the snapshot (function/
+    variable/type declarations), not of the change list, so computing it here
+    does not depend on pipeline position and does not need to be recomputed by
+    ``DetectInternalLeaks`` later (which still runs after redundancy filtering
+    to decide which *triggering* changes produce a synthetic leak finding).
+
+    Deliberately does **not** also tag a change "reachable" merely because its
+    own subject fails to look internal-namespaced (Codex review; reverted
+    after landing — see ADR-044's "Post-merge review rounds" note). A
+    ``source_location``/``namespace`` rule's whole reason to exist is
+    compensating for `AbiSnapshot`'s visibility model marking *every* exported
+    C/C++ symbol ``Visibility.PUBLIC`` regardless of whether the maintainer
+    considers it part of the contract — ``AbiSnapshot`` carries no signal that
+    distinguishes "a private helper the maintainer knows lives under
+    ``internal/``" from "a genuinely public symbol that happens to be declared
+    under a matching path" (both are ``Visibility.PUBLIC``, and neither name
+    need contain an internal-namespace segment). Tagging any
+    non-internal-namespaced subject reachable breaks the former, ordinary,
+    already-relied-upon case (``tests/test_libabigail_parity_extended.py``'s
+    own ``test_suppress_by_source_location`` encodes exactly this) in the
+    course of trying to fix the latter — and no naming heuristic can tell them
+    apart. Closing the latter gap for real needs actual dependency evidence
+    (the L5 call-graph / consumer-import work already on this ADR's P1/P2
+    roadmap), not a heuristic on the symbol's own spelling.
 
     ``Suppression.matches()`` (ADR-044 D2) consults ``public_reachable`` to
     decide whether a broad rule may apply at all — so the underlying evidence
@@ -547,7 +561,6 @@ class MarkReachability:
         if ctx.suppression is None:
             return changes
 
-        from .demangle import demangle
         from .internal_leak import (
             _IDENTITY_VTABLE_KINDS,
             DEFAULT_INTERNAL_NAMESPACES,
@@ -556,62 +569,18 @@ class MarkReachability:
             _path_is_value_propagating,
             _root_type_name_for_change,
             compute_leak_paths,
-            is_internal_type,
         )
 
-        def _subject_is_internal(c: Change, root: str) -> bool:
-            # A type's own name (the leak-path branch's key) is never mangled,
-            # so `root` alone is enough there. A *function/variable* symbol
-            # can be Itanium-mangled or an unqualified extern "C" export name
-            # with no "::" segments at all — `root` (== c.symbol for these
-            # kinds) would then read as a single opaque/unqualified segment
-            # and never match an internal-namespace pattern even when the
-            # entity genuinely lives in one, so also check the qualified name
-            # EnrichSourceLocations already recovered (c.qualified_name) and a
-            # demangled form of the raw symbol, mirroring exactly what
-            # Suppression._ns_match checks at match time — MarkReachability's
-            # notion of "internal" must not diverge from the matcher's.
-            if is_internal_type(root, DEFAULT_INTERNAL_NAMESPACES):
-                return True
-            if c.qualified_name and is_internal_type(c.qualified_name, DEFAULT_INTERNAL_NAMESPACES):
-                return True
-            if c.symbol and c.symbol.startswith("_Z"):
-                dm = demangle(c.symbol)
-                if dm and is_internal_type(dm, DEFAULT_INTERNAL_NAMESPACES):
-                    return True
-            return False
-
-        # Leak-path reachability (the internal-type-leaks-through-public-API
-        # walk) is only meaningful — and only needs computing — for a change
-        # whose own subject is internal-namespaced in the first place. Computed
-        # lazily, once, the first time it's actually needed.
-        leak_paths: tuple[dict[str, list[list[str]]], dict[str, list[list[str]]]] | None = None
+        old_paths = compute_leak_paths(ctx.old, DEFAULT_INTERNAL_NAMESPACES)
+        new_paths = compute_leak_paths(ctx.new, DEFAULT_INTERNAL_NAMESPACES)
+        reachable_types = set(old_paths) | set(new_paths)
+        if not reachable_types:
+            return changes
 
         for c in changes:
             root = _root_type_name_for_change(c)
-            if not root:
+            if root not in reachable_types:
                 continue
-            if not _subject_is_internal(c, root):
-                # Codex review: a broad namespace/source_location rule can
-                # match a change whose own subject is a genuinely *public*
-                # symbol or type — e.g. a public function declared under a
-                # path like ".../internal/..." that a source_location glob
-                # matches by file path, not by name. The internal-type leak
-                # walk below never discovers such a subject (it only ever
-                # records internal type names), so without this branch a
-                # directly-public break was never protected by the
-                # reachability gate at all. No leak-path proof exists for a
-                # direct subject; the diagnostic still explains why.
-                c.public_reachable = True
-                c.reachability_kind = "direct_public_symbol"
-                continue
-
-            if leak_paths is None:
-                leak_paths = (
-                    compute_leak_paths(ctx.old, DEFAULT_INTERNAL_NAMESPACES),
-                    compute_leak_paths(ctx.new, DEFAULT_INTERNAL_NAMESPACES),
-                )
-            old_paths, new_paths = leak_paths
             old_pl = old_paths.get(root, [])
             new_pl = new_paths.get(root, [])
             paths = old_pl + [p for p in new_pl if p not in old_pl]

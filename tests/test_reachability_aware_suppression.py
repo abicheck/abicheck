@@ -176,13 +176,29 @@ class TestMarkReachability:
         assert raw_change in ctx.suppressed
         assert ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK not in [c.kind for c in ctx.kept]
 
-    def test_source_location_suppression_does_not_hide_direct_public_break(self) -> None:
-        """Codex review: the internal-type leak walk (compute_leak_paths) only
-        ever records *internal-namespaced* type names, so a directly public
-        symbol matched by a broad source_location glob purely by file path
-        (not by name) was never covered by the reachability gate at all —
-        MarkReachability must also mark a non-internal-namespaced subject
-        reachable directly, with no leak-path walk needed."""
+    def test_source_location_suppression_of_direct_public_symbol_is_a_known_limitation(
+        self,
+    ) -> None:
+        """Codex review raised this exact scenario (a genuinely public symbol
+        matched by a broad source_location glob purely by file path, not by
+        name) as a gap; a fix was attempted (tagging any non-internal-
+        namespaced subject reachable) and then reverted after it broke
+        tests/test_libabigail_parity_extended.py's own
+        test_suppress_by_source_location — a private helper with no
+        namespace-segment hint under an "internal/" path, the ordinary,
+        long-relied-upon use of this exact selector.
+
+        AbiSnapshot's visibility model marks every exported C/C++ symbol
+        Visibility.PUBLIC regardless of whether the maintainer considers it
+        part of the contract, and neither case's name need contain an
+        internal-namespace segment — there is no naming heuristic that tells
+        "genuinely public, accidentally path-matched" apart from "genuinely
+        private, correctly path-matched". This test documents the accepted,
+        current behavior (matches pre-ADR-044 semantics for this selector)
+        rather than asserting a fix; closing the gap for real needs actual
+        dependency evidence (ADR-044's P1/P2 roadmap: the L5 call-graph /
+        consumer-import work), not a heuristic on the symbol's own spelling.
+        """
         old = _snap(functions=[_public_fn("foo", "int")])
         new = _snap(functions=[])
         raw_change = Change(
@@ -195,65 +211,8 @@ class TestMarkReachability:
             Suppression(source_location="*/internal/*", reason="internal headers")
         ])
         ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
-        assert raw_change.public_reachable is True
-        assert raw_change.reachability_kind == "direct_public_symbol"
-        assert raw_change not in ctx.suppressed
-        assert raw_change in ctx.kept
-        assert ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK in [c.kind for c in ctx.kept]
-
-    def test_mangled_symbol_in_internal_namespace_not_flagged_direct_public(self) -> None:
-        """A change's own Change.symbol can be an Itanium-mangled name or an
-        unqualified extern "C" export with no "::" segments at all — the bare
-        internal-namespace check on such a symbol would never recognize it as
-        internal even though it genuinely is one, wrongly treating it as
-        directly public. MarkReachability must also consult
-        Change.qualified_name (set by EnrichSourceLocations, which runs
-        earlier in the pipeline) the same way Suppression._ns_match does at
-        match time, or a namespace rule matching the qualified form would be
-        refused by a phantom direct_public_symbol tag."""
-        old, new, _ = _reachable_scenario()
-        raw_change = Change(
-            kind=ChangeKind.FUNC_REMOVED,
-            symbol="_ZN6oneapi3dal6kmeans6detail6helperEv",
-            description="function removed",
-            qualified_name="oneapi::dal::kmeans::detail::helper",
-        )
-        suppression = SuppressionList([
-            Suppression(namespace="oneapi::dal::**::detail::**", reason="private")
-        ])
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
         assert raw_change.public_reachable is False
         assert raw_change in ctx.suppressed
-        assert ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK not in [c.kind for c in ctx.kept]
-
-    def test_mangled_symbol_with_no_qualified_name_resolves_via_demangling(self) -> None:
-        """Same as above, but with no Change.qualified_name at all (e.g. a
-        snapshot with no source-location enrichment) — MarkReachability must
-        fall back to demangling the raw symbol itself, mirroring
-        Suppression._ns_match's own demangling fallback."""
-        old, new, _ = _reachable_scenario()
-        raw_change = Change(
-            kind=ChangeKind.FUNC_REMOVED,
-            symbol="_ZN6oneapi3dal6kmeans6detail6helperEv",
-            description="function removed",
-        )
-        suppression = SuppressionList([
-            Suppression(namespace="oneapi::dal::**::detail::**", reason="private")
-        ])
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
-        assert raw_change.public_reachable is False
-        assert raw_change in ctx.suppressed
-
-    def test_empty_symbol_change_skipped(self) -> None:
-        """A change with no symbol at all (e.g. a loader/dynamic pseudo-symbol
-        finding) is left untagged rather than guessed at."""
-        old, new, _ = _reachable_scenario()
-        raw_change = Change(kind=ChangeKind.SONAME_MISSING, symbol="", description="x")
-        suppression = SuppressionList([
-            Suppression(namespace="oneapi::dal::**::detail::**", reason="private")
-        ])
-        DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
-        assert raw_change.public_reachable is False
 
 
 class TestSuppressionPipelineOrderFix:

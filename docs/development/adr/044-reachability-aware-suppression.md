@@ -239,34 +239,48 @@ since JSON/SARIF/JUnit reporters already round-trip `Change` via
   churn that was always going to be demoted anyway. Fixed by mirroring
   `DetectInternalLeaks`'s own `_IDENTITY_VTABLE_KINDS`/`_path_has_indirection`
   judgment inside `MarkReachability` before tagging.
-- **Directly-public subjects were never covered at all.** The
-  internal-type-leak walk (`compute_leak_paths`) only ever records *internal*
-  type names — it has no notion of "this change's own subject is already
-  public." A broad `source_location`/`namespace` rule matching a genuinely
-  public function purely by file path (e.g. a public function physically
-  declared under a path a `source_location: "*/internal/*"` glob matches,
-  with no internal-namespaced name at all) was therefore never protected by
-  the reachability gate — the exact class of silent-hiding failure this ADR
-  exists to close, just missed by the P0 slice's initial scope. Fixed by
-  broadening `MarkReachability`: a change whose subject is **not**
-  internal-namespaced at all is now marked `public_reachable = True` directly
-  (`reachability_kind = "direct_public_symbol"`, no leak-path proof needed),
-  with the leak-path walk only consulted for a subject that *is*
-  internal-namespaced. The internal-namespace check itself also had to widen
-  to match what `Suppression._ns_match` actually checks at match time — a
-  function/variable's `Change.symbol` can be Itanium-mangled or an
-  unqualified `extern "C"` export with no `::` segments at all, which would
-  never read as internal by a bare namespace-segment check even when the
-  entity genuinely lives in one; `MarkReachability` now also consults
-  `Change.qualified_name` (set earlier in the pipeline by
-  `EnrichSourceLocations`) and a demangled form of the raw symbol, the same
-  two fallbacks `_ns_match` already uses. This fix is what exposed the
-  `allow_public_break` scoping bug documented in D2: broadening
-  `public_reachable` to cover ordinary public symbols meant the
-  then-universal `allow_public_break` requirement suddenly applied to every
-  narrow, exact-`symbol:` suppression too, regressing `test_suppression.py`'s
-  basic suppression tests — corrected by scoping that gate to broad selectors
-  only, per D2.
+- **Directly-public subjects are a known, deliberately unclosed gap —
+  attempted, then reverted.** The internal-type-leak walk
+  (`compute_leak_paths`) only ever records *internal* type names — it has no
+  notion of "this change's own subject is already public." A broad
+  `source_location`/`namespace` rule matching a genuinely public function
+  purely by file path (e.g. a public function physically declared under a
+  path a `source_location: "*/internal/*"` glob matches, with no
+  internal-namespaced name at all) is therefore not protected by the
+  reachability gate. A fix was attempted: broaden `MarkReachability` so any
+  change whose subject is **not** internal-namespaced is marked
+  `public_reachable = True` directly (no leak-path proof needed), with the
+  leak-path walk only consulted for a subject that *is* internal-namespaced
+  (also needing the internal-namespace check to widen to match what
+  `Suppression._ns_match` checks at match time — `Change.qualified_name` and
+  a demangled form of the raw symbol, since a mangled/`extern "C"` symbol
+  reads as a single opaque segment otherwise). That fix also exposed a real
+  `allow_public_break` scoping bug — the gate applied to every rule
+  regardless of selector breadth, so an ordinary narrow `symbol:` waiver of a
+  known removal suddenly needed `allow_public_break` too, regressing
+  `test_suppression.py`'s basic suppression tests; corrected by scoping the
+  gate to broad selectors only (D2 as written reflects this correction).
+
+  The broadening itself was then reverted, one CI run later: it regressed
+  `tests/test_libabigail_parity_extended.py::TestSuppressionParity::
+  test_suppress_by_source_location` — a private helper (`internal_fn`, no
+  namespace-segment hint) declared under `src/internal/helper.h`, matched and
+  correctly suppressed by `source_location: "*/internal/*"`. Both that case
+  and Codex's public-function example are, structurally, the **same shape**:
+  an unqualified/non-namespaced `Visibility.PUBLIC` symbol under a path a
+  `source_location` glob matches. `AbiSnapshot`'s visibility model marks
+  *every* exported C/C++ symbol `Visibility.PUBLIC` regardless of whether the
+  maintainer considers it part of the contract — that gap is the entire
+  reason `source_location`-based suppression exists, to compensate for C/C++
+  having no true "this is private" linkage visibility. No signal in the name
+  or the snapshot distinguishes "genuinely public, accidentally path-matched"
+  from "genuinely private, correctly path-matched," so no naming heuristic
+  can close Codex's gap without also breaking the ordinary case. Reverted
+  `MarkReachability` back to the leak-path-only computation; kept the
+  `allow_public_break` broad-selector scoping (independently correct) and the
+  pointer-only-layout fix above. Closing this gap for real needs actual
+  dependency evidence — the L5 call-graph / consumer-import work already on
+  the P1/P2 roadmap below — not a heuristic on the symbol's own spelling.
 
 ### D2. `Suppression` gains a reachability guard
 
