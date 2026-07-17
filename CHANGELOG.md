@@ -115,6 +115,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   captured with `ei_data="MSB"` is equally impossible (x86 is always
   little-endian) and previously passed since `EM_X86_64` matched
   (Codex review, two rounds).
+  `ARM64E` (the pointer-authenticating arm64e ABI variant, a distinct,
+  non-interchangeable ABI third-party wheels are never actually built for)
+  no longer silently satisfies a plain `arm64` wheel-tag claim
+  (Codex review).
   Windows UCRT/runtime checks, CPU-ISA-baseline detection, the full
   per-tag closure policy, and end-to-end CLI auto-derivation from a
   compared wheel's own filename tag (every check above, including G10's

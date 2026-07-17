@@ -332,16 +332,19 @@ class TestWheelTagArchitectureMismatchUnit:
             == []
         )
 
-    def test_arm64e_satisfies_arm64_claim(self) -> None:
-        # ARM64E (pointer-authenticating arm64e ABI variant) is still an
-        # arm64 claim as far as the wheel tag is concerned.
-        macho = _macho(cpu_type="ARM64E")
-        assert (
-            check_wheel_tag_architecture_mismatch(
-                None, macho, {"WHEEL_ARCH": "arm64"}
-            )
-            == []
+    def test_arm64e_does_not_satisfy_arm64_claim(self) -> None:
+        # Codex review #583: ARM64E (pointer-authenticating arm64e ABI
+        # variant) is a distinct, non-interchangeable ABI — macho_metadata.py
+        # keeps it a separate cpu_type label for exactly this reason, and
+        # third-party wheels are never actually built for it, so it must not
+        # silently satisfy a plain arm64 claim.
+        macho = _macho(cpu_type="ARM64E", install_name="@rpath/libfoo.dylib")
+        changes = check_wheel_tag_architecture_mismatch(
+            None, macho, {"WHEEL_ARCH": "arm64"}
         )
+        assert len(changes) == 1
+        assert changes[0].kind is ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH
+        assert "ARM64E" in changes[0].new_value
 
     def test_mismatched_macho_cpu_type_flagged(self) -> None:
         macho = _macho(cpu_type="ARM64", install_name="@rpath/libopenblas.dylib")

@@ -175,11 +175,17 @@ _ARCH_CLAIM_TO_ELF_EI_DATA: dict[str, str] = {
 }
 
 #: Wheel-tag architecture claim -> the Mach-O ``cpu_type`` value(s) that
-#: satisfy it. ``ARM64E`` (the pointer-authenticating arm64e ABI variant) is
-#: still an ``arm64`` claim as far as the wheel tag is concerned.
+#: satisfy it. ``ARM64E`` (the pointer-authenticating arm64e ABI variant)
+#: deliberately does *not* satisfy a plain ``arm64`` claim: it's a distinct,
+#: non-interchangeable ABI (``macho_metadata.py`` keeps it a separate
+#: ``cpu_type`` label for exactly this reason — pointer authentication
+#: changes calling-convention-level behavior), and third-party wheels are
+#: never actually built for it, so a Mach-O showing up as ``ARM64E`` under
+#: an ``arm64``-tagged wheel is unusual evidence worth flagging rather than
+#: silently accepting as equivalent (Codex review #583).
 _ARCH_CLAIM_TO_MACHO_CPU_TYPE: dict[str, frozenset[str]] = {
     "x86_64": frozenset({"X86_64"}),
-    "arm64": frozenset({"ARM64", "ARM64E"}),
+    "arm64": frozenset({"ARM64"}),
 }
 
 
