@@ -14,6 +14,13 @@ means adding a `UC-*` entry to
 **Origin:** external roadmap review (feedback captured and reorganized
 below), 2026-07.
 
+**Relationship to the SciPy roadmap:** three proposals below overlap with
+that doc rather than being independently re-derived — release-matrix /
+support-set delta (its §4), automatic previous-release resolution (its §6),
+and the generic evidence-provider interface (its "Recommended architecture").
+Each is described canonically there; this doc states only what's specific to
+the build-ecosystem framing and points back rather than restating the design.
+
 ---
 
 ## The positioning statement
@@ -97,10 +104,15 @@ genuinely unimplemented; several of the ecosystem gaps below are narrower.)
 **Material gaps** (none has a registry entry yet):
 
 1. A first-class pybind11/nanobind binding-ABI provider (§ below).
-2. Automatic resolution of the matching previous PyPI/conda artifact.
+2. Automatic resolution of the matching previous PyPI/conda artifact —
+   canonical design in the [SciPy roadmap](scipy-scientific-python-roadmap.md)'s
+   §6; a resolver built for one should serve both, so this doc adds only the
+   conda-forge/rattler-build angle (gap 4) on top.
 3. Release-matrix matching and a support-set delta, rather than only
-   per-wheel verdicts — the same conceptual gap the SciPy roadmap's §4
-   describes, generalized past the scientific stack.
+   per-wheel verdicts — canonical design in the
+   [SciPy roadmap](scipy-scientific-python-roadmap.md)'s §4; this doc's
+   cibuildwheel matrix-aggregation use (below) is the same mechanism applied
+   outside the scientific stack, not a second design.
 4. Verification of conda `run_exports`/pins against binary evidence.
 5. Cython `.pxd`/`__pyx_capi__` support — already planned as
    [G25](plans/g25-cython-api-abi-frontend.md).
@@ -163,9 +175,13 @@ finish, a **matrix aggregation** step over the complete old/new wheelhouses
 could answer questions a single-wheel audit structurally cannot — did a
 platform disappear, does one wheel omit an extension module present
 everywhere else, did only one OS raise its floor, does the free-threaded
-wheel expose a different Python API. This is the same support-set-delta gap
-as the ecosystem-gap table's item 3 and the SciPy roadmap's §4; it should
-be designed once and shared rather than built twice.
+wheel expose a different Python API. This is not a new design: it is the
+support-set-delta mechanism the
+[SciPy roadmap](scipy-scientific-python-roadmap.md)'s §4 already specifies
+(dropped/unchanged/added environments), run over cibuildwheel's wheelhouse
+directories instead of SciPy's own release artifacts. Building it once
+against §4's model and pointing both consumers at it avoids two drifting
+implementations of the same delta.
 
 ## Integration with rattler-build and conda-forge
 
@@ -179,7 +195,11 @@ accept the runtime package plus its matching devel/debug outputs — abicheck
 already documents and uses that package shape.
 
 **B. Verifying `run_exports` and pins against observed evidence.** This is
-the more differentiated opportunity and has no registry entry. Today,
+the more differentiated opportunity and has no registry entry; it also
+depends on the same conda-forge-artifact resolver the
+[SciPy roadmap](scipy-scientific-python-roadmap.md)'s §6 already specifies
+(platform, arch, Python ABI, build variant, content-hash caching) — nothing
+new needed there beyond what §6 already lists. Today,
 `run_exports` and global pinnings are declared policy; abicheck could add
 *observed* evidence — e.g. a recipe pinning `libfoo >=4.1,<4.2` when binary
 comparison shows 4.1→4.8 stays ABI-compatible (pin is unnecessarily tight)
@@ -228,19 +248,25 @@ uniform ABI break would produce exactly the false-positive pattern
 abicheck's own FP-rate gate (`scripts/check_fp_rate.py`) is built to catch.
 
 **Proposed provider shape**, rather than scattering framework-specific logic
-through the ELF/PE/Mach-O parsers — one `BindingAbiProvider` in the same
-style as [ADR-032](adr/032-evidence-extractor-plugin-interface.md)'s
-extractor-plugin interface, collecting a normalized surface (framework +
-version, runtime ABI identity, domain, stable/free-threaded flags, C++
-runtime/toolchain facts, cross-module type-visibility scope) from binary
-evidence first, an optional build-emitted manifest second (verified against
-the binary), and the existing `.pyi`/embedded-signature path last for the
-Python-level API itself. This is a materially larger step than the current
-evidence-tier model and should be evaluated against
-[ADR-032](adr/032-evidence-extractor-plugin-interface.md) and
-[ADR-034](adr/034-managed-runtime-and-non-c-abi-frontends.md) before design,
-not layered on ad hoc — the same caution the SciPy roadmap gives its own
-provider-model proposal.
+through the ELF/PE/Mach-O parsers: `BindingAbiProvider` should be one more
+implementation of the `SurfaceProvider` interface the
+[SciPy roadmap](scipy-scientific-python-roadmap.md)'s "Recommended
+architecture" section already proposes (`identify`/`collect`/`compare`/
+`coverage`, alongside its own `CythonApiProvider`/`NumPyCapiProvider`), not a
+separately-invented interface — the two docs should not end up specifying
+two incompatible plugin shapes for the same evidence-provider concept. Its
+`collect()` would produce a normalized surface (framework + version, runtime
+ABI identity, domain, stable/free-threaded flags, C++ runtime/toolchain
+facts, cross-module type-visibility scope) from binary evidence first, an
+optional build-emitted manifest second (verified against the binary), and
+the existing `.pyi`/embedded-signature path last for the Python-level API
+itself. Adopting `SurfaceProvider` is a materially larger step than the
+current evidence-tier model and should be evaluated against
+[ADR-032](adr/032-evidence-extractor-plugin-interface.md) (the existing
+extractor-plugin interface) and
+[ADR-034](adr/034-managed-runtime-and-non-c-abi-frontends.md) (non-C-ABI
+frontend scope) before either provider is designed — the same caution the
+SciPy roadmap gives its own proposal.
 
 ## What abicheck should not try to be
 
@@ -262,11 +288,13 @@ none of those tools share with each other today.
 2. **`BindingAbiProvider` for pybind11/nanobind** (needs a `UC-*` registry
    entry + plan file) — the single highest-leverage new capability, since it
    is invisible to every other tool in the pipeline.
-3. **Release-matrix / support-set delta** — shared machinery with the SciPy
-   roadmap's §4, so design once.
-4. **Automatic previous-artifact resolution** (PyPI/conda-forge) and
-   **`run_exports`/pin verification** — the pieces that turn this from "a
-   tool you invoke" into "a check that runs itself."
+3. **Release-matrix / support-set delta** — build against the
+   [SciPy roadmap](scipy-scientific-python-roadmap.md)'s §4 design, not a
+   parallel one; cibuildwheel's matrix aggregation and SciPy's own release
+   comparison should be two callers of the same mechanism.
+4. **Automatic previous-artifact resolution** (PyPI/conda-forge, per that
+   roadmap's §6) and **`run_exports`/pin verification** — the pieces that
+   turn this from "a tool you invoke" into "a check that runs itself."
 
 ## Relationship to existing work
 
@@ -278,9 +306,9 @@ none of those tools share with each other today.
 | Bundle / multi-extension analysis | [ADR-023](adr/023-bundle-aware-multi-binary-analysis.md) | Already implemented; the binding-ABI provider below would add a framework-identity dimension bundle analysis doesn't currently carry. |
 | NumPy C-API evidence | [G26](plans/g26-numpy-capi-envelope.md) | Already partial, per that plan's own status note; unchanged by this doc. |
 | Wheel deployment-claim verification | [G10](plans/g10-glibc-floor-check.md), [G27](plans/g27-wheel-deployment-verification.md) | Already partial; unchanged by this doc. |
-| pybind11/nanobind `BindingAbiProvider` | [ADR-032](adr/032-evidence-extractor-plugin-interface.md) (plugin interface), [ADR-034](adr/034-managed-runtime-and-non-c-abi-frontends.md) (non-C-ABI frontend scope) | New provider; no registry entry yet. Closest in spirit to the SciPy roadmap's `CythonApiProvider`/`NumPyCapiProvider` — same provider-model pattern, different framework. |
-| Release-matrix / support-set delta | [G2](plans/g2-build-config-and-bundle.md) (build matrix), [ADR-002](adr/002-multi-binary-release-compare.md), SciPy roadmap §4 | Same gap as the SciPy roadmap's §4, described there in scientific-stack terms; should share a design rather than being solved twice. |
-| Automatic previous-artifact resolution | SciPy roadmap §6 | Same gap, same "none yet" status; a resolver built for one should serve both. |
+| pybind11/nanobind `BindingAbiProvider` | [ADR-032](adr/032-evidence-extractor-plugin-interface.md) (plugin interface), [ADR-034](adr/034-managed-runtime-and-non-c-abi-frontends.md) (non-C-ABI frontend scope), SciPy roadmap's `SurfaceProvider` | New provider; no registry entry yet. Should implement the SciPy roadmap's `SurfaceProvider` interface, not a separately-invented one — same interface, sibling to its `CythonApiProvider`/`NumPyCapiProvider`. |
+| Release-matrix / support-set delta | [G2](plans/g2-build-config-and-bundle.md) (build matrix), [ADR-002](adr/002-multi-binary-release-compare.md), SciPy roadmap §4 | Canonical design lives in the SciPy roadmap's §4; this doc's cibuildwheel matrix-aggregation use is the same mechanism, not a second implementation. |
+| Automatic previous-artifact resolution | SciPy roadmap §6 | Canonical design lives there (name/platform/arch/CPython-ABI/variant matching, content-hash caching); a resolver built for one should serve both PyPI and conda-forge lookups. |
 | conda `run_exports`/pin verification | none yet | New; would need the same artifact-resolution/caching layer as the item above. |
 | cibuildwheel audit-stage / matrix aggregation | none yet | New CLI/CI surface; the per-wheel half needs no new code (existing `compare`), the matrix-aggregation half does. |
 
