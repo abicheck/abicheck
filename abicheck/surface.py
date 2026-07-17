@@ -133,6 +133,16 @@ _TYPE_LEVEL_KIND_NAMES: frozenset[str] = frozenset(
         "struct_field_removed",
         "struct_field_type_changed",
         "struct_alignment_changed",
+        # Carries the owner *type* name in Change.symbol (e.g. "Point", not
+        # "Point::x") — must take the type-level reachability path. Missing
+        # this let the symbol-level path run first, where "Point" can
+        # collide with an unrelated *symbol* of the same bare name: any C++
+        # class has an implicit same-named constructor (castxml represents
+        # it unmangled, per the identity() docstring's own caveat), so a
+        # public, reachable type could still be wrongly demoted as
+        # "not-exported" by matching its own hidden constructor instead of
+        # the type reachability graph (case35_field_rename).
+        "field_renamed",
         "enum_underlying_size_changed",
         "struct_packing_changed",
         "type_visibility_changed",
