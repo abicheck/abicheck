@@ -184,24 +184,24 @@ _ARCH_CLAIM_TO_ELF_EI_DATA: dict[str, str] = {
     "loongarch64": "LSB",
 }
 
-#: Every wheel-tag architecture claim's expected ELF class (32/64-bit,
-#: :attr:`ElfMetadata.elf_class`). Most claims' ``e_machine`` value already
-#: implies a bitness (``EM_X86_64``/``EM_AARCH64``/``EM_PPC64`` are 64-bit
-#: exclusive; ``EM_386``/``EM_ARM`` here are 32-bit exclusive), but several
-#: architectures share ONE ``e_machine`` value across both word sizes,
-#: distinguished only by ``EI_CLASS``: ``EM_RISCV`` (RV32/RV64) and
-#: ``EM_LOONGARCH`` (LoongArch32/64) — a 32-bit ELF would otherwise pass a
-#: ``riscv64``/``loongarch64`` claim purely because ``e_machine`` matched
-#: (Codex review #583). ``EM_S390`` is the same story (31/32-bit S/390 vs.
-#: 64-bit z/Architecture ``s390x``), so it's included too for the same
-#: reason, even though not explicitly reported.
+#: Wheel-tag architecture claims whose ``e_machine`` value is shared across
+#: BOTH a 32-bit and a 64-bit variant, distinguished only by ``EI_CLASS``
+#: (:attr:`ElfMetadata.elf_class`): ``EM_RISCV`` (RV32/RV64),
+#: ``EM_LOONGARCH`` (LoongArch32/64), and ``EM_S390`` (31/32-bit S/390 vs.
+#: 64-bit z/Architecture ``s390x``) — a 32-bit ELF would otherwise pass a
+#: ``riscv64``/``loongarch64``/``s390x`` claim purely because ``e_machine``
+#: matched (Codex review #583).
+#:
+#: Deliberately does NOT include ``x86_64``/``aarch64``/``i686``/``armv7l``/
+#: ``ppc64``/``ppc64le``: their ``e_machine`` values are already bitness-
+#: exclusive (``EM_X86_64``/``EM_AARCH64``/``EM_PPC64`` are 64-bit only;
+#: ``EM_386``/``EM_ARM`` here are 32-bit only), so the class check would be
+#: redundant there — and actively harmful for the 32-bit claims:
+#: :attr:`ElfMetadata.elf_class` defaults to 64, so a legacy/partial
+#: snapshot with ``machine`` captured but ``elf_class`` never set would
+#: false-positive an ``i686``/``armv7l`` claim's otherwise-matching 32-bit
+#: binary as a class mismatch (Codex review #583, follow-up).
 _ARCH_CLAIM_TO_ELF_CLASS: dict[str, int] = {
-    "x86_64": 64,
-    "aarch64": 64,
-    "i686": 32,
-    "armv7l": 32,
-    "ppc64le": 64,
-    "ppc64": 64,
     "s390x": 64,
     "riscv64": 64,
     "loongarch64": 64,

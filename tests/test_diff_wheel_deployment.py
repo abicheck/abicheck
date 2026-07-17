@@ -375,14 +375,32 @@ class TestWheelTagArchitectureMismatchUnit:
         )
         assert len(changes) == 1
 
-    def test_x86_64_claim_with_64bit_class_clean(self) -> None:
-        # elf_class defaults to 64 on ElfMetadata, matching every existing
-        # 64-bit-only claim's tests that don't set it explicitly — this
-        # pins that assumption down explicitly for x86_64.
-        elf = _elf(machine="EM_X86_64", ei_data="LSB", elf_class=64)
+    def test_i686_claim_with_unset_elf_class_not_flagged(self) -> None:
+        # Codex review #583, follow-up: ElfMetadata.elf_class defaults to
+        # 64, so checking it for i686/armv7l claims (both 32-bit only) would
+        # false-positive an otherwise-matching binary from a legacy/partial
+        # snapshot that captured `machine` but never set `elf_class`.
+        # e_machine (EM_386) already unambiguously proves 32-bit, so
+        # _ARCH_CLAIM_TO_ELF_CLASS deliberately excludes i686/armv7l.
+        elf = _elf(machine="EM_386", ei_data="LSB")
         assert (
             check_wheel_tag_architecture_mismatch(
-                elf, None, {"WHEEL_ARCH": "x86_64"}
+                elf, None, {"WHEEL_ARCH": "i686"}
+            )
+            == []
+        )
+
+    def test_armv7l_claim_with_unset_elf_class_and_hard_float_not_flagged(
+        self,
+    ) -> None:
+        elf = _elf(
+            machine="EM_ARM",
+            ei_data="LSB",
+            abi_flags=frozenset({"float-hard", "eabi5"}),
+        )
+        assert (
+            check_wheel_tag_architecture_mismatch(
+                elf, None, {"WHEEL_ARCH": "armv7l"}
             )
             == []
         )

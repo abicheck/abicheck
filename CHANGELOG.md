@@ -177,6 +177,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   no `"float-hard"` token (e.g. neither float-ABI bit set) previously
   still passed, even though manylinux's armhf contract requires that bit
   specifically (Codex review, three rounds).
+  Narrowed `_ARCH_CLAIM_TO_ELF_CLASS` to only the genuinely word-size-
+  ambiguous claims (`riscv64`/`loongarch64`/`s390x`, whose `e_machine`
+  value is shared across both bitnesses) — `i686`/`armv7l` were
+  incorrectly included even though their `e_machine` (`EM_386`/`EM_ARM`)
+  already proves 32-bit unambiguously, and since `ElfMetadata.elf_class`
+  defaults to 64, a legacy/partial snapshot with `machine` captured but
+  `elf_class` never set would have false-positived an otherwise-matching
+  32-bit `i686`/`armv7l` binary as a class mismatch (Codex review, follow-up).
   Windows UCRT/runtime checks, CPU-ISA-baseline detection, the full
   per-tag closure policy, and end-to-end CLI auto-derivation from a
   compared wheel's own filename tag (every check above, including G10's
