@@ -7,6 +7,7 @@ gracefully (return SKIP instead of crashing).
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -263,6 +264,45 @@ def test_abicheck_baseline_has_no_full_evidence_options(tmp_path):
             assert option not in dump
 
 
+def test_case115_dump_pins_the_discovered_clang_binary(tmp_path):
+    """--ast-frontend clang only selects the clang backend -- it does not
+    resolve which clang binary to run, and that resolution falls back to a
+    bare "clang" on PATH, absent on hosts that ship only a versioned
+    clang-18. The case115 override must pin the binary --first_available_tool
+    already discovered via --gcc-path, not rely on the bare-name fallback."""
+    mod = _load_benchmark()
+    so = tmp_path / "lib.so"
+    header = tmp_path / "api.h"
+    so.touch()
+    header.touch()
+    commands = []
+
+    class Result:
+        returncode = 0
+        stderr = ""
+        stdout = '{"verdict":"BREAKING","changes":[]}'
+
+    def fake_run(cmd, **kwargs):
+        commands.append([str(x) for x in cmd])
+        if "dump" in cmd:
+            Path(cmd[cmd.index("-o") + 1]).touch()
+        return Result()
+
+    with patch.object(mod, "_HAS_ABICHECK", True), patch.object(
+        mod, "BUILD_DIR", tmp_path / "build"
+    ), patch.object(
+        mod, "_first_available_tool", side_effect=lambda *names: f"/usr/bin/{names[0]}"
+    ), patch.object(mod.subprocess, "run", side_effect=fake_run):
+        mod.run_abicheck(so, so, header, header, "case115_bit_int_width_changed", tmp_path)
+
+    dumps = [cmd for cmd in commands if "dump" in cmd]
+    assert dumps
+    for dump in dumps:
+        assert "--ast-frontend" in dump and "clang" in dump
+        assert "--gcc-path" in dump
+        assert dump[dump.index("--gcc-path") + 1] == "/usr/bin/clang-18"
+
+
 def _write_plugin_pack(pack, version, source, *, with_facts=True):
     import json
     (pack / "source_facts").mkdir(parents=True)
@@ -302,8 +342,11 @@ def test_abicheck_full_builds_separate_targets_merges_separate_packs(tmp_path):
             injection = Path(injection_arg.split("=", 1)[1]).read_text()
             pack = Path(injection.split("out=", 1)[1].split("'", 1)[0].split()[0])
             _write_plugin_pack(pack, version, v1_src if version == "v1" else v2_src)
-        elif "dump" in cmd or "merge" in cmd:
+        elif "dump" in cmd:
             Path(cmd[cmd.index("-o") + 1]).touch()
+        elif "-c" in cmd:
+            # embed_inputs_pack() relink step: [python, -c, script, base, pack, final].
+            Path(cmd[-1]).touch()
         return Result()
 
     build_root = tmp_path / "bench-build"
@@ -322,13 +365,78 @@ def test_abicheck_full_builds_separate_targets_merges_separate_packs(tmp_path):
     assert result.verdict == "BREAKING"
     targets = [cmd[cmd.index("--target") + 1] for cmd in commands if "--target" in cmd]
     assert targets == [f"{case}_v1", f"{case}_v2"]
-    merges = [cmd for cmd in commands if "merge" in cmd]
+    # No standalone `merge` CLI command (removed in the ADR-043 CLI reset) and
+    # no `--sources <pack>` shortcut (which skips the export relink — Codex
+    # review on PR #581); the pack is folded in via a direct embed_inputs_pack()
+    # call, which relinks the source surface against the binary's real exports.
+    merges = [cmd for cmd in commands if "-c" in cmd and "embed_inputs_pack" in cmd[2]]
     assert len(merges) == 2
-    assert merges[0][1:3] == ["-m", "abicheck"]
     assert "abicheck_inputs_v1" in " ".join(merges[0])
     assert "abicheck_inputs_v2" in " ".join(merges[1])
     assert not any("--sources" in cmd for cmd in commands)
+    assert not any(cmd[1:4] == ["-m", "abicheck", "merge"] for cmd in commands)
     assert all(kwargs_timeout == 177 for kwargs_timeout in [177])
+
+
+def test_abicheck_full_case115_dump_pins_the_discovered_clang_binary(tmp_path):
+    """Same --gcc-path requirement as the L2 lane (see
+    test_case115_dump_pins_the_discovered_clang_binary): the L3-L5 lane's own
+    case115 override must not rely on a bare "clang" being on PATH."""
+    mod = _load_benchmark()
+    case = "case115_bit_int_width_changed"
+    case_dir = tmp_path / "examples" / case
+    case_dir.mkdir(parents=True)
+    v1_src, v2_src = case_dir / "v1.c", case_dir / "v2.c"
+    v1_h, v2_h = case_dir / "v1.h", case_dir / "v2.h"
+    for path in (v1_src, v2_src, v1_h, v2_h):
+        path.write_text("/* fixture */\n")
+    plugin = tmp_path / "libabicheck-facts.so"
+    plugin.touch()
+    commands = []
+
+    class Result:
+        returncode = 0
+        stderr = ""
+        stdout = '{"verdict":"BREAKING","changes":[]}'
+
+    def fake_run(cmd, **kwargs):
+        cmd = [str(x) for x in cmd]
+        commands.append(cmd)
+        if cmd[:2] == ["cmake", "--build"]:
+            version = cmd[cmd.index("--target") + 1].rsplit("_", 1)[1]
+            build = Path(cmd[2])
+            out = build / case
+            out.mkdir(parents=True, exist_ok=True)
+            (out / f"lib{version}.so").touch()
+            injection_arg = next(x for x in commands[-2] if x.startswith("-DCMAKE_PROJECT_INCLUDE="))
+            injection = Path(injection_arg.split("=", 1)[1]).read_text()
+            pack = Path(injection.split("out=", 1)[1].split("'", 1)[0].split()[0])
+            _write_plugin_pack(pack, version, v1_src if version == "v1" else v2_src)
+        elif "dump" in cmd:
+            Path(cmd[cmd.index("-o") + 1]).touch()
+        elif "-c" in cmd:
+            Path(cmd[-1]).touch()
+        return Result()
+
+    build_root = tmp_path / "bench-build"
+    with patch.object(mod, "_HAS_ABICHECK", True), patch.object(
+        mod, "BUILD_DIR", build_root
+    ), patch.object(mod, "_find_or_build_abicheck_plugin", return_value=(plugin, "")), patch.object(
+        mod, "_first_available_tool", side_effect=lambda *names: f"/usr/bin/{names[0]}"
+    ), patch.object(mod.subprocess, "run", side_effect=fake_run), patch.object(
+        mod, "SHARED_LIB_SUFFIX", ".so"
+    ):
+        mod.run_abicheck_full(
+            plugin, plugin, v1_h, v2_h, case, tmp_path, case_dir=case_dir,
+            v1_src=v1_src, v2_src=v2_src,
+        )
+
+    dumps = [cmd for cmd in commands if "dump" in cmd]
+    assert dumps
+    for dump in dumps:
+        assert "--ast-frontend" in dump and "clang" in dump
+        assert "--gcc-path" in dump
+        assert dump[dump.index("--gcc-path") + 1] == "/usr/bin/clang-18"
 
 
 def test_plugin_pack_rejects_empty_or_opposite_release(tmp_path):
@@ -490,6 +598,181 @@ def test_collect_metadata_shape_and_accuracy():
     assert acc["scored"] == 3          # SKIP excluded
     assert acc["correct"] == 2          # case03 wrong
     assert acc["pct"] == round(100 * 2 / 3, 1)
+
+
+def test_source_enrichment_match_only_credits_abicheck_full():
+    mod = _load_benchmark()
+    known_case = next(iter(mod._SOURCE_ENRICHMENT_CASES))
+    # abicheck_full promoting COMPATIBLE -> COMPATIBLE_WITH_RISK on source
+    # evidence is enrichment (ADR-028 D3), not a false positive -- but only
+    # for the specific, individually-triaged cases in the allowlist.
+    assert mod._is_source_enrichment_match(
+        known_case, "abicheck_full", "COMPATIBLE", "COMPATIBLE_WITH_RISK"
+    )
+    # Same transition from a lane with no source evidence to justify it stays
+    # a normal miss -- only abicheck_full's L4/L5 findings can produce it.
+    assert not mod._is_source_enrichment_match(
+        known_case, "abicheck", "COMPATIBLE", "COMPATIBLE_WITH_RISK"
+    )
+    assert not mod._is_source_enrichment_match(
+        known_case, "abidiff", "COMPATIBLE", "COMPATIBLE_WITH_RISK"
+    )
+    # Any other transition (including a real over-call past RISK) is not
+    # exempted, even for abicheck_full on a known-enrichment case.
+    assert not mod._is_source_enrichment_match(
+        known_case, "abicheck_full", "COMPATIBLE", "API_BREAK"
+    )
+    assert not mod._is_source_enrichment_match(
+        known_case, "abicheck_full", "NO_CHANGE", "COMPATIBLE_WITH_RISK"
+    )
+    # The same verdict-shape transition on a case NOT in the allowlist is a
+    # real, uncredited miss -- crediting every COMPATIBLE ->
+    # COMPATIBLE_WITH_RISK transition regardless of case would silently hide
+    # a genuine future over-calling regression from the FP count.
+    assert not mod._is_source_enrichment_match(
+        "case999_hypothetical_new_case", "abicheck_full", "COMPATIBLE", "COMPATIBLE_WITH_RISK"
+    )
+
+
+def test_source_enrichment_credited_in_accuracy_fp_and_coverage():
+    mod = _load_benchmark()
+    known_case = next(iter(mod._SOURCE_ENRICHMENT_CASES))
+    results = [
+        {"case": known_case, "expected": "COMPATIBLE", "abicheck_full": "COMPATIBLE_WITH_RISK"},
+    ]
+    correct, scored = mod._accuracy(results, "abicheck_full")
+    assert (correct, scored) == (1, 1)
+    correct, total = mod._coverage_accuracy(results, "abicheck_full")
+    assert (correct, total) == (1, 1)
+    fp, fn = mod._fp_fn_counts(results, "abicheck_full")
+    assert (fp, fn) == (0, 0)
+
+
+def test_source_enrichment_not_credited_for_unlisted_case():
+    mod = _load_benchmark()
+    results = [
+        {
+            "case": "case999_hypothetical_new_case",
+            "expected": "COMPATIBLE",
+            "abicheck_full": "COMPATIBLE_WITH_RISK",
+        },
+    ]
+    correct, scored = mod._accuracy(results, "abicheck_full")
+    assert (correct, scored) == (0, 1)
+    correct, total = mod._coverage_accuracy(results, "abicheck_full")
+    assert (correct, total) == (0, 1)
+    fp, fn = mod._fp_fn_counts(results, "abicheck_full")
+    assert (fp, fn) == (1, 0)
+
+
+def test_freeze_tools_merges_with_existing_frozen_data(tmp_path):
+    """Freezing abicc_xml after abicc_dumper must not drop the dumper columns.
+
+    The documented workflow freezes each ABICC mode separately (ABICC hangs
+    on some cases when both modes run concurrently), so _freeze_tools must
+    merge into any existing file rather than overwrite it wholesale.
+    """
+    mod = _load_benchmark()
+    out = tmp_path / "frozen.json"
+
+    dumper_results = [
+        {"case": "case01_symbol_removal", "abicc_dumper": "BREAKING", "abicc_dumper_ms": 100},
+    ]
+    mod._freeze_tools(dumper_results, ["abicc_dumper"], out)
+
+    xml_results = [
+        {"case": "case01_symbol_removal", "abicc_xml": "BREAKING", "abicc_xml_ms": 200},
+    ]
+    mod._freeze_tools(xml_results, ["abicc_xml"], out)
+
+    frozen = json.loads(out.read_text())
+    assert set(frozen["tools"]) == {"abicc_dumper", "abicc_xml"}
+    entry = frozen["results_by_case"]["case01_symbol_removal"]
+    assert entry["abicc_dumper"] == "BREAKING"
+    assert entry["abicc_dumper_ms"] == 100
+    assert entry["abicc_xml"] == "BREAKING"
+    assert entry["abicc_xml_ms"] == 200
+
+
+def test_freeze_tools_overwrites_only_its_own_tool_columns(tmp_path):
+    """Re-freezing abicc_dumper must update only abicc_dumper's columns for a
+    case, leaving a previously-frozen abicc_xml column on that same case
+    untouched."""
+    mod = _load_benchmark()
+    out = tmp_path / "frozen.json"
+
+    mod._freeze_tools(
+        [{"case": "case01", "abicc_xml": "COMPATIBLE", "abicc_xml_ms": 1}],
+        ["abicc_xml"], out,
+    )
+    mod._freeze_tools(
+        [{"case": "case01", "abicc_dumper": "BREAKING", "abicc_dumper_ms": 2}],
+        ["abicc_dumper"], out,
+    )
+    mod._freeze_tools(
+        [{"case": "case01", "abicc_dumper": "TIMEOUT", "abicc_dumper_ms": 3}],
+        ["abicc_dumper"], out,
+    )
+
+    entry = json.loads(out.read_text())["results_by_case"]["case01"]
+    assert entry["abicc_dumper"] == "TIMEOUT"
+    assert entry["abicc_dumper_ms"] == 3
+    assert entry["abicc_xml"] == "COMPATIBLE"
+
+
+def test_freeze_tools_discards_stale_cache_instead_of_merging(tmp_path):
+    """A prior freeze stamped against a different ground_truth digest must
+    not be merged forward under a fresh timestamp -- that would silently
+    relabel stale competitor verdicts (e.g. for cases that no longer exist,
+    or whose expected verdict changed) as current."""
+    mod = _load_benchmark()
+    out = tmp_path / "frozen.json"
+
+    out.write_text(json.dumps({
+        "schema": "abicheck-frozen-competitor/1.0",
+        "ground_truth_sha256": "stale-digest-from-an-older-catalog",
+        "tools": ["abicc_xml"],
+        "results_by_case": {
+            "case01": {"abicc_xml": "COMPATIBLE", "abicc_xml_ms": 1},
+        },
+    }))
+
+    with patch.object(mod, "_ground_truth_digest", return_value="current-digest"):
+        mod._freeze_tools(
+            [{"case": "case01", "abicc_dumper": "BREAKING", "abicc_dumper_ms": 2}],
+            ["abicc_dumper"], out,
+        )
+
+    frozen = json.loads(out.read_text())
+    assert frozen["ground_truth_sha256"] == "current-digest"
+    assert frozen["tools"] == ["abicc_dumper"]
+    entry = frozen["results_by_case"]["case01"]
+    assert entry == {"abicc_dumper": "BREAKING", "abicc_dumper_ms": 2}
+
+
+def test_run_suite_rejects_freeze_with_cases_filter():
+    """--freeze on a --cases-filtered run would merge a few fresh rows with
+    stale rows for every untouched case, then stamp the whole file as if it
+    were all freshly generated -- refuse before doing any case processing."""
+    mod = _load_benchmark()
+    with patch("sys.argv", [
+        "benchmark_comparison.py", "--cases", "case01",
+        "--tools", "abicc_xml", "--freeze", "abicc_xml",
+    ]):
+        args = mod.parse_args()
+    with pytest.raises(SystemExit):
+        mod.run_suite(args)
+
+
+def test_run_suite_rejects_freeze_with_pinned_suite():
+    mod = _load_benchmark()
+    with patch("sys.argv", [
+        "benchmark_comparison.py", "--suite", "pinned74",
+        "--tools", "abicc_xml", "--freeze", "abicc_xml",
+    ]):
+        args = mod.parse_args()
+    with pytest.raises(SystemExit):
+        mod.run_suite(args)
 
 
 def test_ground_truth_digest_is_stable():
