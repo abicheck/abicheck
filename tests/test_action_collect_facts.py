@@ -226,6 +226,24 @@ class TestInvalidInputsRejected:
         assert result.returncode == 1
         assert "does not exist" in result.stdout
 
+    def test_auto_producer_with_missing_sources_dir_fails(self, tmp_path: Path) -> None:
+        # Regression (Codex review): with producer: auto, a misspelled/
+        # missing sources path looked identical to "no compile database
+        # found here" to _detect_producer, which silently resolved to
+        # wrapper instead of erroring -- a workflow expecting replay from a
+        # real compile-DB tree would silently get wrapper's very different
+        # setup instead of a loud failure about the bad path.
+        result, _, _ = _run_action(
+            {
+                "INPUT_PHASE": "prepare",
+                "INPUT_PRODUCER": "auto",
+                "INPUT_SOURCES": "/no/such/dir",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "does not exist" in result.stdout
+
     def test_clang_plugin_missing_compiler_fails_fast(self, tmp_path: Path) -> None:
         result, _, _ = _run_action(
             {

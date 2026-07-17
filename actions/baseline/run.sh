@@ -47,6 +47,22 @@ for i, e in enumerate(entries):
     if not isinstance(e, dict) or "name" not in e or "artifact" not in e:
         sys.exit(f"entry {i} must be an object with at least \"name\" and \"artifact\"")
     name = e["name"]
+    if not isinstance(name, str) or not name:
+        sys.exit(f"entry {i} has an invalid \"name\" {name!r} -- must be a non-empty string")
+    # Both run.sh ("$OUTPUT_DIR/$name.abicheck.json", bash string concat)
+    # and build_manifest.py (output_dir / f"{name}.abicheck.json", pathlib)
+    # build the per-library snapshot path directly from this string, so a
+    # name containing a path separator or ".."/"." traversal segment -- or
+    # an absolute path, which pathlib silently lets override the left-hand
+    # side of the / operator entirely -- would write outside output_dir
+    # instead of a same-directory snapshot (Codex review).
+    if (
+        "/" in name
+        or "\\" in name
+        or name in (".", "..")
+        or any(ord(c) < 0x20 for c in name)
+    ):
+        sys.exit(f"entry {i} has an invalid \"name\" {name!r} -- must not contain a path separator, be \".\"/\"..\", or contain control characters")
     if name in seen_names:
         # A repeated name would otherwise have its dump silently overwrite
         # the first entry at $OUTPUT_DIR/$name.abicheck.json while the

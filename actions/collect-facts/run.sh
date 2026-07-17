@@ -102,6 +102,13 @@ case "$PRODUCER_IN" in
       # explicitly -- enforce that instead of trusting it.
       _fail "phase: verify needs the exact producer phase: prepare resolved, not producer: auto -- pass producer: \${{ steps.<prepare-step-id>.outputs.producer }}."
     fi
+    # A misspelled/missing sources: path looks identical to "no compile
+    # database found here" to _detect_producer, which silently resolves to
+    # wrapper instead of erroring -- a workflow expecting replay from a real
+    # compile-DB tree would silently get wrapper's very different setup
+    # instead (Codex review). Same check _prepare_replay already does, run
+    # up front so auto-detection can't paper over it.
+    [[ -d "$SOURCES" ]] || _fail "sources '$SOURCES' does not exist."
     PRODUCER=$(_detect_producer "$SOURCES")
     echo "producer: auto -> $PRODUCER (no compile database/build system found under '$SOURCES' means wrapper; found one means replay)"
     ;;

@@ -192,6 +192,34 @@ class TestLibrariesJsonValidation:
         assert "duplicate library name" in result.stdout
         assert "libfoo" in result.stdout
 
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "../evil",
+            "a/b",
+            "a\\b",
+            "/etc/cron.d/evil",
+            ".",
+            "..",
+            "",
+            "a\nb",
+        ],
+    )
+    def test_invalid_library_name_rejected(self, tmp_path: Path, name: str) -> None:
+        # Regression (Codex review): run.sh writes the dump to
+        # "$OUTPUT_DIR/$name.abicheck.json" (bash string concat) and
+        # build_manifest.py builds output_dir / f"{name}.abicheck.json"
+        # (pathlib, which lets an absolute right-hand side override the
+        # left-hand side entirely) -- neither previously rejected a name
+        # containing a path separator or a ".."/"." traversal segment, so a
+        # crafted libraries input could write a snapshot outside output_dir.
+        result, _ = _run_action(
+            {"INPUT_LIBRARIES": json.dumps([{"name": name, "artifact": "a.so"}])},
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "invalid" in result.stdout
+
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="actions/baseline/run.sh not found")
 class TestStaleOutputCleared:
