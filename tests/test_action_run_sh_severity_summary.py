@@ -135,17 +135,73 @@ class TestSeverityErrorSummaryLine:
 
     def test_falls_back_to_generic_message_without_json(self, tmp_path) -> None:
         # FORMAT is markdown (the action default) -- no JSON report to read
-        # `blocking_categories` from, so the generic message is kept.
+        # `blocking_categories` from (PR_JSON explicitly unset too, so this
+        # doesn't depend on there being no ambient PR_JSON in the test
+        # runner's own environment), so the generic message is kept.
         out = _run(
             {
                 "VERDICT": "SEVERITY_ERROR",
                 "FORMAT": "markdown",
                 "OUTPUT_FILE": "",
+                "PR_JSON": "",
                 "ABICHECK_EXIT": "1",
             }
         )
         assert "Severity-level issue detected" in out
         assert "configured as `error`" not in out
+
+    def test_names_blocking_category_from_pr_json_when_format_is_markdown(
+        self, tmp_path
+    ) -> None:
+        # Codex review, PR #595: the common case is FORMAT=markdown (the
+        # action default) with PR comments on, where the compare-mode
+        # command setup already asks the same abicheck invocation to write
+        # an always-unfiltered secondary JSON report to $PR_JSON (via
+        # --secondary-format/--secondary-output) before this Job Summary
+        # code runs -- that must be read too, not just a FORMAT=json
+        # primary output, or the common default-config case never gets the
+        # category-aware message.
+        report = tmp_path / "pr.json"
+        report.write_text(
+            json.dumps({"severity": {"blocking_categories": ["addition"]}}),
+            encoding="utf-8",
+        )
+        out = _run(
+            {
+                "VERDICT": "SEVERITY_ERROR",
+                "FORMAT": "markdown",
+                "OUTPUT_FILE": "",
+                "PR_JSON": str(report),
+                "ABICHECK_EXIT": "1",
+            }
+        )
+        assert "`addition` configured as `error`" in out
+        assert "Severity-level issue detected" not in out
+
+    def test_prefers_primary_json_output_over_pr_json(self, tmp_path) -> None:
+        # When FORMAT=json, OUTPUT_FILE is the primary (unfiltered) report
+        # and should win over a stale/mismatched $PR_JSON if both are set.
+        primary = tmp_path / "primary.json"
+        primary.write_text(
+            json.dumps({"severity": {"blocking_categories": ["quality_issues"]}}),
+            encoding="utf-8",
+        )
+        pr_json = tmp_path / "pr.json"
+        pr_json.write_text(
+            json.dumps({"severity": {"blocking_categories": ["addition"]}}),
+            encoding="utf-8",
+        )
+        out = _run(
+            {
+                "VERDICT": "SEVERITY_ERROR",
+                "FORMAT": "json",
+                "OUTPUT_FILE": str(primary),
+                "PR_JSON": str(pr_json),
+                "ABICHECK_EXIT": "1",
+            }
+        )
+        assert "`quality_issues` configured as `error`" in out
+        assert "addition" not in out
 
     def test_falls_back_when_blocking_categories_empty(self, tmp_path) -> None:
         report = tmp_path / "report.json"
