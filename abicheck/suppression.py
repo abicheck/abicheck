@@ -313,6 +313,17 @@ class Suppression:
                 f"Invalid reachability {self.reachability!r}. "
                 f"Valid values: {sorted(_VALID_REACHABILITY)}"
             )
+        # ADR-044 D2 (Codex review): SuppressionList.load already rejects a
+        # non-bool allow_public_break via _parse_allow_public_break, but a
+        # programmatic caller can construct Suppression directly — Python
+        # does not enforce the dataclass field's `bool` annotation at
+        # runtime, so e.g. allow_public_break="false" would otherwise pass
+        # this safety-critical override's truthiness check as True.
+        if not isinstance(self.allow_public_break, bool):
+            raise ValueError(
+                "'allow_public_break' must be a boolean (true/false), got "
+                f"{self.allow_public_break!r}"
+            )
         # ADR-044 D2: a rule with no explicit reachability defaults to
         # "unreachable-only" when its only selectors are broad (pattern-shaped,
         # not naming one specific symbol/type the author already reasoned

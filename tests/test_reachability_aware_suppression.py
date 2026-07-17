@@ -436,3 +436,13 @@ class TestSuppressionYamlRoundTrip:
         )
         sl = SuppressionList.load(p)
         assert sl._suppressions[0].allow_public_break is True
+
+    def test_allow_public_break_string_rejected_on_direct_construction(self) -> None:
+        """Codex review: SuppressionList.load's validation doesn't protect a
+        programmatic caller constructing Suppression directly — Python does
+        not enforce the dataclass field's bool annotation at runtime, so
+        Suppression(allow_public_break="false") must be rejected in
+        __post_init__ too, or the truthy string would silently enable this
+        safety-critical override."""
+        with pytest.raises(ValueError, match="allow_public_break"):
+            Suppression(namespace="a::*", allow_public_break="false", reason="x")
