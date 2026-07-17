@@ -743,6 +743,31 @@ class TestCastxmlParserTypeName:
         p = _CastxmlParser(root, set(), set())
         assert p._type_name("t4") == "IntPtr const"
 
+    def test_cv_qualified_restrict_only_has_no_spelling_effect(self):
+        # `int * restrict` — CvQualifiedType with ONLY `restrict` set (no
+        # const/volatile): restrict is deliberately excluded from the
+        # rendered spelling (zero ABI/mangling effect, tracked separately
+        # via Param.is_restrict), so the name is unchanged from the base
+        # pointer type — neither prefixed nor suffixed.
+        ft = _fund_type("t1", "int")
+        ptr = Element("PointerType", id="t2", type="t1")
+        cv = Element("CvQualifiedType", id="t3", type="t2", restrict="1")
+        root = _xml_root(ft, ptr, cv)
+        p = _CastxmlParser(root, set(), set())
+        assert p._type_name("t3") == "int*"
+
+    def test_cv_qualifies_pointer_value_empty_id_is_false(self):
+        ft = _fund_type("t1", "int")
+        root = _xml_root(ft)
+        p = _CastxmlParser(root, set(), set())
+        assert p._cv_qualifies_pointer_value("") is False
+
+    def test_cv_qualifies_pointer_value_unresolvable_id_is_false(self):
+        ft = _fund_type("t1", "int")
+        root = _xml_root(ft)
+        p = _CastxmlParser(root, set(), set())
+        assert p._cv_qualifies_pointer_value("does-not-exist") is False
+
     def test_struct_type(self):
         s = Element("Struct", id="t1", name="Point")
         root = _xml_root(s)
