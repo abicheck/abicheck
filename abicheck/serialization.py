@@ -807,6 +807,13 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         elf_only_mode=elf_only_mode,
         from_headers=from_headers,
         from_headers_inferred=from_headers_inferred,
+        # Which L2 header-AST backend produced this snapshot ("castxml" |
+        # "clang"); missing on older snapshots loads as None, which
+        # correctly fails _both_castxml_backed (Codex review, PR #582 —
+        # this was omitted entirely, so every persisted-then-reloaded
+        # castxml snapshot silently lost the tag and permanently disabled
+        # all 8 detectors gated on it).
+        ast_producer=d.get("ast_producer"),
         constants=d.get("constants", {}),
         platform=d.get("platform"),
         language_profile=d.get("language_profile"),

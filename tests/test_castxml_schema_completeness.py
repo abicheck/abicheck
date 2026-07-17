@@ -427,6 +427,25 @@ class TestProducerMismatchDoesNotFalsePositive:
         r = compare(_snap(functions=[f_old]), _snap(functions=[f_new]))
         assert ChangeKind.FUNC_DEPRECATED_REMOVED in _kinds(r)
 
+    def test_survives_dump_to_json_then_compare_files_workflow(self):
+        """The realistic workflow — dump each side to JSON, reload, THEN
+        compare — must still fire. This is the actual bug Codex caught:
+        snapshot_to_dict() wrote ast_producer, but snapshot_from_dict()
+        never read it back, so every persisted-then-reloaded castxml
+        snapshot silently lost the tag and _both_castxml_backed was always
+        False for this — by far the most common — real workflow, not just
+        the in-memory compare() used by every other test in this file."""
+        from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+
+        f_old = _pub_func("old_api", "_Z7old_apiv", deprecated="use new_api")
+        f_new = _pub_func("old_api", "_Z7old_apiv", deprecated=None)
+        old_reloaded = snapshot_from_dict(snapshot_to_dict(_snap(functions=[f_old])))
+        new_reloaded = snapshot_from_dict(snapshot_to_dict(_snap(functions=[f_new])))
+        assert old_reloaded.ast_producer == "castxml"
+        assert new_reloaded.ast_producer == "castxml"
+        r = compare(old_reloaded, new_reloaded)
+        assert ChangeKind.FUNC_DEPRECATED_REMOVED in _kinds(r)
+
 
 # ── Real castxml XML → model field population ───────────────────────────────
 

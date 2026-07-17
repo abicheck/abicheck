@@ -490,7 +490,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `from_headers` — the clang L2 header backend also sets `from_headers`
   but doesn't populate any of these facts yet, so comparing a castxml- and
   a clang-parsed snapshot previously read as every one of them having been
-  removed, purely from the producer mismatch.
+  removed, purely from the producer mismatch. A one-more-round follow-up to
+  that: `snapshot_to_dict()` wrote the new `ast_producer` field, but
+  `snapshot_from_dict()` never read it back — so on the realistic
+  dump-to-JSON-then-compare-files workflow (as opposed to an in-memory
+  `compare()` call), every persisted castxml snapshot silently lost the tag
+  on reload, permanently disabling all eight gated detectors for that
+  workflow specifically. Now round-trips correctly.
 - **MCP `abi_compare`**: a `--used-by`/`--required-symbol` response's
   `summary` (`total_changes`/`breaking`/`api_breaks`/`risk_changes`/
   `compatible`) is now recomputed after scoped-only changes and

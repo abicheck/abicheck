@@ -74,6 +74,41 @@ class TestElfOnlyModeRoundTrip:
         assert snapshot_from_dict(_minimal_dict(elf_only_mode=1)).elf_only_mode is True
 
 
+# ── ast_producer ────────────────────────────────────────────────────────────
+
+
+class TestAstProducerRoundTrip:
+    """ast_producer must survive JSON serialisation and deserialisation.
+
+    Regression guard (Codex review, PR #582): snapshot_to_dict() wrote the
+    field via the generic dataclasses.asdict() pass, but snapshot_from_dict()
+    never read it back into the reconstructed AbiSnapshot — every persisted
+    castxml snapshot silently lost its producer tag on the normal
+    dump-to-JSON-then-compare-files workflow, permanently disabling every
+    detector gated on _both_castxml_backed (field defaults, abstract records,
+    scoped enums, the override specifier, and all four deprecated kinds).
+    """
+
+    def test_castxml_survives_roundtrip(self) -> None:
+        snap = _make_snap(from_headers=True, ast_producer="castxml")
+        j = json.loads(snapshot_to_json(snap))
+        assert j.get("ast_producer") == "castxml"
+        assert snapshot_from_dict(j).ast_producer == "castxml"
+
+    def test_clang_survives_roundtrip(self) -> None:
+        snap = _make_snap(from_headers=True, ast_producer="clang")
+        j = json.loads(snapshot_to_json(snap))
+        restored = snapshot_from_dict(j)
+        assert restored.ast_producer == "clang"
+
+    def test_defaults_to_none_when_absent(self) -> None:
+        """Old snapshots without the key must deserialise to None (unknown
+        producer) — not silently assumed to be castxml."""
+        d = _minimal_dict()
+        assert "ast_producer" not in d
+        assert snapshot_from_dict(d).ast_producer is None
+
+
 # ── constants ─────────────────────────────────────────────────────────────
 
 
