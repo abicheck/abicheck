@@ -103,6 +103,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   its merged pack's `source_graph` (and L5 coverage row) from the pre-existing
   header-only pack only when the merge produced none of its own, never
   overriding a genuine `--sources` L5 collection (Codex review).
+- **Fix**: `dump --header-graph` on the ELF path silently degraded to a
+  declaration-only graph (no type/call edges) whenever `--sources`/
+  `--build-info` seeded build-derived include dirs with no explicit `-I`
+  given — the main snapshot parse already sees those seeded dirs, but the
+  separate `--header-graph` clang pass previously only received the raw
+  `--include` argument, missing the seeded dirs a dependency-SDK header
+  might need to resolve. `perform_elf_dump` now passes the same effective
+  include list to both passes (Codex review).
 
 ### Documentation
 

@@ -422,9 +422,11 @@ def test_perform_elf_dump_attaches_header_graph_when_requested(
 ) -> None:
     """ADR-041 addendum: with header_graph=True, perform_elf_dump calls
     service._attach_header_graph (the same wrapper service.run_dump uses for
-    `compare`'s implicit-dump path) with the raw headers/includes/lang/
-    compile_context/public_headers/public_header_dirs it was given, and
-    writes the wrapper's returned (possibly different) snapshot object."""
+    `compare`'s implicit-dump path) with the raw headers, the L2-seeded
+    includes (see test_perform_elf_dump_header_graph_receives_seeded_includes
+    for the seeded-vs-raw distinction), lang/compile_context/public_headers/
+    public_header_dirs it was given, and writes the wrapper's returned
+    (possibly different) snapshot object."""
     so = tmp_path / "lib.so"
     hdr = tmp_path / "h.h"
     hdr.write_text("struct S { int x; };\n", encoding="utf-8")
@@ -513,6 +515,53 @@ def test_perform_elf_dump_attaches_header_graph_when_requested(
     assert captured["snap"] is plain_snap
     # The wrapper's returned snapshot (not the original) is what gets written.
     assert captured["written_snap"] is graphed_snap
+
+
+def test_perform_elf_dump_header_graph_receives_seeded_includes(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """When --sources/--build-info seeds build-derived L2 include dirs (no
+    explicit -I given), the header-graph attach must see those seeded dirs
+    too, not just the raw --include argument. The main dump() call already
+    gets `eff_includes + inc_extra`; previously `_attach_header_graph` only
+    received the raw `includes` tuple, so its independent second clang pass
+    could silently degrade to a declaration-only graph on a header that
+    needs a build-seeded -I (e.g. a dependency SDK), even though the main
+    snapshot parsed cleanly (Codex review)."""
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "h.h"
+    hdr.write_text("struct S { int x; };\n", encoding="utf-8")
+    seeded = tmp_path / "buildinc"
+    seeded.mkdir()
+
+    plain_snap = AbiSnapshot(library="lib.so", version="1.0")
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", lambda **_kw: plain_snap)
+    monkeypatch.setattr(
+        "abicheck.buildsource.l2_seed.seed_l2_includes",
+        lambda **_kw: ([seeded], []),
+    )
+
+    captured: dict[str, object] = {}
+
+    def fake_attach(
+        snap, header_graph, header_graph_includes, headers, includes,
+        lang, compile_context, public_headers, public_header_dirs,
+    ):  # noqa: ANN001
+        captured["includes"] = includes
+        return snap
+
+    monkeypatch.setattr("abicheck.service._attach_header_graph", fake_attach)
+
+    events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+
+    perform_elf_dump(
+        so, (hdr,), (), "1.0", "c++", None, None, None, (), None, True, False, None,
+        (), (), None, False, (), "", None, None, False, None, None, None, None,
+        False, "build", _expand, _populate, _stamp, _write,
+        header_graph=True, header_graph_includes=False,
+    )
+
+    assert seeded in captured["includes"]
 
 
 def test_perform_elf_dump_skips_header_graph_by_default(

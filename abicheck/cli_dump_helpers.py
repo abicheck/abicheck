@@ -746,7 +746,14 @@ def perform_elf_dump(
     # service._attach_header_graph is the exact wrapper service.run_dump uses
     # for `compare`'s implicit-dump path, reused verbatim so a written
     # snapshot's embedded graph is identical either way. A no-op unless
-    # --header-graph was passed and headers were parsed.
+    # --header-graph was passed and headers were parsed. Pass eff_includes
+    # (seed_l2_includes' output), not the raw includes argument: when
+    # --sources/--build-info seeded build-derived include dirs above (no
+    # explicit -I given) the main dump() call already sees them via
+    # `eff_includes + inc_extra`, but this second, independent clang pass
+    # would otherwise resolve headers with only the user's explicit -I,
+    # silently degrading to a declaration-only graph (no type/call edges)
+    # even though the main snapshot parsed cleanly (Codex review).
     if header_graph:
         from .service import _attach_header_graph
 
@@ -755,7 +762,7 @@ def perform_elf_dump(
             header_graph,
             header_graph_includes,
             list(headers),
-            list(includes),
+            list(eff_includes),
             lang,
             compile_context,
             list(public_headers),
