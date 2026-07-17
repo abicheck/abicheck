@@ -248,7 +248,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: abicheck/abicheck/actions/collect-facts@v0.3.0
+      # collect-facts pinned to a commit SHA, not a tag: see "Pin both uses:
+      # lines" in producing-source-facts.md -- a version tag old enough to
+      # predate this sub-action's own introduction can't resolve it at all.
+      - uses: abicheck/abicheck/actions/collect-facts@<same-sha-as-below>
         id: facts
         with: { phase: prepare, producer: wrapper, public-roots: "include" }
       - name: Build
@@ -262,7 +265,7 @@ jobs:
           cmake -DCMAKE_CXX_COMPILER_LAUNCHER=abicheck-cc \
                 -DCMAKE_C_COMPILER_LAUNCHER=abicheck-cc -S . -B build
           cmake --build build
-      - uses: abicheck/abicheck/actions/collect-facts@v0.3.0
+      - uses: abicheck/abicheck/actions/collect-facts@<same-sha-as-below>
         id: facts-verify
         with: { phase: verify, producer: ${{ steps.facts.outputs.producer }} }
       - uses: actions/upload-artifact@v4
@@ -305,7 +308,10 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with: { pattern: baseline-*, merge-multiple: true, path: baselines/ }
-      - run: gh release upload ${{ github.ref_name }} baselines/*.abicheck.json --clobber
+      # -R is required here: gh normally infers the repo from a local git
+      # checkout, but this job only downloads artifacts, never checks out
+      # the repo, so gh has no repository context to infer from.
+      - run: gh release upload ${{ github.ref_name }} baselines/*.abicheck.json --clobber -R ${{ github.repository }}
         env: { GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} }
 ```
 
@@ -321,7 +327,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: abicheck/abicheck/actions/collect-facts@v0.3.0
+      - uses: abicheck/abicheck/actions/collect-facts@<same-sha-as-below>
         id: facts
         with: { phase: prepare, producer: wrapper, public-roots: "include" }
       - name: Build
@@ -329,7 +335,7 @@ jobs:
           cmake -DCMAKE_CXX_COMPILER_LAUNCHER=abicheck-cc \
                 -DCMAKE_C_COMPILER_LAUNCHER=abicheck-cc -S . -B build
           cmake --build build
-      - uses: abicheck/abicheck/actions/collect-facts@v0.3.0
+      - uses: abicheck/abicheck/actions/collect-facts@<same-sha-as-below>
         id: facts-verify
         with: { phase: verify, producer: ${{ steps.facts.outputs.producer }} }
       - uses: actions/upload-artifact@v4
@@ -361,7 +367,10 @@ jobs:
           depth: source
           output-file: candidate.json
       - name: Download this library's baseline
-        run: gh release download --pattern '${{ matrix.lib.name }}.abicheck.json' -D baselines/
+        # -R is required: this job never checks out the repo either, so gh
+        # has no local repository context to infer from (same reason as the
+        # release-workflow's gh release upload above).
+        run: gh release download --pattern '${{ matrix.lib.name }}.abicheck.json' -D baselines/ -R ${{ github.repository }}
         env: { GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} }
       - name: Compare two snapshots (source/API + binary evidence together)
         uses: abicheck/abicheck@v0.3.0
