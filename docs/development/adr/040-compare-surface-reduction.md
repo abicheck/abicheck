@@ -116,7 +116,7 @@ that keeps casual invocations short without adding one flag per knob.
 
 ```text
 --profile ci-gate     # depth=headers, format=review, exit=severity
---profile release-cut # depth=full, recommend, format=markdown
+--profile release-cut # depth=source, recommend, format=markdown
 --profile quick       # depth=binary, stat
 ```
 

@@ -74,10 +74,12 @@ class TestDryRunToleratesUnavailableBaseline:
     def _run(
         self, env_extra: dict[str, str], *, gh_stub: str = _FAILING_GH_STUB,
     ) -> subprocess.CompletedProcess[str]:
-        # MODE is set earlier in run.sh (outside the extracted region); the
-        # baseline block reads it, so the harness must set it too.
+        # MODE/FORCE_AUDIT_ONLY are set earlier in run.sh (outside the
+        # extracted region); the baseline block reads both, so the harness
+        # must set them too.
         script = (
             'MODE="${INPUT_MODE:-compare}"\n'
+            'FORCE_AUDIT_ONLY="${INPUT_AUDIT:-false}"\n'
             + gh_stub
             + _baseline_region()
             + '\necho "REACHED_END OLD_LIBRARY=${INPUT_OLD_LIBRARY:-} '
@@ -142,3 +144,95 @@ class TestDryRunToleratesUnavailableBaseline:
         )
         assert result.returncode == 0, result.stderr
         assert f"REACHED_END OLD_LIBRARY={baseline}" in result.stdout
+
+
+# A gh stub whose call is detectable (touches a marker file) so tests can
+# assert the fetch never ran at all, not just that it "failed".
+_MARKER_GH_STUB = 'gh() { touch "$GH_CALLED_MARKER"; return 1; }\n'
+
+
+class TestAuditSkipsBaselineFetch:
+    def _run(
+        self, env_extra: dict[str, str], marker: Path,
+    ) -> subprocess.CompletedProcess[str]:
+        script = (
+            'MODE="${INPUT_MODE:-compare}"\n'
+            'FORCE_AUDIT_ONLY="${INPUT_AUDIT:-false}"\n'
+            + _MARKER_GH_STUB
+            + _baseline_region()
+            + '\necho "REACHED_END AGAINST=${INPUT_AGAINST:-}"\n'
+        )
+        env = {**os.environ, **env_extra, "GH_CALLED_MARKER": str(marker)}
+        return subprocess.run(
+            [_bash_executable(), "-c", script],
+            capture_output=True, text=True, env=env, check=False,
+        )
+
+    def test_audit_true_skips_baseline_fetch_entirely(self, tmp_path: Path) -> None:
+        """Regression (Codex + CodeRabbit review): audit: true discards
+        --against anyway (Line ~459), so fetching abi-baseline for a
+        scan-mode audit-only run is always wasted work -- and if the fetch
+        itself fails, it used to hard-fail a run that never needed the
+        baseline at all."""
+        marker = tmp_path / "gh_called"
+        result = self._run(
+            {"INPUT_MODE": "scan", "INPUT_ABI_BASELINE": "latest-release",
+             "INPUT_AUDIT": "true"},
+            marker,
+        )
+        assert result.returncode == 0, result.stderr
+        assert not marker.exists(), "gh was called despite audit:true"
+        assert "REACHED_END AGAINST=" in result.stdout
+
+    def test_audit_false_still_fetches_baseline(self, tmp_path: Path) -> None:
+        """Sanity: the skip is specific to audit:true, not a regression that
+        silently disables baseline fetching for ordinary scan runs."""
+        marker = tmp_path / "gh_called"
+        result = self._run(
+            {"INPUT_MODE": "scan", "INPUT_ABI_BASELINE": "latest-release"},
+            marker,
+        )
+        assert marker.exists(), "gh was not called for a non-audit scan run"
+        assert result.returncode == 1, result.stderr
+
+
+class TestAmbiguousBaselineAssets:
+    def _run(self, gh_body: str) -> subprocess.CompletedProcess[str]:
+        script = (
+            'MODE="${INPUT_MODE:-compare}"\n'
+            'FORCE_AUDIT_ONLY="${INPUT_AUDIT:-false}"\n'
+            f"gh() {{ {gh_body}; }}\n"
+            + _baseline_region()
+            + '\necho "REACHED_END OLD_LIBRARY=${INPUT_OLD_LIBRARY:-}"\n'
+        )
+        env = {**os.environ, "INPUT_MODE": "compare",
+               "INPUT_ABI_BASELINE": "latest-release"}
+        return subprocess.run(
+            [_bash_executable(), "-c", script],
+            capture_output=True, text=True, env=env, check=False,
+        )
+
+    def test_single_asset_still_resolves(self) -> None:
+        """Sanity: the ordinary one-asset case still works after switching
+        off `find | head -1`."""
+        result = self._run(
+            'local dir=""; while [[ $# -gt 0 ]]; do '
+            '[[ "$1" == "-D" ]] && dir="$2"; shift; done; '
+            'touch "$dir/lib.abicheck.json"'
+        )
+        assert result.returncode == 0, result.stderr
+        assert "REACHED_END OLD_LIBRARY=" in result.stdout
+        assert "lib.abicheck.json" in result.stdout
+
+    def test_multiple_assets_rejected_as_ambiguous(self) -> None:
+        """Regression (CodeRabbit review): a release with more than one
+        *.abicheck.json asset must not silently pick an arbitrary one via
+        `find | head -1` — that could compare against the wrong library."""
+        result = self._run(
+            'local dir=""; while [[ $# -gt 0 ]]; do '
+            '[[ "$1" == "-D" ]] && dir="$2"; shift; done; '
+            'touch "$dir/a.abicheck.json" "$dir/b.abicheck.json"'
+        )
+        assert result.returncode == 1
+        assert "Multiple *.abicheck.json assets found" in result.stdout
+        assert "REACHED_END" not in result.stdout

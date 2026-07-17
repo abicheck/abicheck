@@ -86,6 +86,21 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- **MCP `abi_compare`**: a `--used-by`/`--required-symbol` response's
+  `summary` (`total_changes`/`breaking`/`api_breaks`/`risk_changes`/
+  `compatible`) is now recomputed after scoped-only changes and
+  missing-contract labels are folded into `changes`, instead of only
+  reflecting `result.changes` from before the fold-in — a run gated purely
+  by one of these (e.g. a missing required symbol) used to report
+  `total_changes: 0` alongside a `BREAKING` verdict and nonzero `exit_code`
+  (CodeRabbit review).
+- **GitHub Action**: a scan-mode `audit: true` run no longer fetches
+  `abi-baseline` at all — it was always discarded (`--against` is omitted
+  for audit-only runs), so an unavailable release could needlessly fail a
+  run that never used the baseline (Codex + CodeRabbit review). Also:
+  a release with more than one `*.abicheck.json` asset is now rejected as
+  ambiguous instead of silently picking an arbitrary one via `find | head
+  -1`, which could compare against the wrong library (CodeRabbit review).
 - `--depth source`/`--sources` findings from the L5 source graph
   (`SOURCE_TO_BINARY_MAPPING_CHANGED`, `EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED`)
   now localize `source_location` to the declaration's actual declaring file
@@ -200,14 +215,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   New `gateScope`/`gateVerdict`/`gateExitCode` fields are added
   alongside the existing `scopedVerdict`/`abicheck.scoped_verdict`
   names, kept as aliases.
-- **GitHub Action**: the scan-only `audit`/`estimate` inputs are replaced
-  by a single cross-mode `dry-run` input, matching the CLI's own
-  pre-1.0 no-alias policy (ADR-043). `dry-run: 'true'` now maps to
-  `--dry-run` for every mode (`dump`, `compare`, `scan`, `deps-tree`,
-  `deps-compare`) and skips writing `-o`/`--secondary-output` for that
-  step. Forcing scan's single-build hygiene lint (the old `audit: 'true'`)
-  is now done by simply omitting `against`/`abi-baseline` on that step —
-  `scan` already runs audit-only whenever no baseline is given.
+- **GitHub Action**: added a single cross-mode `dry-run` input, the
+  preferred replacement for the scan-only `audit`/`estimate` inputs.
+  `dry-run: 'true'` now maps to `--dry-run` for every mode (`dump`,
+  `compare`, `scan`, `deps-tree`, `deps-compare`) and skips writing
+  `-o`/`--secondary-output` for that step. Forcing scan's single-build
+  hygiene lint (the old `audit: 'true'`) can also be done by simply
+  omitting `against`/`abi-baseline` on that step — `scan` already runs
+  audit-only whenever no baseline is given. `audit`/`estimate` themselves
+  remain functional (scan-only) deprecated aliases — see below.
 
 ---
 

@@ -1221,7 +1221,13 @@ def abi_compare(
                             f"Required symbol/version '{label}' is missing "
                             "from the new library."
                         ),
-                        "impact": None,
+                        # A missing-contract label has no ChangeKind to run
+                        # through _impact_category, but its severity is known
+                        # (blocks_gate) -- reuse the same "breaking"/
+                        # "compatible" label the CLI text report and severity
+                        # gate already use for this, so the summary tally
+                        # below has something to count it under.
+                        "impact": "breaking" if blocks else "compatible",
                         "old_value": None,
                         "new_value": None,
                         "source_location": None,
@@ -1229,6 +1235,24 @@ def abi_compare(
                         "blocks_gate": blocks,
                     }
                 )
+
+            # Recompute summary now that scoped-only changes/missing-contract
+            # labels were folded into "changes" above -- otherwise a run
+            # gated purely by one of these (e.g. a missing required symbol,
+            # or a scoped-only PE_ORDINAL_RETARGETED change) reports
+            # total_changes: 0 alongside a BREAKING verdict/nonzero exit_code,
+            # since the per-category counts were computed from result.changes
+            # before the fold-in (CodeRabbit review).
+            impact_tally = {"breaking": 0, "api_break": 0, "risk": 0, "compatible": 0}
+            for c in response["changes"]:
+                impact_tally[c["impact"]] = impact_tally.get(c["impact"], 0) + 1
+            response["summary"] = {
+                "breaking": impact_tally["breaking"],
+                "api_breaks": impact_tally["api_break"],
+                "risk_changes": impact_tally["risk"],
+                "compatible": impact_tally["compatible"],
+                "total_changes": len(response["changes"]),
+            }
 
         # Include rendered report
         rendered = _render_output(

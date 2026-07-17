@@ -148,7 +148,9 @@ _baseline_unavailable() {
 }
 
 ABI_BASELINE="${INPUT_ABI_BASELINE:-}"
-if [[ -n "$ABI_BASELINE" && ( "$MODE" == "compare" || "$MODE" == "scan" ) ]]; then
+if [[ -n "$ABI_BASELINE" \
+   && ( "$MODE" == "compare" || "$MODE" == "scan" ) \
+   && ! ( "$MODE" == "scan" && "$FORCE_AUDIT_ONLY" == "true" ) ]]; then
   BASELINE_DIR=$(mktemp -d)
   # Clean up temp dir on exit (combined with STDERR_FILE cleanup later)
   _BASELINE_CLEANUP="$BASELINE_DIR"
@@ -173,12 +175,24 @@ if [[ -n "$ABI_BASELINE" && ( "$MODE" == "compare" || "$MODE" == "scan" ) ]]; th
       fi
       echo "::endgroup::"
     fi
-    # Pick the first .abicheck.json found in the download dir (empty/absent
-    # when the download itself failed and _baseline_unavailable returned
-    # instead of exiting, e.g. under --dry-run).
-    BASELINE_FILE=$(find "$BASELINE_DIR" -name '*.abicheck.json' 2>/dev/null | head -1)
-    if [[ -z "$BASELINE_FILE" ]]; then
+    # Require exactly one *.abicheck.json in the download dir: `head -1`
+    # picking an arbitrary match on a multi-asset release could silently
+    # compare against the wrong library and produce an invalid verdict
+    # (Codex review). Built via a while/read loop (not `mapfile`, a bash 4+
+    # builtin) for macOS's stock (GPLv2-frozen) bash 3.2, same portability
+    # constraint as add_flag() above. An empty result also covers the
+    # download itself failing and _baseline_unavailable returning instead
+    # of exiting (e.g. under --dry-run).
+    BASELINE_FILES=()
+    while IFS= read -r _found; do
+      [[ -n "$_found" ]] && BASELINE_FILES+=("$_found")
+    done <<< "$(find "$BASELINE_DIR" -name '*.abicheck.json' 2>/dev/null)"
+    if [[ ${#BASELINE_FILES[@]} -eq 1 ]]; then
+      BASELINE_FILE="${BASELINE_FILES[0]}"
+    elif [[ ${#BASELINE_FILES[@]} -eq 0 ]]; then
       _baseline_unavailable "No *.abicheck.json file found after download."
+    else
+      _baseline_unavailable "Multiple *.abicheck.json assets found (${BASELINE_FILES[*]}); ambiguous which is the baseline. Publish exactly one *.abicheck.json asset per release, or pass abi-baseline a direct file path instead."
     fi
   fi
   if [[ -n "$BASELINE_FILE" ]]; then

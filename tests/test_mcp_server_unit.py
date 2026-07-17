@@ -1319,6 +1319,40 @@ class TestAbiCompare:
         # The missing symbol itself (not a diff Change) still counts.
         assert report["severity"]["categories"]["abi_breaking"]["count"] == 1
 
+    def test_used_by_missing_symbol_only_summary_reflects_folded_changes(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # Regression (CodeRabbit review): `summary` was computed from
+        # result.changes before scoped_missing_labels/scoped_only_changes get
+        # folded into the top-level "changes" array, so a run gated purely by
+        # a missing required symbol (no backing diff Change) reported
+        # total_changes: 0 alongside a BREAKING verdict/exit_code 4.
+        from abicheck.appcompat import AppCompatResult
+
+        kept = _pub_func("kept", "_Z4keptv", "int")
+        old = _make_snapshot("1.0", functions=[kept])
+        new = _make_snapshot("2.0", functions=[kept])
+        old_p, new_p = self._make_binary_pair(tmp_path)
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        scoped = AppCompatResult(
+            app_path=str(app), old_lib_path=str(old_p), new_lib_path=str(new_p),
+            required_symbols={"never_existed"}, required_symbol_count=1,
+            missing_symbols=["never_existed"], verdict=Verdict.BREAKING,
+        )
+        self._patch_used_by(monkeypatch, tmp_path, old, new, scoped)
+
+        raw = abi_compare(
+            str(old_p), str(new_p), used_by=[str(app)],
+            severity_preset="default",
+        )
+        data = json.loads(raw)
+        assert data["verdict"] == "BREAKING"
+        assert data["exit_code"] == 4
+        assert len(data["changes"]) == 1
+        assert data["summary"]["total_changes"] == len(data["changes"])
+        assert data["summary"]["breaking"] == 1
+
     def test_used_by_missing_symbol_covered_by_change_not_double_counted(
         self, tmp_path: Path, monkeypatch
     ):
