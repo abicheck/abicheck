@@ -39,8 +39,10 @@ prebuilt SDK) still gets the non-call type-dependency check, at the cost of
 weaker resolution than a full per-TU Clang replay would give (bare
 unqualified type names when falling back to the flat `AbiSnapshot` model; full
 qualified-name resolution when a `clang -ast-dump=json` header AST is
-available). It is currently reachable only via the Python API
-(`service.run_dump(header_graph=True)`), not the `dump`/`scan` CLI.
+available). It is reachable via the Python API
+(`service.run_dump(header_graph=True)`) and the standalone `dump --header-graph`
+CLI (`--header-graph-includes` additionally folds the include graph), uniformly
+across ELF, PE, and Mach-O input; not yet `scan`.
 
 ## Why no single artifact layer sees it
 
