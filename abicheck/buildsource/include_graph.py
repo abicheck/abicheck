@@ -20,6 +20,7 @@ edges". The depfile *parser* is a pure function exercised by unit tests; the
 live ``clang -M`` invocation is integration-only and degrades gracefully, like
 the L4 source extractors and the call-graph extractor.
 """
+
 from __future__ import annotations
 
 import re
@@ -29,6 +30,7 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from .. import deadline
 from .source_graph import (
     CONF_HIGH,
     GraphEdge,
@@ -46,10 +48,19 @@ if TYPE_CHECKING:
 #: recorded compile command as ``clang -MM``: the compile action, the object
 #: output, and any existing dependency-generation options.
 _DEPFILE_DROP_WITH_VALUE = frozenset({"-o", "--output", "-MF", "-MT", "-MQ", "-MJ"})
-_DEPFILE_DROP_FLAG = frozenset({
-    "-c", "-MD", "-MMD", "-MM", "-M", "-MG", "-MP", "-pipe",
-    "-fno-strict-overflow",
-})
+_DEPFILE_DROP_FLAG = frozenset(
+    {
+        "-c",
+        "-MD",
+        "-MMD",
+        "-MM",
+        "-M",
+        "-MG",
+        "-MP",
+        "-pipe",
+        "-fno-strict-overflow",
+    }
+)
 _DEPFILE_DROP_PREFIXES = (
     "-fdiagnostics-color",
     "-fno-canonical-system-headers",
@@ -59,15 +70,17 @@ _DEPFILE_DROP_PREFIXES = (
 # Compile databases may come from untrusted PR artifacts, so the depfile replay
 # must preserve only compile-context flags and must never forward plugin/pass
 # loading controls to clang.
-_DEPFILE_UNSAFE_WITH_VALUE = frozenset({
-    "-Xclang",
-    "-load",
-    "-plugin",
-    "-add-plugin",
-    "-fplugin",
-    "-fpass-plugin",
-    "-mllvm",
-})
+_DEPFILE_UNSAFE_WITH_VALUE = frozenset(
+    {
+        "-Xclang",
+        "-load",
+        "-plugin",
+        "-add-plugin",
+        "-fplugin",
+        "-fpass-plugin",
+        "-mllvm",
+    }
+)
 _DEPFILE_UNSAFE_FLAG = frozenset({"-cc1"})
 _DEPFILE_UNSAFE_PREFIXES = (
     "-Xclang=",
@@ -83,15 +96,19 @@ _DEPFILE_UNSAFE_PREFIXES = (
 # Clang options that can create or overwrite files even during preprocessing.
 # Build evidence can be supplied by untrusted PR artifacts, so replay must not
 # forward output-producing instrumentation/cache/diagnostic controls.
-_DEPFILE_OUTPUT_WITH_VALUE = frozenset({
-    "-ftime-trace",
-    "-serialize-diagnostic-file",
-    "-fmodules-cache-path",
-})
-_DEPFILE_OUTPUT_FLAG = frozenset({
-    "-save-temps",
-    "--save-temps",
-})
+_DEPFILE_OUTPUT_WITH_VALUE = frozenset(
+    {
+        "-ftime-trace",
+        "-serialize-diagnostic-file",
+        "-fmodules-cache-path",
+    }
+)
+_DEPFILE_OUTPUT_FLAG = frozenset(
+    {
+        "-save-temps",
+        "--save-temps",
+    }
+)
 _DEPFILE_OUTPUT_PREFIXES = (
     "-ftime-trace=",
     "-serialize-diagnostic-file=",
@@ -159,8 +176,7 @@ def depfile_args_from_argv(argv: list[str]) -> list[str]:
         if tok.startswith("--output="):
             continue
         if any(
-            tok.startswith(f) and tok != f
-            for f in ("-o", "-MF", "-MT", "-MQ", "-MJ")
+            tok.startswith(f) and tok != f for f in ("-o", "-MF", "-MT", "-MQ", "-MJ")
         ):
             continue
         if tok in _DEPFILE_DROP_FLAG:
@@ -210,7 +226,7 @@ def parse_depfile(text: str) -> list[str]:
         m = re.search(r":(?=\s|$)", line)
         if m is None:
             continue
-        prereqs = line[m.end():]
+        prereqs = line[m.end() :]
         for tok in prereqs.split():
             tok = tok.strip()
             if tok and tok != "\\" and tok not in seen:
@@ -243,15 +259,25 @@ def augment_graph_with_includes(
                     break
             else:
                 node_id = f"file://{path}"
-                graph.add_node(GraphNode(
-                    id=node_id, kind="file", label=path,
-                    provenance="include_graph", confidence=CONF_HIGH,
-                ))
+                graph.add_node(
+                    GraphNode(
+                        id=node_id,
+                        kind="file",
+                        label=path,
+                        provenance="include_graph",
+                        confidence=CONF_HIGH,
+                    )
+                )
             before = len(graph.edges)
-            graph.add_edge(GraphEdge(
-                src=cu_id, dst=node_id, kind="COMPILE_UNIT_INCLUDES_FILE",
-                provenance="include_graph", confidence=CONF_HIGH,
-            ))
+            graph.add_edge(
+                GraphEdge(
+                    src=cu_id,
+                    dst=node_id,
+                    kind="COMPILE_UNIT_INCLUDES_FILE",
+                    provenance="include_graph",
+                    confidence=CONF_HIGH,
+                )
+            )
             added += len(graph.edges) - before
     return added
 
@@ -304,7 +330,7 @@ class ClangIncludeExtractor:
         out: dict[str, list[str]] = {}
         failures = 0
         attempted = 0
-        deadline = time.monotonic() + self.aggregate_timeout_s
+        aggregate_deadline = time.monotonic() + self.aggregate_timeout_s
         for cu in build.compile_units:
             if not cu.source:
                 continue
@@ -314,7 +340,7 @@ class ClangIncludeExtractor:
                     f"stopped after {attempted} compile units"
                 )
                 break
-            remaining = deadline - time.monotonic()
+            remaining = aggregate_deadline - time.monotonic()
             if remaining <= 0:
                 self.diagnostics.append(
                     "clang -M include-map time budget exhausted: "
@@ -334,16 +360,29 @@ class ClangIncludeExtractor:
             # is not parsed as C++ (wrong __cplusplus / language-conditioned
             # includes) (Codex review).
             cmd = [
-                self.clang_bin, "-M", *_lang_flag(cu.language),
+                self.clang_bin,
+                "-M",
+                *_lang_flag(cu.language),
                 *(unredact_home(a) for a in argv),
             ]
             cwd = unredact_home(cu.directory) if cu.directory else None
             try:
-                proc = subprocess.run(  # noqa: S603 - fixed argv, never shell=True
-                    cmd, cwd=cwd or None, capture_output=True,
-                    text=True, timeout=min(self.per_unit_timeout_s, remaining),
-                    check=False,
+                # Bound by both this extractor's own aggregate timer (above)
+                # and the active --budget deadline, process-group-safe on
+                # timeout, same as the L2/L4/L5 clang calls (Codex review,
+                # PR #591).
+                proc = deadline.run_bounded(  # noqa: S603 - fixed argv, never shell=True
+                    cmd,
+                    cwd=cwd or None,
+                    capture_output=True,
+                    text=True,
+                    timeout=min(self.per_unit_timeout_s, remaining),
                 )
+            except deadline.DeadlineExceeded as exc:
+                self.diagnostics.append(
+                    f"scan deadline exceeded during clang -M include-map: {exc}"
+                )
+                break
             except (OSError, subprocess.SubprocessError) as exc:
                 self.diagnostics.append(f"clang -M failed for {cu.id}: {exc}")
                 continue
@@ -354,7 +393,11 @@ class ClangIncludeExtractor:
                 if len(self.diagnostics) < self.diagnostics_limit:
                     detail = (proc.stderr or "").strip().splitlines()
                     msg = next(
-                        (line for line in detail if "error:" in line or "fatal error:" in line),
+                        (
+                            line
+                            for line in detail
+                            if "error:" in line or "fatal error:" in line
+                        ),
                         detail[0] if detail else f"exit {proc.returncode}",
                     )
                     self.diagnostics.append(f"clang -M failed for {cu.id}: {msg}")

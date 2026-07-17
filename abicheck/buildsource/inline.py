@@ -57,6 +57,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from .. import deadline
 from .build_evidence import BuildEvidence
 from .model import (
     CoverageStatus,
@@ -1309,14 +1310,28 @@ def _run_build_query(
     if not argv:
         return None
     try:
-        proc = subprocess.run(  # noqa: S603 - operator-configured, shell=False, opt-in
+        # Bound by the active scan --budget (not just the local 300s
+        # default) and process-group-safe on timeout — this operator-
+        # configured query runs inside run_scan_core's L2-L5 deadline scope
+        # just like the zero-config inferred query (Codex-review-class fix,
+        # PR #591).
+        proc = deadline.run_bounded(  # noqa: S603 - operator-configured, shell=False, opt-in
             argv,
             cwd=str(cwd) if cwd else None,
             capture_output=True,
             text=True,
             timeout=_QUERY_TIMEOUT_S,
-            check=False,
         )
+    except deadline.DeadlineExceeded as exc:
+        extractors.append(
+            ExtractorRecord(
+                name="build_query",
+                status="failed",
+                detail=f"build.query aborted: scan deadline exceeded ({exc})",
+            )
+        )
+        merged.diagnostics.append(f"build_query: scan deadline exceeded ({exc})")
+        return None
     except (OSError, subprocess.SubprocessError) as exc:
         extractors.append(
             ExtractorRecord(

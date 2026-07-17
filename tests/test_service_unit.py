@@ -779,7 +779,9 @@ class TestDumpElf:
         snap = AbiSnapshot(library="test", version="1.0")
         with (
             patch("abicheck.service.expand_header_inputs", return_value=[]),
-            patch("abicheck.debug_resolver.resolve_debug_info", return_value=None) as mock_resolve,
+            patch(
+                "abicheck.debug_resolver.resolve_debug_info", return_value=None
+            ) as mock_resolve,
             patch("abicheck.dumper.dump", return_value=snap),
         ):
             _dump_elf(
@@ -803,7 +805,9 @@ class TestDumpElf:
         snap = AbiSnapshot(library="test", version="1.0")
         with (
             patch("abicheck.service.expand_header_inputs", return_value=[]),
-            patch("abicheck.debug_resolver.resolve_debug_info", return_value=None) as mock_resolve,
+            patch(
+                "abicheck.debug_resolver.resolve_debug_info", return_value=None
+            ) as mock_resolve,
             patch("abicheck.dumper.dump", return_value=snap),
         ):
             _dump_elf(p, [], [], "1.0", "c++", enable_debuginfod=True)
@@ -896,12 +900,16 @@ class TestHeaderScopedInferredRoots:
 
         root, umb = self._umbrella(tmp_path)
 
-        def raises_deadline_exceeded(path, headers, extra_includes, version, compiler, **k):
+        def raises_deadline_exceeded(
+            path, headers, extra_includes, version, compiler, **k
+        ):
             raise deadline.DeadlineExceeded(-1.0)
 
         with patch("abicheck.dumper._dump_pe", raises_deadline_exceeded):
             with pytest.raises(deadline.DeadlineExceeded):
-                _try_header_scoped_dump("pe", tmp_path / "x.dll", [umb], [], "1.0", "c++")
+                _try_header_scoped_dump(
+                    "pe", tmp_path / "x.dll", [umb], [], "1.0", "c++"
+                )
 
         with patch("abicheck.dumper._dump_macho", raises_deadline_exceeded):
             with pytest.raises(deadline.DeadlineExceeded):
@@ -1951,7 +1959,7 @@ class TestRunDumpHeaderGraph:
                 lambda _b: "/usr/bin/clang++",
             ),
             patch(
-                "abicheck.buildsource.include_graph.subprocess.run",
+                "abicheck.buildsource.include_graph.deadline.run_bounded",
                 lambda *a, **k: _Proc(),
             ),
         ):
@@ -1973,9 +1981,7 @@ class TestRunDumpHeaderGraph:
         )
         assert graph.coverage["include_edges"]["collected"] is True
 
-    def test_header_graph_includes_marks_pass_covered_when_map_is_empty(
-        self, tmp_path
-    ):
+    def test_header_graph_includes_marks_pass_covered_when_map_is_empty(self, tmp_path):
         """A leaf header with no #includes of its own is a genuine zero, not
         an uncollected pass — `header_include_graph` must still be stamped so
         `_include_graph_covered` doesn't mistake it for "never ran"."""
@@ -1999,7 +2005,7 @@ class TestRunDumpHeaderGraph:
                 lambda _b: "/usr/bin/clang++",
             ),
             patch(
-                "abicheck.buildsource.include_graph.subprocess.run",
+                "abicheck.buildsource.include_graph.deadline.run_bounded",
                 lambda *a, **k: _Proc(),
             ),
         ):
@@ -2059,7 +2065,7 @@ class TestRunDumpHeaderGraph:
                 lambda _b: "/usr/bin/clang++",
             ),
             patch(
-                "abicheck.buildsource.include_graph.subprocess.run",
+                "abicheck.buildsource.include_graph.deadline.run_bounded",
                 _fake_run,
             ),
         ):

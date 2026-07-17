@@ -61,6 +61,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from .. import deadline
 from .build_evidence import BuildEvidence
 from .model import ExtractorRecord
 
@@ -352,20 +353,25 @@ def _is_gnu_make_launcher(tool: str) -> bool:
     print different transcript forms, so skip them cleanly.
     """
     try:
-        proc = subprocess.run(  # noqa: S603 - fixed tool plus --version, shell=False
+        # Bound by the active scan --budget too, process-group-safe on
+        # timeout, same as every other clang/build-query subprocess call in
+        # this pipeline (Codex review, PR #591) — this probe is reachable
+        # from `scan --depth source` before L4/L5 even start.
+        proc = deadline.run_bounded(  # noqa: S603 - fixed tool plus --version, shell=False
             [tool, "--version"],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             timeout=10,
-            check=False,
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, deadline.DeadlineExceeded):
         return False
     return proc.returncode == 0 and "GNU Make" in (proc.stdout or "")
 
 
-def _select_gnu_make_launcher(which: Callable[[str], str | None]) -> _MakeLauncher | None:
+def _select_gnu_make_launcher(
+    which: Callable[[str], str | None],
+) -> _MakeLauncher | None:
     """Pick a GNU Make launcher.
 
     Prefer the platform's normal ``make`` when it is GNU (Linux/common CI), then
@@ -390,8 +396,10 @@ def _query_tool_available(tool: str, which: Callable[[str], str | None]) -> bool
     resolved path as available avoids a second PATH lookup with a different
     spelling such as ``which('/usr/bin/make')``.
     """
-    if Path(tool).is_absolute() or tool.startswith(("/", "\\")) or (
-        len(tool) >= 3 and tool[1] == ":" and tool[2] in ("/", "\\")
+    if (
+        Path(tool).is_absolute()
+        or tool.startswith(("/", "\\"))
+        or (len(tool) >= 3 and tool[1] == ":" and tool[2] in ("/", "\\"))
     ):
         return True
     return which(tool) is not None
@@ -498,15 +506,29 @@ def _run_query_process(
 ) -> subprocess.CompletedProcess[str] | None:
     """Run the inferred query; None (+ failed record + diagnostic) if it cannot run."""
     try:
-        return subprocess.run(  # noqa: S603 - fixed abicheck-authored argv, shell=False
+        # Bound by the active scan --budget (not just the local 600s default)
+        # and process-group-safe on timeout — this cmake configure/bazel
+        # aquery/make dry-run runs inside run_scan_core's L2-L5 deadline
+        # scope just like the clang/castxml calls it feeds (Codex review,
+        # PR #591).
+        return deadline.run_bounded(  # noqa: S603 - fixed abicheck-authored argv, shell=False
             cmd,
             cwd=str(sources),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT if system == "make" else subprocess.PIPE,
             text=True,
             timeout=timeout,
-            check=False,
         )
+    except deadline.DeadlineExceeded as exc:
+        extractors.append(
+            ExtractorRecord(
+                name="build_query_auto",
+                status="failed",
+                detail=f"auto {system} query aborted: scan deadline exceeded ({exc})",
+            )
+        )
+        merged.diagnostics.append(f"build_query_auto: scan deadline exceeded ({exc})")
+        return None
     except (OSError, subprocess.SubprocessError) as exc:
         extractors.append(
             ExtractorRecord(

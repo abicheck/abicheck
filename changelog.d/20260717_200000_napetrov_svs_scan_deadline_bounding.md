@@ -114,3 +114,15 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   post-run gap already fixed elsewhere. Both now re-check `deadline.check()`
   right after the subprocess returns and before parsing, degrading to the
   same advisory diagnostic+`[]` contract (ADR-028 D3) on overflow.
+- Swept the rest of the L3/L5 build-resolution path for the same bare-
+  `subprocess.run` anti-pattern (self-audit that turned up the same gap
+  Codex independently flagged on `include_graph.py`): `include_graph.py`'s
+  `ClangIncludeExtractor` (the `clang -M` include-map pass reached from
+  `collect_inline_pack` for both L5 folding and `--header-graph`),
+  `build_query.py`'s zero-config `cmake`/`bazel`/`make` query (and its GNU
+  Make `--version` probe), and `inline.py`'s operator-configured trusted
+  `build.query` command all ran inside the scan's active `--budget` deadline
+  scope but only consulted their own fixed local timeouts (30s/10s/600s/300s
+  respectively), never the `ContextVar` deadline. All three now go through
+  `deadline.run_bounded`, degrading to their existing failed/diagnostic
+  contract on a `DeadlineExceeded` instead of running past the budget.
