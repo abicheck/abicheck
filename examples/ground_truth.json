@@ -1763,6 +1763,7 @@
     "v2.symvers"
    ],
    "min_evidence": "L0",
+   "mode": "snapshot-pair",
    "platforms": [
     "linux"
    ]
@@ -1782,6 +1783,7 @@
     "v2.symvers"
    ],
    "min_evidence": "L0",
+   "mode": "snapshot-pair",
    "platforms": [
     "linux"
    ]
