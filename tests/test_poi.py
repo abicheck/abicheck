@@ -392,6 +392,59 @@ def test_changed_paths_impact_finds_public_entry_reaching_changed_internal() -> 
     assert impacted == frozenset({"decl://api"})
 
 
+def test_changed_paths_impact_considers_every_declaring_edge() -> None:
+    # `helper` (internal) has TWO SOURCE_DECLARES edges -- declared in
+    # include/detail.h first, defined in src/detail/cache.cpp second. Only
+    # the second file is in changed_paths. decl_declaring_files() keeps only
+    # the first-recorded declaring file per decl (via setdefault), so a
+    # changed-decls computation built on that single-file lookup would miss
+    # this match entirely and report no impact -- the walk must consider
+    # every declaring edge, not just the first one (Codex review).
+    graph = SourceGraphSummary(
+        nodes=[
+            GraphNode(
+                id="decl://api",
+                kind="source_decl",
+                label="api",
+                attrs={"visibility": "public_header"},
+            ),
+            GraphNode(
+                id="decl://helper",
+                kind="source_decl",
+                label="helper",
+                attrs={"visibility": "private_header"},
+            ),
+            GraphNode(
+                id="header://include/detail.h",
+                kind="header",
+                label="include/detail.h",
+            ),
+            GraphNode(
+                id="header://src/detail/cache.cpp",
+                kind="header",
+                label="src/detail/cache.cpp",
+            ),
+        ],
+        edges=[
+            GraphEdge(src="decl://api", dst="decl://helper", kind="DECL_CALLS_DECL"),
+            GraphEdge(
+                src="header://include/detail.h",
+                dst="decl://helper",
+                kind="SOURCE_DECLARES",
+            ),
+            GraphEdge(
+                src="header://src/detail/cache.cpp",
+                dst="decl://helper",
+                kind="SOURCE_DECLARES",
+            ),
+        ],
+    )
+    impacted = resolve_changed_paths_public_impact(
+        ["src/detail/cache.cpp"], graph
+    )
+    assert impacted == frozenset({"decl://api"})
+
+
 def test_changed_paths_impact_matches_by_suffix() -> None:
     # Graph node labels carry an absolute build path; the caller passes a
     # repo-relative changed path — suffix matching bridges the two spellings.

@@ -161,6 +161,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   edge into the impacted set *and* unconditionally checks each entry's own
   `def_file`/`source_location` attr, exactly mirroring
   `resolve_symbol_tus`'s own accumulation (CodeRabbit review).
+- **Fix**: `resolve_changed_paths_public_impact` (the *input* side of the
+  impact closure above — which internal decls count as "changed") judged a
+  decl "changed" via `decl_declaring_files()`, which keeps only the *first*
+  `SOURCE_DECLARES` edge per decl. A decl declared/defined from more than one
+  file (e.g. a forward declaration in one header and the full definition in
+  another) was therefore only recognized as changed when its first-recorded
+  declaring file happened to be in `--changed-path` — a change to a *different*
+  one of its declaring files was silently invisible to the whole walk, so no
+  dependent public entries were ever flagged as impacted. Now walks every
+  `SOURCE_DECLARES` edge directly instead of the single-file lookup (Codex
+  review).
 
 ### Documentation
 

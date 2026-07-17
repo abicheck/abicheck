@@ -1617,6 +1617,63 @@ def test_public_impact_closure_covers_both_declaring_header_and_def_file():
     assert set(tus) == {"include/api.h", "src/api.cpp"}
 
 
+def test_public_impact_closure_skips_dangling_source_declares_edge():
+    # A SOURCE_DECLARES edge whose source ("declaring header") node id has no
+    # matching entry in graph.nodes at all (a dangling edge -- fn is None) or
+    # points at a node with an empty label must be skipped, not raise, while
+    # the impacted decl's own def_file attr still resolves it normally.
+    from types import SimpleNamespace
+
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_graph import (
+        GraphEdge,
+        GraphNode,
+        SourceGraphSummary,
+    )
+    from abicheck.scan_engine import _resolve_public_impact_tus
+
+    graph = SourceGraphSummary(
+        nodes=[
+            GraphNode(
+                id="decl://pub",
+                kind="source_decl",
+                label="pub",
+                attrs={"visibility": "public_header", "def_file": "src/api.cpp"},
+            ),
+            GraphNode(
+                id="decl://internal",
+                kind="record_type",
+                label="Internal",
+                attrs={"visibility": "private_header"},
+            ),
+            GraphNode(
+                id="header://src/detail/cache.cpp",
+                kind="header",
+                label="src/detail/cache.cpp",
+            ),
+        ],
+        edges=[
+            GraphEdge(
+                src="header://src/detail/cache.cpp",
+                dst="decl://internal",
+                kind="SOURCE_DECLARES",
+            ),
+            # Dangling: "header://ghost" has no matching node.
+            GraphEdge(
+                src="header://ghost", dst="decl://pub", kind="SOURCE_DECLARES"
+            ),
+            GraphEdge(
+                src="decl://pub", dst="decl://internal", kind="TYPE_HAS_FIELD_TYPE"
+            ),
+        ],
+    )
+    poi_baseline = SimpleNamespace(
+        build_source=BuildSourcePack(root="", source_graph=graph)
+    )
+    tus = _resolve_public_impact_tus(poi_baseline, ["src/detail/cache.cpp"])
+    assert tus == ("src/api.cpp",)
+
+
 def test_public_impact_closure_skips_decls_with_no_resolvable_location():
     # Two more impacted-but-unresolvable shapes alongside the working
     # def_file fallback: a decl with neither a SOURCE_DECLARES edge nor any
