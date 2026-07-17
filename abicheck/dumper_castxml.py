@@ -337,8 +337,25 @@ class _CastxmlParser:
             return self._type_name(el.get("type", ""), depth + 1) + "&&"
         if tag == "CvQualifiedType":
             base = self._type_name(el.get("type", ""), depth + 1)
-            const = "const " if el.get("const") == "1" else ""
-            return f"{const}{base}"
+            # castxml's CvQualifiedType carries const/volatile/restrict
+            # independently (any combination); only `const` was read here
+            # previously, so a volatile- or restrict-qualified field's type
+            # name silently dropped those qualifiers instead of just missing
+            # a dedicated attribute (unlike the genuinely-unmodelable
+            # Atomic case below). Order matches the "const volatile" spelling
+            # convention already used by the DWARF backend's own qualifier
+            # stripping (dwarf_snapshot._strip_type_decorators).
+            quals = [
+                q
+                for q, attr in (
+                    ("const", "const"),
+                    ("volatile", "volatile"),
+                    ("restrict", "restrict"),
+                )
+                if el.get(attr) == "1"
+            ]
+            prefix = f"{' '.join(quals)} " if quals else ""
+            return f"{prefix}{base}"
         if tag == "ElaboratedType":
             # castxml wraps an elaborated-type-specifier (`struct Foo`, `union
             # Foo`, `enum Foo` used directly rather than via a typedef) in an
@@ -1195,13 +1212,20 @@ class _CastxmlParser:
                 fields.extend(self._expand_anonymous_field(child))
                 continue
             bitfield_bits, is_bitfield = self._parse_bitfield_bits(child.get("bits"))
+            field_type = self._type_name(child.get("type", ""))
             fields.append(
                 TypeField(
                     name=child_name,
-                    type=self._type_name(child.get("type", "")),
+                    type=field_type,
                     offset_bits=self._optional_int_attr(child, "offset"),
                     is_bitfield=is_bitfield,
                     bitfield_bits=bitfield_bits,
+                    is_const=bool(re.search(r"\bconst\b", field_type)),
+                    is_volatile=bool(re.search(r"\bvolatile\b", field_type)),
+                    # castxml's Field element carries its own `mutable="1"`
+                    # attribute (fixed xs:int, per castxml.xsd) rather than
+                    # deriving it from the referenced type like const/volatile.
+                    is_mutable=child.get("mutable") == "1",
                     access=self._access_level(child),
                 )
             )
@@ -1254,13 +1278,17 @@ class _CastxmlParser:
                 continue
             inner_offset = self._optional_int_attr(inner, "offset") or 0
             bitfield_bits, is_bitfield = self._parse_bitfield_bits(inner.get("bits"))
+            inner_type = self._type_name(inner.get("type", ""))
             result.append(
                 TypeField(
                     name=inner_name,
-                    type=self._type_name(inner.get("type", "")),
+                    type=inner_type,
                     offset_bits=this_offset + inner_offset,
                     is_bitfield=is_bitfield,
                     bitfield_bits=bitfield_bits,
+                    is_const=bool(re.search(r"\bconst\b", inner_type)),
+                    is_volatile=bool(re.search(r"\bvolatile\b", inner_type)),
+                    is_mutable=inner.get("mutable") == "1",
                     access=self._access_level(inner),
                 )
             )

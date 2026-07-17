@@ -4,6 +4,7 @@ Covers the fallback path added in PR #63 where castxml serialises Field
 elements as space-separated IDs in the ``members`` attribute of a Struct
 instead of as inline child elements.
 """
+
 from __future__ import annotations
 
 from xml.etree.ElementTree import fromstring
@@ -63,6 +64,37 @@ _MEMBERS_CONST_XML = """<?xml version="1.0"?>
   <File id="f1" name="test.h"/>
 </CastXML>"""
 
+_QUALIFIED_FIELDS_XML = """<?xml version="1.0"?>
+<CastXML>
+  <Struct id="_2" name="Hw" context="_1" file="f1" line="1"
+          members="_4 _5 _6 _7" size="128" align="32">
+    <Field id="_4" name="status"   type="_10" offset="0"/>
+    <Field id="_5" name="port"     type="_11" offset="32"/>
+    <Field id="_6" name="cache"    type="_7"  offset="64" mutable="1"/>
+    <Field id="_7" name="plain"    type="_7"  offset="96"/>
+  </Struct>
+  <CvQualifiedType id="_10" type="_7" volatile="1"/>
+  <CvQualifiedType id="_11" type="_7" const="1" volatile="1"/>
+  <FundamentalType id="_7" name="int" size="32"/>
+  <Namespace id="_1" name="::"/>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+
+_ANON_UNION_QUALIFIED_XML = """<?xml version="1.0"?>
+<CastXML>
+  <Struct id="_2" name="Outer" context="_1" file="f1" line="1" size="64" align="32">
+    <Field id="_3" name="" type="_4" offset="0"/>
+  </Struct>
+  <Union id="_4" name="" context="_2" file="f1" line="1" size="32" align="32">
+    <Field id="_5" name="raw" type="_8" offset="0"/>
+    <Field id="_6" name="cached" type="_7" offset="0" mutable="1"/>
+  </Union>
+  <CvQualifiedType id="_8" type="_7" volatile="1"/>
+  <FundamentalType id="_7" name="int" size="32"/>
+  <Namespace id="_1" name="::"/>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+
 _MIXED_XML = """<?xml version="1.0"?>
 <CastXML>
   <Struct id="_2" name="Mixed" context="_1" file="f1" line="1"
@@ -100,6 +132,43 @@ class TestInlineChildrenLayout:
         assert [f.name for f in fields] == ["width", "height", "depth"]
 
 
+class TestQualifiedFieldFacts:
+    """castxml's CvQualifiedType (volatile/const+volatile) and Field
+    ``mutable="1"`` must populate TypeField.is_volatile/is_const/is_mutable —
+    not just leak into the type-name spelling — since diff_types.py's
+    field_became_volatile/field_became_mutable detectors read the booleans.
+    """
+
+    def test_volatile_and_const_volatile_fields(self) -> None:
+        p = _make_parser(_QUALIFIED_FIELDS_XML)
+        fields = {f.name: f for f in p.parse_types()[0].fields}
+        assert fields["status"].is_volatile is True
+        assert fields["status"].is_const is False
+        assert fields["port"].is_volatile is True
+        assert fields["port"].is_const is True
+        assert fields["cache"].is_volatile is False
+        assert fields["plain"].is_volatile is False
+        assert fields["plain"].is_const is False
+
+    def test_mutable_field(self) -> None:
+        p = _make_parser(_QUALIFIED_FIELDS_XML)
+        fields = {f.name: f for f in p.parse_types()[0].fields}
+        assert fields["cache"].is_mutable is True
+        assert fields["plain"].is_mutable is False
+        assert fields["status"].is_mutable is False
+
+    def test_anonymous_union_flatten_preserves_qualifiers(self) -> None:
+        """Flattened anonymous-union members must carry the same real
+        volatile/mutable facts as an ordinary named field (not just the
+        type-name string)."""
+        p = _make_parser(_ANON_UNION_QUALIFIED_XML)
+        fields = {f.name: f for f in p.parse_types()[0].fields}
+        assert fields["raw"].is_volatile is True
+        assert fields["raw"].is_mutable is False
+        assert fields["cached"].is_mutable is True
+        assert fields["cached"].is_volatile is False
+
+
 class TestMembersAttributeLayout:
     """castxml --castxml-output=1 layout: fields via ``members=`` attribute."""
 
@@ -120,9 +189,15 @@ class TestMembersAttributeLayout:
         types = p.parse_types()
         assert len(types) == 1
         fields = types[0].fields
-        assert "const" in fields[0].type.lower()   # sample_rate → const int
-        assert fields[1].type == "int"              # raw_value
-        assert fields[2].type == "int"              # cache_hits
+        assert "const" in fields[0].type.lower()  # sample_rate → const int
+        assert fields[1].type == "int"  # raw_value
+        assert fields[2].type == "int"  # cache_hits
+        # is_const must be a real structured fact, not just embedded in the
+        # type-name string (diff_types.py's field const/volatile/mutable
+        # detectors read these booleans, not the type spelling).
+        assert fields[0].is_const is True
+        assert fields[1].is_const is False
+        assert fields[2].is_const is False
 
     def test_non_field_ids_in_members_are_ignored(self) -> None:
         """Non-Field IDs referenced in members= must be silently skipped."""
@@ -183,7 +258,10 @@ class TestConstantExtraction:
         p = _make_parser(_CONSTANTS_XML, public_header_paths=["test.h"])
         consts = p.parse_constants()
         assert consts == {
-            "kLimit": "4", "A::kLimit": "1", "B::kLimit": "2", "C::kLimit": "3",
+            "kLimit": "4",
+            "A::kLimit": "1",
+            "B::kLimit": "2",
+            "C::kLimit": "3",
         }
 
     def test_no_public_set_skips_extraction(self) -> None:
