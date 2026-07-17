@@ -1422,13 +1422,22 @@ def _diff_field_default_initializer(old: AbiSnapshot, new: AbiSnapshot) -> list[
     clang header backend does not populate ``TypeField.default`` yet, so a
     castxml-vs-clang comparison would otherwise read as every initializer
     having been removed (Codex review, PR #582).
+
+    Unions are NOT excluded (unlike most field-level detectors, which leave
+    them to ``_diff_unions``): a C++ union may have a default member
+    initializer on (at most) one of its variant members
+    (``union U { int x = 1; float y; };``), CastXML parses that member's
+    ``init`` attribute the same as an ordinary struct field, and
+    ``_diff_unions`` never looks at ``default`` at all — so without this,
+    a union variant's initializer being removed or changed went completely
+    undetected (Codex review, PR #582).
     """
     if not _both_castxml_backed(old, new):
         return []
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
-    old_map = {t.name: t for t in old.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl)}
-    new_map = {t.name: t for t in new.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl)}
+    old_map = {t.name: t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl)}
+    new_map = {t.name: t for t in new.types if _is_abi_surface_type(t, exclude_stdlib=excl)}
 
     for name, t_old in old_map.items():
         t_new = new_map.get(name)

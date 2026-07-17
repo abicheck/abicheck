@@ -496,7 +496,21 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   dump-to-JSON-then-compare-files workflow (as opposed to an in-memory
   `compare()` call), every persisted castxml snapshot silently lost the tag
   on reload, permanently disabling all eight gated detectors for that
-  workflow specifically. Now round-trips correctly.
+  workflow specifically. Now round-trips correctly. Two more fixes from a
+  further round: (1) the constructor-key normalization above handled a
+  by-value cv qualifier but not a TOP-LEVEL qualifier on a pointer
+  parameter itself (``int*`` vs ``int* volatile`` — the pointer VALUE is
+  volatile, not its pointee); string-level normalization can't tell that
+  apart from a genuinely-distinct pointee-const overload (both render as
+  ``"volatile int*"``), so the key is now built by reading the real castxml
+  XML structure directly, stripping at most one outermost `CvQualifiedType`
+  layer while leaving any inner (pointee-position) qualifier untouched; (2)
+  `FIELD_DEFAULT_INITIALIZER_REMOVED`/`_CHANGED` excluded unions entirely
+  (matching most other field-level detectors' union exclusion), but a
+  union variant genuinely can carry a default member initializer
+  (`union U { int x = 1; float y; };`) and `_diff_unions` never checked
+  `default` — so a union variant's initializer change went completely
+  undetected. Now included.
 - **MCP `abi_compare`**: a `--used-by`/`--required-symbol` response's
   `summary` (`total_changes`/`breaking`/`api_breaks`/`risk_changes`/
   `compatible`) is now recomputed after scoped-only changes and

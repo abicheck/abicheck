@@ -30,7 +30,6 @@ from .name_classification import (
     canonicalize_type_name as canonicalize_type_name,
     cv_qualifiers_only_differ as cv_qualifiers_only_differ,
     func_signature_cv_only_differ as func_signature_cv_only_differ,
-    func_signature_identity_type as func_signature_identity_type,
     is_abi_surface_type_name as is_abi_surface_type_name,
     is_compiler_internal_type as is_compiler_internal_type,
     is_cxx_runtime_library as is_cxx_runtime_library,

@@ -255,6 +255,37 @@ class TestFieldDefaultInitializerChanged:
         )
         assert ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED not in _kinds(r)
 
+    def test_union_variant_initializer_removed(self):
+        """A union may have a default member initializer on (at most) one
+        variant (``union U { int x = 1; float y; };``); _diff_unions never
+        looks at `default` at all, so this must not be silently excluded
+        the way most other field-level detectors exclude unions (Codex
+        review, PR #582)."""
+        t_old = RecordType(
+            name="U", kind="union", size_bits=32, is_union=True,
+            fields=[TypeField("x", "int", 0, default="1"),
+                    TypeField("y", "float", 0)],
+        )
+        t_new = RecordType(
+            name="U", kind="union", size_bits=32, is_union=True,
+            fields=[TypeField("x", "int", 0, default=None),
+                    TypeField("y", "float", 0)],
+        )
+        r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
+        assert ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED in _kinds(r)
+
+    def test_union_variant_initializer_changed(self):
+        t_old = RecordType(
+            name="U", kind="union", size_bits=32, is_union=True,
+            fields=[TypeField("x", "int", 0, default="1")],
+        )
+        t_new = RecordType(
+            name="U", kind="union", size_bits=32, is_union=True,
+            fields=[TypeField("x", "int", 0, default="2")],
+        )
+        r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
+        assert ChangeKind.FIELD_DEFAULT_INITIALIZER_CHANGED in _kinds(r)
+
 
 # ── {func,var,type,enum}_deprecated_{added,removed} ─────────────────────────
 
@@ -498,6 +529,18 @@ _FIELD_INIT_XML = """<?xml version="1.0"?>
   <File id="f1" name="test.h"/>
 </CastXML>"""
 
+_UNION_FIELD_INIT_XML = """<?xml version="1.0"?>
+<CastXML>
+  <Union id="_2" name="U" context="_1" file="f1" line="1"
+          members="_4 _5" size="32" align="32"/>
+  <Field id="_4" name="x" type="_7" offset="0" init="1"/>
+  <Field id="_5" name="y" type="_8" offset="0"/>
+  <FundamentalType id="_7" name="int" size="32"/>
+  <FundamentalType id="_8" name="float" size="32"/>
+  <Namespace id="_1" name="::"/>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+
 _OVERRIDE_METHOD_XML = """<?xml version="1.0"?>
 <CastXML>
   <Class id="_2" name="Derived" context="_1" file="f1" line="1" size="8" align="8"/>
@@ -534,6 +577,16 @@ class TestCastxmlParserPopulatesNewAttributes:
     def test_field_default_initializer(self) -> None:
         p = _make_parser(_FIELD_INIT_XML)
         assert p.parse_types()[0].fields[0].default == "30"
+
+    def test_union_variant_default_initializer(self) -> None:
+        """The castxml field parser is generic over record kind — a union
+        variant's `init` attribute is captured the same as an ordinary
+        struct field's (Codex review, PR #582: only the diff-level filter
+        was excluding unions, not the parser)."""
+        p = _make_parser(_UNION_FIELD_INIT_XML)
+        fields = {f.name: f for f in p.parse_types()[0].fields}
+        assert fields["x"].default == "1"
+        assert fields["y"].default is None
 
     def test_override_specifier(self) -> None:
         p = _make_parser(_OVERRIDE_METHOD_XML)

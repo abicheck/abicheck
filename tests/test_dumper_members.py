@@ -474,6 +474,48 @@ _CTOR_LONG_ARG_XML = """<?xml version="1.0"?>
   <File id="f1" name="test.h"/>
 </CastXML>"""
 
+# Pointer-parameter ctor variants: plain, a TOP-LEVEL volatile-qualified
+# pointer (the pointer VALUE itself is volatile — CvQualifiedType directly
+# wrapping PointerType), and a POINTEE-const pointer (PointerType wrapping
+# CvQualifiedType — points to a const int, a genuinely distinct overload).
+_CTOR_PTR_ARG_XML = """<?xml version="1.0"?>
+<CastXML>
+  <Class id="_2" name="Widget" context="_1" file="f1" line="1"/>
+  <Constructor id="_3" name="Widget" context="_2" file="f1" line="2" access="public">
+    <Argument name="v" type="_10"/>
+  </Constructor>
+  <PointerType id="_10" type="_7"/>
+  <FundamentalType id="_7" name="int" size="32"/>
+  <Namespace id="_1" name="::"/>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+
+_CTOR_VOLATILE_PTR_ARG_XML = """<?xml version="1.0"?>
+<CastXML>
+  <Class id="_2" name="Widget" context="_1" file="f1" line="1"/>
+  <Constructor id="_3" name="Widget" context="_2" file="f1" line="2" access="public">
+    <Argument name="v" type="_11"/>
+  </Constructor>
+  <CvQualifiedType id="_11" type="_10" volatile="1"/>
+  <PointerType id="_10" type="_7"/>
+  <FundamentalType id="_7" name="int" size="32"/>
+  <Namespace id="_1" name="::"/>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+
+_CTOR_PTR_TO_CONST_ARG_XML = """<?xml version="1.0"?>
+<CastXML>
+  <Class id="_2" name="Widget" context="_1" file="f1" line="1"/>
+  <Constructor id="_3" name="Widget" context="_2" file="f1" line="2" access="public">
+    <Argument name="v" type="_12"/>
+  </Constructor>
+  <PointerType id="_12" type="_13"/>
+  <CvQualifiedType id="_13" type="_7" const="1"/>
+  <FundamentalType id="_7" name="int" size="32"/>
+  <Namespace id="_1" name="::"/>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+
 
 class TestByValueFieldQualifierEndToEndDiff:
     """Full parser -> compare() pipeline: a by-value field gaining `volatile`
@@ -541,3 +583,26 @@ class TestUnmangledCtorSyntheticKeyCvStability:
         assert ChangeKind.FUNC_REMOVED not in kinds
         assert ChangeKind.FUNC_ADDED not in kinds
         assert ChangeKind.FUNC_PARAMS_CHANGED not in kinds
+
+    def test_top_level_pointer_volatile_keeps_same_synthetic_key(self) -> None:
+        """A TOP-LEVEL qualifier on a pointer PARAMETER itself (the pointer
+        VALUE is volatile — castxml's ``CvQualifiedType`` directly wrapping
+        ``PointerType``) must not change the key either: like a by-value
+        qualifier, it has zero effect on real Itanium mangling. This can't
+        be distinguished from a POINTEE-position qualifier by pattern-
+        matching the rendered spelling — both ``Widget(int*)`` and a
+        volatile pointer VALUE render identically as ``"volatile int*"`` —
+        so the fix must read the real XML structure (Codex review, PR #582,
+        fresh evidence beyond the earlier by-value-only case)."""
+        plain = _make_parser(_CTOR_PTR_ARG_XML).parse_functions()[0]
+        volatile_ptr = _make_parser(_CTOR_VOLATILE_PTR_ARG_XML).parse_functions()[0]
+        assert plain.mangled == volatile_ptr.mangled
+
+    def test_pointee_const_still_gets_a_different_key(self) -> None:
+        """Negative control: a POINTEE-position qualifier (``const int*`` —
+        ``PointerType`` wrapping ``CvQualifiedType``) DOES distinguish a
+        real overload (different Itanium mangling: ``PKi`` vs ``Pi``) and
+        must keep a different key."""
+        plain = _make_parser(_CTOR_PTR_ARG_XML).parse_functions()[0]
+        ptr_to_const = _make_parser(_CTOR_PTR_TO_CONST_ARG_XML).parse_functions()[0]
+        assert plain.mangled != ptr_to_const.mangled

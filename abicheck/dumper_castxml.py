@@ -40,7 +40,6 @@ from .model import (
     TypeField,
     Variable,
     Visibility,
-    func_signature_identity_type,
 )
 from .provenance import build_public_set, classify_origin, header_from_location
 
@@ -704,9 +703,39 @@ class _CastxmlParser:
             name = f"operator{name}"
         return name
 
-    def _parse_function_params(self, el: Element) -> tuple[list[Param], bool]:
-        """Collect a function element's parameters and whether it is C-variadic."""
+    def _ctor_param_identity_type(self, type_id: str) -> str:
+        """Type spelling for a synthesized constructor identity key: like
+        ``_type_name``, but with at most one OUTERMOST ``CvQualifiedType``
+        layer removed.
+
+        A top-level cv-qualifier — one directly wrapping the parameter's own
+        type, whether that type is by-value (``volatile int``) or a pointer
+        VALUE itself (``int * volatile``, i.e. ``CvQualifiedType`` directly
+        wrapping ``PointerType``) — participates in neither real Itanium
+        mangling nor overload identity, so it must not change the
+        synthesized key either (Codex review, PR #582). A POINTEE-position
+        qualifier (``const int *`` — ``PointerType`` wrapping
+        ``CvQualifiedType``) is NOT touched: that one genuinely does
+        distinguish two overloads and would mangle differently, so it must
+        keep contributing to the key. This can't be done by pattern-matching
+        the rendered ``_type_name`` string (both cases can render
+        identically, e.g. ``"volatile int*"`` for either a volatile pointer
+        VALUE or a pointer to volatile int) — only the real XML structure
+        tells them apart: only strip when the type id itself resolves
+        directly to a ``CvQualifiedType`` element.
+        """
+        el = self._resolve(type_id)
+        if el is not None and el.tag == "CvQualifiedType":
+            return self._type_name(el.get("type", ""))
+        return self._type_name(type_id)
+
+    def _parse_function_params(self, el: Element) -> tuple[list[Param], bool, list[str]]:
+        """Collect a function element's parameters, whether it is
+        C-variadic, and each parameter's ctor-identity-key type spelling
+        (mirrors ``params`` positionally; see ``_ctor_param_identity_type``).
+        """
         params: list[Param] = []
+        ctor_identity_types: list[str] = []
         is_variadic = False
         for arg in el:
             if arg.tag == "Argument":
@@ -734,14 +763,15 @@ class _CastxmlParser:
                         is_restrict=p_restrict,
                     )
                 )
+                ctor_identity_types.append(self._ctor_param_identity_type(p_type_id))
             elif arg.tag == "Ellipsis":
                 # Trailing C ellipsis (...) — the function is variadic.
                 is_variadic = True
-        return params, is_variadic
+        return params, is_variadic, ctor_identity_types
 
     @staticmethod
     def _function_mangled_name(
-        el: Element, name: str, params: list[Param], raw_mangled: str
+        el: Element, name: str, ctor_identity_types: list[str], raw_mangled: str
     ) -> str:
         """Pick the snapshot key for a function: mangled name, ctor synthesis, or plain name."""
         if raw_mangled:
@@ -754,14 +784,17 @@ class _CastxmlParser:
             # deterministic internal identity from the display name and
             # normalized parameter types; it is intentionally not an ABI
             # symbol, only a stable snapshot key for source-level overloads.
-            # func_signature_identity_type (not the raw p.type) drops a
-            # top-level BY-VALUE cv qualifier the same way real Itanium
-            # mangling would: without it, a layout-neutral declaration
-            # change like ``Widget(int)`` -> ``Widget(volatile int)``
-            # produced two different synthetic keys, so the diff engine saw
-            # a removed + added constructor instead of the same overload
-            # reaching the cv-neutral param comparison (Codex review, PR #582).
-            param_sig = ",".join(func_signature_identity_type(p.type) for p in params)
+            # ctor_identity_types (not the raw Param.type strings) drops a
+            # TOP-LEVEL cv qualifier the same way real Itanium mangling
+            # would — see _ctor_param_identity_type's docstring: without it,
+            # a layout-neutral declaration change like ``Widget(int)`` ->
+            # ``Widget(volatile int)`` (by-value) or ``Widget(int*)`` ->
+            # ``Widget(int* volatile)`` (the pointer VALUE itself, not its
+            # pointee) produced two different synthetic keys, so the diff
+            # engine saw a removed + added constructor instead of the same
+            # overload reaching the cv-neutral param comparison (Codex
+            # review, PR #582).
+            param_sig = ",".join(ctor_identity_types)
             return f"{SYNTHETIC_CTOR_KEY_PREFIX}{name}({param_sig})"
         return name  # C functions: use plain name
 
@@ -848,8 +881,8 @@ class _CastxmlParser:
         ret_type = self._type_name(ret_id) if ret_id else "void"
         ret_ptr_depth = self._pointer_depth(ret_id) if ret_id else 0
 
-        params, is_variadic = self._parse_function_params(el)
-        mangled = self._function_mangled_name(el, name, params, raw_mangled)
+        params, is_variadic, ctor_identity_types = self._parse_function_params(el)
+        mangled = self._function_mangled_name(el, name, ctor_identity_types, raw_mangled)
 
         # Real ELF export evidence overrides castxml's language-mode guess:
         # castxml ALWAYS emits a pseudo-Itanium `mangled` attribute, even for
