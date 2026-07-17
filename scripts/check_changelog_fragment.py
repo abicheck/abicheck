@@ -42,9 +42,12 @@ ROOT = Path(__file__).resolve().parent.parent
 # Fragment-directory files that don't count as a "changelog entry" themselves.
 _NON_FRAGMENT_NAMES = {"README.md"}
 
+# A (status, path) pair, as produced by `git diff --name-status`.
+ChangedFile = tuple[str, str]
 
-def changed_files(base: str, head: str) -> list[str]:
-    """Return paths changed between base and head, including deletions.
+
+def changed_files(base: str, head: str) -> list[ChangedFile]:
+    """Return (status, path) pairs changed between base and head, incl. deletions.
 
     A PR that only *removes* an `abicheck/**/*.py` module/API is exactly the
     kind of user-visible change that needs a fragment, so deletions (`D`)
@@ -53,14 +56,17 @@ def changed_files(base: str, head: str) -> list[str]:
     single `R` entry — with rename detection on, `--name-only` prints only
     the destination path, so a file moved *out* of `abicheck/` (e.g.
     `abicheck/foo.py` -> `tools/foo.py`) would never surface its old,
-    now-deleted `abicheck/` path.
+    now-deleted `abicheck/` path. The status is kept (not just the path) so
+    a *deleted* changelog.d/ fragment can't satisfy the gate — only an
+    added/modified fragment actually gives `scriv collect` something to
+    include in the next release.
     """
     result = subprocess.run(
         [
             "git",
             "diff",
             "--no-renames",
-            "--name-only",
+            "--name-status",
             "--diff-filter=ACDM",
             f"{base}...{head}",
         ],
@@ -69,18 +75,27 @@ def changed_files(base: str, head: str) -> list[str]:
         text=True,
         check=True,
     )
-    return [line for line in result.stdout.splitlines() if line]
+    changes = []
+    for line in result.stdout.splitlines():
+        if not line:
+            continue
+        status, path = line.split("\t", 1)
+        changes.append((status, path))
+    return changes
 
 
-def needs_changelog_entry(changed: list[str]) -> bool:
+def needs_changelog_entry(changed: list[ChangedFile]) -> bool:
     """True if the diff touches abicheck's source (not just tests/docs/scripts)."""
-    return any(f.startswith("abicheck/") and f.endswith(".py") for f in changed)
+    return any(
+        path.startswith("abicheck/") and path.endswith(".py")
+        for _status, path in changed
+    )
 
 
-def has_changelog_fragment(changed: list[str]) -> bool:
-    """True if the diff adds/modifies a real fragment file under changelog.d/."""
-    for f in changed:
-        if not f.startswith("changelog.d/"):
+def has_changelog_fragment(changed: list[ChangedFile]) -> bool:
+    """True if the diff adds/modifies (not just deletes) a fragment in changelog.d/."""
+    for status, f in changed:
+        if status == "D" or not f.startswith("changelog.d/"):
             continue
         name = f.split("/", 1)[1]
         if name in _NON_FRAGMENT_NAMES or name.endswith(".j2"):
