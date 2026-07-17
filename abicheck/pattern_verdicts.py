@@ -334,6 +334,18 @@ def _emit_lost_invariants(
             ),
             modulation_reason="opaque-invariant-broken",
             modulation_rule="lost-opaque-invariant",
+            # ADR-044 (Codex review): this finding only exists because `name`
+            # was tagged OPAQUE_POINTER in `old_idioms`, which itself requires
+            # `_public_pointer_only` to have found a genuine `Visibility.PUBLIC`
+            # function referencing it (idioms.py._recognise_opaque) — the same
+            # reliable "finding's mere existence already proves the subject is
+            # public" signal the other Visibility.PUBLIC-filtered late-detector
+            # findings have. apply_pattern_verdicts runs after MarkReachability
+            # (via checker._apply_pattern_verdicts_step, well after
+            # post_processing.DEFAULT_PIPELINE), so nothing else would ever tag
+            # this Change.
+            public_reachable=True,
+            reachability_kind="direct_public_symbol",
         )
         existing.add(key)
         logger.warning("pattern-verdict raise: %s lost opaque invariant", name)
@@ -366,6 +378,15 @@ def _emit_lost_invariants(
         if key in existing:
             continue
         edges = [f"handle typedef {alias}: {old_target!r} -> {new_target!r}"]
+        # ADR-044: deliberately NOT tagged public_reachable, unlike
+        # OPAQUE_INVARIANT_BROKEN above. `_recognise_handle` walks
+        # `snap.typedefs` (a plain `dict[str, str]`) unconditionally — a
+        # typedef alias carries no Visibility field at all (unlike
+        # Function/Variable), so there is no reliable signal that `alias`
+        # itself is on the public surface rather than an internal typedef the
+        # header-based scan merely happened to see. Tagging it would
+        # reintroduce the reverted "no reliable signal" heuristic bug (see
+        # MANDATORY_TEMPLATE_PARAM_ADDED's identical reasoning).
         change = Change(
             kind=ChangeKind.HANDLE_TYPE_CHANGED,
             symbol=alias,

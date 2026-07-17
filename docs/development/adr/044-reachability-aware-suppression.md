@@ -487,6 +487,34 @@ since JSON/SARIF/JUnit reporters already round-trip `Change` via
   `MarkReachability`/`DetectInternalLeaks`/`DemoteUnreachableInternalChurn`/
   `DetectNamespacePatterns` — added to the P1 roadmap below as a concrete,
   scoped follow-up rather than attempted reactively in this round.
+- **A sixth late-detector gap, this time entirely outside
+  `post_processing.py` (Codex).** Fresh evidence: `pattern_verdicts.
+  apply_pattern_verdicts()` — invoked from `checker._apply_pattern_verdicts_step`,
+  well after `post_processing.DEFAULT_PIPELINE` (and thus `MarkReachability`/
+  `ApplySuppression`) has already run — appends new `OPAQUE_INVARIANT_BROKEN`/
+  `HANDLE_TYPE_CHANGED` `Change`s that `checker._filter_pattern_synthetic`
+  then runs through its own `suppression.is_suppressed(c)` call, the same
+  "late synthetic finding, no diagnostic path" shape as the `diff_namespaces.py`/
+  `diff_templates.py`/`diff_cpp_patterns.py` sweeps above, just reached from a
+  completely different module (`--pattern-verdicts`, ADR-027, not part of the
+  `DEFAULT_PIPELINE` steps this ADR had audited). Audited both kinds:
+  `OPAQUE_INVARIANT_BROKEN`'s subject type is only ever tagged `OPAQUE_POINTER`
+  in `old_idioms` (a precondition for this finding) when `idioms.
+  _recognise_opaque`/`_public_pointer_only` found a genuine `Visibility.PUBLIC`
+  function referencing it — the same reliable signal the other
+  `Visibility.PUBLIC`-filtered late-detector findings have — so tagged
+  `public_reachable=True`/`reachability_kind="direct_public_symbol"` at
+  construction. `HANDLE_TYPE_CHANGED`'s subject is a typedef alias:
+  `AbiSnapshot.typedefs` is a plain `dict[str, str]` with no visibility
+  field at all (typedefs, unlike `Function`/`Variable`, carry none), so
+  `_recognise_handle` walking every declared typedef gives no reliable
+  public/private signal for the alias itself — deliberately left untagged,
+  same reasoning as `MANDATORY_TEMPLATE_PARAM_ADDED`. Added regression
+  assertions for both (including the deliberately-untagged case) to
+  `test_pattern_verdicts.py`. A wider audit of whether any *other*
+  ADR-027/pattern-verdict-adjacent modules construct late synthetic findings
+  the same way remains open — this round only confirmed the two kinds
+  Codex's fresh evidence named.
 
 ### D2. `Suppression` gains a reachability guard
 

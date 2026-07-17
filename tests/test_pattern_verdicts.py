@@ -242,6 +242,11 @@ def test_lost_opaqueness_emits_break_not_silent_demotion() -> None:
     assert ChangeKind.OPAQUE_INVARIANT_BROKEN in kinds
     broken = next(c for c in changes if c.kind == ChangeKind.OPAQUE_INVARIANT_BROKEN)
     assert broken.effective_verdict is None  # a real BREAKING kind, not demoted
+    # ADR-044: OPAQUE_POINTER tagging requires a genuine Visibility.PUBLIC
+    # function reference (idioms._recognise_opaque/_public_pointer_only), so
+    # this finding's mere existence already proves its subject is public.
+    assert broken.public_reachable is True
+    assert broken.reachability_kind == "direct_public_symbol"
     # The layout change itself must NOT have been silently demoted.
     layout = next(c for c in changes if c.kind == ChangeKind.TYPE_SIZE_CHANGED)
     assert layout.effective_verdict is None
@@ -599,6 +604,11 @@ def test_handle_token_change_emits_break() -> None:
     )
     assert any(c.kind == ChangeKind.HANDLE_TYPE_CHANGED for c in changes)
     assert any(m["rule_id"] == "handle-token-changed" for m in ledger)
+    # ADR-044: deliberately untagged — typedefs carry no Visibility field, so
+    # there is no reliable signal that the alias itself is public.
+    handle = next(c for c in changes if c.kind == ChangeKind.HANDLE_TYPE_CHANGED)
+    assert handle.public_reachable is False
+    assert handle.reachability_kind is None
 
 
 def test_builtin_pointer_typedef_is_not_a_handle() -> None:
