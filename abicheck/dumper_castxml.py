@@ -837,9 +837,29 @@ class _CastxmlParser:
                 is_variadic = True
         return params, is_variadic, ctor_identity_types
 
+    def _enclosing_class_qualified_name(self, el: Element) -> str:
+        """Fully-qualified (``ns::Outer::Class``) name of the class/struct/
+        union enclosing a Constructor/Destructor element *el*.
+
+        Distinct from calling ``_qualified_name(el)`` directly on *el*: a
+        Constructor/Destructor's own bare ``name`` attribute already equals
+        the class's own leaf name, so walking from *el* itself would count
+        that leaf twice (``Foo::Foo`` instead of ``ns::Foo``). Walking from
+        *el*'s ``context`` (the class element) instead starts one level up,
+        at the class's own name.
+        """
+        class_el = self._resolve(el.get("context", ""))
+        if class_el is None:
+            return el.get("name", "")
+        return self._qualified_name(class_el)
+
     @staticmethod
     def _function_mangled_name(
-        el: Element, name: str, ctor_identity_types: list[str], raw_mangled: str
+        el: Element,
+        name: str,
+        ctor_identity_types: list[str],
+        raw_mangled: str,
+        qualified_scope: str = "",
     ) -> str:
         """Pick the snapshot key for a function: mangled name, ctor synthesis, or plain name."""
         if raw_mangled:
@@ -862,8 +882,27 @@ class _CastxmlParser:
             # engine saw a removed + added constructor instead of the same
             # overload reaching the cv-neutral param comparison (Codex
             # review, PR #582).
+            #
+            # Use the fully-qualified enclosing class name (falling back to
+            # the bare *name* only if it couldn't be resolved), not just the
+            # bare class name: two public classes with the same leaf name in
+            # different namespaces (``ns1::Foo``/``ns2::Foo``) would
+            # otherwise synthesize the identical key, silently colliding in
+            # ``AbiSnapshot.function_map`` — one class's constructor
+            # additions/removals then went undetected, "first-wins" (Codex
+            # review, PR #582). A non-namespaced class's qualified name is
+            # just its bare name, so this is a no-op for the common case.
+            scope = qualified_scope or name
             param_sig = ",".join(ctor_identity_types)
-            return f"{SYNTHETIC_CTOR_KEY_PREFIX}{name}({param_sig})"
+            return f"{SYNTHETIC_CTOR_KEY_PREFIX}{scope}({param_sig})"
+        if el.tag == "Destructor" and qualified_scope:
+            # Same namespace-collision reasoning as above, applied to the
+            # destructor's synthesized "~ClassName" key: qualify it as
+            # "~ns::Class" instead of bare "~Class". The leading "~" is
+            # preserved (is_synthetic_dtor_key() checks for it), and a
+            # non-namespaced class again collapses to the pre-existing
+            # "~Class" form.
+            return f"~{qualified_scope}"
         return name  # C functions: use plain name
 
     def _function_source_location(
@@ -950,7 +989,14 @@ class _CastxmlParser:
         ret_ptr_depth = self._pointer_depth(ret_id) if ret_id else 0
 
         params, is_variadic, ctor_identity_types = self._parse_function_params(el)
-        mangled = self._function_mangled_name(el, name, ctor_identity_types, raw_mangled)
+        qualified_scope = (
+            self._enclosing_class_qualified_name(el)
+            if el.tag in ("Constructor", "Destructor")
+            else ""
+        )
+        mangled = self._function_mangled_name(
+            el, name, ctor_identity_types, raw_mangled, qualified_scope
+        )
 
         # Real ELF export evidence overrides castxml's language-mode guess:
         # castxml ALWAYS emits a pseudo-Itanium `mangled` attribute, even for

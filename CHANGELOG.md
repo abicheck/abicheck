@@ -578,6 +578,19 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
     occurrence as `"...(None → None)"` instead of the real values (e.g.
     `30 → 60`). `FIELD_DEFAULT_INITIALIZER_REMOVED`'s template does not
     reference `{old}`/`{new}` and was unaffected.
+  - **Synthetic constructor/destructor keys were not namespace-qualified**:
+    when castxml omits a constructor's/destructor's real mangled name, the
+    synthesized snapshot key (`__abicheck_ctor__ClassName(...)` /
+    `~ClassName`) used only the class's bare leaf name. Two public classes
+    with the same leaf name in different namespaces (`ns1::Foo` /
+    `ns2::Foo`) therefore synthesized the identical key, silently colliding
+    in `AbiSnapshot.function_map` — one class's own constructor/destructor
+    additions or removals went undetected ("first-wins", confirmed via a
+    live castxml dump of two same-named-but-namespaced classes). Fixed by
+    qualifying the synthetic key with the enclosing class's fully-qualified
+    name (`_enclosing_class_qualified_name`, reusing the existing
+    `_qualified_name` context-walk); a non-namespaced class's qualified name
+    is just its bare name, so the common case's key is unchanged.
 - **MCP `abi_compare`**: a `--used-by`/`--required-symbol` response's
   `summary` (`total_changes`/`breaking`/`api_breaks`/`risk_changes`/
   `compatible`) is now recomputed after scoped-only changes and

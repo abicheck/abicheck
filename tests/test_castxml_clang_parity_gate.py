@@ -375,14 +375,50 @@ class TestDestructorVisibility:
         castxml_snap, _clang_snap = cpp_snapshots
         assert castxml_snap.elf is not None and castxml_snap.elf.symbols
 
+        # The synthetic key is namespace-qualified ("~outer::inner::Base1",
+        # not bare "~Base1" — see TestDestructorNamespaceQualification below),
+        # so look it up by display name rather than hardcoding the key.
+        base1_mangled = next(
+            f.mangled for f in castxml_snap.functions if f.name == "~Base1"
+        )
         new_snap = copy.deepcopy(castxml_snap)
         new_snap.functions = [
-            f for f in new_snap.functions if f.mangled != "~Base1"
+            f for f in new_snap.functions if f.mangled != base1_mangled
         ]
         r = compare(castxml_snap, new_snap)
-        kinds = {c.kind for c in r.changes if c.symbol == "~Base1"}
+        kinds = {c.kind for c in r.changes if c.symbol == base1_mangled}
         assert ChangeKind.FUNC_REMOVED in kinds
         assert r.verdict == Verdict.BREAKING
+
+
+class TestDestructorNamespaceQualification:
+    """Regression guard (Codex review, PR #582): the synthetic destructor
+    (and constructor) key must be namespace-qualified, not just the bare
+    class name. Base1/Base2/VBase all live in ``outer::inner`` in this
+    corpus's real castxml dump — if the synthetic key were still bare
+    "~Base1", it would be indistinguishable from an unrelated top-level (or
+    differently-namespaced) class also named Base1, silently colliding in
+    AbiSnapshot.function_map."""
+
+    def test_synthetic_destructor_key_is_namespace_qualified(
+        self, cpp_snapshots
+    ) -> None:
+        castxml_snap, _clang_snap = cpp_snapshots
+        base1 = next(f for f in castxml_snap.functions if f.name == "~Base1")
+        assert base1.mangled == "~outer::inner::Base1"
+
+    def test_synthetic_constructor_key_is_namespace_qualified(
+        self, cpp_snapshots
+    ) -> None:
+        castxml_snap, _clang_snap = cpp_snapshots
+        widget_ctors = [
+            f
+            for f in castxml_snap.functions
+            if f.name == "Widget" and not f.mangled.startswith("~")
+        ]
+        assert widget_ctors
+        for f in widget_ctors:
+            assert f.mangled.startswith("__abicheck_ctor__outer::inner::Widget(")
 
 
 # ── Variables and constants ─────────────────────────────────────────────────

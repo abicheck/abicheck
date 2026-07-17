@@ -231,3 +231,90 @@ class TestDestructorOverloadKeyExemptFromElfNarrowing:
         r = compare(old, new)
         assert ChangeKind.FUNC_REMOVED in {c.kind for c in r.changes}
         assert r.verdict == Verdict.BREAKING
+
+
+def _make_root_with_namespaced_same_name_classes() -> Element:
+    """Mirror castxml output for two public classes named ``Foo`` in
+    different namespaces, each with a public virtual destructor and an
+    unmangled constructor — the scenario that used to collide synthetic
+    keys (Codex review, PR #582)."""
+    root = Element("CastXML", attrib={"format": "1.4.0"})
+
+    f1 = SubElement(root, "File")
+    f1.set("id", "f1")
+    f1.set("name", "lib.h")
+
+    SubElement(root, "Namespace", attrib={"id": "_1", "name": "::"})
+    SubElement(root, "Namespace", attrib={"id": "_10", "name": "ns1", "context": "_1"})
+    SubElement(root, "Namespace", attrib={"id": "_11", "name": "ns2", "context": "_1"})
+
+    for ns_id, cls_id, dtor_id, ctor_id in (
+        ("_10", "_20", "_30", "_40"),
+        ("_11", "_21", "_31", "_41"),
+    ):
+        cls = SubElement(root, "Class")
+        cls.set("id", cls_id)
+        cls.set("name", "Foo")
+        cls.set("context", ns_id)
+        cls.set("file", "f1")
+        cls.set("location", "f1:1")
+
+        dtor = SubElement(root, "Destructor")
+        dtor.set("id", dtor_id)
+        dtor.set("name", "Foo")  # castxml: bare class name, never "~Foo"
+        dtor.set("context", cls_id)
+        dtor.set("file", "f1")
+        dtor.set("location", "f1:2")
+        dtor.set("access", "public")
+        dtor.set("virtual", "1")
+
+        ctor = SubElement(root, "Constructor")
+        ctor.set("id", ctor_id)
+        ctor.set("name", "Foo")
+        ctor.set("context", cls_id)
+        ctor.set("file", "f1")
+        ctor.set("location", "f1:3")
+        ctor.set("access", "public")
+
+    return root
+
+
+class TestSyntheticCtorDtorKeysAreNamespaceQualified:
+    """Regression guard (Codex review, PR #582): two same-named classes in
+    different namespaces used to synthesize the identical bare-name key
+    ("~Foo" / "__abicheck_ctor__Foo()"), silently colliding in
+    AbiSnapshot.function_map — one class's own added/removed constructor or
+    destructor went undetected, "first-wins". The synthetic key is now
+    qualified by the enclosing class's fully-qualified name."""
+
+    def test_destructor_keys_differ_across_namespaces(self) -> None:
+        root = _make_root_with_namespaced_same_name_classes()
+        parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+        funcs = parser.parse_functions()
+        dtor_mangled = {f.mangled for f in funcs if f.name == "~Foo"}
+        assert dtor_mangled == {"~ns1::Foo", "~ns2::Foo"}
+
+    def test_constructor_keys_differ_across_namespaces(self) -> None:
+        root = _make_root_with_namespaced_same_name_classes()
+        parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+        funcs = parser.parse_functions()
+        ctor_mangled = {f.mangled for f in funcs if f.name == "Foo"}
+        assert ctor_mangled == {
+            "__abicheck_ctor__ns1::Foo()",
+            "__abicheck_ctor__ns2::Foo()",
+        }
+
+    def test_all_four_entries_survive_indexing(self) -> None:
+        """Distinct keys mean no snapshot-level collision: all four
+        constructor/destructor entries (two classes x ctor+dtor) reach
+        AbiSnapshot.function_map instead of one pair silently overwriting
+        the other."""
+        from abicheck.model import AbiSnapshot
+
+        root = _make_root_with_namespaced_same_name_classes()
+        parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+        funcs = parser.parse_functions()
+        assert len(funcs) == 4
+
+        snap = AbiSnapshot(library="libfoo.so", version="1", functions=funcs)
+        assert len(snap.function_map) == 4
