@@ -187,21 +187,32 @@ _ARCH_CLAIM_TO_ELF_EI_DATA: dict[str, str] = {
 #: Wheel-tag architecture claims whose ``e_machine`` value is shared across
 #: BOTH a 32-bit and a 64-bit variant, distinguished only by ``EI_CLASS``
 #: (:attr:`ElfMetadata.elf_class`): ``EM_RISCV`` (RV32/RV64),
-#: ``EM_LOONGARCH`` (LoongArch32/64), and ``EM_S390`` (31/32-bit S/390 vs.
-#: 64-bit z/Architecture ``s390x``) — a 32-bit ELF would otherwise pass a
-#: ``riscv64``/``loongarch64``/``s390x`` claim purely because ``e_machine``
-#: matched (Codex review #583).
+#: ``EM_LOONGARCH`` (LoongArch32/64), ``EM_S390`` (31/32-bit S/390 vs.
+#: 64-bit z/Architecture ``s390x``), and — despite ``e_machine`` alone
+#: naming a single ISA — ``EM_X86_64``/``EM_AARCH64`` too: the x86-64 x32
+#: ABI uses ``EM_X86_64`` with ``ELFCLASS32`` (ILP32 pointers on a 64-bit
+#: CPU), and AArch64's (now-deprecated) ILP32 ABI uses ``EM_AARCH64`` with
+#: ``ELFCLASS32`` the same way — both are distinct, non-interchangeable
+#: ABIs a plain ``x86_64``/``aarch64`` wheel claim must reject (Codex
+#: review #583).
 #:
-#: Deliberately does NOT include ``x86_64``/``aarch64``/``i686``/``armv7l``/
-#: ``ppc64``/``ppc64le``: their ``e_machine`` values are already bitness-
-#: exclusive (``EM_X86_64``/``EM_AARCH64``/``EM_PPC64`` are 64-bit only;
-#: ``EM_386``/``EM_ARM`` here are 32-bit only), so the class check would be
-#: redundant there — and actively harmful for the 32-bit claims:
-#: :attr:`ElfMetadata.elf_class` defaults to 64, so a legacy/partial
-#: snapshot with ``machine`` captured but ``elf_class`` never set would
-#: false-positive an ``i686``/``armv7l`` claim's otherwise-matching 32-bit
-#: binary as a class mismatch (Codex review #583, follow-up).
+#: Only ``x86_64``/``aarch64`` are safe to include among the *64-bit*
+#: claims sharing an otherwise-unambiguous ``e_machine``: unlike the
+#: 32-bit claims below, :attr:`ElfMetadata.elf_class`'s default (64)
+#: already matches their expected value, so a legacy/partial snapshot
+#: that never explicitly set ``elf_class`` degrades safely rather than
+#: false-positiving (Codex review #583, follow-up). ``ppc64``/``ppc64le``
+#: have no known ``ELFCLASS32`` variant sharing ``EM_PPC64``, so they add
+#: no detection value and are omitted.
+#:
+#: Deliberately does NOT include ``i686``/``armv7l``: both are 32-bit-only
+#: claims where :attr:`ElfMetadata.elf_class`'s 64 default is the *wrong*
+#: direction — a legacy/partial snapshot with ``machine`` captured but
+#: ``elf_class`` never set would false-positive an otherwise-matching
+#: 32-bit binary as a class mismatch (Codex review #583, follow-up).
 _ARCH_CLAIM_TO_ELF_CLASS: dict[str, int] = {
+    "x86_64": 64,
+    "aarch64": 64,
     "s390x": 64,
     "riscv64": 64,
     "loongarch64": 64,
@@ -275,17 +286,24 @@ def check_wheel_tag_architecture_mismatch(
 
     ``e_machine``/``EI_DATA`` also don't prove word size: ``riscv64``,
     ``loongarch64``, and ``s390x`` each share one ``e_machine`` value across
-    both a 32-bit and a 64-bit variant, distinguished only by
-    :attr:`ElfMetadata.elf_class`. Checked against every claim's expected
-    value in :data:`_ARCH_CLAIM_TO_ELF_CLASS` (Codex review #583).
+    both a 32-bit and a 64-bit variant; ``x86_64``/``aarch64`` do too via
+    the x86-64 x32 and AArch64 ILP32 ABIs (``ELFCLASS32`` on an otherwise
+    64-bit-only ``e_machine``), both distinct, non-interchangeable ABIs a
+    plain 64-bit claim must reject. Distinguished only by
+    :attr:`ElfMetadata.elf_class`, checked against every claim's expected
+    value in :data:`_ARCH_CLAIM_TO_ELF_CLASS` (Codex review #583) —
+    deliberately excluding ``i686``/``armv7l``, where the field's 64
+    default would false-positive an unset-``elf_class`` legacy snapshot.
 
     An ``armv7l`` claim additionally requires the hard-float armhf ABI —
     EABI version 5 *and* the explicit hard-float e_flags bit. Once
     ``abi_flags`` is non-empty at all, a missing ``"float-hard"`` token
-    (soft-float, or neither float-ABI bit set) or an ``"eabiN"`` token
-    where N != 5 is flagged — manylinux's ``armv7l`` tag specifically means
-    armhf, and any of those binaries shares the same ``e_machine``/
-    ``EI_DATA`` but is not actually loadable under that tag's runtime
+    (soft-float, or neither float-ABI bit set), or a missing/non-5
+    ``"eabiN"`` token (absence means the real EABI-version field is
+    exactly 0, since ``_decode_abi_flags`` always evaluates it), is
+    flagged — manylinux's ``armv7l`` tag specifically means armhf, and any
+    of those binaries shares the same ``e_machine``/``EI_DATA`` but is not
+    actually loadable under that tag's runtime
     expectations. A fully empty ``abi_flags`` (no decode ran — a legacy/
     undecoded snapshot) still degrades safely rather than false-positiving
     on missing evidence (Codex review #583, three rounds).
@@ -357,14 +375,17 @@ def check_wheel_tag_architecture_mismatch(
                 # or a hard-float binary built against an older EABI (e.g.
                 # eabi4) all share the same e_machine/EI_DATA but cannot
                 # satisfy an armv7l-tagged wheel's runtime expectations.
-                # _decode_abi_flags always evaluates both float e_flags bits
-                # for EM_ARM, so once abi_flags is non-empty at all (decode
-                # actually ran), a missing "float-hard" token is definitive
+                # _decode_abi_flags always evaluates both the float e_flags
+                # bits AND the EABI-version field for EM_ARM, so once
+                # abi_flags is non-empty at all (decode actually ran), a
+                # missing "float-hard" token, or a missing "eabiN" token
+                # (which means the real e_flags EABI-version field is
+                # exactly 0 — GNU/"bare" EABI, not 5), is definitive
                 # contradicting evidence, not merely an absence of
                 # confirming evidence — only a fully empty abi_flags (no
                 # decode ran at all, e.g. a legacy/undecoded snapshot)
                 # degrades safely and skips the check entirely (Codex
-                # review #583, three rounds).
+                # review #583, four rounds).
                 abi_flags: frozenset[str] = getattr(elf, "abi_flags", frozenset())
                 violation: str | None = None
                 if abi_flags:
@@ -372,8 +393,8 @@ def check_wheel_tag_architecture_mismatch(
                         eabi_tokens = sorted(
                             t for t in abi_flags if t.startswith("eabi")
                         )
-                        if eabi_tokens and "eabi5" not in eabi_tokens:
-                            violation = eabi_tokens[0]
+                        if "eabi5" not in eabi_tokens:
+                            violation = eabi_tokens[0] if eabi_tokens else "eabi0"
                     elif "float-soft" in abi_flags:
                         violation = "soft-float"
                     else:

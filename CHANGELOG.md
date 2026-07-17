@@ -185,6 +185,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   defaults to 64, a legacy/partial snapshot with `machine` captured but
   `elf_class` never set would have false-positived an otherwise-matching
   32-bit `i686`/`armv7l` binary as a class mismatch (Codex review, follow-up).
+  Re-added `x86_64`/`aarch64` to `_ARCH_CLAIM_TO_ELF_CLASS` (safe, unlike
+  `i686`/`armv7l`, since the field's 64 default matches their expected
+  64-bit value) to reject the x86-64 x32 and AArch64 ILP32 ABIs — both use
+  their platform's normal 64-bit-only `e_machine` value with `ELFCLASS32`,
+  a distinct, non-interchangeable ABI a plain `x86_64`/`aarch64` wheel
+  claim previously silently accepted. The `armv7l` EABI-version check now
+  also flags a `"float-hard"`-only `abi_flags` set with no `"eabiN"`
+  token at all — `_decode_abi_flags` always evaluates the EABI-version
+  field for `EM_ARM`, so its absence means the real value is exactly 0
+  (GNU/bare EABI), definitively not 5, not merely undecoded (Codex
+  review, four rounds).
   Windows UCRT/runtime checks, CPU-ISA-baseline detection, the full
   per-tag closure policy, and end-to-end CLI auto-derivation from a
   compared wheel's own filename tag (every check above, including G10's

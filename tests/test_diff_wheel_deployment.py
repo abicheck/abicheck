@@ -375,6 +375,37 @@ class TestWheelTagArchitectureMismatchUnit:
         )
         assert len(changes) == 1
 
+    def test_x86_64_claim_with_x32_abi_flagged(self) -> None:
+        # Codex review #583, follow-up: the x86-64 x32 ABI uses EM_X86_64
+        # with ELFCLASS32 (ILP32 pointers on a 64-bit CPU) — a distinct,
+        # non-interchangeable ABI a plain x86_64 wheel claim must reject.
+        elf = _elf(
+            machine="EM_X86_64", ei_data="LSB", elf_class=32, soname="libfoo.so.1"
+        )
+        changes = check_wheel_tag_architecture_mismatch(
+            elf, None, {"WHEEL_ARCH": "x86_64"}
+        )
+        assert len(changes) == 1
+        assert "32-bit" in changes[0].new_value
+
+    def test_x86_64_claim_with_64bit_binary_clean(self) -> None:
+        elf = _elf(machine="EM_X86_64", ei_data="LSB", elf_class=64)
+        assert (
+            check_wheel_tag_architecture_mismatch(
+                elf, None, {"WHEEL_ARCH": "x86_64"}
+            )
+            == []
+        )
+
+    def test_aarch64_claim_with_ilp32_abi_flagged(self) -> None:
+        # AArch64's (now-deprecated) ILP32 ABI uses EM_AARCH64 with
+        # ELFCLASS32 the same way x32 does for x86_64.
+        elf = _elf(machine="EM_AARCH64", ei_data="LSB", elf_class=32)
+        changes = check_wheel_tag_architecture_mismatch(
+            elf, None, {"WHEEL_ARCH": "aarch64"}
+        )
+        assert len(changes) == 1
+
     def test_i686_claim_with_unset_elf_class_not_flagged(self) -> None:
         # Codex review #583, follow-up: ElfMetadata.elf_class defaults to
         # 64, so checking it for i686/armv7l claims (both 32-bit only) would
@@ -473,6 +504,24 @@ class TestWheelTagArchitectureMismatchUnit:
         )
         assert len(changes) == 1
         assert "hard-float" in changes[0].new_value
+
+    def test_armv7l_claim_with_hard_float_but_no_eabi_token_flagged(self) -> None:
+        # Codex review #583, follow-up: _decode_abi_flags always evaluates
+        # the EABI-version field for EM_ARM too — a missing "eabiN" token
+        # means the real e_flags EABI-version field is exactly 0 (GNU/bare
+        # EABI), definitively not 5, even though "float-hard" is present.
+        elf = _elf(
+            machine="EM_ARM",
+            ei_data="LSB",
+            elf_class=32,
+            abi_flags=frozenset({"float-hard"}),
+            soname="libfoo.so.1",
+        )
+        changes = check_wheel_tag_architecture_mismatch(
+            elf, None, {"WHEEL_ARCH": "armv7l"}
+        )
+        assert len(changes) == 1
+        assert "eabi0" in changes[0].new_value
 
     def test_armv7l_claim_with_no_abi_flags_degrades_safely(self) -> None:
         # A legacy/undecoded snapshot without abi_flags captured must not
