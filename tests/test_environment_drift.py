@@ -610,15 +610,34 @@ class TestMusllinuxGlibcDependency:
         assert changes[0].kind is ChangeKind.MUSLLINUX_GLIBC_DEPENDENCY_DETECTED
         assert changes[0].new_value == "GLIBC_2.34"
 
-    def test_glibcxx_symbol_also_flagged(self) -> None:
+    def test_glibcxx_only_symbol_not_flagged(self) -> None:
+        # Codex review #583: a musl system's libstdc++ can legitimately carry
+        # its own GLIBCXX_*/CXXABI_* verneed entries (musl's FAQ documents
+        # using gcc's libstdc++ alongside musl) — only the true GLIBC_*
+        # namespace (glibc's own libc.so.6/loader) proves a glibc dependency.
         from abicheck.diff_versioning import check_musllinux_glibc_dependency
 
         elf = _elf(
             needed=["libstdc++.so.6"],
-            versions_required={"libstdc++.so.6": ["GLIBCXX_3.4.30"]},
+            versions_required={"libstdc++.so.6": ["GLIBCXX_3.4.30", "CXXABI_1.3.13"]},
+        )
+        assert check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"}) == []
+
+    def test_glibc_symbol_flagged_alongside_glibcxx(self) -> None:
+        # A real GLIBC_* requirement is still flagged even when GLIBCXX_*
+        # tags are also present on the same or another provider lib.
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(
+            needed=["libc.so.6", "libstdc++.so.6"],
+            versions_required={
+                "libc.so.6": ["GLIBC_2.34"],
+                "libstdc++.so.6": ["GLIBCXX_3.4.30"],
+            },
         )
         changes = check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"})
         assert len(changes) == 1
+        assert changes[0].new_value == "GLIBC_2.34"
 
     def test_dt_relr_flagged_for_musllinux_tagged_binary(self) -> None:
         from abicheck.diff_versioning import check_musllinux_glibc_dependency

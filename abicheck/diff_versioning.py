@@ -446,18 +446,20 @@ def check_musllinux_glibc_dependency(
 ) -> list[Change]:
     """Flag a musllinux-tagged binary that actually requires glibc (G27).
 
-    musllinux wheels (PEP 656) target Alpine's musl libc, which has no
-    symbol-versioning scheme at all — unlike a manylinux glibc floor, there
-    is no numeric ceiling to check: *any* ``GLIBC_*``/``GLIBCXX_*``/
-    ``CXXABI_*`` version requirement (or an implied ``DT_RELR`` floor) means
-    the binary was linked against glibc's C/C++ runtime and will fail to
-    even resolve its dependencies on a musl system — "error loading shared
-    library: No such file or directory" for the missing glibc-flavoured
-    ``.so``, not merely a symbol-version mismatch. This is entirely new
-    coverage: :func:`check_platform_baseline_floor` only asks "is the
-    required version too high for the declared floor," which is meaningless
-    for musl (there is no glibc version to be "too high" relative to — the
-    dependency itself doesn't exist there).
+    musllinux wheels (PEP 656) target musl libc (e.g. Alpine), which
+    provides none of glibc's own ``GLIBC_*``-versioned ``libc.so.6``/loader
+    symbols — a binary requiring one was linked against glibc itself and
+    will fail to even resolve that dependency on a musl system, not merely
+    hit a symbol-version mismatch. This check is deliberately scoped to
+    *just* the ``GLIBC_*`` namespace (plus the implied ``DT_RELR`` loader
+    floor, which is glibc's own loader convention): unlike glibc, a musl
+    system's libstdc++ can legitimately carry ``GLIBCXX_*``/``CXXABI_*``
+    verneed entries of its own — musl's FAQ explicitly documents using gcc's
+    libstdc++ alongside musl — so those namespaces alone do not prove a
+    glibc dependency and must not be flagged here (Codex review #583).
+    :func:`check_platform_baseline_floor`'s generalized ``GLIBCXX``/
+    ``CXXABI`` floor check is the right tool for that C++-runtime-versioning
+    case; it is orthogonal to musl compatibility.
 
     Declared via ``runtime_floors["MUSLLINUX"]`` (any truthy value, e.g. the
     musllinux tag's own ``"1.2"`` version string — only presence is
@@ -474,9 +476,7 @@ def check_musllinux_glibc_dependency(
     worst_tuple: tuple[int, ...] = (0,)
     for lib, tags in (getattr(elf, "versions_required", None) or {}).items():
         for tag in tags:
-            if tag == "GLIBC_ABI_DT_RELR" or any(
-                tag.startswith(f"{p}_") for p in _BASELINE_FLOOR_PREFIXES
-            ):
+            if tag == "GLIBC_ABI_DT_RELR" or tag.startswith("GLIBC_"):
                 offenders.add(lib)
                 parsed = _parse_abi_version_tag(tag)
                 if parsed != _UNPARSEABLE_VERSION and _version_gt(parsed, worst_tuple):

@@ -75,6 +75,18 @@ class TestMacosDeploymentTargetFloorUnit:
             == []
         )
 
+    def test_padded_equal_versions_not_flagged(self) -> None:
+        # Codex review #583: a bare "11" floor and a "11.0" load-command
+        # minimum name the same version — raw tuple comparison would treat
+        # (11, 0) as exceeding (11,) and falsely flag this.
+        macho = _macho(min_os_version="11.0")
+        assert (
+            check_macos_deployment_target_floor(
+                macho, {"MACOS_DEPLOYMENT_TARGET": "11"}
+            )
+            == []
+        )
+
     def test_above_floor_flagged(self) -> None:
         macho = _macho(min_os_version="12.3", install_name="@rpath/libopenblas.dylib")
         changes = check_macos_deployment_target_floor(

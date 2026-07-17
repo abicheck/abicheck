@@ -40,15 +40,19 @@ WHEEL_DEPLOYMENT_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
         "musllinux_glibc_dependency_detected",
         _B,
         impact="The binary is claimed musllinux-compatible (PEP 656 — "
-        "runs on Alpine's musl libc) but requires a GLIBC_*/GLIBCXX_*/"
-        "CXXABI_*-versioned symbol, or carries an implied glibc-loader "
-        "requirement (DT_RELR). musl has no symbol-versioning namespace "
-        "at all: this is not a version mismatch abicheck can rate as a "
-        "deployment risk, it is a dependency that doesn't exist on the "
-        "target — the dynamic loader fails to resolve the glibc-flavoured "
-        "shared object outright. Rebuild against a musl toolchain (e.g. "
-        "the musllinux manylinux-equivalent Docker images) rather than "
-        "relinking a glibc build under the musllinux tag.",
+        "runs on musl libc, e.g. Alpine) but requires a GLIBC_*-versioned "
+        "symbol, or carries an implied glibc-loader requirement (DT_RELR): "
+        "glibc's own libc.so.6/loader symbol-versioning namespace doesn't "
+        "exist on a musl system at all. (GLIBCXX_*/CXXABI_* alone are not "
+        "flagged here — a musl system's libstdc++ can legitimately carry "
+        "its own such verneed entries; see "
+        "diff_versioning.check_musllinux_glibc_dependency's docstring.) "
+        "This is not a version mismatch abicheck can rate as a deployment "
+        "risk, it is a dependency that doesn't exist on the target — the "
+        "dynamic loader fails to resolve the glibc-flavoured shared object "
+        "outright. Rebuild against a musl toolchain (e.g. the musllinux "
+        "manylinux-equivalent Docker images) rather than relinking a glibc "
+        "build under the musllinux tag.",
         description_template="musllinux-tagged binary requires glibc: {new} (required by: {name})",
     ),
     _E(

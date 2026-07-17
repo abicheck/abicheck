@@ -33,7 +33,7 @@ from __future__ import annotations
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .diff_helpers import make_change
-from .diff_versioning import _parse_dotted_numeric_version
+from .diff_versioning import _parse_dotted_numeric_version, _version_le
 from .macho_metadata import MachoMetadata
 
 #: Declared-floor key for :func:`check_macos_deployment_target_floor`, in the
@@ -64,6 +64,12 @@ def check_macos_deployment_target_floor(
     when *macho* is absent, no floor is declared, the floor is malformed, or
     the binary's own minimum OS is at or below the declared floor.
 
+    Version comparison is padded (via :func:`diff_versioning._version_le`,
+    the same helper the ``GLIBC`` floor check uses): a bare ``"11"`` floor
+    and a ``"11.0"`` load-command minimum name the same version and must
+    compare equal, not have the raw tuple comparison ``(11, 0) > (11,)``
+    treat the more-precise value as exceeding the floor (Codex review #583).
+
     Known limitation: macOS's pre-Big-Sur "compatibility version" scheme
     (e.g. ``10.16`` reported by some tools for what is actually macOS 11)
     is not reconciled against the modern ``11.x``+ scheme — both are
@@ -85,7 +91,7 @@ def check_macos_deployment_target_floor(
     if not required_raw:
         return []
     required_tuple = _parse_dotted_numeric_version(required_raw)
-    if required_tuple is None or required_tuple <= floor_tuple:
+    if required_tuple is None or _version_le(required_tuple, floor_tuple):
         return []
     return [
         make_change(
