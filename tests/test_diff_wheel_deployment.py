@@ -348,10 +348,50 @@ class TestWheelTagArchitectureMismatchUnit:
         )
         assert len(changes) == 1
 
+    def test_riscv64_claim_with_32bit_binary_flagged(self) -> None:
+        # Codex review #583, follow-up: RV32/RV64 share one e_machine
+        # value (EM_RISCV) — a 32-bit RISC-V ELF must not pass a riscv64
+        # claim just because e_machine/EI_DATA matched.
+        elf = _elf(
+            machine="EM_RISCV", ei_data="LSB", elf_class=32, soname="libfoo.so.1"
+        )
+        changes = check_wheel_tag_architecture_mismatch(
+            elf, None, {"WHEEL_ARCH": "riscv64"}
+        )
+        assert len(changes) == 1
+        assert "32-bit" in changes[0].new_value
+
+    def test_loongarch64_claim_with_32bit_binary_flagged(self) -> None:
+        elf = _elf(machine="EM_LOONGARCH", ei_data="LSB", elf_class=32)
+        changes = check_wheel_tag_architecture_mismatch(
+            elf, None, {"WHEEL_ARCH": "loongarch64"}
+        )
+        assert len(changes) == 1
+
+    def test_s390x_claim_with_32bit_binary_flagged(self) -> None:
+        elf = _elf(machine="EM_S390", ei_data="MSB", elf_class=32)
+        changes = check_wheel_tag_architecture_mismatch(
+            elf, None, {"WHEEL_ARCH": "s390x"}
+        )
+        assert len(changes) == 1
+
+    def test_x86_64_claim_with_64bit_class_clean(self) -> None:
+        # elf_class defaults to 64 on ElfMetadata, matching every existing
+        # 64-bit-only claim's tests that don't set it explicitly — this
+        # pins that assumption down explicitly for x86_64.
+        elf = _elf(machine="EM_X86_64", ei_data="LSB", elf_class=64)
+        assert (
+            check_wheel_tag_architecture_mismatch(
+                elf, None, {"WHEEL_ARCH": "x86_64"}
+            )
+            == []
+        )
+
     def test_armv7l_claim_with_hard_float_clean(self) -> None:
         elf = _elf(
             machine="EM_ARM",
             ei_data="LSB",
+            elf_class=32,
             abi_flags=frozenset({"float-hard", "eabi5"}),
         )
         assert (
@@ -369,6 +409,7 @@ class TestWheelTagArchitectureMismatchUnit:
         elf = _elf(
             machine="EM_ARM",
             ei_data="LSB",
+            elf_class=32,
             abi_flags=frozenset({"float-soft", "eabi5"}),
             soname="libfoo.so.1",
         )
@@ -379,10 +420,27 @@ class TestWheelTagArchitectureMismatchUnit:
         assert changes[0].kind is ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH
         assert "soft-float" in changes[0].new_value
 
+    def test_armv7l_claim_with_older_eabi_flagged(self) -> None:
+        # Codex review #583, follow-up: a hard-float binary built against
+        # an older EABI (e.g. eabi4) still doesn't satisfy manylinux's
+        # armhf contract, which requires EABI version 5 specifically.
+        elf = _elf(
+            machine="EM_ARM",
+            ei_data="LSB",
+            elf_class=32,
+            abi_flags=frozenset({"float-hard", "eabi4"}),
+            soname="libfoo.so.1",
+        )
+        changes = check_wheel_tag_architecture_mismatch(
+            elf, None, {"WHEEL_ARCH": "armv7l"}
+        )
+        assert len(changes) == 1
+        assert "eabi4" in changes[0].new_value
+
     def test_armv7l_claim_with_no_abi_flags_degrades_safely(self) -> None:
         # A legacy/undecoded snapshot without abi_flags captured must not
         # false-positive purely from having no evidence to compare.
-        elf = _elf(machine="EM_ARM", ei_data="LSB", abi_flags=frozenset())
+        elf = _elf(machine="EM_ARM", ei_data="LSB", elf_class=32, abi_flags=frozenset())
         assert (
             check_wheel_tag_architecture_mismatch(
                 elf, None, {"WHEEL_ARCH": "armv7l"}

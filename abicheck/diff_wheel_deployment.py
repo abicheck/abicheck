@@ -184,6 +184,29 @@ _ARCH_CLAIM_TO_ELF_EI_DATA: dict[str, str] = {
     "loongarch64": "LSB",
 }
 
+#: Every wheel-tag architecture claim's expected ELF class (32/64-bit,
+#: :attr:`ElfMetadata.elf_class`). Most claims' ``e_machine`` value already
+#: implies a bitness (``EM_X86_64``/``EM_AARCH64``/``EM_PPC64`` are 64-bit
+#: exclusive; ``EM_386``/``EM_ARM`` here are 32-bit exclusive), but several
+#: architectures share ONE ``e_machine`` value across both word sizes,
+#: distinguished only by ``EI_CLASS``: ``EM_RISCV`` (RV32/RV64) and
+#: ``EM_LOONGARCH`` (LoongArch32/64) — a 32-bit ELF would otherwise pass a
+#: ``riscv64``/``loongarch64`` claim purely because ``e_machine`` matched
+#: (Codex review #583). ``EM_S390`` is the same story (31/32-bit S/390 vs.
+#: 64-bit z/Architecture ``s390x``), so it's included too for the same
+#: reason, even though not explicitly reported.
+_ARCH_CLAIM_TO_ELF_CLASS: dict[str, int] = {
+    "x86_64": 64,
+    "aarch64": 64,
+    "i686": 32,
+    "armv7l": 32,
+    "ppc64le": 64,
+    "ppc64": 64,
+    "s390x": 64,
+    "riscv64": 64,
+    "loongarch64": 64,
+}
+
 #: Wheel-tag architecture claim -> the Mach-O ``cpu_type`` value(s) that
 #: satisfy it. ``ARM64E`` (the pointer-authenticating arm64e ABI variant)
 #: deliberately does *not* satisfy a plain ``arm64`` claim: it's a distinct,
@@ -250,12 +273,19 @@ def check_wheel_tag_architecture_mismatch(
     against every claim's expected value in
     :data:`_ARCH_CLAIM_TO_ELF_EI_DATA` (Codex review #583).
 
-    An ``armv7l`` claim additionally requires the hard-float ARM EABI
-    (:attr:`ElfMetadata.abi_flags` carrying ``"float-soft"`` is flagged) —
-    manylinux's ``armv7l`` tag specifically means hard-float, and a
-    soft-float binary shares the same ``e_machine``/``EI_DATA`` but is not
+    ``e_machine``/``EI_DATA`` also don't prove word size: ``riscv64``,
+    ``loongarch64``, and ``s390x`` each share one ``e_machine`` value across
+    both a 32-bit and a 64-bit variant, distinguished only by
+    :attr:`ElfMetadata.elf_class`. Checked against every claim's expected
+    value in :data:`_ARCH_CLAIM_TO_ELF_CLASS` (Codex review #583).
+
+    An ``armv7l`` claim additionally requires the hard-float armhf ABI —
+    EABI version 5 *and* hard-float (``abi_flags`` carrying ``"float-soft"``,
+    or an ``"eabiN"`` token where N != 5, is flagged) — manylinux's
+    ``armv7l`` tag specifically means armhf, and a soft-float or
+    older-EABI binary shares the same ``e_machine``/``EI_DATA`` but is not
     actually loadable under that tag's runtime expectations (Codex review
-    #583).
+    #583, two rounds).
     """
     if not runtime_floors:
         return []
@@ -298,19 +328,14 @@ def check_wheel_tag_architecture_mismatch(
                         new=f"{elf_machine} ({elf_ei_data})",
                     )
                 ]
-            if claimed == "armv7l" and "float-soft" in getattr(
-                elf, "abi_flags", frozenset()
-            ):
-                # manylinux's armv7l tag specifically means the hard-float
-                # ARM EABI (packaging._manylinux._is_linux_armhf checks
-                # EABI5 + EF_ARM_ABI_FLOAT_HARD) — a soft-float ARM binary
-                # shares the same e_machine/EI_DATA but cannot satisfy an
-                # armv7l-tagged wheel's runtime expectations. Only flags on
-                # the definite "float-soft" token (explicit contradicting
-                # evidence); an absent float-ABI token isn't itself proof of
-                # soft-float, so this degrades safely rather than
-                # false-positiving on incomplete evidence (Codex review
-                # #583).
+            expected_class = _ARCH_CLAIM_TO_ELF_CLASS.get(claimed)
+            elf_class = getattr(elf, "elf_class", 64)
+            if expected_class is not None and elf_class != expected_class:
+                # riscv64/loongarch64/s390x share one e_machine value across
+                # both word sizes (RV32/RV64, LoongArch32/64, 31/32-bit
+                # S/390 vs. 64-bit s390x) — a 32-bit ELF would otherwise
+                # pass a "*64" claim purely because e_machine matched
+                # (Codex review #583).
                 return [
                     make_change(
                         ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH,
@@ -318,9 +343,41 @@ def check_wheel_tag_architecture_mismatch(
                         name=getattr(elf, "soname", "") or "<binary>",
                         detail="architecture",
                         old=claimed,
-                        new=f"{elf_machine} (soft-float)",
+                        new=f"{elf_machine} ({elf_class}-bit)",
                     )
                 ]
+            if claimed == "armv7l":
+                # manylinux's armv7l tag specifically means the hard-float
+                # armhf ABI: EABI version 5 AND EF_ARM_ABI_FLOAT_HARD
+                # (packaging._manylinux._is_linux_armhf) — a soft-float
+                # binary or a hard-float binary built against an older EABI
+                # (e.g. eabi4) shares the same e_machine/EI_DATA but cannot
+                # satisfy an armv7l-tagged wheel's runtime expectations.
+                # Only flags on definite contradicting evidence (an actual
+                # "float-soft" token, or an "eabiN" token naming a version
+                # other than 5); an absent float/EABI token isn't itself
+                # proof of a violation, so this degrades safely rather than
+                # false-positiving on incomplete/undecoded evidence (Codex
+                # review #583, two rounds).
+                abi_flags: frozenset[str] = getattr(elf, "abi_flags", frozenset())
+                violation: str | None = None
+                if "float-soft" in abi_flags:
+                    violation = "soft-float"
+                else:
+                    eabi_tokens = sorted(t for t in abi_flags if t.startswith("eabi"))
+                    if eabi_tokens and "eabi5" not in eabi_tokens:
+                        violation = eabi_tokens[0]
+                if violation is not None:
+                    return [
+                        make_change(
+                            ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH,
+                            symbol="<platform-baseline>",
+                            name=getattr(elf, "soname", "") or "<binary>",
+                            detail="architecture",
+                            old=claimed,
+                            new=f"{elf_machine} ({violation})",
+                        )
+                    ]
             return []
     if macho is not None:
         cpu_type = getattr(macho, "cpu_type", "")

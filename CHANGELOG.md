@@ -155,6 +155,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   hard-float ARM EABI, and a soft-float binary shares the same
   `e_machine`/`EI_DATA` but isn't actually loadable under that tag's
   runtime expectations (Codex review).
+  `check_wheel_tag_architecture_mismatch` now also checks ELF word size
+  (`ElfMetadata.elf_class`) against every claim's expected value: `riscv64`,
+  `loongarch64`, and `s390x` each share one `e_machine` value across a
+  32-bit and a 64-bit variant (RV32/RV64, LoongArch32/64, 31/32-bit S/390
+  vs. 64-bit s390x), so a 32-bit ELF previously passed a `"*64"` claim
+  purely because `e_machine` matched. The `armv7l` check now also requires
+  EABI version 5 specifically (not just any hard-float EABI) — manylinux's
+  armhf contract requires EABI5, so an `abi_flags` token like `"eabi4"`
+  (with hard-float) previously still passed (Codex review, two rounds).
   Windows UCRT/runtime checks, CPU-ISA-baseline detection, the full
   per-tag closure policy, and end-to-end CLI auto-derivation from a
   compared wheel's own filename tag (every check above, including G10's
