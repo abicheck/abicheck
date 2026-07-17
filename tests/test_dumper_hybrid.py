@@ -14,6 +14,7 @@ from abicheck.dumper_hybrid import merge_snapshots
 from abicheck.fact_provenance import (
     both_castxml_backed_fact,
     enum_fact_key,
+    fact_producer,
     field_fact_key,
     func_fact_key,
     is_castxml_backed_fact,
@@ -261,6 +262,47 @@ class TestCtorDtorReconciliation:
         assert merged.func_by_mangled(int_synthetic) is None
         assert merged.func_by_mangled(double_synthetic) is None
 
+    def test_multiple_instantiations_default_ctor_stays_safely_unreconciled(self):
+        # Known residual limitation (Codex review): once the scope key is
+        # template-argument-free, two distinct instantiations' DEFAULT
+        # (no-parameter) constructors collide under the identical
+        # (marker, scope) key with no parameter signature left to tell them
+        # apart. The matcher must stay safe (no match, not a WRONG match) —
+        # both synthetic keys survive unreconciled rather than one being
+        # matched to the wrong instantiation's real mangled name.
+        int_synthetic = f"{SYNTHETIC_CTOR_KEY_PREFIX}ns::Widget<int>()"
+        int_castxml = Function(
+            name="Widget", mangled=int_synthetic, return_type="void",
+            access=AccessLevel.PUBLIC,
+        )
+        int_real = "_ZN2ns6WidgetIiEC1Ev"
+        int_clang = Function(
+            name="Widget", mangled=int_real, return_type="void",
+            access=AccessLevel.PUBLIC,
+        )
+        double_synthetic = f"{SYNTHETIC_CTOR_KEY_PREFIX}ns::Widget<double>()"
+        double_castxml = Function(
+            name="Widget", mangled=double_synthetic, return_type="void",
+            access=AccessLevel.PUBLIC,
+        )
+        double_real = "_ZN2ns6WidgetIdEC1Ev"
+        double_clang = Function(
+            name="Widget", mangled=double_real, return_type="void",
+            access=AccessLevel.PUBLIC,
+        )
+        castxml = _snap(
+            functions=[int_castxml, double_castxml], ast_producer="castxml"
+        )
+        clang = _snap(functions=[int_clang, double_clang], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+
+        # Neither synthetic key got (wrongly) rewritten to either real
+        # mangled name -- both sets of functions coexist unreconciled.
+        assert merged.func_by_mangled(int_synthetic) is not None
+        assert merged.func_by_mangled(double_synthetic) is not None
+        assert merged.func_by_mangled(int_real) is not None
+        assert merged.func_by_mangled(double_real) is not None
+
     def test_constructor_synthetic_key_reconciled_to_real_mangled_name(self):
         synthetic = f"{SYNTHETIC_CTOR_KEY_PREFIX}ns::Widget(int)"
         castxml_ctor = Function(
@@ -458,11 +500,13 @@ class TestVariableFactBackfill:
 
 
 class TestParamDefaultsProvenance:
-    """Codex review: a clang-only function (castxml never produced it) must
-    be tagged so ``_diff_param_defaults`` can skip it — clang never
-    populates ``Param.default``, so treating such a function as
-    castxml-backed would misread the coverage gap as every default having
-    been removed."""
+    """Codex review: every merged function needs a "param_defaults" producer
+    tag so ``_diff_param_defaults`` can require the SAME producer on both
+    sides of a pair — both backends populate ``Param.default`` now, but
+    their value representations (castxml: real source expression; clang:
+    structural fingerprint/placeholder) aren't cross-comparable, while a
+    same-producer pair (e.g. clang-only on both sides) is safe to compare
+    exactly like a plain ``--ast-frontend clang`` run already does."""
 
     def test_castxml_sourced_function_tagged_castxml(self):
         f = Function(name="foo", mangled="_Z3fooi", return_type="void")
@@ -604,6 +648,22 @@ class TestFactProvenanceHelpers:
         new_unbacked = _snap(ast_producer="hybrid", fact_provenance={})
         assert both_castxml_backed_fact(old, new_backed, key)
         assert not both_castxml_backed_fact(old, new_unbacked, key)
+
+    def test_fact_producer_single_backend_snapshots(self):
+        key = func_fact_key("_Z3foov", "param_defaults")
+        assert fact_producer(_snap(ast_producer="castxml"), key) == "castxml"
+        assert fact_producer(_snap(ast_producer="clang"), key) == "clang"
+        assert fact_producer(_snap(ast_producer=None), key) is None
+        assert fact_producer(_snap(ast_producer="castxml", from_headers=False), key) is None
+
+    def test_fact_producer_hybrid_reads_provenance_map(self):
+        key = func_fact_key("_Z3foov", "param_defaults")
+        castxml_side = _snap(ast_producer="hybrid", fact_provenance={key: "castxml"})
+        clang_side = _snap(ast_producer="hybrid", fact_provenance={key: "clang"})
+        unrecorded = _snap(ast_producer="hybrid", fact_provenance={})
+        assert fact_producer(castxml_side, key) == "castxml"
+        assert fact_producer(clang_side, key) == "clang"
+        assert fact_producer(unrecorded, key) is None
 
 
 class TestDumpHybridDispatch:

@@ -71,6 +71,7 @@ from .elf_symbol_filter import (
 )
 from .fact_provenance import (
     both_castxml_backed_fact,
+    fact_producer,
     func_fact_key,
     var_fact_key,
 )
@@ -1228,26 +1229,33 @@ def _both_header_aware(old: AbiSnapshot, new: AbiSnapshot) -> bool:
 def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect parameter default value changes/removals.
 
-    Header-tier only: default-argument values are populated solely from castxml
-    header parsing. If either side was NOT (confirmed) parsed from headers
-    (DWARF/symbols mode, or a legacy/inferred headerless snapshot),
-    ``Param.default`` is ``None`` only because the value is *unavailable*, not
-    removed — comparing would report every defaulted parameter as
-    ``PARAM_DEFAULT_VALUE_REMOVED``. Skip unless both sides are header-aware.
+    Header-tier only: default-argument values are populated by both header-AST
+    backends (castxml directly; ``dumper_clang.py`` too, falling back to a
+    structural placeholder for anything beyond a bare literal). If either side
+    was NOT (confirmed) parsed from headers (DWARF/symbols mode, or a
+    legacy/inferred headerless snapshot), ``Param.default`` is ``None`` only
+    because the value is *unavailable*, not removed — comparing would report
+    every defaulted parameter as ``PARAM_DEFAULT_VALUE_REMOVED``. Skip unless
+    both sides are header-aware.
 
     Additionally gated per-function-pair, but ONLY when either side is a
-    ``--ast-frontend hybrid`` snapshot (G28 Phase 3): a hybrid snapshot can
-    carry a mix of castxml-backed functions and clang-only functions castxml
-    never produced at all, and clang never populates ``Param.default``.
-    Without this extra check, a function present via castxml on one side and
-    only via clang (a coverage gap, not a real change) on the other would
-    misread as every default having been removed (Codex review). Scoped to
-    ``ast_producer == "hybrid"`` rather than routing through
-    ``both_castxml_backed_fact`` unconditionally: that helper treats an
-    unset/``None`` ``ast_producer`` (e.g. a hand-built snapshot in a test, or
-    a legacy pre-provenance one) as "not castxml-backed", which would
-    silently skip every plain castxml-vs-castxml comparison that never set
-    the field — a real behavior change entirely unrelated to the hybrid bug.
+    ``--ast-frontend hybrid`` snapshot (G28 Phase 3): a hybrid snapshot can mix
+    castxml-backed and clang-backed functions in the SAME snapshot, and the
+    two backends' default VALUE representations are not cross-comparable
+    (castxml keeps the real source expression; clang's is a placeholder/
+    fingerprint for anything non-trivial) even though both now capture
+    presence/absence correctly. Requiring the SAME producer on both sides of a
+    pair (not "castxml on both sides", which would wrongly suppress a
+    same-producer clang-vs-clang pair that a plain ``--ast-frontend clang``
+    run compares just fine — Codex review) avoids a false CHANGED/REMOVED from
+    a representation mismatch while still catching a real change on either
+    same-producer pairing. Scoped to ``"hybrid" in (old.ast_producer,
+    new.ast_producer)`` rather than applying unconditionally: an unset/
+    ``None`` ``ast_producer`` (e.g. a hand-built snapshot in a test, or a
+    legacy pre-provenance one) must not silently skip every plain
+    castxml-vs-castxml or clang-vs-clang comparison that never set the field —
+    a behavior change entirely unrelated to the hybrid-mixing bug this exists
+    to fix.
     """
     if not _both_header_aware(old, new):
         return []
@@ -1260,10 +1268,12 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         f_new = new_map.get(mangled)
         if f_new is None:
             continue
-        if check_hybrid_provenance and not both_castxml_backed_fact(
-            old, new, func_fact_key(mangled, "param_defaults")
-        ):
-            continue
+        if check_hybrid_provenance:
+            key = func_fact_key(mangled, "param_defaults")
+            old_producer = fact_producer(old, key)
+            new_producer = fact_producer(new, key)
+            if old_producer is None or old_producer != new_producer:
+                continue
         # Compare parameter defaults pairwise
         for i, (p_old, p_new) in enumerate(zip(f_old.params, f_new.params)):
             if p_old.default is not None and p_new.default is None:

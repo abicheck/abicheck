@@ -103,3 +103,36 @@ def both_castxml_backed_fact(old: AbiSnapshot, new: AbiSnapshot, key: str) -> bo
     whole-snapshot check at each individual per-declaration comparison site.
     """
     return is_castxml_backed_fact(old, key) and is_castxml_backed_fact(new, key)
+
+
+def fact_producer(snap: AbiSnapshot, key: str) -> str | None:
+    """Which single backend ("castxml"/"clang") actually backs *key* on
+    *snap*, or ``None`` if that isn't known.
+
+    Unlike :func:`is_castxml_backed_fact` (which answers "is this
+    castxml-sourced, yes/no" for facts ONLY castxml ever populates), this is
+    for a fact BOTH backends can independently produce a real, same-backend-
+    comparable value for (e.g. ``Function.params[i].default`` once
+    ``dumper_clang.py`` started populating it too) — the risk there isn't
+    "clang has no value", it's that the two backends' value *representations*
+    aren't cross-comparable (castxml keeps the source expression text; clang
+    falls back to a structural fingerprint/placeholder for anything beyond a
+    bare literal), so a mixed-producer pair must not be compared even though
+    both sides have SOME value. A same-producer pair (both "castxml" or both
+    "clang") is safe to compare — that is exactly what a same-backend
+    ``--ast-frontend castxml``/``--ast-frontend clang`` run already does.
+
+    - Not (confirmed) header-aware: None.
+    - ``ast_producer in ("castxml", "clang")``: that value unconditionally —
+      every fact on a single-backend snapshot came from that one backend.
+    - ``ast_producer == "hybrid"``: whatever the merge recorded for *key*
+      (``None`` if neither backend's value made it into the map).
+    - Anything else (``None``/unknown producer, legacy snapshot): None.
+    """
+    if not (snap.from_headers and not snap.from_headers_inferred):
+        return None
+    if snap.ast_producer in ("castxml", "clang"):
+        return snap.ast_producer
+    if snap.ast_producer == "hybrid":
+        return snap.fact_provenance.get(key)
+    return None

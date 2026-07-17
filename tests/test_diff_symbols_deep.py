@@ -512,6 +512,37 @@ class TestParamDefaultChanged:
         r = compare(old, new)
         assert ChangeKind.PARAM_DEFAULT_VALUE_REMOVED not in _kinds(r)
 
+    def test_clang_backed_hybrid_pair_on_both_sides_still_compared(self):
+        # Codex review: dumper_clang.py now populates Param.default too (a
+        # structural placeholder for anything beyond a bare literal), so a
+        # function that is clang-only on BOTH sides of a hybrid comparison is
+        # a legitimate same-producer pair -- exactly what a plain
+        # ``--ast-frontend clang`` run already compares with no gate at all.
+        # Requiring "castxml on both sides" (rather than "same producer on
+        # both sides") would wrongly suppress this real removal.
+        f_v1 = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="30")],
+        )
+        f_v2 = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default=None)],
+        )
+        old = AbiSnapshot(
+            library="libtest.so.1", version="1.0", functions=[f_v1],
+            from_headers=True, ast_producer="hybrid",
+            fact_provenance={"func:_Z7connectv:param_defaults": "clang"},
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1", version="1.0", functions=[f_v2],
+            from_headers=True, ast_producer="hybrid",
+            fact_provenance={"func:_Z7connectv:param_defaults": "clang"},
+        )
+        r = compare(old, new)
+        assert ChangeKind.PARAM_DEFAULT_VALUE_REMOVED in _kinds(r)
+
 
 # ── param_renamed ────────────────────────────────────────────────────────
 

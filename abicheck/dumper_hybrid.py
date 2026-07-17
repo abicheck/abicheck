@@ -252,6 +252,23 @@ def _match_synthetic_ctor_dtor(
     against "a false match between two coincidentally-same-signature but
     genuinely different entities": ambiguity (zero or multiple candidates
     surviving all checks) yields None rather than guessing.
+
+    **Known residual limitation** (Codex review): the scope key is
+    normalized template-argument-free (see ``_normalize_scope_for_matching``),
+    so TWO OR MORE distinct instantiations of the same template that both
+    declare a default (no-parameter) constructor, or both have a destructor,
+    collide under the identical normalized ``(marker, scope)`` key with
+    nothing left to disambiguate them (a destructor never takes parameters;
+    a default constructor's own signature is empty on both sides). This
+    correctly yields ambiguous → no match, same as any other unmodeled shape
+    here — it does not produce a wrong match — but it does mean such a
+    ctor/dtor stays unreconciled (the castxml synthetic key and the clang
+    real name both survive as a false remove+add pair) for that narrow case.
+    Resolving it would require decoding the ACTUAL Itanium template-argument
+    encoding (or shelling out to a demangler) to recover each candidate's own
+    instantiation identity — deliberately out of scope here to avoid a new
+    dependency or a heuristic that could produce a wrong match, which would
+    be worse than today's safe non-match.
     """
     parsed = _synthetic_ctor_dtor_scope(castxml_f.mangled)
     if parsed is None:
@@ -319,24 +336,23 @@ def _merge_functions(
         _backfill_function_facts(f, clang_by_mangled.get(f.mangled), provenance)
         for f in merged
     ]
-    # Param.default is populated solely from castxml (dumper_clang.py never
-    # sets it), so every function actually present in castxml_funcs is
-    # castxml-backed for that fact — even one whose synthetic ctor/dtor key
-    # got rewritten to a clang mangled name above, since the *declaration*
-    # itself is still castxml's.
+    # Every function actually present in castxml_funcs is castxml-backed for
+    # this fact — even one whose synthetic ctor/dtor key got rewritten to a
+    # clang mangled name above, since the *declaration* itself is still
+    # castxml's. Both backends populate Param.default now, but their VALUE
+    # representations aren't cross-comparable (castxml keeps the real source
+    # expression; dumper_clang.py falls back to a structural fingerprint/
+    # placeholder for anything beyond a bare literal), so this fact still
+    # needs a producer tag per function — _diff_param_defaults uses it to
+    # require the SAME producer on both sides of a pair, not specifically
+    # "castxml" (Codex review: a clang-only function is still comparable
+    # against ANOTHER clang-only declaration of itself, exactly like a plain
+    # ``--ast-frontend clang`` run already does today).
     for f in merged:
         provenance[func_fact_key(f.mangled, "param_defaults")] = "castxml"
 
     merged_mangled = {f.mangled for f in merged}
     clang_only = [cf for cf in clang_funcs if cf.mangled not in merged_mangled]
-    # A clang-only function (castxml never produced it at all) carries no
-    # real default-argument data — every Param.default is None because
-    # dumper_clang.py doesn't capture them, not because the source has no
-    # defaults. Tagging it "clang" here (rather than leaving it unmarked,
-    # which is_castxml_backed_fact would treat as "unknown") makes
-    # _diff_param_defaults skip this function pair via
-    # both_castxml_backed_fact instead of misreading the coverage gap as a
-    # removed default (Codex review).
     for cf in clang_only:
         provenance[func_fact_key(cf.mangled, "param_defaults")] = "clang"
     merged.extend(clang_only)

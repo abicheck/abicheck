@@ -221,7 +221,21 @@ headers and merges them (`abicheck/dumper_hybrid.py::merge_snapshots`):
   name. Ambiguity (zero or multiple surviving candidates) yields no match —
   the synthetic key is kept as-is, the same pre-Phase-3 behavior — rather
   than risking a false match between coincidentally-same-signature but
-  genuinely different entities.
+  genuinely different entities. The enclosing-class scope is compared with
+  every template argument stripped from every scope component (both a
+  template's own scope, e.g. `ns::Widget<int>` vs. the Itanium-mangled
+  `ns::WidgetIiE`, and an enclosing scope for a nested class inside a
+  template) since castxml and clang spell template arguments in different
+  alphabets there. **Known residual limitation**: this means two or more
+  distinct instantiations of the same template that both declare a default
+  (no-parameter) constructor, or both have a destructor, collide under the
+  same normalized key with no signature left to disambiguate them — they
+  correctly stay unreconciled (ambiguous → no match, never a *wrong* match)
+  rather than risk matching the wrong instantiation. Resolving this would
+  need a real demangler (or hand-decoding Itanium template-argument
+  encoding) to recover each candidate's own instantiation identity —
+  deliberately deferred rather than adding either a new dependency or a
+  heuristic that could mis-match.
 - **Per-fact provenance** (`AbiSnapshot.fact_provenance`, `abicheck/
   fact_provenance.py`) — a `{key: "castxml"|"clang"}` map keyed by
   `func_fact_key`/`var_fact_key`/`type_fact_key`/`enum_fact_key`/
