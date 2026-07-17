@@ -39,7 +39,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# Fragment-directory files that don't count as a "changelog entry" themselves.
+# Real fragments are Markdown ([tool.scriv] format = "md" in pyproject.toml);
+# scriv collect only reads *.md/*.rst in changelog.d/, so anything else
+# (README.md, the .j2 template, or e.g. an accidental placeholder.txt) must
+# not satisfy the gate.
+_FRAGMENT_SUFFIX = ".md"
 _NON_FRAGMENT_NAMES = {"README.md"}
 
 # A (status, path) pair, as produced by `git diff --name-status`.
@@ -98,7 +102,7 @@ def has_changelog_fragment(changed: list[ChangedFile]) -> bool:
         if status == "D" or not f.startswith("changelog.d/"):
             continue
         name = f.split("/", 1)[1]
-        if name in _NON_FRAGMENT_NAMES or name.endswith(".j2"):
+        if name in _NON_FRAGMENT_NAMES or not name.endswith(_FRAGMENT_SUFFIX):
             continue
         return True
     return False
