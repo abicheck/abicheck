@@ -521,10 +521,7 @@ def parse_manylinux_glibc_floor(name: str) -> str | None:
     ``EnvironmentMatrix.runtime_floors["GLIBC"]``, or ``None`` if *name*
     carries no recognizable manylinux tag.
     """
-    tag_segment = name
-    if name.lower().endswith(".whl"):
-        stem = name[: -len(".whl")]
-        tag_segment = stem.rsplit("-", 1)[-1]
+    tag_segment = _wheel_platform_tag_segment(name)
     best: tuple[int, int] | None = None
     for m in _MANYLINUX_TAG_RE.finditer(tag_segment):
         if m.group("legacy"):
@@ -534,6 +531,130 @@ def parse_manylinux_glibc_floor(name: str) -> str | None:
         if best is None or version < best:
             best = version
     return f"{best[0]}.{best[1]}" if best is not None else None
+
+
+def _wheel_platform_tag_segment(name: str) -> str:
+    """The platform-tag segment of a wheel filename.
+
+    When *name* ends in ``.whl``, only its platform-tag segment (the last
+    ``-``-delimited component before the extension, per the PEP 427 wheel
+    filename spec ``{distribution}-{version}(-{build})?-{python}-{abi}-
+    {platform}.whl``) is returned — not the whole filename. Otherwise a
+    platform-tag-prefixed *distribution* name (e.g.
+    ``manylinux_2_17_helper-1.0-cp312-cp312-linux_x86_64.whl``, whose
+    platform tag makes no manylinux promise at all) would be misread as
+    carrying that tag. Shared by :func:`parse_manylinux_glibc_floor`,
+    :func:`parse_musllinux_floor`, and
+    :func:`parse_macos_deployment_target_floor` — see the first for the full
+    rationale. Returns *name* unchanged when it isn't a ``.whl`` filename.
+    """
+    if name.lower().endswith(".whl"):
+        stem = name[: -len(".whl")]
+        return stem.rsplit("-", 1)[-1]
+    return name
+
+
+#: PEP 656 musllinux platform-tag -> the musl libc major.minor version it
+#: names, e.g. ``musllinux_1_2_x86_64``. Unlike manylinux/glibc, musl carries
+#: no symbol-versioning scheme, so there is no binary-evidence floor to check
+#: this version *against* — its presence is a yes/no "this wheel targets
+#: musl" signal for check_musllinux_glibc_dependency (G27). See
+#: docs/development/plans/g27-wheel-deployment-verification.md.
+_MUSLLINUX_TAG_RE = re.compile(r"musllinux_(?P<major>\d+)_(?P<minor>\d+)(?=_|$)")
+
+
+def parse_musllinux_floor(name: str) -> str | None:
+    """Derive the strictest declared musl libc version from a musllinux tag
+    string (G27).
+
+    *name* follows the same wheel-filename/platform-tag-segment handling as
+    :func:`parse_manylinux_glibc_floor` (via :func:`_wheel_platform_tag_segment`),
+    including strictest-of-multi-tag resolution for a compressed PEP 600-style
+    multi-platform segment.
+
+    Returns a dotted ``"X.Y"`` string suitable for
+    ``EnvironmentMatrix.runtime_floors["MUSLLINUX"]`` (read as a presence
+    check, not a numeric floor, by
+    :func:`abicheck.diff_versioning.check_musllinux_glibc_dependency`), or
+    ``None`` if *name* carries no recognizable musllinux tag.
+    """
+    tag_segment = _wheel_platform_tag_segment(name)
+    best: tuple[int, int] | None = None
+    for m in _MUSLLINUX_TAG_RE.finditer(tag_segment):
+        version = (int(m.group("major")), int(m.group("minor")))
+        if best is None or version < best:
+            best = version
+    return f"{best[0]}.{best[1]}" if best is not None else None
+
+
+#: PEP 425 macOS platform-tag -> the deployment target it promises as a
+#: ceiling, e.g. ``macosx_10_9_x86_64`` or ``macosx_11_0_universal2``. The
+#: arch component may contain digits and underscores (``x86_64``,
+#: ``universal2``); the trailing ``(?=[._]|$)`` boundary keeps a multi-tag
+#: compressed segment's dot separator from being swallowed into the match.
+_MACOSX_TAG_RE = re.compile(
+    r"macosx_(?P<major>\d+)_(?P<minor>\d+)_(?P<arch>[a-zA-Z0-9_]+?)(?=[.]|$)"
+)
+
+#: macOS wheel arch tokens that bundle more than one real CPU architecture
+#: under a single string (PEP 425's macOS "fat"/universal-binary tags). Even
+#: a *lone* tag using one of these can't be safely reduced to a single
+#: deployment-target floor: a real ``universal2`` wheel's arm64 slice
+#: commonly has a genuinely higher minimum OS (11.0 — Apple Silicon didn't
+#: exist before macOS 11) than its x86_64 slice's declared 10.9 floor, even
+#: though the tag names only one literal arch token (Codex review #583).
+_MACOS_MULTI_SLICE_ARCH_TOKENS = frozenset(
+    {"universal2", "universal", "intel", "fat", "fat3", "fat64"}
+)
+
+
+def parse_macos_deployment_target_floor(name: str) -> str | None:
+    """Derive the declared macOS deployment target from a
+    ``macosx_X_Y_<arch>`` wheel platform tag (G27, the macOS half of
+    :func:`parse_manylinux_glibc_floor`'s manylinux/glibc idea).
+
+    *name* follows the same wheel-filename/platform-tag-segment handling as
+    :func:`parse_manylinux_glibc_floor`. Unlike the glibc floor, resolution
+    is **not** simply "strictest across every tag in the segment": the
+    deployment target is architecture-specific.
+
+    - Multiple tags naming *different* single-CPU architectures with
+      *different* targets (e.g. a fat wheel's
+      ``macosx_10_9_x86_64.macosx_11_0_arm64``) cannot be collapsed into one
+      number without losing that per-arch distinction — the arm64 slice's
+      own Mach-O minimum OS is legitimately 11.0, and reducing the pair to
+      the x86_64 slice's lower 10.9 would falsely flag that valid arm64
+      slice as exceeding the floor (Codex review #583).
+    - A single tag using one of :data:`_MACOS_MULTI_SLICE_ARCH_TOKENS` (e.g.
+      ``universal2``) is *itself* multi-architecture even though it has only
+      one literal arch token in the tag string — the same ambiguity applies
+      (Codex review #583, follow-up).
+
+    Both cases return ``None`` (no single floor derivable) rather than
+    guess. A single-CPU-architecture tag, or a compressed multi-tag segment
+    where every listed single-CPU architecture agrees on the same target
+    (redundant aliasing, the manylinux-legacy-tag analog), still resolves to
+    that shared value.
+
+    Returns a dotted ``"X.Y"`` string suitable for
+    ``EnvironmentMatrix.runtime_floors["MACOS_DEPLOYMENT_TARGET"]``, or
+    ``None`` if *name* carries no recognizable ``macosx_*`` tag, its tags
+    disagree across architectures, or any tag names a multi-slice arch.
+    """
+    tag_segment = _wheel_platform_tag_segment(name)
+    floor_by_arch: dict[str, tuple[int, int]] = {}
+    for m in _MACOSX_TAG_RE.finditer(tag_segment):
+        version = (int(m.group("major")), int(m.group("minor")))
+        arch = m.group("arch")
+        if arch not in floor_by_arch or version < floor_by_arch[arch]:
+            floor_by_arch[arch] = version
+    if any(arch in _MACOS_MULTI_SLICE_ARCH_TOKENS for arch in floor_by_arch):
+        return None
+    distinct_floors = set(floor_by_arch.values())
+    if len(distinct_floors) != 1:
+        return None
+    best = next(iter(distinct_floors))
+    return f"{best[0]}.{best[1]}"
 
 
 #: Matches a PEP 425 Python tag: an implementation abbreviation (``cp``
@@ -786,9 +907,13 @@ def _os_name_from_wheel_filename(filename: str) -> str | None:
 #: Single-architecture suffixes a Linux wheel platform tag can end in. Order
 #: doesn't matter for correctness (each is ``$``-anchored, so e.g. ``ppc64``
 #: can't spuriously match a ``...ppc64le`` tag), but longer/more-specific
-#: names are listed first for readability.
+#: names are listed first for readability. ``riscv64``/``loongarch64`` are
+#: valid ``manylinux``/``musllinux`` single-arch suffixes too (``packaging``'s
+#: own ``_manylinux._ALLOWED_ARCHS`` includes both) — omitting them silently
+#: skipped ``wheel_tag_architecture_mismatch`` derivation for those wheels
+#: entirely (Codex review #583).
 _WHEEL_LINUX_MACHINE_RE = re.compile(
-    r"(x86_64|aarch64|i686|armv7l|ppc64le|ppc64|s390x)$"
+    r"(x86_64|aarch64|i686|armv7l|ppc64le|ppc64|s390x|riscv64|loongarch64)$"
 )
 
 
@@ -835,6 +960,27 @@ def _platform_machine_from_wheel_filename(filename: str) -> str | None:
         else:
             return None
     return machines.pop() if len(machines) == 1 else None
+
+
+def parse_wheel_architecture_claim(filename: str) -> str | None:
+    """Public wrapper around :func:`_platform_machine_from_wheel_filename`
+    for G27's wheel-tag-vs-binary architecture-mismatch check (the
+    "wheel tag vs. the binary's actual recorded architecture" item from the
+    SciPy/Scientific-Python Roadmap §3, tied to the wheel tag's *own* claim
+    — as opposed to G13's existing ``elf_machine_changed``/
+    ``macho_cpu_type_changed``, which compare two arbitrary binaries against
+    each other, not a binary against its own wheel's filename promise).
+
+    See that function's docstring for exactly which tags this safely
+    derives a single architecture from: single-architecture Linux
+    (``manylinux``/``musllinux``) and macOS tags only. Returns ``None`` for
+    Windows tags, fat/universal macOS tags, ambiguous compressed multi-tag
+    segments, or an unrecognized platform tag — a caller declaring
+    ``runtime_floors["WHEEL_ARCH"]`` from this value therefore never
+    declares a wrong-but-confident claim for those cases; the
+    architecture-mismatch check simply doesn't run.
+    """
+    return _platform_machine_from_wheel_filename(filename)
 
 
 # G26: a wheel's *.dist-info/METADATA declares its runtime dependencies —

@@ -29,7 +29,7 @@ use_cases:
   # ── change_class ──────────────────────────────────────────────────────────
   - id: UC-CHANGE-taxonomy
     axis: change_class
-    name: ABI/API change taxonomy (361 ChangeKinds, 5-tier policy)
+    name: ABI/API change taxonomy (366 ChangeKinds, 5-tier policy)
     status: complete
     evidence:
       modules: [abicheck/change_registry.py, abicheck/checker_policy.py]
@@ -672,16 +672,75 @@ use_cases:
   - id: UC-TC-wheel-deployment-claims
     axis: toolchain
     name: Wheel tag / deployment-claim verification (multi-platform)
-    status: planned
+    status: partial
     gap: G27
     plan: docs/development/plans/g27-wheel-deployment-verification.md
+    evidence:
+      modules: [
+        abicheck/diff_versioning.py,
+        abicheck/diff_wheel_deployment.py,
+        abicheck/package.py,
+        abicheck/change_registry_wheel.py,
+      ]
+      tests: [
+        tests/test_environment_drift.py,
+        tests/test_diff_wheel_deployment.py,
+        tests/test_package.py,
+      ]
     next_steps: >
-      Parse PEP 425/600 wheel platform tags into a structured claim and
-      cross-check against binary evidence: GLIBCXX/CXXABI floor (extends G10
-      from GLIBC-only), macOS LC_VERSION_MIN_MACOSX/LC_BUILD_VERSION vs. the
-      tag's deployment target, Windows UCRT/runtime requirements vs. the PE
-      import set. Currently only the Linux glibc half is even planned (G10);
-      musllinux, macOS, and Windows claims are unchecked entirely. See the
+      DONE: check_platform_baseline_floor (G10) generalized from GLIBC-only
+      to also check GLIBCXX_*/CXXABI_* independently, each against its own
+      declared runtime_floors entry (diff_versioning.py). New
+      check_musllinux_glibc_dependency flags a musllinux-tagged binary that
+      requires any glibc-flavoured versioned symbol at all — a yes/no
+      compatibility check, not a numeric floor, since musl carries no
+      symbol-versioning namespace to compare against. New
+      check_macos_deployment_target_floor (diff_wheel_deployment.py) is the
+      macOS half of G10's idea: LC_VERSION_MIN_MACOSX/LC_BUILD_VERSION vs. a
+      declared MACOS_DEPLOYMENT_TARGET floor, same runtime_floors/
+      --env-matrix mechanism. package.py gained
+      parse_musllinux_floor/parse_macos_deployment_target_floor tag parsers
+      alongside G10's parse_manylinux_glibc_floor (all three share
+      _wheel_platform_tag_segment). New ChangeKinds:
+      musllinux_glibc_dependency_detected, macos_deployment_target_raised.
+      check_wheel_tag_architecture_mismatch (diff_wheel_deployment.py) is
+      the wheel-tag-claim counterpart to G13's elf_machine_changed/
+      macho_cpu_type_changed (which compare two arbitrary binaries, not a
+      binary against its own wheel's filename promise): a single-arch wheel
+      tag (package.parse_wheel_architecture_claim, wrapping the existing
+      _platform_machine_from_wheel_filename) vs. the binary's own ELF
+      e_machine/Mach-O cpu_type, declared via runtime_floors["WHEEL_ARCH"] —
+      new ChangeKind wheel_tag_architecture_mismatch (BREAKING, since a
+      mismatch means the wheel cannot load on its claimed architecture at
+      all, not merely a deployment risk).
+      check_wheel_rpath_not_portable flags a non-$ORIGIN-relative RPATH/
+      RUNPATH entry (RISK) — the classic "works in CI, ImportError on the
+      user's machine" bug auditwheel/delocate exist to fix.
+      check_wheel_closure_dependency_violation flags a DT_NEEDED entry
+      matching auditwheel/delocate's vendored content-hash naming
+      convention (reusing G9's strip_vendor_hash pattern) with no
+      $ORIGIN-relative RPATH/RUNPATH to ever find it (BREAKING) —
+      deliberately narrower than a general "dependency outside the
+      permitted closure" check (which would need a real per-manylinux/
+      musllinux-tag allowed-SONAME policy to avoid false positives on
+      legitimately-present system libraries; see the plan's "Out of scope"
+      for why that full policy replication is deferred). Both gated on a
+      dedicated runtime_floors["WHEEL_CONTEXT"] opt-in key rather than any
+      declared floor, since GLIBC/GLIBCXX/CXXABI are a general-purpose
+      ADR-020b mechanism unrelated to wheel packaging and an ordinary
+      non-wheel DSO declaring one must not get wheel-portability findings
+      it never opted into (Codex review). Both ELF/Linux only; both new
+      ChangeKinds: wheel_rpath_not_portable, wheel_closure_dependency_violation.
+      STILL PLANNED: end-to-end CLI auto-derivation (a single
+      `compare old.whl new.whl` deriving runtime_floors from the *new*
+      wheel's own filename tag with no --env-matrix flag needed — today all
+      of the checks above, including G10's original GLIBC one, still require
+      an explicit --env-matrix declaration); Windows UCRT/MSVC-runtime
+      requirement checking; CPU-ISA-baseline (dispatch-symbol-name
+      heuristic) detection; the full per-tag allowed-dependency policy (the
+      general wheel-closure check, beyond the vendored-hash-specific case
+      above); macOS RPATH/@loader_path portability; a compiled examples/
+      fixture pair. See the plan's "Out of scope" and the
       SciPy/Scientific-Python Roadmap for full context.
 
   - id: UC-TC-dual-abi

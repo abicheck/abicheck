@@ -38,8 +38,11 @@ from abicheck.package import (
     detect_extractor,
     discover_shared_libraries,
     is_package,
+    parse_macos_deployment_target_floor,
     parse_manylinux_glibc_floor,
+    parse_musllinux_floor,
     parse_numpy_requirement_from_metadata,
+    parse_wheel_architecture_claim,
     parse_wheel_numpy_requirement,
     resolve_debug_info,
 )
@@ -848,6 +851,184 @@ class TestParseManylinuxGlibcFloor:
         self, name: str, expected: str | None
     ) -> None:
         assert parse_manylinux_glibc_floor(name) == expected
+
+
+class TestParseMusllinuxFloor:
+    """G27: PEP 656 musllinux platform-tag parsing."""
+
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [
+            pytest.param(
+                "scipy-1.18.0-cp312-cp312-musllinux_1_2_x86_64.whl",
+                "1.2",
+                id="basic_tag",
+            ),
+            pytest.param(
+                "pkg-1.0-cp311-cp311-musllinux_1_1_aarch64.whl",
+                "1.1",
+                id="different_arch",
+            ),
+            # A compressed multi-tag segment claims compatibility with every
+            # listed baseline — the strictest (lowest) applies.
+            pytest.param(
+                "pkg-1.0-cp311-cp311-musllinux_1_2_x86_64.musllinux_1_1_x86_64.whl",
+                "1.1",
+                id="compressed_multi_tag_picks_strictest",
+            ),
+            pytest.param(
+                "pkg-1.0-cp311-cp311-manylinux_2_17_x86_64.whl",
+                None,
+                id="no_musllinux_tag_manylinux",
+            ),
+            pytest.param(
+                "pkg-1.0-py3-none-any.whl", None, id="no_musllinux_tag_any",
+            ),
+            pytest.param(
+                "pkg-1.0-cp311-cp311-musllinux_bogus_x86_64.whl",
+                None,
+                id="malformed_tag_no_crash",
+            ),
+            # Distribution name prefix trap, same as manylinux's equivalent.
+            pytest.param(
+                "musllinux_1_2_helper-1.0-cp312-cp312-linux_x86_64.whl",
+                None,
+                id="musllinux_prefixed_distribution_name_not_mistaken_for_tag",
+            ),
+        ],
+    )
+    def test_parse_musllinux_floor(self, name: str, expected: str | None) -> None:
+        assert parse_musllinux_floor(name) == expected
+
+
+class TestParseMacosDeploymentTargetFloor:
+    """G27: macOS wheel platform-tag deployment-target parsing."""
+
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [
+            pytest.param(
+                "scipy-1.18.0-cp312-cp312-macosx_11_0_arm64.whl",
+                "11.0",
+                id="arm64",
+            ),
+            pytest.param(
+                "pkg-1.0-cp311-cp311-macosx_10_9_x86_64.whl",
+                "10.9",
+                id="x86_64_underscore_arch",
+            ),
+            # A lone "universal2" token is itself multi-architecture (x86_64
+            # + arm64 slices bundled under one string) — a real universal2
+            # wheel's arm64 slice commonly has a genuinely higher minimum OS
+            # than its x86_64 slice, so no single floor is safely derivable
+            # from the tag alone (Codex review #583, follow-up).
+            pytest.param(
+                "pkg-1.0-cp311-cp311-macosx_10_9_universal2.whl",
+                None,
+                id="universal2_is_multi_slice_unresolvable",
+            ),
+            pytest.param(
+                "pkg-1.0-cp311-cp311-macosx_10_9_universal.whl",
+                None,
+                id="universal_is_multi_slice_unresolvable",
+            ),
+            pytest.param(
+                "pkg-1.0-cp311-cp311-macosx_10_9_intel.whl",
+                None,
+                id="intel_is_multi_slice_unresolvable",
+            ),
+            # A compressed segment naming two DIFFERENT architectures with
+            # DIFFERENT targets cannot be collapsed to one number without
+            # losing the fact that the floor is arch-specific — the arm64
+            # slice's own Mach-O minimum OS is legitimately 11.0, so
+            # reducing to x86_64's lower 10.9 would falsely flag it as
+            # exceeding the floor (Codex review #583). No single floor is
+            # derivable, so this returns None rather than guess.
+            pytest.param(
+                "pkg-1.0-cp311-cp311-macosx_10_9_x86_64.macosx_11_0_arm64.whl",
+                None,
+                id="compressed_multi_tag_different_archs_unresolvable",
+            ),
+            # Same architecture named twice with different targets (redundant
+            # aliasing, the manylinux-legacy-tag analog) still resolves to
+            # the strictest within that one arch.
+            pytest.param(
+                "pkg-1.0-cp311-cp311-macosx_10_9_x86_64.macosx_10_12_x86_64.whl",
+                "10.9",
+                id="compressed_multi_tag_same_arch_picks_strictest",
+            ),
+            # Two tags for different architectures that happen to agree on
+            # the same target resolve to that shared value.
+            pytest.param(
+                "pkg-1.0-cp311-cp311-macosx_11_0_x86_64.macosx_11_0_arm64.whl",
+                "11.0",
+                id="compressed_multi_tag_different_archs_same_floor",
+            ),
+            pytest.param(
+                "pkg-1.0-cp311-cp311-manylinux_2_17_x86_64.whl",
+                None,
+                id="no_macos_tag_manylinux",
+            ),
+            pytest.param(
+                "pkg-1.0-py3-none-any.whl", None, id="no_macos_tag_any",
+            ),
+            pytest.param(
+                "pkg-1.0-cp311-cp311-macosx_11_arm64.whl",
+                None,
+                id="malformed_tag_missing_minor_no_crash",
+            ),
+            # Distribution name prefix trap, same as manylinux's equivalent.
+            pytest.param(
+                "macosx_11_0_helper-1.0-cp312-cp312-linux_x86_64.whl",
+                None,
+                id="macosx_prefixed_distribution_name_not_mistaken_for_tag",
+            ),
+        ],
+    )
+    def test_parse_macos_deployment_target_floor(
+        self, name: str, expected: str | None
+    ) -> None:
+        assert parse_macos_deployment_target_floor(name) == expected
+
+
+class TestParseWheelArchitectureClaim:
+    """G27: public wrapper for the wheel-tag architecture-mismatch check —
+    thin delegation to _platform_machine_from_wheel_filename."""
+
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [
+            pytest.param(
+                "scipy-1.18.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+                "x86_64",
+                id="manylinux_x86_64",
+            ),
+            pytest.param(
+                "scipy-1.18.0-cp312-cp312-manylinux_2_17_aarch64.whl",
+                "aarch64",
+                id="manylinux_aarch64",
+            ),
+            pytest.param(
+                "scipy-1.18.0-cp312-cp312-macosx_11_0_arm64.whl",
+                "arm64",
+                id="macosx_arm64",
+            ),
+            pytest.param(
+                "scipy-1.18.0-cp312-cp312-macosx_10_9_universal2.whl",
+                None,
+                id="macosx_universal2_ambiguous",
+            ),
+            pytest.param(
+                "pkg-1.0-cp311-cp311-win_amd64.whl",
+                None,
+                id="windows_not_derived",
+            ),
+        ],
+    )
+    def test_parse_wheel_architecture_claim(
+        self, name: str, expected: str | None
+    ) -> None:
+        assert parse_wheel_architecture_claim(name) == expected
 
 
 class TestParseNumpyRequirementFromMetadata:
@@ -1812,9 +1993,29 @@ class TestPlatformMachineFromWheelFilename:
     def test_unrecognized_linux_architecture_returns_none(self) -> None:
         assert (
             _platform_machine_from_wheel_filename(
-                "pkg-1.0-cp311-cp311-manylinux_2_17_riscv64.whl"
+                "pkg-1.0-cp311-cp311-manylinux_2_17_mips64.whl"
             )
             is None
+        )
+
+    def test_riscv64_linux_architecture_is_derived(self) -> None:
+        # Codex review #583: packaging's own _manylinux._ALLOWED_ARCHS
+        # includes riscv64/loongarch64 — omitting them here silently
+        # skipped wheel_tag_architecture_mismatch derivation entirely for
+        # otherwise valid single-arch manylinux/musllinux wheels.
+        assert (
+            _platform_machine_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-manylinux_2_39_riscv64.whl"
+            )
+            == "riscv64"
+        )
+
+    def test_loongarch64_linux_architecture_is_derived(self) -> None:
+        assert (
+            _platform_machine_from_wheel_filename(
+                "pkg-1.0-cp311-cp311-manylinux_2_39_loongarch64.whl"
+            )
+            == "loongarch64"
         )
 
 

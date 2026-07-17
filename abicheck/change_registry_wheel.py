@@ -1,0 +1,115 @@
+# Copyright 2026 Nikolay Petrov
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Wheel tag / deployment-claim ChangeKind registry entries (G27).
+
+Split out of ``change_registry.py`` to keep that module under the
+AI-readiness 2000-line hard cap (same reason ``change_registry_numpy.py``
+exists). These entries are spliced into the single ``REGISTRY`` at import
+time — declaring a kind here is exactly equivalent to declaring it in
+``change_registry.py``. See ``abicheck/diff_versioning.py``
+(``check_musllinux_glibc_dependency``, and the GLIBCXX/CXXABI extension of
+``check_platform_baseline_floor``) and ``abicheck/diff_wheel_deployment.py``
+(``check_macos_deployment_target_floor``) for the evidence extraction and
+detectors that emit these kinds, and
+``docs/development/plans/g27-wheel-deployment-verification.md`` for the full
+design.
+"""
+
+from __future__ import annotations
+
+from .change_registry_types import ChangeKindMeta, Verdict
+
+_B = Verdict.BREAKING
+_R = Verdict.COMPATIBLE_WITH_RISK
+_E = ChangeKindMeta
+
+WHEEL_DEPLOYMENT_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
+    _E(
+        "musllinux_glibc_dependency_detected",
+        _B,
+        impact="The binary is claimed musllinux-compatible (PEP 656 — "
+        "runs on musl libc, e.g. Alpine) but shows glibc evidence: a "
+        "GLIBC_*-versioned symbol requirement (including the synthetic "
+        "GLIBC_ABI_DT_RELR marker), a direct DT_NEEDED dependency on a "
+        "glibc-only SONAME (libc.so.6, libm.so.6, ...), or glibc's own "
+        "dynamic linker as PT_INTERP: glibc's own libc.so.6/loader "
+        "symbol-versioning namespace doesn't exist on a musl system at "
+        "all. (GLIBCXX_*/CXXABI_* alone are not flagged here — a musl "
+        "system's libstdc++ can legitimately carry its own such verneed "
+        "entries; see "
+        "diff_versioning.check_musllinux_glibc_dependency's docstring.) "
+        "This is not a version mismatch abicheck can rate as a deployment "
+        "risk, it is a dependency that doesn't exist on the target — the "
+        "dynamic loader fails to resolve the glibc-flavoured shared object "
+        "outright. Rebuild against a musl toolchain (e.g. the musllinux "
+        "manylinux-equivalent Docker images) rather than relinking a glibc "
+        "build under the musllinux tag.",
+        description_template="musllinux-tagged binary requires glibc: {new} (required by: {name})",
+    ),
+    _E(
+        "macos_deployment_target_raised",
+        _R,
+        impact="The binary's own Mach-O minimum-OS load command "
+        "(LC_VERSION_MIN_MACOSX/LC_BUILD_VERSION) exceeds the macOS "
+        "deployment target promised by the wheel's platform tag (e.g. "
+        "macosx_10_9_x86_64) or an explicit --env-matrix declaration — "
+        "the macOS counterpart of G10's manylinux glibc-floor check. "
+        "Existing installs on the tag's promised deployment target can "
+        "refuse to load the binary (dyld enforces the minimum-OS load "
+        "command at load time), or exhibit undefined behavior calling "
+        "into SDK symbols introduced after the promised floor.",
+        description_template="macOS deployment target exceeded: binary requires {new}, declared target promises at most {old} (required by: {name})",
+    ),
+    _E(
+        "wheel_tag_architecture_mismatch",
+        _B,
+        impact="The wheel's platform tag names exactly one CPU architecture "
+        "(e.g. manylinux_2_17_x86_64, macosx_11_0_arm64), but the contained "
+        "binary's own ELF e_machine / Mach-O cpu_type records a different "
+        "one. This is not a deployment-envelope risk — the wheel simply "
+        "cannot be loaded on the architecture it claims to support at all. "
+        "Typically a packaging/CI mistake (wrong cross-compilation target, "
+        "mismatched build matrix leg, or a stale artifact reused under the "
+        "wrong tag).",
+        description_template="Wheel tag claims architecture {old}, binary is {new} (required by: {name})",
+    ),
+    _E(
+        "wheel_rpath_not_portable",
+        _R,
+        impact="The binary's RPATH/RUNPATH carries an entry that isn't "
+        "$ORIGIN-relative — almost always a build-machine artifact (the "
+        "build sysroot, a CI runner's checkout path, a developer's local "
+        "prefix) that will not exist once the wheel is installed to an "
+        "arbitrary per-user site-packages path. auditwheel/delocate exist "
+        "specifically to rewrite RPATH/RUNPATH to $ORIGIN-relative paths; "
+        "a wheel that skipped that repair step ships a search path that "
+        "resolves nothing on a clean install.",
+        description_template="RPATH/RUNPATH not $ORIGIN-relative: {new} (binary: {name})",
+    ),
+    _E(
+        "wheel_closure_dependency_violation",
+        _B,
+        impact="A DT_NEEDED entry matches the auditwheel/delocate vendored "
+        "content-hash naming convention (the same pattern G9's vendored-"
+        "library pairing recognizes) — a strong signal the binary is meant "
+        "to load a bundled dependency — but the binary carries no "
+        "$ORIGIN-relative RPATH/RUNPATH entry at all, so the dynamic "
+        "loader has no mechanism to ever find it. The vendored library is "
+        "not actually part of the wheel's resolvable dependency closure "
+        "regardless of whether the file itself was physically included; "
+        "the binary fails to load with an unresolved-dependency error.",
+        description_template="Vendored dependency unresolvable (no $ORIGIN-relative RPATH/RUNPATH): {new} (binary: {name})",
+    ),
+]

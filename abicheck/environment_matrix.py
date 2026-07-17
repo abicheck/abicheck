@@ -152,6 +152,31 @@ def _parse_cuda_constraints(cuda_data: dict[str, Any]) -> CudaConstraints:
     )
 
 
+#: runtime_floors keys whose value is not a dotted-numeric version — they
+#: declare a presence flag (MUSLLINUX, WHEEL_CONTEXT) or a non-version token
+#: (WHEEL_ARCH, e.g. "x86_64") rather than a floor, so the dotted-numeric
+#: validation below doesn't apply to them (Codex review #583: WHEEL_ARCH
+#: was unreachable via --env-matrix/from_dict entirely — every value was
+#: rejected before check_wheel_tag_architecture_mismatch ever ran, since
+#: only the direct-constructor path bypassing from_dict's validation could
+#: set a non-numeric runtime_floors value at all).
+_NON_NUMERIC_RUNTIME_FLOOR_KEYS = frozenset(
+    {"WHEEL_ARCH", "MUSLLINUX", "WHEEL_CONTEXT"}
+)
+
+#: Presence-flag keys (MUSLLINUX, WHEEL_CONTEXT — unlike WHEEL_ARCH, which
+#: expects an actual architecture string, not a yes/no flag) where a YAML
+#: boolean or blank value is meaningful and must be honored as "disabled",
+#: not silently stringified: ``str(False)`` is the non-empty string
+#: ``"False"`` and ``str(None)`` is ``"None"`` — a blank YAML entry
+#: (``WHEEL_CONTEXT:`` with no value, which PyYAML loads as ``None``) or an
+#: explicit ``false`` both parse to a truthy string, which the downstream
+#: checks' plain ``floors.get(...)`` truthiness test reads as *enabled* —
+#: the exact opposite of what a blank or explicitly-disabled entry means
+#: (Codex review #583).
+_PRESENCE_FLAG_RUNTIME_FLOOR_KEYS = frozenset({"MUSLLINUX", "WHEEL_CONTEXT"})
+
+
 def _parse_runtime_floors(floors_raw: object) -> dict[str, str]:
     """Parse and validate the ``runtime_floors`` prefix → version mapping."""
     if not isinstance(floors_raw, dict):
@@ -161,6 +186,21 @@ def _parse_runtime_floors(floors_raw: object) -> dict[str, str]:
         )
     runtime_floors: dict[str, str] = {}
     for key, value in floors_raw.items():
+        key_upper = str(key).upper()
+        if key_upper in _PRESENCE_FLAG_RUNTIME_FLOOR_KEYS and (
+            isinstance(value, (bool, int, float)) or value is None
+        ):
+            # False/blank (None)/numeric zero all mean "not enabled" — omit
+            # the key entirely so downstream `floors.get(...)` truthiness
+            # checks see it as not declared, rather than storing a truthy
+            # string ("False"/"None"/"0") that would silently enable the
+            # gate. `WHEEL_CONTEXT: 0`/`MUSLLINUX: 0` reach here as the
+            # plain int 0 (not a bool), which `str(0) == "0"` — a non-empty,
+            # truthy string — would otherwise pass through untouched (Codex
+            # review #583).
+            if value:
+                runtime_floors[key_upper] = "1"
+            continue
         if isinstance(value, float):
             # An unquoted YAML floor has already been lossily parsed:
             # `GLIBC: 2.40` reaches us as the float 2.4, which would
@@ -173,17 +213,18 @@ def _parse_runtime_floors(floors_raw: object) -> dict[str, str]:
                 f"with the intended digits."
             )
         floor = str(value)
-        # Every dot-separated component must be purely numeric: the floor
-        # contract parses with int() per component, so a "2.28-1" or "2.x"
-        # would silently truncate to (2,) and flip verdicts. Reject
-        # malformed text here instead (Codex review #510).
-        if _parse_dotted_numeric_version(floor) is None:
-            raise ValueError(
-                f"'runtime_floors.{key}' must be a dotted numeric version "
-                f"(digits and dots only, e.g. '2.28'), with each component "
-                f"at most 9 digits, got {value!r}"
-            )
-        runtime_floors[str(key).upper()] = floor
+        if key_upper not in _NON_NUMERIC_RUNTIME_FLOOR_KEYS:
+            # Every dot-separated component must be purely numeric: the floor
+            # contract parses with int() per component, so a "2.28-1" or "2.x"
+            # would silently truncate to (2,) and flip verdicts. Reject
+            # malformed text here instead (Codex review #510).
+            if _parse_dotted_numeric_version(floor) is None:
+                raise ValueError(
+                    f"'runtime_floors.{key}' must be a dotted numeric version "
+                    f"(digits and dots only, e.g. '2.28'), with each component "
+                    f"at most 9 digits, got {value!r}"
+                )
+        runtime_floors[key_upper] = floor
     return runtime_floors
 
 

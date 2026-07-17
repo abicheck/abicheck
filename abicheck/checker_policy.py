@@ -765,7 +765,40 @@ class ChangeKind(str, Enum):
     # whether the floor moved between old and new — unlike RUNTIME_FLOOR_RAISED
     # (a two-snapshot delta), this fires even on a static/unchanged floor that
     # simply exceeds what the artifact's own tag promises (G10).
-    PLATFORM_BASELINE_FLOOR_RAISED = "platform_baseline_floor_raised"  # max required GLIBC_2.x exceeds the declared/derived platform-baseline floor → RISK
+    PLATFORM_BASELINE_FLOOR_RAISED = "platform_baseline_floor_raised"  # max required GLIBC_2.x/GLIBCXX_x/CXXABI_x exceeds the declared/derived platform-baseline floor → RISK
+    # musllinux (PEP 656) wheels target Alpine's musl libc, which has no
+    # symbol-versioning namespace at all — a GLIBC_* requirement (or other
+    # direct glibc-loader/SONAME evidence) means the binary won't even
+    # resolve its dependencies there, not merely a version mismatch (G27,
+    # generalizes G10 beyond glibc-floor comparison to a musl compatibility
+    # yes/no check). GLIBCXX_*/CXXABI_* alone are NOT disqualifying — a musl
+    # system's own libstdc++ can legitimately carry such verneed entries;
+    # see diff_versioning.check_musllinux_glibc_dependency's docstring.
+    MUSLLINUX_GLIBC_DEPENDENCY_DETECTED = "musllinux_glibc_dependency_detected"  # binary tagged musllinux-compatible actually requires a glibc-versioned symbol → BREAKING
+    # A wheel's macosx_X_Y_<arch> platform tag promises a *maximum* macOS
+    # deployment target its binaries may require; the Mach-O
+    # LC_VERSION_MIN_MACOSX/LC_BUILD_VERSION load command carries the
+    # binary's own actual minimum (G27, the macOS half of G10's manylinux
+    # glibc-floor idea).
+    MACOS_DEPLOYMENT_TARGET_RAISED = "macos_deployment_target_raised"  # binary's own Mach-O minimum OS exceeds the declared/derived macOS deployment-target floor → RISK
+    # A wheel's platform tag names exactly one CPU architecture
+    # (manylinux_2_17_x86_64, macosx_11_0_arm64, ...); the contained
+    # binary's own ELF e_machine/Mach-O cpu_type is the ground truth. A
+    # mismatch means the wheel cannot even be loaded on the architecture it
+    # claims to support — worse than a version-floor risk (G27, tied to the
+    # wheel tag's own claim, unlike G13's two-snapshot elf_machine_changed/
+    # macho_cpu_type_changed).
+    WHEEL_TAG_ARCHITECTURE_MISMATCH = "wheel_tag_architecture_mismatch"  # binary's recorded machine/cpu_type disagrees with the wheel tag's claimed architecture → BREAKING
+    # A wheel's binaries install to an unpredictable per-user path; any
+    # RPATH/RUNPATH entry that isn't $ORIGIN-relative is almost always a
+    # build-machine artifact that won't exist on the install target
+    # (auditwheel/delocate exist specifically to rewrite these) (G27).
+    WHEEL_RPATH_NOT_PORTABLE = "wheel_rpath_not_portable"  # RPATH/RUNPATH carries a non-$ORIGIN-relative (absolute) entry in a declared wheel-verification context → RISK
+    # A DT_NEEDED entry matching auditwheel/delocate's vendored content-hash
+    # naming convention (G9's strip_vendor_hash pattern) with no
+    # $ORIGIN-relative RPATH/RUNPATH to ever find it — the vendored
+    # dependency isn't actually part of the resolvable closure (G27).
+    WHEEL_CLOSURE_DEPENDENCY_VIOLATION = "wheel_closure_dependency_violation"  # vendored/hash-suffixed dependency with no $ORIGIN-relative RPATH/RUNPATH mechanism to find it → BREAKING
     # Packed relative relocations (DT_RELR, `-z pack-relative-relocs`,
     # binutils ≥ 2.38 default on some distros). A DT_RELR binary requires
     # glibc ≥ 2.36 (or an equivalent loader) — glibc marks this with the

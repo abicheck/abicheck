@@ -315,11 +315,21 @@ def apply_runtime_floor_contract(
     return changes
 
 
+#: Versioned-symbol namespaces a platform-baseline floor can be declared for.
+#: GLIBC is G10's original scope; GLIBCXX (libstdc++) and CXXABI (the C++
+#: Itanium ABI runtime, also shipped by libstdc++) are G27's extension — a
+#: wheel's binaries can pick up a newer C++ runtime floor independently of
+#: their glibc floor (e.g. a newer GCC bundled in the build image), and a
+#: manylinux tag makes no promise about either, so they need their own
+#: independently-declarable ``runtime_floors`` entries.
+_BASELINE_FLOOR_PREFIXES = ("GLIBC", "GLIBCXX", "CXXABI")
+
+
 def check_platform_baseline_floor(
     elf: ElfMetadata, runtime_floors: dict[str, str] | None
 ) -> list[Change]:
-    """Check a binary's own required GLIBC floor against a declared
-    platform-baseline promise (e.g. a manylinux wheel tag) (G10).
+    """Check a binary's own required GLIBC/GLIBCXX/CXXABI floor against a
+    declared platform-baseline promise (e.g. a manylinux wheel tag) (G10, G27).
 
     A manylinux tag (``manylinux_2_27``, …) is a promise about the *maximum*
     glibc symbol version a wheel's binaries may require. Unlike
@@ -331,39 +341,62 @@ def check_platform_baseline_floor(
     shipped under a ``manylinux_2_27`` tag is broken on day one, with no
     old→new delta for a diff to key on. This is the classic "works on my box,
     `GLIBC_2.x not found` on the user's older system" failure going
-    undetected.
+    undetected. The same reasoning applies independently to the C++ runtime
+    floor (``GLIBCXX_*``/``CXXABI_*``, e.g. a binary rebuilt with a newer GCC
+    picking up a newer libstdc++ symbol without the manylinux glibc floor
+    itself moving at all).
 
     *runtime_floors* is the same ``{prefix: "X.Y"}`` mapping consumed by
     :func:`apply_runtime_floor_contract` (ADR-020b ``EnvironmentMatrix`` /
     ``--env-matrix``) — keys are matched case-insensitively (normalized to
     upper), same as that function, since a direct API caller can construct
     ``EnvironmentMatrix(runtime_floors={"glibc": ...})`` bypassing
-    ``from_dict``'s uppercasing. Only the ``GLIBC`` entry is read here; other
-    prefixes have no platform-tag concept yet. Returns ``[]`` when no
-    ``GLIBC`` floor is declared, the floor is malformed, or the binary's own
-    requirement is at or below it.
+    ``from_dict``'s uppercasing. Only the entries in
+    :data:`_BASELINE_FLOOR_PREFIXES` are read here; other prefixes have no
+    platform-tag concept yet. Each declared prefix is checked independently —
+    a binary can violate the GLIBCXX floor while staying within the GLIBC
+    one, and vice versa, each producing its own finding. Returns ``[]`` when
+    none of the recognized prefixes are declared, every declared floor is
+    malformed, or the binary's own requirement is at or below each declared
+    floor.
 
     A binary built with packed relative relocations (``DT_RELR``) implicitly
     requires glibc >= 2.36 to load even when no ``GLIBC_ABI_DT_RELR``-tagged
     symbol version happens to appear in ``versions_required`` — the same
     implied floor :func:`apply_runtime_floor_contract` folds in for the delta
-    case via ``_DT_RELR_GLIBC_FLOOR_TAG``, so it is folded in here too.
+    case via ``_DT_RELR_GLIBC_FLOOR_TAG``, so it is folded in here too. This
+    implied floor is GLIBC-specific and does not apply to the GLIBCXX/CXXABI
+    checks.
     """
     if not runtime_floors:
         return []
-    floor_raw = {k.upper(): v for k, v in runtime_floors.items()}.get("GLIBC")
-    if not floor_raw:
-        return []
+    floors = {k.upper(): v for k, v in runtime_floors.items()}
+    changes: list[Change] = []
+    for prefix in _BASELINE_FLOOR_PREFIXES:
+        floor_raw = floors.get(prefix)
+        if not floor_raw:
+            continue
+        change = _check_baseline_floor_for_prefix(elf, prefix, floor_raw)
+        if change is not None:
+            changes.append(change)
+    return changes
+
+
+def _check_baseline_floor_for_prefix(
+    elf: ElfMetadata, prefix: str, floor_raw: str
+) -> Change | None:
+    """The single-prefix worker behind :func:`check_platform_baseline_floor`."""
     floor_tuple = _parse_dotted_numeric_version(floor_raw)
     if floor_tuple is None:
-        return []
+        return None
     best: tuple[int, ...] = (0,)
     best_tag = ""
     providers: set[str] = set()
     relr_tuple = _parse_abi_version_tag(_DT_RELR_GLIBC_FLOOR_TAG)
+    tag_prefix = f"{prefix}_"
     for lib, tags in (getattr(elf, "versions_required", None) or {}).items():
         for tag in tags:
-            if tag == "GLIBC_ABI_DT_RELR":
+            if prefix == "GLIBC" and tag == "GLIBC_ABI_DT_RELR":
                 # Legacy snapshots predating the has_dt_relr field may still
                 # carry this synthetic verneed marker directly — treat it as
                 # implying the same floor the has_dt_relr fallback below
@@ -374,7 +407,7 @@ def check_platform_baseline_floor(
                 if _version_gt(relr_tuple, floor_tuple):
                     providers.add(lib)
                 continue
-            if not tag.startswith("GLIBC_"):
+            if not tag.startswith(tag_prefix):
                 continue
             parsed = _parse_abi_version_tag(tag)
             if parsed == _UNPARSEABLE_VERSION:
@@ -383,21 +416,161 @@ def check_platform_baseline_floor(
                 best, best_tag = parsed, tag
             if _version_gt(parsed, floor_tuple):
                 providers.add(lib)
-    if getattr(elf, "has_dt_relr", False):
+    if prefix == "GLIBC" and getattr(elf, "has_dt_relr", False):
         if _version_gt(relr_tuple, best):
             best, best_tag = relr_tuple, _DT_RELR_GLIBC_FLOOR_TAG
         if _version_gt(relr_tuple, floor_tuple):
             providers.add(getattr(elf, "soname", "") or "<binary>")
     if best == (0,) or _version_le(best, floor_tuple):
+        return None
+    return make_change(
+        ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED,
+        symbol="<platform-baseline>",
+        name=", ".join(sorted(providers)) or "(no provider evidence captured)",
+        detail=prefix,
+        old=f"{prefix}_{floor_raw}",
+        new=best_tag,
+    )
+
+
+#: Sentinel key: presence in ``runtime_floors`` (any truthy value; the value
+#: itself is not parsed as a version, since musllinux compatibility is a
+#: yes/no claim, not a numeric floor) declares "this artifact is tagged
+#: musllinux-compatible", the same way ``GLIBC``/``GLIBCXX``/``CXXABI``
+#: declare a numeric floor for :func:`check_platform_baseline_floor`.
+_MUSLLINUX_DECLARED_KEY = "MUSLLINUX"
+
+
+#: Canonical glibc-only SONAMEs (DT_NEEDED evidence) — musl's own libc is
+#: never named any of these (Alpine's musl libc.so is e.g.
+#: ``libc.musl-x86_64.so.1``, folding everything glibc historically split
+#: out — math, threading, dl, realtime, resolver, NSS, async-lookup — into
+#: that one file; musl is also usually the process's own interpreter rather
+#: than a separate DT_NEEDED entry at all), so a binary that directly
+#: depends on any of these cannot resolve that dependency on a musl system
+#: regardless of whether any ``GLIBC_*`` verneed tag was captured (Codex
+#: review #583: a glibc-built ``sin()`` wrapper can need only ``libm.so.6``
+#: with no ``libc.so.6`` DT_NEEDED entry at all).
+_GLIBC_ONLY_SONAMES = frozenset(
+    {
+        "libc.so.6",
+        "libm.so.6",
+        "libpthread.so.0",
+        "libdl.so.2",
+        "librt.so.1",
+        "libresolv.so.2",
+        "libnsl.so.1",
+        "libutil.so.1",
+        "libanl.so.1",
+        # glibc's SIMD vector-math library (glibc 2.22+) — no musl
+        # equivalent (Codex review #583, follow-up).
+        "libmvec.so.1",
+    }
+)
+
+
+#: Basename substrings that identify glibc's own dynamic-linker interpreter
+#: across architectures. Most use the "ld-linux[-ARCH]" family (x86,
+#: aarch64, armhf, riscv64, loongarch64, i686's bare "ld-linux.so.2", ...),
+#: but glibc's ppc64le/ppc64/s390x interpreters use a distinct "ld64.so"
+#: naming instead (``/lib64/ld64.so.2`` on ppc64le, ``ld64.so.1`` on
+#: ppc64/s390x) that the "ld-linux" substring alone misses entirely. musl's
+#: own interpreter naming (``ld-musl-<arch>.so.1``) never overlaps either
+#: pattern, so there's no risk of misclassifying a musl loader as glibc's
+#: (Codex review #583).
+_GLIBC_INTERPRETER_MARKERS = ("ld-linux", "ld64.so")
+
+
+def _direct_glibc_dependency_evidence(elf: ElfMetadata) -> str | None:
+    """Non-verneed evidence that *elf* depends on glibc specifically (G27).
+
+    Covers a snapshot where symbol-version requirements weren't captured (or
+    the binary genuinely calls no versioned symbol) but still directly names
+    a glibc-only artifact: a :data:`_GLIBC_ONLY_SONAMES` entry in DT_NEEDED,
+    or a glibc-style dynamic-linker interpreter path (PT_INTERP — see
+    :data:`_GLIBC_INTERPRETER_MARKERS` for the full set of glibc loader
+    naming conventions this recognizes, distinct from musl's own
+    ``ld-musl-*.so.1`` interpreter naming). Returns the offending value, or
+    ``None``.
+    """
+    needed: list[str] = getattr(elf, "needed", None) or []
+    for lib in needed:
+        if lib in _GLIBC_ONLY_SONAMES:
+            return lib
+    interpreter = getattr(elf, "interpreter", "") or ""
+    if any(marker in interpreter for marker in _GLIBC_INTERPRETER_MARKERS):
+        return interpreter
+    return None
+
+
+def check_musllinux_glibc_dependency(
+    elf: ElfMetadata, runtime_floors: dict[str, str] | None
+) -> list[Change]:
+    """Flag a musllinux-tagged binary that actually requires glibc (G27).
+
+    musllinux wheels (PEP 656) target musl libc (e.g. Alpine), which
+    provides none of glibc's own ``GLIBC_*``-versioned ``libc.so.6``/loader
+    symbols — a binary requiring one was linked against glibc itself and
+    will fail to even resolve that dependency on a musl system, not merely
+    hit a symbol-version mismatch. This check is deliberately scoped to
+    *just* the ``GLIBC_*`` namespace: unlike glibc, a musl system's
+    libstdc++ can legitimately carry ``GLIBCXX_*``/``CXXABI_*`` verneed
+    entries of its own — musl's FAQ explicitly documents using gcc's
+    libstdc++ alongside musl — so those namespaces alone do not prove a
+    glibc dependency and must not be flagged here (Codex review #583).
+    :func:`check_platform_baseline_floor`'s generalized ``GLIBCXX``/
+    ``CXXABI`` floor check is the right tool for that C++-runtime-versioning
+    case; it is orthogonal to musl compatibility.
+
+    The literal ``GLIBC_ABI_DT_RELR`` synthetic verneed marker *is* flagged
+    (it is glibc's own marker name, unambiguous regardless of loader
+    feature support elsewhere), but a bare ``has_dt_relr`` flag on its own
+    is deliberately **not** treated as glibc evidence: packed relative
+    relocations (DT_RELR) are not glibc-specific — musl's own dynamic
+    linker gained RELR support in musl 1.2.4 — so a clean musl-built binary
+    using DT_RELR would otherwise false-positive here (Codex review #583).
+
+    Also checks :func:`_direct_glibc_dependency_evidence`: a snapshot can
+    depend on a glibc-only SONAME or its dynamic linker directly without any
+    ``GLIBC_*`` verneed tag ever having been captured (e.g. incomplete
+    verneed extraction, or a binary that calls no versioned symbol at all) —
+    the DT_NEEDED SONAME or PT_INTERP path alone is still disqualifying
+    evidence, since musl provides none of them under those names (Codex
+    review #583).
+
+    Declared via ``runtime_floors["MUSLLINUX"]`` (any truthy value, e.g. the
+    musllinux tag's own ``"1.2"`` version string — only presence is
+    checked). Returns ``[]`` when musllinux compatibility isn't declared, or
+    when the binary carries no glibc-flavoured evidence at all.
+    """
+    if not runtime_floors:
+        return []
+    floors = {k.upper(): v for k, v in runtime_floors.items()}
+    if not floors.get(_MUSLLINUX_DECLARED_KEY):
+        return []
+    offenders: set[str] = set()
+    worst_tag = ""
+    worst_tuple: tuple[int, ...] = (0,)
+    for lib, tags in (getattr(elf, "versions_required", None) or {}).items():
+        for tag in tags:
+            if tag.startswith("GLIBC_"):  # covers the literal GLIBC_ABI_DT_RELR marker too
+                offenders.add(lib)
+                parsed = _parse_abi_version_tag(tag)
+                if parsed != _UNPARSEABLE_VERSION and _version_gt(parsed, worst_tuple):
+                    worst_tuple, worst_tag = parsed, tag
+    direct_evidence = _direct_glibc_dependency_evidence(elf)
+    if direct_evidence is not None:
+        offenders.add(direct_evidence)
+    if not offenders:
         return []
     return [
         make_change(
-            ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED,
+            ChangeKind.MUSLLINUX_GLIBC_DEPENDENCY_DETECTED,
             symbol="<platform-baseline>",
-            name=", ".join(sorted(providers)) or "(no provider evidence captured)",
-            detail="GLIBC",
-            old=f"GLIBC_{floor_raw}",
-            new=best_tag,
+            name=", ".join(sorted(offenders)),
+            detail="musllinux",
+            old="musllinux (no glibc symbol-versioning namespace)",
+            new=worst_tag or direct_evidence or "glibc-versioned dependency",
         )
     ]
 
@@ -521,6 +694,24 @@ def detect_version_script_missing(
     ]
 
 
+#: BREAKING kinds a SONAME bump cannot remedy — deployment/wheel-packaging
+#: failures rather than an ABI-incompatible symbol-table change. Bumping
+#: DT_SONAME tells consumers "relink against the new major version"; it does
+#: nothing for "your wheel claims x86_64 but the binary is aarch64"
+#: (wheel_tag_architecture_mismatch), "this musllinux-tagged binary actually
+#: needs glibc" (musllinux_glibc_dependency_detected), or "a vendored
+#: dependency has no RPATH to ever be found" (wheel_closure_dependency_violation)
+#: — recommending a bump for these is actively misleading remediation advice
+#: (Codex review #583).
+_SONAME_BUMP_CANNOT_FIX_KINDS = frozenset(
+    {
+        ChangeKind.MUSLLINUX_GLIBC_DEPENDENCY_DETECTED,
+        ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH,
+        ChangeKind.WHEEL_CLOSURE_DEPENDENCY_VIOLATION,
+    }
+)
+
+
 def check_soname_bump_policy(
     changes: list[Change],
     old_elf: ElfMetadata,
@@ -538,6 +729,11 @@ def check_soname_bump_policy(
     breaking_kinds = BREAKING_KINDS
 
     def _is_effectively_breaking(c: Change) -> bool:
+        # Deployment/wheel-packaging BREAKING kinds a SONAME bump cannot fix
+        # never count toward this policy's recommendation, regardless of
+        # effective_verdict (Codex review #583).
+        if c.kind in _SONAME_BUMP_CANNOT_FIX_KINDS:
+            return False
         # Honor a per-finding ``effective_verdict`` override (ADR-025): a change
         # demoted to COMPATIBLE_WITH_RISK — e.g. one confined to an internal/
         # private version-node symbol — must not count as a break here, or it

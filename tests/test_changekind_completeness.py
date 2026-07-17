@@ -447,6 +447,13 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.NUMPY_TARGET_FLOOR_RAISED,
     ChangeKind.NUMPY_METADATA_UNDERSTATES_REQUIRED_VERSION,
     ChangeKind.NUMPY_ABI_MAJOR_INCOMPATIBLE,
+    # exercised by tests/test_environment_drift.py::TestMusllinuxGlibcDependency
+    # and tests/test_diff_wheel_deployment.py (G27)
+    ChangeKind.MUSLLINUX_GLIBC_DEPENDENCY_DETECTED,
+    ChangeKind.MACOS_DEPLOYMENT_TARGET_RAISED,
+    ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH,
+    ChangeKind.WHEEL_RPATH_NOT_PORTABLE,
+    ChangeKind.WHEEL_CLOSURE_DEPENDENCY_VIOLATION,
 }
 
 

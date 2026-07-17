@@ -43,6 +43,183 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **Wheel tag / deployment-claim verification (G27, partial).**
+  `diff_versioning.check_platform_baseline_floor` (G10) now checks the
+  `GLIBCXX_*`/`CXXABI_*` symbol-version floor independently of `GLIBC`, each
+  against its own declared `--env-matrix` `runtime_floors` entry. New
+  `diff_versioning.check_musllinux_glibc_dependency`: flags a
+  `musllinux`-declared binary (`runtime_floors: {MUSLLINUX: "1.2"}`) that
+  requires any glibc-flavoured versioned symbol at all — a yes/no
+  compatibility check rather than a numeric floor, since musl carries no
+  symbol-versioning namespace to compare against — new `BREAKING`
+  `musllinux_glibc_dependency_detected` — scoped to the true `GLIBC_*`
+  namespace plus direct `libc.so.6`/glibc-style-interpreter evidence, since
+  a musl system's own libstdc++ can legitimately carry `GLIBCXX_*`/
+  `CXXABI_*` verneed entries (Codex review). New
+  `diff_wheel_deployment.check_macos_deployment_target_floor`: the macOS
+  half of G10's idea, comparing a Mach-O binary's own
+  `LC_VERSION_MIN_MACOSX`/`LC_BUILD_VERSION` minimum-OS (padded version
+  comparison, so `"11"` and `"11.0"` compare equal) against a declared
+  `MACOS_DEPLOYMENT_TARGET` floor — new `RISK`
+  `macos_deployment_target_raised`. New `abicheck.package`
+  `parse_musllinux_floor()`/`parse_macos_deployment_target_floor()` wheel
+  platform-tag parsers alongside G10's `parse_manylinux_glibc_floor()` (all
+  three share the extracted `_wheel_platform_tag_segment()` helper); the
+  macOS parser is arch-aware and returns `None` rather than collapsing a
+  fat/universal wheel's per-architecture deployment targets into one
+  (possibly wrong) number when they disagree (Codex review). New
+  `diff_wheel_deployment.check_wheel_tag_architecture_mismatch`: a wheel
+  tag naming exactly one CPU architecture (e.g. `manylinux_2_17_x86_64`,
+  `macosx_11_0_arm64`) vs. the binary's own ELF `e_machine`/Mach-O
+  `cpu_type` — the wheel-tag-claim counterpart to the existing
+  two-snapshot `elf_machine_changed`/`macho_cpu_type_changed` (G13) — new
+  `BREAKING` `wheel_tag_architecture_mismatch`, declared via
+  `runtime_floors: {WHEEL_ARCH: "x86_64"}`. New
+  `abicheck.package.parse_wheel_architecture_claim()` (public wrapper over
+  the existing internal wheel-tag arch derivation). New
+  `diff_wheel_deployment.check_wheel_rpath_not_portable`: a non-
+  `$ORIGIN`-relative RPATH/RUNPATH entry — almost always a build-machine
+  artifact that won't exist on the install target — new `RISK`
+  `wheel_rpath_not_portable`. New
+  `diff_wheel_deployment.check_wheel_closure_dependency_violation`: a
+  DT_NEEDED entry matching auditwheel/delocate's vendored content-hash
+  naming convention (reusing G9's `strip_vendor_hash` pattern) with no
+  `$ORIGIN`-relative RPATH/RUNPATH to ever find it — new `BREAKING`
+  `wheel_closure_dependency_violation`. Both deliberately narrower than a
+  general "is this dependency permitted by the wheel's platform tag" check
+  (which needs a real per-manylinux/musllinux-tag allowed-SONAME policy to
+  avoid false positives — out of scope, see the plan) — they key off
+  internally-inconsistent evidence instead of an external allowlist. Both
+  gated on a dedicated `runtime_floors["WHEEL_CONTEXT"]` opt-in key, not on
+  any declared floor being present: `GLIBC`/`GLIBCXX`/`CXXABI` are a
+  general-purpose ADR-020b symbol-version-floor mechanism unrelated to
+  wheel packaging, so an ordinary non-wheel DSO declaring one must not get
+  wheel-portability findings it never opted into (Codex review). A
+  `runtime_floors` boolean value for a presence-flag key (`MUSLLINUX`,
+  `WHEEL_CONTEXT`) is now honored as a boolean instead of stringified —
+  `str(False)` is the truthy string `"False"` (and a blank YAML entry,
+  `WHEEL_CONTEXT:` with no value, loads as `None` — `str(None)` is
+  likewise the truthy `"None"`), which would otherwise let
+  `{WHEEL_CONTEXT: false}` or a blank entry silently *enable* the checks
+  they were meant to leave disabled (Codex review).
+  `check_soname_bump_policy` no longer recommends a
+  SONAME bump for the three new deployment/wheel-packaging `BREAKING`
+  kinds (`musllinux_glibc_dependency_detected`,
+  `wheel_tag_architecture_mismatch`, `wheel_closure_dependency_violation`)
+  — bumping `DT_SONAME` doesn't fix any of them, so recommending one was
+  misleading remediation advice (Codex review).
+  `check_wheel_tag_architecture_mismatch` now also checks ELF `EI_DATA`
+  byte order for every architecture claim, not just the `ppc64`/`ppc64le`
+  pair that shares one `e_machine` value (`EM_PPC64`) — `e_machine` alone
+  doesn't prove endianness for any claim: a claimed `x86_64` binary
+  captured with `ei_data="MSB"` is equally impossible (x86 is always
+  little-endian) and previously passed since `EM_X86_64` matched
+  (Codex review, two rounds).
+  `ARM64E` (the pointer-authenticating arm64e ABI variant, a distinct,
+  non-interchangeable ABI third-party wheels are never actually built for)
+  no longer silently satisfies a plain `arm64` wheel-tag claim
+  (Codex review).
+  `check_wheel_tag_architecture_mismatch`'s Mach-O branch now checks
+  `cpu_types` even when the selected `cpu_type` is empty (a snapshot with
+  `cpu_type=""` but a populated `cpu_types` list previously bypassed the
+  check entirely) (Codex review).
+  `_elf_rpath_entries` now preserves empty RPATH/RUNPATH components — an
+  empty component means "current working directory" to the dynamic loader,
+  a non-portable (and unsafe) entry that was previously silently dropped —
+  and the `$ORIGIN`-relative check now requires the complete `$ORIGIN`/
+  `${ORIGIN}` token (optionally followed by a path separator) rather than a
+  bare prefix match, so a malformed entry like `$ORIGIN_BACKUP` (which
+  `ld.so`'s substring token substitution expands to an unrelated sibling
+  path, not a subdirectory of the binary's own directory) is correctly
+  flagged as non-portable instead of accepted (Codex review).
+  `EnvironmentMatrix._parse_runtime_floors`'s presence-flag handling
+  (`WHEEL_CONTEXT`/`MUSLLINUX`) now also honors numeric zero (`0`/`0.0`) as
+  "disabled" — previously only `False`/`None` were recognized, so
+  `WHEEL_CONTEXT: 0` reached `str(0) == "0"`, a truthy string that silently
+  enabled the wheel-only checks (Codex review).
+  Fixed a stale comment on `ChangeKind.MUSLLINUX_GLIBC_DEPENDENCY_DETECTED`
+  in `checker_policy.py` that claimed `GLIBCXX_*`/`CXXABI_*` alone are
+  disqualifying evidence, contradicting the detector's actual (correct)
+  behavior; also expanded `change_registry_wheel.py`'s impact text to
+  document the direct glibc-SONAME/interpreter evidence path it previously
+  omitted (Codex review).
+  `WHEEL_ARCH`/`parse_wheel_architecture_claim` now recognize `riscv64` and
+  `loongarch64`, matching `packaging`'s own `_manylinux._ALLOWED_ARCHS` —
+  both the wheel-filename parser and `check_wheel_tag_architecture_mismatch`'s
+  ELF `e_machine`/`EI_DATA` maps previously omitted them, so wrong-arch
+  binaries in otherwise-valid single-arch `riscv64`/`loongarch64` wheels
+  silently skipped the check entirely (Codex review).
+  `check_wheel_tag_architecture_mismatch` now also rejects a soft-float ARM
+  binary (`ElfMetadata.abi_flags` carrying `"float-soft"`) under an
+  `armv7l` claim — manylinux's `armv7l` tag specifically means the
+  hard-float ARM EABI, and a soft-float binary shares the same
+  `e_machine`/`EI_DATA` but isn't actually loadable under that tag's
+  runtime expectations (Codex review).
+  `check_wheel_tag_architecture_mismatch` now also checks ELF word size
+  (`ElfMetadata.elf_class`) against every claim's expected value: `riscv64`,
+  `loongarch64`, and `s390x` each share one `e_machine` value across a
+  32-bit and a 64-bit variant (RV32/RV64, LoongArch32/64, 31/32-bit S/390
+  vs. 64-bit s390x), so a 32-bit ELF previously passed a `"*64"` claim
+  purely because `e_machine` matched. The `armv7l` check now also requires
+  EABI version 5 specifically (not just any hard-float EABI) — manylinux's
+  armhf contract requires EABI5, so an `abi_flags` token like `"eabi4"`
+  (with hard-float) previously still passed (Codex review, two rounds).
+  `check_musllinux_glibc_dependency`'s direct-interpreter-evidence check now
+  also recognizes glibc's `ld64.so` loader naming (`ld64.so.2` on ppc64le,
+  `ld64.so.1` on ppc64/s390x) alongside the `ld-linux` family — the bare
+  `"ld-linux" in interpreter` substring check previously missed those
+  architectures' glibc loaders entirely, silently passing a musllinux
+  claim on a binary whose PT_INTERP still names a glibc dynamic linker
+  (Codex review).
+  The `armv7l` check now also requires the explicit hard-float e_flags bit
+  itself, not just absence of an explicit soft-float marker — once
+  `abi_flags` is non-empty at all (decode ran), a set naming `eabi5` but
+  no `"float-hard"` token (e.g. neither float-ABI bit set) previously
+  still passed, even though manylinux's armhf contract requires that bit
+  specifically (Codex review, three rounds).
+  Narrowed `_ARCH_CLAIM_TO_ELF_CLASS` to only the genuinely word-size-
+  ambiguous claims (`riscv64`/`loongarch64`/`s390x`, whose `e_machine`
+  value is shared across both bitnesses) — `i686`/`armv7l` were
+  incorrectly included even though their `e_machine` (`EM_386`/`EM_ARM`)
+  already proves 32-bit unambiguously, and since `ElfMetadata.elf_class`
+  defaults to 64, a legacy/partial snapshot with `machine` captured but
+  `elf_class` never set would have false-positived an otherwise-matching
+  32-bit `i686`/`armv7l` binary as a class mismatch (Codex review, follow-up).
+  Re-added `x86_64`/`aarch64` to `_ARCH_CLAIM_TO_ELF_CLASS` (safe, unlike
+  `i686`/`armv7l`, since the field's 64 default matches their expected
+  64-bit value) to reject the x86-64 x32 and AArch64 ILP32 ABIs — both use
+  their platform's normal 64-bit-only `e_machine` value with `ELFCLASS32`,
+  a distinct, non-interchangeable ABI a plain `x86_64`/`aarch64` wheel
+  claim previously silently accepted. The `armv7l` EABI-version check now
+  also flags a `"float-hard"`-only `abi_flags` set with no `"eabiN"`
+  token at all — `_decode_abi_flags` always evaluates the EABI-version
+  field for `EM_ARM`, so its absence means the real value is exactly 0
+  (GNU/bare EABI), definitively not 5, not merely undecoded (Codex
+  review, four rounds).
+  `_elf_rpath_entries` now prefers `DT_RUNPATH` over `DT_RPATH` rather
+  than combining both — the dynamic loader consults `DT_RPATH` only when
+  the same object carries no `DT_RUNPATH` at all (matching
+  `abicheck.resolver`'s own loader-accurate precedence modeling); when
+  both are present, `DT_RPATH` is entirely ignored. Combining them
+  unconditionally could mask a genuine `wheel_closure_dependency_violation`
+  behind a stale, no-longer-consulted `$ORIGIN`-relative `DT_RPATH` entry,
+  or conversely raise a false `wheel_rpath_not_portable` finding for an
+  ignored absolute `DT_RPATH` entry (Codex review).
+  Fixed an accidental doc typo introduced earlier in this PR:
+  `docs/user-guide/mcp-integration.md`'s `ABICHECK_MCP_MAX_FILE_SIZE`
+  example value had drifted from `2147483648` (2 GiB) to `2147483668`
+  (`/review` finding).
+  `_GLIBC_ONLY_SONAMES` now also includes `libmvec.so.1` — glibc's SIMD
+  vector-math library (glibc 2.22+), which has no musl equivalent; a
+  binary that only needs it (no `libc.so.6` DT_NEEDED entry) previously
+  passed a musllinux claim unflagged (Codex review).
+  Windows UCRT/runtime checks, CPU-ISA-baseline detection, the full
+  per-tag closure policy, and end-to-end CLI auto-derivation from a
+  compared wheel's own filename tag (every check above, including G10's
+  original `GLIBC` one, still requires an explicit `--env-matrix`
+  declaration) remain planned — see the G27 plan's "Out of scope"/status
+  note.
+
 - **`examples/case187`–`case191`**: five new L5 fixture cases covering the
   full `DEPENDENCY_EDGE_KINDS` family behind `public_api_internal_dependency_added`
   — `TYPE_HAS_FIELD_TYPE` (case187, ADR-041's own headline example),
@@ -173,15 +350,6 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `SOURCE_DECLARES` edge directly instead of the single-file lookup (Codex
   review).
 
-### Documentation
-
-- `docs/concepts/build-source-data.md` now documents the ADR-041 P0
-  type-graph edge family (`TYPE_INHERITS`/`TYPE_HAS_FIELD_TYPE`/
-  `DECL_HAS_TYPE`/`DECL_REFERENCES_DECL`, folded by `type_graph.py`
-  alongside the call graph) and the header-only-graph addendum
-  (`header_graph.py`, `service.run_dump(header_graph=True)`) — previously
-  documented only in the ADR text and module docstrings.
-
 - `compare --help-all`: a second-level `--help` disclosure tier (G21.8
   collapse M2). Plain `compare --help` now shows only a curated common
   subset of the ~62 options (inputs, output/format, `--show-only`, policy,
@@ -191,6 +359,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `--help-all` for the full surface. Every option keeps working unqualified
   either way — this only changes default help-screen visibility, not
   behavior.
+
+### Documentation
+
+- `docs/concepts/build-source-data.md` now documents the ADR-041 P0
+  type-graph edge family (`TYPE_INHERITS`/`TYPE_HAS_FIELD_TYPE`/
+  `DECL_HAS_TYPE`/`DECL_REFERENCES_DECL`, folded by `type_graph.py`
+  alongside the call graph) and the header-only-graph addendum
+  (`header_graph.py`, `service.run_dump(header_graph=True)`) — previously
+  documented only in the ADR text and module docstrings.
 
 ### Changed
 

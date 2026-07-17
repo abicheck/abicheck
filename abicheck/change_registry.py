@@ -37,6 +37,7 @@ from .change_registry_types import (  # noqa: F401
     ChangeKindRegistry as ChangeKindRegistry,
     Verdict as Verdict,
 )
+from .change_registry_wheel import WHEEL_DEPLOYMENT_EXTENSION_ENTRIES
 
 # ---------------------------------------------------------------------------
 # Registry entries — single source of truth for all ChangeKind metadata
@@ -1992,7 +1993,8 @@ REGISTRY = ChangeKindRegistry([
     # Build-source (L3/L4/L5) evidence-layer kinds live in
     # change_registry_buildsource.py for the same reason.
     *BUILDSOURCE_EXTENSION_ENTRIES,
-    # NumPy C-API compatibility-envelope kinds (G26) live in
-    # change_registry_numpy.py for the same reason.
+    # NumPy C-API (G26) / wheel tag deployment-claim (G27) kinds live in
+    # change_registry_numpy.py / change_registry_wheel.py for the same reason.
     *NUMPY_EXTENSION_ENTRIES,
+    *WHEEL_DEPLOYMENT_EXTENSION_ENTRIES,
 ])

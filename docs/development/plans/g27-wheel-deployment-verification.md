@@ -1,6 +1,6 @@
 # G27 — wheel tag / deployment-claim verification
 
-**Registry:** `UC-TC-wheel-deployment-claims` (`planned`)
+**Registry:** `UC-TC-wheel-deployment-claims` (`partial`)
 **Effort:** L · **Risk:** low
 **Origin:** [SciPy / Scientific-Python Roadmap](../scipy-scientific-python-roadmap.md) §3.
 Generalizes [G10](g10-glibc-floor-check.md) (Linux glibc floor only) across
@@ -8,13 +8,30 @@ platforms and claim types; reuses [G13](g13-arch-mismatch-guard.md)'s
 architecture-guard machinery and [G12](g12-security-hardening.md)'s
 hardening-flag capture.
 
+**Status note (delivered scope):** the Linux `GLIBCXX`/`CXXABI` floor
+extension, the musllinux glibc-dependency check, the macOS
+deployment-target check, the wheel-tag architecture-mismatch check, and a
+narrowly-scoped RPATH-portability / vendored-dependency-closure check pair
+are done (all reachable via the same `--env-matrix`/`runtime_floors`
+declared-constraint mechanism G10 already shipped for the plain `GLIBC`
+case — see `usecase-registry.yaml`'s `next_steps` for the full breakdown).
+The RPATH/closure pair deliberately does not attempt the *general* "is this
+dependency permitted by the wheel's platform tag" question (that needs a
+real per-manylinux/musllinux-tag allowed-SONAME policy, out of scope here —
+see "Out of scope"); it only catches internally-inconsistent evidence
+(an absolute RPATH/RUNPATH entry; a vendored-looking dependency with no
+bundling mechanism at all). Windows, CPU-ISA-baseline, the full closure
+policy, and end-to-end CLI auto-derivation from a compared wheel's own
+filename tag (still requires an explicit `--env-matrix` today, for every
+check including G10's original `GLIBC` one) remain planned — see "Out of
+scope" below and the registry entry.
+
 ## Problem
 
 A wheel's filename tag and package metadata make explicit promises about
-where its binaries will run. G10 covers exactly one of those promises
-(Linux manylinux glibc floor) and is still `planned`. The same class of
-"claim vs. binary evidence" mismatch exists — largely unchecked — across
-every platform a scientific-Python wheel matrix targets:
+where its binaries will run. G10 (Linux manylinux glibc floor) is now done.
+The same class of "claim vs. binary evidence" mismatch exists — largely
+unchecked — across every platform a scientific-Python wheel matrix targets:
 
 - **Linux**: manylinux tag vs. required `GLIBC_*`; musllinux compatibility;
   `GLIBCXX_*`/`CXXABI_*` floor; RPATH/RUNPATH correctness; dependencies
@@ -42,29 +59,43 @@ no native-ABI signal at all.
 
 ## Goal & acceptance criteria
 
-- [ ] Parse the wheel filename tag (PEP 425/600 platform tags:
+- [x] Parse the wheel filename tag (PEP 425/600 platform tags:
       `manylinux_2_28_x86_64`, `musllinux_1_2_aarch64`,
-      `macosx_11_0_arm64`, `win_amd64`, …) into a structured claim:
-      platform family, libc floor (glibc/musl), OS deployment-target floor,
-      architecture.
-- [ ] For each binary inside the wheel, extract the corresponding evidence:
-      `GLIBC_*`/`GLIBCXX_*`/`CXXABI_*` version-need floor (Linux, extends
-      G10's mechanism to `GLIBCXX`/`CXXABI`), `LC_VERSION_MIN_MACOSX`/
-      `LC_BUILD_VERSION` (macOS), the PE machine type and UCRT/MSVC-runtime
-      import set (Windows), and the CPU ISA baseline implied by disassembled
-      dispatch/feature-detection sections where staticly recoverable.
-- [ ] Compare claim vs. evidence and emit deployment-`RISK`/`BREAKING`
+      `macosx_11_0_arm64`, …) into a structured floor value —
+      `parse_musllinux_floor`/`parse_macos_deployment_target_floor`
+      alongside G10's `parse_manylinux_glibc_floor` (`abicheck/package.py`).
+      `win_amd64` tag parsing (Windows) is not yet done — no Windows
+      evidence-vs-claim check exists yet to consume it.
+- [x] For each binary, extract the corresponding evidence: `GLIBC_*`/
+      `GLIBCXX_*`/`CXXABI_*` version-need floor (Linux, extends G10's
+      mechanism to `GLIBCXX`/`CXXABI`), `LC_VERSION_MIN_MACOSX`/
+      `LC_BUILD_VERSION` (macOS). PE machine type/UCRT-MSVC-runtime import
+      set (Windows) and the CPU ISA baseline from disassembled
+      dispatch/feature-detection sections remain planned.
+- [x] Compare claim vs. evidence and emit deployment-`RISK`/`BREAKING`
       findings on mismatch, each classified per the root `CLAUDE.md`
-      four-step procedure — reusing G10's `platform_baseline_floor_raised`
-      kind for the glibc case and adding platform-specific siblings (e.g.
-      `macos_deployment_target_raised`, `windows_runtime_requirement_added`,
-      `wheel_tag_architecture_mismatch`, `wheel_closure_dependency_violation`).
-- [ ] A within-claim binary (evidence at or below the tag's promised floor)
-      stays clean on all new checks.
-- [ ] Musllinux and macOS/Windows checks are genuinely new coverage, not
-      just glibc generalized in name — each platform's specific evidence
-      source (Mach-O load commands, PE import table, ELF versioned symbols)
-      is actually parsed.
+      four-step procedure — G10's `platform_baseline_floor_raised` kind now
+      also covers the `GLIBCXX`/`CXXABI` case, plus five new siblings:
+      `musllinux_glibc_dependency_detected`, `macos_deployment_target_raised`,
+      `wheel_tag_architecture_mismatch` (the wheel-tag-claim counterpart
+      to G13's `elf_machine_changed`/`macho_cpu_type_changed`, which compare
+      two arbitrary binaries rather than a binary against its own wheel's
+      filename promise), `wheel_rpath_not_portable` (a non-`$ORIGIN`-relative
+      RPATH/RUNPATH entry), and `wheel_closure_dependency_violation` (a
+      vendored/hash-suffixed dependency — G9's `strip_vendor_hash` pattern —
+      with no `$ORIGIN`-relative RPATH/RUNPATH to find it).
+      `windows_runtime_requirement_added` remains planned.
+- [x] A within-claim binary (evidence at or below the tag's promised floor)
+      stays clean on all new checks (unit-tested in
+      `tests/test_environment_drift.py`/`tests/test_diff_wheel_deployment.py`).
+- [x] Musllinux and macOS checks are genuinely new coverage, not just glibc
+      generalized in name: `check_musllinux_glibc_dependency` parses ELF
+      `versions_required` for any glibc-flavoured tag (a presence check, no
+      numeric floor — musl has no version-floor concept at all), and
+      `check_macos_deployment_target_floor` reads the actual Mach-O
+      `min_os_version` field. Windows (PE import table) is not yet
+      implemented, so that specific "genuinely new, not just renamed" bar
+      is unverified for the Windows case.
 
 ## Design
 
@@ -135,3 +166,20 @@ runtime behavior, not a static wheel-claim check); conda package
 mechanism — see the "one-command PyPI/conda compare" item in the
 [SciPy roadmap](../scipy-scientific-python-roadmap.md#6-one-command-pypi-and-conda-release-comparison),
 not yet gap-plan-ified).
+
+A **general** "is this DT_NEEDED entry permitted by the wheel's platform
+tag" wheel-closure check — replicating `auditwheel`'s own versioned
+per-manylinux-tag allowed-SONAME policy JSON — is also out of scope for
+this increment: an incomplete allowlist risks false positives on
+legitimately-present system libraries this project doesn't enumerate,
+which this codebase's FP-rate gate (`scripts/check_fp_rate.py`, baseline
+0) treats as a real regression, not an acceptable cost of coverage. The
+narrower `wheel_closure_dependency_violation` check delivered here sidesteps
+that risk entirely by keying off *internal* evidence (G9's vendored-hash
+naming convention plus the absence of any `$ORIGIN`-relative RPATH/RUNPATH
+entry) rather than an external allowlist — it only fires on a class of
+binary that cannot possibly load, not on an ordinary-but-unenumerated
+system dependency. macOS's own RPATH/`@loader_path`/`@rpath` portability
+conventions (a different, more involved mechanism than Linux's `$ORIGIN`)
+are also deferred — `check_wheel_rpath_not_portable`/
+`check_wheel_closure_dependency_violation` are ELF/Linux only.

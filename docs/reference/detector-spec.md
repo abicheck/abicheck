@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (361 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (366 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -164,8 +164,10 @@ One row per `ChangeKind` (361 total). Columns fuse the verdict partition (`check
 | `macho_filetype_changed` | breaking | `BREAKING` | `error` | L0 | `macho_filetype_changed` | — |
 | `macho_linkage_flags_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `macho_linkage_flags_changed` | — |
 | `macho_reexport_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `macho_reexport_changed` | — |
+| `macos_deployment_target_raised` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `macos_deployment_target_raised` | — |
 | `mandatory_template_param_added` | api_break | `API_BREAK` | `warning` | unspecified | `mandatory_template_param_added` | — |
 | `method_access_changed` | api_break | `API_BREAK` | `warning` | L2 | `method_access_changed` | [case34](../examples/case34_access_level.md) |
+| `musllinux_glibc_dependency_detected` | breaking | `BREAKING` | `error` | L0 | `musllinux_glibc_dependency_detected` | — |
 | `needed_added` | quality | `COMPATIBLE` | `warning` | L0 | `needed_added` | [case138](../examples/case138_needed_added.md) |
 | `needed_order_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `needed_order_changed` | — |
 | `needed_removed` | quality | `COMPATIBLE` | `warning` | L0 | `needed_removed` | — |
@@ -364,6 +366,9 @@ One row per `ChangeKind` (361 total). Columns fuse the verdict partition (`check
 | `vtable_thunk_set_changed` | breaking | `BREAKING` | `error` | L0 | `vtable_thunk_set_changed` | — |
 | `vtt_slot_count_changed` | breaking | `BREAKING` | `error` | L0 | `vtt_slot_count_changed` | [case173](../examples/case173_vtt_slot_count_changed.md) |
 | `wchar_model_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L1 | `wchar_model_changed` | — |
+| `wheel_closure_dependency_violation` | breaking | `BREAKING` | `error` | L0 | `wheel_closure_dependency_violation` | — |
+| `wheel_rpath_not_portable` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `wheel_rpath_not_portable` | — |
+| `wheel_tag_architecture_mismatch` | breaking | `BREAKING` | `error` | L0 | `wheel_tag_architecture_mismatch` | — |
 | `whole_program_vtables_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `whole_program_vtables_mode_changed` | — |
 | `writable_executable_segment` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `writable_executable_segment` | — |
 | `x86_isa_baseline_raised` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `x86_isa_baseline_raised` | — |

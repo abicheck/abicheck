@@ -509,6 +509,299 @@ class TestPlatformBaselineFloorRaised:
         assert changes[0].kind is ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED
         assert changes[0].new_value == "GLIBC_2.36"
 
+    def test_glibcxx_floor_checked_independently_of_glibc(self) -> None:
+        # G27: GLIBCXX/CXXABI extend the same mechanism as GLIBC, each
+        # against its own declared floor.
+        from abicheck.diff_versioning import check_platform_baseline_floor
+
+        elf = _elf(
+            needed=["libstdc++.so.6"],
+            versions_required={
+                "libstdc++.so.6": ["GLIBCXX_3.4.28", "GLIBCXX_3.4.30"]
+            },
+        )
+        assert check_platform_baseline_floor(elf, {"GLIBCXX": "3.4.30"}) == []
+        changes = check_platform_baseline_floor(elf, {"GLIBCXX": "3.4.28"})
+        assert len(changes) == 1
+        assert changes[0].kind is ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED
+        assert changes[0].new_value == "GLIBCXX_3.4.30"
+        assert "GLIBCXX" in changes[0].description
+
+    def test_cxxabi_floor_checked_independently(self) -> None:
+        from abicheck.diff_versioning import check_platform_baseline_floor
+
+        elf = _elf(
+            needed=["libstdc++.so.6"],
+            versions_required={"libstdc++.so.6": ["CXXABI_1.3.13"]},
+        )
+        changes = check_platform_baseline_floor(elf, {"CXXABI": "1.3.11"})
+        assert len(changes) == 1
+        assert changes[0].new_value == "CXXABI_1.3.13"
+
+    def test_glibc_and_glibcxx_floors_both_declared_and_violated(self) -> None:
+        # Each prefix produces its own finding — a binary can violate one
+        # without violating the other.
+        from abicheck.diff_versioning import check_platform_baseline_floor
+
+        elf = _elf(
+            needed=["libc.so.6", "libstdc++.so.6"],
+            versions_required={
+                "libc.so.6": ["GLIBC_2.34"],
+                "libstdc++.so.6": ["GLIBCXX_3.4.30"],
+            },
+        )
+        changes = check_platform_baseline_floor(
+            elf, {"GLIBC": "2.28", "GLIBCXX": "3.4.28"}
+        )
+        assert len(changes) == 2
+        new_values = {c.new_value for c in changes}
+        assert new_values == {"GLIBC_2.34", "GLIBCXX_3.4.30"}
+
+    def test_glibcxx_tag_not_mistaken_for_glibc_prefix(self) -> None:
+        # "GLIBCXX_..." must not satisfy the "GLIBC_" prefix check (and vice
+        # versa) — the two namespaces don't overlap.
+        from abicheck.diff_versioning import check_platform_baseline_floor
+
+        elf = _elf(
+            needed=["libstdc++.so.6"],
+            versions_required={"libstdc++.so.6": ["GLIBCXX_3.4.30"]},
+        )
+        assert check_platform_baseline_floor(elf, {"GLIBC": "2.0"}) == []
+
+    def test_dt_relr_implied_floor_is_glibc_specific(self) -> None:
+        # DT_RELR only implies a GLIBC floor, not a GLIBCXX/CXXABI one.
+        from abicheck.diff_versioning import check_platform_baseline_floor
+
+        elf = _elf(needed=["libc.so.6"], has_dt_relr=True)
+        assert check_platform_baseline_floor(elf, {"GLIBCXX": "3.4.20"}) == []
+
+
+class TestMusllinuxGlibcDependency:
+    """G27: a musllinux-tagged binary must carry no glibc-flavoured
+    symbol-versioning requirement at all — musl has no version-floor concept
+    to compare against numerically, unlike the manylinux GLIBC check."""
+
+    def test_no_declared_musllinux_no_finding(self) -> None:
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(
+            needed=["libc.so.6"],
+            versions_required={"libc.so.6": ["GLIBC_2.34"]},
+        )
+        assert check_musllinux_glibc_dependency(elf, None) == []
+        assert check_musllinux_glibc_dependency(elf, {}) == []
+        assert check_musllinux_glibc_dependency(elf, {"GLIBC": "2.28"}) == []
+
+    def test_clean_musl_binary_no_finding(self) -> None:
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(needed=["libc.musl-x86_64.so.1"], versions_required={})
+        assert check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"}) == []
+
+    def test_glibc_symbol_flagged_for_musllinux_tagged_binary(self) -> None:
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(
+            needed=["libc.so.6"],
+            versions_required={"libc.so.6": ["GLIBC_2.34"]},
+        )
+        changes = check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"})
+        assert len(changes) == 1
+        assert changes[0].kind is ChangeKind.MUSLLINUX_GLIBC_DEPENDENCY_DETECTED
+        assert changes[0].new_value == "GLIBC_2.34"
+
+    def test_glibcxx_only_symbol_not_flagged(self) -> None:
+        # Codex review #583: a musl system's libstdc++ can legitimately carry
+        # its own GLIBCXX_*/CXXABI_* verneed entries (musl's FAQ documents
+        # using gcc's libstdc++ alongside musl) — only the true GLIBC_*
+        # namespace (glibc's own libc.so.6/loader) proves a glibc dependency.
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(
+            needed=["libstdc++.so.6"],
+            versions_required={"libstdc++.so.6": ["GLIBCXX_3.4.30", "CXXABI_1.3.13"]},
+        )
+        assert check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"}) == []
+
+    def test_glibc_symbol_flagged_alongside_glibcxx(self) -> None:
+        # A real GLIBC_* requirement is still flagged even when GLIBCXX_*
+        # tags are also present on the same or another provider lib.
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(
+            needed=["libc.so.6", "libstdc++.so.6"],
+            versions_required={
+                "libc.so.6": ["GLIBC_2.34"],
+                "libstdc++.so.6": ["GLIBCXX_3.4.30"],
+            },
+        )
+        changes = check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"})
+        assert len(changes) == 1
+        assert changes[0].new_value == "GLIBC_2.34"
+
+    def test_bare_dt_relr_flag_alone_not_flagged(self) -> None:
+        # Codex review #583: DT_RELR (packed relative relocations) is not
+        # glibc-specific — musl's own dynamic linker gained RELR support in
+        # musl 1.2.4 — so a clean musl-built binary using it must not
+        # false-positive here.
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(needed=["libc.musl-x86_64.so.1"], has_dt_relr=True)
+        assert check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"}) == []
+
+    def test_glibc_abi_dt_relr_marker_tag_still_flagged(self) -> None:
+        # Unlike the bare has_dt_relr flag, the literal GLIBC_ABI_DT_RELR
+        # verneed marker name is unambiguous glibc evidence.
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(
+            needed=["libc.so.6"],
+            versions_required={"libc.so.6": ["GLIBC_ABI_DT_RELR"]},
+        )
+        changes = check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"})
+        assert len(changes) == 1
+
+    def test_dt_relr_plus_glibc_dt_needed_still_flagged(self) -> None:
+        # Direct DT_NEEDED evidence (libc.so.6) still flags regardless of
+        # DT_RELR's presence.
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(needed=["libc.so.6"], has_dt_relr=True)
+        changes = check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"})
+        assert len(changes) == 1
+
+    def test_needed_libc_so_6_flagged_without_captured_verneed(self) -> None:
+        # Codex review #583: direct DT_NEEDED evidence of glibc's own libc
+        # SONAME must be flagged even when versions_required never captured
+        # a GLIBC_* tag (incomplete verneed extraction, or a binary calling
+        # no versioned symbol at all) — musl provides no libc.so.6.
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(needed=["libc.so.6"], versions_required={})
+        changes = check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"})
+        assert len(changes) == 1
+        assert changes[0].kind is ChangeKind.MUSLLINUX_GLIBC_DEPENDENCY_DETECTED
+        assert changes[0].new_value == "libc.so.6"
+
+    def test_needed_libm_flagged_without_libc_dt_needed(self) -> None:
+        # Codex review #583, follow-up: a glibc-built sin() wrapper can need
+        # only libm.so.6 (pre-2.34 split library) with no libc.so.6
+        # DT_NEEDED entry at all — must still be flagged.
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(needed=["libm.so.6"], versions_required={})
+        changes = check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"})
+        assert len(changes) == 1
+        assert changes[0].new_value == "libm.so.6"
+
+    def test_needed_libpthread_flagged(self) -> None:
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(needed=["libpthread.so.0"], versions_required={})
+        changes = check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"})
+        assert len(changes) == 1
+
+    def test_needed_libmvec_flagged(self) -> None:
+        # Codex review #583, follow-up: glibc's SIMD vector-math library
+        # (libmvec.so.1, glibc 2.22+) has no musl equivalent — a binary
+        # that only needs it (no libc.so.6 DT_NEEDED entry) must still be
+        # flagged.
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(needed=["libmvec.so.1"], versions_required={})
+        changes = check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"})
+        assert len(changes) == 1
+        assert changes[0].new_value == "libmvec.so.1"
+
+    def test_glibc_style_interpreter_flagged_without_captured_verneed(self) -> None:
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(
+            needed=[],
+            versions_required={},
+            interpreter="/lib64/ld-linux-x86-64.so.2",
+        )
+        changes = check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"})
+        assert len(changes) == 1
+        assert changes[0].new_value == "/lib64/ld-linux-x86-64.so.2"
+
+    def test_musl_interpreter_not_flagged(self) -> None:
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(
+            needed=["libc.musl-x86_64.so.1"],
+            versions_required={},
+            interpreter="/lib/ld-musl-x86_64.so.1",
+        )
+        assert check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"}) == []
+
+    def test_ppc64le_glibc_interpreter_flagged(self) -> None:
+        # Codex review #583: glibc's ppc64le interpreter is spelled
+        # "ld64.so.2", not the "ld-linux" family — a bare "ld-linux"
+        # substring check missed it entirely.
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(
+            needed=[],
+            versions_required={},
+            interpreter="/lib64/ld64.so.2",
+        )
+        changes = check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"})
+        assert len(changes) == 1
+        assert changes[0].new_value == "/lib64/ld64.so.2"
+
+    def test_s390x_glibc_interpreter_flagged(self) -> None:
+        # glibc's s390x (and big-endian ppc64) interpreter is "ld64.so.1".
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(
+            needed=[],
+            versions_required={},
+            interpreter="/lib/ld64.so.1",
+        )
+        changes = check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"})
+        assert len(changes) == 1
+
+    def test_musl_ppc64le_interpreter_not_flagged(self) -> None:
+        # musl's own interpreter naming (ld-musl-<arch>.so.1) never
+        # overlaps the "ld64.so" glibc pattern, even on ppc64le/s390x.
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(
+            needed=["libc.musl-ppc64le.so.1"],
+            versions_required={},
+            interpreter="/lib/ld-musl-powerpc64le.so.1",
+        )
+        assert check_musllinux_glibc_dependency(elf, {"MUSLLINUX": "1.2"}) == []
+
+    def test_lowercase_key_still_matches(self) -> None:
+        from abicheck.diff_versioning import check_musllinux_glibc_dependency
+
+        elf = _elf(
+            needed=["libc.so.6"],
+            versions_required={"libc.so.6": ["GLIBC_2.34"]},
+        )
+        changes = check_musllinux_glibc_dependency(elf, {"musllinux": "1.2"})
+        assert len(changes) == 1
+
+    def test_cli_end_to_end_via_env_matrix(self) -> None:
+        def _make() -> ElfMetadata:
+            return _elf(
+                needed=["libc.so.6"],
+                versions_required={"libc.so.6": ["GLIBC_2.34"]},
+            )
+
+        old, new = _snap(_make()), _snap(_make())
+        result = compare(
+            old,
+            new,
+            env_matrix=EnvironmentMatrix(runtime_floors={"MUSLLINUX": "1.2"}),
+        )
+        assert ChangeKind.MUSLLINUX_GLIBC_DEPENDENCY_DETECTED in _kinds(
+            result.changes
+        )
+        assert result.verdict is Verdict.BREAKING
+
 
 class TestPlatformBaselineFloorCliEndToEnd:
     """G10: the check reaches exit code / JSON through the real ``compare``
@@ -600,6 +893,126 @@ class TestEnvironmentMatrixRuntimeFloors:
         # anything that is not digits-and-dots (Codex review #510, round 3).
         with pytest.raises(ValueError, match="digits and dots"):
             EnvironmentMatrix.from_dict({"runtime_floors": {"GLIBC": bad}})
+
+    def test_wheel_arch_non_numeric_value_accepted(self) -> None:
+        # Codex review #583: WHEEL_ARCH was unreachable via --env-matrix/
+        # from_dict at all — every non-numeric value was rejected before
+        # check_wheel_tag_architecture_mismatch ever ran.
+        m = EnvironmentMatrix.from_dict({"runtime_floors": {"WHEEL_ARCH": "x86_64"}})
+        assert m.runtime_floors == {"WHEEL_ARCH": "x86_64"}
+
+    def test_wheel_arch_lowercase_key_normalized_to_upper(self) -> None:
+        m = EnvironmentMatrix.from_dict({"runtime_floors": {"wheel_arch": "arm64"}})
+        assert m.runtime_floors == {"WHEEL_ARCH": "arm64"}
+
+    def test_musllinux_non_numeric_value_accepted(self) -> None:
+        m = EnvironmentMatrix.from_dict({"runtime_floors": {"MUSLLINUX": "yes"}})
+        assert m.runtime_floors == {"MUSLLINUX": "yes"}
+
+    def test_musllinux_dotted_numeric_value_still_accepted(self) -> None:
+        m = EnvironmentMatrix.from_dict({"runtime_floors": {"MUSLLINUX": "1.2"}})
+        assert m.runtime_floors == {"MUSLLINUX": "1.2"}
+
+    def test_wheel_context_non_numeric_value_accepted(self) -> None:
+        m = EnvironmentMatrix.from_dict(
+            {"runtime_floors": {"WHEEL_CONTEXT": "1"}}
+        )
+        assert m.runtime_floors == {"WHEEL_CONTEXT": "1"}
+
+    def test_wheel_context_false_boolean_disables_not_stringified(self) -> None:
+        # Codex review #583: str(False) == "False", a non-empty string the
+        # downstream checks' plain truthiness test would read as *enabled* —
+        # the opposite of a user explicitly disabling the key.
+        m = EnvironmentMatrix.from_dict(
+            {"runtime_floors": {"WHEEL_CONTEXT": False}}
+        )
+        assert m.runtime_floors == {}
+        assert not m.runtime_floors.get("WHEEL_CONTEXT")
+
+    def test_wheel_context_true_boolean_enables(self) -> None:
+        m = EnvironmentMatrix.from_dict(
+            {"runtime_floors": {"WHEEL_CONTEXT": True}}
+        )
+        assert m.runtime_floors.get("WHEEL_CONTEXT")
+
+    def test_musllinux_false_boolean_disables_not_stringified(self) -> None:
+        m = EnvironmentMatrix.from_dict({"runtime_floors": {"MUSLLINUX": False}})
+        assert m.runtime_floors == {}
+
+    def test_musllinux_true_boolean_enables(self) -> None:
+        m = EnvironmentMatrix.from_dict({"runtime_floors": {"MUSLLINUX": True}})
+        assert m.runtime_floors.get("MUSLLINUX")
+
+    def test_wheel_context_blank_value_disables_not_stringified(self) -> None:
+        # Codex review #583, follow-up: a blank YAML entry (`WHEEL_CONTEXT:`
+        # with no value) loads as None. str(None) == "None", a non-empty
+        # string the downstream truthiness check would read as *enabled* —
+        # a blank entry must not silently turn a check on.
+        m = EnvironmentMatrix.from_dict({"runtime_floors": {"WHEEL_CONTEXT": None}})
+        assert m.runtime_floors == {}
+
+    def test_musllinux_blank_value_disables_not_stringified(self) -> None:
+        m = EnvironmentMatrix.from_dict({"runtime_floors": {"MUSLLINUX": None}})
+        assert m.runtime_floors == {}
+
+    def test_wheel_context_zero_int_disables_not_stringified(self) -> None:
+        # Codex review #583, follow-up: `WHEEL_CONTEXT: 0` loads as the
+        # plain int 0 (not a bool), so the earlier bool/None-only check
+        # missed it — str(0) == "0" is a non-empty, truthy string the
+        # downstream `floors.get(...)` check would read as *enabled*.
+        m = EnvironmentMatrix.from_dict({"runtime_floors": {"WHEEL_CONTEXT": 0}})
+        assert m.runtime_floors == {}
+
+    def test_musllinux_zero_int_disables_not_stringified(self) -> None:
+        m = EnvironmentMatrix.from_dict({"runtime_floors": {"MUSLLINUX": 0}})
+        assert m.runtime_floors == {}
+
+    def test_wheel_context_zero_float_disables_not_stringified(self) -> None:
+        m = EnvironmentMatrix.from_dict({"runtime_floors": {"WHEEL_CONTEXT": 0.0}})
+        assert m.runtime_floors == {}
+
+    def test_wheel_context_nonzero_int_enables(self) -> None:
+        m = EnvironmentMatrix.from_dict({"runtime_floors": {"WHEEL_CONTEXT": 1}})
+        assert m.runtime_floors.get("WHEEL_CONTEXT")
+
+    def test_wheel_context_blank_value_end_to_end_does_not_enable_check(
+        self,
+    ) -> None:
+        import yaml
+
+        old = _snap(_elf(rpath="/usr/local/lib"))
+        new = _snap(_elf(rpath="/usr/local/lib"))
+        data = yaml.safe_load("runtime_floors:\n  WHEEL_CONTEXT:\n  GLIBC: \"2.28\"\n")
+        matrix = EnvironmentMatrix.from_dict(data)
+        result = compare(old, new, env_matrix=matrix)
+        assert ChangeKind.WHEEL_RPATH_NOT_PORTABLE not in _kinds(result.changes)
+
+    def test_wheel_context_false_end_to_end_does_not_enable_check(self) -> None:
+        old = _snap(_elf(rpath="/usr/local/lib"))
+        new = _snap(_elf(rpath="/usr/local/lib"))
+        matrix = EnvironmentMatrix.from_dict(
+            {"runtime_floors": {"WHEEL_CONTEXT": False, "GLIBC": "2.28"}}
+        )
+        result = compare(old, new, env_matrix=matrix)
+        assert ChangeKind.WHEEL_RPATH_NOT_PORTABLE not in _kinds(result.changes)
+
+    def test_glibc_still_rejects_non_numeric(self) -> None:
+        # The WHEEL_ARCH/MUSLLINUX exemption must not weaken validation for
+        # genuine numeric-floor keys.
+        with pytest.raises(ValueError, match="dotted numeric"):
+            EnvironmentMatrix.from_dict({"runtime_floors": {"GLIBC": "x86_64"}})
+
+    def test_wheel_arch_reaches_compare_via_from_dict(self) -> None:
+        # End-to-end: the documented --env-matrix/from_dict path must be
+        # able to actually enable wheel_tag_architecture_mismatch, not just
+        # the direct-constructor path the detector's own unit tests use.
+        old = _snap(_elf(machine="EM_AARCH64"))
+        new = _snap(_elf(machine="EM_AARCH64"))
+        matrix = EnvironmentMatrix.from_dict(
+            {"runtime_floors": {"WHEEL_ARCH": "x86_64"}}
+        )
+        result = compare(old, new, env_matrix=matrix)
+        assert ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH in _kinds(result.changes)
 
     def test_env_matrix_rejected_for_release_set_inputs(self, tmp_path) -> None:
         # Directory/package comparisons fan out through the release path,
