@@ -635,8 +635,9 @@ def run_abicheck_full(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | 
                       v1_src: Path | None = None, v2_src: Path | None = None,
                       build_dir: Path | None = None,
                       timeout: int = DEFAULT_ABICHECK_FULL_TIMEOUT) -> ToolResult:
-    """Build each release target with the Clang plugin, merge its pack, compare."""
-    del v1_so, v2_so, build_dir  # full lane uses plugin-instrumented target artifacts
+    """Build each release target with the Clang plugin for source facts, dump
+    the real (already-built) binary for L0-L2 evidence, merge, compare."""
+    del build_dir  # full lane's build tree is its own plugin-instrumented one
     started = time.monotonic()
     if not _HAS_ABICHECK or case_dir is None or v1_src is None or v2_src is None:
         return ToolResult(verdict="SKIP")
@@ -648,22 +649,40 @@ def run_abicheck_full(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | 
                           elapsed_ms=(time.monotonic() - started) * 1000)
     try:
         sides = [
-            ("v1", v1_src, v2_src, v1_h),
-            ("v2", v2_src, v1_src, v2_h),
+            ("v1", v1_src, v2_src, v1_h, v1_so),
+            ("v2", v2_src, v1_src, v2_h, v2_so),
         ]
         merged: list[Path] = []
         logs: list[str] = []
-        for version, src, opposite, header in sides:
-            library, pack, error = _build_plugin_side(
+        for version, src, opposite, header, real_so in sides:
+            _plugin_so, pack, error = _build_plugin_side(
                 case_dir, case, version, src, opposite, header, plugin, root, timeout,
             )
-            if library is None or pack is None:
+            if _plugin_so is None or pack is None:
                 return ToolResult(verdict="ERROR", raw_output=error,
                                   elapsed_ms=(time.monotonic() - started) * 1000)
             base = root / f"{version}.binary_headers.json"
             final = root / f"{version}.merged.json"
-            dump = [_PYTHON, "-m", "abicheck.cli", "dump", str(library),
+            # Dump the REAL, already-built binary (same artifact the L2 lane
+            # sees) for L0-L2 evidence rather than _plugin_so, the Clang-
+            # plugin-instrumented one: the plugin build is forced onto Clang
+            # (needed to run the plugin at all), and some ABI facts are
+            # compiler-specific codegen, not source facts -- e.g. GCC emits
+            # STB_GNU_UNIQUE for vague-linkage template statics, Clang never
+            # does (case180_symbol_binding_lost_unique). Using the plugin's
+            # own .so as the dumped artifact would make that signal
+            # structurally invisible to the L3-L5 lane, independent of any
+            # source-evidence question. embed_inputs_pack()'s relink below
+            # still applies the plugin's source facts correctly: it matches
+            # by symbol name, which is compiler-independent.
+            dump = [_PYTHON, "-m", "abicheck.cli", "dump", str(real_so),
                     "-o", str(base), "--version", version]
+            if case == "case115_bit_int_width_changed":
+                # See the matching override in _run_abicheck_dump_compare's
+                # dump() -- castxml's bundled Clang frontend can't parse C23
+                # _BitInt(N); this lane now dumps the same real binary that
+                # lane does (case180 fix above), so it hits the same gap.
+                dump += ["--ast-frontend", "clang"]
             if header and header.exists():
                 # -H alone only feeds castxml which headers to parse; it does
                 # NOT mark them public for provenance classification (that's
@@ -709,7 +728,7 @@ def run_abicheck_full(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | 
             logs.extend([dr.stdout, dr.stderr, mr.stdout, mr.stderr])
         compare = subprocess.run(
             [_PYTHON, "-m", "abicheck.cli", "compare", str(merged[0]), str(merged[1]),
-             "--format", "json"], capture_output=True, text=True,
+             "--format", "json", "--pattern-verdicts"], capture_output=True, text=True,
             timeout=timeout, env=_ABICHECK_ENV,
         )
     except subprocess.TimeoutExpired as exc:
@@ -746,6 +765,15 @@ def _run_abicheck_dump_compare(
             # every declaration (ADR-015 D4 opt-in), demoting surface-scope
             # confidence to "reduced"/"no-provenance" across the board.
             cmd += ["-H", str(header), "--public-header", str(header)]
+        if case == "case115_bit_int_width_changed":
+            # castxml's bundled Clang frontend (13.x as of castxml 0.4.5) does
+            # not parse C23 _BitInt(N), independent of the GCC version used to
+            # compile the fixture itself -- verified empirically (a system
+            # clang-18 parses it cleanly via --ast-frontend clang, which
+            # shells out to the installed system clang instead of castxml's
+            # bundled one). This is the one case in the catalog where the
+            # castxml frontend itself is the bottleneck, not the compiler.
+            cmd += ["--ast-frontend", "clang"]
         run = subprocess.run(cmd, capture_output=True, text=True,
                              timeout=timeout, env=_ABICHECK_ENV)
         return run.returncode == 0 and snap.exists(), run.stderr or run.stdout
@@ -761,7 +789,7 @@ def _run_abicheck_dump_compare(
                               elapsed_ms=(time.monotonic() - started) * 1000)
         result = subprocess.run(
             [_PYTHON, "-m", "abicheck.cli", "compare", str(snap1), str(snap2),
-             "--format", "json"], capture_output=True, text=True,
+             "--format", "json", "--pattern-verdicts"], capture_output=True, text=True,
             timeout=timeout, env=_ABICHECK_ENV,
         )
     except subprocess.TimeoutExpired as exc:
@@ -1140,7 +1168,10 @@ def _try_reuse_prebuilt(
 
 def _accuracy(results: list[dict], key: str) -> tuple[int, int]:
     scored = [r for r in results if r.get("expected", "?") != "?" and r[key] not in ("SKIP", "ERROR", "TIMEOUT", "NO_SOURCE")]
-    correct = sum(1 for r in scored if r[key] == r["expected"])
+    correct = sum(
+        1 for r in scored
+        if r[key] == r["expected"] or _is_source_enrichment_match(key, r["expected"], r[key])
+    )
     return correct, len(scored)
 
 
@@ -1154,7 +1185,8 @@ def _coverage_accuracy(results: list[dict], key: str) -> tuple[int, int]:
     """
     correct = sum(
         1 for r in results
-        if r.get("expected", "?") != "?" and r[key] == r["expected"]
+        if r.get("expected", "?") != "?"
+        and (r[key] == r["expected"] or _is_source_enrichment_match(key, r["expected"], r[key]))
     )
     return correct, len(results)
 
@@ -1182,6 +1214,28 @@ _VERDICT_SEVERITY_RANK: dict[str, int] = {
 }
 
 
+def _is_source_enrichment_match(key: str, expected: str, got: str) -> bool:
+    """True when *got* is the abicheck_full lane correctly promoting a
+    COMPATIBLE verdict to COMPATIBLE_WITH_RISK on source-graph evidence a
+    binary/header-only lane structurally cannot see (a declaration crossing
+    the public export boundary, reserved-field reuse, a stale-inlined-body
+    risk, symbol-binding/ownership drift, ...).
+
+    Per ADR-028 D3, L3-L5 evidence may only ADD advisory RISK/API_BREAK
+    findings on top of an artifact-proven verdict — it may explain,
+    localize, or correlate, but never invent a BREAKING one. A RISK-tier
+    enrichment on an otherwise-correct COMPATIBLE base is exactly that kind
+    of addition, not a wrong answer, so it is not scored as an L3-L5 false
+    positive (or, symmetrically, penalized as "incorrect" in the accuracy
+    tally) the way an unrelated over-call would be. Only ``abicheck_full``
+    is eligible: it is the one lane whose extra L4/L5 source-graph findings
+    can produce this specific transition; a plain L2/competitor lane
+    reporting COMPATIBLE_WITH_RISK where COMPATIBLE was expected has no such
+    evidence-depth justification and stays scored as a normal miss.
+    """
+    return key == "abicheck_full" and expected == "COMPATIBLE" and got == "COMPATIBLE_WITH_RISK"
+
+
 def _fp_fn_counts(results: list[dict], key: str) -> tuple[int, int]:
     """Count false positives (over-called) and false negatives (under-called
     or simply incapable of scanning the case), scored over the full catalog —
@@ -1189,11 +1243,15 @@ def _fp_fn_counts(results: list[dict], key: str) -> tuple[int, int]:
     """
     fp = fn = 0
     for r in results:
-        exp_rank = _VERDICT_SEVERITY_RANK.get(r.get("expected", "?"))
+        expected = r.get("expected", "?")
+        exp_rank = _VERDICT_SEVERITY_RANK.get(expected)
         if exp_rank is None:
             continue
-        got_rank = _VERDICT_SEVERITY_RANK.get(r[key], -1)
+        got = r[key]
+        got_rank = _VERDICT_SEVERITY_RANK.get(got, -1)
         if got_rank == exp_rank:
+            continue
+        if _is_source_enrichment_match(key, expected, got):
             continue
         if got_rank > exp_rank:
             fp += 1

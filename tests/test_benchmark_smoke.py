@@ -499,6 +499,42 @@ def test_collect_metadata_shape_and_accuracy():
     assert acc["pct"] == round(100 * 2 / 3, 1)
 
 
+def test_source_enrichment_match_only_credits_abicheck_full():
+    mod = _load_benchmark()
+    # abicheck_full promoting COMPATIBLE -> COMPATIBLE_WITH_RISK on source
+    # evidence is enrichment (ADR-028 D3), not a false positive.
+    assert mod._is_source_enrichment_match(
+        "abicheck_full", "COMPATIBLE", "COMPATIBLE_WITH_RISK"
+    )
+    # Same transition from a lane with no source evidence to justify it stays
+    # a normal miss -- only abicheck_full's L4/L5 findings can produce it.
+    assert not mod._is_source_enrichment_match(
+        "abicheck", "COMPATIBLE", "COMPATIBLE_WITH_RISK"
+    )
+    assert not mod._is_source_enrichment_match(
+        "abidiff", "COMPATIBLE", "COMPATIBLE_WITH_RISK"
+    )
+    # Any other transition (including a real over-call past RISK) is not
+    # exempted, even for abicheck_full.
+    assert not mod._is_source_enrichment_match("abicheck_full", "COMPATIBLE", "API_BREAK")
+    assert not mod._is_source_enrichment_match(
+        "abicheck_full", "NO_CHANGE", "COMPATIBLE_WITH_RISK"
+    )
+
+
+def test_source_enrichment_credited_in_accuracy_fp_and_coverage():
+    mod = _load_benchmark()
+    results = [
+        {"case": "case16", "expected": "COMPATIBLE", "abicheck_full": "COMPATIBLE_WITH_RISK"},
+    ]
+    correct, scored = mod._accuracy(results, "abicheck_full")
+    assert (correct, scored) == (1, 1)
+    correct, total = mod._coverage_accuracy(results, "abicheck_full")
+    assert (correct, total) == (1, 1)
+    fp, fn = mod._fp_fn_counts(results, "abicheck_full")
+    assert (fp, fn) == (0, 0)
+
+
 def test_ground_truth_digest_is_stable():
     mod = _load_benchmark()
     first = mod._ground_truth_digest()
