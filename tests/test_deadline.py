@@ -46,13 +46,39 @@ pytestmark = pytest.mark.skipif(
 
 
 def _pid_alive(pid: int) -> bool:
+    """True if *pid* is a live, non-zombie process.
+
+    A zombie (defunct) process still answers ``os.kill(pid, 0)`` successfully
+    — its PID slot isn't released until its parent reaps it — even though it
+    has already terminated and holds no resources beyond the exit-status
+    table entry. On a container runner with no proper init/PID-1 reaper, an
+    orphaned grandchild we just killed can sit as a zombie indefinitely once
+    its (already-reaped) direct-child parent is gone, which would make these
+    tests flake as "still alive" even though the kill worked (Codex review).
+    ``ps -o stat=`` is portable across Linux/BSD/macOS and reports ``Z`` for a
+    zombie; anything else (or the PID no longer existing at all) means it is
+    not a still-running process for the purposes of these orphan checks.
+    """
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
     except PermissionError:
         return True
-    return True
+    try:
+        result = subprocess.run(
+            ["ps", "-o", "stat=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return True  # can't determine state; assume alive (conservative)
+    state = result.stdout.strip()
+    if not state:
+        return False  # ps found nothing -> already gone
+    return not state.startswith("Z")
 
 
 def test_no_active_deadline_is_unbounded() -> None:

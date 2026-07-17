@@ -572,6 +572,18 @@ def _check_scan_evidence_contract(
         )
 
 
+def _remaining_budget_s(start: float, budget_s: float | None) -> float | None:
+    """Seconds left of ``--budget`` from *now*, or ``None`` if no budget is set.
+
+    Shared by every expensive-stage deadline scope in :func:`run_scan_core` (the
+    candidate snapshot build, the baseline comparison) so each one gets the
+    budget that is actually left *at that point in the scan*, not the original
+    total re-applied fresh (which would let a slow early stage silently grant a
+    later stage more time than the user's budget actually leaves).
+    """
+    return budget_s - (time.monotonic() - start) if budget_s is not None else None
+
+
 def _check_scan_budget(
     budget: str | None, budget_s: float | None, elapsed: float,
 ) -> None:
@@ -706,11 +718,8 @@ def run_scan_core(
     # opt in the same way) read this via deadline.bounded_timeout()/deadline.check()
     # so a pathological header stops itself mid-parse rather than running to
     # completion (or hanging) regardless of --budget.
-    _remaining_budget = (
-        budget_s - (time.monotonic() - start) if budget_s is not None else None
-    )
     try:
-        with deadline.deadline_scope(_remaining_budget):
+        with deadline.deadline_scope(_remaining_budget_s(start, budget_s)):
             new_snap, eff_includes = _build_new_snapshot(
                 binary,
                 list(headers),
@@ -792,25 +801,40 @@ def run_scan_core(
     diff_summary: dict[str, Any] | None = None
     if baseline is not None and scan_mode is not ScanMode.AUDIT:
         _stage = time.monotonic()
-        verdict, exit_code, diff_summary = _run_baseline_compare(
-            baseline,
-            binary,
-            new_snap,
-            [],
-            lang,
-            collect_mode,
-            list(headers),
-            # Effective (seeded) includes so the baseline native parse gets the same
-            # build-derived dependency include dirs as the candidate (Codex review).
-            list(eff_includes),
-            list(public_headers),
-            list(public_header_dirs),
-            compile_context=compile_context,
-            baseline_headers=baseline_headers,
-            baseline_includes=baseline_includes,
-            symbols_only=eff_depth_enum is EvidenceDepth.BINARY,
-            debug_presence_only=_uses_debug_presence_only(eff_depth_enum),
-        )
+        try:
+            # A native --against library is parsed through the same L2 clang/
+            # castxml header-AST path as the candidate (Codex review) — without
+            # its own deadline scope here, that parse would silently fall back to
+            # the unbudgeted fixed timeout even though --budget was given.
+            with deadline.deadline_scope(_remaining_budget_s(start, budget_s)):
+                verdict, exit_code, diff_summary = _run_baseline_compare(
+                    baseline,
+                    binary,
+                    new_snap,
+                    [],
+                    lang,
+                    collect_mode,
+                    list(headers),
+                    # Effective (seeded) includes so the baseline native parse gets
+                    # the same build-derived dependency include dirs as the
+                    # candidate (Codex review).
+                    list(eff_includes),
+                    list(public_headers),
+                    list(public_header_dirs),
+                    compile_context=compile_context,
+                    baseline_headers=baseline_headers,
+                    baseline_includes=baseline_includes,
+                    symbols_only=eff_depth_enum is EvidenceDepth.BINARY,
+                    debug_presence_only=_uses_debug_presence_only(eff_depth_enum),
+                )
+        except deadline.DeadlineExceeded as exc:
+            elapsed = time.monotonic() - start
+            raise _BudgetOverflow(
+                f"error: --budget {budget} exceeded ({elapsed:.1f}s > "
+                f"{budget_s:.0f}s) while parsing the --against baseline "
+                "(header/build/source parse). Pin a shallower level or raise "
+                "the budget; a budget never silently shrinks the pinned scope."
+            ) from exc
         # A cross-check the maintainer promoted to `error` (D6) gates the exit
         # even when the baseline diff itself is clean.
         sev_exit = _crosscheck_severity_exit(cc.findings, severities)

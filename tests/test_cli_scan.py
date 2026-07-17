@@ -364,6 +364,55 @@ def test_budget_checked_mid_snapshot_build_not_only_at_end(
     assert elapsed < 2.0
 
 
+def test_budget_checked_during_baseline_compare_not_only_at_end(
+    monkeypatch, runner, new_snap_compatible, baseline_snap
+):
+    # Codex review on the P0 fix: a native --against baseline is parsed
+    # through the same L2 clang/castxml header path as the candidate
+    # (_run_baseline_compare -> resolve_input -> dumper.dump), so it must see
+    # the same shrinking --budget deadline the candidate side does — not only
+    # the candidate's deadline_scope, which closes before the baseline
+    # comparison even starts. Same shape as
+    # test_budget_checked_mid_snapshot_build_not_only_at_end, targeting the
+    # baseline-compare stage instead of the candidate-snapshot stage.
+    import abicheck.scan_engine as cs
+    from abicheck import deadline
+
+    iterations = {"n": 0}
+
+    def _slow_baseline_compare(*args, **kwargs):
+        for _ in range(1000):
+            iterations["n"] += 1
+            time.sleep(0.01)
+            deadline.check()
+        raise AssertionError(
+            "fake baseline compare ran to completion — budget never propagated"
+        )
+
+    monkeypatch.setattr(cs, "_run_baseline_compare", _slow_baseline_compare)
+    start = time.monotonic()
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_compatible),
+            "--against",
+            str(baseline_snap),
+            "--budget",
+            "0.05s",
+        ],
+    )
+    elapsed = time.monotonic() - start
+    assert res.exit_code == 5, res.output
+    assert "budget" in res.output.lower()
+    assert iterations["n"] < 20, (
+        f"fake baseline compare ran {iterations['n']} iterations before the "
+        "budget check fired — it should have stopped after a couple, proving "
+        "the deadline is live during baseline comparison too"
+    )
+    assert elapsed < 2.0
+
+
 def test_invalid_crosscheck_key_is_usage_error(runner, new_snap_compatible):
     res = runner.invoke(
         main,
