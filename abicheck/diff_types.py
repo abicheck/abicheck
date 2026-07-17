@@ -1462,8 +1462,8 @@ def _diff_field_default_initializer(old: AbiSnapshot, new: AbiSnapshot) -> list[
                     ChangeKind.FIELD_DEFAULT_INITIALIZER_CHANGED,
                     symbol=name,
                     name=name, detail=fname,
-                    old_value=f_old.default,
-                    new_value=f_new.default,
+                    old=f_old.default,
+                    new=f_new.default,
                 ))
 
     return changes

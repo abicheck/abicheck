@@ -537,6 +537,36 @@ class TestFieldAccessChanged:
         assert ChangeKind.FIELD_ACCESS_CHANGED in _kinds(r)
 
 
+# ── Field default initializer changes ───────────────────────────────────
+
+class TestFieldDefaultInitializerChanged:
+    """FIELD_DEFAULT_INITIALIZER_CHANGED's description must render the real
+    old/new values, not the literal string "None" (Codex review, PR #582):
+    make_change() only fills {old}/{new} in the registry description
+    template from its ``old=``/``new=`` kwargs, not from ``old_value``/
+    ``new_value`` — passing the latter alone left the template's
+    placeholders unformatted."""
+
+    def test_description_contains_real_old_and_new_values(self):
+        t_old = RecordType(name="Cfg", kind="struct", size_bits=32,
+                           fields=[TypeField("timeout", "int", 0, default="30")])
+        t_new = RecordType(name="Cfg", kind="struct", size_bits=32,
+                           fields=[TypeField("timeout", "int", 0, default="60")])
+        old = AbiSnapshot(library="libtest.so.1", version="1.0",
+                          types=[t_old], ast_producer="castxml", from_headers=True)
+        new = AbiSnapshot(library="libtest.so.1", version="2.0",
+                          types=[t_new], ast_producer="castxml", from_headers=True)
+        r = compare(old, new)
+        changed = [c for c in r.changes
+                   if c.kind == ChangeKind.FIELD_DEFAULT_INITIALIZER_CHANGED]
+        assert len(changed) == 1
+        assert changed[0].old_value == "30"
+        assert changed[0].new_value == "60"
+        assert "30" in changed[0].description
+        assert "60" in changed[0].description
+        assert "None" not in changed[0].description
+
+
 # ── Base class changes ──────────────────────────────────────────────────
 
 class TestBaseClassChanges:

@@ -143,3 +143,91 @@ class TestConstructorOverloadKeyExemptFromElfNarrowing:
         )
         kept = _public_functions(snap)
         assert list(kept) == [funcs[0].mangled]
+
+
+def _make_root_with_virtual_destructor(*, mangled: str = "") -> Element:
+    """Mirror castxml output for a class with a public virtual destructor
+    and no mangled name (the common case: castxml never emits `mangled`
+    for <Destructor>)."""
+    root = Element("CastXML", attrib={"format": "1.4.0"})
+
+    f1 = SubElement(root, "File")
+    f1.set("id", "f1")
+    f1.set("name", "lib.h")
+
+    SubElement(root, "Namespace", attrib={"id": "_1", "name": "::"})
+
+    cls = SubElement(root, "Class")
+    cls.set("id", "_2")
+    cls.set("name", "Base")
+    cls.set("context", "_1")
+    cls.set("file", "f1")
+    cls.set("location", "f1:1")
+
+    dtor = SubElement(root, "Destructor")
+    dtor.set("id", "_3")
+    dtor.set("name", "Base")  # castxml: bare class name, never "~Base"
+    dtor.set("context", "_2")
+    dtor.set("file", "f1")
+    dtor.set("location", "f1:2")
+    dtor.set("access", "public")
+    dtor.set("virtual", "1")
+    if mangled:
+        dtor.set("mangled", mangled)
+
+    return root
+
+
+class TestDestructorOverloadKeyExemptFromElfNarrowing:
+    """Regression guard (Codex review, PR #582): PUBLIC visibility from
+    _ctor_or_dtor_visibility was necessary but not sufficient — without
+    is_synthetic_dtor_key, _public_functions() still silently dropped a
+    genuinely public virtual destructor whenever ELF metadata was present,
+    since its synthesized "~ClassName" key could never match a real export."""
+
+    def test_destructor_display_name_and_visibility(self) -> None:
+        root = _make_root_with_virtual_destructor()
+        parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+        funcs = parser.parse_functions()
+        assert len(funcs) == 1
+        assert funcs[0].name == "~Base"
+        assert funcs[0].mangled == "~Base"
+        assert funcs[0].visibility == Visibility.PUBLIC
+
+    def test_public_functions_keeps_synthetic_dtor_key_without_elf_match(self) -> None:
+        from abicheck.diff_symbols import _public_functions
+        from abicheck.elf_metadata import ElfMetadata, ElfSymbol
+        from abicheck.model import AbiSnapshot
+
+        root = _make_root_with_virtual_destructor()
+        parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+        funcs = parser.parse_functions()
+        assert len(funcs) == 1
+
+        snap = AbiSnapshot(
+            library="libbase.so",
+            version="1",
+            functions=funcs,
+            elf=ElfMetadata(symbols=[ElfSymbol(name="some_other_export")]),
+        )
+        kept = _public_functions(snap)
+        assert list(kept) == [funcs[0].mangled]
+
+    def test_removed_virtual_destructor_reports_func_removed(self) -> None:
+        """End-to-end: with the synthetic-key exemption, a removed virtual
+        destructor actually reaches compare() as FUNC_REMOVED — not just
+        classified PUBLIC and then silently dropped."""
+        from abicheck.checker import ChangeKind, Verdict, compare
+        from abicheck.elf_metadata import ElfMetadata, ElfSymbol
+        from abicheck.model import AbiSnapshot
+
+        root = _make_root_with_virtual_destructor()
+        parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+        funcs = parser.parse_functions()
+        elf = ElfMetadata(symbols=[ElfSymbol(name="some_other_export")])
+
+        old = AbiSnapshot(library="libbase.so", version="1", functions=funcs, elf=elf)
+        new = AbiSnapshot(library="libbase.so", version="2", functions=[], elf=elf)
+        r = compare(old, new)
+        assert ChangeKind.FUNC_REMOVED in {c.kind for c in r.changes}
+        assert r.verdict == Verdict.BREAKING

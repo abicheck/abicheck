@@ -62,7 +62,7 @@ from .diff_symbols_scalar import (  # noqa: F401  (public-surface re-exports)
     _canonical_int_spelling as _canonical_int_spelling,
     _scalar_repr as _scalar_repr,
 )
-from .dumper_castxml import is_synthetic_ctor_key
+from .dumper_castxml import is_synthetic_ctor_key, is_synthetic_dtor_key
 from .elf_symbol_filter import (
     FUNCTION_SYMBOL_TYPES,
     exported_symbol_names,
@@ -190,6 +190,13 @@ def _public_functions(snap: AbiSnapshot) -> dict[str, Function]:
             # removed / case111's added overload); its visibility was already
             # resolved from source access when castxml gave no name to check.
             or is_synthetic_ctor_key(k)
+            # Same reasoning for a synthetic destructor key ("~ClassName",
+            # castxml omitted the real mangled name): it can never equal a
+            # real exported symbol either, so without this a genuinely
+            # public virtual destructor's PUBLIC visibility
+            # (_ctor_or_dtor_visibility) would still be silently dropped
+            # here — necessary but not sufficient (Codex review, PR #582).
+            or is_synthetic_dtor_key(k)
         )
     }
 

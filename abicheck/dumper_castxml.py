@@ -203,6 +203,30 @@ def is_synthetic_ctor_key(key: str) -> bool:
     return key.startswith(SYNTHETIC_CTOR_KEY_PREFIX)
 
 
+#: Marker for a snapshot key synthesized for a destructor whose real mangled
+#: name castxml omitted (see ``_CastxmlParser._function_display_name`` and
+#: ``_function_mangled_name``'s ``return name`` fallback). A class has at
+#: most one destructor, so — unlike constructors — no per-overload prefix is
+#: needed: the synthesized "~ClassName" display name is itself already a
+#: stable, unique identity. It is intentionally not a real ABI symbol (a real
+#: Itanium destructor mangling always starts with ``_Z``, never ``~``), only
+#: a stable key — ``diff_symbols._public_functions()`` reads this the same
+#: way it already does :data:`SYNTHETIC_CTOR_KEY_PREFIX`/
+#: :func:`is_synthetic_ctor_key`, to exempt such entries from its
+#: ELF-export-set narrowing, which they could never pass. Without this, a
+#: real virtual destructor's PUBLIC visibility (``_ctor_or_dtor_visibility``)
+#: was necessary but not sufficient: it would still be silently dropped
+#: before reaching the diff whenever ELF metadata is present (Codex review,
+#: PR #582 — found after the destructor-visibility fix, via the same Phase 2
+#: parity gate).
+_SYNTHETIC_DTOR_KEY_PREFIX = "~"
+
+
+def is_synthetic_dtor_key(key: str) -> bool:
+    """Whether *key* is a castxml destructor synthetic identity."""
+    return key.startswith(_SYNTHETIC_DTOR_KEY_PREFIX)
+
+
 class _CastxmlParser:
     """Parse castxml XML into ABI model objects."""
 

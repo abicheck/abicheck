@@ -353,6 +353,37 @@ class TestDestructorVisibility:
         d_dtors = public_dtor_names(clang_snap)
         assert c_dtors == d_dtors == {"~Base1", "~Base2", "~VBase"}
 
+    def test_removed_virtual_destructor_is_actually_diffable(
+        self, cpp_snapshots
+    ) -> None:
+        """PUBLIC visibility alone is necessary but not sufficient: when the
+        snapshot carries real ELF metadata (the normal case for `dump()` on
+        a compiled .so — every test above except this one only inspected
+        `snap.functions` directly, never the real diff pipeline),
+        `_public_functions()` additionally narrows to keys that match a
+        real export, are `is_deleted`, or are explicitly allow-listed via
+        `is_synthetic_ctor_key()`. A synthetic destructor key ("~ClassName")
+        matched none of those, so a removed virtual destructor was STILL
+        silently dropped before FUNC_REMOVED could ever fire — even after
+        the visibility fix above. Fixed by is_synthetic_dtor_key() (Codex
+        review, PR #582, found immediately after the visibility fix via the
+        same parity gate)."""
+        import copy
+
+        from abicheck.checker import ChangeKind, Verdict, compare
+
+        castxml_snap, _clang_snap = cpp_snapshots
+        assert castxml_snap.elf is not None and castxml_snap.elf.symbols
+
+        new_snap = copy.deepcopy(castxml_snap)
+        new_snap.functions = [
+            f for f in new_snap.functions if f.mangled != "~Base1"
+        ]
+        r = compare(castxml_snap, new_snap)
+        kinds = {c.kind for c in r.changes if c.symbol == "~Base1"}
+        assert ChangeKind.FUNC_REMOVED in kinds
+        assert r.verdict == Verdict.BREAKING
+
 
 # ── Variables and constants ─────────────────────────────────────────────────
 

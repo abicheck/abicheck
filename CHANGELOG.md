@@ -557,6 +557,27 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
     convention (cross-producer, or even just a castxml version bump).
     `canonicalize_type_name` now normalizes sigil spacing the same way
     `_strip_cv_qualifiers` already did internally.
+  Two more real bugs found in a further Codex review round of the same
+  parity work:
+  - **Destructor ELF-filtering gap**: the virtual-destructor visibility fix
+    above was necessary but not sufficient. Whenever ELF metadata is
+    present (the normal case for a real `.so` dump), `_public_functions()`
+    additionally narrows to keys that match a real export, are
+    `is_deleted`, or are explicitly allow-listed via the existing
+    `is_synthetic_ctor_key()`. A synthesized `"~ClassName"` destructor key
+    matched none of those — so a genuinely PUBLIC virtual destructor was
+    still silently dropped before an added/removed destructor could ever
+    reach `FUNC_REMOVED`/`FUNC_ADDED`. Fixed by adding
+    `is_synthetic_dtor_key()` (mirroring the constructor exemption) and
+    wiring it into `_public_functions()`'s allow-list.
+  - **Blank old/new values in initializer-change descriptions**:
+    `FIELD_DEFAULT_INITIALIZER_CHANGED` passed its values as `old_value=`/
+    `new_value=` instead of `old=`/`new=`, so `make_change()`'s
+    `description_template` formatting (which only reads `old=`/`new=`, not
+    the structured `old_value`/`new_value` fields) rendered every
+    occurrence as `"...(None → None)"` instead of the real values (e.g.
+    `30 → 60`). `FIELD_DEFAULT_INITIALIZER_REMOVED`'s template does not
+    reference `{old}`/`{new}` and was unaffected.
 - **MCP `abi_compare`**: a `--used-by`/`--required-symbol` response's
   `summary` (`total_changes`/`breaking`/`api_breaks`/`risk_changes`/
   `compatible`) is now recomputed after scoped-only changes and
