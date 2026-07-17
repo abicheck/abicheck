@@ -594,7 +594,8 @@ def _build_plugin_side(
     try:
         configure = subprocess.run(
             ["cmake", "-S", str(case_dir.parent), "-B", str(side_build),
-             "-DCMAKE_BUILD_TYPE=Debug", f"-DCMAKE_PROJECT_INCLUDE={injection}"],
+             "-DCMAKE_BUILD_TYPE=Debug", f"-DCMAKE_PROJECT_INCLUDE={injection}",
+             "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"],
             capture_output=True, text=True, timeout=timeout, env=env,
         )
         if configure.returncode != 0:
@@ -618,6 +619,89 @@ def _build_plugin_side(
     if not valid:
         return None, None, error
     return library, pack, ""
+
+
+# Cases whose canonical verdict depends on a source-evidence fact the compiled
+# Clang-facts plugin (``contrib/abicheck-clang-plugin``) does not emit: C++20
+# `concept` declarations (case105 — the plugin has no concept-fact emission at
+# all) and the compile-unit's declared C++ standard as an `abi_relevant_
+# build_flag_changed` finding (case98 — the plugin folds the standard into its
+# per-TU cache-key hash only, not into a compared build-flag record). Both
+# facts *are* already proven reachable by `tests/validate_examples.py`'s
+# ``build-source`` artifact variant, which walks the real compile database
+# with `abicheck/buildsource/inline.collect_inline_pack()` (a different,
+# AST-based L3/L4/L5 collector) instead of the compiled plugin — see each
+# case's README. Reuse that same proven mechanism here as a targeted
+# supplement (`compare --build-info/--sources`), rather than replacing the
+# plugin pack every other case in the 191-case catalog already passes with.
+_AST_BUILD_SOURCE_EXTRA_EVIDENCE_CASES: dict[str, tuple[str, str]] = {
+    # case: (source_abi_extractor, source_abi_scope) — mirrors each case's
+    # examples/ground_truth.json entry (validate_examples.py reads the same
+    # fields for its build-source variant).
+    "case98_cxx_standard_floor_raised": ("castxml", "full"),
+    "case105_concept_tightening": ("clang", "headers-only"),
+}
+
+
+def _collect_ast_build_source_pack(
+    case_dir: Path, case: str, version: str, src: Path, header: Path | None,
+    side_build: Path, root: Path,
+) -> tuple[Path | None, str]:
+    """Collect an AST-walked L3/L4/L5 build-source pack via ``collect_inline_pack``.
+
+    Reuses the compile_commands.json CMake already emits for the plugin build
+    (``_build_plugin_side``'s configure step) to find this side's real
+    compile command, then runs the same source collector
+    ``tests/validate_examples.py``'s ``build-source`` variant uses. Returns
+    ``(pack_dir, "")`` on success or ``(None, error_message)``.
+    """
+    import dataclasses  # noqa: PLC0415
+
+    from abicheck.buildsource.inline import collect_inline_pack  # noqa: PLC0415
+
+    extractor, scope = _AST_BUILD_SOURCE_EXTRA_EVIDENCE_CASES[case]
+    compile_db = side_build / "compile_commands.json"
+    if not compile_db.exists():
+        return None, f"{case}/{version}: no compile_commands.json from CMake"
+    try:
+        entries = json.loads(compile_db.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        return None, f"{case}/{version}: unreadable compile_commands.json: {exc}"
+    src_resolved = src.resolve()
+    matching = [
+        e for e in entries
+        if isinstance(e, dict)
+        and Path(str(e.get("file", ""))).expanduser().resolve() == src_resolved
+    ]
+    if not matching:
+        return None, f"{case}/{version}: no compile_commands.json entry for {src}"
+    side_db = root / f"{version}.ast_compile_commands.json"
+    side_db.write_text(json.dumps(matching))
+    # The "clang" extractor shells out to a bare "clang" by default
+    # (collect_inline_pack's clang_bin default) -- absent on hosts that only
+    # ship a versioned clang-18, same gap as the case115/case64 overrides
+    # elsewhere in this file. Pin the actual discovered clang binary so the
+    # replay doesn't silently no-op (and this case's finding doesn't
+    # regress) on such hosts (Codex review on PR #588).
+    clang_bin = _first_available_tool("clang-18", "clang") or "clang"
+    try:
+        pack = collect_inline_pack(
+            sources=case_dir,
+            build_info=side_db,
+            extractor=extractor,
+            clang_bin=clang_bin,
+            scope=scope,
+            layers=("L3", "L4", "L5"),
+            public_header_roots=(str(header),) if header and header.exists() else (),
+        )
+    except Exception as exc:  # noqa: BLE001 - report as a benchmark row, not a crash
+        return None, f"{case}/{version}: collect_inline_pack failed: {exc}"
+    if pack is None:
+        return None, f"{case}/{version}: no build/source evidence collected"
+    out_dir = root / f"{version}.ast_buildsource"
+    dataclasses.replace(pack, root=out_dir).write()
+    return out_dir, ""
+
 
 def run_abicheck(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | None,
                  case: str, rdir: Path, timeout: int = DEFAULT_TIMEOUT) -> ToolResult:
@@ -653,6 +737,7 @@ def run_abicheck_full(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | 
             ("v2", v2_src, v1_src, v2_h, v2_so),
         ]
         merged: list[Path] = []
+        ast_packs: dict[str, Path] = {}
         logs: list[str] = []
         for version, src, opposite, header, real_so in sides:
             _plugin_so, pack, error = _build_plugin_side(
@@ -661,6 +746,16 @@ def run_abicheck_full(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | 
             if _plugin_so is None or pack is None:
                 return ToolResult(verdict="ERROR", raw_output=error,
                                   elapsed_ms=(time.monotonic() - started) * 1000)
+            if case in _AST_BUILD_SOURCE_EXTRA_EVIDENCE_CASES:
+                side_build = root / f"plugin_build_{version}"
+                actual_src = _cmake_declared_source(case_dir, version) or src
+                ast_pack, ast_error = _collect_ast_build_source_pack(
+                    case_dir, case, version, actual_src, header, side_build, root,
+                )
+                if ast_pack is None:
+                    return ToolResult(verdict="ERROR", raw_output=ast_error,
+                                      elapsed_ms=(time.monotonic() - started) * 1000)
+                ast_packs[version] = ast_pack
             base = root / f"{version}.binary_headers.json"
             final = root / f"{version}.merged.json"
             # Dump the REAL, already-built binary (same artifact the L2 lane
@@ -732,9 +827,26 @@ def run_abicheck_full(v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | 
                                   elapsed_ms=(time.monotonic() - started) * 1000)
             merged.append(final)
             logs.extend([dr.stdout, dr.stderr, mr.stdout, mr.stderr])
+        compare_cmd = [
+            _PYTHON, "-m", "abicheck.cli", "compare", str(merged[0]), str(merged[1]),
+            "--format", "json", "--pattern-verdicts",
+        ]
+        if case in _AST_BUILD_SOURCE_EXTRA_EVIDENCE_CASES:
+            # Fold in the AST-walked pack (build flags / concept facts) collected
+            # above, and turn public-header scoping off: the default L2 header
+            # backend (castxml/clang AST) cannot classify a concept as public, so
+            # scoped mode silently drops case105's finding as "internal" (see its
+            # README) — the same reason ground_truth.json's other build-source
+            # cases default `scope_public_headers` to false.
+            compare_cmd += [
+                "--build-info", "old=" + str(ast_packs["v1"]),
+                "--sources", "old=" + str(ast_packs["v1"]),
+                "--build-info", "new=" + str(ast_packs["v2"]),
+                "--sources", "new=" + str(ast_packs["v2"]),
+                "--no-scope-public-headers",
+            ]
         compare = subprocess.run(
-            [_PYTHON, "-m", "abicheck.cli", "compare", str(merged[0]), str(merged[1]),
-             "--format", "json", "--pattern-verdicts"], capture_output=True, text=True,
+            compare_cmd, capture_output=True, text=True,
             timeout=timeout, env=_ABICHECK_ENV,
         )
     except subprocess.TimeoutExpired as exc:

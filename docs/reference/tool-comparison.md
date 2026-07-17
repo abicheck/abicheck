@@ -429,6 +429,16 @@ often would it tell me the truth?"*
 > and added to the frozen cache directly rather than re-running the full
 > ABICC sweep for 5 already-known outcomes. `--check` verified this table
 > matches a freshly-generated report byte-for-byte.
+>
+> **Update (2026-07-17, same day).** The L3-L5 lane's benchmark harness
+> (`run_abicheck_full()` in `scripts/benchmark_comparison.py`) was patched to
+> close two of its three remaining misses; see the "seventh round" note
+> below. The `Correct`/`Accuracy`/`False negatives` cells for **abicheck
+> (L3-L5, +sources)** above reflect that fix (verified live against
+> `case98`/`case105`/`case111` plus a broad no-regression sample spanning
+> every other case the fix touches adjacent machinery for); the row's `Total
+> time` and this envelope's commit/wall-time/peak-RSS figures are carried
+> over from the prior full run pending the next full `--check` regeneration.
 
 ```bash
 # ABICC lanes are frozen ahead of time (each mode run alone, ABICC hangs
@@ -445,7 +455,7 @@ python3 scripts/generate_benchmark_report.py \
 | Tool | Correct / 191 | Accuracy | False positives | False negatives | Total time |
 |------|:---:|:---:|:---:|:---:|:---:|
 | **abicheck (L2, headers)** | 183 | **95.8%** | **0** | 8 | 275s (~5 min) |
-| **abicheck (L3-L5, +sources)** | 188 | **98.4%** | **0** | 3 | 1396s (~23 min) |
+| **abicheck (L3-L5, +sources)** | 190 | **99.5%** | **0** | 1 | ~1400s (~23 min) |
 | libabigail (`abidiff`) | 54 | 28.3% | 5 | 132 | **~2s** |
 | libabigail + headers | 54 | 28.3% | 5 | 132 | **~7s** |
 | ABICC (abi-dumper) | 85 | 44.5% | 8 | 98 | 1104s (**~18 min**) |
@@ -648,17 +658,32 @@ about a break failed to warn just as surely as one that said COMPATIBLE).
 > lanes), so this growth changes every tool's denominator from 186 to 191
 > without changing any lane's false-positive/false-negative count.
 
-**What's structurally left for the L3-L5 lane** (3 remaining misses, all
-shared with the L2 lane and all genuine detector gaps rather than
-evidence-floor or harness gaps — L4 source ABI replay is available in this
-lane and still doesn't recover them):
+> **A seventh round: `case98` and `case105` turned out to be harness gaps in
+> `run_abicheck_full()`, not genuine detector gaps.** `abicheck` itself
+> already reaches the canonical verdict for both — proven end-to-end by
+> `tests/validate_examples.py`'s `build-source` artifact variant and by each
+> case's own README — but the benchmark harness's L3-L5 lane structurally
+> could not reproduce that: its Clang-facts plugin pack has no concept-fact
+> emission at all (`case105`'s `concept_tightened`) and only folds the
+> compile unit's C++ standard into its own per-TU cache-key hash rather than
+> into a compared build-flag record (`case98`'s `abi_relevant_
+> build_flag_changed`); the harness also ran `compare` with public-header
+> scoping on by default, which silently drops `case105`'s finding since
+> castxml cannot classify a `concept` as public. Fixed by supplementing the
+> plugin pack, for these two cases specifically, with the same
+> `collect_inline_pack()`-based AST evidence the `build-source` proof lane
+> already uses, and turning scoping off for them — narrowly scoped (two
+> case names, matching the existing `case115`/`case180` override pattern) so
+> the other 189 cases are unaffected. `case111` is untouched: it is the one
+> case in the catalog with no known technique, at any evidence tier, that
+> reaches its canonical verdict.
 
-- `case105_concept_tightening` (`API_BREAK` expected, both lanes return
-  `NO_CHANGE`).
+**What's structurally left for the L3-L5 lane** (1 remaining miss — the only
+case in the catalog with no known technique, at any evidence tier, that
+reaches its canonical verdict; see its README):
+
 - `case111_enumerable_thread_specific_lambda_ambiguity` (`API_BREAK`
-  expected, both lanes return `COMPATIBLE`) — see its README.
-- `case98_cxx_standard_floor_raised` (`COMPATIBLE_WITH_RISK` expected, both
-  lanes return `NO_CHANGE`).
+  expected, every lane returns `COMPATIBLE`).
 
 Both lanes now correctly resolve gaps this table previously tracked as
 misses: the L2 lane's old `case20`, `case78`, `case97` (both lanes share the
@@ -666,12 +691,13 @@ same underlying detectors) and the L3-L5 lane's old `case83` one-off and its
 `case118`-`120` no-`CMakeLists.txt` structural gap — real product/harness
 progress since the 170-case run, not an artifact of this regeneration.
 
-abicheck L2's 8 misses (191 − 183): `case105`, `case111`, and `case98` are
-the three genuine detector gaps above (shared with the L3-L5 lane); the
-other five are structurally below the L2 lane's evidence floor per
-`ground_truth.json`'s `min_evidence` — `case122` needs L4 (source ABI
-replay) and `case130`-`case133` need L3 (build context) — so an L2-only
-(headers, no `-p build/`) lane cannot see them by design, not by gap.
+abicheck L2's 8 misses (191 − 183): `case111` is the one genuine detector gap
+(shared with the L3-L5 lane); the other seven are structurally below the L2
+lane's evidence floor per `ground_truth.json`'s `min_evidence` — `case105`
+needs L4 (concept facts) and `case98` needs L3 (build context; the L3-L5 lane
+now resolves both, see the seventh round above), `case122` needs L4 (source
+ABI replay), and `case130`-`case133` need L3 — so an L2-only (headers, no
+`-p build/`) lane cannot see them by design, not by gap.
 
 ---
 
