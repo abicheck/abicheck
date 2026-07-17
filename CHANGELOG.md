@@ -43,6 +43,21 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **`examples/case187_public_struct_private_field_type`**: a new L5
+  fixture case demonstrating ADR-041's own headline "not a call at all"
+  scenario — a public struct gaining a private field type
+  (`TYPE_HAS_FIELD_TYPE`), sibling to `case160`'s call-edge case for the
+  same `public_api_internal_dependency_added` finding.
+
+### Documentation
+
+- `docs/concepts/build-source-data.md` now documents the ADR-041 P0
+  type-graph edge family (`TYPE_INHERITS`/`TYPE_HAS_FIELD_TYPE`/
+  `DECL_HAS_TYPE`/`DECL_REFERENCES_DECL`, folded by `type_graph.py`
+  alongside the call graph) and the header-only-graph addendum
+  (`header_graph.py`, `service.run_dump(header_graph=True)`) — previously
+  documented only in the ADR text and module docstrings.
+
 - `compare --help-all`: a second-level `--help` disclosure tier (G21.8
   collapse M2). Plain `compare --help` now shows only a curated common
   subset of the ~62 options (inputs, output/format, `--show-only`, policy,
