@@ -1550,6 +1550,86 @@ def test_public_impact_closure_uses_def_file_fallback_with_no_source_declares():
     assert "src/api.cpp" in tus
 
 
+def test_public_impact_closure_skips_decls_with_no_resolvable_location():
+    # Two more impacted-but-unresolvable shapes alongside the working
+    # def_file fallback: a decl with neither a SOURCE_DECLARES edge nor any
+    # def_file/source_location attr at all (loc falsy), and one whose
+    # source_location is a bare in-memory-scan line number with no path
+    # component (_path_of_location returns "", path falsy). Both must be
+    # silently skipped -- never raise, never appear in the result -- while a
+    # resolvable impacted decl in the same graph still comes through.
+    from types import SimpleNamespace
+
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_graph import (
+        GraphEdge,
+        GraphNode,
+        SourceGraphSummary,
+    )
+    from abicheck.scan_engine import _resolve_public_impact_tus
+
+    graph = SourceGraphSummary(
+        nodes=[
+            GraphNode(
+                id="decl://pub_resolvable",
+                kind="source_decl",
+                label="pub_resolvable",
+                attrs={"visibility": "public_header", "def_file": "src/api.cpp"},
+            ),
+            GraphNode(
+                id="decl://pub_no_location",
+                kind="source_decl",
+                label="pub_no_location",
+                attrs={"visibility": "public_header"},  # no def_file/source_location
+            ),
+            GraphNode(
+                id="decl://pub_bare_line",
+                kind="source_decl",
+                label="pub_bare_line",
+                attrs={"visibility": "public_header", "source_location": "7"},
+            ),
+            GraphNode(
+                id="decl://internal",
+                kind="record_type",
+                label="Internal",
+                attrs={"visibility": "private_header"},
+            ),
+            GraphNode(
+                id="header://src/detail/cache.cpp",
+                kind="header",
+                label="src/detail/cache.cpp",
+            ),
+        ],
+        edges=[
+            GraphEdge(
+                src="header://src/detail/cache.cpp",
+                dst="decl://internal",
+                kind="SOURCE_DECLARES",
+            ),
+            GraphEdge(
+                src="decl://pub_resolvable",
+                dst="decl://internal",
+                kind="TYPE_HAS_FIELD_TYPE",
+            ),
+            GraphEdge(
+                src="decl://pub_no_location",
+                dst="decl://internal",
+                kind="TYPE_HAS_FIELD_TYPE",
+            ),
+            GraphEdge(
+                src="decl://pub_bare_line",
+                dst="decl://internal",
+                kind="TYPE_HAS_FIELD_TYPE",
+            ),
+        ],
+    )
+    poi_baseline = SimpleNamespace(
+        build_source=BuildSourcePack(root="", source_graph=graph)
+    )
+    tus = _resolve_public_impact_tus(poi_baseline, ["src/detail/cache.cpp"])
+    assert tus == ("src/api.cpp",)
+
+
 def test_depth_binary_clears_headers_in_scan(
     monkeypatch, runner, new_snap_compatible, tmp_path
 ):

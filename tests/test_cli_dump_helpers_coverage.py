@@ -624,6 +624,50 @@ def test_perform_elf_dump_header_graph_gets_compile_db_flags(
     assert original_cc.gcc_options == "-DFOO"
 
 
+def test_perform_elf_dump_header_graph_builds_context_when_none_given(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Same compile-DB-flags scenario as
+    test_perform_elf_dump_header_graph_gets_compile_db_flags, but with no
+    compile_context at all (None) -- e.g. a caller that never resolved one.
+    effective_gcc_options must still reach the header-graph attach by
+    constructing a fresh CompileContext, not silently dropping the flags
+    because there was nothing to dataclasses.replace()."""
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "h.h"
+    hdr.write_text("struct S { int x; };\n", encoding="utf-8")
+
+    plain_snap = AbiSnapshot(library="lib.so", version="1.0")
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", lambda **_kw: plain_snap)
+
+    captured: dict[str, object] = {}
+
+    def fake_attach(
+        snap, header_graph, header_graph_includes, headers, includes,
+        lang, compile_context, public_headers, public_header_dirs,
+    ):  # noqa: ANN001
+        captured["compile_context"] = compile_context
+        return snap
+
+    monkeypatch.setattr("abicheck.service._attach_header_graph", fake_attach)
+
+    events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+
+    perform_elf_dump(
+        so, (hdr,), (), "1.0", "c++", None, None,
+        "-DFROM_COMPILE_DB",  # effective_gcc_options, no compile_context given
+        (), None, True, False, None, (), (), None, False, (), "", None, None,
+        False, None, None, None, None, False, "off", _expand, _populate,
+        _stamp, _write,
+        header_graph=True, header_graph_includes=False,
+        # compile_context defaults to None
+    )
+
+    got = captured["compile_context"]
+    assert got is not None
+    assert got.gcc_options == "-DFROM_COMPILE_DB"
+
+
 def test_perform_elf_dump_skips_header_graph_by_default(
     tmp_path: Path, monkeypatch
 ) -> None:

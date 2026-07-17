@@ -1550,6 +1550,39 @@ def test_embed_build_info_preserves_preexisting_header_only_graph(tmp_path):
     assert cov is not None and cov.status == CoverageStatus.PARTIAL
 
 
+def test_embed_build_info_backfills_graph_with_no_preexisting_coverage_row(tmp_path):
+    """Same backfill as test_embed_build_info_preserves_preexisting_header_only_graph,
+    but the pre-existing pack carries source_graph with no matching L5 coverage
+    row in its manifest at all (a degenerate/hand-built pack, unlike the normal
+    service._attach_header_graph output which always sets one). The backfill
+    must still adopt the graph itself and fall back to leaving no L5 row behind
+    (rather than raising) when there is no row to carry over."""
+    from pathlib import Path
+
+    from abicheck.buildsource.model import DataLayer
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
+    from abicheck.cli_buildsource import embed_build_source
+
+    cdb = _write_cdb(tmp_path, "c++17")
+    snap = AbiSnapshot(library="libfoo.so", version="1")
+
+    graph = SourceGraphSummary(nodes=[GraphNode(id="d:foo", kind="function")])
+    header_pack = BuildSourcePack(root=Path(""), source_graph=graph)
+    # No manifest.coverage rows at all -- graph_row lookup finds nothing.
+    assert header_pack.manifest.coverage == []
+    snap.build_source = header_pack
+
+    embed_build_source(snap, cdb, None, collect_mode="build")
+
+    assert snap.build_source is not None
+    assert snap.build_source.source_graph is graph
+    cov = snap.build_source.manifest.coverage_for(DataLayer.L5_SOURCE_GRAPH.value)
+    assert cov is None
+    # L3 facts from --build-info still landed normally.
+    assert snap.build_source.build_evidence is not None
+
+
 def test_embed_build_info_autodiscovers_compile_db_in_tree(tmp_path):
     """A compile DB inside the --sources tree is auto-discovered for L3."""
     from abicheck.cli_buildsource import embed_build_source
