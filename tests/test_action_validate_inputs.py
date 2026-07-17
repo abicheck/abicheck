@@ -163,15 +163,18 @@ class TestFormatIsHardErrorNotSilentFallback:
         assert result.returncode == 0, result.stdout + result.stderr
 
     @pytest.mark.parametrize("mode", ["deps-tree", "deps-compare"])
-    @pytest.mark.parametrize("fmt", ["sarif", "html"])
-    def test_deps_modes_reject_unsupported_format(self, mode: str, fmt: str) -> None:
-        result = _run_validate({"INPUT_MODE": mode, "INPUT_FORMAT": fmt})
+    def test_deps_modes_reject_sarif(self, mode: str) -> None:
+        result = _run_validate({"INPUT_MODE": mode, "INPUT_FORMAT": "sarif"})
         assert result.returncode == 1
         assert "does not support format" in result.stdout
 
     @pytest.mark.parametrize("mode", ["deps-tree", "deps-compare"])
-    @pytest.mark.parametrize("fmt", ["markdown", "json"])
+    @pytest.mark.parametrize("fmt", ["markdown", "json", "html"])
     def test_deps_modes_accept_supported_format(self, mode: str, fmt: str) -> None:
+        # deps-tree/deps-compare's CLI supports markdown|json|html (`deps
+        # tree --help`; html renders via cli_stack.py's stack_to_html) —
+        # Codex review, PR #594: this validator originally rejected html
+        # here too, which would have blocked a real, supported CLI format.
         result = _run_validate({"INPUT_MODE": mode, "INPUT_FORMAT": fmt})
         assert result.returncode == 0, result.stdout + result.stderr
 

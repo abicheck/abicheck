@@ -295,12 +295,13 @@ inputs:
     description: >
       Output format: json, sarif, html, or markdown/text (each mode's
       default when this input is left unset — markdown for compare/
-      deps-tree/deps-compare, text for scan). sarif and html are only
-      supported in compare mode with a single-pair (non-directory,
-      non-package) operand — a directory/package compare rejects them with
-      an error. scan supports text (its default) and json only.
-      deps-tree/deps-compare support markdown and json only. dump ignores
-      this input; it always writes a JSON snapshot. Requesting an
+      deps-tree/deps-compare, text for scan). sarif is only supported in
+      compare mode with a single-pair (non-directory, non-package) operand
+      — a directory/package compare rejects it with an error. html is
+      supported by compare (same single-pair restriction as sarif) and by
+      deps-tree/deps-compare (a dependency-stack report). scan supports
+      text (its default) and json only. dump ignores this input; it always
+      writes a JSON snapshot. Requesting an
       unsupported format for the mode is a hard error raised before any
       dependency install (it used to silently fall back to a supported
       format with only a warning, which is unsafe for CI — see

@@ -74,8 +74,8 @@ case "$MODE" in
     fi
     ;;
   deps-tree | deps-compare)
-    if [[ "$FORMAT" == "sarif" || "$FORMAT" == "html" ]]; then
-      _fail "mode: $MODE does not support format: $FORMAT — only 'markdown' and 'json' are supported."
+    if [[ "$FORMAT" == "sarif" ]]; then
+      _fail "mode: $MODE does not support format: $FORMAT — only 'markdown', 'json', and 'html' are supported."
     fi
     ;;
 esac

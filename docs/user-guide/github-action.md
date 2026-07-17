@@ -32,7 +32,8 @@ back to a different, unrequested behavior.
 | Single binary/snapshot | yes | yes | yes | yes |
 | Directory/package (`new-library`/`old-library`) | yes (fans out per-library) | **error** | **error** | — |
 | Source-only (no `new-library`, via `sources`/`build-info`/`compile-db`) | — | yes | — | — |
-| `format: sarif` / `html` | yes (single pair only) | n/a (always JSON) | **error** | **error** |
+| `format: sarif` | yes (single pair only) | n/a (always JSON) | **error** | **error** |
+| `format: html` | yes (single pair only) | n/a (always JSON) | **error** | yes (dependency-stack report) |
 | `format: json` | yes | n/a (always JSON) | yes | yes |
 | `format: markdown` / `text` | yes | n/a (always JSON) | `text` only | `markdown` only |
 | `upload-sarif: true` | yes (needs `format: sarif`) | **error** | **error** | **error** |
@@ -174,7 +175,7 @@ scan degrades gracefully and L0–L2 stay authoritative.
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `format` | `markdown` (`text` for scan) | Output format: `markdown`, `json`, `sarif`, `html`. `sarif`/`html` are only available in `compare` mode when `old-library`/`new-library` are a single pair — a directory/package comparison rejects them with a clear error (choose `markdown` or `json` instead). `deps-tree`/`deps-compare` support only `markdown`/`json`; `scan` supports only `text`/`json`. Requesting an unsupported format for the mode is a **hard error**, raised before any dependency install — it used to silently fall back to a supported format with only a warning, which is unsafe for CI (see [Mode/input compatibility](#modeinput-compatibility)). |
+| `format` | `markdown` (`text` for scan) | Output format: `markdown`, `json`, `sarif`, `html`. `sarif` is only available in `compare` mode when `old-library`/`new-library` are a single pair — a directory/package comparison rejects it with a clear error (choose `markdown` or `json` instead). `html` is available in `compare` (same single-pair restriction) and in `deps-tree`/`deps-compare` (a dependency-stack report); `scan` supports only `text`/`json`. Requesting an unsupported format for the mode is a **hard error**, raised before any dependency install — it used to silently fall back to a supported format with only a warning, which is unsafe for CI (see [Mode/input compatibility](#modeinput-compatibility)). |
 | `output-file` | — | Path to write report (auto-set for SARIF) |
 | `dry-run` | `false` | Resolve inputs/config and print what the run would do, without analyzing anything or writing output (always exits 0). Maps to `--dry-run`; supported by every mode. In scan mode this also prints the projected per-layer cost. |
 | `estimate` | `false` | **Deprecated.** scan mode only. Functional alias for `dry-run: 'true'` — prefer `dry-run` directly, which applies to every mode. |

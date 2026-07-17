@@ -400,11 +400,13 @@ elif [[ "$MODE" == "deps-tree" ]]; then
   add_flag "--search-path" "${INPUT_SEARCH_PATH:-}"
   add_single_flag "--ld-library-path" "${INPUT_LD_LIBRARY_PATH:-}"
 
-  # Format — deps-tree only supports markdown and json (hard error, not a
-  # silent fallback — see the scan branch's format check above).
+  # Format — deps-tree supports markdown, json, and html (`deps tree
+  # --help`; html renders via cli_stack.py's stack_to_html). Hard error on
+  # anything else (sarif), not a silent fallback — see the scan branch's
+  # format check above.
   FORMAT="${INPUT_FORMAT:-markdown}"
-  if [[ "$FORMAT" != "markdown" && "$FORMAT" != "json" ]]; then
-    echo "::error::mode: deps-tree does not support format: $FORMAT. Only 'markdown' and 'json' are supported."
+  if [[ "$FORMAT" != "markdown" && "$FORMAT" != "json" && "$FORMAT" != "html" ]]; then
+    echo "::error::mode: deps-tree does not support format: $FORMAT. Only 'markdown', 'json', and 'html' are supported."
     exit 1
   fi
   CMD+=(--format "$FORMAT")
@@ -428,11 +430,13 @@ elif [[ "$MODE" == "deps-compare" ]]; then
   add_flag "--search-path" "${INPUT_SEARCH_PATH:-}"
   add_single_flag "--ld-library-path" "${INPUT_LD_LIBRARY_PATH:-}"
 
-  # Format — deps-compare only supports markdown and json (hard error, not
-  # a silent fallback — see the scan branch's format check above).
+  # Format — deps-compare supports markdown, json, and html (`deps compare
+  # --help`; html renders via cli_stack.py's stack_to_html). Hard error on
+  # anything else (sarif), not a silent fallback — see the scan branch's
+  # format check above.
   FORMAT="${INPUT_FORMAT:-markdown}"
-  if [[ "$FORMAT" != "markdown" && "$FORMAT" != "json" ]]; then
-    echo "::error::mode: deps-compare does not support format: $FORMAT. Only 'markdown' and 'json' are supported."
+  if [[ "$FORMAT" != "markdown" && "$FORMAT" != "json" && "$FORMAT" != "html" ]]; then
+    echo "::error::mode: deps-compare does not support format: $FORMAT. Only 'markdown', 'json', and 'html' are supported."
     exit 1
   fi
   CMD+=(--format "$FORMAT")
