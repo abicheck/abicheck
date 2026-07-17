@@ -409,6 +409,19 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- **CastXML field qualifiers**: the CastXML L2 header parser never
+  populated `TypeField.is_const`/`is_volatile`/`is_mutable` — they stayed
+  permanently `False` regardless of the actual declaration, even though
+  `diff_types.py`'s `FIELD_BECAME_CONST`/`FIELD_LOST_CONST`/
+  `FIELD_BECAME_VOLATILE`/`FIELD_LOST_VOLATILE`/`FIELD_BECAME_MUTABLE`/
+  `FIELD_LOST_MUTABLE` detectors already read those booleans. Since
+  CastXML is the default L2 backend, those detectors were silently dead on
+  every header-parsed snapshot. Now derived from the field's referenced
+  `CvQualifiedType` (const/volatile) and its own `mutable="1"` attribute,
+  in both the ordinary-field and anonymous-struct/union-flattening paths.
+  Also extended `_type_name`'s `CvQualifiedType` handling to `volatile`/
+  `restrict` (previously only `const` was read), so those qualifiers no
+  longer silently vanish from a type's spelling.
 - **MCP `abi_compare`**: a `--used-by`/`--required-symbol` response's
   `summary` (`total_changes`/`breaking`/`api_breaks`/`risk_changes`/
   `compatible`) is now recomputed after scoped-only changes and
