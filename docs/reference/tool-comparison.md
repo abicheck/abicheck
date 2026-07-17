@@ -6,14 +6,14 @@ benchmark results across real-world test cases, and why the numbers come out the
 > **Note:** abicheck detects 361 change kinds (see [Change Kind Reference](change-kinds.md)).
 > The current cross-tool benchmark covers a pinned 74-case subset of the
 > `examples/` catalog (`case01`-`case73` + `case26b`); the full
-> `examples/ground_truth.json` catalog now has 191 entries. Tool-to-tool
+> `examples/ground_truth.json` catalog now has 186 entries. Tool-to-tool
 > competitor scans use the 134 binary shared-library `.so` lanes; fixture/source
-> L2/L5/source cases (`case152`-`case158`, `case160`-`case164`, `case187`-`case191`) and the other
+> L2/L5/source cases (`case152`-`case158`, `case160`-`case164`) and the other
 > audit, cross-source, bundle, BTF, and snapshot cases are tracked in dedicated
 > non-`.so` lanes. The subset is pinned so accuracy numbers stay reproducible
 > across releases.
 >
-> **Which denominator is which.** **191** is the whole catalog. The binary
+> **Which denominator is which.** **186** is the whole catalog. The binary
 > competitor lane is **134** shared-library pairs. The scan-depth matrix is
 > compare-style and intentionally uses only comparable v1/v2 shared-library
 > targets: **141/141** of that scope are scanned at every depth. FP/FN math now
@@ -39,14 +39,14 @@ ABICC/libabigail on a stable cross-tool corpus?"
 
 | Scan | Scope | Execution | Result | Quality signal |
 |------|:-----:|-----------|--------|----------------|
-| Catalog metadata | 191 ground-truth entries | `examples/ground_truth.json` + `tests/test_evidence_tiers.py` | 134 binary competitor `.so` lanes + 52 dedicated non-`.so` lanes | Single source of truth for examples, verdicts, expected kinds, and minimum evidence; fixture/source-only L2/L5/source cases are not counted as binary competitor pairs |
+| Catalog metadata | 186 ground-truth entries | `examples/ground_truth.json` + `tests/test_evidence_tiers.py` | 134 binary competitor `.so` lanes + 47 dedicated non-`.so` lanes | Single source of truth for examples, verdicts, expected kinds, and minimum evidence; fixture/source-only L2/L5/source cases are not counted as binary competitor pairs |
 | Build/autodiscovery | 161 integration items | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` in CI | gcc: 132 passed / 29 skipped; clang: 133 passed / 28 skipped | Green default single-library build lane; skipped items are covered by dedicated bundle/source/audit/BTF tests |
-| Full example proof matrix | 191 catalog cases | `validation/scripts/collect_full_example_matrix.py` over CI artifacts + bundle/G20/L3-L5/BTF proofs | Dedicated full-catalog proof lane | Full-catalog source of truth; a `SKIP` in one lane is accepted only when a dedicated lane proves the case |
-| Default/debug verdicts | 191 catalog cases | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` in CI | Single-library debug lane; dedicated non-`.so` cases skip here by design | Single-library debug lane only; XFAIL is not green full-matrix scope |
+| Full example proof matrix | 186 catalog cases | `validation/scripts/collect_full_example_matrix.py` over CI artifacts + bundle/G20/L3-L5/BTF proofs | Dedicated full-catalog proof lane | Full-catalog source of truth; a `SKIP` in one lane is accepted only when a dedicated lane proves the case |
+| Default/debug verdicts | 186 catalog cases | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` in CI | Single-library debug lane; dedicated non-`.so` cases skip here by design | Single-library debug lane only; XFAIL is not green full-matrix scope |
 | Bundle release verdicts | 5 bundle cases | `PYTHONPATH=. python validation/scripts/run_bundle_examples.py --json` | 5 PASS | Runs the ADR-023 multi-library examples through `abicheck compare old/ new/` |
-| Runtime smoke | 191 catalog cases | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Runtime-only proof lane | Runtime harness has no BUILD_ERROR/BASELINE_ERROR bucket |
-| Release headers | 191 catalog cases | `validate_examples.py --artifact-variant release-headers --json` in CI artifact | Reduced-evidence informational lane | False-positive guard passed |
-| Stripped headers | 191 catalog cases | `validate_examples.py --artifact-variant stripped-headers --json` in CI artifact | Reduced-evidence informational lane | Expected signal-loss backlogs remain |
+| Runtime smoke | 186 catalog cases | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Runtime-only proof lane | Runtime harness has no BUILD_ERROR/BASELINE_ERROR bucket |
+| Release headers | 186 catalog cases | `validate_examples.py --artifact-variant release-headers --json` in CI artifact | Reduced-evidence informational lane | False-positive guard passed |
+| Stripped headers | 186 catalog cases | `validate_examples.py --artifact-variant stripped-headers --json` in CI artifact | Reduced-evidence informational lane | Expected signal-loss backlogs remain |
 | Build/source smoke | 10 representative cases | `validate_examples.py case01 case04 case98 case105 case122 case129 case130 case131 case132 case133 --artifact-variant build-source --json` in CI artifact | 10 PASS | Build/source evidence catches the build-flag mode cases in the smoke set |
 | Binary competitor scan | 134 shared-library pairs × 2 external tools | abicc/ABI Compliance Checker and libabigail `abidiff` over built `.so` pairs | 268 tool results: abicc 134, abidiff 134 | Competitor `.so` lane only; fixture/source-only L2/L5/source cases are represented in dedicated lanes, not as missing `.so` results |
 | Scan-depth matrix | 141 comparable targets × 5 depths | `abicheck scan --depth {binary,headers,build,source,full}` | 141/141 scans completed at each depth. Correct/FP/FN on all 141 comparable targets: binary 79 / 1 / 61; headers 115 / 0 / 26; build 115 / 0 / 26; source 141 / 0 / 0; full 141 / 0 / 0 | Compare-style status by depth; full-catalog audit/cross-source/bundle/BTF/snapshot cases are covered by dedicated lanes |
@@ -341,7 +341,7 @@ correct verdict — derived by
 `scripts/evidence_tiers.py`
 and validated by `tests/test_evidence_tiers.py`. Aggregated over the 153 compare-style cases, that yields the cumulative minimum-evidence coverage. The binary competitor `.so` lane is narrower (134 built shared-library pairs); fixture/source-only L2/L5/source cases are listed here by evidence tier instead of being treated as missing competitor binaries:
 
-> **Freshness note.** `examples/ground_truth.json` now has 191 total entries
+> **Freshness note.** `examples/ground_truth.json` now has 186 total entries
 > (verified via `len(json.load(open("examples/ground_truth.json"))["verdicts"])`),
 > not the 153/134 cited above — this table's per-tier breakdown predates
 > case growth since it was last regenerated and has not been re-derived from
@@ -381,9 +381,9 @@ and validated by `tests/test_evidence_tiers.py`. Aggregated over the 153 compare
 > verdict per case, credited from `ground_truth.json` labels — L4/L5 rows are
 > not yet re-run empirically, see the caveat above); it does not penalize a
 > tier for *over-calling* elsewhere in the catalog. The
-> [full-catalog benchmark](#full-catalog-benchmark-2026-07-12-all-170-cases)
-> below is the stricter, empirically-measured number — it scores all 170 cases
-> including false positives, which is why `L3-L5` reads 90.0% there rather
+> [full-catalog benchmark](#full-catalog-benchmark-2026-07-17-all-186-cases)
+> below is the stricter, empirically-measured number — it scores all 186 cases
+> including false positives, which is why `L3-L5` reads 90.9% there rather
 > than the 100% this table's `L5` row shows.
 
 Two directions matter, not just one:
@@ -405,7 +405,7 @@ Two directions matter, not just one:
 
 ---
 
-## Full-catalog benchmark (2026-07-12, all 191 cases)
+## Full-catalog benchmark (2026-07-17, all 186 cases)
 
 Every catalog case scored, with **SKIP/ERROR/TIMEOUT/incapacity all counted as
 misses** — a tool that hung, crashed, or simply has no mode for a case shape
@@ -414,34 +414,30 @@ denominator than "accuracy over cases the tool managed to complete," so read
 it as the answer to *"if I pointed this tool at the whole catalog blind, how
 often would it tell me the truth?"*
 
-> **Table pending regeneration.** The row numbers below are from the last full
-> run against a **170-case** catalog; 21 cases were added since
-> (`case171`–`case191`) without a rerun, so the Correct/Accuracy/FP/FN columns
-> are stale relative to the current catalog size in the heading above. Use
-> `scripts/generate_benchmark_report.py` (wraps the command below, adds a
-> reproducibility envelope and Markdown output) to regenerate this table on a
-> host with `castxml`, `abidiff`, and `abi-compliance-checker` installed, then
-> paste its Markdown output over the table; `--check` verifies the two stay in
-> sync going forward.
+> **Reproducibility envelope.** abicheck `0.5.0`, commit `167e822cd07f`,
+> `ground_truth.json` sha256 `51bd7678c6f0…`. Generated live (no frozen data)
+> via `scripts/generate_benchmark_report.py --check`, which also verified this
+> table matches its own freshly-generated report byte-for-byte. Total wall
+> time ~75 min, peak RSS ~703 MiB.
 
 ```bash
-python3 scripts/benchmark_comparison.py \
+python3 scripts/generate_benchmark_report.py \
   --tools abicheck abicheck_full abidiff abidiff_headers abicc_dumper abicc_xml \
-  --freeze abidiff abidiff_headers abicc_dumper abicc_xml
+  --freeze abidiff abidiff_headers abicc_dumper abicc_xml --check
 ```
 
-| Tool | Correct / 170 (stale — see note above) | Accuracy | False positives | False negatives | Total time |
+| Tool | Correct / 186 | Accuracy | False positives | False negatives | Total time |
 |------|:---:|:---:|:---:|:---:|:---:|
-| **abicheck (L2, headers)** | 160 | **94.1%** | **0** | 10 | 835s (~14 min) |
-| **abicheck (L3-L5, +sources)** | 153 | 90.0% | 7 | 10 | 719s (~12 min) |
-| libabigail (`abidiff`) | 52 | 30.6% | 3 | 115 | **~1s** |
-| libabigail + headers | 52 | 30.6% | 3 | 115 | **~2-5s** |
-| ABICC (abi-dumper) | 73 | 42.9% | 2 | 90 | 2534s (**~42 min**) |
-| ABICC (xml/legacy) | 80 | 47.1% | 1 | 84 | 2143s (**~36 min**) |
+| **abicheck (L2, headers)** | 173 | **93.0%** | **0** | 13 | 264s (~4 min) |
+| **abicheck (L3-L5, +sources)** | 169 | 90.9% | 7 | 10 | 1142s (~19 min) |
+| libabigail (`abidiff`) | 54 | 29.0% | 5 | 127 | **~2s** |
+| libabigail + headers | 54 | 29.0% | 5 | 127 | **~6s** |
+| ABICC (abi-dumper) | 85 | 45.7% | 8 | 93 | 1288s (**~21 min**) |
+| ABICC (xml/legacy) | 77 | 41.4% | 7 | 102 | 1437s (**~24 min**) |
 
-**ABICC is roughly 500-2500× slower than libabigail** for the identical
-170-case catalog (2143-2534s vs ~1-5s) while scoring *lower* on accuracy than
-abicheck's L2 lane. This is why ABICC/libabigail results are frozen
+**ABICC is roughly 230-850× slower than libabigail** for the identical
+186-case catalog (1288-1437s vs ~1.7-5.5s) while scoring *lower* on accuracy
+than abicheck's L2 lane. This is why ABICC/libabigail results are frozen
 (`--freeze`) into `scripts/frozen_competitor_results.json` — a committed
 reference file merged into every subsequent run automatically — rather than
 re-run on every abicheck iteration; nothing in a competitor's own verdict
@@ -453,20 +449,22 @@ crying wolf); a false negative is *under-calling* it (silence on a real
 break, including every SKIP/ERROR/TIMEOUT, since a tool that cannot tell you
 about a break failed to warn just as surely as one that said COMPATIBLE).
 
-- **libabigail's misses are overwhelmingly false negatives** (115/170,
+- **libabigail's misses are overwhelmingly false negatives** (127/186,
   DWARF has no view into noexcept/static/const/layout-invisible changes) —
-  it rarely cries wolf (FP=3), it mostly stays silent.
-- **ABICC's misses skew false-negative too** (84-90/170) but for a different
-  reason: a large share are `SKIP`/`ERROR`/`TIMEOUT` outright rather than a
-  wrong-but-confident verdict — see the slowest-case tables the benchmark
-  prints (`case85`, `case09`, `case105`, `case109`... routinely hit the 90s
-  timeout on both ABICC modes in this environment).
+  it rarely cries wolf (FP=5), it mostly stays silent. 31 of those misses are
+  a flat `SKIP` on fixture/source-only, audit, cross-source, bundle, and BTF
+  cases that have no ELF pair for `abidw`/`abidiff` to read at all.
+- **ABICC's misses skew false-negative too** (93-102/186) for the same two
+  reasons: the same 31 non-`.so` cases `SKIP` outright, and a further 5
+  (abi-dumper) / 13 (xml) hit the 90s per-case timeout in this environment —
+  see the slowest-case tables the benchmark prints (`case85`, `case09`,
+  `case105`, `case109`... routinely hit it on both ABICC modes here).
 - **abicheck L3-L5's 7 false positives** are the one lane here with a real
   over-calling problem — the source-replay/build-context path is
   intentionally more sensitive (RISK/API_BREAK findings that the L2 lane
   doesn't attempt), and this is tracked as a known gap, not hidden.
 
-> **abicheck L3-L5's numbers above are post-fix (three rounds).** An earlier
+> **abicheck L3-L5's numbers above are post-fix (four rounds).** An earlier
 > pass scored the L3-L5 lane at only 104/170 (61.2%, FP=17, FN=49, 3977s).
 > Most of that gap was benchmark-harness bugs, not a product regression:
 >
@@ -527,45 +525,79 @@ about a break failed to warn just as surely as one that said COMPATIBLE).
 >
 > Recovered 9 more cases and cut the false-positive count more than half:
 > 144/170 (84.7%, FP=17) → **153/170 (90.0%, FP=7)**.
+>
+> **A fourth round, discovered while regenerating this table for the 186-case
+> catalog: the L3-L5 lane had silently gone back to 100% `ERROR`.** The
+> ADR-043 CLI surface reset (PR #566) deleted the standalone `collect`/`merge`
+> commands this lane's `run_abicheck_full()` shelled out to
+> (`python -m abicheck merge ...`) and replaced them with inline
+> `dump --sources/--build-info` embedding — but nothing updated the benchmark
+> harness, so every case in the lane errored out from that point on with no
+> test catching it (the harness's own smoke test mocked subprocess calls, so
+> it didn't notice the real CLI had moved under it). Fixed by calling the
+> surviving `embed_inputs_pack()` helper directly instead of the removed CLI
+> command. A follow-up code review then caught that the naive replacement
+> (`dump --sources <pack>`) skips the export-relink step
+> (`_relink_combined_against_exports`) that `embed_inputs_pack()` performs —
+> without it, a plugin-captured pack's `source_abi.roots["exported_symbols"]`
+> stays empty (the plugin can't know the binary's final exports at compile
+> time), silently under-exercising the L4/L5 checks. Calling
+> `embed_inputs_pack()` directly avoids both problems. Recovered:
+> **153/170 (90.0%, FP=7) → 169/186 (90.9%, FP=7, FN=10)** — consistent with
+> the prior quality level, now scored against the grown catalog.
 
 **What's structurally left for the L3-L5 lane** (17 remaining misses):
 
-- **3 (`case118`-`120`) have no `CMakeLists.txt` at all** — the plugin-build
-  lane can only compile CMake targets, so these are structurally unreachable
-  without a direct-compile-with-plugin-flags fallback (mirroring the L2
-  lane's `compile_so()`), not yet implemented. They `ERROR` rather than score.
-- **6 are documented detector gaps shared with the L2 lane** (`case20`,
-  `case78`, `case97`, `case105`, `case111`, `case165`) — not new, not
-  L3-L5-specific; see the L2 miss list below for the root cause of each.
-- **5 are a residual, smaller-scale version of the reachability over-call**
-  (`case16`, `case47`, `case54`, `case62`, `case99`): each is a genuinely
-  compatible change whose declaration crosses the public-reachability
-  boundary in a way that isn't a same-turn add/remove (e.g. an
-  already-existing-but-newly-reachable inline definition), so the narrowed
-  `PUBLIC_REACHABILITY_CHANGED` still fires — correctly, by its own logic —
-  at `COMPATIBLE_WITH_RISK`/`API_BREAK` instead of the expected
-  `COMPATIBLE`. This is the same over-sensitivity tradeoff as before, just
-  scoped down from 15 cases to 5 by the fix above; further narrowing is
-  again a product-policy call (how much cross-boundary movement should
-  read as risk vs. noise), not a mechanical bug.
-- **3 remaining are one-off** (`case83`, `case103`, `case122`) needing
-  individual triage.
+- **`case115_bit_int_width_changed` `ERROR`s** — castxml's bundled Clang 13
+  frontend (in this benchmark environment) doesn't parse C23 `_BitInt(N)`,
+  independent of the GCC version used to compile the fixture itself.
+- **2 (`case175`-`176`, the kABI CRC/symbol-namespace cases) `SKIP`** — same
+  class of gap as this lane's former `case118`-`120` (no plain
+  `CMakeLists.txt` target the plugin-build lane can compile); needs a
+  dedicated build lane the way BTF/audit/bundle cases already have one.
+- **6 are documented detector/evidence-floor gaps shared with the L2 lane**
+  (`case103`, `case105`, `case111`, `case165`, `case98`, `case35`) — see the
+  L2 miss list below for each.
+- **7 are over-calling false positives**: 5 are the residual
+  public-reachability over-call (`case16`, `case47`, `case54`, `case62`,
+  `case99` — a genuinely compatible change whose declaration crosses the
+  public-reachability boundary in a way that isn't a same-turn add/remove,
+  so the narrowed `PUBLIC_REACHABILITY_CHANGED` still fires at
+  `COMPATIBLE_WITH_RISK` instead of the expected `COMPATIBLE`); the other 2
+  are newer catalog cases showing the same pattern
+  (`case185_inherited_override_reuses_slot`) or a distinct one-off
+  over-call (`case186_c_api_pointee_const_abi_neutral`, `NO_CHANGE` called
+  as `API_BREAK`) needing individual triage.
+- **1 remaining is a one-off** (`case180_symbol_binding_lost_unique`,
+  `COMPATIBLE_WITH_RISK` called as `NO_CHANGE`) needing individual triage.
 
-abicheck L2's 10 misses (170 − 160): `case20`, `case78`, `case97`
-(enum-as-literal-constant / hidden-friend-adjacent gaps sharing one root
-cause, see `docs/development/goals.md`), `case105`, `case111` (documented
-detector gaps), `case130`-`case133` (build-mode flips that structurally
-need `-p build/` L3 context, which the L2-only lane doesn't pass), and
-`case165_polymorphic_nonvirtual_dtor` (returned `COMPATIBLE` instead of
-`COMPATIBLE_WITH_RISK` — a deployment-risk classification gap, not a missed
-break).
+Both lanes now correctly resolve gaps this table previously tracked as
+misses: the L2 lane's old `case20`, `case78`, `case97` (both lanes share the
+same underlying detectors) and the L3-L5 lane's old `case83` one-off and its
+`case118`-`120` no-`CMakeLists.txt` structural gap — real product/harness
+progress since the 170-case run, not an artifact of this regeneration.
+
+abicheck L2's 13 misses (186 − 173): seven are structurally below the L2
+lane's evidence floor per `ground_truth.json`'s `min_evidence` — `case105`
+and `case122` need L4 (source ABI replay), `case130`-`case133` and `case98`
+need L3 (build context) — so an L2-only (headers, no `-p build/`) lane
+cannot see them by design, not by gap. `case115_bit_int_width_changed`
+`ERROR`s on the same castxml/C23 `_BitInt` limitation as the L3-L5 lane
+above. `case175`-`176` `SKIP` for the same kABI harness-structural reason.
+`case111_enumerable_thread_specific_lambda_ambiguity` is a documented gap
+where every evidence tier (L0-L5) currently reaches `COMPATIBLE` instead of
+`API_BREAK` (see its README). `case165_polymorphic_nonvirtual_dtor` returns
+`COMPATIBLE` instead of `COMPATIBLE_WITH_RISK` (a deployment-risk
+classification gap, not a missed break). `case35_field_rename` (`API_BREAK`
+expected, `NO_CHANGE` returned) is newly observed at this catalog size and
+not yet triaged.
 
 ---
 
 ## Pinned vendor benchmark summary (2026-05-19, 74-case subset)
 
-> **Historical.** Superseded by the [full-catalog benchmark](#full-catalog-benchmark-2026-07-12-all-170-cases)
-> above, which covers all 170 cases with a stricter denominator (SKIP/ERROR/TIMEOUT
+> **Historical.** Superseded by the [full-catalog benchmark](#full-catalog-benchmark-2026-07-17-all-186-cases)
+> above, which covers all 186 cases with a stricter denominator (SKIP/ERROR/TIMEOUT
 > count as misses) plus an FP/FN breakdown. Kept here for the original 74-case
 > release-pinned methodology and historical numbers. The harness has since
 > dropped the standalone `abicheck_compat`/`abicheck_strict` tool lanes (the
