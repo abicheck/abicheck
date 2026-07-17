@@ -15,7 +15,7 @@
 ## Checklist
 
 - [ ] Tests added / updated for new behaviour
-- [ ] `CHANGELOG.md` updated (under `[Unreleased]`)
+- [ ] Changelog fragment added (`scriv create`) if this touches `abicheck/**/*.py` — see `changelog.d/README.md`
 - [ ] Docs updated if user-visible behaviour changed
 - [ ] `pre-commit run --all-files` passes locally
 - [ ] No new `mypy` or `ruff` errors introduced
