@@ -1346,14 +1346,27 @@ def _freeze_tools(results: list[dict], tool_names: list[str], out_path: Path) ->
     cases when both modes run concurrently) must not drop the earlier tool's
     columns. Only *tool_names*' own columns are overwritten per case; other
     tools' previously-frozen entries for that case are left untouched.
+
+    The existing file is trusted only when its ``ground_truth_sha256`` stamp
+    matches the current catalog digest. A mismatch means the prior freeze
+    was produced against a different (older or newer) catalog -- merging
+    those rows forward under a fresh timestamp/commit stamp would silently
+    relabel stale competitor verdicts as current (a follow-up Codex review
+    on this exact merge caught that risk). Discard the whole existing cache
+    in that case rather than merge it; the caller re-freezes what it just
+    ran, and any other previously-frozen tool must be re-run against the
+    current catalog before it can be trusted again.
     """
+    current_digest = _ground_truth_digest()
     existing = _load_frozen(out_path) or {}
+    if existing.get("ground_truth_sha256") != current_digest:
+        existing = {}
     tools = list(dict.fromkeys([*existing.get("tools", []), *tool_names]))
     frozen: dict[str, Any] = {
         "schema": "abicheck-frozen-competitor/1.0",
         "frozen_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "git_commit": _git_commit(),
-        "ground_truth_sha256": _ground_truth_digest(),
+        "ground_truth_sha256": current_digest,
         "tool_versions": {
             "abidiff": _tool_version(["abidiff", "--version"]),
             "abi-compliance-checker": _tool_version(["abi-compliance-checker", "-dumpversion"]),

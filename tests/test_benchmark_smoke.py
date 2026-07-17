@@ -720,6 +720,36 @@ def test_freeze_tools_overwrites_only_its_own_tool_columns(tmp_path):
     assert entry["abicc_xml"] == "COMPATIBLE"
 
 
+def test_freeze_tools_discards_stale_cache_instead_of_merging(tmp_path):
+    """A prior freeze stamped against a different ground_truth digest must
+    not be merged forward under a fresh timestamp -- that would silently
+    relabel stale competitor verdicts (e.g. for cases that no longer exist,
+    or whose expected verdict changed) as current."""
+    mod = _load_benchmark()
+    out = tmp_path / "frozen.json"
+
+    out.write_text(json.dumps({
+        "schema": "abicheck-frozen-competitor/1.0",
+        "ground_truth_sha256": "stale-digest-from-an-older-catalog",
+        "tools": ["abicc_xml"],
+        "results_by_case": {
+            "case01": {"abicc_xml": "COMPATIBLE", "abicc_xml_ms": 1},
+        },
+    }))
+
+    with patch.object(mod, "_ground_truth_digest", return_value="current-digest"):
+        mod._freeze_tools(
+            [{"case": "case01", "abicc_dumper": "BREAKING", "abicc_dumper_ms": 2}],
+            ["abicc_dumper"], out,
+        )
+
+    frozen = json.loads(out.read_text())
+    assert frozen["ground_truth_sha256"] == "current-digest"
+    assert frozen["tools"] == ["abicc_dumper"]
+    entry = frozen["results_by_case"]["case01"]
+    assert entry == {"abicc_dumper": "BREAKING", "abicc_dumper_ms": 2}
+
+
 def test_ground_truth_digest_is_stable():
     mod = _load_benchmark()
     first = mod._ground_truth_digest()
