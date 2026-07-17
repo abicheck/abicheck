@@ -125,3 +125,105 @@ def test_generous_budget_is_not_truncated_to_internal_default(
         snap = dump(so, [header], header_backend="clang")
     assert time.monotonic() - start < 60
     assert {f.name for f in snap.functions} == {"add"}
+
+
+# --- SVS-shaped pathological header: real, measurable compile cost ----------
+#
+# The field report's own dry-run number (0.51s) vs. real cost (>15,000s) came
+# from a *small on-disk header* whose #include/template complexity a flat
+# size-based estimate can't see. This reproduces that shape with a genuinely
+# expensive (not simulated) clang AST dump from a 4-line header: clang's
+# ``-ast-dump=json`` re-serializes each nested template instantiation inline
+# inside its parent's dump, so a recursive template chain's *dumped output
+# size* grows steeply super-linearly with recursion depth even though the
+# *instantiation count* itself is only linear (memoized). Calibrated locally:
+# depth 100 -> ~40 MB/0.2s, depth 200 -> ~280 MB/0.6s, depth 300 -> ~900 MB/
+# 1.5s — kept modest here (depth 150, ~120 MB) to stay CI-safe while still
+# being a real, non-trivial clang cost, not a sleep() stand-in.
+_DEEP_TEMPLATE_DEPTH = 150
+
+_DEEP_TEMPLATE_HEADER = f"""
+#pragma once
+template <int N> struct Deep {{
+    using type = typename Deep<N - 1>::type;
+    enum {{ v = Deep<N - 1>::v + 1 }};
+}};
+template <> struct Deep<0> {{ using type = int; enum {{ v = 0 }}; }};
+constexpr int deep_value = Deep<{_DEEP_TEMPLATE_DEPTH}>::v;
+int touch(int x);
+"""
+
+_DEEP_TEMPLATE_SOURCE = """
+#include "deep.h"
+int touch(int x) { return x + deep_value; }
+"""
+
+
+@pytest.fixture
+def pathological_lib(tmp_path: Path) -> tuple[Path, Path]:
+    if not (_have("clang") and _have("g++")):
+        pytest.skip("clang and g++ are required for this test")
+    header = tmp_path / "deep.h"
+    header.write_text(_DEEP_TEMPLATE_HEADER)
+    src = tmp_path / "deep.cpp"
+    src.write_text(_DEEP_TEMPLATE_SOURCE)
+    so = tmp_path / "libdeep.so"
+    subprocess.run(
+        [
+            "g++", "-shared", "-fPIC", "-std=c++20",
+            f"-ftemplate-depth={_DEEP_TEMPLATE_DEPTH + 50}",
+            "-o", str(so), str(src), f"-I{tmp_path}",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    return so, header
+
+
+def test_pathological_header_aborts_within_bounded_time_under_tiny_budget(
+    pathological_lib: tuple[Path, Path],
+) -> None:
+    # The P0 acceptance test proper: a header that costs real, measurable
+    # clang time (not a mock) must still be stopped at (roughly) the budget
+    # boundary, not at whatever the header's *actual* cost turns out to be.
+    # An 0.05s budget is far below this header's natural cost (see the
+    # companion "completes" test below), so this proves the abort is driven
+    # by the deadline, not by the header happening to finish quickly anyway.
+    so, header = pathological_lib
+    start = time.monotonic()
+    with deadline.deadline_scope(0.05):
+        with pytest.raises((deadline.DeadlineExceeded, subprocess.TimeoutExpired)):
+            dump(so, [header], header_backend="clang")
+    elapsed = time.monotonic() - start
+    # Generous ceiling (kill-signal delivery + temp-file cleanup), but nowhere
+    # near what an *unbounded* pathological run would cost (the SVS field
+    # report: 15,000+ seconds for a header of this same shape).
+    assert elapsed < 15.0, (
+        f"aborted after {elapsed:.1f}s under a 0.05s budget — the deadline "
+        "must bound this regardless of how expensive the real parse is"
+    )
+
+
+@pytest.mark.slow
+def test_pathological_header_natural_cost_is_tracked(
+    pathological_lib: tuple[Path, Path],
+) -> None:
+    # Perf-tracking companion (not a correctness test): records this header's
+    # *actual, unbudgeted* clang cost so a future regression (e.g. losing the
+    # AST disk cache, or a clang upgrade changing dump behaviour) shows up in
+    # the existing test-duration trend artifact (tests/conftest.py's
+    # ABICHECK_DURATIONS_JSON hook -> scripts/summarize_test_durations.py ->
+    # CI run summary), the same mechanism docs/development/performance.md
+    # already relies on for the compare()-scaling story. Loose bounds only:
+    # this must complete (proving the fixture is genuinely bounded, not a
+    # true hang) but is expected to take real, non-trivial time.
+    so, header = pathological_lib
+    start = time.monotonic()
+    snap = dump(so, [header], header_backend="clang")
+    elapsed = time.monotonic() - start
+    assert {f.name for f in snap.functions} == {"touch"}
+    assert elapsed < 60.0, (
+        f"natural cost grew to {elapsed:.1f}s for depth {_DEEP_TEMPLATE_DEPTH} "
+        "-- recalibrate _DEEP_TEMPLATE_DEPTH down if this fixture (or the "
+        "clang/host it runs on) gets slower"
+    )

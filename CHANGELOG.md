@@ -23,12 +23,22 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   module threads a shrinking scan-wide deadline down to the L2 header-parse
   subprocess boundary (checked *before* each clang/castxml invocation, not
   only at the end) and runs that subprocess in its own process group so a
-  timeout kills the whole tree via SIGTERM→SIGKILL escalation. A user-set
-  `--budget` is honored up to its full value rather than silently re-capped
-  to the old fixed 120s. `scan --dry-run`'s L2 header cost estimate also no
-  longer reports a falsely precise number for a small-but-pathological
+  timeout kills the whole tree via SIGTERM→SIGKILL escalation, unconditionally
+  (not only when the direct child's own exit is what times out — a grandchild
+  that traps/ignores SIGTERM would otherwise dodge it). The deadline also
+  covers `--against` baseline comparisons, not just the candidate snapshot.
+  An in-flight timeout under an active budget is reported as the dedicated
+  budget-overflow exit code, distinct from an ordinary parse timeout. A
+  user-set `--budget` is honored up to its full value rather than silently
+  re-capped to the old fixed 120s. `scan --dry-run`'s L2 header cost estimate
+  also no longer reports a falsely precise number for a small-but-pathological
   header: headers with deep `#include`/template complexity are flagged and
-  priced conservatively instead.
+  priced conservatively instead. This is a **bounding** fix, not a speedup —
+  a genuinely pathological header still costs whatever clang/castxml need, up
+  to whatever `--budget` is given; see
+  [performance.md § L2 header-scan deadline enforcement](docs/development/performance.md#l2-header-scan-deadline-enforcement-pathological-headers)
+  for the perf-tracking coverage and a known remaining gap (the L2 path does
+  not yet bound *memory* the way the L4 replay does).
 
 ### Performance
 
