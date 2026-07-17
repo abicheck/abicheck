@@ -334,7 +334,7 @@ def test_abicheck_full_builds_separate_targets_merges_separate_packs(tmp_path):
     assert "abicheck_inputs_v1" in " ".join(merges[0])
     assert "abicheck_inputs_v2" in " ".join(merges[1])
     assert not any("--sources" in cmd for cmd in commands)
-    assert not any(cmd[:3] == ["-m", "abicheck", "merge"] for cmd in commands)
+    assert not any(cmd[1:4] == ["-m", "abicheck", "merge"] for cmd in commands)
     assert all(kwargs_timeout == 177 for kwargs_timeout in [177])
 
 
