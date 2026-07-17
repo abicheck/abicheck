@@ -106,6 +106,30 @@ class TestDefaultsPassValidation:
 @pytest.mark.skipif(
     not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"
 )
+class TestUnknownModeIsRejected:
+    """The `case "$MODE" in ...` has no arm for an unrecognized value, so
+    without an explicit catch-all a typo like 'scna' falls through silently
+    and every other check in the script is skipped -- Python setup,
+    dependency install, and pip install would all still run before run.sh's
+    own "Unknown mode" check finally reports it (Codex review, PR #594)."""
+
+    def test_typo_mode_is_rejected(self) -> None:
+        result = _run_validate({"INPUT_MODE": "scna"})
+        assert result.returncode == 1
+        assert "Unknown mode" in result.stdout
+        assert "scna" in result.stdout
+
+    @pytest.mark.parametrize(
+        "mode", ["compare", "dump", "scan", "deps-tree", "deps-compare"]
+    )
+    def test_every_real_mode_is_accepted(self, mode: str) -> None:
+        result = _run_validate({"INPUT_MODE": mode})
+        assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(
+    not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"
+)
 class TestDumpRejectsDirectoryOrPackage:
     def test_directory_is_rejected(self, tmp_path: Path) -> None:
         lib_dir = tmp_path / "lib"

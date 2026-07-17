@@ -106,6 +106,15 @@ case "$MODE" in
       fi
     fi
     ;;
+  *)
+    # An unrecognized mode (e.g. a typo like 'scna') has no arm above, so
+    # without this catch-all the case falls through silently and every
+    # other check in this script is skipped -- Python setup, dependency
+    # install, and pip install would all still run before run.sh's own
+    # "Unknown mode" check finally reports it. Mirrors run.sh's message
+    # verbatim.
+    _fail "Unknown mode '$MODE'. Use 'compare', 'dump', 'scan', 'deps-tree', or 'deps-compare'."
+    ;;
 esac
 
 if [[ "$UPLOAD_SARIF" == "true" && "$MODE" != "compare" ]]; then
