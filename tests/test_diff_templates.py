@@ -132,6 +132,11 @@ class TestInternalTemplateLeaks:
         assert len(changes) == 1
         c = changes[0]
         assert c.kind == ChangeKind.INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API
+        # ADR-044 D1/D2 (Codex review): this finding's mere existence proves
+        # public reachability, so it must be tagged directly — it is created
+        # by DetectTemplatePatterns, which runs after ApplySuppression/
+        # MarkReachability, so nothing else would ever tag it.
+        assert c.public_reachable is True
         assert c.symbol == "lib::__detail::walk"
 
     def test_internal_stem_unchanged_no_finding(self) -> None:

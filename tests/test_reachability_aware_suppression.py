@@ -215,6 +215,41 @@ class TestMarkReachability:
         assert raw_change in ctx.suppressed
 
 
+class TestLateSyntheticLeakFindingsNotSuppressible:
+    """Codex review: DetectTemplatePatterns (and any other detector running
+    after ApplySuppression) creates fresh Change objects MarkReachability
+    never had a chance to tag. A synthetic finding whose entire meaning is
+    "this internal thing leaks through the public API" — the same class as
+    internal_leak.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API — must therefore mark
+    itself public_reachable at construction time, or a broad namespace rule
+    default-suppresses it with no overreach diagnostic."""
+
+    def test_internal_template_leak_survives_broad_namespace_suppression(self) -> None:
+        old = _snap(functions=[
+            Function(
+                name="lib::__detail::walk<int>", mangled="walk_int",
+                return_type="void", params=[], visibility=Visibility.PUBLIC,
+            ),
+        ])
+        new = _snap(functions=[
+            Function(
+                name="lib::__detail::walk<double>", mangled="walk_double",
+                return_type="void", params=[], visibility=Visibility.PUBLIC,
+            ),
+        ])
+        suppression = SuppressionList([
+            Suppression(namespace="lib::__detail::*", reason="private detail namespace")
+        ])
+        ctx = DEFAULT_PIPELINE.run([], old, new, suppression=suppression)
+        kinds = [c.kind for c in ctx.kept]
+        assert ChangeKind.INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API in kinds
+        leak = next(
+            c for c in ctx.kept if c.kind == ChangeKind.INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API
+        )
+        assert leak.public_reachable is True
+        assert leak not in ctx.suppressed
+
+
 class TestSuppressionPipelineOrderFix:
     """The ADR's headline regression: example B from the review report."""
 

@@ -254,6 +254,15 @@ def _leak_change(
         detail=f"removed={removed_names}, added={added_names}",
         old_value=str(sorted({n for n, _ in old_sigs})[:3]),
         new_value=str(sorted({n for n, _ in new_sigs})[:3]),
+        # ADR-044 D1/D2 (Codex review): this finding exists *because* a public
+        # signature instantiates an internal-namespace template — mark it
+        # reachable so it can't be suppressed by a broad namespace/
+        # source_location rule the same way internal_leak._build_leak_change
+        # already does for INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API. Runs after
+        # ApplySuppression (DetectTemplatePatterns), so MarkReachability never
+        # sees this Change to tag it itself.
+        public_reachable=True,
+        reachability_kind="value_embedding",
     )
 
 
