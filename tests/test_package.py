@@ -916,10 +916,25 @@ class TestParseMacosDeploymentTargetFloor:
                 "10.9",
                 id="x86_64_underscore_arch",
             ),
+            # A lone "universal2" token is itself multi-architecture (x86_64
+            # + arm64 slices bundled under one string) — a real universal2
+            # wheel's arm64 slice commonly has a genuinely higher minimum OS
+            # than its x86_64 slice, so no single floor is safely derivable
+            # from the tag alone (Codex review #583, follow-up).
             pytest.param(
                 "pkg-1.0-cp311-cp311-macosx_10_9_universal2.whl",
-                "10.9",
-                id="universal2",
+                None,
+                id="universal2_is_multi_slice_unresolvable",
+            ),
+            pytest.param(
+                "pkg-1.0-cp311-cp311-macosx_10_9_universal.whl",
+                None,
+                id="universal_is_multi_slice_unresolvable",
+            ),
+            pytest.param(
+                "pkg-1.0-cp311-cp311-macosx_10_9_intel.whl",
+                None,
+                id="intel_is_multi_slice_unresolvable",
             ),
             # A compressed segment naming two DIFFERENT architectures with
             # DIFFERENT targets cannot be collapsed to one number without
