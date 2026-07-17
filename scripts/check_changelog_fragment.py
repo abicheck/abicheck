@@ -13,6 +13,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
 """Fail a PR that changes abicheck's behavior without a changelog fragment.
 
 Complements CHANGELOG.md's move to scriv-managed fragments (changelog.d/):
@@ -144,4 +145,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())
