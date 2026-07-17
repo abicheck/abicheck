@@ -95,3 +95,14 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   other subprocess call in this pipeline (gained an `input=` parameter to
   support the probe's stdin-fed invocation), degrading to its existing
   best-effort `[]` fallback on a `DeadlineExceeded` exactly like a timeout.
+- **The L5 call/type-graph fold (`--depth source`'s `fold_call_graph`/
+  `fold_type_graph`) now respects `--budget` too.** Both
+  `call_graph.ClangCallGraphExtractor` and `type_graph.ClangTypeGraphExtractor`
+  had the identical bare-`subprocess.run(timeout=120)` /
+  `ThreadPoolExecutor`-with-no-deadline-propagation anti-pattern already fixed
+  in `source_replay.py`'s L4 dispatch. Both now go through
+  `deadline.run_bounded` (degrading to their existing diagnostic+`[]`
+  best-effort contract on overflow — this pass is advisory, ADR-028 D3) and
+  share a `_deadline_bound_worker` helper (`call_graph.py`) to re-establish
+  the captured deadline inside each `ThreadPoolExecutor` worker, the same
+  pattern `source_replay._deadline_bound_worker` uses for L4.

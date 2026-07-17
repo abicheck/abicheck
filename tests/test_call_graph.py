@@ -580,7 +580,7 @@ def _patch_clang(
             raise raises
         return proc
 
-    monkeypatch.setattr(cg.subprocess, "run", fake_run)
+    monkeypatch.setattr(cg.deadline, "run_bounded", fake_run)
 
 
 def test_extract_from_args_parses_mocked_clang(monkeypatch) -> None:
@@ -614,7 +614,7 @@ def test_extract_from_args_reconstructs_safe_parse_command(
         captured["cmd"] = cmd
         return _FakeProc(_json.dumps(ast))
 
-    monkeypatch.setattr(cg.subprocess, "run", fake_run)
+    monkeypatch.setattr(cg.deadline, "run_bounded", fake_run)
     src = tmp_path / "victim.cpp"
     src.write_text("int main() { return 0; }", encoding="utf-8")
 
@@ -659,7 +659,7 @@ def test_extract_from_build_ignores_compile_unit_raw_argv(monkeypatch) -> None:
         captured["cmd"] = cmd
         return _FakeProc(_json.dumps(ast))
 
-    monkeypatch.setattr(cg.subprocess, "run", fake_run)
+    monkeypatch.setattr(cg.deadline, "run_bounded", fake_run)
     build = BuildEvidence(
         compile_units=[
             CompileUnit(
@@ -860,6 +860,65 @@ def test_extract_from_build_parallelizes_and_dedupes(monkeypatch) -> None:
     assert ext.last_elapsed_s >= 0.0
     assert sorted(seen_sources) == ["a.cpp", "b.cpp", "c.cpp"]
     assert edges == [CallEdge("caller", "callee")]
+
+
+def test_extract_from_build_propagates_deadline_into_pool_workers(monkeypatch) -> None:
+    """Codex review (PR #591): contextvars don't cross a ThreadPoolExecutor
+    boundary, so a worker submitted from inside deadline.deadline_scope()
+    used to see no active deadline at all — each clang subprocess call
+    inside it would run to its full fixed 120s regardless of --budget."""
+    import abicheck.buildsource.call_graph as cg
+    from abicheck import deadline
+
+    monkeypatch.setenv("ABICHECK_CALL_GRAPH_JOBS", "2")
+    monkeypatch.setattr(cg, "_call_graph_mem_cap", lambda: 2)
+    monkeypatch.setattr(cg.shutil, "which", lambda _b: "/usr/bin/clang++")
+    seen_remaining: list[float | None] = []
+
+    def fake_extract(self, argv, cwd=None):
+        del self, cwd
+        seen_remaining.append(deadline.remaining())
+        return []
+
+    monkeypatch.setattr(
+        cg.ClangCallGraphExtractor, "_extract_from_safe_args", fake_extract
+    )
+    build = BuildEvidence(
+        compile_units=[
+            CompileUnit(id="cu://a", source="a.cpp"),
+            CompileUnit(id="cu://b", source="b.cpp"),
+            CompileUnit(id="cu://c", source="c.cpp"),
+        ]
+    )
+    ext = ClangCallGraphExtractor()
+    with deadline.deadline_scope(30.0):
+        ext.extract_from_build(build)
+    assert len(seen_remaining) == 3
+    assert all(r is not None for r in seen_remaining), (
+        "pool worker saw no active deadline (remaining()=None) — the scan "
+        "deadline did not cross the executor boundary"
+    )
+    assert all(0 < r <= 30.0 for r in seen_remaining)
+
+
+def test_extract_from_args_deadline_exceeded_degrades_to_diagnostic(monkeypatch) -> None:
+    # Codex review (PR #591): this pass is advisory (ADR-028 D3) — a
+    # DeadlineExceeded from the now-bounded clang subprocess must degrade to
+    # the same diagnostic+[] contract as any other probe failure, not
+    # propagate and abort the whole L5 call-graph fold.
+    import abicheck.buildsource.call_graph as cg
+    from abicheck import deadline
+
+    monkeypatch.setattr(cg.shutil, "which", lambda _b: "/usr/bin/clang++")
+
+    def _raise(*_a, **_k):
+        raise deadline.DeadlineExceeded(-1.0)
+
+    monkeypatch.setattr(cg.deadline, "run_bounded", _raise)
+    ext = ClangCallGraphExtractor()
+    edges = ext.extract_from_args(["x.cpp"])
+    assert edges == []
+    assert any("clang invocation failed" in d for d in ext.diagnostics)
 
 
 # ── collect: call-graph folds automatically (inline_graph_fold.fold_call_graph) ──
