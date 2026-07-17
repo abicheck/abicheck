@@ -153,32 +153,34 @@ def _castxml_available() -> bool:
 #: Header-AST backend identifiers (the L2 producers). castxml is the default and
 #: the schema reference; clang is the alternative for hosts where castxml is
 #: absent or its bundled frontend chokes (ADR-003, "clang as an alternative L2
-#: frontend"). ``auto`` resolves to castxml unless the environment explicitly
-#: selects clang; the clang backend lacks computed record layout evidence.
-HEADER_BACKENDS = ("auto", "castxml", "clang")
+#: frontend"). ``hybrid`` (G28 Phase 3, ``dumper_hybrid.py``) runs BOTH and
+#: merges them — never selected by ``auto`` (needs both tools, ~2x cost).
+#: ``auto`` resolves to castxml unless the environment explicitly selects
+#: clang; the clang backend lacks computed record layout evidence.
+HEADER_BACKENDS = ("auto", "castxml", "clang", "hybrid")
 
 
 def _resolve_header_backend(backend: str | None) -> str:
-    """Resolve an L2 header-AST frontend request to a concrete ``castxml``/``clang``.
+    """Resolve an L2 header-AST frontend request to a concrete ``castxml``/
+    ``clang``/``hybrid``.
 
-    Precedence: an explicit ``castxml``/``clang`` is honored verbatim (and the
-    caller gets a clear error later if that tool is missing). ``auto``/``None``
-    consults the ``ABICHECK_AST_FRONTEND`` env var first, then resolves to
-    castxml (the schema reference). It deliberately does not auto-fallback to
-    clang: clang JSON AST snapshots do not carry computed record size, alignment,
-    field offsets, or vtable layout, so implicit fallback could silently miss
-    layout-only ABI breaks on castxml-less hosts. Users who accept that evidence
-    tier may still request ``clang`` explicitly (or via the environment).
+    Precedence: an explicit ``castxml``/``clang``/``hybrid`` is honored
+    verbatim (and the caller gets a clear error later if a needed tool is
+    missing). ``auto``/``None`` consults the ``ABICHECK_AST_FRONTEND`` env
+    var first, then resolves to castxml (the schema reference). Never
+    auto-falls-back to clang, and never auto-resolves to ``hybrid``: clang
+    JSON AST snapshots lack computed layout, and running both backends
+    unasked would silently double dump cost (see ``dumper_hybrid.py``).
     """
     choice = (backend or "auto").lower()
-    if choice in ("castxml", "clang"):
+    if choice in ("castxml", "clang", "hybrid"):
         return choice
     if choice != "auto":
         raise ValidationError(
             f"Unknown AST frontend {backend!r}; expected one of {HEADER_BACKENDS}."
         )
     env = os.environ.get("ABICHECK_AST_FRONTEND", "").strip().lower()
-    if env in ("castxml", "clang"):
+    if env in ("castxml", "clang", "hybrid"):
         return env
     return "castxml"
 
@@ -456,6 +458,13 @@ def _header_ast_parser(
     uniformly — the only difference is which frontend produced the AST.
     """
     resolved = _resolve_header_backend(backend)
+    if resolved == "hybrid":
+        # No single parser exists for "hybrid" — must be resolved by
+        # dumper_hybrid.run_hybrid_dump, not silently treated as castxml.
+        raise ValidationError(
+            "\"hybrid\" AST frontend has no single parser here "
+            "(see dumper_hybrid.run_hybrid_dump)."
+        )
 
     def _run_clang() -> _ClangAstParser:
         ast_root = _clang_header_dump(
@@ -1303,6 +1312,9 @@ def dump(
             origin stays UNKNOWN and behaviour is unchanged.
         public_header_dirs: Directories whose headers are treated as public
             for provenance classification.
+        header_backend: "auto"/"castxml"/"clang" only — "hybrid" (G28 Phase 3)
+            has no single parser here; use ``dumper_hybrid.run_hybrid_dump``
+            or ``service.run_dump``/the CLI instead.
 
     Returns:
         AbiSnapshot with functions, variables, and types populated.

@@ -82,6 +82,7 @@
   },
   "elf_only_mode": false,
   "enums": [],
+  "fact_provenance": {},
   "from_headers": true,
   "functions": [
     {

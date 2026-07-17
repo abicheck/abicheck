@@ -84,7 +84,7 @@ carry binary evidence (a `dump` of a real library, not headers-only).
 | Input | Default | Description |
 |-------|---------|-------------|
 | `lang` | `c++` | Language mode for the header backend: `c++` or `c` |
-| `ast-frontend` | `auto` (resolves to castxml when present) | L2 header-AST frontend (compare/dump modes): `auto`, `castxml`, or `clang` (`clang -ast-dump=json`, for clang-only hosts). `auto` falls back to clang on a castxml toolchain error. Same as `ABICHECK_AST_FRONTEND`. |
+| `ast-frontend` | `auto` (resolves to castxml when present) | L2 header-AST frontend (compare/dump modes): `auto`, `castxml`, `clang` (`clang -ast-dump=json`, for clang-only hosts), or `hybrid` (runs both and merges them — needs both tools on the runner, never auto-selected). `auto` falls back to clang on a castxml toolchain error. Same as `ABICHECK_AST_FRONTEND`. |
 | `gcc-path` | — | Path to cross-compiler binary (dump mode only) |
 | `gcc-prefix` | — | Cross-toolchain prefix, e.g. `aarch64-linux-gnu-` (dump mode only) |
 | `gcc-options` | — | Extra flags for castxml (dump mode only) |

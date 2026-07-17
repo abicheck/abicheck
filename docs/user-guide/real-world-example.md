@@ -118,7 +118,7 @@ config per run.
 ```yaml
 # .abicheck.yml
 compile:
-  frontend: auto                 # auto | castxml | clang
+  frontend: auto                 # auto | castxml | clang | hybrid
   std: c++20                     # the standard the library is built with
   include_dirs: [include]        # add every root your public headers need
   defines: [FOO_ENABLE_FEATURE=1]

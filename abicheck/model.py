@@ -475,21 +475,42 @@ class AbiSnapshot:
     )  # #define / constexpr name -> value string
     elf_only_mode: bool = False  # True when dumped without headers (all functions are ELF_ONLY provenance)
     from_headers: bool = False  # True when the ABI surface was parsed from public headers (castxml/AST), as opposed to DWARF debug info or the symbol table. Drives the HEADER_AWARE evidence tier — DWARF-derived declarations populate the same functions/types lists but must NOT be mistaken for header-level evidence.
-    # Which L2 header-AST backend produced this snapshot ("castxml" | "clang"),
-    # set only when from_headers is True. Some facts are captured by only one
-    # backend today (e.g. TypeField.default/deprecated, RecordType.is_abstract,
-    # EnumType.is_scoped, Function.is_override/deprecated — castxml-only as of
-    # this field's introduction); detectors for those must gate on BOTH sides
-    # sharing the SAME producer, not merely on from_headers, or a producer
-    # mismatch reads as every such fact being silently removed (Codex review,
-    # PR #582). None for non-header snapshots (DWARF/symbols-only) and for
-    # snapshots predating this field.
+    # Which L2 header-AST backend produced this snapshot ("castxml" | "clang" |
+    # "hybrid"), set only when from_headers is True. Some facts are captured by
+    # only one backend today (e.g. TypeField.default/deprecated,
+    # RecordType.is_abstract, EnumType.is_scoped, Function.is_override/
+    # deprecated — castxml-only as of this field's introduction); detectors for
+    # those must gate on BOTH sides sharing the SAME producer, not merely on
+    # from_headers, or a producer mismatch reads as every such fact being
+    # silently removed (Codex review, PR #582). None for non-header snapshots
+    # (DWARF/symbols-only) and for snapshots predating this field.
+    #
+    # "hybrid" (G28 Phase 3, ``--ast-frontend hybrid``, ``dumper_hybrid.
+    # merge_snapshots()``) means this snapshot was built by running BOTH
+    # castxml and clang over the same headers and merging them field-by-field
+    # — see ``fact_provenance`` below for which specific facts were actually
+    # castxml-sourced on this merged snapshot, since a whole-snapshot producer
+    # tag alone can't tell a caller that.
     # Keyword-only (Codex review, PR #582): both this and the next field were
     # inserted ahead of several existing positional fields (platform,
     # language_profile, ...) — without kw_only, an existing positional
     # caller shifts silently, e.g. binding "elf" to ast_producer instead of
     # platform, corrupting provenance rather than failing loudly.
     ast_producer: str | None = field(default=None, kw_only=True)
+
+    # G28 Phase 3 — per-fact producer provenance for a "hybrid" snapshot only
+    # (empty for every ordinary single-backend snapshot; ``ast_producer`` alone
+    # already answers the question there). Keyed by the stable strings built by
+    # ``fact_provenance.func_fact_key``/``var_fact_key``/``type_fact_key``/
+    # ``enum_fact_key``/``field_fact_key``, valued "castxml" or "clang" — which
+    # backend's value ``dumper_hybrid.merge_snapshots()`` actually used for
+    # that one fact on that one declaration. A key absent from this dict (on a
+    # hybrid snapshot) means neither backend populated it — same "unknown,
+    # don't manufacture a finding" convention as every other tri-state field
+    # here. See ``abicheck/fact_provenance.py`` for the reader-side helpers
+    # every ``_both_castxml_backed``-gated detector uses instead of trusting
+    # ``ast_producer`` alone once a hybrid snapshot is in play.
+    fact_provenance: dict[str, str] = field(default_factory=dict, kw_only=True)
 
     # True when TypeField.is_const/is_volatile/is_mutable and CV-qualifier
     # type spelling are known-reliable for this snapshot's fields. The

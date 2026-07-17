@@ -51,7 +51,8 @@ Available compile-context flags (on `dump`, `compare`, and `scan`):
 - `--gcc-options` — extra compiler flags passed to the header frontend
 - `--sysroot` — alternative system root directory
 - `--nostdinc` / `--no-nostdinc` — do not search standard system include paths
-- `--ast-frontend {auto,castxml,clang}` — which C/C++ AST frontend parses the headers
+- `--ast-frontend {auto,castxml,clang,hybrid}` — which C/C++ AST frontend parses
+  the headers; `hybrid` runs both castxml and clang and merges them
 
 On `compare` these apply to **both** old and new sides; the per-side
 `--old-ast-frontend` / `--new-ast-frontend` overrides still win for the frontend
@@ -64,7 +65,7 @@ it into their L2 header parse (CLI flags override config):
 ```yaml
 # .abicheck.yml
 compile:
-  frontend: castxml          # auto | castxml | clang
+  frontend: castxml          # auto | castxml | clang | hybrid
   std: c++20                 # synthesizes -std=c++20
   defines: [FOO=1, NDEBUG]   # synthesizes -DFOO=1 -DNDEBUG
   include_dirs: [include, third_party/inc]   # appended after -I roots

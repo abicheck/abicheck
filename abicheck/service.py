@@ -507,6 +507,43 @@ def run_dump(
         else header_backend
     )
 
+    if eff_backend == "hybrid":
+        # G28 Phase 3: this is the real Tier-2 entry point the CLI routes
+        # through (unlike dumper.dump(), which has its own, simpler hybrid
+        # recursion for direct Python-API callers) — recurse into run_dump()
+        # itself once per real backend, forcing frontend via a *replaced*
+        # CompileContext (frozen dataclass) so it wins eff_backend's own
+        # precedence check above regardless of what header_backend carries,
+        # then merge. Every other kwarg (SYCL/python-ext/numpy-capi/
+        # header-graph attachment, debug roots, ...) runs identically on
+        # both recursive calls; only the merge step is new.
+        from dataclasses import replace as _dc_replace
+
+        from .dumper_hybrid import merge_snapshots
+
+        def _forced_compile(frontend: str) -> CompileContext:
+            return _dc_replace(compile, frontend=frontend) if compile is not None else CompileContext(frontend=frontend)
+
+        common_kwargs: dict[str, Any] = dict(
+            headers=headers, includes=includes, version=version, lang=lang,
+            pdb_path=pdb_path, dwarf_only=dwarf_only, debug_roots=debug_roots,
+            enable_debuginfod=enable_debuginfod, debuginfod_url=debuginfod_url,
+            debug_format=debug_format, symbols_only=symbols_only,
+            debug_presence_only=debug_presence_only,
+            public_headers=public_headers, public_header_dirs=public_header_dirs,
+            header_graph=header_graph, header_graph_includes=header_graph_includes,
+            notify=notify,
+        )
+        castxml_snap = run_dump(
+            path, binary_fmt, header_backend="castxml",
+            compile=_forced_compile("castxml"), **common_kwargs,
+        )
+        clang_snap = run_dump(
+            path, binary_fmt, header_backend="clang",
+            compile=_forced_compile("clang"), **common_kwargs,
+        )
+        return merge_snapshots(castxml_snap, clang_snap)
+
     if binary_fmt == "elf":
         snap = _dump_elf(
             path,

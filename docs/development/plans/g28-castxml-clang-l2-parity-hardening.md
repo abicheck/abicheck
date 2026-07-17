@@ -9,15 +9,15 @@ finding real parser bugs via Codex review rather than stopping at "tests
 pass." This plan records what shipped, the hardening rounds that followed,
 and scopes the phases that remain multi-week architectural projects rather
 than parser fixes.
-**Effort:** Phase 0–2 + hardening — done (see below). Phase 3 — L (new
-snapshot-merge architecture). Phase 4 — XL (new compiled C++ tool, ABI
-stability risk). Phase 5 — M, partially subsumed by
-[G4](g4-header-ast-extractor.md).
-**Risk:** low for anything already landed (additive, test-gated). Phase 3 is
-medium (provenance bookkeeping can silently regress if a merge rule is
-wrong). Phase 4 is high (new heavyweight dependency, a compiled artifact
-inside a "pure Python" tool, and Clang's internal AST API has no
-cross-release ABI stability guarantee the way CastXML's XML schema does).
+**Effort:** Phase 0–2 + hardening — done (see below). Phase 3 — L, done (see
+below). Phase 4 — XL (new compiled C++ tool, ABI stability risk). Phase 5 —
+M, partially subsumed by [G4](g4-header-ast-extractor.md).
+**Risk:** low for anything already landed (additive, test-gated) — including
+Phase 3, which shipped as a genuinely additive `--ast-frontend hybrid`
+option rather than a change to any existing single-backend path. Phase 4 is
+high (new heavyweight dependency, a compiled artifact inside a "pure Python"
+tool, and Clang's internal AST API has no cross-release ABI stability
+guarantee the way CastXML's XML schema does).
 
 ---
 
@@ -163,62 +163,69 @@ to this ambiguity; the fix closes the gap in the generic type-name
 
 ---
 
-## Phase 3 — hybrid multi-producer snapshot with per-field provenance
+## Done — Phase 3: hybrid multi-producer snapshot with per-field provenance
 
-**Problem.** Today a snapshot is parsed by exactly one L2 backend
+**Problem.** A snapshot used to be parsed by exactly one L2 backend
 (`--ast-frontend {castxml,clang}`); the two backends have non-overlapping
 blind spots (e.g. concepts/`explicit`-on-converter/ctor-mangled-names are
-clang-only-reachable via deeper tooling — see Phase 4/5 — while some facts
-above are castxml-only today). A hybrid producer would run both, merge
-their `AbiSnapshot`s field-by-field, and record which backend contributed
-each fact, upgrading the many `_both_castxml_backed`-gated detectors from
-"disabled when producers differ" to "always available, backfilled from
-whichever backend saw it."
-
-**Confirmed concrete motivating case (Codex review, PR #582).** A synthetic
-constructor/destructor key (`__abicheck_ctor__ns::Class(...)` / `~ns::Class`,
-built when castxml omits a real mangled name) has no shared identity with
-the SAME entity's real Itanium-mangled key on the clang backend. Comparing
-a castxml-produced snapshot against a clang-produced snapshot of the
-*same, unchanged* source reports a false `FUNC_REMOVED` + `FUNC_ADDED` pair
-for every such unmangled constructor/destructor — verified with a real
-castxml+clang dump of an unchanged corpus (both a constructor and a virtual
-destructor). This is symmetric, pre-existing behavior — the constructor
-case predates the destructor work in this PR — not a new regression, and
-is deliberately left unfixed here (see
+clang-only-reachable via deeper tooling — see Phase 4/5 — while several
+facts are castxml-only today). The confirmed concrete motivating case
+(Codex review, PR #582): a synthetic constructor/destructor key
+(`__abicheck_ctor__ns::Class(...)` / `~ns::Class`, built when castxml omits
+a real mangled name) had no shared identity with the SAME entity's real
+Itanium-mangled key on the clang backend, so comparing a castxml-produced
+snapshot against a clang-produced snapshot of the *same, unchanged* source
+reported a false `FUNC_REMOVED` + `FUNC_ADDED` pair for every such
+unmangled constructor/destructor (see
 `tests/test_castxml_clang_parity_gate.py::TestCrossProducerUnmangledIdentityKnownLimitation`,
-which documents today's behavior). A sound fix needs exactly this phase's
-per-fact provenance/reconciliation: matching a synthetic key against a real
-mangled symbol via structural equivalence (same qualified class, compatible
-signature, same access/virtuality) without risking a false match between
-two coincidentally-same-signature but genuinely different entities.
+which documented that behavior before this phase).
 
-**Design sketch.**
+**Shipped.** `--ast-frontend hybrid` runs BOTH backends over the identical
+headers and merges them (`abicheck/dumper_hybrid.py::merge_snapshots`):
 
-- A per-field/per-record provenance map (`{field_path: producer}`) alongside
-  the merged `AbiSnapshot`, analogous to the existing per-declaration
+- **Ctor/dtor identity reconciliation** — the fix for the motivating case
+  above. A castxml synthetic key is matched against a real clang mangled
+  name via structural equivalence (same qualified enclosing class,
+  cv-normalized parameter-signature match for a constructor, same access)
+  and, on a match, the merged entry's key is rewritten to the real mangled
+  name. Ambiguity (zero or multiple surviving candidates) yields no match —
+  the synthetic key is kept as-is, the same pre-Phase-3 behavior — rather
+  than risking a false match between coincidentally-same-signature but
+  genuinely different entities.
+- **Per-fact provenance** (`AbiSnapshot.fact_provenance`, `abicheck/
+  fact_provenance.py`) — a `{key: "castxml"|"clang"}` map keyed by
+  `func_fact_key`/`var_fact_key`/`type_fact_key`/`enum_fact_key`/
+  `field_fact_key`, analogous to the existing per-declaration
   `source_header`/`origin` provenance (ADR-015) but keyed by *fact* rather
-  than by declaration.
-- A merge policy per fact: "prefer castxml, backfill from clang when castxml
-  is null" for castxml-only facts (defaults, deprecated messages, abstract/
-  scoped-enum/override), and the mirror for any clang-only fact Phase 4/5
-  add.
-- Detectors currently gated on `_both_castxml_backed`/`ast_producer` equality
-  would instead check per-fact provenance for the *specific* fields they
-  read, not a whole-snapshot producer tag.
-- Merge must be conservative: a fact present on neither backend stays
-  `None` (unknown), never silently defaulted, mirroring the tri-state
-  conventions already used for `is_final`/`is_abstract`/`param.default`.
+  than by declaration. Merge policy per fact: "prefer castxml, backfill
+  from clang only when castxml's own value is null" — a no-op today since
+  `dumper_clang.py` doesn't populate any of the nine gated facts yet
+  (`Function.deprecated`/`is_override`, `Variable.deprecated`,
+  `RecordType.is_abstract`/`deprecated`, `TypeField.default`/`deprecated`,
+  `EnumType.is_scoped`/`deprecated`), but real, forward-looking scaffolding
+  for once it does. A fact present on neither backend stays absent from the
+  map (unknown), never silently defaulted.
+- **Detector migration** — all nine detectors previously gated on the
+  whole-snapshot `_both_castxml_backed` (now removed, fully replaced) gate
+  per-declaration instead, via `fact_provenance.both_castxml_backed_fact`.
+  This was in fact the bulk of the change, exactly as anticipated below.
 
-**Files & surfaces.** A new `abicheck/dumper_hybrid.py` (or a `merge_snapshots()`
-helper in `dumper.py`) sitting after both `dumper_castxml.py`/`dumper_clang.py`
-produce their snapshots; `AbiSnapshot` gains the provenance map; every
-`_both_castxml_backed`-gated detector in `diff_types.py`/`diff_symbols.py`
-needs a per-fact-provenance equivalent — this is the bulk of the migration
-cost, not the merge itself.
+**CLI/API surfaces.** `HEADER_BACKENDS`/`_resolve_header_backend` in
+`dumper.py` accept `"hybrid"` (never auto-selected — needs both tools,
+~2x cost); `--ast-frontend hybrid` is a `cli_options.py` Click choice;
+`service.run_dump` (the real CLI-facing Tier-2 entry point) and
+`dumper.dump` each recurse into themselves once per real backend and merge
+— see `dumper_hybrid.run_hybrid_dump`'s docstring for why `dumper.dump`
+takes the recursive call as an injected callable rather than importing it
+(avoids an import cycle with `dumper.py`, which already imports
+`dumper_hybrid`). `service.py`'s header-scoped incremental-dump fast path
+(`_try_header_scoped_dump`) is untouched by this phase and does not support
+`"hybrid"` directly — `_header_ast_parser` raises a clear error if `resolved
+== "hybrid"` reaches it without having been resolved by
+`run_hybrid_dump` first, rather than silently defaulting to castxml.
 
-**Out of scope for this phase.** Layout facts (offsets, vtable slots) are
-not part of the merge — CastXML remains the sole layout source until
+**Out of scope, still.** Layout facts (offsets, vtable slots, alignment)
+are not part of the merge — CastXML remains the sole layout source until
 Phase 4 gives clang an independent one.
 
 ## Phase 4 — a Clang `ASTRecordLayout` plugin
@@ -299,12 +306,12 @@ exists, rather than a separate phase with its own new module.
 - [ADR-003](../adr/003-data-source-architecture.md) §D8/D9 — dual L2 backend
   rationale (`header_backend`/`--ast-frontend`).
 - [ADR-037](../adr/037-cli-interface-contract.md) D8 — the
-  `--ast-frontend {auto,castxml,clang}` flag surface.
+  `--ast-frontend {auto,castxml,clang,hybrid}` flag surface.
 - [G4](g4-header-ast-extractor.md) — the concrete plan for most of Phase 5.
 
 ## Out of scope
 
-- Re-litigating Phase 0–2's already-shipped detection behavior (e.g.
+- Re-litigating Phase 0–3's already-shipped detection behavior (e.g.
   `cv_qualifiers_only_differ`'s deliberate by-value-field exclusion,
   `case30_field_qualifiers` ground truth) — those are settled product
   decisions with dedicated regression tests, not open questions.

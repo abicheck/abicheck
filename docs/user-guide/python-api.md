@@ -48,7 +48,7 @@ will reach for most often:
 | `old_includes` / `new_includes` | `list[Path]` | `None` | Extra include dirs passed to the header parser (`-I`) |
 | `old_version` / `new_version` | `str` | `""` | Version labels recorded in the snapshots |
 | `lang` | `str` | `"c++"` | Header language mode (`"c++"` or `"c"`) |
-| `frontend` | `str` | `"auto"` | Header-AST frontend: `"auto"`, `"castxml"`, or `"clang"`. (A fourth value, `"android"`, is source-ABI-only — it needs source inputs and is rejected by `run_compare`, which has no source-input path.) |
+| `frontend` | `str` | `"auto"` | Header-AST frontend: `"auto"`, `"castxml"`, `"clang"`, or `"hybrid"` (runs castxml and clang together and merges them). (A fifth value, `"android"`, is source-ABI-only — it needs source inputs and is rejected by `run_compare`, which has no source-input path.) |
 | `policy` | `str` | `"strict_abi"` | Built-in policy profile (`strict_abi`, `sdk_vendor`, `plugin_abi`) |
 | `policy_file_path` | `Path` | `None` | Custom YAML policy file |
 | `suppress` | `Path` | `None` | Suppression file (YAML or ABICC format) |

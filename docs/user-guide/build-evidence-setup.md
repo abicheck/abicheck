@@ -111,7 +111,9 @@ The matching CLI flags (e.g. `--severity-abi-breaking`, `--strict-suppressions`,
 `--collapse-versioned-symbols`) stay as **hidden** per-run overrides — functional
 but off the visible surface. The L2/L4 frontend is one knob, `--ast-frontend`
 (`auto`/`castxml`/`clang`; env `ABICHECK_AST_FRONTEND`), shared across header-AST
-parsing and source-ABI replay (ADR-037 D8).
+parsing and source-ABI replay (ADR-037 D8). `hybrid` (G28 Phase 3) is header-AST
+only for now — it runs castxml and clang together and merges them, but has no
+L4 source-ABI-replay path yet.
 
 ## Advanced: out-of-band packs, and what `collect`/`graph` left behind
 

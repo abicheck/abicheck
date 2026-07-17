@@ -854,6 +854,10 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         # from schema_version scoped to the CastXML header path specifically
         # (Codex review, PR #582).
         header_cv_facts_reliable=header_cv_facts_reliable_value,
+        # G28 Phase 3 — per-fact provenance map for a hybrid (castxml+clang
+        # merged) snapshot. Absent on every non-hybrid / pre-Phase-3 snapshot,
+        # loads as the empty dict (same "unknown" default as a fresh snapshot).
+        fact_provenance=dict(d.get("fact_provenance", {})),
         constants=d.get("constants", {}),
         platform=d.get("platform"),
         language_profile=d.get("language_profile"),

@@ -26,7 +26,6 @@ from .diff_cxx_rules import itanium_qualified_name, vtable_slot_is_override_reus
 from .diff_helpers import make_change
 from .diff_symbols import (
     _PUBLIC_VIS,
-    _both_castxml_backed,
     _public_functions,
     _public_variables,
     _should_filter_transitive_runtime_symbols,
@@ -35,6 +34,12 @@ from .elf_symbol_filter import (
     FUNCTION_SYMBOL_TYPES,
     VARIABLE_SYMBOL_TYPES,
     exported_symbol_names,
+)
+from .fact_provenance import (
+    both_castxml_backed_fact,
+    enum_fact_key,
+    field_fact_key,
+    type_fact_key,
 )
 from .model import (
     AbiSnapshot,
@@ -203,7 +208,6 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # own old_types/new_types for the identical virtual_method_addition() walk.
     old_types = {t.name: t for t in old.types}
     new_types = {t.name: t for t in new.types}
-    castxml_backed = _both_castxml_backed(old, new)
     cv_facts_reliable = old.header_cv_facts_reliable and new.header_cv_facts_reliable
 
     for name, t_old in old_map.items():
@@ -220,7 +224,13 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         changes.extend(
             _diff_type_pair(
                 name, t_old, t_new, old_funcs, new_funcs, old_types, new_types,
-                castxml_backed=castxml_backed,
+                # Per-type key, not the whole-snapshot _both_castxml_backed:
+                # correctly supports a --ast-frontend hybrid snapshot (G28
+                # Phase 3), where is_abstract is castxml-backed per
+                # declaration, not uniformly across the whole snapshot.
+                castxml_backed=both_castxml_backed_fact(
+                    old, new, type_fact_key(name, "is_abstract")
+                ),
                 cv_facts_reliable=cv_facts_reliable,
             )
         )
@@ -961,7 +971,6 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # (case78). Emit it here, guarded by the same stripped-binary suppression
     # _diff_types uses so a stripped new side can't manufacture phantom removals.
     suppress_removed = _removals_are_unconfirmed(old, new)
-    castxml_backed = _both_castxml_backed(old, new)
 
     for name, e_old in old_map.items():
         if name not in new_map:
@@ -973,7 +982,9 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 ))
             continue
         e_new = new_map[name]
-        if castxml_backed:
+        # Per-enum key, not the whole-snapshot _both_castxml_backed: correctly
+        # supports a --ast-frontend hybrid snapshot (G28 Phase 3).
+        if both_castxml_backed_fact(old, new, enum_fact_key(name, "is_scoped")):
             _append_enum_scoped_changes(changes, name, e_old, e_new)
         old_members = {m.name: m.value for m in e_old.members}
         new_members = {m.name: m.value for m in e_new.members}
@@ -1484,10 +1495,13 @@ def _diff_field_default_initializer(old: AbiSnapshot, new: AbiSnapshot) -> list[
     tracked (matches ``PARAM_DEFAULT_VALUE_*``'s convention: an added default
     is purely additive, never itself flagged).
 
-    Gates on ``_both_castxml_backed`` (not just ``_both_header_aware``): the
-    clang header backend does not populate ``TypeField.default`` yet, so a
-    castxml-vs-clang comparison would otherwise read as every initializer
-    having been removed (Codex review, PR #582).
+    Gates per-field on :func:`fact_provenance.both_castxml_backed_fact` (not
+    just ``_both_header_aware``): the clang header backend does not populate
+    ``TypeField.default`` yet, so a castxml-vs-clang comparison would
+    otherwise read as every initializer having been removed (Codex review,
+    PR #582). Per-field gating (rather than the whole-snapshot
+    ``_both_castxml_backed``) is what correctly supports a ``--ast-frontend
+    hybrid`` snapshot (G28 Phase 3).
 
     Unions are NOT excluded (unlike most field-level detectors, which leave
     them to ``_diff_unions``): a C++ union may have a default member
@@ -1498,8 +1512,6 @@ def _diff_field_default_initializer(old: AbiSnapshot, new: AbiSnapshot) -> list[
     a union variant's initializer being removed or changed went completely
     undetected (Codex review, PR #582).
     """
-    if not _both_castxml_backed(old, new):
-        return []
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
     old_map = {t.name: t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl)}
@@ -1515,6 +1527,10 @@ def _diff_field_default_initializer(old: AbiSnapshot, new: AbiSnapshot) -> list[
         for fname, f_old in old_fields.items():
             f_new = new_fields.get(fname)
             if f_new is None or f_old.default is None:
+                continue
+            if not both_castxml_backed_fact(
+                old, new, field_fact_key(name, fname, "default")
+            ):
                 continue
             if f_new.default is None:
                 changes.append(make_change(
@@ -1548,16 +1564,16 @@ def _diff_field_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     undetected on a CastXML-backed header comparison (Codex review, PR
     #582).
 
-    Header-tier only, gated on ``_both_castxml_backed`` like the other four
+    Header-tier only, gated per-field on
+    :func:`fact_provenance.both_castxml_backed_fact` like the other four
     deprecated detectors (the clang backend doesn't populate
-    ``TypeField.deprecated`` yet). Unions are NOT excluded — matching
-    ``FIELD_DEFAULT_INITIALIZER_REMOVED``/``_CHANGED``'s reasoning: a union
-    variant can carry `[[deprecated]]` too, castxml parses that member's
-    marker the same as an ordinary field, and ``_diff_unions`` never checks
-    ``deprecated`` at all.
+    ``TypeField.deprecated`` yet; per-field gating is what correctly
+    supports a ``--ast-frontend hybrid`` snapshot, G28 Phase 3). Unions are
+    NOT excluded — matching ``FIELD_DEFAULT_INITIALIZER_REMOVED``/
+    ``_CHANGED``'s reasoning: a union variant can carry `[[deprecated]]`
+    too, castxml parses that member's marker the same as an ordinary field,
+    and ``_diff_unions`` never checks ``deprecated`` at all.
     """
-    if not _both_castxml_backed(old, new):
-        return []
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
     old_map = {t.name: t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl)}
@@ -1573,6 +1589,10 @@ def _diff_field_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         for fname, f_old in old_fields.items():
             f_new = new_fields.get(fname)
             if f_new is None:
+                continue
+            if not both_castxml_backed_fact(
+                old, new, field_fact_key(name, fname, "deprecated")
+            ):
                 continue
             if f_old.deprecated is None and f_new.deprecated is not None:
                 changes.append(make_change(
@@ -1597,13 +1617,13 @@ def _diff_type_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect a class/struct/union gaining or losing `[[deprecated]]`.
 
     Header-tier only — see ``FIELD_DEFAULT_INITIALIZER_REMOVED``'s docstring
-    above / ``Function.deprecated``'s in model.py for why this gates on
-    ``_both_castxml_backed`` rather than a per-pair None check or plain
-    ``_both_header_aware`` (the clang backend doesn't populate
-    ``RecordType.deprecated`` yet — Codex review, PR #582).
+    above / ``Function.deprecated``'s in model.py for why this gates
+    per-type on :func:`fact_provenance.both_castxml_backed_fact` rather than
+    a per-pair None check or plain ``_both_header_aware`` (the clang backend
+    doesn't populate ``RecordType.deprecated`` yet — Codex review, PR #582;
+    per-type gating is what correctly supports a ``--ast-frontend hybrid``
+    snapshot, G28 Phase 3).
     """
-    if not _both_castxml_backed(old, new):
-        return []
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
     old_map = {t.name: t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl)}
@@ -1612,6 +1632,8 @@ def _diff_type_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     for name, t_old in old_map.items():
         t_new = new_map.get(name)
         if t_new is None:
+            continue
+        if not both_castxml_backed_fact(old, new, type_fact_key(name, "deprecated")):
             continue
         if t_old.deprecated is None and t_new.deprecated is not None:
             changes.append(make_change(
@@ -1635,12 +1657,11 @@ def _diff_type_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 def _diff_enum_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect an enum gaining or losing `[[deprecated]]` (header-tier only).
 
-    Gates on ``_both_castxml_backed`` — see ``TYPE_DEPRECATED_ADDED``'s
-    docstring above (the clang backend doesn't populate
-    ``EnumType.deprecated`` yet).
+    Gates per-enum on :func:`fact_provenance.both_castxml_backed_fact` — see
+    ``TYPE_DEPRECATED_ADDED``'s docstring above (the clang backend doesn't
+    populate ``EnumType.deprecated`` yet; per-enum gating is what correctly
+    supports a ``--ast-frontend hybrid`` snapshot, G28 Phase 3).
     """
-    if not _both_castxml_backed(old, new):
-        return []
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
     old_map = {
@@ -1653,6 +1674,8 @@ def _diff_enum_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     for name, e_old in old_map.items():
         e_new = new_map.get(name)
         if e_new is None:
+            continue
+        if not both_castxml_backed_fact(old, new, enum_fact_key(name, "deprecated")):
             continue
         if e_old.deprecated is None and e_new.deprecated is not None:
             changes.append(make_change(

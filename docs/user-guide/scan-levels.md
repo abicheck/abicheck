@@ -242,7 +242,7 @@ definition, so they never drift):
 
 | Flag | Purpose |
 |---|---|
-| `--ast-frontend {auto,castxml,clang}` | which frontend parses the headers (env `ABICHECK_AST_FRONTEND`) |
+| `--ast-frontend {auto,castxml,clang,hybrid}` | which frontend parses the headers (env `ABICHECK_AST_FRONTEND`); `hybrid` runs castxml and clang together |
 | `-I/--include DIR` | an include root your headers need (repeatable) |
 | `--gcc-options "…"` | extra compiler flags (whitespace-split), e.g. `--gcc-options "-std=c++20 -DFOO=1"` |
 | `--gcc-option TOK` | one flag verbatim (repeatable; for a flag + spaced value) |
@@ -265,7 +265,7 @@ Four layers resolve the context, **highest precedence first**:
 ```yaml
 # .abicheck.yml
 compile:
-  frontend: auto          # auto | castxml | clang
+  frontend: auto          # auto | castxml | clang | hybrid
   std: c++20
   include_dirs: [include, third_party/include]
   defines: [FOO_ENABLE_FEATURE=1]
