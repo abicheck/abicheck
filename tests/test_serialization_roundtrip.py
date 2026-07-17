@@ -13,6 +13,7 @@ from abicheck.serialization import (
     load_snapshot,
     save_snapshot,
     snapshot_from_dict,
+    snapshot_to_dict,
     snapshot_to_json,
 )
 
@@ -189,6 +190,30 @@ class TestHeaderCvFactsReliableRoundTrip:
         snap = _make_snap()
         j = json.loads(snapshot_to_json(snap))
         assert snapshot_from_dict(j).header_cv_facts_reliable is True
+
+    def test_reserialized_legacy_snapshot_stays_unreliable(self) -> None:
+        """Regression guard (Codex review, PR #582): a load -> save -> load
+        round-trip always re-stamps schema_version to the CURRENT
+        SCHEMA_VERSION (it reflects the writing tool's format capability,
+        not the snapshot's true field-fact origin). Re-deriving
+        header_cv_facts_reliable purely from schema_version on a
+        reserialized legacy snapshot would silently flip an
+        already-known-unreliable snapshot's stale, real-but-wrong cv facts
+        back to "reliable" the next time it's loaded, reintroducing the
+        exact false-positive class this flag exists to prevent. An explicit
+        header_cv_facts_reliable key in the dict must be trusted over
+        re-deriving from schema_version."""
+        legacy = snapshot_from_dict(
+            _minimal_dict(schema_version=8, from_headers=True, ast_producer="castxml")
+        )
+        assert legacy.header_cv_facts_reliable is False
+
+        reserialized = snapshot_to_dict(legacy)
+        assert reserialized["schema_version"] == 9
+        assert reserialized["header_cv_facts_reliable"] is False
+
+        reloaded = snapshot_from_dict(reserialized)
+        assert reloaded.header_cv_facts_reliable is False
 
 
 # ── constants ─────────────────────────────────────────────────────────────

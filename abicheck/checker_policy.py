@@ -886,6 +886,8 @@ class ChangeKind(str, Enum):
     TYPE_DEPRECATED_REMOVED = "type_deprecated_removed"  # class/struct/union lost [[deprecated]] → COMPATIBLE (quality)
     ENUM_DEPRECATED_ADDED = "enum_deprecated_added"  # enum gained [[deprecated]] → COMPATIBLE (quality)
     ENUM_DEPRECATED_REMOVED = "enum_deprecated_removed"  # enum lost [[deprecated]] → COMPATIBLE (quality)
+    FIELD_DEPRECATED_ADDED = "field_deprecated_added"  # struct/class field gained [[deprecated]] → COMPATIBLE (quality)
+    FIELD_DEPRECATED_REMOVED = "field_deprecated_removed"  # struct/class field lost [[deprecated]] → COMPATIBLE (quality)
 
     # ── Composition compatibility (Wave A: runtime binding / loader / PE / wchar) ──
     RUNTIME_SYMBOL_PROVIDER_CHANGED = "runtime_symbol_provider_changed"  # a consumer's symbol reference resolves to a different provider DSO across environments → RISK

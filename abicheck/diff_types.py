@@ -1535,6 +1535,63 @@ def _diff_field_default_initializer(old: AbiSnapshot, new: AbiSnapshot) -> list[
     return changes
 
 
+@registry.detector("field_deprecated")
+def _diff_field_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
+    """Detect a struct/class field gaining or losing `[[deprecated]]`.
+
+    ``TypeField.deprecated`` is populated and serialized (castxml's ``Field``
+    element carries the same ``deprecation``/bare-``attributes`` marker as
+    a function/variable/type/enum declaration), but — unlike those four
+    other surfaces, each of which already has its own dedicated detector —
+    nothing previously read it: a public field changing from `int x;` to
+    `[[deprecated]] int x;` (or losing the marker) went completely
+    undetected on a CastXML-backed header comparison (Codex review, PR
+    #582).
+
+    Header-tier only, gated on ``_both_castxml_backed`` like the other four
+    deprecated detectors (the clang backend doesn't populate
+    ``TypeField.deprecated`` yet). Unions are NOT excluded — matching
+    ``FIELD_DEFAULT_INITIALIZER_REMOVED``/``_CHANGED``'s reasoning: a union
+    variant can carry `[[deprecated]]` too, castxml parses that member's
+    marker the same as an ordinary field, and ``_diff_unions`` never checks
+    ``deprecated`` at all.
+    """
+    if not _both_castxml_backed(old, new):
+        return []
+    changes: list[Change] = []
+    excl = _exclude_stdlib_namespaces(old, new)
+    old_map = {t.name: t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl)}
+    new_map = {t.name: t for t in new.types if _is_abi_surface_type(t, exclude_stdlib=excl)}
+
+    for name, t_old in old_map.items():
+        t_new = new_map.get(name)
+        if t_new is None:
+            continue
+        old_fields = {f.name: f for f in t_old.fields}
+        new_fields = {f.name: f for f in t_new.fields}
+
+        for fname, f_old in old_fields.items():
+            f_new = new_fields.get(fname)
+            if f_new is None:
+                continue
+            if f_old.deprecated is None and f_new.deprecated is not None:
+                changes.append(make_change(
+                    ChangeKind.FIELD_DEPRECATED_ADDED,
+                    symbol=name,
+                    name=name, detail=fname,
+                    new=f_new.deprecated,
+                ))
+            elif f_old.deprecated is not None and f_new.deprecated is None:
+                changes.append(make_change(
+                    ChangeKind.FIELD_DEPRECATED_REMOVED,
+                    symbol=name,
+                    name=name, detail=fname,
+                    old_value=f_old.deprecated,
+                ))
+
+    return changes
+
+
 @registry.detector("type_deprecated")
 def _diff_type_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect a class/struct/union gaining or losing `[[deprecated]]`.

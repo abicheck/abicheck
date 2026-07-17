@@ -330,6 +330,8 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "type_deprecated_removed": "L2",
     "enum_deprecated_added": "L2",
     "enum_deprecated_removed": "L2",
+    "field_deprecated_added": "L2",
+    "field_deprecated_removed": "L2",
     # ── L2: ADR-035 D4 cross-source validation that needs binary exports ↔
     # header decls ↔ header provenance (no compile DB) ──
     "exported_not_public": "L2",

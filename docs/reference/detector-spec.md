@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (382 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (384 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -92,6 +92,8 @@ One row per `ChangeKind` (382 total). Columns fuse the verdict partition (`check
 | `field_bitfield_changed` | breaking | `BREAKING` | `error` | L1 | `field_bitfield_changed` | [case63](../examples/case63_bitfield_changed.md) |
 | `field_default_initializer_changed` | quality | `COMPATIBLE` | `warning` | L2 | `field_default_initializer_changed` | — |
 | `field_default_initializer_removed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `field_default_initializer_removed` | — |
+| `field_deprecated_added` | quality | `COMPATIBLE` | `warning` | L2 | `field_deprecated_added` | — |
+| `field_deprecated_removed` | quality | `COMPATIBLE` | `warning` | L2 | `field_deprecated_removed` | — |
 | `field_lost_const` | quality | `COMPATIBLE` | `warning` | unspecified | `field_lost_const` | — |
 | `field_lost_mutable` | quality | `COMPATIBLE` | `warning` | unspecified | `field_lost_mutable` | — |
 | `field_lost_volatile` | quality | `COMPATIBLE` | `warning` | unspecified | `field_lost_volatile` | — |

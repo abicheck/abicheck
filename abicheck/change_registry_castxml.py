@@ -123,4 +123,8 @@ CASTXML_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
        description_template="Enum marked deprecated: {name} ({detail})"),
     _E("enum_deprecated_removed", _C,
        description_template="Enum no longer marked deprecated: {name}"),
+    _E("field_deprecated_added", _C,
+       description_template="Field marked deprecated: {name}::{detail} ({new})"),
+    _E("field_deprecated_removed", _C,
+       description_template="Field no longer marked deprecated: {name}::{detail}"),
 ]

@@ -567,6 +567,68 @@ class TestFieldDefaultInitializerChanged:
         assert "None" not in changed[0].description
 
 
+class TestFieldDeprecated:
+    """TypeField.deprecated was populated and serialized but nothing read
+    it — a field changing from `int x;` to `[[deprecated]] int x;` (or
+    losing the marker) went completely undetected (Codex review, PR #582).
+    """
+
+    def _snap(self, version, default=None):
+        t = RecordType(name="Cfg", kind="struct", size_bits=32,
+                       fields=[TypeField("count", "int", 0, deprecated=default)])
+        return AbiSnapshot(library="libtest.so.1", version=version, types=[t],
+                          from_headers=True, ast_producer="castxml")
+
+    def test_field_gained_deprecated(self):
+        old = self._snap("1.0", default=None)
+        new = self._snap("2.0", default="use new_count instead")
+        r = compare(old, new)
+        changed = [c for c in r.changes if c.kind == ChangeKind.FIELD_DEPRECATED_ADDED]
+        assert len(changed) == 1
+        assert "use new_count instead" in changed[0].description
+        assert r.verdict == Verdict.COMPATIBLE
+
+    def test_field_lost_deprecated(self):
+        old = self._snap("1.0", default="use new_count instead")
+        new = self._snap("2.0", default=None)
+        r = compare(old, new)
+        assert ChangeKind.FIELD_DEPRECATED_REMOVED in _kinds(r)
+
+    def test_bare_deprecated_with_no_message(self):
+        old = self._snap("1.0", default=None)
+        new = self._snap("2.0", default="")
+        r = compare(old, new)
+        assert ChangeKind.FIELD_DEPRECATED_ADDED in _kinds(r)
+
+    def test_gated_on_both_castxml_backed(self):
+        """clang doesn't populate TypeField.deprecated yet — a producer
+        mismatch must not misread it as the field losing its marker."""
+        t_old = RecordType(name="Cfg", kind="struct", size_bits=32,
+                           fields=[TypeField("count", "int", 0, deprecated="msg")])
+        t_new = RecordType(name="Cfg", kind="struct", size_bits=32,
+                           fields=[TypeField("count", "int", 0, deprecated=None)])
+        old = AbiSnapshot(library="libtest.so.1", version="1.0", types=[t_old],
+                          from_headers=True, ast_producer="castxml")
+        new = AbiSnapshot(library="libtest.so.1", version="2.0", types=[t_new],
+                          from_headers=True, ast_producer="clang")
+        r = compare(old, new)
+        assert ChangeKind.FIELD_DEPRECATED_REMOVED not in _kinds(r)
+
+    def test_union_variant_deprecated_detected(self):
+        """Matches FIELD_DEFAULT_INITIALIZER_*'s union-inclusive precedent:
+        a union variant can carry [[deprecated]] too."""
+        u_old = RecordType(name="Value", kind="union", size_bits=32, is_union=True,
+                           fields=[TypeField("as_int", "int", 0, deprecated=None)])
+        u_new = RecordType(name="Value", kind="union", size_bits=32, is_union=True,
+                           fields=[TypeField("as_int", "int", 0, deprecated="msg")])
+        old = AbiSnapshot(library="libtest.so.1", version="1.0", types=[u_old],
+                          from_headers=True, ast_producer="castxml")
+        new = AbiSnapshot(library="libtest.so.1", version="2.0", types=[u_new],
+                          from_headers=True, ast_producer="castxml")
+        r = compare(old, new)
+        assert ChangeKind.FIELD_DEPRECATED_ADDED in _kinds(r)
+
+
 class TestLegacyCvFactsReliableGating:
     """A persisted pre-CV-fact-fix CastXML snapshot must not misreport a
     false FIELD_BECAME_CONST/VOLATILE/MUTABLE or TYPE_FIELD_TYPE_CHANGED

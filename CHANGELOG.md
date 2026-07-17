@@ -644,6 +644,31 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
     now has a documenting regression test
     (`TestCrossProducerUnmangledIdentityKnownLimitation`) so it isn't
     silently forgotten.
+  - **`header_cv_facts_reliable` didn't survive a reserialization
+    round-trip** (a follow-up Codex finding on the fix two above): a
+    load → `snapshot_to_dict` → save → load cycle always re-stamps
+    `schema_version` to the CURRENT `SCHEMA_VERSION` — it reflects the
+    writing tool's format capability, not the snapshot's true field-fact
+    origin — so re-deriving the flag purely from `schema_version` on a
+    reserialized legacy snapshot silently flipped an
+    already-known-unreliable snapshot's stale, real-but-wrong cv facts
+    back to "reliable" on the next load, reintroducing the exact false
+    `FIELD_BECAME_CONST`/`VOLATILE`/`TYPE_FIELD_TYPE_CHANGED` positives this
+    flag exists to prevent. `snapshot_from_dict` now trusts an explicit
+    `header_cv_facts_reliable` key in the dict over re-deriving from
+    `schema_version`, falling back to the schema_version-based derivation
+    only when the key is genuinely absent (a real legacy file predating
+    this whole mechanism).
+- **`TypeField.deprecated` was parsed and serialized but never diffed**:
+  unlike function/variable/type/enum deprecation (each with its own
+  detector), a struct/class field changing from `int x;` to
+  `[[deprecated]] int x;` (or losing the marker) went completely
+  undetected on a CastXML-backed header comparison. Added
+  `FIELD_DEPRECATED_ADDED`/`FIELD_DEPRECATED_REMOVED` (`COMPATIBLE`,
+  quality) with a dedicated detector, gated on `_both_castxml_backed` like
+  the other four deprecated detectors. Unions are not excluded, matching
+  `FIELD_DEFAULT_INITIALIZER_REMOVED`/`_CHANGED`'s precedent — a union
+  variant can carry `[[deprecated]]` too (Codex review, PR #582).
 - **MCP `abi_compare`**: a `--used-by`/`--required-symbol` response's
   `summary` (`total_changes`/`breaking`/`api_breaks`/`risk_changes`/
   `compatible`) is now recomputed after scoped-only changes and

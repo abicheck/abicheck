@@ -393,6 +393,8 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.TYPE_DEPRECATED_REMOVED,
     ChangeKind.ENUM_DEPRECATED_ADDED,
     ChangeKind.ENUM_DEPRECATED_REMOVED,
+    ChangeKind.FIELD_DEPRECATED_ADDED,
+    ChangeKind.FIELD_DEPRECATED_REMOVED,
     # Namespace-shape patterns — exercised in tests/test_diff_namespaces.py
     ChangeKind.EXPERIMENTAL_GRADUATED,
     ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT,
