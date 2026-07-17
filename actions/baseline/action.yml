@@ -1,0 +1,130 @@
+name: 'abicheck baseline'
+description: >-
+  Dump a set of libraries into a baseline-set (one snapshot file per
+  library plus a manifest.json recording fact-set identity, profile, and
+  per-library content digests), instead of a single `*.abicheck.json` that
+  a multi-library release has no honest way to fit into. Read-only: this
+  Action never commits or pushes -- publishing the result is the calling
+  workflow's job (see docs/user-guide/baseline-management.md).
+
+branding:
+  icon: 'archive'
+  color: 'blue'
+
+inputs:
+  libraries:
+    description: >
+      JSON array of libraries to dump, one object per library:
+      `[{"name": "libfoo", "artifact": "build/libfoo.so", "header":
+      "include/foo.h", "include": "include"}, ...]`. `name` and `artifact`
+      are required per entry; `header`/`include` are optional (space-
+      separated for multiple paths, matching the main Action's `header`/
+      `include` inputs).
+    required: true
+  output-dir:
+    description: 'Directory to write the per-library snapshots and manifest.json into.'
+    required: false
+    default: '.abicheck-baseline'
+  project-ref:
+    description: 'Release/version label recorded in the manifest and passed as each dump''s --version (e.g. github.ref_name).'
+    required: false
+    default: ''
+  profile:
+    description: >
+      Build-profile identifier recorded in the manifest (platform/
+      architecture/compiler/ISA/debug-or-release, e.g.
+      "linux-x86_64-icx-avx2-debug") -- see baseline-management.md#baseline-identity-is-more-than-a-version-number
+      for why a version number alone is not a safe baseline identity for a
+      project with more than one build profile.
+    required: false
+    default: ''
+  build-info:
+    description: >
+      Shared build/source facts pack (e.g. from the collect-facts Action)
+      passed as --build-info to every library's dump call. Omit for a
+      binary/header-only (L0-L2) baseline-set.
+    required: false
+  depth:
+    description: 'Evidence depth passed to every dump call (binary, headers, build, or source). Omit for the CLI default.'
+    required: false
+  previous-manifest:
+    description: >
+      Path to a previous manifest.json to diff against for the
+      refresh-required/refresh-reasons outputs. Omit to skip the freshness
+      comparison (refresh-required is always 'false' without one -- there
+      is nothing to compare against, not a claim that no refresh is
+      needed).
+    required: false
+  validation:
+    description: >
+      'strict' (default) round-trips each freshly-dumped snapshot through
+      a self-compare (compare a.json against itself) as a sanity check
+      that the file it just wrote is loadable and internally consistent;
+      'none' skips it.
+    required: false
+    default: 'strict'
+  python-version:
+    description: 'Python version for setup-python.'
+    required: false
+    default: '3.13'
+  install-deps:
+    description: 'Install system dependencies (castxml, gcc). Set to false if pre-installed.'
+    required: false
+    default: 'true'
+
+outputs:
+  baseline-path:
+    description: 'The output-dir this run wrote into.'
+    value: ${{ steps.run-baseline.outputs.baseline-path }}
+  manifest-path:
+    description: 'Path to the generated manifest.json.'
+    value: ${{ steps.run-baseline.outputs.manifest-path }}
+  library-count:
+    description: 'Number of libraries successfully dumped into this baseline-set.'
+    value: ${{ steps.run-baseline.outputs.library-count }}
+  content-digest:
+    description: 'SHA-256 over the manifest''s artifact list (library names + per-file digests) -- changes whenever any library''s snapshot content changes.'
+    value: ${{ steps.run-baseline.outputs.content-digest }}
+  refresh-required:
+    description: >
+      'true' when previous-manifest was given and this run's manifest
+      differs from it in a way that means old comparisons against it are
+      no longer trustworthy (snapshot_schema, fact_set identity, or the
+      library set changed). 'false' when no previous-manifest was given,
+      or none of those changed.
+    value: ${{ steps.run-baseline.outputs.refresh-required }}
+  refresh-reasons:
+    description: 'Semicolon-separated human-readable reasons refresh-required is true. Empty otherwise.'
+    value: ${{ steps.run-baseline.outputs.refresh-reasons }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install system dependencies
+      if: inputs.install-deps == 'true'
+      shell: bash
+      run: bash "${{ github.action_path }}/../../action/install-deps.sh"
+
+    - name: Install abicheck
+      shell: bash
+      run: pip install "${{ github.action_path }}/../.."
+
+    - name: Dump baseline-set
+      id: run-baseline
+      shell: bash
+      env:
+        INPUT_LIBRARIES: ${{ inputs.libraries }}
+        INPUT_OUTPUT_DIR: ${{ inputs.output-dir }}
+        INPUT_PROJECT_REF: ${{ inputs.project-ref }}
+        INPUT_PROFILE: ${{ inputs.profile }}
+        INPUT_BUILD_INFO: ${{ inputs.build-info }}
+        INPUT_DEPTH: ${{ inputs.depth }}
+        INPUT_PREVIOUS_MANIFEST: ${{ inputs.previous-manifest }}
+        INPUT_VALIDATION: ${{ inputs.validation }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: bash "${{ github.action_path }}/run.sh"

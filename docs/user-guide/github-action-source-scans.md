@@ -225,7 +225,19 @@ which is easy to miss without seeing them chained together:
 The `abicheck_inputs/` pack itself is produced by whichever [producer](producing-source-facts.md#which-producer-pick-one)
 fits your build; the [`collect-facts` Action](producing-source-facts.md#github-actions-the-collect-facts-action)
 wires that up (`phase: prepare` before the build, `phase: verify` after)
-instead of a hand-rolled build script:
+instead of a hand-rolled build script.
+
+This recipe specifically needs a pack it can `upload-artifact` from the
+`build` job and `download-artifact` into separate `dump-baselines` matrix
+jobs, so pin `producer` to `wrapper` or `clang-plugin` rather than `auto`:
+for a CMake/Bazel/compile-DB project, `auto` resolves to `replay`, whose
+`phase: prepare` returns `mode: inline` with an empty `pack-path` and never
+creates an `abicheck_inputs/` directory at all — there is nothing to upload,
+and every matrix row's `build-info: abicheck_inputs/` would point at a
+directory that doesn't exist. (Replay's inline mode is for the single-job
+case in [Section A](#a-inline-at-dump-time-simplest), where `dump` runs
+right after the build with the checked-out `sources:` tree still on disk —
+not for reuse across separate jobs.)
 
 ```yaml
 # Release workflow — build once, produce a per-library baseline set from the
@@ -238,7 +250,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: abicheck/abicheck/actions/collect-facts@v0.3.0
         id: facts
-        with: { phase: prepare, producer: auto, public-roots: "include" }
+        with: { phase: prepare, producer: wrapper, public-roots: "include" }
       - name: Build
         run: cmake -B build -S . && cmake --build build   # picks up the wrapper/plugin env vars collect-facts exported
       - uses: abicheck/abicheck/actions/collect-facts@v0.3.0
