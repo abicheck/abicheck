@@ -48,10 +48,22 @@ def changed_files(base: str, head: str) -> list[str]:
 
     A PR that only *removes* an `abicheck/**/*.py` module/API is exactly the
     kind of user-visible change that needs a fragment, so deletions (`D`)
-    must count alongside additions/copies/modifications/renames.
+    must count alongside additions/modifications. `--no-renames` makes git
+    report a move as a separate delete-old + add-new pair instead of a
+    single `R` entry — with rename detection on, `--name-only` prints only
+    the destination path, so a file moved *out* of `abicheck/` (e.g.
+    `abicheck/foo.py` -> `tools/foo.py`) would never surface its old,
+    now-deleted `abicheck/` path.
     """
     result = subprocess.run(
-        ["git", "diff", "--name-only", "--diff-filter=ACDMR", f"{base}...{head}"],
+        [
+            "git",
+            "diff",
+            "--no-renames",
+            "--name-only",
+            "--diff-filter=ACDM",
+            f"{base}...{head}",
+        ],
         cwd=ROOT,
         capture_output=True,
         text=True,
