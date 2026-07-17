@@ -168,7 +168,16 @@ def _strip_trailing_declarator_const(canonical_type: str) -> str:
             and re.fullmatch(r"(?:\s|const|volatile)*", span)
             and _CV_TOKEN_RE.search(span)
         ):
-            new_span = re.sub(r"\bconst\b", "", span)
+            # .strip(): canonicalize_type_name never puts whitespace directly
+            # after the sigil or directly before the declarator's closing
+            # bracket (e.g. an unchanged volatile-only declarator canonicalizes
+            # to "( *volatile)", not "( * volatile)") — removing "const" from
+            # a combined "const volatile"/"volatile const" span leaves a
+            # separator space stranded at whichever end "const" vacated,
+            # which must be trimmed to match that convention or an unrelated,
+            # unchanged volatile qualifier makes the two sides spuriously
+            # compare unequal (Codex review, PR #589).
+            new_span = re.sub(r"\bconst\b", "", span).strip()
             return canonical_type[: pos + 1] + new_span + canonical_type[span_end:]
     return _TRAILING_CONST_RE.sub("", canonical_type)
 

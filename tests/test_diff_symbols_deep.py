@@ -642,6 +642,29 @@ class TestVarConstChanged:
         assert ChangeKind.VAR_BECAME_CONST in _kinds(r)
         assert ChangeKind.VAR_TYPE_CHANGED not in _kinds(r)
 
+    def test_function_pointer_already_volatile_gaining_const_is_var_became_const(self):
+        """`void (* volatile)()` -> `void (* const volatile)()` (Codex
+        review, PR #589): volatile stays unchanged on both sides, only
+        const is newly added — a pure const-only flip. Removing "const"
+        from the combined "const volatile" span left a stray separator
+        space, so the stripped old/new spellings compared spuriously
+        unequal and misreported VAR_TYPE_CHANGED instead of the correct
+        VAR_BECAME_CONST."""
+        v_v1 = _pub_var("fp", "_Z2fp", "void (* volatile)()", is_const=False)
+        v_v2 = _pub_var("fp", "_Z2fp", "void (* const volatile)()", is_const=True)
+        r = compare(_snap(variables=[v_v1]), _snap(variables=[v_v2]))
+        assert ChangeKind.VAR_BECAME_CONST in _kinds(r)
+        assert ChangeKind.VAR_TYPE_CHANGED not in _kinds(r)
+
+    def test_function_pointer_gaining_both_const_and_volatile_is_type_changed(self):
+        """Negative control: unlike the test above, here volatile is ALSO
+        newly added (not just const) — that's not a pure const-only flip,
+        so it must still report VAR_TYPE_CHANGED."""
+        v_v1 = _pub_var("fp", "_Z2fp", "void (*)()", is_const=False)
+        v_v2 = _pub_var("fp", "_Z2fp", "void (* const volatile)()", is_const=True)
+        r = compare(_snap(variables=[v_v1]), _snap(variables=[v_v2]))
+        assert ChangeKind.VAR_TYPE_CHANGED in _kinds(r)
+
 
 # ── legacy CastXML volatile-variable noise (Codex review, PR #582) ──────────
 
