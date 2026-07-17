@@ -34,6 +34,7 @@ refactors, test-only changes) to bypass the gate.
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -46,6 +47,12 @@ ROOT = Path(__file__).resolve().parent.parent
 # not satisfy the gate.
 _FRAGMENT_SUFFIX = ".md"
 _NON_FRAGMENT_NAMES = {"README.md"}
+
+# fragment_template.md.j2 wraps every category/bullet in an HTML comment for
+# the contributor to uncomment; scriv's own Markdown parser strips comments
+# before looking for sections, so a fragment nobody edited parses to zero
+# sections and silently contributes no text at `scriv collect` time.
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 
 # A (status, path) pair, as produced by `git diff --name-status`.
 ChangedFile = tuple[str, str]
@@ -97,14 +104,15 @@ def needs_changelog_entry(changed: list[ChangedFile]) -> bool:
     )
 
 
-def has_changelog_fragment(changed: list[ChangedFile]) -> bool:
-    """True if the diff adds/modifies (not just deletes) a fragment in changelog.d/.
+def candidate_fragment_paths(changed: list[ChangedFile]) -> list[str]:
+    """Paths of added/modified, direct-child, real (.md) fragments in changelog.d/.
 
     Must be a *direct* child of changelog.d/: scriv's collector globs
     `Path(fragment_directory).glob("*.md")`, which is non-recursive, so a
-    nested changelog.d/foo/bar.md would satisfy this check but never
+    nested changelog.d/foo/bar.md would satisfy a path-only check but never
     actually be collected or deleted at release time.
     """
+    paths = []
     for status, f in changed:
         if status == "D" or not f.startswith("changelog.d/"):
             continue
@@ -113,7 +121,32 @@ def has_changelog_fragment(changed: list[ChangedFile]) -> bool:
             continue
         if not name.endswith(_FRAGMENT_SUFFIX):
             continue
-        return True
+        paths.append(f)
+    return paths
+
+
+def has_changelog_fragment(changed: list[ChangedFile]) -> bool:
+    """True if the diff adds/modifies (not just deletes) a fragment in changelog.d/."""
+    return bool(candidate_fragment_paths(changed))
+
+
+def fragment_has_content(text: str) -> bool:
+    """True if text has any real content once HTML comments are stripped.
+
+    `fragment_template.md.j2` leaves every category/bullet commented out;
+    a PR that runs `scriv create` and commits the file without uncommenting
+    anything would otherwise pass a path-only check while contributing zero
+    changelog text.
+    """
+    return bool(_HTML_COMMENT_RE.sub("", text).strip())
+
+
+def has_nonempty_changelog_fragment(changed: list[ChangedFile], root: Path) -> bool:
+    """True if at least one candidate fragment has real (non-comment) content."""
+    for f in candidate_fragment_paths(changed):
+        path = root / f
+        if path.exists() and fragment_has_content(path.read_text(encoding="utf-8")):
+            return True
     return False
 
 
@@ -137,16 +170,17 @@ def main() -> int:
         print("No abicheck/**/*.py changes — no changelog fragment required.")
         return 0
 
-    if has_changelog_fragment(changed):
+    if has_nonempty_changelog_fragment(changed, ROOT):
         print("Changelog fragment found in changelog.d/ — OK.")
         return 0
 
     print(
         "::error::This PR changes abicheck/**/*.py but adds no changelog "
-        "fragment. Run `scriv create` and describe your change in the "
-        "generated changelog.d/<name>.md file (see changelog.d/README.md), "
-        "or add the `skip-changelog` label if this change has no "
-        "user-facing effect.",
+        "fragment (or the fragment is still the unedited template — "
+        "uncomment a category and write your entry). Run `scriv create` "
+        "and describe your change in the generated changelog.d/<name>.md "
+        "file (see changelog.d/README.md), or add the `skip-changelog` "
+        "label if this change has no user-facing effect.",
         file=sys.stderr,
     )
     return 1

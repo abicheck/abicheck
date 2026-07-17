@@ -91,6 +91,74 @@ def test_combined_gate_requires_added_or_modified_md_fragment() -> None:
     assert gate.has_changelog_fragment(changed) is False
 
 
+# --- fragment_has_content -----------------------------------------------
+
+
+_UNEDITED_TEMPLATE = """<!--
+A new changelog fragment. See changelog.d/README.md for the workflow.
+-->
+
+<!--
+### Added
+
+- **Short bold summary** — the rest of the sentence.
+
+-->
+<!--
+### Fixed
+
+- **Short bold summary** — the rest of the sentence.
+
+-->
+"""
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        (_UNEDITED_TEMPLATE, False),
+        ("", False),
+        ("<!-- just a comment -->", False),
+        ("<!--\nmultiline\ncomment\n-->\n", False),
+        ("### Added\n\n- Real entry.\n", True),
+        ("<!-- intro -->\n\n### Added\n\n- Real entry.\n", True),
+        ("Freeform text with no headings at all.", True),
+    ],
+)
+def test_fragment_has_content(text: str, expected: bool) -> None:
+    assert gate.fragment_has_content(text) is expected
+
+
+# --- has_nonempty_changelog_fragment (real files) ------------------------
+
+
+def test_has_nonempty_changelog_fragment_rejects_unedited_template(
+    tmp_path: Path,
+) -> None:
+    changelog_d = tmp_path / "changelog.d"
+    changelog_d.mkdir()
+    (changelog_d / "20260101_me.md").write_text(_UNEDITED_TEMPLATE)
+
+    changed = [("A", "changelog.d/20260101_me.md")]
+    assert gate.has_changelog_fragment(changed) is True  # path-only check
+    assert gate.has_nonempty_changelog_fragment(changed, tmp_path) is False
+
+
+def test_has_nonempty_changelog_fragment_accepts_edited_fragment(
+    tmp_path: Path,
+) -> None:
+    changelog_d = tmp_path / "changelog.d"
+    changelog_d.mkdir()
+    (changelog_d / "20260101_me.md").write_text("### Added\n\n- Real entry.\n")
+
+    changed = [("A", "changelog.d/20260101_me.md")]
+    assert gate.has_nonempty_changelog_fragment(changed, tmp_path) is True
+
+
+def test_has_nonempty_changelog_fragment_no_candidates(tmp_path: Path) -> None:
+    assert gate.has_nonempty_changelog_fragment([], tmp_path) is False
+
+
 # --- changed_files (real git integration) -----------------------------------
 
 
@@ -222,3 +290,27 @@ def test_main_passes_when_fragment_present(
     )
     assert gate.main() == 0
     assert "OK" in capsys.readouterr().out
+
+
+def test_main_fails_when_fragment_is_unedited_template(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`scriv create`d and committed as-is, nobody uncommented a category."""
+    (repo / "abicheck").mkdir()
+    (repo / "abicheck" / "mod.py").write_text("x = 1\n")
+    _git("add", "-A", cwd=repo)
+    _git("commit", "-q", "-m", "base", cwd=repo)
+    base = _git("rev-parse", "HEAD", cwd=repo)
+
+    (repo / "abicheck" / "mod.py").write_text("x = 2\n")
+    (repo / "changelog.d").mkdir()
+    (repo / "changelog.d" / "20260101_me.md").write_text(_UNEDITED_TEMPLATE)
+    _git("add", "-A", cwd=repo)
+    _git("commit", "-q", "-m", "change behavior + empty fragment", cwd=repo)
+    head = _git("rev-parse", "HEAD", cwd=repo)
+
+    monkeypatch.setattr(
+        "sys.argv", ["check_changelog_fragment.py", "--base", base, "--head", head]
+    )
+    assert gate.main() == 1
+    assert "no changelog" in capsys.readouterr().err
