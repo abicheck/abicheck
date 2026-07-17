@@ -23,11 +23,17 @@ place:
 
 * **Breaking** — clear ABI breaks (and gated source breaks);
 * **Needs review** — source breaks / risk a human should sign off on;
-* **Safe** — additions and policy/surface-scoped compatible removals.
+* **Safe** — compatible changes: new public-API surface and quality findings.
 
 "Safe" here is a pure mirror of the severity the checker already assigned
 (``severity`` field in the JSON, which honours public-surface scoping and the
-active policy) — this module never re-classifies anything.
+active policy) — this module never re-classifies anything. Within Safe, new
+public-API surface (the ``ADDITION_KINDS`` registry — ``func_added``,
+``type_added``, ``enum_member_added``, etc.) renders as its own "➕ Public API
+additions" table with per-symbol kind/detail/location, separate from the
+generic "✅ Safe" list of quality findings — a reviewer approving a new export
+wants to see what was added, not just a bare count folded in with unrelated
+quality notes.
 
 A severity-config category set to ``error`` (e.g. ``severity-addition:
 error``) moves its findings into the Breaking bucket too, since that is what
@@ -1014,7 +1020,17 @@ def _body_sections(model: CommentModel, detail: str) -> list[str]:
         detail,
         open_default=(not model.breaking and bool(model.review)),
     )
-    out += _safe_section(model.safe, detail)
+    # New public-API surface gets its own section — a per-symbol table with
+    # kind/detail/location, the same treatment Breaking/Needs review get —
+    # rather than being folded anonymously into the generic quality-findings
+    # "Safe" list below. A reviewer approving new exports wants to see what
+    # was added, not just a bare symbol count.
+    additions = [f for f in model.safe if f.category == "addition"]
+    quality = [f for f in model.safe if f.category != "addition"]
+    out += _findings_table(
+        "➕ Public API additions", additions, detail, open_default=False
+    )
+    out += _safe_section(quality, detail)
     return out
 
 

@@ -938,6 +938,26 @@ def test_full_detail_expands_all_sections():
     assert body.count("<details open>") == 3
 
 
+def test_safe_quality_section_full_detail_table_with_rows():
+    # Quality-only compatible findings keep their own per-symbol table in
+    # full detail — the fixture above is all-additions, so this exercises
+    # the "✅ Safe" section's full-detail path specifically.
+    report = _compare_report(
+        [
+            {
+                "kind": "soname_bump_unnecessary",
+                "symbol": "libfoo",
+                "description": "unnecessary bump",
+                "severity": "compatible",
+            },
+        ]
+    )
+    body = render_comment(build_model(report), sha="x", detail="full")
+    assert "✅ Safe (1)" in body
+    assert "soname_bump_unnecessary" in body
+    assert "unnecessary bump" in body
+
+
 def test_standard_truncates_large_breaking_table():
     changes = [
         {
@@ -1112,7 +1132,64 @@ def test_finding_with_only_location_renders_location_cell():
     assert "foo.h:9" in body
 
 
-def test_safe_section_caps_symbols_per_kind():
+def test_safe_quality_section_caps_symbols_per_kind():
+    # Quality (non-addition) compatible findings keep the terse
+    # kind:symbols-with-cap rendering in the "✅ Safe" section — additions
+    # are split out into their own section (see tests below) and use a
+    # different (per-symbol table) rendering, so this cap only applies here.
+    changes = [
+        {
+            "kind": "soname_bump_unnecessary",
+            "symbol": f"lib_{i}",
+            "description": "unnecessary bump",
+            "severity": "compatible",
+        }
+        for i in range(20)
+    ]
+    body = render_comment(build_model(_compare_report(changes)), sha="x")
+    assert "(+8)" in body  # 20 symbols, cap 12 → "+8" more
+    assert "➕ Public API additions" not in body
+
+
+def test_additions_render_as_own_section_with_detail():
+    # New public-API surface gets its own "➕ Public API additions" table
+    # with kind/symbol/detail/location — not folded into the generic quality
+    # "Safe" list (a reviewer approving a new export wants to see what was
+    # added, not just a bare count mixed in with unrelated quality notes).
+    report = _compare_report(
+        [
+            {
+                "kind": "func_added",
+                "symbol": "foo_v2",
+                "description": "new exported function",
+                "severity": "compatible",
+                "source_location": "foo.h:42",
+            },
+            {
+                "kind": "soname_bump_unnecessary",
+                "symbol": "libfoo",
+                "description": "SONAME bumped without a break",
+                "severity": "compatible",
+            },
+        ]
+    )
+    body = render_comment(build_model(report), sha="x")
+    assert "➕ Public API additions (1)" in body
+    assert "✅ Safe (1)" in body
+    # the addition shows the same per-symbol detail as Breaking/Needs review
+    assert "new exported function" in body
+    assert "foo.h:42" in body
+    # the addition doesn't leak into the quality-only Safe section
+    additions_block = body.split("➕ Public API additions")[1].split("✅ Safe")[0]
+    assert "foo_v2" in additions_block
+    assert "libfoo" not in additions_block
+
+
+def test_additions_section_lists_all_distinct_symbols_under_row_cap():
+    # 20 distinct addition symbols (no natural API grouping) all render as
+    # their own row — additions go through the same per-symbol table/rollup
+    # as Breaking/Needs review, not the terse kind:symbols-list-with-cap
+    # format the quality-only Safe section still uses.
     changes = [
         {
             "kind": "func_added",
@@ -1123,7 +1200,56 @@ def test_safe_section_caps_symbols_per_kind():
         for i in range(20)
     ]
     body = render_comment(build_model(_compare_report(changes)), sha="x")
-    assert "(+8)" in body  # 20 symbols, cap 12 → "+8" more
+    assert "➕ Public API additions (20)" in body
+    assert "add_0" in body and "add_19" in body
+    assert "more_" not in body  # 20 < the 25-row standard cap
+
+
+def test_additions_section_truncates_past_standard_row_cap():
+    changes = [
+        {
+            "kind": "func_added",
+            "symbol": f"add_{i}",
+            "description": "new",
+            "severity": "compatible",
+        }
+        for i in range(30)
+    ]
+    body = render_comment(build_model(_compare_report(changes)), sha="x")
+    assert "➕ Public API additions (30)" in body
+    assert "more_" in body  # 30 > the 25-row standard cap
+
+
+def test_additions_section_absent_when_only_quality_findings():
+    report = _compare_report(
+        [
+            {
+                "kind": "soname_bump_unnecessary",
+                "symbol": "libfoo",
+                "description": "unnecessary bump",
+                "severity": "compatible",
+            },
+        ]
+    )
+    body = render_comment(build_model(report), sha="x")
+    assert "➕ Public API additions" not in body
+    assert "✅ Safe (1)" in body
+
+
+def test_additions_section_full_detail_flat_rows():
+    changes = [
+        {
+            "kind": "func_added",
+            "symbol": f"Widget::method{i}(int)",
+            "description": "new overload",
+            "severity": "compatible",
+        }
+        for i in range(3)
+    ]
+    body = render_comment(build_model(_compare_report(changes)), sha="x", detail="full")
+    # full detail keeps every addition as its own per-symbol row (no rollup)
+    assert "Widget::method0(int)" in body
+    assert "`Widget` (3)" not in body
 
 
 def test_release_full_detail_table_with_rows():
