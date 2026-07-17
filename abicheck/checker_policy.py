@@ -188,6 +188,7 @@ class ChangeKind(str, Enum):
     EVIDENCE_COVERAGE_ASYMMETRIC = "layer_coverage_asymmetric"  # base scanned with evidence the target lacks
     EVIDENCE_REQUIRED_MISSING = "evidence_required_missing"  # policy require_evidence layer absent (ADR-033 D7)
     VERSIONED_SYMBOL_SCHEME_DETECTED = "versioned_symbol_scheme_detected"  # bulk removed↔added differ only by a version token (ICU u_*_NN / GNU symver); advisory
+    SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK = "suppression_would_hide_public_break"  # a suppression rule matched but was withheld because the change is public-reachable (ADR-044 D4); advisory
     STRUCT_SIZE_CHANGED = "struct_size_changed"  # sizeof(T) changed
     STRUCT_FIELD_OFFSET_CHANGED = "struct_field_offset_changed"  # field moved
     STRUCT_FIELD_REMOVED = "struct_field_removed"  # field deleted

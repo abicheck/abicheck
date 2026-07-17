@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Protocol
 if TYPE_CHECKING:
     from .checker_types import Change
     from .model import AbiSnapshot
-    from .suppression import SuppressionList
+    from .suppression import Suppression, SuppressionList
     from .surface import PublicSurface
 
 
@@ -499,8 +499,79 @@ class DemoteOffPythonSurface:
         return kept
 
 
+class MarkReachability:
+    """Tag each change with public-reachability metadata, before suppression runs.
+
+    ADR-044 D1: the pipeline-order bug this step fixes is that
+    ``ApplySuppression`` used to run before ``DetectInternalLeaks``, so a broad
+    namespace/source_location suppression rule could remove the raw evidence
+    (e.g. a ``type_size_changed`` on an internal type) before the internal-leak
+    detector ever got a chance to see it — silently hiding a genuine leak
+    through the public ABI with no trace in the report.
+
+    This step computes the same public-surface reachability walk
+    (:func:`internal_leak.compute_leak_paths`) that ``DetectInternalLeaks``
+    uses, but up front — before any filtering — and tags every matching change
+    with ``public_reachable``/``reachability_kind``/``reachability_proof_path``.
+    ``compute_leak_paths`` is a pure function of the snapshot (function/
+    variable/type declarations), not of the change list, so computing it here
+    does not depend on pipeline position and does not need to be recomputed by
+    ``DetectInternalLeaks`` later (which still runs after redundancy filtering
+    to decide which *triggering* changes produce a synthetic leak finding).
+
+    ``Suppression.matches()`` (ADR-044 D2) consults ``public_reachable`` to
+    decide whether a broad rule may apply at all — so the underlying evidence
+    for a public-reachable internal change now survives ``ApplySuppression``
+    by default, and ``DetectInternalLeaks`` (still running later in the
+    pipeline, unchanged position) has real evidence to correlate.
+    """
+
+    name = "mark_reachability"
+
+    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        from .internal_leak import (
+            DEFAULT_INTERNAL_NAMESPACES,
+            _format_path,
+            _path_is_value_propagating,
+            _root_type_name_for_change,
+            compute_leak_paths,
+        )
+
+        old_paths = compute_leak_paths(ctx.old, DEFAULT_INTERNAL_NAMESPACES)
+        new_paths = compute_leak_paths(ctx.new, DEFAULT_INTERNAL_NAMESPACES)
+        reachable_types = set(old_paths) | set(new_paths)
+        if not reachable_types:
+            return changes
+
+        for c in changes:
+            root = _root_type_name_for_change(c)
+            if root not in reachable_types:
+                continue
+            old_pl = old_paths.get(root, [])
+            new_pl = new_paths.get(root, [])
+            paths = old_pl + [p for p in new_pl if p not in old_pl]
+            if not paths:
+                continue
+            c.public_reachable = True
+            c.reachability_kind = (
+                "value_embedding"
+                if any(_path_is_value_propagating(p) for p in paths)
+                else "pointer_or_signature"
+            )
+            c.reachability_proof_path = _format_path(min(paths, key=len))
+        return changes
+
+
 class ApplySuppression:
-    """Apply user-provided suppression rules."""
+    """Apply user-provided suppression rules.
+
+    ADR-044 D2: a rule matches only when ``Suppression.matches()`` also passes
+    its reachability/``allow_public_break`` gate — see that method for the
+    semantics. A match refused by that gate is recorded as a
+    ``SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`` diagnostic (ADR-044 D4) instead of
+    being silently dropped, so the change stays visible *and* the suppression
+    author sees why their rule did not apply.
+    """
 
     name = "apply_suppression"
 
@@ -508,12 +579,55 @@ class ApplySuppression:
         if ctx.suppression is None:
             return changes
         filtered: list[Change] = []
+        diagnostics: list[Change] = []
         for c in changes:
-            if ctx.suppression.is_suppressed(c):
+            outcome = ctx.suppression.evaluate(c)
+            if outcome.suppressed:
                 ctx.suppressed.append(c)
-            else:
-                filtered.append(c)
+                continue
+            filtered.append(c)
+            if outcome.withheld_rule is not None:
+                diagnostics.append(
+                    _build_suppression_overreach_change(c, outcome.withheld_rule)
+                )
+        filtered.extend(diagnostics)
         return filtered
+
+
+def _build_suppression_overreach_change(change: Change, rule: Suppression) -> Change:
+    """Build the ``SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`` diagnostic for *change*.
+
+    ADR-044 D4. *rule* is the suppression whose selectors matched *change* but
+    whose reachability/``allow_public_break`` gate withheld the match.
+    """
+    from .checker_policy import ChangeKind
+    from .checker_types import Change
+
+    selector = (
+        rule.namespace
+        or rule.cause_namespace
+        or rule.source_location
+        or rule.symbol
+        or rule.symbol_pattern
+        or rule.type_pattern
+        or "?"
+    )
+    proof = (
+        f" via {change.reachability_proof_path}"
+        if change.reachability_proof_path
+        else ""
+    )
+    return Change(
+        kind=ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK,
+        symbol=change.symbol,
+        description=(
+            f"Suppression rule {selector!r} matched {change.symbol!r} "
+            f"({change.kind.value}) but was not applied: the symbol is "
+            f"public-reachable{proof}. Add `allow_public_break: true` to this "
+            "rule to suppress it anyway."
+        ),
+        caused_by_type=change.symbol,
+    )
 
 
 class SuppressRenamedPairs:
@@ -1287,6 +1401,10 @@ DEFAULT_PIPELINE = PostProcessingPipeline(
         # resolved C-header surface (ctx.surf_new) and defer to it; otherwise it
         # uses the recovered Python API as the extension's public-contract oracle.
         DemoteOffPythonSurface(),
+        # ADR-044 D1: must run before ApplySuppression so a broad suppression
+        # rule can see whether the change it is about to remove is part of the
+        # effective public ABI.
+        MarkReachability(),
         ApplySuppression(),
         SuppressRenamedPairs(),
         FilterRedundant(),

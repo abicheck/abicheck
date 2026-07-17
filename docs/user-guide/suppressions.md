@@ -35,6 +35,15 @@ suppressions:
     expires: 2026-12-31
     label: temporary
     reason: "Temporary waiver until downstream migration"
+
+  - member_name: "value_type"
+    reason: "Nested typedef churn, any container"
+
+  - namespace: "oneapi::dal::**::detail::**"
+    reason: "Private implementation details"
+    # reachability defaults to "unreachable-only" for a namespace rule — see
+    # "Reachability-aware suppression" below. This rule will NOT hide a
+    # detail:: change that turns out to be part of the effective public ABI.
 ```
 
 ---
@@ -46,14 +55,21 @@ suppressions:
 | `symbol` | string | Exact symbol match |
 | `symbol_pattern` | regex string | Fullmatch regex against symbol |
 | `type_pattern` | regex string | Fullmatch regex for type-level changes |
+| `member_name` | regex string | Fullmatch regex against the last `::`-segment of the symbol |
 | `change_kind` | string | Restrict suppression to a specific change kind |
 | `source_location` | glob string | `fnmatch`-style match against `change.source_location` |
+| `namespace` (alias: `entity_namespace`) | glob string | Match the change's own `symbol`/qualified name against a `::`-namespace glob (`**` = any depth) |
+| `cause_namespace` | glob string | Match the change's `caused_by_type` (its documented *cause*, when different from its own subject) against a namespace glob |
+| `reachability` | `unreachable-only` \| `any` \| `public-only` | Gates whether this rule may match a change that is part of the effective public ABI — see below. Default depends on the selector shape. |
+| `allow_public_break` | bool | Required, in addition to `reachability`, for a rule to suppress a change that is both public-reachable and classified `BREAKING`/`API_BREAK` |
 | `label` | string | Optional grouping tag |
 | `expires` | date/datetime | Expiry date; expired rule is ignored |
 | `reason` | string | Human-readable rationale |
 
 `symbol`, `symbol_pattern`, and `type_pattern` are mutually exclusive.
-At least one selector is required (`symbol`/`symbol_pattern`/`type_pattern`/`source_location`).
+`namespace` and `entity_namespace` are aliases for the same selector — specify
+only one. At least one selector is required (`symbol`/`symbol_pattern`/
+`type_pattern`/`member_name`/`source_location`/`namespace`/`cause_namespace`).
 
 ---
 
@@ -62,11 +78,84 @@ At least one selector is required (`symbol`/`symbol_pattern`/`type_pattern`/`sou
 Rules are evaluated with **AND** logic:
 
 - if `source_location` is present, location must match;
+- if `member_name` is present, the symbol's last `::`-segment must match;
+- if `namespace`/`entity_namespace` is present, the change's own symbol/qualified
+  name must lie in that namespace;
+- if `cause_namespace` is present, the change's `caused_by_type` must lie in
+  that namespace;
 - if `symbol` or `symbol_pattern` is present, symbol must match;
 - if `type_pattern` is present, change must be a type-level change and pattern must match;
 - if `change_kind` is present, kind must match.
 
 So `source_location` does **not** bypass symbol/type selectors.
+
+**`namespace` matches only the change's own identity, never its cause.**
+A finding's `symbol` is its own subject; a derived finding's `caused_by_type`
+names a *different* entity responsible for it (e.g. a public function whose
+signature changed because an internal type it depends on changed). A
+`namespace` rule aimed at hiding churn *inside* an internal namespace must
+not also hide an unrelated *public* finding merely because its documented
+cause happens to live there — use `cause_namespace` for that instead:
+
+```yaml
+# Suppresses churn ON internal::Foo itself.
+- namespace: "myns::internal::*"
+
+# Suppresses a finding CAUSED BY something in internal::, regardless of the
+# finding's own (possibly public) subject. Use deliberately — see below.
+- cause_namespace: "myns::internal::*"
+```
+
+---
+
+## Reachability-aware suppression
+
+A broad `namespace`/`source_location` rule can accidentally match an internal
+symbol that is not actually private to the library's compatibility contract —
+one a public inline/template function, a public type's field or base class,
+or a public function signature depends on. abicheck computes this
+reachability (the same public-surface walk `internal_leak.py`'s leak detector
+uses) *before* suppression runs, and a rule's `reachability` setting decides
+whether it may still apply:
+
+| Value | Meaning |
+|-------|---------|
+| `unreachable-only` | The rule will not match a change that is part of the effective public ABI. **Default** for a rule using only broad selectors (`namespace`/`entity_namespace`/`cause_namespace`/`source_location`). |
+| `any` | No reachability filtering — matches regardless. **Default** for a rule using a narrow selector (`symbol`, `symbol_pattern`, `type_pattern`, `member_name`) — naming one exact symbol/type is already an audited decision, so behavior is unchanged from before this feature existed. |
+| `public-only` | Inverse of `unreachable-only` — matches only a public-reachable change. Mainly useful for temporarily isolating leak findings while investigating them. |
+
+Independently of `reachability`, a rule that would suppress a change that is
+**both** public-reachable **and** classified `BREAKING`/`API_BREAK` is
+refused unless the rule also sets `allow_public_break: true` — making that
+specific, higher-risk suppression explicit and reviewable rather than an
+accident of a broad glob:
+
+```yaml
+- namespace: "oneapi::dal::**::detail::**"
+  reason: "Reviewed: descriptor_base growth is safe, wrapper layout unchanged"
+  allow_public_break: true
+```
+
+When a broad rule's selectors match a change but the match is withheld by
+either gate, the change is **not** suppressed, and a
+`suppression_would_hide_public_break` finding is added to the report
+explaining which rule matched and why it did not apply — for example:
+
+```text
+Suppression rule 'oneapi::dal::**::detail::**' matched
+'oneapi::dal::kmeans::detail::descriptor_base' (type_size_changed) but was
+not applied: the symbol is public-reachable via fn:oneapi::dal::make ->
+base:oneapi::dal::kmeans::detail::descriptor_base ->
+oneapi::dal::kmeans::detail::descriptor_base. Add `allow_public_break: true`
+to this rule to suppress it anyway.
+```
+
+This closes a specific correctness gap: without it, a suppression rule could
+remove the raw evidence for an internal-type change before abicheck's
+internal-leak detector had a chance to see it, silently hiding a genuine
+break through the public ABI surface with no trace in the report. See
+[ADR-044](../development/adr/044-reachability-aware-suppression.md) for the
+full design rationale.
 
 ---
 
