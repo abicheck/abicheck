@@ -118,6 +118,23 @@ class TestAssessmentManifest:
         with pytest.raises(ValueError):
             AssessmentManifest.from_dict(data)
 
+    def test_from_dict_rejects_non_dict_input(self):
+        with pytest.raises(TypeError):
+            AssessmentManifest.from_dict(["not", "a", "dict"])  # type: ignore[arg-type]
+
+    def test_from_dict_rejects_non_list_targets(self):
+        with pytest.raises(ValueError):
+            AssessmentManifest.from_dict(
+                {"assessment_id": "a", "head_sha": "s", "targets": "linux-x86_64"}
+            )
+
+    @pytest.mark.parametrize("bad_entry", ["not-a-dict", {}, {"id": ""}])
+    def test_from_dict_rejects_malformed_target_entry(self, bad_entry: object):
+        with pytest.raises(ValueError):
+            AssessmentManifest.from_dict(
+                {"assessment_id": "a", "head_sha": "s", "targets": [bad_entry]}
+            )
+
     def test_direct_construction_rejects_empty_targets(self):
         with pytest.raises(ValueError):
             AssessmentManifest(assessment_id="a", head_sha="s", targets=())
@@ -538,3 +555,25 @@ class TestProgressAndRendering:
 
         assert "ABI regressions found on" in text
         assert LINUX in text
+
+    def test_render_text_includes_job_url_for_unavailable_target(self):
+        assessment = Assessment(_manifest())
+        assessment.record(TargetOutcome.analyzed(LINUX, _diff(Verdict.COMPATIBLE)))
+        assessment.record(
+            TargetOutcome.unavailable(
+                WINDOWS,
+                TargetState.BUILD_FAILED,
+                job_url="https://ci.example/jobs/42",
+            )
+        )
+        text = assessment.finalize().render_text()
+
+        assert "https://ci.example/jobs/42" in text
+
+    def test_render_text_neutral_when_no_targets_analyzed(self):
+        assessment = Assessment(_manifest())
+        assessment.record(TargetOutcome.unavailable(LINUX, TargetState.BUILD_FAILED))
+        assessment.record(TargetOutcome.unavailable(WINDOWS, TargetState.BUILD_FAILED))
+        text = assessment.finalize().render_text()
+
+        assert "No targets could be analyzed." in text
