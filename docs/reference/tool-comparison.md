@@ -473,11 +473,17 @@ denominator than "accuracy over cases the tool managed to complete," so read
 it as the answer to *"if I pointed this tool at the whole catalog blind, how
 often would it tell me the truth?"*
 
-> **Reproducibility envelope.** abicheck `0.5.0`, code commit `ffa860c`
-> (this benchmark run's own commits were docs/data-only — `git diff ffa860c
-> HEAD -- abicheck/` is empty — so the code under test is `ffa860c`
-> regardless of which docs commit is checked out; that SHA is on `main` and
-> stable across a squash-merge, unlike a branch-local docs commit),
+> **Reproducibility envelope.** abicheck `0.5.0`, code commit `ffa860c` — the
+> benchmark numbers below were measured against this commit, which is on
+> `main` and stable across a squash-merge, unlike a branch-local docs commit.
+> This PR's own commits later added a behavior-preserving internal refactor
+> (`abicheck/service.py`'s output-rendering helpers moved to a new
+> `service_render.py` leaf module, fixing an AI-readiness file-size gate; no
+> detector/checker logic changed) — `git diff ffa860c HEAD -- abicheck/` is
+> **not** empty as of that refactor, so treat `ffa860c` as the pre-refactor
+> benchmark baseline, not a claim that the landed tree is byte-identical to
+> it. The full test suite passes identically before and after the refactor,
+> so the numbers below still describe current behavior.
 > `ground_truth.json` sha256 `7836d8b79f96`. All six lanes below (`abicheck`,
 > `abicheck_full`, `abidiff`, `abidiff_headers`, `abicc_dumper`, `abicc_xml`)
 > were regenerated live against the current **193-case** catalog on
