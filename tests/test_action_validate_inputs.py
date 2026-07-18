@@ -228,6 +228,29 @@ class TestFormatIsHardErrorNotSilentFallback:
         result = _run_validate({"INPUT_MODE": "compare", "INPUT_FORMAT": "sarif"})
         assert result.returncode == 0, result.stdout + result.stderr
 
+    @pytest.mark.parametrize("mode", ["deps-tree", "deps-compare"])
+    def test_deps_modes_reject_directory_or_package(
+        self, mode: str, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review): `abicheck deps tree`/`deps compare`
+        # both take a single BINARY, the same per-artifact contract dump/
+        # scan have -- this branch only validated format, so an
+        # unsupported directory/package operand passed this fail-fast step
+        # and would only fail later in the CLI, after setup/dependency
+        # installation.
+        lib_dir = tmp_path / "lib"
+        lib_dir.mkdir()
+        result = _run_validate({"INPUT_MODE": mode, "INPUT_NEW_LIBRARY": str(lib_dir)})
+        assert result.returncode == 1
+        assert "does not accept a directory or package" in result.stdout
+
+    @pytest.mark.parametrize("mode", ["deps-tree", "deps-compare"])
+    def test_deps_modes_accept_plain_binary(self, mode: str, tmp_path: Path) -> None:
+        lib = tmp_path / "libfoo.so.1"
+        lib.write_text("")
+        result = _run_validate({"INPUT_MODE": mode, "INPUT_NEW_LIBRARY": str(lib)})
+        assert result.returncode == 0, result.stdout + result.stderr
+
 
 @pytest.mark.skipif(
     not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"

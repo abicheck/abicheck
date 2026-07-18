@@ -134,6 +134,23 @@ class TestDetectProducer:
         result = _run_predicate(f'_detect_producer "{tmp_path}"')
         assert result.stdout.strip() == "replay"
 
+    def test_compile_commands_json_two_levels_deep_means_wrapper(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review): a compile_commands.json two levels
+        # below sources (e.g. sub/build/compile_commands.json) used to
+        # still report producer=replay/ready=true here, but the inline
+        # replay path this producer hands off to
+        # (abicheck/buildsource/inline.py::_find_compile_db_in_dir) only
+        # ever looks at the root or one immediate subdirectory -- it would
+        # never find this DB, so the actual collection step would silently
+        # collect zero source facts despite the false ready=true.
+        deep_dir = tmp_path / "sub" / "build"
+        deep_dir.mkdir(parents=True)
+        (deep_dir / "compile_commands.json").write_text("[]")
+        result = _run_predicate(f'_detect_producer "{tmp_path}"')
+        assert result.stdout.strip() == "wrapper"
+
     def test_cmakelists_means_replay(self, tmp_path: Path) -> None:
         (tmp_path / "CMakeLists.txt").write_text("")
         result = _run_predicate(f'_detect_producer "{tmp_path}"')

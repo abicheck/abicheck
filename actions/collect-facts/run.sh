@@ -63,7 +63,16 @@ _detect_producer() {
   # `if` silently takes the false branch instead. `-quit` makes find stop
   # itself after the first match, so there is no pipe to race (Codex
   # review; reproduced locally with a 5000-entry tree).
-  if [[ -n "$(find "$src" -maxdepth 3 -name compile_commands.json -print -quit 2>/dev/null)" ]]; then
+  #
+  # -maxdepth 2 (root or one immediate subdirectory below $src), not 3: the
+  # inline replay path this producer: replay hands off to
+  # (abicheck/buildsource/inline.py::_find_compile_db_in_dir) only ever
+  # looks at $src/compile_commands.json or $src/<one-subdir>/
+  # compile_commands.json -- a DB two levels deep would make this report
+  # producer=replay/ready=true, but the actual replay collection step
+  # would never find it and silently collect zero source facts (Codex
+  # review).
+  if [[ -n "$(find "$src" -maxdepth 2 -name compile_commands.json -print -quit 2>/dev/null)" ]]; then
     echo "replay"
     return
   fi
@@ -204,9 +213,11 @@ _prepare_replay() {
   [[ -d "$SOURCES" ]] || _fail "sources '$SOURCES' does not exist."
   local has_db=""
   # -print -quit, not `| grep -q .` -- same pipefail/SIGPIPE race as
-  # _detect_producer above (Codex review).
+  # _detect_producer above. -maxdepth 2, not 3 -- same discoverable-depth
+  # mismatch with inline.py::_find_compile_db_in_dir as _detect_producer
+  # above (Codex review).
   if [[ -f "$SOURCES/compile_commands.json" ]] \
-    || [[ -n "$(find "$SOURCES" -maxdepth 3 -name compile_commands.json -print -quit 2>/dev/null)" ]]; then
+    || [[ -n "$(find "$SOURCES" -maxdepth 2 -name compile_commands.json -print -quit 2>/dev/null)" ]]; then
     has_db="yes"
   fi
   if [[ -z "$has_db" ]]; then

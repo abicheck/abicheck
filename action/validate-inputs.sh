@@ -78,6 +78,13 @@ case "$MODE" in
     fi
     ;;
   deps-tree | deps-compare)
+    # `abicheck deps tree`/`deps compare` both take a single BINARY, not a
+    # directory/package -- the same per-artifact contract dump/scan have,
+    # missing here let an unsupported compare-only operand pass this
+    # fail-fast step and fail later in the CLI instead (Codex review).
+    if [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; then
+      _fail "mode: $MODE does not accept a directory or package for new-library ('$NEW_LIBRARY') — deps tree/deps compare analyse exactly one binary, they have no per-library fan-out. Point new-library at a single binary."
+    fi
     if [[ -n "$FORMAT" && "$FORMAT" != "markdown" && "$FORMAT" != "json" && "$FORMAT" != "html" ]]; then
       _fail "mode: $MODE does not support format: $FORMAT — only 'markdown', 'json', and 'html' are supported."
     fi
