@@ -397,6 +397,20 @@ class TestLlvmMajorFromPredefinedMacros:
         result = _run_predicate(f'_llvm_major_from_predefined_macros "{script}"')
         assert result.stdout.strip() == ""
 
+    def test_returns_success_when_dump_succeeds_with_no_clang_major(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review): a compiler that supports -dM -E and
+        # exits 0 but simply doesn't define __clang_major__ (e.g. a real
+        # gcc, unlike the exit-1 stub above) is a successful EMPTY result,
+        # not a failure -- without an explicit `return 0` after the final
+        # grep, its own no-match exit status (1) leaked out as this
+        # function's exit status instead.
+        compiler = self._fake_compiler(tmp_path, "#define __GNUC__ 13")
+        result = _run_predicate(f'_llvm_major_from_predefined_macros "{compiler}"')
+        assert result.stdout.strip() == ""
+        assert result.returncode == 0
+
     def test_empty_when_compiler_not_found(self) -> None:
         result = _run_predicate(
             '_llvm_major_from_predefined_macros "/no/such/compiler-xyz"'
@@ -511,7 +525,13 @@ class TestBundledLlvmCmakePrefix:
             f'_bundled_llvm_cmake_prefix "{tmp_path}/explicit" "{tmp_path}/cmplr" '
             f'"{tmp_path}/cmplr/bin/icpx"'
         )
-        assert result.stdout.strip() == f"{tmp_path}/explicit"
+        # Regression (Codex review): llvm-cmake-prefix is documented (see
+        # action.yml) as an installation ROOT containing lib/cmake/{llvm,
+        # clang} -- same shape as $CMPLR_ROOT -- not the "lib/cmake" level
+        # directly. Returning $explicit completely unmodified used to
+        # silently expect the opposite, making a correctly-configured
+        # llvm-cmake-prefix input resolve one directory level too shallow.
+        assert result.stdout.strip() == f"{tmp_path}/explicit/lib/cmake"
 
     def test_detects_cmplr_root_with_llvm_cmake_package(self, tmp_path: Path) -> None:
         cmplr_root = tmp_path / "cmplr"

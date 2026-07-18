@@ -192,7 +192,17 @@ _llvm_major_from_version_string() {
 _llvm_major_from_predefined_macros() {
   local compiler="$1" defines
   defines=$("$compiler" -dM -E -x c++ - < /dev/null 2>/dev/null) || return 0
+  # A successful dump that simply has no __clang_major__ (e.g. gcc, which
+  # also supports -dM -E) is a successful EMPTY result, not a failure --
+  # without the explicit `return 0`, the final grep's own no-match exit
+  # status (1) would leak out as this function's own exit status (Codex
+  # review). Callers here only check `-z "$major"`, not the exit status,
+  # so this had no live bug today, but the function's contract should
+  # still be "empty means nothing found", matching
+  # _llvm_major_from_version_string's equivalent contract above (there,
+  # incidentally, via a trailing `head -1` that always exits 0).
   printf '%s' "$defines" | grep -oE '#define __clang_major__ [0-9]+' | grep -oE '[0-9]+$'
+  return 0
 }
 
 # Resolve a CMake prefix path for a vendor-bundled LLVM/Clang install, so
@@ -211,10 +221,21 @@ _llvm_major_from_predefined_macros() {
 # that doesn't match the Clang that later loads it via -fplugin= (Codex
 # review). Empty output means neither applies -- caller falls back to the
 # apt-get install path.
+#
+# Both explicit and $CMPLR_ROOT-derived inputs are treated as the SAME
+# shape -- an installation root containing lib/cmake/{llvm,clang} (matching
+# the llvm-cmake-prefix input's own documented contract in action.yml) --
+# and this function always returns the "lib/cmake" level one directory
+# below that root. The explicit branch used to return $explicit completely
+# unmodified, silently expecting callers to already pass the "lib/cmake"
+# level instead of the documented installation root, a contract mismatch
+# between the docs and the code that made a correctly-configured
+# llvm-cmake-prefix input resolve one directory level too shallow
+# (Codex review).
 _bundled_llvm_cmake_prefix() {
   local explicit="$1" cmplr_root="$2" compiler_path="$3"
   if [[ -n "$explicit" ]]; then
-    printf '%s' "$explicit"
+    printf '%s' "$explicit/lib/cmake"
     return
   fi
   # Normalize both to the same representation before comparing -- on a real
