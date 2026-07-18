@@ -287,7 +287,13 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with: { name: release-build }
-      - uses: abicheck/abicheck@v0.3.0
+      # Same SHA as the build job's collect-facts calls above -- this step
+      # consumes the abicheck_inputs/ pack that produced, and a version tag
+      # here could disagree with collect-facts' pinned SHA on the pack
+      # schema/fact-set recipe, risking a mismatch or missing source facts
+      # the same "pin both uses: lines" rule in producing-source-facts.md
+      # exists to prevent (Codex review).
+      - uses: abicheck/abicheck@<same-sha-as-above>
         with:
           mode: dump
           new-library: ${{ matrix.lib.so }}
@@ -358,7 +364,9 @@ jobs:
       - uses: actions/download-artifact@v4
         with: { name: release-build }
       - name: Dump candidate with build/source evidence
-        uses: abicheck/abicheck@v0.3.0
+        # Same SHA as the build job's collect-facts calls above (Codex
+        # review) -- see the note on the release workflow's equivalent step.
+        uses: abicheck/abicheck@<same-sha-as-above>
         with:
           mode: dump
           new-library: ${{ matrix.lib.so }}
@@ -373,7 +381,7 @@ jobs:
         run: gh release download --pattern '${{ matrix.lib.name }}.abicheck.json' -D baselines/ -R ${{ github.repository }}
         env: { GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} }
       - name: Compare two snapshots (source/API + binary evidence together)
-        uses: abicheck/abicheck@v0.3.0
+        uses: abicheck/abicheck@<same-sha-as-above>
         with:
           old-library: baselines/${{ matrix.lib.name }}.abicheck.json
           new-library: candidate.json
