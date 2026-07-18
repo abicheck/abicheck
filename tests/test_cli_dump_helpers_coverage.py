@@ -1228,38 +1228,48 @@ def test_gated_source_label_without_a_pack_falls_back_to_headers_or_binary() -> 
     assert _gated_source_label(None, headers_snap) == "headers"
 
 
-def test_dump_source_input_is_prebuilt_pack_true_for_build_source_pack(tmp_path) -> None:
+def test_dump_will_attempt_hybrid_l4_extraction_false_for_prebuilt_pack(tmp_path) -> None:
     from abicheck.buildsource.pack import BuildSourcePack
-    from abicheck.cli_dump_helpers import _dump_source_input_is_prebuilt_pack
+    from abicheck.cli_dump_helpers import _dump_will_attempt_hybrid_l4_extraction
 
     pack_dir = tmp_path / "pack"
     BuildSourcePack.empty(pack_dir).write()
-    assert _dump_source_input_is_prebuilt_pack(None, pack_dir) is True
-    assert _dump_source_input_is_prebuilt_pack(pack_dir, None) is True
+    assert _dump_will_attempt_hybrid_l4_extraction(None, pack_dir) is False
+    assert _dump_will_attempt_hybrid_l4_extraction(pack_dir, None) is False
 
 
-def test_dump_source_input_is_prebuilt_pack_false_for_raw_source_tree(tmp_path) -> None:
-    from abicheck.cli_dump_helpers import _dump_source_input_is_prebuilt_pack
+def test_dump_will_attempt_hybrid_l4_extraction_true_for_raw_source_tree(tmp_path) -> None:
+    from abicheck.cli_dump_helpers import _dump_will_attempt_hybrid_l4_extraction
 
     tree = tmp_path / "src"
     tree.mkdir()
-    assert _dump_source_input_is_prebuilt_pack(tree, None) is False
-    assert _dump_source_input_is_prebuilt_pack(None, None) is False
+    assert _dump_will_attempt_hybrid_l4_extraction(tree, None) is True
 
 
-def test_dump_source_input_is_prebuilt_pack_false_for_mixed_raw_and_pack(tmp_path) -> None:
+def test_dump_will_attempt_hybrid_l4_extraction_false_without_any_input(tmp_path) -> None:
+    """Codex review (third finding): no --sources/--build-info at all means
+    collect_inline_pack never runs regardless of frontend -- rejecting here
+    would point the user at a fix (switch frontends) that would not
+    actually satisfy --depth source; the real problem is reported
+    downstream by check_requested_depth_satisfied instead."""
+    from abicheck.cli_dump_helpers import _dump_will_attempt_hybrid_l4_extraction
+
+    assert _dump_will_attempt_hybrid_l4_extraction(None, None) is False
+
+
+def test_dump_will_attempt_hybrid_l4_extraction_true_for_mixed_raw_and_pack(tmp_path) -> None:
     """Codex review: one raw side is enough for collect_inline_pack (and
     extractor/--ast-frontend) to actually run against it -- both provided
-    inputs must be prebuilt packs, not just one."""
+    inputs must be prebuilt packs for this to be False, not just one."""
     from abicheck.buildsource.pack import BuildSourcePack
-    from abicheck.cli_dump_helpers import _dump_source_input_is_prebuilt_pack
+    from abicheck.cli_dump_helpers import _dump_will_attempt_hybrid_l4_extraction
 
     pack_dir = tmp_path / "pack"
     BuildSourcePack.empty(pack_dir).write()
     tree = tmp_path / "src"
     tree.mkdir()
-    assert _dump_source_input_is_prebuilt_pack(tree, pack_dir) is False
-    assert _dump_source_input_is_prebuilt_pack(pack_dir, tree) is False
+    assert _dump_will_attempt_hybrid_l4_extraction(tree, pack_dir) is True
+    assert _dump_will_attempt_hybrid_l4_extraction(pack_dir, tree) is True
 
 
 def test_check_requested_depth_satisfied_headers_without_header_ast_fails() -> None:

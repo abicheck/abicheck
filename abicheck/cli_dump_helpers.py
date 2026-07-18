@@ -232,36 +232,43 @@ def evidence_depth_label(
 _DEPTH_RANK: dict[str, int] = {"binary": 0, "headers": 1, "build": 2, "source": 3}
 
 
-def _dump_source_input_is_prebuilt_pack(
+def _dump_will_attempt_hybrid_l4_extraction(
     sources: Path | None, build_info: Path | None
 ) -> bool:
-    """True when *sources* or *build_info* is a prebuilt pack directory.
+    """True iff ``collect_inline_pack`` would actually run L4 extraction with
+    ``extractor="hybrid"`` for at least one of *sources*/*build_info*.
 
-    Codex review: ``cli_buildsource.embed_build_source`` treats a
-    ``BuildSourcePack`` directory (``is_pack_dir``) or a build-emitted
-    ``abicheck_inputs/`` directory (``_is_inputs_pack_dir``) as data to load
-    and filter, not a source tree to run L4 extraction over — its
-    ``raw_sources``/``raw_build_info`` (the only inputs ``collect_inline_pack``,
-    and therefore ``extractor``, ever sees) are forced to ``None`` in that
-    case. ``--ast-frontend`` has no effect for a prebuilt-pack input, so the
-    ``--depth source`` + ``--ast-frontend hybrid`` rejection must not fire
-    for one.
+    The ``--depth source`` + ``--ast-frontend hybrid`` rejection exists to
+    stop a real, unsupported hybrid L4 extraction attempt from silently
+    degrading — it must fire *only* when one would actually happen, and stay
+    quiet otherwise so the more accurate error (or none at all) surfaces
+    instead. Three cases where it must NOT fire, each found by review:
 
-    Requires *every provided* input to be a prebuilt pack, not merely one of
-    them (Codex review): if ``--sources`` is a raw tree and ``--build-info``
-    is a pack, ``embed_build_source`` only nulls the pack-shaped side — the
-    raw side still reaches ``collect_inline_pack`` (and ``extractor``) as
-    ``raw_sources``/``raw_build_info``, so the unsupported hybrid L4 path can
-    still run for it. ``any(...)`` would have wrongly skipped the rejection
-    for that mixed case.
+    - **Prebuilt pack input** (Codex review): ``cli_buildsource.embed_build_source``
+      treats a ``BuildSourcePack`` directory (``is_pack_dir``) or a
+      build-emitted ``abicheck_inputs/`` directory (``_is_inputs_pack_dir``)
+      as data to load and filter, not a tree to extract from — its
+      ``raw_sources``/``raw_build_info`` (the only inputs
+      ``collect_inline_pack``, and therefore ``extractor``, ever sees) are
+      forced to ``None`` for that side. A *mixed* raw+pack pair still counts
+      as "will attempt": the raw side alone reaches ``collect_inline_pack``
+      with ``extractor="hybrid"``.
+    - **No --sources/--build-info at all** (Codex review, third finding): a
+      bare ``dump lib.so -H api.h --depth source --ast-frontend hybrid``
+      never calls ``collect_inline_pack`` in the first place — L4 was never
+      going to run regardless of frontend. Rejecting here would tell the
+      user to switch frontends when that would not fix anything; the real
+      problem (no source/build evidence at all) is better reported by
+      ``check_requested_depth_satisfied``'s own "reached 'headers'/'binary'"
+      message, which fires downstream regardless.
     """
     from .buildsource.inline import is_pack_dir
     from .cli_buildsource_helpers import _is_inputs_pack_dir
 
-    provided = [p for p in (sources, build_info) if p is not None]
-    if not provided:
-        return False
-    return all(is_pack_dir(p) or _is_inputs_pack_dir(p) for p in provided)
+    return any(
+        p is not None and not (is_pack_dir(p) or _is_inputs_pack_dir(p))
+        for p in (sources, build_info)
+    )
 
 
 class DumpDepthNotSatisfiedError(click.ClickException):

@@ -369,6 +369,32 @@ def test_dump_depth_source_with_hybrid_frontend_rejected(tmp_path) -> None:  # t
     assert not (tmp_path / "out3.json").exists()
 
 
+def test_dump_depth_source_hybrid_frontend_not_rejected_without_sources_or_build_info(
+    tmp_path,
+) -> None:  # type: ignore[no-untyped-def]
+    """Codex review (third finding): a bare
+    `dump lib.so -H api.h --depth source --ast-frontend hybrid` with no
+    --sources/--build-info never calls collect_inline_pack at all -- L4 was
+    never going to run regardless of frontend. Rejecting with "switch
+    frontends" guidance here would be actively misleading (it would not fix
+    anything); the real problem (--depth source not satisfied at all) must
+    surface via the depth-not-satisfied gate instead."""
+    so = tmp_path / "fake.so"
+    so.write_bytes(b"\x7fELF")
+    hdr = tmp_path / "api.h"
+    hdr.write_text("void api(void);\n", encoding="utf-8")
+    res = CliRunner().invoke(
+        main,
+        [
+            "dump", str(so), "-H", str(hdr), "--depth", "source",
+            "--ast-frontend", "hybrid",
+        ],
+    )
+    out = _all_output(res)
+    assert "--ast-frontend hybrid" not in out
+    assert "castxml or --ast-frontend clang" not in out
+
+
 def test_dump_depth_source_with_config_hybrid_frontend_rejected(tmp_path) -> None:  # type: ignore[no-untyped-def]
     """CodeRabbit review: the hybrid+source rejection must also catch a
     frontend selected via .abicheck.yml's `compile.frontend: hybrid`, not
@@ -376,14 +402,22 @@ def test_dump_depth_source_with_config_hybrid_frontend_rejected(tmp_path) -> Non
     here) is not the whole story once resolve_dump_compile_context folds in
     the config file's compile.frontend (CLI > config, but an unset CLI value
     inherits it). The check runs once, after that resolution, for the
-    ordinary (non-source-only) binary dump path."""
+    ordinary (non-source-only) binary dump path.
+
+    Includes --sources (Codex review, third finding): the rejection is
+    scoped to invocations that would actually attempt L4 extraction, so a
+    bare binary dump with no --sources/--build-info at all would no longer
+    trigger it, for an unrelated reason -- see
+    test_dump_depth_source_hybrid_frontend_not_rejected_without_sources_or_build_info."""
     so = tmp_path / "fake.so"
     so.write_bytes(b"\x7fELF")
+    src = tmp_path / "src-cfg"
+    src.mkdir()
     cfg = tmp_path / ".abicheck.yml"
     cfg.write_text("compile:\n  frontend: hybrid\n")
     res = CliRunner().invoke(
         main,
-        ["dump", str(so), "--depth", "source", "--config", str(cfg)],
+        ["dump", str(so), "--sources", str(src), "--depth", "source", "--config", str(cfg)],
     )
     assert res.exit_code != 0, _all_output(res)
     out = _all_output(res)
