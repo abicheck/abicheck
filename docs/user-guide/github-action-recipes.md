@@ -20,7 +20,7 @@ comments, and package-comparison modes.
             abi-baseline-${{ github.event.repository.default_branch }}-
 
       - name: Check ABI
-        uses: abicheck/abicheck@v0.3.0
+        uses: abicheck/abicheck@v0.5.0
         with:
           old-library: abi-baseline.json
           new-library: build/libfoo.so
@@ -47,7 +47,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: mkdir build && cd build && cmake .. && make
 
-      - uses: abicheck/abicheck@v0.3.0
+      - uses: abicheck/abicheck@v0.5.0
         with:
           old-library: abi-baseline.json
           new-library: build/libfoo.so
@@ -64,7 +64,7 @@ then compare with a separate step.
 
 ```yaml
       # Step 1: dump ABI snapshot from cross-compiled binary
-      - uses: abicheck/abicheck@v0.3.0
+      - uses: abicheck/abicheck@v0.5.0
         with:
           mode: dump
           new-library: build-arm64/libfoo.so
@@ -84,7 +84,7 @@ then compare with a separate step.
           - { name: libfoo, so: build/libfoo.so, header: include/foo.h }
           - { name: libbar, so: build/libbar.so, header: include/bar.h }
     steps:
-      - uses: abicheck/abicheck@v0.3.0
+      - uses: abicheck/abicheck@v0.5.0
         with:
           old-library: baselines/${{ matrix.lib.name }}.json
           new-library: ${{ matrix.lib.so }}
@@ -125,7 +125,7 @@ jobs:
           echo "build on ${{ matrix.os }}"
 
       - name: ABI compare (native)
-        uses: abicheck/abicheck@v0.3.0
+        uses: abicheck/abicheck@v0.5.0
         with:
           old-library: baselines/${{ runner.os }}/abi-old.json
           new-library: build/${{ runner.os }}/libfoo.${{ matrix.ext }}
@@ -165,7 +165,7 @@ jobs:
         run: cmake -B build && cmake --build build
 
       - name: ABI compare (native)
-        uses: abicheck/abicheck@v0.3.0
+        uses: abicheck/abicheck@v0.5.0
         with:
           old-library: baselines/${{ runner.os }}/abi-old.json
           new-library: build/libfoo.${{ matrix.ext }}
@@ -234,7 +234,7 @@ If `castxml` + compiler are already available (custom image, pre-provisioned VM,
 or conda-forge environment), set `install-deps: false`:
 
 ```yaml
-      - uses: abicheck/abicheck@v0.3.0
+      - uses: abicheck/abicheck@v0.5.0
         with:
           old-library: old.json
           new-library: new.json
@@ -248,7 +248,7 @@ Example (conda-forge pre-step):
         run: |
           conda install -y -c conda-forge abicheck
 
-      - uses: abicheck/abicheck@v0.3.0
+      - uses: abicheck/abicheck@v0.5.0
         with:
           old-library: old.json
           new-library: new.json
@@ -281,7 +281,7 @@ jobs:
           docker export $(docker create new-image:latest) | tar -xf - -C /tmp/new-root
 
       - name: Full-stack ABI check
-        uses: abicheck/abicheck@v0.3.0
+        uses: abicheck/abicheck@v0.5.0
         with:
           mode: deps-compare
           new-library: usr/bin/myapp
@@ -301,7 +301,7 @@ missing dependencies before deployment:
 
 ```yaml
       - name: Audit dependencies
-        uses: abicheck/abicheck@v0.3.0
+        uses: abicheck/abicheck@v0.5.0
         with:
           mode: deps-tree
           new-library: build/myapp
@@ -315,7 +315,7 @@ binding information alongside the regular ABI diff:
 
 ```yaml
       - name: Compare with dependency context
-        uses: abicheck/abicheck@v0.3.0
+        uses: abicheck/abicheck@v0.5.0
         with:
           old-library: baseline.json
           new-library: build/libfoo.so
@@ -329,7 +329,7 @@ Add `--annotate` to get ABI breaking changes as inline comments on the PR diff.
 See [GitHub PR Annotations](annotations.md) for full details.
 
 ```yaml
-      - uses: abicheck/abicheck@v0.3.0
+      - uses: abicheck/abicheck@v0.5.0
         with:
           old-library: baseline.json
           new-library: build/libfoo.so
@@ -356,7 +356,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: abicheck/abicheck@v0.3.0
+      - uses: abicheck/abicheck@v0.5.0
         with:
           old-library: baseline.json
           new-library: build/libfoo.so
@@ -400,7 +400,7 @@ in the comment to match, rather than **Needs review**.
 Allow API breaks but block binary ABI breaks:
 
 ```yaml
-      - uses: abicheck/abicheck@v0.3.0
+      - uses: abicheck/abicheck@v0.5.0
         with:
           old-library: baseline.json
           new-library: build/libfoo.so
@@ -414,7 +414,7 @@ Allow API breaks but block binary ABI breaks:
 Block PRs that accidentally add new public symbols or types:
 
 ```yaml
-      - uses: abicheck/abicheck@v0.3.0
+      - uses: abicheck/abicheck@v0.5.0
         with:
           old-library: baseline.json
           new-library: build/libfoo.so
@@ -441,7 +441,7 @@ conda (`.conda`, `.tar.bz2`), wheel (`.whl`), and plain directories.
 
 ```yaml
       - name: Compare RPM packages
-        uses: abicheck/abicheck@v0.3.0
+        uses: abicheck/abicheck@v0.5.0
         with:
           old-library: libfoo-1.0-1.el9.x86_64.rpm
           new-library: libfoo-1.1-1.el9.x86_64.rpm
@@ -454,7 +454,7 @@ build-id resolution:
 
 ```yaml
       - name: Compare with debug info
-        uses: abicheck/abicheck@v0.3.0
+        uses: abicheck/abicheck@v0.5.0
         with:
           old-library: libfoo-1.0.rpm
           new-library: libfoo-1.1.rpm
@@ -466,7 +466,7 @@ build-id resolution:
 
 ```yaml
       - name: Compare Deb packages
-        uses: abicheck/abicheck@v0.3.0
+        uses: abicheck/abicheck@v0.5.0
         with:
           old-library: libfoo1_1.0-1_amd64.deb
           new-library: libfoo1_1.1-1_amd64.deb
@@ -478,7 +478,7 @@ build-id resolution:
 
 ```yaml
       - name: Compare SDK tarballs
-        uses: abicheck/abicheck@v0.3.0
+        uses: abicheck/abicheck@v0.5.0
         with:
           old-library: sdk-2.0.tar.gz
           new-library: sdk-2.1.tar.gz
@@ -489,7 +489,7 @@ build-id resolution:
 
 ```yaml
       - name: Compare conda packages
-        uses: abicheck/abicheck@v0.3.0
+        uses: abicheck/abicheck@v0.5.0
         with:
           old-library: pkg-v1.conda
           new-library: pkg-v2.conda
@@ -502,7 +502,7 @@ There is no separate `appcompat` mode (ADR-043 folded it into `compare
 update by scoping a normal `compare` to it via `extra-args`:
 
 ```yaml
-      - uses: abicheck/abicheck@v0.3.0
+      - uses: abicheck/abicheck@v0.5.0
         with:
           old-library: libfoo.so.1
           new-library: build/libfoo.so.2
@@ -517,7 +517,7 @@ against itself (no real ABI change) — the app-scoped verdict reports
 COMPATIBLE only if every symbol it uses resolves:
 
 ```yaml
-      - uses: abicheck/abicheck@v0.3.0
+      - uses: abicheck/abicheck@v0.5.0
         with:
           old-library: build/libfoo.so
           new-library: build/libfoo.so

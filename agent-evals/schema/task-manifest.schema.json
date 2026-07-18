@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/abicheck/abicheck/agent-evals/schema/task-manifest.schema.json",
+  "title": "abicheck agent-eval task manifest",
+  "description": "Schema for agent-evals/tasks/<task-name>/manifest.yaml — a behavioral coding-agent evaluation task (CLAUDE.md M1-5). See agent-evals/README.md for the full contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "description",
+    "base_commit",
+    "prompt",
+    "allowed_paths",
+    "required_checks",
+    "hidden_tests",
+    "forbidden"
+  ],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Task identifier. Must match the containing directory name.",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+    },
+    "description": {
+      "type": "string",
+      "description": "One-line human summary of what the task asks the agent to do."
+    },
+    "base_commit": {
+      "type": "string",
+      "description": "Full 40-character git commit SHA the task is scored against. The agent's working tree must start here.",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "prompt": {
+      "type": "string",
+      "description": "The instruction given to the agent under evaluation, verbatim."
+    },
+    "allowed_paths": {
+      "type": "array",
+      "description": "Glob patterns (relative to repo root) the agent's diff must stay within. A change touching a path outside this list fails scoring regardless of hidden-test outcome.",
+      "items": { "type": "string" },
+      "minItems": 1
+    },
+    "required_checks": {
+      "type": "array",
+      "description": "scripts/verify.py profile names the agent's change must pass (e.g. \"pr\") before hidden tests are even run.",
+      "items": { "type": "string", "enum": ["fast", "pr", "full"] },
+      "minItems": 1
+    },
+    "hidden_tests": {
+      "type": "array",
+      "description": "Paths (relative to this task directory) to pytest files the agent never sees, run after required_checks pass.",
+      "items": { "type": "string" },
+      "minItems": 1
+    },
+    "forbidden": {
+      "type": "array",
+      "description": "Named actions that fail the task immediately if detected, independent of whether hidden tests pass — see README.md for the meaning of each tag.",
+      "items": {
+        "type": "string",
+        "enum": [
+          "edit-generated-output-directly",
+          "weaken-existing-test",
+          "expand-import-cycle-allowlist",
+          "edit-hidden-tests",
+          "skip-required-checks"
+        ]
+      }
+    },
+    "timeout_seconds": {
+      "type": "integer",
+      "description": "Wall-clock budget for the agent's attempt. Optional; the runner applies a default if omitted.",
+      "minimum": 1
+    }
+  }
+}

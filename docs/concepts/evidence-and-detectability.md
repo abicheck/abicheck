@@ -78,6 +78,17 @@ targets: **141/141 targets scanned at every pinned depth**. FP/FN math uses the
 compatible/no-change outcomes. Bundle-component results are structural
 diagnostics only; the catalog keeps one canonical case-level verdict.
 
+> **Freshness note.** This 141-target pin predates the catalog's growth to
+> 193 cases (159 of them compilable `.so`-pair lanes today — see [Tool
+> Comparison's "Which denominator is which"](../reference/tool-comparison.md)
+> for how that split is derived and kept in sync). The table below has not
+> been re-run against the current catalog; treat the percentages as
+> directionally representative of each depth's value, not as current exact
+> counts. Regenerating it against all current `.so`-pair targets is a
+> tracked follow-up, matching the same caveat on the [scan-depth matrix
+> row](../reference/tool-comparison.md#current-scan-quality-snapshot) in
+> Tool Comparison.
+
 | Pinned scan depth | Eval targets | Correct verdicts | Correct verdict coverage | False positives | False negatives | What this says about the layer today |
 |---|---:|---:|---:|---:|---:|---|
 | `binary` | 141 | 79 | 56.0% | 1 | 61 | Cheap artifact floor; many API/header/source-only breaks are invisible. |

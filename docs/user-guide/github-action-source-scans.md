@@ -41,7 +41,7 @@ jobs:
         run: cmake -B build -S . && cmake --build build
 
       - name: Source-intelligence scan
-        uses: abicheck/abicheck@v0.3.0
+        uses: abicheck/abicheck@v0.5.0
         with:
           mode: scan
           new-library: build/libfoo.so
@@ -63,7 +63,7 @@ base ref is available.
 for `auto` (risk-driven, best paired with `since:`):
 
 ```yaml
-      - uses: abicheck/abicheck@v0.4.0
+      - uses: abicheck/abicheck@v0.5.0
         with:
           mode: scan
           new-library: build/libfoo.so
@@ -99,7 +99,7 @@ Run the intra-version hygiene checks against one build — no old version needed
 Useful as a standing lint on the default branch:
 
 ```yaml
-      - uses: abicheck/abicheck@v0.3.0
+      - uses: abicheck/abicheck@v0.5.0
         with:
           mode: scan
           new-library: build/libfoo.so
@@ -116,7 +116,7 @@ projected per-layer cost (TU count, seconds) — without scanning anything,
 always exiting 0. Handy when sizing a budget for a large repo:
 
 ```yaml
-      - uses: abicheck/abicheck@v0.3.0
+      - uses: abicheck/abicheck@v0.5.0
         with:
           mode: scan
           new-library: build/libfoo.so
@@ -133,7 +133,7 @@ finding for it exit `2` (the API_BREAK tier); add `fail-on-api-break: true` so
 that exit turns the step red:
 
 ```yaml
-      - uses: abicheck/abicheck@v0.3.0
+      - uses: abicheck/abicheck@v0.5.0
         with:
           mode: scan
           new-library: build/libfoo.so
@@ -161,7 +161,7 @@ such snapshots) carries the L3/L4/L5 findings — no out-of-band directories:
 
 ```yaml
       - name: Dump baseline with build + source evidence
-        uses: abicheck/abicheck@v0.3.0
+        uses: abicheck/abicheck@v0.5.0
         with:
           mode: dump
           new-library: build/libfoo.so

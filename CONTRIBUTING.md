@@ -2,6 +2,11 @@
 
 Thank you for your interest in contributing!
 
+> Using a coding agent? [`AGENTS.md`](AGENTS.md) is the canonical,
+> vendor-neutral repository contract (commands, architecture map,
+> invariants) — `CLAUDE.md`, `.github/copilot-instructions.md`, and
+> `.cursor/rules/` all point back to it rather than keeping their own copy.
+
 ## Requirements
 
 - Python >= 3.10
@@ -34,10 +39,10 @@ environments layer on the system tools for the heavier marker lanes:
 
 | Environment | `pixi run -e <env> <task>` | Adds |
 |-------------|------------------------------|------|
-| `default` | `test`, `test-cov`, `lint`, `fmt`, `fmt-check`, `typecheck`, `check` | (base — no system tools) |
+| `default` | `test`, `test-cov`, `lint`, `fmt`, `fmt-check`, `typecheck`, `check` | `mkdocs` + plugins, `build`/`twine` (so `pixi run check` — the full `pr` profile — completes without skipping `docs-build`/`distribution-build`) |
 | `integration` | `test-integration` | `castxml`, C/C++ compiler, `cmake` (linux-64/osx-64/osx-arm64 only — no MSVC via conda-forge; see `integration` marker below) |
 | `parity` | `test-libabigail`, `test-abicc` | `libabigail` (`abidiff`) + `abi-compliance-checker` (linux-64 only, conda-forge doesn't ship these elsewhere) |
-| `docs` | `docs-build`, `docs-serve` | `mkdocs` + plugins |
+| `docs` | `docs-build`, `docs-serve` | `mkdocs` + plugins (standalone subset of `default`, for a docs-only environment) |
 
 Note: the `integration`/`parity` environments pull `castxml`/`libabigail`/
 `abi-compliance-checker` from conda-forge at whatever version is current,
@@ -73,6 +78,29 @@ pip install -e ".[dev]"
 ## Testing
 
 abicheck uses a layered testing strategy with `pytest`.
+
+### Before opening a PR: `scripts/verify.py`
+
+The commands below are useful for iterating, but the single source of truth
+for "is this ready for review" is `scripts/verify.py` — the same
+orchestrator `pixi run check`, `.pre-commit-config.yaml`, and CI call
+through, so there's exactly one place check commands are defined:
+
+```bash
+python scripts/verify.py --profile fast   # inner-loop: lint, format, types, fast unit tests
+python scripts/verify.py --profile pr     # what CI actually requires: + golden tests, 95% coverage floor, ai-readiness, FP-rate/tier-accuracy/doc-sync/FAIR-metadata gates
+python scripts/verify.py --profile full   # + integration/parity/mutation/packaging lanes (skipped, not failed, if your environment lacks a tool)
+```
+
+`pixi run check` is exactly `python scripts/verify.py --profile pr` — treat
+either as the real definition of done, not the fast-lane command alone.
+`pixi`'s `default` environment already provisions `mkdocs` and `build`/`twine`
+(the `docs-build`/`distribution-build` steps' dependencies), so `pixi run
+check` is complete out of the box. With plain pip, `pip install -e
+".[dev,docs,dist]"` (not just `[dev]`) is the equivalent — without it, those
+two steps are skipped rather than run, and `verify.py` prints a loud warning
+that the `pr`-profile run is incomplete rather than silently reporting
+success.
 
 ### Quick tests (default CI gate)
 

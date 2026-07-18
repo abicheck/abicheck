@@ -49,11 +49,28 @@ EXAMPLES_DIR = REPO_DIR / "examples"
 
 #: (case dir, expected verdict, expected changed kinds beyond the L5 risk
 #: finding all four share).
+#:
+#: case187/191 name a DWARF-sourced kind (``struct_field_type_changed``/
+#: ``struct_size_changed``) that is genuinely unreachable on macOS: abicheck
+#: has no Mach-O debug-map/N_OSO resolution, so ``_dump_macho`` never attempts
+#: DWARF at all (headers + export table only, unlike ``_dump_elf``). On Linux
+#: the same ``.so`` embeds DWARF directly (no such indirection needed), so the
+#: DWARF-sourced kind fires there in addition to the header-sourced one every
+#: platform gets. Both kinds are independently sufficient for BREAKING per
+#: each case's README; this only picks the one the current platform can prove.
+_STRUCT_FIELD_KIND = (
+    "type_field_type_changed"
+    if sys.platform == "darwin"
+    else "struct_field_type_changed"
+)
+_STRUCT_SIZE_KIND = (
+    "type_size_changed" if sys.platform == "darwin" else "struct_size_changed"
+)
 CASES = [
     (
         "case187_public_struct_private_field_type",
         "BREAKING",
-        {"struct_field_type_changed"},
+        {_STRUCT_FIELD_KIND},
     ),
     (
         "case188_public_class_private_base_class",
@@ -68,7 +85,7 @@ CASES = [
     (
         "case191_header_only_graph_field_type",
         "BREAKING",
-        {"struct_size_changed"},
+        {_STRUCT_SIZE_KIND},
     ),
 ]
 
@@ -131,16 +148,13 @@ def test_header_graph_reproduces_documented_finding(
         ["-Wl,-install_name,@rpath/lib.dylib"] if sys.platform == "darwin" else []
     )
     for src, out in ((case_dir / "v1.cpp", libv1), (case_dir / "v2.cpp", libv2)):
-        # Compile and link as two steps (not one -shared invocation) so the
-        # intermediate .o persists in tmp_path for the rest of the test: on
-        # macOS, `-g` embeds only a debug *map* pointing at the compiler's
-        # object file (ld64's N_OSO stabs), not self-contained DWARF, so an
-        # ephemeral one-shot compile+link's temp .o vanishing before abicheck
-        # reads it silently degrades every struct/base/parameter-type finding
-        # to no DWARF evidence. Every other example case avoids this because
-        # CMake's build tree naturally keeps its .o files around; harmless,
-        # equivalent to one-shot compilation, on Linux (DWARF is embedded
-        # directly in the ELF, no such indirection).
+        # Compile and link as two steps (not one -shared invocation): harmless,
+        # equivalent to one-shot compilation on every platform this test runs
+        # on (abicheck never reads DWARF/a debug map for Mach-O at all --
+        # _dump_macho is headers + export table only, unlike _dump_elf -- so
+        # there is no debug-map indirection here to preserve). Kept for
+        # parity with every other example case, whose CMake build tree
+        # naturally keeps its .o files around.
         obj = out.with_suffix(".o")
         compile_result = subprocess.run(
             [cxx, "-std=c++17", "-fPIC", "-g", "-c", str(src), "-o", str(obj)],

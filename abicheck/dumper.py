@@ -1804,20 +1804,23 @@ def _dump_macho(
             language_profile=profile_hint,
         )
 
-    # On macOS, C symbols have a leading underscore in the export table
-    # (Mach-O convention). Strip it for matching against the header-AST names.
-    exported_no_underscore: set[str] = set()
-    for sym in exported_dynamic:
-        if sym.startswith("_"):
-            exported_no_underscore.add(sym[1:])
-        else:
-            exported_no_underscore.add(sym)
+    # `macho_meta.exports` entries are already normalized (macho_metadata.py
+    # strips the Mach-O ABI's leading underscore itself while walking the
+    # export trie/symtab — see its own "Strip leading underscore" step), so
+    # `exported_dynamic` here already reads e.g. "_ZN4demo9configureE..." for
+    # a C++ symbol or "foo" for a plain C one, matching the header-AST names
+    # castxml computes verbatim. A second strip used to run here too, which
+    # was harmless for C symbols but corrupted every Itanium-mangled C++ name
+    # by eating the leading underscore of its own "_Z..." prefix — silently
+    # guaranteeing zero header/export matches for any C++ Mach-O binary and
+    # falling back to export-table-only mode (observed on macOS CI; the
+    # equivalent ELF path never had this double-strip).
     parser = _header_ast_parser(
         headers, extra_includes, backend=header_backend, compiler=compiler,
         gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
         gcc_option_tokens=gcc_option_tokens,
         sysroot=sysroot, nostdinc=nostdinc, lang=lang,
-        exported_dynamic=exported_no_underscore, exported_static=exported_no_underscore,
+        exported_dynamic=exported_dynamic, exported_static=exported_dynamic,
         public_header_paths=[str(h) for h in headers] + [str(h) for h in (public_headers or [])],
         public_dir_paths=[str(d) for d in (public_header_dirs or [])],
         extra_hash_dirs=extra_hash_dirs,

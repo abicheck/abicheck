@@ -22,18 +22,34 @@ jobs:
       security-events: write
       actions: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
         with:
           fetch-depth: 0
       - id: agentready
-        uses: napetrov/agentready@main
+        uses: napetrov/agentready@ad673222d20c6bc9358b6d6d8d72ebb91141e1a7  # main
         with:
           mode: scan
           job-summary: true
           upload-sarif: true
+      - name: Filter locationless SARIF results
+        if: always() && steps.agentready.outputs.sarif-report-path
+        run: |
+          # codeql-action rejects the *whole file* if even one result has no
+          # location ("locationFromSarifResult: expected at least one
+          # location") -- agentready emits one result per checked rule
+          # (including passing/informational ones), some of which are
+          # repo-level and carry no location. Skipping the upload outright
+          # (the previous approach) also threw away every valid, location-
+          # bearing finding whenever a single locationless one was mixed in.
+          # Filter out only the locationless entries so real findings still
+          # reach code scanning; codeql-action accepts a run with zero
+          # results fine, so no further gating is needed after this.
+          f="${{ steps.agentready.outputs.sarif-report-path }}"
+          jq '(.runs[].results) |= [.[] | select((.locations // []) | length > 0)]' "$f" > "$f.filtered"
+          mv "$f.filtered" "$f"
       - name: Upload SARIF
         if: always() && steps.agentready.outputs.sarif-report-path
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a  # v4
         with:
           sarif_file: ${{ steps.agentready.outputs.sarif-report-path }}
           category: agentready
@@ -48,11 +64,11 @@ jobs:
       security-events: write
       actions: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
         with:
           fetch-depth: 0
       - id: agentready
-        uses: napetrov/agentready@main
+        uses: napetrov/agentready@ad673222d20c6bc9358b6d6d8d72ebb91141e1a7  # main
         with:
           mode: diff
           base-ref: origin/${{ github.base_ref }}
@@ -61,9 +77,25 @@ jobs:
           job-summary: true
           pr-comment: true
           upload-sarif: true
+      - name: Filter locationless SARIF results
+        if: always() && steps.agentready.outputs.sarif-report-path
+        run: |
+          # codeql-action rejects the *whole file* if even one result has no
+          # location ("locationFromSarifResult: expected at least one
+          # location") -- agentready emits one result per checked rule
+          # (including passing/informational ones), some of which are
+          # repo-level and carry no location. Skipping the upload outright
+          # (the previous approach) also threw away every valid, location-
+          # bearing finding whenever a single locationless one was mixed in.
+          # Filter out only the locationless entries so real findings still
+          # reach code scanning; codeql-action accepts a run with zero
+          # results fine, so no further gating is needed after this.
+          f="${{ steps.agentready.outputs.sarif-report-path }}"
+          jq '(.runs[].results) |= [.[] | select((.locations // []) | length > 0)]' "$f" > "$f.filtered"
+          mv "$f.filtered" "$f"
       - name: Upload SARIF
         if: always() && steps.agentready.outputs.sarif-report-path
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a  # v4
         with:
           sarif_file: ${{ steps.agentready.outputs.sarif-report-path }}
           category: agentready

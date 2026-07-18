@@ -874,6 +874,34 @@ def test_ast_mapping_emits_external_linkage_variables_only() -> None:
     assert {e.qualified_name for e in tu.constexpr_values} == {"ns::kN"}
 
 
+def test_mangled_strips_macos_mach_o_underscore() -> None:
+    from abicheck.buildsource.source_extractors.clang import _mangled
+
+    # On Darwin, clang's own -ast-dump=json reports a C++ decl's mangledName
+    # with the Mach-O ABI's extra linker-symbol-table underscore still
+    # attached ("__ZN..." rather than "_ZN...") -- the same decoration
+    # macho_metadata.py already strips off the *binary's* export table.
+    # SourceEntity.identity() keys a public decl's L4/L5 node on this value;
+    # clang_source_edges.py builds the same TU's L5 edges by reusing
+    # call_graph.py's/type_graph.py's own identity functions, which already
+    # strip this decoration -- left unstripped here, the two would land on
+    # different node ids on macOS, breaking the --sources/--build-info
+    # path's public-entry reachability the same way the header-only path
+    # was broken before that fix.
+    assert (
+        _mangled({"mangledName": "__ZN4demo9configureEPvE", "name": "configure"})
+        == "_ZN4demo9configureEPvE"
+    )
+    # No-op when there's no macOS decoration to strip (Linux/Windows clang,
+    # or a name that already omits it).
+    assert (
+        _mangled({"mangledName": "_ZN4demo9configureEPvE", "name": "configure"})
+        == "_ZN4demo9configureEPvE"
+    )
+    # extern "C" case (mangledName == name) still returns "" regardless.
+    assert _mangled({"mangledName": "foo", "name": "foo"}) == ""
+
+
 def test_mangled_internal_linkage_marker() -> None:
     from abicheck.buildsource.source_extractors.clang import (
         _mangled_has_internal_linkage as internal,

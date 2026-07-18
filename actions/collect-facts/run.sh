@@ -50,6 +50,29 @@ _native_pwd() {
   pwd
 }
 
+# Normalize an arbitrary path to the mixed form (drive letter + forward
+# slashes) via cygpath -m, same rationale as _native_pwd above but for a
+# path handed in rather than $(pwd). Needed because $CMPLR_ROOT (a native
+# Windows env var a vendor batch/setup step sets, e.g. "C:\Program Files
+# (x86)\Intel\oneAPI\compiler\latest") and Git Bash's own POSIX-style view
+# of `command -v icx`/`icpx` are two different representations of
+# potentially the same path -- comparing them as raw strings (as
+# _bundled_llvm_cmake_prefix below used to) can never match even after
+# accounting for separator differences alone (Codex review). A no-op
+# outside MINGW/MSYS/CYGWIN or when cygpath is unavailable.
+_normalize_win_path() {
+  local path="$1"
+  [[ -z "$path" ]] && return
+  case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN*)
+      if command -v cygpath >/dev/null 2>&1; then
+        cygpath -m "$path" 2>/dev/null && return
+      fi
+      ;;
+  esac
+  printf '%s' "$path"
+}
+
 PHASE="${INPUT_PHASE:-auto}"
 PRODUCER_IN="${INPUT_PRODUCER:-auto}"
 SOURCES="${INPUT_SOURCES:-.}"
@@ -69,6 +92,7 @@ LIBRARY="${INPUT_LIBRARY:-}"
 EXTRACTOR="${INPUT_EXTRACTOR:-auto}"
 COMPILER="${INPUT_COMPILER:-clang++}"
 INSTALL_DEPS="${INPUT_INSTALL_DEPS:-true}"
+LLVM_CMAKE_PREFIX="${INPUT_LLVM_CMAKE_PREFIX:-}"
 ACTION_PATH="${ACTION_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 
 _fail() {
@@ -143,9 +167,142 @@ _detect_producer() {
 
 # Extract the LLVM/Clang major version number from a `clang --version`-style
 # string (e.g. "clang version 18.1.3" -> "18"). Empty output means unparsable.
+# Fallback only -- see _llvm_major_from_predefined_macros below, which is
+# the primary detection path and handles vendor compilers whose --version
+# banner does not say "clang version N" at all (e.g. Intel's icpx/icx print
+# "Intel(R) oneAPI DPC++/C++ Compiler 2024.0.0 ...", their own product
+# version, not the underlying LLVM major).
 _llvm_major_from_version_string() {
   local version_output="$1"
   printf '%s' "$version_output" | grep -oE 'clang version [0-9]+' | grep -oE '[0-9]+' | head -1
+}
+
+# Ask the compiler itself which Clang major it is, via the predefined
+# __clang_major__ macro (`-dM -E` dumps every predefined macro; grep the one
+# we want). This works for upstream/Apple/Debian Clang exactly like the
+# --version parser above, but ALSO works for vendor compilers built on top
+# of Clang whose --version banner reports a vendor product version instead
+# of the LLVM major -- notably Intel's icpx/icx (oneAPI DPC++/C++ Compiler),
+# whose --version says e.g. "2024.0.0", not any Clang/LLVM number at all.
+# __clang_major__ always reports the real value the loading Clang actually
+# is, which is exactly the thing that must match for the plugin to load
+# (Codex review: regex-on---version alone cannot support icpx/icx).
+# Empty output means the compiler doesn't behave like Clang here (e.g. gcc,
+# or `-dM -E` itself failed) -- callers fall back to _llvm_major_from_version_string.
+_llvm_major_from_predefined_macros() {
+  local compiler="$1" defines
+  defines=$("$compiler" -dM -E -x c++ - < /dev/null 2>/dev/null) || return 0
+  # A successful dump that simply has no __clang_major__ (e.g. gcc, which
+  # also supports -dM -E) is a successful EMPTY result, not a failure --
+  # without the explicit `return 0`, the final grep's own no-match exit
+  # status (1) would leak out as this function's own exit status (Codex
+  # review). Callers here only check `-z "$major"`, not the exit status,
+  # so this had no live bug today, but the function's contract should
+  # still be "empty means nothing found", matching
+  # _llvm_major_from_version_string's equivalent contract above (there,
+  # incidentally, via a trailing `head -1` that always exits 0).
+  printf '%s' "$defines" | grep -oE '#define __clang_major__ [0-9]+' | grep -oE '[0-9]+$'
+  return 0
+}
+
+# Resolve a CMake prefix path for a vendor-bundled LLVM/Clang install, so
+# the plugin builds against the toolchain's own matching dev files instead
+# of a separately apt-installed clang-N/llvm-N-dev/libclang-N-dev that may
+# not even exist for a vendor major version (Codex review: Intel's icpx/icx
+# ship their own LLVM/Clang CMake package under $CMPLR_ROOT and are never
+# available as Ubuntu apt packages). Priority: an explicit override (the
+# llvm-cmake-prefix input) always wins; otherwise $CMPLR_ROOT (the env var
+# Intel's oneAPI setvars.sh/environment sets to the compiler's own install
+# root) auto-applies ONLY if it looks like it bundles an LLVM CMake package
+# AND the resolved $COMPILER binary actually lives under that same root --
+# a job can source oneAPI for unrelated tools while `compiler:` still
+# resolves to a different, unrelated Clang (e.g. the default clang++), and
+# building against $CMPLR_ROOT's LLVM in that case would produce a plugin
+# that doesn't match the Clang that later loads it via -fplugin= (Codex
+# review). Empty output means neither applies -- caller falls back to the
+# apt-get install path.
+#
+# The $CMPLR_ROOT-derived path is always an installation root containing
+# lib/cmake/{llvm,clang} (matching the llvm-cmake-prefix input's own
+# documented contract in action.yml), and this function always returns the
+# "lib/cmake" level one directory below that root. The explicit
+# llvm-cmake-prefix override accepts EITHER shape for that same reason it
+# exists as an escape hatch in the first place -- a user reasonably setting
+# it to the already-resolved "lib/cmake" prefix (mirroring either
+# $CMPLR_ROOT's own auto-detected internal shape, or this same script's
+# existing $(llvm-config --cmakedir)/.. convention a few lines down) must
+# not be double-suffixed into "lib/cmake/lib/cmake", which would make
+# find_package(LLVM/Clang CONFIG) miss the vendor package entirely (Codex
+# review). Disambiguated by directory existence rather than string shape:
+# if $explicit/lib/cmake/llvm exists, treat $explicit as the root and
+# append "lib/cmake"; else if $explicit/llvm exists, $explicit is already
+# the "lib/cmake" level -- pass it through unmodified. Neither existing
+# (e.g. the path doesn't exist yet) falls back to the documented root
+# contract, matching the explicit branch's original fix.
+_bundled_llvm_cmake_prefix() {
+  local explicit="$1" cmplr_root="$2" compiler_path="$3"
+  if [[ -n "$explicit" ]]; then
+    if [[ -d "$explicit/lib/cmake/llvm" ]]; then
+      printf '%s' "$explicit/lib/cmake"
+    elif [[ -d "$explicit/llvm" ]]; then
+      printf '%s' "$explicit"
+    else
+      printf '%s' "$explicit/lib/cmake"
+    fi
+    return
+  fi
+  # Normalize both to the same representation before comparing -- on a real
+  # windows-latest runner, $CMPLR_ROOT (set natively by a vendor batch/
+  # setup step, e.g. "C:\Program Files (x86)\Intel\oneAPI\compiler\latest")
+  # and $(command -v "$COMPILER")'s Git-Bash-POSIX view of the same binary
+  # can be two entirely different-looking paths, not just differently
+  # separated -- a raw string/glob compare (even one accepting either
+  # separator) can never match them (Codex review).
+  cmplr_root=$(_normalize_win_path "$cmplr_root")
+  compiler_path=$(_normalize_win_path "$compiler_path")
+  # Still accept either separator after normalization: _normalize_win_path
+  # is a no-op outside MINGW/MSYS/CYGWIN or without cygpath on PATH, so on
+  # a plain POSIX host (or a Windows host missing cygpath) compiler_path
+  # can still legitimately be backslash-separated (regression caught by
+  # test_detects_cmplr_root_with_llvm_cmake_package on windows-latest CI).
+  #
+  # Require BOTH lib/cmake/llvm and lib/cmake/clang here, not just llvm
+  # (Codex review): the plugin's CMakeLists.txt does
+  # find_package(LLVM REQUIRED CONFIG) *and*
+  # find_package(Clang REQUIRED CONFIG) -- a $CMPLR_ROOT with only a
+  # partial SDK (LLVMConfig.cmake present, ClangConfig.cmake missing) would
+  # otherwise return a prefix here, which makes _prepare_clang_plugin skip
+  # its apt-get fallback entirely (INSTALL_DEPS is ignored once
+  # bundled_cmake_prefix is non-empty) and then fail cmake configure --
+  # strictly worse than the pre-auto-detect behavior, where apt-get would
+  # at least have been attempted and might have supplied a working
+  # libclang-$major-dev. This auto-detect path is inferred, not something
+  # the caller opted into the way an explicit llvm-cmake-prefix is, so it
+  # should not silently take over from a working fallback on a partial
+  # match.
+  if [[ -n "$cmplr_root" && -d "$cmplr_root/lib/cmake/llvm" \
+      && -d "$cmplr_root/lib/cmake/clang" \
+      && ( "$compiler_path" == "$cmplr_root/"* || "$compiler_path" == "$cmplr_root"\\* ) ]]; then
+    printf '%s' "$cmplr_root/lib/cmake"
+    return
+  fi
+}
+
+# Choose the right remediation hint for a `cmake configure` failure while
+# building the Clang plugin. The pre-existing message (the else branch)
+# assumed apt-get was the only way to have reached this cmake invocation and
+# told the user to check the libclang-<major>-dev package -- now that the
+# vendor-bundled path (_bundled_llvm_cmake_prefix above) can also reach it,
+# that hint is actively wrong there: no apt package was ever involved, so
+# "install libclang-N-dev" sends a user with e.g. a broken/partial Intel
+# oneAPI install chasing a package that doesn't exist for their toolchain.
+_cmake_configure_failure_hint() {
+  local bundled_cmake_prefix="$1" llvm_cmake_dir="$2" major="$3"
+  if [[ -n "$bundled_cmake_prefix" ]]; then
+    printf '%s' "the vendor-bundled LLVM/Clang CMake package at '$bundled_cmake_prefix' looks incomplete or mismatched for LLVM $major -- check that '$llvm_cmake_dir' actually contains a full LLVM+Clang CMake install (LLVMConfig.cmake, ClangConfig.cmake), or override llvm-cmake-prefix with a different path."
+  else
+    printf '%s' "see contrib/abicheck-clang-plugin/README.md#build (needs the full libclang-$major-dev package, not just clang-$major)."
+  fi
 }
 
 # Validate the phase/producer combination the way action.yml documents it:
@@ -339,22 +496,51 @@ _prepare_wrapper() {
 
 _prepare_clang_plugin() {
   command -v "$COMPILER" >/dev/null 2>&1 || _fail "compiler '$COMPILER' not found on PATH -- producer: clang-plugin needs the loading Clang available to detect and match its LLVM major."
-  local version_output major
-  version_output=$("$COMPILER" --version 2>&1)
-  major=$(_llvm_major_from_version_string "$version_output")
-  [[ -n "$major" ]] || _fail "could not parse an LLVM major version from '$COMPILER --version':
+  local version_output="" major
+  major=$(_llvm_major_from_predefined_macros "$COMPILER")
+  if [[ -z "$major" ]]; then
+    version_output=$("$COMPILER" --version 2>&1)
+    major=$(_llvm_major_from_version_string "$version_output")
+  fi
+  [[ -n "$major" ]] || _fail "could not determine the Clang/LLVM major version '$COMPILER' is based on -- tried '__clang_major__' via '$COMPILER -dM -E -x c++ -' and parsing '$COMPILER --version':
 $version_output"
   echo "detected LLVM major $major from $COMPILER"
 
-  if [[ "$INSTALL_DEPS" == "true" ]]; then
+  local bundled_cmake_prefix compiler_path
+  compiler_path=$(command -v "$COMPILER" 2>/dev/null || true)
+  bundled_cmake_prefix=$(_bundled_llvm_cmake_prefix "$LLVM_CMAKE_PREFIX" "${CMPLR_ROOT:-}" "$compiler_path")
+
+  if [[ -n "$bundled_cmake_prefix" ]]; then
+    # A vendor toolchain (e.g. Intel's icpx/icx oneAPI compilers) bundles
+    # its own matching LLVM/Clang CMake package -- use it instead of
+    # apt-get, which either doesn't carry that major at all or would build
+    # against a *different* LLVM than the one $COMPILER actually loads
+    # (Codex review).
+    echo "using vendor-bundled LLVM/Clang CMake package at '$bundled_cmake_prefix' -- skipping apt-get install-deps."
+  elif [[ -z "$LLVM_CMAKE_PREFIX" && -n "${CMPLR_ROOT:-}" ]]; then
+    # $CMPLR_ROOT is set (a vendor environment, e.g. Intel oneAPI's
+    # setvars.sh, was sourced) but auto-detection found no lib/cmake/llvm
+    # under it -- worth calling out explicitly rather than silently falling
+    # through to apt-get, since this is the expected outcome for a *stock*
+    # Intel oneAPI DPC++/C++ Compiler install: its CMake packages are
+    # IntelSYCL/IntelDPCPP (compiler-flag helpers for consuming projects,
+    # found under $CMPLR_ROOT/lib/cmake/{IntelSYCL,IntelDPCPP}), not a
+    # standard LLVM/Clang CMake export set -- so there is usually nothing
+    # under $CMPLR_ROOT for auto-detection to find at all (Codex review: the
+    # llvm-cmake-prefix doc previously asserted this auto-detects "true for
+    # a sourced Intel oneAPI environment", which does not hold for the
+    # actual package layout).
+    echo "::notice::\$CMPLR_ROOT is set ('$CMPLR_ROOT') but no LLVM/Clang CMake package was found at '$CMPLR_ROOT/lib/cmake/llvm' -- this is expected for a stock Intel oneAPI DPC++/C++ Compiler install, which ships IntelSYCL/IntelDPCPP CMake modules there instead, not an LLVM/Clang plugin-development SDK. Falling back to apt-get, which will likely fail for a vendor LLVM major. If you have a matching LLVM+Clang CMake package available (e.g. built separately to match '$COMPILER'), set the llvm-cmake-prefix input to it."
+  fi
+  if [[ -z "$bundled_cmake_prefix" && "$INSTALL_DEPS" == "true" ]]; then
     if [[ "$(uname -s)" == "Linux" ]] && command -v apt-get >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1; then
       echo "::group::Install clang-$major dev packages for the plugin build"
       sudo apt-get update -qq
       sudo apt-get install -y -qq "clang-$major" "llvm-$major-dev" "libclang-$major-dev" > /dev/null \
-        || _fail "failed to install clang-$major/llvm-$major-dev/libclang-$major-dev -- producer: clang-plugin needs the exact-major Clang development package (see contrib/abicheck-clang-plugin/README.md#build)."
+        || _fail "failed to install clang-$major/llvm-$major-dev/libclang-$major-dev -- producer: clang-plugin needs the exact-major Clang development package (see contrib/abicheck-clang-plugin/README.md#build). If '$COMPILER' is a vendor toolchain that bundles its own LLVM/Clang (e.g. Intel's icpx/icx under \$CMPLR_ROOT), set the llvm-cmake-prefix input instead of relying on apt."
       echo "::endgroup::"
     else
-      echo "::warning::install-deps: true but this OS/environment cannot apt-get install the Clang dev package automatically. Ensure the libclang-$major-dev equivalent is already installed."
+      echo "::warning::install-deps: true but this OS/environment cannot apt-get install the Clang dev package automatically. Ensure the libclang-$major-dev equivalent is already installed, or set llvm-cmake-prefix to a vendor-bundled LLVM/Clang CMake package."
     fi
   fi
 
@@ -372,10 +558,16 @@ $version_output"
     _fail "cmake not found -- required to build the Clang plugin (contrib/abicheck-clang-plugin)."
   fi
   local llvm_cmake_dir
-  llvm_cmake_dir=$(llvm-config-"$major" --cmakedir 2>/dev/null || llvm-config --cmakedir 2>/dev/null || true)
+  if [[ -n "$bundled_cmake_prefix" ]]; then
+    llvm_cmake_dir="$bundled_cmake_prefix/llvm"
+  else
+    llvm_cmake_dir=$(llvm-config-"$major" --cmakedir 2>/dev/null || llvm-config --cmakedir 2>/dev/null || true)
+  fi
+  local cmake_hint
+  cmake_hint=$(_cmake_configure_failure_hint "$bundled_cmake_prefix" "$llvm_cmake_dir" "$major")
   cmake -S "$plugin_src" -B "$build_dir" \
     ${llvm_cmake_dir:+-DCMAKE_PREFIX_PATH="$llvm_cmake_dir/.."} \
-    || _fail "cmake configure failed for the Clang plugin -- see contrib/abicheck-clang-plugin/README.md#build (needs the full libclang-$major-dev package, not just clang-$major)."
+    || _fail "cmake configure failed for the Clang plugin -- $cmake_hint"
   cmake --build "$build_dir" || _fail "cmake build failed for the Clang plugin."
   echo "::endgroup::"
 

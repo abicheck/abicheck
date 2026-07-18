@@ -80,16 +80,54 @@ inputs:
     description: >
       Compiler used for the build (informational for replay/wrapper; for
       clang-plugin this selects which clang the plugin is built against and
-      must match the clang that later loads it via -fplugin=).
+      must match the clang that later loads it via -fplugin=). Vendor
+      compilers built on top of Clang are supported here too (e.g. Intel's
+      icpx/icx) -- the real LLVM major is read from the compiler's own
+      __clang_major__ macro, not parsed out of --version (which for icpx/icx
+      prints a vendor product version, not an LLVM number). See
+      llvm-cmake-prefix below for pointing the plugin build at that vendor's
+      bundled LLVM/Clang dev files.
     required: false
     default: 'clang++'
   install-deps:
     description: >
       Install system dependencies needed by the selected producer (clang/
       castxml for replay and wrapper; the matching libclang-<N>-dev package
-      for clang-plugin). Set to false if pre-installed.
+      for clang-plugin). Set to false if pre-installed. Ignored for
+      clang-plugin when a vendor-bundled LLVM/Clang is found (see
+      llvm-cmake-prefix) -- that toolchain's own dev files are used instead
+      of apt.
     required: false
     default: 'true'
+  llvm-cmake-prefix:
+    description: >
+      clang-plugin only: explicit CMake prefix for a vendor-bundled
+      LLVM/Clang to build the plugin against, instead of installing a
+      system clang-<N>-dev package. Accepts either an installation root (a
+      directory containing lib/cmake/llvm and lib/cmake/clang, the same
+      shape as $CMPLR_ROOT below) or the already-resolved "lib/cmake" level
+      directly (a directory itself containing llvm/ and clang/) --
+      disambiguated by checking which one actually exists on disk, so
+      either the vendor's own root or a pre-resolved path (e.g. matching
+      the output of `llvm-config --cmakedir`/..) both work. Needed for
+      compilers that ship their own LLVM/Clang and are never available as
+      an apt package for that major -- e.g. Intel's icpx/icx oneAPI
+      compilers. When omitted, this Action auto-detects a root at
+      $CMPLR_ROOT if it's set, looks like it bundles an LLVM CMake package
+      at $CMPLR_ROOT/lib/cmake/llvm, AND the resolved `compiler` binary
+      actually lives under $CMPLR_ROOT (so a job that merely has oneAPI
+      sourced for unrelated tools, while `compiler:` resolves to a
+      different Clang, does not wrongly build the plugin against a
+      mismatched LLVM). A *stock* Intel oneAPI DPC++/C++ Compiler install
+      does not usually satisfy this -- it ships IntelSYCL/IntelDPCPP CMake
+      modules under $CMPLR_ROOT/lib/cmake instead (compiler-flag helpers
+      for projects consuming the compiler, not an LLVM/Clang
+      plugin-development SDK), so auto-detection alone is not expected to
+      find anything there. Set this explicitly, pointing at a matching
+      LLVM+Clang CMake package if you have one available (e.g. built
+      separately to match the vendor compiler's exact LLVM major).
+    required: false
+    default: ''
   python-version:
     description: 'Python version for setup-python.'
     required: false
@@ -150,5 +188,6 @@ runs:
         INPUT_EXTRACTOR: ${{ inputs.extractor }}
         INPUT_COMPILER: ${{ inputs.compiler }}
         INPUT_INSTALL_DEPS: ${{ inputs.install-deps }}
+        INPUT_LLVM_CMAKE_PREFIX: ${{ inputs.llvm-cmake-prefix }}
         ACTION_PATH: ${{ github.action_path }}
       run: bash "${{ github.action_path }}/run.sh"
