@@ -224,6 +224,20 @@ class TestCoveragePolicy:
         assert result.findings_verdict is None
         assert result.exit_code() == 0
 
+    def test_optional_without_expect_still_aggregates_present_reports(
+        self, tmp_path: Path
+    ):
+        # `--optional macos` with no `--expect`: a present linux BREAKING report
+        # must still be aggregated (no-expect = worst-of over what's present),
+        # not shunted to unbaselined because only an optional id was named.
+        _write_report(tmp_path, LINUX, "BREAKING")
+        result = aggregate_reports_dir(tmp_path, optional=[MACOS])
+
+        assert result.findings_verdict is Verdict.BREAKING
+        assert LINUX in {t.target_id for t in result.analyzed}
+        assert not result.unbaselined
+        assert result.exit_code() == 4
+
     def test_no_expected_set_is_pure_worst_of(self, tmp_path: Path):
         # Backward-compatible with the old heredoc: aggregate whatever is
         # present, no coverage gate.

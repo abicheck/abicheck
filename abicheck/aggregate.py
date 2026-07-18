@@ -445,16 +445,24 @@ def aggregate_reports_dir(
 ) -> AggregateResult:
     """Convenience: load a reports dir and aggregate against an expected set.
 
-    If *required* is empty, the expected set is taken to be exactly the reports
-    found (coverage is then trivially complete — pure worst-of aggregation).
-    Supplying *required* is what turns on the "a missing required target is
-    unknown, not compatible" gate.
+    If *required* is empty, there is no declared required set, so the reports
+    actually present become the expected set (pure worst-of aggregation — a
+    present ``BREAKING`` still gates). Any *optional* ids are tracked as
+    optional on top of that (an explicit ``--optional`` id always stays
+    optional, even if a report for it is present). Supplying *required* is what
+    turns on the "a missing required target is unknown, not compatible" gate.
     """
     found = collect_reports(reports_dir, prefix=prefix)
     required = list(required)
     optional = list(optional)
-    if not required and not optional:
-        expected = {tid: True for tid in found}
+    if not required:
+        # No required set declared → aggregate whatever reports are present
+        # (as the required set for worst-of), plus any declared optional
+        # targets. Explicit optional ids win, so a present report for an
+        # id the caller marked optional stays optional.
+        expected = {tid: False for tid in optional}
+        for tid in found:
+            expected.setdefault(tid, True)
     else:
         expected = expected_from_lists(required, optional)
     return aggregate(expected, found)
