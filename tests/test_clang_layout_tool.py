@@ -32,6 +32,7 @@ import pytest
 from abicheck.clang_layout_tool import (
     LAYOUT_TOOL_ENV_VAR,
     _apply_record_facts,
+    _bare_base_name,
     _compile_flags_from_ast_dump_command,
     _expand_header_inputs,
     apply_layout_facts,
@@ -231,6 +232,116 @@ class TestRunLayoutTool:
         idx = cmd.index("-isystem")
         assert cmd[idx + 1] == "/usr/include/probed-libstdcxx"
 
+    def test_cpp_selfheal_retry_on_missing_cpp_stdlib_header(self, tmp_path):
+        # Codex review: this second, independent clang pass re-derives its own
+        # initial force_cpp guess via _resolve_clang_langmode -- the SAME
+        # content-based heuristic dumper._clang_header_dump used BEFORE ITS
+        # OWN C->C++ self-heal retry. If that initial guess was wrong (e.g. a
+        # pure-#include C++ umbrella header), this tool has to self-heal the
+        # exact same way or it silently loses ALL enrichment on an otherwise-
+        # valid dump.
+        header = tmp_path / "a.h"
+        header.write_text("#include <vector>\n")
+        attempt = {"n": 0}
+
+        def _fake_run(cmd, **kwargs):
+            attempt["n"] += 1
+            if attempt["n"] == 1:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0,
+                    stdout='{"ok": false, "records": []}',
+                    stderr="fatal error: 'cstddef' file not found\n",
+                )
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0,
+                stdout='{"ok": true, "records": [{"qualified_name": "Foo", "size_bits": 32}]}',
+                stderr="",
+            )
+
+        with patch(
+            "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
+        ), patch(
+            "abicheck.clang_layout_tool._resolve_clang_langmode",
+            return_value=(False, False, False, "gnu"),
+        ), patch(
+            "abicheck.clang_layout_tool._resolve_clang_system_includes",
+            return_value=(),
+        ), patch(
+            "abicheck.clang_layout_tool.subprocess.run", side_effect=_fake_run
+        ):
+            result = run_layout_tool("/path/to/tool", [header], [])
+
+        assert attempt["n"] == 2
+        assert result == [{"qualified_name": "Foo", "size_bits": 32}]
+
+    def test_error_header_exclusion_retry(self, tmp_path):
+        # Codex review: mirrors dumper._clang_header_dump's own graceful
+        # #error handling -- a header not meant for direct inclusion must be
+        # dropped and the rest re-parsed, not silently lose the whole
+        # enrichment pass.
+        h_ok = tmp_path / "a.h"
+        h_ok.write_text("struct Foo { int a; };\n")
+        h_bad = tmp_path / "bad.h"
+        h_bad.write_text("#error do not #include this internal header directly\n")
+        attempt = {"n": 0}
+
+        def _fake_run(cmd, **kwargs):
+            agg_path = Path(cmd[1])
+            attempt["n"] += 1
+            if attempt["n"] == 1:
+                stderr = (
+                    f"In file included from {agg_path}:2:\n"
+                    f"{h_bad}:1:1: error: do not #include this internal "
+                    "header directly\n"
+                    "    1 | #error do not #include this internal header "
+                    "directly\n"
+                )
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0,
+                    stdout='{"ok": false, "records": []}', stderr=stderr,
+                )
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0,
+                stdout='{"ok": true, "records": [{"qualified_name": "Foo", "size_bits": 32}]}',
+                stderr="",
+            )
+
+        with patch(
+            "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
+        ), patch(
+            "abicheck.clang_layout_tool._resolve_clang_langmode",
+            return_value=(True, False, False, "gnu"),
+        ), patch(
+            "abicheck.clang_layout_tool._resolve_clang_system_includes",
+            return_value=(),
+        ), patch(
+            "abicheck.clang_layout_tool.subprocess.run", side_effect=_fake_run
+        ):
+            result = run_layout_tool("/path/to/tool", [h_ok, h_bad], [])
+
+        assert attempt["n"] == 2
+        assert result == [{"qualified_name": "Foo", "size_bits": 32}]
+
+
+class TestBareBaseName:
+    def test_strips_namespace_qualifier(self):
+        assert _bare_base_name("ns::Base") == "Base"
+
+    def test_strips_nested_namespace_qualifier(self):
+        assert _bare_base_name("outer::inner::Base") == "Base"
+
+    def test_already_bare_name_unchanged(self):
+        assert _bare_base_name("Base") == "Base"
+
+    def test_preserves_template_args_containing_scope_operator(self):
+        # The "::" inside the template argument (std::vector<int>) must not be
+        # mistaken for a scope separator -- only the bracket-depth-0 "::"
+        # right before "Widget" is the real scope boundary.
+        assert (
+            _bare_base_name("ns::Widget<std::vector<int>>")
+            == "Widget<std::vector<int>>"
+        )
+
 
 class TestApplyRecordFacts:
     def test_backfills_only_none_scalar_fields(self):
@@ -250,6 +361,18 @@ class TestApplyRecordFacts:
         facts = {"bases": [{"name": "Base", "offset_bits": 0, "is_virtual": False}]}
         updated = _apply_record_facts(t, facts)
         assert updated.base_offsets == {"Base": 0}
+
+    def test_base_offsets_keyed_bare_not_qualified(self):
+        # Codex review: the tool emits Clang's fully-qualified
+        # getQualifiedNameAsString() for a base ("ns::Base"), but castxml/DWARF
+        # both key base_offsets by the BARE name only ("Base") -- storing the
+        # qualified spelling here would make a namespaced base's offset
+        # incomparable against a castxml/DWARF baseline's base_offsets dict
+        # (_check_base_offsets does an exact key lookup).
+        t = RecordType(name="Derived", kind="class", bases=["ns::Base"], base_offsets={})
+        facts = {"bases": [{"name": "ns::Base", "offset_bits": 64, "is_virtual": False}]}
+        updated = _apply_record_facts(t, facts)
+        assert updated.base_offsets == {"Base": 64}
 
     def test_does_not_override_existing_base_offsets(self):
         t = RecordType(

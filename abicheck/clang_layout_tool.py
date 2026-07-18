@@ -66,9 +66,14 @@ from typing import Any
 from .buildsource.build_query import PRUNED_HEADER_DIR_SEGMENTS
 from .dumper import (
     _build_clang_header_command,
+    _detect_cpp20_headers,
     _resolve_clang_langmode,
 )
 from .dumper_clang import _resolve_clang_bin
+from .dumper_clang_errors import (
+    _is_missing_cpp_stdlib_header_error,
+    retry_excluding_error_headers,
+)
 from .dumper_sysinc import _resolve_clang_system_includes
 from .errors import SnapshotError, ValidationError
 from .header_utils import iter_directory_headers, resolve_inferred_header_roots
@@ -171,15 +176,23 @@ def run_layout_tool(
     # parses because of that auto-probe succeeds for the original direct-clang
     # dump but fails here, silently losing the whole enrichment on an
     # otherwise-valid dump (Codex review).
-    system_includes = _resolve_clang_system_includes(
-        compiler,
-        gcc_path=gcc_path,
-        gcc_prefix=gcc_prefix,
-        sysroot=sysroot,
-        nostdinc=nostdinc,
-        force_cpp=force_cpp,
-        gcc_options=gcc_options,
-        gcc_option_tokens=gcc_option_tokens,
+    def _resolve_sysinc(*, force_cpp: bool) -> tuple[str, ...]:
+        return _resolve_clang_system_includes(
+            compiler,
+            gcc_path=gcc_path,
+            gcc_prefix=gcc_prefix,
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            force_cpp=force_cpp,
+            gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens,
+        )
+
+    system_includes = _resolve_sysinc(force_cpp=force_cpp)
+    # Pre-resolved so the C->C++ self-heal retry below (mirroring
+    # dumper._clang_header_dump's own) doesn't need a second probe.
+    cpp_system_includes = (
+        system_includes if force_cpp else _resolve_sysinc(force_cpp=True)
     )
 
     agg_ext = ".hpp" if force_cpp else ".h"
@@ -187,11 +200,18 @@ def run_layout_tool(
         suffix=agg_ext, mode="w", delete=False
     ) as agg:
         agg_path = Path(agg.name)
-        agg.write(
-            "".join(f'#include "{h.resolve()}"\n' for h in resolved_headers)
+    active_headers = list(resolved_headers)
+
+    def _write_agg(hdrs: list[Path]) -> None:
+        agg_path.write_text(
+            "".join(f'#include "{h.resolve()}"\n' for h in hdrs), encoding="utf-8"
         )
 
-    try:
+    _write_agg(active_headers)
+
+    def _run(
+        fcpp: bool, fcpp20: bool, sysinc: tuple[str, ...]
+    ) -> subprocess.CompletedProcess[str]:
         full_cmd = _build_clang_header_command(
             clang_bin,
             cc_id,
@@ -201,15 +221,72 @@ def run_layout_tool(
             nostdinc=nostdinc,
             gcc_options=gcc_options,
             gcc_option_tokens=gcc_option_tokens,
-            force_cpp=force_cpp,
-            force_cpp20=force_cpp20,
-            system_includes=system_includes,
+            force_cpp=fcpp,
+            force_cpp20=fcpp20,
+            system_includes=sysinc,
         )
         compile_flags = _compile_flags_from_ast_dump_command(full_cmd)
         cmd = [binary, str(agg_path), "--", *compile_flags]
+        return subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout, check=False
+        )
+
+    def _run_shimmed(
+        fcpp: bool, fcpp20: bool, sysinc: tuple[str, ...]
+    ) -> subprocess.CompletedProcess[str]:
+        # The tool always exits 0 (see main.cpp) and signals a recoverable or
+        # total clang parse failure via `"ok": false` in its JSON stdout, not
+        # the process exit code that retry_excluding_error_headers (below)
+        # expects. Shim a returncode from that "ok" field so the SAME shared
+        # retry driver dumper._clang_header_dump uses can drive this tool too,
+        # instead of reimplementing its bounded-attempts exclusion loop here.
+        result = _run(fcpp, fcpp20, sysinc)
         try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=timeout, check=False
+            ok = bool(json.loads(result.stdout).get("ok"))
+        except ValueError:
+            ok = False
+        return subprocess.CompletedProcess(
+            result.args, 0 if ok else 1, result.stdout, result.stderr
+        )
+
+    try:
+        try:
+            result = _run_shimmed(force_cpp, force_cpp20, system_includes)
+        except (subprocess.SubprocessError, OSError) as exc:
+            log.debug("clang layout tool invocation failed: %s", exc)
+            return None
+        cur_fcpp, cur_fcpp20, cur_sysinc = force_cpp, force_cpp20, system_includes
+        # C->C++ self-heal: mirrors dumper._clang_header_dump's own retry, so
+        # a header set that only parses in C++ mode there (e.g. a pure-
+        # #include umbrella header) doesn't silently lose all enrichment here
+        # just because this second, independent pass repeated the same
+        # (wrong) initial C-mode guess (Codex review).
+        if (
+            result.returncode != 0
+            and not force_cpp
+            and _is_missing_cpp_stdlib_header_error(result.stderr or "")
+        ):
+            cur_fcpp, cur_fcpp20, cur_sysinc = (
+                True,
+                _detect_cpp20_headers(resolved_headers),
+                cpp_system_includes,
+            )
+            try:
+                result = _run_shimmed(cur_fcpp, cur_fcpp20, cur_sysinc)
+            except (subprocess.SubprocessError, OSError) as exc:
+                log.debug("clang layout tool invocation failed: %s", exc)
+                return None
+        # Graceful #error handling: mirrors dumper._clang_header_dump's own
+        # retry, so a header excluded from the main dump's aggregate (not
+        # meant for direct inclusion) doesn't abort this second pass entirely
+        # — the same reusable driver just drops it and re-parses the rest.
+        try:
+            result = retry_excluding_error_headers(
+                result=result,
+                run_clang=lambda: _run_shimmed(cur_fcpp, cur_fcpp20, cur_sysinc),
+                write_agg=_write_agg,
+                agg_path=agg_path,
+                active_headers=active_headers,
             )
         except (subprocess.SubprocessError, OSError) as exc:
             log.debug("clang layout tool invocation failed: %s", exc)
@@ -227,6 +304,42 @@ def run_layout_tool(
         agg_path.unlink(missing_ok=True)
 
 
+def _bare_base_name(qualified: str) -> str:
+    """Strip a leading namespace/enclosing-scope qualifier from a base class
+    name -- e.g. ``"ns::Base"`` -> ``"Base"`` -- matching the BARE (never
+    namespace-qualified) convention every other layout-capable backend
+    already uses for ``RecordType.base_offsets`` keys: castxml's own
+    ``_type_name()`` returns just the ``Struct``/``Class`` element's ``name``
+    attribute (dumper_castxml.py), and DWARF's ``_resolve_base_name`` reads
+    the bare ``DW_AT_name`` (dwarf_snapshot.py) -- neither ever includes a
+    namespace prefix. The layout tool instead emits Clang's fully-qualified
+    ``getQualifiedNameAsString()`` for a base; storing THAT as the key would
+    leave every namespaced base's offset incomparable against a castxml/DWARF
+    baseline's bare-keyed ``base_offsets`` dict (``_check_base_offsets`` does
+    an exact key lookup), silently missing a real offset change (Codex
+    review). Splits at bracket-depth 0 only, so a templated base's own type
+    arguments (which may themselves contain ``::``, e.g.
+    ``"ns::Widget<std::vector<int>>"``) are not mistaken for a scope
+    separator.
+    """
+    depth = 0
+    last_split = 0
+    i = 0
+    n = len(qualified)
+    while i < n:
+        ch = qualified[i]
+        if ch in "<(":
+            depth += 1
+        elif ch in ">)":
+            depth -= 1
+        elif depth == 0 and qualified[i : i + 2] == "::":
+            last_split = i + 2
+            i += 2
+            continue
+        i += 1
+    return qualified[last_split:]
+
+
 def _apply_record_facts(t: RecordType, facts: dict[str, Any]) -> RecordType:
     """Backfill *t*'s currently-empty layout fields from one tool record."""
     updates: dict[str, Any] = {}
@@ -238,7 +351,7 @@ def _apply_record_facts(t: RecordType, facts: dict[str, Any]) -> RecordType:
         base_facts = facts.get("bases")
         if isinstance(base_facts, list):
             offsets = {
-                b["name"]: b["offset_bits"]
+                _bare_base_name(b["name"]): b["offset_bits"]
                 for b in base_facts
                 if isinstance(b, dict) and "name" in b and "offset_bits" in b
             }
