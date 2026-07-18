@@ -1245,6 +1245,36 @@ def test_malformed_baseline_input_is_click_error(runner, tmp_path, new_snap_comp
     assert "Failed to load --baseline" in res.output
 
 
+def test_against_package_archive_is_usage_error(runner, tmp_path, new_snap_compatible):
+    # --against's help text says "not a directory or package", but --against's
+    # `dir_okay=False` only rejects directories -- a package archive must be
+    # rejected explicitly, before it reaches resolve_input() (which cannot
+    # extract packages) and fails with a confusing deep error instead (Codex
+    # review).
+    deb = tmp_path / "old.deb"
+    deb.write_bytes(b"!<arch>\n" + b"\x00" * 32)
+    res = runner.invoke(
+        main,
+        ["scan", str(new_snap_compatible), "--against", str(deb)],
+    )
+    assert res.exit_code == 64, res.output
+    assert "does not accept a package archive" in res.output
+    assert "abicheck compare OLD_PACKAGE NEW_PACKAGE" in res.output
+
+
+def test_against_package_archive_rejected_in_dry_run_too(
+    runner, tmp_path, new_snap_compatible
+):
+    deb = tmp_path / "old.deb"
+    deb.write_bytes(b"!<arch>\n" + b"\x00" * 32)
+    res = runner.invoke(
+        main,
+        ["scan", str(new_snap_compatible), "--against", str(deb), "--dry-run"],
+    )
+    assert res.exit_code == 64, res.output
+    assert "does not accept a package archive" in res.output
+
+
 # ── A1: --public-header-dir threads provenance into the scan ──────────────────
 
 

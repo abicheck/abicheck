@@ -9,7 +9,13 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   directory, or package", but the implementation only ever resolved a single
   file; the option now rejects directories at the CLI level (`dir_okay=False`)
   and its docs point at `abicheck compare OLD_PACKAGE NEW_PACKAGE` for
-  directory/package comparisons.
+  directory/package comparisons. `dir_okay=False` only rejects directories,
+  not a package *file* (`.deb`/`.rpm`/`.tar.gz`/...); `scan` now explicitly
+  rejects a package-shaped `--against` (reusing `package.is_package`'s
+  extension/magic-byte detection) with a `UsageError` pointing at the same
+  `abicheck compare` guidance, before it could reach `resolve_input()` (which
+  cannot extract packages) and fail deep with an opaque "cannot detect input
+  format" instead (Codex review).
 - **`compare --used-by`/`--required-symbol(s)` JSON `summary` could contradict
   `changes`** — scoped-only findings (e.g. `consumer_required_symbol_removed`,
   `pe_ordinal_retargeted`) and missing-contract labels were folded into the

@@ -686,9 +686,24 @@ def scan_cmd(
       abicheck scan new.so -H include/ --depth source --since origin/main
     """
     from .dry_run import reject_dry_run_with_output
+    from .package import is_package
 
     reject_dry_run_with_output(dry_run, output)
     _setup_verbosity(verbose)
+    # --against's help text documents "a single file -- not a directory or
+    # package", but `dir_okay=False` on the option itself only rejects
+    # directories -- a package archive (.deb/.rpm/.tar.gz/...) still passes
+    # Click validation and previously reached resolve_input(), which cannot
+    # extract packages, so it failed later with an opaque "cannot detect
+    # input format" instead of a clear, immediate usage error (Codex
+    # review). Checked before the --dry-run branch so dry-run and the real
+    # run agree.
+    if against is not None and is_package(against):
+        raise click.UsageError(
+            f"--against does not accept a package archive ({against}); "
+            "packages are not supported here -- use `abicheck compare "
+            "OLD_PACKAGE NEW_PACKAGE` for package-to-package comparisons."
+        )
     start = time.monotonic()
 
     # Side-aware --header/--include (ADR-040): a bare value applies to both the
