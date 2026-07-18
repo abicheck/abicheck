@@ -73,6 +73,7 @@ class _WriteSnapshotOutput(Protocol):
         build_compile_db: str | None = ...,
         extractor: str = ...,
         inputs_pack: Path | None = ...,
+        depth: str | None = ...,
     ) -> None: ...
 
 
@@ -226,6 +227,52 @@ def evidence_depth_label(
     return "binary"
 
 
+# Same ordering as buildsource.scan_levels.USER_DEPTHS: each rung is a
+# strict superset of the facts below it.
+_DEPTH_RANK: dict[str, int] = {"binary": 0, "headers": 1, "build": 2, "source": 3}
+
+
+class DumpDepthNotSatisfiedError(click.ClickException):
+    """Raised when an explicit ``--depth`` was requested but not reached.
+
+    Exit code 1 (the default for ``ClickException``) — the "requested depth
+    not satisfiable" code already documented by ``render_dump_dry_run``'s
+    "Output and exit-code behavior" section.
+    """
+
+
+def check_requested_depth_satisfied(
+    depth: str | None, snap: AbiSnapshot, build_source: BuildSourcePack | None = None,
+) -> None:
+    """Hard-fail when an *explicitly* requested ``--depth`` was not reached.
+
+    Depth-contract (CLAUDE.md / CLI-audit P1): when ``--depth`` is left
+    unspecified, degrading to whatever evidence is actually available is
+    fine as long as ``evidence_depth_label`` honestly reports it. But once
+    the user explicitly asks for ``headers``/``build``/``source``, silently
+    writing a weaker snapshot is a lie a downstream baseline/CI consumer has
+    no way to detect short of re-deriving the depth themselves — so this
+    raises instead of warning. ``--depth binary`` is always satisfied
+    (rank 0, the floor). A ``depth`` outside ``_DEPTH_RANK`` (defensively,
+    should never happen past CLI parsing) is treated as unconstrained.
+    """
+    if depth is None:
+        return
+    requested_rank = _DEPTH_RANK.get(depth)
+    if requested_rank is None:
+        return
+    effective = evidence_depth_label(snap, build_source)
+    if _DEPTH_RANK.get(effective, 0) < requested_rank:
+        raise DumpDepthNotSatisfiedError(
+            f"--depth {depth} was requested but the snapshot only reached "
+            f"'{effective}' evidence depth. Supply the evidence this rung "
+            "needs (headers via -H/--header, build via --build-info/a "
+            "compile database, source via --sources with linkable "
+            "declarations) or lower --depth to match what is actually "
+            "available."
+        )
+
+
 def render_dump_dry_run(
     *,
     so_path: Path | None,
@@ -369,6 +416,7 @@ def handle_non_elf_dump(
     inputs_pack: Path | None = None,
     header_graph: bool = False,
     header_graph_includes: bool = False,
+    depth: str | None = None,
 ) -> None:
     """Handle the PE/Mach-O native dump path and output writing (split from cli.py).
 
@@ -434,7 +482,7 @@ def handle_non_elf_dump(
     write_snapshot_output(
         snap, output, build_info, sources, build_config, allow_build_query,
         collect_mode, build_query=build_query, build_compile_db=build_compile_db,
-        extractor=header_backend, inputs_pack=inputs_pack,
+        extractor=header_backend, inputs_pack=inputs_pack, depth=depth,
     )
 
 
@@ -581,6 +629,7 @@ def perform_elf_dump(
     header_graph: bool = False,
     header_graph_includes: bool = False,
     compile_context: CompileContext | None = None,
+    depth: str | None = None,
 ) -> None:
     """Run the ELF dump pipeline and write output.
 
@@ -848,4 +897,5 @@ def perform_elf_dump(
         build_compile_db=build_compile_db,
         extractor=header_backend,
         inputs_pack=inputs_pack,
+        depth=depth,
     )

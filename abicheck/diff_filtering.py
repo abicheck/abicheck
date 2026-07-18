@@ -141,15 +141,32 @@ def _qualified_functions_by_mangled(snap: AbiSnapshot | None) -> dict[str, str]:
     return qualified
 
 
+def _qualified_variables_by_mangled(snap: AbiSnapshot | None) -> dict[str, str]:
+    """Return mangled/exported variable names that have C++ qualification."""
+    if snap is None or not _safe_index(snap):
+        return {}
+
+    qualified: dict[str, str] = {}
+    for mangled, var in (getattr(snap, "_var_by_mangled", None) or {}).items():
+        vname = getattr(var, "name", None)
+        if vname and "::" in vname and mangled not in qualified:
+            qualified[mangled] = vname
+    return qualified
+
+
 def _qualified_name_for_change(
     c: Change,
     old_qualified: dict[str, str],
     new_qualified: dict[str, str],
 ) -> str | None:
-    """Safely recover a C++ qualified name for a function change."""
-    if c.kind == ChangeKind.FUNC_ADDED:
+    """Safely recover a C++ qualified name for a function or variable change."""
+    if c.kind in (ChangeKind.FUNC_ADDED, ChangeKind.VAR_ADDED):
         return new_qualified.get(c.symbol)
-    if c.kind in (ChangeKind.FUNC_REMOVED, ChangeKind.FUNC_REMOVED_ELF_ONLY):
+    if c.kind in (
+        ChangeKind.FUNC_REMOVED,
+        ChangeKind.FUNC_REMOVED_ELF_ONLY,
+        ChangeKind.VAR_REMOVED,
+    ):
         return old_qualified.get(c.symbol)
 
     old_name = old_qualified.get(c.symbol)
@@ -169,6 +186,8 @@ def _enrich_source_locations(
 
     old_qualified = _qualified_functions_by_mangled(old)
     new_qualified = _qualified_functions_by_mangled(new)
+    old_var_qualified = _qualified_variables_by_mangled(old)
+    new_var_qualified = _qualified_variables_by_mangled(new)
 
     for c in changes:
         if not c.source_location:
@@ -185,6 +204,8 @@ def _enrich_source_locations(
                 c.source_location = loc
         if not c.qualified_name:
             qual = _qualified_name_for_change(c, old_qualified, new_qualified)
+            if not qual and c.kind in (ChangeKind.VAR_ADDED, ChangeKind.VAR_REMOVED):
+                qual = _qualified_name_for_change(c, old_var_qualified, new_var_qualified)
             if qual:
                 c.qualified_name = qual
 

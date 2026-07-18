@@ -38,6 +38,7 @@ from . import deadline
 from .checker import DiffResult, LibraryMetadata
 from .cli_audit import echo_filtered_surface, echo_reconciled
 from .cli_dump_helpers import (
+    check_requested_depth_satisfied,
     evidence_depth_label,
     handle_non_elf_dump,
     perform_elf_dump,
@@ -297,6 +298,7 @@ def _write_snapshot_output(
     build_compile_db: str | None = None,
     extractor: str = "auto",
     inputs_pack: Path | None = None,
+    depth: str | None = None,
 ) -> None:
     """Serialize snapshot and write to file or stdout.
 
@@ -310,6 +312,9 @@ def _write_snapshot_output(
     ``.abicheck.yml`` ``build.query`` / ``build.compile_db`` keys. *extractor* is
     the L4 source-ABI frontend — the same ``--ast-frontend`` knob that drives the
     L2 header AST (ADR-037 D8): one frontend choice across both pipeline stages.
+    *depth* is the raw ``--depth`` CLI value (``None`` when not passed); when
+    given, ``check_requested_depth_satisfied`` raises if the snapshot did not
+    actually reach it.
     """
     if build_info is not None or sources is not None:
         from .cli_buildsource import embed_build_source
@@ -359,6 +364,11 @@ def _write_snapshot_output(
     if inputs_pack is not None:
         from .cli_buildsource_merge import embed_inputs_pack
         embed_inputs_pack(snap, inputs_pack, output)
+    # CLI-audit P1: an *explicitly* requested --depth that was not actually
+    # reached is a hard failure, not a warning — see
+    # check_requested_depth_satisfied's docstring. Checked last, after every
+    # embed step above has had its chance to fill in build_source.
+    check_requested_depth_satisfied(depth, snap)
     result = snapshot_to_json(snap)
     if output:
         _safe_write_output(output, result)
@@ -585,6 +595,21 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         headers, compile_db_path, compile_db_path_alt,
     )
 
+    # CLI-audit P1: --ast-frontend hybrid dual-runs castxml+clang for the L2
+    # header AST, but L4 source-ABI replay has no such dual-backend merge —
+    # an explicit --depth source would silently reach no further than
+    # castxml/clang alone (or nothing) while still calling itself "hybrid".
+    # Reject the combination outright rather than let it look like a
+    # successful hybrid source analysis; the implicit default (no --depth)
+    # is left alone since it is already allowed to honestly degrade.
+    if depth == "source" and header_backend == "hybrid":
+        raise click.UsageError(
+            "--depth source is incompatible with --ast-frontend hybrid: L4 "
+            "source-ABI replay has no dual-backend hybrid extractor (unlike "
+            "the L2 header-AST snapshot). Pass --ast-frontend castxml or "
+            "--ast-frontend clang for a --depth source dump."
+        )
+
     if dry_run:
         from .cli_dump_helpers import render_dump_dry_run
 
@@ -600,7 +625,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # Source-only dump (no binary) for the parallel-baseline flow.
     if so_path is None:
         from .cli_buildsource import dump_source_only
-        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db, extractor=header_backend)
+        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db, extractor=header_backend, depth=depth)
         return
 
     effective_debug_format = resolve_dump_debug_format(debug_format_opt, debug_format)
@@ -642,6 +667,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             allow_build_query, collect_mode, build_query, build_compile_db,
             header_backend=header_backend, compile_context=_cc,
             header_graph=header_graph, header_graph_includes=header_graph_includes,
+            depth=depth,
         )
         return
 
@@ -706,6 +732,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         header_graph=header_graph,
         header_graph_includes=header_graph_includes,
         compile_context=_cc,
+        depth=depth,
     )
 
 

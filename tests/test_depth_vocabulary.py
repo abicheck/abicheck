@@ -295,9 +295,10 @@ def test_compare_depth_over_snapshots(tmp_path, depth: str) -> None:  # type: ig
     assert res.exit_code == 0, _all_output(res)
 
 
-def test_dump_source_only_depth_build(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """A source-only ``dump --depth build`` resolves the L3 collect mode and runs
-    the source-only branch without error."""
+def test_dump_source_only_depth_build_without_facts_fails(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """CLI-audit P1: a source-only ``dump --depth build`` resolves the L3 collect
+    mode, but an explicitly requested depth that finds no usable compile_commands.json
+    must now hard-fail rather than silently write a weaker (binary-only) snapshot."""
     src = tmp_path / "src"
     src.mkdir()
     res = CliRunner().invoke(
@@ -305,7 +306,9 @@ def test_dump_source_only_depth_build(tmp_path) -> None:  # type: ignore[no-unty
         ["dump", "--sources", str(src), "--depth", "build",
          "-o", str(tmp_path / "out.json")],
     )
-    assert res.exit_code == 0, _all_output(res)
+    assert res.exit_code != 0, _all_output(res)
+    assert "--depth build was requested but the snapshot only reached" in _all_output(res)
+    assert not (tmp_path / "out.json").exists()
 
 
 def test_dump_source_only_depth_binary(tmp_path) -> None:  # type: ignore[no-untyped-def]
@@ -344,3 +347,39 @@ def test_dump_depth_binary_ignores_compile_db(tmp_path) -> None:  # type: ignore
     out = _all_output(res)
     assert "Compilation database" not in out
     assert "requires -H" not in out
+
+
+def test_dump_depth_source_with_hybrid_frontend_rejected(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """CLI-audit P1: L4 source-ABI replay has no dual-backend hybrid extractor
+    (unlike the L2 header AST), so --depth source + --ast-frontend hybrid must
+    be rejected up front rather than silently degrading while still calling
+    itself "hybrid". This is a usage error caught before any dump work runs,
+    so it needs no real binary/compiler on the test machine."""
+    src = tmp_path / "src3"
+    src.mkdir()
+    res = CliRunner().invoke(
+        main,
+        ["dump", "--sources", str(src), "--depth", "source",
+         "--ast-frontend", "hybrid", "-o", str(tmp_path / "out3.json")],
+    )
+    assert res.exit_code != 0, _all_output(res)
+    out = _all_output(res)
+    assert "--ast-frontend hybrid" in out
+    assert "--depth source" in out
+    assert not (tmp_path / "out3.json").exists()
+
+
+def test_dump_depth_headers_with_hybrid_frontend_not_rejected(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """The hybrid-vs-source usage-error rejection is scoped to --depth source
+    specifically -- hybrid is the normal, supported dual-backend choice for
+    the L2 header AST at every other depth, so it must not be blanket-rejected.
+    (The invocation may still fail for the unrelated reason that no headers
+    were actually parsed -- this test only checks it isn't *this* rejection.)"""
+    src = tmp_path / "src4"
+    src.mkdir()
+    res = CliRunner().invoke(
+        main,
+        ["dump", "--sources", str(src), "--depth", "headers",
+         "--ast-frontend", "hybrid", "-o", str(tmp_path / "out4.json")],
+    )
+    assert "--ast-frontend hybrid" not in _all_output(res)

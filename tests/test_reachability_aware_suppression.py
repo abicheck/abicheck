@@ -236,6 +236,33 @@ class TestMarkReachability:
         assert found[0].public_reachable is True
         assert found[0].reachability_kind == "direct_public_symbol"
 
+    def test_public_header_cxx_variable_removal_is_reachable(self) -> None:
+        """Mirror of test_public_header_cxx_function_removal_is_reachable for
+        variables: diff_symbols.py sets Change.symbol to Variable.mangled (the
+        linker name) for VAR_REMOVED, while _public_header_names collects the
+        demangled Variable.name -- so the direct-public-symbol check only
+        matches if EnrichSourceLocations also recovers qualified_name for
+        variable changes, not just function changes."""
+        mangled = "_ZN2ns6detail3varE"
+        old = AbiSnapshot(
+            library="libtest.so", version="1.0",
+            variables=[Variable(
+                name="ns::detail::var", mangled=mangled, type="int",
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            )],
+        )
+        new = AbiSnapshot(library="libtest.so", version="1.0", variables=[])
+        raw_change = Change(
+            kind=ChangeKind.VAR_REMOVED, symbol=mangled, description="removed",
+        )
+        ctx = DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        found = [c for c in ctx.kept if c.kind == ChangeKind.VAR_REMOVED]
+        assert len(found) == 1
+        assert found[0].public_reachable is True
+        assert found[0].reachability_kind == "direct_public_symbol"
+
     def test_public_header_enum_member_change_is_reachable(self) -> None:
         """Codex review (fresh evidence): an ENUM_MEMBER_* finding's symbol
         is "EnumName::member" (diff_types.py), not the plain enum name —
@@ -893,6 +920,36 @@ class TestSuppressionPipelineOrderFix:
             c for c in ctx.kept if c.kind == ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK
         )
         assert "Suppression rule 'oneapi::dal::**::detail::**' matched" in diag.description
+
+    def test_broad_namespace_suppression_does_not_hide_reachable_variable_removal(
+        self,
+    ) -> None:
+        """Variable counterpart of test_broad_namespace_suppression_does_not_hide_reachable_break:
+        a public-header C++ variable removed from a namespace covered by a
+        broad ``namespace`` suppression rule must survive, not be silently
+        dropped because the mangled Change.symbol never gets resolved back
+        to the demangled Variable.name that seeded public-header reachability."""
+        mangled = "_ZN2ns6detail3varE"
+        old = AbiSnapshot(
+            library="libtest.so", version="1.0",
+            variables=[Variable(
+                name="ns::detail::var", mangled=mangled, type="int",
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            )],
+        )
+        new = AbiSnapshot(library="libtest.so", version="1.0", variables=[])
+        raw_change = Change(
+            kind=ChangeKind.VAR_REMOVED, symbol=mangled, description="removed",
+        )
+        suppression = SuppressionList([
+            Suppression(namespace="ns::detail::*", reason="Private implementation details")
+        ])
+        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+
+        found = [c for c in ctx.kept if c.kind == ChangeKind.VAR_REMOVED]
+        assert len(found) == 1
+        assert found[0].public_reachable is True
+        assert ctx.suppressed == []
 
     def test_broad_namespace_suppression_still_suppresses_unreachable_churn(self) -> None:
         """Unreachable internal churn is unaffected — no regression for the

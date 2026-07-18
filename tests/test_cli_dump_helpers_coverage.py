@@ -1189,3 +1189,88 @@ def test_evidence_depth_label_does_not_overstate_empty_source_abi() -> None:
     # All three layers are present but empty -- falls all the way back to
     # "headers" (from_headers=True), not "source" or "build".
     assert evidence_depth_label(snap) == "headers"
+
+
+# ── check_requested_depth_satisfied (CLI-audit P1 strict depth contract) ────
+
+
+def test_check_requested_depth_satisfied_noop_when_depth_not_requested() -> None:
+    """The bare default (no --depth) never hard-fails -- degrading silently
+    is the whole point of leaving --depth unspecified."""
+    from abicheck.cli_dump_helpers import check_requested_depth_satisfied
+
+    snap = AbiSnapshot(library="libfoo.so", version="1.0")
+    check_requested_depth_satisfied(None, snap)  # must not raise
+
+
+def test_check_requested_depth_satisfied_binary_always_passes() -> None:
+    from abicheck.cli_dump_helpers import check_requested_depth_satisfied
+
+    snap = AbiSnapshot(library="libfoo.so", version="1.0")
+    check_requested_depth_satisfied("binary", snap)  # must not raise
+
+
+def test_check_requested_depth_satisfied_headers_without_header_ast_fails() -> None:
+    from abicheck.cli_dump_helpers import (
+        DumpDepthNotSatisfiedError,
+        check_requested_depth_satisfied,
+    )
+
+    snap = AbiSnapshot(library="libfoo.so", version="1.0")  # from_headers=False
+    with pytest.raises(DumpDepthNotSatisfiedError, match="--depth headers"):
+        check_requested_depth_satisfied("headers", snap)
+
+
+def test_check_requested_depth_satisfied_headers_with_header_ast_passes() -> None:
+    from abicheck.cli_dump_helpers import check_requested_depth_satisfied
+
+    snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
+    check_requested_depth_satisfied("headers", snap)  # must not raise
+
+
+def test_check_requested_depth_satisfied_build_without_build_facts_fails() -> None:
+    from abicheck.cli_dump_helpers import (
+        DumpDepthNotSatisfiedError,
+        check_requested_depth_satisfied,
+    )
+
+    snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
+    with pytest.raises(DumpDepthNotSatisfiedError, match="--depth build"):
+        check_requested_depth_satisfied("build", snap)
+
+
+def test_check_requested_depth_satisfied_source_with_source_facts_passes() -> None:
+    from abicheck.buildsource.build_evidence import BuildEvidence
+    from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
+    from abicheck.cli_dump_helpers import check_requested_depth_satisfied
+
+    snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
+    snap.build_source = _pack(
+        build_evidence=BuildEvidence(),
+        source_abi=SourceAbiSurface(
+            reachable_declarations=[SourceEntity(id="foo", kind="function")]
+        ),
+    )
+    check_requested_depth_satisfied("source", snap)  # must not raise
+
+
+def test_check_requested_depth_satisfied_source_with_empty_payload_fails() -> None:
+    """Mirrors test_evidence_depth_label_does_not_overstate_empty_source_abi:
+    a coverage row can be present while the payload links no facts -- the
+    strict check must see through that the same way evidence_depth_label does."""
+    from abicheck.buildsource.build_evidence import BuildEvidence
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+    from abicheck.buildsource.source_graph import SourceGraphSummary
+    from abicheck.cli_dump_helpers import (
+        DumpDepthNotSatisfiedError,
+        check_requested_depth_satisfied,
+    )
+
+    snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
+    snap.build_source = _pack(
+        build_evidence=BuildEvidence(),
+        source_abi=SourceAbiSurface(),
+        source_graph=SourceGraphSummary(),
+    )
+    with pytest.raises(DumpDepthNotSatisfiedError, match="--depth source"):
+        check_requested_depth_satisfied("source", snap)
