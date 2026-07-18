@@ -159,6 +159,7 @@ def test_header_graph_reproduces_documented_finding(
 
     old_json = tmp_path / "old.json"
     new_json = tmp_path / "new.json"
+    dump_stderrs: dict[str, str] = {}
     for lib, header, out in (
         (libv1, "v1.h", old_json),
         (libv2, "v2.h", new_json),
@@ -183,6 +184,7 @@ def test_header_graph_reproduces_documented_finding(
             text=True,
         )
         assert result.returncode == 0, result.stderr
+        dump_stderrs[header] = result.stderr
 
     report_path = tmp_path / "report.json"
     result = subprocess.run(
@@ -230,6 +232,15 @@ def test_header_graph_reproduces_documented_finding(
             new_payload.get("ast_producer"),
             new_payload.get("from_headers"),
         )
+        # `dump`'s UserWarning (emitted by service._try_header_scoped_dump when
+        # it discards a header-scoped snapshot and falls back to export-table
+        # mode) lands on stderr but is only surfaced by pytest on a failing
+        # test — capture both dump invocations' stderr here rather than only
+        # the final `compare` step's, since the fallback happens at dump time.
+        print("v1.h dump stderr:", dump_stderrs.get("v1.h", ""))
+        print("v2.h dump stderr:", dump_stderrs.get("v2.h", ""))
+        print("old macho exports:", json.dumps(old_payload.get("macho", {}), indent=2))
+        print("new macho exports:", json.dumps(new_payload.get("macho", {}), indent=2))
         print("old types:", json.dumps(old_payload.get("types", []), indent=2))
         print("new types:", json.dumps(new_payload.get("types", []), indent=2))
         print("old functions:", json.dumps(old_payload.get("functions", []), indent=2))
