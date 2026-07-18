@@ -333,6 +333,35 @@ def test_claim_build_dir_polls_until_lock_free(tmp_path: Path, monkeypatch):
     release()
 
 
+def test_claim_build_dir_wait_bounded_by_scan_deadline_not_just_local_timeout(
+    tmp_path: Path, monkeypatch
+):
+    # Codex review (PR #591, round 4): the lock-wait loop only consulted its
+    # own *timeout* argument (up to 600s by default for the caller), never the
+    # active scan --budget -- a contended checkout under a tight --budget
+    # could still block here for the full local timeout before falling back
+    # to a unique dir. Must bound the wait by whichever is tighter.
+    fcntl = pytest.importorskip("fcntl")
+    from abicheck import deadline
+
+    base = tmp_path / "abicheck-cmake-deadbeef"
+    calls = {"n": 0}
+
+    def always_busy(fd, op):
+        calls["n"] += 1
+        raise OSError("busy")
+
+    monkeypatch.setattr(fcntl, "flock", always_busy)
+    monkeypatch.setattr(_bq.time, "sleep", lambda _s: None)  # don't actually wait
+    with deadline.deadline_scope(0.5):  # far tighter than the 5s local timeout
+        bdir, release = _bq._claim_inferred_build_dir(base, timeout=5.0)
+    release()
+    assert bdir != base  # fell back to a unique dir
+    # Bounded by the ~0.5s scan deadline (3 polls at the 0.2s poll interval),
+    # not the full 5s local timeout (25 polls).
+    assert calls["n"] <= 4
+
+
 def test_claim_build_dir_marker_fallback_when_no_fcntl(tmp_path: Path, monkeypatch):
     # Without fcntl (e.g. Windows), the claim uses an O_CREAT|O_EXCL marker file:
     # sequential claims re-take the deterministic path (marker removed on release),

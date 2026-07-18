@@ -190,15 +190,25 @@ def _claim_inferred_build_dir(
         fcntl = None  # type: ignore[assignment]
 
     if fcntl is not None:
+        # Bound the wait by the active scan --budget too, not just the local
+        # *timeout* default (600s) -- otherwise scan --budget 5s on a
+        # contended checkout could still block here for minutes before the
+        # bounded query subprocess it's waiting to reach is ever started
+        # (Codex review, PR #591, round 4).
+        scan_remaining = deadline.remaining()
+        effective_timeout = (
+            min(timeout, scan_remaining) if scan_remaining is not None else timeout
+        )
         fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
         waited = 0.0
         while True:
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except OSError:
-                if waited >= timeout:
+                if waited >= effective_timeout:
                     os.close(fd)
-                    # Peer still holds it — don't block the scan indefinitely.
+                    # Peer still holds it (or the scan budget ran out) —
+                    # don't block the scan indefinitely.
                     return Path(
                         tempfile.mkdtemp(prefix=f"{base.name}-", dir=base.parent)
                     ), _noop_release

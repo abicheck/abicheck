@@ -311,3 +311,11 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `deadline.check()` between them, degrading to the existing advisory
   diagnostic+`[]` contract (ADR-028 D3) on overflow, same as the pre-parse
   check (Codex review, PR #591, round 4).
+- `build_query._claim_inferred_build_dir`'s cmake build-dir lock-wait loop
+  only consulted its own local `timeout` argument (up to the caller's 600s
+  default), never the active scan `--budget` — a `scan --budget 5s
+  --depth source` on a checkout already claimed by a concurrent scan could
+  still poll the `flock` for the full local timeout before falling back to
+  a unique sibling dir. The wait is now capped by whichever is tighter, the
+  local timeout or the remaining scan deadline at claim time (Codex review,
+  PR #591, round 4).
