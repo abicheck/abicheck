@@ -1226,6 +1226,25 @@ def test_source_label_is_header_graph_only_false_without_a_pack() -> None:
     assert _source_label_is_header_graph_only(None) is False
 
 
+def test_dump_source_input_is_prebuilt_pack_true_for_build_source_pack(tmp_path) -> None:
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.cli_dump_helpers import _dump_source_input_is_prebuilt_pack
+
+    pack_dir = tmp_path / "pack"
+    BuildSourcePack.empty(pack_dir).write()
+    assert _dump_source_input_is_prebuilt_pack(None, pack_dir) is True
+    assert _dump_source_input_is_prebuilt_pack(pack_dir, None) is True
+
+
+def test_dump_source_input_is_prebuilt_pack_false_for_raw_source_tree(tmp_path) -> None:
+    from abicheck.cli_dump_helpers import _dump_source_input_is_prebuilt_pack
+
+    tree = tmp_path / "src"
+    tree.mkdir()
+    assert _dump_source_input_is_prebuilt_pack(tree, None) is False
+    assert _dump_source_input_is_prebuilt_pack(None, None) is False
+
+
 def test_check_requested_depth_satisfied_headers_without_header_ast_fails() -> None:
     from abicheck.cli_dump_helpers import (
         DumpDepthNotSatisfiedError,

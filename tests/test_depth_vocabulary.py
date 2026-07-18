@@ -413,6 +413,27 @@ def test_dump_source_only_depth_source_with_config_hybrid_frontend_rejected(tmp_
     assert "--depth source" in out
 
 
+def test_dump_depth_source_hybrid_frontend_not_rejected_for_prebuilt_pack(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Codex review: --build-info pointing at a prebuilt BuildSourcePack
+    directory only loads and filters its existing L4/L5 facts
+    (cli_buildsource.embed_build_source's is_pack_dir branch forces
+    collect_inline_pack's raw_build_info to None) -- no L4 extractor ever
+    runs, so --ast-frontend hybrid has no effect and must not be rejected
+    for this input shape, unlike a raw source tree."""
+    from abicheck.buildsource.pack import BuildSourcePack
+
+    pack_dir = tmp_path / "prebuilt-pack"
+    BuildSourcePack.empty(pack_dir).write()
+    res = CliRunner().invoke(
+        main,
+        [
+            "dump", "--build-info", str(pack_dir), "--depth", "source",
+            "--ast-frontend", "hybrid", "-o", str(tmp_path / "out.json"),
+        ],
+    )
+    assert "--ast-frontend hybrid" not in _all_output(res)
+
+
 def test_dump_depth_headers_with_hybrid_frontend_not_rejected(tmp_path) -> None:  # type: ignore[no-untyped-def]
     """The hybrid-vs-source usage-error rejection is scoped to --depth source
     specifically -- hybrid is the normal, supported dual-backend choice for

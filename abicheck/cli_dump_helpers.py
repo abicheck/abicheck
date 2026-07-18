@@ -232,6 +232,29 @@ def evidence_depth_label(
 _DEPTH_RANK: dict[str, int] = {"binary": 0, "headers": 1, "build": 2, "source": 3}
 
 
+def _dump_source_input_is_prebuilt_pack(
+    sources: Path | None, build_info: Path | None
+) -> bool:
+    """True when *sources* or *build_info* is a prebuilt pack directory.
+
+    Codex review: ``cli_buildsource.embed_build_source`` treats a
+    ``BuildSourcePack`` directory (``is_pack_dir``) or a build-emitted
+    ``abicheck_inputs/`` directory (``_is_inputs_pack_dir``) as data to load
+    and filter, not a source tree to run L4 extraction over — its
+    ``raw_sources``/``raw_build_info`` (the only inputs ``collect_inline_pack``,
+    and therefore ``extractor``, ever sees) are forced to ``None`` in that
+    case. ``--ast-frontend`` has no effect for a prebuilt-pack input, so the
+    ``--depth source`` + ``--ast-frontend hybrid`` rejection must not fire
+    for one.
+    """
+    from .buildsource.inline import is_pack_dir
+    from .cli_buildsource_helpers import _is_inputs_pack_dir
+
+    return any(
+        is_pack_dir(p) or _is_inputs_pack_dir(p) for p in (sources, build_info)
+    )
+
+
 class DumpDepthNotSatisfiedError(click.ClickException):
     """Raised when an explicit ``--depth`` was requested but not reached.
 

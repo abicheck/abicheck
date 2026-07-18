@@ -38,6 +38,7 @@ from . import deadline
 from .checker import DiffResult, LibraryMetadata
 from .cli_audit import echo_filtered_surface, echo_reconciled
 from .cli_dump_helpers import (
+    _dump_source_input_is_prebuilt_pack,
     check_requested_depth_satisfied,
     evidence_depth_label,
     handle_non_elf_dump,
@@ -627,7 +628,18 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # once here, after the CLI>config frontend resolution above and before
     # either dispatch branch, so a config-selected `compile.frontend: hybrid`
     # can't bypass it via either path (CodeRabbit + Codex review).
-    if depth == "source" and header_backend == "hybrid":
+    #
+    # Codex review: scoped to invocations that actually run L4 extraction.
+    # --sources/--build-info pointing at a prebuilt BuildSourcePack or
+    # abicheck_inputs/ pack (embed_build_source's is_pack_dir/
+    # _is_inputs_pack_dir branch) just loads and filters existing L4/L5
+    # facts -- no extractor runs, so --ast-frontend is inert there and must
+    # not be rejected.
+    if (
+        depth == "source"
+        and header_backend == "hybrid"
+        and not _dump_source_input_is_prebuilt_pack(sources, build_info)
+    ):
         raise click.UsageError(
             "--depth source is incompatible with --ast-frontend hybrid: L4 "
             "source-ABI replay has no dual-backend hybrid extractor (unlike "
