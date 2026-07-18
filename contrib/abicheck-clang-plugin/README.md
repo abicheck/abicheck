@@ -194,6 +194,36 @@ abicheck dump libfoo.so --build-info ./abicheck_inputs/ -o libfoo.baseline.json
 Optional args: `library=<name>` (recorded in the manifest / `target_id`),
 `version=<v>`. `public-roots=` is repeatable.
 
+### Wiring into a real build
+
+Don't hand-edit every compile. Define the flags once and inject them into your
+build's compile flags. Use an **absolute** `out=` so parallel / out-of-tree
+compiles (which run in per-target working directories) all converge on one
+pack instead of scattering into several `abicheck_inputs/` trees:
+
+```bash
+ABICHECK_PLUGIN_FLAGS="\
+-fplugin=$PWD/build/libabicheck-facts.so \
+-Xclang -plugin-arg-abicheck-facts -Xclang out=$PWD/abicheck_inputs \
+-Xclang -plugin-arg-abicheck-facts -Xclang public-roots=$PWD/include"
+
+cmake -S . -B build -DCMAKE_CXX_FLAGS="$ABICHECK_PLUGIN_FLAGS" && cmake --build build
+#   or: make CXXFLAGS="$ABICHECK_PLUGIN_FLAGS"
+#   or (Bazel): put the same tokens in the target's copts (each -Xclang a
+#               separate list element)
+```
+
+The user-guide page
+[Build Evidence Setup](../../docs/user-guide/build-evidence-setup.md) has the
+per-build-system snippets in full.
+
+> **Compiler caches skip the plugin.** `ccache`/`sccache` replay a cached
+> object file *without running clang* on a cache hit, so **no facts are
+> emitted for that TU** — a silent coverage hole. Run the fact-collecting
+> build with the cache disabled (`CCACHE_DISABLE=1`) or as a dedicated pass.
+> `distcc`/`icecc` compile remotely, so `source_facts/` lands on the remote
+> host — collect on the driver or fetch the pack back.
+
 After the dump, read stderr's L4 coverage line. A healthy pack should report
 non-zero public declarations and, when the binary exports symbols, non-zero
 symbol matches. Ingestion now warns when a pack technically ingests but is
