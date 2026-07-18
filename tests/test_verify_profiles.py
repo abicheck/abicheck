@@ -82,6 +82,21 @@ def test_full_profile_is_superset_of_pr() -> None:
     assert pr_names <= full_names
 
 
+def test_pr_profile_run_with_a_skip_fails(capsys) -> None:
+    """A skipped step in the `pr` profile must exit 1, not 0 — a partial
+    result must never be mistaken for a complete CI-equivalent pass."""
+    step = _step("docs-build")
+    assert step.precondition is not None and step.precondition() is not None, (
+        "this test needs a pr-profile step whose precondition genuinely "
+        "fails in this environment (mkdocs not installed) — if that's no "
+        "longer true, swap in another step with an unmet precondition"
+    )
+    rc = verify.main(["--profile", "pr", "--only", "docs-build"])
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "INCOMPLETE" in out
+
+
 def test_pr_profile_includes_golden_tests() -> None:
     """M0-3's second contradiction: the documented fast command and
     `pixi run check` excluded golden tests, but the canonical CI unit lane
@@ -118,17 +133,29 @@ def test_pre_commit_does_not_pin_an_unpinned_mypy_mirror() -> None:
     """M0-3's first contradiction: a `mirrors-mypy` hook pins its OWN mypy
     version, independent of the `mypy==1.19.1` dev dependency pin — that let
     type errors through that only the CI-pinned mypy caught. mypy must run as
-    a `language: system` local hook (or, if a mirror is reintroduced, its rev
-    must match the pyproject.toml pin exactly)."""
+    a `language: system` local hook routed through `scripts/verify.py` (or,
+    if a mirror is reintroduced, its rev must match the pyproject.toml pin
+    exactly)."""
     text = _read(".pre-commit-config.yaml")
     mirror_match = re.search(
         r"-\s*repo:\s*https://github\.com/pre-commit/mirrors-mypy\s*\n\s*rev:\s*v([0-9.]+)",
         text,
     )
     if mirror_match is None:
-        # No active `- repo: .../mirrors-mypy` entry (e.g. a local/system
-        # hook, which always uses whatever mypy is installed — i.e. the
-        # pyproject.toml pin). Nothing further to check.
+        # No active `- repo: .../mirrors-mypy` entry — a local/system hook
+        # must exist instead, calling through verify.py (CLAUDE.md M0-3),
+        # not a bare `mypy` invocation that could resolve a different
+        # install than the pyproject.toml-pinned one (the exact PATH-
+        # ambiguity bug this whole test file exists to catch instances of).
+        assert re.search(
+            r"-\s*id:\s*mypy\b.*?language:\s*system.*?entry:\s*python scripts/verify\.py",
+            text,
+            re.DOTALL,
+        ), (
+            ".pre-commit-config.yaml: no `mirrors-mypy` entry, but also no "
+            "`language: system` mypy hook routed through scripts/verify.py — "
+            "mypy must run through one or the other, not a bare `mypy` command."
+        )
         return
     pyproject = _read("pyproject.toml")
     pin_match = re.search(r'"mypy==([0-9.]+)"', pyproject)
@@ -142,10 +169,18 @@ def test_pre_commit_does_not_pin_an_unpinned_mypy_mirror() -> None:
 
 def test_pre_commit_runs_ai_readiness() -> None:
     """scripts/CLAUDE.md documents that the AI-readiness gate runs via
-    pre-commit — keep that claim true."""
+    pre-commit — keep that claim true, and keep it to exactly one hook so a
+    future edit can't silently duplicate (or orphan) the entry."""
     text = _read(".pre-commit-config.yaml")
-    assert "ai-readiness" in text
-    assert "verify.py" in text or "check_ai_readiness.py" in text
+    # Count `entry:` lines specifically — the hook's `name:` field also
+    # mentions the command descriptively, which would double-count a plain
+    # substring search.
+    canonical_entry = "entry: python scripts/verify.py --profile pr --only ai-readiness"
+    occurrences = text.count(canonical_entry)
+    assert occurrences == 1, (
+        f"expected exactly one pre-commit hook with `{canonical_entry}`, "
+        f"found {occurrences}"
+    )
 
 
 # --- .github/workflows/ci.yml ---------------------------------------------
@@ -156,7 +191,7 @@ def test_ci_ai_readiness_job_calls_verify_py() -> None:
     assert "scripts/verify.py --profile pr --only ai-readiness" in ci
     assert "fp-rate" in ci and "tier-accuracy" in ci and "usecase-docs-sync" in ci
     assert (
-        "scripts/verify.py --profile pr --only fp-rate,tier-accuracy,usecase-docs-sync"
+        "scripts/verify.py --profile pr --only fp-rate,tier-accuracy,usecase-docs-sync,repo-facts"
         in ci
     )
 
@@ -231,9 +266,24 @@ def test_claude_md_is_a_thin_adapter_over_agents_md() -> None:
 
 
 def test_other_agent_adapters_point_at_agents_md() -> None:
-    """The Copilot and Cursor adapters must reference AGENTS.md rather than
-    keep their own copy of repository-wide commands/invariants."""
-    copilot = _read(".github/copilot-instructions.md")
-    assert "AGENTS.md" in copilot
-    cursor = _read(".cursor/rules/abicheck.mdc")
-    assert "AGENTS.md" in cursor
+    """The Copilot and Cursor adapters must reference AGENTS.md AND must not
+    re-duplicate commands/invariants that belong solely in AGENTS.md — a bare
+    "AGENTS.md" mention alone doesn't prove the file stayed thin (it could
+    mention AGENTS.md once and then repeat a full command block anyway)."""
+    unit_fast = _step("unit-fast")
+    marker_expr = _pytest_marker_expr(unit_fast)
+    for adapter_path in (
+        ".github/copilot-instructions.md",
+        ".cursor/rules/abicheck.mdc",
+    ):
+        text = _read(adapter_path)
+        assert "AGENTS.md" in text, f"{adapter_path}: must reference AGENTS.md"
+        assert "pip install" not in text, (
+            f"{adapter_path}: setup instructions belong in AGENTS.md/"
+            "CONTRIBUTING.md only — duplicating `pip install` here is exactly "
+            "the drift this adapter pattern exists to prevent"
+        )
+        assert marker_expr not in text, (
+            f"{adapter_path}: the fast-lane pytest marker expression is a "
+            "volatile AGENTS.md-owned detail — it must not be duplicated here"
+        )

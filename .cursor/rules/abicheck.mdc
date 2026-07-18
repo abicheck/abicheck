@@ -5,17 +5,12 @@ alwaysApply: true
 ---
 
 This is a thin adapter, not the canonical source (CLAUDE.md "M1-1"). The
-canonical, vendor-neutral repository instructions — quick-reference commands,
-the `scripts/verify.py` verification contract, architecture map, ChangeKind
+canonical, vendor-neutral repository instructions — setup, the
+`scripts/verify.py` verification contract, architecture map, ChangeKind
 conventions, test-quality gates, and the full "what NOT to do" list — live in
-`/AGENTS.md`. Read that file before making a change.
-
-Minimum before proposing a change is done:
-
-```bash
-pip install -e ".[dev]"
-python scripts/verify.py --profile pr   # == `pixi run check`; the real PR gate
-```
+`/AGENTS.md`. Read that file before making a change, and treat
+`python scripts/verify.py --profile pr` (there, not repeated here) as the
+real definition of done.
 
 Do not duplicate commands, invariants, or counts from `AGENTS.md` here — if
 this file and `AGENTS.md` disagree, `AGENTS.md` is correct.

@@ -313,6 +313,29 @@ def test_script_inventory_completeness_passes_when_listed(car, tmp_path, monkeyp
     assert f.warnings == []
 
 
+def test_script_inventory_completeness_ignores_mentions_outside_inventory(
+    car, tmp_path, monkeypatch
+):
+    """A script named only in prose *outside* the '## Inventory' section
+    (e.g. another section's narrative, or a later '## Conventions' heading)
+    must still warn — only an actual inventory row satisfies the check."""
+    fake_scripts = tmp_path
+    (fake_scripts / "CLAUDE.md").write_text(
+        "## Inventory\n\n| Script | Purpose |\n|---|---|\n"
+        "| `other_tool.py` | does another thing |\n\n"
+        "## Conventions\n\nSee `new_tool.py` for an example of the pattern.\n",
+        encoding="utf-8",
+    )
+    (fake_scripts / "new_tool.py").write_text("print('hi')\n", encoding="utf-8")
+    (fake_scripts / "other_tool.py").write_text("print('hi')\n", encoding="utf-8")
+    monkeypatch.setattr(car, "SCRIPTS", fake_scripts)
+    monkeypatch.setattr(car, "ROOT", tmp_path)
+    f = car.Findings()
+    car.check_script_inventory_completeness(f)
+    assert any("new_tool.py" in msg for _, msg in f.warnings), f.warnings
+    assert not any("other_tool.py" in msg for _, msg in f.warnings), f.warnings
+
+
 def test_generated_file_ownership_catches_stripped_marker(car, tmp_path, monkeypatch):
     stripped = tmp_path / "generated.md"
     stripped.write_text("# just content, no marker\n", encoding="utf-8")
@@ -374,3 +397,89 @@ def test_test_ratio_recursive_discovery(car, tmp_path, monkeypatch):
     # the real assertion is the message's numerator, not warn/no-warn.
     assert f.warnings, "expected a ratio warning for this tiny synthetic tree"
     assert "1 test files" in f.warnings[0][1], f.warnings
+
+
+# ---------------------------------------------------------------------------
+# M1-4: repo_facts.json / action-version-freshness synthetic tests
+# ---------------------------------------------------------------------------
+
+
+def test_action_version_freshness_catches_stale_reference(car, tmp_path, monkeypatch):
+    import json
+
+    (tmp_path / "repo_facts.json").write_text(
+        json.dumps({"latest_release": "0.5.0"}), encoding="utf-8"
+    )
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (tmp_path / "README.md").write_text(
+        "uses: abicheck/abicheck@v0.3.0\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(car, "ROOT", tmp_path)
+    monkeypatch.setattr(car, "DOCS", docs)
+    f = car.Findings()
+    car.check_action_version_freshness(f)
+    assert any("v0.3.0" in msg and "0.5.0" in msg for _, msg in f.errors), f.errors
+
+
+def test_action_version_freshness_passes_when_current(car, tmp_path, monkeypatch):
+    import json
+
+    (tmp_path / "repo_facts.json").write_text(
+        json.dumps({"latest_release": "0.5.0"}), encoding="utf-8"
+    )
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (tmp_path / "README.md").write_text(
+        "uses: abicheck/abicheck@v0.5.0\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(car, "ROOT", tmp_path)
+    monkeypatch.setattr(car, "DOCS", docs)
+    f = car.Findings()
+    car.check_action_version_freshness(f)
+    assert f.errors == []
+
+
+def test_action_version_freshness_exempts_adr_dir(car, tmp_path, monkeypatch):
+    import json
+
+    (tmp_path / "repo_facts.json").write_text(
+        json.dumps({"latest_release": "0.5.0"}), encoding="utf-8"
+    )
+    docs = tmp_path / "docs"
+    adr_dir = docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "001-historical.md").write_text(
+        "uses: abicheck/abicheck@v0.3.0\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(car, "ROOT", tmp_path)
+    monkeypatch.setattr(car, "DOCS", docs)
+    # _ACTION_VERSION_EXEMPT_DIRS is computed from DOCS at module-load time
+    # (like REQUIRED_CLAUDE_MD_DIRS etc.), so monkeypatching DOCS alone
+    # doesn't retroactively change it — patch it directly, same pattern used
+    # for the other module-level dir tuples in this file.
+    monkeypatch.setattr(car, "_ACTION_VERSION_EXEMPT_DIRS", (adr_dir,))
+    f = car.Findings()
+    car.check_action_version_freshness(f)
+    assert f.errors == []
+
+
+def test_repo_facts_json_exists_and_is_fresh():
+    """The committed repo_facts.json should be exactly what
+    scripts/gen_repo_facts.py --check verifies — a lightweight structural
+    sanity check that doesn't re-run the (slower) full script."""
+    import json
+
+    facts_path = ROOT / "repo_facts.json"
+    assert facts_path.is_file(), (
+        "repo_facts.json missing — run scripts/gen_repo_facts.py"
+    )
+    facts = json.loads(facts_path.read_text(encoding="utf-8"))
+    for key in (
+        "project_version",
+        "latest_release",
+        "example_cases",
+        "fast_test_cases_collected",
+        "canonical_python",
+    ):
+        assert key in facts, f"repo_facts.json missing {key!r}"

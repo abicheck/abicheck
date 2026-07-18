@@ -32,6 +32,7 @@ Run locally:
 
 from __future__ import annotations
 
+import argparse
 import shutil
 import subprocess
 import sys
@@ -41,13 +42,16 @@ ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.parse_args(argv)
+
     if DIST.exists():
         shutil.rmtree(DIST)
 
     build = subprocess.run([sys.executable, "-m", "build"], cwd=ROOT)
     if build.returncode != 0:
-        return build.returncode
+        return 1
 
     artifacts = sorted(DIST.glob("*.tar.gz")) + sorted(DIST.glob("*.whl"))
     if not artifacts:
@@ -61,13 +65,13 @@ def main() -> int:
         cwd=ROOT,
     )
     if twine.returncode != 0:
-        return twine.returncode
+        return 1
 
     metadata = subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "check_distribution_metadata.py")],
         cwd=ROOT,
     )
-    return metadata.returncode
+    return 0 if metadata.returncode == 0 else 1
 
 
 if __name__ == "__main__":

@@ -226,6 +226,12 @@ STEPS: tuple[Step, ...] = (
         description="Use-case registry vs. human docs drift gate",
     ),
     Step(
+        "repo-facts",
+        _pyscript("scripts/gen_repo_facts.py", "--check"),
+        frozenset({PR, FULL}),
+        description="repo_facts.json freshness (test/example counts, version) — CLAUDE.md M1-4",
+    ),
+    Step(
         "changelog-fragment",
         _pyscript("scripts/check_changelog_fragment.py"),
         frozenset({PR, FULL}),
@@ -431,22 +437,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     n_passed = sum(1 for r in results if r["status"] == "passed")
     n_failed = sum(1 for r in results if r["status"] == "failed")
     n_skipped = sum(1 for r in results if r["status"] == "skipped")
-    overall = "failed" if n_failed else "passed"
     skipped_names = [str(r["name"]) for r in results if r["status"] == "skipped"]
+
+    # `pr` steps are documented as "always-required CI-equivalent checks" — a
+    # skip here (missing tool/module, e.g. mkdocs not installed) means this
+    # run did NOT reproduce everything the real PR gate checks. Unlike `full`
+    # (where skip-on-missing-tool is the deliberate, expected design), that
+    # makes a `pr`-profile run genuinely incomplete, not just imperfect — so
+    # it fails, the same as `n_failed`, rather than merely warning. A partial
+    # result must never exit 0 and be mistaken for a complete one.
+    incomplete = args.profile == PR and n_skipped > 0
+    overall = "failed" if n_failed else "incomplete" if incomplete else "passed"
 
     print(
         f"\nverify.py --profile {args.profile}: {n_passed} passed, {n_failed} failed, {n_skipped} skipped"
     )
-    if args.profile == PR and n_skipped:
-        # `pr` steps are documented as "always-required CI-equivalent checks" —
-        # a skip here (missing tool/module, e.g. mkdocs not installed) means
-        # this run did NOT reproduce everything the real PR gate checks, even
-        # though `overall` above can still read "passed". Say so explicitly:
-        # a partial result must never be mistaken for a complete one.
+    if incomplete:
         print(
             f"WARNING: this `pr`-profile run is INCOMPLETE — skipped "
             f"{', '.join(skipped_names)}. It is not a full substitute for CI "
-            f"until the missing tool(s)/module(s) are installed."
+            f"until the missing tool(s)/module(s) are installed. Treating this "
+            f"as a failure (exit 1), not a pass."
         )
 
     if args.json:
@@ -467,7 +478,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print(f"receipt written to {args.json}")
 
-    return 1 if n_failed else 0
+    return 1 if n_failed or incomplete else 0
 
 
 if __name__ == "__main__":

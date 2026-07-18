@@ -26,15 +26,18 @@ jobs:
           pip install "mypy==1.19.1"  # pin so the drift gate is reproducible (field-eval CI gap)
       - name: AI-readiness checks (file size, CLAUDE.md coverage, ChangeKind invariants, mypy drift, import cycles)
         run: python scripts/verify.py --profile pr --only ai-readiness
-      - name: Install package (for FP-rate / tier-accuracy / doc-sync gates)
-        run: pip install -e .
-      # Scoping FP-rate gate (ADR-024 §7), per-tier accuracy gate, and the
-      # use-case docs sync gate — routed through scripts/verify.py, the same
-      # implementation `pixi run check` and `python scripts/verify.py
-      # --profile pr` run locally (CLAUDE.md "M0-3"), so this job can't
-      # silently diverge from the local PR-profile definition of done.
-      - name: Scoping / tier-accuracy / doc-sync gates
-        run: python scripts/verify.py --profile pr --only fp-rate,tier-accuracy,usecase-docs-sync
+      # `[dev]` (not just the bare package): repo-facts' fast_test_cases_collected
+      # needs pytest to run `--collect-only` (see scripts/gen_repo_facts.py).
+      - name: Install package (for FP-rate / tier-accuracy / doc-sync / repo-facts gates)
+        run: pip install -e ".[dev]"
+      # Scoping FP-rate gate (ADR-024 §7), per-tier accuracy gate, the use-case
+      # docs sync gate, and repo_facts.json freshness — routed through
+      # scripts/verify.py, the same implementation `pixi run check` and
+      # `python scripts/verify.py --profile pr` run locally (CLAUDE.md
+      # "M0-3"), so this job can't silently diverge from the local PR-profile
+      # definition of done.
+      - name: Scoping / tier-accuracy / doc-sync / repo-facts gates
+        run: python scripts/verify.py --profile pr --only fp-rate,tier-accuracy,usecase-docs-sync,repo-facts
       - name: Per-tier accuracy matrix (step-summary artifact)
         if: always()
         run: python scripts/check_tier_accuracy.py --markdown >> "$GITHUB_STEP_SUMMARY"
@@ -378,16 +381,16 @@ jobs:
           cache: 'pip'
       - name: Install package
         run: pip install -e ".[dev]"
+      # Routed through scripts/verify.py (CLAUDE.md "M0-3") — its
+      # "libabigail-parity" Step is marker-scoped (not a hardcoded file
+      # list; tests/test_abidiff_parity_extended.py and
+      # tests/test_surface_scope_parity.py also carry @pytest.mark.libabigail
+      # and would silently never run under the old hardcoded 3-file list)
+      # and sets ABICHECK_MIN_EXECUTED itself — fails loudly if abigail-tools
+      # didn't install (lane would otherwise skip every test and pass), see
+      # tests/conftest.py's silent-skip guard.
       - name: Run libabigail parity tests
-        # Fail loudly if abigail-tools didn't install (lane would otherwise skip
-        # every test and pass) — see tests/conftest.py silent-skip guard.
-        env:
-          ABICHECK_MIN_EXECUTED: '5'
-        # Marker-scoped (not a hardcoded file list): tests/test_abidiff_parity_extended.py
-        # and tests/test_surface_scope_parity.py also carry @pytest.mark.libabigail and
-        # would silently never run under the old hardcoded 3-file list — matches the
-        # `pixi run -e parity test-libabigail` task, which was already marker-scoped.
-        run: pytest tests/ -v -m libabigail --tb=short
+        run: python scripts/verify.py --profile full --only libabigail-parity
 
   abicc-parity:
     needs: [heavy-parity-gate]
@@ -406,15 +409,15 @@ jobs:
           cache: 'pip'
       - name: Install package
         run: pip install -e ".[dev]"
+      # Routed through scripts/verify.py (CLAUDE.md "M0-3") — its
+      # "abicc-parity" Step is marker-scoped (not a hardcoded file list;
+      # tests/test_abicc_parity_extended.py also carries @pytest.mark.abicc
+      # and would silently never run under the old hardcoded 2-file list)
+      # and sets ABICHECK_MIN_EXECUTED itself — fails loudly if
+      # abi-compliance-checker didn't install (lane would otherwise skip
+      # every test and pass), see tests/conftest.py's silent-skip guard.
       - name: Run ABICC parity tests
-        # Fail loudly if abi-compliance-checker didn't install (lane would
-        # otherwise skip every test and pass) — see tests/conftest.py guard.
-        # Marker-scoped (not a hardcoded file list): tests/test_abicc_parity_extended.py
-        # also carries @pytest.mark.abicc and would silently never run under the old
-        # hardcoded 2-file list.
-        env:
-          ABICHECK_MIN_EXECUTED: '10'
-        run: pytest tests/ -v -m abicc --tb=short
+        run: python scripts/verify.py --profile full --only abicc-parity
       - name: Run XML schema validation tests (no ABICC required)
         run: pytest tests/test_xml_parity.py::TestXmlSchemaValidation tests/test_xml_report.py -v --tb=short
 

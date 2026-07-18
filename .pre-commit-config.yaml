@@ -24,8 +24,8 @@ repos:
   - repo: local
     hooks:
       - id: mypy
-        name: mypy (repo-pinned via pyproject.toml [dev])
-        entry: mypy abicheck/
+        name: mypy (scripts/verify.py --profile fast --only typecheck)
+        entry: python scripts/verify.py --profile fast --only typecheck
         language: system
         pass_filenames: false
         types: [python]

@@ -475,10 +475,11 @@ class TestOutputFormatParity:
             "longer present in the rendered HTML report (the CSS still has a "
             "`.verdict-box` element, so this looks like label-text drift in "
             "html_report.py's template rather than a missing feature) — not "
-            "yet triaged. Investigate separately; don't strict-xfail until "
-            "triaged."
+            "yet triaged. Investigate separately (strict=True: this fails "
+            "loudly on an unexpected XPASS once fixed, forcing the marker's "
+            "removal instead of rotting silently)."
         ),
-        strict=False,
+        strict=True,
     )
     def test_report_html_contains_abicc_sections(self, tmp_path):
         """HTML report has ABICC-equivalent sections: verdict, summary, changes."""
@@ -689,10 +690,11 @@ class TestStrictModeParity:
             "strict mode) and passes today — the two tests' expectations "
             "directly contradict each other, which suggests this one encodes a "
             "stale assumption rather than a real product gap, but that needs a "
-            "maintainer decision, not a guess. Investigate separately; don't "
-            "strict-xfail until triaged."
+            "maintainer decision, not a guess. Investigate separately "
+            "(strict=True: this fails loudly on an unexpected XPASS once "
+            "fixed, forcing the marker's removal instead of rotting silently)."
         ),
-        strict=False,
+        strict=True,
     )
     def test_strict_verdict_json_shows_breaking(self, tmp_path):
         """In strict mode, abicheck JSON verdict is BREAKING for additions."""

@@ -279,9 +279,12 @@ Several mechanisms guard test quality so coverage can't be "filled" without veri
 
 ## Line-coverage floor
 
-The fast lane enforces a **95%** line+branch coverage floor (`--cov-fail-under=95`),
-but **only on the canonical Linux/Python-3.13 unit-test lane** in
-`.github/workflows/ci.yml` — that's where the full unit suite runs under coverage.
+The `pr` profile's `unit-pr` step (`scripts/verify.py`) enforces a **95%**
+line+branch coverage floor (`--cov-fail-under=95`) — the `fast` profile does
+not, since it's the everyday inner loop and deliberately skips coverage
+instrumentation. This floor applies **only on the canonical Linux/Python-3.13
+unit-test lane** in `.github/workflows/ci.yml` — that's where the full unit
+suite runs under coverage.
 The other Linux Pythons (3.12/3.14) run the same suite *without* coverage (they would
 only re-check the identical floor, and coverage instrumentation adds ~60% wall time).
 macOS/Windows skip the Linux-only ELF/DWARF parsing tests, which structurally lowers

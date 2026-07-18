@@ -96,10 +96,11 @@ def _is_breaking(verdict: str) -> bool:
         "BREAKING for a struct that is entirely internal (defined outside the "
         "public header, touched only by a static helper) — not yet triaged as "
         "a real public-surface-scoping gap vs. an abidiff-version-sensitive "
-        "parity mismatch (see module docstring). Investigate separately; "
-        "don't strict-xfail until triaged."
+        "parity mismatch (see module docstring). Investigate separately "
+        "(strict=True: this fails loudly on an unexpected XPASS once fixed, "
+        "forcing the marker's removal instead of rotting silently)."
     ),
-    strict=False,
+    strict=True,
 )
 def test_internal_type_change_scoped_out_by_both(tmp_path: Path) -> None:
     """An internal struct's layout change is scoped out by both tools."""
@@ -137,10 +138,11 @@ def test_internal_type_change_scoped_out_by_both(tmp_path: Path) -> None:
         "landing: abidiff's verdict is COMPATIBLE for a public-header struct "
         "whose by-value-parameter size changed, where BREAKING was expected — "
         "not yet triaged as a real issue vs. abidiff-version-sensitive parity "
-        "(see module docstring). Investigate separately; don't strict-xfail "
-        "until triaged."
+        "(see module docstring). Investigate separately (strict=True: this "
+        "fails loudly on an unexpected XPASS once fixed, forcing the "
+        "marker's removal instead of rotting silently)."
     ),
-    strict=False,
+    strict=True,
 )
 def test_public_type_change_breaking_for_both(tmp_path: Path) -> None:
     """A public-header struct passed by value changing size breaks for both."""
