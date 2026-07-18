@@ -940,6 +940,18 @@ semantics) is closed to the extent described under its own entry.
   `test_func_removed_matches_via_mangled_symbol_not_label` to
   `test_internal_leak.py`, reproducing the real-world mangled-vs-label shape
   the prior tests' hand-picked matching names had masked.
+- **Item 4's new fields needed a schema version bump (Codex).** The three
+  new per-finding JSON fields (`public_reachable`/`reachability_kind`/
+  `reachability_proof_path`) are additive optional keys per
+  `abicheck/schemas/__init__.py`'s own documented policy ("additive changes
+  — new optional keys… bump the MINOR component"), the same discipline every
+  prior additive field (2.1 through 2.5) already followed with its own
+  changelog comment — missed here even though the schema's
+  `additionalProperties: true` meant no test caught it (unregistered keys
+  validate anyway). Bumped `REPORT_SCHEMA_VERSION` to `"2.6"` with a matching
+  changelog comment, added the three fields (with `reachability_kind`'s enum)
+  to `compare_report.schema.json`, and re-synced the published
+  `docs/schemas/v1/` copy via `scripts/publish_schemas.py`.
 
 ## Roadmap (not committed — scope/sequence per the usual planning process)
 
