@@ -135,6 +135,8 @@ class TestDumpDryRun:
         # warn condition, so --depth source with --build-info given (but no
         # --sources) fell through untouched and the dry run exited 0 even
         # though the real dump's strict depth gate would raise.
+        snap = tmp_path / "lib.abi.json"
+        _write_snapshot(snap)
         header = tmp_path / "api.h"
         header.write_text("void f(void);\n", encoding="utf-8")
         db = tmp_path / "compile_commands.json"
@@ -142,7 +144,7 @@ class TestDumpDryRun:
         result = CliRunner().invoke(
             main,
             [
-                "dump", "/bin/true", "--dry-run", "--depth", "source",
+                "dump", str(snap), "--dry-run", "--depth", "source",
                 "-H", str(header), "--build-info", str(db),
             ],
         )
