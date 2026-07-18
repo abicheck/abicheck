@@ -109,12 +109,20 @@ def _compile_flags_from_ast_dump_command(cmd: list[str]) -> list[str]:
     context bit-for-bit consistent with whatever the direct-clang L2
     backend actually used to successfully parse these headers, rather than
     risking a second, subtly different derivation drifting out of sync.
+
+    Searches for the specific ADJACENT ``"-Xclang", "-ast-dump=json"`` pair
+    — abicheck's own appended tail — rather than the first bare ``"-Xclang"``
+    anywhere in the command: a user passing their own ``-Xclang <arg>``
+    through ``--gcc-options``/``--gcc-option`` places it earlier in the
+    command, and stopping at THAT one would drop the user's own flag plus
+    everything genuinely shared after it (later pass-through options,
+    system includes, language mode) instead of just abicheck's own dump-mode
+    tail (Codex review).
     """
-    try:
-        xclang_idx = cmd.index("-Xclang")
-    except ValueError:
-        return cmd[1:]
-    return cmd[1:xclang_idx]
+    for i in range(len(cmd) - 1):
+        if cmd[i] == "-Xclang" and cmd[i + 1] == "-ast-dump=json":
+            return cmd[1:i]
+    return cmd[1:]
 
 
 def run_layout_tool(

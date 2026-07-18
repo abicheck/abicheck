@@ -75,6 +75,26 @@ class TestCompileFlagsSlicing:
         cmd = ["clang++", "-I", "/inc"]
         assert _compile_flags_from_ast_dump_command(cmd) == ["-I", "/inc"]
 
+    def test_user_supplied_earlier_xclang_is_preserved(self):
+        # Codex review: a user's own "-Xclang <arg>" passed through
+        # --gcc-options/--gcc-option sits BEFORE abicheck's own appended
+        # "-Xclang -ast-dump=json" tail. The first bare "-Xclang" in the
+        # command is the user's, not ours -- stopping there would drop the
+        # user's own flag/value plus every later shared flag (system
+        # includes, language mode), not just abicheck's dump-mode tail.
+        cmd = [
+            "clang++", "-I", "/inc", "-Xclang", "-some-user-flag",
+            "-isystem", "/usr/include/probed",
+            "-fsyntax-only", "-ferror-limit=0", "-Xclang", "-ast-dump=json",
+            "/tmp/agg.hpp",
+        ]
+        flags = _compile_flags_from_ast_dump_command(cmd)
+        assert flags == [
+            "-I", "/inc", "-Xclang", "-some-user-flag",
+            "-isystem", "/usr/include/probed",
+            "-fsyntax-only", "-ferror-limit=0",
+        ]
+
 
 class TestRunLayoutTool:
     def test_no_headers_returns_none(self):

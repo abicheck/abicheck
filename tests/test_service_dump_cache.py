@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.service_dump_cache import (
@@ -149,6 +150,30 @@ class TestDumpCacheExtraKey:
         k_auto = _dump_cache_extra_key("elf", "auto", None, None)
         k_castxml = _dump_cache_extra_key("elf", "castxml", None, None)
         assert k_auto == k_castxml
+
+    def test_differs_when_layout_tool_becomes_available(self, monkeypatch):
+        # Codex review: service.run_dump calls attach_clang_layout for every
+        # "clang"-backend dump, so the snapshot's layout fields depend on
+        # ABICHECK_CLANG_LAYOUT_TOOL/PATH too -- a cache entry created before
+        # enabling the tool must not be silently reused after enabling it.
+        monkeypatch.delenv("ABICHECK_CLANG_LAYOUT_TOOL", raising=False)
+        with patch(
+            "abicheck.clang_layout_tool.shutil.which", return_value=None
+        ):
+            k_before = _dump_cache_extra_key("elf", "clang", None, None)
+        monkeypatch.setenv("ABICHECK_CLANG_LAYOUT_TOOL", "/opt/abicheck-clang-layout-tool")
+        k_after = _dump_cache_extra_key("elf", "clang", None, None)
+        assert k_before != k_after
+
+    def test_layout_tool_identity_irrelevant_for_castxml_and_hybrid(self, monkeypatch):
+        # The tool only ever runs for the "clang" backend -- its
+        # availability/identity must not needlessly invalidate castxml/hybrid
+        # cache entries, which never involve it at all.
+        monkeypatch.delenv("ABICHECK_CLANG_LAYOUT_TOOL", raising=False)
+        k1 = _dump_cache_extra_key("elf", "castxml", None, None)
+        monkeypatch.setenv("ABICHECK_CLANG_LAYOUT_TOOL", "/opt/abicheck-clang-layout-tool")
+        k2 = _dump_cache_extra_key("elf", "castxml", None, None)
+        assert k1 == k2
 
 
 class TestCachedRunDump:
