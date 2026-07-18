@@ -148,6 +148,63 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   contents were not verified — the same "possibly satisfiable" treatment
   already given to `--depth build` backed by an unverified compile database
   — without a dry run loading the pack to check (real I/O it must not do).
+- **`--dwarf-only` could satisfy `--depth build` without ever using the
+  requested headers** — `--dwarf-only` explicitly ignores `-H` headers
+  (DWARF becomes the primary data source instead), but `perform_elf_dump`'s
+  `parsed_with_build_context` stamp wasn't gated on the snapshot actually
+  being header-parsed (`snap.from_headers`), only on a matched `-p`/
+  `--compile-db`; `dump lib.so -H api.h -p build --dwarf-only --depth build`
+  could pass the strict depth gate and write a DWARF-only snapshot that
+  never touched the header/build context (external review; mirrors the
+  PE/Mach-O path's identical `from_headers` gate).
+- **`dump --sources ... --depth binary` could "succeed" with an entirely
+  empty snapshot** — a source-only dump (no `SO_PATH`) has no binary at
+  all, so `--depth binary` (rank 0, the floor) was trivially "satisfied" by
+  the strict depth gate even for a completely empty snapshot (`--depth
+  binary` also resolves collect_mode to `off`, skipping L3-L5 embedding
+  too); `dump --sources src --depth binary -o out.json` used to exit 0 and
+  write a snapshot with no binary, header, build, or source facts
+  whatsoever — a baseline/CI consumer would read that success as proof the
+  requested rung is genuinely present. Now a usage error, in both the real
+  run and `--dry-run` (external review).
+- **A scoped `compare --used-by`/`--required-symbol(s)` JSON's new
+  `full_summary` key was undocumented and unversioned** — added in this
+  same round of fixes without a `REPORT_SCHEMA_VERSION` bump or a packaged
+  schema entry, violating the schema's own additive-change policy.
+  `REPORT_SCHEMA_VERSION` is now `2.9`; `full_verdict`/`full_severity`
+  (already emitted, unversioned, since the pre-1.0 CLI reset) and
+  `full_summary` are now all declared in `compare_report.schema.json` and
+  documented in `docs/user-guide/output-formats.md` (external review).
+- **`dump_provenance.source_scope` hardcoded `"target"` unconditionally** —
+  correct for `dump`'s own inline `--sources` embed (always "target"
+  scope), but `dump` also accepts a *prebuilt* `--build-info <pack>`/
+  `abicheck_inputs` pack that could have been collected at any scope
+  (`"changed"`/`"full"` from a `collect --depth source --since ...`/
+  `graph-full` run); hardcoding "target" misreported that pack's actual
+  scope, and even claimed a scope for dumps with no source replay evidence
+  at all. Now reads `source_abi.coverage["replay_scope"]` when available,
+  `null` otherwise (external review).
+- **`dump --dry-run --depth build -p <compile-db>` accepted an
+  empty/non-matching compile database as a soft warning instead of a
+  blocker** — loading a compile database and checking whether it matches
+  the resolved headers is cheap, deterministic, read-only resolution (the
+  same JSON load + path match the real run performs before castxml even
+  runs), not "real work out of scope for a dry run" as an earlier version
+  of this fix pass assumed; a matched database is now a clean pass (no
+  warning at all — it does supply real evidence), an empty/unmatched one is
+  now a definite blocker, matching the real run's strict depth gate exactly
+  (external review).
+- **`dump`'s "Resolved evidence depth: ..." stderr line could disagree with
+  the same snapshot's `dump_provenance.effective_depth` in its JSON** — the
+  stderr line used the plain `evidence_depth_label`, while the JSON used
+  the stricter `_gated_source_label` `check_requested_depth_satisfied`
+  itself gates on; they disagree on the documented zero-match-source-only
+  case (L4 replay genuinely ran but linked nothing), so a `--depth source`
+  dump could print `Resolved evidence depth: build` to stderr next to
+  `"effective_depth": "source"` in the JSON it just wrote.
+  `fold_dump_provenance_into_json` now returns its computed label for the
+  stderr line to reuse verbatim, so the two can no longer diverge (external
+  review).
 
 ### Added
 

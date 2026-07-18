@@ -522,7 +522,7 @@ def test_perform_elf_dump_stamps_build_context_and_attaches(
     db = tmp_path / "compile_commands.json"
     db.write_text(json.dumps([{"command": "cc -DKEEP -c config.c"}]), encoding="utf-8")
 
-    snap = AbiSnapshot(library="lib.so", version="1.0")
+    snap = AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
     monkeypatch.setattr("abicheck.cli_dump_helpers.dump", lambda **_kw: snap)
 
     events, _stamp, _write, _expand, _populate = _elf_dump_callables()
@@ -569,6 +569,66 @@ def test_perform_elf_dump_stamps_build_context_and_attaches(
     assert snap.conditional_fields["Config"]["legacy"]["guard"] == "KEEP"
     assert events.get("stamped") and events.get("written")
     assert "populated" not in events  # follow_deps was False
+
+
+def test_perform_elf_dump_does_not_stamp_build_context_for_dwarf_only(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Codex review: --dwarf-only explicitly ignores -H headers
+    (dumper._try_dwarf_snapshot warns "ignoring provided headers" and returns
+    a DWARF-built snapshot with from_headers left False) -- a -p compile
+    database matching the originally *requested* headers must not be
+    recorded as real build-context evidence for a snapshot that never
+    actually parsed them, even though compile_db_context_matched is True
+    (mirrors handle_non_elf_dump's identical from_headers gate)."""
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "config.h"
+    hdr.write_text("struct Config {\n int v;\n};", encoding="utf-8")
+    db = tmp_path / "compile_commands.json"
+    db.write_text(json.dumps([{"command": "cc -DKEEP -c config.c"}]), encoding="utf-8")
+
+    snap = AbiSnapshot(library="lib.so", version="1.0", from_headers=False)
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", lambda **_kw: snap)
+
+    events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+
+    perform_elf_dump(
+        so,
+        (hdr,),
+        (),
+        "1.0",
+        "c",
+        None,
+        None,
+        None,
+        (),  # gcc_path/prefix/options/option_tokens
+        None,
+        True,  # sysroot, nostdinc
+        True,  # dwarf_only
+        None,  # effective_debug_format
+        (),
+        (),  # public_headers, public_header_dirs
+        db,  # effective_compile_db
+        False,
+        (),
+        "",  # follow_deps, search_paths, ld_library_path
+        None,
+        None,
+        False,  # git_tag, build_id, no_git
+        None,
+        None,
+        None,
+        None,
+        False,
+        "off",  # output..collect_mode
+        _expand,
+        _populate,
+        _stamp,
+        _write,
+        compile_db_context_matched=True,
+    )
+
+    assert snap.parsed_with_build_context is False
 
 
 def test_perform_elf_dump_does_not_stamp_build_context_when_db_unmatched(
@@ -1752,10 +1812,15 @@ def test_fold_dump_provenance_uses_gated_label_for_zero_match_source_case() -> N
     )
     snap.build_source = pack
 
-    text = fold_dump_provenance_into_json("{}", "source", snap)
+    text, resolved_label = fold_dump_provenance_into_json("{}", "source", snap)
     provenance = json.loads(text)["dump_provenance"]
     assert provenance["effective_depth"] == "source"
     assert provenance["degraded"] is False
+    # External review: cli.dump_cmd's "Resolved evidence depth: ..." stderr
+    # echo reuses this returned label verbatim instead of recomputing via
+    # the plain evidence_depth_label -- pin that the two can never disagree
+    # for this exact case (JSON: "source" vs. a stale stderr "build").
+    assert resolved_label == provenance["effective_depth"] == "source"
 
 
 def test_fold_dump_provenance_falls_back_to_l4_extractor_when_ast_producer_absent() -> None:
@@ -1794,7 +1859,7 @@ def test_fold_dump_provenance_falls_back_to_l4_extractor_when_ast_producer_absen
     ]
     snap.build_source = pack
 
-    text = fold_dump_provenance_into_json("{}", "source", snap)
+    text, _ = fold_dump_provenance_into_json("{}", "source", snap)
     provenance = json.loads(text)["dump_provenance"]
     assert provenance["frontend"] == "clang"
 
@@ -1832,7 +1897,7 @@ def test_fold_dump_provenance_prefers_l4_frontend_over_ast_producer_at_source_de
     ]
     snap.build_source = pack
 
-    text = fold_dump_provenance_into_json("{}", "source", snap)
+    text, _ = fold_dump_provenance_into_json("{}", "source", snap)
     provenance = json.loads(text)["dump_provenance"]
     assert provenance["effective_depth"] == "source"
     assert provenance["frontend"] == "clang"
@@ -1860,7 +1925,7 @@ def test_fold_dump_provenance_keeps_ast_producer_below_source_depth() -> None:
     pack.manifest.extractors = [ExtractorRecord(name="source_abi:clang", status="failed")]
     snap.build_source = pack
 
-    text = fold_dump_provenance_into_json("{}", "build", snap)
+    text, _ = fold_dump_provenance_into_json("{}", "build", snap)
     provenance = json.loads(text)["dump_provenance"]
     assert provenance["effective_depth"] == "build"
     assert provenance["frontend"] == "castxml"
@@ -1885,9 +1950,64 @@ def test_fold_dump_provenance_frontend_none_when_no_l4_replay_and_no_ast_produce
     pack.manifest.extractors = [ExtractorRecord(name="compile_commands", status="ok")]
     snap.build_source = pack
 
-    text = fold_dump_provenance_into_json("{}", "build", snap)
+    text, _ = fold_dump_provenance_into_json("{}", "build", snap)
     provenance = json.loads(text)["dump_provenance"]
     assert provenance["frontend"] is None
+    assert provenance["source_scope"] is None
+
+
+def test_fold_dump_provenance_source_scope_none_without_source_abi() -> None:
+    """External review: dump_provenance.source_scope previously hardcoded
+    "target" unconditionally, even for a build_source pack with no L4
+    source_abi surface at all (e.g. a --depth build dump, L3 only) -- must
+    report None rather than fabricating a scope no replay ever ran at."""
+    import json
+
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.cli_dump_helpers import fold_dump_provenance_into_json
+
+    snap = AbiSnapshot(library="libfoo.so", version="1.0")
+    pack = BuildSourcePack(
+        root=Path(""),
+        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+    )
+    snap.build_source = pack
+
+    text, _ = fold_dump_provenance_into_json("{}", "build", snap)
+    provenance = json.loads(text)["dump_provenance"]
+    assert provenance["source_scope"] is None
+
+
+def test_fold_dump_provenance_source_scope_reads_prebuilt_pack_replay_scope() -> None:
+    """External review: dump also accepts a *prebuilt* --build-info pack,
+    which can have been collected at any replay scope (e.g. "changed"/"full"
+    from a `collect --depth source --since ...`/`graph-full` run, not just
+    dump's own inline-embed "target"). Hardcoding "target" unconditionally
+    misreported that pack's actual scope; must read
+    source_abi.coverage["replay_scope"] instead of assuming."""
+    import json
+
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+    from abicheck.cli_dump_helpers import fold_dump_provenance_into_json
+
+    snap = AbiSnapshot(library="libfoo.so", version="1.0")
+    surface = SourceAbiSurface()
+    surface.coverage["compile_units_selected"] = 1
+    surface.coverage["compile_units_parsed"] = 1
+    surface.coverage["replay_scope"] = "changed"
+    pack = BuildSourcePack(
+        root=Path(""),
+        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        source_abi=surface,
+    )
+    snap.build_source = pack
+
+    text, _ = fold_dump_provenance_into_json("{}", "source", snap)
+    provenance = json.loads(text)["dump_provenance"]
+    assert provenance["source_scope"] == "changed"
 
 
 def test_l4_source_abi_was_attempted_false_for_unavailable_extractor() -> None:

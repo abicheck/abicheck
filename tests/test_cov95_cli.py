@@ -1884,6 +1884,19 @@ class TestUsedByScoping:
         assert data["summary"]["breaking"] == 1
         assert data["full_summary"]["total_changes"] == 0
 
+        # Schema-validation regression (external review): full_summary is a
+        # schema-2.9 top-level key -- assert this exact scoped-only payload
+        # (the shape that motivated adding it) validates against the
+        # packaged compare_report.schema.json, not just that reading it by
+        # hand looks right.
+        try:
+            import jsonschema
+        except ImportError:
+            pytest.skip("jsonschema not installed")
+        from abicheck.schemas import load_compare_report_schema
+
+        jsonschema.validate(instance=data, schema=load_compare_report_schema())
+
 
 class TestVerifyRuntimeFlag:
     """``compare --used-by APP --verify-runtime`` (ADR-044 P2 item 2), via a

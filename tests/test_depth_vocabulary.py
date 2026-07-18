@@ -311,42 +311,72 @@ def test_dump_source_only_depth_build_without_facts_fails(tmp_path) -> None:  # 
     assert not (tmp_path / "out.json").exists()
 
 
-def test_dump_source_only_depth_binary(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """``dump --depth binary`` resolves and runs the symbols-only branch."""
+def test_dump_source_only_depth_binary_is_usage_error(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """External review: a source-only dump (no SO_PATH) has no binary at
+    all, so --depth binary -- rank 0, the floor -- was trivially "satisfied"
+    by check_requested_depth_satisfied even for a completely empty snapshot
+    (--depth binary resolves collect_mode to "off", skipping L3-L5 embedding
+    too). `dump --sources src --depth binary -o out.json` used to exit 0 and
+    write a snapshot with no binary, header, build, or source facts at all --
+    a baseline/CI consumer would read that success as proof the requested
+    rung is genuinely present. Must now be rejected as a usage error."""
     src = tmp_path / "src2"
+    src.mkdir()
+    out = tmp_path / "out2.json"
+    res = CliRunner().invoke(
+        main,
+        ["dump", "--sources", str(src), "--depth", "binary", "-o", str(out)],
+    )
+    assert res.exit_code == 64, _all_output(res)
+    assert "--depth binary requires a native artifact" in _all_output(res)
+    assert not out.exists()
+
+
+def test_dump_source_only_depth_binary_rejected_in_dry_run_too(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    src = tmp_path / "src2b"
     src.mkdir()
     res = CliRunner().invoke(
         main,
-        ["dump", "--sources", str(src), "--depth", "binary",
-         "-o", str(tmp_path / "out2.json")],
+        ["dump", "--sources", str(src), "--depth", "binary", "--dry-run"],
     )
-    # Resolution + symbols-clearing ran; a source-only symbols dump writes an
-    # L0-L2 snapshot and exits clean.
-    assert res.exit_code == 0, _all_output(res)
-    assert (tmp_path / "out2.json").is_file()
+    assert res.exit_code == 64, _all_output(res)
+    assert "--depth binary requires a native artifact" in _all_output(res)
 
 
 def test_dump_json_records_depth_provenance(tmp_path) -> None:  # type: ignore[no-untyped-def]
     """Audit finding: a persisted dump snapshot didn't record what --depth was
     requested vs. actually reached anywhere a later reader could inspect --
-    the written JSON must carry a ``dump_provenance`` block."""
+    the written JSON must carry a ``dump_provenance`` block.
+
+    Uses --depth build (not binary -- a source-only dump has no binary at
+    all, so --depth binary is now a usage error, see
+    test_dump_source_only_depth_binary_is_usage_error) with a real matching
+    compile database so the requested rung is genuinely satisfiable."""
     import json
 
     src = tmp_path / "src3"
     src.mkdir()
+    cdb = [{"directory": str(src), "file": "foo.cpp",
+            "arguments": ["c++", "-std=c++17", "-c", "foo.cpp"]}]
+    (src / "compile_commands.json").write_text(json.dumps(cdb), encoding="utf-8")
     out = tmp_path / "out3.json"
     res = CliRunner().invoke(
         main,
-        ["dump", "--sources", str(src), "--depth", "binary", "-o", str(out)],
+        ["dump", "--sources", str(src), "--depth", "build", "-o", str(out)],
     )
     assert res.exit_code == 0, _all_output(res)
     data = json.loads(out.read_text(encoding="utf-8"))
     assert data["dump_provenance"] == {
-        "requested_depth": "binary",
-        "effective_depth": "binary",
+        "requested_depth": "build",
+        "effective_depth": "build",
         "degraded": False,
         "frontend": None,
-        "source_scope": "target",
+        # --depth build only reaches L3 (no L4 source replay), so there is
+        # no source_abi coverage to read a replay scope from -- None, not a
+        # fabricated "target" (external review; see
+        # test_fold_dump_provenance_source_scope_* in
+        # test_cli_dump_helpers_coverage.py for the cases that do have one).
+        "source_scope": None,
     }
 
 

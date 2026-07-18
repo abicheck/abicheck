@@ -27,6 +27,7 @@ tree``/``deps compare``) that previously had none.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -103,12 +104,46 @@ class TestDumpDryRun:
         assert result.exit_code == 1, result.output
         assert "Exit code: 1" in result.output
 
-    def test_depth_build_with_compile_db_does_not_block(self, tmp_path: Path) -> None:
-        # A -p/--compile-db might satisfy --depth build -- whether it
-        # actually matches these headers is real work (load + header-
-        # inclusion scan) a dry run must not perform, so this stays the
-        # softer "would carry only L0-L2 data" warning rather than a
-        # blocker; the real run resolves it for real.
+    def test_depth_build_with_matching_compile_db_does_not_block(
+        self, tmp_path: Path
+    ) -> None:
+        # External review: loading a -p/--compile-db and checking whether it
+        # matches the resolved headers is cheap, deterministic, read-only
+        # resolution -- not "real work out of scope for a dry run". A
+        # genuinely matching compile database is a definite pass, with no
+        # warning at all (it does supply real "build" evidence).
+        snap = tmp_path / "lib.abi.json"
+        _write_snapshot(snap)
+        header = tmp_path / "api.h"
+        header.write_text("void f(void);\n", encoding="utf-8")
+        db = tmp_path / "compile_commands.json"
+        db.write_text(
+            json.dumps([{
+                "directory": str(tmp_path),
+                "command": f"cc -c {header} -o f.o",
+                "file": str(header),
+            }]),
+            encoding="utf-8",
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(snap), "--dry-run", "--depth", "build",
+                "-H", str(header), "-p", str(db),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        # render_dump_dry_run's own compile-db-aware warning (distinct from
+        # resolve_dump_collect_context's separate, unconditional
+        # --sources/--build-info-absence echo, which still fires here and
+        # is not what this test targets).
+        assert "would carry only L0-L2 data." not in result.output
+
+    def test_depth_build_with_unmatched_compile_db_blocks(self, tmp_path: Path) -> None:
+        # The sibling case: an empty/non-matching compile database is now a
+        # *definite* verdict (the same load+match the real run performs),
+        # not a soft "possibly satisfiable" warning -- the real run's
+        # strict depth gate would certainly reject this.
         snap = tmp_path / "lib.abi.json"
         _write_snapshot(snap)
         header = tmp_path / "api.h"
@@ -122,7 +157,8 @@ class TestDumpDryRun:
                 "-H", str(header), "-p", str(db),
             ],
         )
-        assert result.exit_code == 0, result.output
+        assert result.exit_code == 1, result.output
+        assert "no entry matching the resolved headers" in result.output
 
     def test_compile_db_without_headers_is_usage_error(self, tmp_path: Path) -> None:
         # resolve_dump_compile_db raises a UsageError (exit 64) for -p

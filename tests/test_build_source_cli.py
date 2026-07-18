@@ -1079,20 +1079,29 @@ def test_dump_collect_mode_off_embeds_nothing(tmp_path):
     """A depth rung that resolves to collect mode "off" collects no source
     evidence even with a source tree.
 
-    CLI-audit P1: uses ``--depth binary`` rather than ``--depth headers`` --
-    both resolve to the same "off" collect mode (headers/binary depth reach
-    no source method, ADR-037 D5), but a source-only dump (no SO_PATH, no
-    ``-H``) structurally never parses headers, so an *explicit* ``--depth
-    headers`` here would now correctly hard-fail under the strict depth
-    contract (dump never reaches 'headers'). ``--depth binary`` is always
-    satisfied (the floor rung) and exercises the identical "off" suppression
-    path this test cares about."""
+    CLI-audit P1: previously exercised via ``dump --sources tree --depth
+    binary`` (both "headers" and "binary" resolve to the "off" collect
+    mode, ADR-037 D5) -- but a source-only dump (no SO_PATH) structurally
+    has no binary at all, so an *explicit* ``--depth binary`` there is now
+    itself a usage error (external review: it used to let an empty,
+    fact-less snapshot silently "satisfy" the floor rung), and ``--depth
+    headers`` fails the pre-existing strict depth gate the same way (a
+    source-only dump never reaches 'headers' either). Neither CLI spelling
+    can reach this collect_mode="off" suppression path for a source-only
+    dump anymore -- which is the correct, tighter invariant -- so this
+    now calls ``dump_source_only`` directly with collect_mode="off" and
+    depth=None (bypassing the CLI depth-string validation, which is a
+    separate concern from the "off" embedding-suppression behavior this
+    test actually cares about)."""
+    from abicheck.cli_buildsource import dump_source_only
+
     tree = _source_tree(tmp_path)
     out = tmp_path / "s.json"
-    result = CliRunner().invoke(main, [
-        "dump", "--sources", str(tree), "--depth", "binary", "-o", str(out),
-    ])
-    assert result.exit_code == 0, result.output
+    dump_source_only(
+        sources=tree, build_info=None, version="1.0", output=out,
+        build_config=None, allow_build_query=False, git_tag=None,
+        build_id=None, no_git=True, collect_mode="off", depth=None,
+    )
     assert load_snapshot(out).build_source is None
 
 

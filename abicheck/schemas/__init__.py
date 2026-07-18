@@ -107,7 +107,20 @@ from typing import Any
 #:       consumer binary's own requirement, or an actual dynamic-linker
 #:       failure) rather than established by the L0-L5 public-surface walk
 #:       the other four values describe. Additive enum member.
-REPORT_SCHEMA_VERSION = "2.8"
+#: 2.9 — added three additive optional top-level keys documenting the
+#:       existing scoped-vs-full-library split for a ``--used-by``/
+#:       ``--required-symbol(s)`` compare: ``full_verdict`` (mirrors
+#:       ``verdict``'s enum), ``full_severity`` (mirrors ``severity``'s
+#:       shape), and ``full_summary`` (mirrors ``summary``'s shape).
+#:       ``full_verdict``/``full_severity`` were already emitted (unversioned)
+#:       since the pre-1.0 CLI reset (#566); ``full_summary`` is new this
+#:       version, fixing the audit finding that a scoped run gated only by a
+#:       scoped-only synthetic finding could report a non-zero ``verdict``
+#:       next to a stale, contradictory ``summary.total_changes: 0`` --
+#:       ``summary`` is now always recomputed from the complete (post-scoping)
+#:       ``changes`` array, and ``full_summary`` preserves the original
+#:       pre-scoping counts. Additive optional keys (external review).
+REPORT_SCHEMA_VERSION = "2.9"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

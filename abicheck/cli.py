@@ -41,7 +41,6 @@ from .cli_audit import echo_filtered_surface, echo_reconciled
 from .cli_dump_helpers import (
     _dump_will_attempt_hybrid_l4_extraction,
     check_requested_depth_satisfied,
-    evidence_depth_label,
     fold_dump_provenance_into_json,
     handle_non_elf_dump,
     perform_elf_dump,
@@ -376,7 +375,7 @@ def _write_snapshot_output(
     # Audit finding: dump/baseline provenance didn't record requested vs.
     # effective depth anywhere a later reader could inspect -- fold it into
     # the written JSON now that the strict gate above has had its say.
-    result = fold_dump_provenance_into_json(result, depth, snap)
+    result, resolved_depth_label = fold_dump_provenance_into_json(result, depth, snap)
     if output:
         _safe_write_output(output, result)
         click.echo(f"Snapshot written to {output}", err=True)
@@ -386,7 +385,12 @@ def _write_snapshot_output(
         # collected nothing usable is never silently reported as if it had
         # succeeded. Only alongside the file-write notice above (never for
         # bare stdout output, which callers may pipe/parse as pure JSON).
-        click.echo(f"Resolved evidence depth: {evidence_depth_label(snap)}", err=True)
+        # Reuses fold_dump_provenance_into_json's own returned label (the
+        # strict _gated_source_label, not the plain evidence_depth_label)
+        # so this line can never disagree with the JSON's effective_depth
+        # for the same dump -- they previously could, on the documented
+        # zero-match-source-only case (external review).
+        click.echo(f"Resolved evidence depth: {resolved_depth_label}", err=True)
     else:
         click.echo(result)
 
@@ -654,6 +658,24 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             "--ast-frontend clang for a --depth source dump."
         )
 
+    # A source-only dump (no SO_PATH) has no binary at all, so --depth binary
+    # -- rank 0, the floor everything else must exceed -- is trivially
+    # "satisfied" by check_requested_depth_satisfied even for a completely
+    # empty snapshot (--depth binary resolves collect_mode to "off", which
+    # skips L3-L5 embedding too): `dump --sources src --depth binary -o
+    # out.json` would exit 0 and write a snapshot with no binary, header,
+    # build, or source facts at all -- a baseline/CI consumer would read
+    # that success as proof the requested rung is genuinely present. Checked
+    # unconditionally, before the --dry-run branch, so both paths reject the
+    # same way (external review).
+    if so_path is None and depth == "binary":
+        raise click.UsageError(
+            "--depth binary requires a native artifact (SO_PATH); a "
+            "source-only dump (--sources/--build-info with no SO_PATH) has "
+            "no binary to report and needs at least --depth build or "
+            "--depth source to produce any evidence."
+        )
+
     # Resolve debug-format and binary-format identity once, shared between
     # the dry-run report and the real run, and raise the same UsageError/
     # BadParameter a real run would for either -- unconditionally, before the
@@ -699,6 +721,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         from .buildsource.inline import is_pack_dir
         from .cli_buildsource_helpers import _is_inputs_pack_dir
         from .cli_dump_helpers import render_dump_dry_run
+        from .cli_helpers_compare import dry_run_compile_db_matched
 
         emit_dry_run(
             render_dump_dry_run(
@@ -707,6 +730,13 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
                 depth=depth, collect_mode=collect_mode,
                 header_backend=header_backend, output=output,
                 has_compile_db=bool(compile_db_path or compile_db_path_alt),
+                # External review: dry-run previously only checked bare -p/
+                # --compile-db presence; loading it and matching against the
+                # resolved headers is cheap, deterministic, read-only
+                # resolution, not "real work out of scope for a dry run".
+                compile_db_matched=dry_run_compile_db_matched(
+                    compile_db_path, compile_db_path_alt, headers, compile_db_filter,
+                ),
                 # embed_build_source's own classification: a source-capable
                 # --build-info is either a BuildSourcePack (is_pack_dir) or a
                 # Flow-2 abicheck_inputs/ directory (_is_inputs_pack_dir) --
