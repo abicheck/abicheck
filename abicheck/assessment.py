@@ -165,11 +165,17 @@ class AssessmentManifest:
         for entry in raw_targets:
             if not isinstance(entry, dict) or not entry.get("id"):
                 raise ValueError(f"each target needs an 'id': {entry!r}")
-            targets.append(
-                TargetSpec(
-                    id=str(entry["id"]), required=bool(entry.get("required", True))
+            required = entry.get("required", True)
+            if not isinstance(required, bool):
+                # bool(None) / bool("false") would silently coerce a null or
+                # malformed 'required' into an unintended value — e.g. an
+                # unset field in the manifest generator turning a required
+                # target optional, which coverage_verdict() would then never
+                # flag as a missing-required-target failure.
+                raise ValueError(
+                    f"'required' must be a boolean when present: {entry!r}"
                 )
-            )
+            targets.append(TargetSpec(id=str(entry["id"]), required=required))
 
         # __post_init__ enforces non-empty/unique-id invariants uniformly.
         return cls(

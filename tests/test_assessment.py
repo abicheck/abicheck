@@ -93,6 +93,16 @@ class TestAssessmentManifest:
         with pytest.raises(ValueError):
             AssessmentManifest.from_dict({"targets": [{"id": LINUX}]})
 
+    @pytest.mark.parametrize("bad_required", [None, "false", 0, 1])
+    def test_from_dict_rejects_non_boolean_required(self, bad_required):
+        data = {
+            "assessment_id": "a",
+            "head_sha": "s",
+            "targets": [{"id": LINUX, "required": bad_required}],
+        }
+        with pytest.raises(ValueError):
+            AssessmentManifest.from_dict(data)
+
     def test_direct_construction_rejects_empty_targets(self):
         with pytest.raises(ValueError):
             AssessmentManifest(assessment_id="a", head_sha="s", targets=())
