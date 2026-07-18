@@ -297,6 +297,16 @@ class TestRendering:
         assert "BREAKING on:" in text
         assert LINUX in text
 
+    def test_render_text_groups_mixed_regressions_by_verdict(self, tmp_path: Path):
+        # linux BREAKING, windows API_BREAK: each must be listed under its own
+        # verdict — the API_BREAK target must not be mislabeled BREAKING.
+        _write_report(tmp_path, LINUX, "BREAKING")
+        _write_report(tmp_path, WINDOWS, "API_BREAK")
+        text = aggregate_reports_dir(tmp_path, required=[LINUX, WINDOWS]).render_text()
+
+        assert f"BREAKING on: {LINUX}." in text
+        assert f"API_BREAK on: {WINDOWS}." in text
+
 
 class TestReportPrefix:
     def test_custom_prefix(self, tmp_path: Path):

@@ -266,12 +266,15 @@ class AggregateResult:
         elif _SEVERITY[findings] == 0:
             lines.append("  No ABI regressions in the analyzed targets.")
         else:
-            regressed = sorted(
-                t.target_id
-                for t in self.analyzed
-                if t.verdict is not None and _SEVERITY[t.verdict] > 0
-            )
-            lines.append(f"  {findings.value} on: {', '.join(regressed)}.")
+            # Group by each target's own verdict, worst first, so a mixed run
+            # names an API_BREAK target under API_BREAK — not under the overall
+            # worst (BREAKING) verdict.
+            for verdict in (Verdict.BREAKING, Verdict.API_BREAK):
+                hits = sorted(
+                    t.target_id for t in self.analyzed if t.verdict is verdict
+                )
+                if hits:
+                    lines.append(f"  {verdict.value} on: {', '.join(hits)}.")
 
         lines.append("Coverage:")
         if self.coverage is CoverageStatus.COMPLETE:
