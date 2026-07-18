@@ -460,6 +460,26 @@ class TestCrossProducerUnmangledIdentityKnownLimitation:
     future Phase-3 fix has a concrete regression to flip (from asserting
     the false pair fires, to asserting it doesn't) rather than this gap
     being silently reintroduced or forgotten.
+
+    Phase 3 shipped (``--ast-frontend hybrid``,
+    ``dumper_hybrid.merge_snapshots``) — but its reconciliation only runs
+    WITHIN one hybrid dump invocation, matching that SAME call's own two
+    sub-dumps (``dumper_hybrid._match_synthetic_ctor_dtor``) before the
+    merged snapshot is ever handed to a comparison. It has no way to
+    retroactively reconcile a DIFFERENT, already-persisted snapshot from an
+    earlier, separate invocation — so comparing an existing plain-castxml
+    JSON baseline (still keyed by the synthetic ``__abicheck_ctor__...``/
+    ``~ClassName`` placeholder) against a FRESH hybrid dump of the same,
+    unchanged headers still reports the identical false
+    ``FUNC_REMOVED``/``FUNC_ADDED`` pair this class documents — the merged
+    hybrid snapshot's own key for that constructor/destructor is now the
+    real clang mangled name (reconciled away from the synthetic form during
+    ITS OWN merge), which the old baseline's synthetic key still doesn't
+    match (Codex review). Adopting ``hybrid`` for a NEW baseline dump too
+    (so both sides of every future comparison go through the same
+    reconciliation) avoids this; there is no fix for comparing against an
+    already-persisted pre-hybrid baseline without the same general
+    cross-invocation reconciliation work described above.
     """
 
     def test_unmangled_constructor_cross_producer_compare_reports_false_remove_and_add(

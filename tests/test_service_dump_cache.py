@@ -192,6 +192,43 @@ class TestDumpCacheExtraKey:
         k_after = _dump_cache_extra_key("elf", "hybrid", None, None)
         assert k_before != k_after
 
+    def test_differs_when_layout_tool_becomes_available_for_unpinned_auto(
+        self, monkeypatch
+    ):
+        # Codex review: dumper._header_ast_parser's G16 logic can silently
+        # runtime-fallback a genuinely-unpinned "auto" request from castxml to
+        # clang (toolchain-version mismatch or a direct-include #error guard)
+        # -- invisible to _resolve_header_backend's static, content-blind
+        # resolution (which optimistically returns "castxml" for unpinned
+        # auto). That fallback's snapshot is clang-sourced and gets the same
+        # attach_clang_layout enrichment an explicit "clang" dump would, so
+        # the layout tool's identity must be hashed for this case too, even
+        # though resolved_backend here is "castxml".
+        monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
+        monkeypatch.delenv("ABICHECK_CLANG_LAYOUT_TOOL", raising=False)
+        with patch(
+            "abicheck.clang_layout_tool.shutil.which", return_value=None
+        ):
+            k_before = _dump_cache_extra_key("elf", "auto", None, None)
+        monkeypatch.setenv("ABICHECK_CLANG_LAYOUT_TOOL", "/opt/abicheck-clang-layout-tool")
+        k_after = _dump_cache_extra_key("elf", "auto", None, None)
+        assert k_before != k_after
+
+    def test_layout_tool_identity_irrelevant_for_explicit_castxml_pin(
+        self, monkeypatch
+    ):
+        # An EXPLICIT castxml request -- either --ast-frontend castxml or an
+        # ABICHECK_AST_FRONTEND=castxml pin with a raw "auto" request -- never
+        # triggers the G16 runtime fallback (the castxml failure surfaces
+        # verbatim instead), so the layout tool truly never runs for it and
+        # must not needlessly invalidate its cache entry.
+        monkeypatch.setenv("ABICHECK_AST_FRONTEND", "castxml")
+        monkeypatch.delenv("ABICHECK_CLANG_LAYOUT_TOOL", raising=False)
+        k1 = _dump_cache_extra_key("elf", "auto", None, None)
+        monkeypatch.setenv("ABICHECK_CLANG_LAYOUT_TOOL", "/opt/abicheck-clang-layout-tool")
+        k2 = _dump_cache_extra_key("elf", "auto", None, None)
+        assert k1 == k2
+
 
 class TestCachedRunDump:
     def test_cache_hit_skips_run_dump(self, tmp_path):

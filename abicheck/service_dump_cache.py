@@ -24,6 +24,7 @@ end result as a lazy import without the indirection.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -120,14 +121,33 @@ def _dump_cache_extra_key(
     hybrid branch recurses into its own ``header_backend="clang"`` sub-dump
     (which gets the same ``attach_clang_layout`` enrichment) before
     ``merge_snapshots`` folds any clang-only declarations — carrying their
-    layout facts — into the merged result (Codex review). Skipped only for
-    ``"castxml"``, whose snapshots never involve this tool at all.
+    layout facts — into the merged result (Codex review).
+
+    Also hashed for a genuinely-unpinned ``"auto"`` request (raw
+    ``header_backend == "auto"`` AND ``ABICHECK_AST_FRONTEND`` unset), even
+    though :func:`_resolve_header_backend` optimistically resolves that to
+    ``"castxml"``: ``dumper._header_ast_parser``'s G16 logic can silently
+    runtime-fallback such a request from castxml to clang (a toolchain-
+    version mismatch or a direct-include ``#error`` guard) — invisible to
+    this static, content-blind resolution, which can't know in advance
+    whether castxml will actually succeed for these specific headers. That
+    fallback's resulting snapshot is clang-sourced and gets the identical
+    ``attach_clang_layout`` enrichment an explicit ``--ast-frontend clang``
+    dump would, so its cache key must depend on the layout tool's identity
+    too (Codex review). An EXPLICIT ``castxml`` request (or an
+    ``ABICHECK_AST_FRONTEND=castxml`` pin) never triggers this fallback
+    (the castxml failure surfaces verbatim instead), so it's correctly
+    excluded — the tool truly never runs for those.
     """
     from .dumper import _resolve_header_backend
 
     resolved_backend = _resolve_header_backend(header_backend)
+    env_pin = os.environ.get("ABICHECK_AST_FRONTEND", "").strip().lower()
+    auto_may_fallback_to_clang = (
+        (header_backend or "auto").strip().lower() == "auto" and not env_pin
+    )
     layout_tool = ""
-    if resolved_backend in ("clang", "hybrid"):
+    if resolved_backend in ("clang", "hybrid") or auto_may_fallback_to_clang:
         from .clang_layout_tool import find_layout_tool_bin
 
         layout_tool = find_layout_tool_bin() or ""

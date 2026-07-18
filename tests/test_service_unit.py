@@ -465,6 +465,52 @@ class TestRunDumpHybridHeaderGraphAttachedOnce:
         assert result.ast_producer == "hybrid"
 
 
+class TestRunDumpHybridDoesNotDoubleEnrichLayout:
+    """general-purpose review finding: run_dump's hybrid branch used to call
+    attach_clang_layout a SECOND time on the already-merged snapshot, even
+    though the recursive header_backend="clang" sub-dump already got it from
+    that same function's own ELF/PE/Mach-O tail before the merge -- a
+    provably redundant extra invocation of the compiled external tool
+    (apply_layout_facts backfills nothing new the second time)."""
+
+    def _fake_dump_elf(self, castxml_snap, clang_snap):
+        def _fake(*args, **kwargs):
+            compile_ctx = kwargs.get("compile")
+            if compile_ctx is not None and compile_ctx.frontend == "clang":
+                return clang_snap
+            return castxml_snap
+
+        return _fake
+
+    def test_attach_clang_layout_not_called_on_merged_snapshot(self, tmp_path):
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        castxml_snap = AbiSnapshot(
+            library="test", version="1.0", from_headers=True, ast_producer="castxml"
+        )
+        clang_snap = AbiSnapshot(
+            library="test", version="1.0", from_headers=True, ast_producer="clang"
+        )
+        calls: list[AbiSnapshot] = []
+
+        def _fake_attach(snap, *_args, **_kwargs):
+            calls.append(snap)
+            return snap
+
+        with patch(
+            "abicheck.service._dump_elf",
+            side_effect=self._fake_dump_elf(castxml_snap, clang_snap),
+        ), patch("abicheck.service.attach_clang_layout", side_effect=_fake_attach):
+            result = run_dump(p, "elf", header_backend="hybrid")
+
+        # attach_clang_layout is called once per recursive sub-dump's OWN
+        # elf-branch tail (castxml_snap's and clang_snap's) -- never a third
+        # time on the merged (ast_producer="hybrid") snapshot itself.
+        assert len(calls) == 2
+        assert all(c.ast_producer != "hybrid" for c in calls)
+        assert result.ast_producer == "hybrid"
+
+
 # ── _implicit_header_includes() (P3: -H umbrella resolves without -I) ────────
 
 

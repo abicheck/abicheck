@@ -237,6 +237,25 @@ headers and merges them (`abicheck/dumper_hybrid.py::merge_snapshots`):
   encoding) to recover each candidate's own instantiation identity —
   deliberately deferred rather than adding either a new dependency or a
   heuristic that could mis-match.
+  **Known residual limitation, scope boundary** (Codex review): the
+  reconciliation above only runs WITHIN one hybrid dump invocation — it
+  matches that SAME call's own castxml and clang sub-dumps against each
+  other before merging, and has no way to retroactively reconcile a
+  DIFFERENT, already-persisted snapshot from an earlier, separate
+  invocation. Comparing an existing plain-castxml JSON baseline (still
+  keyed by the synthetic placeholder) against a fresh `--ast-frontend
+  hybrid` dump of the same, unchanged headers therefore still reports the
+  same false `FUNC_REMOVED`/`FUNC_ADDED` pair the motivating case above
+  describes — the merged hybrid snapshot's own key for that constructor/
+  destructor is now the real mangled name (reconciled during ITS OWN
+  merge), which the old baseline's synthetic key still doesn't match.
+  Re-dumping the baseline with `hybrid` too (so both sides of a future
+  comparison go through the same reconciliation) avoids this; there is no
+  fix for comparing against an already-persisted pre-hybrid baseline
+  without the same general cross-invocation identity reconciliation this
+  phase deliberately scoped out (see
+  `tests/test_castxml_clang_parity_gate.py::TestCrossProducerUnmangledIdentityKnownLimitation`'s
+  docstring for the full explanation).
 - **Per-fact provenance** (`AbiSnapshot.fact_provenance`, `abicheck/
   fact_provenance.py`) — a `{key: "castxml"|"clang"}` map keyed by
   `func_fact_key`/`var_fact_key`/`type_fact_key`/`enum_fact_key`/
@@ -318,7 +337,10 @@ successfully parsed, and `apply_layout_facts()` backfills only the
 currently-`None`/empty layout fields on the snapshot's existing
 `RecordType`s (a no-op for castxml/hybrid snapshots, which already carry
 real layout). Wired into `service.run_dump` as `attach_clang_layout()`,
-gated on `ast_producer == "clang"`, running once after the snapshot is
+gated on `ast_producer in ("clang", "hybrid")` (a `hybrid` merge appends
+clang-only records dumper_clang.py never gives layout, so it needs the
+same backfill; already-enriched castxml-sourced records in the same
+snapshot are left untouched), running once after the snapshot is
 built (and, for a `header_graph=True` request, after that graph attaches
 too — the two enrichments touch disjoint snapshot fields). Every failure
 mode (tool missing, a compile the tool can't recover from, a timeout,

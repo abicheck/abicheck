@@ -550,12 +550,16 @@ def run_dump(
             compile=_forced_compile("clang"), **common_kwargs,
         )
         merged = merge_snapshots(castxml_snap, clang_snap)
-        merged = _attach_header_graph(
+        # No attach_clang_layout call here: clang_snap's own recursive
+        # run_dump(header_backend="clang") call above already got it (this
+        # function's ELF/PE/Mach-O tail below calls it unconditionally), so
+        # re-running it on merged would just re-invoke the external tool for
+        # nothing left to backfill (review finding).
+        return _attach_header_graph(
             merged, header_graph, header_graph_includes,
             _headers, _includes, lang, compile,
             public_headers, public_header_dirs,
         )
-        return attach_clang_layout(merged, _headers, _includes, lang=lang, compile=compile)
 
     if binary_fmt == "elf":
         snap = _dump_elf(

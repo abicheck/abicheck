@@ -489,10 +489,12 @@ def attach_clang_layout(
     only ever backfill a CURRENTLY-``None``/empty field: a castxml-sourced
     record in the merge already carries real layout and is left untouched;
     only the clang-only records the merge appended (whose layout fields
-    dumper_clang.py always leaves empty) actually get enriched. Also runs a
-    second, harmless no-op time for ``service.run_dump``'s own hybrid branch,
-    whose recursive ``header_backend="clang"`` sub-dump is already enriched
-    before the merge by that same recursive call's own tail.
+    dumper_clang.py always leaves empty) actually get enriched.
+    ``service.run_dump``'s own hybrid branch does NOT call this a second time
+    on its merged result — its recursive ``header_backend="clang"`` sub-dump
+    is already enriched before the merge by that same recursive call's own
+    tail, so a second call there would just re-invoke the external tool for
+    nothing left to fill (general-purpose review finding).
 
     *compile* is typed ``Any`` rather than ``service_scan.CompileContext``
     (duck-typed: only ``.gcc_path``/``.gcc_prefix``/``.gcc_options``/
