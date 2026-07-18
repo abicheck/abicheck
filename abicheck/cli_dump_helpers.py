@@ -463,6 +463,18 @@ def fold_dump_provenance_into_json(text: str, depth: str | None, snap: AbiSnapsh
     short, so reaching this point means it did not -- recorded anyway so a
     reader sees a positive "no, this is not weaker than requested" signal
     rather than an absent field.
+
+    ``effective_depth`` uses ``_gated_source_label``, the same strict
+    recompute ``check_requested_depth_satisfied`` gates on -- not the plain
+    ``evidence_depth_label``. They disagree on exactly the case
+    ``_gated_source_label``'s docstring documents: a zero-match source-only
+    dump (L4 replay genuinely ran but linked nothing, no binary to link
+    against) reports "source" satisfied by the strict gate, but
+    ``evidence_depth_label`` still reports "build" (its own L4-or-L5
+    payload-emptiness check sees both empty). Using the plain label here
+    would serialize ``effective_depth: "build", degraded: true`` for a
+    ``--depth source`` dump the strict gate had just accepted moments
+    earlier in the same call -- self-contradictory (Codex review).
     """
     import json
 
@@ -470,7 +482,7 @@ def fold_dump_provenance_into_json(text: str, depth: str | None, snap: AbiSnapsh
         payload = json.loads(text)
     except ValueError:
         return text
-    effective = evidence_depth_label(snap)
+    effective = _gated_source_label(snap.build_source, snap)
     payload["dump_provenance"] = {
         "requested_depth": depth,
         "effective_depth": effective,
@@ -586,25 +598,44 @@ def render_dump_dry_run(
             f"--depth {depth} was requested but no --sources/--build-info was given; "
             "the snapshot would carry only L0-L2 data."
         )
-        # Cheaply, deterministically known to fail the real run's strict
-        # check_requested_depth_satisfied gate -- not merely degraded, since
-        # neither input given here could ever reach it: --depth source has
-        # no path but --sources/--build-info (a -p/--compile-db supplies L3
-        # "build" context only, never L4 source-ABI replay), and --depth
-        # build has no path at all once --sources/--build-info AND -p are
-        # both absent. A --depth build backed by *some* compile database is
-        # deliberately left as the softer warning above, not a blocker --
-        # whether that database actually matches these headers is real work
-        # (load + header-inclusion scan) a dry run must not perform, so it
-        # is only "possibly satisfiable", not "definitely satisfiable"
-        # (Codex review).
-        if depth == "source" or (depth == "build" and not has_compile_db):
-            result.block(
-                f"--depth {depth} was requested but the resolved evidence "
-                "depth check_requested_depth_satisfied would raise on: "
-                f"nothing here can reach '{depth}' -- the real run would "
-                "exit 1."
-            )
+    # Cheaply, deterministically known to fail the real run's strict
+    # check_requested_depth_satisfied gate -- computed independently of the
+    # warn above (not nested under its both-absent condition), since
+    # --depth source has its own, narrower requirement: L4 source-ABI
+    # replay only ever runs over a source tree
+    # (buildsource.inline._run_inline_source_abi returns ``(None, [])``
+    # whenever ``sources`` is None) -- a raw --build-info/-p compile
+    # database supplies L3 "build" context only, never L4, even when
+    # --sources is absent. A --depth source dry-run with --build-info but
+    # no --sources previously fell through this whole block (the warn's
+    # "both absent" guard was false) and reported success even though the
+    # real dump would hard-fail (Codex review). --depth build has no path
+    # at all once --sources/--build-info AND -p are all absent. A --depth
+    # build backed by *some* compile database is deliberately left as the
+    # softer warning above, not a blocker -- whether that database
+    # actually matches these headers is real work (load + header-inclusion
+    # scan) a dry run must not perform, so it is only "possibly
+    # satisfiable", not "definitely satisfiable" (Codex review).
+    if depth == "source" and sources is None:
+        result.block(
+            "--depth source was requested but no --sources was given -- a "
+            "raw --build-info/-p compile database supplies L3 build "
+            "context only, never L4 source-ABI replay -- the resolved "
+            "evidence depth check_requested_depth_satisfied would raise "
+            "on this: the real run would exit 1."
+        )
+    elif (
+        depth == "build"
+        and sources is None
+        and build_info is None
+        and not has_compile_db
+    ):
+        result.block(
+            "--depth build was requested but no --sources/--build-info/-p "
+            "was given -- the resolved evidence depth "
+            "check_requested_depth_satisfied would raise on this: the "
+            "real run would exit 1."
+        )
     return result
 
 

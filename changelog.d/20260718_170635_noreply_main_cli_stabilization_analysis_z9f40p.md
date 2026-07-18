@@ -28,4 +28,14 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   try-compile** — `project(...)` now declares both `C CXX` (some LLVM/Clang
   CMake config packages run a C-language try-compile even for a C++-only
   consumer).
+- **`dump --dry-run --depth source` with `--build-info` but no `--sources`
+  now blocks instead of reporting success** — a raw `--build-info` compile
+  database supplies L3 build context only; L4 source-ABI replay only ever
+  runs over a `--sources` tree, so the real (non-dry) dump's strict depth
+  gate would hard-fail on this input while the dry run previously exited 0.
+- **`dump_provenance`'s `effective_depth` now matches the strict depth
+  gate's own verdict** — it previously used the plain (non-gated) evidence
+  label, which disagrees with the gate on a zero-match source-only dump (L4
+  replay ran but linked nothing); a `--depth source` dump the gate had just
+  accepted could serialize `effective_depth: "build", degraded: true`.
 

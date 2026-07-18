@@ -124,6 +124,32 @@ class TestDumpDryRun:
         )
         assert result.exit_code == 0, result.output
 
+    def test_depth_source_with_build_info_but_no_sources_blocks(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review: a raw --build-info compile database supplies L3
+        # "build" context only -- L4 source-ABI replay only ever runs over
+        # a --sources tree (buildsource.inline._run_inline_source_abi
+        # returns (None, []) whenever `sources` is None). The blocker below
+        # used to be nested under a "sources AND build_info both absent"
+        # warn condition, so --depth source with --build-info given (but no
+        # --sources) fell through untouched and the dry run exited 0 even
+        # though the real dump's strict depth gate would raise.
+        header = tmp_path / "api.h"
+        header.write_text("void f(void);\n", encoding="utf-8")
+        db = tmp_path / "compile_commands.json"
+        db.write_text("[]", encoding="utf-8")
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", "/bin/true", "--dry-run", "--depth", "source",
+                "-H", str(header), "--build-info", str(db),
+            ],
+        )
+        assert result.exit_code == 1, result.output
+        assert "Exit code: 1" in result.output
+        assert "no --sources was given" in result.output
+
 
 class TestCompareDryRun:
     def test_rejects_output_flag(self, tmp_path: Path) -> None:

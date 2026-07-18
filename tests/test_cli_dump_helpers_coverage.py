@@ -1572,6 +1572,39 @@ def test_check_requested_depth_satisfied_source_zero_match_no_graph_passes() -> 
     check_requested_depth_satisfied("source", snap)  # must not raise
 
 
+def test_fold_dump_provenance_uses_gated_label_for_zero_match_source_case() -> None:
+    """Codex review: fold_dump_provenance_into_json previously computed
+    effective_depth via the plain evidence_depth_label, which -- for this
+    exact zero-match source-only case -- reports "build" even though
+    check_requested_depth_satisfied('source', snap) just accepted it via
+    _gated_source_label. A --depth source dump that the strict gate had
+    just satisfied moments earlier would then serialize
+    effective_depth: "build", degraded: true -- self-contradictory. Must
+    use the same gated label the strict check used."""
+    import json
+
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+    from abicheck.cli_dump_helpers import fold_dump_provenance_into_json
+
+    snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
+    surface = SourceAbiSurface()
+    surface.coverage["compile_units_selected"] = 1
+    surface.coverage["compile_units_parsed"] = 1
+    pack = BuildSourcePack(
+        root=Path(""),
+        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        source_abi=surface,
+    )
+    snap.build_source = pack
+
+    text = fold_dump_provenance_into_json("{}", "source", snap)
+    provenance = json.loads(text)["dump_provenance"]
+    assert provenance["effective_depth"] == "source"
+    assert provenance["degraded"] is False
+
+
 def test_l4_source_abi_was_attempted_false_for_unavailable_extractor() -> None:
     """Codex review (fifth finding): _run_inline_source_abi returns the same
     empty-surface, PARTIAL-coverage shape both when a source-only dump
