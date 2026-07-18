@@ -569,6 +569,7 @@ class TestBundledLlvmCmakePrefix:
     def test_detects_cmplr_root_with_llvm_cmake_package(self, tmp_path: Path) -> None:
         cmplr_root = tmp_path / "cmplr"
         (cmplr_root / "lib" / "cmake" / "llvm").mkdir(parents=True)
+        (cmplr_root / "lib" / "cmake" / "clang").mkdir()
         # The resolved compiler must live under $CMPLR_ROOT for auto-use to
         # apply -- see test_empty_when_compiler_not_under_cmplr_root below.
         compiler_path = cmplr_root / "bin" / "icpx"
@@ -598,6 +599,27 @@ class TestBundledLlvmCmakePrefix:
         # mistaken for one.
         cmplr_root = tmp_path / "cmplr"
         cmplr_root.mkdir()
+        compiler_path = cmplr_root / "bin" / "icpx"
+        result = _run_predicate(
+            f'_bundled_llvm_cmake_prefix "" "{cmplr_root}" "{compiler_path}"'
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == ""
+
+    def test_empty_when_cmplr_root_has_llvm_but_not_clang_cmake_package(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review): a partial SDK under $CMPLR_ROOT --
+        # LLVMConfig.cmake present but ClangConfig.cmake missing -- must
+        # not be auto-used. The plugin's CMakeLists.txt requires BOTH
+        # find_package(LLVM CONFIG) and find_package(Clang CONFIG); if this
+        # returned a prefix here, _prepare_clang_plugin would skip its
+        # apt-get fallback entirely (bundled_cmake_prefix non-empty bypasses
+        # INSTALL_DEPS) and then fail cmake configure -- strictly worse than
+        # not auto-detecting at all, since apt-get might have supplied a
+        # working libclang-$major-dev.
+        cmplr_root = tmp_path / "cmplr"
+        (cmplr_root / "lib" / "cmake" / "llvm").mkdir(parents=True)
         compiler_path = cmplr_root / "bin" / "icpx"
         result = _run_predicate(
             f'_bundled_llvm_cmake_prefix "" "{cmplr_root}" "{compiler_path}"'
@@ -645,6 +667,7 @@ class TestBundledLlvmCmakePrefix:
 
         cmplr_root = tmp_path / "cmplr"
         (cmplr_root / "lib" / "cmake" / "llvm").mkdir(parents=True)
+        (cmplr_root / "lib" / "cmake" / "clang").mkdir()
         compiler_path = cmplr_root / "bin" / "icpx"
         cygpath_script = (
             "#!/bin/sh\n"

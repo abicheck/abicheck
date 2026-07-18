@@ -265,7 +265,23 @@ _bundled_llvm_cmake_prefix() {
   # a plain POSIX host (or a Windows host missing cygpath) compiler_path
   # can still legitimately be backslash-separated (regression caught by
   # test_detects_cmplr_root_with_llvm_cmake_package on windows-latest CI).
+  #
+  # Require BOTH lib/cmake/llvm and lib/cmake/clang here, not just llvm
+  # (Codex review): the plugin's CMakeLists.txt does
+  # find_package(LLVM REQUIRED CONFIG) *and*
+  # find_package(Clang REQUIRED CONFIG) -- a $CMPLR_ROOT with only a
+  # partial SDK (LLVMConfig.cmake present, ClangConfig.cmake missing) would
+  # otherwise return a prefix here, which makes _prepare_clang_plugin skip
+  # its apt-get fallback entirely (INSTALL_DEPS is ignored once
+  # bundled_cmake_prefix is non-empty) and then fail cmake configure --
+  # strictly worse than the pre-auto-detect behavior, where apt-get would
+  # at least have been attempted and might have supplied a working
+  # libclang-$major-dev. This auto-detect path is inferred, not something
+  # the caller opted into the way an explicit llvm-cmake-prefix is, so it
+  # should not silently take over from a working fallback on a partial
+  # match.
   if [[ -n "$cmplr_root" && -d "$cmplr_root/lib/cmake/llvm" \
+      && -d "$cmplr_root/lib/cmake/clang" \
       && ( "$compiler_path" == "$cmplr_root/"* || "$compiler_path" == "$cmplr_root"\\* ) ]]; then
     printf '%s' "$cmplr_root/lib/cmake"
     return
