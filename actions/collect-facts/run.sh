@@ -501,7 +501,22 @@ $version_output"
     # against a *different* LLVM than the one $COMPILER actually loads
     # (Codex review).
     echo "using vendor-bundled LLVM/Clang CMake package at '$bundled_cmake_prefix' -- skipping apt-get install-deps."
-  elif [[ "$INSTALL_DEPS" == "true" ]]; then
+  elif [[ -z "$LLVM_CMAKE_PREFIX" && -n "${CMPLR_ROOT:-}" ]]; then
+    # $CMPLR_ROOT is set (a vendor environment, e.g. Intel oneAPI's
+    # setvars.sh, was sourced) but auto-detection found no lib/cmake/llvm
+    # under it -- worth calling out explicitly rather than silently falling
+    # through to apt-get, since this is the expected outcome for a *stock*
+    # Intel oneAPI DPC++/C++ Compiler install: its CMake packages are
+    # IntelSYCL/IntelDPCPP (compiler-flag helpers for consuming projects,
+    # found under $CMPLR_ROOT/lib/cmake/{IntelSYCL,IntelDPCPP}), not a
+    # standard LLVM/Clang CMake export set -- so there is usually nothing
+    # under $CMPLR_ROOT for auto-detection to find at all (Codex review: the
+    # llvm-cmake-prefix doc previously asserted this auto-detects "true for
+    # a sourced Intel oneAPI environment", which does not hold for the
+    # actual package layout).
+    echo "::notice::\$CMPLR_ROOT is set ('$CMPLR_ROOT') but no LLVM/Clang CMake package was found at '$CMPLR_ROOT/lib/cmake/llvm' -- this is expected for a stock Intel oneAPI DPC++/C++ Compiler install, which ships IntelSYCL/IntelDPCPP CMake modules there instead, not an LLVM/Clang plugin-development SDK. Falling back to apt-get, which will likely fail for a vendor LLVM major. If you have a matching LLVM+Clang CMake package available (e.g. built separately to match '$COMPILER'), set the llvm-cmake-prefix input to it."
+  fi
+  if [[ -z "$bundled_cmake_prefix" && "$INSTALL_DEPS" == "true" ]]; then
     if [[ "$(uname -s)" == "Linux" ]] && command -v apt-get >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1; then
       echo "::group::Install clang-$major dev packages for the plugin build"
       sudo apt-get update -qq

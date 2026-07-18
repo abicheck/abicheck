@@ -114,12 +114,18 @@ inputs:
       an apt package for that major -- e.g. Intel's icpx/icx oneAPI
       compilers. When omitted, this Action auto-detects a root at
       $CMPLR_ROOT if it's set, looks like it bundles an LLVM CMake package
-      (true for a sourced Intel oneAPI environment), AND the resolved
-      `compiler` binary actually lives under $CMPLR_ROOT (so a job that
-      merely has oneAPI sourced for unrelated tools, while `compiler:`
-      resolves to a different Clang, does not
-      wrongly build the plugin against a mismatched LLVM) -- set this
-      explicitly only to override that.
+      at $CMPLR_ROOT/lib/cmake/llvm, AND the resolved `compiler` binary
+      actually lives under $CMPLR_ROOT (so a job that merely has oneAPI
+      sourced for unrelated tools, while `compiler:` resolves to a
+      different Clang, does not wrongly build the plugin against a
+      mismatched LLVM). A *stock* Intel oneAPI DPC++/C++ Compiler install
+      does not usually satisfy this -- it ships IntelSYCL/IntelDPCPP CMake
+      modules under $CMPLR_ROOT/lib/cmake instead (compiler-flag helpers
+      for projects consuming the compiler, not an LLVM/Clang
+      plugin-development SDK), so auto-detection alone is not expected to
+      find anything there. Set this explicitly, pointing at a matching
+      LLVM+Clang CMake package if you have one available (e.g. built
+      separately to match the vendor compiler's exact LLVM major).
     required: false
     default: ''
   python-version:
