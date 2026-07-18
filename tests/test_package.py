@@ -2515,6 +2515,88 @@ class TestDebExtractorExtended:
         extract_zst.assert_called_once()
         assert extract_zst.call_args.args[0].name == "data.tar.zst"
 
+    def test_extract_symbols_file_from_control_tar(self, tmp_path: Path) -> None:
+        """CLI-audit P2: DebExtractor only ever read data.tar.*; control.tar.*
+        (which carries the dpkg-gensymbols(1) symbols contract) was never
+        extracted at all, so the Debian symbols contract could not
+        participate in a package compare. Builds a real (uncompressed)
+        control.tar containing a symbols file and verifies
+        ExtractResult.symbols_file points at the extracted copy with the
+        right content."""
+        f = tmp_path / "test.deb"
+        f.write_bytes(b"!<arch>\n" + b"\x00" * 100)
+        out = tmp_path / "output"
+        out.mkdir()
+        symbols_text = "libfoo.so.1 libfoo1 #MINVER#\n _ZN3foo3barEv@Base 1.0\n"
+
+        def fake_run(*args, **kwargs):
+            staging = Path(kwargs.get("cwd", "."))
+            with tarfile.open(staging / "data.tar", "w"):
+                pass
+            with tarfile.open(staging / "control.tar", "w") as tf:
+                data = symbols_text.encode()
+                info = tarfile.TarInfo(name="symbols")
+                info.size = len(data)
+                tf.addfile(info, io.BytesIO(data))
+            return mock.Mock(returncode=0)
+
+        with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
+            with mock.patch("abicheck.package.subprocess.run", side_effect=fake_run):
+                result = DebExtractor().extract(f, out)
+
+        assert result.symbols_file is not None
+        assert result.symbols_file.name == "symbols"
+        assert result.symbols_file.read_text() == symbols_text
+
+    def test_extract_no_control_tar_leaves_symbols_file_none(self, tmp_path: Path) -> None:
+        """A .deb with no control.tar.* member (malformed, but data.tar.*
+        alone is enough to raise SnapshotError only when data.tar.* itself
+        is missing) leaves symbols_file None rather than raising."""
+        f = tmp_path / "test.deb"
+        f.write_bytes(b"!<arch>\n" + b"\x00" * 100)
+        out = tmp_path / "output"
+        out.mkdir()
+
+        def fake_run(*args, **kwargs):
+            staging = Path(kwargs.get("cwd", "."))
+            with tarfile.open(staging / "data.tar", "w"):
+                pass
+            return mock.Mock(returncode=0)
+
+        with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
+            with mock.patch("abicheck.package.subprocess.run", side_effect=fake_run):
+                result = DebExtractor().extract(f, out)
+
+        assert result.symbols_file is None
+
+    def test_extract_control_tar_without_symbols_leaves_symbols_file_none(
+        self, tmp_path: Path,
+    ) -> None:
+        """A control.tar.* present but with no ./symbols member (the common
+        case -- most packages aren't built with dpkg-gensymbols) leaves
+        symbols_file None."""
+        f = tmp_path / "test.deb"
+        f.write_bytes(b"!<arch>\n" + b"\x00" * 100)
+        out = tmp_path / "output"
+        out.mkdir()
+
+        def fake_run(*args, **kwargs):
+            staging = Path(kwargs.get("cwd", "."))
+            with tarfile.open(staging / "data.tar", "w"):
+                pass
+            with tarfile.open(staging / "control.tar", "w") as tf:
+                data = b"Package: libfoo1\n"
+                info = tarfile.TarInfo(name="control")
+                info.size = len(data)
+                tf.addfile(info, io.BytesIO(data))
+            return mock.Mock(returncode=0)
+
+        with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
+            with mock.patch("abicheck.package.subprocess.run", side_effect=fake_run):
+                result = DebExtractor().extract(f, out)
+
+        assert result.symbols_file is None
+
     def test_extract_relative_deb_path_passes_absolute_path_to_ar(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:

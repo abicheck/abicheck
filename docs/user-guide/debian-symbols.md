@@ -14,6 +14,19 @@ Generate, validate, and diff [Debian symbols files](https://manpages.debian.org/
 > Split out of [CLI Usage](cli-usage.md), which covers the core `dump`/
 > `compare` flow.
 
+## Automatic contract check on `.deb` package compare
+
+`compare OLD.deb NEW.deb` (and the directory/package fan-out this routes
+through) now extracts and compares each side's `control.tar.*` `symbols`
+file automatically when both packages ship one — no separate command or
+flag needed. A mismatch (an added/removed entry, or a minimum-version
+regression) is folded into the compare's warning output as informational
+context; it does not by itself change the compare's verdict or exit code
+(the binary ABI diff is still the sole source of truth for BREAKING/
+API_BREAK), since a packaging-contract drift and a real ABI break are
+different questions — see the API reference below to run the same check
+standalone (e.g. against an unpackaged `.symbols` file from a source tree).
+
 ## Generate a symbols file from a shared library
 
 ```python

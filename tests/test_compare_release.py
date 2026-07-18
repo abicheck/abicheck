@@ -848,7 +848,7 @@ class TestExtractIfPackage:
         lib_dir = tmp_path / "lib"
         lib_dir.mkdir()
 
-        lib_out, debug_out, header_out = _extract_if_package(
+        lib_out, debug_out, header_out, _symbols_out = _extract_if_package(
             input_path=lib_dir,
             debug_pkg=None,
             devel_pkg=None,
@@ -879,7 +879,7 @@ class TestExtractIfPackage:
 
         dbg_extractor = _make_mock_extractor(lib_dir=extracted_debug, debug_dir=extracted_debug)
 
-        lib_out, debug_out, header_out = _extract_if_package(
+        lib_out, debug_out, header_out, _symbols_out = _extract_if_package(
             input_path=lib_dir,
             debug_pkg=dbg_pkg,
             devel_pkg=None,
@@ -910,7 +910,7 @@ class TestExtractIfPackage:
 
         dev_extractor = _make_mock_extractor(lib_dir=extracted_headers, header_dir=extracted_headers)
 
-        lib_out, debug_out, header_out = _extract_if_package(
+        lib_out, debug_out, header_out, _symbols_out = _extract_if_package(
             input_path=lib_dir,
             debug_pkg=None,
             devel_pkg=dev_pkg,
@@ -953,7 +953,7 @@ class TestExtractIfPackage:
                 return dev_extractor
             return None
 
-        lib_out, debug_out, header_out = _extract_if_package(
+        lib_out, debug_out, header_out, _symbols_out = _extract_if_package(
             input_path=lib_dir,
             debug_pkg=dbg_pkg,
             devel_pkg=dev_pkg,
@@ -985,7 +985,7 @@ class TestExtractIfPackage:
         # debug_dir=None in ExtractResult: fallback must use lib_dir
         dbg_extractor = _make_mock_extractor(lib_dir=extracted, debug_dir=None)
 
-        lib_out, debug_out, header_out = _extract_if_package(
+        lib_out, debug_out, header_out, _symbols_out = _extract_if_package(
             input_path=lib_dir,
             debug_pkg=dbg_pkg,
             devel_pkg=None,
@@ -1029,7 +1029,7 @@ class TestExtractIfPackage:
                 return dbg_extractor
             return None
 
-        lib_out, debug_out, header_out = _extract_if_package(
+        lib_out, debug_out, header_out, _symbols_out = _extract_if_package(
             input_path=pkg,
             debug_pkg=dbg_pkg,
             devel_pkg=None,
@@ -1041,6 +1041,101 @@ class TestExtractIfPackage:
         assert lib_out == main_lib
         assert debug_out == extracted_debug  # .debug_dir preferred over .lib_dir
         assert header_out is None
+
+
+class TestDebianSymbolsWarning:
+    """CLI-audit P2: the extracted .symbols contract must actually
+    participate in a package compare, not just be extracted and ignored."""
+
+    def test_none_when_either_side_missing(self, tmp_path: Path) -> None:
+        from abicheck.cli_compare_release_helpers import _debian_symbols_warning
+
+        symbols = tmp_path / "symbols"
+        symbols.write_text("libfoo.so.1 libfoo1 #MINVER#\n _foo@Base 1.0\n")
+        assert _debian_symbols_warning(None, None) is None
+        assert _debian_symbols_warning(symbols, None) is None
+        assert _debian_symbols_warning(None, symbols) is None
+
+    def test_none_when_contracts_identical(self, tmp_path: Path) -> None:
+        from abicheck.cli_compare_release_helpers import _debian_symbols_warning
+
+        text = "libfoo.so.1 libfoo1 #MINVER#\n _foo@Base 1.0\n"
+        old = tmp_path / "old_symbols"
+        new = tmp_path / "new_symbols"
+        old.write_text(text)
+        new.write_text(text)
+        assert _debian_symbols_warning(old, new) is None
+
+    def test_reports_removed_and_added_symbols(self, tmp_path: Path) -> None:
+        from abicheck.cli_compare_release_helpers import _debian_symbols_warning
+
+        old = tmp_path / "old_symbols"
+        new = tmp_path / "new_symbols"
+        old.write_text("libfoo.so.1 libfoo1 #MINVER#\n _foo@Base 1.0\n _bar@Base 1.0\n")
+        new.write_text("libfoo.so.1 libfoo1 #MINVER#\n _foo@Base 1.0\n _baz@Base 1.0\n")
+        note = _debian_symbols_warning(old, new)
+        assert note is not None
+        assert "Debian symbols contract changed" in note
+        assert "_bar@Base" in note
+        assert "_baz@Base" in note
+
+    def test_reports_version_regression(self, tmp_path: Path) -> None:
+        from abicheck.cli_compare_release_helpers import _debian_symbols_warning
+
+        old = tmp_path / "old_symbols"
+        new = tmp_path / "new_symbols"
+        old.write_text("libfoo.so.1 libfoo1 #MINVER#\n _foo@Base 2.0\n")
+        new.write_text("libfoo.so.1 libfoo1 #MINVER#\n _foo@Base 1.0\n")
+        note = _debian_symbols_warning(old, new)
+        assert note is not None
+        assert "_foo" in note
+        assert "2.0 -> 1.0" in note
+
+    def test_unparseable_file_reported_not_raised(self, tmp_path: Path) -> None:
+        from abicheck.cli_compare_release_helpers import _debian_symbols_warning
+
+        old = tmp_path / "old_symbols"
+        new = tmp_path / "new_symbols"
+        old.write_text("libfoo.so.1 libfoo1 #MINVER#\n _foo@Base 1.0\n")
+        # Missing entirely -- load_symbols_file must raise OSError, not crash
+        # the whole release compare.
+        note = _debian_symbols_warning(old, new)
+        assert note is not None
+        assert "could not be parsed" in note
+
+    def test_prepare_inputs_folds_symbols_note_into_warnings(self, tmp_path: Path) -> None:
+        """End-to-end through _prepare_compare_release_inputs: a real
+        extract_if_package callable returning differing symbols_file paths
+        must land its note in the returned warning_msgs."""
+        old = tmp_path / "old"
+        new = tmp_path / "new"
+        old.mkdir()
+        new.mkdir()
+        (old / "libfoo.so").write_text("old")
+        (new / "libfoo.so").write_text("new")
+        old_symbols = tmp_path / "old_symbols"
+        new_symbols = tmp_path / "new_symbols"
+        old_symbols.write_text("libfoo.so.1 libfoo1 #MINVER#\n _foo@Base 1.0\n")
+        new_symbols.write_text("libfoo.so.1 libfoo1 #MINVER#\n _foo@Base 2.0\n")
+
+        def _fake_extract(p, _dbg, _dev):
+            symbols = old_symbols if p == old else new_symbols
+            return p, None, None, symbols
+
+        result = _prepare_compare_release_inputs(
+            old, new,
+            None, None, None, None,
+            False, False,
+            (), (), (),
+            (),
+            (), (),
+            _fake_extract,
+            lambda *_args, **_kwargs: [],
+            lambda _p: False,
+            lambda _p: True,
+        )
+        warning_msgs = result[8]
+        assert any("Debian symbols contract changed" in m for m in warning_msgs)
 
 
 class TestCompareReleaseIncludes:
@@ -1077,7 +1172,7 @@ class TestCompareReleaseIncludes:
             (), (), (),
             (),
             (old_inc_only,), (new_inc_only,),
-            lambda p, _dbg, _dev: (p, None, None),
+            lambda p, _dbg, _dev: (p, None, None, None),
             lambda *_args, **_kwargs: [],
             lambda _p: False,
             lambda _p: True,

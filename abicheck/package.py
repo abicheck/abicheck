@@ -57,6 +57,12 @@ class ExtractResult:
     lib_dir: Path  # path to extracted shared libraries
     debug_dir: Path | None = None  # path to extracted debug info
     header_dir: Path | None = None  # path to extracted headers (devel pkg)
+    # Debian dpkg-gensymbols(1) contract shipped in a .deb's control.tar.* as
+    # ./symbols (CLI-audit P2: "Debian .symbols not integrated" -- only
+    # data.tar.* was ever read). None for every non-Deb extractor and for a
+    # Deb package that ships no symbols file (most do not; only libraries
+    # built with dpkg-gensymbols do).
+    symbols_file: Path | None = None
     metadata: dict[str, str] = field(default_factory=dict)
 
 
@@ -355,11 +361,15 @@ class DebExtractor:
 
     def extract(self, pkg_path: Path, target_dir: Path) -> ExtractResult:
         _log.info("Extracting Deb: %s", pkg_path)
-        self._deb_extract(pkg_path, target_dir)
-        return ExtractResult(lib_dir=target_dir)
+        symbols_file = self._deb_extract(pkg_path, target_dir)
+        return ExtractResult(lib_dir=target_dir, symbols_file=symbols_file)
 
-    def _deb_extract(self, deb_path: Path, target_dir: Path) -> None:
-        """Extract Debian package: ar x to get data.tar.*, then tar extract."""
+    def _deb_extract(self, deb_path: Path, target_dir: Path) -> Path | None:
+        """Extract Debian package: ar x to get data.tar.*/control.tar.*, then
+        tar extract each. Returns the path to control.tar.*'s ``symbols``
+        member (dpkg-gensymbols(1) contract) if the package ships one, else
+        ``None`` -- most packages don't; only libraries built with
+        dpkg-gensymbols do (CLI-audit P2)."""
         ar = shutil.which("ar")
         if not ar:
             raise SnapshotError(
@@ -379,10 +389,12 @@ class DebExtractor:
 
             # Find data.tar.* member
             data_tar = None
+            control_tar = None
             for candidate in staging.iterdir():
                 if candidate.name.startswith("data.tar"):
                     data_tar = candidate
-                    break
+                elif candidate.name.startswith("control.tar"):
+                    control_tar = candidate
 
             if data_tar is None:
                 raise SnapshotError(
@@ -394,6 +406,21 @@ class DebExtractor:
                 TarExtractor._safe_extract_zst_tar(data_tar, target_dir)
             else:
                 TarExtractor._safe_extract(data_tar, target_dir)
+
+            # control.tar.* holds package metadata (control, md5sums, and --
+            # for a library package built with dpkg-gensymbols -- symbols).
+            # Extracted into its own subdirectory so its ./control never
+            # collides with a same-named path under data.tar.*'s payload.
+            if control_tar is None:
+                return None
+            control_dir = target_dir / ".deb_control"
+            control_dir.mkdir(exist_ok=True)
+            if control_tar.name.endswith(".tar.zst"):
+                TarExtractor._safe_extract_zst_tar(control_tar, control_dir)
+            else:
+                TarExtractor._safe_extract(control_tar, control_dir)
+            symbols_path = control_dir / "symbols"
+            return symbols_path if symbols_path.is_file() else None
         finally:
             shutil.rmtree(staging, ignore_errors=True)
 

@@ -159,6 +159,31 @@ abicheck dump libfoo.so -H include/foo.h \
 gh release upload v2.0.0 libfoo-2.0.0.abicheck.json --clobber
 ```
 
+### Recipe A2: Multi-Library Releases — the `baseline` Action (a generator, not a registry)
+
+Recipe A above dumps one library. A release with several libraries needs one
+snapshot per library plus a manifest tying them together — the
+[`abicheck/abicheck/actions/baseline`](https://github.com/abicheck/abicheck/tree/main/actions/baseline)
+Action is a thin convenience wrapper around exactly that: it runs a plain
+`abicheck dump` once per library named in its `libraries` JSON input, writes
+each snapshot into `output-dir`, and records fact-set identity, build
+profile, and per-library content digests into a `manifest.json` alongside
+them. Nothing about it is the removed baseline registry (see the callout
+above) — it does not commit, publish, address baselines by
+`library:version:platform` key, or replace this page's storage recipes; it
+only replaces hand-writing a per-library `dump` matrix and a manifest
+generator. Publishing the `output-dir` it produces is still the calling
+workflow's job, using whichever storage recipe on this page fits (Recipe A's
+`gh release upload`, Recipe B's git commit, etc., applied to the whole
+directory instead of one file).
+
+See [Recommended flow: a multi-library release with one shared facts
+pack](github-action-source-scans.md#recommended-flow-a-multi-library-release-with-one-shared-facts-pack)
+for how this composes with `--build-info`/`--sources` when the libraries
+share one collected facts pack, and the Action's own `action.yml` for its
+full input/output reference (`profile`, `depth`, `previous-manifest` for
+refresh detection, etc.).
+
 ### Recipe B: Git-Committed Baselines
 
 Best for: small libraries where you want baselines auditable in PR diffs.

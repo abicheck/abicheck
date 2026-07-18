@@ -102,3 +102,30 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `ctx.invoke` via Click's private context/default-resolution internals for
   no behavioral gain.
 
+### Added
+
+- **Debian `.symbols` contract now participates in package compare** —
+  `DebExtractor` only ever read a `.deb`'s `data.tar.*`; `control.tar.*`
+  (which carries the `dpkg-gensymbols(1)` contract as `./symbols` for a
+  library built with it) was never extracted at all, so the packaging
+  contract could never inform a `compare`/`compare-release` run regardless
+  of drift between it and the actual binary. `ExtractResult` gains a
+  `symbols_file` field; when both sides of a `.deb`-to-`.deb` compare ship
+  one, a mismatch (added/removed entry, minimum-version regression) is
+  folded into the release warnings as informational context — additive
+  only, never gating the verdict/exit code. See
+  `docs/user-guide/debian-symbols.md` § "Automatic contract check on `.deb`
+  package compare".
+
+### Documentation
+
+- **The `actions/baseline` Action is now documented** — it had no
+  user-facing doc page at all. Added `baseline-management.md` § "Recipe A2:
+  Multi-Library Releases", explicitly framed as a *baseline-set generator*
+  (a thin wrapper running `dump` per library plus a manifest) rather than
+  the removed baseline registry, to avoid readers mistaking it for a
+  reintroduction of the `push`/`pull`/`list`/`delete` subcommand group
+  ADR-043 removed. `actions/collect-facts` was already documented only in
+  the advanced source-facts pages (`producing-source-facts.md`,
+  `github-action-source-scans.md`), never surfaced as part of the everyday
+  `dump`/`compare`/`scan`/`deps` story — no change needed there.

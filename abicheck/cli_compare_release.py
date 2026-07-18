@@ -48,6 +48,7 @@ from .cli_compare_release_helpers import (  # noqa: F401
     _collect_bundle_result,
     _collect_release_warnings,
     _compute_release_severity_exit_code,
+    _debian_symbols_warning,
     _discover_include_roots,
     _exit_compare_release,
     _extract_if_package,
@@ -1176,7 +1177,7 @@ def compare_release_cmd(
 
     def _do_extract(
         input_path: Path, debug_pkg: Path | None, devel_pkg: Path | None
-    ) -> tuple[Path, Path | None, Path | None]:
+    ) -> tuple[Path, Path | None, Path | None, Path | None]:
         return _extract_if_package(
             input_path,
             debug_pkg,
@@ -1398,7 +1399,8 @@ def _prepare_compare_release_inputs(
     old_includes_only: tuple[Path, ...],
     new_includes_only: tuple[Path, ...],
     extract_if_package: Callable[
-        [Path, Path | None, Path | None], tuple[Path, Path | None, Path | None]
+        [Path, Path | None, Path | None],
+        tuple[Path, Path | None, Path | None, Path | None],
     ],
     discover_shared_libraries: Callable[..., list[Path]],
     is_package: Callable[[Path], bool],
@@ -1418,12 +1420,12 @@ def _prepare_compare_release_inputs(
     list[str],
 ]:
     """Prepare inputs/maps/keys for compare-release command."""
-    old_lib_dir, old_debug_dir, old_header_dir = extract_if_package(
+    old_lib_dir, old_debug_dir, old_header_dir, old_symbols_file = extract_if_package(
         old_dir,
         debug_info1,
         devel_pkg1,
     )
-    new_lib_dir, new_debug_dir, new_header_dir = extract_if_package(
+    new_lib_dir, new_debug_dir, new_header_dir, new_symbols_file = extract_if_package(
         new_dir,
         debug_info2,
         devel_pkg2,
@@ -1450,6 +1452,9 @@ def _prepare_compare_release_inputs(
     warning_msgs: list[str] = [
         f"Warning: {warning}" for warning in (old_warns + new_warns)
     ]
+    debian_symbols_note = _debian_symbols_warning(old_symbols_file, new_symbols_file)
+    if debian_symbols_note is not None:
+        warning_msgs.append(debian_symbols_note)
     old_h, new_h = _resolve_release_headers(
         headers,
         old_headers_only,
