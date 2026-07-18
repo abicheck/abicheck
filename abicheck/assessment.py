@@ -52,7 +52,7 @@ Usage::
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any
 
@@ -569,6 +569,7 @@ class Assessment:
         """
         self.manifest = manifest
         self.require_identity = require_identity
+        self._target_specs: dict[str, TargetSpec] = {t.id: t for t in manifest.targets}
         self._outcomes: dict[str, TargetOutcome] = {}
         self._additional_outcomes: dict[str, TargetOutcome] = {}
 
@@ -606,14 +607,20 @@ class Assessment:
             and outcome.assessment_id != self.manifest.assessment_id
         ):
             return
-        bucket = (
-            self._outcomes
-            if outcome.target_id in self.manifest.target_ids
-            else self._additional_outcomes
-        )
+        spec = self._target_specs.get(outcome.target_id)
+        bucket = self._outcomes if spec is not None else self._additional_outcomes
         existing = bucket.get(outcome.target_id)
         if existing is not None and existing.attempt > outcome.attempt:
             return
+        if spec is not None and outcome.required != spec.required:
+            # A caller's TargetOutcome.required defaults to True and is easy
+            # to leave unset/wrong — the manifest is the authority on
+            # whether a target is required, so reconcile it here rather
+            # than trust each call site to repeat it correctly. Only
+            # finalize()'s synthesized INCOMPLETE outcomes did this before;
+            # a target that *did* report would otherwise keep whatever
+            # (possibly stale) required value the caller happened to pass.
+            outcome = replace(outcome, required=spec.required)
         bucket[outcome.target_id] = outcome
 
     def progress(self) -> tuple[int, int]:

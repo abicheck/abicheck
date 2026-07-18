@@ -542,6 +542,48 @@ class TestAcceptanceCases:
         assert not complete.is_partial
         assert complete.outcomes[WINDOWS].state is TargetState.ANALYZED
 
+    def test_record_reconciles_required_from_manifest_for_optional_target(self):
+        # TargetOutcome.required defaults to True regardless of what the
+        # manifest actually declares. A caller reporting an optional
+        # target's outcome without explicitly repeating required=False
+        # must not end up with a recorded outcome that contradicts the
+        # manifest -- only finalize()'s synthesized INCOMPLETE outcomes did
+        # this correctly before.
+        manifest = _manifest(required=(LINUX,), optional=(WINDOWS,))
+        assessment = Assessment(manifest)
+        assessment.record(TargetOutcome.analyzed(LINUX, _diff(Verdict.COMPATIBLE)))
+        assessment.record(TargetOutcome.unavailable(WINDOWS, TargetState.BUILD_FAILED))
+        result = assessment.finalize()
+
+        assert result.outcomes[LINUX].required is True
+        assert result.outcomes[WINDOWS].required is False
+
+    def test_record_reconciles_required_true_for_required_target(self):
+        # Symmetric case: a caller that (wrongly) passes required=False for
+        # an actually-required target must not have that stick either.
+        manifest = _manifest(required=(LINUX,))
+        assessment = Assessment(manifest)
+        assessment.record(
+            TargetOutcome.analyzed(LINUX, _diff(Verdict.COMPATIBLE), required=False)
+        )
+        result = assessment.finalize()
+
+        assert result.outcomes[LINUX].required is True
+
+    def test_record_does_not_reconcile_required_for_additional_outcome(self):
+        # A target outside the manifest has no manifest truth to reconcile
+        # against -- it keeps whatever the caller passed.
+        manifest = _manifest(required=(LINUX,))
+        assessment = Assessment(manifest)
+        assessment.record(
+            TargetOutcome.analyzed(
+                "macos-arm64", _diff(Verdict.COMPATIBLE), required=False
+            )
+        )
+        result = assessment.finalize()
+
+        assert result.additional_outcomes["macos-arm64"].required is False
+
     def test_stale_lower_attempt_does_not_clobber_newer_result(self):
         assessment = Assessment(_manifest())
         assessment.record(
