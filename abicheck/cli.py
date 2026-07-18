@@ -656,6 +656,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
 
     if dry_run:
         from .buildsource.inline import is_pack_dir
+        from .cli_buildsource_helpers import _is_inputs_pack_dir
         from .cli_dump_helpers import render_dump_dry_run
 
         emit_dry_run(
@@ -665,7 +666,14 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
                 depth=depth, collect_mode=collect_mode,
                 header_backend=header_backend, output=output,
                 has_compile_db=bool(compile_db_path or compile_db_path_alt),
-                build_info_is_pack=is_pack_dir(build_info),
+                # embed_build_source's own classification: a source-capable
+                # --build-info is either a BuildSourcePack (is_pack_dir) or a
+                # Flow-2 abicheck_inputs/ directory (_is_inputs_pack_dir) --
+                # both can carry L4 source_abi facts, unlike a raw compile
+                # DB/build dir (Codex review, second finding on this signal).
+                build_info_is_pack=(
+                    is_pack_dir(build_info) or _is_inputs_pack_dir(build_info)
+                ),
             )
         )
 

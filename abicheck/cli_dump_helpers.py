@@ -528,17 +528,20 @@ def render_dump_dry_run(
     can).
 
     ``build_info_is_pack`` (Codex review): whether ``--build-info`` names a
-    prebuilt ``BuildSourcePack``/``abicheck_inputs`` directory rather than a
-    raw compile DB / build dir -- checked via ``buildsource.inline.
-    is_pack_dir`` (a manifest-shape stat + small JSON read, not a full pack
-    load). ``cli_buildsource.embed_build_source``'s ``_combine_packs`` falls
-    back to a pack-shaped ``build_info``'s own ``source_abi`` (L4) when no
-    ``--sources`` pack is given, so ``--depth source --build-info <pack>``
-    with no ``--sources`` can genuinely reach "source" for real -- unlike a
-    raw compile database, which never carries L4 facts of its own. Without
-    this, that combination was wrongly treated as "--depth source has no
-    path without --sources" and blocked even though the real (non-dry) run
-    writes a valid source-depth snapshot.
+    prebuilt ``BuildSourcePack`` *or* a Flow-2 ``abicheck_inputs/`` directory
+    rather than a raw compile DB / build dir -- the caller ORs
+    ``buildsource.inline.is_pack_dir`` and ``cli_buildsource_helpers.
+    _is_inputs_pack_dir`` (each a manifest-shape stat + small JSON read, not
+    a full pack load), the same two directory kinds ``cli_buildsource.
+    embed_build_source`` itself recognizes as pack-shaped (``bi_is_pack``/
+    ``bi_is_inputs``). Either one's ``_combine_packs`` fallback lets a
+    pack-shaped ``build_info``'s own ``source_abi`` (L4) satisfy ``--depth
+    source`` with no ``--sources`` pack given, unlike a raw compile
+    database, which never carries L4 facts of its own. Checking only
+    ``is_pack_dir`` missed the ``abicheck_inputs/`` case (Codex review,
+    second finding on this signal): that combination was wrongly treated as
+    "--depth source has no path without --sources" and blocked even though
+    the real (non-dry) run writes a valid source-depth snapshot from it.
     """
     from .cli_helpers_compare import discover_project_config
     from .dry_run import DryRunResult, tool_status

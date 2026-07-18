@@ -51,4 +51,11 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   to when no `--sources` pack is given — so `--depth source` can genuinely
   succeed without `--sources` in that case. Only a raw compile database
   (never carrying L4 facts) is still treated as unsatisfiable.
+- **`dump --dry-run` now also recognizes a Flow-2 `abicheck_inputs/`
+  `--build-info` directory as pack-shaped** — the dry-run's pack detection
+  checked only `BuildSourcePack` (`is_pack_dir`), missing the second
+  directory kind `embed_build_source` itself already accepts
+  (`_is_inputs_pack_dir`, ADR-035 D5); `--depth source --build-info
+  <abicheck_inputs>` with no `--sources` was wrongly blocked even though
+  the real dump can ingest its L4 facts and succeed.
 

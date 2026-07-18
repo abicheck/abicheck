@@ -184,6 +184,34 @@ class TestDumpDryRun:
         )
         assert result.exit_code == 0, result.output
 
+    def test_depth_source_with_inputs_pack_build_info_does_not_block(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, second finding on this signal: embed_build_source
+        # recognizes TWO pack-shaped --build-info directory kinds --
+        # BuildSourcePack (is_pack_dir) and the Flow-2 abicheck_inputs/
+        # protocol (_is_inputs_pack_dir, ADR-035 D5) -- either can carry its
+        # own L4 source_abi and satisfy --depth source with no --sources.
+        # Checking only is_pack_dir missed this second kind.
+        import json
+
+        snap = tmp_path / "lib.abi.json"
+        _write_snapshot(snap)
+        inputs_dir = tmp_path / "abicheck_inputs"
+        inputs_dir.mkdir()
+        (inputs_dir / "manifest.json").write_text(
+            json.dumps({"kind": "abicheck_inputs", "version": 1}),
+            encoding="utf-8",
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(snap), "--dry-run", "--depth", "source",
+                "--build-info", str(inputs_dir),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+
 
 class TestCompareDryRun:
     def test_rejects_output_flag(self, tmp_path: Path) -> None:
