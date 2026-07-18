@@ -469,7 +469,7 @@ class TestExpandHeaderInputs:
 
 
 class TestAttachClangLayout:
-    def test_noop_when_not_clang_producer(self, tmp_path):
+    def test_noop_when_pure_castxml_producer(self, tmp_path):
         header = tmp_path / "a.h"
         header.write_text("struct Foo {};")
         snap = AbiSnapshot(library="lib", version="1.0", ast_producer="castxml")
@@ -542,3 +542,38 @@ class TestAttachClangLayout:
         ) as mock_run:
             attach_clang_layout(snap, [header], [], lang="c", compile=None)
         assert mock_run.call_args.kwargs["compiler"] == "cc"
+
+    def test_enriches_clang_only_records_in_a_hybrid_snapshot(self, tmp_path):
+        # Codex review: cli_dump_helpers.perform_elf_dump's --ast-frontend
+        # hybrid path goes through dumper.dump() -> dumper_hybrid.run_hybrid_dump,
+        # which never enriches either sub-dump (importing this module from
+        # dumper_hybrid.py would close a real cycle back through dumper.py).
+        # The merged "hybrid" snapshot must still get enriched here, or a
+        # saved JSON baseline from `abicheck dump --ast-frontend hybrid`
+        # never carries layout facts for the clang-only records the merge
+        # appended.
+        header = tmp_path / "a.h"
+        header.write_text("struct Foo { int a; }; struct Bar { int b; };")
+        castxml_backed = RecordType(
+            name="Foo", kind="struct", size_bits=192, alignment_bits=32,
+        )
+        clang_only = RecordType(name="Bar", kind="struct", size_bits=None)
+        snap = AbiSnapshot(
+            library="lib", version="1.0", ast_producer="hybrid",
+            types=[castxml_backed, clang_only],
+        )
+        fake_records = [
+            {"qualified_name": "Foo", "size_bits": 999},  # must NOT be applied
+            {"qualified_name": "Bar", "size_bits": 32},
+        ]
+        with patch(
+            "abicheck.clang_layout_tool.find_layout_tool_bin",
+            return_value="/fake/tool",
+        ), patch(
+            "abicheck.clang_layout_tool.run_layout_tool", return_value=fake_records
+        ):
+            result = attach_clang_layout(snap, [header], [], lang=None, compile=None)
+        # The castxml-sourced record already had real layout -- untouched.
+        assert result.type_by_name("Foo").size_bits == 192
+        # The clang-only record had no layout at all -- backfilled.
+        assert result.type_by_name("Bar").size_bits == 32

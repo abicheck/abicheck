@@ -464,11 +464,11 @@ def attach_clang_layout(
     lang: str | None,
     compile: Any,
 ) -> AbiSnapshot:
-    """Optionally enrich a pure ``--ast-frontend clang`` snapshot with real
-    layout facts from the G28 Phase 4 companion tool.
+    """Optionally enrich a ``--ast-frontend clang``/``hybrid`` snapshot with
+    real layout facts from the G28 Phase 4 companion tool.
 
-    A no-op unless ALL of: the snapshot's L2 backend was actually
-    ``"clang"`` (never for castxml/hybrid/DWARF-only/symbols-only — those
+    A no-op unless ALL of: the snapshot's L2 backend was actually ``"clang"``
+    or ``"hybrid"`` (never for pure castxml/DWARF-only/symbols-only — those
     either already have real layout or have no header-AST at all), headers
     were supplied, and the optional companion tool binary is resolvable
     (:func:`find_layout_tool_bin` — an explicit opt-in via
@@ -477,13 +477,30 @@ def attach_clang_layout(
     compile error, a timeout, malformed output) degrades to "no
     enrichment," never raises (ADR-028 D3).
 
+    Including ``"hybrid"`` (Codex review) matters specifically for a caller
+    that reaches a merged hybrid snapshot WITHOUT its own clang sub-dump ever
+    having been enriched first — e.g. ``cli_dump_helpers.perform_elf_dump``'s
+    ``--ast-frontend hybrid`` path, which calls ``dumper.dump()`` (whose own
+    ``run_hybrid_dump`` recursion never attaches layout facts to either
+    sub-dump — that would need importing this module from ``dumper_hybrid.py``,
+    which sits on ``dumper.py``'s own import path back to this module and
+    would close a real cycle). Safe to run unconditionally on a hybrid
+    snapshot because :func:`apply_layout_facts`/:func:`_apply_record_facts`
+    only ever backfill a CURRENTLY-``None``/empty field: a castxml-sourced
+    record in the merge already carries real layout and is left untouched;
+    only the clang-only records the merge appended (whose layout fields
+    dumper_clang.py always leaves empty) actually get enriched. Also runs a
+    second, harmless no-op time for ``service.run_dump``'s own hybrid branch,
+    whose recursive ``header_backend="clang"`` sub-dump is already enriched
+    before the merge by that same recursive call's own tail.
+
     *compile* is typed ``Any`` rather than ``service_scan.CompileContext``
     (duck-typed: only ``.gcc_path``/``.gcc_prefix``/``.gcc_options``/
     ``.gcc_option_tokens``/``.sysroot``/``.nostdinc`` are read) purely to
     avoid importing ``service_scan`` here — the same import-cycle reason
     :func:`_expand_header_inputs` is a local copy instead of a reuse.
     """
-    if snap.ast_producer != "clang" or not headers:
+    if snap.ast_producer not in ("clang", "hybrid") or not headers:
         return snap
     binary = find_layout_tool_bin()
     if binary is None:
