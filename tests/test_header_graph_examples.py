@@ -108,14 +108,41 @@ def test_header_graph_reproduces_documented_finding(
 
     libv1 = tmp_path / "libv1.so"
     libv2 = tmp_path / "libv2.so"
+    # macOS: without a pinned -install_name, clang derives LC_ID_DYLIB from
+    # the (differing) output path, which the Mach-O diff reports as a
+    # spurious SONAME_CHANGED (same gotcha examples/CMakeLists.txt's APPLE
+    # branch and test_cross_platform_integration.py's
+    # test_native_identical_dylib_is_compatible already document/pin around)
+    # -- give both builds the identical install name.
+    install_name_flags = (
+        ["-Wl,-install_name,@rpath/lib.dylib"] if sys.platform == "darwin" else []
+    )
     for src, out in ((case_dir / "v1.cpp", libv1), (case_dir / "v2.cpp", libv2)):
-        result = subprocess.run(
-            [cxx, "-std=c++17", "-shared", "-fPIC", "-g", str(src), "-o", str(out)],
+        # Compile and link as two steps (not one -shared invocation) so the
+        # intermediate .o persists in tmp_path for the rest of the test: on
+        # macOS, `-g` embeds only a debug *map* pointing at the compiler's
+        # object file (ld64's N_OSO stabs), not self-contained DWARF, so an
+        # ephemeral one-shot compile+link's temp .o vanishing before abicheck
+        # reads it silently degrades every struct/base/parameter-type finding
+        # to no DWARF evidence. Every other example case avoids this because
+        # CMake's build tree naturally keeps its .o files around; harmless,
+        # equivalent to one-shot compilation, on Linux (DWARF is embedded
+        # directly in the ELF, no such indirection).
+        obj = out.with_suffix(".o")
+        compile_result = subprocess.run(
+            [cxx, "-std=c++17", "-fPIC", "-g", "-c", str(src), "-o", str(obj)],
             cwd=case_dir,
             capture_output=True,
             text=True,
         )
-        assert result.returncode == 0, result.stderr
+        assert compile_result.returncode == 0, compile_result.stderr
+        link_result = subprocess.run(
+            [cxx, "-shared", "-g", str(obj), "-o", str(out), *install_name_flags],
+            cwd=case_dir,
+            capture_output=True,
+            text=True,
+        )
+        assert link_result.returncode == 0, link_result.stderr
 
     old_json = tmp_path / "old.json"
     new_json = tmp_path / "new.json"
