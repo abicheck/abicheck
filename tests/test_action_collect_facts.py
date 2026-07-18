@@ -373,6 +373,14 @@ class TestWrapperProducer:
         # nothing here should claim readiness prematurely.
 
     def test_multiple_public_roots_joined_for_env_var(self, tmp_path: Path) -> None:
+        # Regression: this runs the real system uname (no stub, unlike the
+        # Windows-simulation test below), so on an actual windows-latest CI
+        # runner (Git Bash reports uname -s as MINGW64_NT-...) run.sh's own
+        # platform detection correctly joins with ';', not ':' -- a
+        # hardcoded ':' expectation here failed the real Windows CI lane
+        # even though the separator was correct for that platform. Expect
+        # whatever the real OS's separator is, same as cc_wrapper.py's own
+        # os.pathsep-based split.
         result, github_env, _ = _run_action(
             {
                 "INPUT_PHASE": "prepare",
@@ -383,9 +391,8 @@ class TestWrapperProducer:
             tmp_path,
         )
         assert result.returncode == 0, result.stdout + result.stderr
-        assert (
-            _parse_kv_file(github_env)["ABICHECK_CC_HEADERS"] == "include:gen/include"
-        )
+        expected = os.pathsep.join(["include", "gen/include"])
+        assert _parse_kv_file(github_env)["ABICHECK_CC_HEADERS"] == expected
 
     def test_multiple_public_roots_joined_with_semicolon_on_windows(
         self, tmp_path: Path
