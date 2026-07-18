@@ -37,7 +37,6 @@ clang; see ``header_graph.py``).
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -50,11 +49,28 @@ EXAMPLES_DIR = REPO_DIR / "examples"
 
 #: (case dir, expected verdict, expected changed kinds beyond the L5 risk
 #: finding all four share).
+#:
+#: case187/191 name a DWARF-sourced kind (``struct_field_type_changed``/
+#: ``struct_size_changed``) that is genuinely unreachable on macOS: abicheck
+#: has no Mach-O debug-map/N_OSO resolution, so ``_dump_macho`` never attempts
+#: DWARF at all (headers + export table only, unlike ``_dump_elf``). On Linux
+#: the same ``.so`` embeds DWARF directly (no such indirection needed), so the
+#: DWARF-sourced kind fires there in addition to the header-sourced one every
+#: platform gets. Both kinds are independently sufficient for BREAKING per
+#: each case's README; this only picks the one the current platform can prove.
+_STRUCT_FIELD_KIND = (
+    "type_field_type_changed"
+    if sys.platform == "darwin"
+    else "struct_field_type_changed"
+)
+_STRUCT_SIZE_KIND = (
+    "type_size_changed" if sys.platform == "darwin" else "struct_size_changed"
+)
 CASES = [
     (
         "case187_public_struct_private_field_type",
         "BREAKING",
-        {"struct_field_type_changed"},
+        {_STRUCT_FIELD_KIND},
     ),
     (
         "case188_public_class_private_base_class",
@@ -69,7 +85,7 @@ CASES = [
     (
         "case191_header_only_graph_field_type",
         "BREAKING",
-        {"struct_size_changed"},
+        {_STRUCT_SIZE_KIND},
     ),
 ]
 
@@ -132,16 +148,13 @@ def test_header_graph_reproduces_documented_finding(
         ["-Wl,-install_name,@rpath/lib.dylib"] if sys.platform == "darwin" else []
     )
     for src, out in ((case_dir / "v1.cpp", libv1), (case_dir / "v2.cpp", libv2)):
-        # Compile and link as two steps (not one -shared invocation) so the
-        # intermediate .o persists in tmp_path for the rest of the test: on
-        # macOS, `-g` embeds only a debug *map* pointing at the compiler's
-        # object file (ld64's N_OSO stabs), not self-contained DWARF, so an
-        # ephemeral one-shot compile+link's temp .o vanishing before abicheck
-        # reads it silently degrades every struct/base/parameter-type finding
-        # to no DWARF evidence. Every other example case avoids this because
-        # CMake's build tree naturally keeps its .o files around; harmless,
-        # equivalent to one-shot compilation, on Linux (DWARF is embedded
-        # directly in the ELF, no such indirection).
+        # Compile and link as two steps (not one -shared invocation): harmless,
+        # equivalent to one-shot compilation on every platform this test runs
+        # on (abicheck never reads DWARF/a debug map for Mach-O at all --
+        # _dump_macho is headers + export table only, unlike _dump_elf -- so
+        # there is no debug-map indirection here to preserve). Kept for
+        # parity with every other example case, whose CMake build tree
+        # naturally keeps its .o files around.
         obj = out.with_suffix(".o")
         compile_result = subprocess.run(
             [cxx, "-std=c++17", "-fPIC", "-g", "-c", str(src), "-o", str(obj)],
@@ -160,29 +173,10 @@ def test_header_graph_reproduces_documented_finding(
 
     old_json = tmp_path / "old.json"
     new_json = tmp_path / "new.json"
-    dump_stderrs: dict[str, str] = {}
-    # dumper_cache._cache_path's own layout (mirrored here, not imported, so
-    # this stays a pure diagnostic with no production-code coupling): the raw
-    # castxml XML for each dump is content-addressed under this directory.
-    # Snapshotting its contents around each dump call recovers exactly what
-    # castxml produced on the runner, without needing production code changes
-    # to surface it.
-    _xdg_cache = os.environ.get("XDG_CACHE_HOME")
-    castxml_cache_dir = (
-        (Path(_xdg_cache) if _xdg_cache else Path.home() / ".cache")
-        / "abi_check"
-        / "castxml"
-    )
-    castxml_xml: dict[str, str] = {}
     for lib, header, out in (
         (libv1, "v1.h", old_json),
         (libv2, "v2.h", new_json),
     ):
-        before_xml = (
-            set(castxml_cache_dir.glob("*.xml"))
-            if castxml_cache_dir.is_dir()
-            else set()
-        )
         result = subprocess.run(
             [
                 sys.executable,
@@ -203,17 +197,6 @@ def test_header_graph_reproduces_documented_finding(
             text=True,
         )
         assert result.returncode == 0, result.stderr
-        dump_stderrs[header] = result.stderr
-        after_xml = (
-            set(castxml_cache_dir.glob("*.xml"))
-            if castxml_cache_dir.is_dir()
-            else set()
-        )
-        for new_file in after_xml - before_xml:
-            try:
-                castxml_xml[header] = new_file.read_text(errors="replace")
-            except OSError:
-                pass
 
     report_path = tmp_path / "report.json"
     result = subprocess.run(
@@ -237,45 +220,8 @@ def test_header_graph_reproduces_documented_finding(
     assert report_path.is_file(), result.stderr
 
     payload = json.loads(report_path.read_text())
+    assert payload["verdict"] == expected_verdict, payload["verdict"]
     got_kinds = {c["kind"] for c in payload.get("changes", [])}
     expected_kinds = expected_extra_kinds | {"public_api_internal_dependency_added"}
     missing = expected_kinds - got_kinds
-    if payload["verdict"] != expected_verdict or missing:
-        # TEMPORARY diagnostic (not gated on -s; pytest only shows captured
-        # stdout for a failing test, so this is silent on green runs): dump
-        # the full old/new snapshot `types` + the emitted `changes` so a
-        # platform-specific miss (seen on macos-latest, never on
-        # ubuntu-latest, for this exact test) can be root-caused from CI
-        # log output alone, without local macOS/castxml access. Remove once
-        # the macOS-specific gap this is chasing is understood and fixed.
-        old_payload = json.loads(old_json.read_text())
-        new_payload = json.loads(new_json.read_text())
-        print(f"\n--- {case_name} diagnostic (sys.platform={sys.platform}) ---")
-        print(
-            "old ast_producer/from_headers:",
-            old_payload.get("ast_producer"),
-            old_payload.get("from_headers"),
-        )
-        print(
-            "new ast_producer/from_headers:",
-            new_payload.get("ast_producer"),
-            new_payload.get("from_headers"),
-        )
-        # `dump`'s UserWarning (emitted by service._try_header_scoped_dump when
-        # it discards a header-scoped snapshot and falls back to export-table
-        # mode) lands on stderr but is only surfaced by pytest on a failing
-        # test — capture both dump invocations' stderr here rather than only
-        # the final `compare` step's, since the fallback happens at dump time.
-        print("v1.h dump stderr:", dump_stderrs.get("v1.h", ""))
-        print("v2.h dump stderr:", dump_stderrs.get("v2.h", ""))
-        print("v1.h castxml XML:", castxml_xml.get("v1.h", "<not found in cache>"))
-        print("v2.h castxml XML:", castxml_xml.get("v2.h", "<not found in cache>"))
-        print("old macho exports:", json.dumps(old_payload.get("macho", {}), indent=2))
-        print("new macho exports:", json.dumps(new_payload.get("macho", {}), indent=2))
-        print("old types:", json.dumps(old_payload.get("types", []), indent=2))
-        print("new types:", json.dumps(new_payload.get("types", []), indent=2))
-        print("old functions:", json.dumps(old_payload.get("functions", []), indent=2))
-        print("new functions:", json.dumps(new_payload.get("functions", []), indent=2))
-        print("changes:", json.dumps(payload.get("changes", []), indent=2))
-    assert payload["verdict"] == expected_verdict, payload["verdict"]
     assert not missing, f"{case_name}: missing kinds {missing}; got {got_kinds}"
