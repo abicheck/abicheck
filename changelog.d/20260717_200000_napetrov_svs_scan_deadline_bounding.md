@@ -301,3 +301,13 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   deadline re-checks (before and after the load) now share a small
   `_recheck_deadline()` helper to keep the file under its 2000-line hard cap
   (Codex review, PR #591, round 4).
+- Same "check before, but not after, the JSON load" gap closed on the L5
+  call/type-graph fold: `call_graph.ClangCallGraphExtractor` and
+  `type_graph.ClangTypeGraphExtractor` combined `json.loads(proc.stdout)`
+  and the recursive `parse_clang_ast_calls`/`parse_clang_ast_types` walk
+  into a single expression after only a pre-parse `deadline.check()` — a
+  large L5 AST's JSON load could itself consume the rest of the budget,
+  leaving the walk to run unbounded. The load and walk are now split with a
+  `deadline.check()` between them, degrading to the existing advisory
+  diagnostic+`[]` contract (ADR-028 D3) on overflow, same as the pre-parse
+  check (Codex review, PR #591, round 4).

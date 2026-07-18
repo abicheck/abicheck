@@ -840,7 +840,22 @@ class ClangCallGraphExtractor:
             # Both json.loads and the recursive AST walk can hit Python's
             # recursion limit on a pathologically deep TU; guard so a degenerate
             # AST degrades to "no call edges" rather than aborting collection.
-            return parse_clang_ast_calls(json.loads(proc.stdout))
+            ast = json.loads(proc.stdout)
+        except (ValueError, RecursionError) as exc:
+            self.diagnostics.append(f"could not parse clang AST JSON: {exc}")
+            return []
+        try:
+            # The JSON load itself can consume the rest of the budget on a
+            # huge AST; re-check before the recursive walk (Codex review,
+            # PR #591, round 4).
+            deadline.check()
+        except deadline.DeadlineExceeded as exc:
+            self.diagnostics.append(
+                f"scan deadline exceeded before walking clang AST: {exc}"
+            )
+            return []
+        try:
+            return parse_clang_ast_calls(ast)
         except (ValueError, RecursionError) as exc:
             self.diagnostics.append(f"could not parse clang AST JSON: {exc}")
             return []

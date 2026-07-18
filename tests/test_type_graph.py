@@ -1582,6 +1582,43 @@ def test_extract_from_safe_args_rechecks_deadline_before_parsing_ast(
     )
 
 
+def test_extract_from_safe_args_rechecks_deadline_before_walking_ast(
+    monkeypatch,
+) -> None:
+    """Codex review (PR #591, round 4): json.loads() on a huge L5 type-graph
+    AST can itself consume the rest of the budget -- the existing pre-load
+    deadline.check() doesn't catch that; must re-check again after the load,
+    before the recursive parse_clang_ast_types() walk."""
+    import json as _json
+    import time
+
+    import abicheck.buildsource.type_graph as tg
+    from abicheck import deadline
+
+    ast = _tu(_record("Widget", inner=[_field("x", "int")]))
+
+    def fake_run(*_a, **_k):
+        return _FakeProc(_json.dumps(ast))
+
+    monkeypatch.setattr(tg.shutil, "which", lambda _b: "/usr/bin/clang++")
+    monkeypatch.setattr(tg.deadline, "run_bounded", fake_run)
+    real_loads = tg.json.loads
+
+    def _slow_loads(text):
+        time.sleep(0.05)
+        return real_loads(text)
+
+    monkeypatch.setattr(tg.json, "loads", _slow_loads)
+    extractor = ClangTypeGraphExtractor(clang_bin="clang++")
+    with deadline.deadline_scope(0.03):
+        edges = extractor._extract_from_safe_args(["--", "foo.cpp"])
+    assert edges == []
+    assert any(
+        "scan deadline exceeded before walking clang AST" in d
+        for d in extractor.diagnostics
+    )
+
+
 # ── ClangTypeGraphExtractor: graceful degrade ────────────────────────────────
 
 
