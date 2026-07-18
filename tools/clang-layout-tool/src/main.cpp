@@ -125,12 +125,28 @@ std::optional<uint64_t> vptrOffsetBits(const CXXRecordDecl *RD,
   return static_cast<uint64_t>(Offset.getQuantity()) * 8;
 }
 
+// `typedef struct { ... } Foo;` (the common C idiom) makes RD itself
+// anonymous -- getQualifiedNameAsString() returns "" (or an unhelpful
+// "(anonymous struct at ...)"-style spelling in some clang versions).
+// dumper_clang.py recovers this exact case by aliasing the record under its
+// typedef's name (`_anon_typedef_names`); mirror that here via Clang's own
+// TagDecl::getTypedefNameForAnonDecl(), which points straight at the
+// TypedefNameDecl the anonymous tag is defined through, so apply_layout_facts
+// can still match it by name (Codex review).
+std::string recordDisplayName(const RecordDecl *RD) {
+  if (RD->getIdentifier() == nullptr) {
+    if (const TypedefNameDecl *TD = RD->getTypedefNameForAnonDecl())
+      return TD->getQualifiedNameAsString();
+  }
+  return RD->getQualifiedNameAsString();
+}
+
 // Emits the JSON shared by every record kind (C struct/union or C++ class):
 // the opening brace, qualified_name/size/align/dsize, no trailing comma.
 void emitRecordHeader(llvm::raw_string_ostream &OS, const RecordDecl *RD,
                       const ASTRecordLayout &Layout) {
   OS << "{";
-  OS << "\"qualified_name\":\"" << jsonEscape(RD->getQualifiedNameAsString())
+  OS << "\"qualified_name\":\"" << jsonEscape(recordDisplayName(RD))
      << "\",";
   OS << "\"size_bits\":" << (Layout.getSize().getQuantity() * 8) << ",";
   OS << "\"alignment_bits\":" << (Layout.getAlignment().getQuantity() * 8)

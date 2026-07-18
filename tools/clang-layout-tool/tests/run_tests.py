@@ -164,6 +164,22 @@ def main() -> int:
     assert "is_standard_layout" not in rec
     assert "bases" not in rec
 
+    # c_anon_typedef.c: `typedef struct {...} Foo;` -- the RecordDecl itself
+    # is anonymous (no tag name), so getQualifiedNameAsString() alone would
+    # return "". The tool must resolve the record's display name through
+    # its TypedefNameForAnonDecl (mirroring dumper_clang.py's own anonymous-
+    # record-under-typedef-name handling) so apply_layout_facts can still
+    # match it by name.
+    records = run_tool(binary, "c_anon_typedef.c", "-x", "c", "-std=gnu11")
+    check(
+        "c_anon_typedef.c", "Foo", records,
+        {"size_bits": 192, "data_size_bits": 192},
+    )
+    rec = records["Foo"]
+    assert field_offset(rec, "a") == 0
+    assert field_offset(rec, "b") == 64
+    assert field_offset(rec, "c") == 128
+
     if failures:
         print(f"FAILED ({len(failures)}):")
         for f in failures:
