@@ -157,6 +157,9 @@ class TestRunLayoutTool:
             "abicheck.clang_layout_tool._resolve_clang_langmode",
             return_value=(True, False, False, "gnu"),
         ), patch(
+            "abicheck.clang_layout_tool._resolve_clang_system_includes",
+            return_value=(),
+        ), patch(
             "abicheck.clang_layout_tool.subprocess.run", side_effect=_fake_run
         ):
             result = run_layout_tool("/path/to/tool", [header], [])
@@ -167,6 +170,46 @@ class TestRunLayoutTool:
         # The aggregate temp file must be cleaned up after the run.
         agg_path = Path(captured_cmd["cmd"][1])
         assert not agg_path.exists()
+
+    def test_probed_system_includes_are_threaded_into_compile_flags(self, tmp_path):
+        # Codex review: without this, a header set that only parses because
+        # of dumper._clang_header_dump's own libstdc++/libc auto-probe
+        # succeeds for the original direct-clang dump but fails here,
+        # silently losing the whole layout enrichment.
+        header = tmp_path / "a.h"
+        header.write_text("struct Foo { int a; };")
+        captured_cmd = {}
+
+        def _fake_run(cmd, **kwargs):
+            captured_cmd["cmd"] = cmd
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0,
+                stdout='{"ok": true, "records": []}', stderr="",
+            )
+
+        with patch(
+            "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
+        ), patch(
+            "abicheck.clang_layout_tool._resolve_clang_langmode",
+            return_value=(True, False, False, "gnu"),
+        ), patch(
+            "abicheck.clang_layout_tool._resolve_clang_system_includes",
+            return_value=("/usr/include/probed-libstdcxx",),
+        ) as mock_probe, patch(
+            "abicheck.clang_layout_tool.subprocess.run", side_effect=_fake_run
+        ):
+            run_layout_tool(
+                "/path/to/tool", [header], [], gcc_options="--sysroot=/x"
+            )
+
+        # The probe itself must be called with the caller's compile context.
+        mock_probe.assert_called_once()
+        assert mock_probe.call_args.kwargs["gcc_options"] == "--sysroot=/x"
+        assert mock_probe.call_args.kwargs["force_cpp"] is True
+        # And its result must land in the actual compile command as -isystem.
+        cmd = captured_cmd["cmd"]
+        idx = cmd.index("-isystem")
+        assert cmd[idx + 1] == "/usr/include/probed-libstdcxx"
 
 
 class TestApplyRecordFacts:

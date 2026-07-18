@@ -69,6 +69,7 @@ from .dumper import (
     _resolve_clang_langmode,
 )
 from .dumper_clang import _resolve_clang_bin
+from .dumper_sysinc import _resolve_clang_system_includes
 from .errors import SnapshotError, ValidationError
 from .header_utils import iter_directory_headers, resolve_inferred_header_roots
 from .model import AbiSnapshot, RecordType
@@ -156,6 +157,22 @@ def run_layout_tool(
     force_cpp, force_cpp20, _explicit_c, cc_id = _resolve_clang_langmode(
         lang, resolved_headers, clang_bin, gcc_options, gcc_option_tokens
     )
+    # Re-probe the same host system-include dirs `dumper._clang_header_dump`
+    # injects (castxml<->clang parity: libstdc++/libc headers a hermetic
+    # -isystem doesn't already cover). Without this, a header set that only
+    # parses because of that auto-probe succeeds for the original direct-clang
+    # dump but fails here, silently losing the whole enrichment on an
+    # otherwise-valid dump (Codex review).
+    system_includes = _resolve_clang_system_includes(
+        compiler,
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+        force_cpp=force_cpp,
+        gcc_options=gcc_options,
+        gcc_option_tokens=gcc_option_tokens,
+    )
 
     agg_ext = ".hpp" if force_cpp else ".h"
     with tempfile.NamedTemporaryFile(
@@ -178,6 +195,7 @@ def run_layout_tool(
             gcc_option_tokens=gcc_option_tokens,
             force_cpp=force_cpp,
             force_cpp20=force_cpp20,
+            system_includes=system_includes,
         )
         compile_flags = _compile_flags_from_ast_dump_command(full_cmd)
         cmd = [binary, str(agg_path), "--", *compile_flags]

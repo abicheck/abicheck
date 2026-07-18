@@ -368,6 +368,48 @@ def test_parse_types_fields_bases_and_forward_decl_skipped() -> None:
     assert derived.has_anonymous_aggregate_fields is False
 
 
+def test_parse_types_sets_qualified_name_for_namespaced_record() -> None:
+    # Codex review (G28 Phase 4): RecordType.qualified_name must be populated
+    # for a namespaced/nested type -- the layout tool's own JSON output
+    # indexes records by RD->getQualifiedNameAsString() (e.g. "ns::Foo"), and
+    # a lookup that only ever sees the bare name never matches, silently
+    # losing layout enrichment for any non-global-namespace type.
+    root = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "ns",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "inner": [
+                {
+                    "kind": "CXXRecordDecl",
+                    "name": "Foo",
+                    "tagUsed": "struct",
+                    "loc": {"line": 2},
+                    "completeDefinition": True,
+                    "inner": [
+                        {"kind": "FieldDecl", "name": "a", "type": {"qualType": "int"}},
+                    ],
+                },
+            ],
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Global",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 20},
+            "completeDefinition": True,
+            "inner": [
+                {"kind": "FieldDecl", "name": "b", "type": {"qualType": "int"}},
+            ],
+        },
+    )
+    types = {t.name: t for t in _ClangAstParser(root, set(), set()).parse_types()}
+    assert types["Foo"].qualified_name == "ns::Foo"
+    # A global-scope record's qualified spelling is identical to its bare
+    # name, so qualified_name stays None (matches castxml's own convention).
+    assert types["Global"].qualified_name is None
+
+
 def test_parse_types_anonymous_aggregate_flattening_sets_flag() -> None:
     """A record whose members come from an anonymous struct/union gets
     those members flattened into `fields` (clang emits an IndirectFieldDecl
