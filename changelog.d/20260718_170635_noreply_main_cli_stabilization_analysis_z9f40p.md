@@ -58,4 +58,11 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   (`_is_inputs_pack_dir`, ADR-035 D5); `--depth source --build-info
   <abicheck_inputs>` with no `--sources` was wrongly blocked even though
   the real dump can ingest its L4 facts and succeed.
+- **`dump_provenance.frontend` no longer goes silently `null` for a
+  headers-less `--sources`/`--build-info` dump** — `ast_producer` is only
+  ever stamped by the L2 header-AST pipeline, which a symbol-only ELF dump
+  (no `-H`) never reaches even when a real L4 `source_abi:<extractor>`
+  replay ran over `--sources`; `frontend` now falls back to the build-source
+  pack's extractor ledger so the actual L4 frontend identity (`clang`/
+  `castxml`) is still recorded.
 

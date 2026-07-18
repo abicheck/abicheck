@@ -1674,6 +1674,71 @@ def test_fold_dump_provenance_uses_gated_label_for_zero_match_source_case() -> N
     assert provenance["degraded"] is False
 
 
+def test_fold_dump_provenance_falls_back_to_l4_extractor_when_ast_producer_absent() -> None:
+    """Codex review: a symbol-only ELF dump (no -H headers) returns from
+    dumper._build_symbol_only_snapshot before the L2 header-AST pipeline ever
+    runs, so ast_producer stays None even when embed_build_source went on to
+    run a real L4 source_abi:<extractor> replay over --sources. Without a
+    fallback, dump_provenance.frontend silently loses the extractor identity
+    for the (common) --sources/--build-info --depth build|source run with no
+    -H. The pack's extractor ledger (buildsource.inline._run_inline_source_abi
+    always records source_abi:<extractor>, success or not) is the correct
+    fallback source."""
+    import json
+
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.model import ExtractorRecord
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+    from abicheck.cli_dump_helpers import fold_dump_provenance_into_json
+
+    snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=False)
+    assert snap.ast_producer is None
+    surface = SourceAbiSurface()
+    surface.coverage["compile_units_selected"] = 1
+    surface.coverage["compile_units_parsed"] = 1
+    pack = BuildSourcePack(
+        root=Path(""),
+        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        source_abi=surface,
+    )
+    pack.manifest.extractors = [
+        ExtractorRecord(name="compile_commands", status="ok"),
+        ExtractorRecord(
+            name="source_abi:clang", status="ok", detail="scope=target, 1/1 TUs parsed"
+        ),
+    ]
+    snap.build_source = pack
+
+    text = fold_dump_provenance_into_json("{}", "source", snap)
+    provenance = json.loads(text)["dump_provenance"]
+    assert provenance["frontend"] == "clang"
+
+
+def test_fold_dump_provenance_frontend_none_when_no_l4_replay_and_no_ast_producer() -> None:
+    """No header AST and no L4 extractor record at all (e.g. a bare --build-info
+    dump with only L3 evidence) -- frontend has no source to fall back to and
+    must stay None rather than fabricating a value."""
+    import json
+
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.model import ExtractorRecord
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.cli_dump_helpers import fold_dump_provenance_into_json
+
+    snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=False)
+    pack = BuildSourcePack(
+        root=Path(""),
+        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+    )
+    pack.manifest.extractors = [ExtractorRecord(name="compile_commands", status="ok")]
+    snap.build_source = pack
+
+    text = fold_dump_provenance_into_json("{}", "build", snap)
+    provenance = json.loads(text)["dump_provenance"]
+    assert provenance["frontend"] is None
+
+
 def test_l4_source_abi_was_attempted_false_for_unavailable_extractor() -> None:
     """Codex review (fifth finding): _run_inline_source_abi returns the same
     empty-surface, PARTIAL-coverage shape both when a source-only dump

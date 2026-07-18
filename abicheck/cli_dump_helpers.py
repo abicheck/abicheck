@@ -490,12 +490,42 @@ def fold_dump_provenance_into_json(text: str, depth: str | None, snap: AbiSnapsh
             depth is not None
             and _DEPTH_RANK.get(effective, 0) < _DEPTH_RANK.get(depth, 0)
         ),
-        "frontend": snap.ast_producer,
+        "frontend": snap.ast_producer or _l4_source_abi_frontend(snap),
         # dump always analyzes the resolved library target -- unlike `scan`,
         # there is no --since/--changed-path narrowing concept here.
         "source_scope": "target",
     }
     return json.dumps(payload, indent=2)
+
+
+def _l4_source_abi_frontend(snap: AbiSnapshot) -> str | None:
+    """Best-effort L4 source-ABI extractor identity for ``dump_provenance.frontend``.
+
+    ``snap.ast_producer`` is only ever stamped by the L2 header-AST pipeline
+    (``dumper.py``'s castxml/clang parser); a symbol-only ELF dump with no
+    ``-H`` headers (the common shape for a plain ``--sources``/``--build-info
+    --depth build|source`` run) returns *before* that pipeline ever runs, so
+    ``ast_producer`` stays ``None`` even though ``embed_build_source`` went on
+    to run a real L4 ``source_abi:<extractor>`` replay over the source tree --
+    losing the actual frontend identity from provenance (Codex review).
+
+    Falls back to the build-source pack's extractor ledger
+    (``buildsource.inline._run_inline_source_abi`` always records its result,
+    success or not, as ``source_abi:<extractor>``): the most recent
+    non-skipped/non-failed entry names the frontend that genuinely produced
+    the linked ``SourceAbiSurface``. ``None`` when no such record exists
+    (e.g. a headers-only or symbol-only dump with no L4 replay at all).
+    """
+    pack = snap.build_source
+    if pack is None:
+        return None
+    for record in reversed(pack.manifest.extractors):
+        if not record.name.startswith("source_abi:"):
+            continue
+        if record.status in ("skipped", "failed"):
+            continue
+        return record.name.removeprefix("source_abi:")
+    return None
 
 
 def render_dump_dry_run(
