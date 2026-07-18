@@ -1006,6 +1006,25 @@ semantics) is closed to the extent described under its own entry.
   `test_internal_leak.py` (the latter confirming demangling only changes
   what counts as *internal*, not a blanket allowance for every mangled
   label).
+- **A fourth internal-namespace-threading gap: `DetectTemplatePatterns`
+  (Codex, fresh evidence).** Item 5's PolicyFile.internal_namespaces work
+  threaded `ctx.internal_namespaces` through `MarkReachability`/
+  `DetectInternalLeaks`/`DemoteUnreachableInternalChurn`, deliberately
+  excluding `DetectNamespacePatterns` (a different, unrelated
+  `experimental_namespaces` convention). `DetectTemplatePatterns` is a
+  distinct, genuine fourth case that was simply missed:
+  `detect_internal_template_leaks`'s own `_INTERNAL_TEMPLATE_NAMESPACES`
+  (`detail`/`impl`/`internal`/`__detail`/`_impl`, plus `__internal`) is the
+  *same* internal-implementation convention the other three steps use, but
+  `DetectTemplatePatterns.run()` called `detect_template_patterns(ctx.old,
+  ctx.new)` with no namespaces argument at all — a project with a custom
+  convention (e.g. `priv`) would have its `MarkReachability` tag corrected
+  but `INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API` still blind to it. Gave
+  `DetectTemplatePatterns` the identical `namespaces` constructor parameter
+  and `self._namespaces or ctx.internal_namespaces or
+  _INTERNAL_TEMPLATE_NAMESPACES` fallback the other three steps use. Added
+  `test_pipeline_internal_namespaces_reaches_detect_template_patterns` to
+  `test_reachability_aware_suppression.py`.
 
 ## Roadmap (not committed — scope/sequence per the usual planning process)
 

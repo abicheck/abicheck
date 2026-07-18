@@ -382,6 +382,34 @@ class TestMarkReachability:
         assert raw_change2 not in ctx2.kept
         assert raw_change2 in ctx2.out_of_surface
 
+    def test_pipeline_internal_namespaces_reaches_detect_template_patterns(self) -> None:
+        """Codex review, fresh evidence: DetectTemplatePatterns's
+        detect_internal_template_leaks uses _INTERNAL_TEMPLATE_NAMESPACES —
+        the same internal-implementation convention MarkReachability/
+        DetectInternalLeaks/DemoteUnreachableInternalChurn use (unlike
+        DetectNamespacePatterns's unrelated experimental_namespaces) — but
+        DetectTemplatePatterns.run() never threaded ctx.internal_namespaces
+        through at all, a genuine fourth gap distinct from the
+        DetectNamespacePatterns exclusion, which is deliberate."""
+        old = _snap(functions=[_public_fn("lib::priv::walk<int>")])
+        new = _snap(functions=[_public_fn("lib::priv::walk<char>")])
+
+        # Without internal_namespaces: "priv" is not in
+        # _INTERNAL_TEMPLATE_NAMESPACES, so no finding.
+        ctx = DEFAULT_PIPELINE.run([], old, new)
+        assert not any(
+            c.kind == ChangeKind.INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API
+            for c in ctx.kept
+        )
+
+        # With internal_namespaces=("priv",): recognized, finding fires.
+        ctx2 = DEFAULT_PIPELINE.run([], old, new, internal_namespaces=("priv",))
+        found = [
+            c for c in ctx2.kept
+            if c.kind == ChangeKind.INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API
+        ]
+        assert len(found) == 1
+
     def test_policy_file_internal_namespaces_reaches_checker_pipeline(self) -> None:
         """ADR-044 P1 item 5, full glue: checker._run_post_processing must
         read PolicyFile.internal_namespaces and thread it into

@@ -1125,10 +1125,25 @@ class DetectTemplatePatterns:
 
     name = "detect_template_patterns"
 
-    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
-        from .diff_templates import detect_template_patterns
+    def __init__(self, namespaces: tuple[str, ...] | None = None) -> None:
+        # Mirrors MarkReachability/DetectInternalLeaks/
+        # DemoteUnreachableInternalChurn's own constructor (Codex review,
+        # fresh evidence): detect_internal_template_leaks's
+        # _INTERNAL_TEMPLATE_NAMESPACES is the same internal-implementation
+        # convention those three steps use (detail/impl/internal/__detail/
+        # _impl, plus __internal) -- unlike DetectNamespacePatterns's
+        # unrelated experimental_namespaces, PolicyFile.internal_namespaces
+        # should reach this step too.
+        self._namespaces = namespaces
 
-        new_findings = detect_template_patterns(ctx.old, ctx.new)
+    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        from .diff_templates import (
+            _INTERNAL_TEMPLATE_NAMESPACES,
+            detect_template_patterns,
+        )
+
+        namespaces = self._namespaces or ctx.internal_namespaces or _INTERNAL_TEMPLATE_NAMESPACES
+        new_findings = detect_template_patterns(ctx.old, ctx.new, namespaces)
         if not new_findings:
             return changes
         _merge_findings_respecting_suppression(changes, new_findings, ctx)
