@@ -1220,10 +1220,12 @@ def test_check_requested_depth_satisfied_unknown_depth_is_noop() -> None:
     check_requested_depth_satisfied("not-a-real-depth", snap)  # must not raise
 
 
-def test_source_label_is_header_graph_only_false_without_a_pack() -> None:
-    from abicheck.cli_dump_helpers import _source_label_is_header_graph_only
+def test_gated_source_label_without_a_pack_falls_back_to_headers_or_binary() -> None:
+    from abicheck.cli_dump_helpers import _gated_source_label
 
-    assert _source_label_is_header_graph_only(None) is False
+    assert _gated_source_label(None, AbiSnapshot(library="libfoo.so", version="1.0")) == "binary"
+    headers_snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
+    assert _gated_source_label(None, headers_snap) == "headers"
 
 
 def test_dump_source_input_is_prebuilt_pack_true_for_build_source_pack(tmp_path) -> None:
@@ -1243,6 +1245,21 @@ def test_dump_source_input_is_prebuilt_pack_false_for_raw_source_tree(tmp_path) 
     tree.mkdir()
     assert _dump_source_input_is_prebuilt_pack(tree, None) is False
     assert _dump_source_input_is_prebuilt_pack(None, None) is False
+
+
+def test_dump_source_input_is_prebuilt_pack_false_for_mixed_raw_and_pack(tmp_path) -> None:
+    """Codex review: one raw side is enough for collect_inline_pack (and
+    extractor/--ast-frontend) to actually run against it -- both provided
+    inputs must be prebuilt packs, not just one."""
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.cli_dump_helpers import _dump_source_input_is_prebuilt_pack
+
+    pack_dir = tmp_path / "pack"
+    BuildSourcePack.empty(pack_dir).write()
+    tree = tmp_path / "src"
+    tree.mkdir()
+    assert _dump_source_input_is_prebuilt_pack(tree, pack_dir) is False
+    assert _dump_source_input_is_prebuilt_pack(pack_dir, tree) is False
 
 
 def test_check_requested_depth_satisfied_headers_without_header_ast_fails() -> None:
@@ -1347,20 +1364,70 @@ def test_check_requested_depth_satisfied_header_graph_only_does_not_satisfy_sour
     with pytest.raises(DumpDepthNotSatisfiedError, match="--depth source"):
         check_requested_depth_satisfied("source", snap)
 
-    # A real source-tier pack (L3 present, feeding a genuine L5 graph even
-    # without L4) must still satisfy --depth source -- only the header-only
-    # signature (L3 AND L4 both NOT_COLLECTED) is rejected.
-    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 
-    real_pack = BuildSourcePack(
+def test_check_requested_depth_satisfied_l3_plus_backfilled_graph_does_not_satisfy_source() -> None:
+    """Codex review (second finding): cli_buildsource.embed_build_source's
+    header-only-graph backfill can graft a --header-graph L5 pack onto an
+    otherwise-real, L3-only --build-info pack -- so "L3 present, L4 absent,
+    L5 present" is NOT a reliable "genuine source-tier" signature either; it
+    is exactly what a real `--build-info <L3-pack> --header-graph` run
+    produces with zero L4/L5 source-tier replay. The strict gate must
+    require real L4 facts, not just a non-empty L3."""
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.model import CoverageStatus, DataLayer, LayerCoverage
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
+    from abicheck.cli_dump_helpers import (
+        DumpDepthNotSatisfiedError,
+        check_requested_depth_satisfied,
+    )
+
+    snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
+    backfilled_pack = BuildSourcePack(
         root=Path(""),
         build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
         source_graph=SourceGraphSummary(nodes=[GraphNode(id="n1", kind="function")]),
     )
-    real_pack.manifest.coverage = [
+    backfilled_pack.manifest.coverage = [
         LayerCoverage(layer=DataLayer.L3_BUILD.value, status=CoverageStatus.PRESENT),
         LayerCoverage(layer=DataLayer.L4_SOURCE_ABI.value, status=CoverageStatus.NOT_COLLECTED),
         LayerCoverage(layer=DataLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.PRESENT),
     ]
+    snap.build_source = backfilled_pack
+
+    assert evidence_depth_label(snap) == "source"
+    with pytest.raises(DumpDepthNotSatisfiedError, match="--depth source"):
+        check_requested_depth_satisfied("source", snap)
+    # The failure message should honestly name "build" (real L3), not
+    # "binary" or "headers", since L3 genuinely is present.
+    try:
+        check_requested_depth_satisfied("source", snap)
+    except DumpDepthNotSatisfiedError as exc:
+        assert "reached 'build'" in str(exc)
+
+    # A --depth build request against the same pack is genuinely satisfied
+    # -- L3 is real here, only the "source" rung is gated on L4.
+    check_requested_depth_satisfied("build", snap)  # must not raise
+
+
+def test_check_requested_depth_satisfied_source_with_real_l4_facts_passes() -> None:
+    """The gate is satisfied whenever L4 (source_abi) genuinely has facts,
+    regardless of whether L3/L5 are also present -- this is what a real
+    --sources/--build-info replay with L4 reachable declarations looks like."""
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
+    from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
+    from abicheck.cli_dump_helpers import check_requested_depth_satisfied
+
+    snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
+    real_pack = BuildSourcePack(
+        root=Path(""),
+        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        source_abi=SourceAbiSurface(
+            reachable_declarations=[SourceEntity(id="foo", kind="function")]
+        ),
+        source_graph=SourceGraphSummary(nodes=[GraphNode(id="n1", kind="function")]),
+    )
     snap.build_source = real_pack
     check_requested_depth_satisfied("source", snap)  # must not raise

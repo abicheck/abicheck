@@ -419,11 +419,26 @@ def test_dump_depth_source_hybrid_frontend_not_rejected_for_prebuilt_pack(tmp_pa
     (cli_buildsource.embed_build_source's is_pack_dir branch forces
     collect_inline_pack's raw_build_info to None) -- no L4 extractor ever
     runs, so --ast-frontend hybrid has no effect and must not be rejected
-    for this input shape, unlike a raw source tree."""
+    for this input shape, unlike a raw source tree.
+
+    CodeRabbit review: the pack carries real L4 facts (not an empty
+    manifest-only pack) so the command runs to genuine completion (exit 0)
+    instead of failing for the unrelated "--depth source not satisfied"
+    reason -- an empty pack would make this test pass even if the hybrid
+    rejection fired but got masked by that other failure first."""
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
     from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
 
     pack_dir = tmp_path / "prebuilt-pack"
-    BuildSourcePack.empty(pack_dir).write()
+    pack = BuildSourcePack(
+        root=pack_dir,
+        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        source_abi=SourceAbiSurface(
+            reachable_declarations=[SourceEntity(id="foo", kind="function")]
+        ),
+    )
+    pack.write()
     res = CliRunner().invoke(
         main,
         [
@@ -431,7 +446,33 @@ def test_dump_depth_source_hybrid_frontend_not_rejected_for_prebuilt_pack(tmp_pa
             "--ast-frontend", "hybrid", "-o", str(tmp_path / "out.json"),
         ],
     )
+    assert res.exit_code == 0, _all_output(res)
     assert "--ast-frontend hybrid" not in _all_output(res)
+
+
+def test_dump_depth_source_hybrid_frontend_rejected_for_mixed_raw_and_pack(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Codex review: only ONE of --sources/--build-info being a prebuilt
+    pack must not skip the rejection -- the other (raw) side still reaches
+    collect_inline_pack with extractor=hybrid, so the unsupported L4 path
+    can still run for it."""
+    from abicheck.buildsource.pack import BuildSourcePack
+
+    pack_dir = tmp_path / "prebuilt-pack"
+    BuildSourcePack.empty(pack_dir).write()
+    src = tmp_path / "raw-src"
+    src.mkdir()
+    res = CliRunner().invoke(
+        main,
+        [
+            "dump", "--sources", str(src), "--build-info", str(pack_dir),
+            "--depth", "source", "--ast-frontend", "hybrid",
+            "-o", str(tmp_path / "out2.json"),
+        ],
+    )
+    assert res.exit_code != 0, _all_output(res)
+    out = _all_output(res)
+    assert "--ast-frontend hybrid" in out
+    assert "--depth source" in out
 
 
 def test_dump_depth_headers_with_hybrid_frontend_not_rejected(tmp_path) -> None:  # type: ignore[no-untyped-def]

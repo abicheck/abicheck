@@ -246,13 +246,22 @@ def _dump_source_input_is_prebuilt_pack(
     case. ``--ast-frontend`` has no effect for a prebuilt-pack input, so the
     ``--depth source`` + ``--ast-frontend hybrid`` rejection must not fire
     for one.
+
+    Requires *every provided* input to be a prebuilt pack, not merely one of
+    them (Codex review): if ``--sources`` is a raw tree and ``--build-info``
+    is a pack, ``embed_build_source`` only nulls the pack-shaped side — the
+    raw side still reaches ``collect_inline_pack`` (and ``extractor``) as
+    ``raw_sources``/``raw_build_info``, so the unsupported hybrid L4 path can
+    still run for it. ``any(...)`` would have wrongly skipped the rejection
+    for that mixed case.
     """
     from .buildsource.inline import is_pack_dir
     from .cli_buildsource_helpers import _is_inputs_pack_dir
 
-    return any(
-        is_pack_dir(p) or _is_inputs_pack_dir(p) for p in (sources, build_info)
-    )
+    provided = [p for p in (sources, build_info) if p is not None]
+    if not provided:
+        return False
+    return all(is_pack_dir(p) or _is_inputs_pack_dir(p) for p in provided)
 
 
 class DumpDepthNotSatisfiedError(click.ClickException):
@@ -264,35 +273,72 @@ class DumpDepthNotSatisfiedError(click.ClickException):
     """
 
 
-def _source_label_is_header_graph_only(build_source: BuildSourcePack | None) -> bool:
-    """True when *build_source*'s "source" label rests only on a header-only
-    (L2) declaration graph, with no real L3/L4 facts behind it.
+def _l4_source_abi_was_attempted(build_source: BuildSourcePack) -> bool:
+    """True when L4 source-ABI extraction genuinely ran, regardless of
+    whether it linked any declarations.
 
-    Codex review: ``service._attach_header_graph`` (``--header-graph`` with
-    headers but no ``--sources``/``--build-info``) builds a ``BuildSourcePack``
-    whose L5 ``source_graph`` is genuinely non-empty while L3 (``build_evidence``)
-    and L4 (``source_abi``) are never populated at all — no build or L4
-    source-ABI replay ever ran (see that function's own comment: "L3/L4 stay
-    honestly NOT_COLLECTED"). ``evidence_depth_label`` treats a non-empty L5
-    alone as "source" (by design — genuine source-tier collection can
-    legitimately populate L5 without L4, since ``source_graph.build_source_graph``
-    folds ``BuildEvidence`` structure even when the L4 surface found nothing),
-    but that always requires *some* real L3 build evidence to have run first.
-    A pack with L3 **and** L4 both genuinely empty has no real source/build
-    evidence behind it at all — an explicit ``--depth source`` must not be
-    satisfied by ``--header-graph`` alone, or that flag would silently bypass
-    the depth contract this function enforces.
+    ``buildsource.inline`` stamps L4 coverage ``PRESENT``/``PARTIAL`` (never
+    ``NOT_COLLECTED``) the moment ``_run_inline_source_abi`` returns a
+    surface object at all — including the "ran but 0/N symbols matched"
+    case, which is the *expected*, warn-only outcome for a source-only
+    ``dump --sources`` (no binary to link declarations against; see
+    ``_write_snapshot_output``'s G21.7 "collected but linked no facts"
+    warning). ``NOT_COLLECTED`` only happens when L4 extraction never ran at
+    all — no ``--sources``/``--build-info``, or ``--ast-frontend hybrid``
+    (which ``buildsource.inline._run_inline_source_abi`` records as
+    ``"skipped"`` rather than running either backend).
 
-    Uses the same fact-based emptiness check as ``evidence_depth_label``
-    itself (``_layer_payload_empty``, payload content — not coverage-row
-    status) so a pack with real L4 facts but no stamped L3/L4 coverage rows
-    (e.g. a hand-built test fixture) is never mistaken for header-graph-only.
+    Falls back to the payload-based ``_layer_payload_empty`` check when no
+    coverage row exists at all, so a hand-built pack (a test fixture, or an
+    out-of-band ``--old/new-sources`` pack assembled without going through
+    ``inline.py``'s coverage stamping) with genuine ``source_abi`` facts but
+    no coverage row is not mistaken for "never attempted".
     """
-    if build_source is None:
-        return False
+    from .buildsource.model import CoverageStatus, DataLayer
     from .cli import _layer_payload_empty
 
-    return _layer_payload_empty(build_source, "L3") and _layer_payload_empty(build_source, "L4")
+    cov = build_source.manifest.coverage_for(DataLayer.L4_SOURCE_ABI)
+    if cov is not None:
+        return cov.status != CoverageStatus.NOT_COLLECTED
+    return not _layer_payload_empty(build_source, "L4")
+
+
+def _gated_source_label(build_source: BuildSourcePack | None, snap: AbiSnapshot) -> str:
+    """Recompute the "source" evidence label for the *strict* depth gate.
+
+    ``evidence_depth_label`` honestly reports "source" whenever L4 or L5
+    carries facts — correct for its own honesty contract, since genuine
+    source-tier collection can legitimately populate L5 (``source_graph``)
+    without L4 (``source_abi``): ``source_graph.build_source_graph`` folds
+    ``BuildEvidence`` structure into a graph even when the L4 surface found
+    nothing. But that L4-or-L5 rule is too permissive for a *gate*: a
+    non-empty L5 can also come from a header-only (L2) declaration graph
+    that never ran any L4/L5 source-tier replay at all —
+    ``service._attach_header_graph`` (``--header-graph`` with no
+    ``--sources``/``--build-info``) attaches one directly, and
+    ``cli_buildsource.embed_build_source``'s backfill step (see its own
+    comment: "a genuine --sources L5 collection in merged always wins; the
+    header-only graph fills the gap only when merged carries none") can
+    graft that same header-only graph onto an otherwise-real, L3-only
+    ``--build-info`` pack — so "L3 present" does not rule out a
+    header-only-graph L5 either (Codex review, second finding).
+
+    The reliable signal is whether L4 extraction was genuinely *attempted*
+    (``_l4_source_abi_was_attempted``) — a coverage-status check, not a
+    payload-emptiness one: a source-only dump legitimately links zero
+    declarations (no binary to link against) yet must still satisfy an
+    explicit ``--depth source`` the same way it already only warns (not
+    errors) about that case; only a *never-attempted* L4 (the header-graph
+    cases above) is downgraded here, to "build" (real L3, none) or
+    ``headers``/``binary`` (nothing).
+    """
+    from .cli import _layer_payload_empty
+
+    if build_source is not None and _l4_source_abi_was_attempted(build_source):
+        return "source"
+    if build_source is not None and not _layer_payload_empty(build_source, "L3"):
+        return "build"
+    return "headers" if snap.from_headers else "binary"
 
 
 def check_requested_depth_satisfied(
@@ -317,11 +363,11 @@ def check_requested_depth_satisfied(
         return
     effective_pack = build_source if build_source is not None else snap.build_source
     effective = evidence_depth_label(snap, build_source)
-    if effective == "source" and _source_label_is_header_graph_only(effective_pack):
-        # Downgrade for gating purposes only -- a --header-graph-only pack
-        # is not "source" evidence no matter how evidence_depth_label's
-        # general (and separately correct) L4-or-L5 rule reads it.
-        effective = "headers" if snap.from_headers else "binary"
+    if effective == "source":
+        # Downgrade for gating purposes only -- see _gated_source_label's
+        # docstring for why evidence_depth_label's own L4-or-L5 rule is not
+        # trustworthy enough for a hard gate.
+        effective = _gated_source_label(effective_pack, snap)
     if _DEPTH_RANK.get(effective, 0) < requested_rank:
         raise DumpDepthNotSatisfiedError(
             f"--depth {depth} was requested but the snapshot only reached "
