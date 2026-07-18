@@ -352,18 +352,25 @@ def _is_gnu_make_launcher(tool: str) -> bool:
     messages. BSD/non-GNU make implementations can accept different flags or
     print different transcript forms, so skip them cleanly.
     """
+    probe_timeout = 10.0
+    scan_remaining = deadline.remaining()
+    if scan_remaining is not None:
+        # run_bounded() honors an active outer deadline verbatim (not
+        # min(timeout, left)), so a bare `timeout=` alone would let this
+        # probe run for the *whole* remaining scan budget under a generous
+        # --budget instead of its own 10s cap; nest a narrower scope bound
+        # by whichever is tighter (Codex review, PR #591, round 2 — mirrors
+        # the include-map local-cap fix).
+        probe_timeout = min(probe_timeout, scan_remaining)
     try:
-        # Bound by the active scan --budget too, process-group-safe on
-        # timeout, same as every other clang/build-query subprocess call in
-        # this pipeline (Codex review, PR #591) — this probe is reachable
-        # from `scan --depth source` before L4/L5 even start.
-        proc = deadline.run_bounded(  # noqa: S603 - fixed tool plus --version, shell=False
-            [tool, "--version"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            timeout=10,
-        )
+        with deadline.deadline_scope(probe_timeout):
+            proc = deadline.run_bounded(  # noqa: S603 - fixed tool plus --version, shell=False
+                [tool, "--version"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=probe_timeout,
+            )
     except (OSError, subprocess.SubprocessError, deadline.DeadlineExceeded):
         return False
     return proc.returncode == 0 and "GNU Make" in (proc.stdout or "")

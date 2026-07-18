@@ -121,6 +121,30 @@ def test_resolved_make_launcher_path_is_available_without_second_which():
     )
 
 
+def test_gnu_make_probe_bounded_by_local_cap_not_full_scan_budget(monkeypatch):
+    """Codex review (PR #591), round 2: deadline.run_bounded() honors an
+    active outer deadline verbatim (not min(timeout, left)), so a bare
+    timeout=10 alone did nothing once a generous --budget was active -- a
+    hung `make --version` wrapper could consume the whole remaining scan
+    budget instead of this probe's own 10s cap. Mirrors the include-map
+    local-cap fix."""
+    from abicheck import deadline
+
+    seen_remaining: list[float | None] = []
+
+    def fake_run(*_a, **_k):
+        seen_remaining.append(deadline.remaining())
+        return _FakeProc(0, stdout="GNU Make 4.4\n")
+
+    monkeypatch.setattr(_bq.deadline, "run_bounded", fake_run)
+    with deadline.deadline_scope(1800.0):  # a generous 30-minute --budget
+        assert _bq._is_gnu_make_launcher("/usr/bin/make") is True
+
+    assert seen_remaining
+    # Bound by the probe's own 10s cap, not the 1800s scan budget.
+    assert seen_remaining[0] is not None and seen_remaining[0] <= 10.5
+
+
 class _FakeProc:
     def __init__(self, returncode=0, stdout="", stderr=""):
         self.returncode = returncode

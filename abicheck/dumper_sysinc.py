@@ -126,21 +126,30 @@ def _probe_gnu_system_includes(cc_bin: str, *, cpp: bool) -> list[str]:
     ``-isystem`` makes clang use GCC's intrinsics headers, which reference
     GCC-only builtins clang does not implement and the parse fails.
 
-    Bounded by the active deadline (not just the fixed 15s) and process-
-    group-safe on timeout, same as the main clang/castxml subprocess calls —
-    otherwise a tight ``--budget`` could still spend up to ~15s per probe (two
-    probes: C and C++) in a slow/hung compiler before the budget-aware parse
-    is ever reached (Codex review).
+    Bounded by the tighter of its own 15s cap and the active deadline, and
+    process-group-safe on timeout, same as the main clang/castxml subprocess
+    calls — otherwise a tight ``--budget`` could still spend up to ~15s per
+    probe (two probes: C and C++) in a slow/hung compiler before the
+    budget-aware parse is ever reached (Codex review). Nesting a narrower
+    scope also stops a *generous* ``--budget`` from letting a hung probe run
+    for the whole remaining scan budget instead of its own 15s ceiling —
+    ``run_bounded()`` honors an active outer deadline verbatim, not
+    ``min(timeout, left)`` (Codex review, round 2).
     """
     lang = "c++" if cpp else "c"
+    probe_timeout = 15.0
+    scan_remaining = deadline.remaining()
+    if scan_remaining is not None:
+        probe_timeout = min(probe_timeout, scan_remaining)
     try:
-        proc = deadline.run_bounded(
-            [cc_bin, "-E", "-x", lang, "-v", "-"],
-            input="",
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
+        with deadline.deadline_scope(probe_timeout):
+            proc = deadline.run_bounded(
+                [cc_bin, "-E", "-x", lang, "-v", "-"],
+                input="",
+                capture_output=True,
+                text=True,
+                timeout=probe_timeout,
+            )
     except (OSError, subprocess.SubprocessError, deadline.DeadlineExceeded):
         return []
     return [

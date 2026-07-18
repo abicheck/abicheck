@@ -151,3 +151,10 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   local cap or the outer scan deadline — so a `--budget 30m --depth
   source` scan can no longer have this advisory pass consume the whole
   budget on one stuck compile unit.
+- Same `run_bounded()`-ignores-`timeout=`-under-an-active-deadline gap,
+  found in the two remaining auxiliary probes with a local cap smaller
+  than 120s: `dumper_sysinc._probe_gnu_system_includes` (the castxml↔clang
+  system-include parity probe, 15s local cap) and
+  `build_query._is_gnu_make_launcher` (the GNU Make `--version` check,
+  10s local cap). Both now run inside a nested `deadline.deadline_scope()`
+  bound to whichever is tighter, same as the include-map fix above.
