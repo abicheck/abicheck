@@ -114,9 +114,40 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   branch had already returned — so `dump --dry-run` could report success on
   an invocation the real run would immediately reject with a
   `UsageError`/`BadParameter`. The two checks are now pure predicates
-  (`check_dump_compile_db_error`/`check_dump_debug_format_error`) shared
-  between both paths: the real run still raises for its "Usage: ..." exit
-  64, and the dry run now reports the same condition as a blocker (exit 1).
+  (`check_dump_compile_db_error`/`check_dump_debug_format_error`) raised
+  directly, unconditionally, before the `--dry-run` branch — the identical
+  exit-64 usage error on both paths, not a softer exit-1 evidence blocker
+  synthesized for the dry run (CodeRabbit review caught an earlier version
+  of this fix doing exactly that).
+- **A `.deb`'s planted `.deb_control/symbols` payload path could spoof its
+  own Debian symbols contract** — `DebExtractor` extracted `data.tar.*`
+  directly into the target directory, then created `.deb_control/` inside
+  that same tree for `control.tar.*`; a `data.tar.*` member literally named
+  `.deb_control/symbols` (crafted or coincidental) was left in place
+  whenever `control.tar.*` had no `symbols` member of its own, and returned
+  as though it were the genuine `dpkg-gensymbols(1)` contract. The
+  `.deb_control` directory is now cleared before `control.tar.*` is
+  extracted into it, so only its real members can ever populate the
+  returned `symbols_file`.
+- **`dump_provenance.frontend` could name the wrong backend at `--depth
+  source`** — it always preferred `snap.ast_producer` (the L2 header-AST
+  backend) over the L4 replay extractor, so a header snapshot parsed with
+  one frontend (e.g. `castxml`) combined with a prebuilt L4 pack from a
+  *different* one (e.g. `clang`) recorded the unrelated L2 backend as the
+  source-depth frontend. Now prefers the L4 extractor once the effective
+  depth is `source` (the L2 backend is irrelevant to what actually produced
+  the accepted evidence); `ast_producer` stays authoritative below `source`.
+- **`dump --dry-run --depth source --build-info <pack>` gave no signal at
+  all when the pack lacked real L4 evidence** — a pack-*shaped*
+  `--build-info` (`is_pack_dir`/`_is_inputs_pack_dir`, a cheap manifest-shape
+  check) was treated as fully satisfying, but that shape alone doesn't prove
+  the pack's manifest actually carries usable `source_abi` facts; a
+  manifest-only/empty pack is exactly as unsatisfiable as a raw compile
+  database, yet produced neither the existing warning (which requires
+  `--build-info` to also be absent) nor a blocker. Now warns that the pack's
+  contents were not verified — the same "possibly satisfiable" treatment
+  already given to `--depth build` backed by an unverified compile database
+  — without a dry run loading the pack to check (real I/O it must not do).
 
 ### Added
 

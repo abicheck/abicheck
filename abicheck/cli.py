@@ -655,32 +655,50 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         )
 
     # Resolve debug-format and binary-format identity once, shared between
-    # the dry-run report and the real run: these two validations
-    # (resolve_dump_compile_db's UsageError, and the debug-format/PE-Mach-O
-    # BadParameter below) previously only ran in the real path, after the
-    # dry-run branch -- so `dump --dry-run` could report success on an
-    # invocation the real run would immediately reject. Uses the pure,
-    # side-effect-free binary_utils.normalize_binary_input (no linker-script
-    # "Note:" echo) rather than _normalize_binary_input, matching dry-run's
-    # own "cheap, read-only resolution only" contract; the real path below
-    # still calls _normalize_binary_input itself for that echo and the
-    # so_path reassignment.
+    # the dry-run report and the real run, and raise the same UsageError/
+    # BadParameter a real run would for either -- unconditionally, before the
+    # --dry-run branch, exactly like the hybrid+depth UsageError check above.
+    # These two validations (resolve_dump_compile_db's UsageError, and the
+    # debug-format/PE-Mach-O BadParameter below) previously only ran in the
+    # real path, after the dry-run branch, so `dump --dry-run` could report
+    # success on an invocation the real run would immediately reject.
+    # CodeRabbit review: an earlier version of this fix instead encoded both
+    # as DryRunResult blockers (exit 1) -- silently downgrading what is a
+    # genuine usage error (exit 64) into an evidence-blocker mistakenly, and
+    # disagreeing with the real run's actual exit code for the identical
+    # input. Raising directly here keeps dry-run and the real run on the
+    # exact same code path for this check, not just the same message. Uses
+    # the pure, side-effect-free binary_utils.normalize_binary_input (no
+    # linker-script "Note:" echo) rather than _normalize_binary_input,
+    # matching dry-run's own "cheap, read-only resolution only" contract;
+    # the real path below still calls _normalize_binary_input itself for
+    # that echo and the so_path reassignment (a no-op re-validation once
+    # this has already passed).
     effective_debug_format: str | None = None
-    dry_run_binary_fmt: str | None = None
     if so_path is not None:
-        effective_debug_format = resolve_dump_debug_format(debug_format_opt, debug_format)
         from .binary_utils import normalize_binary_input as _peek_binary_format
+        from .cli_dump_helpers import (
+            check_dump_compile_db_error,
+            check_dump_debug_format_error,
+        )
 
+        effective_debug_format = resolve_dump_debug_format(debug_format_opt, debug_format)
+        compile_db_error = check_dump_compile_db_error(
+            compile_db_path, compile_db_path_alt, headers
+        )
+        if compile_db_error is not None:
+            raise click.UsageError(compile_db_error)
         _, dry_run_binary_fmt = _peek_binary_format(so_path)
+        debug_format_error = check_dump_debug_format_error(
+            effective_debug_format, dry_run_binary_fmt
+        )
+        if debug_format_error is not None:
+            raise click.BadParameter(debug_format_error)
 
     if dry_run:
         from .buildsource.inline import is_pack_dir
         from .cli_buildsource_helpers import _is_inputs_pack_dir
-        from .cli_dump_helpers import (
-            check_dump_compile_db_error,
-            check_dump_debug_format_error,
-            render_dump_dry_run,
-        )
+        from .cli_dump_helpers import render_dump_dry_run
 
         emit_dry_run(
             render_dump_dry_run(
@@ -696,12 +714,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
                 # DB/build dir (Codex review, second finding on this signal).
                 build_info_is_pack=(
                     is_pack_dir(build_info) or _is_inputs_pack_dir(build_info)
-                ),
-                compile_db_error=check_dump_compile_db_error(
-                    compile_db_path, compile_db_path_alt, headers
-                ),
-                debug_format_error=check_dump_debug_format_error(
-                    effective_debug_format, dry_run_binary_fmt
                 ),
             )
         )

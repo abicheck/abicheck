@@ -2597,6 +2597,43 @@ class TestDebExtractorExtended:
 
         assert result.symbols_file is None
 
+    def test_extract_data_tar_planted_deb_control_symbols_is_not_trusted(
+        self, tmp_path: Path,
+    ) -> None:
+        """Codex review: data.tar.*'s own payload can contain a member
+        literally named .deb_control/symbols (crafted or coincidental); if
+        control.tar.* then has no symbols member of its own, the fixed
+        .deb_control extraction directory must not silently keep the
+        payload's planted file and return it as though it were the genuine
+        dpkg-gensymbols(1) contract from control.tar.*."""
+        f = tmp_path / "test.deb"
+        f.write_bytes(b"!<arch>\n" + b"\x00" * 100)
+        out = tmp_path / "output"
+        out.mkdir()
+        planted = "libfoo.so.1 libfoo1 9999.0\n _ZN3foo3evilEv@Base 9999.0\n"
+
+        def fake_run(*args, **kwargs):
+            staging = Path(kwargs.get("cwd", "."))
+            with tarfile.open(staging / "data.tar", "w") as tf:
+                data = planted.encode()
+                info = tarfile.TarInfo(name=".deb_control/symbols")
+                info.size = len(data)
+                tf.addfile(info, io.BytesIO(data))
+            with tarfile.open(staging / "control.tar", "w") as tf:
+                data = b"Package: libfoo1\n"
+                info = tarfile.TarInfo(name="control")
+                info.size = len(data)
+                tf.addfile(info, io.BytesIO(data))
+            return mock.Mock(returncode=0)
+
+        with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
+            with mock.patch("abicheck.package.subprocess.run", side_effect=fake_run):
+                result = DebExtractor().extract(f, out)
+
+        assert result.symbols_file is None
+        # The planted payload file must have been wiped, not left in place.
+        assert not (out / ".deb_control" / "symbols").exists()
+
     def test_extract_relative_deb_path_passes_absolute_path_to_ar(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:

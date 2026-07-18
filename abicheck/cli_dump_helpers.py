@@ -505,6 +505,18 @@ def fold_dump_provenance_into_json(text: str, depth: str | None, snap: AbiSnapsh
     except ValueError:
         return text
     effective = _gated_source_label(snap.build_source, snap)
+    # At "source" depth, the L4 replay extractor -- not the L2 header-AST
+    # backend -- is what actually produced the evidence that satisfied the
+    # requested depth: a header snapshot parsed with castxml/hybrid combined
+    # with a prebuilt Clang L4 pack (or vice versa) must record the L4
+    # extractor here, not the unrelated L2 one ast_producer names
+    # (CodeRabbit review). Below "source", ast_producer is the only
+    # frontend that ran at all, so it stays authoritative there.
+    frontend = (
+        (_l4_source_abi_frontend(snap) or snap.ast_producer)
+        if effective == "source"
+        else (snap.ast_producer or _l4_source_abi_frontend(snap))
+    )
     payload["dump_provenance"] = {
         "requested_depth": depth,
         "effective_depth": effective,
@@ -512,7 +524,7 @@ def fold_dump_provenance_into_json(text: str, depth: str | None, snap: AbiSnapsh
             depth is not None
             and _DEPTH_RANK.get(effective, 0) < _DEPTH_RANK.get(depth, 0)
         ),
-        "frontend": snap.ast_producer or _l4_source_abi_frontend(snap),
+        "frontend": frontend,
         # dump always analyzes the resolved library target -- unlike `scan`,
         # there is no --since/--changed-path narrowing concept here.
         "source_scope": "target",
@@ -563,8 +575,6 @@ def render_dump_dry_run(
     output: Path | None,
     has_compile_db: bool = False,
     build_info_is_pack: bool = False,
-    compile_db_error: str | None = None,
-    debug_format_error: str | None = None,
 ) -> Any:
     """Build the ``dump --dry-run`` report (ADR-043 D4): resolve, never execute.
 
@@ -597,19 +607,17 @@ def render_dump_dry_run(
     "--depth source has no path without --sources" and blocked even though
     the real (non-dry) run writes a valid source-depth snapshot from it.
 
-    ``compile_db_error``/``debug_format_error``: pre-computed results of
-    :func:`check_dump_compile_db_error`/:func:`check_dump_debug_format_error`
-    -- the same pure predicates the real (non-dry) run's
-    ``resolve_dump_compile_db``/PE-Mach-O ``BadParameter`` check use, called
-    by ``cli.dump_cmd`` *before* branching on ``dry_run`` so both paths agree
-    on the two checks that previously only ran in the real path, after the
-    dry-run branch (so a ``-p`` compile DB with no ``-H``, or a
-    ``--debug-format``/``--dwarf``/``--btf``/``--ctf`` selection against a
-    PE/Mach-O binary, reported dry-run success on an invocation the real run
-    would immediately reject). Threaded in rather than recomputed here to
-    keep this function itself free of the real-path's binary-format
-    detection (the "Available data layers" probe below already does its own,
-    unrelated, best-effort detection).
+    A ``-p`` compile DB with no ``-H``, or a ``--debug-format``/``--dwarf``/
+    ``--btf``/``--ctf`` selection against a PE/Mach-O binary, are genuine
+    usage errors in the real run (``click.UsageError``/``BadParameter``,
+    exit 64) -- ``cli.dump_cmd`` checks both, via
+    :func:`check_dump_compile_db_error`/:func:`check_dump_debug_format_error`,
+    and raises directly *before* branching on ``dry_run`` at all, so this
+    function is never even reached for that input on either path. Do not
+    re-encode either as a :meth:`DryRunResult.block` (exit 1) here -- that
+    would silently downgrade a usage error into an evidence blocker and
+    disagree with the real run's actual exit code for the identical input
+    (CodeRabbit review).
     """
     from .cli_helpers_compare import discover_project_config
     from .dry_run import DryRunResult, tool_status
@@ -713,6 +721,27 @@ def render_dump_dry_run(
             "evidence depth check_requested_depth_satisfied would raise "
             "on this: the real run would exit 1."
         )
+    elif depth == "source" and sources is None and build_info_is_pack:
+        # CodeRabbit review: pack *shape* alone (is_pack_dir/
+        # _is_inputs_pack_dir -- a manifest-shape stat + small JSON read,
+        # not a full pack load per this function's own docstring) does not
+        # prove the pack's manifest actually carries usable L4 source_abi
+        # facts -- a manifest-only/empty pack is exactly as unsatisfiable
+        # as a raw compile database, but previously fell through with no
+        # signal at all here (neither the warn() above, which requires
+        # build_info to also be None, nor this block). Loading the pack to
+        # verify is real I/O a dry run must not perform, so -- mirroring
+        # the sibling "--depth build backed by some compile database"
+        # warning below -- this is only "possibly satisfiable", not
+        # "definitely satisfiable".
+        result.warn(
+            "--depth source was requested with no --sources; it depends "
+            "entirely on --build-info's own source_abi facts (a prebuilt "
+            "BuildSourcePack/abicheck_inputs pack). A dry run does not "
+            "load the pack to verify it actually carries L4 evidence -- "
+            "if it doesn't, the real run's evidence depth check would "
+            "reject it."
+        )
     elif (
         depth == "build"
         and sources is None
@@ -725,14 +754,6 @@ def render_dump_dry_run(
             "check_requested_depth_satisfied would raise on this: the "
             "real run would exit 1."
         )
-    # These two checks previously only ran in the real (non-dry) path, after
-    # this function's caller had already returned/exited via emit_dry_run --
-    # a dry run could report success on an invocation click.UsageError/
-    # click.BadParameter would immediately reject for real.
-    if compile_db_error is not None:
-        result.block(compile_db_error)
-    if debug_format_error is not None:
-        result.block(debug_format_error)
     return result
 
 

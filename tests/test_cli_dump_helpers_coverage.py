@@ -1799,6 +1799,73 @@ def test_fold_dump_provenance_falls_back_to_l4_extractor_when_ast_producer_absen
     assert provenance["frontend"] == "clang"
 
 
+def test_fold_dump_provenance_prefers_l4_frontend_over_ast_producer_at_source_depth() -> None:
+    """CodeRabbit review: a header snapshot parsed with one backend (e.g.
+    castxml/hybrid, recorded as ast_producer) combined with a prebuilt L4
+    pack from a *different* extractor (e.g. clang) must record the L4
+    extractor as dump_provenance.frontend once the effective depth is
+    "source" -- ast_producer names the unrelated L2 header-AST backend, not
+    what actually produced the source-depth evidence. Below "source",
+    ast_producer stays authoritative (covered by the sibling "falls back to
+    l4 extractor when ast_producer absent" test above)."""
+    import json
+
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.model import ExtractorRecord
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+    from abicheck.cli_dump_helpers import fold_dump_provenance_into_json
+
+    snap = AbiSnapshot(
+        library="libfoo.so", version="1.0", from_headers=True, ast_producer="castxml",
+    )
+    surface = SourceAbiSurface()
+    surface.coverage["compile_units_selected"] = 1
+    surface.coverage["compile_units_parsed"] = 1
+    pack = BuildSourcePack(
+        root=Path(""),
+        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        source_abi=surface,
+    )
+    pack.manifest.extractors = [
+        ExtractorRecord(name="source_abi:clang", status="ok"),
+    ]
+    snap.build_source = pack
+
+    text = fold_dump_provenance_into_json("{}", "source", snap)
+    provenance = json.loads(text)["dump_provenance"]
+    assert provenance["effective_depth"] == "source"
+    assert provenance["frontend"] == "clang"
+
+
+def test_fold_dump_provenance_keeps_ast_producer_below_source_depth() -> None:
+    """Below "source" depth, ast_producer is the only frontend that ran at
+    all (no L4 replay contributed to the effective depth), so it stays
+    authoritative even if a build_source pack happens to carry an unrelated
+    L4 extractor record from a prior/partial run."""
+    import json
+
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.model import ExtractorRecord
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.cli_dump_helpers import fold_dump_provenance_into_json
+
+    snap = AbiSnapshot(
+        library="libfoo.so", version="1.0", from_headers=True, ast_producer="castxml",
+    )
+    pack = BuildSourcePack(
+        root=Path(""),
+        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+    )
+    pack.manifest.extractors = [ExtractorRecord(name="source_abi:clang", status="failed")]
+    snap.build_source = pack
+
+    text = fold_dump_provenance_into_json("{}", "build", snap)
+    provenance = json.loads(text)["dump_provenance"]
+    assert provenance["effective_depth"] == "build"
+    assert provenance["frontend"] == "castxml"
+
+
 def test_fold_dump_provenance_frontend_none_when_no_l4_replay_and_no_ast_producer() -> None:
     """No header AST and no L4 extractor record at all (e.g. a bare --build-info
     dump with only L3 evidence) -- frontend has no source to fall back to and

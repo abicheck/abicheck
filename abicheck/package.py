@@ -414,7 +414,20 @@ class DebExtractor:
             if control_tar is None:
                 return None
             control_dir = target_dir / ".deb_control"
-            control_dir.mkdir(exist_ok=True)
+            # data.tar.* was just extracted into target_dir above and could
+            # itself contain a member literally named .deb_control/symbols
+            # (crafted or coincidental) -- if control.tar.* then has no
+            # symbols member of its own, exist_ok=True would silently leave
+            # that payload file in place and it would be returned below as
+            # if it were the genuine dpkg-gensymbols(1) contract (Codex
+            # review). Clear any pre-existing content first so only
+            # control.tar.*'s real members ever populate this directory,
+            # regardless of what data.tar.* planted at the same path.
+            if control_dir.is_symlink() or control_dir.is_file():
+                control_dir.unlink()
+            elif control_dir.is_dir():
+                shutil.rmtree(control_dir)
+            control_dir.mkdir()
             if control_tar.name.endswith(".tar.zst"):
                 TarExtractor._safe_extract_zst_tar(control_tar, control_dir)
             else:

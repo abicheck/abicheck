@@ -124,11 +124,15 @@ class TestDumpDryRun:
         )
         assert result.exit_code == 0, result.output
 
-    def test_compile_db_without_headers_blocks(self, tmp_path: Path) -> None:
-        # resolve_dump_compile_db raises a UsageError for -p without -H in
-        # the real run; dry-run previously never checked this at all (the
-        # check only existed in the real path, after the dry-run branch had
-        # already returned), so it used to report success here.
+    def test_compile_db_without_headers_is_usage_error(self, tmp_path: Path) -> None:
+        # resolve_dump_compile_db raises a UsageError (exit 64) for -p
+        # without -H in the real run; dry-run previously never checked this
+        # at all (the check only existed in the real path, after the
+        # dry-run branch had already returned), so it used to report
+        # success here. CodeRabbit review: an earlier fix encoded this as a
+        # DryRunResult blocker (exit 1) instead of matching the real run's
+        # actual exit code -- it must raise the identical UsageError, not a
+        # softer evidence-blocker.
         so = tmp_path / "libfoo.so"
         so.write_bytes(b"\x7fELF" + b"\x00" * 60)
         db = tmp_path / "compile_commands.json"
@@ -136,19 +140,23 @@ class TestDumpDryRun:
         result = CliRunner().invoke(
             main, ["dump", str(so), "--dry-run", "-p", str(db)]
         )
-        assert result.exit_code == 1, result.output
+        assert result.exit_code == 64, result.output
+        assert "Usage:" in result.output
         assert "requires -H/--header" in result.output
 
-    def test_debug_format_against_pe_binary_blocks(self, tmp_path: Path) -> None:
+    def test_debug_format_against_pe_binary_is_usage_error(self, tmp_path: Path) -> None:
         # --debug-format (and the legacy --dwarf/--btf/--ctf flags) is only
-        # meaningful for ELF; the real run raises BadParameter for a PE/
-        # Mach-O binary. Dry-run previously never checked this either.
+        # meaningful for ELF; the real run raises BadParameter (exit 64) for
+        # a PE/Mach-O binary. Dry-run previously never checked this either,
+        # and an earlier fix wrongly downgraded it to a blocker (exit 1) --
+        # see the sibling compile-db test above (CodeRabbit review).
         pe = tmp_path / "foo.dll"
         pe.write_bytes(b"MZ" + b"\x00" * 60)
         result = CliRunner().invoke(
             main, ["dump", str(pe), "--dry-run", "--debug-format", "dwarf"]
         )
-        assert result.exit_code == 1, result.output
+        assert result.exit_code == 64, result.output
+        assert "Usage:" in result.output
         assert "only supported for ELF binaries" in result.output
 
     def test_depth_source_with_build_info_but_no_sources_blocks(
@@ -238,6 +246,37 @@ class TestDumpDryRun:
             ],
         )
         assert result.exit_code == 0, result.output
+
+    def test_depth_source_with_pack_build_info_warns_not_verified(
+        self, tmp_path: Path
+    ) -> None:
+        # CodeRabbit review: pack *shape* alone (is_pack_dir) does not prove
+        # the pack's manifest actually carries usable L4 source_abi facts --
+        # a manifest-only/empty pack is exactly as unsatisfiable as a raw
+        # compile database, but previously produced no signal at all here.
+        # A dry run must not load the pack to verify (real I/O), so this
+        # stays a soft warning -- "possibly satisfiable" -- not a blocker,
+        # mirroring the sibling --depth build/some-compile-database warning.
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_abi import SourceAbiSurface
+
+        snap = tmp_path / "lib.abi.json"
+        _write_snapshot(snap)
+        pack_dir = tmp_path / "pack"
+        pack_dir.mkdir()
+        surface = SourceAbiSurface()
+        surface.coverage["compile_units_selected"] = 1
+        surface.coverage["compile_units_parsed"] = 1
+        BuildSourcePack(root=pack_dir, source_abi=surface).write()
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(snap), "--dry-run", "--depth", "source",
+                "--build-info", str(pack_dir),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "does not load the pack to verify" in result.output
 
 
 class TestCompareDryRun:
