@@ -80,16 +80,38 @@ inputs:
     description: >
       Compiler used for the build (informational for replay/wrapper; for
       clang-plugin this selects which clang the plugin is built against and
-      must match the clang that later loads it via -fplugin=).
+      must match the clang that later loads it via -fplugin=). Vendor
+      compilers built on top of Clang are supported here too (e.g. Intel's
+      icpx/icx) -- the real LLVM major is read from the compiler's own
+      __clang_major__ macro, not parsed out of --version (which for icpx/icx
+      prints a vendor product version, not an LLVM number). See
+      llvm-cmake-prefix below for pointing the plugin build at that vendor's
+      bundled LLVM/Clang dev files.
     required: false
     default: 'clang++'
   install-deps:
     description: >
       Install system dependencies needed by the selected producer (clang/
       castxml for replay and wrapper; the matching libclang-<N>-dev package
-      for clang-plugin). Set to false if pre-installed.
+      for clang-plugin). Set to false if pre-installed. Ignored for
+      clang-plugin when a vendor-bundled LLVM/Clang is found (see
+      llvm-cmake-prefix) -- that toolchain's own dev files are used instead
+      of apt.
     required: false
     default: 'true'
+  llvm-cmake-prefix:
+    description: >
+      clang-plugin only: explicit CMake prefix (a directory containing
+      lib/cmake/llvm and lib/cmake/clang) for a vendor-bundled LLVM/Clang to
+      build the plugin against, instead of installing a system clang-<N>-dev
+      package. Needed for compilers that ship their own LLVM/Clang and are
+      never available as an apt package for that major -- e.g. Intel's
+      icpx/icx oneAPI compilers. When omitted, this Action auto-detects one
+      at "$CMPLR_ROOT/lib/cmake" if $CMPLR_ROOT is set and looks like it
+      bundles an LLVM CMake package (true for a sourced Intel oneAPI
+      environment) -- set this explicitly only to override that.
+    required: false
+    default: ''
   python-version:
     description: 'Python version for setup-python.'
     required: false
@@ -150,5 +172,6 @@ runs:
         INPUT_EXTRACTOR: ${{ inputs.extractor }}
         INPUT_COMPILER: ${{ inputs.compiler }}
         INPUT_INSTALL_DEPS: ${{ inputs.install-deps }}
+        INPUT_LLVM_CMAKE_PREFIX: ${{ inputs.llvm-cmake-prefix }}
         ACTION_PATH: ${{ github.action_path }}
       run: bash "${{ github.action_path }}/run.sh"

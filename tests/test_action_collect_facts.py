@@ -315,6 +315,107 @@ class TestLlvmMajorParsing:
 @pytest.mark.skipif(
     not RUN_SH.is_file(), reason="actions/collect-facts/run.sh not found"
 )
+class TestLlvmMajorFromPredefinedMacros:
+    """Regression (Codex review): a vendor compiler built on top of Clang
+    (e.g. Intel's icpx/icx) prints its own product version in --version, not
+    an LLVM/Clang number -- _llvm_major_from_version_string's "clang version
+    N" regex cannot ever match it. __clang_major__ is the value that
+    actually has to match for the plugin to load, and every Clang-based
+    compiler (vendor or not) defines it, so this probe is compiler-agnostic
+    where the --version parser is not."""
+
+    def _fake_compiler(self, tmp_path: Path, *defines: str) -> Path:
+        script = tmp_path / "fake-compiler"
+        printf_lines = "\n".join(f'  printf \'{line}\\n\'' for line in defines)
+        script.write_text(
+            "#!/bin/sh\n"
+            'if [ "$1" = "-dM" ]; then\n'
+            f"{printf_lines}\n"
+            "  exit 0\n"
+            "fi\n"
+            "exit 1\n"
+        )
+        script.chmod(0o755)
+        return script
+
+    def test_parses_clang_major_from_macro_dump(self, tmp_path: Path) -> None:
+        # Simulates a vendor compiler (e.g. icpx) whose --version would not
+        # match "clang version N" at all, but which still defines
+        # __clang_major__ correctly under -dM -E.
+        compiler = self._fake_compiler(
+            tmp_path, "#define __clang_major__ 16", "#define __clang_minor__ 0"
+        )
+        result = _run_predicate(f'_llvm_major_from_predefined_macros "{compiler}"')
+        assert result.stdout.strip() == "16"
+
+    def test_ignores_other_defines(self, tmp_path: Path) -> None:
+        compiler = self._fake_compiler(
+            tmp_path,
+            "#define __clang_minor__ 3",
+            "#define __clang_major__ 18",
+            "#define __GNUC__ 4",
+        )
+        result = _run_predicate(f'_llvm_major_from_predefined_macros "{compiler}"')
+        assert result.stdout.strip() == "18"
+
+    def test_empty_when_compiler_does_not_support_dM(self, tmp_path: Path) -> None:
+        # gcc (or any non-Clang compiler) rejects -dM -E -x c++ - in a way
+        # that doesn't emit __clang_major__ -- callers must fall back to
+        # _llvm_major_from_version_string instead of failing outright.
+        script = tmp_path / "fake-gcc"
+        script.write_text("#!/bin/sh\nexit 1\n")
+        script.chmod(0o755)
+        result = _run_predicate(f'_llvm_major_from_predefined_macros "{script}"')
+        assert result.stdout.strip() == ""
+
+    def test_empty_when_compiler_not_found(self) -> None:
+        result = _run_predicate(
+            '_llvm_major_from_predefined_macros "/no/such/compiler-xyz"'
+        )
+        assert result.stdout.strip() == ""
+
+
+@pytest.mark.skipif(
+    not RUN_SH.is_file(), reason="actions/collect-facts/run.sh not found"
+)
+class TestBundledLlvmCmakePrefix:
+    """Regression (Codex review): the clang-plugin build previously always
+    apt-get-installed clang-N/llvm-N-dev/libclang-N-dev and looked up
+    llvm-config-N --cmakedir, with no way to point it at a vendor toolchain's
+    own bundled LLVM/Clang (e.g. Intel's icpx/icx under $CMPLR_ROOT, which
+    apt does not carry at all)."""
+
+    def test_explicit_override_wins(self, tmp_path: Path) -> None:
+        result = _run_predicate(
+            f'_bundled_llvm_cmake_prefix "{tmp_path}/explicit" "{tmp_path}/cmplr"'
+        )
+        assert result.stdout.strip() == f"{tmp_path}/explicit"
+
+    def test_detects_cmplr_root_with_llvm_cmake_package(self, tmp_path: Path) -> None:
+        cmplr_root = tmp_path / "cmplr"
+        (cmplr_root / "lib" / "cmake" / "llvm").mkdir(parents=True)
+        result = _run_predicate(f'_bundled_llvm_cmake_prefix "" "{cmplr_root}"')
+        assert result.stdout.strip() == str(cmplr_root / "lib" / "cmake")
+
+    def test_empty_when_cmplr_root_unset(self) -> None:
+        result = _run_predicate('_bundled_llvm_cmake_prefix "" ""')
+        assert result.stdout.strip() == ""
+
+    def test_empty_when_cmplr_root_has_no_llvm_cmake_package(
+        self, tmp_path: Path
+    ) -> None:
+        # $CMPLR_ROOT set (e.g. some other vendor env var reuse) but it
+        # doesn't actually bundle an LLVM CMake package -- must not be
+        # mistaken for one.
+        cmplr_root = tmp_path / "cmplr"
+        cmplr_root.mkdir()
+        result = _run_predicate(f'_bundled_llvm_cmake_prefix "" "{cmplr_root}"')
+        assert result.stdout.strip() == ""
+
+
+@pytest.mark.skipif(
+    not RUN_SH.is_file(), reason="actions/collect-facts/run.sh not found"
+)
 class TestPhaseNeedsExternalBuildStep:
     @pytest.mark.parametrize(
         ("phase", "producer", "expected"),

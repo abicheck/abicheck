@@ -142,6 +142,15 @@ for the build. The plugin is **ABI-locked to the loading Clang's LLVM major**
 of the zero-parse path, and why Full source scan and Wrapper injection remain
 the portable defaults.
 
+This also works with vendor compilers built on top of Clang, e.g. Intel's
+`icpx`/`icx` oneAPI compilers — the `collect-facts` Action (below) detects the
+real LLVM major from the compiler's own `__clang_major__` macro rather than
+parsing `--version` (whose banner for `icpx`/`icx` reports a vendor product
+version, not an LLVM number), and can build the plugin against that vendor's
+own bundled LLVM/Clang CMake package (auto-detected from `$CMPLR_ROOT`, or set
+explicitly via `llvm-cmake-prefix`) instead of an apt package that vendor
+major may not even have.
+
 ## The one trap: public-roots must match how headers *resolve*
 
 !!! warning "Point the public-header root at the resolved path, not the install dir"

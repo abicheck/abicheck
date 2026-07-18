@@ -69,6 +69,7 @@ LIBRARY="${INPUT_LIBRARY:-}"
 EXTRACTOR="${INPUT_EXTRACTOR:-auto}"
 COMPILER="${INPUT_COMPILER:-clang++}"
 INSTALL_DEPS="${INPUT_INSTALL_DEPS:-true}"
+LLVM_CMAKE_PREFIX="${INPUT_LLVM_CMAKE_PREFIX:-}"
 ACTION_PATH="${ACTION_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 
 _fail() {
@@ -143,9 +144,54 @@ _detect_producer() {
 
 # Extract the LLVM/Clang major version number from a `clang --version`-style
 # string (e.g. "clang version 18.1.3" -> "18"). Empty output means unparsable.
+# Fallback only -- see _llvm_major_from_predefined_macros below, which is
+# the primary detection path and handles vendor compilers whose --version
+# banner does not say "clang version N" at all (e.g. Intel's icpx/icx print
+# "Intel(R) oneAPI DPC++/C++ Compiler 2024.0.0 ...", their own product
+# version, not the underlying LLVM major).
 _llvm_major_from_version_string() {
   local version_output="$1"
   printf '%s' "$version_output" | grep -oE 'clang version [0-9]+' | grep -oE '[0-9]+' | head -1
+}
+
+# Ask the compiler itself which Clang major it is, via the predefined
+# __clang_major__ macro (`-dM -E` dumps every predefined macro; grep the one
+# we want). This works for upstream/Apple/Debian Clang exactly like the
+# --version parser above, but ALSO works for vendor compilers built on top
+# of Clang whose --version banner reports a vendor product version instead
+# of the LLVM major -- notably Intel's icpx/icx (oneAPI DPC++/C++ Compiler),
+# whose --version says e.g. "2024.0.0", not any Clang/LLVM number at all.
+# __clang_major__ always reports the real value the loading Clang actually
+# is, which is exactly the thing that must match for the plugin to load
+# (Codex review: regex-on---version alone cannot support icpx/icx).
+# Empty output means the compiler doesn't behave like Clang here (e.g. gcc,
+# or `-dM -E` itself failed) -- callers fall back to _llvm_major_from_version_string.
+_llvm_major_from_predefined_macros() {
+  local compiler="$1" defines
+  defines=$("$compiler" -dM -E -x c++ - < /dev/null 2>/dev/null) || return 0
+  printf '%s' "$defines" | grep -oE '#define __clang_major__ [0-9]+' | grep -oE '[0-9]+$'
+}
+
+# Resolve a CMake prefix path for a vendor-bundled LLVM/Clang install, so
+# the plugin builds against the toolchain's own matching dev files instead
+# of a separately apt-installed clang-N/llvm-N-dev/libclang-N-dev that may
+# not even exist for a vendor major version (Codex review: Intel's icpx/icx
+# ship their own LLVM/Clang CMake package under $CMPLR_ROOT and are never
+# available as Ubuntu apt packages). Priority: an explicit override (the
+# llvm-cmake-prefix input) first, then $CMPLR_ROOT (the env var Intel's
+# oneAPI setvars.sh/environment sets to the compiler's own install root)
+# if it looks like it actually bundles an LLVM CMake package. Empty output
+# means neither applies -- caller falls back to the apt-get install path.
+_bundled_llvm_cmake_prefix() {
+  local explicit="$1" cmplr_root="$2"
+  if [[ -n "$explicit" ]]; then
+    printf '%s' "$explicit"
+    return
+  fi
+  if [[ -n "$cmplr_root" && -d "$cmplr_root/lib/cmake/llvm" ]]; then
+    printf '%s' "$cmplr_root/lib/cmake"
+    return
+  fi
 }
 
 # Validate the phase/producer combination the way action.yml documents it:
@@ -339,22 +385,35 @@ _prepare_wrapper() {
 
 _prepare_clang_plugin() {
   command -v "$COMPILER" >/dev/null 2>&1 || _fail "compiler '$COMPILER' not found on PATH -- producer: clang-plugin needs the loading Clang available to detect and match its LLVM major."
-  local version_output major
-  version_output=$("$COMPILER" --version 2>&1)
-  major=$(_llvm_major_from_version_string "$version_output")
-  [[ -n "$major" ]] || _fail "could not parse an LLVM major version from '$COMPILER --version':
+  local version_output="" major
+  major=$(_llvm_major_from_predefined_macros "$COMPILER")
+  if [[ -z "$major" ]]; then
+    version_output=$("$COMPILER" --version 2>&1)
+    major=$(_llvm_major_from_version_string "$version_output")
+  fi
+  [[ -n "$major" ]] || _fail "could not determine the Clang/LLVM major version '$COMPILER' is based on -- tried '__clang_major__' via '$COMPILER -dM -E -x c++ -' and parsing '$COMPILER --version':
 $version_output"
   echo "detected LLVM major $major from $COMPILER"
 
-  if [[ "$INSTALL_DEPS" == "true" ]]; then
+  local bundled_cmake_prefix
+  bundled_cmake_prefix=$(_bundled_llvm_cmake_prefix "$LLVM_CMAKE_PREFIX" "${CMPLR_ROOT:-}")
+
+  if [[ -n "$bundled_cmake_prefix" ]]; then
+    # A vendor toolchain (e.g. Intel's icpx/icx oneAPI compilers) bundles
+    # its own matching LLVM/Clang CMake package -- use it instead of
+    # apt-get, which either doesn't carry that major at all or would build
+    # against a *different* LLVM than the one $COMPILER actually loads
+    # (Codex review).
+    echo "using vendor-bundled LLVM/Clang CMake package at '$bundled_cmake_prefix' -- skipping apt-get install-deps."
+  elif [[ "$INSTALL_DEPS" == "true" ]]; then
     if [[ "$(uname -s)" == "Linux" ]] && command -v apt-get >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1; then
       echo "::group::Install clang-$major dev packages for the plugin build"
       sudo apt-get update -qq
       sudo apt-get install -y -qq "clang-$major" "llvm-$major-dev" "libclang-$major-dev" > /dev/null \
-        || _fail "failed to install clang-$major/llvm-$major-dev/libclang-$major-dev -- producer: clang-plugin needs the exact-major Clang development package (see contrib/abicheck-clang-plugin/README.md#build)."
+        || _fail "failed to install clang-$major/llvm-$major-dev/libclang-$major-dev -- producer: clang-plugin needs the exact-major Clang development package (see contrib/abicheck-clang-plugin/README.md#build). If '$COMPILER' is a vendor toolchain that bundles its own LLVM/Clang (e.g. Intel's icpx/icx under \$CMPLR_ROOT), set the llvm-cmake-prefix input instead of relying on apt."
       echo "::endgroup::"
     else
-      echo "::warning::install-deps: true but this OS/environment cannot apt-get install the Clang dev package automatically. Ensure the libclang-$major-dev equivalent is already installed."
+      echo "::warning::install-deps: true but this OS/environment cannot apt-get install the Clang dev package automatically. Ensure the libclang-$major-dev equivalent is already installed, or set llvm-cmake-prefix to a vendor-bundled LLVM/Clang CMake package."
     fi
   fi
 
@@ -372,7 +431,11 @@ $version_output"
     _fail "cmake not found -- required to build the Clang plugin (contrib/abicheck-clang-plugin)."
   fi
   local llvm_cmake_dir
-  llvm_cmake_dir=$(llvm-config-"$major" --cmakedir 2>/dev/null || llvm-config --cmakedir 2>/dev/null || true)
+  if [[ -n "$bundled_cmake_prefix" ]]; then
+    llvm_cmake_dir="$bundled_cmake_prefix/llvm"
+  else
+    llvm_cmake_dir=$(llvm-config-"$major" --cmakedir 2>/dev/null || llvm-config --cmakedir 2>/dev/null || true)
+  fi
   cmake -S "$plugin_src" -B "$build_dir" \
     ${llvm_cmake_dir:+-DCMAKE_PREFIX_PATH="$llvm_cmake_dir/.."} \
     || _fail "cmake configure failed for the Clang plugin -- see contrib/abicheck-clang-plugin/README.md#build (needs the full libclang-$major-dev package, not just clang-$major)."
