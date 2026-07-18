@@ -237,6 +237,35 @@ class TestRunOnce:
         assert "before" in result.old.stderr_tail
         assert "after" in result.old.stderr_tail
 
+    def test_same_directory_old_new_libraries_resolve_independently(
+        self, tmp_path, monkeypatch,
+    ):
+        """Codex review: old_lib and new_lib may be different files sitting in
+        the *same* directory (e.g. versioned build artifacts) -- pointing
+        LD_LIBRARY_PATH at that shared directory for both runs would let the
+        dynamic loader resolve to whichever candidate happens to match the
+        requested name first, silently ignoring which of old/new this run
+        was actually supposed to test. Each run must stage its own library
+        alone in an isolated directory listed first on LD_LIBRARY_PATH, so
+        the loader can only ever find the intended file."""
+        monkeypatch.setattr(rp.sys, "platform", "linux")
+        resolved_targets = []
+
+        def _fake_run(argv, env=None, capture_output=None, text=None, errors=None, timeout=None, check=None):
+            staged_dir = rp.Path(env["LD_LIBRARY_PATH"].split(":")[0])
+            entries = list(staged_dir.iterdir())
+            assert len(entries) == 1
+            resolved_targets.append(entries[0].resolve())
+            return subprocess.CompletedProcess(argv, returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(rp.subprocess, "run", _fake_run)
+        app = _make_exec(tmp_path)
+        # Both libraries deliberately share one directory (tmp_path).
+        old_lib = _make_lib(tmp_path, "old.so")
+        new_lib = _make_lib(tmp_path, "new.so")
+        run_runtime_probe(app, old_lib, new_lib)
+        assert resolved_targets == [old_lib.resolve(), new_lib.resolve()]
+
     def test_relative_bare_name_resolved_before_exec(self, tmp_path, monkeypatch):
         """A bare relative app name (no '/') must not be searched for on PATH
         (Codex review): subprocess treats an argv[0] with no directory
@@ -258,6 +287,41 @@ class TestRunOnce:
         new_lib = _make_lib(tmp_path, "new.so")
         run_runtime_probe(relative_app, old_lib, new_lib)
         assert all(argv[0] == str(app.resolve()) for argv in captured_argv)
+
+
+class TestLoadName:
+    def test_uses_soname_when_present(self, tmp_path, monkeypatch):
+        lib = _make_lib(tmp_path, "libfoo.so.1.2.3")
+        fake_meta = type("_FakeElfMetadata", (), {"soname": "libfoo.so.1"})()
+        monkeypatch.setattr(
+            "abicheck.elf_metadata.parse_elf_metadata", lambda p: fake_meta
+        )
+        assert rp._load_name(lib) == "libfoo.so.1"
+
+    def test_falls_back_to_basename_on_parse_failure(self, tmp_path):
+        # _make_lib's bytes are not a real parseable ELF; parse_elf_metadata
+        # degrades to an empty ElfMetadata (soname == "") rather than raising.
+        lib = _make_lib(tmp_path, "old.so")
+        assert rp._load_name(lib) == "old.so"
+
+    def test_falls_back_to_basename_for_empty_soname(self, tmp_path, monkeypatch):
+        lib = _make_lib(tmp_path, "old.so")
+        fake_meta = type("_FakeElfMetadata", (), {"soname": ""})()
+        monkeypatch.setattr(
+            "abicheck.elf_metadata.parse_elf_metadata", lambda p: fake_meta
+        )
+        assert rp._load_name(lib) == "old.so"
+
+    def test_falls_back_to_basename_for_path_shaped_soname(self, tmp_path, monkeypatch):
+        """A malformed/hostile SONAME containing a path separator must not be
+        used as-is -- staged.symlink_to would otherwise create the symlink
+        somewhere other than the intended isolated staging directory."""
+        lib = _make_lib(tmp_path, "old.so")
+        fake_meta = type("_FakeElfMetadata", (), {"soname": "../../etc/evil"})()
+        monkeypatch.setattr(
+            "abicheck.elf_metadata.parse_elf_metadata", lambda p: fake_meta
+        )
+        assert rp._load_name(lib) == "old.so"
 
 
 class TestRegressedSymbol:

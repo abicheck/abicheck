@@ -1440,6 +1440,33 @@ review's priority tiers.
    against `public_header_names` alongside `root`. Added
    `test_public_header_cxx_function_removal_is_reachable` to
    `test_reachability_aware_suppression.py`.
+   **Post-merge review (Codex), one more finding on `runtime_probe.py`:**
+   "When OLD and NEW are different files in the same directory, both
+   `_run_once` calls compute the same `LD_LIBRARY_PATH` and execute the same
+   app with an identical environment, so `--verify-runtime` never actually
+   switches the consumer from the old library to the new one." Confirmed:
+   `_run_once` set `LD_LIBRARY_PATH` to just `lib_path.resolve().parent` —
+   when `old_lib` and `new_lib` are two different files sitting in the same
+   directory (a realistic layout: versioned build artifacts, or a symlink
+   the "old" build already left pointing at the SONAME the consumer's
+   `DT_NEEDED` actually requests), the dynamic loader resolves the requested
+   SONAME to whichever file in that shared directory happens to match first
+   — independent of which of `old_lib`/`new_lib` this specific `_run_once`
+   call was asked to test. A regression that only shows up against the new
+   library could silently probe the old one twice and report a false clean
+   bill of health. Fixed by staging each side's library, alone, into its own
+   fresh `tempfile.TemporaryDirectory()`, under the name the dynamic linker
+   will actually look up (`DT_SONAME` when present — read via the existing
+   `elf_metadata.parse_elf_metadata`, since a file's on-disk name can differ
+   from its embedded SONAME — falling back to the file's own basename on
+   any parse failure, empty SONAME, or a defensively-rejected path-shaped
+   SONAME), and listing that staging directory *first* on `LD_LIBRARY_PATH`
+   (the library's real parent directory is still appended after it, so any
+   other same-directory runtime dependency stays resolvable) — this forces
+   each run to resolve to exactly the intended file regardless of what else
+   sits alongside it. Added `test_same_directory_old_new_libraries_resolve_independently`
+   and `TestLoadName` (four cases: SONAME present, parse failure, empty
+   SONAME, path-shaped SONAME) to `test_runtime_probe.py`.
 3. ~~New worked examples exercising this ADR's headline scenario end-to-end
    (public inline dispatch to an exported internal specialization; the same
    case under a blanket namespace suppression, asserting the break survives

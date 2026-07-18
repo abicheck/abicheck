@@ -47,6 +47,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -116,35 +117,71 @@ class RuntimeProbeResult:
         return None
 
 
+def _load_name(lib_path: Path) -> str:
+    """The name the dynamic linker will actually look up for *lib_path*.
+
+    Reads the target's ``DT_SONAME`` when present -- that's the string glibc
+    matches against ``LD_LIBRARY_PATH`` entries, and it can differ from the
+    file's own on-disk name (e.g. ``libfoo.so.1.2.3`` embedding SONAME
+    ``libfoo.so.1``). Falls back to the file's own basename when there is no
+    SONAME, parsing fails (``parse_elf_metadata`` degrades to an empty
+    ``ElfMetadata`` rather than raising), or -- defensively -- the SONAME
+    contains a path separator, which would otherwise escape the staged
+    directory in :func:`_run_once`.
+    """
+    from .elf_metadata import parse_elf_metadata
+
+    soname = parse_elf_metadata(lib_path).soname
+    if not soname or "/" in soname:
+        return lib_path.name
+    return soname
+
+
 def _run_once(app_path: Path, lib_path: Path, timeout: float) -> RuntimeProbeOutcome:
     env = dict(os.environ)
     env["LD_BIND_NOW"] = "1"
-    lib_dir = str(lib_path.resolve().parent)
+    lib_path = lib_path.resolve()
+    lib_dir = str(lib_path.parent)
     existing = env.get("LD_LIBRARY_PATH", "")
-    env["LD_LIBRARY_PATH"] = f"{lib_dir}:{existing}" if existing else lib_dir
     try:
-        proc = subprocess.run(
-            # A bare relative name with no directory component (e.g. Path("app")
-            # from a cwd-relative --used-by arg) would otherwise be searched for
-            # on PATH instead of the current directory, like a shell would do
-            # for an unqualified command (Codex review) -- resolve first, same
-            # as lib_path above.
-            [str(app_path.resolve())],
-            env=env,
-            capture_output=True,
-            text=True,
-            # A real executable's stderr is arbitrary bytes, not guaranteed
-            # to be valid UTF-8 (or the locale's encoding) -- without this,
-            # decoding raises UnicodeDecodeError *after* the child exits,
-            # escaping this best-effort helper and aborting the whole
-            # compare instead of returning a RuntimeProbeOutcome (Codex
-            # review). Malformed bytes are replaced, not dropped, so the
-            # symbol-lookup-error regex still matches valid ASCII segments
-            # around them.
-            errors="replace",
-            timeout=timeout,
-            check=False,
-        )
+        with tempfile.TemporaryDirectory(prefix="abicheck-runtime-probe-") as stage_dir:
+            # old_lib and new_lib may be different files sitting in the *same*
+            # directory (e.g. versioned build artifacts) -- pointing
+            # LD_LIBRARY_PATH at that shared directory for both runs would let
+            # the dynamic loader resolve to whichever candidate happens to
+            # match the requested name first, silently ignoring which of
+            # old/new this specific run was supposed to test (Codex review).
+            # Staging the intended file alone, under its own load name, in a
+            # directory nothing else occupies, and listing that directory
+            # *first* forces the loader to resolve to exactly this file.
+            # lib_dir is still appended after it so any other same-directory
+            # runtime dependency the library itself needs remains resolvable.
+            staged = Path(stage_dir) / _load_name(lib_path)
+            staged.symlink_to(lib_path)
+            search_path = f"{stage_dir}:{lib_dir}"
+            env["LD_LIBRARY_PATH"] = f"{search_path}:{existing}" if existing else search_path
+            proc = subprocess.run(
+                # A bare relative name with no directory component (e.g. Path("app")
+                # from a cwd-relative --used-by arg) would otherwise be searched for
+                # on PATH instead of the current directory, like a shell would do
+                # for an unqualified command (Codex review) -- resolve first, same
+                # as lib_path above.
+                [str(app_path.resolve())],
+                env=env,
+                capture_output=True,
+                text=True,
+                # A real executable's stderr is arbitrary bytes, not guaranteed
+                # to be valid UTF-8 (or the locale's encoding) -- without this,
+                # decoding raises UnicodeDecodeError *after* the child exits,
+                # escaping this best-effort helper and aborting the whole
+                # compare instead of returning a RuntimeProbeOutcome (Codex
+                # review). Malformed bytes are replaced, not dropped, so the
+                # symbol-lookup-error regex still matches valid ASCII segments
+                # around them.
+                errors="replace",
+                timeout=timeout,
+                check=False,
+            )
     except subprocess.TimeoutExpired:
         return RuntimeProbeOutcome(ok=False, timed_out=True)
     except OSError as exc:
@@ -171,8 +208,12 @@ def run_runtime_probe(
 ) -> RuntimeProbeResult:
     """Run *app_path* once against *old_lib* and once against *new_lib*.
 
-    Both runs set ``LD_BIND_NOW=1`` and point ``LD_LIBRARY_PATH`` at the
-    respective library's directory. Never raises: an unsupported platform,
+    Both runs set ``LD_BIND_NOW=1`` and stage the respective library into
+    its own isolated directory listed first on ``LD_LIBRARY_PATH`` (its
+    parent directory is still appended after, for any other same-directory
+    runtime dependency) -- this way each run resolves to exactly the
+    intended file even when *old_lib* and *new_lib* are different files in
+    the same directory. Never raises: an unsupported platform,
     a non-executable *app_path*, a timeout, or any OS-level failure to spawn
     the process all degrade to a result the caller can inspect, exactly
     like :mod:`abicheck.appcompat`'s own best-effort parsing.
