@@ -614,6 +614,65 @@ class TestWrapperProducer:
         expected = f"{tmp_path / 'include'};{tmp_path / 'gen/include'}"
         assert _parse_kv_file(github_env)["ABICHECK_CC_HEADERS"] == expected
 
+    def test_output_dir_converted_from_msys_path_on_windows(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review): Git Bash/MSYS's own `pwd` reports its
+        # POSIX-style view of the filesystem (e.g. /d/a/repo/repo), not a
+        # Windows path. ABICHECK_INPUTS_DIR is read by the native Windows
+        # Python/Clang toolchain the Action installs, which has no notion of
+        # an MSYS root and would resolve /d/... as a relative path (a
+        # literal "d" directory) under the current drive instead of the
+        # intended location -- run.sh must convert through `cygpath -m`
+        # rather than joining `$(pwd)` directly on MINGW/MSYS/CYGWIN. Stubs
+        # both `uname` and `cygpath` (via a PATH-prepended fake bin dir),
+        # since this test environment is Linux; the stub `cygpath` prefixes
+        # its output so the test can tell it was actually invoked rather
+        # than silently falling back to raw `pwd`.
+        fake_bin = tmp_path / "fakebin"
+        fake_bin.mkdir()
+        (fake_bin / "uname").write_text('#!/bin/sh\necho "MINGW64_NT-10.0-x86_64"\n')
+        (fake_bin / "uname").chmod(0o755)
+        (fake_bin / "cygpath").write_text('#!/bin/sh\necho "WINCONV:$2"\n')
+        (fake_bin / "cygpath").chmod(0o755)
+
+        result, github_env, _ = _run_action(
+            {
+                "INPUT_PHASE": "prepare",
+                "INPUT_PRODUCER": "wrapper",
+                "INPUT_INSTALL_DEPS": "false",
+                "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        expected = f"WINCONV:{tmp_path / 'abicheck_inputs'}"
+        assert _parse_kv_file(github_env)["ABICHECK_INPUTS_DIR"] == expected
+
+    def test_output_dir_uses_raw_pwd_when_cygpath_unavailable(
+        self, tmp_path: Path
+    ) -> None:
+        # cygpath is normally always present alongside Git Bash, but must
+        # not be a hard requirement -- fall back to plain `pwd` rather than
+        # failing the whole step if it's missing for some reason.
+        fake_bin = tmp_path / "fakebin"
+        fake_bin.mkdir()
+        (fake_bin / "uname").write_text('#!/bin/sh\necho "MINGW64_NT-10.0-x86_64"\n')
+        (fake_bin / "uname").chmod(0o755)
+
+        result, github_env, _ = _run_action(
+            {
+                "INPUT_PHASE": "prepare",
+                "INPUT_PRODUCER": "wrapper",
+                "INPUT_INSTALL_DEPS": "false",
+                "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        expected = str(tmp_path / "abicheck_inputs")
+        assert _parse_kv_file(github_env)["ABICHECK_INPUTS_DIR"] == expected
+
     def test_verify_fails_on_missing_pack_dir(self, tmp_path: Path) -> None:
         result, _, _ = _run_action(
             {

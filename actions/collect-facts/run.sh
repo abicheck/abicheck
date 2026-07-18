@@ -28,6 +28,28 @@ _is_absolute_path() {
   esac
 }
 
+# Git Bash/MSYS's own `pwd` reports its POSIX-style view of the filesystem
+# (e.g. /d/a/repo/repo), not a Windows path. That is fine as long as
+# everything downstream stays inside Git Bash, but ABICHECK_INPUTS_DIR/the
+# plugin out=/public-roots= flags are read by the native Windows Python and
+# Clang toolchain the Action installs, which has no notion of an MSYS root
+# and resolves /d/... as a relative path (a literal "d" directory) under
+# whatever the current drive happens to be -- silently writing the pack
+# somewhere other than where phase: verify or the caller's build looks for
+# it. cygpath -m converts to the mixed form (drive letter + forward
+# slashes) both Git Bash and native Windows tools accept (Codex review).
+_native_pwd() {
+  case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN*)
+      if command -v cygpath >/dev/null 2>&1; then
+        cygpath -m "$(pwd)"
+        return
+      fi
+      ;;
+  esac
+  pwd
+}
+
 PHASE="${INPUT_PHASE:-auto}"
 PRODUCER_IN="${INPUT_PRODUCER:-auto}"
 SOURCES="${INPUT_SOURCES:-.}"
@@ -40,7 +62,7 @@ OUTPUT="${INPUT_OUTPUT:-abicheck_inputs}"
 # pack-path all reference, so verification would report an empty pack even
 # though the build was actually instrumented (Codex review).
 if ! _is_absolute_path "$OUTPUT"; then
-  OUTPUT="$(pwd)/$OUTPUT"
+  OUTPUT="$(_native_pwd)/$OUTPUT"
 fi
 PUBLIC_ROOTS="${INPUT_PUBLIC_ROOTS:-}"
 LIBRARY="${INPUT_LIBRARY:-}"
@@ -189,7 +211,7 @@ _resolve_public_root() {
   if _is_absolute_path "$root"; then
     printf '%s' "$root"
   else
-    printf '%s' "$(pwd)/$root"
+    printf '%s' "$(_native_pwd)/$root"
   fi
 }
 
