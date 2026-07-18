@@ -679,16 +679,18 @@ def compute_leak_paths(
 def _is_consumer_compiled_node(node_id: str, node_by_id: dict[str, GraphNode]) -> bool:
     """Whether *node_id*'s own body is compiled into consumer code.
 
-    Mirrors the permissive default in
-    :func:`~abicheck.buildsource.source_graph.is_consumer_compiled_public_entry`:
-    a node with no ``consumer_compiled_body`` attr at all (e.g. a
-    ``header_graph.py`` node, which by construction only ever gets outgoing
-    call/reference edges from in-header bodies) defaults to ``True``.
+    Thin re-export of
+    :func:`~abicheck.buildsource.source_graph.is_consumer_compiled_node` (the
+    shared predicate both the entry check and this walk's own
+    expand-past-this-node check use) so the rest of this module keeps its
+    existing call shape. See that function's docstring for the exact
+    default rule — permissive only for a genuine ``header_graph.py`` node,
+    conservative for everything else attr-less (notably a build-integrated
+    ``call_graph.py`` fallback node, Codex review, fresh evidence).
     """
-    node = node_by_id.get(node_id)
-    if node is None:
-        return True
-    return bool(node.attrs.get("consumer_compiled_body", True))
+    from .buildsource.source_graph import is_consumer_compiled_node
+
+    return is_consumer_compiled_node(node_id, node_by_id)
 
 
 def _consumer_compiled_reachability(

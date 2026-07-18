@@ -777,19 +777,53 @@ def is_consumer_compiled_public_entry(
     every including translation unit — true for inline functions/methods
     and templates, false for an ordinary out-of-line definition — captured
     by ``GraphNode.attrs["consumer_compiled_body"]``
-    (:func:`build_source_graph`). A node without that attr at all (e.g. a
-    ``header_graph.py`` node, which by construction only ever gets outgoing
-    ``DECL_CALLS_DECL``/``DECL_REFERENCES_DECL`` edges from in-header
-    bodies in the first place — see that module's own docstring) defaults
-    permissively to ``True``, since the over-reach this guards against
-    cannot arise there.
+    (:func:`build_source_graph`). A node without that attr at all defaults
+    permissively to ``True`` — matching the header-graph/type-node/generic
+    case, where no signal either way is available — **except** a node whose
+    ``provenance`` is :data:`_CALL_GRAPH_FALLBACK_PROVENANCE` (Codex review,
+    fresh evidence): ``augment_graph_with_calls`` (``call_graph.py``) stamps
+    exactly this tag on a fallback node it creates for a caller/callee
+    identity with no other declaration node backing it — a real,
+    build-integrated project function reached only through the call graph
+    itself, whose out-of-line body is not necessarily consumer-compiled. An
+    inline public ``wrap()`` calling an ordinary out-of-line project
+    function ``helper_a()`` (this fallback shape) which itself calls an
+    internal ``ns::detail::helper()`` must stop expanding *at* ``helper_a()``
+    — treating "no signal" as "safe" for this one node shape would silently
+    reintroduce the exact over-reach this predicate exists to reject.
     """
     if not is_public_dependency_node(node_id, node_by_id, exported_decls):
         return False
+    return is_consumer_compiled_node(node_id, node_by_id)
+
+
+#: ``provenance`` tag ``augment_graph_with_calls`` (``call_graph.py``) stamps
+#: on a fallback node it creates for a caller/callee identity with no other
+#: declaration node backing it — the one node shape known to lack a
+#: ``consumer_compiled_body`` attr while still representing a genuine,
+#: build-integrated (out-of-line, not-necessarily-consumer-compiled) project
+#: declaration, as opposed to "no signal available" (header-graph/type nodes,
+#: synthetic test fixtures, …) which stays permissive by default. Mirrored as
+#: a literal string rather than imported from ``call_graph.py`` to avoid
+#: coupling this module to that one's internal constant.
+_CALL_GRAPH_FALLBACK_PROVENANCE = "call_graph"
+
+
+def is_consumer_compiled_node(node_id: str, node_by_id: dict[str, GraphNode]) -> bool:
+    """Whether *node_id*'s own body is compiled into consumer code, independent
+    of whether it also qualifies as a *public* entry (see
+    :func:`is_consumer_compiled_public_entry` for that combined check) — the
+    predicate a call-graph *traversal* needs at every intermediate node, not
+    just at the entries it starts from (Codex review, fresh evidence: see
+    :func:`is_consumer_compiled_public_entry`'s docstring for the fallback-node
+    shape this conservative exception protects against).
+    """
     node = node_by_id.get(node_id)
     if node is None:
         return True
-    return bool(node.attrs.get("consumer_compiled_body", True))
+    if "consumer_compiled_body" in node.attrs:
+        return bool(node.attrs["consumer_compiled_body"])
+    return node.provenance != _CALL_GRAPH_FALLBACK_PROVENANCE
 
 
 def is_internal_dependency_node(

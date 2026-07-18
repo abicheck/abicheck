@@ -205,11 +205,15 @@ once instead of repeating it in every suppression rule:
 ```yaml
 internal_namespaces:
   - priv
-  - "*_internal"   # fnmatch glob against each `::`-joined namespace segment
+  - vendor_impl
 ```
 
-An empty (or omitted) list keeps every detector's own built-in default —
-existing policy files are unaffected.
+Each entry must match a `::`-joined namespace **segment exactly** — not a
+glob or regex — the same way the built-in `detail`/`impl`/`internal`/
+`__detail`/`_impl` tokens do (`priv` matches `acme::priv::Widget`'s `priv`
+segment, but not `acme::privhelpers::Widget`). An empty (or omitted) list
+keeps every detector's own built-in default — existing policy files are
+unaffected.
 
 ---
 

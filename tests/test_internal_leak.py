@@ -1017,6 +1017,44 @@ class TestComputeCallGraphLeakPaths:
         # that it correctly stopped expanding past it.
         assert paths == {}
 
+    def test_walk_stops_at_call_graph_fallback_node_with_no_signal(self) -> None:
+        """Codex review, fresh evidence: the previous fix's default
+        (permissive when consumer_compiled_body is absent) covered the
+        explicit-False case above, but a real call_graph.py fallback node
+        (augment_graph_with_calls, created for a caller/callee identity with
+        no other declaration node backing it) has NO consumer_compiled_body
+        attr at all -- neither True nor False -- while still being a real,
+        build-integrated project function whose out-of-line body is not
+        necessarily consumer-compiled. A public inline wrap() calling such a
+        fallback-shaped intermediate (demo::helper_a, provenance="call_graph",
+        no consumer_compiled_body key) which itself calls an internal
+        helper() must stop expanding at helper_a() -- treating "no signal"
+        as "safe" for this one provenance would silently reintroduce the
+        exact over-reach the previous fix closed for the explicit-False
+        shape."""
+        from abicheck.buildsource.source_graph import GraphEdge, GraphNode
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        snap = _graph_snap(
+            [
+                GraphNode(
+                    id="decl://wrap", kind="source_decl", label="demo::wrap",
+                    attrs={"visibility": "public_header", "consumer_compiled_body": True},
+                ),
+                GraphNode(
+                    id="decl://helper_a", kind="source_decl", label="demo::helper_a",
+                    provenance="call_graph", attrs={"defined_in_project": True},
+                ),
+                _decl_node("decl://helper", "demo::detail::helper", "source"),
+            ],
+            [
+                GraphEdge(src="decl://wrap", dst="decl://helper_a", kind="DECL_CALLS_DECL"),
+                GraphEdge(src="decl://helper_a", dst="decl://helper", kind="DECL_CALLS_DECL"),
+            ],
+        )
+        paths = compute_call_graph_leak_paths(snap)
+        assert paths == {}
+
     def test_reference_edge_also_counts(self) -> None:
         from abicheck.buildsource.source_graph import GraphEdge
         from abicheck.internal_leak import compute_call_graph_leak_paths

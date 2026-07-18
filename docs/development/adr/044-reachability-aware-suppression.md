@@ -1128,6 +1128,39 @@ semantics) is closed to the extent described under its own entry.
   comparable precision requirement. Added
   `test_walk_stops_expanding_past_non_consumer_compiled_intermediate` to
   `test_internal_leak.py`.
+  **Post-merge review (Codex), one more node shape the "permissive default"
+  missed.** The fix above's permissive default (treat a node as
+  consumer-compiled when `consumer_compiled_body` is simply absent) was
+  scoped too broadly: it also covered a *real, build-integrated*
+  `call_graph.py` fallback node — `augment_graph_with_calls` creates one,
+  tagged `provenance="call_graph"`, for a caller/callee identity with no
+  other declaration node backing it (e.g. a project helper function the L4
+  declarations pass never separately captured) — which has no
+  `consumer_compiled_body` attr at all, unlike the deliberate `False` the
+  previous fix's own test used. A public inline `wrap()` calling such an
+  intermediate (`demo::helper_a`, this exact fallback shape) which itself
+  calls an internal `helper()` still had `helper()` read as reachable,
+  since "no attr at all" fell through to the permissive branch. Fixed by
+  narrowing the exception: the permissive default now only yields to a
+  conservative `False` when the node's `provenance` is specifically the
+  `call_graph.py` fallback tag (`_CALL_GRAPH_FALLBACK_PROVENANCE`) — every
+  other attr-less node (header-graph nodes, type nodes, synthetic test
+  fixtures with no provenance at all) keeps the original permissive
+  default, since "no signal either way" is not the same claim as "known to
+  be an uncertain build-integrated declaration." (An earlier version of
+  this fix tried an *allowlist* — permissive only for a recognized
+  `header_graph.py` provenance tag, conservative for everything else — but
+  that regressed a wide swath of the existing test suite, whose synthetic
+  fixtures never set a provenance at all; the blocklist framing above is
+  the one that closes the real gap without disturbing tests that carry no
+  opinion on the question.) Shared the fix as a new
+  `source_graph.is_consumer_compiled_node` predicate consumed by both
+  `is_consumer_compiled_public_entry` (the entry check) and
+  `internal_leak._is_consumer_compiled_node` (the walk's own
+  expand-past-this-node check), so the two can never drift out of sync
+  again. Added
+  `test_walk_stops_at_call_graph_fallback_node_with_no_signal` to
+  `test_internal_leak.py`.
 
 ## Roadmap (not committed — scope/sequence per the usual planning process)
 
