@@ -82,7 +82,19 @@ from typing import Any
 #:       (e.g. ``"inline_body_changed"``) — the structured sibling to the
 #:       correlation ``description`` already carried in prose. Additive
 #:       optional key.
-REPORT_SCHEMA_VERSION = "2.5"
+#: 2.6 — added the optional per-finding ``reviewer_action`` key, present only
+#:       on a COMPATIBLE addition (``recommended_action == "no_action_required"``):
+#:       finer-grained reviewer guidance that field alone couldn't carry, since
+#:       it only answers "does the old binary consumer need to do anything?"
+#:       (no) and not "does a human reviewing this PR have anything to check?"
+#:       (usually yes — was the export intentional, do exhaustive switches
+#:       need the new case, does a stable-API doc need updating). One of
+#:       ``review_exhaustive_switches`` (``enum_member_added``),
+#:       ``document_stable_replacement`` (``experimental_graduated``), or the
+#:       default ``confirm_public_api_intent`` for every other addition kind.
+#:       Additive optional key; does not change ``recommended_action``'s
+#:       existing values or meaning.
+REPORT_SCHEMA_VERSION = "2.6"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

@@ -23,6 +23,7 @@ import pytest
 from abicheck.pr_comment import (
     MARKER,
     CommentModel,
+    Finding,
     build_model,
     render_comment,
     should_post,
@@ -387,10 +388,197 @@ def test_gate_api_break_files_api_break_as_breaking():
     gated = build_model(report, gate_api_break=True)
     assert gated.counts == (1, 1, 0)  # api_break → breaking, risk stays review
     body = render_comment(gated, sha="x")
-    assert "ABI BREAKING" in body
+    # A gated *source* API break is not a binary ABI break — it gets its own
+    # headline rather than being folded into "ABI BREAKING" (ADR-042: the
+    # compatibility and gate axes are independent).
+    assert "ABI BREAKING" not in body
+    assert "Source API break blocks this PR" in body
     # default (ungated) keeps api_break in review
     ungated = build_model(report)
     assert ungated.counts == (0, 2, 0)
+
+
+def test_severity_potential_breaking_error_risk_only_not_worded_as_source_break():
+    # "api_break" and "risk" share the "potential_breaking" severity-config
+    # category, but a risk-only gate is not a source API break — the
+    # headline must say so distinctly (Codex review, PR #595).
+    report = _compare_report(
+        [
+            {
+                "kind": "type_field_added",
+                "symbol": "S",
+                "description": "d",
+                "severity": "risk",
+            },
+        ]
+    )
+    report["severity"] = {"config": {"potential_breaking": "error"}, "exit_code": 1}
+    model = build_model(report)
+    assert model.counts == (1, 0, 0)
+    assert model.breaking_categories == frozenset({"potential_breaking"})
+    assert model.breaking_severities == frozenset({"risk"})
+    body = render_comment(model, sha="x")
+    assert "ABI BREAKING" not in body
+    assert "Source API break" not in body
+    assert "Compatibility risk blocks this PR" in body
+
+
+def test_severity_potential_breaking_error_api_break_worded_as_source_break():
+    # The api_break sibling of the case above: this one genuinely is a
+    # source-level API break, so it keeps the "Source API break" wording.
+    report = _compare_report(
+        [
+            {
+                "kind": "enum_member_added",
+                "symbol": "E::X",
+                "description": "d",
+                "severity": "api_break",
+            },
+        ]
+    )
+    report["severity"] = {"config": {"potential_breaking": "error"}, "exit_code": 1}
+    model = build_model(report)
+    assert model.breaking_severities == frozenset({"api_break"})
+    body = render_comment(model, sha="x")
+    assert "Source API break blocks this PR" in body
+
+
+def test_severity_potential_breaking_error_release_risk_only_not_source_break():
+    # Release-mode twin: risk_changes (not source_breaks) promoted by
+    # potential_breaking=error must not read as a "source API break" either.
+    report = {
+        "verdict": "COMPATIBLE_WITH_RISK",
+        "old_dir": "/o",
+        "new_dir": "/n",
+        "libraries": [
+            {
+                "library": "lib.so",
+                "verdict": "COMPATIBLE_WITH_RISK",
+                "breaking": 0,
+                "source_breaks": 0,
+                "risk_changes": 3,
+                "compatible_additions": 0,
+            },
+        ],
+        "severity": {"config": {"potential_breaking": "error"}, "exit_code": 1},
+        "unmatched_old": [],
+        "unmatched_new": [],
+    }
+    model = build_model(report)
+    assert model.counts == (3, 0, 0)
+    assert model.breaking_severities == frozenset({"risk"})
+    body = render_comment(model, sha="x")
+    assert "Source API break" not in body
+    assert "Compatibility risk blocks this PR" in body
+
+
+def test_severity_potential_breaking_error_release_api_break_source_break():
+    # Release-mode twin: source_breaks promoted by potential_breaking=error
+    # (without fail-on-api-break) is a genuine source API break.
+    report = {
+        "verdict": "API_BREAK",
+        "old_dir": "/o",
+        "new_dir": "/n",
+        "libraries": [
+            {
+                "library": "lib.so",
+                "verdict": "API_BREAK",
+                "breaking": 0,
+                "source_breaks": 2,
+                "risk_changes": 0,
+                "compatible_additions": 0,
+            },
+        ],
+        "severity": {"config": {"potential_breaking": "error"}, "exit_code": 1},
+        "unmatched_old": [],
+        "unmatched_new": [],
+    }
+    model = build_model(report)
+    assert model.counts == (2, 0, 0)
+    assert model.breaking_severities == frozenset({"api_break"})
+    body = render_comment(model, sha="x")
+    assert "Source API break blocks this PR" in body
+
+
+def test_severity_potential_breaking_error_release_global_risk_section():
+    # A release-global (bundle/matrix) COMPATIBLE_WITH_RISK section promoted
+    # by potential_breaking=error is a risk, not a source API break.
+    report = {
+        "verdict": "COMPATIBLE_WITH_RISK",
+        "old_dir": "/o",
+        "new_dir": "/n",
+        "libraries": [],
+        "matrix_verdict": "COMPATIBLE_WITH_RISK",
+        "matrix_findings": [
+            {"kind": "macro_guarded", "symbol": "FOO", "description": "z"},
+        ],
+        "severity": {"config": {"potential_breaking": "error"}, "exit_code": 1},
+        "unmatched_old": [],
+        "unmatched_new": [],
+    }
+    model = build_model(report)
+    assert model.counts == (1, 0, 0)
+    assert model.breaking_severities == frozenset({"risk"})
+    body = render_comment(model, sha="x")
+    assert "Source API break" not in body
+    assert "Compatibility risk blocks this PR" in body
+
+
+def test_gate_api_break_release_global_api_break_worded_as_source_break():
+    # A release-global section whose own verdict IS API_BREAK, promoted to
+    # Breaking directly via fail-on-api-break's verdict_map override (not via
+    # the potential_breaking=error "review"→"breaking" promotion path) — the
+    # `if bucket == "breaking":` branch must still classify it as a source
+    # break, not silently mis-tag it as a binary ABI break.
+    report = {
+        "verdict": "API_BREAK",
+        "old_dir": "/o",
+        "new_dir": "/n",
+        "libraries": [],
+        "matrix_verdict": "API_BREAK",
+        "matrix_findings": [
+            {"kind": "macro_guarded", "symbol": "FOO", "description": "z"},
+        ],
+        "unmatched_old": [],
+        "unmatched_new": [],
+    }
+    model = build_model(report, gate_api_break=True)
+    assert model.breaking_categories == frozenset({"potential_breaking"})
+    assert model.breaking_severities == frozenset({"api_break"})
+    body = render_comment(model, sha="x")
+    assert "ABI BREAKING" not in body
+    assert "Source API break blocks this PR" in body
+
+
+def test_release_lib_row_zero_gated_additions_and_quality_add_no_category():
+    # add_err/qual_err gate a library with zero additions/quality findings —
+    # the count contribution is (correctly) zero, and it must not spuriously
+    # add "addition"/"quality_issues" to breaking_categories for an empty set.
+    report = {
+        "verdict": "BREAKING",
+        "old_dir": "/o",
+        "new_dir": "/n",
+        "libraries": [
+            {
+                "library": "lib.so",
+                "verdict": "BREAKING",
+                "breaking": 2,
+                "source_breaks": 0,
+                "risk_changes": 0,
+                "compatible_additions": 0,
+                "quality_issues": 0,
+            },
+        ],
+        "severity": {
+            "config": {"addition": "error", "quality_issues": "error"},
+            "exit_code": 1,
+        },
+        "unmatched_old": [],
+        "unmatched_new": [],
+    }
+    model = build_model(report)
+    assert model.counts == (2, 0, 0)
+    assert model.breaking_categories == frozenset({"abi_breaking"})
 
 
 def test_gate_api_break_release_source_breaks_count_as_breaking():
@@ -443,7 +631,17 @@ def test_severity_addition_error_files_additions_as_breaking():
     }
     gated = build_model(report)
     assert gated.counts == (1, 0, 0)  # addition → breaking
-    assert "ABI BREAKING" in render_comment(gated, sha="x")
+    assert gated.breaking_categories == frozenset({"addition"})
+    body = render_comment(gated, sha="x")
+    # A policy-gated COMPATIBLE addition is not an ABI break: the checker
+    # still reports COMPATIBLE, only the CI *gate* is blocked (ADR-042).
+    # "ABI BREAKING" would tell the reviewer the wrong thing.
+    assert "ABI BREAKING" not in body
+    assert "Public API expansion requires approval" in body
+    assert "Compatibility: COMPATIBLE" in body
+    assert "Gate: BLOCKED" in body
+    assert "`addition` is configured as `error`" in body
+    assert "foo_new" in body
     # without the severity config, the same addition stays safe
     plain = _compare_report(
         [
@@ -456,6 +654,38 @@ def test_severity_addition_error_files_additions_as_breaking():
         ]
     )
     assert build_model(plain).counts == (0, 0, 1)
+
+
+def test_severity_addition_error_with_ungated_review_finding_scopes_gate_note():
+    # A gated addition (policy-only Breaking bucket) alongside a separate,
+    # *ungated* api_break sitting in "Needs review" must not claim whole-
+    # report "Compatibility: COMPATIBLE" — that overstates it, since the
+    # review finding may itself be an incompatibility (Codex review, #595).
+    report = _compare_report(
+        [
+            {
+                "kind": "func_added",
+                "symbol": "foo_new",
+                "description": "new",
+                "severity": "compatible",
+            },
+            {
+                "kind": "enum_member_added",
+                "symbol": "E::X",
+                "description": "d",
+                "severity": "api_break",
+            },
+        ]
+    )
+    report["severity"] = {"config": {"addition": "error"}, "exit_code": 1}
+    model = build_model(report)
+    assert model.counts == (1, 1, 0)  # addition → breaking, api_break → review
+    body = render_comment(model, sha="x")
+    assert "Public API expansion requires approval" in body
+    assert "Compatibility: COMPATIBLE" not in body
+    assert "Gate: BLOCKED" in body
+    assert "`addition` is configured as `error`" in body
+    assert "Needs review" in body
 
 
 def test_severity_addition_error_classifies_non_added_kinds():
@@ -503,7 +733,12 @@ def test_severity_quality_error_release_quality_breaking():
         "unmatched_new": [],
     }
     # quality (2) → breaking, additions (5-2=3) → safe
-    assert build_model(report).counts == (2, 0, 3)
+    model = build_model(report)
+    assert model.counts == (2, 0, 3)
+    assert model.breaking_categories == frozenset({"quality_issues"})
+    body = render_comment(model, sha="x")
+    assert "ABI BREAKING" not in body
+    assert "Quality policy violation" in body
 
 
 def test_severity_addition_error_release_additions_breaking():
@@ -525,7 +760,74 @@ def test_severity_addition_error_release_additions_breaking():
         "unmatched_old": [],
         "unmatched_new": [],
     }
-    assert build_model(report).counts == (4, 0, 0)
+    model = build_model(report)
+    assert model.counts == (4, 0, 0)
+    assert model.breaking_categories == frozenset({"addition"})
+    body = render_comment(model, sha="x")
+    # Release-mode rows don't carry per-finding detail, but the headline must
+    # still avoid "ABI BREAKING" for a policy-gated COMPATIBLE release.
+    assert "ABI BREAKING" not in body
+    assert "Public API expansion requires approval" in body
+
+
+def test_severity_addition_and_quality_both_gated_mixed_headline():
+    # Both categories gated and both contribute findings → neither
+    # single-category headline fits; use the generic policy-violation one
+    # (still never "ABI BREAKING").
+    report = _compare_report(
+        [
+            {
+                "kind": "func_added",
+                "symbol": "foo_new",
+                "description": "new",
+                "severity": "compatible",
+            },
+            {
+                "kind": "soname_bump_unnecessary",
+                "symbol": "libfoo",
+                "description": "unnecessary bump",
+                "severity": "compatible",
+            },
+        ]
+    )
+    report["severity"] = {
+        "config": {"addition": "error", "quality_issues": "error"},
+        "exit_code": 1,
+    }
+    model = build_model(report)
+    assert model.breaking_categories == frozenset({"addition", "quality_issues"})
+    body = render_comment(model, sha="x")
+    assert "ABI BREAKING" not in body
+    assert "Policy violation blocks this PR" in body
+
+
+def test_severity_addition_error_mixed_with_real_break_stays_abi_breaking():
+    # A real ABI break alongside a gated addition must still headline as
+    # "ABI BREAKING" — the addition doesn't dilute a genuine incompatibility.
+    report = _compare_report(
+        [
+            {
+                "kind": "func_removed",
+                "symbol": "foo_gone",
+                "description": "removed",
+                "severity": "breaking",
+            },
+            {
+                "kind": "func_added",
+                "symbol": "foo_new",
+                "description": "new",
+                "severity": "compatible",
+            },
+        ]
+    )
+    report["severity"] = {"config": {"addition": "error"}, "exit_code": 1}
+    model = build_model(report)
+    assert model.breaking_categories == frozenset({"abi_breaking", "addition"})
+    body = render_comment(model, sha="x")
+    assert "ABI BREAKING" in body
+    # The genuine break takes priority; no policy-only gate note is shown
+    # since the bucket isn't policy-only.
+    assert "Gate: BLOCKED" not in body
 
 
 def test_malformed_changes_are_skipped():
@@ -634,6 +936,26 @@ def test_full_detail_expands_all_sections():
     # every <details> opens expanded in full mode
     assert "<details><summary>" not in body
     assert body.count("<details open>") == 3
+
+
+def test_safe_quality_section_full_detail_table_with_rows():
+    # Quality-only compatible findings keep their own per-symbol table in
+    # full detail — the fixture above is all-additions, so this exercises
+    # the "✅ Safe" section's full-detail path specifically.
+    report = _compare_report(
+        [
+            {
+                "kind": "soname_bump_unnecessary",
+                "symbol": "libfoo",
+                "description": "unnecessary bump",
+                "severity": "compatible",
+            },
+        ]
+    )
+    body = render_comment(build_model(report), sha="x", detail="full")
+    assert "✅ Safe (1)" in body
+    assert "soname_bump_unnecessary" in body
+    assert "unnecessary bump" in body
 
 
 def test_standard_truncates_large_breaking_table():
@@ -810,7 +1132,64 @@ def test_finding_with_only_location_renders_location_cell():
     assert "foo.h:9" in body
 
 
-def test_safe_section_caps_symbols_per_kind():
+def test_safe_quality_section_caps_symbols_per_kind():
+    # Quality (non-addition) compatible findings keep the terse
+    # kind:symbols-with-cap rendering in the "✅ Safe" section — additions
+    # are split out into their own section (see tests below) and use a
+    # different (per-symbol table) rendering, so this cap only applies here.
+    changes = [
+        {
+            "kind": "soname_bump_unnecessary",
+            "symbol": f"lib_{i}",
+            "description": "unnecessary bump",
+            "severity": "compatible",
+        }
+        for i in range(20)
+    ]
+    body = render_comment(build_model(_compare_report(changes)), sha="x")
+    assert "(+8)" in body  # 20 symbols, cap 12 → "+8" more
+    assert "➕ Public API additions" not in body
+
+
+def test_additions_render_as_own_section_with_detail():
+    # New public-API surface gets its own "➕ Public API additions" table
+    # with kind/symbol/detail/location — not folded into the generic quality
+    # "Safe" list (a reviewer approving a new export wants to see what was
+    # added, not just a bare count mixed in with unrelated quality notes).
+    report = _compare_report(
+        [
+            {
+                "kind": "func_added",
+                "symbol": "foo_v2",
+                "description": "new exported function",
+                "severity": "compatible",
+                "source_location": "foo.h:42",
+            },
+            {
+                "kind": "soname_bump_unnecessary",
+                "symbol": "libfoo",
+                "description": "SONAME bumped without a break",
+                "severity": "compatible",
+            },
+        ]
+    )
+    body = render_comment(build_model(report), sha="x")
+    assert "➕ Public API additions (1)" in body
+    assert "✅ Safe (1)" in body
+    # the addition shows the same per-symbol detail as Breaking/Needs review
+    assert "new exported function" in body
+    assert "foo.h:42" in body
+    # the addition doesn't leak into the quality-only Safe section
+    additions_block = body.split("➕ Public API additions")[1].split("✅ Safe")[0]
+    assert "foo_v2" in additions_block
+    assert "libfoo" not in additions_block
+
+
+def test_additions_section_lists_all_distinct_symbols_under_row_cap():
+    # 20 distinct addition symbols (no natural API grouping) all render as
+    # their own row — additions go through the same per-symbol table/rollup
+    # as Breaking/Needs review, not the terse kind:symbols-list-with-cap
+    # format the quality-only Safe section still uses.
     changes = [
         {
             "kind": "func_added",
@@ -821,7 +1200,56 @@ def test_safe_section_caps_symbols_per_kind():
         for i in range(20)
     ]
     body = render_comment(build_model(_compare_report(changes)), sha="x")
-    assert "(+8)" in body  # 20 symbols, cap 12 → "+8" more
+    assert "➕ Public API additions (20)" in body
+    assert "add_0" in body and "add_19" in body
+    assert "more_" not in body  # 20 < the 25-row standard cap
+
+
+def test_additions_section_truncates_past_standard_row_cap():
+    changes = [
+        {
+            "kind": "func_added",
+            "symbol": f"add_{i}",
+            "description": "new",
+            "severity": "compatible",
+        }
+        for i in range(30)
+    ]
+    body = render_comment(build_model(_compare_report(changes)), sha="x")
+    assert "➕ Public API additions (30)" in body
+    assert "more_" in body  # 30 > the 25-row standard cap
+
+
+def test_additions_section_absent_when_only_quality_findings():
+    report = _compare_report(
+        [
+            {
+                "kind": "soname_bump_unnecessary",
+                "symbol": "libfoo",
+                "description": "unnecessary bump",
+                "severity": "compatible",
+            },
+        ]
+    )
+    body = render_comment(build_model(report), sha="x")
+    assert "➕ Public API additions" not in body
+    assert "✅ Safe (1)" in body
+
+
+def test_additions_section_full_detail_flat_rows():
+    changes = [
+        {
+            "kind": "func_added",
+            "symbol": f"Widget::method{i}(int)",
+            "description": "new overload",
+            "severity": "compatible",
+        }
+        for i in range(3)
+    ]
+    body = render_comment(build_model(_compare_report(changes)), sha="x", detail="full")
+    # full detail keeps every addition as its own per-symbol row (no rollup)
+    assert "Widget::method0(int)" in body
+    assert "`Widget` (3)" not in body
 
 
 def test_release_full_detail_table_with_rows():
@@ -866,6 +1294,43 @@ def test_empty_model_renders_clean_verdict():
     body = render_comment(model, sha="")
     assert "No ABI changes" in body
     assert MARKER in body
+
+
+def test_header_potential_breaking_with_no_severity_falls_back_to_source_break():
+    # Defensive fallback: a "potential_breaking" bucket should always carry
+    # an "api_break" or "risk" severity in practice (every code path that
+    # sets the category sets the severity alongside it) — but if it somehow
+    # didn't, the header must still say something, not crash or go silent.
+    model = CommentModel(
+        mode="compare",
+        subject="lib",
+        old_label="o",
+        new_label="n",
+        policy="strict_abi",
+        breaking=[Finding(kind="k", symbol="s", category="potential_breaking")],
+        breaking_categories=frozenset({"potential_breaking"}),
+    )
+    body = render_comment(model, sha="x")
+    assert "Source API break blocks this PR" in body
+
+
+def test_header_untracked_category_falls_back_to_abi_breaking():
+    # Defensive fallback: every mode is supposed to populate
+    # breaking_categories from a known set ("abi_breaking" /
+    # "potential_breaking" / "addition" / "quality_issues") — if a bucket is
+    # non-empty with an unrecognised category, err conservative rather than
+    # silently rendering no headline at all.
+    model = CommentModel(
+        mode="compare",
+        subject="lib",
+        old_label="o",
+        new_label="n",
+        policy="strict_abi",
+        breaking=[Finding(kind="k", symbol="s")],
+        breaking_categories=frozenset({"unrecognised_category"}),
+    )
+    body = render_comment(model, sha="x")
+    assert "## ❌ abicheck — ABI BREAKING" in body
 
 
 # ---------------------------------------------------------------------------

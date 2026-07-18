@@ -714,7 +714,8 @@ def abi_compare(
     Returns a structured JSON result with verdict, change summary, and the
     full list of changes. The verdict indicates binary ABI compatibility:
     - NO_CHANGE: identical ABI
-    - COMPATIBLE: only additions (backward compatible)
+    - COMPATIBLE: no incompatible ABI/API changes (may include additions
+      and quality findings; backward compatible)
     - COMPATIBLE_WITH_RISK: binary-compatible but deployment risk present
     - API_BREAK: source-level break (recompilation needed)
     - BREAKING: binary ABI break (old binaries will crash)

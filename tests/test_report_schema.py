@@ -149,6 +149,27 @@ class TestReportValidatesAgainstSchema:
         )
         self._validate(payload)
 
+    def test_addition_reviewer_action_validates_against_packaged_schema(self):
+        # Regression guard (Codex review, PR #595): reviewer_action was added
+        # to reporter.py and the *docs* schema copy, but the packaged schema
+        # abicheck/schemas/compare_report.schema.json -- what
+        # load_compare_report_schema() actually reads at runtime -- was left
+        # stale. jsonschema.validate would still pass a stale schema (its
+        # "change" object has additionalProperties: true), so this doesn't
+        # just check "no error" -- it asserts the field the real payload
+        # carries is the one actually declared in the packaged schema's enum.
+        old, new = _breaking_pair()
+        payload = json.loads(reporter.to_json(compare(old, new)))
+        self._validate(payload)
+        additions = [
+            c for c in payload["changes"] if c.get("recommended_action") == "no_action_required"
+        ]
+        assert additions, "fixture must produce at least one addition finding"
+        schema = load_compare_report_schema()
+        declared_enum = schema["$defs"]["change"]["properties"]["reviewer_action"]["enum"]
+        for c in additions:
+            assert c["reviewer_action"] in declared_enum
+
 
 class TestSchemaVersion:
     def test_emitted_version_matches_constant(self):

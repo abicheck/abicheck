@@ -40,7 +40,7 @@ _No ABI changes detected._
 | Verdict | Meaning |
 |---------|---------|
 | ✅ NO_CHANGE | Identical ABI |
-| ✅ COMPATIBLE | Only additions (backward compatible) |
+| ✅ COMPATIBLE | No incompatible ABI/API changes — may include additions and quality findings (backward compatible) |
 | ⚠️ COMPATIBLE_WITH_RISK | Binary-compatible; verify target environment |
 | ⚠️ API_BREAK | Source-level API change — recompilation required |
 | ❌ BREAKING | Binary ABI break — recompilation required |

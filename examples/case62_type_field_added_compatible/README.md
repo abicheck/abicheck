@@ -44,8 +44,19 @@ embed — that's breaking. This case demonstrates the safe pattern.
 
 ## What abicheck detects
 
-- **`TYPE_FIELD_ADDED`**: A new field was added to the struct.
 - **`FUNC_ADDED`**: `session_get_priority()` is a new symbol.
+
+`Session` is forward-declared only in the public header — its definition
+never appears in header-based diffing at all, so no type-level finding
+fires for it (not `TYPE_FIELD_ADDED`, not `TYPE_FIELD_ADDED_COMPATIBLE`).
+That's the point of the pattern: the struct's layout isn't part of the
+diffed public surface to begin with, so there's nothing to classify as
+"added" or "compatible" — it's simply invisible to the checker, which is
+exactly what makes it safe to change. (For an example where `TYPE_FIELD_ADDED_COMPATIBLE`
+actually fires on a *visible* struct's appended field, see case94 — there
+it's paired with a breaking `TYPE_SIZE_CHANGED` on the same struct, since
+the catalog does not yet have a case isolating a clean, standalone
+COMPATIBLE verdict driven by `TYPE_FIELD_ADDED_COMPATIBLE` alone.)
 
 **Overall verdict: COMPATIBLE**
 
@@ -58,7 +69,7 @@ gcc -shared -fPIC -g good.c -include good.h -o libgood.so
 python3 -m abicheck.cli dump libbad.so  -o /tmp/v1.json
 python3 -m abicheck.cli dump libgood.so -o /tmp/v2.json
 python3 -m abicheck.cli compare /tmp/v1.json /tmp/v2.json
-# → COMPATIBLE: TYPE_FIELD_ADDED, FUNC_ADDED
+# → COMPATIBLE: FUNC_ADDED
 ```
 
 ## Design pattern
@@ -87,4 +98,12 @@ struct Widget {
 - [How to Write Shared Libraries — Opaque Types](https://www.akkadia.org/drepper/dsohowto.pdf)
 
 
-Implementation note: v1 keeps reserved private storage in the opaque `Session` object; v2 consumes part of that storage for the new private `priority` field while preserving the public handle ABI. This keeps the case focused on a compatible private field addition rather than a public layout change.
+Implementation note: v1's private `Session` definition keeps a reserved
+`_reserved0` slot; v2 renames it to `priority` at the same offset and size.
+This keeps `sizeof(Session)` identical between versions — deliberately, so
+the case isolates *only* the opacity argument (the struct is invisible to
+header-based diffing either way) rather than also depending on
+`_filter_opaque_size_changes`' pointer-only-usage suppression of a growing
+`sizeof`. Since `Session` is never in the public header, none of this is
+visible to abicheck regardless — the private struct could have changed
+size too and the verdict would be identical.

@@ -39,7 +39,8 @@
 
 ## ✅ Additions
 
-- Field added: Point::z
+- **type_field_added_compatible**: Field added: Point::z
+  > Field appended without changing existing offsets; old code works but won't initialize the new field.
 
 ---
 ## Legend
@@ -47,7 +48,7 @@
 | Verdict | Meaning |
 |---------|---------|
 | ✅ NO_CHANGE | Identical ABI |
-| ✅ COMPATIBLE | Only additions (backward compatible) |
+| ✅ COMPATIBLE | No incompatible ABI/API changes — may include additions and quality findings (backward compatible) |
 | ⚠️ COMPATIBLE_WITH_RISK | Binary-compatible; verify target environment |
 | ⚠️ API_BREAK | Source-level API change — recompilation required |
 | ❌ BREAKING | Binary ABI break — recompilation required |

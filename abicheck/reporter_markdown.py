@@ -787,7 +787,7 @@ def _footer_lines() -> list[str]:
         "| Verdict | Meaning |",
         "|---------|---------|",
         "| ✅ NO_CHANGE | Identical ABI |",
-        "| ✅ COMPATIBLE | Only additions (backward compatible) |",
+        "| ✅ COMPATIBLE | No incompatible ABI/API changes — may include additions and quality findings (backward compatible) |",
         "| ⚠️ COMPATIBLE_WITH_RISK | Binary-compatible; verify target environment |",
         "| ⚠️ API_BREAK | Source-level API change — recompilation required |",
         "| ❌ BREAKING | Binary ABI break — recompilation required |",
@@ -869,7 +869,13 @@ def _build_severity_sections(
             sev_label = _section_severity_label(severity_config, "addition")
             lines += [f"## {_ADDITION_ICON} Additions{sev_label}", ""]
             for c in additions_list:
-                lines.append(f"- {c.description}")
+                # Same per-change detail as Breaking/Source-Level Breaks
+                # (kind, location, impact) — a bare description dropped the
+                # kind and any per-kind caveat (e.g. enum_member_added's
+                # "may shift subsequent values" note), silently losing
+                # information a reviewer needs to approve new public API
+                # surface.
+                lines.append(_format_change_md(c))
             lines.append("")
 
     return lines
