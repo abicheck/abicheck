@@ -369,9 +369,17 @@ def _clang_header_dump(
         # A cache hit still costs time parsing a potentially huge AST (Codex review).
         deadline.check()
         try:
-            return cast("dict[str, Any]", json.loads(cached.read_text(encoding="utf-8")))
+            _cached_result = cast(
+                "dict[str, Any]", json.loads(cached.read_text(encoding="utf-8"))
+            )
         except (ValueError, OSError):
             cached.unlink(missing_ok=True)
+        else:
+            # The load itself can consume the rest of the budget on a huge
+            # cached AST; re-check before handing it to the AST walker
+            # (Codex review, PR #591, round 3).
+            deadline.check()
+            return _cached_result
 
     agg_ext = ".hpp" if force_cpp else ".h"
     with tempfile.NamedTemporaryFile(suffix=agg_ext, mode="w", delete=False) as agg:
@@ -1022,6 +1030,10 @@ def _castxml_dump(
         if _cached_root is None:
             cached.unlink(missing_ok=True)
         else:
+            # The parse itself can consume the rest of the budget on a huge
+            # cached XML tree; re-check before handing it off (Codex review,
+            # PR #591, round 3).
+            deadline.check()
             return cast(Element, _cached_root)
 
     cc_bin, cc_id = _resolve_compiler_binary(compiler, gcc_path, gcc_prefix)

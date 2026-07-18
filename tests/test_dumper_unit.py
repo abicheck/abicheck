@@ -555,6 +555,34 @@ class TestCastxmlDump:
             with pytest.raises(deadline.DeadlineExceeded):
                 _castxml_dump([Path("h.h")], [])
 
+    def test_cache_hit_rechecks_deadline_after_parse(self, tmp_path, monkeypatch):
+        """Codex review (PR #591, round 3): DefusedET.parse() on a warm cache
+        hit can itself consume the rest of the budget for a huge cached XML
+        tree -- the existing pre-parse deadline.check() doesn't catch that;
+        must re-check again after the parse before handing the root off."""
+        import time
+
+        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/castxml")
+        cache_xml = tmp_path / "cached.xml"
+        from xml.etree.ElementTree import ElementTree
+
+        ElementTree(Element("GCC_XML")).write(str(cache_xml))
+        monkeypatch.setattr("abicheck.dumper._cache_key", lambda *a, **kw: "testkey")
+        monkeypatch.setattr("abicheck.dumper._cache_path", lambda k: cache_xml)
+
+        from abicheck import deadline, dumper
+
+        real_parse = dumper.DefusedET.parse
+
+        def _slow_parse(path):
+            time.sleep(0.05)
+            return real_parse(path)
+
+        monkeypatch.setattr(dumper.DefusedET, "parse", _slow_parse)
+        with deadline.deadline_scope(0.03):
+            with pytest.raises(deadline.DeadlineExceeded):
+                _castxml_dump([Path("h.h")], [])
+
     def test_corrupt_cache_is_discarded(self, tmp_path, monkeypatch):
         """Corrupt cache entry is removed before castxml is re-invoked."""
         import subprocess

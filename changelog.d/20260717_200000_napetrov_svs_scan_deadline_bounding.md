@@ -250,3 +250,11 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   (already threaded back through `_extract_cache_misses`'s result list),
   which the test reads directly — verified correct under both backends,
   including `ABICHECK_L4_EXECUTOR=process` (CodeRabbit review, PR #591).
+- Two more warm-cache-hit deadline gaps closed, same shape as the earlier
+  pre-parse cache-hit checks: the L2 clang header-AST cache hit
+  (`_clang_header_dump`) re-checks the deadline before spawning nothing but
+  *after* `json.loads()` — a huge cached AST's JSON parse can itself consume
+  the rest of the budget, and the existing pre-load check doesn't see that.
+  Same fix on the castxml side (`_castxml_dump`): re-checks after
+  `DefusedET.parse()` of a large cached XML tree, before handing the root
+  off to the rest of L2 processing (Codex review, PR #591, round 3).

@@ -1233,6 +1233,40 @@ def test_clang_header_dump_rechecks_deadline_on_cache_hit(
     assert calls["n"] == 1  # never reached the subprocess path — cache hit
 
 
+def test_clang_header_dump_rechecks_deadline_after_cache_load(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Codex review (PR #591, round 3): json.loads() on a warm cache hit can
+    itself consume the rest of the budget for a huge cached AST -- the
+    existing pre-load deadline.check() doesn't catch that; must re-check
+    again after the load before handing the root to the AST walker."""
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    cache = tmp_path / "cache.json"
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+
+    def _run(cmd, **kwargs):
+        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
+        return _fake_proc()
+
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
+    _clang_header_dump([header], [])  # warms the cache
+    assert cache.exists()
+
+    real_json_loads = dumper.json.loads
+
+    def _slow_loads(text):
+        time.sleep(0.05)
+        return real_json_loads(text)
+
+    monkeypatch.setattr(dumper.json, "loads", _slow_loads)
+    with dumper.deadline.deadline_scope(0.03):
+        with pytest.raises(dumper.deadline.DeadlineExceeded):
+            _clang_header_dump([header], [])
+
+
 def test_parse_clang_ast_result_missing_ast_file_reports_no_ast(tmp_path: Path) -> None:
     # ast_path.stat() itself can fail (the temp file vanished/was never
     # created) — that must degrade to the same "no AST" error as an empty
