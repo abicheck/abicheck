@@ -348,7 +348,7 @@ def test_probe_gnu_system_includes_mocked(monkeypatch, tmp_path: Path) -> None:
     class _P:
         stderr = "ignored"
 
-    monkeypatch.setattr(dumper_sysinc.subprocess, "run", lambda *a, **k: _P())
+    monkeypatch.setattr(dumper_sysinc.deadline, "run_bounded", lambda *a, **k: _P())
     monkeypatch.setattr(
         dumper_sysinc,
         "_parse_gnu_include_search_dirs",
@@ -364,8 +364,51 @@ def test_probe_gnu_system_includes_handles_oserror(monkeypatch) -> None:
     def _boom(*a, **k):
         raise OSError("no compiler")
 
-    monkeypatch.setattr(dumper_sysinc.subprocess, "run", _boom)
+    monkeypatch.setattr(dumper_sysinc.deadline, "run_bounded", _boom)
     assert dumper_sysinc._probe_gnu_system_includes("g++", cpp=True) == []
+
+
+def test_probe_gnu_system_includes_degrades_on_deadline_exceeded(monkeypatch) -> None:
+    # Codex review (PR #591): the probe is now deadline-bounded via
+    # deadline.run_bounded; an exhausted --budget must degrade to [] (same
+    # best-effort contract as a missing compiler/timeout), not propagate and
+    # abort the whole L2 clang parse over an auxiliary parity probe.
+    from abicheck import dumper_sysinc
+
+    def _raise(*a, **k):
+        raise dumper_sysinc.deadline.DeadlineExceeded(-1.0)
+
+    monkeypatch.setattr(dumper_sysinc.deadline, "run_bounded", _raise)
+    assert dumper_sysinc._probe_gnu_system_includes("g++", cpp=True) == []
+
+
+def test_probe_gnu_system_includes_bounded_by_local_cap_not_full_scan_budget(
+    monkeypatch,
+) -> None:
+    """Codex review (PR #591), round 2: deadline.run_bounded() honors an
+    active outer deadline verbatim (not min(timeout, left)), so a bare
+    timeout=15 alone did nothing once a generous --budget was active -- a
+    hung `g++ -E -v -` could consume the whole remaining scan budget instead
+    of this probe's own 15s cap. Mirrors the include-map local-cap fix."""
+    from abicheck import deadline, dumper_sysinc
+
+    seen_remaining: list[float | None] = []
+
+    def fake_run(*_a, **_k):
+        seen_remaining.append(deadline.remaining())
+
+        class _P:
+            stderr = ""
+
+        return _P()
+
+    monkeypatch.setattr(dumper_sysinc.deadline, "run_bounded", fake_run)
+    with deadline.deadline_scope(1800.0):  # a generous 30-minute --budget
+        dumper_sysinc._probe_gnu_system_includes("g++", cpp=True)
+
+    assert seen_remaining
+    # Bound by the probe's own 15s cap, not the 1800s scan budget.
+    assert seen_remaining[0] is not None and seen_remaining[0] <= 15.5
 
 
 @pytest.mark.parametrize(
@@ -416,7 +459,7 @@ def test_probe_gnu_system_includes_drops_gcc_resource_dir(
     class _P:
         stderr = "ignored"
 
-    monkeypatch.setattr(dumper_sysinc.subprocess, "run", lambda *a, **k: _P())
+    monkeypatch.setattr(dumper_sysinc.deadline, "run_bounded", lambda *a, **k: _P())
     monkeypatch.setattr(
         dumper_sysinc,
         "_parse_gnu_include_search_dirs",

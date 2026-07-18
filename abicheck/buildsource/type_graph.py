@@ -68,8 +68,10 @@ import time
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
+from .. import deadline
 from .source_graph import (
     CONF_HIGH,
     CONF_REDUCED,
@@ -1458,16 +1460,26 @@ class ClangTypeGraphExtractor:
             self.diagnostics.append(f"{self.clang_bin} not found in PATH")
             return []
         cmd = [self.clang_bin, "-Xclang", "-ast-dump=json", "-fsyntax-only", *argv]
+        local_cap = 120.0
+        scan_remaining = deadline.remaining()
+        effective_timeout = (
+            local_cap if scan_remaining is None else min(local_cap, scan_remaining)
+        )
         try:
-            proc = subprocess.run(  # noqa: S603 - fixed argv, never shell=True
-                cmd,
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                timeout=120,
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
+            # Bound by min(local_cap, active --budget deadline), process-group-
+            # safe on timeout, degrades to the same diagnostic+[] contract on
+            # overflow — mirrors
+            # call_graph.ClangCallGraphExtractor._extract_from_safe_args
+            # (Codex review, PR #591, round 8).
+            with deadline.deadline_scope(effective_timeout):
+                proc = deadline.run_bounded(  # noqa: S603 - fixed argv, never shell=True
+                    cmd,
+                    cwd=cwd,
+                    capture_output=True,
+                    text=True,
+                    timeout=local_cap,
+                )
+        except (OSError, subprocess.SubprocessError, deadline.DeadlineExceeded) as exc:
             self.diagnostics.append(f"clang invocation failed: {exc}")
             return []
         if not proc.stdout.strip():
@@ -1487,7 +1499,32 @@ class ClangTypeGraphExtractor:
                 f"clang exited {proc.returncode} (stderr: {proc.stderr[:200]})"
             )
         try:
-            return parse_clang_ast_types(json.loads(proc.stdout))
+            # clang can exit successfully right as the budget expires; recheck
+            # before the CPU/RSS-heavy parse+walk, same as the L2/L4 post-run
+            # checks and call_graph's identical fix (Codex review, PR #591).
+            deadline.check()
+        except deadline.DeadlineExceeded as exc:
+            self.diagnostics.append(
+                f"scan deadline exceeded before parsing clang AST: {exc}"
+            )
+            return []
+        try:
+            ast = json.loads(proc.stdout)
+        except (ValueError, RecursionError) as exc:
+            self.diagnostics.append(f"could not parse clang AST JSON: {exc}")
+            return []
+        try:
+            # The JSON load itself can consume the rest of the budget on a
+            # huge AST; re-check before the recursive walk (Codex review,
+            # PR #591, round 4).
+            deadline.check()
+        except deadline.DeadlineExceeded as exc:
+            self.diagnostics.append(
+                f"scan deadline exceeded before walking clang AST: {exc}"
+            )
+            return []
+        try:
+            return parse_clang_ast_types(ast)
         except (ValueError, RecursionError) as exc:
             self.diagnostics.append(f"could not parse clang AST JSON: {exc}")
             return []
@@ -1502,7 +1539,7 @@ class ClangTypeGraphExtractor:
 
     def extract_from_build(self, build: BuildEvidence) -> list[TypeEdge]:
         """Extract type edges across every compile unit in *build* (best effort)."""
-        from .call_graph import _call_graph_jobs
+        from .call_graph import _call_graph_jobs, _deadline_bound_worker
 
         start = time.monotonic()
         units = [cu for cu in build.compile_units if cu.source]
@@ -1536,8 +1573,13 @@ class ClangTypeGraphExtractor:
 
         try:
             if self.last_jobs > 1 and len(units) > 1:
+                pool_worker = partial(
+                    _deadline_bound_worker,
+                    deadline.current_deadline_ts(),
+                    self._extract_from_compile_unit,
+                )
                 with ThreadPoolExecutor(max_workers=self.last_jobs) as pool:
-                    for edges in pool.map(self._extract_from_compile_unit, units):
+                    for edges in pool.map(pool_worker, units):
                         add_edges(edges)
             else:
                 for cu in units:

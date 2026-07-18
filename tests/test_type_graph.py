@@ -1489,6 +1489,166 @@ def test_extract_from_build_merges_richer_edge_across_compile_units(
     assert edges[0].dst_file == "src/detail/impl.h"
 
 
+def test_extract_from_build_propagates_deadline_into_pool_workers(monkeypatch) -> None:
+    """Codex review (PR #591): contextvars don't cross a ThreadPoolExecutor
+    boundary, so a worker submitted from inside deadline.deadline_scope()
+    used to see no active deadline at all — each clang subprocess call
+    inside it would run to its full fixed 120s regardless of --budget. Same
+    fix/pattern as call_graph.ClangCallGraphExtractor (shared
+    _deadline_bound_worker helper)."""
+    import abicheck.buildsource.call_graph as cg
+    from abicheck import deadline
+
+    monkeypatch.setenv("ABICHECK_CALL_GRAPH_JOBS", "2")
+    monkeypatch.setattr(cg, "_call_graph_mem_cap", lambda: 2)
+    seen_remaining: list[float | None] = []
+
+    extractor = ClangTypeGraphExtractor(clang_bin="clang++")
+    monkeypatch.setattr(extractor, "available", lambda: True)
+
+    def _fake_extract(cu: CompileUnit) -> list[TypeEdge]:
+        seen_remaining.append(deadline.remaining())
+        return []
+
+    monkeypatch.setattr(extractor, "_extract_from_compile_unit", _fake_extract)
+    build = BuildEvidence(
+        compile_units=[
+            CompileUnit(id="cu://a", source="a.cpp"),
+            CompileUnit(id="cu://b", source="b.cpp"),
+            CompileUnit(id="cu://c", source="c.cpp"),
+        ]
+    )
+    with deadline.deadline_scope(30.0):
+        extractor.extract_from_build(build)
+    assert len(seen_remaining) == 3
+    assert all(r is not None for r in seen_remaining), (
+        "pool worker saw no active deadline (remaining()=None) — the scan "
+        "deadline did not cross the executor boundary"
+    )
+    assert all(0 < r <= 30.0 for r in seen_remaining)
+
+
+def test_extract_from_safe_args_deadline_exceeded_degrades_to_diagnostic(
+    monkeypatch,
+) -> None:
+    # Codex review (PR #591): this pass is advisory (ADR-028 D3) — a
+    # DeadlineExceeded from the now-bounded clang subprocess must degrade to
+    # the same diagnostic+[] contract as any other probe failure, not
+    # propagate and abort the whole L5 type-graph fold.
+    import abicheck.buildsource.type_graph as tg
+    from abicheck import deadline
+
+    def _raise(*_a, **_k):
+        raise deadline.DeadlineExceeded(-1.0)
+
+    monkeypatch.setattr(tg.deadline, "run_bounded", _raise)
+    extractor = ClangTypeGraphExtractor(clang_bin="clang++")
+    monkeypatch.setattr(extractor, "available", lambda: True)
+    edges = extractor._extract_from_safe_args(["--", "foo.cpp"])
+    assert edges == []
+    assert any("clang invocation failed" in d for d in extractor.diagnostics)
+
+
+def test_extract_from_safe_args_bounded_by_local_cap_not_full_scan_budget(
+    monkeypatch,
+) -> None:
+    """Codex review (PR #591), round 8: deadline.run_bounded() honors an
+    active outer deadline verbatim (not min(timeout, left)), so a bare
+    timeout=120 on this L5 clang call alone did nothing once a scan
+    --budget was active: the call stayed bound by the FULL remaining scan
+    budget instead of this pass's own 120s local cap, mirroring the
+    identical call_graph.py regression. Assert the ContextVar deadline
+    observed inside run_bounded is capped near the local cap, not the much
+    larger outer scan budget."""
+    import abicheck.buildsource.type_graph as tg
+    from abicheck import deadline
+
+    seen_remaining: list[float | None] = []
+
+    def fake_run_bounded(*_a, **_k):
+        seen_remaining.append(deadline.remaining())
+        raise deadline.DeadlineExceeded(-1.0)
+
+    monkeypatch.setattr(tg.deadline, "run_bounded", fake_run_bounded)
+    extractor = ClangTypeGraphExtractor(clang_bin="clang++")
+    monkeypatch.setattr(extractor, "available", lambda: True)
+    with deadline.deadline_scope(1800.0):  # a generous 30-minute --budget
+        extractor._extract_from_safe_args(["--", "foo.cpp"])
+
+    assert seen_remaining
+    assert seen_remaining[0] is not None and seen_remaining[0] <= 120.5
+
+
+def test_extract_from_safe_args_rechecks_deadline_before_parsing_ast(
+    monkeypatch,
+) -> None:
+    """Codex review (PR #591): the same post-subprocess gap as call_graph's
+    identical fix — clang can exit successfully right as the budget expires,
+    but json.loads()+parse_clang_ast_types() used to run unbounded. Must
+    degrade to the advisory diagnostic+[] contract (ADR-028 D3), not raise."""
+    import json as _json
+    import time
+
+    import abicheck.buildsource.type_graph as tg
+    from abicheck import deadline
+
+    ast = _tu(_record("Widget", inner=[_field("x", "int")]))
+
+    def fake_run(*_a, **_k):
+        # Simulate the budget running out while clang was still parsing: by
+        # the time it exits successfully, the deadline has already passed.
+        time.sleep(0.05)
+        return _FakeProc(_json.dumps(ast))
+
+    monkeypatch.setattr(tg.shutil, "which", lambda _b: "/usr/bin/clang++")
+    monkeypatch.setattr(tg.deadline, "run_bounded", fake_run)
+    extractor = ClangTypeGraphExtractor(clang_bin="clang++")
+    with deadline.deadline_scope(0.03):
+        edges = extractor._extract_from_safe_args(["--", "foo.cpp"])
+    assert edges == []
+    assert any(
+        "scan deadline exceeded before parsing clang AST" in d
+        for d in extractor.diagnostics
+    )
+
+
+def test_extract_from_safe_args_rechecks_deadline_before_walking_ast(
+    monkeypatch,
+) -> None:
+    """Codex review (PR #591, round 4): json.loads() on a huge L5 type-graph
+    AST can itself consume the rest of the budget -- the existing pre-load
+    deadline.check() doesn't catch that; must re-check again after the load,
+    before the recursive parse_clang_ast_types() walk."""
+    import json as _json
+    import time
+
+    import abicheck.buildsource.type_graph as tg
+    from abicheck import deadline
+
+    ast = _tu(_record("Widget", inner=[_field("x", "int")]))
+
+    def fake_run(*_a, **_k):
+        return _FakeProc(_json.dumps(ast))
+
+    monkeypatch.setattr(tg.shutil, "which", lambda _b: "/usr/bin/clang++")
+    monkeypatch.setattr(tg.deadline, "run_bounded", fake_run)
+    real_loads = tg.json.loads
+
+    def _slow_loads(text):
+        time.sleep(0.05)
+        return real_loads(text)
+
+    monkeypatch.setattr(tg.json, "loads", _slow_loads)
+    extractor = ClangTypeGraphExtractor(clang_bin="clang++")
+    with deadline.deadline_scope(0.03):
+        edges = extractor._extract_from_safe_args(["--", "foo.cpp"])
+    assert edges == []
+    assert any(
+        "scan deadline exceeded before walking clang AST" in d
+        for d in extractor.diagnostics
+    )
+
+
 # ── ClangTypeGraphExtractor: graceful degrade ────────────────────────────────
 
 
@@ -1510,7 +1670,7 @@ def _patch_clang(monkeypatch, *, proc: _FakeProc) -> None:
     import abicheck.buildsource.type_graph as tg
 
     monkeypatch.setattr(tg.shutil, "which", lambda _b: "/usr/bin/clang++")
-    monkeypatch.setattr(tg.subprocess, "run", lambda *_a, **_k: proc)
+    monkeypatch.setattr(tg.deadline, "run_bounded", lambda *_a, **_k: proc)
 
 
 def test_extract_from_safe_args_nonzero_exit_records_diagnostic_but_salvages_edges(
@@ -1846,9 +2006,7 @@ def test_real_mangled_function_identity_stays_the_mangled_name() -> None:
         {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Config")]},
         _record(
             "Widget",
-            inner=[
-                _method("bar", "_ZN6Widget3barE", [_param("x", "detail::Config")])
-            ],
+            inner=[_method("bar", "_ZN6Widget3barE", [_param("x", "detail::Config")])],
         ),
     )
     edges = parse_clang_ast_types(ast)

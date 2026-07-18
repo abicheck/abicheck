@@ -61,6 +61,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from .. import deadline
 from .build_evidence import BuildEvidence
 from .model import ExtractorRecord
 
@@ -189,15 +190,25 @@ def _claim_inferred_build_dir(
         fcntl = None  # type: ignore[assignment]
 
     if fcntl is not None:
+        # Bound the wait by the active scan --budget too, not just the local
+        # *timeout* default (600s) -- otherwise scan --budget 5s on a
+        # contended checkout could still block here for minutes before the
+        # bounded query subprocess it's waiting to reach is ever started
+        # (Codex review, PR #591, round 4).
+        scan_remaining = deadline.remaining()
+        effective_timeout = (
+            min(timeout, scan_remaining) if scan_remaining is not None else timeout
+        )
         fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
         waited = 0.0
         while True:
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except OSError:
-                if waited >= timeout:
+                if waited >= effective_timeout:
                     os.close(fd)
-                    # Peer still holds it — don't block the scan indefinitely.
+                    # Peer still holds it (or the scan budget ran out) —
+                    # don't block the scan indefinitely.
                     return Path(
                         tempfile.mkdtemp(prefix=f"{base.name}-", dir=base.parent)
                     ), _noop_release
@@ -351,21 +362,43 @@ def _is_gnu_make_launcher(tool: str) -> bool:
     messages. BSD/non-GNU make implementations can accept different flags or
     print different transcript forms, so skip them cleanly.
     """
+    probe_timeout = 10.0
+    scan_remaining = deadline.remaining()
+    if scan_remaining is not None:
+        # run_bounded() honors an active outer deadline verbatim (not
+        # min(timeout, left)), so a bare `timeout=` alone would let this
+        # probe run for the *whole* remaining scan budget under a generous
+        # --budget instead of its own 10s cap; nest a narrower scope bound
+        # by whichever is tighter (Codex review, PR #591, round 2 — mirrors
+        # the include-map local-cap fix).
+        probe_timeout = min(probe_timeout, scan_remaining)
     try:
-        proc = subprocess.run(  # noqa: S603 - fixed tool plus --version, shell=False
-            [tool, "--version"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            timeout=10,
-            check=False,
-        )
+        with deadline.deadline_scope(probe_timeout):
+            proc = deadline.run_bounded(  # noqa: S603 - fixed tool plus --version, shell=False
+                [tool, "--version"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=probe_timeout,
+            )
+    except deadline.DeadlineExceeded:
+        # The nested scope above already restored the OUTER deadline by the
+        # time this except runs, so re-checking it here distinguishes "only
+        # this probe's local 10s cap expired" (an ordinary unavailable-tool
+        # result) from "the enclosing scan --budget is genuinely gone"
+        # (propagate, don't misreport it as launcher detection failing and
+        # potentially waste more time probing further candidates)
+        # (CodeRabbit review, PR #591).
+        deadline.check()
+        return False
     except (OSError, subprocess.SubprocessError):
         return False
     return proc.returncode == 0 and "GNU Make" in (proc.stdout or "")
 
 
-def _select_gnu_make_launcher(which: Callable[[str], str | None]) -> _MakeLauncher | None:
+def _select_gnu_make_launcher(
+    which: Callable[[str], str | None],
+) -> _MakeLauncher | None:
     """Pick a GNU Make launcher.
 
     Prefer the platform's normal ``make`` when it is GNU (Linux/common CI), then
@@ -390,8 +423,10 @@ def _query_tool_available(tool: str, which: Callable[[str], str | None]) -> bool
     resolved path as available avoids a second PATH lookup with a different
     spelling such as ``which('/usr/bin/make')``.
     """
-    if Path(tool).is_absolute() or tool.startswith(("/", "\\")) or (
-        len(tool) >= 3 and tool[1] == ":" and tool[2] in ("/", "\\")
+    if (
+        Path(tool).is_absolute()
+        or tool.startswith(("/", "\\"))
+        or (len(tool) >= 3 and tool[1] == ":" and tool[2] in ("/", "\\"))
     ):
         return True
     return which(tool) is not None
@@ -497,16 +532,37 @@ def _run_query_process(
     extractors: list[ExtractorRecord],
 ) -> subprocess.CompletedProcess[str] | None:
     """Run the inferred query; None (+ failed record + diagnostic) if it cannot run."""
+    scan_remaining = deadline.remaining()
+    effective_timeout = (
+        timeout if scan_remaining is None else min(timeout, scan_remaining)
+    )
     try:
-        return subprocess.run(  # noqa: S603 - fixed abicheck-authored argv, shell=False
-            cmd,
-            cwd=str(sources),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT if system == "make" else subprocess.PIPE,
-            text=True,
-            timeout=timeout,
-            check=False,
+        # Bound by min(local timeout default, active scan --budget) —
+        # run_bounded() alone would honor a generous outer deadline verbatim
+        # instead of this query's own cap, letting a hung cmake configure/
+        # bazel aquery/make dry-run burn the whole remaining scan budget —
+        # and process-group-safe on timeout. Runs inside run_scan_core's
+        # L2-L5 deadline scope just like the clang/castxml calls it feeds
+        # (Codex review, PR #591, round 8).
+        with deadline.deadline_scope(effective_timeout):
+            return deadline.run_bounded(  # noqa: S603 - fixed abicheck-authored argv, shell=False
+                cmd,
+                cwd=str(sources),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT if system == "make" else subprocess.PIPE,
+                text=True,
+                timeout=timeout,
+            )
+    except deadline.DeadlineExceeded as exc:
+        extractors.append(
+            ExtractorRecord(
+                name="build_query_auto",
+                status="failed",
+                detail=f"auto {system} query aborted: scan deadline exceeded ({exc})",
+            )
         )
+        merged.diagnostics.append(f"build_query_auto: scan deadline exceeded ({exc})")
+        return None
     except (OSError, subprocess.SubprocessError) as exc:
         extractors.append(
             ExtractorRecord(

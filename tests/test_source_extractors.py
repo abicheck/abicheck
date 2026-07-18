@@ -326,11 +326,165 @@ def test_extract_runs_in_compile_unit_directory(tmp_path: Path, monkeypatch) -> 
         Path(out).write_text('<GCC_XML><File id="f1" name="foo.h"/></GCC_XML>')
         return _Result()
 
-    monkeypatch.setattr(castxml_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(castxml_mod.deadline, "run_bounded", _fake_run)
     cu = _cu(source="src/foo.cpp", directory=str(tmp_path))
     tu = extractor.extract(cu, public_header_roots=["foo.h"], target_id="target://x")
     assert captured["cwd"] == str(tmp_path)
     assert tu.extractor["name"] == "castxml-source"
+
+
+def test_extract_uses_deadline_bounded_not_raw_subprocess(monkeypatch) -> None:
+    # P0 follow-up: same fix family as the L2 header-AST subprocess
+    # (abicheck/deadline.py) — the castxml L4 extractor must go through
+    # deadline.run_bounded (shrinking --budget deadline + process-group kill
+    # on timeout), not a bare subprocess.run(timeout=self.timeout).
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
+
+    extractor = CastxmlSourceExtractor()
+    monkeypatch.setattr(extractor, "available", lambda: True)
+    seen: dict[str, object] = {}
+
+    class _Result:
+        returncode = 0
+        stderr = ""
+
+    def _fake_run(cmd, **kw):  # type: ignore[no-untyped-def]
+        seen.update(kw)
+        out = cmd[cmd.index("-o") + 1]
+        Path(out).write_text('<GCC_XML><File id="f1" name="foo.h"/></GCC_XML>')
+        return _Result()
+
+    monkeypatch.setattr(castxml_mod.deadline, "run_bounded", _fake_run)
+    extractor.extract(_cu(source="foo.cpp"), public_header_roots=["foo.h"])
+    assert seen.get("timeout") == extractor.timeout
+
+
+def test_extract_deadline_exceeded_degrades_like_timeout(monkeypatch) -> None:
+    # A --budget deadline expiring mid-extraction must degrade to the same
+    # SourceExtractionError contract as an ordinary subprocess timeout (this
+    # extractor's failures already fold into partial per-TU coverage rather
+    # than aborting the scan), not propagate as a distinct exception type.
+    from abicheck import deadline
+    from abicheck.buildsource.source_extractors import (
+        SourceExtractionError,
+        castxml as castxml_mod,
+    )
+
+    extractor = CastxmlSourceExtractor()
+    monkeypatch.setattr(extractor, "available", lambda: True)
+
+    def _raise(cmd, **kw):  # type: ignore[no-untyped-def]
+        raise deadline.DeadlineExceeded(-1.0)
+
+    monkeypatch.setattr(castxml_mod.deadline, "run_bounded", _raise)
+    with pytest.raises(SourceExtractionError, match="timed out"):
+        extractor.extract(_cu(source="foo.cpp"), public_header_roots=["foo.h"])
+
+
+def test_extract_bounded_by_local_cap_not_full_scan_budget(monkeypatch) -> None:
+    """Codex review (PR #591), round 7: deadline.run_bounded() honors an
+    active outer deadline verbatim (not min(timeout, left)), so a bare
+    timeout=self.timeout on the L4 castxml call alone did nothing once a scan
+    --budget was active: the call stayed bound by the FULL remaining scan
+    budget instead of this extractor's own ~120s local cap. A hung per-TU
+    castxml replay under a generous --budget could therefore eat the whole
+    remaining scan instead of degrading after self.timeout. Assert the
+    ContextVar deadline observed inside run_bounded is capped at the local
+    timeout, not the much larger outer scan budget."""
+    from abicheck import deadline
+    from abicheck.buildsource.source_extractors import (
+        SourceExtractionError,
+        castxml as castxml_mod,
+    )
+
+    extractor = CastxmlSourceExtractor(timeout=10)
+    monkeypatch.setattr(extractor, "available", lambda: True)
+    seen_remaining: list[float | None] = []
+
+    def _raise(cmd, **kw):  # type: ignore[no-untyped-def]
+        seen_remaining.append(deadline.remaining())
+        raise deadline.DeadlineExceeded(-1.0)
+
+    monkeypatch.setattr(castxml_mod.deadline, "run_bounded", _raise)
+    with deadline.deadline_scope(1800.0):  # a generous 30-minute --budget
+        with pytest.raises(SourceExtractionError):
+            extractor.extract(_cu(source="foo.cpp"), public_header_roots=["foo.h"])
+
+    assert seen_remaining
+    # Bound by the extractor's own ~10s local cap, not the 1800s scan budget.
+    assert seen_remaining[0] is not None and seen_remaining[0] <= 10.5
+
+
+def test_extract_rechecks_deadline_before_parsing_xml(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Codex review follow-up (PR #591): the 'check deadline before loading
+    cached/output data' gap fixed in the L2 dumper.py path and the L4 clang
+    extractor also existed here — a budget that expires exactly as castxml
+    exits successfully must not silently let the XML parse run past it, and
+    must degrade to SourceExtractionError (L4 never aborts the scan), not a
+    raw DeadlineExceeded."""
+    import time
+
+    from abicheck import deadline
+    from abicheck.buildsource.source_extractors import (
+        SourceExtractionError,
+        castxml as castxml_mod,
+    )
+
+    extractor = CastxmlSourceExtractor()
+    monkeypatch.setattr(extractor, "available", lambda: True)
+
+    class _Result:
+        returncode = 0
+        stderr = ""
+
+    def _fake_run(cmd, **kw):  # type: ignore[no-untyped-def]
+        time.sleep(0.05)
+        out = cmd[cmd.index("-o") + 1]
+        Path(out).write_text('<GCC_XML><File id="f1" name="foo.h"/></GCC_XML>')
+        return _Result()
+
+    monkeypatch.setattr(castxml_mod.deadline, "run_bounded", _fake_run)
+    with deadline.deadline_scope(0.01):
+        with pytest.raises(SourceExtractionError, match="deadline exceeded"):
+            extractor.extract(_cu(source="foo.cpp"), public_header_roots=["foo.h"])
+
+
+def test_extract_rechecks_deadline_after_parsing_xml(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Codex review (PR #591, round 4): DefusedET.parse() on a large per-TU
+    castxml XML file can itself consume the rest of the budget -- the
+    existing pre-parse deadline.check() doesn't catch that; must re-check
+    again after the parse, before walking the tree in _parse_root."""
+    import time
+
+    from abicheck import deadline
+    from abicheck.buildsource.source_extractors import (
+        SourceExtractionError,
+        castxml as castxml_mod,
+    )
+
+    extractor = CastxmlSourceExtractor()
+    monkeypatch.setattr(extractor, "available", lambda: True)
+
+    class _Result:
+        returncode = 0
+        stderr = ""
+
+    def _fake_run(cmd, **kw):  # type: ignore[no-untyped-def]
+        out = cmd[cmd.index("-o") + 1]
+        Path(out).write_text('<GCC_XML><File id="f1" name="foo.h"/></GCC_XML>')
+        return _Result()
+
+    monkeypatch.setattr(castxml_mod.deadline, "run_bounded", _fake_run)
+    real_parse = castxml_mod.DefusedET.parse
+
+    def _slow_parse(path):
+        time.sleep(0.05)
+        return real_parse(path)
+
+    monkeypatch.setattr(castxml_mod.DefusedET, "parse", _slow_parse)
+    with deadline.deadline_scope(0.03):
+        with pytest.raises(SourceExtractionError, match="deadline exceeded"):
+            extractor.extract(_cu(source="foo.cpp"), public_header_roots=["foo.h"])
 
 
 def test_unredact_home_expands_tilde() -> None:
@@ -387,7 +541,7 @@ def test_extract_unredacts_home_for_replay(tmp_path: Path, monkeypatch) -> None:
         Path(out).write_text('<GCC_XML><File id="f1" name="foo.h"/></GCC_XML>')
         return _Result()
 
-    monkeypatch.setattr(castxml_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(castxml_mod.deadline, "run_bounded", _fake_run)
     # Absolute (redacted) source + a `~`-redacted include path in the build.
     cu = _cu(
         source="~/proj/src/foo.cpp",
@@ -424,7 +578,7 @@ def test_extract_unredacts_home_in_macro_value(tmp_path: Path, monkeypatch) -> N
         Path(out).write_text('<GCC_XML><File id="f1" name="foo.h"/></GCC_XML>')
         return _Result()
 
-    monkeypatch.setattr(castxml_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(castxml_mod.deadline, "run_bounded", _fake_run)
     cu = _cu(
         source="~/proj/src/foo.cpp",
         directory="~/proj",
@@ -487,13 +641,17 @@ def test_entity_from_function_drops_bare_name_mangled_fallback() -> None:
     # distinct (Codex review #335, P2).
     ctor_int = entity_from_function(
         Function(
-            name="Widget", mangled="Widget", return_type="void",
+            name="Widget",
+            mangled="Widget",
+            return_type="void",
             params=[Param("x", "int")],
         )
     )
     ctor_dbl = entity_from_function(
         Function(
-            name="Widget", mangled="Widget", return_type="void",
+            name="Widget",
+            mangled="Widget",
+            return_type="void",
             params=[Param("x", "double")],
         )
     )
@@ -885,7 +1043,9 @@ def test_entity_from_typedef_carries_provenance() -> None:
     assert plain.source_location.origin == "PUBLIC_HEADER"
     assert plain.visibility == "public_header"
 
-    gen = entity_from_typedef("cfg_t", "long", source_header="gen/cfg.h", generated=True)
+    gen = entity_from_typedef(
+        "cfg_t", "long", source_header="gen/cfg.h", generated=True
+    )
     assert gen.source_location.origin == "GENERATED"
     assert gen.visibility == "generated"
 

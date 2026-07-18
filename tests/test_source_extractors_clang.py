@@ -1984,11 +1984,7 @@ def test_macros_suppress_project_prefixed_include_guard(tmp_path) -> None:
         "/* case47: a leading file-header comment, like the real fixture. */\n"
         "#ifndef CASE47_V1_HPP\n#define CASE47_V1_HPP\n\nclass Calculator {};\n"
     )
-    text = (
-        f'# 1 "{header}" 1\n'
-        "#define CASE47_V1_HPP\n"
-        "#define CASE47_VALUE 3\n"
-    )
+    text = f'# 1 "{header}" 1\n#define CASE47_V1_HPP\n#define CASE47_VALUE 3\n'
     macros, _ = macros_from_preprocessor(text, [str(header)])
     names = {e.qualified_name for e in macros}
     assert names == {"CASE47_VALUE"}
@@ -2175,13 +2171,14 @@ def _patch_run(monkeypatch, handler) -> ClangSourceExtractor:  # type: ignore[no
 
     extractor = ClangSourceExtractor()
     monkeypatch.setattr(extractor, "available", lambda: True)
-    monkeypatch.setattr(clang_mod.subprocess, "run", handler)
+    monkeypatch.setattr(clang_mod.deadline, "run_bounded", handler)
     return extractor
 
 
 def test_extract_runs_macro_pass(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     import json
 
+    from abicheck.buildsource.source_extractors import clang as clang_mod
     from abicheck.buildsource.source_extractors.clang import _clang_compiler_version
 
     # The compiler-version lookup (ADR-038 C.8 fact_set) is process-lifetime
@@ -2201,6 +2198,12 @@ def test_extract_runs_macro_pass(monkeypatch) -> None:  # type: ignore[no-untype
         return _Result(0, '# 1 "include/foo.h" 1\n#define FOO_SIZE 16\n')
 
     extractor = _patch_run(monkeypatch, handler)
+    # _clang_compiler_version's "clang -dumpversion" probe is a small, best-
+    # effort provenance lookup (like dumper.py's castxml --version note) and
+    # deliberately does NOT go through deadline.run_bounded — patch it here
+    # too so this test's call count stays deterministic without depending on
+    # a real clang install.
+    monkeypatch.setattr(clang_mod.subprocess, "run", handler)
     tu = extractor.extract(
         _cu(source="foo.cpp"), public_header_roots=["include/foo.h"], target_id="t"
     )
@@ -2222,6 +2225,25 @@ def test_extract_macro_pass_failure_is_diagnostic(monkeypatch) -> None:  # type:
     tu = extractor.extract(_cu(), public_header_roots=["include/foo.h"])
     assert tu.macros == []
     assert any("macro pass" in d for d in tu.diagnostics)
+
+
+def test_extract_macro_pass_timeout_is_diagnostic_not_crash(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    # The macro pass's own _run() (distinct from the AST-dump pass's
+    # _run_ast_to_file) must also be bounded/process-group-safe (Codex review,
+    # PR #591) — and since this second pass is best-effort (ADR-028 D7), a
+    # timeout there degrades to a diagnostic, not a crash of the whole extract.
+    import json
+    import subprocess as sp
+
+    def handler(cmd, **kw):  # type: ignore[no-untyped-def]
+        if "-ast-dump=json" in cmd:
+            return _emit_ast(kw, json.dumps(_ast()))
+        raise sp.TimeoutExpired(cmd, 5)
+
+    extractor = _patch_run(monkeypatch, handler)
+    tu = extractor.extract(_cu(), public_header_roots=["include/foo.h"])
+    assert tu.macros == []
+    assert any("macro pass skipped" in d and "timed out" in d for d in tu.diagnostics)
 
 
 def test_extract_recovered_ast_exit_downgrades_edges_and_read_files_coverage(
@@ -2284,6 +2306,71 @@ def test_extract_timeout_raises(monkeypatch) -> None:  # type: ignore[no-untyped
         extractor.extract(_cu(), public_header_roots=["include/foo.h"])
 
 
+def test_extract_deadline_exceeded_degrades_like_timeout(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    # P0 follow-up: an active scan --budget expiring mid-L4-extraction must
+    # degrade to the SAME SourceExtractionError contract as an ordinary
+    # subprocess timeout (this extractor's failures already fold into partial
+    # per-TU coverage rather than aborting the scan — ADR-030 D3), not
+    # propagate as a distinct, uncaught exception type.
+    from abicheck import deadline
+
+    def handler(cmd, **kw):  # type: ignore[no-untyped-def]
+        raise deadline.DeadlineExceeded(-1.0)
+
+    extractor = _patch_run(monkeypatch, handler)
+    with pytest.raises(SourceExtractionError, match="timed out"):
+        extractor.extract(_cu(), public_header_roots=["include/foo.h"])
+
+
+def test_extract_rechecks_deadline_before_loading_ast(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Codex review follow-up (PR #591): the 'check deadline before loading
+    the AST file' gap fixed in the L2 dumper.py path also existed in this L4
+    extractor — a budget that expires exactly as clang exits successfully
+    must not silently let the AST JSON load run past it, and must degrade to
+    SourceExtractionError (L4 never aborts the scan), not a raw
+    DeadlineExceeded escaping past _extract_one's except clause."""
+    import json
+    import time
+
+    from abicheck import deadline
+
+    def handler(cmd, **kw):  # type: ignore[no-untyped-def]
+        time.sleep(0.05)
+        return _emit_ast(kw, json.dumps(_ast()))
+
+    extractor = _patch_run(monkeypatch, handler)
+    with deadline.deadline_scope(0.01):
+        with pytest.raises(SourceExtractionError, match="deadline exceeded"):
+            extractor.extract(_cu(), public_header_roots=["include/foo.h"])
+
+
+def test_extract_rechecks_deadline_after_loading_ast(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Codex review (PR #591, round 4): json.load() on a huge L4 AST can
+    itself consume the rest of the budget -- the existing pre-load
+    deadline.check() doesn't catch that; must re-check again after the load,
+    before walking the AST in source_abi_from_clang_ast/_attach_source_edges."""
+    import json
+    import time
+
+    from abicheck import deadline
+    from abicheck.buildsource.source_extractors import clang as clang_mod
+
+    def handler(cmd, **kw):  # type: ignore[no-untyped-def]
+        return _emit_ast(kw, json.dumps(_ast()))
+
+    extractor = _patch_run(monkeypatch, handler)
+    real_json_load = clang_mod.json.load
+
+    def _slow_load(fh):
+        time.sleep(0.05)
+        return real_json_load(fh)
+
+    monkeypatch.setattr(clang_mod.json, "load", _slow_load)
+    with deadline.deadline_scope(0.03):
+        with pytest.raises(SourceExtractionError, match="deadline exceeded"):
+            extractor.extract(_cu(), public_header_roots=["include/foo.h"])
+
+
 def test_extract_invalid_json_raises(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     extractor = _patch_run(monkeypatch, lambda cmd, **kw: _emit_ast(kw, "{not json"))
     with pytest.raises(SourceExtractionError, match="not valid JSON"):
@@ -2304,11 +2391,63 @@ def test_run_ast_to_file_unlinks_temp_on_unexpected_error(
     def _boom(cmd, **kw):  # type: ignore[no-untyped-def]
         raise OSError("disk full")
 
-    monkeypatch.setattr(clang_mod.subprocess, "run", _boom)
+    monkeypatch.setattr(clang_mod.deadline, "run_bounded", _boom)
     extractor = ClangSourceExtractor()
     with pytest.raises(OSError, match="disk full"):
         extractor._run_ast_to_file(["clang"], "", "x.cpp")
     assert not spill.exists()  # cleaned up on error
+
+
+def test_run_ast_to_file_bounded_by_local_cap_not_full_scan_budget(monkeypatch) -> None:
+    """Codex review (PR #591), round 7: deadline.run_bounded() honors an
+    active outer deadline verbatim (not min(timeout, left)), so a bare
+    timeout=self.timeout on the L4 AST-dump call alone did nothing once a
+    scan --budget was active: the call stayed bound by the FULL remaining
+    scan budget instead of this extractor's own ~180s local cap. A hung
+    per-TU clang replay under a generous --budget could therefore eat the
+    whole remaining scan instead of degrading after self.timeout. Assert the
+    ContextVar deadline observed inside run_bounded is capped at the local
+    timeout, not the much larger outer scan budget."""
+    from abicheck import deadline
+    from abicheck.buildsource.source_extractors import clang as clang_mod
+
+    seen_remaining: list[float | None] = []
+
+    def fake_run_bounded(*_a, **_k):  # type: ignore[no-untyped-def]
+        seen_remaining.append(deadline.remaining())
+        raise deadline.DeadlineExceeded(-1.0)
+
+    monkeypatch.setattr(clang_mod.deadline, "run_bounded", fake_run_bounded)
+    extractor = ClangSourceExtractor(timeout=10)
+    with deadline.deadline_scope(1800.0):  # a generous 30-minute --budget
+        with pytest.raises(SourceExtractionError):
+            extractor._run_ast_to_file(["clang"], "", "x.cpp")
+
+    assert seen_remaining
+    # Bound by the extractor's own ~10s local cap, not the 1800s scan budget.
+    assert seen_remaining[0] is not None and 0 < seen_remaining[0] <= 10.5
+
+
+def test_run_bounded_by_local_cap_not_full_scan_budget(monkeypatch) -> None:
+    """Same round-7 fix as test_run_ast_to_file_bounded_by_local_cap_not_full_scan_budget,
+    for the macro-pass _run() call site."""
+    from abicheck import deadline
+    from abicheck.buildsource.source_extractors import clang as clang_mod
+
+    seen_remaining: list[float | None] = []
+
+    def fake_run_bounded(*_a, **_k):  # type: ignore[no-untyped-def]
+        seen_remaining.append(deadline.remaining())
+        raise deadline.DeadlineExceeded(-1.0)
+
+    monkeypatch.setattr(clang_mod.deadline, "run_bounded", fake_run_bounded)
+    extractor = ClangSourceExtractor(timeout=10)
+    with deadline.deadline_scope(1800.0):  # a generous 30-minute --budget
+        with pytest.raises(SourceExtractionError):
+            extractor._run(["clang"], "", "x.cpp")
+
+    assert seen_remaining
+    assert seen_remaining[0] is not None and 0 < seen_remaining[0] <= 10.5
 
 
 def test_build_clang_macro_command_gnu_and_msvc() -> None:
@@ -2361,7 +2500,7 @@ def test_extract_parses_fake_clang_json(tmp_path: Path, monkeypatch) -> None:  #
             return _Result(0, "", "")
         return _Result(0, "")  # macro pass (capture_output)
 
-    monkeypatch.setattr(clang_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(clang_mod.deadline, "run_bounded", _fake_run)
     cu = _cu(source="src/foo.cpp", directory=str(tmp_path))
     tu = extractor.extract(
         cu, public_header_roots=["include/foo.h"], target_id="target://x"
@@ -2408,7 +2547,7 @@ def test_extract_populates_source_edges_and_coverage(
             return _Result(0, "", "")
         return _Result(0, "")
 
-    monkeypatch.setattr(clang_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(clang_mod.deadline, "run_bounded", _fake_run)
     cu = _cu(source="src/foo.cpp", directory=str(tmp_path))
     tu = extractor.extract(
         cu, public_header_roots=["include/foo.h"], target_id="target://x"
@@ -2446,7 +2585,7 @@ def test_extract_source_edges_failure_reaches_tu_diagnostics_and_coverage(
             return _Result(0, "", "")
         return _Result(0, "")
 
-    monkeypatch.setattr(clang_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(clang_mod.deadline, "run_bounded", _fake_run)
     cu = _cu(source="src/foo.cpp", directory=str(tmp_path))
     tu = extractor.extract(
         cu, public_header_roots=["include/foo.h"], target_id="target://x"
@@ -2466,7 +2605,7 @@ def test_extract_raises_on_empty_clang_output(monkeypatch) -> None:  # type: ign
         # stderr is bytes (real subprocess PIPE without text=True).
         return _Result(1, "", b"fatal error: 'foo.h' file not found")
 
-    monkeypatch.setattr(clang_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(clang_mod.deadline, "run_bounded", _fake_run)
     with pytest.raises(SourceExtractionError, match="no AST"):
         extractor.extract(_cu(), public_header_roots=["include/foo.h"])
 

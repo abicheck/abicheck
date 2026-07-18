@@ -25,6 +25,7 @@ from pathlib import Path
 
 import pytest
 
+from abicheck import deadline
 from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit, Target
 from abicheck.buildsource.source_abi import SourceAbiTu, SourceEntity, SourceLocation
 from abicheck.buildsource.source_extractors.base import SourceExtractionError
@@ -32,6 +33,7 @@ from abicheck.buildsource.source_replay import (
     CI_MODE_TO_SCOPE,
     REPLAY_SCOPES,
     SourceAbiCache,
+    _extract_cache_misses,
     compute_tu_cache_key,
     public_header_roots_for,
     run_source_replay,
@@ -42,6 +44,19 @@ from abicheck.buildsource.source_replay import (
 
 def _cu(cu_id: str, source: str, target_id: str = "", **kw: object) -> CompileUnit:
     return CompileUnit(id=cu_id, source=source, target_id=target_id, language="CXX", **kw)  # type: ignore[arg-type]
+
+
+def _worker_records_remaining_deadline(cu: CompileUnit) -> tuple[None, str]:
+    """Module-level so it stays picklable if run under a process pool.
+
+    Reports the observed ``deadline.remaining()`` through the worker's own
+    return value rather than a module-level list: a ProcessPoolExecutor
+    worker mutates its own private copy of a global, leaving the parent's
+    list empty, so a module-level accumulator only works for the
+    ThreadPoolExecutor backend (CodeRabbit review, PR #591).
+    """
+    remaining = deadline.remaining()
+    return None, "none" if remaining is None else repr(remaining)
 
 
 def _build() -> BuildEvidence:
@@ -912,3 +927,69 @@ def test_parallel_l4_is_deterministic(monkeypatch):
     ids_serial = [e.id for e in s_serial.reachable_declarations]
     ids_par = [e.id for e in s_par.reachable_declarations]
     assert ids_serial == ids_par                  # same linked surface, same order
+
+
+def test_extract_cache_misses_propagates_deadline_into_pool_workers() -> None:
+    """Codex review (PR #591): contextvars don't cross a ThreadPoolExecutor
+    boundary, so a worker submitted from inside deadline.deadline_scope() used
+    to see no active deadline at all and silently fall back to the extractor's
+    fixed default timeout regardless of --budget. _extract_cache_misses must
+    capture the deadline before dispatching and re-establish it in each
+    worker.
+
+    Reads the observed values back from _extract_cache_misses's own return
+    value (not a module-level list) so this is valid for both the default
+    ThreadPoolExecutor and the opt-in ABICHECK_L4_EXECUTOR=process
+    ProcessPoolExecutor backend: a ProcessPoolExecutor worker mutates its
+    own private copy of a global list, leaving the parent's list empty
+    (CodeRabbit review, PR #591)."""
+    units = [_cu(f"cu://u{i}", f"src/u{i}.cpp") for i in range(4)]
+    with deadline.deadline_scope(30.0):
+        results = _extract_cache_misses(
+            _worker_records_remaining_deadline, units, jobs=4
+        )
+    seen = [None if raw == "none" else float(raw) for _, raw in results]
+    assert len(seen) == 4
+    assert all(r is not None for r in seen), (
+        "pool worker saw no active deadline (remaining()=None) — the scan "
+        "deadline did not cross the executor boundary"
+    )
+    assert all(0 < r <= 30.0 for r in seen)
+
+
+def test_extract_cache_misses_installs_sigterm_cleanup_in_process_pool_workers(
+    monkeypatch,
+) -> None:
+    """Codex review (PR #591, round 3): a ProcessPoolExecutor worker is a
+    genuinely separate OS process, so it never inherits the SIGTERM handler
+    cli.main installs in the main process (fork-inherited handlers aren't
+    guaranteed either -- ABICHECK_L4_EXECUTOR's pool can use the "spawn"
+    start method). Without deadline.install_sigterm_cleanup running inside
+    each worker, an external SIGTERM landing there mid-run_bounded() kills
+    the worker with Python's default disposition, leaving its detached
+    clang/castxml process group untracked and orphaned. Must pass it as
+    the pool's initializer."""
+    import abicheck.buildsource.source_replay as sr
+
+    captured: dict[str, object] = {}
+
+    class _FakeProcessPoolExecutor:
+        def __init__(self, *a, **kw):
+            captured.update(kw)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def map(self, fn, items):
+            return [fn(u) for u in items]
+
+    monkeypatch.setattr(sr, "ProcessPoolExecutor", _FakeProcessPoolExecutor)
+    monkeypatch.setattr(sr, "_l4_use_process_pool", lambda: True)
+
+    units = [_cu(f"cu://u{i}", f"src/u{i}.cpp") for i in range(2)]
+    sr._extract_cache_misses(lambda cu: (None, None), units, jobs=2)
+
+    assert captured.get("initializer") is deadline.install_sigterm_cleanup

@@ -41,12 +41,14 @@ import os
 import shutil
 import subprocess  # noqa: S404 - call-graph extraction shells out to clang (never shell=True)
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from .. import deadline
 from ..build_context import _extract_flags
 from .adapters.base import source_from_argv
 from .source_graph import (
@@ -734,6 +736,25 @@ def _call_graph_jobs(n_units: int) -> int:
     return jobs
 
 
+def _deadline_bound_worker(
+    deadline_ts: float | None,
+    worker: Callable[[BuildEvidenceCompileUnit], list[Any]],
+    unit: BuildEvidenceCompileUnit,
+) -> list[Any]:
+    """Re-establish a captured scan deadline inside a ThreadPoolExecutor worker.
+
+    ``contextvars`` don't cross a ``ThreadPoolExecutor`` boundary, so a worker
+    submitted from ``extract_from_build`` would otherwise see no active
+    deadline and each clang subprocess call inside it would run to its full
+    fixed 120s regardless of ``--budget`` (Codex review, PR #591; same
+    pattern as ``source_replay._deadline_bound_worker``). Shared by both
+    :meth:`ClangCallGraphExtractor.extract_from_build` and
+    ``ClangTypeGraphExtractor.extract_from_build`` (``type_graph.py``).
+    """
+    with deadline.with_deadline_ts(deadline_ts):
+        return worker(unit)
+
+
 # ── live clang extraction (integration only) ────────────────────────────────
 
 
@@ -771,16 +792,29 @@ class ClangCallGraphExtractor:
             self.diagnostics.append(f"{self.clang_bin} not found in PATH")
             return []
         cmd = [self.clang_bin, "-Xclang", "-ast-dump=json", "-fsyntax-only", *argv]
+        local_cap = 120.0
+        scan_remaining = deadline.remaining()
+        effective_timeout = (
+            local_cap if scan_remaining is None else min(local_cap, scan_remaining)
+        )
         try:
-            proc = subprocess.run(  # noqa: S603 - fixed argv, never shell=True
-                cmd,
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                timeout=120,
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
+            # Bound by min(local_cap, active --budget deadline) — run_bounded()
+            # alone would honor a generous outer deadline verbatim instead of
+            # this pass's own 120s cap, letting one hung TU eat the whole
+            # remaining scan budget — and process-group-safe on timeout, same
+            # as the L2/L4 clang calls. A deadline overflow degrades to the
+            # same diagnostic+[] contract as any other probe failure — this
+            # pass is advisory (ADR-028 D3), never authoritative, so it must
+            # never abort the scan (Codex review, PR #591, round 8).
+            with deadline.deadline_scope(effective_timeout):
+                proc = deadline.run_bounded(  # noqa: S603 - fixed argv, never shell=True
+                    cmd,
+                    cwd=cwd,
+                    capture_output=True,
+                    text=True,
+                    timeout=local_cap,
+                )
+        except (OSError, subprocess.SubprocessError, deadline.DeadlineExceeded) as exc:
             self.diagnostics.append(f"clang invocation failed: {exc}")
             return []
         if not proc.stdout.strip():
@@ -802,10 +836,35 @@ class ClangCallGraphExtractor:
                 f"clang exited {proc.returncode} (stderr: {proc.stderr[:200]})"
             )
         try:
+            # clang can exit successfully right as the budget expires; recheck
+            # before the CPU/RSS-heavy parse+walk, same as the L2/L4 post-run
+            # checks (Codex review, PR #591).
+            deadline.check()
+        except deadline.DeadlineExceeded as exc:
+            self.diagnostics.append(
+                f"scan deadline exceeded before parsing clang AST: {exc}"
+            )
+            return []
+        try:
             # Both json.loads and the recursive AST walk can hit Python's
             # recursion limit on a pathologically deep TU; guard so a degenerate
             # AST degrades to "no call edges" rather than aborting collection.
-            return parse_clang_ast_calls(json.loads(proc.stdout))
+            ast = json.loads(proc.stdout)
+        except (ValueError, RecursionError) as exc:
+            self.diagnostics.append(f"could not parse clang AST JSON: {exc}")
+            return []
+        try:
+            # The JSON load itself can consume the rest of the budget on a
+            # huge AST; re-check before the recursive walk (Codex review,
+            # PR #591, round 4).
+            deadline.check()
+        except deadline.DeadlineExceeded as exc:
+            self.diagnostics.append(
+                f"scan deadline exceeded before walking clang AST: {exc}"
+            )
+            return []
+        try:
+            return parse_clang_ast_calls(ast)
         except (ValueError, RecursionError) as exc:
             self.diagnostics.append(f"could not parse clang AST JSON: {exc}")
             return []
@@ -841,8 +900,13 @@ class ClangCallGraphExtractor:
 
         try:
             if self.last_jobs > 1 and len(units) > 1:
+                pool_worker = partial(
+                    _deadline_bound_worker,
+                    deadline.current_deadline_ts(),
+                    self._extract_from_compile_unit,
+                )
                 with ThreadPoolExecutor(max_workers=self.last_jobs) as pool:
-                    for edges in pool.map(self._extract_from_compile_unit, units):
+                    for edges in pool.map(pool_worker, units):
                         add_edges(edges)
             else:
                 for cu in units:

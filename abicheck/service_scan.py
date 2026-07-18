@@ -28,6 +28,7 @@ backward compatibility.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -265,23 +266,71 @@ _COST_PER_TU_REPLAY = 7.5  # L4 per-TU semantic AST replay, cold-cache default
 _COST_PER_TU_GRAPH = 0.02  # L5 per-TU graph fold/edge
 
 
-def _estimate_header_seconds(headers: list[Path]) -> float:
-    """Size-aware L2 cost: a fixed per-header parse/preprocess base plus a
-    marginal per-KB term over each header's on-disk size.
+#: A flat size-based estimate prices a one-line ``#include`` umbrella and a
+#: heavily-templated header identically per KB — real-world field evidence (the
+#: SVS ``datatype.h``/``float16.h``/``meta.h`` trio) showed a dry-run estimate
+#: of 0.51s for headers whose actual parse ran over 15,000s before an external
+#: SIGKILL: none of that cost is visible in on-disk bytes, it comes from
+#: template/include fan-out the compiler has to instantiate. These are a cheap,
+#: local (no compiler invocation) peek for that signal so the dry-run estimate
+#: can flag it instead of reporting a falsely precise number.
+_COMPLEXITY_PEEK_BYTES = 512 * 1024
+_COMPLEXITY_INCLUDE_THRESHOLD = 8  # local #include lines
+_COMPLEXITY_TEMPLATE_THRESHOLD = 5  # template/concept/requires/SFINAE hits
+_COMPLEXITY_MULTIPLIER = 25.0  # conservative floor-raising factor, not a promise
+_INCLUDE_RE = re.compile(rb"^[ \t]*#[ \t]*include\b", re.MULTILINE)
+_TEMPLATE_RE = re.compile(
+    rb"\btemplate[ \t]*<|\bconcept\b|\brequires\b|\benable_if\b|\bconstexpr\b"
+)
 
-    A large templated header (an ICU/hdf5 umbrella) is ranked above a one-line
-    shim instead of every header costing the same flat anchor. Falls back to the
-    base alone when a path can't be stat'd (a symlink/glob that no longer
-    resolves) so the estimate never raises mid-dry-run.
+
+def _header_complexity_signal(path: Path) -> bool:
+    """Best-effort local peek: many ``#include``s or heavy template/concept/
+    constexpr usage in *path* signal a header whose real parse time a flat
+    size-based estimate systematically under-prices (recursive template
+    instantiation is not linear in header bytes — the SVS pathological case had
+    small headers and a near-unbounded real parse time). Never raises; an
+    unreadable header is treated as unknown risk (not flagged), matching the
+    size estimate's own fall back to the base cost alone.
+    """
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read(_COMPLEXITY_PEEK_BYTES)
+    except OSError:
+        return False
+    return (
+        len(_INCLUDE_RE.findall(data)) >= _COMPLEXITY_INCLUDE_THRESHOLD
+        or len(_TEMPLATE_RE.findall(data)) >= _COMPLEXITY_TEMPLATE_THRESHOLD
+    )
+
+
+def _estimate_header_seconds(headers: list[Path]) -> tuple[float, bool]:
+    """Size-aware L2 cost, plus a complexity-risk flag.
+
+    Returns ``(seconds, high_risk)``: *seconds* is a fixed per-header parse/
+    preprocess base plus a marginal per-KB term over each header's on-disk
+    size — inflated by :data:`_COMPLEXITY_MULTIPLIER` for any header that trips
+    :func:`_header_complexity_signal`, so a small-but-pathological header no
+    longer prices as a fraction of a second. *high_risk* is True when any
+    header tripped the signal — callers surface this as an explicit caveat
+    instead of a falsely precise point estimate (P0 SVS field report).
+
+    Falls back to the base alone when a path can't be stat'd (a symlink/glob
+    that no longer resolves) so the estimate never raises mid-dry-run.
     """
     total = 0.0
+    high_risk = False
     for h in headers:
-        total += _COST_PER_HEADER_PARSE
+        cost = _COST_PER_HEADER_PARSE
         try:
-            total += _COST_PER_HEADER_KB * (h.stat().st_size / 1024.0)
+            cost += _COST_PER_HEADER_KB * (h.stat().st_size / 1024.0)
         except OSError:
-            continue
-    return total
+            pass
+        if _header_complexity_signal(h):
+            high_risk = True
+            cost *= _COMPLEXITY_MULTIPLIER
+        total += cost
+    return total, high_risk
 
 
 def _count_compile_db_tus(compile_db: Path) -> int:
@@ -485,7 +534,8 @@ def _resolve_estimate_level(
     # valid seed, else TARGET — an unseeded explicit-source estimate must not
     # under-project to the "source-changed" default (no seed → no TUs).
     collect_mode = level_to_collect_mode(
-        resolved, eff_depth,
+        resolved,
+        eff_depth,
         source_scope=SourceScope.CHANGED if seeded else SourceScope.TARGET,
     )
     return resolved, eff_depth, collect_mode
@@ -564,7 +614,18 @@ def _intrinsic_layer_estimates(
     eff_req_headers = [] if eff_depth is EvidenceDepth.BINARY else list(req.headers)
     expanded_headers = expand_header_inputs(eff_req_headers) if eff_req_headers else []
     n_headers = len(expanded_headers)
-    l2_seconds = _estimate_header_seconds(expanded_headers)
+    l2_seconds, l2_high_risk = _estimate_header_seconds(expanded_headers)
+    if not n_headers:
+        l2_note = "no headers supplied"
+    elif l2_high_risk:
+        l2_note = (
+            "public-header AST (needs castxml or clang); deep #include/template "
+            "complexity detected — this is a conservative floor, not a precise "
+            "ETA, actual parse time can be far higher (unbounded in pathological "
+            "cases); pass --budget to cap it"
+        )
+    else:
+        l2_note = "public-header AST (needs castxml or clang)"
     return [
         CostEstimate(
             None,
@@ -575,16 +636,7 @@ def _intrinsic_layer_estimates(
             "binary export table parse",
         ),
         CostEstimate(None, "L1_debug", 0, 0.05, 0.0, "debug info (if present)"),
-        CostEstimate(
-            None,
-            "L2_header",
-            n_headers,
-            l2_seconds,
-            0.0,
-            "public-header AST (needs castxml or clang)"
-            if n_headers
-            else "no headers supplied",
-        ),
+        CostEstimate(None, "L2_header", n_headers, l2_seconds, 0.0, l2_note),
     ]
 
 
@@ -602,7 +654,13 @@ def _source_layer_estimates(
     # an unseeded explicit-source scan/estimate silently reports zero source
     # layers (the same zero-TU defect the collect-mode fix addresses).
     estimates: list[CostEstimate] = []
-    if collect_mode in ("build", "graph-build", "source-changed", "source-target", "graph-full"):
+    if collect_mode in (
+        "build",
+        "graph-build",
+        "source-changed",
+        "source-target",
+        "graph-full",
+    ):
         estimates.append(
             CostEstimate(
                 "s1",
@@ -800,7 +858,8 @@ def run_scan(req: ScanRequest) -> ScanResult:
     # target), so an explicit/pinned source depth with no diff seed never
     # silently collects zero translation units (parity with the CLI's scan).
     collect_mode = level_to_collect_mode(
-        resolved, eff_depth,
+        resolved,
+        eff_depth,
         source_scope=SourceScope.CHANGED if seeded else SourceScope.TARGET,
     )
     # --depth binary is symbols-only (L0/L1): suppress the L2 header AST (and its
@@ -899,6 +958,23 @@ def _scan_subprocess_worker(req: ScanRequest, q: Any) -> None:
     """
     import os
 
+    from . import deadline
+
+    # _kill_process_tree's _descendant_pgids() walk is a point-in-time
+    # snapshot taken before proc.terminate() fires; a clang/castxml child
+    # this worker spawns via deadline.run_bounded() in the gap between that
+    # snapshot and the terminate() call is invisible to it. Without this,
+    # proc.terminate() (default SIGTERM disposition, since this is a fresh
+    # `spawn`-context process with no inherited handler) would kill the
+    # worker immediately, leaving that just-spawned detached process group
+    # permanently orphaned — the worker's own _active_pgroups registry never
+    # gets a handler chance to sweep it. install_sigterm_cleanup() gives this
+    # worker the same in-process cleanup handler the plain CLI path and the
+    # L4 ProcessPoolExecutor workers already install, so its own SIGTERM
+    # handler kills every group *it* has registered before the process
+    # actually exits — independent of what the outer descendant-pgid
+    # snapshot did or didn't see (Codex review, PR #591, round 9).
+    deadline.install_sigterm_cleanup()
     try:
         os.setsid()  # new process group; killpg(parent) reaches clang subprocs
     except (OSError, AttributeError):
@@ -909,31 +985,122 @@ def _scan_subprocess_worker(req: ScanRequest, q: Any) -> None:
         q.put(("err", f"{type(exc).__name__}: {exc}"))
 
 
+def _descendant_pgids(root_pid: int) -> set[int]:
+    """Every process-group id in *root_pid*'s live process tree (POSIX, best-effort).
+
+    A clang/castxml child spawned via ``deadline.run_bounded`` detaches into its
+    *own* new session/group (needed so its own inner-timeout ``killpg`` can't
+    self-kill the caller) — a plain ``killpg(root_pgid)`` from an ancestor no
+    longer reaches it even though the PPID chain still leads back to *root_pid*,
+    until *root_pid* itself dies and severs that link. Walking a live
+    ``ps -eo pid,ppid`` snapshot while *root_pid* is still alive finds every such
+    descendant's own pgid too, so it can be killed alongside the worker's own
+    group instead of surviving as an orphan (Codex review, PR #591). Returns an
+    empty set on any failure (missing ``ps``, non-POSIX, ...) — never raises.
+    """
+    import os
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["ps", "-eo", "pid=,ppid="],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    children: dict[int, list[int]] = {}
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) != 2:
+            continue
+        try:
+            pid, ppid = int(parts[0]), int(parts[1])
+        except ValueError:
+            continue
+        children.setdefault(ppid, []).append(pid)
+    pgids: set[int] = set()
+    stack, seen = [root_pid], set()
+    while stack:
+        pid = stack.pop()
+        if pid in seen:
+            continue
+        seen.add(pid)
+        try:
+            pgids.add(os.getpgid(pid))
+        except (ProcessLookupError, PermissionError, AttributeError, OSError):
+            pass
+        stack.extend(children.get(pid, []))
+    return pgids
+
+
 def _kill_process_tree(proc: Any) -> None:
-    """Terminate *proc* and its process group (best-effort, never raises)."""
+    """Terminate *proc* and every group in its process tree (best-effort, never raises).
+
+    Killing only ``proc``'s own group used to miss a clang/castxml child that
+    had detached into its own session via ``deadline.run_bounded``'s
+    ``start_new_session=True`` — that isolation is needed so *its* inner-timeout
+    ``killpg`` can't self-kill the worker, but it also made the child invisible
+    to this outer, worker-level ``killpg``. :func:`_descendant_pgids` finds it
+    (and any other detached descendant) by PPID while ``proc`` is still alive, so
+    it gets killed here too instead of surviving as an orphan (Codex review,
+    PR #591).
+    """
     import os
     import signal
 
     if not proc.is_alive():
         return
     try:
-        pgid = os.getpgid(proc.pid)
-        # Only kill the *group* when the child actually detached into its own
-        # (``os.setsid`` ran). If it timed out before that, its pgid still equals
-        # the parent's group — killpg would then terminate the MCP server itself,
-        # so fall back to killing just the worker process (Codex review).
         own_pgid = os.getpgrp()
-        if pgid != own_pgid:
-            os.killpg(pgid, signal.SIGTERM)
-            proc.join(3)
-            if proc.is_alive():
-                os.killpg(pgid, signal.SIGKILL)
-        else:
-            proc.terminate()
-    except (ProcessLookupError, PermissionError, AttributeError, OSError):
+    except (AttributeError, OSError):
         try:
             proc.terminate()
         except (OSError, AttributeError):
+            pass
+        proc.join(5)
+        return
+    pgids: set[int] = set()
+    try:
+        pgids.add(os.getpgid(proc.pid))
+    except (ProcessLookupError, PermissionError, AttributeError, OSError):
+        pass
+    pgids |= _descendant_pgids(proc.pid)
+    # Only kill *proc*'s own group when it actually detached into its own (``os.
+    # setsid`` ran). If it timed out before that, its pgid still equals the
+    # parent's group — killpg would then terminate the MCP server itself, so
+    # that group is excluded and only its (already-detached) descendants, if
+    # any, are targeted (Codex review).
+    pgids.discard(own_pgid)
+    # Unconditional: proc itself never detached (own_pgid was excluded above
+    # precisely because it's still in the parent's group), so it is never
+    # reached by the killpg sweep below over *descendant* groups. Skipping
+    # this when pgids is non-empty left the direct worker process running
+    # forever whenever it had spawned a detached clang/castxml child but had
+    # not itself detached (CodeRabbit review, PR #591).
+    try:
+        proc.terminate()
+    except (OSError, AttributeError):
+        pass
+    if not pgids:
+        proc.join(5)
+        return
+    for pgid in pgids:
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+    proc.join(3)
+    # Unconditional SIGKILL sweep, not gated on proc's own exit: a detached
+    # clang/castxml session or a SIGTERM-ignoring grandchild can outlive the
+    # grace period even once the direct worker has already exited (mirrors
+    # deadline._kill_process_tree's same escalation fix).
+    for pgid in pgids:
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
             pass
     proc.join(5)
 

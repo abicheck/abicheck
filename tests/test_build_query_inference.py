@@ -121,6 +121,68 @@ def test_resolved_make_launcher_path_is_available_without_second_which():
     )
 
 
+def test_gnu_make_probe_bounded_by_local_cap_not_full_scan_budget(monkeypatch):
+    """Codex review (PR #591), round 2: deadline.run_bounded() honors an
+    active outer deadline verbatim (not min(timeout, left)), so a bare
+    timeout=10 alone did nothing once a generous --budget was active -- a
+    hung `make --version` wrapper could consume the whole remaining scan
+    budget instead of this probe's own 10s cap. Mirrors the include-map
+    local-cap fix."""
+    from abicheck import deadline
+
+    seen_remaining: list[float | None] = []
+
+    def fake_run(*_a, **_k):
+        seen_remaining.append(deadline.remaining())
+        return _FakeProc(0, stdout="GNU Make 4.4\n")
+
+    monkeypatch.setattr(_bq.deadline, "run_bounded", fake_run)
+    with deadline.deadline_scope(1800.0):  # a generous 30-minute --budget
+        assert _bq._is_gnu_make_launcher("/usr/bin/make") is True
+
+    assert seen_remaining
+    # Bound by the probe's own 10s cap, not the 1800s scan budget.
+    assert seen_remaining[0] is not None and seen_remaining[0] <= 10.5
+
+
+def test_gnu_make_probe_local_cap_hit_with_generous_scan_budget_returns_false(
+    monkeypatch,
+):
+    """CodeRabbit review (PR #591): hitting this probe's OWN 10s cap is an
+    ordinary "not GNU Make" result, even with an active outer --budget, as
+    long as that outer budget still had more than 10s left when the probe
+    started (so the local cap, not the scan deadline, was what actually
+    bound the nested scope)."""
+    from abicheck import deadline
+
+    monkeypatch.setattr(
+        _bq.deadline,
+        "run_bounded",
+        lambda *_a, **_k: (_ for _ in ()).throw(deadline.DeadlineExceeded(-1.0)),
+    )
+    with deadline.deadline_scope(1800.0):  # generous 30-minute --budget
+        assert _bq._is_gnu_make_launcher("/usr/bin/make") is False
+
+
+def test_gnu_make_probe_propagates_genuine_scan_deadline_exhaustion(monkeypatch):
+    """CodeRabbit review (PR #591): when the OUTER scan --budget (not this
+    probe's own 10s local cap) is what actually expired, the resulting
+    DeadlineExceeded must propagate -- silently returning False would
+    misreport a genuine budget overflow as "GNU Make isn't installed" and
+    could waste more time probing further launcher candidates instead of
+    aborting."""
+    from abicheck import deadline
+
+    monkeypatch.setattr(
+        _bq.deadline,
+        "run_bounded",
+        lambda *_a, **_k: (_ for _ in ()).throw(deadline.DeadlineExceeded(-1.0)),
+    )
+    with deadline.deadline_scope(0.0):  # already-exhausted outer budget
+        with pytest.raises(deadline.DeadlineExceeded):
+            _bq._is_gnu_make_launcher("/usr/bin/make")
+
+
 class _FakeProc:
     def __init__(self, returncode=0, stdout="", stderr=""):
         self.returncode = returncode
@@ -155,7 +217,7 @@ def test_run_cmake_ingests_out_of_tree_and_merges(tmp_path: Path, monkeypatch):
         )
         return _FakeProc(0)
 
-    monkeypatch.setattr(_bq.subprocess, "run", fake_run)
+    monkeypatch.setattr(_bq.deadline, "run_bounded", fake_run)
     merged, ext = BuildEvidence(), []
     out = run_inferred_build_query(tmp_path, merged, ext)
     assert out is None  # evidence merged, no path threaded
@@ -186,7 +248,7 @@ def test_run_cmake_defers_build_dir_cleanup_when_requested(tmp_path: Path, monke
         )
         return _FakeProc(0)
 
-    monkeypatch.setattr(_bq.subprocess, "run", fake_run)
+    monkeypatch.setattr(_bq.deadline, "run_bounded", fake_run)
     merged, ext = BuildEvidence(), []
     cleanup: list = []
     out = run_inferred_build_query(tmp_path, merged, ext, cleanup=cleanup)
@@ -222,7 +284,7 @@ def test_inferred_cmake_build_dir_lock_contention_falls_back_to_unique(
             seen.append(Path(cmd[cmd.index("-B") + 1]))
             return _FakeProc(0)
 
-        monkeypatch.setattr(_bq.subprocess, "run", fake_run)
+        monkeypatch.setattr(_bq.deadline, "run_bounded", fake_run)
         # timeout=0 → fall back immediately instead of polling the held lock.
         run_inferred_build_query(tmp_path, BuildEvidence(), [], timeout=0)
         assert seen, "the query should still run on a fallback dir"
@@ -269,6 +331,35 @@ def test_claim_build_dir_polls_until_lock_free(tmp_path: Path, monkeypatch):
     bdir, release = _bq._claim_inferred_build_dir(base, timeout=5)
     assert bdir == base and calls["n"] == 1  # polled once, then acquired
     release()
+
+
+def test_claim_build_dir_wait_bounded_by_scan_deadline_not_just_local_timeout(
+    tmp_path: Path, monkeypatch
+):
+    # Codex review (PR #591, round 4): the lock-wait loop only consulted its
+    # own *timeout* argument (up to 600s by default for the caller), never the
+    # active scan --budget -- a contended checkout under a tight --budget
+    # could still block here for the full local timeout before falling back
+    # to a unique dir. Must bound the wait by whichever is tighter.
+    fcntl = pytest.importorskip("fcntl")
+    from abicheck import deadline
+
+    base = tmp_path / "abicheck-cmake-deadbeef"
+    calls = {"n": 0}
+
+    def always_busy(fd, op):
+        calls["n"] += 1
+        raise OSError("busy")
+
+    monkeypatch.setattr(fcntl, "flock", always_busy)
+    monkeypatch.setattr(_bq.time, "sleep", lambda _s: None)  # don't actually wait
+    with deadline.deadline_scope(0.5):  # far tighter than the 5s local timeout
+        bdir, release = _bq._claim_inferred_build_dir(base, timeout=5.0)
+    release()
+    assert bdir != base  # fell back to a unique dir
+    # Bounded by the ~0.5s scan deadline (3 polls at the 0.2s poll interval),
+    # not the full 5s local timeout (25 polls).
+    assert calls["n"] <= 4
 
 
 def test_claim_build_dir_marker_fallback_when_no_fcntl(tmp_path: Path, monkeypatch):
@@ -344,7 +435,7 @@ def test_inferred_query_skipped_when_no_private_root(tmp_path: Path, monkeypatch
 
 def test_run_cmake_no_db_is_partial(tmp_path: Path, monkeypatch):
     (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
-    monkeypatch.setattr(_bq.subprocess, "run", lambda cmd, **kw: _FakeProc(0))
+    monkeypatch.setattr(_bq.deadline, "run_bounded", lambda cmd, **kw: _FakeProc(0))
     merged, ext = BuildEvidence(), []
     assert (
         run_inferred_build_query(
@@ -372,7 +463,7 @@ def test_inferred_cmake_build_dir_is_stable_per_source_tree(
         seen.append(cmd[cmd.index("-B") + 1])
         return _FakeProc(0)
 
-    monkeypatch.setattr(_bq.subprocess, "run", fake_run)
+    monkeypatch.setattr(_bq.deadline, "run_bounded", fake_run)
     for _ in range(2):
         run_inferred_build_query(tmp_path, BuildEvidence(), [])
     assert seen[0] == seen[1]  # deterministic across runs
@@ -382,7 +473,7 @@ def test_inferred_cmake_build_dir_is_stable_per_source_tree(
 def test_run_nonzero_exit_is_failed(tmp_path: Path, monkeypatch):
     (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
     monkeypatch.setattr(
-        _bq.subprocess, "run", lambda cmd, **kw: _FakeProc(1, stderr="boom")
+        _bq.deadline, "run_bounded", lambda cmd, **kw: _FakeProc(1, stderr="boom")
     )
     merged, ext = BuildEvidence(), []
     assert run_inferred_build_query(tmp_path, merged, ext) is None
@@ -395,7 +486,7 @@ def test_ingest_failure_degrades_to_diagnostic(tmp_path: Path, monkeypatch):
     # aquery JSON, temp-dir full), it degrades to a failed diagnostic, not an
     # exception that aborts the dump (review).
     (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
-    monkeypatch.setattr(_bq.subprocess, "run", lambda cmd, **kw: _FakeProc(0))
+    monkeypatch.setattr(_bq.deadline, "run_bounded", lambda cmd, **kw: _FakeProc(0))
 
     def boom(*a, **k):
         raise ValueError("malformed query output")
@@ -459,11 +550,66 @@ def test_trusted_query_missing_configured_db_does_not_autodiscover(
     (tmp_path / "compile_commands.json").write_text("[]")  # stale default DB present
     cfg = BuildConfig(query="my-configure", compile_db="build/compile_commands.json")
     # Query exits 0 but writes nothing at the configured path.
-    monkeypatch.setattr(_inline.subprocess, "run", lambda *a, **k: _FakeProc(0))
+    monkeypatch.setattr(_inline.deadline, "run_bounded", lambda *a, **k: _FakeProc(0))
     merged, ext = BuildEvidence(), []
     out = _run_build_query(cfg, tmp_path, merged, ext)
     assert out is None  # configured DB missing → not masked by autodiscovery
     assert ext[-1].status == "partial"
+
+
+def test_trusted_query_is_bound_by_active_scan_deadline(tmp_path: Path, monkeypatch):
+    """Codex-review-class gap (PR #591): the operator-configured trusted
+    build.query command shares the same reachability-inside-the-scan-
+    deadline-scope as the zero-config inferred query, but only consulted its
+    own local 300s default. Must go through deadline.run_bounded and degrade
+    to a failed ExtractorRecord + diagnostic on overflow."""
+    from abicheck import deadline
+    from abicheck.buildsource import inline as _inline
+    from abicheck.buildsource.inline import BuildConfig, _run_build_query
+
+    def _raise(*_a, **_k):
+        raise deadline.DeadlineExceeded(-1.0)
+
+    monkeypatch.setattr(_inline.deadline, "run_bounded", _raise)
+    cfg = BuildConfig(query="my-configure")
+    merged, ext = BuildEvidence(), []
+    out = _run_build_query(cfg, tmp_path, merged, ext)
+    assert out is None
+    assert ext[-1].status == "failed"
+    assert "scan deadline exceeded" in ext[-1].detail
+    assert any("scan deadline exceeded" in d for d in merged.diagnostics)
+
+
+def test_trusted_query_bounded_by_local_cap_not_full_scan_budget(
+    tmp_path: Path, monkeypatch
+):
+    """Codex review (PR #591), round 8: deadline.run_bounded() honors an
+    active outer deadline verbatim (not min(timeout, left)), so a bare
+    timeout=_QUERY_TIMEOUT_S (300s) on the trusted build.query call alone
+    did nothing once a scan --budget was active: the call stayed bound by
+    the FULL remaining scan budget instead of this query's own 300s local
+    cap. A hung configured query under a generous --budget could therefore
+    burn the whole remaining scan instead of degrading after 300s. Assert
+    the ContextVar deadline observed inside run_bounded is capped near the
+    local cap, not the much larger outer scan budget."""
+    from abicheck import deadline
+    from abicheck.buildsource import inline as _inline
+    from abicheck.buildsource.inline import BuildConfig, _run_build_query
+
+    seen_remaining: list[float | None] = []
+
+    def fake_run_bounded(*_a, **_k):
+        seen_remaining.append(deadline.remaining())
+        raise deadline.DeadlineExceeded(-1.0)
+
+    monkeypatch.setattr(_inline.deadline, "run_bounded", fake_run_bounded)
+    cfg = BuildConfig(query="my-configure")
+    merged, ext = BuildEvidence(), []
+    with deadline.deadline_scope(1800.0):  # a generous 30-minute --budget
+        _run_build_query(cfg, tmp_path, merged, ext)
+
+    assert seen_remaining
+    assert seen_remaining[0] is not None and seen_remaining[0] <= 300.5
 
 
 def test_trusted_query_without_configured_db_autodiscovers(tmp_path: Path, monkeypatch):
@@ -475,7 +621,7 @@ def test_trusted_query_without_configured_db_autodiscovers(tmp_path: Path, monke
 
     (tmp_path / "compile_commands.json").write_text("[]")
     cfg = BuildConfig(query="my-configure")  # no compile_db configured
-    monkeypatch.setattr(_inline.subprocess, "run", lambda *a, **k: _FakeProc(0))
+    monkeypatch.setattr(_inline.deadline, "run_bounded", lambda *a, **k: _FakeProc(0))
     merged, ext = BuildEvidence(), []
     out = _run_build_query(cfg, tmp_path, merged, ext)
     assert out is not None and out.name == "compile_commands.json"
@@ -609,10 +755,64 @@ def test_run_subprocess_error_is_failed(tmp_path: Path, monkeypatch):
     def boom(cmd, **kw):
         raise OSError("no cmake")
 
-    monkeypatch.setattr(_bq.subprocess, "run", boom)
+    monkeypatch.setattr(_bq.deadline, "run_bounded", boom)
     merged, ext = BuildEvidence(), []
     assert run_inferred_build_query(tmp_path, merged, ext) is None
     assert ext[-1].status == "failed"
+
+
+def test_run_is_bound_by_active_scan_deadline(tmp_path: Path, monkeypatch):
+    """Codex-review-class gap (PR #591): the zero-config cmake/bazel/make query
+    had the identical bare-subprocess.run anti-pattern already fixed for
+    call_graph.py/type_graph.py/include_graph.py — this runs inside
+    run_scan_core's L2-L5 deadline scope (`scan --budget ... --depth source`
+    on a project with no --build-info) but only consulted its own local
+    600s default, never the active --budget. Must go through
+    deadline.run_bounded and degrade to a failed ExtractorRecord + diagnostic,
+    not hang past the budget."""
+    from abicheck import deadline
+
+    (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
+
+    def _raise(*_a, **_k):
+        raise deadline.DeadlineExceeded(-1.0)
+
+    monkeypatch.setattr(_bq.deadline, "run_bounded", _raise)
+    merged, ext = BuildEvidence(), []
+    out = run_inferred_build_query(tmp_path, merged, ext)
+    assert out is None
+    assert ext[-1].status == "failed"
+    assert "scan deadline exceeded" in ext[-1].detail
+    assert any("scan deadline exceeded" in d for d in merged.diagnostics)
+
+
+def test_run_bounded_by_local_cap_not_full_scan_budget(tmp_path: Path, monkeypatch):
+    """Codex review (PR #591), round 8: deadline.run_bounded() honors an
+    active outer deadline verbatim (not min(timeout, left)), so a bare
+    timeout=timeout (default 600s, INFERRED_QUERY_TIMEOUT_S) on the
+    zero-config cmake/bazel/make query alone did nothing once a scan
+    --budget was active: the call stayed bound by the FULL remaining scan
+    budget instead of this query's own 600s local cap. A hung inferred
+    query under a generous --budget could therefore burn the whole
+    remaining scan instead of degrading after 600s. Assert the ContextVar
+    deadline observed inside run_bounded is capped near the local cap, not
+    the much larger outer scan budget."""
+    from abicheck import deadline
+
+    (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
+    seen_remaining: list[float | None] = []
+
+    def fake_run_bounded(*_a, **_k):
+        seen_remaining.append(deadline.remaining())
+        raise deadline.DeadlineExceeded(-1.0)
+
+    monkeypatch.setattr(_bq.deadline, "run_bounded", fake_run_bounded)
+    merged, ext = BuildEvidence(), []
+    with deadline.deadline_scope(1800.0):  # a generous 30-minute --budget
+        run_inferred_build_query(tmp_path, merged, ext)
+
+    assert seen_remaining
+    assert seen_remaining[0] is not None and seen_remaining[0] <= 600.5
 
 
 def test_run_make_ingests_dry_run_transcript(tmp_path: Path, monkeypatch):
@@ -635,7 +835,7 @@ def test_run_make_ingests_dry_run_transcript(tmp_path: Path, monkeypatch):
             stdout="c++ -std=c++17 -Iinclude -c src/foo.cc -o foo.o\n",
         )
 
-    monkeypatch.setattr(_bq.subprocess, "run", fake_run)
+    monkeypatch.setattr(_bq.deadline, "run_bounded", fake_run)
     merged, ext = BuildEvidence(), []
     assert (
         run_inferred_build_query(
@@ -666,7 +866,7 @@ def test_run_make_keeps_partial_transcript_on_nonzero_exit(tmp_path: Path, monke
             stderr=None,
         )
 
-    monkeypatch.setattr(_bq.subprocess, "run", fake_run)
+    monkeypatch.setattr(_bq.deadline, "run_bounded", fake_run)
     merged, ext = BuildEvidence(), []
     assert (
         run_inferred_build_query(
@@ -693,7 +893,7 @@ def test_run_make_prefers_make_when_gnu(tmp_path: Path, monkeypatch):
         assert cmd == ["/usr/bin/make", "-B", "-n", "-k", "-w"]
         return _FakeProc(0, stdout="cc -c ok.c -o ok.o\n")
 
-    monkeypatch.setattr(_bq.subprocess, "run", fake_run)
+    monkeypatch.setattr(_bq.deadline, "run_bounded", fake_run)
     merged, ext = BuildEvidence(), []
     assert (
         run_inferred_build_query(
@@ -706,9 +906,7 @@ def test_run_make_prefers_make_when_gnu(tmp_path: Path, monkeypatch):
     assert ext[-1].status == "ok"
 
 
-def test_run_make_falls_back_to_gmake_when_make_is_not_gnu(
-    tmp_path: Path, monkeypatch
-):
+def test_run_make_falls_back_to_gmake_when_make_is_not_gnu(tmp_path: Path, monkeypatch):
     (tmp_path / "Makefile").write_text("all:\n\t$(CC) -c ok.c -o ok.o\n")
     seen: list[list[str]] = []
 
@@ -724,7 +922,7 @@ def test_run_make_falls_back_to_gmake_when_make_is_not_gnu(
             stdout="gmake[1]: Entering directory '/x'\ncc -c ok.c -o ok.o\n",
         )
 
-    monkeypatch.setattr(_bq.subprocess, "run", fake_run)
+    monkeypatch.setattr(_bq.deadline, "run_bounded", fake_run)
     merged, ext = BuildEvidence(), []
     assert (
         run_inferred_build_query(
@@ -759,7 +957,7 @@ def test_run_make_uses_gnumake_when_make_and_gmake_are_absent(
         assert cmd == ["/usr/local/bin/gnumake", "-B", "-n", "-k", "-w"]
         return _FakeProc(0, stdout="cc -c ok.c -o ok.o\n")
 
-    monkeypatch.setattr(_bq.subprocess, "run", fake_run)
+    monkeypatch.setattr(_bq.deadline, "run_bounded", fake_run)
     merged, ext = BuildEvidence(), []
     assert (
         run_inferred_build_query(
@@ -783,7 +981,7 @@ def test_run_make_skips_without_gnu_make(tmp_path: Path, monkeypatch):
     def fake_run(cmd, **kw):
         return _FakeProc(0, stdout="BSD make\n")
 
-    monkeypatch.setattr(_bq.subprocess, "run", fake_run)
+    monkeypatch.setattr(_bq.deadline, "run_bounded", fake_run)
     merged, ext = BuildEvidence(), []
     assert (
         run_inferred_build_query(
@@ -809,7 +1007,7 @@ def test_bazelisk_fallback_when_bazel_absent(tmp_path: Path, monkeypatch):
         ran["cmd"] = cmd
         return _FakeProc(0, stdout='{"actions": []}')
 
-    monkeypatch.setattr(_bq.subprocess, "run", fake_run)
+    monkeypatch.setattr(_bq.deadline, "run_bounded", fake_run)
     merged, ext = BuildEvidence(), []
     out = run_inferred_build_query(
         tmp_path,
@@ -864,7 +1062,9 @@ def test_inferred_query_diag_yields_partial_l3_coverage():
 def test_run_bazel_empty_action_graph_is_partial(tmp_path: Path, monkeypatch):
     (tmp_path / "MODULE.bazel").write_text("module(name='x')\n")
     monkeypatch.setattr(
-        _bq.subprocess, "run", lambda cmd, **kw: _FakeProc(0, stdout='{"actions":[]}')
+        _bq.deadline,
+        "run_bounded",
+        lambda cmd, **kw: _FakeProc(0, stdout='{"actions":[]}'),
     )
     merged, ext = BuildEvidence(), []
     # Stub `which` so the test is hermetic: without it, a host that lacks a

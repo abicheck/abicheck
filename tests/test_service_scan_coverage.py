@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import json
 import os
+import signal
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -45,6 +47,7 @@ from abicheck.service_scan import (
     _count_compile_db_tus,
     _count_pack_tus,
     _count_source_tus,
+    _descendant_pgids,
     _kill_process_tree,
     _layers_from_coverage,
     _scan_subprocess_worker,
@@ -299,6 +302,29 @@ def test_scan_subprocess_worker_ignores_setsid_failure(
     assert q.items and q.items[0][0] == "ok"
 
 
+def test_scan_subprocess_worker_installs_sigterm_cleanup(
+    monkeypatch: pytest.MonkeyPatch, snap_path: Path
+) -> None:
+    # Codex review (PR #591), round 9: _kill_process_tree's _descendant_pgids()
+    # walk is a point-in-time snapshot taken before proc.terminate() fires; a
+    # clang/castxml child this worker spawns via deadline.run_bounded() in the
+    # gap between that snapshot and the terminate() call is invisible to it.
+    # Without its own SIGTERM handler installed, proc.terminate() (default
+    # disposition, since this is a fresh spawn-context process with nothing
+    # inherited) would kill the worker immediately, orphaning that child. The
+    # worker must install its own cleanup handler so its own _active_pgroups
+    # registry gets a chance to sweep whatever it has registered, independent
+    # of what the outer snapshot did or didn't see.
+    from abicheck import deadline
+
+    monkeypatch.setattr(os, "setsid", lambda: None, raising=False)
+    calls: list[bool] = []
+    monkeypatch.setattr(deadline, "install_sigterm_cleanup", lambda: calls.append(True))
+    q = _FakeQueue()
+    _scan_subprocess_worker(ScanRequest(binaries=[snap_path], mode="audit"), q)
+    assert calls == [True]
+
+
 # ── _kill_process_tree: the terminate/killpg branches (lines 886-912) ─────────
 
 
@@ -359,6 +385,73 @@ def test_kill_process_tree_kills_detached_group(
 
 
 @_posix_process_groups
+def test_kill_process_tree_kills_detached_descendant_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Codex review (PR #591): a clang/castxml child spawned via
+    deadline.run_bounded's start_new_session=True detaches into its OWN
+    session/pgid, distinct from the worker's own group — killing only
+    proc.pid's own group used to leave that child running as an orphan once
+    the worker's group-kill fired. _descendant_pgids must find it by walking
+    the live PPID tree, and _kill_process_tree must killpg it too."""
+    signals: list[tuple[int, int]] = []
+    # Worker pid 4321 is a detached group leader (pgid 4321, distinct from
+    # this test's own group 111); its child 5555 (standing in for a clang/
+    # castxml invocation) further detached into ITS OWN group (pgid 5555) —
+    # exactly what deadline.run_bounded's start_new_session=True produces.
+    monkeypatch.setattr(
+        os, "getpgid", lambda pid: {4321: 4321, 5555: 5555}.get(pid, pid)
+    )
+    monkeypatch.setattr(os, "getpgrp", lambda: 111)
+    monkeypatch.setattr(os, "killpg", lambda pgid, sig: signals.append((pgid, sig)))
+
+    def _fake_ps(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert cmd[0] == "ps"
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout="4321 100\n5555 4321\n", stderr=""
+        )
+
+    monkeypatch.setattr(subprocess, "run", _fake_ps)
+    proc = _FakeProc(pid=4321)  # stays alive → triggers the SIGKILL escalation
+    _kill_process_tree(proc)
+    import signal
+
+    assert (4321, signal.SIGTERM) in signals
+    assert (5555, signal.SIGTERM) in signals
+    assert (4321, signal.SIGKILL) in signals
+    assert (5555, signal.SIGKILL) in signals
+
+
+@_posix_process_groups
+def test_kill_process_tree_terminates_worker_even_with_detached_descendants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CodeRabbit review (PR #591): when the worker itself never detached
+    (its pgid still equals the parent's group, so it's excluded from the
+    pgid set to avoid killpg-ing the MCP server) but it spawned a detached
+    clang/castxml descendant (pgids stays non-empty), proc.terminate() must
+    still run -- it used to be skipped whenever pgids was non-empty,
+    leaving the direct worker process running forever."""
+    monkeypatch.setattr(
+        os, "getpgid", lambda pid: {4321: 111, 5555: 5555}.get(pid, pid)
+    )
+    monkeypatch.setattr(os, "getpgrp", lambda: 111)  # worker never detached
+    monkeypatch.setattr(os, "killpg", lambda pgid, sig: None)
+
+    def _fake_ps(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert cmd[0] == "ps"
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout="4321 100\n5555 4321\n", stderr=""
+        )
+
+    monkeypatch.setattr(subprocess, "run", _fake_ps)
+    proc = _FakeProc(pid=4321)  # stays alive → also exercises the killpg sweep
+    _kill_process_tree(proc)
+
+    assert proc.terminated == 1
+
+
+@_posix_process_groups
 def test_kill_process_tree_falls_back_on_oserror(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -395,6 +488,119 @@ def test_kill_process_tree_swallows_terminate_failure(
     assert 5 in proc.joins
 
 
+@_posix_process_groups
+def test_kill_process_tree_getpgrp_failure_falls_back_to_terminate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # os.getpgrp() itself can raise on a platform without process groups
+    # (AttributeError, the same guard the rest of this helper uses) — fall
+    # back to a plain terminate() before ever touching getpgid/killpg.
+    monkeypatch.setattr(
+        os, "getpgrp", lambda: (_ for _ in ()).throw(AttributeError("no getpgrp"))
+    )
+    proc = _FakeProc()
+    _kill_process_tree(proc)  # must not raise
+    assert proc.terminated == 1
+    assert 5 in proc.joins
+
+
+@_posix_process_groups
+def test_kill_process_tree_getpgrp_and_terminate_both_fail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The doubly-defensive path for the getpgrp-failure fallback itself:
+    # os.getpgrp() raises, and the subsequent terminate() *also* raises. Both
+    # must be swallowed — the trailing reap join still runs, never propagates.
+    monkeypatch.setattr(
+        os, "getpgrp", lambda: (_ for _ in ()).throw(AttributeError("no getpgrp"))
+    )
+
+    class _StubbornProc(_FakeProc):
+        def terminate(self) -> None:
+            super().terminate()
+            raise OSError("terminate failed")
+
+    proc = _StubbornProc()
+    _kill_process_tree(proc)  # must not raise
+    assert proc.terminated == 1
+    assert 5 in proc.joins
+
+
+@_posix_process_groups
+def test_kill_process_tree_sigterm_failure_on_one_pgid_still_signals_others(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Multiple detached groups (the worker's own + a descendant's): one
+    # killpg(SIGTERM) call raising must not abort the sweep over the rest.
+    monkeypatch.setattr(
+        os, "getpgid", lambda pid: {4321: 4321, 5555: 5555}.get(pid, pid)
+    )
+    monkeypatch.setattr(os, "getpgrp", lambda: 111)
+    signals: list[tuple[int, int]] = []
+
+    def _killpg(pgid: int, sig: int) -> None:
+        if pgid == 4321 and sig == signal.SIGTERM:
+            raise PermissionError("no permission for this group")
+        signals.append((pgid, sig))
+
+    monkeypatch.setattr(os, "killpg", _killpg)
+
+    def _fake_ps(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout="4321 100\n5555 4321\n", stderr=""
+        )
+
+    monkeypatch.setattr(subprocess, "run", _fake_ps)
+    proc = _FakeProc(pid=4321)
+    _kill_process_tree(proc)  # must not raise despite the first killpg failing
+    assert (5555, signal.SIGTERM) in signals
+    assert (4321, signal.SIGKILL) in signals
+    assert (5555, signal.SIGKILL) in signals
+
+
+# ── _descendant_pgids: ps-output parsing edge cases (best-effort, never raises) ──
+
+
+@_posix_process_groups
+def test_descendant_pgids_empty_on_ps_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _boom(*_a: object, **_k: object) -> None:
+        raise OSError("ps not found")
+
+    monkeypatch.setattr(subprocess, "run", _boom)
+    assert _descendant_pgids(4321) == set()
+
+
+@_posix_process_groups
+def test_descendant_pgids_skips_malformed_and_non_integer_lines(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A malformed `ps` line (wrong field count) or a non-integer pid/ppid must
+    # be skipped rather than raising, while well-formed lines still parse.
+    def _fake_ps(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        stdout = "not-a-valid-line\n4321 abc\nabc 4321\n5555 4321\n"
+        return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _fake_ps)
+    monkeypatch.setattr(os, "getpgid", lambda pid: pid)
+    assert _descendant_pgids(4321) == {4321, 5555}
+
+
+@_posix_process_groups
+def test_descendant_pgids_does_not_loop_on_a_cycle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A pid appearing as its own (indirect) child — via a race in the ps
+    # snapshot, or a re-parented pid reused mid-walk — must not spin forever;
+    # the `seen` set stops the walk from revisiting it.
+    def _fake_ps(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        stdout = "5555 4321\n4321 5555\n"  # 4321 <-> 5555, a two-node cycle
+        return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _fake_ps)
+    monkeypatch.setattr(os, "getpgid", lambda pid: pid)
+    assert _descendant_pgids(4321) == {4321, 5555}
+
+
 # ── run_scan_subprocess: the killable MCP harness (lines 915-943) ─────────────
 
 
@@ -407,6 +613,46 @@ def test_run_scan_subprocess_returns_result_dict(snap_path: Path) -> None:
     assert isinstance(payload, dict)
     assert "verdict" in payload
     assert isinstance(payload["layers"], list)
+
+
+def test_run_scan_subprocess_joins_already_exited_worker(
+    monkeypatch: pytest.MonkeyPatch, snap_path: Path
+) -> None:
+    # When the worker has already finished by the time the parent checks
+    # (the common case — q.get() already returned the payload), cleanup is a
+    # plain join(), not the process-tree kill (that path is only for a
+    # still-running worker after a timeout).
+    import multiprocessing
+    import queue as _queue_mod
+
+    class _FakeProcess:
+        def __init__(self, target, args, daemon) -> None:
+            self._target = target
+            self._args = args
+            self.joined: list[float | None] = []
+
+        def start(self) -> None:
+            self._target(*self._args)
+
+        def is_alive(self) -> bool:
+            return False
+
+        def join(self, timeout: float | None = None) -> None:
+            self.joined.append(timeout)
+
+    class _FakeCtx:
+        def Queue(self):  # noqa: N802 - matches multiprocessing.Queue's name
+            return _queue_mod.Queue()
+
+        def Process(self, target, args, daemon):  # noqa: N802
+            return _FakeProcess(target, args, daemon)
+
+    monkeypatch.setattr(multiprocessing, "get_context", lambda _name: _FakeCtx())
+    payload = run_scan_subprocess(
+        ScanRequest(binaries=[snap_path], mode="audit"), timeout=5.0
+    )
+    assert isinstance(payload, dict)
+    assert "verdict" in payload
 
 
 def test_run_scan_subprocess_propagates_worker_error(snap_path: Path) -> None:

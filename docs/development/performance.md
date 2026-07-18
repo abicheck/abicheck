@@ -341,6 +341,67 @@ memory cap (`_call_graph_mem_cap` → `_l4_mem_cap`, same `ABICHECK_L4_JOB_MEM_G
 budget); `ABICHECK_CALL_GRAPH_JOBS` still overrides the CPU count but memory wins
 over an over-eager override, exactly like `_l4_jobs`.
 
+### L2 header-scan deadline enforcement (pathological headers)
+
+A real-world field report (Intel SVS) found the cheap tier's flatness above has
+an exception: a *pathological* header (deep `#include`/template complexity) can
+make the L2 clang/castxml AST dump itself run far longer than its on-disk size
+suggests — the report's own `scan --dry-run` estimate read 0.51 s for a header
+set whose actual parse ran over 15,000 s and 3+ GiB RSS before an *external*
+`SIGKILL`, because `--budget` was checked only once, after the whole scan had
+already finished, and the clang/castxml `subprocess.run(timeout=120)` call had
+no process-group isolation (a timeout only killed the direct child, orphaning
+any compiler-driver grandchild).
+
+The fix (`abicheck/deadline.py`) threads a shrinking `--budget` deadline down
+to the L2 subprocess boundary (checked before each clang/castxml invocation,
+not only at the end) and runs that subprocess in its own process group so a
+timeout kills the whole tree. This is a **bounding** fix, not a speedup — a
+genuinely pathological header still costs whatever clang/castxml need, up to
+whatever `--budget` is given; it now fails cleanly at that boundary instead of
+running unbounded.
+
+Regression/perf-tracking coverage, deliberately without needing the SVS corpus
+itself (see "Extract minimal synthetic fixtures" guidance):
+
+- `tests/test_deadline.py` — fast, synthetic (`sh`/`sleep`), proves the
+  process-group kill and mid-stage budget check mechanisms directly.
+- `tests/test_header_scan_deadline_integration.py` — real clang, self-skips if
+  absent. `test_pathological_header_aborts_within_bounded_time_under_tiny_budget`
+  reproduces the SVS shape with a *genuinely* expensive (not simulated) 4-line
+  header: a recursive template chain whose clang `-ast-dump=json` output grows
+  steeply super-linearly with recursion depth (calibrated locally: depth 100 →
+  ~40 MB/0.2 s, depth 200 → ~280 MB/0.6 s, depth 300 → ~900 MB/1.5 s — kept at
+  depth 150 in the test to stay CI-safe), and asserts a tiny budget bounds it.
+  The `slow`-marked companion `test_pathological_header_natural_cost_is_tracked`
+  records that header's *unbudgeted* natural cost so a future regression (lost
+  disk cache, a clang upgrade changing dump behaviour) shows up in the existing
+  per-test duration trend (`tests/conftest.py`'s `ABICHECK_DURATIONS_JSON` hook
+  → `scripts/summarize_test_durations.py` → the CI run summary) — the same
+  mechanism this page already relies on for the `compare()`-scaling story,
+  rather than a new bespoke benchmark harness. `scripts/benchmark_scaling.py`
+  is deliberately **not** the home for this: it is pure-Python by design ("no
+  compiler/castxml" — see its module docstring) and this concern is inherently
+  compiler-driven.
+
+**Fixed (follow-up):** the L2 path (`dumper._clang_header_dump`, via the new
+`dumper_clang_errors.run_clang_to_ast_file`) now spills clang's AST-dump
+stdout straight to a temp file, mirroring the L4 per-TU replay
+(`source_extractors/clang.py`'s `_run_ast_to_file`) instead of capturing it
+into a Python `str`. The calibration above showed a *tiny* header can
+legitimately produce hundreds of MB to multiple GB of AST-dump output, which
+`capture_output=True` would buffer on top of the parsed dict this code also
+builds; measured ~27% lower Python-heap peak (`tracemalloc`) on the depth-150
+fixture (364.5 MB → 267.1 MB) with the fix. The same `deadline.run_bounded`
+treatment (shrinking `--budget` deadline, process-group kill on timeout) was
+also extended to `preprocessor_scan.py`'s live extractor and both L4 source
+extractors (`source_extractors/clang.py`, `source_extractors/castxml.py`),
+which previously used the same fixed-timeout/no-process-group pattern the P0
+fix closed for L2 — and a --budget deadline expiring during a PE/Mach-O
+header-scoped dump (`service._try_header_scoped_dump`) is no longer silently
+swallowed by the broad `except Exception` that falls back to export-table
+mode for a merely-unavailable header backend.
+
 ## L4 source-replay (dump-side) performance
 
 The scaling harness above is pure-Python and times the *compare* pipeline. The

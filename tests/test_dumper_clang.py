@@ -23,11 +23,12 @@ the live ``clang -ast-dump=json`` run live in the integration lane
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
 
-from abicheck import dumper, dumper_clang
+from abicheck import dumper, dumper_clang, dumper_clang_errors
 from abicheck.dumper import (
     _auto_system_includes_enabled,
     _build_clang_header_command,
@@ -45,6 +46,7 @@ from abicheck.dumper_clang import (
     _pointer_depth,
     _return_type,
 )
+from abicheck.dumper_clang_errors import _parse_clang_ast_result
 from abicheck.errors import SnapshotError
 from abicheck.model import AccessLevel, Visibility
 
@@ -758,21 +760,18 @@ def _stub_clang_self_heal(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "abicheck.dumper._resolve_clang_system_includes", lambda *a, **k: ()
     )
-    fail = _sp.CompletedProcess(
-        args=[], returncode=1, stdout="",
-        stderr="fatal error: 'cstddef' file not found",
-    )
-    ok = _sp.CompletedProcess(
-        args=[], returncode=0,
-        stdout='{"kind": "TranslationUnitDecl", "inner": []}', stderr="",
-    )
+    fail = _sp.CompletedProcess(args=[], returncode=1, stdout="", stderr="fatal error: 'cstddef' file not found")
+    ok = _sp.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
     calls = {"n": 0}
 
     def _run(*a: object, **k: object) -> _sp.CompletedProcess[str]:
         calls["n"] += 1
-        return fail if calls["n"] == 1 else ok
+        if calls["n"] == 1:
+            return fail
+        _write_stdout_file(k, '{"kind": "TranslationUnitDecl", "inner": []}')
+        return ok
 
-    monkeypatch.setattr("abicheck.dumper.subprocess.run", _run)
+    monkeypatch.setattr("abicheck.dumper.deadline.run_bounded", _run)
 
 
 def test_clang_self_heal_explicit_c_warns(
@@ -1168,6 +1167,18 @@ def _fake_proc(stdout: str = "", stderr: str = "", returncode: int = 0):
     return p
 
 
+def _write_stdout_file(kwargs: dict, text: str) -> None:
+    """Write *text* to a mocked ``deadline.run_bounded(..., stdout=<file>)``
+    call's file object, mirroring what a real clang subprocess (its stdout
+    redirected to a temp file by dumper.py's L2 streaming, see
+    _clang_header_dump._run_clang) would have written. A no-op if the mock
+    wasn't invoked with a real file (e.g. a test that intentionally leaves the
+    AST empty to exercise the "no AST" error path)."""
+    fobj = kwargs.get("stdout")
+    if fobj is not None:
+        fobj.write(text.encode("utf-8"))
+
+
 def test_header_ast_parser_clang_branch(monkeypatch: pytest.MonkeyPatch) -> None:
     ast = _tu(
         {
@@ -1221,9 +1232,10 @@ def test_clang_header_dump_success_and_cache(
 
     def _run(cmd, **kwargs):
         calls["n"] += 1
-        return _fake_proc(stdout=ast_json)
+        _write_stdout_file(kwargs, ast_json)
+        return _fake_proc()
 
-    monkeypatch.setattr(dumper.subprocess, "run", _run)
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
 
     root = _clang_header_dump([header], [])
     assert root == {"kind": "TranslationUnitDecl", "inner": []}
@@ -1232,6 +1244,173 @@ def test_clang_header_dump_success_and_cache(
     root2 = _clang_header_dump([header], [])
     assert root2 == root
     assert calls["n"] == 1
+
+
+def test_clang_header_dump_rechecks_deadline_on_cache_hit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Codex review (PR #591): a warm AST cache hit still costs real time
+    reading/parsing a potentially huge cached AST — deadline.check() must
+    fire on that path too, not just on the cache-miss subprocess path."""
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    cache = tmp_path / "cache.json"
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+    calls = {"n": 0}
+
+    def _run(cmd, **kwargs):
+        calls["n"] += 1
+        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
+        return _fake_proc()
+
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
+    _clang_header_dump([header], [])  # warms the cache
+    assert cache.exists() and calls["n"] == 1
+
+    with dumper.deadline.deadline_scope(-1):  # already expired
+        with pytest.raises(dumper.deadline.DeadlineExceeded):
+            _clang_header_dump([header], [])
+    assert calls["n"] == 1  # never reached the subprocess path — cache hit
+
+
+def test_clang_header_dump_rechecks_deadline_after_cache_load(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Codex review (PR #591, round 3): json.loads() on a warm cache hit can
+    itself consume the rest of the budget for a huge cached AST -- the
+    existing pre-load deadline.check() doesn't catch that; must re-check
+    again after the load before handing the root to the AST walker."""
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    cache = tmp_path / "cache.json"
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+
+    def _run(cmd, **kwargs):
+        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
+        return _fake_proc()
+
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
+    _clang_header_dump([header], [])  # warms the cache
+    assert cache.exists()
+
+    real_json_loads = dumper.json.loads
+
+    def _slow_loads(text):
+        time.sleep(0.05)
+        return real_json_loads(text)
+
+    monkeypatch.setattr(dumper.json, "loads", _slow_loads)
+    with dumper.deadline.deadline_scope(0.03):
+        with pytest.raises(dumper.deadline.DeadlineExceeded):
+            _clang_header_dump([header], [])
+
+
+def test_parse_clang_ast_result_missing_ast_file_reports_no_ast(tmp_path: Path) -> None:
+    # ast_path.stat() itself can fail (the temp file vanished/was never
+    # created) — that must degrade to the same "no AST" error as an empty
+    # file, not an unhandled OSError.
+    result = _fake_proc(stdout="", stderr="boom", returncode=0)
+    missing = tmp_path / "does-not-exist.json"
+    with pytest.raises(SnapshotError, match="no AST"):
+        _parse_clang_ast_result(result, tmp_path / "cache.json", missing)
+
+
+def test_parse_clang_ast_result_swallows_cache_write_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # The cache write (_atomic_copy) is best-effort: a failure there (e.g. an
+    # unwritable cache dir) must not turn a successful parse into an error —
+    # the caller already has the parsed root; only the cache population is lost.
+    ast_path = tmp_path / "ast.json"
+    ast_path.write_text('{"kind": "TranslationUnitDecl", "inner": []}', encoding="utf-8")
+    result = _fake_proc(stdout="", stderr="", returncode=0)
+
+    def _boom(_src, _dst):
+        raise OSError("cache dir unwritable")
+
+    monkeypatch.setattr(dumper_clang_errors, "_atomic_copy", _boom)
+    root = _parse_clang_ast_result(result, tmp_path / "cache.json", ast_path)
+    assert root == {"kind": "TranslationUnitDecl", "inner": []}
+
+
+def test_parse_clang_ast_result_rechecks_deadline_after_json_load(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # CodeRabbit review (PR #591): json.load() on a multi-GB AST can itself
+    # consume the remaining budget; the existing pre-load deadline.check()
+    # doesn't catch that -- must re-check again before the (also non-trivial)
+    # streamed cache copy, or an expired budget still completes it and hands
+    # back a result for downstream AST walking.
+    ast_path = tmp_path / "ast.json"
+    ast_path.write_text('{"kind": "TranslationUnitDecl", "inner": []}', encoding="utf-8")
+    result = _fake_proc(stdout="", stderr="", returncode=0)
+    real_json_load = dumper_clang_errors.json.load
+
+    def _slow_load(fh):
+        time.sleep(0.05)
+        return real_json_load(fh)
+
+    monkeypatch.setattr(dumper_clang_errors.json, "load", _slow_load)
+    with dumper_clang_errors.deadline.deadline_scope(0.03):
+        with pytest.raises(dumper_clang_errors.deadline.DeadlineExceeded):
+            _parse_clang_ast_result(result, tmp_path / "cache.json", ast_path)
+
+
+def test_parse_clang_ast_result_rechecks_deadline_after_cache_copy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # CodeRabbit review (PR #591): the streamed cache copy (_atomic_copy) can
+    # also consume the remaining budget on a huge AST; re-check once more
+    # before returning so a budget that expired during the copy doesn't
+    # silently hand the result to the (also potentially expensive) caller.
+    ast_path = tmp_path / "ast.json"
+    ast_path.write_text('{"kind": "TranslationUnitDecl", "inner": []}', encoding="utf-8")
+    result = _fake_proc(stdout="", stderr="", returncode=0)
+
+    def _slow_copy(_src, _dst):
+        time.sleep(0.05)
+
+    monkeypatch.setattr(dumper_clang_errors, "_atomic_copy", _slow_copy)
+    with dumper_clang_errors.deadline.deadline_scope(0.03):
+        with pytest.raises(dumper_clang_errors.deadline.DeadlineExceeded):
+            _parse_clang_ast_result(result, tmp_path / "cache.json", ast_path)
+
+
+def test_clang_header_dump_streams_stdout_to_file_not_memory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # P0 follow-up: a pathological header's clang -ast-dump=json can be
+    # hundreds of MB to multiple GB (real-world field report). The L2 call
+    # must redirect stdout to a real file (dumper.py's L2 streaming, mirroring
+    # source_extractors/clang.py's L4 _run_ast_to_file) instead of
+    # capture_output=True, which would buffer the whole payload into a Python
+    # str on top of the dict this function builds.
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
+    # Isolate the single clang AST-dump call from the (also run_bounded-based,
+    # Codex review follow-up) system-include probe — otherwise its capture_
+    # output=True call leaks into `seen` alongside the AST-dump call's kwargs.
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+    seen: dict[str, object] = {}
+
+    def _run(cmd, **kwargs):
+        seen.update(kwargs)
+        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
+        return _fake_proc()
+
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
+    _clang_header_dump([header], [])
+    assert seen.get("capture_output") is not True
+    assert hasattr(seen.get("stdout"), "write"), (
+        "stdout must be a real writable file object, not None/PIPE — a "
+        "pathological header's AST dump must never be buffered in memory"
+    )
 
 
 def test_clang_header_dump_no_output_raises(
@@ -1244,11 +1423,43 @@ def test_clang_header_dump_no_output_raises(
     # Exit 0 but empty stdout → the "no AST" path (a nonzero exit is the
     # earlier branch, covered by test_clang_header_dump_nonzero_exit_raises).
     monkeypatch.setattr(
-        dumper.subprocess, "run",
+        dumper.deadline, "run_bounded",
         lambda *a, **k: _fake_proc(stdout="", stderr="boom", returncode=0),
     )
     with pytest.raises(SnapshotError, match="no AST"):
         _clang_header_dump([header], [])
+
+
+def test_clang_header_dump_rechecks_deadline_before_loading_ast(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Codex review (PR #591): a --budget that expires exactly as clang exits
+    successfully must not silently let the (potentially huge) AST JSON load +
+    walk run well past it. deadline.check() must fire again right after the
+    subprocess returns, before json.load — not just once before it was
+    spawned."""
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
+    # Isolate the single clang AST-dump call from the setup/prep work leading
+    # up to it (same as test_clang_header_dump_success_and_cache): disable the
+    # castxml↔clang system-include probe, a separate best-effort subprocess
+    # whose own variable cost would otherwise eat into the tight budget below
+    # before the call under test even starts.
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+
+    def _run(cmd, **kwargs):
+        # Simulate the budget running out while clang was still parsing: by
+        # the time it exits successfully, the deadline has already passed.
+        time.sleep(0.05)
+        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
+        return _fake_proc()
+
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
+    with dumper.deadline.deadline_scope(0.03):
+        with pytest.raises(dumper.deadline.DeadlineExceeded):
+            _clang_header_dump([header], [])
 
 
 def test_clang_header_dump_bad_json_raises(
@@ -1258,10 +1469,12 @@ def test_clang_header_dump_bad_json_raises(
     header.write_text("int foo(void);\n")
     monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
     monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
-    monkeypatch.setattr(
-        dumper.subprocess, "run",
-        lambda *a, **k: _fake_proc(stdout="not json", returncode=0),
-    )
+
+    def _run(*a, **k):
+        _write_stdout_file(k, "not json")
+        return _fake_proc(returncode=0)
+
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
     with pytest.raises(SnapshotError, match="not valid JSON"):
         _clang_header_dump([header], [])
 
@@ -1315,9 +1528,10 @@ def test_clang_header_dump_retries_cpp_on_missing_cpp_stdlib_header(
         cmds.append(list(cmd))
         if len(cmds) == 1:
             return _fake_proc(stderr="fatal error: 'cstddef' file not found", returncode=1)
-        return _fake_proc(stdout=ast_json, returncode=0)
+        _write_stdout_file(kwargs, ast_json)
+        return _fake_proc(returncode=0)
 
-    monkeypatch.setattr(dumper.subprocess, "run", _run)
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
     root = _clang_header_dump([header], [])
     assert root == {"kind": "TranslationUnitDecl", "inner": []}
     assert len(cmds) == 2  # one C attempt + one C++ retry
@@ -1341,7 +1555,7 @@ def test_clang_header_dump_no_retry_on_other_error(
         calls["n"] += 1
         return _fake_proc(stderr="error: undeclared identifier 'x'", returncode=1)
 
-    monkeypatch.setattr(dumper.subprocess, "run", _run)
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
     with pytest.raises(SnapshotError, match="failed to parse"):
         _clang_header_dump([header], [])
     assert calls["n"] == 1  # no retry
@@ -1819,7 +2033,7 @@ def test_clang_header_dump_nonzero_exit_raises(
         stderr = "error: use of undeclared identifier"
         returncode = 1
 
-    monkeypatch.setattr(dumper.subprocess, "run", lambda *a, **k: _P())
+    monkeypatch.setattr(dumper.deadline, "run_bounded", lambda *a, **k: _P())
     with pytest.raises(SnapshotError, match="failed to parse"):
         _clang_header_dump([header], [])
 
@@ -1964,7 +2178,7 @@ def test_clang_header_dump_timeout_raises(
     def _boom(*a, **k):
         raise _sp.TimeoutExpired(cmd="clang", timeout=120)
 
-    monkeypatch.setattr(dumper.subprocess, "run", _boom)
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _boom)
     with pytest.raises(SnapshotError, match="timed out"):
         _clang_header_dump([header], [])
 
@@ -1980,10 +2194,12 @@ def test_clang_header_dump_corrupt_cache_is_discarded(
 
     monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
     monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
-    monkeypatch.setattr(
-        dumper.subprocess, "run",
-        lambda *a, **k: _fake_proc(stdout=ast, returncode=0),
-    )
+
+    def _run(*a, **k):
+        _write_stdout_file(k, ast)
+        return _fake_proc(returncode=0)
+
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
     # The corrupt cache is unlinked and the fresh clang run repopulates it.
     root = _clang_header_dump([header], [])
     assert root == {"kind": "TranslationUnitDecl", "inner": []}

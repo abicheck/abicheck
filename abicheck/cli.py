@@ -34,6 +34,7 @@ try:
 except ImportError:  # pragma: no cover - rich-click is a declared dependency
     _RootGroupBase = click.Group  # type: ignore[assignment,misc]
 
+from . import deadline
 from .checker import DiffResult, LibraryMetadata
 from .cli_audit import echo_filtered_surface, echo_reconciled
 from .cli_dump_helpers import (
@@ -447,6 +448,12 @@ configure_rich_help()  # register --help option-group panels (G21.8 / M1)
 )
 def main() -> None:
     """abicheck — ABI compatibility checker for C/C++ shared libraries."""
+    # The plain CLI/CI path has no outer watchdog analogous to the MCP path's
+    # service_scan._kill_process_tree; without this, an external SIGTERM
+    # (job-scheduler cancellation, a CI step's own timeout) can orphan a
+    # detached clang/castxml process group started by deadline.run_bounded
+    # (Codex review, PR #591).
+    deadline.install_sigterm_cleanup()
 
 
 @main.command("dump")

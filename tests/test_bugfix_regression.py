@@ -411,7 +411,7 @@ class TestBug8CppHintOnCFailure:
     def test_lang_c_with_cpp_header_shows_hint(self, tmp_path: Path):
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run",
+            patch("abicheck.dumper.deadline.run_bounded",
                   return_value=self._failed_process("error: use of undeclared identifier 'class'")),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"),
         ):
@@ -425,7 +425,7 @@ class TestBug8CppHintOnCFailure:
     def test_lang_c_with_pure_c_header_no_hint(self, tmp_path: Path):
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run",
+            patch("abicheck.dumper.deadline.run_bounded",
                   return_value=self._failed_process("error: something else")),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"),
         ):
@@ -456,7 +456,7 @@ class TestBug9CastxmlTimeout:
         timeout_exc = subprocess.TimeoutExpired(cmd=["castxml"], timeout=120)
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=timeout_exc),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=timeout_exc),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"),
         ):
             from abicheck.dumper import _castxml_dump
@@ -469,7 +469,7 @@ class TestBug9CastxmlTimeout:
         timeout_exc = subprocess.TimeoutExpired(cmd=["castxml"], timeout=120)
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=timeout_exc),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=timeout_exc),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"),
         ):
             from abicheck.dumper import _castxml_dump
@@ -484,7 +484,7 @@ class TestBug9CastxmlTimeout:
         )
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=timeout_exc),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=timeout_exc),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"),
         ):
             from abicheck.dumper import _castxml_dump
@@ -498,7 +498,7 @@ class TestBug9CastxmlTimeout:
         timeout_exc = subprocess.TimeoutExpired(cmd=["castxml"], timeout=120)
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=timeout_exc),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=timeout_exc),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"),
         ):
             from abicheck.dumper import _castxml_dump
@@ -509,3 +509,63 @@ class TestBug9CastxmlTimeout:
         # No stale temp files left behind
         leftover = list(tmp_path.glob("tmp*"))
         assert len(leftover) == 0 or all(f.name == "test.h" for f in leftover)
+
+
+def test_castxml_rechecks_deadline_before_parsing_xml(tmp_path: Path) -> None:
+    """Codex review follow-up (PR #591): the same 'check deadline before
+    loading a large parse result' gap fixed on the clang L2 AST path also
+    existed on the castxml L2 XML-parsing path — a budget that expires
+    exactly as castxml exits successfully must not silently let the XML
+    parse run past it."""
+    import time
+
+    from abicheck import deadline
+
+    def _fake_run(cmd, **kw):
+        time.sleep(0.05)
+        out = Path(cmd[cmd.index("-o") + 1])
+        out.write_text('<GCC_XML><File id="f1" name="foo.h"/></GCC_XML>')
+        proc: subprocess.CompletedProcess = MagicMock(spec=subprocess.CompletedProcess)
+        proc.returncode = 0
+        proc.stderr = ""
+        proc.stdout = ""
+        return proc
+
+    with (
+        patch("abicheck.dumper._castxml_available", return_value=True),
+        patch("abicheck.dumper.deadline.run_bounded", side_effect=_fake_run),
+        patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"),
+    ):
+        from abicheck.dumper import _castxml_dump
+        header = tmp_path / "test.h"
+        header.write_text("int x;", encoding="utf-8")
+        with deadline.deadline_scope(0.01):
+            with pytest.raises(deadline.DeadlineExceeded):
+                _castxml_dump([header], [])
+
+
+def test_validate_castxml_output_rechecks_deadline_after_parse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Codex review (PR #591, round 3): DefusedET.parse() on a large fresh
+    castxml XML output can itself consume the rest of the budget -- the
+    existing pre-parse deadline.check() doesn't catch that; must re-check
+    again after the parse before handing the root off to the caller."""
+    import time
+
+    from abicheck import deadline, dumper
+
+    out_xml = tmp_path / "out.xml"
+    out_xml.write_text('<GCC_XML><File id="f1" name="foo.h"/></GCC_XML>')
+    result = subprocess.CompletedProcess(args=["castxml"], returncode=0, stdout="", stderr="")
+
+    real_parse = dumper.DefusedET.parse
+
+    def _slow_parse(path):
+        time.sleep(0.05)
+        return real_parse(path)
+
+    monkeypatch.setattr(dumper.DefusedET, "parse", _slow_parse)
+    with deadline.deadline_scope(0.03):
+        with pytest.raises(deadline.DeadlineExceeded):
+            dumper._validate_castxml_output(result, out_xml, [], False)

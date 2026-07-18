@@ -292,9 +292,7 @@ def test_flat_model_public_struct_private_field_type() -> None:
 
 
 def test_flat_model_type_inherits_base() -> None:
-    base = RecordType(
-        name="Base", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER
-    )
+    base = RecordType(name="Base", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER)
     derived = RecordType(
         name="Derived",
         kind="struct",
@@ -308,7 +306,9 @@ def test_flat_model_type_inherits_base() -> None:
 
 
 def test_flat_model_function_return_and_param_types() -> None:
-    private = RecordType(name="Private", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER)
+    private = RecordType(
+        name="Private", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER
+    )
     fn = Function(
         name="f",
         mangled="_Z1fv",
@@ -323,7 +323,9 @@ def test_flat_model_function_return_and_param_types() -> None:
 
 
 def test_flat_model_enum_type_node_kind() -> None:
-    en = EnumType(name="Color", origin=ScopeOrigin.PUBLIC_HEADER, source_header=PUBLIC_HEADER)
+    en = EnumType(
+        name="Color", origin=ScopeOrigin.PUBLIC_HEADER, source_header=PUBLIC_HEADER
+    )
     graph = build_header_only_graph(_snapshot(enums=[en]))
     node = next(n for n in graph.nodes if n.id == "type://Color")
     assert node.kind == "enum_type"
@@ -331,7 +333,9 @@ def test_flat_model_enum_type_node_kind() -> None:
 
 
 def test_flat_model_builtin_and_pointer_types_excluded() -> None:
-    fn = Function(name="f", mangled="_Z1fv", return_type="int", origin=ScopeOrigin.PUBLIC_HEADER)
+    fn = Function(
+        name="f", mangled="_Z1fv", return_type="int", origin=ScopeOrigin.PUBLIC_HEADER
+    )
     graph = build_header_only_graph(_snapshot(functions=[fn]))
     assert not any(e.kind == "DECL_HAS_TYPE" for e in graph.edges)
 
@@ -347,8 +351,12 @@ def test_flat_model_ambiguous_bare_name_edge_skipped_entirely() -> None:
     # reporting (or hiding) a public-to-internal dependency that may not
     # actually exist (Codex review; the fix that only labelled the edge
     # "unresolved" without skipping it still let this happen).
-    impl_public = RecordType(name="Impl", kind="struct", origin=ScopeOrigin.PUBLIC_HEADER)
-    impl_private = RecordType(name="Impl", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER)
+    impl_public = RecordType(
+        name="Impl", kind="struct", origin=ScopeOrigin.PUBLIC_HEADER
+    )
+    impl_private = RecordType(
+        name="Impl", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER
+    )
     public = RecordType(
         name="Public",
         kind="struct",
@@ -399,9 +407,7 @@ def test_flat_model_ambiguous_source_record_edges_skipped() -> None:
         fields=[TypeField(name="p", type="Priv*")],
         origin=ScopeOrigin.PRIVATE_HEADER,
     )
-    graph = build_header_only_graph(
-        _snapshot(types=[foo_public, priv, foo_private])
-    )
+    graph = build_header_only_graph(_snapshot(types=[foo_public, priv, foo_private]))
     assert not any(e.kind == "TYPE_HAS_FIELD_TYPE" for e in graph.edges)
 
 
@@ -410,7 +416,9 @@ def test_flat_model_ambiguous_bare_name_across_struct_and_enum() -> None:
     # one shared count dict — a struct and an enum sharing a bare name must
     # be just as ambiguous as two structs sharing one, not silently exempt
     # because they're different declaration kinds.
-    tag_struct = RecordType(name="Tag", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER)
+    tag_struct = RecordType(
+        name="Tag", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER
+    )
     tag_enum = EnumType(name="Tag", origin=ScopeOrigin.PUBLIC_HEADER)
     public = RecordType(
         name="Public",
@@ -431,7 +439,9 @@ def test_flat_model_resolves_private_type_nested_in_a_template_argument() -> Non
     # check cares about, and it was previously missed entirely (only an
     # unresolved edge to the literal "std::vector<Private>" string was
     # created).
-    private = RecordType(name="Private", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER)
+    private = RecordType(
+        name="Private", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER
+    )
     fn = Function(
         name="f",
         mangled="_Z1fv",
@@ -532,7 +542,7 @@ def test_header_include_extractor_parses_mocked_clang(tmp_path, monkeypatch) -> 
         stdout = f"pub.o: {pub} {impl}"
         stderr = ""
 
-    monkeypatch.setattr(ig.subprocess, "run", lambda *a, **k: _Proc())
+    monkeypatch.setattr(ig.deadline, "run_bounded", lambda *a, **k: _Proc())
 
     include_map, diags = ClangHeaderIncludeExtractor().extract(
         [str(pub)], [str(tmp_path)]
@@ -564,7 +574,7 @@ def test_header_include_extractor_forwards_gcc_options(tmp_path, monkeypatch) ->
 
         return _Proc()
 
-    monkeypatch.setattr(ig.subprocess, "run", _fake_run)
+    monkeypatch.setattr(ig.deadline, "run_bounded", _fake_run)
     ClangHeaderIncludeExtractor().extract([str(pub)], [], gcc_options="-DFOO=1")
     assert "-DFOO=1" in seen_argv["cmd"]
 
@@ -588,7 +598,7 @@ def test_header_include_extractor_folds_into_graph(tmp_path, monkeypatch) -> Non
         stdout = f"pub.o: {pub} {impl}"
         stderr = ""
 
-    monkeypatch.setattr(ig.subprocess, "run", lambda *a, **k: _Proc())
+    monkeypatch.setattr(ig.deadline, "run_bounded", lambda *a, **k: _Proc())
 
     include_map, _diags = ClangHeaderIncludeExtractor().extract(
         [str(pub)], [str(tmp_path)]
@@ -754,7 +764,7 @@ def test_header_include_extractor_forwards_sysroot_and_nostdinc(
 
         return _Proc()
 
-    monkeypatch.setattr(ig.subprocess, "run", _fake_run)
+    monkeypatch.setattr(ig.deadline, "run_bounded", _fake_run)
     ClangHeaderIncludeExtractor().extract(
         [str(pub)], [], sysroot="/opt/cross-sysroot", nostdinc=True
     )

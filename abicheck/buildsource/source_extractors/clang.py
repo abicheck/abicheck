@@ -61,6 +61,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from ... import deadline
 from ...header_conditionals import _include_guard_macro, _strip_comments
 from ..build_evidence import CompileUnit
 from ..model import LayerConfidence
@@ -79,6 +80,7 @@ from ._argv import (
     split_public_roots,
     unredact_home,
 )
+from ._deadline_bound import run_bounded_for_extraction
 from .base import SourceExtractionError
 
 # Public-header-root equivalence + path classification was split into a leaf
@@ -134,6 +136,7 @@ def _clang_compiler_version(clang_bin: str) -> str:
         return r.stdout.strip() if r.returncode == 0 else ""
     except (OSError, subprocess.TimeoutExpired):
         return ""
+
 
 #: AST node kinds clang emits for the entities we fingerprint. Includes the C++
 #: special members (constructor/destructor/conversion) so a change to a public
@@ -258,7 +261,8 @@ def _clang_context_args(
         # abi_relevant_flags after it, or clang would silently parse the TU at
         # the wrong language level (e.g. CMake's gnu++17 then c++20 pair).
         extra = [
-            flag for flag in extra
+            flag
+            for flag in extra
             if not flag.startswith("-std=")
             and not flag.lower().startswith(("/std:", "-std:"))
         ]
@@ -1695,6 +1699,16 @@ def _emit_typedef(
     )
 
 
+def _recheck_deadline(source: str, when: str) -> None:
+    """Re-check the deadline mid-extraction; folds into SourceExtractionError."""
+    try:
+        deadline.check()
+    except deadline.DeadlineExceeded as exc:
+        raise SourceExtractionError(
+            f"scan deadline exceeded {when} for {source}"
+        ) from exc
+
+
 class ClangSourceExtractor:
     """Produce a :class:`SourceAbiTu` from one compile unit via clang (D3, phase 5).
 
@@ -1769,6 +1783,7 @@ class ClangSourceExtractor:
                     f"(exit {ast_rc}): {ast_stderr[:1000]}"
                     + _missing_generated_header_hint(ast_stderr)
                 )
+            _recheck_deadline(compile_unit.source, "before loading AST")
             try:
                 with open(ast_path, "rb") as fh:  # bytes: json detects encoding
                     ast_root = json.load(fh)
@@ -1778,6 +1793,8 @@ class ClangSourceExtractor:
                 ) from exc
         finally:
             ast_path.unlink(missing_ok=True)
+        # The JSON load can itself consume the budget (Codex review, round 4).
+        _recheck_deadline(compile_unit.source, "after loading AST")
         # A non-zero exit with usable JSON means clang recovered from some errors;
         # record it as a diagnostic (partial coverage) rather than discarding the
         # dump (ADR-028 D7).
@@ -1883,20 +1900,19 @@ class ClangSourceExtractor:
         ``unredact_home`` only rewrites a ``~`` standing in for a home directory,
         so a literal ``~`` mid-token is left intact (mirrors castxml, PR #336).
         """
+        # Bound by min(self.timeout, active --budget) and process-group-safe on
+        # timeout, same fix as the L2 header-AST subprocess (Codex review, PR
+        # #591, round 7).
         cmd = [unredact_home(tok) for tok in cmd]
-        try:
-            return subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout,
-                check=False,
-                cwd=directory or None,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise SourceExtractionError(
-                f"clang timed out after {self.timeout}s on {source_label}"
-            ) from exc
+        return run_bounded_for_extraction(
+            cmd,
+            timeout=self.timeout,
+            tool_label="clang",
+            unit_label=source_label,
+            capture_output=True,
+            text=True,
+            cwd=directory or None,
+        )
 
     def _run_ast_to_file(
         self, cmd: list[str], directory: str, source_label: str
@@ -1915,26 +1931,23 @@ class ClangSourceExtractor:
         parse). ``stderr`` stays buffered (it is small). The temp file is removed on
         timeout/failure here; on success the caller's ``finally`` removes it.
         """
+        # See _run: run_bounded_for_extraction bounds this the same way.
         cmd = [unredact_home(tok) for tok in cmd]
         fd, name = tempfile.mkstemp(prefix="abicheck-l4-ast-", suffix=".json")
         path = Path(name)
         try:
             with os.fdopen(fd, "wb") as out:
-                proc = subprocess.run(
+                proc = run_bounded_for_extraction(
                     cmd,
+                    timeout=self.timeout,
+                    tool_label="clang",
+                    unit_label=source_label,
                     stdout=out,
                     stderr=subprocess.PIPE,
-                    timeout=self.timeout,
-                    check=False,
                     cwd=directory or None,
                 )
             stderr = proc.stderr.decode("utf-8", "replace") if proc.stderr else ""
             return path, stderr, proc.returncode
-        except subprocess.TimeoutExpired as exc:
-            path.unlink(missing_ok=True)
-            raise SourceExtractionError(
-                f"clang timed out after {self.timeout}s on {source_label}"
-            ) from exc
         except BaseException:
             path.unlink(missing_ok=True)
             raise

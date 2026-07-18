@@ -54,7 +54,7 @@ class TestCastxmlNonZeroExit:
         """castxml exit 1 → RuntimeError mentioning exit code."""
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run",
+            patch("abicheck.dumper.deadline.run_bounded",
                   return_value=_make_completed_process(returncode=1, stderr="error: no such file")),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent_cache.xml"),
         ):
@@ -69,7 +69,7 @@ class TestCastxmlNonZeroExit:
         stderr_text = "fatal error: myheader.h: No such file or directory"
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run",
+            patch("abicheck.dumper.deadline.run_bounded",
                   return_value=_make_completed_process(returncode=2, stderr=stderr_text)),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent_cache.xml"),
         ):
@@ -83,7 +83,7 @@ class TestCastxmlNonZeroExit:
         """Error message should include the exit code."""
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run",
+            patch("abicheck.dumper.deadline.run_bounded",
                   return_value=_make_completed_process(returncode=127, stderr="")),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent_cache.xml"),
         ):
@@ -115,7 +115,7 @@ class TestCastxmlEmptyOutput:
 
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent_cache.xml"),
         ):
             from abicheck.dumper import _castxml_dump
@@ -132,7 +132,7 @@ class TestCastxmlEmptyOutput:
 
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent_cache.xml"),
         ):
             from abicheck.dumper import _castxml_dump
@@ -155,7 +155,7 @@ class TestCastxmlEmptyXmlRoot:
 
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent_cache.xml"),
         ):
             from abicheck.dumper import _castxml_dump
@@ -174,7 +174,7 @@ class TestCastxmlEmptyXmlRoot:
 
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent_cache.xml"),
         ):
             from abicheck.dumper import _castxml_dump
@@ -200,7 +200,7 @@ class TestCastxmlInvalidXml:
 
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent_cache.xml"),
         ):
             from abicheck.dumper import _castxml_dump
@@ -220,7 +220,7 @@ class TestCastxmlInvalidXml:
 
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent_cache.xml"),
         ):
             from abicheck.dumper import _castxml_dump
@@ -243,7 +243,7 @@ class TestCastxmlSuccessPath:
 
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent_cache.xml"),
         ):
             from abicheck.dumper import _castxml_dump

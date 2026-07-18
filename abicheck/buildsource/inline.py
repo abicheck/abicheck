@@ -57,6 +57,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from .. import deadline
 from .build_evidence import BuildEvidence
 from .model import (
     CoverageStatus,
@@ -1309,15 +1310,38 @@ def _run_build_query(
         return None
     if not argv:
         return None
+    scan_remaining = deadline.remaining()
+    effective_timeout = (
+        _QUERY_TIMEOUT_S
+        if scan_remaining is None
+        else min(_QUERY_TIMEOUT_S, scan_remaining)
+    )
     try:
-        proc = subprocess.run(  # noqa: S603 - operator-configured, shell=False, opt-in
-            argv,
-            cwd=str(cwd) if cwd else None,
-            capture_output=True,
-            text=True,
-            timeout=_QUERY_TIMEOUT_S,
-            check=False,
+        # Bound by min(local 300s default, active scan --budget) —
+        # run_bounded() alone would honor a generous outer deadline verbatim
+        # instead of this query's own cap, letting a hung configured query
+        # burn the whole remaining scan budget — and process-group-safe on
+        # timeout. This operator-configured query runs inside
+        # run_scan_core's L2-L5 deadline scope just like the zero-config
+        # inferred query (Codex review, PR #591, round 8).
+        with deadline.deadline_scope(effective_timeout):
+            proc = deadline.run_bounded(  # noqa: S603 - operator-configured, shell=False, opt-in
+                argv,
+                cwd=str(cwd) if cwd else None,
+                capture_output=True,
+                text=True,
+                timeout=_QUERY_TIMEOUT_S,
+            )
+    except deadline.DeadlineExceeded as exc:
+        extractors.append(
+            ExtractorRecord(
+                name="build_query",
+                status="failed",
+                detail=f"build.query aborted: scan deadline exceeded ({exc})",
+            )
         )
+        merged.diagnostics.append(f"build_query: scan deadline exceeded ({exc})")
+        return None
     except (OSError, subprocess.SubprocessError) as exc:
         extractors.append(
             ExtractorRecord(

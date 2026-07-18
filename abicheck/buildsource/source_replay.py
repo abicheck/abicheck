@@ -49,7 +49,9 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
+from typing import Any
 
+from .. import deadline
 from .build_evidence import BuildEvidence, CompileUnit, Target
 from .source_abi import SOURCE_ABI_VERSION, SourceAbiSurface, SourceAbiTu
 from .source_extractors._argv import (
@@ -1033,6 +1035,23 @@ def _replay_cache_lookup(
     return keys, results, misses
 
 
+def _deadline_bound_worker(
+    deadline_ts: float | None,
+    worker: Callable[[CompileUnit], tuple[SourceAbiTu | None, str | None]],
+    unit: CompileUnit,
+) -> tuple[SourceAbiTu | None, str | None]:
+    """Re-establish a captured scan deadline inside a pool worker.
+
+    ``contextvars`` don't cross a ``ThreadPoolExecutor``/``ProcessPoolExecutor``
+    boundary, so without this a worker would see no active deadline and each
+    extractor's ``deadline.run_bounded`` call would silently fall back to its
+    fixed default timeout regardless of ``--budget`` (Codex review, PR #591).
+    Module-level so it stays picklable for the process pool.
+    """
+    with deadline.with_deadline_ts(deadline_ts):
+        return worker(unit)
+
+
 def _extract_cache_misses(
     worker: Callable[[CompileUnit], tuple[SourceAbiTu | None, str | None]],
     miss_units: list[CompileUnit],
@@ -1045,14 +1064,28 @@ def _extract_cache_misses(
     into a closed-over list.
     """
     if jobs > 1 and len(miss_units) > 1:
+        pool_worker = partial(
+            _deadline_bound_worker, deadline.current_deadline_ts(), worker
+        )
         # Process pool parallelizes the GIL-bound AST post-processing too, not
         # just the clang subprocess wait (opt-in; see _l4_use_process_pool).
         executor_cls = (
             ProcessPoolExecutor if _l4_use_process_pool() else ThreadPoolExecutor
         )
+        executor_kwargs: dict[str, Any] = {"max_workers": jobs}
+        if executor_cls is ProcessPoolExecutor:
+            # A process-pool worker is a genuinely separate OS process, so it
+            # never inherits the SIGTERM handler cli.main installed in the
+            # main process (fork-inherited handlers are also not guaranteed —
+            # ABICHECK_L4_EXECUTOR's default start method can be "spawn"). An
+            # external SIGTERM landing on this worker mid-run_bounded() would
+            # otherwise kill it with Python's default disposition, leaving its
+            # detached clang/castxml process group untracked and orphaned
+            # (Codex review, PR #591, round 3).
+            executor_kwargs["initializer"] = deadline.install_sigterm_cleanup
         try:
-            with executor_cls(max_workers=jobs) as pool:
-                return list(pool.map(worker, miss_units))
+            with executor_cls(**executor_kwargs) as pool:
+                return list(pool.map(pool_worker, miss_units))
         except Exception as exc:  # noqa: BLE001
             # A process pool can fail to start (spawn import error, sandbox with
             # no /dev/shm, …) where threads would not. Degrade to a serial pass

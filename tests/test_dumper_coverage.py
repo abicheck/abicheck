@@ -9,7 +9,6 @@ members-attribute parsing, _pointer_depth, _underlying_type_name).
 from __future__ import annotations
 
 import shutil
-import subprocess
 import warnings
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,6 +16,7 @@ from xml.etree.ElementTree import Element, SubElement
 
 import pytest
 
+from abicheck import deadline
 from abicheck.dumper import (
     _cache_key,
     _castxml_dump,
@@ -253,7 +253,7 @@ class TestCastxmlDumpBranches:
                     break
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-        monkeypatch.setattr(subprocess, "run", fake_run)
+        monkeypatch.setattr(deadline, "run_bounded", fake_run)
         return captured_cmd
 
     def test_gcc_path_used(self, tmp_path, monkeypatch):
@@ -325,7 +325,7 @@ class TestCastxmlDumpBranches:
                     break
             return SimpleNamespace(returncode=1, stdout="", stderr="compilation error")
 
-        monkeypatch.setattr(subprocess, "run", fake_run)
+        monkeypatch.setattr(deadline, "run_bounded", fake_run)
 
         with pytest.raises(RuntimeError, match="castxml failed"):
             _castxml_dump([header], [])

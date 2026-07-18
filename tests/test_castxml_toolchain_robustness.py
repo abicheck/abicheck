@@ -58,7 +58,9 @@ _ASSUME_STDERR = (
 )
 
 
-def _completed(stdout: str = "", stderr: str = "", returncode: int = 0) -> subprocess.CompletedProcess:
+def _completed(
+    stdout: str = "", stderr: str = "", returncode: int = 0
+) -> subprocess.CompletedProcess:
     result: subprocess.CompletedProcess = MagicMock(spec=subprocess.CompletedProcess)
     result.returncode = returncode
     result.stdout = stdout
@@ -80,7 +82,9 @@ class TestParseCastxmlVersion:
 
     def test_parses_llvm_version_spelling(self) -> None:
         # castxml builds that print "LLVM version" rather than "clang version".
-        raw, clang = _parse_castxml_version("castxml version 0.6.8\nLLVM version 18.1.8\n")
+        raw, clang = _parse_castxml_version(
+            "castxml version 0.6.8\nLLVM version 18.1.8\n"
+        )
         assert raw == "0.6.8"
         assert clang == (18, 1)
 
@@ -92,8 +96,10 @@ class TestParseCastxmlVersion:
 class TestVersionNote:
     def test_old_clang_recommends_upgrade(self) -> None:
         with patch(
-            "abicheck.dumper.subprocess.run",
-            return_value=_completed(stdout="castxml version 0.5.1\nclang version 14.0.0\n"),
+            "abicheck.dumper.deadline.run_bounded",
+            return_value=_completed(
+                stdout="castxml version 0.5.1\nclang version 14.0.0\n"
+            ),
         ):
             note = _castxml_version_note()
         assert "clang 14" in note
@@ -102,15 +108,17 @@ class TestVersionNote:
 
     def test_new_clang_gives_no_note(self) -> None:
         with patch(
-            "abicheck.dumper.subprocess.run",
-            return_value=_completed(stdout="castxml version 0.6.8\nclang version 18.1.8\n"),
+            "abicheck.dumper.deadline.run_bounded",
+            return_value=_completed(
+                stdout="castxml version 0.6.8\nclang version 18.1.8\n"
+            ),
         ):
             assert _castxml_version_note() == ""
 
     def test_castxml_version_without_clang_line(self) -> None:
         # castxml version is reported but no parseable clang line — still nudge.
         with patch(
-            "abicheck.dumper.subprocess.run",
+            "abicheck.dumper.deadline.run_bounded",
             return_value=_completed(stdout="castxml version 0.4.5\n"),
         ):
             note = _castxml_version_note()
@@ -119,14 +127,109 @@ class TestVersionNote:
 
     def test_no_version_info_is_silent(self) -> None:
         with patch(
-            "abicheck.dumper.subprocess.run",
+            "abicheck.dumper.deadline.run_bounded",
             return_value=_completed(stdout="unrelated output\n"),
         ):
             assert _castxml_version_note() == ""
 
     def test_probe_failure_is_silent(self) -> None:
-        with patch("abicheck.dumper.subprocess.run", side_effect=OSError("not found")):
+        with patch(
+            "abicheck.dumper.deadline.run_bounded", side_effect=OSError("not found")
+        ):
             assert _castxml_version_note() == ""
+
+    def test_probe_deadline_exceeded_propagates(self) -> None:
+        # Second-round Codex review (PR #591): a DeadlineExceeded here is
+        # NOT an ordinary probe failure (missing tool, etc.) — this probe
+        # sits on the authoritative L2 castxml path. Silently degrading it
+        # to "" (as an earlier fix did) let a budget overflow during the
+        # probe masquerade as a normal HeaderToolchainError/SnapshotError
+        # (CLI exit 1) instead of the documented budget-overflow exit 5, so
+        # it must propagate uncaught like the castxml/clang subprocess
+        # calls around it.
+        # Round-3 note: DeadlineExceeded propagates only when the *outer scan*
+        # deadline (not this probe's own 15s local cap) is what's binding —
+        # an active deadline_scope tighter than 15s makes that the case here
+        # (Codex review, PR #591, round 3).
+        from abicheck import deadline
+
+        with (
+            patch(
+                "abicheck.dumper.deadline.run_bounded",
+                side_effect=deadline.DeadlineExceeded(-1.0),
+            ),
+            deadline.deadline_scope(5.0),
+            pytest.raises(deadline.DeadlineExceeded),
+        ):
+            _castxml_version_note()
+
+    def test_probe_local_cap_hit_with_generous_scan_budget_is_silent(self) -> None:
+        # Codex review (PR #591), round 3: hitting this probe's OWN 15s cap
+        # is an ordinary probe failure -- even with an active outer --budget,
+        # as long as that outer budget still had *more* than 15s left when
+        # the probe started (so the local cap, not the scan deadline, was
+        # what actually bound the nested scope).
+        from abicheck import deadline
+
+        with (
+            patch(
+                "abicheck.dumper.deadline.run_bounded",
+                side_effect=deadline.DeadlineExceeded(-1.0),
+            ),
+            deadline.deadline_scope(1800.0),  # generous 30-minute --budget
+        ):
+            assert _castxml_version_note() == ""
+
+    def test_probe_bounded_by_local_cap_not_full_scan_budget(self) -> None:
+        # Codex review (PR #591), round 3: deadline.run_bounded() honors an
+        # active outer deadline verbatim (not min(timeout, left)), so a bare
+        # timeout=15 alone did nothing once a generous --budget was active --
+        # a hung `castxml --version` could consume the whole remaining scan
+        # budget instead of this probe's own 15s cap.
+        from abicheck import deadline
+
+        seen_remaining: list[float | None] = []
+
+        def fake_run(*_a, **_k):
+            seen_remaining.append(deadline.remaining())
+            return _completed(stdout="unrelated output\n")
+
+        with (
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
+            deadline.deadline_scope(1800.0),  # generous 30-minute --budget
+        ):
+            _castxml_version_note()
+
+        assert seen_remaining
+        assert seen_remaining[0] is not None and seen_remaining[0] <= 15.5
+
+    def test_probe_classified_as_local_cap_at_entry_still_propagates_if_outer_expires_by_return(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Codex review (PR #591, round 3): run_bounded's own escalation
+        # (SIGTERM -> grace -> SIGKILL, plus a fixed 5s pipe-drain) can push
+        # real elapsed time past what scan_remaining showed when this probe
+        # decided whether the local 15s cap or the outer scan deadline was
+        # binding. A probe correctly classified "local-cap-only" at entry
+        # (outer had *just over* 15s left) must still propagate if the
+        # outer deadline is exhausted by the time the except clause runs --
+        # trusting a snapshot taken before the call would silently swallow
+        # a genuine budget overflow as an ordinary probe failure.
+        from abicheck import deadline
+
+        clock = {"t": 1000.0}
+        monkeypatch.setattr(deadline.time, "monotonic", lambda: clock["t"])
+
+        def fake_run(*_a, **_k):
+            clock["t"] += 20.0  # simulate run_bounded's real escalation cost
+            raise deadline.DeadlineExceeded(-1.0)
+
+        with (
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
+            deadline.deadline_scope(15.5),  # just over the 15s local cap
+            pytest.raises(deadline.DeadlineExceeded),
+        ):
+            _castxml_version_note()
 
 
 class TestFailureHint:
@@ -139,7 +242,9 @@ class TestFailureHint:
 
     def test_floatn_hint_includes_version_note(self) -> None:
         hint = _castxml_failure_hint(
-            _FLOATN_STDERR, force_cpp=True, headers=[],
+            _FLOATN_STDERR,
+            force_cpp=True,
+            headers=[],
             version_note=" Detected castxml 0.5.1 (clang 14.0); upgrade.",
         )
         assert "Detected castxml 0.5.1" in hint
@@ -182,12 +287,18 @@ class TestProbeGating:
         def fake_run(cmd, **kwargs):  # noqa: ANN001
             calls.append(list(cmd))
             if "--version" in cmd:
-                return _completed(stdout="castxml version 0.5.1\nclang version 14.0.0\n")
+                return _completed(
+                    stdout="castxml version 0.5.1\nclang version 14.0.0\n"
+                )
             return _completed(returncode=1, stderr=_FLOATN_STDERR)
 
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            # Both the main castxml dump and the `castxml --version` probe
+            # (_castxml_version_note) now go through deadline.run_bounded
+            # (Codex review, PR #591) — patched to the same fake so either
+            # call routes here.
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
         ):
             header = tmp_path / "api.hpp"
@@ -196,20 +307,51 @@ class TestProbeGating:
                 _castxml_dump([header], [])
 
         msg = str(exc.value)
-        assert "newer castxml" in msg          # base sized-float hint
+        assert "newer castxml" in msg  # base sized-float hint
         assert "Detected castxml 0.5.1" in msg  # folded-in version note
         assert any("--version" in c for c in calls)  # probe happened
+
+    def test_version_probe_deadline_exceeded_propagates_end_to_end(
+        self, tmp_path: Path
+    ) -> None:
+        # Second-round Codex review (PR #591): when the scan budget expires
+        # during the `--version` probe (triggered by a frontend-too-old
+        # castxml failure), the DeadlineExceeded must escape _castxml_dump
+        # uncaught -- not get folded into a HeaderToolchainError/SnapshotError
+        # (CLI exit 1) the way an earlier fix incorrectly did.
+        from abicheck import deadline
+
+        def fake_run(cmd, **kwargs):  # noqa: ANN001
+            if "--version" in cmd:
+                raise deadline.DeadlineExceeded(-1.0)
+            return _completed(returncode=1, stderr=_FLOATN_STDERR)
+
+        with (
+            patch("abicheck.dumper._castxml_available", return_value=True),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
+            patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
+            # Round-3 note: propagation requires the *outer scan* deadline to
+            # be the binding constraint, not just this probe's own 15s local
+            # cap (Codex review, PR #591, round 3).
+            deadline.deadline_scope(5.0),
+            pytest.raises(deadline.DeadlineExceeded),
+        ):
+            header = tmp_path / "api.hpp"
+            header.write_text("int f();\n", encoding="utf-8")
+            _castxml_dump([header], [])
 
     def test_unrelated_failure_skips_version_probe(self, tmp_path: Path) -> None:
         calls: list[list[str]] = []
 
         def fake_run(cmd, **kwargs):  # noqa: ANN001
             calls.append(list(cmd))
-            return _completed(returncode=1, stderr="fatal error: missing.h: No such file")
+            return _completed(
+                returncode=1, stderr="fatal error: missing.h: No such file"
+            )
 
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
         ):
             header = tmp_path / "api.hpp"
@@ -256,7 +398,7 @@ class TestLangCFallsBackToCpp:
         header.write_text("namespace ns { int f(int); }\n", encoding="utf-8")
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
             caplog.at_level("WARNING"),
         ):
@@ -276,18 +418,20 @@ class TestLangCFallsBackToCpp:
 
         def fake_run(cmd, **kwargs):  # noqa: ANN001
             modes.append(_in_c_mode(cmd))
-            return _completed(returncode=1, stderr="fatal error: 'cfg.h' file not found")
+            return _completed(
+                returncode=1, stderr="fatal error: 'cfg.h' file not found"
+            )
 
         header = tmp_path / "zlib.h"
         header.write_text(
-            "#ifndef __cplusplus\n#include \"cfg.h\"\n#endif\n"
+            '#ifndef __cplusplus\n#include "cfg.h"\n#endif\n'
             '#ifdef __cplusplus\nextern "C" {\n#endif\nint f(void);\n'
             "#ifdef __cplusplus\n}\n#endif\n",
             encoding="utf-8",
         )
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
             pytest.raises(SnapshotError) as exc,
         ):
@@ -307,7 +451,9 @@ class TestLangCFallsBackToCpp:
     def test_both_modes_fail_surfaces_requested_c_error(self, tmp_path: Path) -> None:
         def fake_run(cmd, **kwargs):  # noqa: ANN001
             if "--version" in cmd:
-                return _completed(stdout="castxml version 0.6.8\nclang version 18.1.8\n")
+                return _completed(
+                    stdout="castxml version 0.6.8\nclang version 18.1.8\n"
+                )
             return _completed(returncode=1, stderr="error: expected ';'")
 
         # A genuine C++-only construct triggers the retry; both modes fail here.
@@ -315,7 +461,7 @@ class TestLangCFallsBackToCpp:
         header.write_text("class Widget { int x; };\n", encoding="utf-8")
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
             pytest.raises(SnapshotError) as exc,
         ):
@@ -330,13 +476,15 @@ class TestLangCFallsBackToCpp:
 
         def fake_run(cmd, **kwargs):  # noqa: ANN001
             modes.append(_in_c_mode(cmd))
-            return _completed(returncode=1, stderr="fatal error: missing.h: No such file")
+            return _completed(
+                returncode=1, stderr="fatal error: missing.h: No such file"
+            )
 
         header = tmp_path / "api.h"
         header.write_text("int plain_c(void);\n", encoding="utf-8")
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
             pytest.raises(SnapshotError),
         ):
@@ -364,7 +512,7 @@ class TestHeaderToolchainErrorClass:
         header.write_text("int f(void);\n", encoding="utf-8")
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
             pytest.raises(HeaderToolchainError) as exc,
         ):
@@ -383,7 +531,7 @@ class TestHeaderToolchainErrorClass:
         header.write_text("int f(void);\n", encoding="utf-8")
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
             pytest.raises(SnapshotError) as exc,
         ):
@@ -410,7 +558,7 @@ class TestHeaderToolchainErrorClass:
         header.write_text("int f(void);\n", encoding="utf-8")
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
             pytest.raises(SnapshotError) as exc,
         ):

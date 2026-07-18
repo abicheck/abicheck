@@ -54,12 +54,17 @@ if TYPE_CHECKING:
 
 from defusedxml import ElementTree as DefusedET
 
+from . import deadline
 from ._compiler_options import has_explicit_cpp_std, has_explicit_std
 from .dumper_cache import _atomic_write, _cache_path
 from .dumper_castxml import (
     _CastxmlParser as _CastxmlParser,
     _parse_vtable_index as _parse_vtable_index,
     _vt_sort_key as _vt_sort_key,
+)
+from .dumper_castxml_probe import (
+    _castxml_version_note as _castxml_version_note,
+    _parse_castxml_version as _parse_castxml_version,
 )
 from .dumper_clang import (
     _clang_available as _clang_available,
@@ -72,6 +77,7 @@ from .dumper_clang_errors import (
     _parse_clang_ast_result,
     diagnose_header_compile_failure,
     retry_excluding_error_headers,
+    run_clang_to_ast_file,
 )
 from .dumper_debug import (
     # DWARF/BTF/CTF format resolution + the kernel-binary heuristic live in the
@@ -362,10 +368,20 @@ def _clang_header_dump(
     )
     cached = _cache_path(key, backend="clang")
     if cached.exists():
+        # A cache hit still costs time parsing a potentially huge AST (Codex review).
+        deadline.check()
         try:
-            return cast("dict[str, Any]", json.loads(cached.read_text(encoding="utf-8")))
+            _cached_result = cast(
+                "dict[str, Any]", json.loads(cached.read_text(encoding="utf-8"))
+            )
         except (ValueError, OSError):
             cached.unlink(missing_ok=True)
+        else:
+            # The load itself can consume the rest of the budget on a huge
+            # cached AST; re-check before handing it to the AST walker
+            # (Codex review, PR #591, round 3).
+            deadline.check()
+            return _cached_result
 
     agg_ext = ".hpp" if force_cpp else ".h"
     with tempfile.NamedTemporaryFile(suffix=agg_ext, mode="w", delete=False) as agg:
@@ -379,6 +395,8 @@ def _clang_header_dump(
 
     _write_agg(active_headers)
 
+    _ast_paths: list[Path] = []  # each attempt's AST, cleaned up in `finally` below
+
     def _run_clang(fcpp: bool, fcpp20: bool, sysinc: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
         cmd = _build_clang_header_command(
             clang_bin, cc_id, extra_includes, agg_path,
@@ -387,12 +405,15 @@ def _clang_header_dump(
             force_cpp=fcpp, force_cpp20=fcpp20,
             system_includes=sysinc,
         )
+        # DeadlineExceeded propagates uncaught, mapped by run_scan_core to _BudgetOverflow.
+        deadline.check()
         try:
-            return subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
+            return run_clang_to_ast_file(cmd, timeout=120, on_created=_ast_paths.append)
         except subprocess.TimeoutExpired as exc:
             raise SnapshotError(
                 "clang timed out after 120 seconds parsing the header(s). The header "
-                "may contain syntax that causes the frontend to hang."
+                "may contain syntax that causes the frontend to hang. The clang "
+                "process (and any child processes) has been terminated."
             ) from exc
 
     try:
@@ -426,9 +447,11 @@ def _clang_header_dump(
             agg_path=agg_path,
             active_headers=active_headers,
         )
-        return _parse_clang_ast_result(result, cached)
+        return _parse_clang_ast_result(result, cached, _ast_paths[-1])
     finally:
         agg_path.unlink(missing_ok=True)
+        for _p in _ast_paths:
+            _p.unlink(missing_ok=True)
 
 
 def _header_ast_parser(
@@ -852,23 +875,6 @@ def _build_castxml_command(
 #   error: unknown type name '_Float32'
 _SIZED_FLOAT_RE = re.compile(r"_Float(?:16|32|64|128)(?:x)?\b")
 
-# castxml drives an internal Clang frontend; it must be new enough to parse
-# modern host headers. _Float32/_Float64/_Float128 land in Clang 16, and the
-# [[assume]] / __assume__ attribute (GCC 13+ libstdc++) in Clang 18. We
-# recommend a bundled Clang >= this so both are covered. This is the durable
-# fix for the header-scoped toolchain aborts (plan G16) — abicheck cannot
-# reliably work around a frontend that is simply older than the host headers,
-# so it detects the version and tells the user to upgrade.
-_RECOMMENDED_CLANG_MAJOR = 18
-
-_CASTXML_VERSION_RE = re.compile(r"castxml version\s+(\S+)", re.IGNORECASE)
-# `castxml --version` does not always print the bundled frontend version, and
-# when it does the spelling varies ("clang version 18.1.8", "LLVM version 18.1.8").
-# Accept either so the precise floor comparison can actually fire.
-_CLANG_VERSION_RE = re.compile(
-    r"(?:clang|LLVM) version\s+(\d+)(?:\.(\d+))?", re.IGNORECASE
-)
-
 
 def _is_toolchain_version_failure(stderr: str) -> bool:
     """True when a castxml failure is a bundled-Clang-too-old signature
@@ -877,53 +883,6 @@ def _is_toolchain_version_failure(stderr: str) -> bool:
     return bool(stderr) and (
         bool(_SIZED_FLOAT_RE.search(stderr)) or "__assume__" in stderr
     )
-
-
-def _parse_castxml_version(output: str) -> tuple[str | None, tuple[int, int] | None]:
-    """Parse ``castxml --version`` text into (castxml_version, clang_major_minor).
-
-    Either element is ``None`` when not found. Pure/string-only so it is fully
-    unit-testable without castxml installed.
-    """
-    cx = _CASTXML_VERSION_RE.search(output or "")
-    cl = _CLANG_VERSION_RE.search(output or "")
-    cx_ver = cx.group(1) if cx else None
-    clang = (int(cl.group(1)), int(cl.group(2) or 0)) if cl else None
-    return cx_ver, clang
-
-
-def _castxml_version_note() -> str:
-    """Probe ``castxml --version`` and, when its bundled Clang predates the
-    recommended floor, return a one-line upgrade note (else "").
-
-    Best-effort: any probe failure yields "" so the base diagnostic still
-    stands. Only called on an actual parse failure, so the extra process is
-    incurred rarely.
-    """
-    try:
-        proc = subprocess.run(
-            ["castxml", "--version"],
-            capture_output=True, text=True, timeout=15, check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    raw, clang = _parse_castxml_version(f"{proc.stdout}\n{proc.stderr}")
-    if clang is not None and clang[0] < _RECOMMENDED_CLANG_MAJOR:
-        detected = (
-            f"castxml {raw} (clang {clang[0]}.{clang[1]})"
-            if raw else f"clang {clang[0]}.{clang[1]}"
-        )
-        return (
-            f" Detected {detected}; these host headers need clang "
-            f">= {_RECOMMENDED_CLANG_MAJOR} — upgrade castxml to a build with a "
-            f"newer bundled Clang."
-        )
-    if raw and clang is None:
-        return (
-            f" Detected castxml {raw}; upgrade it if its bundled Clang predates "
-            f"the host gcc (clang >= {_RECOMMENDED_CLANG_MAJOR} recommended)."
-        )
-    return ""
 
 
 def _castxml_failure_hint(
@@ -1005,6 +964,7 @@ def _validate_castxml_output(
         raise SnapshotError(
             f"castxml exited 0 but produced no output file (or empty file).{detail}"
         )
+    deadline.check()  # before parsing; outside the try below (Exception would swallow it)
     try:
         root = cast(Element, DefusedET.parse(str(out_xml)).getroot())
     except Exception as xml_exc:
@@ -1021,6 +981,10 @@ def _validate_castxml_output(
             f"Check that the header paths are correct and the compiler can "
             f"parse them.{detail}"
         )
+    # The parse itself can consume the rest of the budget on a huge fresh
+    # XML tree; re-check before handing it off (Codex review, PR #591,
+    # round 3, mirrors the cached-hit and clang-AST paths).
+    deadline.check()
     return root
 
 
@@ -1070,6 +1034,8 @@ def _castxml_dump(
     )
     cached = _cache_path(key)
     if cached.exists():
+        # Same reasoning as the clang cache-hit path (_clang_header_dump, Codex review).
+        deadline.check()
         try:
             _cached_root = DefusedET.parse(str(cached)).getroot()
         except Exception:
@@ -1077,6 +1043,10 @@ def _castxml_dump(
         if _cached_root is None:
             cached.unlink(missing_ok=True)
         else:
+            # The parse itself can consume the rest of the budget on a huge
+            # cached XML tree; re-check before handing it off (Codex review,
+            # PR #591, round 3).
+            deadline.check()
             return cast(Element, _cached_root)
 
     cc_bin, cc_id = _resolve_compiler_binary(compiler, gcc_path, gcc_prefix)
@@ -1137,6 +1107,12 @@ def _castxml_dump(
             _atomic_write(cached, out_xml.read_bytes())
         except OSError as exc:
             log.warning("Could not write castxml AST cache %s: %s", cached, exc)
+        # Re-reading the whole XML file (read_bytes) and writing the cache copy
+        # can itself consume real time on a huge fresh tree; re-check before
+        # handing the already-parsed root back to the caller, mirroring the
+        # pre-cache-write check in _validate_castxml_output (Codex review,
+        # PR #591, round 10).
+        deadline.check()
         return root
     finally:
         out_xml.unlink(missing_ok=True)
@@ -1183,8 +1159,9 @@ def _run_castxml_attempt(
     )
 
     try:
+        deadline.check()  # propagates uncaught, like _clang_header_dump._run_clang
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
+            result = deadline.run_bounded(cmd, capture_output=True, text=True, timeout=120)
         except subprocess.TimeoutExpired as exc:
             stderr_snippet = ""
             if exc.stderr:
@@ -1193,7 +1170,8 @@ def _run_castxml_attempt(
             raise SnapshotError(
                 f"castxml timed out after 120 seconds. The header file may contain "
                 f"syntax that causes the compiler to hang. Check that the header "
-                f"is valid and can be compiled with gcc/g++.{stderr_snippet}"
+                f"is valid and can be compiled with gcc/g++. The castxml process "
+                f"(and any child processes) has been terminated.{stderr_snippet}"
             ) from exc
         return _validate_castxml_output(result, out_xml, headers, force_cpp)
     finally:

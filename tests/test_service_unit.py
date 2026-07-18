@@ -925,7 +925,9 @@ class TestDumpElf:
         snap = AbiSnapshot(library="test", version="1.0")
         with (
             patch("abicheck.service.expand_header_inputs", return_value=[]),
-            patch("abicheck.debug_resolver.resolve_debug_info", return_value=None) as mock_resolve,
+            patch(
+                "abicheck.debug_resolver.resolve_debug_info", return_value=None
+            ) as mock_resolve,
             patch("abicheck.dumper.dump", return_value=snap),
         ):
             _dump_elf(
@@ -949,7 +951,9 @@ class TestDumpElf:
         snap = AbiSnapshot(library="test", version="1.0")
         with (
             patch("abicheck.service.expand_header_inputs", return_value=[]),
-            patch("abicheck.debug_resolver.resolve_debug_info", return_value=None) as mock_resolve,
+            patch(
+                "abicheck.debug_resolver.resolve_debug_info", return_value=None
+            ) as mock_resolve,
             patch("abicheck.dumper.dump", return_value=snap),
         ):
             _dump_elf(p, [], [], "1.0", "c++", enable_debuginfod=True)
@@ -1026,6 +1030,38 @@ class TestHeaderScopedInferredRoots:
         toks = list(captured["gcc_option_tokens"])
         assert str(root) in toks and toks[toks.index(str(root)) - 1] == "-isystem"
         assert root in captured["extra_hash_dirs"]
+
+    def test_deadline_exceeded_propagates_not_swallowed_as_fallback(self, tmp_path):
+        # Codex review on the P0 fix: the broad `except Exception` below (which
+        # exists to fall back to export-table mode when a header backend is
+        # merely unavailable) must NOT also swallow an active --budget's
+        # deadline.DeadlineExceeded. Falling back on that would silently mask
+        # the overflow (a degraded-but-"successful" scan instead of the
+        # dedicated budget-overflow exit code) and let the scan keep doing
+        # work past the point it should have aborted. It must propagate so
+        # run_scan_core's except deadline.DeadlineExceeded -> _BudgetOverflow
+        # mapping applies to PE/Mach-O the same way it already does for ELF.
+        from abicheck import deadline
+        from abicheck.service import _try_header_scoped_dump
+
+        root, umb = self._umbrella(tmp_path)
+
+        def raises_deadline_exceeded(
+            path, headers, extra_includes, version, compiler, **k
+        ):
+            raise deadline.DeadlineExceeded(-1.0)
+
+        with patch("abicheck.dumper._dump_pe", raises_deadline_exceeded):
+            with pytest.raises(deadline.DeadlineExceeded):
+                _try_header_scoped_dump(
+                    "pe", tmp_path / "x.dll", [umb], [], "1.0", "c++"
+                )
+
+        with patch("abicheck.dumper._dump_macho", raises_deadline_exceeded):
+            with pytest.raises(deadline.DeadlineExceeded):
+                _try_header_scoped_dump(
+                    "macho", tmp_path / "x.dylib", [umb], [], "1.0", "c++"
+                )
 
 
 class TestDumpPe:
@@ -2069,7 +2105,7 @@ class TestRunDumpHeaderGraph:
                 lambda _b: "/usr/bin/clang++",
             ),
             patch(
-                "abicheck.buildsource.include_graph.subprocess.run",
+                "abicheck.buildsource.include_graph.deadline.run_bounded",
                 lambda *a, **k: _Proc(),
             ),
         ):
@@ -2091,9 +2127,7 @@ class TestRunDumpHeaderGraph:
         )
         assert graph.coverage["include_edges"]["collected"] is True
 
-    def test_header_graph_includes_marks_pass_covered_when_map_is_empty(
-        self, tmp_path
-    ):
+    def test_header_graph_includes_marks_pass_covered_when_map_is_empty(self, tmp_path):
         """A leaf header with no #includes of its own is a genuine zero, not
         an uncollected pass — `header_include_graph` must still be stamped so
         `_include_graph_covered` doesn't mistake it for "never ran"."""
@@ -2117,7 +2151,7 @@ class TestRunDumpHeaderGraph:
                 lambda _b: "/usr/bin/clang++",
             ),
             patch(
-                "abicheck.buildsource.include_graph.subprocess.run",
+                "abicheck.buildsource.include_graph.deadline.run_bounded",
                 lambda *a, **k: _Proc(),
             ),
         ):
@@ -2177,7 +2211,7 @@ class TestRunDumpHeaderGraph:
                 lambda _b: "/usr/bin/clang++",
             ),
             patch(
-                "abicheck.buildsource.include_graph.subprocess.run",
+                "abicheck.buildsource.include_graph.deadline.run_bounded",
                 _fake_run,
             ),
         ):
