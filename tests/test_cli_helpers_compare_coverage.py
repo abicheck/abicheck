@@ -19,6 +19,7 @@ from abicheck.cli_helpers_compare import (
     _resolve_build_context_flags,
     _resolve_severity,
     discover_project_config,
+    dry_run_compile_db_matched,
     fold_l0_hard_removals,
 )
 from abicheck.errors import AbicheckError
@@ -165,6 +166,77 @@ def test_resolve_build_context_flags_invalid_json_raises_click_exception(tmp_pat
     db.write_text("{ this is not json", encoding="utf-8")
     with pytest.raises(click.ClickException):
         _resolve_build_context_flags(db, (), None)
+
+
+def test_dry_run_compile_db_matched_none_without_a_db():
+    """No -p/--compile-db given at all -> None, distinct from a definite
+    True/False verdict, and no I/O attempted."""
+    assert dry_run_compile_db_matched(None, None, (), None) is None
+
+
+def test_dry_run_compile_db_matched_true_for_matching_header(tmp_path, capsys):
+    """Mirrors _resolve_build_context_flags's own matched=True case, but
+    silently -- no 'Build context: ...' stderr echo (that announcement
+    belongs to the real run, not a dry run)."""
+    src = tmp_path / "foo.cpp"
+    src.write_text('#include "foo.h"\nint f() { return 0; }\n', encoding="utf-8")
+    header = tmp_path / "foo.h"
+    header.write_text("int f();\n", encoding="utf-8")
+    db = _write_compile_db(
+        tmp_path,
+        [{"directory": str(tmp_path), "file": "foo.cpp", "arguments": ["c++", "-c", "foo.cpp"]}],
+    )
+
+    assert dry_run_compile_db_matched(db, None, (header,), None) is True
+    assert capsys.readouterr().err == ""
+
+
+def test_dry_run_compile_db_matched_alias_path_used_when_primary_absent(tmp_path):
+    """The -p alias (second positional arg) is honored, same as
+    _resolve_build_context_flags's effective_compile_db resolution."""
+    header = tmp_path / "foo.h"
+    header.write_text("int f(void);\n", encoding="utf-8")
+    db = _write_compile_db(
+        tmp_path,
+        [{"directory": str(tmp_path), "file": "foo.c", "arguments": ["cc", "-c", "foo.c"]}],
+    )
+    assert dry_run_compile_db_matched(None, db, (header,), None) is True
+
+
+def test_dry_run_compile_db_matched_union_fallback_without_headers(tmp_path):
+    """No headers -> build_context_union_fallback branch (mirrors
+    _resolve_build_context_flags's identical no-headers path)."""
+    db = _write_compile_db(
+        tmp_path,
+        [{"directory": str(tmp_path), "file": "a.cpp", "arguments": ["c++", "-c", "a.cpp"]}],
+    )
+    assert dry_run_compile_db_matched(db, None, (), None) is True
+
+
+def test_dry_run_compile_db_matched_false_for_empty_db(tmp_path):
+    """A syntactically valid but empty compile_commands.json -- definite
+    False, not raised, not None."""
+    db = _write_compile_db(tmp_path, [])
+    header = tmp_path / "foo.h"
+    header.write_text("int f(void);\n", encoding="utf-8")
+    assert dry_run_compile_db_matched(db, None, (header,), None) is False
+
+
+def test_dry_run_compile_db_matched_false_for_missing_db():
+    """A missing compile database file: _resolve_build_context_flags raises
+    click.ClickException for this, but a dry run must never raise -- it's a
+    definite False (the invocation cannot succeed), not a crash."""
+    assert (
+        dry_run_compile_db_matched(Path("/nonexistent/compile_commands.json"), None, (), None)
+        is False
+    )
+
+
+def test_dry_run_compile_db_matched_false_for_malformed_json(tmp_path):
+    """Malformed JSON in the compile db: folded into False, not raised."""
+    db = tmp_path / "compile_commands.json"
+    db.write_text("{ this is not json", encoding="utf-8")
+    assert dry_run_compile_db_matched(db, None, (), None) is False
 
 
 def test_resolve_severity_not_explicit_when_all_none():
