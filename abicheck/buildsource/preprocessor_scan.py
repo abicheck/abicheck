@@ -464,15 +464,46 @@ class ClangPreprocessorExtractor:
         # compile units on a tight budget is acceptable, silently hanging or
         # orphaning a clang process is not.
         self.runs_attempted += 1
+        probe_timeout = 120.0
+        scan_remaining = deadline.remaining()
+        bound_by_scan_deadline = (
+            scan_remaining is not None and scan_remaining < probe_timeout
+        )
+        if scan_remaining is not None:
+            # run_bounded() honors an active outer deadline verbatim (not
+            # min(timeout, left)), so a bare timeout=120 alone would let a
+            # hung clang -E/-M consume the *whole* remaining scan budget
+            # under a generous --budget instead of this pre-scan's own 120s
+            # per-unit cap. Nest a narrower scope bound by whichever is
+            # tighter (Codex review, PR #591, round 5).
+            probe_timeout = min(probe_timeout, scan_remaining)
         try:
-            proc = deadline.run_bounded(  # noqa: S603 - fixed argv, never shell=True
-                cmd,
-                cwd=cwd or None,
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
+            with deadline.deadline_scope(probe_timeout):
+                proc = deadline.run_bounded(  # noqa: S603 - fixed argv, never shell=True
+                    cmd,
+                    cwd=cwd or None,
+                    capture_output=True,
+                    text=True,
+                    timeout=probe_timeout,
+                )
         except deadline.DeadlineExceeded as exc:
+            if not bound_by_scan_deadline:
+                # The entry-time snapshot said this pre-scan's OWN 120s
+                # per-unit cap was binding, not the outer scan deadline --
+                # but run_bounded's own escalation (SIGTERM -> grace ->
+                # SIGKILL, plus a fixed 5s pipe-drain) can push real elapsed
+                # time past that snapshot, so re-check the (now-restored)
+                # outer deadline directly instead of trusting it alone
+                # (Codex review, PR #591, round 3 pattern). Only this unit's
+                # own timeout: an ordinary per-unit failure, not a
+                # scan-budget overflow -- keep processing later units.
+                try:
+                    deadline.check()
+                except deadline.DeadlineExceeded:
+                    pass
+                else:
+                    self.diagnostics.append(f"clang -E timed out for {unit}: {exc}")
+                    return None
             self.deadline_exhausted = True
             self.diagnostics.append(
                 f"clang -E skipped for {unit}: scan --budget exceeded ({exc})"

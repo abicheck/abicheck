@@ -319,3 +319,18 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   a unique sibling dir. The wait is now capped by whichever is tighter, the
   local timeout or the remaining scan deadline at claim time (Codex review,
   PR #591, round 4).
+- `preprocessor_scan.ClangPreprocessorExtractor._run` had the same
+  timeout-ignored-under-an-active-deadline gap as the other auxiliary
+  probes: it passed a bare `timeout=120` to `deadline.run_bounded()`,
+  which honors an active outer deadline verbatim rather than
+  `min(timeout, left)` — so a generous `--budget` let a hung `clang
+  -E`/`-M` consume the *whole* remaining scan budget instead of this
+  advisory pre-scan's own 120s per-unit cap. Now nests a narrower
+  `deadline_scope` bound by whichever is tighter, same as the include-map/
+  build-query/castxml-probe fixes. Also fixes the resulting
+  misclassification: hitting only the local 120s cap under a generous
+  budget now degrades to an ordinary per-unit diagnostic (continues to the
+  next compile unit) instead of unconditionally setting
+  `deadline_exhausted` and abandoning the rest of the pre-scan — that flag
+  is now reserved for a genuine outer scan-budget overflow (Codex review,
+  PR #591, round 5).

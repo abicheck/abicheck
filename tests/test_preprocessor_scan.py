@@ -292,11 +292,42 @@ def test_run_uses_deadline_bounded_not_raw_subprocess(monkeypatch) -> None:
     assert ex.runs_ok == 1
 
 
-def test_deadline_exceeded_degrades_to_diagnostic_not_crash(monkeypatch) -> None:
-    # Unlike the L2 header path (authoritative evidence, must abort the scan),
-    # this pre-scan is advisory (ADR-028 D3): a --budget deadline expiring
-    # mid-preprocess must degrade to a diagnostic + skipped unit, never
-    # propagate and crash the whole `scan` command.
+def test_run_nests_local_cap_deadline_scope_not_full_scan_budget(monkeypatch) -> None:
+    # Codex review (PR #591, round 5): deadline.run_bounded() honors an
+    # active outer deadline verbatim (not min(timeout, left)), so a bare
+    # timeout=120 alone did nothing once a generous --budget was active --
+    # a hung clang -E/-M could consume the whole remaining scan budget
+    # instead of this pre-scan's own 120s per-unit cap. Must nest a
+    # narrower deadline_scope bound by whichever is tighter.
+    from abicheck import deadline
+    from abicheck.buildsource import preprocessor_scan as ps
+
+    class _P:
+        stdout = "#define NDEBUG 1\n"
+        stderr = ""
+        returncode = 0
+
+    seen_remaining: list[float | None] = []
+
+    def _fake_run_bounded(cmd, **kwargs):
+        seen_remaining.append(deadline.remaining())
+        return _P()
+
+    monkeypatch.setattr(deadline, "run_bounded", _fake_run_bounded)
+    ex = ps.ClangPreprocessorExtractor()
+    with deadline.deadline_scope(1800.0):  # generous 30-minute --budget
+        ex._run(["clang++", "-E", "-dM", "a.cpp"], None, "cu://a")
+    assert seen_remaining
+    assert seen_remaining[0] is not None and seen_remaining[0] <= 120.5
+
+
+def test_run_local_cap_timeout_with_generous_budget_is_ordinary_per_unit_failure(
+    monkeypatch,
+) -> None:
+    # Codex review (PR #591, round 5): hitting this pre-scan's OWN 120s
+    # per-unit cap under a generous outer --budget must degrade to an
+    # ordinary per-unit diagnostic -- not scan-budget exhaustion, which
+    # would wrongly stop processing every remaining compile unit too.
     from abicheck import deadline
     from abicheck.buildsource import preprocessor_scan as ps
 
@@ -305,7 +336,34 @@ def test_deadline_exceeded_degrades_to_diagnostic_not_crash(monkeypatch) -> None
 
     monkeypatch.setattr(deadline, "run_bounded", _raise)
     ex = ps.ClangPreprocessorExtractor()
-    text = ex._run(["clang++", "-E", "-dM", "a.cpp"], None, "cu://a")
+    with deadline.deadline_scope(1800.0):  # generous 30-minute --budget
+        text = ex._run(["clang++", "-E", "-dM", "a.cpp"], None, "cu://a")
+    assert text is None
+    assert ex.deadline_exhausted is False
+    assert any("timed out" in d for d in ex.diagnostics)
+
+
+def test_deadline_exceeded_degrades_to_diagnostic_not_crash(monkeypatch) -> None:
+    # Unlike the L2 header path (authoritative evidence, must abort the scan),
+    # this pre-scan is advisory (ADR-028 D3): a --budget deadline expiring
+    # mid-preprocess must degrade to a diagnostic + skipped unit, never
+    # propagate and crash the whole `scan` command.
+    #
+    # Round-5 note: DeadlineExceeded is attributed to the OUTER scan deadline
+    # (not just this pre-scan's own 120s per-unit cap) only when an active
+    # deadline_scope tighter than 120s makes that the case (Codex review,
+    # PR #591, round 5, mirrors the include-map/build-query classification
+    # fix).
+    from abicheck import deadline
+    from abicheck.buildsource import preprocessor_scan as ps
+
+    def _raise(cmd, **kwargs):
+        raise deadline.DeadlineExceeded(-1.0)
+
+    monkeypatch.setattr(deadline, "run_bounded", _raise)
+    ex = ps.ClangPreprocessorExtractor()
+    with deadline.deadline_scope(5.0):  # tighter than the 120s per-unit cap
+        text = ex._run(["clang++", "-E", "-dM", "a.cpp"], None, "cu://a")
     assert text is None
     assert ex.deadline_exhausted is True
     assert any("budget" in d.lower() for d in ex.diagnostics)
@@ -332,7 +390,8 @@ def test_capture_macros_stops_after_deadline_exhausted(monkeypatch) -> None:
 
     monkeypatch.setattr(deadline, "run_bounded", _raise_once)
     ex = ps.ClangPreprocessorExtractor()
-    out = ex.capture_macros(build)
+    with deadline.deadline_scope(5.0):  # tighter than the 120s per-unit cap
+        out = ex.capture_macros(build)
     assert out == {}
     assert calls["n"] == 1, (
         f"expected exactly one attempt before the loop stopped, got {calls['n']}"
@@ -353,9 +412,10 @@ def test_capture_header_includes_stops_after_deadline_exhausted(monkeypatch) -> 
 
     monkeypatch.setattr(deadline, "run_bounded", _raise_once)
     ex = ps.ClangPreprocessorExtractor()
-    out = ex.capture_header_includes(
-        ["include/a.h", "include/b.h", "include/c.h"], ["-Iinclude"]
-    )
+    with deadline.deadline_scope(5.0):  # tighter than the 120s per-unit cap
+        out = ex.capture_header_includes(
+            ["include/a.h", "include/b.h", "include/c.h"], ["-Iinclude"]
+        )
     assert out == {}
     assert calls["n"] == 1, (
         f"expected exactly one attempt before the loop stopped, got {calls['n']}"
