@@ -616,6 +616,7 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--sysroot",
         "--used-by",
         "--verbose",
+        "--verify-runtime",
         "--version",
         "-H",
         "-I",

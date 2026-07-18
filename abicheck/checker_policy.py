@@ -919,6 +919,14 @@ class ChangeKind(str, Enum):
     # real consumer binary's own undefined-symbol table (ELF/PE/Mach-O) is
     # empirical ground truth independent of any header/namespace reasoning.
     CONSUMER_REQUIRED_SYMBOL_REMOVED = "consumer_required_symbol_removed"  # a real consumer binary's required dynamic symbol is no longer exported by the new library → BREAKING
+    # ADR-044 P2 item 2: the --verify-runtime execution harness's own
+    # signal — a real consumer binary loads cleanly (LD_BIND_NOW=1) against
+    # the old library but the dynamic linker itself reports an undefined
+    # symbol against the new one. A corroborating, dynamic-evidence signal
+    # alongside the static scanner, not a replacement for it (an execution
+    # environment can fail for unrelated reasons) → RISK, never BREAKING on
+    # its own, per the authority rule.
+    CONSUMER_RUNTIME_LOAD_FAILED = "consumer_runtime_load_failed"  # a real consumer binary that loaded against the old library fails to resolve a symbol against the new one at runtime → RISK
 
     # ── NumPy C-API compatibility envelope (G26) ──────────────────────────────
     # The NumPy C-API is consumed through an indirect function-pointer table

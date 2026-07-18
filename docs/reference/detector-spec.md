@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (387 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (388 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -48,6 +48,7 @@ One row per `ChangeKind` (387 total). Columns fuse the verdict partition (`check
 | `constant_removed` | api_break | `API_BREAK` | `warning` | unspecified | `constant_removed` | — |
 | `constexpr_value_changed` | api_break | `API_BREAK` | `warning` | unspecified | `constexpr_value_changed` | — |
 | `consumer_required_symbol_removed` | breaking | `BREAKING` | `error` | L0 | `consumer_required_symbol_removed` | — |
+| `consumer_runtime_load_failed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `consumer_runtime_load_failed` | — |
 | `cpo_kind_changed` | breaking | `BREAKING` | `error` | L2 | `cpo_kind_changed` | [case88](../examples/case88_cpo_kind_changed.md) |
 | `cpu_dispatch_isa_dropped` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `cpu_dispatch_isa_dropped` | [case83](../examples/case83_cpu_dispatch_isa_dropped.md) |
 | `ctor_explicit_added` | api_break | `API_BREAK` | `warning` | L2 | `ctor_explicit_added` | [case106](../examples/case106_ctor_became_explicit.md) |

@@ -628,6 +628,7 @@ def _apply_used_by_scoping(
     old_snapshot: Any, new_snapshot: Any,
     policy: str, policy_file: PolicyFile | None,
     exit_code_scheme: str = "legacy", sev_config: Any = None,
+    verify_runtime: bool = False,
 ) -> int:
     """Scope *result* to each ``--used-by`` app; worst-wins (ADR-043).
 
@@ -641,6 +642,13 @@ def _apply_used_by_scoping(
     renderer and returns the worst app's exit code, computed under
     *exit_code_scheme* (legacy verdict floor, or severity-aware over each
     app's relevant changes when the caller passed --severity-*).
+
+    *verify_runtime* (ADR-044 P2 item 2) additionally runs each app once
+    against the old library and once against the new one
+    (:func:`~abicheck.runtime_probe.run_runtime_probe`) when both are real
+    binaries — a JSON-snapshot side has no file to execute against, so the
+    probe is silently skipped for that app, same as the static check's own
+    snapshot fallback degrades gracefully.
     """
     from .appcompat import scope_diff_to_app
     from .service import detect_binary_format
@@ -700,6 +708,21 @@ def _apply_used_by_scoping(
             result, app, old_lib, new_lib,
             policy=policy, policy_file=policy_file,
         )
+        if verify_runtime and isinstance(old_lib, Path) and isinstance(new_lib, Path):
+            from .checker_policy import ChangeKind
+            from .diff_helpers import make_change
+            from .runtime_probe import run_runtime_probe
+
+            probe = run_runtime_probe(app, old_lib, new_lib)
+            regressed_symbol = probe.regressed_symbol
+            if regressed_symbol:
+                scoped.breaking_for_app.append(
+                    make_change(
+                        ChangeKind.CONSUMER_RUNTIME_LOAD_FAILED,
+                        symbol=regressed_symbol,
+                        name=app.name,
+                    )
+                )
         summaries.append(_app_compat_summary(scoped))
         relevant_finding_ids.update(_finding_id(c) for c in scoped.breaking_for_app)
         relevant_changes_by_id.update(
@@ -978,6 +1001,7 @@ def run_compare(
     used_by_apps: tuple[Path, ...] = (),
     required_symbols_opt: tuple[str, ...] = (),
     required_symbols_file: Path | None = None,
+    verify_runtime: bool = False,
 ) -> None:
     """Run the single-pair (or set fan-out) ``compare`` flow and exit accordingly."""
     from .dry_run import reject_dry_run_with_output
@@ -1424,6 +1448,7 @@ def run_compare(
             result, used_by_apps, used_by_old_input, used_by_new_input, old, new,
             policy, pf,
             exit_code_scheme=resolved_cfg.exit_code_scheme, sev_config=sev_config,
+            verify_runtime=verify_runtime,
         )
     elif required_symbols:
         scoped_exit_code = _apply_required_symbol_scoping(
@@ -1708,6 +1733,7 @@ def _fold_scoped_compat_into_text(
         # sarif.to_sarif/junit_report._build_testsuite's identical fold-in).
         changes_list = payload.get("changes")
         if isinstance(changes_list, list):
+            from .checker_policy import EvidenceStatus
             from .reporter import _change_to_dict
 
             eff_sets = result._effective_kind_sets()
@@ -1721,6 +1747,14 @@ def _fold_scoped_compat_into_text(
                         policy=result.policy or "strict_abi",
                         kind_sets=eff_sets,
                         policy_file=result.policy_file,
+                        # Codex review: a scoped-only change (PE_ORDINAL_RETARGETED,
+                        # CONSUMER_REQUIRED_SYMBOL_REMOVED, CONSUMER_RUNTIME_LOAD_FAILED)
+                        # is proven by the real consumer's own import table/execution,
+                        # not by an artifact-level library diff -- evidence_status_for_change
+                        # would otherwise report "artifact_proven" purely from the kind's
+                        # BREAKING/RISK category, same as appcompat_to_json's own
+                        # CONSUMER_PROVEN override for this exact finding shape.
+                        evidence_status_override=EvidenceStatus.CONSUMER_PROVEN,
                     )
                 )
             for label in missing_labels:

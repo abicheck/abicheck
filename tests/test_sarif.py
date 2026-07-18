@@ -766,6 +766,30 @@ class TestScopedGate:
         assert scoped_gate["relevantFindingCount"] == 1
         assert scoped_gate["unrelatedFindingCount"] == 0
 
+    def test_scoped_only_change_has_consumer_proven_evidence_status(self) -> None:
+        """Codex review: a scoped-only change is proven by the real
+        consumer's own import table/execution, not an artifact-level
+        library diff -- its properties.evidenceStatus must be
+        consumer_proven, not the BREAKING-category default artifact_proven."""
+        from abicheck.reporter import _finding_id
+
+        scoped_only = Change(
+            kind=ChangeKind.PE_ORDINAL_RETARGETED,
+            symbol="ordinal:5",
+            description="ordinal 5 retargeted",
+            old_value="OldFunc", new_value="NewFunc",
+        )
+        r = _make_result([], verdict=Verdict.COMPATIBLE)
+        r.scoped_verdict = Verdict.BREAKING  # type: ignore[attr-defined]
+        r.scoped_exit_code = 4  # type: ignore[attr-defined]
+        r.scoped_exit_code_scheme = "legacy"  # type: ignore[attr-defined]
+        r.gate_scope = "used_by"  # type: ignore[attr-defined]
+        r.scoped_relevant_finding_ids = frozenset({_finding_id(scoped_only)})  # type: ignore[attr-defined]
+        r.scoped_only_changes = (scoped_only,)  # type: ignore[attr-defined]
+        doc = to_sarif(r)
+        results = doc["runs"][0]["results"]
+        assert results[0]["properties"]["evidenceStatus"] == "consumer_proven"
+
     def test_scoped_only_change_respects_show_only(self) -> None:
         # Regression (Codex review): result.changes is filtered through
         # apply_show_only above, but scoped_only_changes was appended

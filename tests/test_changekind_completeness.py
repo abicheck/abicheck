@@ -283,6 +283,8 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.WCHAR_MODEL_CHANGED,
     # exercised by tests/test_appcompat.py (ADR-044 P2 item 1)
     ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+    # exercised by tests/test_cov95_cli.py::TestVerifyRuntimeFlag (ADR-044 P2 item 2)
+    ChangeKind.CONSUMER_RUNTIME_LOAD_FAILED,
     # G23 Phase A — Linux ELF artifact facts (tests/test_g23_elf_facts.py)
     ChangeKind.STATIC_TLS_INTRODUCED,
     ChangeKind.STATIC_TLS_REMOVED,

@@ -198,6 +198,12 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     # A consumer binary's own undefined-symbol table vs. the new library's
     # export table -- both pure binary facts, no debug info/headers needed.
     "consumer_required_symbol_removed": "L0",
+    # --verify-runtime's execution harness corroborates the same underlying
+    # L0-observable fact (a symbol the consumer's own binary needs is gone)
+    # via a different detection mechanism (actually running the consumer),
+    # not additional static evidence -- L0 is still the minimum static tier
+    # at which this class of fact is detectable at all.
+    "consumer_runtime_load_failed": "L0",
     # wchar_t model drift is read from DW_AT_producer, like toolchain_flag_drift.
     "wchar_model_changed": "L1",
     # Canonical kinds that older catalog rows previously left implicit.

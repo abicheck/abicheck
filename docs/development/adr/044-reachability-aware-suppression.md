@@ -1025,6 +1025,18 @@ semantics) is closed to the extent described under its own entry.
   _INTERNAL_TEMPLATE_NAMESPACES` fallback the other three steps use. Added
   `test_pipeline_internal_namespaces_reaches_detect_template_patterns` to
   `test_reachability_aware_suppression.py`.
+- **A fourth node-label shape: hash-suffixed identities (Codex, fresh
+  evidence).** `function_decl_identity` (`source_graph.py`) has a third
+  branch beyond mangled-name and bare-qualified-name: a declaration with no
+  distinct mangled name (e.g. `extern "C"`) gets
+  `"{qualified_name}#sha256:{digest}"`. `compute_call_graph_leak_paths`
+  stored this raw hash-suffixed string as its only key for such a node,
+  which a real `Change.symbol`/`qualified_name` never carries — the same
+  key-mismatch bug class as the mangled-label case, one shape later. Fixed
+  by also indexing the hash-stripped qualified name (splitting off
+  `"#sha256:..."`) alongside the existing label/mangled-symbol keys. Added
+  `test_hash_suffixed_label_also_keyed_by_stripped_name` to
+  `test_internal_leak.py`.
 
 ## Roadmap (not committed — scope/sequence per the usual planning process)
 
@@ -1066,9 +1078,47 @@ review's priority tiers.
    `--required-symbol`/plugin-host scoping paths have the identical
    ad-hoc-string shape and are a natural, structurally-identical follow-up,
    not attempted in this round.
-2. Old-consumer/new-library execution harness (`LD_BIND_NOW=1`, optionally
+2. ~~Old-consumer/new-library execution harness (`LD_BIND_NOW=1`, optionally
    ASan/UBSan) as an opt-in validation capability alongside the static
-   scanner, not a replacement for it.
+   scanner, not a replacement for it.~~ **Closed for the `LD_BIND_NOW` core;
+   ASan/UBSan deliberately deferred, per the item's own "optionally".** New
+   `abicheck/runtime_probe.py` module + `--verify-runtime` flag (opt-in,
+   valid only with `--used-by`): runs each consumer binary once against the
+   old library and once against the new one, both times with
+   `LD_BIND_NOW=1` and `LD_LIBRARY_PATH` pointed at the respective library.
+   Deliberately narrow detection: the only signal recognized is glibc's own
+   `symbol lookup error: ... undefined symbol: X` on stderr — the dynamic
+   linker's unambiguous statement that eager binding failed to resolve a
+   real symbol. An app's own exit code or general crash behavior is
+   explicitly **not** interpreted (too noisy/unreliable — an app can exit
+   nonzero for reasons that have nothing to do with the library). New
+   `ChangeKind.CONSUMER_RUNTIME_LOAD_FAILED` (`RISK_KINDS`, never
+   `BREAKING` on its own — an execution environment can fail for unrelated
+   reasons, so this only *corroborates* the static scanner, per the
+   authority rule) fires only when the app ran cleanly against the old
+   library but the linker names a missing symbol against the new one
+   (`RuntimeProbeResult.regressed_symbol`). Linux-only (`LD_BIND_NOW`/
+   `LD_LIBRARY_PATH` are glibc/ELF mechanisms; macOS's `DYLD_*` env vars are
+   stripped by SIP for most binaries, Windows has no equivalent) — skips
+   silently on any other platform or when OLD/NEW aren't real binaries
+   (mirrors `abicheck/bundle.py`'s ELF-only degrade precedent), never
+   raises. Folded into the same `_apply_used_by_scoping` worst-wins
+   exit-code/verdict machinery `PE_ORDINAL_RETARGETED`/
+   `CONSUMER_REQUIRED_SYMBOL_REMOVED` already use, via a synthetic `Change`
+   appended to `breaking_for_app` — no separate reporting path.
+   **Post-merge review (Codex), same change:** the new scoped-only
+   `Change`s (`PE_ORDINAL_RETARGETED`/`CONSUMER_REQUIRED_SYMBOL_REMOVED`/
+   `CONSUMER_RUNTIME_LOAD_FAILED`) rendered through the plain
+   `_change_to_dict`/`_result_for` path (not `appcompat_to_json`'s own
+   override) reported `evidence_status: artifact_proven` purely from their
+   `BREAKING`/`RISK` category — even though none of them come from an
+   artifact-level library diff at all; the evidence is the consumer's own
+   import table or execution. A pre-existing gap for `PE_ORDINAL_RETARGETED`
+   that the two new sibling kinds simply inherited. Fixed by adding an
+   `evidence_status_override` parameter to `sarif._result_for` (mirroring
+   `reporter._change_to_dict`'s existing one) and passing
+   `EvidenceStatus.CONSUMER_PROVEN` at both `scoped_only_changes` render
+   sites (JSON's `_fold_scoped_compat_into_text`, SARIF's `to_sarif`).
 3. New worked examples exercising this ADR's headline scenario end-to-end
    (public inline dispatch to an exported internal specialization; the same
    case under a blanket namespace suppression, asserting the break survives

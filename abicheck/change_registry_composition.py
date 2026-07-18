@@ -118,6 +118,17 @@ COMPOSITION_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
               "load, or crash the first time it calls the symbol, with no "
               "recompilation involved.",
        description_template="Consumer '{name}' requires symbol '{symbol}', which the new library no longer exports"),
+    _E("consumer_runtime_load_failed", _R,
+       impact="The --verify-runtime execution harness (ADR-044 P2 item 2) ran "
+              "this real consumer binary with LD_BIND_NOW=1: it loaded and ran "
+              "cleanly against the old library, but the dynamic linker itself "
+              "reported an undefined symbol against the new one. This is "
+              "empirical, dynamic corroboration alongside the static scanner, "
+              "not a replacement for it — an execution environment can fail "
+              "for reasons unrelated to the library (missing unrelated "
+              "dependency, sandboxing), so this never manufactures a BREAKING "
+              "verdict on its own.",
+       description_template="Consumer '{name}' loads against the old library but the dynamic linker reports undefined symbol '{symbol}' against the new one"),
 
     # ── Fundamental compiler data-model flags ────────────────────────────────
     _E("wchar_model_changed", _R,

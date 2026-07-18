@@ -793,6 +793,16 @@ def compute_call_graph_leak_paths(
             mangled = decl_to_symbol.get(target)
             if mangled and mangled != name:
                 result[mangled].append(formatted)
+            # Codex review (fresh evidence): function_decl_identity's third
+            # shape -- a declaration with no distinct mangled name (e.g.
+            # extern "C") gets label="{qualified_name}#sha256:{digest}" (see
+            # source_graph.py's function_decl_identity), not the bare
+            # qualified name a real Change.symbol/qualified_name would ever
+            # carry. Index the hash-stripped qualified name too so this
+            # shape matches the same way the label-only case already does.
+            hash_stripped = name.split("#sha256:", 1)[0]
+            if hash_stripped != name:
+                result[hash_stripped].append(formatted)
     return dict(result)
 
 

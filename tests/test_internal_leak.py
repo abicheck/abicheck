@@ -1083,6 +1083,27 @@ class TestComputeCallGraphLeakPaths:
         )
         assert compute_call_graph_leak_paths(snap) == {}
 
+    def test_hash_suffixed_label_also_keyed_by_stripped_name(self) -> None:
+        """Codex review, fresh evidence: function_decl_identity's third node
+        shape -- a declaration with no distinct mangled name (e.g. extern
+        "C") gets label="{qualified_name}#sha256:{digest}", not the bare
+        qualified name a real Change.symbol/qualified_name would ever carry.
+        The hash-stripped name must also be a lookup key."""
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        label = "ns::detail::c_helper#sha256:abcdef1234567890"
+        snap = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", label, "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        paths = compute_call_graph_leak_paths(snap)
+        assert "ns::detail::c_helper" in paths
+        assert paths["ns::detail::c_helper"] == paths[label]
+
 
 class TestDetectCallGraphLeaks:
     def test_func_removed_on_internal_decl_reachable_via_call_graph(self) -> None:
