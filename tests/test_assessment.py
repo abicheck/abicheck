@@ -113,6 +113,42 @@ class TestAssessmentManifest:
         with pytest.raises(ValueError):
             AssessmentManifest.from_dict({"targets": [{"id": LINUX}]})
 
+    def test_from_dict_rejects_empty_string_assessment_id(self):
+        # Empty strings pass the isinstance(str) check but must still be
+        # rejected as "required" — distinct from the non-string-type case.
+        with pytest.raises(ValueError):
+            AssessmentManifest.from_dict(
+                {"assessment_id": "", "head_sha": HEAD_SHA, "targets": [{"id": LINUX}]}
+            )
+
+    @pytest.mark.parametrize("bad_assessment_id", [12345, True, 3.14, ["abc"]])
+    def test_from_dict_rejects_non_string_assessment_id(
+        self, bad_assessment_id: object
+    ):
+        # str(assessment_id) would previously coerce a numeric id (e.g. a CI
+        # run id) into a string silently. TargetOutcome.assessment_id is
+        # never coerced, so a matching outcome carrying the same numeric id
+        # would then compare unequal and get dropped as stale/foreign.
+        with pytest.raises(ValueError):
+            AssessmentManifest.from_dict(
+                {
+                    "assessment_id": bad_assessment_id,
+                    "head_sha": HEAD_SHA,
+                    "targets": [{"id": LINUX}],
+                }
+            )
+
+    @pytest.mark.parametrize("bad_head_sha", [12345, True, 3.14])
+    def test_from_dict_rejects_non_string_head_sha(self, bad_head_sha: object):
+        with pytest.raises(ValueError):
+            AssessmentManifest.from_dict(
+                {
+                    "assessment_id": "abc123",
+                    "head_sha": bad_head_sha,
+                    "targets": [{"id": LINUX}],
+                }
+            )
+
     @pytest.mark.parametrize("bad_required", [None, "false", 0, 1])
     def test_from_dict_rejects_non_boolean_required(self, bad_required: object):
         data = {
@@ -329,6 +365,40 @@ class TestTargetOutcome:
         result = assessment.finalize()
         assert result.outcomes[LINUX].state is TargetState.ANALYZED
         assert not result.additional_outcomes
+
+    @pytest.mark.parametrize("bad_id", [12345, True, 3.14])
+    def test_rejects_non_string_assessment_id(self, bad_id: object):
+        with pytest.raises(ValueError):
+            TargetOutcome.unavailable(
+                LINUX, TargetState.BUILD_FAILED, assessment_id=bad_id
+            )
+
+    @pytest.mark.parametrize("bad_sha", [12345, True, 3.14])
+    def test_rejects_non_string_head_sha(self, bad_sha: object):
+        with pytest.raises(ValueError):
+            TargetOutcome.unavailable(LINUX, TargetState.BUILD_FAILED, head_sha=bad_sha)
+
+    def test_numeric_assessment_id_cannot_bypass_stale_guard_via_mismatch(self):
+        # An outcome hydrated with a numeric assessment_id (matching a
+        # manifest whose assessment_id came from the same un-stringified
+        # source) must not compare unequal to the manifest's string form
+        # and get dropped as a foreign assessment. Since neither side can
+        # be constructed with a numeric identity anymore, prove the
+        # symmetric string identities actually match end to end.
+        manifest = AssessmentManifest.from_dict(
+            {"assessment_id": "12345", "head_sha": HEAD_SHA, "targets": [{"id": LINUX}]}
+        )
+        assessment = Assessment(manifest, require_identity=True)
+        assessment.record(
+            TargetOutcome.analyzed(
+                LINUX,
+                _diff(Verdict.COMPATIBLE),
+                assessment_id="12345",
+                head_sha=HEAD_SHA,
+            )
+        )
+        result = assessment.finalize()
+        assert result.outcomes[LINUX].state is TargetState.ANALYZED
 
 
 class TestAcceptanceCases:

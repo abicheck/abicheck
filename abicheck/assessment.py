@@ -176,6 +176,14 @@ class AssessmentManifest:
 
         assessment_id = data.get("assessment_id")
         head_sha = data.get("head_sha")
+        if not isinstance(assessment_id, str) or not isinstance(head_sha, str):
+            # str(assessment_id) would silently coerce a numeric id (e.g. a
+            # CI run id passed as JSON int 12345) into "12345" — but
+            # TargetOutcome.assessment_id/head_sha are never coerced, so an
+            # outcome carrying the same numeric id would compare unequal
+            # (12345 != "12345") and get dropped as stale/foreign by
+            # Assessment.record(), especially under require_identity=True.
+            raise ValueError("'assessment_id' and 'head_sha' must be non-empty strings")
         if not assessment_id or not head_sha:
             raise ValueError("'assessment_id' and 'head_sha' are required")
 
@@ -213,8 +221,8 @@ class AssessmentManifest:
 
         # __post_init__ enforces non-empty/unique-id invariants uniformly.
         return cls(
-            assessment_id=str(assessment_id),
-            head_sha=str(head_sha),
+            assessment_id=assessment_id,
+            head_sha=head_sha,
             targets=tuple(targets),
         )
 
@@ -261,6 +269,21 @@ class TargetOutcome:
         if not isinstance(self.target_id, str) or not self.target_id:
             raise ValueError(
                 f"'target_id' must be a non-empty string, got {self.target_id!r}"
+            )
+        # These are compared directly against AssessmentManifest's
+        # (str) assessment_id/head_sha in Assessment.record(). A numeric
+        # value here (e.g. an un-stringified CI run id from a JSON payload)
+        # would compare unequal to the manifest's string form (12345 !=
+        # "12345") and get dropped as stale/foreign — silently, and worse
+        # under require_identity=True where that's the exact case it's
+        # meant to trust.
+        if self.assessment_id is not None and not isinstance(self.assessment_id, str):
+            raise ValueError(
+                f"'assessment_id' must be a string or None, got {self.assessment_id!r}"
+            )
+        if self.head_sha is not None and not isinstance(self.head_sha, str):
+            raise ValueError(
+                f"'head_sha' must be a string or None, got {self.head_sha!r}"
             )
         # attempt is the *only* supersession guard Assessment.record() has
         # for reruns (existing.attempt > outcome.attempt). A string attempt
