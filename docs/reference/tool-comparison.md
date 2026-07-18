@@ -476,14 +476,17 @@ often would it tell me the truth?"*
 > **Reproducibility envelope.** abicheck `0.5.0`, code commit `ffa860c` — the
 > benchmark numbers below were measured against this commit, which is on
 > `main` and stable across a squash-merge, unlike a branch-local docs commit.
-> This PR's own commits later added a behavior-preserving internal refactor
-> (`abicheck/service.py`'s output-rendering helpers moved to a new
-> `service_render.py` leaf module, fixing an AI-readiness file-size gate; no
-> detector/checker logic changed) — `git diff ffa860c HEAD -- abicheck/` is
-> **not** empty as of that refactor, so treat `ffa860c` as the pre-refactor
-> benchmark baseline, not a claim that the landed tree is byte-identical to
-> it. The full test suite passes identically before and after the refactor,
-> so the numbers below still describe current behavior.
+> `main` has since moved on past `ffa860c` (this doc's branch was rebased
+> onto it): `56055ac` split `abicheck/service.py`'s output-rendering helpers
+> into a `service_render.py` leaf module (behavior-preserving, fixes an
+> AI-readiness file-size gate) and also fixed real detector bugs — three
+> macOS-only Itanium-mangled-name normalization fixes (no effect on Linux,
+> where this benchmark ran) and one platform-agnostic fix to how
+> `public_api_internal_dependency_added` findings get surface-filtered.
+> The numbers below are accurate for `ffa860c` but have **not** been
+> re-verified against `56055ac`; the platform-agnostic fix could in
+> principle change results for cases involving that finding kind — treat
+> a re-run against current `main` as a tracked follow-up, not yet done.
 > `ground_truth.json` sha256 `7836d8b79f96`. All six lanes below (`abicheck`,
 > `abicheck_full`, `abidiff`, `abidiff_headers`, `abicc_dumper`, `abicc_xml`)
 > were regenerated live against the current **193-case** catalog on
