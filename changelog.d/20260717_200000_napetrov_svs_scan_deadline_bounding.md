@@ -196,3 +196,10 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   it fell back to killing only the already-dead direct process, leaving
   the backgrounded compiler orphaned. Now uses `proc.pid` directly as the
   pgid, no lookup (Codex review, PR #591).
+- Same race, same fix, in `deadline._register_pgroup` (the
+  `install_sigterm_cleanup` registry populated right after `Popen()`
+  returns): a fast wrapper backgrounding the real compiler and exiting
+  immediately could make its `os.getpgid(proc.pid)` lookup fail too,
+  silently skipping registration — an external SIGTERM would then find no
+  tracked group for that (still-alive) backgrounded compiler at all. Now
+  uses `proc.pid` directly here as well.

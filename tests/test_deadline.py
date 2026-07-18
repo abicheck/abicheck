@@ -480,6 +480,30 @@ def test_run_bounded_leaves_no_leftover_registered_pgroup() -> None:
         assert deadline._active_pgroups == set()
 
 
+def test_register_pgroup_succeeds_even_when_getpgid_would_fail(monkeypatch) -> None:
+    # Round-2 Codex review (PR #591): a fast wrapper that backgrounds the
+    # real compiler and exits immediately can make a *live* os.getpgid(pid)
+    # lookup raise, even though the backgrounded child is still alive in
+    # that same group. _register_pgroup must not depend on that lookup
+    # succeeding -- proc.pid IS the pgid by construction
+    # (start_new_session=True) -- or the group silently never gets tracked,
+    # leaving install_sigterm_cleanup's handler with nothing to kill.
+    proc = _FakeProc(pid=5555)
+
+    def _boom(_pid: int) -> int:
+        raise AssertionError("os.getpgid should not be called any more")
+
+    monkeypatch.setattr(os, "getpgid", _boom)
+    with deadline._active_pgroups_lock:
+        deadline._active_pgroups.clear()
+
+    pgid = deadline._register_pgroup(proc)
+
+    assert pgid == 5555
+    with deadline._active_pgroups_lock:
+        assert 5555 in deadline._active_pgroups
+
+
 def test_sigterm_cleanup_handler_kills_tracked_process_group(
     monkeypatch, tmp_path
 ) -> None:

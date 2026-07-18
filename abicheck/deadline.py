@@ -327,12 +327,20 @@ def _kill_process_tree(proc: subprocess.Popen[Any], use_pgroup: bool) -> None:
         pass
 
 
-def _register_pgroup(proc: subprocess.Popen[Any]) -> int | None:
-    """Track *proc*'s process group for :func:`install_sigterm_cleanup`, if resolvable."""
-    try:
-        pgid = os.getpgid(proc.pid)
-    except (ProcessLookupError, OSError):
-        return None
+def _register_pgroup(proc: subprocess.Popen[Any]) -> int:
+    """Track *proc*'s process group for :func:`install_sigterm_cleanup`.
+
+    Uses ``proc.pid`` directly rather than looking it up via
+    ``os.getpgid(proc.pid)``: with ``start_new_session=True`` the child's pid
+    *is* its own pgid for the whole lifetime of that group, and a live lookup
+    can fail on a fast wrapper that backgrounds the real work and exits
+    immediately — even though the backgrounded child is still very much
+    alive in that same group. A failed lookup here would silently skip
+    registration, so an external SIGTERM would see no tracked group and
+    leave the detached compiler orphaned (Codex review, PR #591) — the same
+    class of race :func:`_kill_process_tree` avoids the same way.
+    """
+    pgid = proc.pid
     with _active_pgroups_lock:
         _active_pgroups.add(pgid)
     return pgid
