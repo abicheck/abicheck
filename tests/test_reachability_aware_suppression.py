@@ -202,6 +202,40 @@ class TestMarkReachability:
         assert found[0].public_reachable is True
         assert found[0].reachability_kind == "direct_public_symbol"
 
+    def test_public_header_cxx_function_removal_is_reachable(self) -> None:
+        """Codex review, fresh evidence: root (from _root_type_name_for_change)
+        is Change.symbol verbatim for a function-shaped change, and
+        diff_symbols.py sets that to the *mangled* linker name -- while
+        _public_header_names collects Function.name, which is demangled.
+        root == a public_header_names entry therefore never matches for a
+        real (mangled) C++ symbol, so a public-header-declared function's
+        own FUNC_REMOVED fell through the direct-public-symbol check
+        entirely and relied solely on the layout/call-graph walks to tag it
+        -- which a standalone public entry point nothing else references or
+        embeds is reachable by neither. EnrichSourceLocations (runs before
+        MarkReachability) sets Change.qualified_name from the demangled
+        Function.name for exactly this FUNC_REMOVED case, so it must be
+        checked too."""
+        mangled = "_ZN2ns6detail3apiEv"
+        old = AbiSnapshot(
+            library="libtest.so", version="1.0",
+            functions=[Function(
+                name="ns::detail::api", mangled=mangled, return_type="void",
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            )],
+        )
+        new = AbiSnapshot(library="libtest.so", version="1.0", functions=[])
+        raw_change = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol=mangled, description="removed",
+        )
+        ctx = DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_REMOVED]
+        assert len(found) == 1
+        assert found[0].public_reachable is True
+        assert found[0].reachability_kind == "direct_public_symbol"
+
     def test_public_header_enum_member_change_is_reachable(self) -> None:
         """Codex review (fresh evidence): an ENUM_MEMBER_* finding's symbol
         is "EnumName::member" (diff_types.py), not the plain enum name —

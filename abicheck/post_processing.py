@@ -683,7 +683,27 @@ class MarkReachability:
                 if "::" in root and c.kind in _ENUM_MEMBER_KINDS
                 else None
             )
-            if root in public_header_names or enum_owner in public_header_names:
+            # Codex review (fresh evidence): root is c.symbol verbatim for a
+            # function/variable-shaped change, and diff_symbols.py sets that
+            # to the *mangled* linker name for FUNC_REMOVED/FUNC_ADDED/etc. --
+            # while _public_header_names above collects Function.name, which
+            # is demangled. root == a public_header_names entry therefore
+            # never matches for a real (mangled) C++ symbol, so a
+            # public-header-declared C++ function/variable removal fell
+            # through this direct-public-symbol check entirely, relying
+            # entirely on the layout/call-graph walks below to still tag it
+            # -- and a standalone public entry point that nothing else
+            # references or embeds is reachable by neither, so it was
+            # silently untagged and a broad suppression rule could hide it
+            # with no diagnostic. c.qualified_name (EnrichSourceLocations,
+            # runs before this step) is set from the demangled Function.name
+            # for exactly the FUNC_REMOVED/FUNC_ADDED kinds this matters for,
+            # so check it too.
+            if (
+                root in public_header_names
+                or enum_owner in public_header_names
+                or (c.qualified_name and c.qualified_name in public_header_names)
+            ):
                 c.public_reachable = True
                 c.reachability_kind = "direct_public_symbol"
                 continue

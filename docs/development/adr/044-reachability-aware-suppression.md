@@ -1413,6 +1413,33 @@ review's priority tiers.
    contradicted by the P1/P2 slices documented earlier in this same file
    (`REPORT_SCHEMA_VERSION` bumped twice, `--verify-runtime` added). Both
    fixed.
+   **Post-merge review (Codex), one more finding on the direct-public-symbol
+   check itself:** "When the public-header declaration is a C++
+   function/variable, `_public_header_names()` records the
+   demangled/qualified model name, while a removal/type-change `root` is
+   still often the linker symbol (for example `_ZN...`), and only functions
+   may have `c.qualified_name` filled by `EnrichSourceLocations`. This
+   direct-public branch therefore misses a public-header `ns::detail::api()`
+   removal, so a broad namespace suppression such as `namespace:
+   "**::detail::*"` treats the hard `FUNC_REMOVED` as unreachable and
+   suppresses it with no overreach diagnostic." Verified directly:
+   `_root_type_name_for_change(c)` is `c.symbol` verbatim for a
+   function-shaped change, and `diff_symbols.py` sets `Change.symbol` to the
+   *mangled* linker name for `FUNC_REMOVED`/`FUNC_ADDED`/etc., while
+   `_public_header_names()` collects `Function.name`, which is demangled —
+   so `root in public_header_names` never matches for a real C++ symbol. A
+   standalone public entry point that nothing else embeds or calls (so
+   neither the layout walk nor the call-graph walk independently proves it
+   reachable) therefore fell through `MarkReachability`'s direct-public-symbol
+   check entirely, leaving `public_reachable` at its default `False` and
+   letting a broad `namespace`/`source_location` rule hide the removal with
+   no `suppression_would_hide_public_break` diagnostic. Fixed by also
+   checking `c.qualified_name` (populated by `EnrichSourceLocations`, which
+   runs earlier in `DEFAULT_PIPELINE`, from the demangled `Function.name` for
+   exactly the `FUNC_REMOVED`/`FUNC_REMOVED_ELF_ONLY` kinds this matters for)
+   against `public_header_names` alongside `root`. Added
+   `test_public_header_cxx_function_removal_is_reachable` to
+   `test_reachability_aware_suppression.py`.
 3. ~~New worked examples exercising this ADR's headline scenario end-to-end
    (public inline dispatch to an exported internal specialization; the same
    case under a blanket namespace suppression, asserting the break survives
