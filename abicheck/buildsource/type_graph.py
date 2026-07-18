@@ -481,7 +481,35 @@ def _decl_return_type_name(node: dict[str, Any]) -> str:
 
 def _decl_identity(node: dict[str, Any]) -> str:
     """Stable identity for a decl node: mangled name when clang emits one."""
-    return str(node.get("mangledName") or node.get("name") or "")
+    return _normalize_mangled(str(node.get("mangledName") or node.get("name") or ""))
+
+
+def _normalize_mangled(mangled: str) -> str:
+    """Strip a spurious macOS Mach-O ABI leading underscore from an Itanium
+    mangled name clang reports (``__ZN...`` -> ``_ZN...``).
+
+    Mirrors ``call_graph._normalize_mangled`` (same bug, same fix, kept as a
+    local copy rather than a cross-import since neither module currently
+    imports the other and both sit near the AI-readiness line-count cap).
+    On Darwin, clang's own AST dump reports a C++ decl's ``mangledName`` with
+    the platform's extra linker-symbol-table underscore still attached, but
+    the ``Function``/``Variable`` objects this identity must join against
+    (``header_graph._decl_identity``, seeded from the flat ``AbiSnapshot``)
+    carry the already-stripped, one-underscore form (normalized upstream in
+    ``macho_metadata.py``/``dumper._dump_macho``). Left unstripped, a
+    header-only graph's ``DECL_HAS_TYPE``/``TYPE_INHERITS`` edge rooted at a
+    public *function* (as opposed to a type -- types don't get this
+    decoration) never joins its ``SOURCE_DECLARES``-seeded counterpart, so
+    it can never be recognized as a public graph entry
+    (``is_public_dependency_node``) -- silently dropping every
+    ``PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`` finding rooted at a function on
+    macOS. ``__Z`` is an unambiguous, platform-independent marker (a real
+    Itanium mangled name always starts with ``_Z``; a literal C++ identifier
+    starting with two underscores is reserved and never emitted here), so
+    this is a no-op on Linux/Windows, where clang's ``mangledName`` is
+    already the bare ``_Z...`` form.
+    """
+    return mangled[1:] if mangled.startswith("__Z") else mangled
 
 
 def _node_file(node: dict[str, Any]) -> str:
@@ -1068,7 +1096,10 @@ def _walk_types(
         # right fallback here too.
         qualified_name = "::".join([*scope, name]) if scope else name
         ident = function_decl_identity(
-            str(node.get("mangledName") or ""), name, qualified_name, ""
+            _normalize_mangled(str(node.get("mangledName") or "")),
+            name,
+            qualified_name,
+            "",
         )
         if ident:
             raw_var = _decl_type_name(node)
@@ -1091,7 +1122,10 @@ def _walk_types(
         )
         ident = (
             function_decl_identity(
-                str(node.get("mangledName") or ""), name, qualified_name, type_qual
+                _normalize_mangled(str(node.get("mangledName") or "")),
+                name,
+                qualified_name,
+                type_qual,
             )
             if name
             else ""

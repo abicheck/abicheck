@@ -220,45 +220,8 @@ def test_header_graph_reproduces_documented_finding(
     assert report_path.is_file(), result.stderr
 
     payload = json.loads(report_path.read_text())
+    assert payload["verdict"] == expected_verdict, payload["verdict"]
     got_kinds = {c["kind"] for c in payload.get("changes", [])}
     expected_kinds = expected_extra_kinds | {"public_api_internal_dependency_added"}
     missing = expected_kinds - got_kinds
-    if missing:
-        # TEMPORARY diagnostic (see the same pattern used to root-cause the
-        # dumper.py/surface.py fixes earlier on this branch): case189 is the
-        # one case in this family still missing public_api_internal_dependency_added
-        # on macOS after both of those fixes, and a direct in-process repro
-        # (mocked Mach-O exports + real castxml/clang against these exact
-        # headers) could NOT reproduce the gap -- the finding survived the
-        # full service.run_dump -> JSON round-trip -> compare_snapshots
-        # pipeline there. Something about real castxml's output on macOS for
-        # this specific header must differ from what that repro assumed.
-        # Print the function-level provenance (origin/source_header decide
-        # whether header_graph.seed_decl can mark this decl a valid public
-        # graph entry) so the next real-macOS failure carries the answer.
-        old_payload = json.loads(old_json.read_text())
-        new_payload = json.loads(new_json.read_text())
-        print(f"\n--- {case_name} missing {missing} (sys.platform={sys.platform}) ---")
-        for label, payload_side in (("old", old_payload), ("new", new_payload)):
-            for fn in payload_side.get("functions", []):
-                print(
-                    f"{label} function: name={fn.get('name')!r} "
-                    f"mangled={fn.get('mangled')!r} visibility={fn.get('visibility')!r} "
-                    f"origin={fn.get('origin')!r} source_header={fn.get('source_header')!r}"
-                )
-            bs = payload_side.get("build_source")
-            graph = (bs or {}).get("source_graph") if bs else None
-            if graph:
-                print(
-                    f"{label} graph nodes:",
-                    json.dumps(graph.get("nodes", []), indent=2),
-                )
-                print(
-                    f"{label} graph edges:",
-                    json.dumps(graph.get("edges", []), indent=2),
-                )
-            else:
-                print(f"{label} build_source/source_graph: {bs!r}")
-        print("changes:", json.dumps(payload.get("changes", []), indent=2))
-    assert payload["verdict"] == expected_verdict, payload["verdict"]
     assert not missing, f"{case_name}: missing kinds {missing}; got {got_kinds}"
