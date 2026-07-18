@@ -407,6 +407,7 @@ def test_perform_elf_dump_stamps_build_context_and_attaches(
         _populate,
         _stamp,
         _write,
+        compile_db_context_matched=True,
     )
 
     assert snap.parsed_with_build_context is True
@@ -415,6 +416,66 @@ def test_perform_elf_dump_stamps_build_context_and_attaches(
     assert snap.conditional_fields["Config"]["legacy"]["guard"] == "KEEP"
     assert events.get("stamped") and events.get("written")
     assert "populated" not in events  # follow_deps was False
+
+
+def test_perform_elf_dump_does_not_stamp_build_context_when_db_unmatched(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Codex review: a -p/--compile-db path that is present (effective_compile_db
+    is not None) but derived no usable castxml flags (compile_db_context_matched
+    is False -- e.g. an empty or non-matching compile_commands.json) must NOT
+    stamp parsed_with_build_context, since evidence_depth_label/
+    check_requested_depth_satisfied read that flag as genuine "build" evidence
+    for the strict --depth build gate. Otherwise a --compile-db pointing at an
+    unusable DB would silently satisfy --depth build with zero real facts."""
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "config.h"
+    hdr.write_text("struct Config {\n int v;\n};", encoding="utf-8")
+    db = tmp_path / "compile_commands.json"
+    db.write_text(json.dumps([]), encoding="utf-8")  # syntactically valid, empty
+
+    snap = AbiSnapshot(library="lib.so", version="1.0")
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", lambda **_kw: snap)
+
+    events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+
+    perform_elf_dump(
+        so,
+        (hdr,),
+        (),
+        "1.0",
+        "c",
+        None,
+        None,
+        None,
+        (),  # gcc_path/prefix/options/option_tokens
+        None,
+        True,  # sysroot, nostdinc
+        False,
+        None,  # dwarf_only, effective_debug_format
+        (),
+        (),  # public_headers, public_header_dirs
+        db,  # effective_compile_db
+        False,
+        (),
+        "",  # follow_deps, search_paths, ld_library_path
+        None,
+        None,
+        False,  # git_tag, build_id, no_git
+        None,
+        None,
+        None,
+        None,
+        False,
+        "off",  # output..collect_mode
+        _expand,
+        _populate,
+        _stamp,
+        _write,
+        compile_db_context_matched=False,
+    )
+
+    assert snap.parsed_with_build_context is False
 
 
 def test_perform_elf_dump_attaches_header_graph_when_requested(

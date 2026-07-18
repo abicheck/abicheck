@@ -753,6 +753,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         header_graph_includes=header_graph_includes,
         compile_context=_cc,
         depth=depth,
+        compile_db_context_matched=bool(build_context_flags),
     )
 
 

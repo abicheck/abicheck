@@ -799,6 +799,7 @@ def perform_elf_dump(
     header_graph_includes: bool = False,
     compile_context: CompileContext | None = None,
     depth: str | None = None,
+    compile_db_context_matched: bool = False,
 ) -> None:
     """Run the ELF dump pipeline and write output.
 
@@ -818,6 +819,16 @@ def perform_elf_dump(
     All helper callables (expand_header_inputs, populate_dependency_info,
     stamp_provenance, write_snapshot_output) are passed in from cli.py to avoid
     an import cycle — cli_dump_helpers must not import from cli.
+
+    ``compile_db_context_matched`` (Codex review): whether cli.py's
+    ``_resolve_build_context_flags(effective_compile_db, headers,
+    compile_db_filter)`` actually derived any castxml flags from the ``-p``/
+    ``--compile-db`` database for these headers — computed there (before this
+    function is even called) since that is the one place both the compile-DB
+    load and the header-context derivation already happen. Distinct from
+    ``effective_compile_db`` merely being non-``None``: a syntactically valid
+    but empty (or non-matching) ``compile_commands.json`` still sets that, but
+    derives nothing, and must not be recorded as real build-context evidence.
     """
     compiler = "cc" if lang == "c" else "c++"
     resolved_headers = expand_header_inputs(list(headers)) if headers else []
@@ -903,8 +914,14 @@ def perform_elf_dump(
         raise click.ClickException(str(exc)) from exc
 
     try:
-        # Record that the header AST was parsed with the real build context (ADR-029)
-        if effective_compile_db and resolved_headers:
+        # Record that the header AST was parsed with the real build context (ADR-029).
+        # Gated on compile_db_context_matched (whether the DB actually yielded usable
+        # castxml flags for these headers), not just effective_compile_db's presence --
+        # a syntactically valid but empty/non-matching compile_commands.json sets
+        # effective_compile_db without deriving anything, which must not silently
+        # satisfy the --depth build strict gate (evidence_depth_label reads this flag
+        # as "build" evidence; Codex review).
+        if effective_compile_db and resolved_headers and compile_db_context_matched:
             snap.parsed_with_build_context = True
 
         # ADR-039 collection layer — when a compile DB is available, harvest the
