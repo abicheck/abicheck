@@ -92,7 +92,7 @@ See [Getting Started](https://abicheck.github.io/abicheck/getting-started/) for 
 
 ## Which command do I need?
 
-abicheck's whole CLI is exactly 5 root commands: `dump`, `compare`, `scan`, `deps`, `compat`.
+abicheck's whole CLI is 6 root commands: `dump`, `compare`, `scan`, `deps`, `compat`, `aggregate`.
 
 | I want to… | Use |
 |------------|-----|
@@ -104,6 +104,7 @@ abicheck's whole CLI is exactly 5 root commands: `dump`, `compare`, `scan`, `dep
 | Validate a binary's full dependency stack across two sysroots | [`abicheck deps compare`](https://abicheck.github.io/abicheck/user-guide/cli-usage/) |
 | Drop-in replacement for `abi-compliance-checker` | [`abicheck compat`](https://abicheck.github.io/abicheck/user-guide/from-abicc/) |
 | Save a reusable ABI snapshot | [`abicheck dump`](https://abicheck.github.io/abicheck/getting-started/) |
+| Fold per-target ABI reports from a CI build matrix into one gate verdict | [`abicheck aggregate`](https://abicheck.github.io/abicheck/user-guide/github-action-recipes/) |
 
 ---
 

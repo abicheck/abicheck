@@ -161,6 +161,33 @@ audit/hygiene/source-consistency scan only; pass it and `scan` also compares
 
 ---
 
+## `abicheck aggregate`
+
+The multi-target fan-in gate folds the per-target `compare`/`scan` JSON reports
+a CI build matrix produces (one `abi-report-<target>.json` per leg) into one
+verdict. Its exit code is the worst of two orthogonal conclusions — **findings**
+(the worst ABI verdict over the *analyzed* targets, in `compare`'s scheme) and
+**coverage** (did every *required* expected target actually report?):
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | Every required target analyzed and compatible |
+| `2` | Source-level / API break in an analyzed target |
+| `4` | ABI break in an analyzed target, **or** — under the default `--on-missing-required fail` — a required target was unavailable (no/unreadable report) or nothing was analyzed at all |
+| `64` | Invalid invocation (bad arguments/options) |
+
+> **A required target with no report is _unavailable_ (unknown), never counted
+> as compatible.** This is the whole point of the command: a matrix leg that
+> failed before uploading its report is reported as a coverage gap and fails
+> the gate — it is never silently folded into the verdict as an empty,
+> compatible ABI. `--on-missing-required warn` lets the findings verdict alone
+> decide the exit code (the gap is still reported); `--optional <id>` marks a
+> target whose absence never fails coverage. Supply the expected set with
+> `--expect <ids>` (the same list the CI matrix defines); omit it to aggregate
+> whatever reports are present with no coverage gate (pure worst-of).
+
+---
+
 ## Application- and plugin-scoped comparisons (`compare --used-by`/`--required-symbol`)
 
 The standalone `appcompat` and `plugin-check` commands are gone (ADR-043).
@@ -316,6 +343,8 @@ one of those.
 App/plugin-scoped comparisons (`compare --used-by`/`--required-symbol`) reuse
 the `compare` columns above — see
 [Application- and plugin-scoped comparisons](#application-and-plugin-scoped-comparisons-compare-used-by-required-symbol).
+`aggregate` reuses `compare`'s `0`/`2`/`4` scheme over its analyzed targets and
+adds a coverage gate — see [`abicheck aggregate`](#abicheck-aggregate).
 `--dry-run` (on `dump`/`compare`/`scan`/`deps tree`/`deps compare`) reuses
 none of these rows — it always exits `0`/`1`/`64`; see
 [`--dry-run`](#-dry-run-dump-compare-scan-deps-tree-deps-compare) above.
