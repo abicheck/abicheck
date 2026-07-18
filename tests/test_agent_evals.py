@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -69,8 +70,9 @@ def test_manifest_name_matches_directory(task_dir: Path) -> None:
 
 @pytest.mark.parametrize("task_dir", _task_dirs(), ids=lambda p: p.name)
 def test_manifest_base_commit_exists_in_history(task_dir: Path) -> None:
-    import subprocess
-
+    """Skips rather than fails when this checkout is shallow (CI's default
+    `actions/checkout` depth) and can't see the commit for that reason alone —
+    a real unknown SHA still fails on a full/unshallow checkout."""
     manifest = run_task._load_manifest(task_dir)
     proc = subprocess.run(
         ["git", "cat-file", "-e", manifest["base_commit"]],
@@ -78,6 +80,19 @@ def test_manifest_base_commit_exists_in_history(task_dir: Path) -> None:
         capture_output=True,
         timeout=10,
     )
+    if proc.returncode != 0:
+        shallow = subprocess.run(
+            ["git", "rev-parse", "--is-shallow-repository"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if shallow.stdout.strip() == "true":
+            pytest.skip(
+                "shallow checkout — can't verify base_commit is a real "
+                "ancestor without full history (git fetch --unshallow)"
+            )
     assert proc.returncode == 0, (
         f"{task_dir.name}/manifest.yaml: base_commit "
         f"{manifest['base_commit']!r} is not a known commit in this repo"
@@ -148,3 +163,50 @@ class TestCheckAllowedPaths:
         )
         assert ok
         assert violations == []
+
+
+def _git(tmp_path: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+
+class TestChangedPaths:
+    """_changed_paths must see the agent's edits whether or not the agent
+    committed them (Codex review, PR #604) — an uncommitted edit to a
+    forbidden path must not silently bypass allowed_paths scoring."""
+
+    def _repo(self, tmp_path: Path) -> str:
+        _git(tmp_path, "init", "-q")
+        _git(tmp_path, "config", "user.email", "test@example.com")
+        _git(tmp_path, "config", "user.name", "Test")
+        (tmp_path / "base.txt").write_text("base\n", encoding="utf-8")
+        _git(tmp_path, "add", "base.txt")
+        _git(tmp_path, "commit", "-q", "-m", "base")
+        proc = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return proc.stdout.strip()
+
+    def test_sees_committed_changes(self, tmp_path: Path, monkeypatch) -> None:
+        base = self._repo(tmp_path)
+        (tmp_path / "committed.txt").write_text("x\n", encoding="utf-8")
+        _git(tmp_path, "add", "committed.txt")
+        _git(tmp_path, "commit", "-q", "-m", "add committed.txt")
+        monkeypatch.setattr(run_task, "ROOT", tmp_path)
+        assert "committed.txt" in run_task._changed_paths(base)
+
+    def test_sees_uncommitted_staged_changes(self, tmp_path: Path, monkeypatch) -> None:
+        base = self._repo(tmp_path)
+        (tmp_path / "base.txt").write_text("modified\n", encoding="utf-8")
+        _git(tmp_path, "add", "base.txt")
+        monkeypatch.setattr(run_task, "ROOT", tmp_path)
+        assert "base.txt" in run_task._changed_paths(base)
+
+    def test_sees_untracked_files(self, tmp_path: Path, monkeypatch) -> None:
+        base = self._repo(tmp_path)
+        (tmp_path / "untracked.txt").write_text("x\n", encoding="utf-8")
+        monkeypatch.setattr(run_task, "ROOT", tmp_path)
+        assert "untracked.txt" in run_task._changed_paths(base)

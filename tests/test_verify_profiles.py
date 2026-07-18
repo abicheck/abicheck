@@ -31,6 +31,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 _VERIFY_PATH = ROOT / "scripts" / "verify.py"
 _spec = importlib.util.spec_from_file_location("abicheck_scripts_verify", _VERIFY_PATH)
@@ -80,6 +82,29 @@ def test_full_profile_is_superset_of_pr() -> None:
     pr_names = {s.name for s in verify.STEPS if verify.PR in s.profiles}
     full_names = {s.name for s in verify.STEPS if verify.FULL in s.profiles}
     assert pr_names <= full_names
+
+
+def test_only_rejects_a_step_that_exists_but_is_not_in_this_profile() -> None:
+    """`--profile pr --only <full-only-step>` must error, not silently drop
+    the step and produce a smaller-than-requested "complete" run (Codex
+    review, PR #604)."""
+    full_only = {s.name for s in verify.STEPS if verify.FULL in s.profiles} - {
+        s.name for s in verify.STEPS if verify.PR in s.profiles
+    }
+    assert full_only, "expected at least one full-only step to exist"
+    step_name = sorted(full_only)[0]
+    with pytest.raises(SystemExit, match=f"not in --profile {verify.PR}.*{step_name}"):
+        verify.steps_for(verify.PR, {step_name}, set())
+
+
+def test_only_rejects_a_completely_unknown_step_name() -> None:
+    with pytest.raises(SystemExit, match="no such step: totally-bogus-step"):
+        verify.steps_for(verify.PR, {"totally-bogus-step"}, set())
+
+
+def test_only_accepts_a_step_that_is_in_this_profile() -> None:
+    selected = verify.steps_for(verify.PR, {"lint"}, set())
+    assert [s.name for s in selected] == ["lint"]
 
 
 def test_pr_profile_run_with_a_skip_fails(monkeypatch, capsys) -> None:

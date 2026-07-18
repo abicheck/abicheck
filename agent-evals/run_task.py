@@ -88,25 +88,30 @@ def _validate_manifest(manifest: dict[str, Any]) -> list[str]:
     ]
 
 
-def _changed_paths(base_commit: str) -> list[str]:
+def _git_names(*args: str) -> list[str]:
     proc = subprocess.run(
-        ["git", "diff", "--name-only", f"{base_commit}..HEAD"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        timeout=30,
+        ["git", *args], cwd=ROOT, capture_output=True, text=True, timeout=30
     )
     if proc.returncode != 0:
-        # Fall back to the working tree vs. base_commit (agent may not have
-        # committed yet) rather than failing the whole run on a git error.
-        proc = subprocess.run(
-            ["git", "diff", "--name-only", base_commit],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        return []
     return [line for line in proc.stdout.splitlines() if line]
+
+
+def _changed_paths(base_commit: str) -> list[str]:
+    """Every path the agent could plausibly have touched since *base_commit*.
+
+    The documented workflow ("run against a working tree that already
+    contains the agent's changes") does not require the agent to have
+    committed — `git diff base..HEAD` alone only sees committed history, so
+    staged/unstaged edits and new untracked files would silently bypass
+    `allowed_paths` scoring (Codex review, PR #604). Union three views
+    instead: committed diff since base, working-tree diff vs. HEAD
+    (staged+unstaged), and untracked files not covered by .gitignore.
+    """
+    committed = _git_names("diff", "--name-only", f"{base_commit}..HEAD")
+    working_tree = _git_names("diff", "--name-only", "HEAD")
+    untracked = _git_names("ls-files", "--others", "--exclude-standard")
+    return sorted(set(committed) | set(working_tree) | set(untracked))
 
 
 def _check_allowed_paths(

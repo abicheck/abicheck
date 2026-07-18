@@ -339,6 +339,20 @@ Pick the right home:
 - `64` = usage error (bad flags/inputs; `cli._EXIT_USAGE_ERROR`) — applies across commands
 - Full per-command matrix: `docs/reference/exit-codes.md`
 
+## Known gaps — acknowledged remaining work
+
+- **Depth contract, CLI vs. API/MCP** (CLAUDE.md "M1-6"): PR #601 (open) adds
+  a hard-fail `DumpDepthNotSatisfiedError` when an explicit `dump --depth`
+  isn't actually reached — but only at the CLI entry point (`cli.py` /
+  `cli_dump_helpers.py`). `action/run.sh` already propagates that (or any
+  other) nonzero `dump` exit code as an Action failure unconditionally — no
+  fix needed there. The gap is `abicheck/service.py`'s `ScanRequest`/
+  `run_scan_subprocess` and `abicheck/mcp_server.py`'s MCP tools (see
+  `_validate_public_depth`'s docstring): neither enforces the same
+  requested-vs-achieved check, so a Python-API caller or an MCP-driven agent
+  passing an explicit `depth=` can silently get a shallower-tier result. Once
+  PR #601 merges, extend the same check to those two call paths.
+
 ## What NOT to do
 
 - Don't hand-edit `CHANGELOG.md`'s `## [Unreleased]` section directly — add a `changelog.d/` fragment instead (see Conventions above); CI enforces this

@@ -353,11 +353,26 @@ STEPS: tuple[Step, ...] = (
 def steps_for(profile: str, only: set[str] | None, skip: set[str]) -> list[Step]:
     selected = [s for s in STEPS if profile in s.profiles]
     if only:
-        unknown = only - {s.name for s in STEPS}
+        # Validated against `selected` (this profile's steps), NOT the global
+        # catalog: a name that exists globally but not in `--profile
+        # <profile>` (e.g. `--profile pr --only libabigail-parity`, a
+        # full-only step) would otherwise silently vanish from the run
+        # instead of erroring — `--only` is an explicit request, so a step
+        # that can't be honored must fail loudly, not produce a quietly
+        # smaller "complete" run (Codex review, PR #604).
+        in_profile_names = {s.name for s in selected}
+        unknown = only - in_profile_names
         if unknown:
-            raise SystemExit(
-                f"--only: unknown step name(s): {', '.join(sorted(unknown))}"
-            )
+            out_of_profile = unknown & {s.name for s in STEPS}
+            unknown_entirely = unknown - out_of_profile
+            parts = []
+            if out_of_profile:
+                parts.append(
+                    f"not in --profile {profile}: {', '.join(sorted(out_of_profile))}"
+                )
+            if unknown_entirely:
+                parts.append(f"no such step: {', '.join(sorted(unknown_entirely))}")
+            raise SystemExit(f"--only: {'; '.join(parts)}")
         selected = [s for s in selected if s.name in only]
     if skip:
         unknown = skip - {s.name for s in STEPS}
