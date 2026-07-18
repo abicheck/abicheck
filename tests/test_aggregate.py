@@ -213,6 +213,17 @@ class TestCoveragePolicy:
         assert result.coverage is CoverageStatus.COMPLETE
         assert result.exit_code() == 0
 
+    def test_optional_only_with_nothing_analyzed_does_not_fail(self, tmp_path: Path):
+        # Only an optional target was declared and none reported: there is no
+        # required coverage gap, so the gate must not fail (exit 0) even under
+        # the default fail policy — an unavailable optional target never gates.
+        result = aggregate_reports_dir(tmp_path, optional=[MACOS])
+
+        assert not result.required_gap
+        assert result.coverage is CoverageStatus.COMPLETE
+        assert result.findings_verdict is None
+        assert result.exit_code() == 0
+
     def test_no_expected_set_is_pure_worst_of(self, tmp_path: Path):
         # Backward-compatible with the old heredoc: aggregate whatever is
         # present, no coverage gate.
@@ -223,6 +234,19 @@ class TestCoveragePolicy:
         assert result.coverage is CoverageStatus.COMPLETE
         assert result.findings_verdict is Verdict.API_BREAK
         assert result.exit_code() == 2
+
+    def test_findings_verdict_preserves_risk_over_compatible(self, tmp_path: Path):
+        # One target COMPATIBLE, another COMPATIBLE_WITH_RISK. Both are exit-0,
+        # but the reported findings_verdict must surface the risk, not collapse
+        # to whichever verdict sorts first.
+        _write_report(tmp_path, LINUX, "COMPATIBLE")
+        _write_report(tmp_path, WINDOWS, "COMPATIBLE_WITH_RISK")
+        result = aggregate_reports_dir(tmp_path, required=[LINUX, WINDOWS])
+
+        assert result.findings_verdict is Verdict.COMPATIBLE_WITH_RISK
+        assert result.exit_code() == 0  # risk is non-blocking for the gate
+        assert result.to_dict()["findings_verdict"] == "COMPATIBLE_WITH_RISK"
+        assert "compatible-with-risk on: windows-x86_64" in result.render_text()
 
 
 class TestRendering:
@@ -324,3 +348,26 @@ class TestAggregateCLI:
         assert res.exit_code == 4
         payload = json.loads(res.output)
         assert payload["findings_verdict"] == "BREAKING"
+
+    def test_output_to_file(self, tmp_path: Path):
+        from abicheck.cli import main
+
+        reports = tmp_path / "reports"
+        reports.mkdir()
+        _write_report(reports, LINUX, "COMPATIBLE")
+        out = tmp_path / "result.json"
+        res = CliRunner().invoke(
+            main,
+            [
+                "aggregate",
+                "--expect",
+                LINUX,
+                "--format",
+                "json",
+                "-o",
+                str(out),
+                str(reports),
+            ],
+        )
+        assert res.exit_code == 0
+        assert json.loads(out.read_text())["coverage"] == "complete"

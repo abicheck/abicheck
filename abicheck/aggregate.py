@@ -55,12 +55,26 @@ from .change_registry_types import Verdict
 #: Verdict → gate severity, mirroring ``compare``'s 0/2/4 exit scheme
 #: (see docs/reference/exit-codes.md). NO_CHANGE / COMPATIBLE /
 #: COMPATIBLE_WITH_RISK are all non-blocking (0); API_BREAK is a source-level
-#: break (2); BREAKING is an ABI break (4).
+#: break (2); BREAKING is an ABI break (4). Used for the exit code only.
 _SEVERITY: dict[Verdict, int] = {
     Verdict.NO_CHANGE: 0,
     Verdict.COMPATIBLE: 0,
     Verdict.COMPATIBLE_WITH_RISK: 0,
     Verdict.API_BREAK: 2,
+    Verdict.BREAKING: 4,
+}
+
+#: Total ordering over verdicts for *reporting* the worst analyzed verdict.
+#: Unlike ``_SEVERITY`` (which collapses the three non-blocking verdicts to
+#: 0 for the exit code), this keeps ``COMPATIBLE_WITH_RISK`` strictly above
+#: ``COMPATIBLE`` so the reported ``findings_verdict`` never hides a risk one
+#: target flagged. It stays monotonic with ``_SEVERITY``, so the worst verdict
+#: by this rank also has the worst severity — the exit code is unchanged.
+_VERDICT_RANK: dict[Verdict, int] = {
+    Verdict.NO_CHANGE: 0,
+    Verdict.COMPATIBLE: 1,
+    Verdict.COMPATIBLE_WITH_RISK: 2,
+    Verdict.API_BREAK: 3,
     Verdict.BREAKING: 4,
 }
 
@@ -143,11 +157,16 @@ class AggregateResult:
 
     @property
     def findings_verdict(self) -> Verdict | None:
-        """Worst verdict over *analyzed* targets, or ``None`` if none analyzed."""
+        """Worst verdict over *analyzed* targets, or ``None`` if none analyzed.
+
+        Ranked by :data:`_VERDICT_RANK` (a total order), not by exit severity,
+        so a ``COMPATIBLE_WITH_RISK`` reported by one target is never hidden
+        behind another's ``COMPATIBLE``.
+        """
         analyzed = self.analyzed
         if not analyzed:
             return None
-        return max((t.verdict for t in analyzed), key=lambda v: _SEVERITY[v])  # type: ignore[index,arg-type]
+        return max((t.verdict for t in analyzed), key=lambda v: _VERDICT_RANK[v])  # type: ignore[index,arg-type]
 
     @property
     def findings_severity(self) -> int:
@@ -155,12 +174,23 @@ class AggregateResult:
         return _SEVERITY[verdict] if verdict is not None else 0
 
     @property
+    def required_gap(self) -> bool:
+        """A *required* target that did not report — the coverage fail condition.
+
+        Optional targets never count: a run that declares only optional
+        targets (or whose only unavailable targets are optional) has no
+        required gap and so never fails the coverage gate.
+        """
+        return any(not t.analyzed and t.required for t in self.targets)
+
+    @property
     def coverage(self) -> CoverageStatus:
-        if not self.analyzed:
-            return CoverageStatus.EMPTY
-        if any(not t.analyzed and t.required for t in self.targets):
-            return CoverageStatus.PARTIAL
-        return CoverageStatus.COMPLETE
+        if not self.required_gap:
+            return CoverageStatus.COMPLETE
+        # A required target is unavailable. Distinguish "nothing analyzed at
+        # all" (EMPTY) from "some analyzed, some required missing" (PARTIAL)
+        # for rendering; both fail the gate.
+        return CoverageStatus.EMPTY if not self.analyzed else CoverageStatus.PARTIAL
 
     @property
     def is_partial(self) -> bool:
@@ -172,11 +202,11 @@ class AggregateResult:
         """Gate exit code: worst of findings severity and coverage policy.
 
         Findings map to ``compare``'s 0/2/4 scheme. Under the default
-        ``FAIL`` policy, incomplete required coverage (a required target
-        unavailable, or nothing analyzed at all) fails the gate at 4 — a gate
-        must not pass green while a required platform is unknown. Under
-        ``WARN``, coverage never contributes to the exit code (findings alone
-        decide), but the gap is still rendered.
+        ``FAIL`` policy, a *required* coverage gap (a required target that did
+        not report) fails the gate at 4 — a gate must not pass green while a
+        required platform is unknown. An unavailable *optional* target never
+        contributes. Under ``WARN``, coverage never affects the exit code
+        (findings alone decide), but the gap is still rendered.
         """
         code = self.findings_severity
         if (
@@ -223,6 +253,16 @@ class AggregateResult:
         findings = self.findings_verdict
         if findings is None:
             lines.append("  No targets were analyzed — no ABI verdict.")
+        elif findings is Verdict.COMPATIBLE_WITH_RISK:
+            risky = sorted(
+                t.target_id
+                for t in self.analyzed
+                if t.verdict is Verdict.COMPATIBLE_WITH_RISK
+            )
+            lines.append(
+                "  No ABI regressions, but compatible-with-risk on: "
+                f"{', '.join(risky)}."
+            )
         elif _SEVERITY[findings] == 0:
             lines.append("  No ABI regressions in the analyzed targets.")
         else:
@@ -235,10 +275,13 @@ class AggregateResult:
 
         lines.append("Coverage:")
         if self.coverage is CoverageStatus.COMPLETE:
-            lines.append("  Complete — every expected target was analyzed.")
+            lines.append("  Complete — every required target was analyzed.")
         else:
-            unknown = ", ".join(t.target_id for t in self.unavailable) or "(none)"
-            lines.append(f"  Incomplete — unknown on: {unknown}.")
+            unknown = (
+                ", ".join(t.target_id for t in self.unavailable if t.required)
+                or "(none)"
+            )
+            lines.append(f"  Incomplete — required target(s) unknown: {unknown}.")
 
         return "\n".join(lines)
 
