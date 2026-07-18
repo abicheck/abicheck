@@ -282,6 +282,75 @@ def test_non_elf_dump_defaults_header_graph_off(tmp_path: Path) -> None:
     assert kwargs["header_graph_includes"] is False
 
 
+def test_non_elf_dump_stamps_build_context_when_compile_db_matched(
+    tmp_path: Path,
+) -> None:
+    """Codex review: a -p/--compile-db match was never threaded into the
+    PE/Mach-O path at all -- snap.parsed_with_build_context stayed False
+    even when cli.py's _resolve_build_context_flags found a real match, so
+    `dump foo.dll -H api.h -p build --depth build` was wrongly rejected as
+    only reaching "headers". Mirrors perform_elf_dump's identical stamp."""
+    so = tmp_path / "lib.dll"
+    snap = AbiSnapshot(library="lib.dll", version="1.0")
+    header = tmp_path / "api.h"
+    header.write_text("void f(void);\n", encoding="utf-8")
+
+    def _dump_native(*a, **k):  # noqa: ANN002, ANN003
+        return snap
+
+    handle_non_elf_dump(
+        so,
+        "pe",
+        (header,),
+        (),
+        "1.0",
+        "c++",
+        None,
+        False,
+        None,
+        None,
+        False,
+        None,
+        _dump_native,
+        _noop_stamp,
+        _record_write,
+        compile_db_context_matched=True,
+    )
+    assert snap.parsed_with_build_context is True
+
+
+def test_non_elf_dump_does_not_stamp_build_context_when_compile_db_unmatched(
+    tmp_path: Path,
+) -> None:
+    so = tmp_path / "lib.dll"
+    snap = AbiSnapshot(library="lib.dll", version="1.0")
+    header = tmp_path / "api.h"
+    header.write_text("void f(void);\n", encoding="utf-8")
+
+    def _dump_native(*a, **k):  # noqa: ANN002, ANN003
+        return snap
+
+    handle_non_elf_dump(
+        so,
+        "pe",
+        (header,),
+        (),
+        "1.0",
+        "c++",
+        None,
+        False,
+        None,
+        None,
+        False,
+        None,
+        _dump_native,
+        _noop_stamp,
+        _record_write,
+        compile_db_context_matched=False,
+    )
+    assert snap.parsed_with_build_context is False
+
+
 def test_non_elf_dump_follow_deps_warns(tmp_path: Path, capsys) -> None:
     """--follow-deps is ELF-only; the native path emits a stderr warning (line 244)."""
     so = tmp_path / "lib.dylib"

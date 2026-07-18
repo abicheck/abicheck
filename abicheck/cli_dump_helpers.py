@@ -510,6 +510,7 @@ def render_dump_dry_run(
     header_backend: str,
     output: Path | None,
     has_compile_db: bool = False,
+    build_info_is_pack: bool = False,
 ) -> Any:
     """Build the ``dump --dry-run`` report (ADR-043 D4): resolve, never execute.
 
@@ -525,6 +526,19 @@ def render_dump_dry_run(
     by *some* compile database (which might satisfy it -- unknown without
     actually loading it) from one backed by nothing at all (which never
     can).
+
+    ``build_info_is_pack`` (Codex review): whether ``--build-info`` names a
+    prebuilt ``BuildSourcePack``/``abicheck_inputs`` directory rather than a
+    raw compile DB / build dir -- checked via ``buildsource.inline.
+    is_pack_dir`` (a manifest-shape stat + small JSON read, not a full pack
+    load). ``cli_buildsource.embed_build_source``'s ``_combine_packs`` falls
+    back to a pack-shaped ``build_info``'s own ``source_abi`` (L4) when no
+    ``--sources`` pack is given, so ``--depth source --build-info <pack>``
+    with no ``--sources`` can genuinely reach "source" for real -- unlike a
+    raw compile database, which never carries L4 facts of its own. Without
+    this, that combination was wrongly treated as "--depth source has no
+    path without --sources" and blocked even though the real (non-dry) run
+    writes a valid source-depth snapshot.
     """
     from .cli_helpers_compare import discover_project_config
     from .dry_run import DryRunResult, tool_status
@@ -615,8 +629,12 @@ def render_dump_dry_run(
     # softer warning above, not a blocker -- whether that database
     # actually matches these headers is real work (load + header-inclusion
     # scan) a dry run must not perform, so it is only "possibly
-    # satisfiable", not "definitely satisfiable" (Codex review).
-    if depth == "source" and sources is None:
+    # satisfiable", not "definitely satisfiable" (Codex review). A
+    # pack-shaped --build-info is the same "possibly satisfiable" case for
+    # --depth source: _combine_packs falls back to its own source_abi (L4)
+    # when no --sources pack is given, so it is left as the warning above
+    # too, not a blocker (Codex review, second finding on this signal).
+    if depth == "source" and sources is None and not build_info_is_pack:
         result.block(
             "--depth source was requested but no --sources was given -- a "
             "raw --build-info/-p compile database supplies L3 build "
@@ -689,6 +707,7 @@ def handle_non_elf_dump(
     header_graph: bool = False,
     header_graph_includes: bool = False,
     depth: str | None = None,
+    compile_db_context_matched: bool = False,
 ) -> None:
     """Handle the PE/Mach-O native dump path and output writing (split from cli.py).
 
@@ -706,6 +725,17 @@ def handle_non_elf_dump(
     across ELF/PE/Mach-O — previously only the ELF ``perform_elf_dump`` path
     forwarded these, so ``dump --header-graph`` silently no-opped on PE/Mach-O
     input (Codex review).
+
+    ``compile_db_context_matched`` (Codex review): whether cli.py's
+    ``_resolve_build_context_flags(effective_compile_db, headers,
+    compile_db_filter)`` found a compile-DB entry for these headers —
+    computed there (before this function is even called) since that is the
+    one place the -p/--compile-db load happens. Mirrors
+    ``perform_elf_dump``'s identically-named parameter/stamp: without it, a
+    -p compile database's flags never reached the PE/Mach-O header parse at
+    all, and ``snap.parsed_with_build_context`` was never set here, so a
+    ``dump foo.dll -H api.h -p build --depth build`` was wrongly rejected
+    as only having reached "headers".
     """
     if follow_deps:
         click.echo("Warning: --follow-deps is only supported for ELF binaries.", err=True)
@@ -750,6 +780,14 @@ def handle_non_elf_dump(
     finally:
         if _l2_pending_cleanups:
             _run_cleanups(_l2_pending_cleanups)
+    # Record that the header AST was parsed with the real build context
+    # (mirrors perform_elf_dump's identical stamp) -- gated on
+    # compile_db_context_matched, not just headers' presence, for the same
+    # reason perform_elf_dump's docstring gives: a syntactically valid but
+    # empty/non-matching compile database must not be recorded as real
+    # build-context evidence.
+    if headers and compile_db_context_matched:
+        snap.parsed_with_build_context = True
     stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
     write_snapshot_output(
         snap, output, build_info, sources, build_config, allow_build_query,

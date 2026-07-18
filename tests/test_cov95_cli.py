@@ -378,6 +378,53 @@ class TestSmallHelpers:
         assert "will be ignored" not in result.output
         assert getattr(captured["compile_context"], "gcc_option_tokens") == ("-DX",)
 
+    def test_dump_compile_db_flags_and_match_threaded_to_non_elf(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Codex review: -p/--compile-db was resolved for ELF only -- a PE/
+        Mach-O dump silently dropped the compile database's castxml/clang
+        flags entirely, and never threaded the matched signal through to
+        handle_non_elf_dump either (so snap.parsed_with_build_context could
+        never be set, wrongly rejecting a --depth build backed only by -p).
+        """
+        import json
+        import struct
+
+        import abicheck.cli as cli_mod
+
+        header = tmp_path / "foo.h"
+        header.write_text("int f();\n", encoding="utf-8")
+        src = tmp_path / "foo.cpp"
+        src.write_text('#include "foo.h"\nint f() { return 0; }\n', encoding="utf-8")
+        db = tmp_path / "compile_commands.json"
+        db.write_text(
+            json.dumps(
+                [
+                    {
+                        "directory": str(tmp_path),
+                        "file": "foo.cpp",
+                        "arguments": ["c++", "-std=c++17", "-DFOO=1", "-c", "foo.cpp"],
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        dylib = tmp_path / "fake.dylib"
+        dylib.write_bytes(struct.pack("<I", 0xFEEDFACF) + b"\x00" * 64)
+
+        captured: dict[str, object] = {}
+        monkeypatch.setattr(
+            cli_mod, "handle_non_elf_dump", lambda *a, **k: captured.update(k)
+        )
+        result = CliRunner().invoke(
+            main, ["dump", str(dylib), "-H", str(header), "-p", str(db)]
+        )
+        assert result.exit_code == 0, result.output
+        assert captured["compile_db_context_matched"] is True
+        gcc_options = getattr(captured["compile_context"], "gcc_options")
+        assert "-std=c++17" in gcc_options
+        assert "-DFOO=1" in gcc_options
+
     def test_dump_gcc_option_help(self) -> None:
         # G21.5: the repeatable --gcc-option is documented on dump.
         out = CliRunner().invoke(main, ["dump", "--help"]).output

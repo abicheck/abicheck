@@ -16,6 +16,7 @@
 """CLI — abicheck dump | compare | compat (dump | check)."""
 from __future__ import annotations
 
+import dataclasses
 import logging
 import sys
 from pathlib import Path
@@ -654,6 +655,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         )
 
     if dry_run:
+        from .buildsource.inline import is_pack_dir
         from .cli_dump_helpers import render_dump_dry_run
 
         emit_dry_run(
@@ -663,6 +665,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
                 depth=depth, collect_mode=collect_mode,
                 header_backend=header_backend, output=output,
                 has_compile_db=bool(compile_db_path or compile_db_path_alt),
+                build_info_is_pack=is_pack_dir(build_info),
             )
         )
 
@@ -674,6 +677,16 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
 
     effective_debug_format = resolve_dump_debug_format(debug_format_opt, debug_format)
     effective_compile_db = resolve_dump_compile_db(compile_db_path, compile_db_path_alt, headers)
+    # Resolved before the PE/Mach-O dispatch (Codex review): both binary-format
+    # branches need the same -p/--compile-db -> castxml/clang flags and matched
+    # signal -- the ELF path used to compute these only after the PE/Mach-O
+    # early return, so a compile database's flags were silently dropped for
+    # PE/Mach-O input, and --depth build backed only by -p was wrongly
+    # rejected there (parsed_with_build_context was never stamped either).
+    build_context_flags, compile_db_matched = _resolve_build_context_flags(
+        effective_compile_db, headers, compile_db_filter,
+    )
+    effective_gcc_options = _merge_gcc_options(build_context_flags, gcc_options)
 
     # Auto-detect binary format — PE/Mach-O skip the ELF/castxml path. The
     # conventional ``libfoo.so`` dev symlink is often a GNU ld linker script;
@@ -685,22 +698,22 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         )
 
     if binary_fmt in ("pe", "macho"):
+        native_cc = (
+            dataclasses.replace(_cc, gcc_options=effective_gcc_options)
+            if effective_gcc_options != _cc.gcc_options
+            else _cc
+        )
         handle_non_elf_dump(
             so_path, binary_fmt, headers, includes, version, lang, pdb_path,
             follow_deps, git_tag, build_id, no_git, output,
             _dump_native_binary, _stamp_provenance, _write_snapshot_output,
             public_headers, public_header_dirs, build_info, sources, build_config,
             allow_build_query, collect_mode, build_query, build_compile_db,
-            header_backend=header_backend, compile_context=_cc,
+            header_backend=header_backend, compile_context=native_cc,
             header_graph=header_graph, header_graph_includes=header_graph_includes,
-            depth=depth,
+            depth=depth, compile_db_context_matched=compile_db_matched,
         )
         return
-
-    build_context_flags, compile_db_matched = _resolve_build_context_flags(
-        effective_compile_db, headers, compile_db_filter,
-    )
-    effective_gcc_options = _merge_gcc_options(build_context_flags, gcc_options)
 
     # Debug artifact resolution (ADR-021a): resolve before dump. P1.1: thread
     # a resolved detached debug file (build-id tree / path-mirror / debuginfod

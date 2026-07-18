@@ -38,4 +38,17 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   label, which disagrees with the gate on a zero-match source-only dump (L4
   replay ran but linked nothing); a `--depth source` dump the gate had just
   accepted could serialize `effective_depth: "build", degraded: true`.
+- **`-p`/`--compile-db` now reaches PE/Mach-O dumps** — the compile
+  database's derived flags and matched signal were resolved only for the
+  ELF path; a PE/Mach-O dump silently dropped a `-p` compile database's
+  flags entirely, and `--depth build` backed only by `-p` was wrongly
+  rejected as having reached only `headers` since
+  `snap.parsed_with_build_context` was never stamped there.
+- **`dump --dry-run --depth source --build-info <prebuilt pack>` no longer
+  blocks incorrectly** — a *pack-shaped* `--build-info` (e.g. from a
+  previous `collect` or the `abicheck-cc` wrapper) can carry its own L4
+  `source_abi`, which `embed_build_source`'s pack-combine step falls back
+  to when no `--sources` pack is given — so `--depth source` can genuinely
+  succeed without `--sources` in that case. Only a raw compile database
+  (never carrying L4 facts) is still treated as unsatisfiable.
 

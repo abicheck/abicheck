@@ -152,6 +152,38 @@ class TestDumpDryRun:
         assert "Exit code: 1" in result.output
         assert "no --sources was given" in result.output
 
+    def test_depth_source_with_prebuilt_pack_build_info_does_not_block(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, second finding: a raw compile-DB --build-info never
+        # carries L4 facts, but a *pack-shaped* --build-info (e.g. from a
+        # previous `collect` or the abicheck-cc wrapper) can carry its own
+        # source_abi -- cli_buildsource.embed_build_source's _combine_packs
+        # falls back to that pack's source_abi when no --sources pack is
+        # given, so --depth source --build-info <pack> (no --sources) can
+        # genuinely succeed for real. The blocker above must not fire for
+        # this case -- unlike a raw compile database, checked via
+        # buildsource.inline.is_pack_dir (cheap manifest-shape read).
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_abi import SourceAbiSurface
+
+        snap = tmp_path / "lib.abi.json"
+        _write_snapshot(snap)
+        pack_dir = tmp_path / "pack"
+        pack_dir.mkdir()
+        surface = SourceAbiSurface()
+        surface.coverage["compile_units_selected"] = 1
+        surface.coverage["compile_units_parsed"] = 1
+        BuildSourcePack(root=pack_dir, source_abi=surface).write()
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(snap), "--dry-run", "--depth", "source",
+                "--build-info", str(pack_dir),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+
 
 class TestCompareDryRun:
     def test_rejects_output_flag(self, tmp_path: Path) -> None:
