@@ -1861,6 +1861,57 @@ class TestScopeDiffToAppWithSnapshots:
             result = scope_diff_to_app(diff, tmp_path / "app", old_snap, new_snap)
         assert result.missing_symbols == ["foo_init"]
 
+    def test_uncovered_missing_symbol_becomes_consumer_required_symbol_removed(
+        self, tmp_path,
+    ):
+        """ADR-044 P2 item 1: a missing symbol with no matching library-diff
+        Change is promoted to a first-class, suppressible
+        CONSUMER_REQUIRED_SYMBOL_REMOVED finding — not left as a bespoke
+        string only special-cased by reporter.py/sarif.py/junit_report.py."""
+        old_snap = self._snap("1.0", "libfoo.so.1", ["foo_init", "foo_process"])
+        new_snap = self._snap("2.0", "libfoo.so.1", ["foo_init"])
+        # No FUNC_REMOVED for foo_process in the diff at all (e.g. the header
+        # never declared it, so the artifact-level diff never saw it removed)
+        # -- the ONLY evidence this symbol vanished is the consumer's own
+        # undefined-symbol requirement.
+        diff = DiffResult(
+            old_version="1.0", new_version="2.0", library="libfoo.so.1",
+            changes=[], verdict=Verdict.COMPATIBLE,
+        )
+        app_reqs = AppRequirements(undefined_symbols={"foo_init", "foo_process"})
+        app_path = tmp_path / "myapp"
+        with patch(
+            "abicheck.appcompat.parse_app_requirements", return_value=app_reqs
+        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+            result = scope_diff_to_app(diff, app_path, old_snap, new_snap)
+        assert result.missing_symbols == ["foo_process"]
+        overlay = [
+            c for c in result.breaking_for_app
+            if c.kind == ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED
+        ]
+        assert len(overlay) == 1
+        assert overlay[0].symbol == "foo_process"
+        assert "myapp" in overlay[0].description
+
+    def test_missing_symbol_covered_by_diff_change_gets_no_overlay(self, tmp_path):
+        """The dedup case: a missing symbol already represented by a real
+        library-diff Change (FUNC_REMOVED) must not also get the overlay --
+        that would double-report the same break."""
+        old_snap = self._snap("1.0", "libfoo.so.1", ["foo_init", "foo_process"])
+        new_snap = self._snap("2.0", "libfoo.so.1", ["foo_init"])
+        diff = DiffResult(
+            old_version="1.0", new_version="2.0", library="libfoo.so.1",
+            changes=[Change(ChangeKind.FUNC_REMOVED, "foo_process", "removed")],
+            verdict=Verdict.BREAKING,
+        )
+        app_reqs = AppRequirements(undefined_symbols={"foo_init", "foo_process"})
+        with patch(
+            "abicheck.appcompat.parse_app_requirements", return_value=app_reqs
+        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+            result = scope_diff_to_app(diff, tmp_path / "app", old_snap, new_snap)
+        assert result.missing_symbols == ["foo_process"]
+        assert [c.kind for c in result.breaking_for_app] == [ChangeKind.FUNC_REMOVED]
+
 
 # ---------------------------------------------------------------------------
 # _lib_fmt / _lib_pe_meta / _lib_macho_meta: PE/Mach-O snapshot + Path branches

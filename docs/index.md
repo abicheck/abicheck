@@ -20,7 +20,7 @@ It supports ELF (Linux), PE/COFF (Windows), and Mach-O (macOS) binaries, and it'
 ## Why abicheck
 
 - **Five-source evidence model** — abicheck overlays up to five independent, additive sources (the binary, its debug info, its public headers, its build-system data, and optionally its sources — `L0`–`L4`), cross-checks them against each other (DWARF/PDB debug info against the symbol table, header AST against build flags), and lets the strongest evidence win. Each source catches breaks the others miss. See [Evidence & Detectability](concepts/evidence-and-detectability.md).
-- **386 detection rules** — symbol removal, signature changes, struct/class layout drift, vtable reordering, enum value shifts, qualifier changes, calling conventions, and many more. See the [Change Kind Reference](reference/change-kinds.md).
+- **387 detection rules** — symbol removal, signature changes, struct/class layout drift, vtable reordering, enum value shifts, qualifier changes, calling conventions, and many more. See the [Change Kind Reference](reference/change-kinds.md).
 - **Multiple output formats** — Markdown, JSON, SARIF (GitHub Code Scanning), HTML.
 - **Policy profiles** — `strict_abi`, `sdk_vendor`, `plugin_abi`, or custom YAML overrides.
 - **ABICC drop-in** — full flag parity for migrating from `abi-compliance-checker`.

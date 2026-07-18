@@ -914,6 +914,11 @@ class ChangeKind(str, Enum):
     PE_ORDINAL_RETARGETED = "pe_ordinal_retargeted"  # a consumer's ordinal-only PE import now resolves to a different exported function → BREAKING
     PE_IMPORT_LOAD_MODE_CHANGED = "pe_import_load_mode_changed"  # an imported DLL function moved between eager (IAT) and delay-loaded → RISK
     WCHAR_MODEL_CHANGED = "wchar_model_changed"  # -fshort-wchar drift changes wchar_t size/signedness with no symbol-level signal → RISK
+    # ADR-044 P2 item 1: promotes --used-by's (ADR-005/043) previously ad-hoc
+    # "missing symbol" string into a first-class, suppressible ChangeKind — a
+    # real consumer binary's own undefined-symbol table (ELF/PE/Mach-O) is
+    # empirical ground truth independent of any header/namespace reasoning.
+    CONSUMER_REQUIRED_SYMBOL_REMOVED = "consumer_required_symbol_removed"  # a real consumer binary's required dynamic symbol is no longer exported by the new library → BREAKING
 
     # ── NumPy C-API compatibility envelope (G26) ──────────────────────────────
     # The NumPy C-API is consumed through an indirect function-pointer table

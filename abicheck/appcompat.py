@@ -916,6 +916,23 @@ def scope_diff_to_app(
     breaking_for_app, irrelevant_for_app = _partition_app_changes(diff, relevance_reqs)
     breaking_for_app = breaking_for_app + ordinal_retargets
 
+    # ADR-044 P2 item 1: promote a missing symbol not already represented by a
+    # library-diff Change (e.g. FUNC_REMOVED) into a first-class, suppressible
+    # CONSUMER_REQUIRED_SYMBOL_REMOVED finding, instead of leaving it as a
+    # bespoke string only special-cased by reporter.py/sarif.py/junit_report.py.
+    # Scoped to the genuinely-uncovered subset via uncovered_missing_symbols
+    # (the same dedup _scoped_severity_summary/cli_compare_helpers.py already
+    # use) so a symbol already covered by a real diff Change is never
+    # double-reported as both that Change and this overlay.
+    for sym in uncovered_missing_symbols(missing_symbols, breaking_for_app):
+        breaking_for_app.append(
+            make_change(
+                ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+                symbol=sym,
+                name=app_path.name,
+            )
+        )
+
     # Compute app-specific verdict
     required_count = len(app_reqs.undefined_symbols)
     coverage = _compute_symbol_coverage(new_exports, required_count, len(missing_symbols))

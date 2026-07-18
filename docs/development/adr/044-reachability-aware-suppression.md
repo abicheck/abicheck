@@ -1033,13 +1033,39 @@ review's priority tiers.
 
 ### P2 — empirical validation
 
-1. Consumer import manifests: `--consumer-binary`/`--consumer-dir`, ELF
+1. ~~Consumer import manifests: `--consumer-binary`/`--consumer-dir`, ELF
    undefined-dynamic-symbol / PE-import / Mach-O-undefined-symbol
    collection from a baseline-built consumer, producing a
    `consumer_required_symbol_removed` finding when the candidate library no
-   longer exports something a real consumer's baseline build referenced —
-   ground truth that needs no template-dispatch understanding at all,
-   independent of P1's static graph work.
+   longer exports something a real consumer's baseline build referenced.~~
+   **Closed — but not the way this item's own wording assumed.** This
+   infrastructure already existed: `compare --used-by APP` (ADR-005/ADR-043,
+   `appcompat.py`) already collects a real consumer binary's ELF undefined
+   symbols / PE imports / Mach-O undefined symbols and diffs them against
+   the new library's export table — this item's roadmap text was written
+   without apparent awareness of it, so no new `--consumer-binary`/
+   `--consumer-dir` flags or extraction code were needed. The genuine gap
+   was narrower: a missing symbol was only a bespoke string in
+   `AppCompatResult.missing_symbols`, special-cased by each reporter format
+   (`reporter.py`/`sarif.py`/`junit_report.py`), never a real
+   suppressible `Change`/`ChangeKind` the way `PE_ORDINAL_RETARGETED`
+   already is. Added `ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED`
+   (`BREAKING_KINDS`) and, in `scope_diff_to_app`, promoted every missing
+   symbol not already represented by a library-diff `Change` (via the
+   existing `uncovered_missing_symbols` dedup — the same helper
+   `_scoped_severity_summary` already uses to avoid double-counting) into
+   one, following the `_check_pe_ordinal_imports`/`PE_ORDINAL_RETARGETED`
+   precedent exactly. `AppCompatResult.missing_symbols` (the raw string
+   list) is untouched for backward compatibility with existing reporter
+   code; the new `Change`s are purely additive into `breaking_for_app`.
+   `AppCompatResult.verdict`'s existing missing-symbols-force-`BREAKING`
+   shortcut is also untouched (no exit-code/verdict behavior change) — this
+   is enrichment (a real `ChangeKind`, docs, evidence tier, suppressibility
+   in principle), not a severity change. Scoped to `--used-by` only (the
+   ADR's literal "consumer's baseline build" framing); the sibling
+   `--required-symbol`/plugin-host scoping paths have the identical
+   ad-hoc-string shape and are a natural, structurally-identical follow-up,
+   not attempted in this round.
 2. Old-consumer/new-library execution harness (`LD_BIND_NOW=1`, optionally
    ASan/UBSan) as an opt-in validation capability alongside the static
    scanner, not a replacement for it.

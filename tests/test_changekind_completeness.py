@@ -281,6 +281,8 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.PE_ORDINAL_RETARGETED,
     ChangeKind.PE_IMPORT_LOAD_MODE_CHANGED,
     ChangeKind.WCHAR_MODEL_CHANGED,
+    # exercised by tests/test_appcompat.py (ADR-044 P2 item 1)
+    ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
     # G23 Phase A — Linux ELF artifact facts (tests/test_g23_elf_facts.py)
     ChangeKind.STATIC_TLS_INTRODUCED,
     ChangeKind.STATIC_TLS_REMOVED,

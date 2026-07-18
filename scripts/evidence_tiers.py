@@ -195,6 +195,9 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     # alone, no debug info or headers needed.
     "pe_ordinal_retargeted": "L0",
     "pe_import_load_mode_changed": "L0",
+    # A consumer binary's own undefined-symbol table vs. the new library's
+    # export table -- both pure binary facts, no debug info/headers needed.
+    "consumer_required_symbol_removed": "L0",
     # wchar_t model drift is read from DW_AT_producer, like toolchain_flag_drift.
     "wchar_model_changed": "L1",
     # Canonical kinds that older catalog rows previously left implicit.
