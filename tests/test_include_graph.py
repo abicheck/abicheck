@@ -542,3 +542,40 @@ def test_extract_from_build_enforces_aggregate_timeout(monkeypatch) -> None:
     assert calls[0][1] == 1.0
     assert out == {"cu://0": ["foo.cpp", "inc/foo.h"]}
     assert any("time budget exhausted" in d for d in ext.diagnostics)
+
+
+def test_extractor_call_bounded_by_local_cap_not_full_scan_budget(monkeypatch) -> None:
+    """Codex review (PR #591), round 2: deadline.run_bounded() honors an
+    active outer deadline verbatim -- not min(timeout, left) -- so passing
+    timeout=min(local_cap, local_remaining) alone did nothing once a scan
+    deadline was active: the call would still be bounded by the FULL
+    remaining scan budget instead of this extractor's own per-unit/aggregate
+    ceiling. A hung depfile replay under a generous `--budget 30m` could
+    therefore eat the whole scan instead of stopping at ~aggregate_timeout_s.
+    The fix nests a narrower deadline.deadline_scope() around each call;
+    assert the ContextVar deadline observed by the call is bound to the
+    tight local cap, not the much larger outer scan budget."""
+    import abicheck.buildsource.include_graph as ig
+    from abicheck import deadline
+
+    monkeypatch.setattr(ig.shutil, "which", lambda _b: "/usr/bin/clang++")
+    seen_remaining: list[float | None] = []
+
+    def fake_run(*_a, **_k):
+        seen_remaining.append(deadline.remaining())
+
+        class _R:
+            stdout = "foo.o: foo.cpp inc/foo.h"
+            stderr = ""
+
+        return _R()
+
+    monkeypatch.setattr(ig.deadline, "run_bounded", fake_run)
+    ext = ClangIncludeExtractor(aggregate_timeout_s=5.0, per_unit_timeout_s=5.0)
+    build = BuildEvidence(compile_units=[CompileUnit(id="cu://a", source="a.cpp")])
+    with deadline.deadline_scope(1800.0):  # a generous 30-minute --budget
+        ext.extract_from_build(build)
+
+    assert seen_remaining
+    # Bound by the extractor's own ~5s local cap, not the 1800s scan budget.
+    assert seen_remaining[0] is not None and seen_remaining[0] <= 5.5

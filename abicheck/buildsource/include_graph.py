@@ -366,18 +366,27 @@ class ClangIncludeExtractor:
                 *(unredact_home(a) for a in argv),
             ]
             cwd = unredact_home(cu.directory) if cu.directory else None
+            per_call_timeout = min(self.per_unit_timeout_s, remaining)
+            scan_remaining = deadline.remaining()
+            if scan_remaining is not None:
+                # run_bounded() honors an active outer deadline verbatim (not
+                # min(timeout, left) — a generous --budget must not get
+                # silently re-capped), so a bare `timeout=` here would let a
+                # hung call eat the *whole* remaining scan budget instead of
+                # this extractor's own per-unit/aggregate ceiling. Nest a
+                # narrower scope so this call is bound by whichever is
+                # tighter (Codex review, PR #591).
+                per_call_timeout = min(per_call_timeout, scan_remaining)
             try:
-                # Bound by both this extractor's own aggregate timer (above)
-                # and the active --budget deadline, process-group-safe on
-                # timeout, same as the L2/L4/L5 clang calls (Codex review,
-                # PR #591).
-                proc = deadline.run_bounded(  # noqa: S603 - fixed argv, never shell=True
-                    cmd,
-                    cwd=cwd or None,
-                    capture_output=True,
-                    text=True,
-                    timeout=min(self.per_unit_timeout_s, remaining),
-                )
+                # Process-group-safe on timeout, same as the L2/L4/L5 clang calls.
+                with deadline.deadline_scope(per_call_timeout):
+                    proc = deadline.run_bounded(  # noqa: S603 - fixed argv, never shell=True
+                        cmd,
+                        cwd=cwd or None,
+                        capture_output=True,
+                        text=True,
+                        timeout=per_call_timeout,
+                    )
             except deadline.DeadlineExceeded as exc:
                 self.diagnostics.append(
                     f"scan deadline exceeded during clang -M include-map: {exc}"

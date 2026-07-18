@@ -139,3 +139,15 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   documented budget-overflow exit 5. It now propagates uncaught, like the
   castxml/clang subprocess calls around it on this authoritative L2 path
   (ADR-028 D3 draws the advisory/authoritative line at L3+, not L2).
+- Correction to the `include_graph.py` fix: `deadline.run_bounded()` honors
+  an active outer `--budget` deadline *verbatim*, not `min(timeout, left)` —
+  by design, so a generous explicit budget is never silently re-capped
+  (see its docstring). That meant passing `timeout=min(local_cap,
+  local_remaining)` alone did nothing once a scan deadline was active: a
+  hung `clang -M` include-map call would still get the *full* remaining
+  scan budget instead of stopping at this extractor's own ~30s
+  aggregate/120s per-unit ceiling. Each call now runs inside a narrower
+  nested `deadline.deadline_scope()` bound to whichever is tighter — the
+  local cap or the outer scan deadline — so a `--budget 30m --depth
+  source` scan can no longer have this advisory pass consume the whole
+  budget on one stuck compile unit.
