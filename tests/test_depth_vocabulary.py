@@ -369,6 +369,29 @@ def test_dump_depth_source_with_hybrid_frontend_rejected(tmp_path) -> None:  # t
     assert not (tmp_path / "out3.json").exists()
 
 
+def test_dump_depth_source_with_config_hybrid_frontend_rejected(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """CodeRabbit review: the hybrid+source rejection must also catch a
+    frontend selected via .abicheck.yml's `compile.frontend: hybrid`, not
+    just an explicit --ast-frontend flag. The first (pre-dispatch) check
+    only sees the raw CLI value ("auto" here); resolve_dump_compile_context
+    later resolves header_backend to "hybrid" from the config file, for the
+    ordinary (non-source-only) binary dump path -- the check must be
+    repeated after that resolution or a config-selected hybrid frontend
+    would silently bypass it."""
+    so = tmp_path / "fake.so"
+    so.write_bytes(b"\x7fELF")
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  frontend: hybrid\n")
+    res = CliRunner().invoke(
+        main,
+        ["dump", str(so), "--depth", "source", "--config", str(cfg)],
+    )
+    assert res.exit_code != 0, _all_output(res)
+    out = _all_output(res)
+    assert "--ast-frontend hybrid" in out
+    assert "--depth source" in out
+
+
 def test_dump_depth_headers_with_hybrid_frontend_not_rejected(tmp_path) -> None:  # type: ignore[no-untyped-def]
     """The hybrid-vs-source usage-error rejection is scoped to --depth source
     specifically -- hybrid is the normal, supported dual-backend choice for

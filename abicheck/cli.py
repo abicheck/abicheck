@@ -658,6 +658,19 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     gcc_option_tokens, sysroot, nostdinc = _cc.gcc_option_tokens, _cc.sysroot, _cc.nostdinc
     header_backend = _cc.frontend
 
+    # CodeRabbit review: header_backend can also arrive via .abicheck.yml's
+    # `compile.frontend` (resolved into _cc.frontend just above), which the
+    # earlier hybrid+source check — run before this config fold — cannot see
+    # when the CLI flag itself was left at "auto". Repeat the check now that
+    # header_backend reflects the fully-resolved (CLI > config) frontend.
+    if depth == "source" and header_backend == "hybrid":
+        raise click.UsageError(
+            "--depth source is incompatible with --ast-frontend hybrid: L4 "
+            "source-ABI replay has no dual-backend hybrid extractor (unlike "
+            "the L2 header-AST snapshot). Pass --ast-frontend castxml or "
+            "--ast-frontend clang for a --depth source dump."
+        )
+
     if binary_fmt in ("pe", "macho"):
         handle_non_elf_dump(
             so_path, binary_fmt, headers, includes, version, lang, pdb_path,

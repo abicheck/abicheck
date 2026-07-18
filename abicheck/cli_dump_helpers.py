@@ -241,6 +241,37 @@ class DumpDepthNotSatisfiedError(click.ClickException):
     """
 
 
+def _source_label_is_header_graph_only(build_source: BuildSourcePack | None) -> bool:
+    """True when *build_source*'s "source" label rests only on a header-only
+    (L2) declaration graph, with no real L3/L4 facts behind it.
+
+    Codex review: ``service._attach_header_graph`` (``--header-graph`` with
+    headers but no ``--sources``/``--build-info``) builds a ``BuildSourcePack``
+    whose L5 ``source_graph`` is genuinely non-empty while L3 (``build_evidence``)
+    and L4 (``source_abi``) are never populated at all — no build or L4
+    source-ABI replay ever ran (see that function's own comment: "L3/L4 stay
+    honestly NOT_COLLECTED"). ``evidence_depth_label`` treats a non-empty L5
+    alone as "source" (by design — genuine source-tier collection can
+    legitimately populate L5 without L4, since ``source_graph.build_source_graph``
+    folds ``BuildEvidence`` structure even when the L4 surface found nothing),
+    but that always requires *some* real L3 build evidence to have run first.
+    A pack with L3 **and** L4 both genuinely empty has no real source/build
+    evidence behind it at all — an explicit ``--depth source`` must not be
+    satisfied by ``--header-graph`` alone, or that flag would silently bypass
+    the depth contract this function enforces.
+
+    Uses the same fact-based emptiness check as ``evidence_depth_label``
+    itself (``_layer_payload_empty``, payload content — not coverage-row
+    status) so a pack with real L4 facts but no stamped L3/L4 coverage rows
+    (e.g. a hand-built test fixture) is never mistaken for header-graph-only.
+    """
+    if build_source is None:
+        return False
+    from .cli import _layer_payload_empty
+
+    return _layer_payload_empty(build_source, "L3") and _layer_payload_empty(build_source, "L4")
+
+
 def check_requested_depth_satisfied(
     depth: str | None, snap: AbiSnapshot, build_source: BuildSourcePack | None = None,
 ) -> None:
@@ -261,7 +292,13 @@ def check_requested_depth_satisfied(
     requested_rank = _DEPTH_RANK.get(depth)
     if requested_rank is None:
         return
+    effective_pack = build_source if build_source is not None else snap.build_source
     effective = evidence_depth_label(snap, build_source)
+    if effective == "source" and _source_label_is_header_graph_only(effective_pack):
+        # Downgrade for gating purposes only -- a --header-graph-only pack
+        # is not "source" evidence no matter how evidence_depth_label's
+        # general (and separately correct) L4-or-L5 rule reads it.
+        effective = "headers" if snap.from_headers else "binary"
     if _DEPTH_RANK.get(effective, 0) < requested_rank:
         raise DumpDepthNotSatisfiedError(
             f"--depth {depth} was requested but the snapshot only reached "

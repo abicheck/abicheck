@@ -1210,6 +1210,22 @@ def test_check_requested_depth_satisfied_binary_always_passes() -> None:
     check_requested_depth_satisfied("binary", snap)  # must not raise
 
 
+def test_check_requested_depth_satisfied_unknown_depth_is_noop() -> None:
+    """Defensive branch: a depth value outside _DEPTH_RANK (should never
+    happen past CLI parsing, which restricts --depth to the four known
+    rungs) is treated as unconstrained rather than raising."""
+    from abicheck.cli_dump_helpers import check_requested_depth_satisfied
+
+    snap = AbiSnapshot(library="libfoo.so", version="1.0")
+    check_requested_depth_satisfied("not-a-real-depth", snap)  # must not raise
+
+
+def test_source_label_is_header_graph_only_false_without_a_pack() -> None:
+    from abicheck.cli_dump_helpers import _source_label_is_header_graph_only
+
+    assert _source_label_is_header_graph_only(None) is False
+
+
 def test_check_requested_depth_satisfied_headers_without_header_ast_fails() -> None:
     from abicheck.cli_dump_helpers import (
         DumpDepthNotSatisfiedError,
@@ -1274,3 +1290,58 @@ def test_check_requested_depth_satisfied_source_with_empty_payload_fails() -> No
     )
     with pytest.raises(DumpDepthNotSatisfiedError, match="--depth source"):
         check_requested_depth_satisfied("source", snap)
+
+
+def test_check_requested_depth_satisfied_header_graph_only_does_not_satisfy_source() -> None:
+    """Codex review: service._attach_header_graph (--header-graph without
+    --sources/--build-info) builds a pack whose L5 source_graph is genuinely
+    non-empty while L3/L4 coverage rows are explicitly NOT_COLLECTED -- no
+    build or L4 source-ABI replay ever ran. evidence_depth_label's honest L5
+    check alone would read this as "source", letting --header-graph silently
+    satisfy an explicit --depth source with zero real source/build evidence.
+    The strict check must see through that and still fail."""
+    from abicheck.buildsource.model import CoverageStatus, DataLayer, LayerCoverage
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
+    from abicheck.cli_dump_helpers import (
+        DumpDepthNotSatisfiedError,
+        check_requested_depth_satisfied,
+    )
+
+    snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
+    pack = BuildSourcePack(
+        root=Path(""),
+        source_graph=SourceGraphSummary(nodes=[GraphNode(id="n1", kind="function")]),
+    )
+    pack.manifest.coverage = [
+        LayerCoverage(layer=DataLayer.L3_BUILD.value, status=CoverageStatus.NOT_COLLECTED),
+        LayerCoverage(layer=DataLayer.L4_SOURCE_ABI.value, status=CoverageStatus.NOT_COLLECTED),
+        LayerCoverage(layer=DataLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.PRESENT),
+    ]
+    snap.build_source = pack
+
+    # Sanity check: evidence_depth_label alone (the honesty-reporting
+    # function) does read this as "source" -- that's the exact gap the
+    # strict check must independently close, not a bug in that function.
+    assert evidence_depth_label(snap) == "source"
+
+    with pytest.raises(DumpDepthNotSatisfiedError, match="--depth source"):
+        check_requested_depth_satisfied("source", snap)
+
+    # A real source-tier pack (L3 present, feeding a genuine L5 graph even
+    # without L4) must still satisfy --depth source -- only the header-only
+    # signature (L3 AND L4 both NOT_COLLECTED) is rejected.
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+
+    real_pack = BuildSourcePack(
+        root=Path(""),
+        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        source_graph=SourceGraphSummary(nodes=[GraphNode(id="n1", kind="function")]),
+    )
+    real_pack.manifest.coverage = [
+        LayerCoverage(layer=DataLayer.L3_BUILD.value, status=CoverageStatus.PRESENT),
+        LayerCoverage(layer=DataLayer.L4_SOURCE_ABI.value, status=CoverageStatus.NOT_COLLECTED),
+        LayerCoverage(layer=DataLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.PRESENT),
+    ]
+    snap.build_source = real_pack
+    check_requested_depth_satisfied("source", snap)  # must not raise
