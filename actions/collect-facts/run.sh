@@ -194,7 +194,16 @@ _bundled_llvm_cmake_prefix() {
     printf '%s' "$explicit"
     return
   fi
-  if [[ -n "$cmplr_root" && -d "$cmplr_root/lib/cmake/llvm" && "$compiler_path" == "$cmplr_root"/* ]]; then
+  # Match compiler_path against cmplr_root followed by EITHER separator --
+  # $CMPLR_ROOT is a caller-supplied/Action-detected path that may use
+  # either, and $(command -v "$COMPILER") on a Windows/Git-Bash runner can
+  # come back backslash-separated even though this script otherwise
+  # normalizes to forward slashes elsewhere. Hardcoding "/" here made the
+  # guard silently never match on Windows, defeating this function
+  # entirely on that platform (regression caught by
+  # test_detects_cmplr_root_with_llvm_cmake_package on windows-latest CI).
+  if [[ -n "$cmplr_root" && -d "$cmplr_root/lib/cmake/llvm" \
+      && ( "$compiler_path" == "$cmplr_root/"* || "$compiler_path" == "$cmplr_root"\\* ) ]]; then
     printf '%s' "$cmplr_root/lib/cmake"
     return
   fi
