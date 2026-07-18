@@ -300,6 +300,68 @@ class TestMarkReachability:
         assert found[0].public_reachable is True
         assert found[0].reachability_kind == "direct_public_symbol"
 
+    def test_public_header_cxx_variable_removal_reachable_with_bare_castxml_name(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: the default CastXML backend never
+        qualifies Function.name/Variable.name with namespace context --
+        dumper_castxml.py's parse_variables()/_function_display_name() both
+        store the bare declaration ``name`` XML attribute, so a real
+        public-header variable in namespace ``ns::detail`` reaches this
+        pipeline as ``Variable(name="var", ...)``, not
+        ``Variable(name="ns::detail::var", ...)`` as every other test in this
+        class hand-constructs it. The prior '"::" in name' guard silently
+        never fired for this (the only real) shape -- qualified identity must
+        be recovered from the mangled linker symbol via demangling instead."""
+        mangled = "_ZN2ns6detail3varE"
+        old = AbiSnapshot(
+            library="libtest.so", version="1.0",
+            variables=[Variable(
+                name="var", mangled=mangled, type="int",
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            )],
+        )
+        new = AbiSnapshot(library="libtest.so", version="1.0", variables=[])
+        raw_change = Change(
+            kind=ChangeKind.VAR_REMOVED, symbol=mangled, description="removed",
+        )
+        ctx = DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        found = [c for c in ctx.kept if c.kind == ChangeKind.VAR_REMOVED]
+        assert len(found) == 1
+        assert found[0].qualified_name == "ns::detail::var"
+        assert found[0].public_reachable is True
+        assert found[0].reachability_kind == "direct_public_symbol"
+
+    def test_public_header_cxx_function_removal_reachable_with_bare_castxml_name(
+        self,
+    ) -> None:
+        """Mirror of the variable case above for functions: the same
+        bare-name CastXML shape applies to Function.name, and this exact
+        mechanism predates this PR's variable extension -- confirming the gap
+        was never function-specific either."""
+        mangled = "_ZN2ns6detail3apiEv"
+        old = AbiSnapshot(
+            library="libtest.so", version="1.0",
+            functions=[Function(
+                name="api", mangled=mangled, return_type="void",
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            )],
+        )
+        new = AbiSnapshot(library="libtest.so", version="1.0", functions=[])
+        raw_change = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol=mangled, description="removed",
+        )
+        ctx = DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_REMOVED]
+        assert len(found) == 1
+        assert found[0].qualified_name == "ns::detail::api"
+        assert found[0].public_reachable is True
+        assert found[0].reachability_kind == "direct_public_symbol"
+
     def test_public_header_enum_member_change_is_reachable(self) -> None:
         """Codex review (fresh evidence): an ENUM_MEMBER_* finding's symbol
         is "EnumName::member" (diff_types.py), not the plain enum name —

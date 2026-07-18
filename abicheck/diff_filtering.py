@@ -128,30 +128,62 @@ def _safe_index(snap: AbiSnapshot) -> bool:
     return True
 
 
+def _qualified_by_mangled(entries: list[tuple[str, object]]) -> dict[str, str]:
+    """Return mangled → qualified-name for declarations that carry C++ qualification.
+
+    ``entries`` is a list of ``(mangled, decl)`` pairs (a ``Function`` or
+    ``Variable``). Prefers ``decl.name`` when it already contains ``"::"``
+    (a frontend/hand-built snapshot that qualifies names directly), but that
+    is not the common case: the default CastXML backend stores only the
+    bare declaration name (``dumper_castxml.py``'s ``parse_variables()``/
+    ``_function_display_name()`` both read the raw castxml ``name``
+    attribute, never walking namespace ``context`` the way
+    ``_CastxmlParser._qualified_name()`` does for constants) — so trusting
+    ``decl.name`` alone left this whole mechanism a no-op against real
+    CastXML dumps of a namespaced declaration (Codex review, fresh
+    evidence). Falls back to demangling the *mangled* linker symbol
+    directly, which is backend-independent: the Itanium mangling always
+    encodes the true namespace/class qualification. Batched via
+    ``demangle_batch`` (one ``c++filt``/``cxxfilt`` pass) rather than one
+    subprocess per symbol.
+    """
+    from .demangle import demangle_batch, strip_signature
+
+    qualified: dict[str, str] = {}
+    to_demangle: list[str] = []
+    for mangled, decl in entries:
+        if mangled in qualified:
+            continue
+        name = getattr(decl, "name", None)
+        if name and "::" in name:
+            qualified[mangled] = name
+        else:
+            to_demangle.append(mangled)
+    if to_demangle:
+        demangled = demangle_batch(to_demangle)
+        for mangled in to_demangle:
+            d = demangled.get(mangled)
+            if d:
+                qualified[mangled] = strip_signature(d)
+    return qualified
+
+
 def _qualified_functions_by_mangled(snap: AbiSnapshot | None) -> dict[str, str]:
     """Return mangled/exported function names that have C++ qualification."""
     if snap is None or not _safe_index(snap):
         return {}
-
-    qualified: dict[str, str] = {}
-    for mangled, fn in (getattr(snap, "_func_by_mangled", None) or {}).items():
-        fname = getattr(fn, "name", None)
-        if fname and "::" in fname and mangled not in qualified:
-            qualified[mangled] = fname
-    return qualified
+    return _qualified_by_mangled(
+        list((getattr(snap, "_func_by_mangled", None) or {}).items())
+    )
 
 
 def _qualified_variables_by_mangled(snap: AbiSnapshot | None) -> dict[str, str]:
     """Return mangled/exported variable names that have C++ qualification."""
     if snap is None or not _safe_index(snap):
         return {}
-
-    qualified: dict[str, str] = {}
-    for mangled, var in (getattr(snap, "_var_by_mangled", None) or {}).items():
-        vname = getattr(var, "name", None)
-        if vname and "::" in vname and mangled not in qualified:
-            qualified[mangled] = vname
-    return qualified
+    return _qualified_by_mangled(
+        list((getattr(snap, "_var_by_mangled", None) or {}).items())
+    )
 
 
 def _qualified_name_for_change(

@@ -74,4 +74,16 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   --depth build` could report success on a snapshot that never actually
   used the headers or the compile database. The stamp is now also gated on
   the returned snapshot being genuinely header-scoped (`from_headers`).
+- **Broad suppression could still hide a namespaced public C++
+  function/variable break under the default CastXML backend** — the
+  mangled-vs-demangled identity recovery added for suppression
+  reachability trusted `Function.name`/`Variable.name` already containing
+  `"::"`, but CastXML never qualifies those fields with namespace context
+  (only the bare declared name); the mechanism was therefore a no-op
+  against real CastXML dumps for both functions and variables, not just
+  the previously-identified variable gap. `_qualified_functions_by_mangled`/
+  `_qualified_variables_by_mangled` and `MarkReachability`'s
+  `_public_header_names()` now recover the qualified identity by
+  demangling the *mangled* linker symbol directly (backend-independent)
+  when `.name` isn't already qualified.
 
