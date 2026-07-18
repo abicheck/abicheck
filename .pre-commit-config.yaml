@@ -6,16 +6,32 @@ repos:
         args: [--fix]
       - id: ruff-format
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.14.0
-    hooks:
-      - id: mypy
-        # strict mode + ignore_missing_imports are set in pyproject.toml [tool.mypy]
-        additional_dependencies: [defusedxml, pyyaml, click]
-
   - repo: https://github.com/PyCQA/bandit
     rev: 1.8.3
     hooks:
       - id: bandit
         args: [-ll, -r]
         files: ^abicheck/
+
+  # mypy and the AI-readiness gate run as `language: system` local hooks
+  # instead of the `mirrors-mypy` sandboxed mirror: a mirrored hook pins its
+  # *own* mypy version (previously v1.14.0), which drifted from the
+  # `mypy==1.19.1` pin in pyproject.toml's `[project.optional-dependencies]
+  # dev` and let type errors through that only the CI-pinned mypy caught
+  # (see CLAUDE.md "Known mypy issues" / "M0-3"). Running the environment's
+  # own installed `mypy`/`verify.py` ties both hooks to whatever version is
+  # actually pinned, permanently, with no separate rev to remember to bump.
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy (scripts/verify.py --profile fast --only typecheck)
+        entry: python scripts/verify.py --profile fast --only typecheck
+        language: system
+        pass_filenames: false
+        types: [python]
+      - id: ai-readiness
+        name: AI-readiness gate (scripts/verify.py --profile pr --only ai-readiness)
+        entry: python scripts/verify.py --profile pr --only ai-readiness
+        language: system
+        pass_filenames: false
+        always_run: true

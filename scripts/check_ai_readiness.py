@@ -20,9 +20,9 @@ from __future__ import annotations
 
 import argparse
 import ast
+import importlib.util
 import json
 import re
-import shutil
 import subprocess
 import sys
 from collections import defaultdict
@@ -41,20 +41,99 @@ EXAMPLES = ROOT / "examples"
 SCRIPTS = ROOT / "scripts"
 EVAL = ROOT / "eval"
 VALIDATION = ROOT / "validation"
+ACTION = ROOT / "action"
+CONTRIB_CLANG_PLUGIN = ROOT / "contrib" / "abicheck-clang-plugin"
+GITHUB_DIR = ROOT / ".github"
+AGENT_EVALS = ROOT / "agent-evals"
 
 # ---------------------------------------------------------------------------
 # Tunables
 # ---------------------------------------------------------------------------
+
+# First-party Python roots (CLAUDE.md "M1-2"): every tree of hand-written,
+# agent-editable source the size/test-ratio checks below cover. `abicheck/`
+# was previously the only root scanned — `scripts/`, `eval/`, `validation/`,
+# `action/`, and the clang-plugin's `tests/` could grow unbounded (including
+# the readiness script itself: `check_ai_readiness.py` was 1842 lines, over
+# its own WARN threshold, before this list started covering `scripts/`).
+FIRST_PARTY_PY_ROOTS: tuple[Path, ...] = (
+    PKG,
+    SCRIPTS,
+    TESTS,
+    EVAL,
+    VALIDATION,
+    ACTION,
+    CONTRIB_CLANG_PLUGIN,
+    AGENT_EVALS,
+)
+
+# Directory *names* excluded from first-party scanning wherever they appear
+# under a first-party root — fixture data, golden snapshots, and generated
+# CI-artifact output are not hand-written source an agent edits directly.
+FIRST_PARTY_EXCLUDE_DIR_NAMES: frozenset[str] = frozenset(
+    {"__pycache__", "fixtures", "golden", "results", "build"}
+)
+
+
+def _iter_first_party_python_files() -> Iterable[Path]:
+    """Yield every first-party .py file, skipping excluded subdirectories."""
+    for root in FIRST_PARTY_PY_ROOTS:
+        if not root.exists():
+            continue
+        for path in root.rglob("*.py"):
+            rel_parts = path.relative_to(ROOT).parts
+            if any(part in FIRST_PARTY_EXCLUDE_DIR_NAMES for part in rel_parts):
+                continue
+            yield path
+
 
 # File-size thresholds (lines).  Files over WARN_LINES surface a warning;
 # files over ERROR_LINES are an error unless they appear in LARGE_FILE_ALLOWLIST.
 WARN_LINES = 1500
 ERROR_LINES = 2000
 
-# Hard line limit is enforced for every source file. If you find yourself
-# wanting to add an entry, split the file instead — the AI-readiness check is
-# meant to keep modules legible for agents.
-LARGE_FILE_ALLOWLIST: frozenset[str] = frozenset()
+# Hard line limit is enforced for every first-party source file. If you find
+# yourself wanting to add an entry, split the file instead — the AI-readiness
+# check is meant to keep modules legible for agents. Every entry below
+# predates first-party scanning covering `scripts/`/`tests/` (CLAUDE.md
+# "M1-2") — these were already over the hard cap the moment those trees
+# started being scanned, and each needs its own reviewed split pass, not one
+# rushed through as a side effect of an unrelated readiness-gate change.
+# Tracked here instead of silently exempted — every one still surfaces as a
+# WARN on every run, so the debt stays visible rather than invisible.
+#
+# `check_ai_readiness.py` itself is the one entry that isn't pre-existing
+# debt this change merely discovered — the checks added in this same commit
+# pushed it over 2000 lines. It stays here rather than being split because
+# its largest self-contained block (`check_cli_contract` and its ~15 private
+# helpers, ADR-037 D10) is exactly what `tests/test_cli_contract.py`
+# monkeypatches by module-level name (e.g. `gate._VERDICT_CMD_MODULES`)
+# before calling `gate.check_cli_contract(...)` — moving that block to a
+# sibling module would make `check_cli_contract` read a *different* module's
+# globals than the ones the monkeypatch rebinds, silently breaking those
+# tests' ability to patch the very state they're asserting against. That
+# split needs its own pass that also updates the test file, not this one.
+LARGE_FILE_ALLOWLIST: frozenset[str] = frozenset(
+    {
+        "scripts/benchmark_comparison.py",
+        "scripts/check_ai_readiness.py",
+        "tests/test_type_graph.py",
+        "tests/test_l3l4l5_new_kinds.py",
+        "tests/test_mcp_server_unit.py",
+        "tests/test_cli_scan.py",
+        "tests/test_appcompat.py",
+        "tests/test_dumper_clang.py",
+        "tests/test_source_abi.py",
+        "tests/test_bundle.py",
+        "tests/test_source_extractors_clang.py",
+        "tests/test_build_source_cli.py",
+        "tests/test_cov95_cli.py",
+        "tests/test_service_unit.py",
+        "tests/test_crosscheck.py",
+        "tests/test_dwarf_coverage_gaps.py",
+        "tests/test_package.py",
+    }
+)
 
 # Directories that must contain a CLAUDE.md for per-area agent context.
 REQUIRED_CLAUDE_MD_DIRS: tuple[Path, ...] = (
@@ -66,6 +145,17 @@ REQUIRED_CLAUDE_MD_DIRS: tuple[Path, ...] = (
     SCRIPTS,
     EVAL,
     VALIDATION,
+)
+
+# Directories added later (CLAUDE.md "M1-1"/"M1-2") that use the canonical
+# vendor-neutral AGENTS.md instead of CLAUDE.md — either file satisfies this
+# check, unlike REQUIRED_CLAUDE_MD_DIRS above which stays CLAUDE.md-only for
+# the original, already-established directories.
+REQUIRED_AGENT_INSTRUCTION_DIRS: tuple[Path, ...] = (
+    GITHUB_DIR,
+    ACTION,
+    CONTRIB_CLANG_PLUGIN,
+    AGENT_EVALS,
 )
 
 # Minimum test-file ratio (test files / source files).
@@ -144,14 +234,15 @@ def _read(p: Path) -> str:
 
 
 def check_file_sizes(f: Findings) -> None:
-    """ERROR if a source file exceeds ERROR_LINES (unless allow-listed);
-    WARN at WARN_LINES regardless.
+    """ERROR if a first-party source file exceeds ERROR_LINES (unless
+    allow-listed); WARN at WARN_LINES regardless.
+
+    Covers every FIRST_PARTY_PY_ROOTS tree (CLAUDE.md "M1-2"), not just
+    `abicheck/` — `scripts/`, `eval/`, `validation/`, `action/`, and the
+    clang-plugin's `tests/` can grow unbounded just as easily.
     """
-    for path in _iter_python_sources():
+    for path in _iter_first_party_python_files():
         rel = _rel(path)
-        # Skip __pycache__ and similar; rglob shouldn't return them but be safe.
-        if "__pycache__" in rel:
-            continue
         with path.open("r", encoding="utf-8") as fh:
             lines = sum(1 for _ in fh)
         if lines > ERROR_LINES:
@@ -188,16 +279,155 @@ def check_claude_md_coverage(f: Findings) -> None:
             )
 
 
+def check_agent_instructions_coverage(f: Findings) -> None:
+    """ERROR if a REQUIRED_AGENT_INSTRUCTION_DIRS tree has neither an
+    AGENTS.md nor a CLAUDE.md (CLAUDE.md "M1-1"/"M1-2").
+
+    Distinct from check_claude_md_coverage above: these are directories added
+    after AGENTS.md became the canonical vendor-neutral instruction file, so
+    either name satisfies the requirement — unlike REQUIRED_CLAUDE_MD_DIRS,
+    which stays CLAUDE.md-only for the original, already-established dirs.
+    """
+    for d in REQUIRED_AGENT_INSTRUCTION_DIRS:
+        if not d.exists():
+            continue
+        if (d / "AGENTS.md").is_file() or (d / "CLAUDE.md").is_file():
+            continue
+        f.err(
+            "agent-instructions-coverage",
+            f"{_rel(d)}/: missing AGENTS.md (or CLAUDE.md) — agents need per-area context",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Check: every scripts/*.py file is listed in scripts/CLAUDE.md's inventory
+# ---------------------------------------------------------------------------
+
+
+def _extract_markdown_section(text: str, heading: str) -> str:
+    """Return the body of a `## <heading>` markdown section (up to the next
+    `## `-level heading, or EOF). Empty string if the heading isn't found."""
+    pattern = re.compile(
+        rf"^##\s+{re.escape(heading)}\s*$(.*?)(?=^##\s+|\Z)", re.MULTILINE | re.DOTALL
+    )
+    m = pattern.search(text)
+    return m.group(1) if m else ""
+
+
+def check_script_inventory_completeness(f: Findings) -> None:
+    """WARN if a scripts/*.py file isn't mentioned by name in scripts/CLAUDE.md's
+    "## Inventory" table specifically — not just mentioned anywhere in the file.
+
+    scripts/CLAUDE.md's "Inventory" table is the discovery surface an agent
+    reads before assuming a script does or doesn't exist — an unlisted script
+    is invisible to that discovery path even though `ls scripts/` would find
+    it (CLAUDE.md "M1-2": "script inventory completeness"). Scoping to the
+    Inventory section specifically (not the whole file) matters: a script
+    named only in prose elsewhere (e.g. "see gen_foo.py's docstring") would
+    otherwise satisfy this check without actually having an inventory row.
+    """
+    claude_md = SCRIPTS / "CLAUDE.md"
+    if not claude_md.is_file():
+        return  # already reported by claude-md-coverage
+    inventory = _extract_markdown_section(_read(claude_md), "Inventory")
+    if not inventory:
+        f.warn(
+            "script-inventory",
+            f"{_rel(claude_md)}: no '## Inventory' section found; "
+            "script-inventory completeness can't be checked",
+        )
+        return
+    for path in sorted(SCRIPTS.glob("*.py")):
+        if path.name.startswith("_"):
+            continue  # private/internal helper, not a discoverable entry point
+        if f"`{path.name}`" not in inventory:
+            f.warn(
+                "script-inventory",
+                f"{_rel(path)}: not mentioned in scripts/CLAUDE.md's '## Inventory' table",
+            )
+
+
+# ---------------------------------------------------------------------------
+# Check: generated-file ownership (CLAUDE.md "M1-2")
+# ---------------------------------------------------------------------------
+
+# (path, required marker substring (case-insensitive), generator to re-run).
+# Scoped to files where a textual marker is possible (Markdown/Python/JSON
+# with a description field) — pure-data JSON snapshot fixtures (the G20/
+# L3-L5/reachability example fixtures) have no room for a marker and are
+# already gated by their own generator's `--check` drift flag instead.
+GENERATED_FILE_MARKERS: tuple[tuple[Path, str, str], ...] = (
+    (
+        DOCS / "reference" / "detector-spec.md",
+        "generated by scripts/gen_detector_spec.py",
+        "gen_detector_spec.py",
+    ),
+    (
+        DOCS / "reference" / "detector-spec.json",
+        "(generated)",
+        "gen_detector_spec.py",
+    ),
+    (
+        PKG / "stable_abi_data.py",
+        "generated data",
+        "gen_stable_abi_data.py",
+    ),
+)
+
+
+def check_generated_file_ownership(f: Findings) -> None:
+    """ERROR if a known-generated file lost its "this is generated" marker.
+
+    Catches the case a hand-edit strips the banner comment entirely (which
+    would otherwise defeat the whole point of marking a file generated — an
+    agent reading it with no banner has no signal to check the generator
+    instead of hand-editing). Drift *content* (a generated file whose content
+    no longer matches its generator's output) is separately gated by each
+    generator's own `--check` flag — this check only verifies the ownership
+    signal itself is still present.
+    """
+    for path, marker, generator in GENERATED_FILE_MARKERS:
+        if not path.is_file():
+            continue
+        if marker not in _read(path).lower():
+            f.err(
+                "generated-file-ownership",
+                f"{_rel(path)}: missing its generated-file marker ({marker!r}) "
+                f"— regenerate with `python scripts/{generator}` rather than "
+                "hand-editing, and keep the marker comment.",
+            )
+    for path in sorted((DOCS / "examples").glob("case*.md")):
+        if "generated by scripts/gen_examples_docs.py" not in _read(path).lower():
+            f.err(
+                "generated-file-ownership",
+                f"{_rel(path)}: missing its generated-file marker — regenerate "
+                "with `python scripts/gen_examples_docs.py` rather than hand-editing.",
+            )
+
+
 # ---------------------------------------------------------------------------
 # Check: test-file ratio
 # ---------------------------------------------------------------------------
 
 
 def check_test_ratio(f: Findings) -> None:
+    """Recursive test discovery (CLAUDE.md "M1-2"): a `test_*.py` nested in a
+    subdirectory of `tests/` (e.g. a future `tests/subpkg/test_foo.py`) must
+    count toward the ratio just as a top-level one does — `TESTS.glob(...)`
+    silently wouldn't see it. Fixture/golden-data subtrees are excluded via
+    FIRST_PARTY_EXCLUDE_DIR_NAMES since they aren't test modules even if a
+    stray file there matched the `test_*.py` glob.
+    """
     src_count = sum(1 for p in PKG.rglob("*.py") if not p.name.startswith("__"))
     if src_count < MIN_SOURCE_FILES_FOR_RATIO:
         return
-    test_count = sum(1 for p in TESTS.glob("test_*.py"))
+    test_count = sum(
+        1
+        for p in TESTS.rglob("test_*.py")
+        if not any(
+            part in FIRST_PARTY_EXCLUDE_DIR_NAMES for part in p.relative_to(TESTS).parts
+        )
+    )
     ratio = test_count / src_count if src_count else 0.0
     if ratio < MIN_TEST_RATIO:
         f.warn(
@@ -494,6 +724,7 @@ def check_doc_count_sync(f: Findings) -> None:
     exempt_dirs = (adr_dir, archive_dir)
     sweep_files = [
         ROOT / "README.md",
+        ROOT / "AGENTS.md",
         ROOT / "CLAUDE.md",
         ROOT / "examples" / "README.md",
     ]
@@ -520,6 +751,70 @@ def check_doc_count_sync(f: Findings) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Check: GitHub Action version-reference freshness (CLAUDE.md "M1-4")
+# ---------------------------------------------------------------------------
+
+# Historical/dated records are exempt: an ADR, an archived doc, a dated field
+# report, or a retrospective "when this shipped" narrative bullet legitimately
+# names the version that was current *then*, not "latest" — the same
+# exemption principle check_doc_count_sync's generic sweep already uses for
+# ADRs/archives.
+_ACTION_VERSION_EXEMPT_DIRS: tuple[Path, ...] = (
+    DOCS / "development" / "adr",
+    DOCS / "development" / "archive",
+    VALIDATION,
+)
+_ACTION_VERSION_EXEMPT_FILES: frozenset[Path] = frozenset(
+    {
+        DOCS / "development" / "goals.md",  # retrospective "Done:" bullets
+        ROOT / "CHANGELOG.md",
+    }
+)
+
+_ACTION_VERSION_RE = re.compile(r"abicheck/abicheck@v(\d+\.\d+\.\d+)")
+
+
+def check_action_version_freshness(f: Findings) -> None:
+    """ERROR if a non-exempt doc's `abicheck/abicheck@vX.Y.Z` GitHub Action
+    usage example doesn't match repo_facts.json's `latest_release`.
+
+    repo_facts.json is the single source of truth this checks against
+    (generated by `scripts/gen_repo_facts.py`, itself gated by
+    `verify.py`'s `repo-facts` step) — an agent should never be able to
+    copy a `uses:` line from the docs and get a superseded release tag.
+    """
+    facts_path = ROOT / "repo_facts.json"
+    if not facts_path.is_file():
+        return  # repo-facts step / gen_repo_facts.py --check reports this
+    try:
+        latest = json.loads(_read(facts_path))["latest_release"]
+    except (json.JSONDecodeError, KeyError):
+        return
+
+    candidates = [ROOT / "README.md"]
+    if DOCS.exists():
+        candidates += sorted(DOCS.rglob("*.md"))
+
+    for path in candidates:
+        if path in _ACTION_VERSION_EXEMPT_FILES:
+            continue
+        if any(path.is_relative_to(d) for d in _ACTION_VERSION_EXEMPT_DIRS):
+            continue
+        text = _read(path)
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            for m in _ACTION_VERSION_RE.finditer(line):
+                if m.group(1) != latest:
+                    f.err(
+                        "action-version-freshness",
+                        f"{_rel(path)}:{lineno}: references "
+                        f"abicheck/abicheck@v{m.group(1)}, but repo_facts.json's "
+                        f"latest_release is {latest}. Update the doc (or add it "
+                        "to the exemption list in check_action_version_freshness "
+                        "if it's a deliberate historical reference).",
+                    )
+
+
+# ---------------------------------------------------------------------------
 # Check: import-cycle detection
 # ---------------------------------------------------------------------------
 
@@ -536,8 +831,11 @@ def _module_imports(path: Path) -> set[str]:
     # `__getattr__` shim uses to re-export the graph helpers from `cli_graph`
     # without registering a `cli_buildsource → cli_graph` edge (which would form
     # a real cycle). If you switch a shim like that to a static import, expect
-    # this gate to flag the cycle — add the module-set to IMPORT_CYCLE_ALLOWLIST
-    # only if the coupling is genuinely intended.
+    # this gate to flag the cycle — that is very likely a real dependency-
+    # direction problem, not something to unblock by extending
+    # IMPORT_CYCLE_ALLOWLIST (see check_import_cycles' docstring / AGENTS.md
+    # "What NOT to do"). Fix the direction (function-local import, or move
+    # the shared logic to a leaf module) instead.
     src = _read(path)
     try:
         tree = ast.parse(src, filename=str(path))
@@ -784,6 +1082,18 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
 
 
 def check_import_cycles(f: Findings) -> None:
+    """ERROR on any strongly-connected component (SCC) not a subset of a
+    baselined entry in IMPORT_CYCLE_ALLOWLIST (CLAUDE.md "M1-3").
+
+    The honest name for what this enforces is "no *unapproved* SCC growth",
+    not "no import cycles" — a large, deliberately-baselined CLI-registration
+    SCC already exists and is allowed (see IMPORT_CYCLE_ALLOWLIST below). What
+    this actually guards: no *new* module joins that baseline, and no *new*,
+    separate SCC forms outside it. Extending IMPORT_CYCLE_ALLOWLIST to make a
+    freshly-discovered cycle pass is an architectural decision needing an ADR
+    or explicit review sign-off — it is not a routine unblock-CI step (see
+    AGENTS.md "What NOT to do").
+    """
     # Build module -> direct abicheck imports.
     all_modules = {_module_name(p) for p in PKG.rglob("*.py")}
     graph: dict[str, set[str]] = {}
@@ -814,7 +1124,7 @@ def check_import_cycles(f: Findings) -> None:
         if any(short <= allowed for allowed in IMPORT_CYCLE_ALLOWLIST):
             continue
         f.err(
-            "import-cycles",
+            "import-cycle-growth",
             " -> ".join(m.removeprefix("abicheck.") for m in cyc),
         )
 
@@ -827,15 +1137,21 @@ def check_import_cycles(f: Findings) -> None:
 def check_mypy_baseline(f: Findings) -> None:
     """Run `mypy abicheck/` and ensure the error count hasn't drifted upward.
 
-    Skipped (with a single info line) when mypy is unavailable on PATH.
+    Skipped (with a single info line) when mypy is unavailable. Invoked as
+    ``sys.executable -m mypy`` rather than a bare ``mypy`` resolved via PATH
+    (`shutil.which`) — a bare command name can resolve to a *different*
+    install than the one pinned for this interpreter (`mypy==1.19.1` per
+    pyproject.toml's `[dev]` extra), which silently ran the wrong mypy
+    version here and reported a false baseline drift (CLAUDE.md "M0-3" —
+    the same PATH-ambiguity class scripts/verify.py's `_py()` helper exists
+    to close, just found again in this script's own bespoke invocation).
     """
-    mypy_bin = shutil.which("mypy")
-    if mypy_bin is None:
+    if importlib.util.find_spec("mypy") is None:
         print("mypy-baseline: mypy not installed, skipping")
         return
     try:
-        proc = subprocess.run(  # noqa: S603 — explicit binary path from PATH
-            [mypy_bin, "abicheck"],
+        proc = subprocess.run(
+            [sys.executable, "-m", "mypy", "abicheck"],
             cwd=ROOT,
             capture_output=True,
             text=True,
@@ -1771,13 +2087,17 @@ def check_license_header(f: Findings) -> None:
 CHECKS: dict[str, Callable[[Findings], None]] = {
     "file-size": check_file_sizes,
     "claude-md-coverage": check_claude_md_coverage,
+    "agent-instructions-coverage": check_agent_instructions_coverage,
+    "script-inventory": check_script_inventory_completeness,
+    "generated-file-ownership": check_generated_file_ownership,
     "test-ratio": check_test_ratio,
     "future-annotations": check_future_annotations,
     "changekind-partition": check_changekind_partition,
     "changekind-detector": check_changekind_detector_crossref,
     "changekind-docs": check_changekind_docs,
     "doc-count-sync": check_doc_count_sync,
-    "import-cycles": check_import_cycles,
+    "action-version-freshness": check_action_version_freshness,
+    "import-cycle-growth": check_import_cycles,
     "mypy-baseline": check_mypy_baseline,
     "examples-ground-truth": check_examples_ground_truth,
     "examples-readme-sync": check_examples_readme_sync,

@@ -22,11 +22,11 @@ jobs:
       security-events: write
       actions: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
         with:
           fetch-depth: 0
       - id: agentready
-        uses: napetrov/agentready@main
+        uses: napetrov/agentready@ad673222d20c6bc9358b6d6d8d72ebb91141e1a7  # main
         with:
           mode: scan
           job-summary: true
@@ -49,7 +49,7 @@ jobs:
           mv "$f.filtered" "$f"
       - name: Upload SARIF
         if: always() && steps.agentready.outputs.sarif-report-path
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a  # v4
         with:
           sarif_file: ${{ steps.agentready.outputs.sarif-report-path }}
           category: agentready
@@ -64,11 +64,11 @@ jobs:
       security-events: write
       actions: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
         with:
           fetch-depth: 0
       - id: agentready
-        uses: napetrov/agentready@main
+        uses: napetrov/agentready@ad673222d20c6bc9358b6d6d8d72ebb91141e1a7  # main
         with:
           mode: diff
           base-ref: origin/${{ github.base_ref }}
@@ -95,7 +95,7 @@ jobs:
           mv "$f.filtered" "$f"
       - name: Upload SARIF
         if: always() && steps.agentready.outputs.sarif-report-path
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a  # v4
         with:
           sarif_file: ${{ steps.agentready.outputs.sarif-report-path }}
           category: agentready

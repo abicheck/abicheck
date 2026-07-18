@@ -21,10 +21,10 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
           python-version: "3.14"  # consistent with main CI matrix
 
@@ -46,7 +46,7 @@ jobs:
           python -c "import abicheck; print('abicheck version:', abicheck.__version__)"
 
       - name: Upload dist artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: dist
           path: dist/
@@ -62,7 +62,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
         with:
           persist-credentials: false
 
@@ -74,7 +74,7 @@ jobs:
           sudo apt-get install -y abi-compliance-checker || true
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
           python-version: "3.14"
           cache: 'pip'
@@ -86,7 +86,7 @@ jobs:
         run: python scripts/benchmark_comparison.py --suite pinned74 --abicc-timeout 60
 
       - name: Upload benchmark report (workflow artifact)
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: benchmark-report
           path: benchmark_reports/benchmark_report.json
@@ -102,7 +102,7 @@ jobs:
       contents: write
     steps:
       - name: Download benchmark report
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           name: benchmark-report
           path: benchmark_reports/
@@ -125,14 +125,16 @@ jobs:
       id-token: write  # required for Trusted Publishing (OIDC)
     steps:
       - name: Download dist artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           name: dist
           path: dist/
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # release/v1
         # Uses Trusted Publishing (OIDC) — no API token needed.
         # Configure at: https://pypi.org/manage/project/abicheck/settings/publishing/
-        # Note: pypa/gh-action-pypi-publish is pinned to branch 'release/v1'.
-        # For stricter supply-chain hardening, pin to a commit SHA.
+        # Pinned to a commit SHA (not the mutable `release/v1` branch it
+        # tracks) — this job has `id-token: write` for OIDC, so a re-pointed
+        # branch ref here would be a real supply-chain risk (AGENTS.md
+        # "Known gaps" — Action pinning).

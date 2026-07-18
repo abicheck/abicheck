@@ -77,6 +77,25 @@ dev = [
 validation = [
     "zstandard>=0.21",
 ]
+# Mirrors [tool.pixi.feature.docs.pypi-dependencies] and the `lint-and-types`
+# CI job's docs install — `pip install -e ".[dev,docs]"` is what
+# `scripts/verify.py --profile pr`'s docs-build step needs to actually run
+# instead of skipping (CLAUDE.md "M0-3": a skip must never be mistaken for a
+# pass — see verify.py's incomplete-run warning).
+docs = [
+    "mkdocs",
+    "mkdocs-material",
+    "pymdown-extensions",
+    "mkdocs-redirects",
+]
+# Mirrors [tool.pixi.feature.dist.pypi-dependencies] and the `fair-metadata`
+# CI job's install — `pip install -e ".[dev,dist]"` is what
+# `scripts/verify.py --profile pr`'s distribution-build step needs to
+# actually run instead of skipping (same M0-3 rationale as `docs` above).
+dist = [
+    "build",
+    "twine",
+]
 
 [tool.mypy]
 python_version = "3.10"
@@ -265,15 +284,26 @@ platforms = ["linux-64", "osx-64", "osx-arm64", "win-64"]
 [tool.pixi.pypi-dependencies]
 abicheck = { path = ".", editable = true }
 
+# All of the tasks below except `fmt`/`test-cov` (which mutate or vary a check
+# rather than gate it) route through scripts/verify.py, the single
+# implementation shared by pre-commit, CI, and contributor docs (CLAUDE.md
+# "M0-3") — so `pixi run check` and the required CI checks can never drift
+# apart again.
 [tool.pixi.feature.dev.tasks]
-lint = "ruff check abicheck/ tests/"
+verify-fast = "python scripts/verify.py --profile fast"
+verify-pr = "python scripts/verify.py --profile pr"
+verify-full = "python scripts/verify.py --profile full"
+lint = "python scripts/verify.py --profile fast --only lint"
 fmt = "ruff format abicheck/ tests/"
-fmt-check = "ruff format --check abicheck/ tests/"
-test = "pytest tests/ -m \"not integration and not libabigail and not abicc and not slow and not golden\""
+fmt-check = "python scripts/verify.py --profile fast --only fmt-check"
+test = "python scripts/verify.py --profile fast --only unit-fast"
 test-cov = "pytest tests/ -m \"not integration and not libabigail and not abicc and not slow and not golden\" --cov=abicheck --cov-report=term-missing"
-typecheck = "mypy abicheck/"
-ai-readiness = "python scripts/check_ai_readiness.py"
-check = { depends-on = ["lint", "fmt-check", "typecheck", "test", "ai-readiness"] }
+typecheck = "python scripts/verify.py --profile fast --only typecheck"
+ai-readiness = "python scripts/verify.py --profile pr --only ai-readiness"
+# `pixi run check` == the exact PR gate (scripts/verify.py --profile pr), not
+# a hand-picked subset — this is the definition-of-done contributors/agents
+# should trust.
+check = "python scripts/verify.py --profile pr"
 
 # Shared castxml + C/C++ compiler, needed by both `integration` (header/DWARF
 # parsing) and `parity` (feeding abidiff/abi-compliance-checker ABI dumps).
@@ -324,8 +354,20 @@ mkdocs-redirects = "*"
 docs-build = "mkdocs build --strict"
 docs-serve = "mkdocs serve"
 
+# `python -m build` + `twine check`, matching the `fair-metadata` CI job's
+# distribution-build step (now a required `pr`-profile gate — CLAUDE.md
+# "M0-3": a skip must never be mistaken for a pass, so `default` below must
+# provision this rather than let `pixi run check` skip-and-fail out of the box).
+[tool.pixi.feature.dist.pypi-dependencies]
+build = "*"
+twine = "*"
+
 [tool.pixi.environments]
-default = { features = ["dev", "mcp"], solve-group = "default" }
+# Includes `docs` and `dist` so `pixi run check` (== `--profile pr`) actually
+# completes rather than skipping docs-build/distribution-build and failing
+# the incomplete-run gate on a fresh `pixi install` — see the two features
+# above.
+default = { features = ["dev", "mcp", "docs", "dist"], solve-group = "default" }
 integration = { features = ["dev", "mcp", "native-toolchain", "integration"], solve-group = "default" }
 parity = { features = ["dev", "mcp", "native-toolchain", "parity"], solve-group = "parity" }
 docs = { features = ["docs"], solve-group = "docs" }

@@ -353,7 +353,7 @@ and abicheck for you, runs the comparison, sets the step exit code, and can
 upload SARIF — all in a few lines of YAML:
 
 ```yaml
-- uses: abicheck/abicheck@v0.3.0
+- uses: abicheck/abicheck@v0.5.0
   with:
     old-library: abi-baseline.json   # committed or downloaded baseline
     new-library: build/libfoo.so

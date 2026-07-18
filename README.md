@@ -125,7 +125,7 @@ Any active severity setting (a `--severity-*` flag or a severity value in `.abic
 ## GitHub Action
 
 ```yaml
-- uses: abicheck/abicheck@v0.3.0
+- uses: abicheck/abicheck@v0.5.0
   with:
     old-library: abi-baseline.json
     new-library: build/libfoo.so
@@ -259,7 +259,7 @@ Per-case matrix, methodology, full-catalog notes, and the pinned cross-tool comp
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, testing, code style, and PR workflow. Project status and roadmap: [development/goals.md](docs/development/goals.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, testing, code style, and PR workflow. Project status and roadmap: [development/goals.md](docs/development/goals.md). Coding agents (Claude Code, Copilot, Cursor, or otherwise): the canonical repository contract is [AGENTS.md](AGENTS.md).
 
 ## License
 

@@ -44,7 +44,7 @@ def test_script_imports(car):
         "changekind-partition",
         "changekind-detector",
         "changekind-docs",
-        "import-cycles",
+        "import-cycle-growth",
         "mypy-baseline",
         "examples-ground-truth",
         "mkdocs-nav-coverage",
@@ -79,10 +79,13 @@ def test_claude_md_coverage_holds(car):
     assert f.errors == [], f"Missing CLAUDE.md files: {f.errors}"
 
 
-def test_no_import_cycles(car):
+def test_no_unapproved_import_cycle_growth(car):
+    """The check's real invariant (CLAUDE.md "M1-3"): no *unapproved* SCC
+    growth beyond IMPORT_CYCLE_ALLOWLIST's baseline — not literally "no
+    cycles" (a large by-design CLI-registration SCC is already baselined)."""
     f = car.Findings()
     car.check_import_cycles(f)
-    assert f.errors == [], f"Import cycles detected: {f.errors}"
+    assert f.errors == [], f"Unapproved import-cycle growth detected: {f.errors}"
 
 
 def test_adr_index_and_nav_sync_holds(car):
@@ -132,9 +135,10 @@ def test_main_returns_zero_on_clean_tree(car, capsys):
 
     We skip the slowest whole-tree scans here to avoid re-running them:
     - ``mypy-baseline`` needs mypy (exercised in the dedicated CI lane);
-    - ``import-cycles`` and ``banned-imports`` each re-walk every module's AST
-      and are already asserted individually by ``test_no_import_cycles`` and
-      ``test_no_banned_imports``. Running them again inside this end-to-end
+    - ``import-cycle-growth`` and ``banned-imports`` each re-walk every
+      module's AST and are already asserted individually by
+      ``test_no_unapproved_import_cycle_growth`` and ``test_no_banned_imports``.
+      Running them again inside this end-to-end
       check just doubled the cost (it was the dominant unit-lane offender at
       ~14.6s under coverage) without adding coverage — ``scripts/`` isn't
       measured, and the full gate already runs standalone in the
@@ -146,7 +150,7 @@ def test_main_returns_zero_on_clean_tree(car, capsys):
             "--skip",
             "mypy-baseline",
             "--skip",
-            "import-cycles",
+            "import-cycle-growth",
             "--skip",
             "banned-imports",
         ]
@@ -211,3 +215,271 @@ def test_examples_readme_sync_catches_swapped_row_verdict(car, tmp_path, monkeyp
     assert any("case02_bar" in msg and "BREAKING" in msg for _, msg in f.errors), (
         f"expected a verdict-mismatch error for case02_bar, got {f.errors}"
     )
+
+
+# ---------------------------------------------------------------------------
+# M1-2: first-party-repository coverage synthetic tests
+# ---------------------------------------------------------------------------
+
+
+def test_file_sizes_covers_first_party_roots_beyond_abicheck(
+    car, tmp_path, monkeypatch
+):
+    """An oversized script outside abicheck/ must fail the gate.
+
+    Regression guard for the exact gap M1-2 describes: before first-party
+    scanning covered `scripts/`/`eval/`/`validation/`/`action/`/the clang
+    plugin's `tests/`, an oversized file there was invisible to this check.
+    """
+    fake_root = tmp_path / "scripts"
+    fake_root.mkdir()
+    (fake_root / "oversized.py").write_text(
+        "\n".join(f"x{i} = {i}" for i in range(car.ERROR_LINES + 10)) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(car, "FIRST_PARTY_PY_ROOTS", (fake_root,))
+    monkeypatch.setattr(car, "LARGE_FILE_ALLOWLIST", frozenset())
+    monkeypatch.setattr(car, "ROOT", tmp_path)
+    f = car.Findings()
+    car.check_file_sizes(f)
+    assert any("oversized.py" in msg for _, msg in f.errors), f.errors
+
+
+def test_file_sizes_allowlisted_file_only_warns(car, tmp_path, monkeypatch):
+    fake_root = tmp_path / "scripts"
+    fake_root.mkdir()
+    (fake_root / "big.py").write_text(
+        "\n".join(f"x{i} = {i}" for i in range(car.ERROR_LINES + 10)) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(car, "FIRST_PARTY_PY_ROOTS", (fake_root,))
+    monkeypatch.setattr(car, "LARGE_FILE_ALLOWLIST", frozenset({"scripts/big.py"}))
+    monkeypatch.setattr(car, "ROOT", tmp_path)
+    f = car.Findings()
+    car.check_file_sizes(f)
+    assert f.errors == []
+    assert any("big.py" in msg for _, msg in f.warnings)
+
+
+def test_agent_instructions_coverage_catches_missing_dir(car, tmp_path, monkeypatch):
+    missing = tmp_path / "some-tree"
+    missing.mkdir()
+    monkeypatch.setattr(car, "REQUIRED_AGENT_INSTRUCTION_DIRS", (missing,))
+    monkeypatch.setattr(car, "ROOT", tmp_path)
+    f = car.Findings()
+    car.check_agent_instructions_coverage(f)
+    assert any("some-tree" in msg for _, msg in f.errors), f.errors
+
+
+@pytest.mark.parametrize("filename", ["AGENTS.md", "CLAUDE.md"])
+def test_agent_instructions_coverage_accepts_either_file(
+    car, tmp_path, monkeypatch, filename
+):
+    covered = tmp_path / "some-tree"
+    covered.mkdir()
+    (covered / filename).write_text("# instructions\n", encoding="utf-8")
+    monkeypatch.setattr(car, "REQUIRED_AGENT_INSTRUCTION_DIRS", (covered,))
+    monkeypatch.setattr(car, "ROOT", tmp_path)
+    f = car.Findings()
+    car.check_agent_instructions_coverage(f)
+    assert f.errors == []
+
+
+def test_script_inventory_completeness_catches_unlisted_script(
+    car, tmp_path, monkeypatch
+):
+    fake_scripts = tmp_path
+    (fake_scripts / "CLAUDE.md").write_text(
+        "## Inventory\n\n| Script | Purpose |\n|---|---|\n", encoding="utf-8"
+    )
+    (fake_scripts / "new_tool.py").write_text("print('hi')\n", encoding="utf-8")
+    monkeypatch.setattr(car, "SCRIPTS", fake_scripts)
+    monkeypatch.setattr(car, "ROOT", tmp_path)
+    f = car.Findings()
+    car.check_script_inventory_completeness(f)
+    assert any("new_tool.py" in msg for _, msg in f.warnings), f.warnings
+
+
+def test_script_inventory_completeness_passes_when_listed(car, tmp_path, monkeypatch):
+    fake_scripts = tmp_path
+    (fake_scripts / "CLAUDE.md").write_text(
+        "## Inventory\n\n| `new_tool.py` | does a thing |\n", encoding="utf-8"
+    )
+    (fake_scripts / "new_tool.py").write_text("print('hi')\n", encoding="utf-8")
+    monkeypatch.setattr(car, "SCRIPTS", fake_scripts)
+    monkeypatch.setattr(car, "ROOT", tmp_path)
+    f = car.Findings()
+    car.check_script_inventory_completeness(f)
+    assert f.warnings == []
+
+
+def test_script_inventory_completeness_ignores_mentions_outside_inventory(
+    car, tmp_path, monkeypatch
+):
+    """A script named only in prose *outside* the '## Inventory' section
+    (e.g. another section's narrative, or a later '## Conventions' heading)
+    must still warn — only an actual inventory row satisfies the check."""
+    fake_scripts = tmp_path
+    (fake_scripts / "CLAUDE.md").write_text(
+        "## Inventory\n\n| Script | Purpose |\n|---|---|\n"
+        "| `other_tool.py` | does another thing |\n\n"
+        "## Conventions\n\nSee `new_tool.py` for an example of the pattern.\n",
+        encoding="utf-8",
+    )
+    (fake_scripts / "new_tool.py").write_text("print('hi')\n", encoding="utf-8")
+    (fake_scripts / "other_tool.py").write_text("print('hi')\n", encoding="utf-8")
+    monkeypatch.setattr(car, "SCRIPTS", fake_scripts)
+    monkeypatch.setattr(car, "ROOT", tmp_path)
+    f = car.Findings()
+    car.check_script_inventory_completeness(f)
+    assert any("new_tool.py" in msg for _, msg in f.warnings), f.warnings
+    assert not any("other_tool.py" in msg for _, msg in f.warnings), f.warnings
+
+
+def test_generated_file_ownership_catches_stripped_marker(car, tmp_path, monkeypatch):
+    stripped = tmp_path / "generated.md"
+    stripped.write_text("# just content, no marker\n", encoding="utf-8")
+    monkeypatch.setattr(
+        car,
+        "GENERATED_FILE_MARKERS",
+        ((stripped, "generated by scripts/gen_thing.py", "gen_thing.py"),),
+    )
+    monkeypatch.setattr(car, "ROOT", tmp_path)
+    monkeypatch.setattr(car, "DOCS", tmp_path / "no-such-docs-dir")
+    f = car.Findings()
+    car.check_generated_file_ownership(f)
+    assert any("generated.md" in msg for _, msg in f.errors), f.errors
+
+
+def test_generated_file_ownership_passes_with_marker_present(
+    car, tmp_path, monkeypatch
+):
+    kept = tmp_path / "generated.md"
+    kept.write_text(
+        "<!-- generated by scripts/gen_thing.py -->\ncontent\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        car,
+        "GENERATED_FILE_MARKERS",
+        ((kept, "generated by scripts/gen_thing.py", "gen_thing.py"),),
+    )
+    monkeypatch.setattr(car, "ROOT", tmp_path)
+    monkeypatch.setattr(car, "DOCS", tmp_path / "no-such-docs-dir")
+    f = car.Findings()
+    car.check_generated_file_ownership(f)
+    assert f.errors == []
+
+
+def test_test_ratio_recursive_discovery(car, tmp_path, monkeypatch):
+    """A nested tests/subpkg/test_foo.py must count toward the ratio — a
+    plain TESTS.glob("test_*.py") (non-recursive) would miss it."""
+    fake_pkg = tmp_path / "abicheck"
+    fake_pkg.mkdir()
+    # 1 test file / N source files must fall strictly below MIN_TEST_RATIO
+    # (20%) for the warning to fire — N=5 gives exactly 20% (not < 20%).
+    n_source = max(car.MIN_SOURCE_FILES_FOR_RATIO, int(1 / car.MIN_TEST_RATIO) + 1)
+    for i in range(n_source):
+        (fake_pkg / f"mod{i}.py").write_text("x = 1\n", encoding="utf-8")
+
+    fake_tests = tmp_path / "tests"
+    nested = fake_tests / "subpkg"
+    nested.mkdir(parents=True)
+    (nested / "test_nested.py").write_text(
+        "def test_x(): assert True\n", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(car, "PKG", fake_pkg)
+    monkeypatch.setattr(car, "TESTS", fake_tests)
+    f = car.Findings()
+    car.check_test_ratio(f)
+    # One nested test file only (below MIN_TEST_RATIO for this source count)
+    # would warn if uncounted, and would ALSO warn if counted at this size —
+    # the real assertion is the message's numerator, not warn/no-warn.
+    assert f.warnings, "expected a ratio warning for this tiny synthetic tree"
+    assert "1 test files" in f.warnings[0][1], f.warnings
+
+
+# ---------------------------------------------------------------------------
+# M1-4: repo_facts.json / action-version-freshness synthetic tests
+# ---------------------------------------------------------------------------
+
+
+def test_action_version_freshness_catches_stale_reference(car, tmp_path, monkeypatch):
+    import json
+
+    (tmp_path / "repo_facts.json").write_text(
+        json.dumps({"latest_release": "0.5.0"}), encoding="utf-8"
+    )
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (tmp_path / "README.md").write_text(
+        "uses: abicheck/abicheck@v0.3.0\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(car, "ROOT", tmp_path)
+    monkeypatch.setattr(car, "DOCS", docs)
+    f = car.Findings()
+    car.check_action_version_freshness(f)
+    assert any("v0.3.0" in msg and "0.5.0" in msg for _, msg in f.errors), f.errors
+
+
+def test_action_version_freshness_passes_when_current(car, tmp_path, monkeypatch):
+    import json
+
+    (tmp_path / "repo_facts.json").write_text(
+        json.dumps({"latest_release": "0.5.0"}), encoding="utf-8"
+    )
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (tmp_path / "README.md").write_text(
+        "uses: abicheck/abicheck@v0.5.0\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(car, "ROOT", tmp_path)
+    monkeypatch.setattr(car, "DOCS", docs)
+    f = car.Findings()
+    car.check_action_version_freshness(f)
+    assert f.errors == []
+
+
+def test_action_version_freshness_exempts_adr_dir(car, tmp_path, monkeypatch):
+    import json
+
+    (tmp_path / "repo_facts.json").write_text(
+        json.dumps({"latest_release": "0.5.0"}), encoding="utf-8"
+    )
+    docs = tmp_path / "docs"
+    adr_dir = docs / "development" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "001-historical.md").write_text(
+        "uses: abicheck/abicheck@v0.3.0\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(car, "ROOT", tmp_path)
+    monkeypatch.setattr(car, "DOCS", docs)
+    # _ACTION_VERSION_EXEMPT_DIRS is computed from DOCS at module-load time
+    # (like REQUIRED_CLAUDE_MD_DIRS etc.), so monkeypatching DOCS alone
+    # doesn't retroactively change it — patch it directly, same pattern used
+    # for the other module-level dir tuples in this file.
+    monkeypatch.setattr(car, "_ACTION_VERSION_EXEMPT_DIRS", (adr_dir,))
+    f = car.Findings()
+    car.check_action_version_freshness(f)
+    assert f.errors == []
+
+
+def test_repo_facts_json_exists_and_is_fresh():
+    """The committed repo_facts.json should be exactly what
+    scripts/gen_repo_facts.py --check verifies — a lightweight structural
+    sanity check that doesn't re-run the (slower) full script."""
+    import json
+
+    facts_path = ROOT / "repo_facts.json"
+    assert facts_path.is_file(), (
+        "repo_facts.json missing — run scripts/gen_repo_facts.py"
+    )
+    facts = json.loads(facts_path.read_text(encoding="utf-8"))
+    for key in (
+        "project_version",
+        "latest_release",
+        "example_cases",
+        "fast_test_cases_collected",
+        "canonical_python",
+    ):
+        assert key in facts, f"repo_facts.json missing {key!r}"
