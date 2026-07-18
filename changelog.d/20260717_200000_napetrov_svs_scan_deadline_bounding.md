@@ -184,3 +184,15 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   re-exported so the public `dumper._castxml_version_note` surface is
   unchanged — the same split-and-reexport pattern `dumper_sysinc.py`/
   `dumper_clang_errors.py` already established earlier in this PR.
+- Fixed a race in `deadline._kill_process_tree`: it looked up the target
+  process group via `os.getpgid(proc.pid)`, which can fail once the
+  direct child has already exited (e.g. a wrapper that backgrounds the
+  real compiler and exits itself) — even though the process group itself,
+  with the still-running backgrounded child, is very much alive. Since
+  `run_bounded`'s `start_new_session=True` makes the child's pid *equal*
+  to the pgid for the group's entire lifetime (a POSIX process group's id
+  never changes, even after its leader exits, as long as a member
+  remains), the lookup was unnecessary and actively harmful: on failure
+  it fell back to killing only the already-dead direct process, leaving
+  the backgrounded compiler orphaned. Now uses `proc.pid` directly as the
+  pgid, no lookup (Codex review, PR #591).

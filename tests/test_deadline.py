@@ -336,26 +336,38 @@ def test_kill_process_tree_without_pgroup_kills_direct_process_only() -> None:
     assert proc.waits == [None]
 
 
-def test_kill_process_tree_getpgid_failure_falls_back_to_direct_kill(
+def test_kill_process_tree_reaches_group_after_wrapper_already_exited(
     monkeypatch,
 ) -> None:
-    # A race: the process already exited between the timeout firing and this
-    # call — os.getpgid raises. Fall back to killing the direct child rather
-    # than erroring.
+    # Codex review (PR #591): a wrapper that backgrounds the real compiler
+    # and exits itself races ahead of the timeout handler -- by the time
+    # _kill_process_tree runs, an os.getpgid(proc.pid) lookup could fail
+    # (the leader process is already gone) even though the process GROUP
+    # (with the still-running backgrounded child) is very much alive.
+    # proc.pid IS the pgid for the whole lifetime of that group
+    # (start_new_session=True never changes it, even after the leader
+    # exits), so no getpgid lookup is needed at all -- prove it is never
+    # even called, and that killpg still reaches the group via proc.pid.
     proc = _FakeProc()
-    monkeypatch.setattr(
-        os, "getpgid", lambda _pid: (_ for _ in ()).throw(ProcessLookupError())
-    )
+
+    def _boom(_pid: int) -> int:
+        raise AssertionError("os.getpgid should not be called any more")
+
+    monkeypatch.setattr(os, "getpgid", _boom)
+    signals: list[tuple[int, int]] = []
+    monkeypatch.setattr(os, "killpg", lambda pgid, sig: signals.append((pgid, sig)))
+
     deadline._kill_process_tree(proc, use_pgroup=True)
-    assert proc.killed == 1
-    assert proc.waits == [None]
+
+    import signal
+
+    assert (proc.pid, signal.SIGTERM) in signals
 
 
 def test_kill_process_tree_sigterm_killpg_failure_falls_back_to_direct_kill(
     monkeypatch,
 ) -> None:
     proc = _FakeProc()
-    monkeypatch.setattr(os, "getpgid", lambda _pid: 999)
 
     def _boom(_pgid: int, _sig: int) -> None:
         raise PermissionError("no permission to signal that group")
@@ -375,7 +387,6 @@ def test_kill_process_tree_escalates_to_sigkill_after_double_wait_timeout(
     # swallowed, not propagated, and SIGKILL must still fire.
     proc = _FakeProc()
     proc._wait_raises = True
-    monkeypatch.setattr(os, "getpgid", lambda _pid: 999)
     signals: list[tuple[int, int]] = []
     monkeypatch.setattr(os, "killpg", lambda pgid, sig: signals.append((pgid, sig)))
 
@@ -383,8 +394,8 @@ def test_kill_process_tree_escalates_to_sigkill_after_double_wait_timeout(
 
     import signal
 
-    assert (999, signal.SIGTERM) in signals
-    assert (999, signal.SIGKILL) in signals
+    assert (proc.pid, signal.SIGTERM) in signals
+    assert (proc.pid, signal.SIGKILL) in signals
     assert proc.waits == [5, 5]  # both grace-period waits attempted
 
 

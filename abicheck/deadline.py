@@ -290,17 +290,23 @@ def _kill_process_tree(proc: subprocess.Popen[Any], use_pgroup: bool) -> None:
     survivor dodge it. ``killpg(SIGKILL)`` on an already-fully-dead group is
     a harmless ``ProcessLookupError``, so escalating unconditionally costs
     nothing on the common case where SIGTERM was enough.
+
+    Uses ``proc.pid`` directly as the pgid rather than looking it up via
+    ``os.getpgid(proc.pid)``: ``run_bounded``'s ``start_new_session=True``
+    makes the child both its session and process-group leader, so its pid
+    *is* the pgid for the whole lifetime of that group — a POSIX process
+    group's id never changes, even after its leader itself exits, as long as
+    a member remains. A wrapper that backgrounds the real compiler and exits
+    immediately would otherwise make ``os.getpgid(proc.pid)`` fail (the
+    leader is already gone) and fall back to killing only the already-dead
+    direct process, leaving the still-running backgrounded compiler orphaned
+    (Codex review, PR #591).
     """
     if not use_pgroup:
         proc.kill()
         proc.wait()
         return
-    try:
-        pgid = os.getpgid(proc.pid)
-    except (ProcessLookupError, OSError):
-        proc.kill()
-        proc.wait()
-        return
+    pgid = proc.pid
     try:
         os.killpg(pgid, signal.SIGTERM)
     except (ProcessLookupError, PermissionError, OSError):
