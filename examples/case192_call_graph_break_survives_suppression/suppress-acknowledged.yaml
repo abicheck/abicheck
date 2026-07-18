@@ -1,0 +1,5 @@
+version: 1
+suppressions:
+  - namespace: "demo::detail::**"
+    reason: "Reviewed: compute_avx2 removal tracked in MYLIB-1234, consumers migrated"
+    allow_public_break: true

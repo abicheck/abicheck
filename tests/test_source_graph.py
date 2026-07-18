@@ -342,6 +342,50 @@ def test_source_abi_builds_public_reachability_slice() -> None:
     assert all(n.kind in NODE_KINDS for n in g.nodes)
 
 
+def test_ordinary_function_decl_node_marked_not_consumer_compiled() -> None:
+    """An ordinary out-of-line function (kind="function", no sibling
+    inline/template entity) gets consumer_compiled_body=False -- its body is
+    compiled into the library binary only, never into consumer code
+    (Codex review, ADR-044 P1 item 1 follow-up)."""
+    b = BuildEvidence()
+    b.targets.append(Target(id="target://libfoo", confidence=Confidence.HIGH))
+    surface = SourceAbiSurface(library="libfoo.so", target_id="target://libfoo")
+    surface.reachable_declarations.append(
+        _entity("foo::bar", "function", mangled="_ZN3foo3barEv")
+    )
+    g = build_source_graph(b, source_abi=surface)
+    decl_nodes = [n for n in g.nodes if n.kind == "source_decl"]
+    assert len(decl_nodes) == 1
+    assert decl_nodes[0].attrs["consumer_compiled_body"] is False
+
+
+def test_inline_function_decl_node_marked_consumer_compiled_despite_id_collision() -> (
+    None
+):
+    """clang.py always emits a plain "function" entity for a public-header
+    function *and*, when it has a body, a sibling "inline" entity sharing the
+    same identity() (mangled name) -- both collide onto the same graph node
+    id, and add_node keeps only the first writer's (the "function" entity's,
+    since reachable_declarations is iterated first) attrs. Without computing
+    consumer_compiled_body from the full identity set up front, the winning
+    node would read decl_kind="function" and lose the inline signal entirely
+    (Codex review)."""
+    b = BuildEvidence()
+    b.targets.append(Target(id="target://libfoo", confidence=Confidence.HIGH))
+    surface = SourceAbiSurface(library="libfoo.so", target_id="target://libfoo")
+    surface.reachable_declarations.append(
+        _entity("foo::inl", "function", mangled="_ZN3foo3inlEv")
+    )
+    surface.reachable_inline_bodies.append(
+        _entity("foo::inl", "inline", mangled="_ZN3foo3inlEv")
+    )
+    g = build_source_graph(b, source_abi=surface)
+    decl_nodes = [n for n in g.nodes if n.kind == "source_decl"]
+    assert len(decl_nodes) == 1
+    assert decl_nodes[0].attrs["decl_kind"] == "function"
+    assert decl_nodes[0].attrs["consumer_compiled_body"] is True
+
+
 def test_cpp_decl_maps_to_symbol_with_identity_keyed_mapping() -> None:
     # Regression (Codex): the persisted source_decl_to_binary_symbol map is keyed
     # by entity identity (mangled name for C++), so build_source_graph must look

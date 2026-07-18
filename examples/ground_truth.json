@@ -3775,6 +3775,51 @@
     "macos",
     "windows"
    ]
+  },
+  "case192_call_graph_break_survives_suppression": {
+   "abi_break": true,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "breaking",
+   "description": "A public inline dispatcher (demo::compute) calls straight into an internal detail::compute_avx2 specialization removed in v2. Because compute() is inline, its body -- including the call -- is compiled into every consumer binary, so the removal is a real, consumer-visible break despite hiding behind an internal-sounding namespace. The L5 call-graph walk (DECL_CALLS_DECL from a consumer_compiled_body=true entry) proves this reachability before suppression rules run: a broad namespace: \"demo::detail::**\" rule is refused (suppression_would_hide_public_break) unless the rule explicitly sets allow_public_break: true. This is the headline oneDAL-style scenario ADR-044 was built for.",
+   "expected": "BREAKING",
+   "expected_kinds": [
+    "func_removed",
+    "internal_symbol_required_by_public_api"
+   ],
+   "fixtures": [
+    "old.abi.json",
+    "new.abi.json"
+   ],
+   "min_evidence": "L5",
+   "mode": "snapshot-pair",
+   "platforms": [
+    "linux",
+    "macos",
+    "windows"
+   ]
+  },
+  "case193_ordinary_exported_fn_call_not_reachable": {
+   "abi_break": true,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "breaking",
+   "description": "The deliberate counter-example to case192: demo::api() is an ordinary, out-of-line exported function (not inline, not a template) whose body -- compiled into libdemo.so only, never into any consumer binary -- calls the internal detail::log_context(), removed in v2. The L5 call-graph walk only seeds entries whose own body is emitted into consumer code (consumer_compiled_body=true); api()'s node is tagged false, so log_context() is never treated as public-reachable through it. A broad namespace: \"demo::detail::**\" suppression rule therefore applies cleanly with no diagnostic at all -- the graph stays quiet on the common case (an ordinary exported function calling a private helper) while it stays loud on the rare one (case192).",
+   "expected": "BREAKING",
+   "expected_kinds": [
+    "func_removed"
+   ],
+   "fixtures": [
+    "old.abi.json",
+    "new.abi.json"
+   ],
+   "min_evidence": "L0",
+   "mode": "snapshot-pair",
+   "platforms": [
+    "linux",
+    "macos",
+    "windows"
+   ]
   }
  },
  "version": "4",

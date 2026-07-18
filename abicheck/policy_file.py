@@ -237,6 +237,23 @@ def _parse_frozen_namespaces(frozen_raw: Any) -> list[str]:
     return result
 
 
+def _parse_internal_namespaces(raw: Any) -> list[str]:
+    """Validate and parse the ``internal_namespaces`` list of namespace tokens."""
+    if not isinstance(raw, list):
+        raise PolicyError(
+            "'internal_namespaces' must be a YAML list of namespace tokens, got "
+            + type(raw).__name__
+        )
+    result: list[str] = []
+    for i, token in enumerate(raw):
+        if not isinstance(token, str):
+            raise PolicyError(
+                f"internal_namespaces[{i}]: expected string, got {type(token).__name__}"
+            )
+        result.append(token)
+    return result
+
+
 # Severity ordering used for frozen-namespace floor comparisons.
 _VERDICT_ORDER: list[Verdict] = [
     Verdict.NO_CHANGE,
@@ -355,6 +372,18 @@ class PolicyFile:
     # globbing against ``::``-joined namespace segments; ``**`` matches any
     # number of leading segments. Empty list = no extra namespaces.
     frozen_namespaces: list[str] = field(default_factory=list)
+    # ADR-044 P1 item 5 — project-configurable internal-implementation-namespace
+    # convention (e.g. ``priv`` instead of the hard-coded default ``detail``/
+    # ``impl``/``internal``/``__detail``/``_impl`` five-token set). Threaded
+    # into MarkReachability/DetectInternalLeaks/DemoteUnreachableInternalChurn
+    # via PipelineContext.internal_namespaces (mirrors frozen_namespaces'
+    # threading). Empty list = use each step's own DEFAULT_INTERNAL_NAMESPACES.
+    # Deliberately NOT threaded into DetectNamespacePatterns's
+    # experimental_namespaces constructor parameter: that governs a distinct
+    # convention (the `experimental::` graduation namespace, DEFAULT_EXPERIMENTAL_NAMESPACES)
+    # unrelated to internal-implementation-detail namespaces, despite the ADR's
+    # roadmap text grouping all four steps together.
+    internal_namespaces: list[str] = field(default_factory=list)
     # ADR-033 D7 — evidence-aware policy controls. ``None`` means "unset": the
     # finding keeps its default category (current behaviour). A set value maps
     # the whole category of build/source evidence findings to a verdict ceiling.
@@ -408,6 +437,7 @@ class PolicyFile:
         base_policy = _parse_base_policy(raw)
         overrides = _parse_overrides(raw.get("overrides", {}), path)
         frozen_namespaces = _parse_frozen_namespaces(raw.get("frozen_namespaces", []))
+        internal_namespaces = _parse_internal_namespaces(raw.get("internal_namespaces", []))
         source_only, build_drift, graph_risk, require_evidence = _parse_evidence_policy(
             raw.get("evidence_policy", {}), path
         )
@@ -417,6 +447,7 @@ class PolicyFile:
             overrides=overrides,
             source_path=path,
             frozen_namespaces=frozen_namespaces,
+            internal_namespaces=internal_namespaces,
             source_only_findings=source_only,
             build_context_drift=build_drift,
             graph_risk_findings=graph_risk,

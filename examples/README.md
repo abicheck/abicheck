@@ -1,7 +1,7 @@
 # ABI Scenario Catalog
 
 <!-- BEGIN GENERATED: catalog-headline (keep counts in sync with examples/ground_truth.json) -->
-This directory contains **191 cases** (186 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
+This directory contains **193 cases** (188 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
 <!-- END GENERATED: catalog-headline -->
 
 - Paired `v1/` and `v2/` source + headers.
@@ -20,7 +20,7 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 <!-- BEGIN GENERATED: verdict-distribution (keep counts in sync with examples/ground_truth.json) -->
 | Verdict | Count | `checker_policy.py` set | Icon |
 |---------|-------|-------------------------|------|
-| BREAKING | 101 | `BREAKING_KINDS` | 🔴 |
+| BREAKING | 103 | `BREAKING_KINDS` | 🔴 |
 | API_BREAK | 17 | `API_BREAK_KINDS` | 🟠 |
 | COMPATIBLE_WITH_RISK | 31 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 9 | `ADDITION_KINDS` | 🟢 |
@@ -432,6 +432,8 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [189](case189_public_function_private_parameter_type/README.md) | _public_function_private_parameter_type — Public function newly gains a private parameter type | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [190](case190_public_inline_function_references_internal_constant/README.md) | _public_inline_function_references_internal_constant — Public inline function newly reads an internal constant | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [191](case191_header_only_graph_field_type/README.md) | _header_only_graph_field_type — Same finding, proven with no build integration at all | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [192](case192_call_graph_break_survives_suppression/README.md) | Call-graph-reachable break survives a broad internal-namespace suppression | Breaking | 🔴 BREAKING |
+| [193](case193_ordinary_exported_fn_call_not_reachable/README.md) | An ordinary exported function's internal call is not public-reachable | Breaking | 🔴 BREAKING |
 <!-- END GENERATED: case-index -->
 
 ---

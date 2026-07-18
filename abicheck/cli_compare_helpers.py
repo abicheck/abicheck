@@ -628,6 +628,8 @@ def _apply_used_by_scoping(
     old_snapshot: Any, new_snapshot: Any,
     policy: str, policy_file: PolicyFile | None,
     exit_code_scheme: str = "legacy", sev_config: Any = None,
+    verify_runtime: bool = False,
+    suppression: Any = None,
 ) -> int:
     """Scope *result* to each ``--used-by`` app; worst-wins (ADR-043).
 
@@ -641,6 +643,20 @@ def _apply_used_by_scoping(
     renderer and returns the worst app's exit code, computed under
     *exit_code_scheme* (legacy verdict floor, or severity-aware over each
     app's relevant changes when the caller passed --severity-*).
+
+    *verify_runtime* (ADR-044 P2 item 2) additionally runs each app once
+    against the old library and once against the new one
+    (:func:`~abicheck.runtime_probe.run_runtime_probe`) when both are real
+    binaries — a JSON-snapshot side has no file to execute against, so the
+    probe is silently skipped for that app, same as the static check's own
+    snapshot fallback degrades gracefully.
+
+    *suppression* (ADR-044 P2, Codex review) is forwarded to
+    :func:`~abicheck.appcompat.scope_diff_to_app` and also consulted here
+    directly for the ``CONSUMER_RUNTIME_LOAD_FAILED`` overlay: both findings
+    are synthesized *after* the pipeline's own suppression pass already ran
+    over ``result.changes``, so without this they would be unsuppressible
+    even by an exact rule.
     """
     from .appcompat import scope_diff_to_app
     from .service import detect_binary_format
@@ -698,8 +714,59 @@ def _apply_used_by_scoping(
     for app in used_by_apps:
         scoped = scope_diff_to_app(
             result, app, old_lib, new_lib,
-            policy=policy, policy_file=policy_file,
+            policy=policy, policy_file=policy_file, suppression=suppression,
         )
+        if verify_runtime and isinstance(old_lib, Path) and isinstance(new_lib, Path):
+            from .checker_policy import ChangeKind
+            from .diff_helpers import make_change
+            from .runtime_probe import run_runtime_probe
+
+            probe = run_runtime_probe(app, old_lib, new_lib)
+            regressed_symbol = probe.regressed_symbol
+            if regressed_symbol:
+                # public_reachable=True (Codex review, fresh evidence, mirrors
+                # appcompat.scope_diff_to_app's identical fix for
+                # CONSUMER_REQUIRED_SYMBOL_REMOVED): this finding only exists
+                # because the dynamic linker itself failed to resolve a
+                # symbol for a real, executed --used-by consumer binary --
+                # left at the dataclass default (False), a broad
+                # namespace/source_location suppression rule's default
+                # "unreachable-only" reachability would read it as
+                # unreachable and silently suppress a runtime regression that
+                # is, by construction, always consumer-proven real.
+                runtime_change = make_change(
+                    ChangeKind.CONSUMER_RUNTIME_LOAD_FAILED,
+                    symbol=regressed_symbol,
+                    name=app.name,
+                    public_reachable=True,
+                    reachability_kind="consumer_proven",
+                )
+                add_finding = suppression is None
+                if suppression is not None:
+                    outcome = suppression.evaluate(runtime_change)
+                    add_finding = not outcome.suppressed
+                    if add_finding and outcome.withheld_rule is not None:
+                        from .post_processing import _build_suppression_overreach_change
+
+                        scoped.breaking_for_app.append(
+                            _build_suppression_overreach_change(
+                                runtime_change, outcome.withheld_rule
+                            )
+                        )
+                if add_finding:
+                    scoped.breaking_for_app.append(runtime_change)
+                    # scope_diff_to_app already computed scoped.verdict before
+                    # this RISK-tier finding existed -- recompute so a clean
+                    # static scope plus a runtime regression reports
+                    # COMPATIBLE_WITH_RISK instead of a stale COMPATIBLE
+                    # (Codex review).
+                    from .appcompat import _compute_appcompat_verdict
+
+                    scoped.verdict = _compute_appcompat_verdict(
+                        scoped.missing_symbols, scoped.missing_versions,
+                        scoped.breaking_for_app, scoped.required_symbol_count,
+                        policy, policy_file,
+                    )
         summaries.append(_app_compat_summary(scoped))
         relevant_finding_ids.update(_finding_id(c) for c in scoped.breaking_for_app)
         relevant_changes_by_id.update(
@@ -978,6 +1045,7 @@ def run_compare(
     used_by_apps: tuple[Path, ...] = (),
     required_symbols_opt: tuple[str, ...] = (),
     required_symbols_file: Path | None = None,
+    verify_runtime: bool = False,
 ) -> None:
     """Run the single-pair (or set fan-out) ``compare`` flow and exit accordingly."""
     from .dry_run import reject_dry_run_with_output
@@ -1424,6 +1492,7 @@ def run_compare(
             result, used_by_apps, used_by_old_input, used_by_new_input, old, new,
             policy, pf,
             exit_code_scheme=resolved_cfg.exit_code_scheme, sev_config=sev_config,
+            verify_runtime=verify_runtime, suppression=suppression,
         )
     elif required_symbols:
         scoped_exit_code = _apply_required_symbol_scoping(
@@ -1708,6 +1777,7 @@ def _fold_scoped_compat_into_text(
         # sarif.to_sarif/junit_report._build_testsuite's identical fold-in).
         changes_list = payload.get("changes")
         if isinstance(changes_list, list):
+            from .checker_policy import EvidenceStatus
             from .reporter import _change_to_dict
 
             eff_sets = result._effective_kind_sets()
@@ -1721,6 +1791,14 @@ def _fold_scoped_compat_into_text(
                         policy=result.policy or "strict_abi",
                         kind_sets=eff_sets,
                         policy_file=result.policy_file,
+                        # Codex review: a scoped-only change (PE_ORDINAL_RETARGETED,
+                        # CONSUMER_REQUIRED_SYMBOL_REMOVED, CONSUMER_RUNTIME_LOAD_FAILED)
+                        # is proven by the real consumer's own import table/execution,
+                        # not by an artifact-level library diff -- evidence_status_for_change
+                        # would otherwise report "artifact_proven" purely from the kind's
+                        # BREAKING/RISK category, same as appcompat_to_json's own
+                        # CONSUMER_PROVEN override for this exact finding shape.
+                        evidence_status_override=EvidenceStatus.CONSUMER_PROVEN,
                     )
                 )
             for label in missing_labels:

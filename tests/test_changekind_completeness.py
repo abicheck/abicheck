@@ -47,6 +47,9 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.VERSIONED_SYMBOL_SCHEME_DETECTED,
     # exercised by tests/test_reachability_aware_suppression.py (ADR-044 D4)
     ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK,
+    # exercised by tests/test_internal_leak.py and
+    # tests/test_reachability_aware_suppression.py (ADR-044 P1 items 1-2)
+    ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API,
     ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED,
     ChangeKind.ENUM_MEMBER_ADDED,
     ChangeKind.ENUM_MEMBER_REMOVED,
@@ -278,6 +281,10 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.PE_ORDINAL_RETARGETED,
     ChangeKind.PE_IMPORT_LOAD_MODE_CHANGED,
     ChangeKind.WCHAR_MODEL_CHANGED,
+    # exercised by tests/test_appcompat.py (ADR-044 P2 item 1)
+    ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+    # exercised by tests/test_cov95_cli.py::TestVerifyRuntimeFlag (ADR-044 P2 item 2)
+    ChangeKind.CONSUMER_RUNTIME_LOAD_FAILED,
     # G23 Phase A — Linux ELF artifact facts (tests/test_g23_elf_facts.py)
     ChangeKind.STATIC_TLS_INTRODUCED,
     ChangeKind.STATIC_TLS_REMOVED,

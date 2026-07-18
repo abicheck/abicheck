@@ -46,6 +46,7 @@ from .checker_policy import ChangeKind
 from .checker_types import Change
 
 if TYPE_CHECKING:
+    from .buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary
     from .model import AbiSnapshot, RecordType
 
 
@@ -118,6 +119,28 @@ def _strip_template_args(name: str) -> str:
         prev = cur
         cur = _TEMPLATE_ARG_RE.sub("", cur)
     return cur
+
+
+def _strip_signature_params(name: str) -> str:
+    """Truncate a demangled C++ function signature at its own parameter list.
+
+    ``cxxfilt``/``c++filt`` demangle a mangled function name to the full
+    signature, e.g. ``ns::api::foo(ns::detail::T*)`` — not just the bare
+    qualified name. Tracks paren depth and cuts at the first depth-0 ``(``
+    (the function's own parameter list opening; a deeper ``(`` is a nested
+    parameter type, e.g. a function-pointer parameter, and must not be
+    mistaken for it). A name with no top-level ``(`` at all (already a bare
+    qualified name, or not a function) is returned unchanged.
+    """
+    depth = 0
+    for i, ch in enumerate(name):
+        if ch == "(":
+            if depth == 0:
+                return name[:i]
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+    return name
 
 
 def _name_segments(name: str) -> list[str]:
@@ -675,6 +698,242 @@ def compute_leak_paths(
     return _dedup_paths(paths)
 
 
+def _is_consumer_compiled_node(node_id: str, node_by_id: dict[str, GraphNode]) -> bool:
+    """Whether *node_id*'s own body is compiled into consumer code.
+
+    Thin re-export of
+    :func:`~abicheck.buildsource.source_graph.is_consumer_compiled_node` (the
+    shared predicate both the entry check and this walk's own
+    expand-past-this-node check use) so the rest of this module keeps its
+    existing call shape. See that function's docstring for the exact
+    default rule — permissive only for a genuine ``header_graph.py`` node,
+    conservative for everything else attr-less (notably a build-integrated
+    ``call_graph.py`` fallback node, Codex review, fresh evidence).
+    """
+    from .buildsource.source_graph import is_consumer_compiled_node
+
+    return is_consumer_compiled_node(node_id, node_by_id)
+
+
+def _consumer_compiled_reachability(
+    graph: SourceGraphSummary,
+    edge_kinds: frozenset[str],
+    entries: Iterable[str],
+    node_by_id: dict[str, GraphNode],
+) -> dict[str, tuple[frozenset[str], dict[str, GraphEdge]]]:
+    """BFS from each *entry*, restricted to consumer-compiled call chains.
+
+    Unlike :func:`~abicheck.buildsource.source_graph_findings._dependency_reachability`
+    (which this call-graph walk used before this fix), the traversal does not
+    simply expand every edge transitively from an already-validated entry
+    (Codex review, fresh evidence): a public inline ``wrap()`` calling an
+    ordinary out-of-line exported ``api()``, which in turn calls
+    ``ns::detail::helper()``, has ``api()`` genuinely reachable from
+    ``wrap()``'s own compiled body (a consumer really does link against
+    ``api()``'s exported symbol) -- but ``helper()`` is not, since that call
+    happens entirely inside the library's binary, in a function
+    (``api()``) whose own body a consumer never compiles. The walk therefore
+    stops **expanding past** (not discovering) a node whose own
+    ``consumer_compiled_body`` is false: such a node is still recorded as
+    reachable (its own removal/change IS consumer-visible through the entry
+    that calls it), but whatever it calls is not queued for further descent.
+    Also returns each entry's predecessor-edge map so the caller can
+    reconstruct a proof path without a second, unrestricted graph walk that
+    could show a route the restriction above would have rejected.
+    """
+    adjacency: dict[str, list[GraphEdge]] = {}
+    for e in graph.edges:
+        if e.kind in edge_kinds:
+            adjacency.setdefault(e.src, []).append(e)
+    out: dict[str, tuple[frozenset[str], dict[str, GraphEdge]]] = {}
+    for entry in entries:
+        seen: set[str] = {entry}
+        came_from: dict[str, GraphEdge] = {}
+        queue: collections.deque[str] = collections.deque([entry])
+        while queue:
+            node = queue.popleft()
+            if node != entry and not _is_consumer_compiled_node(node, node_by_id):
+                continue
+            for e in adjacency.get(node, []):
+                if e.dst in seen:
+                    continue
+                seen.add(e.dst)
+                came_from[e.dst] = e
+                queue.append(e.dst)
+        seen.discard(entry)
+        out[entry] = (frozenset(seen), came_from)
+    return out
+
+
+def _reconstruct_path(
+    came_from: dict[str, GraphEdge], entry: str, target: str
+) -> list[GraphEdge] | None:
+    """Rebuild the entry-to-target edge chain from a predecessor map.
+
+    Mirrors :func:`~abicheck.buildsource.source_graph_findings._dependency_path`'s
+    return shape (``[]`` for ``entry == target``, ``None`` if unreachable) but
+    replays the *same* restricted walk's predecessors instead of re-deriving a
+    path from an unrestricted one, so the displayed proof path can never show
+    a route :func:`_consumer_compiled_reachability` would not itself take.
+    """
+    if entry == target:
+        return []
+    if target not in came_from:
+        return None
+    path: list[GraphEdge] = []
+    cur = target
+    while cur != entry:
+        e = came_from[cur]
+        path.append(e)
+        cur = e.src
+    path.reverse()
+    return path
+
+
+def compute_call_graph_leak_paths(
+    snap: AbiSnapshot,
+    internal_namespaces: Iterable[str] = DEFAULT_INTERNAL_NAMESPACES,
+) -> dict[str, list[str]]:
+    """Call-graph analogue of :func:`compute_leak_paths` (ADR-044 P1 item 1).
+
+    Walks the optional L5 source graph's ``DECL_CALLS_DECL``/
+    ``DECL_REFERENCES_DECL`` edges from every public entry whose own body is
+    actually compiled into consumer code (exported-symbol decl or
+    public-header-visible decl/type, restricted to an inline/template
+    rendition where the graph can tell the difference — Codex review; see
+    :func:`~abicheck.buildsource.source_graph.is_consumer_compiled_public_entry`
+    for why an ordinary out-of-line exported function does not qualify),
+    returning a mapping ``lookup_key -> list of formatted proof-path
+    strings`` (one per public entry that reaches it, edge-kind-annotated via
+    :func:`~abicheck.buildsource.source_graph_findings._format_dependency_path`,
+    e.g. ``"pub() --[DECL_CALLS_DECL]--> detail::helper()"``).
+
+    Each reachable internal target is recorded under **two** keys when both
+    are available (Codex review, fresh evidence): the graph node's own
+    ``label`` (a demangled qualified name, e.g. ``ns::detail::helper`` — the
+    format ``compute_leak_paths``'s type-layout walk already keys by, and
+    what a hand-authored/synthetic ``Change`` uses), and, when the node has
+    its own ``SOURCE_DECL_MAPS_TO_SYMBOL`` edge, the exported **mangled**
+    symbol name that edge maps to (the same ``binary_symbol://`` identity
+    :func:`~abicheck.buildsource.source_graph.localize_symbol` already
+    resolves for the reverse direction). The latter matters because
+    ``diff_symbols.py`` builds a real ``FUNC_REMOVED``/similar ``Change`` with
+    ``symbol=`` the **mangled** linker name, not the demangled qualified name
+    — a call-graph-only node's ``label`` can also be the mangled name or a
+    hash-suffixed qualified name depending on provenance (see
+    :mod:`abicheck.buildsource.call_graph`), so keying by ``label`` alone
+    would silently never match a real, compiled C++ removal. For exactly this
+    mangled-label shape, the internal-namespace *classification* check below
+    also demangles first (only for that check — the stored key stays the
+    original mangled ``label``, which already equals a real ``Change.symbol``
+    directly), since a bare mangled name has no ``::`` segments for
+    :func:`is_internal_type` to recognize at all.
+
+    This is a *symbol-availability* signal, distinct from
+    :func:`compute_leak_paths`'s layout/type-graph walk: a public inline
+    function's body calling into a removed/changed internal template
+    specialization has no field/base/signature evidence at all (nothing a
+    layout walk can see) but is real to a linker — the exact oneDAL
+    dispatcher gap this ADR's P0 slice explicitly left open (see the ADR's
+    "What this ADR does not fix" section).
+
+    Requires an embedded L5 graph (``--sources``/``--build-info``/
+    ``--header-graph``) with at least one relevant edge; returns ``{}``
+    otherwise — never an error, mirroring
+    :func:`~abicheck.buildsource.poi.resolve_changed_paths_public_impact`'s
+    degrade contract, so a project with no build-source evidence sees no
+    behavior change at all.
+    """
+    build_source = getattr(snap, "build_source", None)
+    graph = build_source.source_graph if build_source is not None else None
+    if graph is None or not getattr(graph, "nodes", None):
+        return {}
+
+    from .buildsource.source_graph import is_consumer_compiled_public_entry
+    from .buildsource.source_graph_findings import _format_dependency_path
+
+    edge_kinds = frozenset({"DECL_CALLS_DECL", "DECL_REFERENCES_DECL"})
+    if not any(e.kind in edge_kinds for e in graph.edges):
+        return {}
+
+    node_by_id = {n.id: n for n in graph.nodes}
+    decl_to_symbol: dict[str, str] = {}
+    symbol_prefix = "binary_symbol://"
+    for e in graph.edges:
+        if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL" and e.dst.startswith(symbol_prefix):
+            decl_to_symbol[e.src] = e.dst[len(symbol_prefix):]
+    exported_decls = set(decl_to_symbol)
+    # is_consumer_compiled_public_entry (not the broader is_public_dependency_node
+    # crosscheck.py's advisory RISK-only check uses) -- an ordinary out-of-line
+    # exported function's own internal calls never reach consumer-compiled code
+    # at all, so seeding the walk from it would treat a purely internal
+    # implementation-detail dependency as public-reachable (Codex review).
+    entries = [
+        n.id
+        for n in graph.nodes
+        if is_consumer_compiled_public_entry(n.id, node_by_id, exported_decls)
+    ]
+    if not entries:
+        return {}
+
+    internal_set = set(internal_namespaces)
+    reachability = _consumer_compiled_reachability(graph, edge_kinds, entries, node_by_id)
+    result: dict[str, list[str]] = collections.defaultdict(list)
+    for entry in entries:
+        targets, came_from = reachability.get(entry, (frozenset(), {}))
+        for target in targets:
+            node = node_by_id.get(target)
+            if node is None:
+                continue
+            name = node.label or target
+            # Codex review (fresh evidence): a call-graph-only fallback node
+            # (augment_graph_with_calls, added when a callee has no other
+            # SOURCE_DECLARES-backed node) gets label=ident straight from
+            # function_decl_identity, which returns the *mangled* name for
+            # any ordinary (non-extern-"C") C++ function -- with no "::" at
+            # all, is_internal_type would reject it here before this
+            # function's own dual-key logic below ever runs. Demangle only
+            # for this classification check, not for the stored key: the
+            # mangled name here is the same canonical Itanium symbol
+            # diff_symbols.py puts on a real FUNC_REMOVED's Change.symbol, so
+            # the existing direct mangled-to-mangled match already works
+            # once classification correctly recognizes it as internal.
+            lookup_name = name
+            if name.startswith("_Z"):
+                from .demangle import demangle
+
+                # demangle() returns the full signature (e.g.
+                # "ns::api::foo(ns::detail::T*)"), not just the qualified
+                # name -- is_internal_type's segment scan would otherwise
+                # find "detail" inside the *parameter* type and misclassify
+                # an ordinary public function as an internal leak target
+                # merely because it takes/returns an internal type (Codex
+                # review, fresh evidence). Strip the signature's own
+                # parameter list before classifying.
+                lookup_name = _strip_signature_params(demangle(name) or name)
+            if not is_internal_type(lookup_name, internal_set):
+                continue
+            path_edges = _reconstruct_path(came_from, entry, target)
+            if not path_edges:
+                continue
+            formatted = _format_dependency_path(graph, path_edges)
+            result[name].append(formatted)
+            mangled = decl_to_symbol.get(target)
+            if mangled and mangled != name:
+                result[mangled].append(formatted)
+            # Codex review (fresh evidence): function_decl_identity's third
+            # shape -- a declaration with no distinct mangled name (e.g.
+            # extern "C") gets label="{qualified_name}#sha256:{digest}" (see
+            # source_graph.py's function_decl_identity), not the bare
+            # qualified name a real Change.symbol/qualified_name would ever
+            # carry. Index the hash-stripped qualified name too so this
+            # shape matches the same way the label-only case already does.
+            hash_stripped = name.split("#sha256:", 1)[0]
+            if hash_stripped != name:
+                result[hash_stripped].append(formatted)
+    return dict(result)
+
+
 # ---------------------------------------------------------------------------
 # Leak detection
 # ---------------------------------------------------------------------------
@@ -970,6 +1229,128 @@ def detect_internal_leaks(
                 tname, triggers, paths, old if old_pl else new, value_prop
             )
         )
+
+    return out
+
+
+def _build_call_graph_leak_change(
+    dname: str,
+    triggers: list[Change],
+    proof_paths: list[str],
+) -> Change:
+    """Build a single ``INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API`` Change entry.
+
+    The call-graph analogue of :func:`_build_leak_change`: composes an
+    already artifact-proven ``BREAKING`` finding on an internal decl with a
+    ``DECL_CALLS_DECL``/``DECL_REFERENCES_DECL`` proof path from a public
+    entry, instead of a layout/type-graph reachability path.
+    """
+    kinds_seen = sorted({c.kind.value for c in triggers})
+    path_strs = proof_paths[:3]
+    more = "" if len(proof_paths) <= 3 else f" (+{len(proof_paths) - 3} more paths)"
+    return Change(
+        kind=ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API,
+        symbol=dname,
+        description=(
+            f"Internal symbol '{dname}' changed ({', '.join(kinds_seen)}) and "
+            "is called/referenced from the public ABI surface — an "
+            "application built against the old public entry point can fail "
+            f"to resolve this symbol at load time. Call/reference paths: "
+            f"{'; '.join(path_strs)}{more}."
+        ),
+        caused_by_type=dname,
+        # ADR-044 D1/D2: same reasoning as _build_leak_change — this finding
+        # exists *because* dname is reachable from the public surface via the
+        # call graph, so a broad suppression rule's reachability gate must
+        # not treat it as unreachable either.
+        public_reachable=True,
+        reachability_kind="symbol_availability",
+        reachability_proof_path=path_strs[0] if path_strs else None,
+    )
+
+
+def detect_call_graph_leaks(
+    changes: list[Change],
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    internal_namespaces: Iterable[str] = DEFAULT_INTERNAL_NAMESPACES,
+) -> list[Change]:
+    """Return additional ``Change`` entries for call-graph-reachable internal
+    symbol changes (ADR-044 P1 items 1-2) — the call-graph analogue of
+    :func:`detect_internal_leaks`.
+
+    Unlike the layout walk, which triggers on a fixed set of layout-affecting
+    kinds (:data:`_LEAK_TRIGGERING_KINDS`) applied to a type *embedding* the
+    internal root, this triggers directly on any already artifact-proven
+    ``BREAKING_KINDS`` change whose own subject *is* the internal decl (e.g.
+    ``func_removed`` on an internal template specialization) — the
+    ``DECL_CALLS_DECL``/``DECL_REFERENCES_DECL`` evidence explains *why* a
+    public consumer is affected; per the authority rule (ADR-028 D3/ADR-041)
+    it never manufactures the break itself, since the triggering change is
+    already independently artifact-proven.
+
+    Deliberately does **not** also trigger on ``API_BREAK_KINDS`` (Codex
+    review, fresh evidence): that tier is the ``SOURCE_CONTRACT`` evidence
+    class (``checker_policy.py``'s own docstring — "a source-level break that
+    needs a recompile... not necessarily a shipped ABI break"), and most of
+    its members (e.g. ``inline_function_removed``, whose own inline comment
+    reads "no exported symbol") have no removed linker symbol at all —
+    composing one into this overlay's "can fail to resolve this symbol at
+    load time" description would be a false binary-load-time claim for a
+    change that was never one. Mirrors :data:`_LEAK_TRIGGERING_KINDS`'s own
+    precedent of a hand-curated, binary-observable-only trigger set, rather
+    than the full breaking/API-break union.
+
+    Requires an embedded L5 graph on at least one snapshot (see
+    :func:`compute_call_graph_leak_paths`); returns ``[]`` otherwise.
+    """
+    from .checker_policy import BREAKING_KINDS
+
+    internal_set = tuple(internal_namespaces)
+    triggering_kinds = BREAKING_KINDS
+    # Deliberately NOT pre-filtered by is_internal_type(root, ...) here
+    # (Codex review, fresh evidence): _root_type_name_for_change(c) is
+    # c.symbol verbatim for a function-shaped kind like FUNC_REMOVED, and
+    # diff_symbols.py sets that to the *mangled* linker name (no "::"
+    # segments at all) — is_internal_type would reject every real C++
+    # removal before it ever reached the call-path lookup below, exactly the
+    # bug this review round caught. compute_call_graph_leak_paths already
+    # gates its own keys on is_internal_type(node.label, ...) (the qualified
+    # name, which does have "::" segments), so a dict hit below is already
+    # sufficient proof of "internal and call-graph-reachable" — checking it
+    # again here on the wrong string would only reintroduce the bug.
+    by_symbol: dict[str, list[Change]] = collections.defaultdict(list)
+    for c in changes:
+        if c.kind not in triggering_kinds:
+            continue
+        by_symbol[_root_type_name_for_change(c)].append(c)
+    if not by_symbol:
+        return []
+
+    old_call_paths = compute_call_graph_leak_paths(old, internal_set)
+    new_call_paths = compute_call_graph_leak_paths(new, internal_set)
+    if not old_call_paths and not new_call_paths:
+        return []
+
+    out: list[Change] = []
+    for dname, triggers in by_symbol.items():
+        # Codex review (fresh evidence): compute_call_graph_leak_paths's
+        # mangled-symbol key requires a SOURCE_DECL_MAPS_TO_SYMBOL edge,
+        # which only the build-integrated L4/L5 path creates — the
+        # header-only path (header_graph.py) never does. Each trigger's own
+        # c.qualified_name (set by EnrichSourceLocations from Function.name,
+        # independent of graph provenance) is a reliable fallback key that
+        # works in both modes.
+        keys = {dname, *(t.qualified_name for t in triggers if t.qualified_name)}
+        old_pp: list[str] = []
+        new_pp: list[str] = []
+        for key in keys:
+            old_pp.extend(p for p in old_call_paths.get(key, []) if p not in old_pp)
+            new_pp.extend(p for p in new_call_paths.get(key, []) if p not in new_pp)
+        proof_paths = old_pp + [p for p in new_pp if p not in old_pp]
+        if not proof_paths:
+            continue
+        out.append(_build_call_graph_leak_change(dname, triggers, proof_paths))
 
     return out
 

@@ -195,6 +195,15 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     # alone, no debug info or headers needed.
     "pe_ordinal_retargeted": "L0",
     "pe_import_load_mode_changed": "L0",
+    # A consumer binary's own undefined-symbol table vs. the new library's
+    # export table -- both pure binary facts, no debug info/headers needed.
+    "consumer_required_symbol_removed": "L0",
+    # --verify-runtime's execution harness corroborates the same underlying
+    # L0-observable fact (a symbol the consumer's own binary needs is gone)
+    # via a different detection mechanism (actually running the consumer),
+    # not additional static evidence -- L0 is still the minimum static tier
+    # at which this class of fact is detectable at all.
+    "consumer_runtime_load_failed": "L0",
     # wchar_t model drift is read from DW_AT_producer, like toolchain_flag_drift.
     "wchar_model_changed": "L1",
     # Canonical kinds that older catalog rows previously left implicit.
@@ -390,6 +399,12 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "public_api_internal_dependency_added": "L5",
     "target_dependency_added": "L5",
     "exported_symbol_source_owner_changed": "L5",
+    # ADR-044 P1 items 1-2: call-graph analogue of
+    # internal_type_leaks_via_public_api (L2 above) — only fires when the L5
+    # graph's DECL_CALLS_DECL/DECL_REFERENCES_DECL edges prove a public entry
+    # reaches the changed internal decl; a header-only (L2) evidence set has
+    # no call-graph edges at all, so this genuinely needs the graph tier.
+    "internal_symbol_required_by_public_api": "L5",
     # ── ADR-035 D8 single-release hygiene audit ──
     # unversioned_exported_symbol is pure ELF (export table vs .gnu.version_d);
     # rtti_for_internal_type needs header provenance to know a type is internal.

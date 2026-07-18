@@ -233,6 +233,37 @@ class TestReporterChangeToDict:
         )
         assert "correlated_change_kind" not in d
 
+    def test_change_to_dict_surfaces_reachability_fields(self) -> None:
+        # ADR-044 P1 item 4: structured reachability evidence, previously
+        # description-prose-only (inside the suppression_would_hide_public_break
+        # diagnostic).
+        from abicheck.reporter import _change_to_dict
+
+        c = _change(
+            ChangeKind.FUNC_REMOVED,
+            "ns::detail::train_ops_dispatcher",
+            public_reachable=True,
+            reachability_kind="symbol_availability",
+            reachability_proof_path="pubFn --[DECL_CALLS_DECL]--> ns::detail::train_ops_dispatcher",
+        )
+        d = _change_to_dict(c, policy="strict_abi")
+        assert d["public_reachable"] is True
+        assert d["reachability_kind"] == "symbol_availability"
+        assert d["reachability_proof_path"] == (
+            "pubFn --[DECL_CALLS_DECL]--> ns::detail::train_ops_dispatcher"
+        )
+
+    def test_change_to_dict_omits_reachability_fields_when_unset(self) -> None:
+        from abicheck.reporter import _change_to_dict
+
+        d = _change_to_dict(
+            _change(ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED, "demo::compute"),
+            policy="strict_abi",
+        )
+        assert "public_reachable" not in d
+        assert "reachability_kind" not in d
+        assert "reachability_proof_path" not in d
+
 
 class TestReporterJsonLeaf:
     def test_leaf_json_severity_from_sets(self) -> None:
@@ -254,6 +285,39 @@ class TestReporterJsonLeaf:
         assert severities["enum_member_renamed"] == "api_break"
         assert severities["enum_last_member_value_changed"] == "risk"
         assert severities["enum_member_added"] == "compatible"
+
+    def test_leaf_json_surfaces_reachability_fields_for_root_type_change(self) -> None:
+        # ADR-044 P1 item 4: a root TYPE_* change routes through the
+        # hand-rolled _leaf_entry, not _change_to_dict — it needs its own
+        # copy of the same structured reachability fields, since this is
+        # exactly the category the layout-reachability walk tags most often.
+        from abicheck.reporter import to_json
+
+        c = _change(
+            ChangeKind.TYPE_SIZE_CHANGED,
+            "ns::detail::Impl",
+            public_reachable=True,
+            reachability_kind="value_embedding",
+            reachability_proof_path="ns::Pub → field:impl_ → ns::detail::Impl",
+        )
+        result = _diff_result([c], verdict=Verdict.BREAKING)
+        out = json.loads(to_json(result, report_mode="leaf"))
+        entry = out["leaf_changes"][0]
+        assert entry["public_reachable"] is True
+        assert entry["reachability_kind"] == "value_embedding"
+        assert entry["reachability_proof_path"] == "ns::Pub → field:impl_ → ns::detail::Impl"
+
+    def test_leaf_json_omits_reachability_fields_when_unset(self) -> None:
+        from abicheck.reporter import to_json
+
+        result = _diff_result(
+            [_change(ChangeKind.TYPE_SIZE_CHANGED, "ns::T")], verdict=Verdict.BREAKING
+        )
+        out = json.loads(to_json(result, report_mode="leaf"))
+        entry = out["leaf_changes"][0]
+        assert "public_reachable" not in entry
+        assert "reachability_kind" not in entry
+        assert "reachability_proof_path" not in entry
 
     def test_leaf_json_unknown_severity_with_override(self) -> None:
         # Line 481: a kind moved out of all sets via policy override → "unknown".

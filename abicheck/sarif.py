@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any
 
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
 from abicheck.checker_policy import (
+    EvidenceStatus,
     evidence_status_for_change,
     impact_for,
     policy_for,
@@ -212,6 +213,7 @@ def _result_for(
     severity_config: SeverityConfig | None = None,
     *,
     relevant_ids: frozenset[str] | None = None,
+    evidence_status_override: EvidenceStatus | None = None,
 ) -> dict[str, Any]:
     """Produce a SARIF result object for a Change.
 
@@ -223,6 +225,13 @@ def _result_for(
     ``false`` so a consumer can distinguish "not severe" from "out of scope"
     (CLI-audit P1: SARIF result levels must follow the scoped gate, not just
     the full-library verdict).
+
+    *evidence_status_override*, when given, wins over the kind-derived
+    :func:`evidence_status_for_change` — mirrors ``reporter._change_to_dict``'s
+    own override, for a scoped-only finding (``PE_ORDINAL_RETARGETED``,
+    ``CONSUMER_REQUIRED_SYMBOL_REMOVED``, ``CONSUMER_RUNTIME_LOAD_FAILED``)
+    proven by the real consumer's own import table/execution, not by an
+    artifact-level library diff (Codex review).
     """
     library, old_version, new_version = (
         result.library,
@@ -267,7 +276,17 @@ def _result_for(
         properties["causedCount"] = change.caused_count
     if change.correlated_change_kind:
         properties["correlatedChangeKind"] = change.correlated_change_kind
-    evidence_status = evidence_status_for_change(change)
+    # ADR-044 P1 item 4 — structured reachability evidence (previously
+    # description-text-only, e.g. inside the suppression_would_hide_public_break
+    # diagnostic's prose): whether this change is public-reachable, how, and
+    # the shortest proof path.
+    if change.public_reachable:
+        properties["publicReachable"] = True
+        if change.reachability_kind:
+            properties["reachabilityKind"] = change.reachability_kind
+        if change.reachability_proof_path:
+            properties["reachabilityProofPath"] = change.reachability_proof_path
+    evidence_status = evidence_status_override or evidence_status_for_change(change)
     if evidence_status is not None:
         properties["evidenceStatus"] = evidence_status.value
 
@@ -515,7 +534,14 @@ def to_sarif(
         if rule_id not in rules_seen:
             rules_seen[rule_id] = _rule_for(change.kind)
         sarif_results.append(
-            _result_for(change, result, severity_config, relevant_ids=relevant_ids)
+            _result_for(
+                change, result, severity_config, relevant_ids=relevant_ids,
+                # Codex review: proven by the real consumer's own import
+                # table/execution, not an artifact-level library diff --
+                # mirrors reporter.appcompat_to_json's own override for this
+                # exact finding shape.
+                evidence_status_override=EvidenceStatus.CONSUMER_PROVEN,
+            )
         )
 
     gate_scope = getattr(result, "gate_scope", None)

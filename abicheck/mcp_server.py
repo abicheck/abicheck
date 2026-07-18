@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from .policy_file import PolicyFile
     from .severity import SeverityConfig
+    from .suppression import SuppressionList
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -866,7 +867,9 @@ def abi_compare(
 
         # Resolve inputs, load suppression/policy, and compare — all under
         # a real timeout so we don't block the MCP stdio server.
-        def _do_compare() -> tuple[AbiSnapshot, AbiSnapshot, DiffResult, PolicyFile | None]:
+        def _do_compare() -> tuple[
+            AbiSnapshot, AbiSnapshot, DiffResult, PolicyFile | None, SuppressionList | None
+        ]:
             old_snap = _resolve_input(
                 old_path, old_h, inc, "old", language, public_headers=old_h
             )
@@ -898,12 +901,13 @@ def abi_compare(
                     policy_file=pf,
                 ),
                 pf,
+                suppression,
             )
 
         with _futures.ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(_do_compare)
             try:
-                old_snap, new_snap, result, pf = future.result(timeout=MCP_TIMEOUT)
+                old_snap, new_snap, result, pf, suppression = future.result(timeout=MCP_TIMEOUT)
             except _futures.TimeoutError:
                 elapsed = _time.monotonic() - t0
                 _audit_log(
@@ -1013,7 +1017,7 @@ def abi_compare(
                 _check_file_size(app_path, label="used_by")
                 scoped = scope_diff_to_app(
                     result, app_path, old_lib, new_lib,
-                    policy=active_policy, policy_file=pf,
+                    policy=active_policy, policy_file=pf, suppression=suppression,
                 )
                 relevant_finding_ids.update(_finding_id(c) for c in scoped.breaking_for_app)
                 relevant_changes_by_id.update(

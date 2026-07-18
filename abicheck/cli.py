@@ -1307,6 +1307,16 @@ def _embed_inline_source_side(
                    "real library binaries or JSON snapshots carrying binary evidence "
                    "(a `dump` of a real library, not headers-only). Mutually "
                    "exclusive with --required-symbol/--required-symbols.")
+@click.option("--verify-runtime", "verify_runtime", is_flag=True, default=False,
+              help="With --used-by: actually run each consumer binary once against "
+                   "the OLD library and once against the NEW one (LD_BIND_NOW=1), "
+                   "recording a consumer_runtime_load_failed RISK finding when the "
+                   "dynamic linker itself reports an undefined symbol against the "
+                   "new library after loading cleanly against the old one (ADR-044 "
+                   "P2 item 2). A dynamic corroborating signal alongside the static "
+                   "scanner, never a replacement for it. Requires OLD/NEW to be real "
+                   "library binaries (not JSON snapshots) and is Linux-only; a "
+                   "no-op elsewhere. Ignored without --used-by.")
 @click.option("--required-symbol", "required_symbols_opt", multiple=True,
               help="An exported linker symbol a plugin host resolves via dlopen/dlsym "
                    "and requires (repeatable; folds `plugin-check`). Scopes the "

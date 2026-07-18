@@ -313,6 +313,17 @@ def _to_json_leaf(
             eff = getattr(c, "effective_verdict", None)
             if isinstance(eff, Verdict):
                 entry["effective_verdict"] = eff.value
+        # ADR-044 P1 item 4: same structured reachability fields
+        # _change_to_dict adds for non-type changes — a root TYPE_* change is
+        # exactly the category the layout-reachability walk tags most often.
+        if getattr(c, "public_reachable", False):
+            entry["public_reachable"] = True
+            reach_kind = getattr(c, "reachability_kind", None)
+            if reach_kind:
+                entry["reachability_kind"] = reach_kind
+            proof_path = getattr(c, "reachability_proof_path", None)
+            if proof_path:
+                entry["reachability_proof_path"] = proof_path
         return entry
 
     leaf_changes_list = [_leaf_entry(c) for c in type_changes]
@@ -869,6 +880,19 @@ def _change_to_dict(
     correlated = getattr(c, "correlated_change_kind", None)
     if correlated:
         d["correlated_change_kind"] = correlated
+    # ADR-044 P1 item 4 — structured reachability evidence (previously
+    # description-text-only): whether a suppression rule's reachability gate
+    # tagged this change public-reachable, how (layout/call-graph/direct),
+    # and the shortest proof path, so a machine consumer doesn't need to
+    # parse the suppression_would_hide_public_break diagnostic's prose.
+    if getattr(c, "public_reachable", False):
+        d["public_reachable"] = True
+        reach_kind = getattr(c, "reachability_kind", None)
+        if reach_kind:
+            d["reachability_kind"] = reach_kind
+        proof_path = getattr(c, "reachability_proof_path", None)
+        if proof_path:
+            d["reachability_proof_path"] = proof_path
     return d
 
 

@@ -108,6 +108,27 @@ COMPOSITION_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
               "consumer first calls it — a deployment/error-handling risk "
               "even though the DLL and symbol both still exist.",
        description_template="Import load mode changed for '{name}': {old} → {new}"),
+    _E("consumer_required_symbol_removed", _B,
+       impact="A real consumer binary's own dynamic-symbol table (ELF undefined "
+              "symbol / PE import / Mach-O undefined symbol, collected via "
+              "--used-by, ADR-005/043) required this exact symbol from the "
+              "library at load time — empirical ground truth independent of "
+              "any header/namespace/visibility reasoning. The new library no "
+              "longer exports it: the consumer's existing binary will fail to "
+              "load, or crash the first time it calls the symbol, with no "
+              "recompilation involved.",
+       description_template="Consumer '{name}' requires symbol '{symbol}', which the new library no longer exports"),
+    _E("consumer_runtime_load_failed", _R,
+       impact="The --verify-runtime execution harness (ADR-044 P2 item 2) ran "
+              "this real consumer binary with LD_BIND_NOW=1: it loaded and ran "
+              "cleanly against the old library, but the dynamic linker itself "
+              "reported an undefined symbol against the new one. This is "
+              "empirical, dynamic corroboration alongside the static scanner, "
+              "not a replacement for it — an execution environment can fail "
+              "for reasons unrelated to the library (missing unrelated "
+              "dependency, sandboxing), so this never manufactures a BREAKING "
+              "verdict on its own.",
+       description_template="Consumer '{name}' loads against the old library but the dynamic linker reports undefined symbol '{symbol}' against the new one"),
 
     # ── Fundamental compiler data-model flags ────────────────────────────────
     _E("wchar_model_changed", _R,

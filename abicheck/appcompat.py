@@ -859,6 +859,7 @@ def scope_diff_to_app(
     *,
     policy: str = "strict_abi",
     policy_file: PolicyFile | None = None,
+    suppression: SuppressionList | None = None,
 ) -> AppCompatResult:
     """Scope an already-computed library diff to one application's actual usage.
 
@@ -876,6 +877,13 @@ def scope_diff_to_app(
     so no re-parse of a real binary is required for those lookups. *app_path*
     is unaffected: the application itself always needs a real binary to read
     its DT_NEEDED/import table from.
+
+    *suppression* (ADR-044 P2, Codex review): the same rule set already used
+    to compute *diff* — evaluated again here because
+    :data:`ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED` is synthesized fresh
+    from ``missing_symbols`` *after* the pipeline's own suppression pass has
+    already run, so it would otherwise be unsuppressible even by an exact
+    ``symbol:``/``change_kind:`` rule that matches it precisely.
     """
     library_soname = _get_lib_soname(old_lib)
     app_reqs = parse_app_requirements(app_path, library_soname)
@@ -916,9 +924,70 @@ def scope_diff_to_app(
     breaking_for_app, irrelevant_for_app = _partition_app_changes(diff, relevance_reqs)
     breaking_for_app = breaking_for_app + ordinal_retargets
 
-    # Compute app-specific verdict
+    # ADR-044 P2 item 1: promote a missing symbol not already represented by a
+    # library-diff Change (e.g. FUNC_REMOVED) into a first-class, suppressible
+    # CONSUMER_REQUIRED_SYMBOL_REMOVED finding, instead of leaving it as a
+    # bespoke string only special-cased by reporter.py/sarif.py/junit_report.py.
+    # Scoped to the genuinely-uncovered subset via uncovered_missing_symbols
+    # (the same dedup _scoped_severity_summary/cli_compare_helpers.py already
+    # use) so a symbol already covered by a real diff Change is never
+    # double-reported as both that Change and this overlay.
+    # Compute coverage from the raw (pre-suppression) missing count -- it is
+    # an objective fact about the export table, not a gate, so a suppressed
+    # overlay finding should not make the reported coverage number lie.
     required_count = len(app_reqs.undefined_symbols)
     coverage = _compute_symbol_coverage(new_exports, required_count, len(missing_symbols))
+
+    suppressed_missing: set[str] = set()
+    for sym in uncovered_missing_symbols(missing_symbols, breaking_for_app):
+        # public_reachable=True (Codex review, fresh evidence): this overlay
+        # only ever exists because a real --used-by consumer binary's own
+        # undefined-symbol requirement genuinely resolved to nothing in the
+        # new library -- there is no "maybe internal, maybe not" ambiguity
+        # the way there is for an ordinary internal-namespace Change. Left at
+        # its dataclass default (False), a broad namespace/source_location
+        # suppression rule's default "unreachable-only" reachability would
+        # read it as unreachable and silently suppress a break that is, by
+        # construction, always consumer-proven real.
+        overlay_change = make_change(
+            ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+            symbol=sym,
+            name=app_path.name,
+            public_reachable=True,
+            reachability_kind="consumer_proven",
+        )
+        if suppression is None:
+            breaking_for_app.append(overlay_change)
+            continue
+        # evaluate() (not the cheaper is_suppressed) so a broad rule whose
+        # selectors matched but was withheld by the reachability/
+        # allow_public_break gate still emits the same
+        # SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK diagnostic ApplySuppression
+        # produces for changes it sees directly (mirrors checker.py's
+        # _filter_suppressed_changes / post_processing.py's
+        # _merge_findings_respecting_suppression).
+        outcome = suppression.evaluate(overlay_change)
+        if outcome.suppressed:
+            # Codex review (fresh evidence): missing_symbols independently
+            # forces Verdict.BREAKING in _compute_appcompat_verdict below
+            # regardless of breaking_for_app, and feeds the scoped exit-code
+            # floor / missing-label text output the same way -- dropping only
+            # the synthesized Change left the suppression cosmetic. This
+            # overlay IS the suppressible representation of a missing symbol
+            # (that was the point of promoting it out of a bespoke string),
+            # so a suppressed overlay must also remove its raw string from
+            # every one of those consumers.
+            suppressed_missing.add(sym)
+            continue
+        breaking_for_app.append(overlay_change)
+        if outcome.withheld_rule is not None:
+            from .post_processing import _build_suppression_overreach_change
+
+            breaking_for_app.append(
+                _build_suppression_overreach_change(overlay_change, outcome.withheld_rule)
+            )
+    if suppressed_missing:
+        missing_symbols = [s for s in missing_symbols if s not in suppressed_missing]
 
     verdict = _compute_appcompat_verdict(
         missing_symbols, missing_versions, breaking_for_app,
@@ -1005,7 +1074,7 @@ def check_appcompat(
 
     return scope_diff_to_app(
         diff, app_path, old_lib_path, new_lib_path,
-        policy=policy, policy_file=policy_file,
+        policy=policy, policy_file=policy_file, suppression=suppression,
     )
 
 

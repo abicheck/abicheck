@@ -1,13 +1,22 @@
 # ADR-044: Reachability-Aware Suppression and the Effective Public ABI
 
 **Date:** 2026-07-17
-**Status:** Accepted — P0 slice (this change) implemented: pipeline-order
-correctness fix, `Suppression.reachability`/`allow_public_break`, entity/cause
-namespace split, `suppression_would_hide_public_break` diagnostic. P1
-(compose artifact break + L5 graph proof path into a first-class overlay
-finding, propagation-aware edge semantics) and P2 (consumer-import evidence,
-old-consumer/new-library execution harness) are roadmap, not committed to any
-timeline — see "Roadmap" below.
+**Status:** Accepted — P0 slice implemented: pipeline-order correctness fix,
+`Suppression.reachability`/`allow_public_break`, entity/cause namespace
+split, `suppression_would_hide_public_break` diagnostic. **P1 (first-class
+detection) is now also implemented** — see "P1 slice" below: L5 call-graph
+evidence wired into `MarkReachability`/`DetectInternalLeaks`, the new
+`internal_symbol_required_by_public_api` overlay `ChangeKind`, a third
+`reachability_kind` value (`symbol_availability`), structured JSON/SARIF
+reachability fields, `PolicyFile.internal_namespaces`, and the two remaining
+`checker.py` suppression call sites routed through the diagnostic-emitting
+helper. **P2 is now also implemented** — see "P2 — empirical validation"
+below: the `consumer_required_symbol_removed` `ChangeKind` promoting
+`--used-by`'s missing-symbol check to a first-class suppressible finding,
+the opt-in `--verify-runtime` old-consumer/new-library execution probe
+(`consumer_runtime_load_failed`, `RISK`-tier), and worked examples
+(`case192`/`case193`) exercising the headline scenario and its deliberate
+counter-example end to end.
 **Decision maker:** Nikolay Petrov (@napetrov)
 
 ---
@@ -814,101 +823,728 @@ project that wants CI to fail loudly when this fires can already do so via
 `--severity-risk error` (existing severity-gating mechanism, ADR-009),
 requiring no new CLI surface for this slice.
 
-### What this ADR does not fix (roadmap, not committed)
+### What the P0 slice did not fix (closed by the P1 slice below)
 
 The oneDAL dispatcher case (`func_removed` on an internal template
 specialization reached only via `DECL_CALLS_DECL` from a public inline
 function — no layout evidence, so `internal_leak.py`'s
 `_LEAK_TRIGGERING_KINDS`/BFS-over-`RecordType` walk structurally cannot see
-it) is **not** closed by this slice. `MarkReachability` reuses
-`internal_leak.compute_leak_paths`, which only walks type-layout
-reachability (inheritance, by-value fields, signatures) — it has no access
-to the L5 semantic call graph (`source_graph.py`,
-`buildsource/poi.resolve_changed_paths_public_impact`, ADR-041). Closing
-that gap for real needs ADR-041 P1 item 3 ("public-entry impact closure...
-nothing calls this one yet") wired into a scan/replay path, plus the new
-`internal_symbol_required_by_public_api` overlay kind the review proposes.
-That is a materially larger change — it needs a build (`compile_commands.json`)
-or at minimum a header-only AST pass to have `DECL_CALLS_DECL` evidence at
-all — and is **P1 roadmap**, below, not part of this P0 slice. This slice's
-value is narrower but immediate: for every leak shape abicheck's existing
-`internal_leak.py`/`crosscheck.py` detectors *can already* see (layout,
-vtable, inheritance, embedded-by-value, and the type/field/base graph edges
-`PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` already covers), a suppression can no
-longer make the detector blind to the evidence before it runs.
+it) was **not** closed by the P0 slice. `MarkReachability` reused only
+`internal_leak.compute_leak_paths`, which walks type-layout reachability
+(inheritance, by-value fields, signatures) — it had no access to the L5
+semantic call graph (`source_graph.py`). The P1 slice below closes this gap.
+
+## P1 slice: call-graph reachability, the overlay kind, and remaining plumbing
+
+Implemented as a follow-up change on the same branch, closing P1 items 1, 2,
+5, and 6 below in full and item 4 in full; item 3 (propagation-aware edge
+semantics) is closed to the extent described under its own entry.
+
+- **Item 1 (call-graph evidence).** New `internal_leak.compute_call_graph_leak_paths(snap, internal_namespaces)`
+  walks the optional L5 source graph's `DECL_CALLS_DECL`/`DECL_REFERENCES_DECL`
+  edges from every public entry (`buildsource.source_graph.is_public_dependency_node`),
+  returning `internal_decl_name -> [formatted proof paths]` — the call-graph
+  sibling to `compute_leak_paths`'s layout walk, reusing
+  `source_graph_findings._dependency_reachability`/`_dependency_path`/
+  `_format_dependency_path` (all three already existed, unwired for this
+  purpose). `MarkReachability` now consults this as a second, independent
+  evidence source: a change untouched by the layout walk (no field/base/
+  signature evidence at all) can still be tagged `public_reachable=True` via
+  a pure call/reference edge. Requires an embedded L5 graph
+  (`--sources`/`--build-info`/`--header-graph`); returns `{}` and changes no
+  behavior otherwise, mirroring `poi.resolve_changed_paths_public_impact`'s
+  own degrade contract.
+- **Item 2 (overlay `ChangeKind`).** New `internal_symbol_required_by_public_api`
+  (`BREAKING_KINDS`, registered in `change_registry_suppression.py` alongside
+  the P0 diagnostic to stay under `change_registry.py`'s line cap). Built by
+  new `internal_leak.detect_call_graph_leaks`/`_build_call_graph_leak_change`,
+  wired into the existing `DetectInternalLeaks` pipeline step alongside
+  `detect_internal_leaks`. Triggers only on a change whose own kind is
+  already `BREAKING_KINDS` (artifact-proven; **not** `API_BREAK_KINDS` — see
+  the post-merge review round below) and whose subject is internal-namespaced
+  and call-graph-reachable — per the
+  authority rule (ADR-028 D3/ADR-041), the graph edge composes with and
+  explains an already-proven break; it never manufactures one, exactly like
+  `INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API`'s own `BREAKING` classification.
+- **Item 3 (edge semantics) — partially closed.** `reachability_kind` grew a
+  third real value, `"symbol_availability"`, for the call-graph case —
+  no longer the "two-value approximation" the P0 slice shipped with. The
+  finer `DECL_CALLS_DECL` vs. `DECL_REFERENCES_DECL` distinction the item
+  also names is preserved as text inside `reachability_proof_path` (via
+  `_format_dependency_path`'s `--[EDGE_KIND]-->` annotation) rather than a
+  further split of `reachability_kind` itself — a deliberate stopping point,
+  not an oversight: a machine-readable call-vs-reference sub-enum is a
+  reasonable further increment but wasn't required to close the item's core
+  ask (distinguishing symbol-availability edges from the two layout-based
+  kinds). Left as a candidate future refinement.
+- **Item 4 (structured report fields).** `public_reachable`/
+  `reachability_kind`/`reachability_proof_path` now appear as first-class
+  fields (not just inside the `suppression_would_hide_public_break`
+  diagnostic's prose) in JSON (`reporter._change_to_dict` **and**
+  `_to_json_leaf`'s `_leaf_entry` — the latter handles root `TYPE_*` changes,
+  the category the layout walk tags most often, and was easy to miss since
+  it's a separate hand-rolled dict) and SARIF (`sarif._result_for`'s
+  `properties`, camelCased per that format's convention). JUnit was left
+  untouched — it doesn't surface `caused_by_type`/`correlated_change_kind`
+  either, so adding reachability fields there would be new precedent, not
+  parity.
+- **Item 5 (configurable internal-namespace convention).** New
+  `PolicyFile.internal_namespaces: list[str]` (parsed identically to
+  `frozen_namespaces`), threaded via a new `PipelineContext.internal_namespaces`
+  field through `PostProcessingPipeline.run()` (appended *after* the
+  existing optional parameters, not inserted mid-signature — a Codex review
+  on the PR caught that an earlier draft inserted it before
+  `scope_to_public_surface`, which would have silently broken any positional
+  caller of that parameter) to `MarkReachability`/`DetectInternalLeaks`/
+  `DemoteUnreachableInternalChurn`. Deliberately **not** threaded into
+  `DetectNamespacePatterns`'s `experimental_namespaces` — despite this
+  item's own wording grouping all four steps together, that parameter
+  governs an unrelated convention (the `experimental::` graduation
+  namespace, a different default token set), and conflating the two would
+  reintroduce a bug, not fix one.
+- **Item 6 (remaining `checker.py` call sites).** `_filter_suppressed_changes`
+  and `_apply_surface_metrics` now call `SuppressionList.evaluate()` and
+  append the same `_build_suppression_overreach_change()` diagnostic
+  `ApplySuppression`/`_filter_pattern_synthetic` already produce, instead of
+  the boolean `is_suppressed()`.
+
+**Post-merge review round (Codex), same P1 change:**
+
+- **Mangled symbol vs. demangled label — item 1 was inert on real binaries
+  (fresh evidence).** `compute_call_graph_leak_paths` keyed its result dict by
+  `node.label` — the L5 graph's demangled qualified name for a
+  `SOURCE_DECLARES`-backed decl (`ns::detail::train_ops_dispatcher`), or, for
+  a call-graph-only fallback node, either the mangled name or a
+  `#sha256:`-suffixed qualified name depending on provenance. But
+  `diff_symbols.py` builds a real `FUNC_REMOVED` `Change` with
+  `symbol=` the **mangled** linker name (`_ZN2ns6detail19train_ops_dispatcherEv`),
+  and `_root_type_name_for_change` returns that verbatim for a
+  function-shaped kind — so `detect_call_graph_leaks`'s lookup by `c.symbol`
+  almost never matched `compute_call_graph_leak_paths`'s label-keyed result
+  for a real, castxml/clang-parsed C++ removal; the whole item 1/2 mechanism
+  only appeared to work in unit tests that hand-construct a `Change.symbol`
+  equal to the graph label. Worse, `detect_call_graph_leaks` also
+  pre-filtered its triggering-change candidates with
+  `is_internal_type(root, ...)` — a check that splits on `"::"` — which a
+  bare mangled name (no `::` at all) always fails, rejecting every real
+  candidate before the (already-broken) lookup even ran.
+  Fixed both: `compute_call_graph_leak_paths` now also resolves each
+  internal target's own exported symbol via its `SOURCE_DECL_MAPS_TO_SYMBOL`
+  edge (the same `binary_symbol://` identity
+  `source_graph.localize_symbol()` already uses for the reverse direction)
+  and records the proof paths under that mangled key too, alongside the
+  existing label key — a node with no such edge (no linkage, e.g. fully
+  inlined) gets no mangled key, but no `FUNC_REMOVED`-shaped `Change` could
+  ever look one up anyway. `detect_call_graph_leaks` dropped its redundant
+  `is_internal_type` pre-filter entirely: a hit in the call-path dict is
+  already sufficient proof of "internal and call-graph-reachable", since
+  `compute_call_graph_leak_paths` gates its own key insertion on
+  `is_internal_type(node.label, ...)` (the qualified name, which does have
+  `::` segments) before ever adding either key. Added
+  `test_result_also_keyed_by_mangled_exported_symbol`/
+  `test_func_removed_matches_via_mangled_symbol_not_label` to
+  `test_internal_leak.py`, reproducing the real-world mangled-vs-label shape
+  the prior tests' hand-picked matching names had masked.
+- **Item 4's new fields needed a schema version bump (Codex).** The three
+  new per-finding JSON fields (`public_reachable`/`reachability_kind`/
+  `reachability_proof_path`) are additive optional keys per
+  `abicheck/schemas/__init__.py`'s own documented policy ("additive changes
+  — new optional keys… bump the MINOR component"), the same discipline every
+  prior additive field (2.1 through 2.5) already followed with its own
+  changelog comment — missed here even though the schema's
+  `additionalProperties: true` meant no test caught it (unregistered keys
+  validate anyway). Bumped `REPORT_SCHEMA_VERSION` (originally to `"2.6"`;
+  renumbered to `"2.7"` when rebasing onto `main`'s own unrelated `2.6` bump
+  for `reviewer_action`, #595) with a matching changelog comment, added the
+  three fields (with `reachability_kind`'s enum) to
+  `compare_report.schema.json`, and re-synced the published `docs/schemas/v1/`
+  copy via `scripts/publish_schemas.py`.
+- **Header-graph mode still had the mangled-vs-label gap; `API_BREAK_KINDS`
+  triggers were a category error (Codex, fresh evidence, two findings).**
+  (1) The mangled-symbol-key fix above only helps when the L5 graph carries a
+  `SOURCE_DECL_MAPS_TO_SYMBOL` edge — the build-integrated L4/L5 path
+  (`source_graph.py`) creates one, but the header-only path (`header_graph.py`,
+  `--header-graph`/the implicit dump path, no real build at all) never does,
+  so the mismatch this review round already fixed once still applied for
+  header-graph-only snapshots. Fixed by also trying each trigger's own
+  `Change.qualified_name` (set by `EnrichSourceLocations` from `Function.name`
+  — the same demangled name a graph node's `label` carries in *either* mode,
+  independent of graph provenance) as a fallback lookup key in both
+  `MarkReachability` and `detect_call_graph_leaks`, alongside the existing
+  mangled-symbol key. (2) `detect_call_graph_leaks`'s trigger set was
+  `BREAKING_KINDS | API_BREAK_KINDS`, but `API_BREAK_KINDS` is the
+  `SOURCE_CONTRACT` evidence tier — "a source-level break that needs a
+  recompile… not necessarily a shipped ABI break" per `checker_policy.py`'s
+  own docstring — and most of its members (e.g. `inline_function_removed`,
+  whose own inline comment reads "no exported symbol") have no removed
+  linker symbol at all. Composing one into this overlay's "can fail to
+  resolve this symbol at load time" description was a false binary-load-time
+  claim for a change that was never one — the same category of mistake
+  `_LEAK_TRIGGERING_KINDS`'s own hand-curated (not "every breaking-shaped
+  kind") trigger set was designed to avoid. Restricted the trigger set to
+  `BREAKING_KINDS` only. Extended `test_internal_leak.py` with
+  `test_header_graph_mode_matches_via_qualified_name` (no
+  `SOURCE_DECL_MAPS_TO_SYMBOL` edge, mangled `Change.symbol` +
+  `qualified_name` set, matching only via the fallback key) and
+  `test_api_break_kind_is_not_a_trigger` (an `API_BREAK_KINDS` member with
+  call-graph evidence produces no overlay).
+- **A third mangled-label shape, this time at classification, not key
+  matching (Codex, fresh evidence).** `augment_graph_with_calls`
+  (`call_graph.py`) adds a fallback `source_decl` node — with no
+  `SOURCE_DECL_MAPS_TO_SYMBOL` edge at all — for a callee that has no other
+  node in the graph yet, labelling it via `function_decl_identity`, which
+  returns the raw **mangled** name for any ordinary (non-`extern "C"`) C++
+  function. A bare mangled name has no `::` segments, so
+  `is_internal_type(node.label, ...)` rejected it *before*
+  `compute_call_graph_leak_paths` even reached the dual-key logic the first
+  fix in this round added — the entry was silently dropped at
+  classification, one step earlier than either of the two previously-fixed
+  shapes. Fixed by demangling (`abicheck.demangle.demangle`, already used
+  elsewhere in this codebase for the same mangled↔qualified correlation
+  problem) only for this classification check when the label looks mangled
+  (`startswith("_Z")`) — the stored key stays the original mangled label
+  unchanged, since that already equals a real `FUNC_REMOVED`'s
+  `Change.symbol` directly (both are the same canonical Itanium-mangled
+  linker symbol), so no further key-matching change was needed once
+  classification correctly recognizes it as internal. Added
+  `test_mangled_only_label_demangled_for_classification`/
+  `test_mangled_label_not_internal_after_demangling_stays_dropped` to
+  `test_internal_leak.py` (the latter confirming demangling only changes
+  what counts as *internal*, not a blanket allowance for every mangled
+  label).
+- **A fourth internal-namespace-threading gap: `DetectTemplatePatterns`
+  (Codex, fresh evidence).** Item 5's PolicyFile.internal_namespaces work
+  threaded `ctx.internal_namespaces` through `MarkReachability`/
+  `DetectInternalLeaks`/`DemoteUnreachableInternalChurn`, deliberately
+  excluding `DetectNamespacePatterns` (a different, unrelated
+  `experimental_namespaces` convention). `DetectTemplatePatterns` is a
+  distinct, genuine fourth case that was simply missed:
+  `detect_internal_template_leaks`'s own `_INTERNAL_TEMPLATE_NAMESPACES`
+  (`detail`/`impl`/`internal`/`__detail`/`_impl`, plus `__internal`) is the
+  *same* internal-implementation convention the other three steps use, but
+  `DetectTemplatePatterns.run()` called `detect_template_patterns(ctx.old,
+  ctx.new)` with no namespaces argument at all — a project with a custom
+  convention (e.g. `priv`) would have its `MarkReachability` tag corrected
+  but `INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API` still blind to it. Gave
+  `DetectTemplatePatterns` the identical `namespaces` constructor parameter
+  and `self._namespaces or ctx.internal_namespaces or
+  _INTERNAL_TEMPLATE_NAMESPACES` fallback the other three steps use. Added
+  `test_pipeline_internal_namespaces_reaches_detect_template_patterns` to
+  `test_reachability_aware_suppression.py`.
+- **A fourth node-label shape: hash-suffixed identities (Codex, fresh
+  evidence).** `function_decl_identity` (`source_graph.py`) has a third
+  branch beyond mangled-name and bare-qualified-name: a declaration with no
+  distinct mangled name (e.g. `extern "C"`) gets
+  `"{qualified_name}#sha256:{digest}"`. `compute_call_graph_leak_paths`
+  stored this raw hash-suffixed string as its only key for such a node,
+  which a real `Change.symbol`/`qualified_name` never carries — the same
+  key-mismatch bug class as the mangled-label case, one shape later. Fixed
+  by also indexing the hash-stripped qualified name (splitting off
+  `"#sha256:..."`) alongside the existing label/mangled-symbol keys. Added
+  `test_hash_suffixed_label_also_keyed_by_stripped_name` to
+  `test_internal_leak.py`.
+- **The call-graph *entry set* itself over-reached (Codex, fresh
+  evidence).** Every fix above was about matching a *target* symbol
+  correctly once a walk from some public entry already reached it — this
+  one is about which nodes get to seed the walk at all.
+  `compute_call_graph_leak_paths` seeded entries via
+  `is_public_dependency_node` (shared with `crosscheck.py`'s advisory
+  `public_to_internal_dependency` check): exported-symbol-mapped **or**
+  public-header-visible, with no further distinction. But an ordinary,
+  out-of-line exported function (e.g. `api()` defined in a `.cpp` file) is
+  public in exactly that sense while its *body* — and therefore its own
+  internal calls, e.g. to `ns::detail::helper()` — is compiled into the
+  **library's** binary only, never into any consumer's; a consumer links
+  against `api()`'s exported symbol alone and never sees, references, or
+  embeds `helper()`. If `helper()` is removed, either the library's own
+  build breaks (the vendor's problem, nothing to do with any external
+  consumer) or `api()`'s recompiled body simply stops calling it — never a
+  consumer-visible break. Treating every exported function as a valid
+  call-graph entry (as the shared predicate does) therefore either
+  manufactured a spurious "still reachable" narrative on a genuinely
+  safe-to-suppress internal change, or — via
+  `post_processing.MarkReachability`'s `public_reachable` tag — blocked a
+  broad internal-namespace suppression rule from ever applying to the
+  *common* case, since most functions in most libraries are ordinary,
+  out-of-line, non-template. The real criterion is whether the entry's own
+  body is emitted into every including translation unit (true for inline
+  functions/methods and templates, false for an ordinary out-of-line
+  definition) — but that distinction, while computed at the L4
+  `SourceAbiSurface` layer (three separate `reachable_declarations`/
+  `reachable_templates`/`reachable_inline_bodies` buckets), was **lost**
+  when folded into the L5 graph: an inline function generates *two*
+  entities sharing one identity (a plain "function" declaration entity
+  clang.py always emits, plus a sibling "inline" body entity), both
+  collide onto the same graph node id, and `add_node`'s first-writer-wins
+  dedup keeps only the "function" entity's `attrs["decl_kind"]` (iterated
+  first) — so even a decl_kind-based check would silently never see
+  "inline" for exactly the functions that matter. Fixed in two parts,
+  scoped to `internal_leak.py`'s call-graph walk only (deliberately **not**
+  touching `crosscheck.py`'s advisory, RISK-only, non-suppression-gating
+  check, which has no comparable precision requirement): (1)
+  `build_source_graph` now computes the inline/template identity set
+  up front and stamps `attrs["consumer_compiled_body"]` on every decl
+  node from that set membership — so the attr is correct regardless of
+  which sibling entity wins the id race; (2) a new
+  `is_consumer_compiled_public_entry` predicate
+  (`buildsource/source_graph.py`) layers that attr on top of
+  `is_public_dependency_node`, defaulting permissively to `True` when the
+  attr is absent (e.g. a `header_graph.py` node, which by construction only
+  ever gets outgoing call/reference edges from in-header bodies in the
+  first place, so the over-reach cannot arise there) —
+  `compute_call_graph_leak_paths` now seeds its walk from this predicate
+  instead. Added `test_ordinary_function_decl_node_marked_not_consumer_compiled`/
+  `test_inline_function_decl_node_marked_consumer_compiled_despite_id_collision`
+  to `test_source_graph.py` (the id-collision case specifically) and
+  `test_ordinary_out_of_line_exported_entry_is_not_a_leak_path`/
+  `test_inline_entry_with_explicit_flag_is_still_a_leak_path` to
+  `test_internal_leak.py`.
+- **Restricting the entry set was not enough on its own — the *walk* also
+  over-reached (Codex, fresh evidence).** The fix above stops an ordinary
+  out-of-line exported function from *seeding* the call-graph walk, but
+  `compute_call_graph_leak_paths` still computed reachability via the shared
+  `source_graph_findings._dependency_reachability`, which expands every
+  edge transitively from an already-validated entry with no further
+  restriction. So a public inline `wrap()` calling an ordinary out-of-line
+  exported `api()` (`consumer_compiled_body: false`), which itself calls an
+  internal `ns::detail::helper()`, still had `helper()` show up in
+  `wrap()`'s reachable set: `api()` is a legitimate entry-adjacent node (a
+  consumer really does link against `api()`'s exported symbol, so it must
+  stay *recorded* as reachable), but whatever `api()` calls happens entirely
+  inside the library's own binary — the walk must stop *expanding past*
+  such a node, not just refuse to *start* from one. Fixed by replacing the
+  shared (and, for `crosscheck.py`'s broader advisory use, correctly
+  unrestricted) reachability helper with a new, `internal_leak.py`-local
+  `_consumer_compiled_reachability`: a BFS that records every direct
+  successor of a node but only continues expanding past a successor whose
+  own `consumer_compiled_body` is true (defaulting permissively when the
+  attr is absent, same rule as the entry predicate). It also returns each
+  entry's predecessor-edge map so `_reconstruct_path` can rebuild the
+  displayed proof path by replaying the *same* restricted walk, rather than
+  calling the shared, unrestricted `_dependency_path` a second time and
+  risking a displayed route the restriction above would not itself take.
+  `crosscheck.py`'s `public_to_internal_dependency` (RISK-only, never
+  suppression-gating) is untouched — it still uses the original
+  unrestricted `_dependency_reachability`/`_dependency_path`, since its
+  broader "does any decl-dependency edge exist at all" question has no
+  comparable precision requirement. Added
+  `test_walk_stops_expanding_past_non_consumer_compiled_intermediate` to
+  `test_internal_leak.py`.
+  **Post-merge review (Codex), one more node shape the "permissive default"
+  missed.** The fix above's permissive default (treat a node as
+  consumer-compiled when `consumer_compiled_body` is simply absent) was
+  scoped too broadly: it also covered a *real, build-integrated*
+  `call_graph.py` fallback node — `augment_graph_with_calls` creates one,
+  tagged `provenance="call_graph"`, for a caller/callee identity with no
+  other declaration node backing it (e.g. a project helper function the L4
+  declarations pass never separately captured) — which has no
+  `consumer_compiled_body` attr at all, unlike the deliberate `False` the
+  previous fix's own test used. A public inline `wrap()` calling such an
+  intermediate (`demo::helper_a`, this exact fallback shape) which itself
+  calls an internal `helper()` still had `helper()` read as reachable,
+  since "no attr at all" fell through to the permissive branch. Fixed by
+  narrowing the exception: the permissive default now only yields to a
+  conservative `False` when the node's `provenance` is specifically the
+  `call_graph.py` fallback tag (`_CALL_GRAPH_FALLBACK_PROVENANCE`) — every
+  other attr-less node (header-graph nodes, type nodes, synthetic test
+  fixtures with no provenance at all) keeps the original permissive
+  default, since "no signal either way" is not the same claim as "known to
+  be an uncertain build-integrated declaration." (An earlier version of
+  this fix tried an *allowlist* — permissive only for a recognized
+  `header_graph.py` provenance tag, conservative for everything else — but
+  that regressed a wide swath of the existing test suite, whose synthetic
+  fixtures never set a provenance at all; the blocklist framing above is
+  the one that closes the real gap without disturbing tests that carry no
+  opinion on the question.) Shared the fix as a new
+  `source_graph.is_consumer_compiled_node` predicate consumed by both
+  `is_consumer_compiled_public_entry` (the entry check) and
+  `internal_leak._is_consumer_compiled_node` (the walk's own
+  expand-past-this-node check), so the two can never drift out of sync
+  again. Added
+  `test_walk_stops_at_call_graph_fallback_node_with_no_signal` to
+  `test_internal_leak.py`.
 
 ## Roadmap (not committed — scope/sequence per the usual planning process)
 
-Numbering mirrors the review's own priority tiers.
-
-### P1 — first-class detection
-
-1. Wire `buildsource/poi.resolve_changed_paths_public_impact` (ADR-041 P1
-   item 3's unwired pure helper) into the comparison pipeline so a
-   `DECL_CALLS_DECL`/`DECL_REFERENCES_DECL` path from a public entry to a
-   changed/removed internal decl is available as reachability evidence
-   alongside `MarkReachability`'s layout-only walk — closing the exact
-   oneDAL dispatcher gap named above.
-2. New overlay `ChangeKind`, `internal_symbol_required_by_public_api`:
-   composition of an artifact-level `BREAKING_KINDS` finding (e.g.
-   `func_removed`) with a public → internal `DECL_CALLS_DECL`/
-   `DECL_REFERENCES_DECL` proof path — the call-graph analogue of
-   `INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API` (which is layout-only today). Per
-   the authority rule this codebase has held since ADR-028 D3/ADR-041, the
-   graph edge only *explains and correlates* an already-artifact-proven
-   break; it never manufactures one on its own.
-3. Propagation-aware edge semantics: distinguish layout-propagating edges
-   (`TYPE_INHERITS`, by-value `TYPE_HAS_FIELD_TYPE`) from
-   identity/signature-propagating edges (pointer/reference parameter or
-   return of an internal type) from symbol-availability edges
-   (`DECL_CALLS_DECL`/`DECL_REFERENCES_DECL`) from indirection barriers
-   (`pimpl<T>`, `unique_ptr<T>` — `internal_leak.py`'s
-   `_is_known_pointer_wrapper`/`_field_is_indirect` already implement this
-   distinction for the layout walk; extending the same taxonomy to the L5
-   graph is the open part). `reachability_kind` (D1) is a two-value
-   approximation of this; the full taxonomy is richer.
-4. Surface `reachability_proof_path`/graph proof paths in every report
-   format (currently `Change.description`-only, per ADR-041 P0 slice 3's
-   convention) as first-class structured fields in JSON/SARIF.
-5. Project-configurable internal-namespace conventions: a
-   `PolicyFile.internal_namespaces:` key (or CLI flag), threaded
-   consistently through `MarkReachability`/`DetectInternalLeaks`/
-   `DemoteUnreachableInternalChurn`/`DetectNamespacePatterns`'s existing
-   `namespaces` constructor parameters (all four already accept one; none
-   are wired to real user config today). Closes the gap named in this
-   ADR's changelog where a project using an internal-namespace convention
-   outside the hard-coded `DEFAULT_INTERNAL_NAMESPACES` five-token default
-   (`detail`/`impl`/`internal`/`__detail`/`_impl`) is invisible to every
-   step in this list, including the reachability tag this ADR's own
-   suppression gate depends on.
-6. Route `checker.py`'s remaining `is_suppressed()` call sites
-   (`_filter_suppressed_changes`, `_apply_surface_metrics`) through an
-   `evaluate()`-based helper too, so a broad rule matched-but-withheld on
-   those paths also produces the `SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`
-   diagnostic. Lower priority than the now-closed `_filter_pattern_synthetic`
-   case: neither builds a fresh synthetic finding a suppression rule could
-   plausibly want to match-but-withhold the same way — they filter
-   pre-existing/aggregate findings, not late detector output.
+P1 is implemented (above); P2 remains open, numbering mirrors the original
+review's priority tiers.
 
 ### P2 — empirical validation
 
-1. Consumer import manifests: `--consumer-binary`/`--consumer-dir`, ELF
+1. ~~Consumer import manifests: `--consumer-binary`/`--consumer-dir`, ELF
    undefined-dynamic-symbol / PE-import / Mach-O-undefined-symbol
    collection from a baseline-built consumer, producing a
    `consumer_required_symbol_removed` finding when the candidate library no
-   longer exports something a real consumer's baseline build referenced —
-   ground truth that needs no template-dispatch understanding at all,
-   independent of P1's static graph work.
-2. Old-consumer/new-library execution harness (`LD_BIND_NOW=1`, optionally
+   longer exports something a real consumer's baseline build referenced.~~
+   **Closed — but not the way this item's own wording assumed.** This
+   infrastructure already existed: `compare --used-by APP` (ADR-005/ADR-043,
+   `appcompat.py`) already collects a real consumer binary's ELF undefined
+   symbols / PE imports / Mach-O undefined symbols and diffs them against
+   the new library's export table — this item's roadmap text was written
+   without apparent awareness of it, so no new `--consumer-binary`/
+   `--consumer-dir` flags or extraction code were needed. The genuine gap
+   was narrower: a missing symbol was only a bespoke string in
+   `AppCompatResult.missing_symbols`, special-cased by each reporter format
+   (`reporter.py`/`sarif.py`/`junit_report.py`), never a real
+   suppressible `Change`/`ChangeKind` the way `PE_ORDINAL_RETARGETED`
+   already is. Added `ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED`
+   (`BREAKING_KINDS`) and, in `scope_diff_to_app`, promoted every missing
+   symbol not already represented by a library-diff `Change` (via the
+   existing `uncovered_missing_symbols` dedup — the same helper
+   `_scoped_severity_summary` already uses to avoid double-counting) into
+   one, following the `_check_pe_ordinal_imports`/`PE_ORDINAL_RETARGETED`
+   precedent exactly. `AppCompatResult.missing_symbols` (the raw string
+   list) is untouched for backward compatibility with existing reporter
+   code; the new `Change`s are purely additive into `breaking_for_app`.
+   `AppCompatResult.verdict`'s existing missing-symbols-force-`BREAKING`
+   shortcut is also untouched (no exit-code/verdict behavior change) — this
+   is enrichment (a real `ChangeKind`, docs, evidence tier, suppressibility
+   in principle), not a severity change. Scoped to `--used-by` only (the
+   ADR's literal "consumer's baseline build" framing); the sibling
+   `--required-symbol`/plugin-host scoping paths have the identical
+   ad-hoc-string shape and are a natural, structurally-identical follow-up,
+   not attempted in this round.
+2. ~~Old-consumer/new-library execution harness (`LD_BIND_NOW=1`, optionally
    ASan/UBSan) as an opt-in validation capability alongside the static
-   scanner, not a replacement for it.
-3. New worked examples exercising this ADR's headline scenario end-to-end
+   scanner, not a replacement for it.~~ **Closed for the `LD_BIND_NOW` core;
+   ASan/UBSan deliberately deferred, per the item's own "optionally".** New
+   `abicheck/runtime_probe.py` module + `--verify-runtime` flag (opt-in,
+   valid only with `--used-by`): runs each consumer binary once against the
+   old library and once against the new one, both times with
+   `LD_BIND_NOW=1` and `LD_LIBRARY_PATH` pointed at the respective library.
+   Deliberately narrow detection: the only signal recognized is glibc's own
+   `symbol lookup error: ... undefined symbol: X` on stderr — the dynamic
+   linker's unambiguous statement that eager binding failed to resolve a
+   real symbol. An app's own exit code or general crash behavior is
+   explicitly **not** interpreted (too noisy/unreliable — an app can exit
+   nonzero for reasons that have nothing to do with the library). New
+   `ChangeKind.CONSUMER_RUNTIME_LOAD_FAILED` (`RISK_KINDS`, never
+   `BREAKING` on its own — an execution environment can fail for unrelated
+   reasons, so this only *corroborates* the static scanner, per the
+   authority rule) fires only when the app ran cleanly against the old
+   library but the linker names a missing symbol against the new one
+   (`RuntimeProbeResult.regressed_symbol`). Linux-only (`LD_BIND_NOW`/
+   `LD_LIBRARY_PATH` are glibc/ELF mechanisms; macOS's `DYLD_*` env vars are
+   stripped by SIP for most binaries, Windows has no equivalent) — skips
+   silently on any other platform or when OLD/NEW aren't real binaries
+   (mirrors `abicheck/bundle.py`'s ELF-only degrade precedent), never
+   raises. Folded into the same `_apply_used_by_scoping` worst-wins
+   exit-code/verdict machinery `PE_ORDINAL_RETARGETED`/
+   `CONSUMER_REQUIRED_SYMBOL_REMOVED` already use, via a synthetic `Change`
+   appended to `breaking_for_app` — no separate reporting path.
+   **Post-merge review (Codex), same change:** the new scoped-only
+   `Change`s (`PE_ORDINAL_RETARGETED`/`CONSUMER_REQUIRED_SYMBOL_REMOVED`/
+   `CONSUMER_RUNTIME_LOAD_FAILED`) rendered through the plain
+   `_change_to_dict`/`_result_for` path (not `appcompat_to_json`'s own
+   override) reported `evidence_status: artifact_proven` purely from their
+   `BREAKING`/`RISK` category — even though none of them come from an
+   artifact-level library diff at all; the evidence is the consumer's own
+   import table or execution. A pre-existing gap for `PE_ORDINAL_RETARGETED`
+   that the two new sibling kinds simply inherited. Fixed by adding an
+   `evidence_status_override` parameter to `sarif._result_for` (mirroring
+   `reporter._change_to_dict`'s existing one) and passing
+   `EvidenceStatus.CONSUMER_PROVEN` at both `scoped_only_changes` render
+   sites (JSON's `_fold_scoped_compat_into_text`, SARIF's `to_sarif`).
+   **Post-merge review (Codex), one more finding after threading suppression
+   through:** the suppression fix above only dropped the suppressed symbol
+   from the synthesized `Change`; the same symbol was left in
+   `AppCompatResult.missing_symbols` (the raw string list), which
+   `_compute_appcompat_verdict` checks **independently** and unconditionally
+   forces `Verdict.BREAKING` on — and which the scoped exit-code floor and
+   missing-label text output also read directly. Suppressing the overlay
+   `Change` alone was therefore cosmetic: the verdict/exit code/report text
+   still failed on a symbol the user had explicitly (and correctly) waived.
+   Fixed by also removing the symbol from `missing_symbols` itself when its
+   overlay is suppressed — this overlay *is* the suppressible representation
+   of a missing symbol (the entire point of promoting it out of a bespoke
+   string), so a suppressed overlay must remove the raw string from every
+   consumer of it, not just the `Change` list. `symbol_coverage` is
+   deliberately computed from the pre-suppression count: it is a factual
+   metric about the export table, not a gate, and should not be made to lie
+   because a finding was waived.
+   **Post-merge review (Codex), three more findings on the same P2 change:**
+   (a) `runtime_probe._run_once` passed a bare `Path` straight to
+   `subprocess.run([str(app_path)], ...)` — for a relative app name with no
+   `/` (e.g. a `--used-by app` invocation from the app's own directory),
+   that argv[0] shape makes the OS search `PATH`, not the current
+   directory, exactly like an unqualified shell command; with `.` typically
+   absent from `PATH` this silently raised `OSError` on both runs and the
+   probe never fired at all. Fixed by resolving to an absolute path first
+   (`app_path.resolve()`), same as `lib_path` already was. (b) Both
+   `CONSUMER_REQUIRED_SYMBOL_REMOVED` (`scope_diff_to_app`) and
+   `CONSUMER_RUNTIME_LOAD_FAILED` (`_apply_used_by_scoping`) are
+   synthesized *after* the comparison pipeline's own suppression pass has
+   already run over `diff.changes` — neither function received the active
+   `SuppressionList` at all, so an exact `symbol:`/`change_kind:`
+   suppression rule for either overlay finding could never actually
+   suppress it; the scoped gate would keep failing on a change the user had
+   explicitly (and correctly) waived. Fixed by threading `suppression`
+   through `scope_diff_to_app` (and its `check_appcompat`/MCP-server call
+   sites) and `_apply_used_by_scoping`, evaluating it against each
+   synthesized `Change` before appending — mirrors how the base diff was
+   already suppressed, just applied a second time to findings that did not
+   exist yet at that point. (c) `_apply_used_by_scoping` appended the
+   `CONSUMER_RUNTIME_LOAD_FAILED` finding to `scoped.breaking_for_app`
+   *after* `scope_diff_to_app` had already computed `scoped.verdict` from
+   the static scope alone — so a run with a clean static scope but a real
+   runtime regression still reported the stale `COMPATIBLE` verdict instead
+   of `COMPATIBLE_WITH_RISK`, even though the finding list itself was
+   correct. Fixed by recomputing `scoped.verdict` via
+   `_compute_appcompat_verdict` immediately after the append.
+   **Post-merge review (Codex), one more finding: the reachability gate
+   itself, not just whether suppression ran at all.** Both overlays'
+   suppression evaluation (fixed above) still left `public_reachable` at the
+   `Change` dataclass default (`False`) — but unlike an ordinary
+   internal-namespace `Change`, where "maybe internal, maybe not" is exactly
+   the ambiguity `MarkReachability`'s walk exists to resolve, these two
+   overlays have **no such ambiguity at all**: `CONSUMER_REQUIRED_SYMBOL_REMOVED`
+   only ever exists because a real `--used-by` consumer's own
+   undefined-symbol requirement genuinely resolved to nothing in the new
+   library, and `CONSUMER_RUNTIME_LOAD_FAILED` only ever exists because the
+   dynamic linker itself failed to resolve a symbol for a real, executed
+   consumer binary — both are consumer-proven by construction. Left at the
+   default, `Suppression._passes_reachability_gate`'s `"unreachable-only"`
+   default for a broad `namespace`/`source_location` rule reads
+   `public_reachable=False` and matches, silently suppressing a break that
+   can never actually be safe to hide the way an ordinary internal-namespace
+   change sometimes is — precisely the failure mode this whole ADR exists to
+   prevent, just missed for these two synthesized overlays specifically.
+   Fixed by constructing both with `public_reachable=True` (a new
+   `reachability_kind` value, `"consumer_proven"`) before suppression
+   evaluation, and switching both call sites from the cheaper
+   `is_suppressed` to `evaluate` so a broad rule withheld by the
+   `allow_public_break` gate (`CONSUMER_REQUIRED_SYMBOL_REMOVED` is
+   `BREAKING`, so this gate applies to it) still emits the same
+   `SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK` diagnostic `ApplySuppression`
+   produces for changes it sees directly, reusing
+   `post_processing._build_suppression_overreach_change` rather than
+   duplicating its construction (mirrors `checker.py`'s own
+   `_filter_suppressed_changes`, already routed through `evaluate` per P1
+   item 6). `CONSUMER_RUNTIME_LOAD_FAILED` is `RISK`-tier, so
+   `would_withhold` never fires for it by design (a `RISK`-classified,
+   reachability-mismatched change is the rule correctly declining to apply,
+   not an overreach worth a diagnostic) — the same `evaluate`-based
+   plumbing is still used for consistency and to stay correct if that
+   kind's tier ever changes. A narrow `symbol:`/`change_kind:` rule is
+   unaffected either way (exempt from both gates, unchanged behavior).
+   **Post-merge review (Codex), two more findings on the `public_reachable`
+   fix itself:** (a) the compare-report JSON schema's `reachability_kind`
+   enum only listed the four public-surface-walk values
+   (`direct_public_symbol`/`value_embedding`/`pointer_or_signature`/
+   `symbol_availability`) — a report containing either overlay now emits
+   `reachability_kind: "consumer_proven"`, which failed schema validation
+   even though the report still advertised a passing `report_schema_version`.
+   Fixed by adding `"consumer_proven"` to the enum (an additive change per
+   the schema's own stability policy, `abicheck/schemas/__init__.py`) and
+   bumping `REPORT_SCHEMA_VERSION` (originally to `2.7`; renumbered to `2.8`
+   in the same rebase mentioned above), re-synced to `docs/schemas/v1/` via
+   `scripts/publish_schemas.py`. (b) Unrelated to the
+   reachability fix but on the same file: `runtime_probe._run_once`'s
+   `subprocess.run(..., text=True)` has no `errors=` handling, and a real
+   executable's stderr is arbitrary bytes with no guarantee of being valid
+   UTF-8 (or the locale's encoding) — a non-UTF-8 byte would raise
+   `UnicodeDecodeError` *after* the child process exits, escaping this
+   best-effort probe entirely and aborting the whole `compare` invocation
+   instead of degrading to a `RuntimeProbeOutcome`, exactly the failure mode
+   the surrounding `try`/`except OSError` was meant to prevent. Fixed by
+   adding `errors="replace"` so malformed bytes are substituted, not fatal —
+   the symbol-lookup-error regex still matches the valid ASCII segments
+   around them. Added a real-subprocess regression test (not a mocked
+   `subprocess.run`, since the decoding itself is what's under test) to
+   `test_runtime_probe.py`, and a `jsonschema`-validating regression test to
+   `test_cov95_cli.py` for the enum fix.
+   **Post-merge review (Codex), one more finding on `runtime_probe.py`:**
+   `_SYMBOL_LOOKUP_ERROR_RE`'s capture group was `\S+`, which does not stop
+   at a comma — glibc appends `", version X"` after the bare name for a
+   *versioned* undefined-symbol failure (e.g. `"undefined symbol: foo,
+   version FOO_1.0"`), so the captured group was `"foo,"` (trailing comma
+   included), not the real import/export name `"foo"`. The synthesized
+   `consumer_runtime_load_failed` finding therefore carried a symbol that
+   could never match an exact suppression rule for the real symbol, and
+   `--verify-runtime` reported the wrong name for every versioned import.
+   Fixed by changing the capture group from `\S+` to `[^,\s]+` (stop at a
+   comma or whitespace, whichever comes first) — the unversioned case is
+   unaffected since there is no comma to stop at. Added
+   `test_versioned_symbol_lookup_error_strips_version_suffix` to
+   `test_runtime_probe.py`.
+   **Post-merge review (Codex), two more findings, one per module.** (a)
+   `internal_leak.py`: `demangle()` returns the **full signature** (e.g.
+   `ns::api::foo(ns::detail::T*)`), not just the qualified name — the
+   classification check at the call-graph fallback-node site (see the
+   third-Codex-round fix above) passed this straight to `is_internal_type`,
+   whose segment scan finds `detail` inside the *parameter* type and
+   misclassifies an ordinary **public** function (`ns::api::foo`) as an
+   internal leak target merely because it takes/returns an internal type —
+   even though `foo` itself lives in the public `ns::api` namespace. A later
+   `func_removed` on `foo` would then spuriously also emit
+   `internal_symbol_required_by_public_api`, describing a genuinely public
+   symbol's removal as if it were an internal one leaking through. Fixed by
+   a new `_strip_signature_params` helper (tracks paren depth, cuts at the
+   first depth-0 `(` — the function's own parameter-list opening, not a
+   nested one from e.g. a function-pointer parameter type) applied before
+   classification; the stored lookup key is unaffected, only the
+   classification input. Added `TestStripSignatureParams` (unit-level) and
+   `test_public_fn_with_internal_param_type_not_misclassified`
+   (integration-level) to `test_internal_leak.py`. (b) `runtime_probe.py`:
+   a dynamic-linker failure for a reason *other* than an undefined symbol —
+   most commonly a missing, unrelated dependency (`"error while loading
+   shared libraries: libfoo.so.2: cannot open shared object file"`) — does
+   not match `_SYMBOL_LOOKUP_ERROR_RE`, so it fell through to `ok=True`
+   regardless of the actual (nonzero) exit code. An `old` probe run that
+   never actually loaded (for a reason unrelated to the library under
+   comparison) would then still satisfy `regressed_symbol`'s `old.ok` guard,
+   letting a `new` run's real undefined-symbol failure report a false
+   regression against a baseline that was never clean to begin with. Fixed
+   by adding a second, narrower regex (`_LOADER_ERROR_RE`) for this exact,
+   version-stable glibc substring, returning `ok=False` (no `missing_symbol`,
+   since the failure isn't attributable to a specific symbol) when it
+   matches — deliberately narrow, so the module's own documented "an app's
+   own nonzero exit code is common and meaningless on its own" principle
+   stays intact for every other failure shape; this is one more unambiguous
+   linker statement, the same class as the symbol-lookup-error case already
+   handled, not a general exit-code interpretation. Added
+   `test_loader_failure_for_unrelated_reason_is_not_ok` to
+   `test_runtime_probe.py`.
+   **A independent review pass (not Codex) of the full diff also found two
+   documentation-only inaccuracies:** `examples/case192_.../README.md`
+   described the `internal_symbol_required_by_public_api` overlay as
+   "`RISK`-classified" — it is actually `BREAKING`
+   (`change_registry_suppression.py`), confirmed by `ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API
+   in BREAKING_KINDS` at runtime; and this ADR's own "Consequences" section
+   still read "No new CLI flags; no schema/serialization version bump" — true
+   for the original P0 slice that bullet was written for, but directly
+   contradicted by the P1/P2 slices documented earlier in this same file
+   (`REPORT_SCHEMA_VERSION` bumped twice, `--verify-runtime` added). Both
+   fixed.
+   **Post-merge review (Codex), one more finding on the direct-public-symbol
+   check itself:** "When the public-header declaration is a C++
+   function/variable, `_public_header_names()` records the
+   demangled/qualified model name, while a removal/type-change `root` is
+   still often the linker symbol (for example `_ZN...`), and only functions
+   may have `c.qualified_name` filled by `EnrichSourceLocations`. This
+   direct-public branch therefore misses a public-header `ns::detail::api()`
+   removal, so a broad namespace suppression such as `namespace:
+   "**::detail::*"` treats the hard `FUNC_REMOVED` as unreachable and
+   suppresses it with no overreach diagnostic." Verified directly:
+   `_root_type_name_for_change(c)` is `c.symbol` verbatim for a
+   function-shaped change, and `diff_symbols.py` sets `Change.symbol` to the
+   *mangled* linker name for `FUNC_REMOVED`/`FUNC_ADDED`/etc., while
+   `_public_header_names()` collects `Function.name`, which is demangled —
+   so `root in public_header_names` never matches for a real C++ symbol. A
+   standalone public entry point that nothing else embeds or calls (so
+   neither the layout walk nor the call-graph walk independently proves it
+   reachable) therefore fell through `MarkReachability`'s direct-public-symbol
+   check entirely, leaving `public_reachable` at its default `False` and
+   letting a broad `namespace`/`source_location` rule hide the removal with
+   no `suppression_would_hide_public_break` diagnostic. Fixed by also
+   checking `c.qualified_name` (populated by `EnrichSourceLocations`, which
+   runs earlier in `DEFAULT_PIPELINE`, from the demangled `Function.name` for
+   exactly the `FUNC_REMOVED`/`FUNC_REMOVED_ELF_ONLY` kinds this matters for)
+   against `public_header_names` alongside `root`. Added
+   `test_public_header_cxx_function_removal_is_reachable` to
+   `test_reachability_aware_suppression.py`.
+   **Post-merge review (Codex), one more finding on `runtime_probe.py`:**
+   "When OLD and NEW are different files in the same directory, both
+   `_run_once` calls compute the same `LD_LIBRARY_PATH` and execute the same
+   app with an identical environment, so `--verify-runtime` never actually
+   switches the consumer from the old library to the new one." Confirmed:
+   `_run_once` set `LD_LIBRARY_PATH` to just `lib_path.resolve().parent` —
+   when `old_lib` and `new_lib` are two different files sitting in the same
+   directory (a realistic layout: versioned build artifacts, or a symlink
+   the "old" build already left pointing at the SONAME the consumer's
+   `DT_NEEDED` actually requests), the dynamic loader resolves the requested
+   SONAME to whichever file in that shared directory happens to match first
+   — independent of which of `old_lib`/`new_lib` this specific `_run_once`
+   call was asked to test. A regression that only shows up against the new
+   library could silently probe the old one twice and report a false clean
+   bill of health. Fixed by staging each side's library, alone, into its own
+   fresh `tempfile.TemporaryDirectory()`, under the name the dynamic linker
+   will actually look up (`DT_SONAME` when present — read via the existing
+   `elf_metadata.parse_elf_metadata`, since a file's on-disk name can differ
+   from its embedded SONAME — falling back to the file's own basename on
+   any parse failure, empty SONAME, or a defensively-rejected path-shaped
+   SONAME), and listing that staging directory *first* on `LD_LIBRARY_PATH`
+   (the library's real parent directory is still appended after it, so any
+   other same-directory runtime dependency stays resolvable) — this forces
+   each run to resolve to exactly the intended file regardless of what else
+   sits alongside it. Added `test_same_directory_old_new_libraries_resolve_independently`
+   and `TestLoadName` (four cases: SONAME present, parse failure, empty
+   SONAME, path-shaped SONAME) to `test_runtime_probe.py`.
+   **Post-merge review (Codex), two more findings, one per module.**
+   (a) `buildsource/source_graph.py`: "When a build-source pack includes
+   Kythe/CodeQL call edges, the adapters create `source_decl` nodes with
+   provenance `"kythe"`/`"codeql"` and no `consumer_compiled_body` attribute;
+   this fallback therefore treats those attr-less intermediate callees as
+   consumer-compiled and keeps expanding through their bodies... reintroducing
+   the overreach this predicate was meant to avoid for external graph
+   backends." Confirmed: `graph_backends.py`'s `ingest_kythe_entries`/
+   `ingest_codeql_call_results`/`ingest_codeql_extends_results` create exactly
+   the fallback-node shape the prior Codex-review fix closed for
+   `call_graph.py`'s own fallback tag (`is_consumer_compiled_node` treating
+   "no `consumer_compiled_body` attr" as safe-to-continue *unless*
+   `provenance == "call_graph"`) — but tagged `provenance="kythe"`/`"codeql"`
+   instead, which the blocklist never covered, so an inline public
+   wrapper → ordinary out-of-line helper → `detail::leaf` chain imported from
+   an external indexer still walked straight through the helper. Fixed by
+   generalizing `_CALL_GRAPH_FALLBACK_PROVENANCE` (a single string) into
+   `_NO_CONSUMER_COMPILED_SIGNAL_PROVENANCES` (a frozenset of
+   `{"call_graph", "kythe", "codeql"}`); `is_consumer_compiled_node` now
+   checks membership in that set. Added
+   `test_walk_stops_at_kythe_codeql_node_with_no_signal`
+   (parametrized over both provenances) to `test_internal_leak.py`, alongside
+   the existing `test_walk_stops_at_call_graph_fallback_node_with_no_signal`
+   it mirrors. (b) `runtime_probe.py`: "When the consumer binary has legacy
+   `DT_RPATH` without `DT_RUNPATH`, glibc searches that RPATH before
+   `LD_LIBRARY_PATH`... so putting the staged directory first here does not
+   force the old/new library selection." Confirmed against `ld.so(8)`'s
+   documented search order: a legacy `DT_RPATH` (present with no
+   `DT_RUNPATH`) is searched *before* `LD_LIBRARY_PATH`; `DT_RUNPATH` (what a
+   modern toolchain actually emits) is searched *after* it — so the same-
+   directory staging fix just above cannot force the loader's choice for a
+   binary built with this legacy shape, and both the old and new probe runs
+   could silently resolve through the embedded RPATH instead, defeating
+   `--verify-runtime`'s one purpose for exactly the binaries most likely to
+   need it (older/vendored build setups). Rather than attempt a fragile
+   override (e.g. `LD_PRELOAD`, which would load *both* copies of the library
+   into one process and risk misattributing which copy's global/static state
+   an undefined-symbol failure actually reflects — a correctness risk this
+   probe's own "airtight claim, not inferred" design principle rules out),
+   added `_has_legacy_rpath_without_runpath()` (reads the app's own
+   `DT_RPATH`/`DT_RUNPATH` via `parse_elf_metadata`) and a new early-exit in
+   `run_runtime_probe`: this exact shape now declines with `attempted=False`
+   and an explanatory `skipped_reason`, instead of silently reporting a
+   result the module cannot actually attribute to the library under test. A
+   `DT_RUNPATH` present alongside a `DT_RPATH` makes `ld.so` ignore the
+   `DT_RPATH` entirely, so that combination is unaffected. Added
+   `test_legacy_rpath_without_runpath_skips` and
+   `test_runpath_alongside_rpath_does_not_skip` to `test_runtime_probe.py`.
+3. ~~New worked examples exercising this ADR's headline scenario end-to-end
    (public inline dispatch to an exported internal specialization; the same
    case under a blanket namespace suppression, asserting the break survives
    and the diagnostic fires; a safe pimpl counter-example) — the review's
    examples A/B/D are the most valuable regression coverage and are natural
-   `examples/case*/` additions once P1 item 1 is wired, since case A/B need
-   the call-graph reachability this P0 slice does not yet have.
+   `examples/case*/` additions now that P1 item 1's call-graph reachability
+   is wired (previously blocked on it).~~ **Closed for A/B combined into one
+   case, plus a deliberate negative-space counter-example in place of the
+   literal pimpl case.** `examples/case192_call_graph_break_survives_suppression`
+   ships the full A/B scenario in one case (a public inline dispatcher's call
+   into a removed internal specialization: `BREAKING` unmodified, refused
+   under a broad `namespace: "demo::detail::**"` suppression rule with the
+   `suppression_would_hide_public_break` diagnostic naming the proof path,
+   then `NO_CHANGE` once the same rule adds `allow_public_break: true`).
+   `examples/case193_ordinary_exported_fn_call_not_reachable` is the
+   counter-example this round actually needed more: not the type-layout
+   pimpl shape (already covered by `case118`-`case120`'s public-surface
+   scoping), but the call-graph walk's own negative-space check — an
+   ordinary out-of-line exported function's internal call is not
+   public-reachable, so the identical broad suppression rule applies
+   cleanly with no diagnostic at all. Building it is what surfaced the
+   transitive-traversal over-reach documented in the P1 slice above (a
+   third example, a literal pimpl-via-graph case, remains a nice-to-have
+   follow-up, not attempted in this round). Both ship hand-built
+   `AbiSnapshot` pairs with an embedded L5 graph
+   (`scripts/gen_reachability_examples.py`), validated compiler-free by
+   `tests/test_reachability_examples.py`.
 
 ## Consequences
 
@@ -926,24 +1562,42 @@ Numbering mirrors the review's own priority tiers.
 - `namespace`'s `caused_by_type` matching is removed outright (D3); a rule
   that depended on it (none found in this repo's own test suite/examples at
   authoring time) needs `cause_namespace` instead.
-- No new CLI flags; no schema/serialization version bump. `SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`
-  is a new `ChangeKind`, following the standard four-step procedure
-  (`/CLAUDE.md` "Adding a new ChangeKind").
+- `SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK` is a new `ChangeKind`, following the
+  standard four-step procedure (`/CLAUDE.md` "Adding a new ChangeKind"). This
+  P0 slice itself added no new CLI flags and no schema/serialization version
+  bump; both since happened as the P1/P2 slices landed — `REPORT_SCHEMA_VERSION`
+  bumped to `2.7` (P1 item 4's structured `public_reachable`/`reachability_kind`/
+  `reachability_proof_path` fields) and again to `2.8` (P2's `"consumer_proven"`
+  `reachability_kind` enum member; both numbers shifted up by one from their
+  original `2.6`/`2.7` when this branch was rebased onto `main`'s own
+  unrelated `2.6` bump for `reviewer_action`, #595), and `--verify-runtime` is
+  a new P2 CLI flag. See `abicheck/schemas/__init__.py`'s own changelog for
+  the exact history.
 
 ## References
 
-- `abicheck/post_processing.py` — `DEFAULT_PIPELINE`, `MarkReachability`,
-  `ApplySuppression`, `DetectInternalLeaks`, `DemoteUnreachableInternalChurn`
-- `abicheck/internal_leak.py` — `compute_leak_paths`, `_LEAK_TRIGGERING_KINDS`,
+- `abicheck/post_processing.py` — `DEFAULT_PIPELINE`, `PipelineContext`,
+  `MarkReachability`, `ApplySuppression`, `DetectInternalLeaks`,
+  `DemoteUnreachableInternalChurn`
+- `abicheck/internal_leak.py` — `compute_leak_paths`, `compute_call_graph_leak_paths`,
+  `detect_internal_leaks`, `detect_call_graph_leaks`, `_LEAK_TRIGGERING_KINDS`,
   `_root_type_name_for_change`
 - `abicheck/suppression.py` — `Suppression`, `SuppressionList`
 - `abicheck/checker_types.py` — `Change`
+- `abicheck/checker.py` — `_filter_suppressed_changes`, `_apply_surface_metrics`
+- `abicheck/policy_file.py` — `PolicyFile.internal_namespaces`
+- `abicheck/reporter.py`, `abicheck/sarif.py` — structured reachability fields
+- `abicheck/buildsource/source_graph.py`/`source_graph_findings.py` — the L5
+  graph and `_dependency_reachability`/`_dependency_path`/
+  `_format_dependency_path` the P1 slice's call-graph walk reuses
 - ADR-004 — Report filtering and deduplication (redundancy-before-verdict
   invariant this ADR deliberately does not disturb)
 - ADR-013 — Suppression system design (pipeline-ordering rationale this ADR
   amends)
 - ADR-024 — Public ABI surface resolution (audit-ledger / never-silently-drop
   convention this ADR follows for `suppression_would_hide_public_break`)
+- ADR-028 — Build-source evidence pack (the authority rule the P1 overlay
+  kind's `BREAKING` classification relies on: L3-L5 evidence may explain/
+  correlate an artifact-proven break, never manufacture one)
 - ADR-041 — Compiler-facts semantic impact graph (`PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`,
-  the unwired `poi.resolve_changed_paths_public_impact` P1 roadmap item this
-  ADR's own P1 depends on)
+  the L5 graph schema the P1 slice's call-graph walk reuses)

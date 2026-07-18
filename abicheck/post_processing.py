@@ -47,6 +47,14 @@ class PipelineContext:
     # Consumed by EscalateFrozenNamespaceViolations to tag matching
     # findings with Change.frozen_namespace_violation.
     frozen_namespaces: list[str] = field(default_factory=list)
+    # ADR-044 P1 item 5: project-configurable internal-implementation-namespace
+    # convention, threaded in from PolicyFile.internal_namespaces. None means
+    # "not configured" — MarkReachability/DetectInternalLeaks/
+    # DemoteUnreachableInternalChurn each fall back to their own
+    # DEFAULT_INTERNAL_NAMESPACES. Deliberately not consulted by
+    # DetectNamespacePatterns's experimental_namespaces — a different, unrelated
+    # convention (see PolicyFile.internal_namespaces's docstring).
+    internal_namespaces: tuple[str, ...] | None = None
     # ADR-024 §D4: when True, FilterNonPublicSurface moves findings that are
     # not on the public-header-scoped ABI surface to ``out_of_surface``.
     scope_to_public_surface: bool = False
@@ -593,10 +601,12 @@ class MarkReachability:
         # DEFAULT_INTERNAL_NAMESPACES (e.g. "priv" instead of "detail") would
         # be recognized by the leak detector but invisible to the
         # reachability tag that gates suppression — reintroducing this ADR's
-        # own failure mode for exactly that convention. No caller wires a
-        # non-default value through DEFAULT_PIPELINE today (see ADR-044's
-        # changelog); this only removes the structural inconsistency so a
-        # future policy-level override reaches this step too.
+        # own failure mode for exactly that convention. An explicit
+        # constructor argument (this parameter) always wins; absent that,
+        # ``run()`` falls back to ``ctx.internal_namespaces`` — the
+        # PolicyFile.internal_namespaces value DEFAULT_PIPELINE threads
+        # through on every call (ADR-044 P1 item 5) — before finally
+        # defaulting to DEFAULT_INTERNAL_NAMESPACES.
         self._namespaces = namespaces
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
@@ -610,6 +620,7 @@ class MarkReachability:
             _path_has_indirection,
             _path_is_value_propagating,
             _root_type_name_for_change,
+            compute_call_graph_leak_paths,
             compute_leak_paths,
         )
         from .model import ScopeOrigin
@@ -627,10 +638,24 @@ class MarkReachability:
             names.update(e.name for e in snap.enums if e.origin == ScopeOrigin.PUBLIC_HEADER)
             return names
 
-        namespaces = self._namespaces or DEFAULT_INTERNAL_NAMESPACES
+        namespaces = self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
         old_paths = compute_leak_paths(ctx.old, namespaces)
         new_paths = compute_leak_paths(ctx.new, namespaces)
         reachable_types = set(old_paths) | set(new_paths)
+        # ADR-044 P1 item 1: a second, independent reachability signal — the
+        # optional L5 call graph's DECL_CALLS_DECL/DECL_REFERENCES_DECL edges
+        # (--sources/--build-info/--header-graph). compute_leak_paths only
+        # ever sees layout/type-graph reachability (inheritance, by-value
+        # fields, signatures); a public inline function's *body* calling into
+        # a removed/changed internal template specialization has none of
+        # that evidence at all, but is real to a linker — the exact oneDAL
+        # dispatcher gap the P0 slice's own "What this ADR does not fix"
+        # section named. Returns {} on both sides with no embedded graph, so
+        # this degrades to the prior behavior automatically for the common
+        # case.
+        old_call_paths = compute_call_graph_leak_paths(ctx.old, namespaces)
+        new_call_paths = compute_call_graph_leak_paths(ctx.new, namespaces)
+        call_reachable = set(old_call_paths) | set(new_call_paths)
         # ScopeOrigin.PUBLIC_HEADER (Codex review, fresh evidence):
         # compute_leak_paths only ever records *internal* types reached
         # while walking from the public surface — a declaration that is
@@ -644,7 +669,7 @@ class MarkReachability:
         # kind that carries the field (function/variable/type/enum), not
         # just RecordType.
         public_header_names = _public_header_names(ctx.old) | _public_header_names(ctx.new)
-        if not reachable_types and not public_header_names:
+        if not reachable_types and not public_header_names and not call_reachable:
             return changes
 
         for c in changes:
@@ -658,36 +683,86 @@ class MarkReachability:
                 if "::" in root and c.kind in _ENUM_MEMBER_KINDS
                 else None
             )
-            if root in public_header_names or enum_owner in public_header_names:
+            # Codex review (fresh evidence): root is c.symbol verbatim for a
+            # function/variable-shaped change, and diff_symbols.py sets that
+            # to the *mangled* linker name for FUNC_REMOVED/FUNC_ADDED/etc. --
+            # while _public_header_names above collects Function.name, which
+            # is demangled. root == a public_header_names entry therefore
+            # never matches for a real (mangled) C++ symbol, so a
+            # public-header-declared C++ function/variable removal fell
+            # through this direct-public-symbol check entirely, relying
+            # entirely on the layout/call-graph walks below to still tag it
+            # -- and a standalone public entry point that nothing else
+            # references or embeds is reachable by neither, so it was
+            # silently untagged and a broad suppression rule could hide it
+            # with no diagnostic. c.qualified_name (EnrichSourceLocations,
+            # runs before this step) is set from the demangled Function.name
+            # for exactly the FUNC_REMOVED/FUNC_ADDED kinds this matters for,
+            # so check it too.
+            if (
+                root in public_header_names
+                or enum_owner in public_header_names
+                or (c.qualified_name and c.qualified_name in public_header_names)
+            ):
                 c.public_reachable = True
                 c.reachability_kind = "direct_public_symbol"
                 continue
-            if root not in reachable_types:
-                continue
-            old_pl = old_paths.get(root, [])
-            new_pl = new_paths.get(root, [])
-            paths = old_pl + [p for p in new_pl if p not in old_pl]
-            if not paths:
-                continue
-            # Mirror DetectInternalLeaks's own value/indirection judgment
-            # (Codex review): a pure-layout change reached *only* through a
-            # pointer/reference is not consumer-visible and DetectInternalLeaks
-            # will not emit a leak finding for it either — tagging it
-            # public_reachable anyway would refuse a broad suppression rule
-            # and append a suppression_would_hide_public_break diagnostic for
-            # churn that was always going to be demoted as unreachable by
-            # DemoteUnreachableInternalChurn, a false alarm.
-            identity_or_vtable = c.kind in _IDENTITY_VTABLE_KINDS
-            all_indirect = all(_path_has_indirection(p) for p in paths)
-            if all_indirect and not identity_or_vtable:
-                continue
-            c.public_reachable = True
-            c.reachability_kind = (
-                "value_embedding"
-                if any(_path_is_value_propagating(p) for p in paths)
-                else "pointer_or_signature"
+            tagged = False
+            if root in reachable_types:
+                old_pl = old_paths.get(root, [])
+                new_pl = new_paths.get(root, [])
+                paths = old_pl + [p for p in new_pl if p not in old_pl]
+                # Mirror DetectInternalLeaks's own value/indirection judgment
+                # (Codex review): a pure-layout change reached *only* through
+                # a pointer/reference is not consumer-visible and
+                # DetectInternalLeaks will not emit a leak finding for it
+                # either — tagging it public_reachable anyway would refuse a
+                # broad suppression rule and append a
+                # suppression_would_hide_public_break diagnostic for churn
+                # that was always going to be demoted as unreachable by
+                # DemoteUnreachableInternalChurn, a false alarm.
+                identity_or_vtable = c.kind in _IDENTITY_VTABLE_KINDS
+                all_indirect = bool(paths) and all(
+                    _path_has_indirection(p) for p in paths
+                )
+                if paths and not (all_indirect and not identity_or_vtable):
+                    c.public_reachable = True
+                    c.reachability_kind = (
+                        "value_embedding"
+                        if any(_path_is_value_propagating(p) for p in paths)
+                        else "pointer_or_signature"
+                    )
+                    c.reachability_proof_path = _format_path(min(paths, key=len))
+                    tagged = True
+            # ADR-044 P1 items 1/3: independent of (and checked regardless of
+            # the outcome of) the layout walk above — a change can be
+            # call-graph-reachable without any layout/type-graph evidence at
+            # all (e.g. func_removed on an internal decl with no field/base/
+            # signature reference anywhere).
+            # Codex review (fresh evidence): compute_call_graph_leak_paths's
+            # mangled-symbol key only exists when the graph carries a
+            # SOURCE_DECL_MAPS_TO_SYMBOL edge for the target decl — the
+            # build-integrated L4/L5 path (source_graph.py) creates one, but
+            # the header-only path (header_graph.py, --header-graph/the
+            # implicit dump path, no real build) never does. c.qualified_name
+            # (EnrichSourceLocations, runs before this step) is set from
+            # Function.name — the same demangled name a graph node's own
+            # label carries in EITHER mode — so it is a reliable fallback key
+            # independent of which graph provenance produced the evidence.
+            call_key = (
+                root if root in call_reachable
+                else (c.qualified_name if c.qualified_name in call_reachable else None)
             )
-            c.reachability_proof_path = _format_path(min(paths, key=len))
+            if not tagged and call_key is not None:
+                call_paths = old_call_paths.get(call_key, []) + [
+                    p
+                    for p in new_call_paths.get(call_key, [])
+                    if p not in old_call_paths.get(call_key, [])
+                ]
+                if call_paths:
+                    c.public_reachable = True
+                    c.reachability_kind = "symbol_availability"
+                    c.reachability_proof_path = min(call_paths, key=len)
         return changes
 
 
@@ -1070,10 +1145,25 @@ class DetectTemplatePatterns:
 
     name = "detect_template_patterns"
 
-    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
-        from .diff_templates import detect_template_patterns
+    def __init__(self, namespaces: tuple[str, ...] | None = None) -> None:
+        # Mirrors MarkReachability/DetectInternalLeaks/
+        # DemoteUnreachableInternalChurn's own constructor (Codex review,
+        # fresh evidence): detect_internal_template_leaks's
+        # _INTERNAL_TEMPLATE_NAMESPACES is the same internal-implementation
+        # convention those three steps use (detail/impl/internal/__detail/
+        # _impl, plus __internal) -- unlike DetectNamespacePatterns's
+        # unrelated experimental_namespaces, PolicyFile.internal_namespaces
+        # should reach this step too.
+        self._namespaces = namespaces
 
-        new_findings = detect_template_patterns(ctx.old, ctx.new)
+    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        from .diff_templates import (
+            _INTERNAL_TEMPLATE_NAMESPACES,
+            detect_template_patterns,
+        )
+
+        namespaces = self._namespaces or ctx.internal_namespaces or _INTERNAL_TEMPLATE_NAMESPACES
+        new_findings = detect_template_patterns(ctx.old, ctx.new, namespaces)
         if not new_findings:
             return changes
         _merge_findings_respecting_suppression(changes, new_findings, ctx)
@@ -1132,11 +1222,16 @@ class DetectInternalLeaks:
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         from .internal_leak import (
             DEFAULT_INTERNAL_NAMESPACES,
+            detect_call_graph_leaks,
             detect_internal_leaks,
         )
 
-        namespaces = self._namespaces or DEFAULT_INTERNAL_NAMESPACES
+        namespaces = self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
         extra = detect_internal_leaks(changes, ctx.old, ctx.new, namespaces)
+        # ADR-044 P1 items 1-2: the call-graph analogue, for a triggering
+        # change with no layout/type-graph evidence at all (see
+        # MarkReachability's own call-graph fallback, same namespaces).
+        extra = extra + detect_call_graph_leaks(changes, ctx.old, ctx.new, namespaces)
         if not extra:
             return changes
         # Synthetic leak findings must respect user suppression rules too.
@@ -1188,7 +1283,7 @@ class DemoteUnreachableInternalChurn:
         )
         from .surface import REASON_PRIVATE_INTERNAL_UNREACHABLE
 
-        namespaces = self._namespaces or DEFAULT_INTERNAL_NAMESPACES
+        namespaces = self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
         frozen = list(ctx.frozen_namespaces)
 
         def _is_frozen(type_name: str) -> bool:
@@ -1472,6 +1567,12 @@ class PostProcessingPipeline:
         force_public_symbols: set[str] | None = None,
         collapse_versioned_symbols: bool = False,
         public_surface_allowlist: set[str] | None = None,
+        # Appended after the existing optional parameters (Codex review) —
+        # inserting it earlier would silently break a positional caller of
+        # any parameter after it (e.g. `.run(c, old, new, sup, fns, True)`
+        # for scope_to_public_surface would instead bind `True` here and
+        # leave scoping disabled, with no error).
+        internal_namespaces: tuple[str, ...] | None = None,
     ) -> PipelineContext:
         """Run all steps, returning the final PipelineContext."""
         ctx = PipelineContext(
@@ -1479,6 +1580,7 @@ class PostProcessingPipeline:
             new=new,
             suppression=suppression,
             frozen_namespaces=list(frozen_namespaces or []),
+            internal_namespaces=internal_namespaces,
             scope_to_public_surface=scope_to_public_surface,
             force_public_symbols=set(force_public_symbols or set()),
             collapse_versioned_symbols=collapse_versioned_symbols,

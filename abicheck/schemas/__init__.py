@@ -94,7 +94,20 @@ from typing import Any
 #:       default ``confirm_public_api_intent`` for every other addition kind.
 #:       Additive optional key; does not change ``recommended_action``'s
 #:       existing values or meaning.
-REPORT_SCHEMA_VERSION = "2.6"
+#: 2.7 — added three additive optional per-finding keys (ADR-044 P1 item 4):
+#:       ``public_reachable`` (bool), ``reachability_kind`` (one of
+#:       "direct_public_symbol"/"value_embedding"/"pointer_or_signature"/
+#:       "symbol_availability"), and ``reachability_proof_path`` (string) —
+#:       previously surfaced only as prose inside the
+#:       ``suppression_would_hide_public_break`` diagnostic's description.
+#: 2.8 — added ``"consumer_proven"`` to ``reachability_kind``'s enum
+#:       (ADR-044 P2): set on the ``consumer_required_symbol_removed``/
+#:       ``consumer_runtime_load_failed`` overlays ``compare --used-by``
+#:       synthesizes, which are always consumer-verified real (a real
+#:       consumer binary's own requirement, or an actual dynamic-linker
+#:       failure) rather than established by the L0-L5 public-surface walk
+#:       the other four values describe. Additive enum member.
+REPORT_SCHEMA_VERSION = "2.8"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

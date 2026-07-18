@@ -131,6 +131,7 @@ problem in CI.
 |--------|-------------|
 | `OLD_INPUT` / `NEW_INPUT` | Old and new library (`.so`/`.dll`/`.dylib`, JSON snapshot, or ABICC dump) — same as plain `compare`. With `--used-by`, a JSON snapshot works only if it carries binary evidence (a `dump` of a real library, not headers-only) — its `elf`/`pe`/`macho` field is what the app's imports resolve against. |
 | `--used-by FILE` | Application binary whose imports/required symbol versions scope the comparison (repeatable). Mutually exclusive with `--required-symbol`/`--required-symbols`. |
+| `--verify-runtime` | With `--used-by`: actually run each consumer binary once against OLD and once against NEW (see [Runtime verification](#runtime-verification-verify-runtime) below). |
 | `-H` / `--header` | Public header file or directory (repeatable, side-aware with `old=`/`new=`) |
 | `-I` / `--include` | Extra include directory for castxml (repeatable, side-aware) |
 | `--lang` | Language mode: `c++` (default) or `c` |
@@ -149,6 +150,61 @@ option among the full `compare` surface, not a separate command with its own
 flags.
 
 ---
+
+## Runtime verification (`--verify-runtime`)
+
+Everything above is **static**: it reads the consumer binary's own import
+table and the new library's export table, without running either. Most ABI
+breaks are visible that way, but not all of them — a struct layout change
+that leaves every symbol name intact can still corrupt memory at runtime.
+`--verify-runtime` (ADR-044 P2 item 2) adds a **dynamic**, opt-in
+corroborating check on top of the static one:
+
+```bash
+abicheck compare old.so new.so --used-by myapp --verify-runtime
+```
+
+For each `--used-by` app, this actually runs the binary twice — once with
+`LD_LIBRARY_PATH` pointed at the old library, once at the new one — with
+`LD_BIND_NOW=1` set both times. `LD_BIND_NOW` forces the dynamic linker to
+resolve every symbol reference immediately at load time (the same eager
+binding a `-z now`-linked production deployment gets), instead of lazily on
+first call — so a missing symbol fails loudly and immediately rather than
+silently, on whichever code path happens to call it first, at some point in
+the future.
+
+If the app loads and runs cleanly against the old library, but the dynamic
+linker itself reports `symbol lookup error: ... undefined symbol: X` against
+the new one, `--verify-runtime` emits a `consumer_runtime_load_failed`
+finding (`COMPATIBLE_WITH_RISK`) naming `X`. This is deliberately narrow: it
+only interprets the dynamic linker's own explicit "I could not resolve this
+symbol" message, never the app's own exit code or general crash behavior —
+an app can legitimately exit nonzero for reasons that have nothing to do
+with the library (a missing input file, a usage error), so treating that as
+a "runtime regression" would be noisy and unreliable. Because of that
+narrowness, this is always a **RISK**-tier finding, never `BREAKING` on its
+own — an execution environment can fail for reasons unrelated to the library
+(sandboxing, an unrelated missing dependency), so `--verify-runtime` only
+*corroborates* the static scanner, it never replaces it or overrides its
+verdict.
+
+**Requirements and limits:**
+
+- Both OLD and NEW must be real library binaries on disk (not JSON
+  snapshots) — there is no file to point `LD_LIBRARY_PATH` at otherwise.
+  `--verify-runtime` is silently skipped for any app where this doesn't hold.
+- **Linux-only.** `LD_BIND_NOW`/`LD_LIBRARY_PATH` are glibc/ELF mechanisms
+  with no reliable equivalent on macOS (System Integrity Protection strips
+  `DYLD_*` environment variables from most binaries) or Windows (no
+  env-var-driven early-bind/preload for PE loading). On any other platform,
+  `--verify-runtime` is a no-op.
+- Each run has a fixed timeout; a consumer that hangs is treated the same as
+  one that never regressed (no finding), not as a failure — a timeout has no
+  specific missing symbol to name, so it isn't attributable to the library
+  change with the same confidence.
+- The consumer binary is executed on your machine, in your environment, with
+  whatever privileges the `abicheck` process has. Only pass `--verify-runtime`
+  for a consumer binary you trust to run.
 
 ## Exit codes
 

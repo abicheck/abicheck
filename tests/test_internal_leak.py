@@ -61,6 +61,36 @@ class TestNameSegments:
         assert _name_segments("") == []
 
 
+class TestStripSignatureParams:
+    def test_strips_params(self) -> None:
+        from abicheck.internal_leak import _strip_signature_params
+
+        assert (
+            _strip_signature_params("ns::api::foo(ns::detail::T*)")
+            == "ns::api::foo"
+        )
+
+    def test_stops_at_top_level_paren_not_nested_one(self) -> None:
+        """A function-pointer parameter type has its own nested parens
+        (e.g. "void (*)(int)") -- must not be mistaken for the function's
+        own parameter-list opening."""
+        from abicheck.internal_leak import _strip_signature_params
+
+        assert (
+            _strip_signature_params("ns::api::bar(void (*)(int))") == "ns::api::bar"
+        )
+
+    def test_no_parens_returned_unchanged(self) -> None:
+        from abicheck.internal_leak import _strip_signature_params
+
+        assert _strip_signature_params("ns::detail::helper") == "ns::detail::helper"
+
+    def test_empty_string(self) -> None:
+        from abicheck.internal_leak import _strip_signature_params
+
+        assert _strip_signature_params("") == ""
+
+
 class TestIsInternalType:
     @pytest.mark.parametrize("name", [
         "oneapi::dal::detail::pimpl",
@@ -866,3 +896,609 @@ class TestExampleCaseParity:
         assert leaks, "case76 pattern: leak must be detected"
         assert leaks[0].symbol == "mylib::detail::algorithm_iface"
         assert "mylib::svm_algorithm" in leaks[0].description
+
+
+# ---------------------------------------------------------------------------
+# compute_call_graph_leak_paths / detect_call_graph_leaks (ADR-044 P1 items 1-2)
+# ---------------------------------------------------------------------------
+
+
+def _decl_node(node_id: str, label: str, visibility: str):
+    from abicheck.buildsource.source_graph import GraphNode
+
+    return GraphNode(
+        id=node_id, kind="source_decl", label=label, attrs={"visibility": visibility}
+    )
+
+
+def _graph_snap(nodes: list, edges: list) -> AbiSnapshot:
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_graph import SourceGraphSummary
+
+    graph = SourceGraphSummary(nodes=list(nodes), edges=list(edges))
+    return AbiSnapshot(
+        library="libtest.so",
+        version="1.0",
+        build_source=BuildSourcePack(root="", source_graph=graph),
+    )
+
+
+class TestComputeCallGraphLeakPaths:
+    def test_no_build_source_returns_empty(self) -> None:
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        assert compute_call_graph_leak_paths(_snap()) == {}
+
+    def test_no_relevant_edges_returns_empty(self) -> None:
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_graph import GraphEdge, SourceGraphSummary
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        graph = SourceGraphSummary(
+            nodes=[_decl_node("decl://pub", "pubFn", "public_header")],
+            edges=[GraphEdge(src="decl://pub", dst="decl://x", kind="DECL_HAS_TYPE")],
+        )
+        snap = AbiSnapshot(
+            library="libtest.so",
+            version="1.0",
+            build_source=BuildSourcePack(root="", source_graph=graph),
+        )
+        assert compute_call_graph_leak_paths(snap) == {}
+
+    def test_public_entry_calling_internal_decl_is_a_leak_path(self) -> None:
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        snap = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", "ns::detail::helper", "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        paths = compute_call_graph_leak_paths(snap)
+        assert "ns::detail::helper" in paths
+        assert "pubFn" in paths["ns::detail::helper"][0]
+        assert "DECL_CALLS_DECL" in paths["ns::detail::helper"][0]
+
+    def test_ordinary_out_of_line_exported_entry_is_not_a_leak_path(self) -> None:
+        """Codex review: an ordinary, out-of-line exported function's own body
+        is compiled into the *library's* binary only, never into any
+        consumer's -- its internal calls (e.g. to ns::detail::helper) are not
+        public-reachable the way an inline/template entry's calls are.
+        consumer_compiled_body=False (the build-integrated source_graph.py
+        signal for "not inline, not a template") must exclude it from the
+        walk's entry set entirely."""
+        from abicheck.buildsource.source_graph import GraphEdge, GraphNode
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        snap = _graph_snap(
+            [
+                GraphNode(
+                    id="decl://pub", kind="source_decl", label="api",
+                    attrs={"visibility": "public_header", "consumer_compiled_body": False},
+                ),
+                _decl_node("decl://int", "ns::detail::helper", "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        assert compute_call_graph_leak_paths(snap) == {}
+
+    def test_inline_entry_with_explicit_flag_is_still_a_leak_path(self) -> None:
+        """The positive counterpart: consumer_compiled_body=True (an inline
+        method/template entry) still seeds the walk, same as before this
+        signal existed -- this ADR's own headline scenario."""
+        from abicheck.buildsource.source_graph import GraphEdge, GraphNode
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        snap = _graph_snap(
+            [
+                GraphNode(
+                    id="decl://pub", kind="source_decl", label="pubInline",
+                    attrs={"visibility": "public_header", "consumer_compiled_body": True},
+                ),
+                _decl_node("decl://int", "ns::detail::helper", "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        paths = compute_call_graph_leak_paths(snap)
+        assert "ns::detail::helper" in paths
+
+    def test_walk_stops_expanding_past_non_consumer_compiled_intermediate(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: restricting the *entry set* to
+        consumer-compiled nodes is not enough on its own -- the walk itself
+        must also stop *expanding past* a non-consumer-compiled intermediate.
+        A public inline wrap() calls an ordinary out-of-line exported api()
+        (consumer_compiled_body=False), which in turn calls an internal
+        helper(). api() itself IS reachable from wrap() (a consumer really
+        does link against api()'s exported symbol), but helper() is not --
+        that call happens entirely inside the library's binary, in a
+        function whose own body no consumer ever compiles. Before this fix,
+        the walk expanded transitively past every intermediate regardless of
+        its own consumer_compiled_body, so helper()'s removal would have
+        been (wrongly) reported reachable through wrap()."""
+        from abicheck.buildsource.source_graph import GraphEdge, GraphNode
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        snap = _graph_snap(
+            [
+                GraphNode(
+                    id="decl://wrap", kind="source_decl", label="demo::wrap",
+                    attrs={"visibility": "public_header", "consumer_compiled_body": True},
+                ),
+                GraphNode(
+                    id="decl://api", kind="source_decl", label="demo::api",
+                    attrs={"visibility": "public_header", "consumer_compiled_body": False},
+                ),
+                _decl_node("decl://helper", "demo::detail::helper", "source"),
+            ],
+            [
+                GraphEdge(src="decl://wrap", dst="decl://api", kind="DECL_CALLS_DECL"),
+                GraphEdge(src="decl://api", dst="decl://helper", kind="DECL_CALLS_DECL"),
+            ],
+        )
+        paths = compute_call_graph_leak_paths(snap)
+        assert "demo::detail::helper" not in paths
+        # api() itself is a real, direct dependency of wrap() and is not in an
+        # internal namespace, so it never becomes a leak-path key either way --
+        # this asserts the walk didn't silently drop it from the graph, only
+        # that it correctly stopped expanding past it.
+        assert paths == {}
+
+    def test_walk_stops_at_call_graph_fallback_node_with_no_signal(self) -> None:
+        """Codex review, fresh evidence: the previous fix's default
+        (permissive when consumer_compiled_body is absent) covered the
+        explicit-False case above, but a real call_graph.py fallback node
+        (augment_graph_with_calls, created for a caller/callee identity with
+        no other declaration node backing it) has NO consumer_compiled_body
+        attr at all -- neither True nor False -- while still being a real,
+        build-integrated project function whose out-of-line body is not
+        necessarily consumer-compiled. A public inline wrap() calling such a
+        fallback-shaped intermediate (demo::helper_a, provenance="call_graph",
+        no consumer_compiled_body key) which itself calls an internal
+        helper() must stop expanding at helper_a() -- treating "no signal"
+        as "safe" for this one provenance would silently reintroduce the
+        exact over-reach the previous fix closed for the explicit-False
+        shape."""
+        from abicheck.buildsource.source_graph import GraphEdge, GraphNode
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        snap = _graph_snap(
+            [
+                GraphNode(
+                    id="decl://wrap", kind="source_decl", label="demo::wrap",
+                    attrs={"visibility": "public_header", "consumer_compiled_body": True},
+                ),
+                GraphNode(
+                    id="decl://helper_a", kind="source_decl", label="demo::helper_a",
+                    provenance="call_graph", attrs={"defined_in_project": True},
+                ),
+                _decl_node("decl://helper", "demo::detail::helper", "source"),
+            ],
+            [
+                GraphEdge(src="decl://wrap", dst="decl://helper_a", kind="DECL_CALLS_DECL"),
+                GraphEdge(src="decl://helper_a", dst="decl://helper", kind="DECL_CALLS_DECL"),
+            ],
+        )
+        paths = compute_call_graph_leak_paths(snap)
+        assert paths == {}
+
+    @pytest.mark.parametrize("backend_provenance", ["kythe", "codeql"])
+    def test_walk_stops_at_kythe_codeql_node_with_no_signal(
+        self, backend_provenance: str,
+    ) -> None:
+        """Codex review, fresh evidence: the call_graph.py fallback-node fix
+        above only excused that one provenance from the permissive
+        "no consumer_compiled_body attr -> treat as reachable" default --
+        graph_backends.py's ingest_kythe_entries/ingest_codeql_call_results
+        create the identical shape (a bare source_decl node with no
+        consumer_compiled_body attr at all) for an imported external-indexer
+        edge, tagged provenance="kythe"/"codeql" instead of "call_graph".
+        Neither export format says whether the referenced declaration's body
+        is inline/template, so a public inline wrap() calling such a
+        Kythe/CodeQL-sourced intermediate (demo::helper_a) which itself calls
+        an internal helper() must stop expanding at helper_a() for the same
+        reason as the call_graph fallback shape."""
+        from abicheck.buildsource.source_graph import GraphEdge, GraphNode
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        snap = _graph_snap(
+            [
+                GraphNode(
+                    id="decl://wrap", kind="source_decl", label="demo::wrap",
+                    attrs={"visibility": "public_header", "consumer_compiled_body": True},
+                ),
+                GraphNode(
+                    id="decl://helper_a", kind="source_decl", label="demo::helper_a",
+                    provenance=backend_provenance, attrs={"defined_in_project": True},
+                ),
+                _decl_node("decl://helper", "demo::detail::helper", "source"),
+            ],
+            [
+                GraphEdge(src="decl://wrap", dst="decl://helper_a", kind="DECL_CALLS_DECL"),
+                GraphEdge(src="decl://helper_a", dst="decl://helper", kind="DECL_CALLS_DECL"),
+            ],
+        )
+        paths = compute_call_graph_leak_paths(snap)
+        assert paths == {}
+
+    def test_reference_edge_also_counts(self) -> None:
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        snap = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", "ns::detail::Const", "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_REFERENCES_DECL")],
+        )
+        paths = compute_call_graph_leak_paths(snap)
+        assert "ns::detail::Const" in paths
+
+    def test_non_internal_target_not_recorded(self) -> None:
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        snap = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://other", "ns::otherPublicFn", "public_header"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://other", kind="DECL_CALLS_DECL")],
+        )
+        assert compute_call_graph_leak_paths(snap) == {}
+
+    def test_no_public_entry_returns_empty(self) -> None:
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        snap = _graph_snap(
+            [
+                _decl_node("decl://a", "ns::detail::a", "source"),
+                _decl_node("decl://b", "ns::detail::b", "source"),
+            ],
+            [GraphEdge(src="decl://a", dst="decl://b", kind="DECL_CALLS_DECL")],
+        )
+        assert compute_call_graph_leak_paths(snap) == {}
+
+    def test_custom_namespaces_recognizes_convention(self) -> None:
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        snap = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", "ns::priv::helper", "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        assert compute_call_graph_leak_paths(snap) == {}
+        assert "ns::priv::helper" in compute_call_graph_leak_paths(snap, ("priv",))
+
+    def test_result_also_keyed_by_mangled_exported_symbol(self) -> None:
+        """Codex review, fresh evidence: a real ``FUNC_REMOVED`` Change's
+        ``symbol`` is the mangled linker name (diff_symbols.py), not the
+        node's demangled qualified-name label — keying the result only by
+        ``node.label`` would silently never match a real compiled C++
+        removal. A target node's own SOURCE_DECL_MAPS_TO_SYMBOL edge (the
+        same binary_symbol:// identity localize_symbol() already uses) must
+        also produce a lookup key."""
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        snap = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", "ns::detail::train_ops_dispatcher", "source"),
+            ],
+            [
+                GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL"),
+                GraphEdge(
+                    src="decl://int",
+                    dst="binary_symbol://_ZN2ns6detail19train_ops_dispatcherEv",
+                    kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+                ),
+            ],
+        )
+        paths = compute_call_graph_leak_paths(snap)
+        # Both the demangled qualified-name key (compute_leak_paths's own
+        # convention, and what a hand-authored Change might use) ...
+        assert "ns::detail::train_ops_dispatcher" in paths
+        # ... and the mangled key a real diff_symbols.py FUNC_REMOVED
+        # Change.symbol actually holds must resolve to the same proof paths.
+        assert "_ZN2ns6detail19train_ops_dispatcherEv" in paths
+        assert paths["_ZN2ns6detail19train_ops_dispatcherEv"] == paths[
+            "ns::detail::train_ops_dispatcher"
+        ]
+
+    def test_no_symbol_mapping_keys_only_by_label(self) -> None:
+        """A call-graph-only target with no exported symbol at all (e.g.
+        fully inlined, no linkage) gets no mangled key — there is no
+        FUNC_REMOVED-shaped Change that could ever look one up anyway."""
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        snap = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", "ns::detail::helper", "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        paths = compute_call_graph_leak_paths(snap)
+        assert list(paths.keys()) == ["ns::detail::helper"]
+
+    def test_mangled_only_label_demangled_for_classification(self, monkeypatch) -> None:
+        """Codex review, fresh evidence: augment_graph_with_calls's
+        call-graph-only fallback node (added when a callee has no
+        SOURCE_DECLARES-backed node elsewhere) gets label=ident from
+        function_decl_identity, which is the *mangled* name for any
+        ordinary C++ function -- no "::" at all, so is_internal_type would
+        reject it before classification without demangling first. The
+        stored key stays the original mangled label (matching a real
+        FUNC_REMOVED's Change.symbol directly)."""
+        import abicheck.demangle as demangle_mod
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        mangled = "_ZN2ns6detail6helperEv"
+        monkeypatch.setattr(demangle_mod, "demangle", lambda s: "ns::detail::helper()")
+        snap = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", mangled, "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        paths = compute_call_graph_leak_paths(snap)
+        assert mangled in paths
+        assert "pubFn" in paths[mangled][0]
+
+    def test_mangled_label_not_internal_after_demangling_stays_dropped(self, monkeypatch) -> None:
+        """A mangled label that demangles to a non-internal qualified name
+        must still be excluded -- demangling only changes what's classified
+        as internal, not a blanket "keep everything mangled" allowance."""
+        import abicheck.demangle as demangle_mod
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        mangled = "_ZN2ns9PublicFooEv"
+        monkeypatch.setattr(demangle_mod, "demangle", lambda s: "ns::PublicFoo()")
+        snap = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", mangled, "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        assert compute_call_graph_leak_paths(snap) == {}
+
+    def test_public_fn_with_internal_param_type_not_misclassified(
+        self, monkeypatch,
+    ) -> None:
+        """Codex review, fresh evidence: demangle() returns the *full
+        signature* ("ns::api::foo(ns::detail::T*)"), not just the qualified
+        name. is_internal_type's segment scan would otherwise find "detail"
+        inside the *parameter* type and misclassify an ordinary public
+        function as an internal leak target merely because it takes an
+        internal-namespaced type -- even though the function itself lives in
+        the public ns::api namespace. The signature's own parameter list
+        must be stripped before classification."""
+        import abicheck.demangle as demangle_mod
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        mangled = "_ZN2ns3api3fooEPNS_6detail1TE"
+        monkeypatch.setattr(
+            demangle_mod, "demangle", lambda s: "ns::api::foo(ns::detail::T*)"
+        )
+        snap = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://target", mangled, "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://target", kind="DECL_CALLS_DECL")],
+        )
+        assert compute_call_graph_leak_paths(snap) == {}
+
+    def test_hash_suffixed_label_also_keyed_by_stripped_name(self) -> None:
+        """Codex review, fresh evidence: function_decl_identity's third node
+        shape -- a declaration with no distinct mangled name (e.g. extern
+        "C") gets label="{qualified_name}#sha256:{digest}", not the bare
+        qualified name a real Change.symbol/qualified_name would ever carry.
+        The hash-stripped name must also be a lookup key."""
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        label = "ns::detail::c_helper#sha256:abcdef1234567890"
+        snap = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", label, "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        paths = compute_call_graph_leak_paths(snap)
+        assert "ns::detail::c_helper" in paths
+        assert paths["ns::detail::c_helper"] == paths[label]
+
+
+class TestDetectCallGraphLeaks:
+    def test_func_removed_on_internal_decl_reachable_via_call_graph(self) -> None:
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import detect_call_graph_leaks
+
+        old = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", "ns::detail::train_ops_dispatcher", "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        new = _graph_snap(
+            [_decl_node("decl://pub", "pubFn", "public_header")],
+            [],
+        )
+        triggering = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="ns::detail::train_ops_dispatcher",
+            description="removed",
+        )
+        extra = detect_call_graph_leaks([triggering], old, new)
+        assert len(extra) == 1
+        overlay = extra[0]
+        assert overlay.kind == ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API
+        assert overlay.symbol == "ns::detail::train_ops_dispatcher"
+        assert overlay.public_reachable is True
+        assert overlay.reachability_kind == "symbol_availability"
+        assert "pubFn" in (overlay.reachability_proof_path or "")
+
+    def test_func_removed_matches_via_mangled_symbol_not_label(self) -> None:
+        """Codex review, fresh evidence: the real-world shape. A real
+        FUNC_REMOVED Change's symbol is the mangled linker name, which does
+        NOT equal the graph node's demangled qualified-name label — the
+        overlay finding must still be produced via the node's own
+        SOURCE_DECL_MAPS_TO_SYMBOL edge, not only when a test hand-picks a
+        matching label/symbol pair."""
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import detect_call_graph_leaks
+
+        mangled = "_ZN2ns6detail19train_ops_dispatcherEv"
+        old = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", "ns::detail::train_ops_dispatcher", "source"),
+            ],
+            [
+                GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL"),
+                GraphEdge(
+                    src="decl://int",
+                    dst=f"binary_symbol://{mangled}",
+                    kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+                ),
+            ],
+        )
+        new = _graph_snap([_decl_node("decl://pub", "pubFn", "public_header")], [])
+        # symbol is the mangled name, exactly as diff_symbols.py builds it —
+        # NOT "ns::detail::train_ops_dispatcher" (the node's label).
+        triggering = Change(kind=ChangeKind.FUNC_REMOVED, symbol=mangled, description="removed")
+        extra = detect_call_graph_leaks([triggering], old, new)
+        assert len(extra) == 1
+        overlay = extra[0]
+        assert overlay.kind == ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API
+        assert overlay.symbol == mangled
+        assert overlay.public_reachable is True
+
+    def test_no_op_without_triggering_change(self) -> None:
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import detect_call_graph_leaks
+
+        old = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", "ns::detail::helper", "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        new = _graph_snap([], [])
+        assert detect_call_graph_leaks([], old, new) == []
+
+    def test_non_breaking_kind_is_not_a_trigger(self) -> None:
+        """A COMPATIBLE finding on an internal decl must not compose an
+        overlay finding — the authority rule (only an already artifact-proven
+        BREAKING change may be explained/correlated, never manufactured)."""
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import detect_call_graph_leaks
+
+        old = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", "ns::detail::helper", "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        new = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", "ns::detail::helper", "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        compatible_change = Change(
+            kind=ChangeKind.FUNC_ADDED,
+            symbol="ns::detail::helper",
+            description="added an overload",
+        )
+        assert detect_call_graph_leaks([compatible_change], old, new) == []
+
+    def test_api_break_kind_is_not_a_trigger(self) -> None:
+        """Codex review, fresh evidence: API_BREAK_KINDS is the
+        SOURCE_CONTRACT tier, not artifact-proven — most of its members
+        (e.g. inline_function_removed) have no removed linker symbol at all,
+        so composing one into this overlay's "fails to resolve at load
+        time" claim would be a false binary-load-time claim. Only
+        BREAKING_KINDS may trigger, even with real call-graph evidence."""
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.checker_policy import BREAKING_KINDS
+        from abicheck.internal_leak import detect_call_graph_leaks
+
+        old = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", "ns::detail::helper", "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        new = _graph_snap([_decl_node("decl://pub", "pubFn", "public_header")], [])
+        assert ChangeKind.INLINE_FUNCTION_REMOVED not in BREAKING_KINDS
+        api_break_change = Change(
+            kind=ChangeKind.INLINE_FUNCTION_REMOVED,
+            symbol="ns::detail::helper",
+            description="inline function removed",
+        )
+        assert detect_call_graph_leaks([api_break_change], old, new) == []
+
+    def test_header_graph_mode_matches_via_qualified_name(self) -> None:
+        """Codex review, fresh evidence: header_graph.py (--header-graph, no
+        real build) never creates a SOURCE_DECL_MAPS_TO_SYMBOL edge, so the
+        mangled-symbol-key fix above is a no-op in that mode. A real
+        FUNC_REMOVED's Change.qualified_name (set by EnrichSourceLocations
+        from Function.name, independent of graph provenance) must serve as
+        a fallback lookup key against the label-keyed result."""
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import detect_call_graph_leaks
+
+        mangled = "_ZN2ns6detail6helperEv"
+        # No SOURCE_DECL_MAPS_TO_SYMBOL edge at all -- the header-graph shape.
+        old = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", "ns::detail::helper", "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        new = _graph_snap([_decl_node("decl://pub", "pubFn", "public_header")], [])
+        triggering = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol=mangled,
+            qualified_name="ns::detail::helper",
+            description="removed",
+        )
+        extra = detect_call_graph_leaks([triggering], old, new)
+        assert len(extra) == 1
+        overlay = extra[0]
+        assert overlay.kind == ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API
+        assert overlay.public_reachable is True
+
+    def test_no_call_graph_evidence_no_overlay(self) -> None:
+        from abicheck.internal_leak import detect_call_graph_leaks
+
+        triggering = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="ns::detail::train_ops_dispatcher",
+            description="removed",
+        )
+        assert detect_call_graph_leaks([triggering], _snap(), _snap()) == []

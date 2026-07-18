@@ -1861,6 +1861,183 @@ class TestScopeDiffToAppWithSnapshots:
             result = scope_diff_to_app(diff, tmp_path / "app", old_snap, new_snap)
         assert result.missing_symbols == ["foo_init"]
 
+    def test_uncovered_missing_symbol_becomes_consumer_required_symbol_removed(
+        self, tmp_path,
+    ):
+        """ADR-044 P2 item 1: a missing symbol with no matching library-diff
+        Change is promoted to a first-class, suppressible
+        CONSUMER_REQUIRED_SYMBOL_REMOVED finding — not left as a bespoke
+        string only special-cased by reporter.py/sarif.py/junit_report.py."""
+        old_snap = self._snap("1.0", "libfoo.so.1", ["foo_init", "foo_process"])
+        new_snap = self._snap("2.0", "libfoo.so.1", ["foo_init"])
+        # No FUNC_REMOVED for foo_process in the diff at all (e.g. the header
+        # never declared it, so the artifact-level diff never saw it removed)
+        # -- the ONLY evidence this symbol vanished is the consumer's own
+        # undefined-symbol requirement.
+        diff = DiffResult(
+            old_version="1.0", new_version="2.0", library="libfoo.so.1",
+            changes=[], verdict=Verdict.COMPATIBLE,
+        )
+        app_reqs = AppRequirements(undefined_symbols={"foo_init", "foo_process"})
+        app_path = tmp_path / "myapp"
+        with patch(
+            "abicheck.appcompat.parse_app_requirements", return_value=app_reqs
+        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+            result = scope_diff_to_app(diff, app_path, old_snap, new_snap)
+        assert result.missing_symbols == ["foo_process"]
+        overlay = [
+            c for c in result.breaking_for_app
+            if c.kind == ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED
+        ]
+        assert len(overlay) == 1
+        assert overlay[0].symbol == "foo_process"
+        assert "myapp" in overlay[0].description
+
+    def test_missing_symbol_covered_by_diff_change_gets_no_overlay(self, tmp_path):
+        """The dedup case: a missing symbol already represented by a real
+        library-diff Change (FUNC_REMOVED) must not also get the overlay --
+        that would double-report the same break."""
+        old_snap = self._snap("1.0", "libfoo.so.1", ["foo_init", "foo_process"])
+        new_snap = self._snap("2.0", "libfoo.so.1", ["foo_init"])
+        diff = DiffResult(
+            old_version="1.0", new_version="2.0", library="libfoo.so.1",
+            changes=[Change(ChangeKind.FUNC_REMOVED, "foo_process", "removed")],
+            verdict=Verdict.BREAKING,
+        )
+        app_reqs = AppRequirements(undefined_symbols={"foo_init", "foo_process"})
+        with patch(
+            "abicheck.appcompat.parse_app_requirements", return_value=app_reqs
+        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+            result = scope_diff_to_app(diff, tmp_path / "app", old_snap, new_snap)
+        assert result.missing_symbols == ["foo_process"]
+        assert [c.kind for c in result.breaking_for_app] == [ChangeKind.FUNC_REMOVED]
+
+    def test_consumer_required_symbol_removed_overlay_is_suppressible(self, tmp_path):
+        """Codex review: CONSUMER_REQUIRED_SYMBOL_REMOVED is synthesized after
+        the pipeline's own suppression pass already ran over diff.changes, so
+        without threading `suppression` through here an exact rule for this
+        symbol/kind could never actually suppress it. missing_symbols must
+        also drop the suppressed symbol (Codex review, fresh evidence): it
+        independently forces Verdict.BREAKING in _compute_appcompat_verdict
+        regardless of breaking_for_app, so dropping only the synthesized
+        Change would leave the suppression cosmetic."""
+        from abicheck.suppression import Suppression, SuppressionList
+
+        old_snap = self._snap("1.0", "libfoo.so.1", ["foo_init", "foo_process"])
+        new_snap = self._snap("2.0", "libfoo.so.1", ["foo_init"])
+        diff = DiffResult(
+            old_version="1.0", new_version="2.0", library="libfoo.so.1",
+            changes=[], verdict=Verdict.COMPATIBLE,
+        )
+        app_reqs = AppRequirements(undefined_symbols={"foo_init", "foo_process"})
+        suppression = SuppressionList([Suppression(symbol="foo_process")])
+        with patch(
+            "abicheck.appcompat.parse_app_requirements", return_value=app_reqs
+        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+            result = scope_diff_to_app(
+                diff, tmp_path / "app", old_snap, new_snap, suppression=suppression,
+            )
+        assert result.missing_symbols == []
+        assert [c.kind for c in result.breaking_for_app] == []
+        assert result.verdict == Verdict.COMPATIBLE
+        # Coverage stays factual (the symbol really is absent from new
+        # exports) -- suppression silences the gate, not the reported metric.
+        assert result.symbol_coverage < 100.0
+
+    def test_consumer_required_symbol_removed_overlay_survives_unmatched_suppression(
+        self, tmp_path,
+    ):
+        from abicheck.suppression import Suppression, SuppressionList
+
+        old_snap = self._snap("1.0", "libfoo.so.1", ["foo_init", "foo_process"])
+        new_snap = self._snap("2.0", "libfoo.so.1", ["foo_init"])
+        diff = DiffResult(
+            old_version="1.0", new_version="2.0", library="libfoo.so.1",
+            changes=[], verdict=Verdict.COMPATIBLE,
+        )
+        app_reqs = AppRequirements(undefined_symbols={"foo_init", "foo_process"})
+        suppression = SuppressionList([Suppression(symbol="unrelated_symbol")])
+        with patch(
+            "abicheck.appcompat.parse_app_requirements", return_value=app_reqs
+        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+            result = scope_diff_to_app(
+                diff, tmp_path / "app", old_snap, new_snap, suppression=suppression,
+            )
+        assert [c.kind for c in result.breaking_for_app] == [
+            ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED
+        ]
+
+    def test_consumer_required_symbol_removed_not_hidden_by_broad_namespace_rule(
+        self, tmp_path,
+    ):
+        """Codex review, fresh evidence: this overlay only ever exists because
+        a real --used-by consumer's own undefined-symbol requirement
+        genuinely resolved to nothing in the new library -- there is no
+        "maybe internal, maybe not" ambiguity the way there is for an
+        ordinary internal-namespace Change. Before this fix the overlay was
+        built with public_reachable at its dataclass default (False), so a
+        broad namespace/source_location rule's default "unreachable-only"
+        reachability read it as unreachable and silently suppressed a break
+        that is, by construction, always consumer-proven real -- exactly the
+        failure mode this whole ADR exists to prevent for ordinary Changes,
+        just missed for this one synthesized overlay. public_reachable=True
+        must survive a broad rule (still visible, with the
+        suppression_would_hide_public_break diagnostic naming why) while a
+        narrow symbol:/change_kind: rule (already covered by the sibling
+        test above) is unaffected."""
+        from abicheck.suppression import Suppression, SuppressionList
+
+        old_snap = self._snap("1.0", "libfoo.so.1", ["foo_init", "ns::detail::foo"])
+        new_snap = self._snap("2.0", "libfoo.so.1", ["foo_init"])
+        diff = DiffResult(
+            old_version="1.0", new_version="2.0", library="libfoo.so.1",
+            changes=[], verdict=Verdict.COMPATIBLE,
+        )
+        app_reqs = AppRequirements(undefined_symbols={"foo_init", "ns::detail::foo"})
+        suppression = SuppressionList(
+            [Suppression(namespace="ns::detail::**", reason="detail churn")]
+        )
+        with patch(
+            "abicheck.appcompat.parse_app_requirements", return_value=app_reqs
+        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+            result = scope_diff_to_app(
+                diff, tmp_path / "app", old_snap, new_snap, suppression=suppression,
+            )
+        assert result.verdict == Verdict.BREAKING
+        assert result.missing_symbols == ["ns::detail::foo"]
+        kinds = [c.kind for c in result.breaking_for_app]
+        assert ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED in kinds
+        assert ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK in kinds
+
+    def test_consumer_required_symbol_removed_broad_rule_applies_with_override(
+        self, tmp_path,
+    ):
+        """The explicit-acknowledgment counterpart: allow_public_break: true
+        on the same broad rule does suppress it, same as any other
+        public-reachable BREAKING change."""
+        from abicheck.suppression import Suppression, SuppressionList
+
+        old_snap = self._snap("1.0", "libfoo.so.1", ["foo_init", "ns::detail::foo"])
+        new_snap = self._snap("2.0", "libfoo.so.1", ["foo_init"])
+        diff = DiffResult(
+            old_version="1.0", new_version="2.0", library="libfoo.so.1",
+            changes=[], verdict=Verdict.COMPATIBLE,
+        )
+        app_reqs = AppRequirements(undefined_symbols={"foo_init", "ns::detail::foo"})
+        suppression = SuppressionList([
+            Suppression(
+                namespace="ns::detail::**", reason="reviewed", allow_public_break=True,
+            )
+        ])
+        with patch(
+            "abicheck.appcompat.parse_app_requirements", return_value=app_reqs
+        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+            result = scope_diff_to_app(
+                diff, tmp_path / "app", old_snap, new_snap, suppression=suppression,
+            )
+        assert result.missing_symbols == []
+        assert result.breaking_for_app == []
+
 
 # ---------------------------------------------------------------------------
 # _lib_fmt / _lib_pe_meta / _lib_macho_meta: PE/Mach-O snapshot + Path branches
