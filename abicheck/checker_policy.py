@@ -419,8 +419,10 @@ class ChangeKind(str, Enum):
     INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API = "internal_type_leaks_via_public_api"
 
     # ADR-044 P1 items 1-2: the call-graph analogue of the leak above. An
-    # already artifact-proven BREAKING/API_BREAK change (e.g. func_removed) on
-    # an internal-namespaced decl is called/referenced from a public entry
+    # already artifact-proven BREAKING change (e.g. func_removed — never
+    # API_BREAK_KINDS, most of which have no removed linker symbol at all,
+    # e.g. inline_function_removed) on an internal-namespaced decl is
+    # called/referenced from a public entry
     # point over a DECL_CALLS_DECL/DECL_REFERENCES_DECL edge in the optional
     # L5 source graph (--sources/--build-info/--header-graph) — the exact
     # oneDAL dispatcher shape this ADR's P0 slice explicitly left open (no

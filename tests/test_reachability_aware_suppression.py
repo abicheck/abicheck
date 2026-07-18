@@ -629,6 +629,39 @@ class TestCallGraphReachability:
         assert found[0].reachability_kind == "symbol_availability"
         assert "pubFn" in (found[0].reachability_proof_path or "")
 
+    def test_mark_reachability_matches_via_qualified_name_fallback(self) -> None:
+        """Codex review, fresh evidence: header_graph.py (--header-graph, no
+        real build) never creates a SOURCE_DECL_MAPS_TO_SYMBOL edge, so
+        compute_call_graph_leak_paths's mangled-symbol key is unavailable in
+        that mode. Change.qualified_name (EnrichSourceLocations, set from
+        Function.name independent of graph provenance) must serve as a
+        fallback lookup key so MarkReachability still tags the change."""
+        from abicheck.buildsource.source_graph import GraphEdge
+
+        mangled = "_ZN2ns6detail19train_ops_dispatcherEv"
+        old = _graph_snap(
+            [_public_fn("pubFn")],
+            nodes=[
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", "ns::detail::train_ops_dispatcher", "source"),
+            ],
+            edges=[GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        new = _graph_snap([_public_fn("pubFn")])
+        raw_change = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol=mangled,
+            qualified_name="ns::detail::train_ops_dispatcher",
+            description="removed",
+        )
+        ctx = DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_REMOVED]
+        assert len(found) == 1
+        assert found[0].public_reachable is True
+        assert found[0].reachability_kind == "symbol_availability"
+
     def test_detect_internal_leaks_emits_call_graph_overlay_finding(self) -> None:
         from abicheck.buildsource.source_graph import GraphEdge
 

@@ -1081,9 +1081,9 @@ def _build_call_graph_leak_change(
     """Build a single ``INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API`` Change entry.
 
     The call-graph analogue of :func:`_build_leak_change`: composes an
-    already artifact-proven ``BREAKING``/``API_BREAK`` finding on an internal
-    decl with a ``DECL_CALLS_DECL``/``DECL_REFERENCES_DECL`` proof path from
-    a public entry, instead of a layout/type-graph reachability path.
+    already artifact-proven ``BREAKING`` finding on an internal decl with a
+    ``DECL_CALLS_DECL``/``DECL_REFERENCES_DECL`` proof path from a public
+    entry, instead of a layout/type-graph reachability path.
     """
     kinds_seen = sorted({c.kind.value for c in triggers})
     path_strs = proof_paths[:3]
@@ -1122,20 +1122,32 @@ def detect_call_graph_leaks(
     Unlike the layout walk, which triggers on a fixed set of layout-affecting
     kinds (:data:`_LEAK_TRIGGERING_KINDS`) applied to a type *embedding* the
     internal root, this triggers directly on any already artifact-proven
-    ``BREAKING_KINDS``/``API_BREAK_KINDS`` change whose own subject *is* the
-    internal decl (e.g. ``func_removed`` on an internal template
-    specialization) — the ``DECL_CALLS_DECL``/``DECL_REFERENCES_DECL``
-    evidence explains *why* a public consumer is affected; per the authority
-    rule (ADR-028 D3/ADR-041) it never manufactures the break itself, since
-    the triggering change is already independently artifact-proven.
+    ``BREAKING_KINDS`` change whose own subject *is* the internal decl (e.g.
+    ``func_removed`` on an internal template specialization) — the
+    ``DECL_CALLS_DECL``/``DECL_REFERENCES_DECL`` evidence explains *why* a
+    public consumer is affected; per the authority rule (ADR-028 D3/ADR-041)
+    it never manufactures the break itself, since the triggering change is
+    already independently artifact-proven.
+
+    Deliberately does **not** also trigger on ``API_BREAK_KINDS`` (Codex
+    review, fresh evidence): that tier is the ``SOURCE_CONTRACT`` evidence
+    class (``checker_policy.py``'s own docstring — "a source-level break that
+    needs a recompile... not necessarily a shipped ABI break"), and most of
+    its members (e.g. ``inline_function_removed``, whose own inline comment
+    reads "no exported symbol") have no removed linker symbol at all —
+    composing one into this overlay's "can fail to resolve this symbol at
+    load time" description would be a false binary-load-time claim for a
+    change that was never one. Mirrors :data:`_LEAK_TRIGGERING_KINDS`'s own
+    precedent of a hand-curated, binary-observable-only trigger set, rather
+    than the full breaking/API-break union.
 
     Requires an embedded L5 graph on at least one snapshot (see
     :func:`compute_call_graph_leak_paths`); returns ``[]`` otherwise.
     """
-    from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS
+    from .checker_policy import BREAKING_KINDS
 
     internal_set = tuple(internal_namespaces)
-    triggering_kinds = BREAKING_KINDS | API_BREAK_KINDS
+    triggering_kinds = BREAKING_KINDS
     # Deliberately NOT pre-filtered by is_internal_type(root, ...) here
     # (Codex review, fresh evidence): _root_type_name_for_change(c) is
     # c.symbol verbatim for a function-shaped kind like FUNC_REMOVED, and
@@ -1162,8 +1174,19 @@ def detect_call_graph_leaks(
 
     out: list[Change] = []
     for dname, triggers in by_symbol.items():
-        old_pp = old_call_paths.get(dname, [])
-        new_pp = new_call_paths.get(dname, [])
+        # Codex review (fresh evidence): compute_call_graph_leak_paths's
+        # mangled-symbol key requires a SOURCE_DECL_MAPS_TO_SYMBOL edge,
+        # which only the build-integrated L4/L5 path creates — the
+        # header-only path (header_graph.py) never does. Each trigger's own
+        # c.qualified_name (set by EnrichSourceLocations from Function.name,
+        # independent of graph provenance) is a reliable fallback key that
+        # works in both modes.
+        keys = {dname, *(t.qualified_name for t in triggers if t.qualified_name)}
+        old_pp: list[str] = []
+        new_pp: list[str] = []
+        for key in keys:
+            old_pp.extend(p for p in old_call_paths.get(key, []) if p not in old_pp)
+            new_pp.extend(p for p in new_call_paths.get(key, []) if p not in new_pp)
         proof_paths = old_pp + [p for p in new_pp if p not in old_pp]
         if not proof_paths:
             continue

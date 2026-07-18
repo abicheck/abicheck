@@ -1122,8 +1122,7 @@ class TestDetectCallGraphLeaks:
     def test_non_breaking_kind_is_not_a_trigger(self) -> None:
         """A COMPATIBLE finding on an internal decl must not compose an
         overlay finding — the authority rule (only an already artifact-proven
-        BREAKING/API_BREAK change may be explained/correlated, never
-        manufactured)."""
+        BREAKING change may be explained/correlated, never manufactured)."""
         from abicheck.buildsource.source_graph import GraphEdge
         from abicheck.internal_leak import detect_call_graph_leaks
 
@@ -1147,6 +1146,65 @@ class TestDetectCallGraphLeaks:
             description="added an overload",
         )
         assert detect_call_graph_leaks([compatible_change], old, new) == []
+
+    def test_api_break_kind_is_not_a_trigger(self) -> None:
+        """Codex review, fresh evidence: API_BREAK_KINDS is the
+        SOURCE_CONTRACT tier, not artifact-proven — most of its members
+        (e.g. inline_function_removed) have no removed linker symbol at all,
+        so composing one into this overlay's "fails to resolve at load
+        time" claim would be a false binary-load-time claim. Only
+        BREAKING_KINDS may trigger, even with real call-graph evidence."""
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.checker_policy import BREAKING_KINDS
+        from abicheck.internal_leak import detect_call_graph_leaks
+
+        old = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", "ns::detail::helper", "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        new = _graph_snap([_decl_node("decl://pub", "pubFn", "public_header")], [])
+        assert ChangeKind.INLINE_FUNCTION_REMOVED not in BREAKING_KINDS
+        api_break_change = Change(
+            kind=ChangeKind.INLINE_FUNCTION_REMOVED,
+            symbol="ns::detail::helper",
+            description="inline function removed",
+        )
+        assert detect_call_graph_leaks([api_break_change], old, new) == []
+
+    def test_header_graph_mode_matches_via_qualified_name(self) -> None:
+        """Codex review, fresh evidence: header_graph.py (--header-graph, no
+        real build) never creates a SOURCE_DECL_MAPS_TO_SYMBOL edge, so the
+        mangled-symbol-key fix above is a no-op in that mode. A real
+        FUNC_REMOVED's Change.qualified_name (set by EnrichSourceLocations
+        from Function.name, independent of graph provenance) must serve as
+        a fallback lookup key against the label-keyed result."""
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import detect_call_graph_leaks
+
+        mangled = "_ZN2ns6detail6helperEv"
+        # No SOURCE_DECL_MAPS_TO_SYMBOL edge at all -- the header-graph shape.
+        old = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", "ns::detail::helper", "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        new = _graph_snap([_decl_node("decl://pub", "pubFn", "public_header")], [])
+        triggering = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol=mangled,
+            qualified_name="ns::detail::helper",
+            description="removed",
+        )
+        extra = detect_call_graph_leaks([triggering], old, new)
+        assert len(extra) == 1
+        overlay = extra[0]
+        assert overlay.kind == ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API
+        assert overlay.public_reachable is True
 
     def test_no_call_graph_evidence_no_overlay(self) -> None:
         from abicheck.internal_leak import detect_call_graph_leaks

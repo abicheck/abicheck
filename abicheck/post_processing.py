@@ -719,9 +719,25 @@ class MarkReachability:
             # call-graph-reachable without any layout/type-graph evidence at
             # all (e.g. func_removed on an internal decl with no field/base/
             # signature reference anywhere).
-            if not tagged and root in call_reachable:
-                call_paths = old_call_paths.get(root, []) + [
-                    p for p in new_call_paths.get(root, []) if p not in old_call_paths.get(root, [])
+            # Codex review (fresh evidence): compute_call_graph_leak_paths's
+            # mangled-symbol key only exists when the graph carries a
+            # SOURCE_DECL_MAPS_TO_SYMBOL edge for the target decl — the
+            # build-integrated L4/L5 path (source_graph.py) creates one, but
+            # the header-only path (header_graph.py, --header-graph/the
+            # implicit dump path, no real build) never does. c.qualified_name
+            # (EnrichSourceLocations, runs before this step) is set from
+            # Function.name — the same demangled name a graph node's own
+            # label carries in EITHER mode — so it is a reliable fallback key
+            # independent of which graph provenance produced the evidence.
+            call_key = (
+                root if root in call_reachable
+                else (c.qualified_name if c.qualified_name in call_reachable else None)
+            )
+            if not tagged and call_key is not None:
+                call_paths = old_call_paths.get(call_key, []) + [
+                    p
+                    for p in new_call_paths.get(call_key, [])
+                    if p not in old_call_paths.get(call_key, [])
                 ]
                 if call_paths:
                     c.public_reachable = True

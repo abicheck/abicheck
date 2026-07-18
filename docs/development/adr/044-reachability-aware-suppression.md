@@ -856,8 +856,9 @@ semantics) is closed to the extent described under its own entry.
   new `internal_leak.detect_call_graph_leaks`/`_build_call_graph_leak_change`,
   wired into the existing `DetectInternalLeaks` pipeline step alongside
   `detect_internal_leaks`. Triggers only on a change whose own kind is
-  already `BREAKING_KINDS`/`API_BREAK_KINDS` (artifact-proven) and whose
-  subject is internal-namespaced and call-graph-reachable — per the
+  already `BREAKING_KINDS` (artifact-proven; **not** `API_BREAK_KINDS` — see
+  the post-merge review round below) and whose subject is internal-namespaced
+  and call-graph-reachable — per the
   authority rule (ADR-028 D3/ADR-041), the graph edge composes with and
   explains an already-proven break; it never manufactures one, exactly like
   `INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API`'s own `BREAKING` classification.
@@ -952,6 +953,35 @@ semantics) is closed to the extent described under its own entry.
   changelog comment, added the three fields (with `reachability_kind`'s enum)
   to `compare_report.schema.json`, and re-synced the published
   `docs/schemas/v1/` copy via `scripts/publish_schemas.py`.
+- **Header-graph mode still had the mangled-vs-label gap; `API_BREAK_KINDS`
+  triggers were a category error (Codex, fresh evidence, two findings).**
+  (1) The mangled-symbol-key fix above only helps when the L5 graph carries a
+  `SOURCE_DECL_MAPS_TO_SYMBOL` edge — the build-integrated L4/L5 path
+  (`source_graph.py`) creates one, but the header-only path (`header_graph.py`,
+  `--header-graph`/the implicit dump path, no real build at all) never does,
+  so the mismatch this review round already fixed once still applied for
+  header-graph-only snapshots. Fixed by also trying each trigger's own
+  `Change.qualified_name` (set by `EnrichSourceLocations` from `Function.name`
+  — the same demangled name a graph node's `label` carries in *either* mode,
+  independent of graph provenance) as a fallback lookup key in both
+  `MarkReachability` and `detect_call_graph_leaks`, alongside the existing
+  mangled-symbol key. (2) `detect_call_graph_leaks`'s trigger set was
+  `BREAKING_KINDS | API_BREAK_KINDS`, but `API_BREAK_KINDS` is the
+  `SOURCE_CONTRACT` evidence tier — "a source-level break that needs a
+  recompile… not necessarily a shipped ABI break" per `checker_policy.py`'s
+  own docstring — and most of its members (e.g. `inline_function_removed`,
+  whose own inline comment reads "no exported symbol") have no removed
+  linker symbol at all. Composing one into this overlay's "can fail to
+  resolve this symbol at load time" description was a false binary-load-time
+  claim for a change that was never one — the same category of mistake
+  `_LEAK_TRIGGERING_KINDS`'s own hand-curated (not "every breaking-shaped
+  kind") trigger set was designed to avoid. Restricted the trigger set to
+  `BREAKING_KINDS` only. Extended `test_internal_leak.py` with
+  `test_header_graph_mode_matches_via_qualified_name` (no
+  `SOURCE_DECL_MAPS_TO_SYMBOL` edge, mangled `Change.symbol` +
+  `qualified_name` set, matching only via the fallback key) and
+  `test_api_break_kind_is_not_a_trigger` (an `API_BREAK_KINDS` member with
+  call-graph evidence produces no overlay).
 
 ## Roadmap (not committed — scope/sequence per the usual planning process)
 
