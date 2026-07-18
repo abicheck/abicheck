@@ -1,0 +1,93 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: add-change-kind-small
+description: >-
+  Add detection for a class/struct/union gaining or losing the C++17
+  [[nodiscard]] attribute, and follow CLAUDE.md's "Adding a new ChangeKind"
+  procedure end to end.
+base_commit: 83972cb8f761a8a6efd8c9f030a427e120e74e01
+
+prompt: |
+  abicheck does not currently detect a class/struct/union gaining or losing
+  the C++17 `[[nodiscard]]` attribute (verify: `RecordType` in
+  `abicheck/model.py` has no `nodiscard` field, and grepping the codebase for
+  "nodiscard" turns up nothing — compare this to `RecordType.deprecated`,
+  which already detects the analogous `[[deprecated]]` case).
+
+  Add this detection, following the "Adding a new ChangeKind" procedure in
+  the repo-root CLAUDE.md:
+
+  1. Add `TYPE_NODISCARD_ADDED` and `TYPE_NODISCARD_REMOVED` to the
+     `ChangeKind` enum in `abicheck/checker_policy.py`, and place both in
+     exactly one of `BREAKING_KINDS` / `API_BREAK_KINDS` / `COMPATIBLE_KINDS`
+     / `RISK_KINDS`. Model the verdict/severity on `TYPE_DEPRECATED_ADDED` /
+     `TYPE_DEPRECATED_REMOVED` (same directionality: gaining `[[nodiscard]]`
+     is a compile-time-only, source-level advisory — not an ABI break, and
+     not something callers must react to at the binary level — so it belongs
+     in the same category as the deprecated-type kinds, not in
+     `BREAKING_KINDS`/`API_BREAK_KINDS`).
+  2. Add a `nodiscard` field to `RecordType` in `abicheck/model.py`, matching
+     the existing tri-state/None convention documented on
+     `RecordType.deprecated`/`Function.deprecated` in that file (None = not
+     captured by this dumper backend; a real value on both sides of a
+     comparison is what a detector may safely diff).
+  3. Populate it in `abicheck/dumper_castxml.py` for `RecordType`
+     construction sites — castxml surfaces `[[nodiscard]]` as a token in an
+     XML element's `attributes` string, the same mechanism already used for
+     `deprecated` (see `_deprecation_marker`) and for the `is_final`
+     attribute.
+  4. Implement a detector in `abicheck/diff_types.py` that emits
+     `TYPE_NODISCARD_ADDED` / `TYPE_NODISCARD_REMOVED`, gated the same way
+     `_diff_type_deprecated` is gated (per-type on
+     `fact_provenance.both_castxml_backed_fact`, since — like
+     `deprecated` — `dumper_clang.py` does not populate this field yet).
+     Register it with `detector_registry` the way the neighboring detectors
+     in that file are registered.
+  5. Add a unit test for the new detector (construct two snapshots directly,
+     as `tests/test_diff_types_deep.py`'s `TestFieldDeprecated` does for the
+     field-level case — no compiler needed).
+  6. Run `python scripts/gen_detector_spec.py` (or the equivalent `--check`
+     step in `scripts/verify.py`) to refresh the generated detector-spec
+     docs, and add a changelog fragment per CLAUDE.md's Conventions section.
+
+  Do not implement `[[nodiscard]]` as a generic `contract_attributes` entry
+  (that mechanism is for *function*-level attributes; `RecordType` has no
+  such field) and do not touch `Function`/`EnumType` — scope this to
+  `RecordType` only.
+
+allowed_paths:
+  - "abicheck/model.py"
+  - "abicheck/checker_policy.py"
+  - "abicheck/dumper_castxml.py"
+  - "abicheck/diff_types.py"
+  - "docs/reference/detector-spec.md"
+  - "docs/reference/detector-spec.json"
+  - "docs/**/*.md"
+  - "tests/**"
+  - "changelog.d/*.md"
+
+required_checks:
+  - pr
+
+hidden_tests:
+  - hidden_tests/test_type_nodiscard_detection.py
+
+forbidden:
+  - edit-generated-output-directly
+  - weaken-existing-test
+  - expand-import-cycle-allowlist
+  - edit-hidden-tests
+  - skip-required-checks
