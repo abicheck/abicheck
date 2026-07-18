@@ -63,10 +63,23 @@ def _resolve_build_context_flags(
     effective_compile_db: Path | None,
     headers: tuple[Path, ...],
     compile_db_filter: str | None,
-) -> list[str]:
-    """Resolve compile database into castxml flags for dump."""
+) -> tuple[list[str], bool]:
+    """Resolve compile database into castxml flags for dump.
+
+    Returns ``(flags, matched)``. ``matched`` is ``True`` iff a compile-DB
+    entry genuinely backs the resolved :class:`~abicheck.build_context.BuildContext`
+    (its ``compile_db_path`` is set by both ``build_context_for_header``'s
+    direct-match branch and ``build_context_union_fallback``'s merge branch,
+    and only stays ``None`` for a syntactically valid but empty -- or entirely
+    filtered-out -- compile database). Distinct from ``bool(flags)``: a
+    genuinely matched TU with no ABI-relevant flags to forward (e.g. a plain
+    ``cc -c src/foo.c`` with no interesting defines/includes/standard) still
+    derives an empty ``flags`` list, but is real build-context evidence, not
+    an absent one -- conflating the two would make ``dump lib.so -H api.h -p
+    build --depth build`` wrongly reject a matched-but-flagless compile
+    database (Codex review, second finding on this signal)."""
     if not effective_compile_db:
-        return []
+        return [], False
     from .cli_resolve import _expand_header_inputs
     from .errors import AbicheckError
 
@@ -102,7 +115,7 @@ def _resolve_build_context_flags(
                     "using first-match values. See --verbose for details.",
                     err=True,
                 )
-        return flags
+        return flags, ctx.compile_db_path is not None
     except (AbicheckError, OSError) as exc:
         raise click.ClickException(str(exc)) from exc
 

@@ -76,6 +76,54 @@ class TestDumpDryRun:
         assert _CONTRACT_FOOTER in first.output
         assert "Command: dump" in first.output
 
+    def test_depth_source_with_no_evidence_input_blocks(self, tmp_path: Path) -> None:
+        # Codex review: the real (non-dry) run's check_requested_depth_satisfied
+        # strict gate now hard-fails `--depth source`/`--depth build` with no
+        # way to reach that depth, but a --dry-run used to exit 0 for the
+        # identical inputs (only a soft "would carry only L0-L2 data"
+        # warning) -- silently accepting a baseline invocation that the real
+        # run would then reject. --depth source has no path but --sources/
+        # --build-info (a -p/--compile-db only ever supplies "build"
+        # context), so this is cheaply, deterministically known to fail
+        # without running anything.
+        snap = tmp_path / "lib.abi.json"
+        _write_snapshot(snap)
+        result = CliRunner().invoke(
+            main, ["dump", str(snap), "--dry-run", "--depth", "source"]
+        )
+        assert result.exit_code == 1, result.output
+        assert "Exit code: 1" in result.output
+
+    def test_depth_build_with_no_evidence_input_blocks(self, tmp_path: Path) -> None:
+        snap = tmp_path / "lib.abi.json"
+        _write_snapshot(snap)
+        result = CliRunner().invoke(
+            main, ["dump", str(snap), "--dry-run", "--depth", "build"]
+        )
+        assert result.exit_code == 1, result.output
+        assert "Exit code: 1" in result.output
+
+    def test_depth_build_with_compile_db_does_not_block(self, tmp_path: Path) -> None:
+        # A -p/--compile-db might satisfy --depth build -- whether it
+        # actually matches these headers is real work (load + header-
+        # inclusion scan) a dry run must not perform, so this stays the
+        # softer "would carry only L0-L2 data" warning rather than a
+        # blocker; the real run resolves it for real.
+        snap = tmp_path / "lib.abi.json"
+        _write_snapshot(snap)
+        header = tmp_path / "api.h"
+        header.write_text("void f(void);\n", encoding="utf-8")
+        db = tmp_path / "compile_commands.json"
+        db.write_text("[]", encoding="utf-8")
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(snap), "--dry-run", "--depth", "build",
+                "-H", str(header), "-p", str(db),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+
 
 class TestCompareDryRun:
     def test_rejects_output_flag(self, tmp_path: Path) -> None:

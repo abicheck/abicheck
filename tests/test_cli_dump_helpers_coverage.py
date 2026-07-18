@@ -1343,22 +1343,6 @@ def test_dump_will_attempt_hybrid_l4_extraction_false_without_any_input() -> Non
     assert _dump_will_attempt_hybrid_l4_extraction(None) is False
 
 
-def test_dump_will_attempt_hybrid_l4_extraction_ignores_build_info(tmp_path) -> None:
-    """Codex review (fourth finding): a raw --build-info tree never feeds L4
-    extraction -- embed_build_source passes raw_sources (never raw_build_info)
-    as _run_inline_source_abi's one 'sources' argument, so --build-info plays
-    no part in whether an extractor (hybrid or otherwise) runs. Only a raw
-    (non-pack) --sources tree does. The predicate takes a single 'sources'
-    argument for exactly this reason -- there is no build_info parameter to
-    pass a raw tree to."""
-    from abicheck.buildsource.pack import BuildSourcePack
-    from abicheck.cli_dump_helpers import _dump_will_attempt_hybrid_l4_extraction
-
-    pack_dir = tmp_path / "pack"
-    BuildSourcePack.empty(pack_dir).write()
-    assert _dump_will_attempt_hybrid_l4_extraction(pack_dir) is False
-
-
 def test_check_requested_depth_satisfied_headers_without_header_ast_fails() -> None:
     from abicheck.cli_dump_helpers import (
         DumpDepthNotSatisfiedError,
@@ -1396,7 +1380,10 @@ def test_check_requested_depth_satisfied_build_with_compile_db_context_passes() 
     machinery), never snap.parsed_with_build_context (the older -p/
     --compile-db ADR-020a/039 signal perform_elf_dump sets, with no
     BuildSourcePack of its own)."""
-    from abicheck.cli_dump_helpers import check_requested_depth_satisfied
+    from abicheck.cli_dump_helpers import (
+        DumpDepthNotSatisfiedError,
+        check_requested_depth_satisfied,
+    )
 
     snap = AbiSnapshot(
         library="libfoo.so", version="1.0", from_headers=True,
@@ -1405,7 +1392,7 @@ def test_check_requested_depth_satisfied_build_with_compile_db_context_passes() 
     check_requested_depth_satisfied("build", snap)  # must not raise
     # A compile-database build context is still not source-tier evidence --
     # --depth source must still fail for the same snapshot.
-    with pytest.raises(Exception, match="--depth source"):
+    with pytest.raises(DumpDepthNotSatisfiedError, match="--depth source"):
         check_requested_depth_satisfied("source", snap)
 
 

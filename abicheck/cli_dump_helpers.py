@@ -453,6 +453,7 @@ def render_dump_dry_run(
     collect_mode: str,
     header_backend: str,
     output: Path | None,
+    has_compile_db: bool = False,
 ) -> Any:
     """Build the ``dump --dry-run`` report (ADR-043 D4): resolve, never execute.
 
@@ -460,6 +461,14 @@ def render_dump_dry_run(
     shows the resolved depth/collect-mode and available data layers, and
     checks tool availability on PATH. Never runs castxml/clang, a build query,
     or any I/O beyond stat()/PATH lookups.
+
+    ``has_compile_db`` (Codex review): whether ``-p``/``--compile-db`` was
+    given, threaded in as a bare presence flag (no DB load, no header
+    matching -- that is real work, out of scope for a dry run) so the "would
+    definitely fail" check below can tell a ``--depth build`` request backed
+    by *some* compile database (which might satisfy it -- unknown without
+    actually loading it) from one backed by nothing at all (which never
+    can).
     """
     from .cli_helpers_compare import discover_project_config
     from .dry_run import DryRunResult, tool_status
@@ -533,6 +542,25 @@ def render_dump_dry_run(
             f"--depth {depth} was requested but no --sources/--build-info was given; "
             "the snapshot would carry only L0-L2 data."
         )
+        # Cheaply, deterministically known to fail the real run's strict
+        # check_requested_depth_satisfied gate -- not merely degraded, since
+        # neither input given here could ever reach it: --depth source has
+        # no path but --sources/--build-info (a -p/--compile-db supplies L3
+        # "build" context only, never L4 source-ABI replay), and --depth
+        # build has no path at all once --sources/--build-info AND -p are
+        # both absent. A --depth build backed by *some* compile database is
+        # deliberately left as the softer warning above, not a blocker --
+        # whether that database actually matches these headers is real work
+        # (load + header-inclusion scan) a dry run must not perform, so it
+        # is only "possibly satisfiable", not "definitely satisfiable"
+        # (Codex review).
+        if depth == "source" or (depth == "build" and not has_compile_db):
+            result.block(
+                f"--depth {depth} was requested but the resolved evidence "
+                "depth check_requested_depth_satisfied would raise on: "
+                f"nothing here can reach '{depth}' -- the real run would "
+                "exit 1."
+            )
     return result
 
 
@@ -820,15 +848,18 @@ def perform_elf_dump(
     stamp_provenance, write_snapshot_output) are passed in from cli.py to avoid
     an import cycle — cli_dump_helpers must not import from cli.
 
-    ``compile_db_context_matched`` (Codex review): whether cli.py's
-    ``_resolve_build_context_flags(effective_compile_db, headers,
-    compile_db_filter)`` actually derived any castxml flags from the ``-p``/
-    ``--compile-db`` database for these headers — computed there (before this
-    function is even called) since that is the one place both the compile-DB
-    load and the header-context derivation already happen. Distinct from
-    ``effective_compile_db`` merely being non-``None``: a syntactically valid
-    but empty (or non-matching) ``compile_commands.json`` still sets that, but
-    derives nothing, and must not be recorded as real build-context evidence.
+    ``compile_db_context_matched`` (Codex review): the second element of
+    cli.py's ``_resolve_build_context_flags(effective_compile_db, headers,
+    compile_db_filter)`` -- whether a compile-DB entry genuinely backed the
+    resolved ``BuildContext`` (its ``compile_db_path`` is set) — computed
+    there (before this function is even called) since that is the one place
+    both the compile-DB load and the header-context derivation already
+    happen. Distinct from both ``effective_compile_db`` merely being
+    non-``None`` (a syntactically valid but empty, or entirely filtered-out,
+    ``compile_commands.json`` still sets that, but matches nothing) *and*
+    from whether any castxml flags were derived (a genuinely matched TU with
+    no ABI-relevant flags to forward is still real build-context evidence,
+    not an absent one — Codex review, second finding on this signal).
     """
     compiler = "cc" if lang == "c" else "c++"
     resolved_headers = expand_header_inputs(list(headers)) if headers else []

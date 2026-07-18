@@ -657,6 +657,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
                 build_info=build_info, build_config=build_config,
                 depth=depth, collect_mode=collect_mode,
                 header_backend=header_backend, output=output,
+                has_compile_db=bool(compile_db_path or compile_db_path_alt),
             )
         )
 
@@ -691,7 +692,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         )
         return
 
-    build_context_flags = _resolve_build_context_flags(
+    build_context_flags, compile_db_matched = _resolve_build_context_flags(
         effective_compile_db, headers, compile_db_filter,
     )
     effective_gcc_options = _merge_gcc_options(build_context_flags, gcc_options)
@@ -753,7 +754,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         header_graph_includes=header_graph_includes,
         compile_context=_cc,
         depth=depth,
-        compile_db_context_matched=bool(build_context_flags),
+        compile_db_context_matched=compile_db_matched,
     )
 
 

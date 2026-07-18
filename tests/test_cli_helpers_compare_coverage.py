@@ -33,8 +33,9 @@ def _write_compile_db(directory, entries):
 
 
 def test_resolve_build_context_flags_no_db_short_circuits():
-    """With no compile db, resolver returns an empty list without touching IO."""
-    assert _resolve_build_context_flags(None, (), None) == []
+    """With no compile db, resolver returns an empty list and matched=False
+    without touching IO."""
+    assert _resolve_build_context_flags(None, (), None) == ([], False)
 
 
 def test_resolve_build_context_flags_matched_header(tmp_path, capsys):
@@ -65,18 +66,43 @@ def test_resolve_build_context_flags_matched_header(tmp_path, capsys):
         ],
     )
 
-    flags = _resolve_build_context_flags(db, (header,), None)
+    flags, matched = _resolve_build_context_flags(db, (header,), None)
 
     # Flags derived from the matched TU: language standard, define, include path.
     assert "-std=c++17" in flags
     assert "-DFOO=1" in flags
     assert "-I" in flags
+    assert matched is True
     # The "Build context: ... flags derived" note is emitted on stderr.
     err = capsys.readouterr().err
     assert "Build context:" in err
     assert "flags derived" in err
     # Single matched TU -> no conflict warning.
     assert "conflicting flags" not in err
+
+
+def test_resolve_build_context_flags_matched_but_no_flags_still_reports_matched(
+    tmp_path,
+):
+    """Codex review: a matched TU with no ABI-relevant flags to forward (a
+    plain `cc -c src/foo.c` with no interesting defines/includes/standard)
+    still derives an empty flags list, but matched must stay True -- it is
+    real build-context evidence, not an absent one. This is the exact case
+    dump lib.so -H api.h -p build --depth build must accept."""
+    src = tmp_path / "foo.c"
+    src.write_text('#include "foo.h"\nint f(void) { return 0; }\n', encoding="utf-8")
+    header = tmp_path / "foo.h"
+    header.write_text("int f(void);\n", encoding="utf-8")
+
+    db = _write_compile_db(
+        tmp_path,
+        [{"directory": str(tmp_path), "file": "foo.c", "arguments": ["cc", "-c", "foo.c"]}],
+    )
+
+    flags, matched = _resolve_build_context_flags(db, (header,), None)
+
+    assert flags == []
+    assert matched is True
 
 
 def test_resolve_build_context_flags_union_fallback_with_conflicts(tmp_path, capsys):
@@ -101,13 +127,29 @@ def test_resolve_build_context_flags_union_fallback_with_conflicts(tmp_path, cap
     )
 
     # headers=() -> resolved_hdrs empty -> union fallback branch.
-    flags = _resolve_build_context_flags(db, (), None)
+    flags, matched = _resolve_build_context_flags(db, (), None)
 
     assert "-std=c++17" in flags
+    assert matched is True
     err = capsys.readouterr().err
     assert "Build context:" in err
     # Conflicting -DX values across the two TUs -> has_conflicts True.
     assert "conflicting flags" in err
+
+
+def test_resolve_build_context_flags_empty_db_not_matched(tmp_path):
+    """A syntactically valid but empty compile_commands.json matches nothing --
+    matched must be False (Codex review, the original finding this signal
+    exists to fix: an empty/unusable -p database must not satisfy --depth
+    build)."""
+    db = _write_compile_db(tmp_path, [])
+    header = tmp_path / "foo.h"
+    header.write_text("int f(void);\n", encoding="utf-8")
+
+    flags, matched = _resolve_build_context_flags(db, (header,), None)
+
+    assert flags == []
+    assert matched is False
 
 
 def test_resolve_build_context_flags_missing_db_raises_click_exception(tmp_path):
