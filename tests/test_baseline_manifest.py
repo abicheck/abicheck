@@ -653,15 +653,18 @@ class TestMainCli:
         self, tmp_path: Path
     ) -> None:
         # Regression (Codex review): source_replay.py's replay producer
-        # stamps wall-clock durations and cache hit/miss counts into
-        # build_source.source_abi.coverage (cache_lookup_s, extract_s,
-        # link_s, elapsed_s, cache_misses, cache_hits) -- these depend on the
-        # runner's cache warmth/load, not on the source-fact content, so
-        # hashing them made the digest unstable across reruns of identical
-        # source facts.
+        # stamps wall-clock durations, cache hit/miss counts, and its own
+        # parallelism setting into build_source.source_abi.coverage
+        # (cache_lookup_s, extract_s, link_s, elapsed_s, cache_misses,
+        # cache_hits, extractor_jobs) -- these depend on the runner's cache
+        # warmth/load/CPU count, not on the source-fact content, so hashing
+        # them made the digest unstable across reruns of identical source
+        # facts (extractor_jobs was a later addition to this same list, once
+        # replaying the same facts on a differently-sized runner was found
+        # to still churn the digest).
         snap_path = tmp_path / "libfoo.abicheck.json"
 
-        def _write(elapsed_s: float, cache_misses: int) -> None:
+        def _write(elapsed_s: float, cache_misses: int, extractor_jobs: int) -> None:
             data = {
                 "library": "libfoo",
                 "version": "1.0.0",
@@ -679,6 +682,7 @@ class TestMainCli:
                             "elapsed_s": elapsed_s,
                             "cache_misses": cache_misses,
                             "cache_hits": 3,
+                            "extractor_jobs": extractor_jobs,
                             "compile_units_parsed": 12,
                         }
                     }
@@ -687,11 +691,11 @@ class TestMainCli:
             snap_path.write_text(json.dumps(data), encoding="utf-8")
 
         entries = [{"name": "libfoo", "artifact": "a.so"}]
-        _write(1.8, 0)
+        _write(1.8, 0, 4)
         manifest1 = build_manifest_module.build_manifest(
             tmp_path, "", "", entries, None
         )
-        _write(3.4, 5)
+        _write(3.4, 5, 16)
         manifest2 = build_manifest_module.build_manifest(
             tmp_path, "", "", entries, None
         )

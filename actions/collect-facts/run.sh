@@ -17,6 +17,17 @@ PHASE="${INPUT_PHASE:-auto}"
 PRODUCER_IN="${INPUT_PRODUCER:-auto}"
 SOURCES="${INPUT_SOURCES:-.}"
 OUTPUT="${INPUT_OUTPUT:-abicheck_inputs}"
+# Resolve to an absolute path up front: the CMake compiler-launcher recipe
+# this Action documents invokes abicheck-cc (and the Clang plugin's out=
+# flag) with cwd set to the *build* directory, not this script's own cwd
+# (the repo root) -- a relative ABICHECK_INPUTS_DIR/out= would then resolve
+# under build/ instead of the top-level pack _reset_output_dir/phase: verify/
+# pack-path all reference, so verification would report an empty pack even
+# though the build was actually instrumented (Codex review).
+case "$OUTPUT" in
+  /*) ;;
+  *) OUTPUT="$(pwd)/$OUTPUT" ;;
+esac
 PUBLIC_ROOTS="${INPUT_PUBLIC_ROOTS:-}"
 LIBRARY="${INPUT_LIBRARY:-}"
 EXTRACTOR="${INPUT_EXTRACTOR:-auto}"
@@ -56,7 +67,12 @@ _detect_producer() {
     echo "replay"
     return
   fi
-  if [[ -f "$src/CMakeLists.txt" || -f "$src/WORKSPACE" || -f "$src/WORKSPACE.bazel" ]]; then
+  # MODULE.bazel: the bzlmod-only layout Bazel 6+ projects use has no
+  # WORKSPACE file at all -- omitting it here left auto-detection silently
+  # inconsistent with abicheck/buildsource/build_query.py's own Bazel
+  # marker set (WORKSPACE.bazel, WORKSPACE, and MODULE.bazel), which the
+  # replay path actually queries (Codex review).
+  if [[ -f "$src/CMakeLists.txt" || -f "$src/WORKSPACE" || -f "$src/WORKSPACE.bazel" || -f "$src/MODULE.bazel" ]]; then
     # cmake/bazel can emit a compile DB on request -- replay's own
     # build-system query (documented in producing-source-facts.md) handles
     # generating it, no wrapper needed.

@@ -59,6 +59,11 @@ _VOLATILE_COVERAGE_KEYS = (
     "elapsed_s",
     "cache_misses",
     "cache_hits",
+    # The replay producer's own parallelism setting (CPU count or
+    # ABICHECK_L4_JOBS), not a property of the extracted content -- the
+    # same ABI/source facts replayed on a differently-sized runner would
+    # otherwise still churn the digest (Codex review).
+    "extractor_jobs",
 )
 # LayerCoverage rows (abicheck/buildsource/model.py) embedded at
 # build_source.manifest.coverage: build_inline_coverage() (buildsource/

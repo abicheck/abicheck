@@ -144,6 +144,16 @@ class TestDetectProducer:
         result = _run_predicate(f'_detect_producer "{tmp_path}"')
         assert result.stdout.strip() == "replay"
 
+    def test_bazel_bzlmod_module_file_means_replay(self, tmp_path: Path) -> None:
+        # Regression (Codex review): bzlmod-only Bazel 6+ projects have no
+        # WORKSPACE file at all, only MODULE.bazel -- omitting it here left
+        # auto-detection inconsistent with abicheck/buildsource/
+        # build_query.py's own Bazel marker set, which the replay path
+        # actually queries.
+        (tmp_path / "MODULE.bazel").write_text("")
+        result = _run_predicate(f'_detect_producer "{tmp_path}"')
+        assert result.stdout.strip() == "replay"
+
     def test_empty_tree_means_wrapper(self, tmp_path: Path) -> None:
         result = _run_predicate(f'_detect_producer "{tmp_path}"')
         assert result.stdout.strip() == "wrapper"
@@ -389,6 +399,29 @@ class TestWrapperProducer:
         assert outputs["ready"] == "false"
         # phase: prepare's job is done before the caller's own build step --
         # nothing here should claim readiness prematurely.
+
+    def test_prepare_exports_absolute_inputs_dir(self, tmp_path: Path) -> None:
+        # Regression (Codex review): the documented CMake compiler-launcher
+        # recipe invokes abicheck-cc with cwd set to the *build* directory,
+        # not this script's own cwd -- a relative ABICHECK_INPUTS_DIR/out=
+        # (e.g. the documented default "abicheck_inputs") would then resolve
+        # under build/ instead of the top-level pack _reset_output_dir/
+        # phase: verify/pack-path all reference, so verification would
+        # report an empty pack even though the build was instrumented.
+        result, github_env, github_output = _run_action(
+            {
+                "INPUT_PHASE": "prepare",
+                "INPUT_PRODUCER": "wrapper",
+                "INPUT_OUTPUT": "abicheck_inputs",  # relative, the documented default
+                "INPUT_INSTALL_DEPS": "false",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        env = _parse_kv_file(github_env)
+        assert env["ABICHECK_INPUTS_DIR"] == str(tmp_path / "abicheck_inputs")
+        outputs = _parse_kv_file(github_output)
+        assert outputs["pack-path"] == str(tmp_path / "abicheck_inputs")
 
     def test_prepare_clears_stale_output_dir(self, tmp_path: Path) -> None:
         # Regression (Codex review): init_inputs_pack() is idempotent across
