@@ -1,19 +1,48 @@
 # CODEOWNERS — auto-assign reviewers on all PRs
 # See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#
+# Rows below are grouped by RISK TIER, most-specific-path-wins per GitHub's
+# matching rules (a later, more specific pattern overrides an earlier,
+# broader one for the paths it covers). All tiers currently resolve to the
+# same person (@napetrov is the sole maintainer) — the structure exists so
+# that when a second maintainer joins, CRITICAL-tier paths can require a
+# narrower, more senior reviewer set without restructuring this file. Don't
+# collapse this back to a single `* @napetrov` line; the tiering is the
+# point, not the current reviewer list.
 
-# Default owner for everything
-*                   @napetrov
+# --- Default (fallback for anything not matched below) ---
+*                                       @napetrov
 
-# CI / workflows
-.github/            @napetrov
+# --- CRITICAL: supply-chain / release / security trust boundary ---
+# A bad review here can publish a malicious release, exfiltrate secrets, or
+# widen what CI is trusted to execute — these paths should get the most
+# scrutiny of anything in the repo.
+/.github/workflows/publish.yml         @napetrov
+/.github/workflows/pages.yml           @napetrov
+/.github/workflows/security.yml        @napetrov
+/.github/workflows/agentready.yml      @napetrov
+/.github/CODEOWNERS                    @napetrov
+/action/action.yml                     @napetrov
+/action/run.sh                         @napetrov
 
-# Core library
-abicheck/           @napetrov
+# --- HIGH: ABI-correctness core (a mistake here is a silent false
+# negative/positive in every downstream user's compatibility check) ---
+/abicheck/checker_policy.py            @napetrov
+/abicheck/checker.py                   @napetrov
+/abicheck/diff_symbols.py              @napetrov
+/abicheck/diff_types.py                @napetrov
+/abicheck/diff_platform.py             @napetrov
 
-# Tests
-tests/              @napetrov
+# --- STANDARD: everything else CI/workflow-adjacent ---
+/.github/                              @napetrov
 
-# Documentation
-docs/               @napetrov
-*.md                @napetrov
-mkdocs.yml          @napetrov
+# --- STANDARD: core library ---
+/abicheck/                             @napetrov
+
+# --- STANDARD: tests ---
+/tests/                                @napetrov
+
+# --- STANDARD: documentation ---
+/docs/                                 @napetrov
+*.md                                   @napetrov
+/mkdocs.yml                            @napetrov

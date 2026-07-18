@@ -25,6 +25,18 @@ Detects 388 ABI/API change types across ELF, PE/COFF, and Mach-O binaries,
 categorized into `BREAKING_KINDS`, `API_BREAK_KINDS`, `COMPATIBLE_KINDS`, and `RISK_KINDS` (see `ChangeKind`).
 Drop-in replacement for abi-compliance-checker (ABICC).
 
+**Two different Python version numbers matter here, don't conflate them:**
+`pyproject.toml`'s `requires-python = ">=3.10"` is the *minimum supported*
+version (what a user's environment needs to run abicheck) — CI tests 3.12,
+3.13, and 3.14 across platforms to keep that floor honest. **3.13** is the
+*canonical development/CI* version — `repo_facts.json`'s `canonical_python`,
+the single Linux lane the 95% coverage floor runs on (see "Line-coverage
+floor" below), and what the `ai-readiness` CI job (including its
+`repo_facts.json` mypy-baseline recheck) pins to. The separate
+`lint-and-types` job that gates `mypy abicheck/` cleanliness on every PR
+runs on 3.14, matching the other non-canonical lanes. When in doubt about
+which Python to develop against locally, use 3.13.
+
 ## Quick reference
 
 ```bash
@@ -189,10 +201,22 @@ cover the surrounding first-party trees this file doesn't detail.
 
 ## Adding a new ChangeKind
 
-1. Add to `ChangeKind` enum in `checker_policy.py`
-2. Place in exactly one of `BREAKING_KINDS`, `API_BREAK_KINDS`, `COMPATIBLE_KINDS`, or `RISK_KINDS` (import-time assertion enforces completeness)
-3. Implement detection in the appropriate diff module
-4. Add unit test
+1. Add to `ChangeKind` enum in `checker_policy.py`.
+2. Add ONE `ChangeKindMeta` entry (kind string, `default_verdict`, optional
+   `impact`/`description_template`) to `abicheck/change_registry.py` or one
+   of its sibling `change_registry_<topic>.py` files (`_castxml`,
+   `_buildsource`, `_composition`, `_coverage`, `_numpy`, `_suppression` —
+   split out only to stay under the file-size cap; declaring an entry in any
+   of them is equivalent). **Do NOT hand-edit `BREAKING_KINDS`/
+   `API_BREAK_KINDS`/`COMPATIBLE_KINDS`/`RISK_KINDS` in `checker_policy.py`
+   directly** — those are `frozenset`s *derived* from the registry at import
+   time (`_kinds_for(...)`); the registry entry's `default_verdict` is what
+   actually places a kind into one of them, and the import-time completeness
+   assertion checks the derived sets, not a set you'd edit by hand.
+3. Implement detection in the appropriate diff module, registered via
+   `@registry.detector("...")` (`detector_registry.py`) the way the
+   neighboring detectors in that file are.
+4. Add unit test.
 
 ## Conventions
 
@@ -352,6 +376,45 @@ Pick the right home:
   requested-vs-achieved check, so a Python-API caller or an MCP-driven agent
   passing an explicit `depth=` can silently get a shallower-tier result. Once
   PR #601 merges, extend the same check to those two call paths.
+
+- **Action pinning is deliberately partial, not a full sweep.** Third-party
+  GitHub Actions in `.github/workflows/agentready.yml`, `ci.yml` (the
+  `id-token: write` jobs), `pages.yml`, `publish.yml`, and `security.yml` are
+  pinned to a full commit SHA (with a `# <tag>` comment) rather than a
+  mutable tag/branch — those five carry `security-events:write`,
+  `pull-requests:write`, `contents:write`, or `id-token:write` (OIDC/PyPI
+  Trusted Publishing), so a re-pointed tag there is a real supply-chain risk.
+  Other workflows (`test-action.yml`, `eval-suite.yml`, `performance.yml`,
+  `realworld-validation.yml`, `dependency-review.yml`, and any future ones)
+  still use tags — deliberately deferred, since they only run with
+  `contents: read` and don't touch secrets/publishing/security-event write
+  access, so the blast radius of a compromised tag there is far smaller.
+  Extend the same pinning to a workflow only when it gains elevated
+  permissions, not preemptively.
+- **CODEOWNERS risk tiers currently all resolve to one person.** The file is
+  structured by risk tier (CRITICAL/HIGH/STANDARD) so a second maintainer
+  can be slotted into CRITICAL/HIGH without restructuring, but there is
+  only one maintainer today — don't read the tiering as "these are reviewed
+  by different people," it isn't, yet.
+- **Deferred entirely, not attempted this pass** (heavier structural
+  changes, each needing its own scoped design rather than a drive-by
+  addition):
+  - *Devcontainer image* — a maintained `.devcontainer/` needs a decision on
+    which system tools (castxml, libabigail, abi-compliance-checker,
+    compilers) ship baked-in vs. installed on first use, and upkeep as those
+    pins drift; `pixi` (see CONTRIBUTING.md) already solves the "one command
+    gets you a working dev environment" problem this would target, without
+    the image-maintenance burden.
+  - *Trend-reporting database* — persisting `scripts/check_tier_accuracy.py`
+    /`check_fp_rate.py`/mutation-score history across runs (rather than each
+    CI run only gating against a static baseline) needs a storage decision
+    (artifact-based vs. external DB) and a retention/access policy before
+    it's worth building.
+  - *Full behavioral baseline* — `agent-evals/` (this pass, M1-5) is a real
+    but minimal harness with one task; a "full behavioral baseline" implies
+    a broad task suite plus a scoring/leaderboard story, which should grow
+    from real usage of the one-task harness rather than being speculatively
+    built out now.
 
 ## What NOT to do
 
