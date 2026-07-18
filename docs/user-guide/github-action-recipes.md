@@ -202,52 +202,76 @@ jobs:
       - name: Aggregate verdicts and gate
         run: |
           pip install abicheck --quiet
-          abicheck aggregate abi-reports/ \
-            --expect linux-x86_64,macos-arm64,windows-x86_64
+          abicheck aggregate abi-reports/ --manifest abi-targets.json
 ```
 
-`--expect` is the target set the matrix was supposed to produce — the same
-list the matrix `include:` block defines, so the two never drift. `aggregate`
-then guarantees the property the old hand-written gate loop silently violated:
+`--manifest` names the **single source of truth** for the targets the matrix
+must produce — commit it next to the workflow and read it from both the matrix
+and the gate so the two can never drift:
+
+```json
+{
+  "targets": [
+    {"id": "linux-x86_64",   "required": true},
+    {"id": "macos-arm64",    "required": true},
+    {"id": "windows-x86_64", "required": true}
+  ]
+}
+```
+
+(For a quick inline set, `--expect linux-x86_64,macos-arm64,windows-x86_64`
+with optional `--optional <ids>` is equivalent; `--discovered-only` opts out of
+the coverage gate entirely. One of the three is **required** — a bare
+`aggregate abi-reports/` is a usage error, because with no declared target set
+the gate cannot tell a missing required target from an absent one.) `aggregate`
+then guarantees the properties the old hand-written gate loop silently violated:
 
 * **A required target with no report is _unavailable_ (unknown), never counted
   as compatible.** If the Windows leg fails before uploading
   `abi-report-windows-x86_64.json`, the gate reports Windows as unavailable and
-  exits non-zero — it does **not** pass green as "all platforms compatible"
+  fails at exit `1` — it does **not** pass green as "all platforms compatible"
   when a required platform was never analyzed.
-* **Findings and coverage are separate.** The exit code follows `compare`'s
-  scheme over the *analyzed* targets (`0` compatible / `2` source break / `4`
-  ABI break), and — under the default `--on-missing-required fail` — incomplete
-  required coverage also fails the gate at `4`. A build-infrastructure failure
-  on one leg is reported as a coverage gap, never as a fake ABI regression.
+* **Gate, coverage, and compatibility stay orthogonal (ADR-042).** Each report
+  carries its own severity gate decision; `aggregate` *combines* those (a
+  policy-blocked `COMPATIBLE` still fails, a demoted `BREAKING` can pass) rather
+  than recomputing a gate from the verdict. The exit code is `0` pass / `1`
+  coverage gap or an addition/quality-only block / `2` source break / `4` ABI
+  break. A missing required build is a **coverage** failure at `1` — never
+  promoted to a fake ABI-break exit `4`.
 
 !!! tip
     Set `fail-on-breaking: false` in each matrix job and let the gate decide.
     Use `fail-fast: false` on the matrix and `if: ${{ always() }}` on the
     upload step and the gate job so one failed leg neither cancels the others
     nor skips the fan-in. Pass `--on-missing-required warn` to `aggregate` if
-    you want a missing required target to be reported but not fail the gate
-    (findings alone then decide the exit code); mark a target `--optional`
-    if its absence should never fail coverage.
+    you want a missing required target to be reported but not fail the gate (the
+    per-target gate decisions alone then decide the exit code); mark a target
+    `"required": false` in the manifest (or `--optional`) if its absence should
+    never fail coverage.
 
 Sample output when the Windows leg failed to produce a report:
 
 ```text
-ABI aggregate: Partial
+ABI aggregate gate: Failed (coverage: partial)
 Analyzed 2 of 3 required targets
 
   linux-x86_64: COMPATIBLE
   macos-arm64: COMPATIBLE
   windows-x86_64: ⚠ unavailable — no report was produced for this expected target
 
-Findings:
+Compatibility:
   No ABI regressions in the analyzed targets.
 Coverage:
-  Incomplete — unknown on: windows-x86_64.
+  Incomplete — required target(s) unknown: windows-x86_64.
+Gate:
+  Failed — exit 1; required coverage incomplete.
 ```
 
-Add `--format json` for a machine-readable result (per-target `analyzed`/
-`verdict`, `findings_verdict`, `coverage`) to post elsewhere.
+Add `--format json` for a versioned, machine-readable result — the three axes
+are kept separate under `gate` (`passed`/`exit_code`/`blocking_targets`),
+`coverage` (`status`/counts/`missing_required_targets`), and `compatibility`
+(`verdict`/`analyzed_targets`), plus a per-`targets` breakdown — to post
+elsewhere.
 
 ## Skip system dependency installation
 

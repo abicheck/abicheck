@@ -15,9 +15,10 @@
 
 """Unit tests for abicheck.aggregate — multi-target fan-in gate.
 
-Grounded on the fan-out/fan-in acceptance table: a target that never produced
-a report is *unavailable* (unknown), never folded into the verdict as an empty,
-compatible ABI. Findings and coverage are graded as orthogonal conclusions.
+Grounded on the fan-out/fan-in review contract: an expected target with no
+report is *unavailable* (unknown), never compatible; compatibility, gate, and
+coverage are three orthogonal axes (ADR-042); a coverage gap is exit 1, never
+an ABI-break exit 4.
 """
 
 from __future__ import annotations
@@ -29,8 +30,11 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck.aggregate import (
+    AggregateError,
     CoverageStatus,
+    ExpectedTargets,
     OnMissingRequired,
+    OnUnexpectedTarget,
     aggregate_reports_dir,
     parse_report_verdict,
     target_id_from_path,
@@ -48,14 +52,21 @@ def _write_report(
     verdict: str | None,
     *,
     prefix: str = "abi-report-",
+    severity: dict | None = None,
     **extra,
 ) -> Path:
     payload: dict[str, object] = dict(extra)
     if verdict is not None:
         payload["verdict"] = verdict
+    if severity is not None:
+        payload["severity"] = severity
     path = d / f"{prefix}{target_id}.json"
     path.write_text(json.dumps(payload))
     return path
+
+
+def _expect(*required: str, optional: tuple[str, ...] = ()) -> ExpectedTargets:
+    return ExpectedTargets.from_lists(list(required), list(optional))
 
 
 class TestHelpers:
@@ -64,334 +75,403 @@ class TestHelpers:
         [
             ("abi-report-linux-x86_64.json", "linux-x86_64"),
             ("linux-x86_64.json", "linux-x86_64"),
-            ("abi-report-windows-x86_64-cp312.json", "windows-x86_64-cp312"),
         ],
     )
     def test_target_id_from_path(self, name: str, expected: str):
         assert target_id_from_path(Path(name)) == expected
 
-    def test_parse_report_verdict_reads_verdict(self):
+    def test_parse_report_verdict(self):
         assert parse_report_verdict({"verdict": "BREAKING"}) is Verdict.BREAKING
-
-    @pytest.mark.parametrize(
-        "payload", [{}, {"verdict": None}, {"verdict": "NONSENSE"}]
-    )
-    def test_parse_report_verdict_none_when_absent_or_bad(self, payload: dict):
-        assert parse_report_verdict(payload) is None
+        assert parse_report_verdict({}) is None
+        assert parse_report_verdict({"verdict": "NONSENSE"}) is None
 
 
 class TestAcceptanceTable:
-    """One test per row of the fan-out/fan-in acceptance table."""
+    """The fan-out/fan-in acceptance scenarios."""
 
-    def test_both_targets_succeed_clean(self, tmp_path: Path):
+    def test_both_clean(self, tmp_path: Path):
         _write_report(tmp_path, LINUX, "COMPATIBLE")
         _write_report(tmp_path, WINDOWS, "COMPATIBLE")
-        result = aggregate_reports_dir(tmp_path, required=[LINUX, WINDOWS])
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX, WINDOWS))
+        assert r.coverage is CoverageStatus.COMPLETE
+        assert r.passed
+        assert r.exit_code() == 0
 
-        assert result.coverage is CoverageStatus.COMPLETE
-        assert result.findings_verdict is Verdict.COMPATIBLE
-        assert result.exit_code() == 0
-
-    def test_one_target_regression_other_clean(self, tmp_path: Path):
+    def test_real_abi_break_exits_4(self, tmp_path: Path):
         _write_report(tmp_path, LINUX, "BREAKING")
         _write_report(tmp_path, WINDOWS, "COMPATIBLE")
-        result = aggregate_reports_dir(tmp_path, required=[LINUX, WINDOWS])
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX, WINDOWS))
+        assert r.exit_code() == 4
+        assert r.compatibility_verdict is Verdict.BREAKING
 
-        assert result.coverage is CoverageStatus.COMPLETE
-        assert result.findings_verdict is Verdict.BREAKING
-        assert result.exit_code() == 4
-
-    def test_clean_target_plus_missing_required_is_not_compatible(self, tmp_path: Path):
-        # THE core case: the fragile heredoc would print "all compatible" and
-        # exit 0. Here the missing required target is unavailable → gate fails.
-        _write_report(tmp_path, LINUX, "COMPATIBLE")
-        result = aggregate_reports_dir(tmp_path, required=[LINUX, WINDOWS])
-
-        assert result.coverage is CoverageStatus.PARTIAL
-        assert result.findings_verdict is Verdict.COMPATIBLE  # only over analyzed
-        assert WINDOWS in {t.target_id for t in result.unavailable}
-        assert result.exit_code() == 4  # coverage gate fails under default policy
-
-    def test_regression_plus_missing_required_no_synthetic_break(self, tmp_path: Path):
-        _write_report(tmp_path, LINUX, "BREAKING")
-        result = aggregate_reports_dir(tmp_path, required=[LINUX, WINDOWS])
-
-        # Windows contributes NO synthetic finding — only Linux's real break.
-        assert {t.target_id for t in result.analyzed} == {LINUX}
-        assert result.findings_verdict is Verdict.BREAKING
-
-    def test_both_builds_missing_no_abi_verdict(self, tmp_path: Path):
-        result = aggregate_reports_dir(tmp_path, required=[LINUX, WINDOWS])
-
-        assert result.coverage is CoverageStatus.EMPTY
-        assert result.findings_verdict is None  # nothing analyzed → no verdict
-        assert result.exit_code() == 4  # a gate cannot pass with zero evidence
-
-    def test_source_break_maps_to_exit_2(self, tmp_path: Path):
+    def test_source_break_exits_2(self, tmp_path: Path):
         _write_report(tmp_path, LINUX, "API_BREAK")
-        _write_report(tmp_path, WINDOWS, "COMPATIBLE")
-        result = aggregate_reports_dir(tmp_path, required=[LINUX, WINDOWS])
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert r.exit_code() == 2
 
-        assert result.findings_verdict is Verdict.API_BREAK
-        assert result.exit_code() == 2
-
-    def test_unreadable_report_is_unavailable_not_a_break(self, tmp_path: Path):
-        # A present-but-verdict-less report is unknown, not a silent pass and
-        # not a synthetic break.
+    def test_missing_required_is_unavailable_and_exits_1_not_4(self, tmp_path: Path):
+        # THE core case: a clean linux report + a missing required windows must
+        # NOT pass green, and the coverage gap must be exit 1 (a build that
+        # never ran), never an ABI-break exit 4.
         _write_report(tmp_path, LINUX, "COMPATIBLE")
-        _write_report(tmp_path, WINDOWS, None)  # no verdict key
-        result = aggregate_reports_dir(tmp_path, required=[LINUX, WINDOWS])
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX, WINDOWS))
+        assert r.coverage is CoverageStatus.PARTIAL
+        assert WINDOWS in r.missing_required
+        assert r.exit_code() == 1
+        assert not r.passed
 
-        windows = next(t for t in result.targets if t.target_id == WINDOWS)
-        assert not windows.analyzed
-        assert windows.reason is not None
-        assert result.coverage is CoverageStatus.PARTIAL
+    def test_full_outage_missing_dir_is_coverage_not_usage_error(self, tmp_path: Path):
+        r = aggregate_reports_dir(tmp_path / "nope", expected=_expect(LINUX, WINDOWS))
+        assert r.coverage is CoverageStatus.EMPTY
+        assert r.compatibility_verdict is None
+        assert r.exit_code() == 1
 
-    def test_corrupt_json_report_is_unavailable(self, tmp_path: Path):
-        _write_report(tmp_path, LINUX, "COMPATIBLE")
-        (tmp_path / f"abi-report-{WINDOWS}.json").write_text("{ not valid json")
-        result = aggregate_reports_dir(tmp_path, required=[LINUX, WINDOWS])
+    def test_regression_plus_missing_no_synthetic_break(self, tmp_path: Path):
+        _write_report(tmp_path, LINUX, "BREAKING")
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX, WINDOWS))
+        assert {t.target_id for t in r.analyzed} == {LINUX}
+        assert r.exit_code() == 4  # linux's real break, not a windows synthetic one
 
-        windows = next(t for t in result.targets if t.target_id == WINDOWS)
-        assert not windows.analyzed
-        assert "unreadable" in (windows.reason or "")
+    def test_unreadable_and_verdictless_reports_are_unavailable(self, tmp_path: Path):
+        _write_report(tmp_path, LINUX, None)  # no verdict key
+        (tmp_path / f"abi-report-{WINDOWS}.json").write_text("{ bad json")
+        (tmp_path / f"abi-report-{MACOS}.json").write_text("[1,2,3]")  # not an object
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX, WINDOWS, MACOS))
+        assert not any(t.analyzed for t in r.targets)
+        assert r.coverage is CoverageStatus.EMPTY
 
-    def test_non_object_json_report_is_unavailable(self, tmp_path: Path):
-        # Valid JSON but not an object (e.g. a bare array) → unknown, not a pass.
-        _write_report(tmp_path, LINUX, "COMPATIBLE")
-        (tmp_path / f"abi-report-{WINDOWS}.json").write_text("[1, 2, 3]")
-        result = aggregate_reports_dir(tmp_path, required=[LINUX, WINDOWS])
 
-        windows = next(t for t in result.targets if t.target_id == WINDOWS)
-        assert not windows.analyzed
-        assert result.is_partial
+class TestGateVsVerdict:
+    """ADR-042: the gate is each report's own decision, never the verdict."""
 
-    def test_rerun_producing_the_report_moves_partial_to_complete(self, tmp_path: Path):
-        _write_report(tmp_path, LINUX, "COMPATIBLE")
-        partial = aggregate_reports_dir(tmp_path, required=[LINUX, WINDOWS])
-        assert partial.coverage is CoverageStatus.PARTIAL
+    def test_compatible_but_policy_blocked_addition_fails(self, tmp_path: Path):
+        # verdict COMPATIBLE, but the report's own gate says blocking (exit 1).
+        _write_report(
+            tmp_path,
+            LINUX,
+            "COMPATIBLE",
+            severity={
+                "exit_code": 1,
+                "blocking": True,
+                "blocking_categories": ["addition"],
+            },
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert r.compatibility_verdict is Verdict.COMPATIBLE  # honest compat axis
+        assert not r.passed  # but the gate fails
+        assert r.exit_code() == 1
+        assert LINUX in r.blocking_targets
 
-        _write_report(tmp_path, WINDOWS, "COMPATIBLE")  # rerun uploads its report
-        complete = aggregate_reports_dir(tmp_path, required=[LINUX, WINDOWS])
-        assert complete.coverage is CoverageStatus.COMPLETE
+    def test_breaking_but_demoted_gate_passes(self, tmp_path: Path):
+        # verdict BREAKING, but the report's gate was demoted to non-blocking.
+        _write_report(
+            tmp_path, LINUX, "BREAKING", severity={"exit_code": 0, "blocking": False}
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert r.compatibility_verdict is Verdict.BREAKING  # honest compat axis
+        assert r.passed  # gate honours the report's own decision
+        assert r.exit_code() == 0
 
-    def test_new_unbaselined_target_is_surfaced_separately(self, tmp_path: Path):
-        _write_report(tmp_path, LINUX, "COMPATIBLE")
-        _write_report(tmp_path, MACOS, "COMPATIBLE")  # not in expected set
-        result = aggregate_reports_dir(tmp_path, required=[LINUX])
+    def test_legacy_report_without_gate_block_falls_back_to_verdict(
+        self, tmp_path: Path
+    ):
+        _write_report(tmp_path, LINUX, "BREAKING")  # no severity block
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert r.exit_code() == 4
+        target = r.targets[0]
+        assert target.gate is not None and target.gate.from_report is False
 
-        assert result.coverage is CoverageStatus.COMPLETE  # expected set is fine
-        assert {t.target_id for t in result.unbaselined} == {MACOS}
-        assert MACOS in result.render_text()  # not silently swallowed
+    def test_malformed_gate_block_falls_back_to_legacy(self, tmp_path: Path):
+        # severity present but exit_code is not an int → ignore the block,
+        # fall back to the verdict-derived legacy gate.
+        _write_report(tmp_path, LINUX, "BREAKING", severity={"exit_code": "nope"})
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert r.targets[0].gate is not None
+        assert r.targets[0].gate.from_report is False
+        assert r.exit_code() == 4
 
 
 class TestCoveragePolicy:
-    def test_missing_required_defaults_to_gate_failure(self, tmp_path: Path):
+    def test_missing_required_warn_lets_gate_decide(self, tmp_path: Path):
         _write_report(tmp_path, LINUX, "COMPATIBLE")
-        result = aggregate_reports_dir(tmp_path, required=[LINUX, WINDOWS])
+        r = aggregate_reports_dir(
+            tmp_path,
+            expected=_expect(LINUX, WINDOWS),
+            on_missing_required=OnMissingRequired.WARN,
+        )
+        assert r.coverage is CoverageStatus.PARTIAL
+        assert not r.coverage_blocking
+        assert r.exit_code() == 0  # clean findings + warn → pass
 
-        assert result.exit_code(on_missing_required=OnMissingRequired.FAIL) == 4
-
-    def test_missing_required_warn_lets_findings_decide(self, tmp_path: Path):
+    def test_missing_optional_never_fails(self, tmp_path: Path):
         _write_report(tmp_path, LINUX, "COMPATIBLE")
-        result = aggregate_reports_dir(tmp_path, required=[LINUX, WINDOWS])
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX, optional=(MACOS,)))
+        assert r.coverage is CoverageStatus.COMPLETE
+        assert r.exit_code() == 0
 
-        # Clean findings + warn policy → exit 0 even though coverage is partial.
-        assert result.exit_code(on_missing_required=OnMissingRequired.WARN) == 0
-        assert result.coverage is CoverageStatus.PARTIAL  # still reported
 
-    def test_missing_required_warn_still_fails_on_real_break(self, tmp_path: Path):
-        _write_report(tmp_path, LINUX, "BREAKING")
-        result = aggregate_reports_dir(tmp_path, required=[LINUX, WINDOWS])
-
-        assert result.exit_code(on_missing_required=OnMissingRequired.WARN) == 4
-
-    def test_missing_optional_target_never_fails_coverage(self, tmp_path: Path):
+class TestUnexpectedTargets:
+    def test_include_gates_unexpected_findings(self, tmp_path: Path):
         _write_report(tmp_path, LINUX, "COMPATIBLE")
-        result = aggregate_reports_dir(tmp_path, required=[LINUX], optional=[MACOS])
+        _write_report(tmp_path, MACOS, "BREAKING")  # not expected
+        r = aggregate_reports_dir(
+            tmp_path,
+            expected=_expect(LINUX),
+            on_unexpected_target=OnUnexpectedTarget.INCLUDE,
+        )
+        assert r.coverage is CoverageStatus.COMPLETE  # expected set is fine
+        assert MACOS in {t.target_id for t in r.unbaselined}
+        assert r.exit_code() == 4  # macos's break IS gated under include
 
-        assert result.coverage is CoverageStatus.COMPLETE
-        assert result.exit_code() == 0
-
-    def test_optional_only_with_nothing_analyzed_does_not_fail(self, tmp_path: Path):
-        # Only an optional target was declared and none reported: there is no
-        # required coverage gap, so the gate must not fail (exit 0) even under
-        # the default fail policy — an unavailable optional target never gates.
-        result = aggregate_reports_dir(tmp_path, optional=[MACOS])
-
-        assert not result.required_gap
-        assert result.coverage is CoverageStatus.COMPLETE
-        assert result.findings_verdict is None
-        assert result.exit_code() == 0
-
-    def test_optional_without_expect_still_aggregates_present_reports(
-        self, tmp_path: Path
-    ):
-        # `--optional macos` with no `--expect`: a present linux BREAKING report
-        # must still be aggregated (no-expect = worst-of over what's present),
-        # not shunted to unbaselined because only an optional id was named.
-        _write_report(tmp_path, LINUX, "BREAKING")
-        result = aggregate_reports_dir(tmp_path, optional=[MACOS])
-
-        assert result.findings_verdict is Verdict.BREAKING
-        assert LINUX in {t.target_id for t in result.analyzed}
-        assert not result.unbaselined
-        assert result.exit_code() == 4
-
-    def test_no_expected_set_is_pure_worst_of(self, tmp_path: Path):
-        # Backward-compatible with the old heredoc: aggregate whatever is
-        # present, no coverage gate.
+    def test_warn_does_not_gate_unexpected(self, tmp_path: Path):
         _write_report(tmp_path, LINUX, "COMPATIBLE")
-        _write_report(tmp_path, WINDOWS, "API_BREAK")
-        result = aggregate_reports_dir(tmp_path)
+        _write_report(tmp_path, MACOS, "BREAKING")
+        r = aggregate_reports_dir(
+            tmp_path,
+            expected=_expect(LINUX),
+            on_unexpected_target=OnUnexpectedTarget.WARN,
+        )
+        assert r.exit_code() == 0
+        assert MACOS in {t.target_id for t in r.unbaselined}
 
-        assert result.coverage is CoverageStatus.COMPLETE
-        assert result.findings_verdict is Verdict.API_BREAK
-        assert result.exit_code() == 2
-
-    def test_findings_verdict_preserves_risk_over_compatible(self, tmp_path: Path):
-        # One target COMPATIBLE, another COMPATIBLE_WITH_RISK. Both are exit-0,
-        # but the reported findings_verdict must surface the risk, not collapse
-        # to whichever verdict sorts first.
+    def test_ignore_drops_unexpected(self, tmp_path: Path):
         _write_report(tmp_path, LINUX, "COMPATIBLE")
-        _write_report(tmp_path, WINDOWS, "COMPATIBLE_WITH_RISK")
-        result = aggregate_reports_dir(tmp_path, required=[LINUX, WINDOWS])
+        _write_report(tmp_path, MACOS, "BREAKING")
+        r = aggregate_reports_dir(
+            tmp_path,
+            expected=_expect(LINUX),
+            on_unexpected_target=OnUnexpectedTarget.IGNORE,
+        )
+        assert r.unbaselined == ()
+        assert r.exit_code() == 0
 
-        assert result.findings_verdict is Verdict.COMPATIBLE_WITH_RISK
-        assert result.exit_code() == 0  # risk is non-blocking for the gate
-        assert result.to_dict()["findings_verdict"] == "COMPATIBLE_WITH_RISK"
-        assert "compatible-with-risk on: windows-x86_64" in result.render_text()
+    def test_fail_on_any_unexpected(self, tmp_path: Path):
+        _write_report(tmp_path, LINUX, "COMPATIBLE")
+        _write_report(tmp_path, MACOS, "COMPATIBLE")  # clean, but unexpected
+        r = aggregate_reports_dir(
+            tmp_path,
+            expected=_expect(LINUX),
+            on_unexpected_target=OnUnexpectedTarget.FAIL,
+        )
+        assert r.exit_code() == 1
+
+
+class TestDiscoveredOnly:
+    def test_discovered_only_aggregates_present_no_coverage_gate(self, tmp_path: Path):
+        _write_report(tmp_path, LINUX, "API_BREAK")
+        r = aggregate_reports_dir(tmp_path, discovered_only=True)
+        assert r.discovered_only
+        assert r.exit_code() == 2  # worst-of over present reports
+        assert r.coverage is CoverageStatus.COMPLETE  # no required set to gate
+
+    def test_no_expected_and_not_discovered_is_an_error(self, tmp_path: Path):
+        with pytest.raises(AggregateError):
+            aggregate_reports_dir(tmp_path)
+
+
+class TestManifestAndIdentity:
+    def test_manifest_round_trip(self, tmp_path: Path):
+        data = {
+            "targets": [
+                {"id": LINUX, "required": True},
+                {"id": MACOS, "required": False},
+            ]
+        }
+        (tmp_path / "m.json").write_text(json.dumps(data))
+        exp = ExpectedTargets.from_manifest_file(tmp_path / "m.json")
+        assert exp.targets == {LINUX: True, MACOS: False}
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            {"targets": []},
+            {"targets": [{"id": ""}]},
+            {"targets": [{"id": 123}]},
+            {"targets": [{"id": LINUX, "required": "yes"}]},
+            {"targets": [{"id": LINUX}, {"id": LINUX}]},
+            {"targets": [42]},  # non-object entry
+            {"nope": 1},
+            [1, 2],
+        ],
+    )
+    def test_manifest_rejects_malformed(self, bad):
+        with pytest.raises(AggregateError):
+            ExpectedTargets.from_manifest_data(bad)
+
+    def test_manifest_file_unreadable_is_error(self, tmp_path: Path):
+        (tmp_path / "m.json").write_text("{ not json")
+        with pytest.raises(AggregateError):
+            ExpectedTargets.from_manifest_file(tmp_path / "m.json")
+
+    def test_from_lists_empty_is_error(self):
+        with pytest.raises(AggregateError):
+            ExpectedTargets.from_lists([], [])
+
+    def test_report_self_identifies_target_id(self, tmp_path: Path):
+        # Filename derives "renamed", but the report's own target_id wins.
+        (tmp_path / "abi-report-renamed.json").write_text(
+            json.dumps({"verdict": "COMPATIBLE", "target_id": LINUX})
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert r.targets[0].analyzed
+        assert r.exit_code() == 0
+
+    def test_duplicate_target_id_is_hard_error(self, tmp_path: Path):
+        _write_report(tmp_path, "linux", "COMPATIBLE", prefix="abi-report-")
+        _write_report(tmp_path, "linux", "BREAKING", prefix="")  # both -> "linux"
+        with pytest.raises(AggregateError):
+            aggregate_reports_dir(tmp_path, expected=_expect("linux"))
+
+    def test_stale_head_sha_report_is_unavailable(self, tmp_path: Path):
+        _write_report(tmp_path, LINUX, "COMPATIBLE", head_sha="oldsha")
+        manifest = ExpectedTargets(targets={LINUX: True}, head_sha="newsha")
+        r = aggregate_reports_dir(tmp_path, expected=manifest)
+        assert not r.targets[0].analyzed
+        assert "different commit" in (r.targets[0].reason or "")
 
 
 class TestRendering:
-    def test_to_dict_round_trips_key_fields(self, tmp_path: Path):
-        _write_report(tmp_path, LINUX, "COMPATIBLE", library="libfoo.so")
-        result = aggregate_reports_dir(tmp_path, required=[LINUX, WINDOWS])
-        d = result.to_dict()
-
-        assert d["coverage"] == "partial"
-        assert d["findings_verdict"] == "COMPATIBLE"
-        ids = {t["target_id"]: t for t in d["targets"]}
-        assert ids[LINUX]["analyzed"] is True
-        assert ids[WINDOWS]["analyzed"] is False
-
-    def test_render_text_partial_names_unknown_target(self, tmp_path: Path):
+    def test_json_schema_shape(self, tmp_path: Path):
         _write_report(tmp_path, LINUX, "COMPATIBLE")
-        text = aggregate_reports_dir(tmp_path, required=[LINUX, WINDOWS]).render_text()
+        d = aggregate_reports_dir(tmp_path, expected=_expect(LINUX, WINDOWS)).to_dict()
+        assert d["aggregate_schema_version"] == "1.0"
+        assert d["status"] == "fail"
+        assert d["gate"]["exit_code"] == 1
+        assert d["gate"]["coverage_blocking"] is True
+        assert d["coverage"]["missing_required_targets"] == [WINDOWS]
+        assert d["coverage"]["required_targets"] == 2
+        assert d["compatibility"]["analyzed_targets"] == 1
 
-        assert "Partial" in text
-        assert "unavailable" in text
-        assert WINDOWS in text
+    def test_json_includes_unbaselined_targets(self, tmp_path: Path):
+        _write_report(tmp_path, LINUX, "COMPATIBLE")
+        _write_report(tmp_path, MACOS, "COMPATIBLE")  # unexpected
+        d = aggregate_reports_dir(tmp_path, expected=_expect(LINUX)).to_dict()
+        assert d["unbaselined"]
+        assert d["unbaselined"][0]["unexpected"] is True
 
-    def test_render_text_empty_when_nothing_analyzed(self, tmp_path: Path):
-        text = aggregate_reports_dir(tmp_path, required=[LINUX]).render_text()
+    def test_unavailable_property_names_missing_targets(self, tmp_path: Path):
+        _write_report(tmp_path, LINUX, "COMPATIBLE")
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX, WINDOWS))
+        assert {t.target_id for t in r.unavailable} == {WINDOWS}
 
-        assert "No coverage" in text
-        assert "No targets were analyzed" in text
+    def test_json_distinguishes_fail_and_warn(self, tmp_path: Path):
+        _write_report(tmp_path, LINUX, "COMPATIBLE")
+        fail = aggregate_reports_dir(
+            tmp_path, expected=_expect(LINUX, WINDOWS)
+        ).to_dict()
+        warn = aggregate_reports_dir(
+            tmp_path,
+            expected=_expect(LINUX, WINDOWS),
+            on_missing_required=OnMissingRequired.WARN,
+        ).to_dict()
+        assert fail["gate"]["exit_code"] != warn["gate"]["exit_code"]
 
-    def test_render_text_names_regressed_targets(self, tmp_path: Path):
-        _write_report(tmp_path, LINUX, "BREAKING")
-        _write_report(tmp_path, WINDOWS, "COMPATIBLE")
-        text = aggregate_reports_dir(tmp_path, required=[LINUX, WINDOWS]).render_text()
-
-        assert "BREAKING on:" in text
-        assert LINUX in text
-
-    def test_render_text_groups_mixed_regressions_by_verdict(self, tmp_path: Path):
-        # linux BREAKING, windows API_BREAK: each must be listed under its own
-        # verdict — the API_BREAK target must not be mislabeled BREAKING.
+    def test_text_groups_mixed_regressions_by_verdict(self, tmp_path: Path):
         _write_report(tmp_path, LINUX, "BREAKING")
         _write_report(tmp_path, WINDOWS, "API_BREAK")
-        text = aggregate_reports_dir(tmp_path, required=[LINUX, WINDOWS]).render_text()
+        text = aggregate_reports_dir(
+            tmp_path, expected=_expect(LINUX, WINDOWS)
+        ).render_text()
+        assert f"BREAKING on: {LINUX}" in text
+        assert f"API_BREAK on: {WINDOWS}" in text
 
-        assert f"BREAKING on: {LINUX}." in text
-        assert f"API_BREAK on: {WINDOWS}." in text
+    def test_text_preserves_risk(self, tmp_path: Path):
+        _write_report(tmp_path, LINUX, "COMPATIBLE")
+        _write_report(tmp_path, WINDOWS, "COMPATIBLE_WITH_RISK")
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX, WINDOWS))
+        assert r.compatibility_verdict is Verdict.COMPATIBLE_WITH_RISK
+        assert "compatible-with-risk on: windows-x86_64" in r.render_text()
 
+    def test_text_full_outage(self, tmp_path: Path):
+        text = aggregate_reports_dir(tmp_path, expected=_expect(LINUX)).render_text()
+        assert "no coverage" in text
+        assert "no compatibility verdict" in text
 
-class TestReportPrefix:
-    def test_custom_prefix(self, tmp_path: Path):
-        _write_report(tmp_path, LINUX, "COMPATIBLE", prefix="report_")
-        result = aggregate_reports_dir(tmp_path, required=[LINUX], prefix="report_")
-        assert result.coverage is CoverageStatus.COMPLETE
-
-    def test_bare_filename_no_prefix(self, tmp_path: Path):
-        _write_report(tmp_path, LINUX, "COMPATIBLE", prefix="")
-        result = aggregate_reports_dir(tmp_path, required=[LINUX])
-        assert result.coverage is CoverageStatus.COMPLETE
+    def test_text_api_break_only(self, tmp_path: Path):
+        # Only API_BREAK present (no BREAKING) — the render must name it under
+        # API_BREAK without an empty BREAKING line.
+        _write_report(tmp_path, LINUX, "API_BREAK")
+        text = aggregate_reports_dir(tmp_path, expected=_expect(LINUX)).render_text()
+        assert f"API_BREAK on: {LINUX}." in text
+        assert "BREAKING on:" not in text
 
 
 class TestAggregateCLI:
-    """End-to-end through the actual `abicheck aggregate` command."""
-
-    def test_missing_required_target_exits_4(self, tmp_path: Path):
+    def _run(self, args):
         from abicheck.cli import main
 
+        return CliRunner().invoke(main, ["aggregate", *args])
+
+    def test_missing_required_exits_1(self, tmp_path: Path):
         _write_report(tmp_path, LINUX, "COMPATIBLE")
-        res = CliRunner().invoke(
-            main, ["aggregate", "--expect", f"{LINUX},{WINDOWS}", str(tmp_path)]
-        )
-        assert res.exit_code == 4
-        assert "Partial" in res.output
-        assert WINDOWS in res.output
+        res = self._run(["--expect", f"{LINUX},{WINDOWS}", str(tmp_path)])
+        assert res.exit_code == 1
+        assert "Failed" in res.output
 
     def test_all_clean_exits_0(self, tmp_path: Path):
-        from abicheck.cli import main
-
         _write_report(tmp_path, LINUX, "COMPATIBLE")
         _write_report(tmp_path, WINDOWS, "COMPATIBLE")
-        res = CliRunner().invoke(
-            main, ["aggregate", "--expect", f"{LINUX},{WINDOWS}", str(tmp_path)]
-        )
+        res = self._run(["--expect", f"{LINUX},{WINDOWS}", str(tmp_path)])
         assert res.exit_code == 0
 
-    def test_warn_policy_exits_0_on_missing_required(self, tmp_path: Path):
-        from abicheck.cli import main
-
-        _write_report(tmp_path, LINUX, "COMPATIBLE")
-        res = CliRunner().invoke(
-            main,
-            [
-                "aggregate",
-                "--expect",
-                f"{LINUX},{WINDOWS}",
-                "--on-missing-required",
-                "warn",
-                str(tmp_path),
-            ],
-        )
-        assert res.exit_code == 0
-        assert "Incomplete" in res.output
-
-    def test_json_format_is_valid(self, tmp_path: Path):
-        from abicheck.cli import main
-
+    def test_abi_break_exits_4(self, tmp_path: Path):
         _write_report(tmp_path, LINUX, "BREAKING")
-        res = CliRunner().invoke(
-            main, ["aggregate", "--expect", LINUX, "--format", "json", str(tmp_path)]
-        )
+        res = self._run(["--expect", LINUX, "--format", "json", str(tmp_path)])
         assert res.exit_code == 4
-        payload = json.loads(res.output)
-        assert payload["findings_verdict"] == "BREAKING"
+        assert json.loads(res.output)["compatibility"]["verdict"] == "BREAKING"
+
+    def test_no_expected_set_is_usage_error(self, tmp_path: Path):
+        _write_report(tmp_path, LINUX, "COMPATIBLE")
+        res = self._run([str(tmp_path)])
+        assert res.exit_code == 64
+
+    def test_discovered_only_flag(self, tmp_path: Path):
+        _write_report(tmp_path, LINUX, "COMPATIBLE")
+        res = self._run(["--discovered-only", str(tmp_path)])
+        assert res.exit_code == 0
+
+    def test_manifest_flag(self, tmp_path: Path):
+        _write_report(tmp_path, LINUX, "COMPATIBLE")
+        (tmp_path / "m.json").write_text(
+            json.dumps({"targets": [{"id": LINUX, "required": True}]})
+        )
+        res = self._run(["--manifest", str(tmp_path / "m.json"), str(tmp_path)])
+        assert res.exit_code == 0
+
+    def test_conflicting_sources_is_usage_error(self, tmp_path: Path):
+        _write_report(tmp_path, LINUX, "COMPATIBLE")
+        (tmp_path / "m.json").write_text(
+            json.dumps({"targets": [{"id": LINUX, "required": True}]})
+        )
+        res = self._run(
+            ["--manifest", str(tmp_path / "m.json"), "--expect", LINUX, str(tmp_path)]
+        )
+        assert res.exit_code == 64
+
+    def test_discovered_only_conflicts_with_expect(self, tmp_path: Path):
+        _write_report(tmp_path, LINUX, "COMPATIBLE")
+        res = self._run(["--discovered-only", "--expect", LINUX, str(tmp_path)])
+        assert res.exit_code == 64
+
+    def test_duplicate_target_id_usage_error(self, tmp_path: Path):
+        _write_report(tmp_path, "linux", "COMPATIBLE", prefix="abi-report-")
+        _write_report(tmp_path, "linux", "BREAKING", prefix="")
+        res = self._run(["--expect", "linux", str(tmp_path)])
+        assert res.exit_code == 64
+
+    def test_malformed_manifest_is_usage_error(self, tmp_path: Path):
+        _write_report(tmp_path, LINUX, "COMPATIBLE")
+        (tmp_path / "m.json").write_text(json.dumps({"targets": []}))
+        res = self._run(["--manifest", str(tmp_path / "m.json"), str(tmp_path)])
+        assert res.exit_code == 64
 
     def test_output_to_file(self, tmp_path: Path):
-        from abicheck.cli import main
-
-        reports = tmp_path / "reports"
+        reports = tmp_path / "r"
         reports.mkdir()
         _write_report(reports, LINUX, "COMPATIBLE")
-        out = tmp_path / "result.json"
-        res = CliRunner().invoke(
-            main,
-            [
-                "aggregate",
-                "--expect",
-                LINUX,
-                "--format",
-                "json",
-                "-o",
-                str(out),
-                str(reports),
-            ],
+        out = tmp_path / "out.json"
+        res = self._run(
+            ["--expect", LINUX, "--format", "json", "-o", str(out), str(reports)]
         )
         assert res.exit_code == 0
-        assert json.loads(out.read_text())["coverage"] == "complete"
+        assert json.loads(out.read_text())["status"] == "pass"

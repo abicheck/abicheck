@@ -165,26 +165,62 @@ audit/hygiene/source-consistency scan only; pass it and `scan` also compares
 
 The multi-target fan-in gate folds the per-target `compare`/`scan` JSON reports
 a CI build matrix produces (one `abi-report-<target>.json` per leg) into one
-verdict. Its exit code is the worst of two orthogonal conclusions — **findings**
-(the worst ABI verdict over the *analyzed* targets, in `compare`'s scheme) and
-**coverage** (did every *required* expected target actually report?):
+gate decision. Three axes stay **orthogonal** (ADR-042), and the exit code is
+the worst contribution across them:
+
+- **gate** — each report already carries its own severity gate decision
+  (`severity.{exit_code,blocking,blocking_categories}`); `aggregate` *combines*
+  those, it never recomputes a gate from the compatibility verdict. So a
+  `COMPATIBLE` report with an `addition=error` policy still contributes exit
+  `1`, and a `BREAKING` report under a demoted preset can contribute `0`.
+  Reports produced without any `--severity-*` policy carry no gate block and
+  fall back to the legacy verdict→exit mapping (`0`/`2`/`4`).
+- **coverage** — did every *required* expected target actually report? An
+  incomplete required coverage is a *coverage* failure at exit `1`; it is
+  **never** promoted to an ABI-break exit `4`.
+- **compatibility** — the worst verdict over the analyzed targets, reported for
+  context; it does not by itself drive the exit code.
 
 | Exit code | Meaning |
 |-----------|---------|
-| `0` | Every required target analyzed and compatible |
-| `2` | Source-level / API break in an analyzed target |
-| `4` | ABI break in an analyzed target, **or** — under the default `--on-missing-required fail` — a required target was unavailable (no/unreadable report) or nothing was analyzed at all |
-| `64` | Invalid invocation (bad arguments/options) |
+| `0` | Every required target analyzed, no blocking findings |
+| `1` | A required target was unavailable (coverage gap, default `--on-missing-required fail`) **or** an analyzed target's gate blocks on an `addition`/`quality` finding only |
+| `2` | An analyzed target's gate is a source-level / API break |
+| `4` | An analyzed target's gate is an ABI break |
+| `64` | Invalid invocation (bad arguments/options, malformed manifest, duplicate target id, or no expected-target set given) |
+
+The highest applicable code wins: a run with both an ABI break and a coverage
+gap exits `4`; a run whose *only* problem is a missing required target exits
+`1`, never `4`.
 
 > **A required target with no report is _unavailable_ (unknown), never counted
 > as compatible.** This is the whole point of the command: a matrix leg that
 > failed before uploading its report is reported as a coverage gap and fails
-> the gate — it is never silently folded into the verdict as an empty,
-> compatible ABI. `--on-missing-required warn` lets the findings verdict alone
-> decide the exit code (the gap is still reported); `--optional <id>` marks a
-> target whose absence never fails coverage. Supply the expected set with
-> `--expect <ids>` (the same list the CI matrix defines); omit it to aggregate
-> whatever reports are present with no coverage gate (pure worst-of).
+> the gate at exit `1` — it is never silently folded into the verdict as an
+> empty, compatible ABI, and a build that simply never ran is never handed an
+> ABI-break exit `4`.
+
+**Declaring the expected-target set (required — one of):**
+
+- `--manifest abi-targets.json` (recommended) — the single source of truth for
+  which targets the matrix must produce: `{"targets": [{"id": "linux-x86_64",
+  "required": true}, ...]}`. Generate it once in the plan job and feed the same
+  file to both the matrix and this gate so they never drift.
+- `--expect <ids>` (repeatable / comma-separated), with optional `--optional
+  <ids>` — an inline alternative to a manifest file.
+- `--discovered-only` — explicitly aggregate whatever reports are present with
+  **no** coverage gate (pure worst-of the gate decisions). Required to run
+  without a manifest/`--expect`: with no declared target set the gate cannot
+  tell a missing required target from an intentionally absent one, so a bare
+  `aggregate reports/` is a usage error (exit `64`), not a silent pass.
+
+`--on-missing-required warn` downgrades a coverage gap to advisory (the
+per-target gate decisions alone then decide the exit code). `--on-unexpected-target`
+(`include`/`warn`/`fail`/`ignore`, default `include`) controls a report whose
+target is not in the expected set: `include` counts its real findings in the
+gate but not in required coverage. The `--format json` output is versioned
+(`aggregate_schema_version`) and carries the three axes separately under
+`gate` / `coverage` / `compatibility`.
 
 ---
 
@@ -343,8 +379,9 @@ one of those.
 App/plugin-scoped comparisons (`compare --used-by`/`--required-symbol`) reuse
 the `compare` columns above — see
 [Application- and plugin-scoped comparisons](#application-and-plugin-scoped-comparisons-compare-used-by-required-symbol).
-`aggregate` reuses `compare`'s `0`/`2`/`4` scheme over its analyzed targets and
-adds a coverage gate — see [`abicheck aggregate`](#abicheck-aggregate).
+`aggregate` combines each report's own severity gate (`0`/`1`/`2`/`4`) over its
+analyzed targets and adds a coverage gate (a required gap exits `1`, never `4`) —
+see [`abicheck aggregate`](#abicheck-aggregate).
 `--dry-run` (on `dump`/`compare`/`scan`/`deps tree`/`deps compare`) reuses
 none of these rows — it always exits `0`/`1`/`64`; see
 [`--dry-run`](#-dry-run-dump-compare-scan-deps-tree-deps-compare) above.
