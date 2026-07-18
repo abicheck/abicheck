@@ -144,9 +144,38 @@ _write_output() {
 # this run. _verify_pack's TU-count check would then see the STALE nonzero
 # count and report ready=true even if this run's build never actually
 # invoked abicheck-cc/the plugin (Codex review).
+#
+# Removes only the two known pack-content items (abicheck/buildsource/
+# inputs_pack.py's INPUTS_MANIFEST_NAME/SOURCE_FACTS_DIR), never the whole
+# $OUTPUT tree: output is a user-controlled Action input, and a workflow
+# that accidentally points it at an existing non-pack directory (the
+# workspace root, a shared build/source directory) must not have this step
+# recursively delete whatever is there (Codex review).
 _reset_output_dir() {
-  rm -rf "$OUTPUT"
+  rm -f "$OUTPUT/manifest.json"
+  rm -rf "$OUTPUT/source_facts"
   mkdir -p "$OUTPUT"
+}
+
+# Resolve a public-roots line to an absolute path, same rationale as
+# OUTPUT above: ABICHECK_CC_HEADERS/the plugin's public-roots= flag are
+# read by abicheck-cc/the plugin while they run with cwd set to the
+# *build* directory (the documented CMake compiler-launcher recipe), not
+# this script's own cwd. A relative root like the documented
+# public-roots: "include" would then resolve against the wrong
+# directory -- split_public_roots() (abicheck/buildsource/
+# source_extractors/_argv.py) checks os.path.isdir() there and, finding
+# nothing, misclassifies it as a file root instead of a directory root,
+# so declarations under the real source-tree include/ never match. An
+# already-absolute root, or one already ending in a path separator (a
+# directory marker split_public_roots() honours even when the path
+# doesn't exist yet), is passed through unchanged (Codex review).
+_resolve_public_root() {
+  local root="$1"
+  case "$root" in
+    /*) printf '%s' "$root" ;;
+    *) printf '%s' "$(pwd)/$root" ;;
+  esac
 }
 
 # ---------------------------------------------------------------------------
@@ -255,8 +284,12 @@ _prepare_wrapper() {
     case "$(uname -s)" in
       MINGW* | MSYS* | CYGWIN*) sep=';' ;;
     esac
-    local roots_joined
-    roots_joined=$(printf '%s' "$PUBLIC_ROOTS" | tr '\n' "$sep" | sed "s/${sep}\$//")
+    local roots_joined="" root resolved
+    while IFS= read -r root; do
+      [[ -z "$root" ]] && continue
+      resolved=$(_resolve_public_root "$root")
+      roots_joined="${roots_joined:+$roots_joined$sep}$resolved"
+    done <<< "$PUBLIC_ROOTS"
     _write_env "ABICHECK_CC_HEADERS" "$roots_joined"
   fi
   echo "::notice::producer: wrapper prepared -- front your build command with 'abicheck-cc' (e.g. CC=\"abicheck-cc gcc\" CXX=\"abicheck-cc g++\", or CMAKE_CXX_COMPILER_LAUNCHER=abicheck-cc), run your build next, then call this Action again with phase: verify to check the collected pack at '$OUTPUT'."
@@ -341,9 +374,12 @@ $version_output"
   # pair per public root (public-roots= is repeatable per the plugin docs).
   local plugin_flags="-fplugin=$plugin_so -Xclang -plugin-arg-abicheck-facts -Xclang out=$OUTPUT"
   if [[ -n "$PUBLIC_ROOTS" ]]; then
-    local root
+    local root resolved
     while IFS= read -r root; do
-      [[ -n "$root" ]] && plugin_flags="$plugin_flags -Xclang -plugin-arg-abicheck-facts -Xclang public-roots=$root"
+      if [[ -n "$root" ]]; then
+        resolved=$(_resolve_public_root "$root")
+        plugin_flags="$plugin_flags -Xclang -plugin-arg-abicheck-facts -Xclang public-roots=$resolved"
+      fi
     done <<< "$PUBLIC_ROOTS"
   fi
   [[ -n "$LIBRARY" ]] && plugin_flags="$plugin_flags -Xclang -plugin-arg-abicheck-facts -Xclang library=$LIBRARY"

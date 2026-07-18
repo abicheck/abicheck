@@ -421,7 +421,10 @@ class TestWrapperProducer:
         assert env["ABICHECK_INPUTS_DIR"] == str(tmp_path / "abicheck_inputs")
         assert env["ABICHECK_CC_EXTRACTOR"] == "clang"
         assert env["ABICHECK_CC_LIBRARY"] == "foo"
-        assert env["ABICHECK_CC_HEADERS"] == "include"
+        # Resolved to absolute (Codex review): abicheck-cc runs with cwd set
+        # to the build directory in the documented recipe, not this
+        # script's cwd, so a relative root must be resolved here first.
+        assert env["ABICHECK_CC_HEADERS"] == str(tmp_path / "include")
         outputs = _parse_kv_file(github_output)
         assert outputs["producer"] == "wrapper"
         assert outputs["mode"] == "pack"
@@ -481,6 +484,37 @@ class TestWrapperProducer:
         assert result.returncode == 0, result.stdout + result.stderr
         assert not stale_record.exists()
 
+    def test_prepare_does_not_recursively_delete_unrelated_output_dir(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review): output is a user-controlled Action
+        # input -- the earlier stale-pack-clearing fix (test above) used a
+        # blind `rm -rf "$OUTPUT"`, so a workflow that accidentally pointed
+        # output: at an existing non-pack directory (the workspace root, a
+        # shared build/source directory) would have this step recursively
+        # delete whatever was there. Only the two known pack-content items
+        # (manifest.json, source_facts/) should ever be removed.
+        output = tmp_path / "abicheck_inputs"
+        output.mkdir()
+        unrelated_file = output / "important.txt"
+        unrelated_file.write_text("do not delete me\n")
+        unrelated_dir = output / "unrelated_dir"
+        unrelated_dir.mkdir()
+        (unrelated_dir / "also_important.txt").write_text("keep\n")
+
+        result, _, _ = _run_action(
+            {
+                "INPUT_PHASE": "prepare",
+                "INPUT_PRODUCER": "wrapper",
+                "INPUT_OUTPUT": str(output),
+                "INPUT_INSTALL_DEPS": "false",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert unrelated_file.read_text() == "do not delete me\n"
+        assert (unrelated_dir / "also_important.txt").read_text() == "keep\n"
+
     def test_multiple_public_roots_joined_for_env_var(self, tmp_path: Path) -> None:
         # Regression: this runs the real system uname (no stub, unlike the
         # Windows-simulation test below), so on an actual windows-latest CI
@@ -500,7 +534,11 @@ class TestWrapperProducer:
             tmp_path,
         )
         assert result.returncode == 0, result.stdout + result.stderr
-        expected = os.pathsep.join(["include", "gen/include"])
+        # Each root resolved to absolute (Codex review) before joining --
+        # see test_prepare_writes_env_vars for why.
+        expected = os.pathsep.join(
+            [str(tmp_path / "include"), str(tmp_path / "gen/include")]
+        )
         assert _parse_kv_file(github_env)["ABICHECK_CC_HEADERS"] == expected
 
     def test_multiple_public_roots_joined_with_semicolon_on_windows(
@@ -528,9 +566,8 @@ class TestWrapperProducer:
             tmp_path,
         )
         assert result.returncode == 0, result.stdout + result.stderr
-        assert (
-            _parse_kv_file(github_env)["ABICHECK_CC_HEADERS"] == "include;gen/include"
-        )
+        expected = f"{tmp_path / 'include'};{tmp_path / 'gen/include'}"
+        assert _parse_kv_file(github_env)["ABICHECK_CC_HEADERS"] == expected
 
     def test_verify_fails_on_missing_pack_dir(self, tmp_path: Path) -> None:
         result, _, _ = _run_action(
