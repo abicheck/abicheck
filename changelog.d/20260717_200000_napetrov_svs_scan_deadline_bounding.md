@@ -334,3 +334,16 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `deadline_exhausted` and abandoning the rest of the pre-scan — that flag
   is now reserved for a genuine outer scan-budget overflow (Codex review,
   PR #591, round 5).
+- Closed a narrow but real race in `run_bounded()`: an external SIGTERM
+  (job-scheduler cancellation, a CI step's own timeout) landing in the gap
+  between `Popen()` detaching a child into its own session and
+  `_register_pgroup()` tracking its pgid would run
+  `install_sigterm_cleanup()`'s handler with an empty registry, leaving
+  that just-spawned process group outside both this process's own group
+  and the cleanup set — permanently orphaned, with no other mechanism able
+  to reach it. `run_bounded()` now blocks `SIGTERM` on the calling thread
+  (`signal.pthread_sigmask`) across the whole spawn-plus-registration
+  window and unblocks it immediately after, so a SIGTERM arriving in that
+  window is deferred rather than dropped — delivered the instant it's
+  unblocked, by which point the handler sees the tracked pgid (Codex
+  review, PR #591, round 6).

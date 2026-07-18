@@ -470,6 +470,44 @@ def test_run_bounded_kills_tree_on_unexpected_communicate_error(monkeypatch) -> 
 # that gap for the plain CLI/CI path (no MCP-style outer watchdog there).
 
 
+def test_run_bounded_blocks_sigterm_across_spawn_and_registration(monkeypatch) -> None:
+    # Codex review (PR #591, round 6): an external SIGTERM landing in the gap
+    # between Popen() detaching the child and _register_pgroup() tracking its
+    # pgid would run install_sigterm_cleanup's handler with an empty
+    # registry, permanently orphaning the just-spawned group (the handler
+    # only kills what's *tracked*). SIGTERM must be blocked on this thread
+    # across that whole window, unblocked only once registration is done, so
+    # a SIGTERM that arrived mid-spawn is deferred until the handler can see
+    # the group.
+    calls: list[str] = []
+    real_popen = subprocess.Popen
+    real_register = deadline._register_pgroup
+
+    def _tracking_popen(*a, **kw):
+        calls.append("popen")
+        return real_popen(*a, **kw)
+
+    def _tracking_register(proc):
+        calls.append("register")
+        return real_register(proc)
+
+    def _tracking_sigmask(how, mask):
+        assert signal.SIGTERM in mask
+        calls.append("block" if how == signal.SIG_BLOCK else "unblock")
+
+    monkeypatch.setattr(subprocess, "Popen", _tracking_popen)
+    monkeypatch.setattr(deadline, "_register_pgroup", _tracking_register)
+    monkeypatch.setattr(signal, "pthread_sigmask", _tracking_sigmask)
+    with deadline._active_pgroups_lock:
+        deadline._active_pgroups.clear()
+
+    deadline.run_bounded(
+        [sys.executable, "-c", "print('hi')"], timeout=5, capture_output=True, text=True
+    )
+
+    assert calls == ["block", "popen", "register", "unblock"]
+
+
 def test_run_bounded_leaves_no_leftover_registered_pgroup() -> None:
     with deadline._active_pgroups_lock:
         deadline._active_pgroups.clear()

@@ -242,16 +242,32 @@ def run_bounded(
     if capture_output:
         stdout = subprocess.PIPE
         stderr = subprocess.PIPE
-    proc = subprocess.Popen(  # noqa: S603 — cmd is caller-built argv, never shell text
-        cmd,
-        cwd=cwd,
-        stdin=subprocess.PIPE if input is not None else None,
-        stdout=stdout,
-        stderr=stderr,
-        text=text,
-        start_new_session=use_pgroup,
-    )
-    pgid = _register_pgroup(proc) if use_pgroup else None
+    if use_pgroup:
+        # Block SIGTERM on this thread across spawn+registration. Without
+        # this, an external SIGTERM (job-scheduler cancellation, a CI step's
+        # own timeout) landing in the gap between Popen() detaching the child
+        # and _register_pgroup() tracking its pgid would run
+        # install_sigterm_cleanup's handler with an empty registry, leaving
+        # the just-spawned group outside both this process's own group and
+        # the cleanup set — permanently orphaned (Codex review, PR #591,
+        # round 6). Deferred here, delivered the instant it's unblocked
+        # right after registration, by which point the handler sees the
+        # tracked pgid.
+        signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
+    try:
+        proc = subprocess.Popen(  # noqa: S603 — cmd is caller-built argv, never shell text
+            cmd,
+            cwd=cwd,
+            stdin=subprocess.PIPE if input is not None else None,
+            stdout=stdout,
+            stderr=stderr,
+            text=text,
+            start_new_session=use_pgroup,
+        )
+        pgid = _register_pgroup(proc) if use_pgroup else None
+    finally:
+        if use_pgroup:
+            signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM})
     try:
         try:
             out, err = proc.communicate(input=input, timeout=effective_timeout)
