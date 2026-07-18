@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import pytest
 
-from abicheck.checker_policy import ChangeKind
+from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import Change
 from abicheck.model import (
     AbiSnapshot,
@@ -255,11 +255,11 @@ class TestMarkReachability:
         detail/impl/internal/__detail/_impl — a project using a different
         convention (e.g. "priv") is invisible to the reachability walk unless
         MarkReachability accepts the same namespaces override
-        DetectInternalLeaks/DemoteUnreachableInternalChurn already do. No
-        caller wires a non-default value through DEFAULT_PIPELINE today
-        (see ADR-044's changelog for why closing this for real needs a new
-        policy-level config surface); this only pins the constructor
-        contract so a future override reaches this step too."""
+        DetectInternalLeaks/DemoteUnreachableInternalChurn already do. An
+        explicit constructor argument is the lowest-level override; see
+        test_policy_internal_namespaces_reaches_mark_reachability below for
+        the ADR-044 P1 item 5 end-to-end PolicyFile.internal_namespaces path
+        that now also reaches this step via ctx.internal_namespaces."""
         from abicheck.post_processing import MarkReachability, PipelineContext
 
         old = _snap(
@@ -296,6 +296,133 @@ class TestMarkReachability:
         )
         MarkReachability(namespaces=("priv",)).run([raw_change2], ctx)
         assert raw_change2.public_reachable is True
+
+    def test_pipeline_internal_namespaces_reaches_mark_reachability(self) -> None:
+        """ADR-044 P1 item 5: DEFAULT_PIPELINE.run(internal_namespaces=...) —
+        the value PolicyFile.internal_namespaces feeds via checker.py's
+        _run_post_processing — must reach MarkReachability's walk through
+        PipelineContext.internal_namespaces, without requiring a bespoke
+        MarkReachability(namespaces=...) construction."""
+        old = _snap(
+            functions=[_public_fn("make", "ns::Widget*")],
+            types=[
+                RecordType(name="ns::Widget", kind="class", bases=["ns::priv::Base"]),
+                RecordType(name="ns::priv::Base", kind="class", size_bits=64),
+            ],
+        )
+        new = _snap(
+            functions=[_public_fn("make", "ns::Widget*")],
+            types=[
+                RecordType(name="ns::Widget", kind="class", bases=["ns::priv::Base"]),
+                RecordType(name="ns::priv::Base", kind="class", size_bits=128),
+            ],
+        )
+        raw_change = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="ns::priv::Base",
+            description="size changed",
+        )
+        # Without internal_namespaces, "priv" is not recognized as internal.
+        DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        assert raw_change.public_reachable is False
+
+        raw_change2 = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="ns::priv::Base",
+            description="size changed",
+        )
+        ctx2 = DEFAULT_PIPELINE.run(
+            [raw_change2],
+            old,
+            new,
+            suppression=_needs_evidence_suppression(),
+            internal_namespaces=("priv",),
+        )
+        found = [c for c in ctx2.kept if c.kind == ChangeKind.TYPE_SIZE_CHANGED]
+        assert len(found) == 1
+        assert found[0].public_reachable is True
+
+    def test_pipeline_internal_namespaces_reaches_demote_unreachable_churn(self) -> None:
+        """ADR-044 P1 item 5: PipelineContext.internal_namespaces must also
+        reach DetectInternalLeaks/DemoteUnreachableInternalChurn, not just
+        MarkReachability — otherwise a project using a non-default internal
+        convention would have its reachability *tag* corrected but the
+        unreachable-churn demotion still blind to it."""
+        old = _snap(
+            functions=[_public_fn("foo", "int")],
+            types=[RecordType(name="ns::priv::Hidden", kind="class", size_bits=64)],
+        )
+        new = _snap(
+            functions=[_public_fn("foo", "int")],
+            types=[RecordType(name="ns::priv::Hidden", kind="class", size_bits=128)],
+        )
+        raw_change = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="ns::priv::Hidden",
+            description="size changed",
+        )
+        # Without internal_namespaces: "priv" isn't recognized as internal at
+        # all, so DemoteUnreachableInternalChurn never considers it for
+        # demotion — the raw churn stays in ctx.kept.
+        ctx = DEFAULT_PIPELINE.run([raw_change], old, new)
+        assert raw_change in ctx.kept
+
+        raw_change2 = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="ns::priv::Hidden",
+            description="size changed",
+        )
+        # With internal_namespaces=("priv",): recognized as internal,
+        # unreachable from the public surface -> demoted out of ctx.kept.
+        ctx2 = DEFAULT_PIPELINE.run(
+            [raw_change2], old, new, internal_namespaces=("priv",)
+        )
+        assert raw_change2 not in ctx2.kept
+        assert raw_change2 in ctx2.out_of_surface
+
+    def test_policy_file_internal_namespaces_reaches_checker_pipeline(self) -> None:
+        """ADR-044 P1 item 5, full glue: checker._run_post_processing must
+        read PolicyFile.internal_namespaces and thread it into
+        DEFAULT_PIPELINE.run — this is the one hop not exercised by the
+        DEFAULT_PIPELINE.run(internal_namespaces=...)-level tests above."""
+        from abicheck.checker import _run_post_processing
+        from abicheck.policy_file import PolicyFile
+
+        old = _snap(
+            functions=[_public_fn("make", "ns::Widget*")],
+            types=[
+                RecordType(name="ns::Widget", kind="class", bases=["ns::priv::Base"]),
+                RecordType(name="ns::priv::Base", kind="class", size_bits=64),
+            ],
+        )
+        new = _snap(
+            functions=[_public_fn("make", "ns::Widget*")],
+            types=[
+                RecordType(name="ns::Widget", kind="class", bases=["ns::priv::Base"]),
+                RecordType(name="ns::priv::Base", kind="class", size_bits=128),
+            ],
+        )
+        raw_change = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="ns::priv::Base",
+            description="size changed",
+        )
+        policy_file = PolicyFile(internal_namespaces=["priv"])
+        kept, *_rest = _run_post_processing(
+            [raw_change],
+            old,
+            new,
+            suppression=_needs_evidence_suppression(),
+            policy_file=policy_file,
+            scope_to_public_surface=False,
+            force_public_symbols=None,
+            collapse_versioned_symbols=False,
+        )
+        found = [c for c in kept if c.kind == ChangeKind.TYPE_SIZE_CHANGED]
+        assert len(found) == 1
+        assert found[0].public_reachable is True
 
     def test_does_not_tag_unreachable_internal_change(self) -> None:
         old, new, raw_change = _unreachable_scenario()
@@ -883,3 +1010,128 @@ class TestLateDetectorSuppressionDiagnostic:
         assert any(
             "descriptor_base" in (d.symbol or "") for d in diag
         )
+
+
+class TestCheckerLevelSuppressionDiagnostic:
+    """ADR-044 P1 item 6: checker.py's own _filter_suppressed_changes (SONAME/
+    platform-floor policy findings) and _apply_surface_metrics (ADR-027
+    surface roll-ups) build/receive Change objects directly — outside
+    DEFAULT_PIPELINE entirely — so they had the same is_suppressed()-only gap
+    the post_processing.py late-detector fixes (TestLateDetectorSyntheticFindings
+    above) already closed for findings built inside the pipeline. Both now
+    route through SuppressionList.evaluate() too."""
+
+    def test_filter_suppressed_changes_emits_withheld_diagnostic(self) -> None:
+        from abicheck.checker import _filter_suppressed_changes
+
+        c = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="oneapi::dal::kmeans::detail::train_ops_dispatcher",
+            description="removed",
+            public_reachable=True,
+        )
+        suppression = SuppressionList([
+            Suppression(namespace="oneapi::dal::**::detail::**", reason="broad rule")
+        ])
+        suppressed: list[Change] = []
+        visible = _filter_suppressed_changes([c], suppression, suppressed)
+        assert c in visible
+        assert c not in suppressed
+        diag = [v for v in visible if v.kind == ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK]
+        assert len(diag) == 1
+        assert "train_ops_dispatcher" in diag[0].symbol
+
+    def test_filter_suppressed_changes_still_suppresses_narrow_rule(self) -> None:
+        """Unchanged behavior for the common case: a narrow symbol: waiver
+        still suppresses outright, with no diagnostic."""
+        from abicheck.checker import _filter_suppressed_changes
+
+        c = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="lib::internal_helper",
+            description="removed",
+        )
+        suppression = SuppressionList([
+            Suppression(symbol="lib::internal_helper", reason="exact waiver")
+        ])
+        suppressed: list[Change] = []
+        visible = _filter_suppressed_changes([c], suppression, suppressed)
+        assert visible == []
+        assert suppressed == [c]
+
+    def test_filter_suppressed_changes_noop_without_suppression(self) -> None:
+        from abicheck.checker import _filter_suppressed_changes
+
+        c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="removed")
+        suppressed: list[Change] = []
+        assert _filter_suppressed_changes([c], None, suppressed) == [c]
+        assert suppressed == []
+
+    def test_apply_surface_metrics_emits_withheld_diagnostic(self, monkeypatch) -> None:
+        """Wiring test: _apply_surface_metrics now filters
+        diff_surface_metrics()'s output through the same evaluate()-based
+        helper. Surface-metric findings are COMPATIBLE-only in practice
+        today (see the function's own docstring), so a BREAKING finding is
+        injected here purely to exercise the withheld-diagnostic mechanism,
+        not to claim diff_surface_metrics produces one."""
+        import abicheck.diff_surface_metrics as dsm
+        from abicheck.checker import _apply_surface_metrics
+
+        finding = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="lib::detail::Foo",
+            description="synthetic surface finding",
+            public_reachable=True,
+        )
+        monkeypatch.setattr(dsm, "diff_surface_metrics", lambda old, new: [finding])
+        suppression = SuppressionList([
+            Suppression(namespace="lib::detail::*", reason="broad rule")
+        ])
+        old = _snap()
+        new = _snap()
+        kept: list[Change] = []
+        suppressed: list[Change] = []
+        kept2, verdict = _apply_surface_metrics(
+            old,
+            new,
+            kept,
+            [],
+            suppressed,
+            suppression,
+            "strict_abi",
+            None,
+            Verdict.NO_CHANGE,
+        )
+        assert finding in kept2
+        assert finding not in suppressed
+        diag = [c for c in kept2 if c.kind == ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK]
+        assert len(diag) == 1
+        assert verdict != Verdict.NO_CHANGE
+
+    def test_apply_surface_metrics_still_suppresses_narrow_rule(self, monkeypatch) -> None:
+        import abicheck.diff_surface_metrics as dsm
+        from abicheck.checker import _apply_surface_metrics
+
+        finding = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol="lib::Foo", description="synthetic"
+        )
+        monkeypatch.setattr(dsm, "diff_surface_metrics", lambda old, new: [finding])
+        suppression = SuppressionList([Suppression(symbol="lib::Foo", reason="exact")])
+        old = _snap()
+        new = _snap()
+        kept: list[Change] = []
+        suppressed: list[Change] = []
+        kept2, verdict = _apply_surface_metrics(
+            old,
+            new,
+            kept,
+            [],
+            suppressed,
+            suppression,
+            "strict_abi",
+            None,
+            Verdict.NO_CHANGE,
+        )
+        assert kept2 == []
+        assert suppressed == [finding]
+        assert verdict == Verdict.NO_CHANGE

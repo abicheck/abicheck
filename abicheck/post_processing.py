@@ -47,6 +47,14 @@ class PipelineContext:
     # Consumed by EscalateFrozenNamespaceViolations to tag matching
     # findings with Change.frozen_namespace_violation.
     frozen_namespaces: list[str] = field(default_factory=list)
+    # ADR-044 P1 item 5: project-configurable internal-implementation-namespace
+    # convention, threaded in from PolicyFile.internal_namespaces. None means
+    # "not configured" — MarkReachability/DetectInternalLeaks/
+    # DemoteUnreachableInternalChurn each fall back to their own
+    # DEFAULT_INTERNAL_NAMESPACES. Deliberately not consulted by
+    # DetectNamespacePatterns's experimental_namespaces — a different, unrelated
+    # convention (see PolicyFile.internal_namespaces's docstring).
+    internal_namespaces: tuple[str, ...] | None = None
     # ADR-024 §D4: when True, FilterNonPublicSurface moves findings that are
     # not on the public-header-scoped ABI surface to ``out_of_surface``.
     scope_to_public_surface: bool = False
@@ -593,10 +601,12 @@ class MarkReachability:
         # DEFAULT_INTERNAL_NAMESPACES (e.g. "priv" instead of "detail") would
         # be recognized by the leak detector but invisible to the
         # reachability tag that gates suppression — reintroducing this ADR's
-        # own failure mode for exactly that convention. No caller wires a
-        # non-default value through DEFAULT_PIPELINE today (see ADR-044's
-        # changelog); this only removes the structural inconsistency so a
-        # future policy-level override reaches this step too.
+        # own failure mode for exactly that convention. An explicit
+        # constructor argument (this parameter) always wins; absent that,
+        # ``run()`` falls back to ``ctx.internal_namespaces`` — the
+        # PolicyFile.internal_namespaces value DEFAULT_PIPELINE threads
+        # through on every call (ADR-044 P1 item 5) — before finally
+        # defaulting to DEFAULT_INTERNAL_NAMESPACES.
         self._namespaces = namespaces
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
@@ -627,7 +637,7 @@ class MarkReachability:
             names.update(e.name for e in snap.enums if e.origin == ScopeOrigin.PUBLIC_HEADER)
             return names
 
-        namespaces = self._namespaces or DEFAULT_INTERNAL_NAMESPACES
+        namespaces = self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
         old_paths = compute_leak_paths(ctx.old, namespaces)
         new_paths = compute_leak_paths(ctx.new, namespaces)
         reachable_types = set(old_paths) | set(new_paths)
@@ -1135,7 +1145,7 @@ class DetectInternalLeaks:
             detect_internal_leaks,
         )
 
-        namespaces = self._namespaces or DEFAULT_INTERNAL_NAMESPACES
+        namespaces = self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
         extra = detect_internal_leaks(changes, ctx.old, ctx.new, namespaces)
         if not extra:
             return changes
@@ -1188,7 +1198,7 @@ class DemoteUnreachableInternalChurn:
         )
         from .surface import REASON_PRIVATE_INTERNAL_UNREACHABLE
 
-        namespaces = self._namespaces or DEFAULT_INTERNAL_NAMESPACES
+        namespaces = self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
         frozen = list(ctx.frozen_namespaces)
 
         def _is_frozen(type_name: str) -> bool:
@@ -1468,6 +1478,7 @@ class PostProcessingPipeline:
         new: AbiSnapshot,
         suppression: SuppressionList | None = None,
         frozen_namespaces: list[str] | None = None,
+        internal_namespaces: tuple[str, ...] | None = None,
         scope_to_public_surface: bool = False,
         force_public_symbols: set[str] | None = None,
         collapse_versioned_symbols: bool = False,
@@ -1479,6 +1490,7 @@ class PostProcessingPipeline:
             new=new,
             suppression=suppression,
             frozen_namespaces=list(frozen_namespaces or []),
+            internal_namespaces=internal_namespaces,
             scope_to_public_surface=scope_to_public_surface,
             force_public_symbols=set(force_public_symbols or set()),
             collapse_versioned_symbols=collapse_versioned_symbols,

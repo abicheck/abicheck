@@ -404,6 +404,40 @@ def test_frozen_namespace_floor_survives_effective_verdict(tmp_path: Path) -> No
     assert pf.compute_verdict([c2]) == Verdict.COMPATIBLE
 
 
+def test_internal_namespaces_parsed_from_policy_file(tmp_path: Path) -> None:
+    """ADR-044 P1 item 5: internal_namespaces loads as a plain string list,
+    mirroring frozen_namespaces's own parsing."""
+    p = tmp_path / "policy.yaml"
+    p.write_text("internal_namespaces:\n  - priv\n  - hidden\n", encoding="utf-8")
+    pf = PolicyFile.load(p)
+    assert pf.internal_namespaces == ["priv", "hidden"]
+
+
+def test_internal_namespaces_defaults_to_empty(tmp_path: Path) -> None:
+    p = tmp_path / "policy.yaml"
+    p.write_text("base_policy: strict_abi\n", encoding="utf-8")
+    pf = PolicyFile.load(p)
+    assert pf.internal_namespaces == []
+
+
+def test_internal_namespaces_rejects_non_list(tmp_path: Path) -> None:
+    from abicheck.errors import PolicyError
+
+    p = tmp_path / "policy.yaml"
+    p.write_text("internal_namespaces: priv\n", encoding="utf-8")
+    with pytest.raises(PolicyError, match="internal_namespaces"):
+        PolicyFile.load(p)
+
+
+def test_internal_namespaces_rejects_non_string_element(tmp_path: Path) -> None:
+    from abicheck.errors import PolicyError
+
+    p = tmp_path / "policy.yaml"
+    p.write_text("internal_namespaces:\n  - 5\n", encoding="utf-8")
+    with pytest.raises(PolicyError, match="internal_namespaces\\[0\\]"):
+        PolicyFile.load(p)
+
+
 def test_effective_verdict_precedence_is_used_by_severity_paths(tmp_path: Path) -> None:
     """A per-finding verdict must outrank a policy-file kind override everywhere."""
     p = tmp_path / "policy.yaml"

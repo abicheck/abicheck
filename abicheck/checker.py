@@ -172,15 +172,30 @@ def _filter_suppressed_changes(
 ) -> list[Change]:
     """Remove suppressed advisories (SONAME/platform-floor) from *changes*,
     appending them to *suppressed* in-place. Returns the visible subset.
+
+    Uses :meth:`SuppressionList.evaluate` (not the cheaper ``is_suppressed``)
+    so a broad rule whose selectors matched a public-reachable change but was
+    withheld by the reachability/``allow_public_break`` gate still produces
+    the same ``SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`` diagnostic
+    ``ApplySuppression`` produces for changes it sees directly (ADR-044 D4;
+    P1 item 6) — mirrors ``_filter_pattern_synthetic``'s established pattern
+    for this same plain-``SuppressionList``-plus-``list[Change]`` shape.
     """
     if suppression is None or not changes:
         return changes
+    from .post_processing import _build_suppression_overreach_change
+
     visible: list[Change] = []
+    diagnostics: list[Change] = []
     for c in changes:
-        if suppression.is_suppressed(c):
+        outcome = suppression.evaluate(c)
+        if outcome.suppressed:
             suppressed.append(c)
-        else:
-            visible.append(c)
+            continue
+        visible.append(c)
+        if outcome.withheld_rule is not None:
+            diagnostics.append(_build_suppression_overreach_change(c, outcome.withheld_rule))
+    visible.extend(diagnostics)
     return visible
 
 
@@ -204,22 +219,19 @@ def _apply_surface_metrics(
     """
     from .diff_surface_metrics import diff_surface_metrics
 
-    surface_metric_added = False
-    for c in diff_surface_metrics(old, new):
-        if suppression is not None and suppression.is_suppressed(c):
-            suppressed.append(c)
-        else:
-            kept.append(c)
-            surface_metric_added = True
+    visible = _filter_suppressed_changes(
+        list(diff_surface_metrics(old, new)), suppression, suppressed
+    )
+    if not visible:
+        return kept, current_verdict
+    kept.extend(visible)
     # These roll-ups are COMPATIBLE, never breaking, but they are still
     # changes: appending them after `verdict` was computed above would leave
     # a NO_CHANGE verdict alongside e.g. a `public_surface_grew` finding,
     # making the CLI/JSON summary inconsistent with the finding set. Recompute
     # so NO_CHANGE flips to COMPATIBLE when the only findings are these
     # roll-ups (ADR-027 review).
-    if surface_metric_added:
-        return kept, _compute_verdict_for(kept + verdict_redundant, policy, policy_file)
-    return kept, current_verdict
+    return kept, _compute_verdict_for(kept + verdict_redundant, policy, policy_file)
 
 
 def _filter_pattern_synthetic(
@@ -382,12 +394,18 @@ def _run_post_processing(
     from .post_processing import DEFAULT_PIPELINE
 
     frozen_ns = list(policy_file.frozen_namespaces) if policy_file is not None else []
+    internal_ns = (
+        tuple(policy_file.internal_namespaces)
+        if policy_file is not None and policy_file.internal_namespaces
+        else None
+    )
     pp_ctx = DEFAULT_PIPELINE.run(
         changes,
         old,
         new,
         suppression=suppression,
         frozen_namespaces=frozen_ns,
+        internal_namespaces=internal_ns,
         scope_to_public_surface=scope_to_public_surface,
         force_public_symbols=force_public_symbols,
         collapse_versioned_symbols=collapse_versioned_symbols,
