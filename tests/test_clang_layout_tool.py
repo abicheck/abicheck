@@ -1,0 +1,337 @@
+# Copyright 2026 Nikolay Petrov
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Unit tests for G28 Phase 4: clang_layout_tool.py.
+
+Covers the optional/opt-in binary resolution, the ast-dump-command ->
+compile-flags slicing, the subprocess invocation (mocked, no real compiler
+needed), and the fact-application merge logic. No test here requires the
+real compiled companion tool or a real clang -- that lives in
+tools/clang-layout-tool/tests/ (built + run only when explicitly requested).
+"""
+
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+from abicheck.clang_layout_tool import (
+    LAYOUT_TOOL_ENV_VAR,
+    _apply_record_facts,
+    _compile_flags_from_ast_dump_command,
+    _expand_header_inputs,
+    apply_layout_facts,
+    attach_clang_layout,
+    find_layout_tool_bin,
+    run_layout_tool,
+)
+from abicheck.errors import ValidationError
+from abicheck.model import AbiSnapshot, RecordType, TypeField
+
+
+class TestFindLayoutToolBin:
+    def test_env_var_wins(self, monkeypatch):
+        monkeypatch.setenv(LAYOUT_TOOL_ENV_VAR, "/custom/path/tool")
+        assert find_layout_tool_bin() == "/custom/path/tool"
+
+    def test_falls_back_to_path(self, monkeypatch):
+        monkeypatch.delenv(LAYOUT_TOOL_ENV_VAR, raising=False)
+        with patch("shutil.which", return_value="/usr/bin/abicheck-clang-layout-tool"):
+            assert find_layout_tool_bin() == "/usr/bin/abicheck-clang-layout-tool"
+
+    def test_none_when_unavailable(self, monkeypatch):
+        monkeypatch.delenv(LAYOUT_TOOL_ENV_VAR, raising=False)
+        with patch("shutil.which", return_value=None):
+            assert find_layout_tool_bin() is None
+
+
+class TestCompileFlagsSlicing:
+    def test_strips_cc_bin_and_ast_dump_tail(self):
+        cmd = [
+            "clang++", "-I", "/inc", "-std=gnu++17",
+            "-fsyntax-only", "-ferror-limit=0", "-Xclang", "-ast-dump=json",
+            "/tmp/agg.hpp",
+        ]
+        flags = _compile_flags_from_ast_dump_command(cmd)
+        assert flags == [
+            "-I", "/inc", "-std=gnu++17", "-fsyntax-only", "-ferror-limit=0",
+        ]
+
+    def test_defensive_fallback_when_no_xclang(self):
+        cmd = ["clang++", "-I", "/inc"]
+        assert _compile_flags_from_ast_dump_command(cmd) == ["-I", "/inc"]
+
+
+class TestRunLayoutTool:
+    def test_no_headers_returns_none(self):
+        assert run_layout_tool("some-binary", [], []) is None
+
+    def test_missing_clang_driver_returns_none(self, tmp_path):
+        header = tmp_path / "a.h"
+        header.write_text("struct Foo {};")
+        with patch(
+            "abicheck.clang_layout_tool._resolve_clang_bin",
+            side_effect=Exception("no clang"),
+        ):
+            assert run_layout_tool("some-binary", [header], []) is None
+
+    def test_subprocess_timeout_returns_none(self, tmp_path):
+        header = tmp_path / "a.h"
+        header.write_text("struct Foo {};")
+        with patch(
+            "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
+        ), patch(
+            "abicheck.clang_layout_tool._resolve_clang_langmode",
+            return_value=(True, False, False, "gnu"),
+        ), patch(
+            "abicheck.clang_layout_tool.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="x", timeout=1),
+        ):
+            assert run_layout_tool("some-binary", [header], []) is None
+
+    def test_malformed_json_returns_none(self, tmp_path):
+        header = tmp_path / "a.h"
+        header.write_text("struct Foo {};")
+        fake_result = subprocess.CompletedProcess(
+            args=["x"], returncode=0, stdout="not json", stderr=""
+        )
+        with patch(
+            "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
+        ), patch(
+            "abicheck.clang_layout_tool._resolve_clang_langmode",
+            return_value=(True, False, False, "gnu"),
+        ), patch(
+            "abicheck.clang_layout_tool.subprocess.run", return_value=fake_result
+        ):
+            assert run_layout_tool("some-binary", [header], []) is None
+
+    def test_records_missing_or_wrong_type_returns_none(self, tmp_path):
+        header = tmp_path / "a.h"
+        header.write_text("struct Foo {};")
+        fake_result = subprocess.CompletedProcess(
+            args=["x"], returncode=0, stdout='{"ok": true, "records": "oops"}', stderr=""
+        )
+        with patch(
+            "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
+        ), patch(
+            "abicheck.clang_layout_tool._resolve_clang_langmode",
+            return_value=(True, False, False, "gnu"),
+        ), patch(
+            "abicheck.clang_layout_tool.subprocess.run", return_value=fake_result
+        ):
+            assert run_layout_tool("some-binary", [header], []) is None
+
+    def test_successful_run_returns_records_and_cleans_up_agg_file(self, tmp_path):
+        header = tmp_path / "a.h"
+        header.write_text("struct Foo { int a; };")
+        fake_records = [{"qualified_name": "Foo", "size_bits": 32}]
+        captured_cmd = {}
+
+        def _fake_run(cmd, **kwargs):
+            captured_cmd["cmd"] = cmd
+            agg_path = Path(cmd[1])
+            assert agg_path.exists()
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0,
+                stdout=__import__("json").dumps({"ok": True, "records": fake_records}),
+                stderr="",
+            )
+
+        with patch(
+            "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
+        ), patch(
+            "abicheck.clang_layout_tool._resolve_clang_langmode",
+            return_value=(True, False, False, "gnu"),
+        ), patch(
+            "abicheck.clang_layout_tool.subprocess.run", side_effect=_fake_run
+        ):
+            result = run_layout_tool("/path/to/tool", [header], [])
+
+        assert result == fake_records
+        assert captured_cmd["cmd"][0] == "/path/to/tool"
+        assert captured_cmd["cmd"][2] == "--"
+        # The aggregate temp file must be cleaned up after the run.
+        agg_path = Path(captured_cmd["cmd"][1])
+        assert not agg_path.exists()
+
+
+class TestApplyRecordFacts:
+    def test_backfills_only_none_scalar_fields(self):
+        t = RecordType(
+            name="Foo", kind="struct", size_bits=None, alignment_bits=64,
+        )
+        facts = {"size_bits": 192, "alignment_bits": 128, "data_size_bits": 192}
+        updated = _apply_record_facts(t, facts)
+        assert updated.size_bits == 192
+        # alignment_bits was already set (64) -- must NOT be overridden by the
+        # tool's value (128), even though the tool reported one.
+        assert updated.alignment_bits == 64
+        assert updated.data_size_bits == 192
+
+    def test_backfills_base_offsets_only_when_empty(self):
+        t = RecordType(name="Derived", kind="class", bases=["Base"], base_offsets={})
+        facts = {"bases": [{"name": "Base", "offset_bits": 0, "is_virtual": False}]}
+        updated = _apply_record_facts(t, facts)
+        assert updated.base_offsets == {"Base": 0}
+
+    def test_does_not_override_existing_base_offsets(self):
+        t = RecordType(
+            name="Derived", kind="class", bases=["Base"], base_offsets={"Base": 64}
+        )
+        facts = {"bases": [{"name": "Base", "offset_bits": 0, "is_virtual": False}]}
+        updated = _apply_record_facts(t, facts)
+        assert updated.base_offsets == {"Base": 64}
+
+    def test_backfills_field_offsets_only_when_none(self):
+        f1 = TypeField(name="a", type="int", offset_bits=None)
+        f2 = TypeField(name="b", type="int", offset_bits=32)
+        t = RecordType(name="Foo", kind="struct", fields=[f1, f2])
+        facts = {
+            "fields": [
+                {"name": "a", "offset_bits": 0},
+                {"name": "b", "offset_bits": 999},
+            ]
+        }
+        updated = _apply_record_facts(t, facts)
+        assert updated.fields[0].offset_bits == 0
+        # b already had a real offset -- must not be overridden.
+        assert updated.fields[1].offset_bits == 32
+
+    def test_no_matching_facts_returns_same_object(self):
+        t = RecordType(name="Foo", kind="struct")
+        updated = _apply_record_facts(t, {})
+        assert updated is t
+
+
+class TestApplyLayoutFacts:
+    def test_none_records_is_noop(self):
+        snap = AbiSnapshot(library="lib", version="1.0")
+        assert apply_layout_facts(snap, None) is snap
+
+    def test_empty_records_is_noop(self):
+        snap = AbiSnapshot(library="lib", version="1.0")
+        assert apply_layout_facts(snap, []) is snap
+
+    def test_matches_by_qualified_name(self):
+        t = RecordType(
+            name="Foo", kind="struct", qualified_name="ns::Foo", size_bits=None
+        )
+        snap = AbiSnapshot(library="lib", version="1.0", types=[t])
+        records = [{"qualified_name": "ns::Foo", "size_bits": 64}]
+        updated = apply_layout_facts(snap, records)
+        assert updated.type_by_name("Foo").size_bits == 64
+
+    def test_matches_by_bare_name_when_no_qualified_name(self):
+        t = RecordType(name="Foo", kind="struct", size_bits=None)
+        snap = AbiSnapshot(library="lib", version="1.0", types=[t])
+        records = [{"qualified_name": "Foo", "size_bits": 64}]
+        updated = apply_layout_facts(snap, records)
+        assert updated.type_by_name("Foo").size_bits == 64
+
+    def test_no_match_returns_snapshot_unchanged(self):
+        t = RecordType(name="Foo", kind="struct", size_bits=None)
+        snap = AbiSnapshot(library="lib", version="1.0", types=[t])
+        records = [{"qualified_name": "Bar", "size_bits": 64}]
+        assert apply_layout_facts(snap, records) is snap
+
+    def test_type_lookup_cache_invalidated_after_update(self):
+        t = RecordType(name="Foo", kind="struct", size_bits=None)
+        snap = AbiSnapshot(library="lib", version="1.0", types=[t])
+        # Warm the lazy cache before enrichment.
+        assert snap.type_by_name("Foo").size_bits is None
+        records = [{"qualified_name": "Foo", "size_bits": 64}]
+        updated = apply_layout_facts(snap, records)
+        assert updated.type_by_name("Foo").size_bits == 64
+
+
+class TestExpandHeaderInputs:
+    def test_missing_path_raises(self, tmp_path):
+        with pytest.raises(ValidationError):
+            _expand_header_inputs([tmp_path / "nope.h"])
+
+    def test_file_passes_through(self, tmp_path):
+        h = tmp_path / "a.h"
+        h.write_text("")
+        assert _expand_header_inputs([h]) == [h]
+
+    def test_directory_expands_and_dedupes(self, tmp_path):
+        (tmp_path / "a.h").write_text("")
+        (tmp_path / "b.hpp").write_text("")
+        result = _expand_header_inputs([tmp_path, tmp_path / "a.h"])
+        names = sorted(p.name for p in result)
+        assert names == ["a.h", "b.hpp"]
+
+    def test_empty_directory_raises(self, tmp_path):
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        with pytest.raises(ValidationError):
+            _expand_header_inputs([empty])
+
+
+class TestAttachClangLayout:
+    def test_noop_when_not_clang_producer(self, tmp_path):
+        header = tmp_path / "a.h"
+        header.write_text("struct Foo {};")
+        snap = AbiSnapshot(library="lib", version="1.0", ast_producer="castxml")
+        result = attach_clang_layout(snap, [header], [], lang=None, compile=None)
+        assert result is snap
+
+    def test_noop_when_no_headers(self):
+        snap = AbiSnapshot(library="lib", version="1.0", ast_producer="clang")
+        result = attach_clang_layout(snap, [], [], lang=None, compile=None)
+        assert result is snap
+
+    def test_noop_when_tool_unavailable(self, tmp_path):
+        header = tmp_path / "a.h"
+        header.write_text("struct Foo {};")
+        snap = AbiSnapshot(library="lib", version="1.0", ast_producer="clang")
+        with patch(
+            "abicheck.clang_layout_tool.find_layout_tool_bin", return_value=None
+        ):
+            result = attach_clang_layout(snap, [header], [], lang=None, compile=None)
+        assert result is snap
+
+    def test_noop_on_bad_header_path(self, tmp_path):
+        snap = AbiSnapshot(library="lib", version="1.0", ast_producer="clang")
+        with patch(
+            "abicheck.clang_layout_tool.find_layout_tool_bin",
+            return_value="/fake/tool",
+        ):
+            result = attach_clang_layout(
+                snap, [tmp_path / "missing.h"], [], lang=None, compile=None
+            )
+        assert result is snap
+
+    def test_enriches_when_tool_available(self, tmp_path):
+        header = tmp_path / "a.h"
+        header.write_text("struct Foo { int a; };")
+        t = RecordType(name="Foo", kind="struct", size_bits=None)
+        snap = AbiSnapshot(
+            library="lib", version="1.0", ast_producer="clang", types=[t]
+        )
+        fake_records = [{"qualified_name": "Foo", "size_bits": 32}]
+        with patch(
+            "abicheck.clang_layout_tool.find_layout_tool_bin",
+            return_value="/fake/tool",
+        ), patch(
+            "abicheck.clang_layout_tool.run_layout_tool", return_value=fake_records
+        ) as mock_run:
+            result = attach_clang_layout(snap, [header], [], lang=None, compile=None)
+        assert result.type_by_name("Foo").size_bits == 32
+        mock_run.assert_called_once()
+        # binary is the first positional arg
+        assert mock_run.call_args[0][0] == "/fake/tool"

@@ -10,14 +10,15 @@ pass." This plan records what shipped, the hardening rounds that followed,
 and scopes the phases that remain multi-week architectural projects rather
 than parser fixes.
 **Effort:** Phase 0–2 + hardening — done (see below). Phase 3 — L, done (see
-below). Phase 4 — XL (new compiled C++ tool, ABI stability risk). Phase 5 —
-M, partially subsumed by [G4](g4-header-ast-extractor.md).
+below). Phase 4 — XL, done (see below). Phase 5 — M, partially subsumed by
+[G4](g4-header-ast-extractor.md).
 **Risk:** low for anything already landed (additive, test-gated) — including
-Phase 3, which shipped as a genuinely additive `--ast-frontend hybrid`
-option rather than a change to any existing single-backend path. Phase 4 is
-high (new heavyweight dependency, a compiled artifact inside a "pure Python"
-tool, and Clang's internal AST API has no cross-release ABI stability
-guarantee the way CastXML's XML schema does).
+Phase 3 (`--ast-frontend hybrid`, additive rather than a change to any
+existing single-backend path) and Phase 4 (the companion layout tool is
+fully opt-in via `ABICHECK_CLANG_LAYOUT_TOOL`; unset, the direct-clang
+backend is byte-for-byte unchanged). The compiled tool itself still carries
+the documented ABI-stability caveat below — it is versioned/tested against
+one pinned LLVM release, not guaranteed portable across others.
 
 ---
 
@@ -272,48 +273,85 @@ takes the recursive call as an injected callable rather than importing it
 are not part of the merge — CastXML remains the sole layout source until
 Phase 4 gives clang an independent one.
 
-## Phase 4 — a Clang `ASTRecordLayout` plugin
+## Done — Phase 4: a Clang `ASTRecordLayout` companion tool
 
 **Problem.** `clang::ASTRecordLayout` (`clang/AST/RecordLayout.h`) is what
 Clang's own Sema/CodeGen use internally to compute a record's *actual
 compiled layout* for the target ABI — `getSize()`, `getFieldOffset(i)`,
-`getBaseClassOffset()`, vtable-pointer/thunk placement, and so on. It is a
-**C++ API**, reachable only from a Clang tool built with LibTooling/libclang
-— not exposed by any `clang` command-line flag, and *not* exposed by
-`clang.cindex`'s stable C API either (the [G4](g4-header-ast-extractor.md)
-plan's `clang.cindex`-based extractor gets concepts/`explicit`/mangled
-names, but no layout facts — that is a materially different capability).
-Today `abicheck`'s direct-clang backend (`-ast-dump=json`) gives rich
-declarations but zero layout data, which is precisely why CastXML — which
-runs its own bundled Clang internally and exports the layout it computed —
-remains the stronger layout source.
+`getBaseClassOffset()`, the primary vtable pointer's placement, and so on.
+It is a **C++ API**, reachable only from a Clang tool built with
+LibTooling/libclang — not exposed by any `clang` command-line flag, and
+*not* exposed by `clang.cindex`'s stable C API either (the
+[G4](g4-header-ast-extractor.md) plan's `clang.cindex`-based extractor gets
+concepts/`explicit`/mangled names, but no layout facts — that is a
+materially different capability). The direct-clang backend (`-ast-dump=json`)
+gives rich declarations but zero layout data, which is exactly why CastXML
+— which runs its own bundled Clang internally and exports the layout it
+already computed — remains the stronger layout source for that path.
 
-**Design sketch.** A standalone, small C++ tool linked against libclang/
-LibTooling that parses the same headers, walks every `RecordDecl`, calls
-`ASTContext::getASTRecordLayout()`, and serializes offsets/vtable-slot/
-thunk info to a JSON sidecar `dumper.py` can merge in (via Phase 3's
-per-fact provenance) — making the direct-clang backend a fully
-self-sufficient layout source instead of depending on CastXML or DWARF
-backfill.
+**Shipped.** `tools/clang-layout-tool/` — a standalone LibTooling program
+(`abicheck-clang-layout-tool`) that walks every complete, non-dependent
+`CXXRecordDecl`, calls `ASTContext::getASTRecordLayout()`, and serializes
+per-record JSON: `size_bits`/`alignment_bits`/`data_size_bits`,
+`is_standard_layout`/`is_trivially_copyable`, the primary vtable pointer's
+absolute bit offset (derived from `hasOwnVFPtr()`/`getPrimaryBase()`/
+`isPrimaryBaseVirtual()` — 0 for a class with its own vtable, otherwise the
+primary base's own offset, which every ASTRecordLayout base-offset accessor
+already reports absolute rather than relative to an intermediate parent),
+every direct field's bit offset, and every direct/virtual base's bit offset.
+Hand-verified against the real Itanium x86-64 ABI across POD vs. non-POD
+tail-padding reuse, single/multiple/virtual inheritance, and vtable-pointer
+placement (no castxml available in the build sandbox to cross-check
+against, so verification used a derived-class-field-placement technique:
+confirming a base's `dsize` by observing exactly where a further-derived
+class's own member actually lands).
 
-**Why this is XL/high-risk, not a parser fix.**
+`abicheck/clang_layout_tool.py` bridges the tool into the direct-clang L2
+backend: `find_layout_tool_bin()` resolves the binary (an explicit
+`ABICHECK_CLANG_LAYOUT_TOOL=/path` env var, or a bare
+`abicheck-clang-layout-tool` on `PATH` — **never a hard dependency**, unset
+means the enrichment is silently skipped), `run_layout_tool()` re-aggregates
+the same headers and reuses `dumper._build_clang_header_command`'s own
+flag-building (sliced down to the shared compiler-context prefix) so the
+tool sees an identical compile context to whatever direct-clang already
+successfully parsed, and `apply_layout_facts()` backfills only the
+currently-`None`/empty layout fields on the snapshot's existing
+`RecordType`s (a no-op for castxml/hybrid snapshots, which already carry
+real layout). Wired into `service.run_dump` as `attach_clang_layout()`,
+gated on `ast_producer == "clang"`, running once after the snapshot is
+built (and, for a `header_graph=True` request, after that graph attaches
+too — the two enrichments touch disjoint snapshot fields). Every failure
+mode (tool missing, a compile the tool can't recover from, a timeout,
+malformed output) degrades to "no enrichment," never raises (ADR-028 D3).
+
+**Why this stayed XL/higher-risk than a parser fix**, even though it
+shipped as fully additive/opt-in:
 
 - It is a **new compiled build target**, not a Python change: needs
-  libclang/LibTooling dev headers, a CMake/LLVM link step, and a packaging
-  story for a compiled binary living inside an otherwise "pure Python"
-  tool (ADR-001's core stance) — likely an optional extra, not a default
-  dependency.
+  libclang/LibTooling dev headers (`libclang-18-dev`/`llvm-18-dev` in this
+  session's sandbox) and a CMake/LLVM link step — a packaging story for
+  distributing pre-built binaries (rather than requiring every user to
+  compile it themselves) is still open, tracked as follow-up work.
 - Clang's internal C++ AST API has **no cross-LLVM-release ABI stability**
-  guarantee the way CastXML's versioned XML schema does; this needs a
-  version-compatibility matrix (which LLVM releases the plugin is built
-  against) before it can be trusted the way CastXML is today.
-- Only worth doing once Phase 3's provenance-merge plumbing exists to
-  actually consume a second, independent layout source usefully.
+  guarantee the way CastXML's versioned XML schema does. The tool is
+  currently verified against exactly one pinned LLVM release (18.1.3); a
+  version-compatibility matrix across multiple LLVM releases is explicitly
+  NOT attempted here — deferred until real multi-version usage surfaces
+  concrete incompatibilities to fix, rather than guessed at speculatively.
+- Deliberately does NOT attempt full vtable slot enumeration or thunk
+  offsets (`clang::VTableContext`/`ItaniumVTableContext` is a materially
+  larger surface) — scoped to size/alignment/offsets/vptr placement per
+  this plan's own original scope note.
 
-**Files & surfaces.** A new top-level tool directory (e.g. `tools/clang-layout-plugin/`,
-outside the `abicheck/` Python package), a JSON sidecar schema, `dumper_clang.py`
-gains an optional layout-merge step, `pyproject.toml`/packaging for the
-optional extra.
+**Files & surfaces.** `tools/clang-layout-tool/` (`CMakeLists.txt`,
+`src/main.cpp`, `tests/fixtures/*.cpp` hand-verification cases) outside the
+`abicheck/` Python package; `abicheck/clang_layout_tool.py` (the Python
+bridge); `service.py`'s `attach_clang_layout()` wiring; `RecordType`'s
+existing layout-closure fields (`size_bits`/`alignment_bits`/
+`data_size_bits`/`vptr_offset_bits`/`base_offsets`/`TypeField.offset_bits`)
+needed no schema change — they already existed for castxml's own layout
+data and this phase simply gives the direct-clang backend an independent
+way to populate the same fields.
 
 ## Phase 5 — concepts / `requires` / template-default normalization
 

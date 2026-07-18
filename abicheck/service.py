@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING, Any
 from .api_types import CompareRequest, InputSpec
 from .checker import compare
 from .checker_types import DiffResult, LibraryMetadata
+from .clang_layout_tool import attach_clang_layout
 from .errors import AbicheckError, SnapshotError, ValidationError
 from .header_utils import deferred_token_dirs, resolve_inferred_header_roots
 from .model import AbiSnapshot, EnumType, Function, RecordType, Visibility
@@ -549,11 +550,12 @@ def run_dump(
             compile=_forced_compile("clang"), **common_kwargs,
         )
         merged = merge_snapshots(castxml_snap, clang_snap)
-        return _attach_header_graph(
+        merged = _attach_header_graph(
             merged, header_graph, header_graph_includes,
             _headers, _includes, lang, compile,
             public_headers, public_header_dirs,
         )
+        return attach_clang_layout(merged, _headers, _includes, lang=lang, compile=compile)
 
     if binary_fmt == "elf":
         snap = _dump_elf(
@@ -579,7 +581,7 @@ def run_dump(
         _try_attach_python_ext_metadata(snap)
         _try_attach_python_api_surface(snap)
         _try_attach_numpy_capi_surface(snap, path)
-        return _attach_header_graph(
+        snap = _attach_header_graph(
             snap,
             header_graph,
             header_graph_includes,
@@ -590,6 +592,7 @@ def run_dump(
             public_headers,
             public_header_dirs,
         )
+        return attach_clang_layout(snap, _headers, _includes, lang=lang, compile=compile)
     if binary_fmt == "pe":
         snap = _dump_pe(
             path,
@@ -605,7 +608,7 @@ def run_dump(
         _try_attach_python_ext_metadata(snap)
         _try_attach_python_api_surface(snap)
         _try_attach_numpy_capi_surface(snap, path)
-        return _attach_header_graph(
+        snap = _attach_header_graph(
             snap,
             header_graph,
             header_graph_includes,
@@ -616,6 +619,7 @@ def run_dump(
             public_headers,
             public_header_dirs,
         )
+        return attach_clang_layout(snap, _headers, _includes, lang=lang, compile=compile)
     if binary_fmt == "macho":
         snap = _dump_macho(
             path,
@@ -630,7 +634,7 @@ def run_dump(
         _try_attach_python_ext_metadata(snap)
         _try_attach_python_api_surface(snap)
         _try_attach_numpy_capi_surface(snap, path)
-        return _attach_header_graph(
+        snap = _attach_header_graph(
             snap,
             header_graph,
             header_graph_includes,
@@ -641,6 +645,7 @@ def run_dump(
             public_headers,
             public_header_dirs,
         )
+        return attach_clang_layout(snap, _headers, _includes, lang=lang, compile=compile)
     raise ValidationError(f"Unsupported binary format: {binary_fmt}")
 
 
