@@ -84,6 +84,34 @@ class TestRunOnce:
         assert result.new is not None and result.new.ok is False
         assert result.new.missing_symbol == "foo_bar"
 
+    def test_versioned_symbol_lookup_error_strips_version_suffix(
+        self, tmp_path, monkeypatch,
+    ):
+        """Codex review: glibc appends ", version X" after the bare symbol
+        name for a versioned undefined-symbol failure (e.g. "undefined
+        symbol: foo, version FOO_1.0") -- the old \\S+ capture included the
+        trailing comma ("foo,"), so the synthesized finding's symbol never
+        matched the real import/export name and an exact suppression for
+        "foo" could never apply."""
+        monkeypatch.setattr(rp.sys, "platform", "linux")
+
+        def _fake_run(argv, env=None, capture_output=None, text=None, errors=None, timeout=None, check=None):
+            return subprocess.CompletedProcess(
+                argv, returncode=127, stdout="",
+                stderr=(
+                    "./app: symbol lookup error: ./app: undefined symbol: "
+                    "foo_bar, version FOO_1.0\n"
+                ),
+            )
+
+        monkeypatch.setattr(rp.subprocess, "run", _fake_run)
+        app = _make_exec(tmp_path)
+        old_lib = _make_lib(tmp_path, "old.so")
+        new_lib = _make_lib(tmp_path, "new.so")
+        result = run_runtime_probe(app, old_lib, new_lib)
+        assert result.old is not None
+        assert result.old.missing_symbol == "foo_bar"
+
     def test_clean_run_is_ok(self, tmp_path, monkeypatch):
         monkeypatch.setattr(rp.sys, "platform", "linux")
 

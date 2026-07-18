@@ -1350,6 +1350,20 @@ review's priority tiers.
    `subprocess.run`, since the decoding itself is what's under test) to
    `test_runtime_probe.py`, and a `jsonschema`-validating regression test to
    `test_cov95_cli.py` for the enum fix.
+   **Post-merge review (Codex), one more finding on `runtime_probe.py`:**
+   `_SYMBOL_LOOKUP_ERROR_RE`'s capture group was `\S+`, which does not stop
+   at a comma — glibc appends `", version X"` after the bare name for a
+   *versioned* undefined-symbol failure (e.g. `"undefined symbol: foo,
+   version FOO_1.0"`), so the captured group was `"foo,"` (trailing comma
+   included), not the real import/export name `"foo"`. The synthesized
+   `consumer_runtime_load_failed` finding therefore carried a symbol that
+   could never match an exact suppression rule for the real symbol, and
+   `--verify-runtime` reported the wrong name for every versioned import.
+   Fixed by changing the capture group from `\S+` to `[^,\s]+` (stop at a
+   comma or whitespace, whichever comes first) — the unversioned case is
+   unaffected since there is no comma to stop at. Added
+   `test_versioned_symbol_lookup_error_strips_version_suffix` to
+   `test_runtime_probe.py`.
 3. ~~New worked examples exercising this ADR's headline scenario end-to-end
    (public inline dispatch to an exported internal specialization; the same
    case under a blanket namespace suppression, asserting the break survives

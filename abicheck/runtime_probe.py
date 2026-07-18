@@ -51,7 +51,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 _SYMBOL_LOOKUP_ERROR_RE = re.compile(
-    r"symbol lookup error:.*undefined symbol:\s*(\S+)"
+    # A versioned symbol lookup failure appends ", version X" after the bare
+    # name (e.g. "undefined symbol: foo, version FOO_1.0") -- [^,\s]+ (not
+    # \S+) stops before the comma so the captured symbol matches the real
+    # import/export name, not "foo," (Codex review).
+    r"symbol lookup error:.*undefined symbol:\s*([^,\s]+)"
 )
 
 #: Tail of captured stderr kept on a probe outcome — enough for a human to
