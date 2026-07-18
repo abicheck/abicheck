@@ -86,8 +86,8 @@ Commands below use `PYTHONPATH=.`.
 | Build/autodiscovery | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | CI Linux, gcc/clang | 166 integration items | gcc: 137 passed / 29 skipped; clang: 138 passed / 28 skipped | Green default single-library build lane |
 | Default/debug verdicts | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 191 catalog cases | gcc: 149 PASS / 5 XFAIL / 37 SKIP; clang: 149 PASS / 6 XFAIL / 36 SKIP | Green default/debug verdict lane |
 | Runtime smoke | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 191 catalog cases | 85 DEMONSTRATED / 68 NO_RUNTIME_SIGNAL / 1 BASELINE_SIGNAL / 37 SKIP | Passing; no BUILD_ERROR. The runner now compares each app's baseline exit code against a per-case `runtime_baseline_exit` in `ground_truth.json` (default 0) instead of hardcoding zero, so apps that deliberately return a computed value (e.g. case111's `ets(42).local()` returning `42`) are no longer misread as a broken baseline. `case06_visibility` is the one remaining, intentionally-unwhitelisted case — see "Known validation gaps" below |
-| Release headers | `python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 191 catalog cases | 141 PASS / 1 FAIL / 5 XFAIL / 44 SKIP | Informational; one case regresses to a false-risk result under release (no-debug-info) headers — needs a root-cause pass, not yet fixed |
-| Stripped headers | `python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 191 catalog cases | 137 PASS / 5 FAIL / 5 XFAIL / 44 SKIP | Informational; reduced-evidence signal-loss backlog (below) |
+| Release headers | `python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 191 catalog cases | 149 PASS / 5 XFAIL / 37 SKIP | Informational; the false-risk regression on `case61_var_added` (`exported_object_alignment_reduced`) is fixed — CastXML now resolves a variable's natural type alignment as declared-alignment corroboration even without an explicit `alignas` override |
+| Stripped headers | `python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 191 catalog cases | 144 PASS / 5 FAIL / 5 XFAIL / 37 SKIP | Informational; reduced-evidence signal-loss backlog (below) |
 | Build/source smoke | `python tests/validate_examples.py case01 case04 case98 case105 case122 case129 case130 case131 case132 case133 --artifact-variant build-source --json` | CI Linux artifact | 10 representative cases | 10 PASS | Informational, clean. Not full L3-L5 coverage — see "Known validation gaps" |
 
 Counts above are from the most recent full catalog run this table was refreshed against; re-run
@@ -213,7 +213,8 @@ success means one `COVERED` row per current ground-truth entry, with no
 `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1` opt-in documented there.
 
 Current stripped-header signal-loss cases: `case103_toolchain_flag_drift`,
-`case117_no_unique_address`, and `case129_struct_return_convention`.
+`case117_no_unique_address`, `case129_struct_return_convention`,
+`case60_base_class_position_changed`, and `case69_trivial_to_nontrivial`.
 
 The release/stripped artifact lanes are reported-only plus false-positive
 guarded, while build-source stays a representative smoke because source replay is
@@ -230,8 +231,9 @@ Recent build/source and ABI-mode examples:
 | `case133_tls_model_flip` | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) |
 
 Current mode-specific backlog: stripped headers under-classifies
-`case103_toolchain_flag_drift`, `case117_no_unique_address`, and
-`case129_struct_return_convention`; default/debug and release-header modes
+`case103_toolchain_flag_drift`, `case117_no_unique_address`,
+`case129_struct_return_convention`, `case60_base_class_position_changed`, and
+`case69_trivial_to_nontrivial`; default/debug and release-header modes
 classify those catalog cases correctly.
 
 Expected non-pass buckets are already represented in `ground_truth.json`:

@@ -365,6 +365,15 @@ class TestCastxmlExtraction:
         # Same fallback resolves through a Typedef to the underlying type.
         assert by_name["g_typedef"].alignment_bits == 32
 
+    def test_type_alignment_bits_guards(self):
+        # Direct edge cases the Variable fixtures above can't reach: a real
+        # castxml Variable always carries a non-empty `type` id, and every id
+        # it references resolves — so the empty-id and unresolvable-id guards
+        # in _type_alignment_bits need their own coverage.
+        parser = self._parser()
+        assert parser._type_alignment_bits("") is None
+        assert parser._type_alignment_bits("_nonexistent") is None
+
     def test_extract_contract_attributes_filters_unknown(self):
         assert _extract_contract_attributes("noexcept final gnu:malloc") == ["malloc"]
         assert _extract_contract_attributes("") == []
