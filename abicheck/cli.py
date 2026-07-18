@@ -595,13 +595,38 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         headers, compile_db_path, compile_db_path_alt,
     )
 
+    # Fold the project's .abicheck.yml compile: block into the L2 compile context
+    # (compare↔dump↔scan parity, ADR-037 D3): the same shared resolver scan uses,
+    # so a dump honors `compile.std`/`defines`/`sysroot`/`frontend`/`include_dirs`
+    # for its header AST the way scan does. CLI > config; an explicit --config or
+    # the .abicheck.yml auto-discovered at the --sources root. Resolved before the
+    # so_path-is-None dispatch (Codex review) -- resolve_dump_compile_context has
+    # no so_path/binary_fmt dependency, and dump_source_only needs the
+    # config-resolved frontend too: it drives the L4 source-ABI extractor (the
+    # same --ast-frontend knob as the L2 header AST, ADR-037 D8), so a
+    # .abicheck.yml `compile.frontend` must reach the source-only path exactly
+    # like it already does the binary-dump path, not just this validation check.
+    _cc, includes = resolve_dump_compile_context(
+        _resolved_compile_context,
+        gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+        gcc_option_tokens=gcc_option_tokens, sysroot=sysroot, nostdinc=nostdinc,
+        header_backend=header_backend, includes=includes,
+        build_config=build_config, sources=sources,
+    )
+    gcc_path, gcc_prefix, gcc_options = _cc.gcc_path, _cc.gcc_prefix, _cc.gcc_options
+    gcc_option_tokens, sysroot, nostdinc = _cc.gcc_option_tokens, _cc.sysroot, _cc.nostdinc
+    header_backend = _cc.frontend
+
     # CLI-audit P1: --ast-frontend hybrid dual-runs castxml+clang for the L2
     # header AST, but L4 source-ABI replay has no such dual-backend merge —
     # an explicit --depth source would silently reach no further than
     # castxml/clang alone (or nothing) while still calling itself "hybrid".
     # Reject the combination outright rather than let it look like a
     # successful hybrid source analysis; the implicit default (no --depth)
-    # is left alone since it is already allowed to honestly degrade.
+    # is left alone since it is already allowed to honestly degrade. Checked
+    # once here, after the CLI>config frontend resolution above and before
+    # either dispatch branch, so a config-selected `compile.frontend: hybrid`
+    # can't bypass it via either path (CodeRabbit + Codex review).
     if depth == "source" and header_backend == "hybrid":
         raise click.UsageError(
             "--depth source is incompatible with --ast-frontend hybrid: L4 "
@@ -638,37 +663,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     if effective_debug_format is not None and binary_fmt in ("pe", "macho"):
         raise click.BadParameter(
             f"--{effective_debug_format} is only supported for ELF binaries, not {binary_fmt.upper()}."
-        )
-
-    # Fold the project's .abicheck.yml compile: block into the L2 compile context
-    # (compare↔dump↔scan parity, ADR-037 D3): the same shared resolver scan uses,
-    # so a dump honors `compile.std`/`defines`/`sysroot`/`frontend`/`include_dirs`
-    # for its header AST the way scan does. CLI > config; an explicit --config or
-    # the .abicheck.yml auto-discovered at the --sources root. Resolved *before*
-    # the format dispatch so the PE/Mach-O header-scoping path gets the same
-    # context as ELF (Codex review) — `_try_header_scoped_dump` consumes it.
-    _cc, includes = resolve_dump_compile_context(
-        _resolved_compile_context,
-        gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
-        gcc_option_tokens=gcc_option_tokens, sysroot=sysroot, nostdinc=nostdinc,
-        header_backend=header_backend, includes=includes,
-        build_config=build_config, sources=sources,
-    )
-    gcc_path, gcc_prefix, gcc_options = _cc.gcc_path, _cc.gcc_prefix, _cc.gcc_options
-    gcc_option_tokens, sysroot, nostdinc = _cc.gcc_option_tokens, _cc.sysroot, _cc.nostdinc
-    header_backend = _cc.frontend
-
-    # CodeRabbit review: header_backend can also arrive via .abicheck.yml's
-    # `compile.frontend` (resolved into _cc.frontend just above), which the
-    # earlier hybrid+source check — run before this config fold — cannot see
-    # when the CLI flag itself was left at "auto". Repeat the check now that
-    # header_backend reflects the fully-resolved (CLI > config) frontend.
-    if depth == "source" and header_backend == "hybrid":
-        raise click.UsageError(
-            "--depth source is incompatible with --ast-frontend hybrid: L4 "
-            "source-ABI replay has no dual-backend hybrid extractor (unlike "
-            "the L2 header-AST snapshot). Pass --ast-frontend castxml or "
-            "--ast-frontend clang for a --depth source dump."
         )
 
     if binary_fmt in ("pe", "macho"):

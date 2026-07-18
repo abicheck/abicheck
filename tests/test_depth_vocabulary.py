@@ -372,12 +372,11 @@ def test_dump_depth_source_with_hybrid_frontend_rejected(tmp_path) -> None:  # t
 def test_dump_depth_source_with_config_hybrid_frontend_rejected(tmp_path) -> None:  # type: ignore[no-untyped-def]
     """CodeRabbit review: the hybrid+source rejection must also catch a
     frontend selected via .abicheck.yml's `compile.frontend: hybrid`, not
-    just an explicit --ast-frontend flag. The first (pre-dispatch) check
-    only sees the raw CLI value ("auto" here); resolve_dump_compile_context
-    later resolves header_backend to "hybrid" from the config file, for the
-    ordinary (non-source-only) binary dump path -- the check must be
-    repeated after that resolution or a config-selected hybrid frontend
-    would silently bypass it."""
+    just an explicit --ast-frontend flag -- the CLI value alone ("auto"
+    here) is not the whole story once resolve_dump_compile_context folds in
+    the config file's compile.frontend (CLI > config, but an unset CLI value
+    inherits it). The check runs once, after that resolution, for the
+    ordinary (non-source-only) binary dump path."""
     so = tmp_path / "fake.so"
     so.write_bytes(b"\x7fELF")
     cfg = tmp_path / ".abicheck.yml"
@@ -385,6 +384,28 @@ def test_dump_depth_source_with_config_hybrid_frontend_rejected(tmp_path) -> Non
     res = CliRunner().invoke(
         main,
         ["dump", str(so), "--depth", "source", "--config", str(cfg)],
+    )
+    assert res.exit_code != 0, _all_output(res)
+    out = _all_output(res)
+    assert "--ast-frontend hybrid" in out
+    assert "--depth source" in out
+
+
+def test_dump_source_only_depth_source_with_config_hybrid_frontend_rejected(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Codex review: the source-only dump path (no SO_PATH) used to return
+    via dump_source_only() before resolve_dump_compile_context ever ran, so
+    a config-selected `compile.frontend: hybrid` reached the L4 extractor
+    unchecked -- not just bypassing this validation, but genuinely using a
+    different frontend than the project's .abicheck.yml requested. The
+    compile-context resolution (and this check) now runs before the
+    so_path-is-None dispatch, so both paths see the same resolved frontend."""
+    src = tmp_path / "src5"
+    src.mkdir()
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  frontend: hybrid\n")
+    res = CliRunner().invoke(
+        main,
+        ["dump", "--sources", str(src), "--depth", "source", "--config", str(cfg)],
     )
     assert res.exit_code != 0, _all_output(res)
     out = _all_output(res)
