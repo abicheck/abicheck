@@ -589,14 +589,13 @@ branch-local docs commit, is the stable reference).
 
 ### Scan-status matrix
 
-| Check configuration | 74-case benchmark subset | Status |
-|---------------------|:----------------:|--------|
-| `abicheck` | ✅ 74/74 completed | 74/74 exact |
-| `abicheck_full` | ✅ 74/74 completed | 74/74 exact |
-| `abidiff` | ✅ 74/74 completed | 21/74 exact |
-| `abidiff_headers` | ✅ 74/74 completed | 21/74 exact |
-| `abicc_dumper` | ⚠️ 71/74 scored | `case09_cpp_vtable`, `case59_func_became_inline` timeout; `case16_inline_to_non_inline` error |
-| `abicc_xml` | ⚠️ 72/74 scored | `case16_inline_to_non_inline`, `case60_base_class_position_changed` timeout |
+`abicheck`, `abicheck_full`, `abidiff`, and `abidiff_headers` complete all
+74/74 cases cleanly. Only the two ABICC lanes leave cases unscored — the
+`Correct`/`Accuracy` columns above already fold this in, but not which
+specific cases: `abicc_dumper` scores 71/74 (`case09_cpp_vtable`,
+`case59_func_became_inline` timeout; `case16_inline_to_non_inline` error);
+`abicc_xml` scores 72/74 (`case16_inline_to_non_inline`,
+`case60_base_class_position_changed` timeout).
 
 ### Commands used
 
