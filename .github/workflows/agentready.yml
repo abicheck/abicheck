@@ -35,13 +35,20 @@ jobs:
         id: sarif_check
         if: always() && steps.agentready.outputs.sarif-report-path
         run: |
-          count=$(jq '[.runs[].results[]?] | length' "${{ steps.agentready.outputs.sarif-report-path }}")
-          echo "count=$count" >> "$GITHUB_OUTPUT"
+          # codeql-action rejects the *whole file* if even one result has no
+          # location ("locationFromSarifResult: expected at least one
+          # location") -- agentready emits one result per checked rule
+          # (including passing/informational ones), some of which are
+          # repo-level and carry no location, so counting *any* result
+          # (locationless or not) doesn't predict the failure. Count only
+          # results missing a non-empty locations array.
+          missing=$(jq '[.runs[].results[]? | select((.locations // []) | length == 0)] | length' "${{ steps.agentready.outputs.sarif-report-path }}")
+          echo "missing_location_count=$missing" >> "$GITHUB_OUTPUT"
       - name: Upload SARIF
-        # codeql-action rejects a SARIF file with zero results
-        # ("locationFromSarifResult: expected at least one location"), so skip
-        # the upload entirely when there is nothing to report.
-        if: always() && steps.agentready.outputs.sarif-report-path && steps.sarif_check.outputs.count != '0'
+        # Skip the upload entirely when any result lacks a location --
+        # codeql-action cannot process the file at all in that case, so
+        # there's nothing salvageable to upload.
+        if: always() && steps.agentready.outputs.sarif-report-path && steps.sarif_check.outputs.missing_location_count == '0'
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: ${{ steps.agentready.outputs.sarif-report-path }}
@@ -74,13 +81,20 @@ jobs:
         id: sarif_check
         if: always() && steps.agentready.outputs.sarif-report-path
         run: |
-          count=$(jq '[.runs[].results[]?] | length' "${{ steps.agentready.outputs.sarif-report-path }}")
-          echo "count=$count" >> "$GITHUB_OUTPUT"
+          # codeql-action rejects the *whole file* if even one result has no
+          # location ("locationFromSarifResult: expected at least one
+          # location") -- agentready emits one result per checked rule
+          # (including passing/informational ones), some of which are
+          # repo-level and carry no location, so counting *any* result
+          # (locationless or not) doesn't predict the failure. Count only
+          # results missing a non-empty locations array.
+          missing=$(jq '[.runs[].results[]? | select((.locations // []) | length == 0)] | length' "${{ steps.agentready.outputs.sarif-report-path }}")
+          echo "missing_location_count=$missing" >> "$GITHUB_OUTPUT"
       - name: Upload SARIF
-        # codeql-action rejects a SARIF file with zero results
-        # ("locationFromSarifResult: expected at least one location"), so skip
-        # the upload entirely when there is nothing to report.
-        if: always() && steps.agentready.outputs.sarif-report-path && steps.sarif_check.outputs.count != '0'
+        # Skip the upload entirely when any result lacks a location --
+        # codeql-action cannot process the file at all in that case, so
+        # there's nothing salvageable to upload.
+        if: always() && steps.agentready.outputs.sarif-report-path && steps.sarif_check.outputs.missing_location_count == '0'
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: ${{ steps.agentready.outputs.sarif-report-path }}
