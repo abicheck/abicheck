@@ -401,6 +401,17 @@ def apply_layout_facts(
     that is currently ``None``/empty — never overrides an existing value.
     A no-op (returns *snapshot* unchanged) when *records* is empty/``None``
     or matches nothing.
+
+    Never matches a ``RecordType.is_template_pattern`` record: Clang's
+    ``getQualifiedNameAsString()`` spells a class template's own pattern AND
+    every one of its concrete instantiations identically (no template
+    arguments in the name — confirmed empirically), so an explicitly
+    instantiated ``template class Box<int>;`` alongside the pattern in the
+    same header would otherwise let the tool's per-instantiation layout
+    attach to the pattern's own record — an arbitrary, wrong match (whatever
+    instantiation happens to be present), not just an imprecise one.
+    ``dumper_layout_backfill.py``'s own by-name DWARF backfill already skips
+    ``is_template_pattern`` for this identical reason (Codex review).
     """
     if not records:
         return snapshot
@@ -415,7 +426,7 @@ def apply_layout_facts(
     new_types = []
     changed = False
     for t in snapshot.types:
-        facts = by_name.get(t.qualified_name or t.name)
+        facts = by_name.get(t.qualified_name or t.name) if not t.is_template_pattern else None
         if facts is None:
             new_types.append(t)
             continue

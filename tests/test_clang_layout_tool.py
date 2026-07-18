@@ -470,6 +470,22 @@ class TestApplyLayoutFacts:
         updated = apply_layout_facts(snap, records)
         assert updated.type_by_name("Foo").size_bits == 64
 
+    def test_template_pattern_never_matched(self):
+        # Codex review: Clang's getQualifiedNameAsString() spells a class
+        # template's pattern AND every concrete instantiation identically
+        # (no template arguments in the name -- confirmed empirically), so
+        # an explicitly-instantiated "template class Box<int>;" alongside
+        # the pattern in the same header would otherwise let an arbitrary
+        # instantiation's layout attach to the pattern's own record --
+        # dumper_layout_backfill.py's DWARF backfill already guards against
+        # this identical ambiguity for the same reason.
+        pattern = RecordType(
+            name="Box", kind="class", size_bits=None, is_template_pattern=True,
+        )
+        snap = AbiSnapshot(library="lib", version="1.0", types=[pattern])
+        records = [{"qualified_name": "Box", "size_bits": 32}]
+        assert apply_layout_facts(snap, records) is snap
+
 
 class TestExpandHeaderInputs:
     def test_missing_path_raises(self, tmp_path):
