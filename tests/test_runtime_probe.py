@@ -61,6 +61,47 @@ class TestRunRuntimeProbePlatformGuards:
         assert result.attempted is False
         assert "executable" in (result.skipped_reason or "")
 
+    def test_legacy_rpath_without_runpath_skips(self, tmp_path, monkeypatch):
+        """Codex review: ld.so(8) searches a legacy DT_RPATH (present with no
+        DT_RUNPATH) *before* LD_LIBRARY_PATH -- staging the intended library
+        first on LD_LIBRARY_PATH cannot force the loader's choice for such a
+        binary, so the probe must decline rather than silently report a
+        result it cannot actually attribute to old_lib/new_lib."""
+        monkeypatch.setattr(rp.sys, "platform", "linux")
+        fake_meta = type("_FakeElfMetadata", (), {"rpath": "/some/rpath", "runpath": ""})()
+        monkeypatch.setattr(
+            "abicheck.elf_metadata.parse_elf_metadata", lambda p: fake_meta
+        )
+        app = _make_exec(tmp_path)
+        old_lib = _make_lib(tmp_path, "old.so")
+        new_lib = _make_lib(tmp_path, "new.so")
+        result = run_runtime_probe(app, old_lib, new_lib)
+        assert result.attempted is False
+        assert "DT_RPATH" in (result.skipped_reason or "")
+
+    def test_runpath_alongside_rpath_does_not_skip(self, tmp_path, monkeypatch):
+        """A DT_RUNPATH present alongside DT_RPATH makes ld.so ignore
+        DT_RPATH entirely (ld.so(8)) and search DT_RUNPATH *after*
+        LD_LIBRARY_PATH -- this shape is safe for the probe's staging."""
+        monkeypatch.setattr(rp.sys, "platform", "linux")
+        fake_meta = type(
+            "_FakeElfMetadata", (),
+            {"rpath": "/some/rpath", "runpath": "/some/runpath", "soname": ""},
+        )()
+        monkeypatch.setattr(
+            "abicheck.elf_metadata.parse_elf_metadata", lambda p: fake_meta
+        )
+
+        def _fake_run(argv, env=None, capture_output=None, text=None, errors=None, timeout=None, check=None):
+            return subprocess.CompletedProcess(argv, returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(rp.subprocess, "run", _fake_run)
+        app = _make_exec(tmp_path)
+        old_lib = _make_lib(tmp_path, "old.so")
+        new_lib = _make_lib(tmp_path, "new.so")
+        result = run_runtime_probe(app, old_lib, new_lib)
+        assert result.attempted is True
+
 
 class TestRunOnce:
     def test_symbol_lookup_error_detected(self, tmp_path, monkeypatch):

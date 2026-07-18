@@ -137,6 +137,27 @@ def _load_name(lib_path: Path) -> str:
     return soname
 
 
+def _has_legacy_rpath_without_runpath(app_path: Path) -> bool:
+    """Whether *app_path* embeds a legacy ``DT_RPATH`` with no ``DT_RUNPATH``.
+
+    ld.so(8): a legacy ``DT_RPATH`` (present with no ``DT_RUNPATH``) is
+    searched **before** ``LD_LIBRARY_PATH``; ``DT_RUNPATH`` (the modern
+    replacement, and what a normal toolchain emits today) is searched
+    *after* it. Staging the intended library first on ``LD_LIBRARY_PATH``
+    (:func:`_run_once`) therefore cannot force the loader's choice for a
+    binary built with this legacy shape -- if its ``DT_RPATH`` already
+    resolves the consumer's dependency, both the old and new probe runs
+    would silently load whatever that RPATH points at instead of the
+    respective staged file (Codex review). Detected so
+    :func:`run_runtime_probe` can decline rather than report a result this
+    module cannot actually attribute to the library under test.
+    """
+    from .elf_metadata import parse_elf_metadata
+
+    meta = parse_elf_metadata(app_path)
+    return bool(meta.rpath) and not meta.runpath
+
+
 def _run_once(app_path: Path, lib_path: Path, timeout: float) -> RuntimeProbeOutcome:
     env = dict(os.environ)
     env["LD_BIND_NOW"] = "1"
@@ -213,7 +234,12 @@ def run_runtime_probe(
     parent directory is still appended after, for any other same-directory
     runtime dependency) -- this way each run resolves to exactly the
     intended file even when *old_lib* and *new_lib* are different files in
-    the same directory. Never raises: an unsupported platform,
+    the same directory. Declines (``attempted=False``) rather than probe at
+    all when *app_path* embeds a legacy ``DT_RPATH`` with no ``DT_RUNPATH``
+    (see :func:`_has_legacy_rpath_without_runpath`): ``LD_LIBRARY_PATH``
+    staging cannot override that shape's search order, so this module would
+    otherwise silently report an unverified (and possibly identical-either-way)
+    result. Never raises otherwise: an unsupported platform,
     a non-executable *app_path*, a timeout, or any OS-level failure to spawn
     the process all degrade to a result the caller can inspect, exactly
     like :mod:`abicheck.appcompat`'s own best-effort parsing.
@@ -232,6 +258,18 @@ def run_runtime_probe(
             app_path=str(app_path),
             attempted=False,
             skipped_reason=f"{app_path} is not executable",
+        )
+    if _has_legacy_rpath_without_runpath(app_path):
+        return RuntimeProbeResult(
+            app_path=str(app_path),
+            attempted=False,
+            skipped_reason=(
+                f"{app_path} embeds a legacy DT_RPATH with no DT_RUNPATH; "
+                "the dynamic linker searches DT_RPATH before LD_LIBRARY_PATH "
+                "(ld.so(8)), so this probe cannot reliably select which of "
+                "old_lib/new_lib the app actually loads and declines rather "
+                "than report an unverified result"
+            ),
         )
     old_outcome = _run_once(app_path, old_lib, timeout)
     new_outcome = _run_once(app_path, new_lib, timeout)

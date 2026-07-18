@@ -1467,6 +1467,54 @@ review's priority tiers.
    sits alongside it. Added `test_same_directory_old_new_libraries_resolve_independently`
    and `TestLoadName` (four cases: SONAME present, parse failure, empty
    SONAME, path-shaped SONAME) to `test_runtime_probe.py`.
+   **Post-merge review (Codex), two more findings, one per module.**
+   (a) `buildsource/source_graph.py`: "When a build-source pack includes
+   Kythe/CodeQL call edges, the adapters create `source_decl` nodes with
+   provenance `"kythe"`/`"codeql"` and no `consumer_compiled_body` attribute;
+   this fallback therefore treats those attr-less intermediate callees as
+   consumer-compiled and keeps expanding through their bodies... reintroducing
+   the overreach this predicate was meant to avoid for external graph
+   backends." Confirmed: `graph_backends.py`'s `ingest_kythe_entries`/
+   `ingest_codeql_call_results`/`ingest_codeql_extends_results` create exactly
+   the fallback-node shape the prior Codex-review fix closed for
+   `call_graph.py`'s own fallback tag (`is_consumer_compiled_node` treating
+   "no `consumer_compiled_body` attr" as safe-to-continue *unless*
+   `provenance == "call_graph"`) — but tagged `provenance="kythe"`/`"codeql"`
+   instead, which the blocklist never covered, so an inline public
+   wrapper → ordinary out-of-line helper → `detail::leaf` chain imported from
+   an external indexer still walked straight through the helper. Fixed by
+   generalizing `_CALL_GRAPH_FALLBACK_PROVENANCE` (a single string) into
+   `_NO_CONSUMER_COMPILED_SIGNAL_PROVENANCES` (a frozenset of
+   `{"call_graph", "kythe", "codeql"}`); `is_consumer_compiled_node` now
+   checks membership in that set. Added
+   `test_walk_stops_at_kythe_codeql_node_with_no_signal`
+   (parametrized over both provenances) to `test_internal_leak.py`, alongside
+   the existing `test_walk_stops_at_call_graph_fallback_node_with_no_signal`
+   it mirrors. (b) `runtime_probe.py`: "When the consumer binary has legacy
+   `DT_RPATH` without `DT_RUNPATH`, glibc searches that RPATH before
+   `LD_LIBRARY_PATH`... so putting the staged directory first here does not
+   force the old/new library selection." Confirmed against `ld.so(8)`'s
+   documented search order: a legacy `DT_RPATH` (present with no
+   `DT_RUNPATH`) is searched *before* `LD_LIBRARY_PATH`; `DT_RUNPATH` (what a
+   modern toolchain actually emits) is searched *after* it — so the same-
+   directory staging fix just above cannot force the loader's choice for a
+   binary built with this legacy shape, and both the old and new probe runs
+   could silently resolve through the embedded RPATH instead, defeating
+   `--verify-runtime`'s one purpose for exactly the binaries most likely to
+   need it (older/vendored build setups). Rather than attempt a fragile
+   override (e.g. `LD_PRELOAD`, which would load *both* copies of the library
+   into one process and risk misattributing which copy's global/static state
+   an undefined-symbol failure actually reflects — a correctness risk this
+   probe's own "airtight claim, not inferred" design principle rules out),
+   added `_has_legacy_rpath_without_runpath()` (reads the app's own
+   `DT_RPATH`/`DT_RUNPATH` via `parse_elf_metadata`) and a new early-exit in
+   `run_runtime_probe`: this exact shape now declines with `attempted=False`
+   and an explanatory `skipped_reason`, instead of silently reporting a
+   result the module cannot actually attribute to the library under test. A
+   `DT_RUNPATH` present alongside a `DT_RPATH` makes `ld.so` ignore the
+   `DT_RPATH` entirely, so that combination is unaffected. Added
+   `test_legacy_rpath_without_runpath_skips` and
+   `test_runpath_alongside_rpath_does_not_skip` to `test_runtime_probe.py`.
 3. ~~New worked examples exercising this ADR's headline scenario end-to-end
    (public inline dispatch to an exported internal specialization; the same
    case under a blanket namespace suppression, asserting the break survives
