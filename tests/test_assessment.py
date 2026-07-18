@@ -232,8 +232,13 @@ class TestTargetOutcome:
         assert outcome.state.value == "build_failed"
 
     def test_raw_string_analyzed_state_without_findings_still_raises(self):
-        with pytest.raises(ValueError):
-            TargetOutcome.unavailable(LINUX, "analyzed")
+        # Going through unavailable() would hit its own "use
+        # TargetOutcome.analyzed()" guard first (state coerces to ANALYZED
+        # before that check), not the __post_init__ path this test targets —
+        # construct directly so the missing-findings validation is what
+        # actually fires.
+        with pytest.raises(ValueError, match="must carry findings"):
+            TargetOutcome(target_id=LINUX, state="analyzed")
 
     def test_raw_string_incomplete_state_still_rejected(self):
         with pytest.raises(ValueError):
@@ -273,6 +278,28 @@ class TestTargetOutcome:
             TargetOutcome.analyzed(LINUX, _diff(Verdict.COMPATIBLE), attempt="10")
         with pytest.raises(ValueError):
             TargetOutcome.unavailable(LINUX, TargetState.BUILD_FAILED, attempt="2")
+
+    @pytest.mark.parametrize("bad_target_id", [123, True, 3.14, None, ""])
+    def test_rejects_non_string_target_id(self, bad_target_id: object):
+        with pytest.raises(ValueError):
+            TargetOutcome.unavailable(bad_target_id, TargetState.BUILD_FAILED)
+
+    def test_non_string_target_id_cannot_masquerade_as_the_string_target(self):
+        # An outcome whose target_id was hydrated as an int instead of the
+        # manifest's string id would fail `in manifest.target_ids` silently,
+        # get routed into additional_outcomes as "unbaselined", and
+        # finalize() would then synthesize INCOMPLETE for the real target
+        # despite a matching outcome having arrived. Prove it can't be
+        # constructed that way at all.
+        manifest = _manifest(required=(LINUX,))
+        with pytest.raises(ValueError):
+            TargetOutcome.analyzed(123, _diff(Verdict.COMPATIBLE))  # type: ignore[arg-type]
+        # A well-typed outcome for the same id still records correctly.
+        assessment = Assessment(manifest)
+        assessment.record(TargetOutcome.analyzed(LINUX, _diff(Verdict.COMPATIBLE)))
+        result = assessment.finalize()
+        assert result.outcomes[LINUX].state is TargetState.ANALYZED
+        assert not result.additional_outcomes
 
 
 class TestAcceptanceCases:

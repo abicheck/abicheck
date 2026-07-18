@@ -240,6 +240,16 @@ class TargetOutcome:
     findings: DiffResult | None = None
 
     def __post_init__(self) -> None:
+        # An untyped/CLI-hydrated target_id (e.g. an int where the manifest
+        # declared the equivalent string) would fail `in manifest.target_ids`
+        # membership silently — Assessment.record() would route it into
+        # additional_outcomes as "unbaselined" instead of matching the real
+        # target, and finalize() would then synthesize INCOMPLETE for the
+        # manifest target despite a real outcome having arrived for it.
+        if not isinstance(self.target_id, str) or not self.target_id:
+            raise ValueError(
+                f"'target_id' must be a non-empty string, got {self.target_id!r}"
+            )
         # attempt is the *only* supersession guard Assessment.record() has
         # for reruns (existing.attempt > outcome.attempt). A string attempt
         # from an untyped/CLI payload would compare lexicographically
