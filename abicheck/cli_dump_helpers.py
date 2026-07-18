@@ -396,12 +396,22 @@ def check_requested_depth_satisfied(
     if requested_rank is None:
         return
     effective_pack = build_source if build_source is not None else snap.build_source
-    effective = evidence_depth_label(snap, build_source)
-    if effective == "source":
-        # Downgrade for gating purposes only -- see _gated_source_label's
-        # docstring for why evidence_depth_label's own L4-or-L5 rule is not
-        # trustworthy enough for a hard gate.
-        effective = _gated_source_label(effective_pack, snap)
+    # _gated_source_label is called unconditionally, not just when
+    # evidence_depth_label already says "source" -- evidence_depth_label's
+    # own payload-emptiness check requires *either* L4 *or* L5 to be
+    # non-empty, but a zero-match source-only dump (replay parsed TUs, linked
+    # nothing because there is no binary to link against, and folded no L5
+    # graph either) leaves both empty, so evidence_depth_label reports "build"
+    # directly -- which would skip the gated recompute entirely and wrongly
+    # reject that valid zero-match dump (CodeRabbit review). _gated_source_label
+    # is self-contained (it recomputes straight from build_source, not from
+    # evidence_depth_label's verdict) and never returns a *higher* rung than
+    # is justified -- for every other case (evidence_depth_label already
+    # "source", or genuinely no build_source at all) it reproduces the same
+    # result the old evidence_depth_label-first path did; see its own
+    # docstring for why evidence_depth_label's L4-or-L5 rule is not
+    # trustworthy enough for a hard gate on its own.
+    effective = _gated_source_label(effective_pack, snap)
     if _DEPTH_RANK.get(effective, 0) < requested_rank:
         raise DumpDepthNotSatisfiedError(
             f"--depth {depth} was requested but the snapshot only reached "

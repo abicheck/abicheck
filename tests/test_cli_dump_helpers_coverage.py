@@ -1443,6 +1443,40 @@ def test_check_requested_depth_satisfied_source_with_real_l4_facts_passes() -> N
     check_requested_depth_satisfied("source", snap)  # must not raise
 
 
+def test_check_requested_depth_satisfied_source_zero_match_no_graph_passes() -> None:
+    """CodeRabbit review: evidence_depth_label's own L4-or-L5 payload-emptiness
+    rule requires *either* L4 *or* L5 to be non-empty -- a zero-match
+    source-only dump that parsed TUs but linked no declarations (no binary to
+    link against) AND folded no L5 graph leaves *both* empty, so
+    evidence_depth_label reports "build" directly. The old code only called
+    _gated_source_label when evidence_depth_label already said "source",
+    so this genuinely-attempted, zero-match case skipped the gated recompute
+    entirely and was wrongly rejected -- exactly the "unseeded --depth source
+    that selected 0 TUs" scenario _write_snapshot_output's own G21.7 warning
+    describes as expected, warn-only behavior, not a hard failure. Unlike
+    test_check_requested_depth_satisfied_source_with_real_l4_facts_passes
+    above, this pack deliberately carries NO source_graph, so it only passes
+    once _gated_source_label runs unconditionally."""
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+    from abicheck.cli_dump_helpers import check_requested_depth_satisfied
+
+    snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
+    surface = SourceAbiSurface()
+    surface.coverage["compile_units_selected"] = 1
+    surface.coverage["compile_units_parsed"] = 1
+    pack = BuildSourcePack(
+        root=Path(""),
+        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        source_abi=surface,
+    )
+    snap.build_source = pack
+
+    assert evidence_depth_label(snap) == "build"
+    check_requested_depth_satisfied("source", snap)  # must not raise
+
+
 def test_l4_source_abi_was_attempted_false_for_unavailable_extractor() -> None:
     """Codex review (fifth finding): _run_inline_source_abi returns the same
     empty-surface, PARTIAL-coverage shape both when a source-only dump
