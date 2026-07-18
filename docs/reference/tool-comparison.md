@@ -339,16 +339,30 @@ pipeline four times:
 ### Which source discovers what
 
 Each case in `examples/ground_truth.json`
-carries a `min_evidence` field — the weakest source at which abicheck reaches the
-correct verdict — derived by
+carries a `min_evidence` field — the weakest source at which abicheck reaches
+*every one of the case's cataloged `expected_kinds`*, not just its verdict —
+derived by
 `scripts/evidence_tiers.py`
-and validated by `tests/test_evidence_tiers.py`. Aggregated over the 153 compare-style cases, that yields the cumulative minimum-evidence coverage. The binary competitor `.so` lane is narrower (134 built shared-library pairs); fixture/source-only L2/L5/source cases are listed here by evidence tier instead of being treated as missing competitor binaries:
+(`compute_min_evidence()` takes the strongest tier across all `expected_kinds`,
+by design: "the whole break is only fully visible once every contributing
+kind is") and validated by `tests/test_evidence_tiers.py`. Aggregated over the 153 compare-style cases, that yields the cumulative minimum-evidence coverage. The binary competitor `.so` lane is narrower (134 built shared-library pairs); fixture/source-only L2/L5/source cases are listed here by evidence tier instead of being treated as missing competitor binaries:
 
 > **Freshness note.** `examples/ground_truth.json` now has 193 total entries
 > (verified via `len(json.load(open("examples/ground_truth.json"))["verdicts"])`),
 > not the 153/134 cited above — this table's per-tier breakdown predates
 > case growth since it was last regenerated and has not been re-derived from
-> `scripts/evidence_tiers.py` against the current catalog. Treat the *shape*
+> `scripts/evidence_tiers.py` against the current catalog. When it is:
+> `case187`/`188`/`189`/`191` will land in the `L5` row by this table's
+> kind-set-floor definition even though their `BREAKING` verdict alone is
+> empirically reachable at `L0`/`L1` (`public_api_internal_dependency_added`
+> is the only L5 kind in their `expected_kinds`, correlated context on an
+> already-detected structural break, not what makes the verdict fire) —
+> `--evidence-tiers`'s own "min_evidence vs empirical detect-tier
+> differences" report already flags exactly this divergence per case
+> (verified: `declared=L5 empirical=L0`/`L1` for all four), so a future
+> regeneration should read that drift report rather than assume this
+> staircase's `L5` percentage means "requires a source graph to detect the
+> break." Treat the *shape*
 > (evidence compounds, L0→L1 is the biggest single jump) as durable and the
 > exact counts/percentages as stale; regenerating this table against the
 > current catalog is a follow-up, not done as part of this pass.
