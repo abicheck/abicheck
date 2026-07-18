@@ -2668,6 +2668,48 @@ class TestDebExtractorExtended:
         assert result.symbols_file is not None
         assert result.symbols_file.read_text() == symbols_text
 
+    def test_control_tar_planted_shared_object_is_not_discovered(
+        self, tmp_path: Path,
+    ) -> None:
+        """Codex review: control.tar.* (package metadata -- control,
+        md5sums, the symbols contract) is extracted into target_dir/.deb_control/,
+        the same tree discover_shared_libraries() walks for package-compare
+        purposes. A crafted control.tar.* could plant a file shaped like a
+        shared object there and discover_shared_libraries()'s "accept any
+        .so-suffixed file at any depth" fallback would then report it as
+        real package payload. Verifies the planted file is excluded."""
+        f = tmp_path / "test.deb"
+        f.write_bytes(b"!<arch>\n" + b"\x00" * 100)
+        out = tmp_path / "output"
+        out.mkdir()
+
+        elf_path = tmp_path / "planted.so"
+        _make_minimal_elf_so(elf_path)
+        elf_bytes = elf_path.read_bytes()
+
+        def fake_run(*args, **kwargs):
+            staging = Path(kwargs.get("cwd", "."))
+            with tarfile.open(staging / "data.tar", "w") as tf:
+                info = tarfile.TarInfo(name="usr/lib/libgenuine.so")
+                info.size = len(elf_bytes)
+                tf.addfile(info, io.BytesIO(elf_bytes))
+            with tarfile.open(staging / "control.tar", "w") as tf:
+                info = tarfile.TarInfo(name="libevil.so")
+                info.size = len(elf_bytes)
+                tf.addfile(info, io.BytesIO(elf_bytes))
+            return mock.Mock(returncode=0)
+
+        with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
+            with mock.patch("abicheck.package.subprocess.run", side_effect=fake_run):
+                DebExtractor().extract(f, out)
+
+        assert (out / ".deb_control" / "libevil.so").exists()
+
+        result = discover_shared_libraries(out)
+        result_names = {p.name for p in result}
+        assert "libevil.so" not in result_names
+        assert "libgenuine.so" in result_names
+
     def test_extract_relative_deb_path_passes_absolute_path_to_ar(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:

@@ -129,6 +129,15 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `.deb_control` directory is now cleared before `control.tar.*` is
   extracted into it, so only its real members can ever populate the
   returned `symbols_file`.
+- **`control.tar.*`'s own metadata could pollute package-compare library
+  discovery** — `DebExtractor` extracts `control.tar.*` (package metadata:
+  `control`, `md5sums`, the `dpkg-gensymbols(1)` symbols contract) into
+  `target_dir/.deb_control/`, the same tree `discover_shared_libraries()`
+  walks for `.deb`-to-`.deb` package compare. A crafted (or coincidental)
+  `control.tar.*` member shaped like a shared object would be picked up by
+  that function's "accept any `.so`-suffixed file at any depth" fallback
+  and reported as though it were real package payload. `.deb_control` is
+  now pruned from the walk by name (external review).
 - **`dump_provenance.frontend` could name the wrong backend at `--depth
   source`** — it always preferred `snap.ast_producer` (the L2 header-AST
   backend) over the L4 replay extractor, so a header snapshot parsed with

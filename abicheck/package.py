@@ -1424,6 +1424,19 @@ def discover_shared_libraries(
 
     libraries: list[Path] = []
     for dirpath, _dirnames, filenames in os.walk(extract_dir, followlinks=False):
+        # DebExtractor extracts a .deb's control.tar.* (package metadata --
+        # control, md5sums, and the dpkg-gensymbols(1) symbols contract) into
+        # this internal, dot-prefixed sentinel subdirectory of the same
+        # target_dir this function walks. It is package *metadata*, never
+        # payload -- a crafted/malicious control.tar.* could plant a file
+        # shaped like a shared object there (or a legitimate payload could
+        # coincidentally use the name .deb_control/, which the earlier
+        # pre-extraction cleanup now removes), and this function's own
+        # "accept any .so-suffixed file at any depth" fallback would then
+        # discover it as though it were a real library in the package
+        # (Codex review). No legitimate package payload uses this name, so
+        # pruning it from the walk is safe.
+        _dirnames[:] = [d for d in _dirnames if d != ".deb_control"]
         for fn in filenames:
             fp = Path(dirpath) / fn
             elf_path = fp
