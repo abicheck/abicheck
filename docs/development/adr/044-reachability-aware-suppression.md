@@ -982,6 +982,30 @@ semantics) is closed to the extent described under its own entry.
   `qualified_name` set, matching only via the fallback key) and
   `test_api_break_kind_is_not_a_trigger` (an `API_BREAK_KINDS` member with
   call-graph evidence produces no overlay).
+- **A third mangled-label shape, this time at classification, not key
+  matching (Codex, fresh evidence).** `augment_graph_with_calls`
+  (`call_graph.py`) adds a fallback `source_decl` node — with no
+  `SOURCE_DECL_MAPS_TO_SYMBOL` edge at all — for a callee that has no other
+  node in the graph yet, labelling it via `function_decl_identity`, which
+  returns the raw **mangled** name for any ordinary (non-`extern "C"`) C++
+  function. A bare mangled name has no `::` segments, so
+  `is_internal_type(node.label, ...)` rejected it *before*
+  `compute_call_graph_leak_paths` even reached the dual-key logic the first
+  fix in this round added — the entry was silently dropped at
+  classification, one step earlier than either of the two previously-fixed
+  shapes. Fixed by demangling (`abicheck.demangle.demangle`, already used
+  elsewhere in this codebase for the same mangled↔qualified correlation
+  problem) only for this classification check when the label looks mangled
+  (`startswith("_Z")`) — the stored key stays the original mangled label
+  unchanged, since that already equals a real `FUNC_REMOVED`'s
+  `Change.symbol` directly (both are the same canonical Itanium-mangled
+  linker symbol), so no further key-matching change was needed once
+  classification correctly recognizes it as internal. Added
+  `test_mangled_only_label_demangled_for_classification`/
+  `test_mangled_label_not_internal_after_demangling_stays_dropped` to
+  `test_internal_leak.py` (the latter confirming demangling only changes
+  what counts as *internal*, not a blanket allowance for every mangled
+  label).
 
 ## Roadmap (not committed — scope/sequence per the usual planning process)
 

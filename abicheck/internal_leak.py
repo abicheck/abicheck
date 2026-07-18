@@ -704,7 +704,12 @@ def compute_call_graph_leak_paths(
     — a call-graph-only node's ``label`` can also be the mangled name or a
     hash-suffixed qualified name depending on provenance (see
     :mod:`abicheck.buildsource.call_graph`), so keying by ``label`` alone
-    would silently never match a real, compiled C++ removal.
+    would silently never match a real, compiled C++ removal. For exactly this
+    mangled-label shape, the internal-namespace *classification* check below
+    also demangles first (only for that check — the stored key stays the
+    original mangled ``label``, which already equals a real ``Change.symbol``
+    directly), since a bare mangled name has no ``::`` segments for
+    :func:`is_internal_type` to recognize at all.
 
     This is a *symbol-availability* signal, distinct from
     :func:`compute_leak_paths`'s layout/type-graph walk: a public inline
@@ -761,7 +766,24 @@ def compute_call_graph_leak_paths(
             if node is None:
                 continue
             name = node.label or target
-            if not is_internal_type(name, internal_set):
+            # Codex review (fresh evidence): a call-graph-only fallback node
+            # (augment_graph_with_calls, added when a callee has no other
+            # SOURCE_DECLARES-backed node) gets label=ident straight from
+            # function_decl_identity, which returns the *mangled* name for
+            # any ordinary (non-extern-"C") C++ function -- with no "::" at
+            # all, is_internal_type would reject it here before this
+            # function's own dual-key logic below ever runs. Demangle only
+            # for this classification check, not for the stored key: the
+            # mangled name here is the same canonical Itanium symbol
+            # diff_symbols.py puts on a real FUNC_REMOVED's Change.symbol, so
+            # the existing direct mangled-to-mangled match already works
+            # once classification correctly recognizes it as internal.
+            lookup_name = name
+            if name.startswith("_Z"):
+                from .demangle import demangle
+
+                lookup_name = demangle(name) or name
+            if not is_internal_type(lookup_name, internal_set):
                 continue
             path_edges = _dependency_path(graph, edge_kinds, entry, target)
             if not path_edges:

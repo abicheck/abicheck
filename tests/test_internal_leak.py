@@ -1038,6 +1038,51 @@ class TestComputeCallGraphLeakPaths:
         paths = compute_call_graph_leak_paths(snap)
         assert list(paths.keys()) == ["ns::detail::helper"]
 
+    def test_mangled_only_label_demangled_for_classification(self, monkeypatch) -> None:
+        """Codex review, fresh evidence: augment_graph_with_calls's
+        call-graph-only fallback node (added when a callee has no
+        SOURCE_DECLARES-backed node elsewhere) gets label=ident from
+        function_decl_identity, which is the *mangled* name for any
+        ordinary C++ function -- no "::" at all, so is_internal_type would
+        reject it before classification without demangling first. The
+        stored key stays the original mangled label (matching a real
+        FUNC_REMOVED's Change.symbol directly)."""
+        import abicheck.demangle as demangle_mod
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        mangled = "_ZN2ns6detail6helperEv"
+        monkeypatch.setattr(demangle_mod, "demangle", lambda s: "ns::detail::helper()")
+        snap = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", mangled, "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        paths = compute_call_graph_leak_paths(snap)
+        assert mangled in paths
+        assert "pubFn" in paths[mangled][0]
+
+    def test_mangled_label_not_internal_after_demangling_stays_dropped(self, monkeypatch) -> None:
+        """A mangled label that demangles to a non-internal qualified name
+        must still be excluded -- demangling only changes what's classified
+        as internal, not a blanket "keep everything mangled" allowance."""
+        import abicheck.demangle as demangle_mod
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        mangled = "_ZN2ns9PublicFooEv"
+        monkeypatch.setattr(demangle_mod, "demangle", lambda s: "ns::PublicFoo()")
+        snap = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", mangled, "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        assert compute_call_graph_leak_paths(snap) == {}
+
 
 class TestDetectCallGraphLeaks:
     def test_func_removed_on_internal_decl_reachable_via_call_graph(self) -> None:
