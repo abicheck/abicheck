@@ -296,6 +296,17 @@ def run_layout_tool(
         except ValueError:
             log.debug("clang layout tool produced non-JSON output")
             return None
+        # Mirrors dumper_clang_errors._parse_clang_ast_result's own "the L2
+        # header AST must be complete to be authoritative" contract: even
+        # after every retry above, the tool may still report "ok": false
+        # (a recoverable-error parse that still emitted SOME records for the
+        # declarations it did visit, per main.cpp's own comment). Trusting
+        # those anyway would let hybrid/clang snapshots carry layout facts
+        # for an arbitrary, silently-incomplete subset of records instead of
+        # cleanly degrading to no enrichment (Codex review).
+        if payload.get("ok") is not True:
+            log.debug("clang layout tool reported a failed/partial parse")
+            return None
         records = payload.get("records")
         if not isinstance(records, list):
             return None

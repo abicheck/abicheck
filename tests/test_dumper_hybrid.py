@@ -710,6 +710,67 @@ class TestTypeAndFieldFactBackfill:
         merged = merge_snapshots(castxml, clang)
         assert merged.type_by_name("Cfg").fields[0].name == "x"
 
+    def test_layout_scalar_fields_backfilled_from_enriched_clang(self):
+        # Codex review: castxml never populates data_size_bits/
+        # is_standard_layout/is_trivially_copyable at all -- when the
+        # optional G28 Phase 4 layout tool already enriched clang_snap
+        # before this merge, a type present on BOTH backends (the common
+        # case) must still pick those facts up, not just a clang-only type.
+        t_old = RecordType(
+            name="Widget", kind="class", size_bits=64,
+            data_size_bits=None, is_standard_layout=None,
+            is_trivially_copyable=None, vptr_offset_bits=None,
+        )
+        t_clang = RecordType(
+            name="Widget", kind="class", size_bits=64,
+            data_size_bits=48, is_standard_layout=True,
+            is_trivially_copyable=False, vptr_offset_bits=0,
+        )
+        castxml = _snap(types=[t_old], ast_producer="castxml")
+        clang = _snap(types=[t_clang], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+        merged_t = merged.type_by_name("Widget")
+        assert merged_t.data_size_bits == 48
+        assert merged_t.is_standard_layout is True
+        assert merged_t.is_trivially_copyable is False
+        assert merged_t.vptr_offset_bits == 0
+
+    def test_layout_scalar_fields_never_override_castxml(self):
+        # castxml's own real layout, when present, always wins.
+        t_old = RecordType(
+            name="Widget", kind="class", size_bits=64, data_size_bits=64,
+        )
+        t_clang = RecordType(
+            name="Widget", kind="class", size_bits=64, data_size_bits=999,
+        )
+        castxml = _snap(types=[t_old], ast_producer="castxml")
+        clang = _snap(types=[t_clang], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+        assert merged.type_by_name("Widget").data_size_bits == 64
+
+    def test_base_offsets_backfilled_when_castxml_empty(self):
+        t_old = RecordType(
+            name="Derived", kind="class", bases=["Base"], base_offsets={},
+        )
+        t_clang = RecordType(
+            name="Derived", kind="class", bases=["Base"],
+            base_offsets={"Base": 64},
+        )
+        castxml = _snap(types=[t_old], ast_producer="castxml")
+        clang = _snap(types=[t_clang], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+        assert merged.type_by_name("Derived").base_offsets == {"Base": 64}
+
+    def test_field_offset_bits_backfilled_from_enriched_clang(self):
+        f_old = TypeField(name="a", type="int", offset_bits=None)
+        f_clang = TypeField(name="a", type="int", offset_bits=32)
+        t_old = RecordType(name="Foo", kind="struct", fields=[f_old])
+        t_clang = RecordType(name="Foo", kind="struct", fields=[f_clang])
+        castxml = _snap(types=[t_old], ast_producer="castxml")
+        clang = _snap(types=[t_clang], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+        assert merged.type_by_name("Foo").fields[0].offset_bits == 32
+
 
 class TestEnumFactBackfill:
     def test_is_scoped_and_deprecated_from_castxml(self):

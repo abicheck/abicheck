@@ -44,12 +44,20 @@ their two independent :class:`~abicheck.model.AbiSnapshot`\\ s to
   detectors can tell a castxml-backed fact apart from an unbacked one on a
   per-declaration basis instead of trusting a whole-snapshot producer tag.
 
-**Out of scope** (explicitly, per the G28 plan): layout facts (sizes,
-offsets, vtable slots, alignment) are NOT merged — castxml remains the sole
-layout source; every such field is taken from the castxml snapshot as-is.
+**Layout facts**: castxml remains the PRIMARY layout source — its own real
+size/alignment/offset/vtable data is never overridden. When the optional G28
+Phase 4 companion tool (``ABICHECK_CLANG_LAYOUT_TOOL``) has already enriched
+the clang sub-dump before this merge, its facts backfill any of the same
+fields castxml itself never computes at all (``data_size_bits``,
+``is_standard_layout``, ``is_trivially_copyable``) or left empty (an opaque/
+incomplete castxml record) — see :func:`_merge_record_type`/
+:func:`_merge_field`. Without the layout tool enabled, this is a no-op:
+``dumper_clang.py``'s plain ``-ast-dump=json`` parse leaves every one of
+these fields empty too, so there is nothing to backfill from.
+
 Everything not explicitly merged below (typedefs, constants, ELF/PE/Mach-O
-metadata, DWARF metadata, ...) is likewise taken verbatim from the castxml
-snapshot, which is used as the base via ``dataclasses.replace``.
+metadata, DWARF metadata, ...) is taken verbatim from the castxml snapshot,
+which is used as the base via ``dataclasses.replace``.
 """
 
 from __future__ import annotations
@@ -407,6 +415,21 @@ def _merge_variable(
     return replace(v, deprecated=value) if value != v.deprecated else v
 
 
+#: G28 Phase 4 layout facts castxml either never populates at all
+#: (data_size_bits/is_standard_layout/is_trivially_copyable) or leaves empty
+#: for an opaque/incomplete record (size_bits/alignment_bits/
+#: vptr_offset_bits) -- backfilled from an already-enriched clang_t below
+#: only when castxml's own value is still None (Codex review).
+_LAYOUT_SCALAR_ATTRS = (
+    "size_bits",
+    "alignment_bits",
+    "data_size_bits",
+    "is_standard_layout",
+    "is_trivially_copyable",
+    "vptr_offset_bits",
+)
+
+
 def _merge_field(
     type_name: str,
     f: TypeField,
@@ -421,6 +444,10 @@ def _merge_field(
         )
         if value != getattr(f, attr):
             updates[attr] = value
+    # G28 Phase 4: same layout backfill as _merge_record_type, for the
+    # per-field offset the optional companion tool computes.
+    if clang_f is not None and f.offset_bits is None and clang_f.offset_bits is not None:
+        updates["offset_bits"] = clang_f.offset_bits
     return replace(f, **updates) if updates else f
 
 
@@ -435,6 +462,21 @@ def _merge_record_type(
         )
         if value != getattr(t, attr):
             updates[attr] = value
+
+    # G28 Phase 4 (optional ABICHECK_CLANG_LAYOUT_TOOL): clang_t may carry
+    # REAL ASTRecordLayout facts the companion tool already backfilled onto
+    # clang_snap BEFORE this merge (attach_clang_layout runs on clang_snap's
+    # own recursive dump). Without this, a type present on BOTH backends --
+    # the common case -- lost every one of these facts in a hybrid merge
+    # even with the layout tool enabled, while a clang-ONLY type (appended
+    # verbatim below) kept them (Codex review). Never overrides an existing
+    # castxml value -- castxml's own real layout, when present, always wins.
+    if clang_t is not None:
+        for attr in _LAYOUT_SCALAR_ATTRS:
+            if getattr(t, attr) is None and getattr(clang_t, attr) is not None:
+                updates[attr] = getattr(clang_t, attr)
+        if not t.base_offsets and clang_t.base_offsets:
+            updates["base_offsets"] = clang_t.base_offsets
 
     clang_fields_by_name = {cf.name: cf for cf in clang_t.fields} if clang_t else {}
     merged_fields = [

@@ -156,6 +156,33 @@ class TestRunLayoutTool:
         ):
             assert run_layout_tool("some-binary", [header], []) is None
 
+    def test_failed_parse_rejects_partial_records(self, tmp_path):
+        # Codex review: main.cpp's own comment says a recoverable-error
+        # parse still emits "ok": false plus whatever partial records it
+        # produced for the declarations it did visit -- trusting those
+        # anyway would let a hybrid/clang snapshot carry layout facts for an
+        # arbitrary, silently-incomplete subset of records instead of
+        # cleanly degrading to no enrichment, mirroring
+        # dumper_clang_errors._parse_clang_ast_result's own "the L2 header
+        # AST must be complete to be authoritative" contract for the main
+        # clang dump.
+        header = tmp_path / "a.h"
+        header.write_text("struct Foo { int a; };")
+        fake_result = subprocess.CompletedProcess(
+            args=["x"], returncode=0,
+            stdout='{"ok": false, "records": [{"qualified_name": "Foo", "size_bits": 32}]}',
+            stderr="",
+        )
+        with patch(
+            "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
+        ), patch(
+            "abicheck.clang_layout_tool._resolve_clang_langmode",
+            return_value=(True, False, False, "gnu"),
+        ), patch(
+            "abicheck.clang_layout_tool.subprocess.run", return_value=fake_result
+        ):
+            assert run_layout_tool("some-binary", [header], []) is None
+
     def test_successful_run_returns_records_and_cleans_up_agg_file(self, tmp_path):
         header = tmp_path / "a.h"
         header.write_text("struct Foo { int a; };")
