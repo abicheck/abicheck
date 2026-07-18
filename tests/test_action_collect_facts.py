@@ -38,7 +38,8 @@ from pathlib import Path
 
 import pytest
 
-ACTION_DIR = Path(__file__).resolve().parents[1] / "actions" / "collect-facts"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+ACTION_DIR = REPO_ROOT / "actions" / "collect-facts"
 RUN_SH = ACTION_DIR / "run.sh"
 _HELPERS_MARKER = "# ---------------------------------------------------------------------------\n# Resolve producer"
 
@@ -96,6 +97,20 @@ def _run_action(
         "GITHUB_ENV": str(github_env),
         "GITHUB_OUTPUT": str(github_output),
         "ACTION_PATH": str(ACTION_DIR),
+        # run.sh's _verify_pack invokes a bare `python3 -c` with cwd=tmp_path
+        # (not this pytest process's own sys.path) to import
+        # abicheck.buildsource.inputs_validate. pytest itself can always
+        # import abicheck via pyproject.toml's `pythonpath = ["."]`, but that
+        # only extends the pytest process's own sys.path -- if whichever
+        # `python3` resolves on PATH inside the subprocess has no site-
+        # packages entry for abicheck (e.g. it isn't the same interpreter
+        # pytest was invoked from), the subprocess fails with
+        # ModuleNotFoundError before ever reaching pack validation (Codex
+        # review). Mirror pytest's own mechanism explicitly instead of
+        # depending on ambient python3 resolution.
+        "PYTHONPATH": os.pathsep.join(
+            filter(None, [str(REPO_ROOT), os.environ.get("PYTHONPATH")])
+        ),
         **env_extra,
     }
     result = subprocess.run(
@@ -756,6 +771,39 @@ class TestWrapperProducer:
         assert outputs["ready"] == "true"
         assert outputs["mode"] == "pack"
         assert outputs["pack-path"] == str(pack)
+
+    def test_subprocess_env_includes_repo_root_on_pythonpath(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression (Codex review): _verify_pack's `python3 -c` does a
+        # fresh PATH lookup for python3, independent of whichever
+        # interpreter this pytest process itself runs under -- pytest can
+        # always import abicheck via pyproject.toml's `pythonpath = ["."]`,
+        # but that only extends the pytest process's own sys.path. If the
+        # subprocess's python3 resolves to a different interpreter (or one
+        # with no editable abicheck install at all), it fails with
+        # ModuleNotFoundError before ever reaching pack validation. Verify
+        # _run_action's env directly (intercepting subprocess.run rather
+        # than spinning up a real second interpreter, since abicheck's
+        # required pyyaml/click/pyelftools dependencies would still need
+        # to be independently present in any such interpreter regardless
+        # of PYTHONPATH -- this test isolates the one thing this specific
+        # fix controls: whether REPO_ROOT reaches the subprocess env).
+        captured: dict[str, dict[str, str]] = {}
+
+        def _fake_run(
+            *args: object, **kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            captured["env"] = kwargs["env"]  # type: ignore[assignment]
+            return subprocess.CompletedProcess(
+                args=(), returncode=0, stdout="", stderr=""
+            )
+
+        monkeypatch.setattr(subprocess, "run", _fake_run)
+        _run_action({"INPUT_PHASE": "verify", "INPUT_PRODUCER": "wrapper"}, tmp_path)
+
+        pythonpath_entries = captured["env"]["PYTHONPATH"].split(os.pathsep)
+        assert str(REPO_ROOT) in pythonpath_entries
 
     def test_verify_reemits_producer_version_persisted_by_prepare(
         self, tmp_path: Path
