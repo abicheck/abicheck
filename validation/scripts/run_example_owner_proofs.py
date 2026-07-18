@@ -19,6 +19,7 @@ SCHEMA_VERSION = "example_owner_proofs.v1"
 OWNER_PROOFS = {
     "btf": "tests/test_workflow_kernel_accel.py::test_committed_btf_example_matches_ground_truth",
     "g20": "tests/test_g20_catalog.py",
+    "header_graph": "tests/test_header_graph_examples.py",
     "kabi": "tests/test_kabi_examples.py",
     "l3l4l5": "tests/test_l3l4l5_examples.py",
     "python_api": "tests/test_python_api_examples.py",

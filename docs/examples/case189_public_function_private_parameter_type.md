@@ -9,6 +9,7 @@
 | **Flags** | ABI break, API break, Bad practice |
 | **Detected `ChangeKind`s** | `func_removed`, `public_api_internal_dependency_added` |
 | **Source files** | `examples/case189_public_function_private_parameter_type/` |
+| **Known kind gap** | `public_api_internal_dependency_added` — verdict is correct; see note below |
 
 **Verdict:** 🔴 BREAKING · **Findings:** `func_removed` (artifact-proven) + `public_api_internal_dependency_added` (L5, correlated) · **Evidence tier:** L1 for the verdict; L5 (`--header-graph`) for the risk finding
 
@@ -96,6 +97,10 @@ API, or take/return only public types (e.g. a builder pattern, or an opaque
 public handle that wraps the internal type).
 
 ---
+
+## Ground-truth provenance
+
+**Known kind gap:** public_api_internal_dependency_added is only emitted by `dump --header-graph`, an opt-in flag tests/validate_examples.py's default gcc/clang debug-headers lane does not pass (see tests/validate_examples.py's _kinds_strict_signal call site). The BREAKING verdict is still correct via func_removed alone; --header-graph is exercised for real, separately, by tests/test_header_graph_examples.py (wired into the full-matrix proof gate via the header_graph OWNER_PROOFS/SPECIAL_PROOFS entry in validation/scripts/run_example_owner_proofs.py and collect_full_example_matrix.py).
 
 ## Source files
 

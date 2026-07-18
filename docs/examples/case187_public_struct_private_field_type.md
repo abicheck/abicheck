@@ -9,6 +9,7 @@
 | **Flags** | ABI break, API break, Bad practice |
 | **Detected `ChangeKind`s** | `struct_field_type_changed`, `public_api_internal_dependency_added` |
 | **Source files** | `examples/case187_public_struct_private_field_type/` |
+| **Known kind gap** | `public_api_internal_dependency_added` — verdict is correct; see note below |
 
 **Verdict:** 🔴 BREAKING · **Findings:** `struct_field_type_changed` (artifact-proven) + `public_api_internal_dependency_added` (L5, correlated) · **Evidence tier:** L1 for the verdict; L5 (`--header-graph`) for the risk finding
 
@@ -102,6 +103,10 @@ consumers cannot track (e.g. an opaque handle or a pimpl indirection instead
 of embedding the internal type directly).
 
 ---
+
+## Ground-truth provenance
+
+**Known kind gap:** public_api_internal_dependency_added is only emitted by `dump --header-graph`, an opt-in flag tests/validate_examples.py's default gcc/clang debug-headers lane does not pass (see tests/validate_examples.py's _kinds_strict_signal call site). The BREAKING verdict is still correct via struct_field_type_changed alone; --header-graph is exercised for real, separately, by tests/test_header_graph_examples.py (wired into the full-matrix proof gate via the header_graph OWNER_PROOFS/SPECIAL_PROOFS entry in validation/scripts/run_example_owner_proofs.py and collect_full_example_matrix.py).
 
 ## Source files
 
