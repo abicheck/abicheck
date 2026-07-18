@@ -381,6 +381,40 @@ def test_extract_deadline_exceeded_degrades_like_timeout(monkeypatch) -> None:
         extractor.extract(_cu(source="foo.cpp"), public_header_roots=["foo.h"])
 
 
+def test_extract_bounded_by_local_cap_not_full_scan_budget(monkeypatch) -> None:
+    """Codex review (PR #591), round 7: deadline.run_bounded() honors an
+    active outer deadline verbatim (not min(timeout, left)), so a bare
+    timeout=self.timeout on the L4 castxml call alone did nothing once a scan
+    --budget was active: the call stayed bound by the FULL remaining scan
+    budget instead of this extractor's own ~120s local cap. A hung per-TU
+    castxml replay under a generous --budget could therefore eat the whole
+    remaining scan instead of degrading after self.timeout. Assert the
+    ContextVar deadline observed inside run_bounded is capped at the local
+    timeout, not the much larger outer scan budget."""
+    from abicheck import deadline
+    from abicheck.buildsource.source_extractors import (
+        SourceExtractionError,
+        castxml as castxml_mod,
+    )
+
+    extractor = CastxmlSourceExtractor(timeout=10)
+    monkeypatch.setattr(extractor, "available", lambda: True)
+    seen_remaining: list[float | None] = []
+
+    def _raise(cmd, **kw):  # type: ignore[no-untyped-def]
+        seen_remaining.append(deadline.remaining())
+        raise deadline.DeadlineExceeded(-1.0)
+
+    monkeypatch.setattr(castxml_mod.deadline, "run_bounded", _raise)
+    with deadline.deadline_scope(1800.0):  # a generous 30-minute --budget
+        with pytest.raises(SourceExtractionError):
+            extractor.extract(_cu(source="foo.cpp"), public_header_roots=["foo.h"])
+
+    assert seen_remaining
+    # Bound by the extractor's own ~10s local cap, not the 1800s scan budget.
+    assert seen_remaining[0] is not None and seen_remaining[0] <= 10.5
+
+
 def test_extract_rechecks_deadline_before_parsing_xml(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     """Codex review follow-up (PR #591): the 'check deadline before loading
     cached/output data' gap fixed in the L2 dumper.py path and the L4 clang
@@ -607,13 +641,17 @@ def test_entity_from_function_drops_bare_name_mangled_fallback() -> None:
     # distinct (Codex review #335, P2).
     ctor_int = entity_from_function(
         Function(
-            name="Widget", mangled="Widget", return_type="void",
+            name="Widget",
+            mangled="Widget",
+            return_type="void",
             params=[Param("x", "int")],
         )
     )
     ctor_dbl = entity_from_function(
         Function(
-            name="Widget", mangled="Widget", return_type="void",
+            name="Widget",
+            mangled="Widget",
+            return_type="void",
             params=[Param("x", "double")],
         )
     )
@@ -1005,7 +1043,9 @@ def test_entity_from_typedef_carries_provenance() -> None:
     assert plain.source_location.origin == "PUBLIC_HEADER"
     assert plain.visibility == "public_header"
 
-    gen = entity_from_typedef("cfg_t", "long", source_header="gen/cfg.h", generated=True)
+    gen = entity_from_typedef(
+        "cfg_t", "long", source_header="gen/cfg.h", generated=True
+    )
     assert gen.source_location.origin == "GENERATED"
     assert gen.visibility == "generated"
 

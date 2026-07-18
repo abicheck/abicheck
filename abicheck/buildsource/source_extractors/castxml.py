@@ -29,7 +29,6 @@ context→argv builder is pure and unit-testable; only :meth:`extract` shells ou
 from __future__ import annotations
 
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 from typing import cast
@@ -48,6 +47,7 @@ from ._argv import (
     split_public_roots,
     unredact_home,
 )
+from ._deadline_bound import run_bounded_for_extraction
 from .base import SourceExtractionError, assemble_source_tu
 
 #: castxml extractor schema/behaviour version, recorded in the dump provenance.
@@ -171,28 +171,25 @@ class CastxmlSourceExtractor:
             # being expanded is the accepted tradeoff for replaying redacted
             # home-path macros correctly.
             cmd = [_unredact_home(tok) for tok in cmd]
-            try:
-                # Run in the compile unit's directory so relative -I/-isystem
-                # and forced-include paths resolve exactly as the real build did
-                # (compile_commands.json `directory`). deadline.run_bounded bounds
-                # this by the active scan --budget (not just self.timeout) and
-                # kills the whole process group on timeout instead of orphaning a
-                # compiler-driver grandchild (P0 follow-up, same fix as the L2
-                # header-AST subprocess). A deadline overflow is folded into the
-                # same SourceExtractionError contract as an ordinary timeout —
-                # this extractor's failures already degrade to partial per-TU
-                # coverage rather than aborting the scan.
-                result = deadline.run_bounded(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=self.timeout,
-                    cwd=directory or None,
-                )
-            except (subprocess.TimeoutExpired, deadline.DeadlineExceeded) as exc:
-                raise SourceExtractionError(
-                    f"castxml timed out after {self.timeout}s on {compile_unit.source}"
-                ) from exc
+            # Run in the compile unit's directory so relative -I/-isystem and
+            # forced-include paths resolve exactly as the real build did
+            # (compile_commands.json `directory`). Bound by min(self.timeout,
+            # active --budget deadline) — run_bounded() alone would honor a
+            # generous outer deadline verbatim instead of this call's own cap
+            # — and process-group-safe on timeout (P0 follow-up; Codex review,
+            # PR #591, round 7). Both a local timeout and a scan-deadline
+            # overflow fold into the same SourceExtractionError contract as
+            # an ordinary failure — this extractor's errors already degrade
+            # to partial per-TU coverage rather than aborting the scan.
+            result = run_bounded_for_extraction(
+                cmd,
+                timeout=self.timeout,
+                tool_label="castxml",
+                unit_label=compile_unit.source,
+                capture_output=True,
+                text=True,
+                cwd=directory or None,
+            )
             if (
                 result.returncode != 0
                 or not out_xml.exists()

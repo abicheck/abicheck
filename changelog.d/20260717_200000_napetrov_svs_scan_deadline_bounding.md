@@ -347,3 +347,39 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   window is deferred rather than dropped — delivered the instant it's
   unblocked, by which point the handler sees the tracked pgid (Codex
   review, PR #591, round 6).
+- The round-6 SIGTERM-orphan fix above was itself incomplete: blocking
+  SIGTERM with `signal.pthread_sigmask` only defers delivery on the
+  *calling* thread, but CPython only ever runs an installed signal handler
+  on the *main* thread regardless of which thread actually received the
+  signal — and `run_bounded()` is invoked from `ThreadPoolExecutor` workers
+  on the default L4/L5 paths (`source_replay.py`, `call_graph.py`,
+  `type_graph.py`). A worker blocking SIGTERM on itself did not stop the
+  main thread from concurrently running `_sigterm_cleanup_handler` against
+  a stale (pre-registration) registry. `run_bounded()` now also holds
+  `_active_pgroups_lock` across the same `Popen()`→`_register_pgroup()`
+  window; the handler already acquires that same lock before reading the
+  registry, so on the main thread it now genuinely blocks until the worker
+  finishes registering — real inter-thread mutual exclusion the thread-local
+  signal mask alone could not provide. Both mechanisms are needed together:
+  the mask closes the same-thread case (a signal interrupting the thread
+  that is itself calling `run_bounded()` directly), which the lock alone
+  cannot close because `_active_pgroups_lock` is a reentrant `RLock` and a
+  same-thread handler invocation would just re-enter it instead of blocking
+  (Codex review, PR #591, round 7).
+- Closed the last two instances of the local-cap-vs-scan-deadline
+  classification gap fixed repeatedly above, this time in the L4 source
+  extractors' own per-TU subprocess calls: `ClangSourceExtractor._run`/
+  `_run_ast_to_file` and `CastxmlSourceExtractor.extract` passed a bare
+  `timeout=self.timeout` to `deadline.run_bounded()`, which honors an
+  active outer `--budget` deadline verbatim rather than
+  `min(timeout, left)` — so a generous budget let one hung per-TU clang/
+  castxml replay consume the *whole* remaining scan budget instead of
+  degrading after this extractor's own ~180s/120s local cap, starving every
+  other TU still queued behind it. Both now route through a shared
+  `run_bounded_for_extraction()` helper (new
+  `source_extractors/_deadline_bound.py`) that nests a narrower
+  `deadline.deadline_scope()` bound by whichever is tighter, same shape as
+  the include-map/build-query/preprocessor-scan fixes; both extractors'
+  failures already fold into the existing `SourceExtractionError`/partial-
+  per-TU-coverage contract, so this only changes *how fast* a hung TU is
+  detected, not whether the scan aborts (Codex review, PR #591, round 7).

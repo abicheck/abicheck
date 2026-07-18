@@ -243,17 +243,38 @@ def run_bounded(
         stdout = subprocess.PIPE
         stderr = subprocess.PIPE
     if use_pgroup:
-        # Block SIGTERM on this thread across spawn+registration. Without
-        # this, an external SIGTERM (job-scheduler cancellation, a CI step's
-        # own timeout) landing in the gap between Popen() detaching the child
-        # and _register_pgroup() tracking its pgid would run
-        # install_sigterm_cleanup's handler with an empty registry, leaving
-        # the just-spawned group outside both this process's own group and
-        # the cleanup set — permanently orphaned (Codex review, PR #591,
-        # round 6). Deferred here, delivered the instant it's unblocked
-        # right after registration, by which point the handler sees the
-        # tracked pgid.
+        # Close the Popen()->_register_pgroup() race two ways at once, since
+        # each closes a different half of it (Codex review, PR #591, rounds
+        # 6-7). Without either, an external SIGTERM (job-scheduler
+        # cancellation, a CI step's own timeout) landing in that gap would
+        # run install_sigterm_cleanup's handler with an empty/stale registry,
+        # leaving the just-spawned group outside both this process's own
+        # group and the cleanup set — permanently orphaned:
+        #
+        # - pthread_sigmask blocks delivery on *this* thread, closing the
+        #   same-thread case: a signal landing while this very thread is
+        #   running Popen()/_register_pgroup() (e.g. the single-threaded CLI
+        #   path with no thread pool). This is necessary because
+        #   _active_pgroups_lock is an RLock — a same-thread signal handler
+        #   invocation would re-enter it instead of blocking, and see the
+        #   registry before _register_pgroup() ran.
+        # - Holding _active_pgroups_lock across the same window closes the
+        #   cross-thread case: run_bounded() is invoked from
+        #   ThreadPoolExecutor workers on the default L4/L5 paths
+        #   (source_replay, call_graph, type_graph), but CPython only ever
+        #   runs the installed SIGTERM handler on the *main* thread —
+        #   independent of which thread the signal was delivered to — so a
+        #   worker blocking SIGTERM on itself does not stop the (unblocked)
+        #   main thread from concurrently running the handler with a stale
+        #   registry. _sigterm_cleanup_handler already acquires this same
+        #   lock before reading the registry, so on the main thread it
+        #   genuinely blocks until the worker finishes registering.
+        #
+        # Deferred/blocked here, released the instant registration
+        # completes, by which point any handler invocation sees the tracked
+        # pgid.
         signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
+        _active_pgroups_lock.acquire()
     try:
         proc = subprocess.Popen(  # noqa: S603 — cmd is caller-built argv, never shell text
             cmd,
@@ -267,6 +288,7 @@ def run_bounded(
         pgid = _register_pgroup(proc) if use_pgroup else None
     finally:
         if use_pgroup:
+            _active_pgroups_lock.release()
             signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM})
     try:
         try:

@@ -1984,11 +1984,7 @@ def test_macros_suppress_project_prefixed_include_guard(tmp_path) -> None:
         "/* case47: a leading file-header comment, like the real fixture. */\n"
         "#ifndef CASE47_V1_HPP\n#define CASE47_V1_HPP\n\nclass Calculator {};\n"
     )
-    text = (
-        f'# 1 "{header}" 1\n'
-        "#define CASE47_V1_HPP\n"
-        "#define CASE47_VALUE 3\n"
-    )
+    text = f'# 1 "{header}" 1\n#define CASE47_V1_HPP\n#define CASE47_VALUE 3\n'
     macros, _ = macros_from_preprocessor(text, [str(header)])
     names = {e.qualified_name for e in macros}
     assert names == {"CASE47_VALUE"}
@@ -2247,9 +2243,7 @@ def test_extract_macro_pass_timeout_is_diagnostic_not_crash(monkeypatch) -> None
     extractor = _patch_run(monkeypatch, handler)
     tu = extractor.extract(_cu(), public_header_roots=["include/foo.h"])
     assert tu.macros == []
-    assert any(
-        "macro pass skipped" in d and "timed out" in d for d in tu.diagnostics
-    )
+    assert any("macro pass skipped" in d and "timed out" in d for d in tu.diagnostics)
 
 
 def test_extract_recovered_ast_exit_downgrades_edges_and_read_files_coverage(
@@ -2402,6 +2396,58 @@ def test_run_ast_to_file_unlinks_temp_on_unexpected_error(
     with pytest.raises(OSError, match="disk full"):
         extractor._run_ast_to_file(["clang"], "", "x.cpp")
     assert not spill.exists()  # cleaned up on error
+
+
+def test_run_ast_to_file_bounded_by_local_cap_not_full_scan_budget(monkeypatch) -> None:
+    """Codex review (PR #591), round 7: deadline.run_bounded() honors an
+    active outer deadline verbatim (not min(timeout, left)), so a bare
+    timeout=self.timeout on the L4 AST-dump call alone did nothing once a
+    scan --budget was active: the call stayed bound by the FULL remaining
+    scan budget instead of this extractor's own ~180s local cap. A hung
+    per-TU clang replay under a generous --budget could therefore eat the
+    whole remaining scan instead of degrading after self.timeout. Assert the
+    ContextVar deadline observed inside run_bounded is capped at the local
+    timeout, not the much larger outer scan budget."""
+    from abicheck import deadline
+    from abicheck.buildsource.source_extractors import clang as clang_mod
+
+    seen_remaining: list[float | None] = []
+
+    def fake_run_bounded(*_a, **_k):  # type: ignore[no-untyped-def]
+        seen_remaining.append(deadline.remaining())
+        raise deadline.DeadlineExceeded(-1.0)
+
+    monkeypatch.setattr(clang_mod.deadline, "run_bounded", fake_run_bounded)
+    extractor = ClangSourceExtractor(timeout=10)
+    with deadline.deadline_scope(1800.0):  # a generous 30-minute --budget
+        with pytest.raises(SourceExtractionError):
+            extractor._run_ast_to_file(["clang"], "", "x.cpp")
+
+    assert seen_remaining
+    # Bound by the extractor's own ~10s local cap, not the 1800s scan budget.
+    assert seen_remaining[0] is not None and seen_remaining[0] <= 10.5
+
+
+def test_run_bounded_by_local_cap_not_full_scan_budget(monkeypatch) -> None:
+    """Same round-7 fix as test_run_ast_to_file_bounded_by_local_cap_not_full_scan_budget,
+    for the macro-pass _run() call site."""
+    from abicheck import deadline
+    from abicheck.buildsource.source_extractors import clang as clang_mod
+
+    seen_remaining: list[float | None] = []
+
+    def fake_run_bounded(*_a, **_k):  # type: ignore[no-untyped-def]
+        seen_remaining.append(deadline.remaining())
+        raise deadline.DeadlineExceeded(-1.0)
+
+    monkeypatch.setattr(clang_mod.deadline, "run_bounded", fake_run_bounded)
+    extractor = ClangSourceExtractor(timeout=10)
+    with deadline.deadline_scope(1800.0):  # a generous 30-minute --budget
+        with pytest.raises(SourceExtractionError):
+            extractor._run(["clang"], "", "x.cpp")
+
+    assert seen_remaining
+    assert seen_remaining[0] is not None and seen_remaining[0] <= 10.5
 
 
 def test_build_clang_macro_command_gnu_and_msvc() -> None:

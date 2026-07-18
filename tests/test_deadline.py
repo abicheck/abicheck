@@ -35,6 +35,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 
 import pytest
@@ -170,7 +171,9 @@ def test_run_bounded_raises_timeout_expired_on_overrun() -> None:
         )
 
 
-def test_run_bounded_raises_deadline_exceeded_for_inflight_timeout_under_budget() -> None:
+def test_run_bounded_raises_deadline_exceeded_for_inflight_timeout_under_budget() -> (
+    None
+):
     # Codex review finding: a subprocess that is already *running* when an
     # active --budget's deadline hits must still be reported as a budget
     # overflow (DeadlineExceeded -> _BudgetOverflow/exit 5), not a generic
@@ -506,6 +509,70 @@ def test_run_bounded_blocks_sigterm_across_spawn_and_registration(monkeypatch) -
     )
 
     assert calls == ["block", "popen", "register", "unblock"]
+
+
+def test_run_bounded_holds_registry_lock_across_spawn_and_registration(
+    monkeypatch,
+) -> None:
+    # Codex review (PR #591, round 7): pthread_sigmask alone only defers
+    # SIGTERM delivery on the thread that calls run_bounded(). The default
+    # L4/L5 paths (source_replay, call_graph, type_graph) invoke run_bounded()
+    # from ThreadPoolExecutor workers, but CPython always runs the installed
+    # SIGTERM handler on the *main* thread regardless of which thread the
+    # signal was delivered to — so a worker blocking SIGTERM on itself does
+    # not stop the main thread from concurrently running
+    # _sigterm_cleanup_handler against a stale registry. Holding
+    # _active_pgroups_lock across the same Popen()->_register_pgroup() window
+    # closes that gap too, since the handler acquires the same lock before
+    # reading the registry (real inter-thread mutual exclusion, unlike
+    # thread-local signal masking). This proves the lock is genuinely *held*
+    # (not just briefly touched inside _register_pgroup) by having a second
+    # thread attempt a blocking acquire while run_bounded is mid-spawn on a
+    # different thread and confirming it cannot get in.
+    entered = threading.Event()
+    release_child = threading.Event()
+    real_register = deadline._register_pgroup
+
+    def _slow_register(proc):
+        entered.set()
+        release_child.wait(timeout=5)
+        return real_register(proc)
+
+    monkeypatch.setattr(deadline, "_register_pgroup", _slow_register)
+    with deadline._active_pgroups_lock:
+        deadline._active_pgroups.clear()
+
+    acquired_during_window: list[bool] = []
+
+    def _prober() -> None:
+        entered.wait(timeout=5)
+        got = deadline._active_pgroups_lock.acquire(timeout=0.3)
+        acquired_during_window.append(got)
+        if got:
+            deadline._active_pgroups_lock.release()
+
+    prober = threading.Thread(target=_prober)
+    prober.start()
+
+    runner = threading.Thread(
+        target=lambda: deadline.run_bounded(
+            [sys.executable, "-c", "print('hi')"],
+            timeout=5,
+            capture_output=True,
+            text=True,
+        )
+    )
+    runner.start()
+
+    prober.join(timeout=5)
+    release_child.set()
+    runner.join(timeout=5)
+
+    # A different thread's acquire() attempt, made while run_bounded() is
+    # mid-spawn on the runner thread, must fail (block for the whole probe
+    # window) — proving the lock is held cross-thread across the critical
+    # section, not just momentarily inside _register_pgroup.
+    assert acquired_during_window == [False]
 
 
 def test_run_bounded_leaves_no_leftover_registered_pgroup() -> None:

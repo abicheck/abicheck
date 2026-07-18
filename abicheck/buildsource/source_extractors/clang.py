@@ -80,6 +80,7 @@ from ._argv import (
     split_public_roots,
     unredact_home,
 )
+from ._deadline_bound import run_bounded_for_extraction
 from .base import SourceExtractionError
 
 # Public-header-root equivalence + path classification was split into a leaf
@@ -135,6 +136,7 @@ def _clang_compiler_version(clang_bin: str) -> str:
         return r.stdout.strip() if r.returncode == 0 else ""
     except (OSError, subprocess.TimeoutExpired):
         return ""
+
 
 #: AST node kinds clang emits for the entities we fingerprint. Includes the C++
 #: special members (constructor/destructor/conversion) so a change to a public
@@ -259,7 +261,8 @@ def _clang_context_args(
         # abi_relevant_flags after it, or clang would silently parse the TU at
         # the wrong language level (e.g. CMake's gnu++17 then c++20 pair).
         extra = [
-            flag for flag in extra
+            flag
+            for flag in extra
             if not flag.startswith("-std=")
             and not flag.lower().startswith(("/std:", "-std:"))
         ]
@@ -1701,7 +1704,9 @@ def _recheck_deadline(source: str, when: str) -> None:
     try:
         deadline.check()
     except deadline.DeadlineExceeded as exc:
-        raise SourceExtractionError(f"scan deadline exceeded {when} for {source}") from exc
+        raise SourceExtractionError(
+            f"scan deadline exceeded {when} for {source}"
+        ) from exc
 
 
 class ClangSourceExtractor:
@@ -1895,21 +1900,19 @@ class ClangSourceExtractor:
         ``unredact_home`` only rewrites a ``~`` standing in for a home directory,
         so a literal ``~`` mid-token is left intact (mirrors castxml, PR #336).
         """
-        # Bound by the active --budget deadline (not just self.timeout) and
-        # process-group-safe on timeout, same fix as the L2 header-AST subprocess.
+        # Bound by min(self.timeout, active --budget) and process-group-safe on
+        # timeout, same fix as the L2 header-AST subprocess (Codex review, PR
+        # #591, round 7).
         cmd = [unredact_home(tok) for tok in cmd]
-        try:
-            return deadline.run_bounded(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout,
-                cwd=directory or None,
-            )
-        except (subprocess.TimeoutExpired, deadline.DeadlineExceeded) as exc:
-            raise SourceExtractionError(
-                f"clang timed out after {self.timeout}s on {source_label}"
-            ) from exc
+        return run_bounded_for_extraction(
+            cmd,
+            timeout=self.timeout,
+            tool_label="clang",
+            unit_label=source_label,
+            capture_output=True,
+            text=True,
+            cwd=directory or None,
+        )
 
     def _run_ast_to_file(
         self, cmd: list[str], directory: str, source_label: str
@@ -1928,26 +1931,23 @@ class ClangSourceExtractor:
         parse). ``stderr`` stays buffered (it is small). The temp file is removed on
         timeout/failure here; on success the caller's ``finally`` removes it.
         """
-        # See _run: deadline.run_bounded bounds this the same way.
+        # See _run: run_bounded_for_extraction bounds this the same way.
         cmd = [unredact_home(tok) for tok in cmd]
         fd, name = tempfile.mkstemp(prefix="abicheck-l4-ast-", suffix=".json")
         path = Path(name)
         try:
             with os.fdopen(fd, "wb") as out:
-                proc = deadline.run_bounded(
+                proc = run_bounded_for_extraction(
                     cmd,
+                    timeout=self.timeout,
+                    tool_label="clang",
+                    unit_label=source_label,
                     stdout=out,
                     stderr=subprocess.PIPE,
-                    timeout=self.timeout,
                     cwd=directory or None,
                 )
             stderr = proc.stderr.decode("utf-8", "replace") if proc.stderr else ""
             return path, stderr, proc.returncode
-        except (subprocess.TimeoutExpired, deadline.DeadlineExceeded) as exc:
-            path.unlink(missing_ok=True)
-            raise SourceExtractionError(
-                f"clang timed out after {self.timeout}s on {source_label}"
-            ) from exc
         except BaseException:
             path.unlink(missing_ok=True)
             raise
