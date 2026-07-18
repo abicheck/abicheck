@@ -44,7 +44,7 @@ def test_script_imports(car):
         "changekind-partition",
         "changekind-detector",
         "changekind-docs",
-        "import-cycles",
+        "import-cycle-growth",
         "mypy-baseline",
         "examples-ground-truth",
         "mkdocs-nav-coverage",
@@ -79,10 +79,13 @@ def test_claude_md_coverage_holds(car):
     assert f.errors == [], f"Missing CLAUDE.md files: {f.errors}"
 
 
-def test_no_import_cycles(car):
+def test_no_unapproved_import_cycle_growth(car):
+    """The check's real invariant (CLAUDE.md "M1-3"): no *unapproved* SCC
+    growth beyond IMPORT_CYCLE_ALLOWLIST's baseline — not literally "no
+    cycles" (a large by-design CLI-registration SCC is already baselined)."""
     f = car.Findings()
     car.check_import_cycles(f)
-    assert f.errors == [], f"Import cycles detected: {f.errors}"
+    assert f.errors == [], f"Unapproved import-cycle growth detected: {f.errors}"
 
 
 def test_adr_index_and_nav_sync_holds(car):
@@ -132,9 +135,10 @@ def test_main_returns_zero_on_clean_tree(car, capsys):
 
     We skip the slowest whole-tree scans here to avoid re-running them:
     - ``mypy-baseline`` needs mypy (exercised in the dedicated CI lane);
-    - ``import-cycles`` and ``banned-imports`` each re-walk every module's AST
-      and are already asserted individually by ``test_no_import_cycles`` and
-      ``test_no_banned_imports``. Running them again inside this end-to-end
+    - ``import-cycle-growth`` and ``banned-imports`` each re-walk every
+      module's AST and are already asserted individually by
+      ``test_no_unapproved_import_cycle_growth`` and ``test_no_banned_imports``.
+      Running them again inside this end-to-end
       check just doubled the cost (it was the dominant unit-lane offender at
       ~14.6s under coverage) without adding coverage — ``scripts/`` isn't
       measured, and the full gate already runs standalone in the
@@ -146,7 +150,7 @@ def test_main_returns_zero_on_clean_tree(car, capsys):
             "--skip",
             "mypy-baseline",
             "--skip",
-            "import-cycles",
+            "import-cycle-growth",
             "--skip",
             "banned-imports",
         ]

@@ -743,8 +743,11 @@ def _module_imports(path: Path) -> set[str]:
     # `__getattr__` shim uses to re-export the graph helpers from `cli_graph`
     # without registering a `cli_buildsource → cli_graph` edge (which would form
     # a real cycle). If you switch a shim like that to a static import, expect
-    # this gate to flag the cycle — add the module-set to IMPORT_CYCLE_ALLOWLIST
-    # only if the coupling is genuinely intended.
+    # this gate to flag the cycle — that is very likely a real dependency-
+    # direction problem, not something to unblock by extending
+    # IMPORT_CYCLE_ALLOWLIST (see check_import_cycles' docstring / AGENTS.md
+    # "What NOT to do"). Fix the direction (function-local import, or move
+    # the shared logic to a leaf module) instead.
     src = _read(path)
     try:
         tree = ast.parse(src, filename=str(path))
@@ -991,6 +994,18 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
 
 
 def check_import_cycles(f: Findings) -> None:
+    """ERROR on any strongly-connected component (SCC) not a subset of a
+    baselined entry in IMPORT_CYCLE_ALLOWLIST (CLAUDE.md "M1-3").
+
+    The honest name for what this enforces is "no *unapproved* SCC growth",
+    not "no import cycles" — a large, deliberately-baselined CLI-registration
+    SCC already exists and is allowed (see IMPORT_CYCLE_ALLOWLIST below). What
+    this actually guards: no *new* module joins that baseline, and no *new*,
+    separate SCC forms outside it. Extending IMPORT_CYCLE_ALLOWLIST to make a
+    freshly-discovered cycle pass is an architectural decision needing an ADR
+    or explicit review sign-off — it is not a routine unblock-CI step (see
+    AGENTS.md "What NOT to do").
+    """
     # Build module -> direct abicheck imports.
     all_modules = {_module_name(p) for p in PKG.rglob("*.py")}
     graph: dict[str, set[str]] = {}
@@ -1021,7 +1036,7 @@ def check_import_cycles(f: Findings) -> None:
         if any(short <= allowed for allowed in IMPORT_CYCLE_ALLOWLIST):
             continue
         f.err(
-            "import-cycles",
+            "import-cycle-growth",
             " -> ".join(m.removeprefix("abicheck.") for m in cyc),
         )
 
@@ -1993,7 +2008,7 @@ CHECKS: dict[str, Callable[[Findings], None]] = {
     "changekind-detector": check_changekind_detector_crossref,
     "changekind-docs": check_changekind_docs,
     "doc-count-sync": check_doc_count_sync,
-    "import-cycles": check_import_cycles,
+    "import-cycle-growth": check_import_cycles,
     "mypy-baseline": check_mypy_baseline,
     "examples-ground-truth": check_examples_ground_truth,
     "examples-readme-sync": check_examples_readme_sync,
