@@ -301,6 +301,33 @@ class TestResultContent:
         props = doc["runs"][0]["results"][0]["properties"]
         assert "correlatedChangeKind" not in props
 
+    def test_result_reachability_fields(self) -> None:
+        # ADR-044 P1 item 4: reachability evidence (previously description-
+        # prose-only, via the suppression_would_hide_public_break diagnostic)
+        # must also reach SARIF's properties bag as structured fields.
+        c = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="ns::detail::train_ops_dispatcher",
+            description="removed",
+            public_reachable=True,
+            reachability_kind="symbol_availability",
+            reachability_proof_path="pubFn --[DECL_CALLS_DECL]--> ns::detail::train_ops_dispatcher",
+        )
+        doc = to_sarif(_make_result([c]))
+        props = doc["runs"][0]["results"][0]["properties"]
+        assert props["publicReachable"] is True
+        assert props["reachabilityKind"] == "symbol_availability"
+        assert props["reachabilityProofPath"] == (
+            "pubFn --[DECL_CALLS_DECL]--> ns::detail::train_ops_dispatcher"
+        )
+
+    def test_result_reachability_fields_absent_when_unset(self) -> None:
+        doc = to_sarif(_make_result([_breaking_change()]))
+        props = doc["runs"][0]["results"][0]["properties"]
+        assert "publicReachable" not in props
+        assert "reachabilityKind" not in props
+        assert "reachabilityProofPath" not in props
+
     def test_result_evidence_status_breaking(self) -> None:
         doc = to_sarif(_make_result([_breaking_change()], verdict=Verdict.BREAKING))
         props = doc["runs"][0]["results"][0]["properties"]

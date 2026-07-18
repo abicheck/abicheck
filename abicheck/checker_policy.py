@@ -418,6 +418,18 @@ class ChangeKind(str, Enum):
     # from / embeds-by-value / uses-as-template-argument the internal type.
     INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API = "internal_type_leaks_via_public_api"
 
+    # ADR-044 P1 items 1-2: the call-graph analogue of the leak above. An
+    # already artifact-proven BREAKING/API_BREAK change (e.g. func_removed) on
+    # an internal-namespaced decl is called/referenced from a public entry
+    # point over a DECL_CALLS_DECL/DECL_REFERENCES_DECL edge in the optional
+    # L5 source graph (--sources/--build-info/--header-graph) — the exact
+    # oneDAL dispatcher shape this ADR's P0 slice explicitly left open (no
+    # layout/type-graph evidence exists for a pure call, so
+    # INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API's walk cannot see it). Per the
+    # authority rule (ADR-028 D3/ADR-041), this graph edge only explains and
+    # correlates an already artifact-proven break; it never manufactures one.
+    INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API = "internal_symbol_required_by_public_api"
+
     # ── library-family-shaped breaks added in case77–case89 ──────────────────────
     # See examples/case79_missing_template_instantiation/README.md
     INSTANTIATION_MISSING_FROM_BINARY = "instantiation_missing_from_binary"

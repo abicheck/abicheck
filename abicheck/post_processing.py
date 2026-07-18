@@ -620,6 +620,7 @@ class MarkReachability:
             _path_has_indirection,
             _path_is_value_propagating,
             _root_type_name_for_change,
+            compute_call_graph_leak_paths,
             compute_leak_paths,
         )
         from .model import ScopeOrigin
@@ -641,6 +642,20 @@ class MarkReachability:
         old_paths = compute_leak_paths(ctx.old, namespaces)
         new_paths = compute_leak_paths(ctx.new, namespaces)
         reachable_types = set(old_paths) | set(new_paths)
+        # ADR-044 P1 item 1: a second, independent reachability signal — the
+        # optional L5 call graph's DECL_CALLS_DECL/DECL_REFERENCES_DECL edges
+        # (--sources/--build-info/--header-graph). compute_leak_paths only
+        # ever sees layout/type-graph reachability (inheritance, by-value
+        # fields, signatures); a public inline function's *body* calling into
+        # a removed/changed internal template specialization has none of
+        # that evidence at all, but is real to a linker — the exact oneDAL
+        # dispatcher gap the P0 slice's own "What this ADR does not fix"
+        # section named. Returns {} on both sides with no embedded graph, so
+        # this degrades to the prior behavior automatically for the common
+        # case.
+        old_call_paths = compute_call_graph_leak_paths(ctx.old, namespaces)
+        new_call_paths = compute_call_graph_leak_paths(ctx.new, namespaces)
+        call_reachable = set(old_call_paths) | set(new_call_paths)
         # ScopeOrigin.PUBLIC_HEADER (Codex review, fresh evidence):
         # compute_leak_paths only ever records *internal* types reached
         # while walking from the public surface — a declaration that is
@@ -654,7 +669,7 @@ class MarkReachability:
         # kind that carries the field (function/variable/type/enum), not
         # just RecordType.
         public_header_names = _public_header_names(ctx.old) | _public_header_names(ctx.new)
-        if not reachable_types and not public_header_names:
+        if not reachable_types and not public_header_names and not call_reachable:
             return changes
 
         for c in changes:
@@ -672,32 +687,46 @@ class MarkReachability:
                 c.public_reachable = True
                 c.reachability_kind = "direct_public_symbol"
                 continue
-            if root not in reachable_types:
-                continue
-            old_pl = old_paths.get(root, [])
-            new_pl = new_paths.get(root, [])
-            paths = old_pl + [p for p in new_pl if p not in old_pl]
-            if not paths:
-                continue
-            # Mirror DetectInternalLeaks's own value/indirection judgment
-            # (Codex review): a pure-layout change reached *only* through a
-            # pointer/reference is not consumer-visible and DetectInternalLeaks
-            # will not emit a leak finding for it either — tagging it
-            # public_reachable anyway would refuse a broad suppression rule
-            # and append a suppression_would_hide_public_break diagnostic for
-            # churn that was always going to be demoted as unreachable by
-            # DemoteUnreachableInternalChurn, a false alarm.
-            identity_or_vtable = c.kind in _IDENTITY_VTABLE_KINDS
-            all_indirect = all(_path_has_indirection(p) for p in paths)
-            if all_indirect and not identity_or_vtable:
-                continue
-            c.public_reachable = True
-            c.reachability_kind = (
-                "value_embedding"
-                if any(_path_is_value_propagating(p) for p in paths)
-                else "pointer_or_signature"
-            )
-            c.reachability_proof_path = _format_path(min(paths, key=len))
+            tagged = False
+            if root in reachable_types:
+                old_pl = old_paths.get(root, [])
+                new_pl = new_paths.get(root, [])
+                paths = old_pl + [p for p in new_pl if p not in old_pl]
+                # Mirror DetectInternalLeaks's own value/indirection judgment
+                # (Codex review): a pure-layout change reached *only* through
+                # a pointer/reference is not consumer-visible and
+                # DetectInternalLeaks will not emit a leak finding for it
+                # either — tagging it public_reachable anyway would refuse a
+                # broad suppression rule and append a
+                # suppression_would_hide_public_break diagnostic for churn
+                # that was always going to be demoted as unreachable by
+                # DemoteUnreachableInternalChurn, a false alarm.
+                identity_or_vtable = c.kind in _IDENTITY_VTABLE_KINDS
+                all_indirect = bool(paths) and all(
+                    _path_has_indirection(p) for p in paths
+                )
+                if paths and not (all_indirect and not identity_or_vtable):
+                    c.public_reachable = True
+                    c.reachability_kind = (
+                        "value_embedding"
+                        if any(_path_is_value_propagating(p) for p in paths)
+                        else "pointer_or_signature"
+                    )
+                    c.reachability_proof_path = _format_path(min(paths, key=len))
+                    tagged = True
+            # ADR-044 P1 items 1/3: independent of (and checked regardless of
+            # the outcome of) the layout walk above — a change can be
+            # call-graph-reachable without any layout/type-graph evidence at
+            # all (e.g. func_removed on an internal decl with no field/base/
+            # signature reference anywhere).
+            if not tagged and root in call_reachable:
+                call_paths = old_call_paths.get(root, []) + [
+                    p for p in new_call_paths.get(root, []) if p not in old_call_paths.get(root, [])
+                ]
+                if call_paths:
+                    c.public_reachable = True
+                    c.reachability_kind = "symbol_availability"
+                    c.reachability_proof_path = min(call_paths, key=len)
         return changes
 
 
@@ -1142,11 +1171,16 @@ class DetectInternalLeaks:
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         from .internal_leak import (
             DEFAULT_INTERNAL_NAMESPACES,
+            detect_call_graph_leaks,
             detect_internal_leaks,
         )
 
         namespaces = self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
         extra = detect_internal_leaks(changes, ctx.old, ctx.new, namespaces)
+        # ADR-044 P1 items 1-2: the call-graph analogue, for a triggering
+        # change with no layout/type-graph evidence at all (see
+        # MarkReachability's own call-graph fallback, same namespaces).
+        extra = extra + detect_call_graph_leaks(changes, ctx.old, ctx.new, namespaces)
         if not extra:
             return changes
         # Synthetic leak findings must respect user suppression rules too.
@@ -1478,11 +1512,16 @@ class PostProcessingPipeline:
         new: AbiSnapshot,
         suppression: SuppressionList | None = None,
         frozen_namespaces: list[str] | None = None,
-        internal_namespaces: tuple[str, ...] | None = None,
         scope_to_public_surface: bool = False,
         force_public_symbols: set[str] | None = None,
         collapse_versioned_symbols: bool = False,
         public_surface_allowlist: set[str] | None = None,
+        # Appended after the existing optional parameters (Codex review) —
+        # inserting it earlier would silently break a positional caller of
+        # any parameter after it (e.g. `.run(c, old, new, sup, fns, True)`
+        # for scope_to_public_surface would instead bind `True` here and
+        # leave scoping disabled, with no error).
+        internal_namespaces: tuple[str, ...] | None = None,
     ) -> PipelineContext:
         """Run all steps, returning the final PipelineContext."""
         ctx = PipelineContext(

@@ -1,12 +1,17 @@
 # ADR-044: Reachability-Aware Suppression and the Effective Public ABI
 
 **Date:** 2026-07-17
-**Status:** Accepted — P0 slice (this change) implemented: pipeline-order
-correctness fix, `Suppression.reachability`/`allow_public_break`, entity/cause
-namespace split, `suppression_would_hide_public_break` diagnostic. P1
-(compose artifact break + L5 graph proof path into a first-class overlay
-finding, propagation-aware edge semantics) and P2 (consumer-import evidence,
-old-consumer/new-library execution harness) are roadmap, not committed to any
+**Status:** Accepted — P0 slice implemented: pipeline-order correctness fix,
+`Suppression.reachability`/`allow_public_break`, entity/cause namespace
+split, `suppression_would_hide_public_break` diagnostic. **P1 (first-class
+detection) is now also implemented** — see "P1 slice" below: L5 call-graph
+evidence wired into `MarkReachability`/`DetectInternalLeaks`, the new
+`internal_symbol_required_by_public_api` overlay `ChangeKind`, a third
+`reachability_kind` value (`symbol_availability`), structured JSON/SARIF
+reachability fields, `PolicyFile.internal_namespaces`, and the two remaining
+`checker.py` suppression call sites routed through the diagnostic-emitting
+helper. P2 (consumer-import evidence, old-consumer/new-library execution
+harness, new worked examples) remains roadmap, not committed to any
 timeline — see "Roadmap" below.
 **Decision maker:** Nikolay Petrov (@napetrov)
 
@@ -814,81 +819,94 @@ project that wants CI to fail loudly when this fires can already do so via
 `--severity-risk error` (existing severity-gating mechanism, ADR-009),
 requiring no new CLI surface for this slice.
 
-### What this ADR does not fix (roadmap, not committed)
+### What the P0 slice did not fix (closed by the P1 slice below)
 
 The oneDAL dispatcher case (`func_removed` on an internal template
 specialization reached only via `DECL_CALLS_DECL` from a public inline
 function — no layout evidence, so `internal_leak.py`'s
 `_LEAK_TRIGGERING_KINDS`/BFS-over-`RecordType` walk structurally cannot see
-it) is **not** closed by this slice. `MarkReachability` reuses
-`internal_leak.compute_leak_paths`, which only walks type-layout
-reachability (inheritance, by-value fields, signatures) — it has no access
-to the L5 semantic call graph (`source_graph.py`,
-`buildsource/poi.resolve_changed_paths_public_impact`, ADR-041). Closing
-that gap for real needs ADR-041 P1 item 3 ("public-entry impact closure...
-nothing calls this one yet") wired into a scan/replay path, plus the new
-`internal_symbol_required_by_public_api` overlay kind the review proposes.
-That is a materially larger change — it needs a build (`compile_commands.json`)
-or at minimum a header-only AST pass to have `DECL_CALLS_DECL` evidence at
-all — and is **P1 roadmap**, below, not part of this P0 slice. This slice's
-value is narrower but immediate: for every leak shape abicheck's existing
-`internal_leak.py`/`crosscheck.py` detectors *can already* see (layout,
-vtable, inheritance, embedded-by-value, and the type/field/base graph edges
-`PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` already covers), a suppression can no
-longer make the detector blind to the evidence before it runs.
+it) was **not** closed by the P0 slice. `MarkReachability` reused only
+`internal_leak.compute_leak_paths`, which walks type-layout reachability
+(inheritance, by-value fields, signatures) — it had no access to the L5
+semantic call graph (`source_graph.py`). The P1 slice below closes this gap.
+
+## P1 slice: call-graph reachability, the overlay kind, and remaining plumbing
+
+Implemented as a follow-up change on the same branch, closing P1 items 1, 2,
+5, and 6 below in full and item 4 in full; item 3 (propagation-aware edge
+semantics) is closed to the extent described under its own entry.
+
+- **Item 1 (call-graph evidence).** New `internal_leak.compute_call_graph_leak_paths(snap, internal_namespaces)`
+  walks the optional L5 source graph's `DECL_CALLS_DECL`/`DECL_REFERENCES_DECL`
+  edges from every public entry (`buildsource.source_graph.is_public_dependency_node`),
+  returning `internal_decl_name -> [formatted proof paths]` — the call-graph
+  sibling to `compute_leak_paths`'s layout walk, reusing
+  `source_graph_findings._dependency_reachability`/`_dependency_path`/
+  `_format_dependency_path` (all three already existed, unwired for this
+  purpose). `MarkReachability` now consults this as a second, independent
+  evidence source: a change untouched by the layout walk (no field/base/
+  signature evidence at all) can still be tagged `public_reachable=True` via
+  a pure call/reference edge. Requires an embedded L5 graph
+  (`--sources`/`--build-info`/`--header-graph`); returns `{}` and changes no
+  behavior otherwise, mirroring `poi.resolve_changed_paths_public_impact`'s
+  own degrade contract.
+- **Item 2 (overlay `ChangeKind`).** New `internal_symbol_required_by_public_api`
+  (`BREAKING_KINDS`, registered in `change_registry_suppression.py` alongside
+  the P0 diagnostic to stay under `change_registry.py`'s line cap). Built by
+  new `internal_leak.detect_call_graph_leaks`/`_build_call_graph_leak_change`,
+  wired into the existing `DetectInternalLeaks` pipeline step alongside
+  `detect_internal_leaks`. Triggers only on a change whose own kind is
+  already `BREAKING_KINDS`/`API_BREAK_KINDS` (artifact-proven) and whose
+  subject is internal-namespaced and call-graph-reachable — per the
+  authority rule (ADR-028 D3/ADR-041), the graph edge composes with and
+  explains an already-proven break; it never manufactures one, exactly like
+  `INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API`'s own `BREAKING` classification.
+- **Item 3 (edge semantics) — partially closed.** `reachability_kind` grew a
+  third real value, `"symbol_availability"`, for the call-graph case —
+  no longer the "two-value approximation" the P0 slice shipped with. The
+  finer `DECL_CALLS_DECL` vs. `DECL_REFERENCES_DECL` distinction the item
+  also names is preserved as text inside `reachability_proof_path` (via
+  `_format_dependency_path`'s `--[EDGE_KIND]-->` annotation) rather than a
+  further split of `reachability_kind` itself — a deliberate stopping point,
+  not an oversight: a machine-readable call-vs-reference sub-enum is a
+  reasonable further increment but wasn't required to close the item's core
+  ask (distinguishing symbol-availability edges from the two layout-based
+  kinds). Left as a candidate future refinement.
+- **Item 4 (structured report fields).** `public_reachable`/
+  `reachability_kind`/`reachability_proof_path` now appear as first-class
+  fields (not just inside the `suppression_would_hide_public_break`
+  diagnostic's prose) in JSON (`reporter._change_to_dict` **and**
+  `_to_json_leaf`'s `_leaf_entry` — the latter handles root `TYPE_*` changes,
+  the category the layout walk tags most often, and was easy to miss since
+  it's a separate hand-rolled dict) and SARIF (`sarif._result_for`'s
+  `properties`, camelCased per that format's convention). JUnit was left
+  untouched — it doesn't surface `caused_by_type`/`correlated_change_kind`
+  either, so adding reachability fields there would be new precedent, not
+  parity.
+- **Item 5 (configurable internal-namespace convention).** New
+  `PolicyFile.internal_namespaces: list[str]` (parsed identically to
+  `frozen_namespaces`), threaded via a new `PipelineContext.internal_namespaces`
+  field through `PostProcessingPipeline.run()` (appended *after* the
+  existing optional parameters, not inserted mid-signature — a Codex review
+  on the PR caught that an earlier draft inserted it before
+  `scope_to_public_surface`, which would have silently broken any positional
+  caller of that parameter) to `MarkReachability`/`DetectInternalLeaks`/
+  `DemoteUnreachableInternalChurn`. Deliberately **not** threaded into
+  `DetectNamespacePatterns`'s `experimental_namespaces` — despite this
+  item's own wording grouping all four steps together, that parameter
+  governs an unrelated convention (the `experimental::` graduation
+  namespace, a different default token set), and conflating the two would
+  reintroduce a bug, not fix one.
+- **Item 6 (remaining `checker.py` call sites).** `_filter_suppressed_changes`
+  and `_apply_surface_metrics` now call `SuppressionList.evaluate()` and
+  append the same `_build_suppression_overreach_change()` diagnostic
+  `ApplySuppression`/`_filter_pattern_synthetic` already produce, instead of
+  the boolean `is_suppressed()`.
 
 ## Roadmap (not committed — scope/sequence per the usual planning process)
 
-Numbering mirrors the review's own priority tiers.
-
-### P1 — first-class detection
-
-1. Wire `buildsource/poi.resolve_changed_paths_public_impact` (ADR-041 P1
-   item 3's unwired pure helper) into the comparison pipeline so a
-   `DECL_CALLS_DECL`/`DECL_REFERENCES_DECL` path from a public entry to a
-   changed/removed internal decl is available as reachability evidence
-   alongside `MarkReachability`'s layout-only walk — closing the exact
-   oneDAL dispatcher gap named above.
-2. New overlay `ChangeKind`, `internal_symbol_required_by_public_api`:
-   composition of an artifact-level `BREAKING_KINDS` finding (e.g.
-   `func_removed`) with a public → internal `DECL_CALLS_DECL`/
-   `DECL_REFERENCES_DECL` proof path — the call-graph analogue of
-   `INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API` (which is layout-only today). Per
-   the authority rule this codebase has held since ADR-028 D3/ADR-041, the
-   graph edge only *explains and correlates* an already-artifact-proven
-   break; it never manufactures one on its own.
-3. Propagation-aware edge semantics: distinguish layout-propagating edges
-   (`TYPE_INHERITS`, by-value `TYPE_HAS_FIELD_TYPE`) from
-   identity/signature-propagating edges (pointer/reference parameter or
-   return of an internal type) from symbol-availability edges
-   (`DECL_CALLS_DECL`/`DECL_REFERENCES_DECL`) from indirection barriers
-   (`pimpl<T>`, `unique_ptr<T>` — `internal_leak.py`'s
-   `_is_known_pointer_wrapper`/`_field_is_indirect` already implement this
-   distinction for the layout walk; extending the same taxonomy to the L5
-   graph is the open part). `reachability_kind` (D1) is a two-value
-   approximation of this; the full taxonomy is richer.
-4. Surface `reachability_proof_path`/graph proof paths in every report
-   format (currently `Change.description`-only, per ADR-041 P0 slice 3's
-   convention) as first-class structured fields in JSON/SARIF.
-5. Project-configurable internal-namespace conventions: a
-   `PolicyFile.internal_namespaces:` key (or CLI flag), threaded
-   consistently through `MarkReachability`/`DetectInternalLeaks`/
-   `DemoteUnreachableInternalChurn`/`DetectNamespacePatterns`'s existing
-   `namespaces` constructor parameters (all four already accept one; none
-   are wired to real user config today). Closes the gap named in this
-   ADR's changelog where a project using an internal-namespace convention
-   outside the hard-coded `DEFAULT_INTERNAL_NAMESPACES` five-token default
-   (`detail`/`impl`/`internal`/`__detail`/`_impl`) is invisible to every
-   step in this list, including the reachability tag this ADR's own
-   suppression gate depends on.
-6. Route `checker.py`'s remaining `is_suppressed()` call sites
-   (`_filter_suppressed_changes`, `_apply_surface_metrics`) through an
-   `evaluate()`-based helper too, so a broad rule matched-but-withheld on
-   those paths also produces the `SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`
-   diagnostic. Lower priority than the now-closed `_filter_pattern_synthetic`
-   case: neither builds a fresh synthetic finding a suppression rule could
-   plausibly want to match-but-withhold the same way — they filter
-   pre-existing/aggregate findings, not late detector output.
+P1 is implemented (above); P2 remains open, numbering mirrors the original
+review's priority tiers.
 
 ### P2 — empirical validation
 
@@ -907,8 +925,8 @@ Numbering mirrors the review's own priority tiers.
    case under a blanket namespace suppression, asserting the break survives
    and the diagnostic fires; a safe pimpl counter-example) — the review's
    examples A/B/D are the most valuable regression coverage and are natural
-   `examples/case*/` additions once P1 item 1 is wired, since case A/B need
-   the call-graph reachability this P0 slice does not yet have.
+   `examples/case*/` additions now that P1 item 1's call-graph reachability
+   is wired (previously blocked on it).
 
 ## Consequences
 
@@ -932,18 +950,28 @@ Numbering mirrors the review's own priority tiers.
 
 ## References
 
-- `abicheck/post_processing.py` — `DEFAULT_PIPELINE`, `MarkReachability`,
-  `ApplySuppression`, `DetectInternalLeaks`, `DemoteUnreachableInternalChurn`
-- `abicheck/internal_leak.py` — `compute_leak_paths`, `_LEAK_TRIGGERING_KINDS`,
+- `abicheck/post_processing.py` — `DEFAULT_PIPELINE`, `PipelineContext`,
+  `MarkReachability`, `ApplySuppression`, `DetectInternalLeaks`,
+  `DemoteUnreachableInternalChurn`
+- `abicheck/internal_leak.py` — `compute_leak_paths`, `compute_call_graph_leak_paths`,
+  `detect_internal_leaks`, `detect_call_graph_leaks`, `_LEAK_TRIGGERING_KINDS`,
   `_root_type_name_for_change`
 - `abicheck/suppression.py` — `Suppression`, `SuppressionList`
 - `abicheck/checker_types.py` — `Change`
+- `abicheck/checker.py` — `_filter_suppressed_changes`, `_apply_surface_metrics`
+- `abicheck/policy_file.py` — `PolicyFile.internal_namespaces`
+- `abicheck/reporter.py`, `abicheck/sarif.py` — structured reachability fields
+- `abicheck/buildsource/source_graph.py`/`source_graph_findings.py` — the L5
+  graph and `_dependency_reachability`/`_dependency_path`/
+  `_format_dependency_path` the P1 slice's call-graph walk reuses
 - ADR-004 — Report filtering and deduplication (redundancy-before-verdict
   invariant this ADR deliberately does not disturb)
 - ADR-013 — Suppression system design (pipeline-ordering rationale this ADR
   amends)
 - ADR-024 — Public ABI surface resolution (audit-ledger / never-silently-drop
   convention this ADR follows for `suppression_would_hide_public_break`)
+- ADR-028 — Build-source evidence pack (the authority rule the P1 overlay
+  kind's `BREAKING` classification relies on: L3-L5 evidence may explain/
+  correlate an artifact-proven break, never manufacture one)
 - ADR-041 — Compiler-facts semantic impact graph (`PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`,
-  the unwired `poi.resolve_changed_paths_public_impact` P1 roadmap item this
-  ADR's own P1 depends on)
+  the L5 graph schema the P1 slice's call-graph walk reuses)

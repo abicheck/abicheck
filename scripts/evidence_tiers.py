@@ -390,6 +390,12 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "public_api_internal_dependency_added": "L5",
     "target_dependency_added": "L5",
     "exported_symbol_source_owner_changed": "L5",
+    # ADR-044 P1 items 1-2: call-graph analogue of
+    # internal_type_leaks_via_public_api (L2 above) — only fires when the L5
+    # graph's DECL_CALLS_DECL/DECL_REFERENCES_DECL edges prove a public entry
+    # reaches the changed internal decl; a header-only (L2) evidence set has
+    # no call-graph edges at all, so this genuinely needs the graph tier.
+    "internal_symbol_required_by_public_api": "L5",
     # ── ADR-035 D8 single-release hygiene audit ──
     # unversioned_exported_symbol is pure ELF (export table vs .gnu.version_d);
     # rtti_for_internal_type needs header provenance to know a type is internal.

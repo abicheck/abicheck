@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 385,
+  "count": 386,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -1360,6 +1360,15 @@
       "min_evidence": "L1",
       "doc_slug": "integer_model_changed",
       "examples": "case112_lp64_ilp64"
+    },
+    {
+      "kind": "internal_symbol_required_by_public_api",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L5",
+      "doc_slug": "internal_symbol_required_by_public_api",
+      "examples": ""
     },
     {
       "kind": "internal_template_leaks_via_public_api",

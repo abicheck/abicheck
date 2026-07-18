@@ -267,6 +267,16 @@ def _result_for(
         properties["causedCount"] = change.caused_count
     if change.correlated_change_kind:
         properties["correlatedChangeKind"] = change.correlated_change_kind
+    # ADR-044 P1 item 4 — structured reachability evidence (previously
+    # description-text-only, e.g. inside the suppression_would_hide_public_break
+    # diagnostic's prose): whether this change is public-reachable, how, and
+    # the shortest proof path.
+    if change.public_reachable:
+        properties["publicReachable"] = True
+        if change.reachability_kind:
+            properties["reachabilityKind"] = change.reachability_kind
+        if change.reachability_proof_path:
+            properties["reachabilityProofPath"] = change.reachability_proof_path
     evidence_status = evidence_status_for_change(change)
     if evidence_status is not None:
         properties["evidenceStatus"] = evidence_status.value

@@ -675,6 +675,82 @@ def compute_leak_paths(
     return _dedup_paths(paths)
 
 
+def compute_call_graph_leak_paths(
+    snap: AbiSnapshot,
+    internal_namespaces: Iterable[str] = DEFAULT_INTERNAL_NAMESPACES,
+) -> dict[str, list[str]]:
+    """Call-graph analogue of :func:`compute_leak_paths` (ADR-044 P1 item 1).
+
+    Walks the optional L5 source graph's ``DECL_CALLS_DECL``/
+    ``DECL_REFERENCES_DECL`` edges from every public entry (exported-symbol
+    decl or public-header-visible decl/type, per
+    :func:`~abicheck.buildsource.source_graph.is_public_dependency_node`),
+    returning a mapping ``internal_decl_name -> list of formatted proof-path
+    strings`` (one per public entry that reaches it, edge-kind-annotated via
+    :func:`~abicheck.buildsource.source_graph_findings._format_dependency_path`,
+    e.g. ``"pub() --[DECL_CALLS_DECL]--> detail::helper()"``).
+
+    This is a *symbol-availability* signal, distinct from
+    :func:`compute_leak_paths`'s layout/type-graph walk: a public inline
+    function's body calling into a removed/changed internal template
+    specialization has no field/base/signature evidence at all (nothing a
+    layout walk can see) but is real to a linker — the exact oneDAL
+    dispatcher gap this ADR's P0 slice explicitly left open (see the ADR's
+    "What this ADR does not fix" section).
+
+    Requires an embedded L5 graph (``--sources``/``--build-info``/
+    ``--header-graph``) with at least one relevant edge; returns ``{}``
+    otherwise — never an error, mirroring
+    :func:`~abicheck.buildsource.poi.resolve_changed_paths_public_impact`'s
+    degrade contract, so a project with no build-source evidence sees no
+    behavior change at all.
+    """
+    build_source = getattr(snap, "build_source", None)
+    graph = build_source.source_graph if build_source is not None else None
+    if graph is None or not getattr(graph, "nodes", None):
+        return {}
+
+    from .buildsource.source_graph import is_public_dependency_node
+    from .buildsource.source_graph_findings import (
+        _dependency_path,
+        _dependency_reachability,
+        _format_dependency_path,
+    )
+
+    edge_kinds = frozenset({"DECL_CALLS_DECL", "DECL_REFERENCES_DECL"})
+    if not any(e.kind in edge_kinds for e in graph.edges):
+        return {}
+
+    node_by_id = {n.id: n for n in graph.nodes}
+    exported_decls = {
+        e.src for e in graph.edges if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL"
+    }
+    entries = [
+        n.id
+        for n in graph.nodes
+        if is_public_dependency_node(n.id, node_by_id, exported_decls)
+    ]
+    if not entries:
+        return {}
+
+    internal_set = set(internal_namespaces)
+    reachability = _dependency_reachability(graph, edge_kinds)
+    result: dict[str, list[str]] = collections.defaultdict(list)
+    for entry in entries:
+        for target in reachability.get(entry, frozenset()):
+            node = node_by_id.get(target)
+            if node is None:
+                continue
+            name = node.label or target
+            if not is_internal_type(name, internal_set):
+                continue
+            path_edges = _dependency_path(graph, edge_kinds, entry, target)
+            if not path_edges:
+                continue
+            result[name].append(_format_dependency_path(graph, path_edges))
+    return dict(result)
+
+
 # ---------------------------------------------------------------------------
 # Leak detection
 # ---------------------------------------------------------------------------
@@ -970,6 +1046,97 @@ def detect_internal_leaks(
                 tname, triggers, paths, old if old_pl else new, value_prop
             )
         )
+
+    return out
+
+
+def _build_call_graph_leak_change(
+    dname: str,
+    triggers: list[Change],
+    proof_paths: list[str],
+) -> Change:
+    """Build a single ``INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API`` Change entry.
+
+    The call-graph analogue of :func:`_build_leak_change`: composes an
+    already artifact-proven ``BREAKING``/``API_BREAK`` finding on an internal
+    decl with a ``DECL_CALLS_DECL``/``DECL_REFERENCES_DECL`` proof path from
+    a public entry, instead of a layout/type-graph reachability path.
+    """
+    kinds_seen = sorted({c.kind.value for c in triggers})
+    path_strs = proof_paths[:3]
+    more = "" if len(proof_paths) <= 3 else f" (+{len(proof_paths) - 3} more paths)"
+    return Change(
+        kind=ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API,
+        symbol=dname,
+        description=(
+            f"Internal symbol '{dname}' changed ({', '.join(kinds_seen)}) and "
+            "is called/referenced from the public ABI surface — an "
+            "application built against the old public entry point can fail "
+            f"to resolve this symbol at load time. Call/reference paths: "
+            f"{'; '.join(path_strs)}{more}."
+        ),
+        caused_by_type=dname,
+        # ADR-044 D1/D2: same reasoning as _build_leak_change — this finding
+        # exists *because* dname is reachable from the public surface via the
+        # call graph, so a broad suppression rule's reachability gate must
+        # not treat it as unreachable either.
+        public_reachable=True,
+        reachability_kind="symbol_availability",
+        reachability_proof_path=path_strs[0] if path_strs else None,
+    )
+
+
+def detect_call_graph_leaks(
+    changes: list[Change],
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    internal_namespaces: Iterable[str] = DEFAULT_INTERNAL_NAMESPACES,
+) -> list[Change]:
+    """Return additional ``Change`` entries for call-graph-reachable internal
+    symbol changes (ADR-044 P1 items 1-2) — the call-graph analogue of
+    :func:`detect_internal_leaks`.
+
+    Unlike the layout walk, which triggers on a fixed set of layout-affecting
+    kinds (:data:`_LEAK_TRIGGERING_KINDS`) applied to a type *embedding* the
+    internal root, this triggers directly on any already artifact-proven
+    ``BREAKING_KINDS``/``API_BREAK_KINDS`` change whose own subject *is* the
+    internal decl (e.g. ``func_removed`` on an internal template
+    specialization) — the ``DECL_CALLS_DECL``/``DECL_REFERENCES_DECL``
+    evidence explains *why* a public consumer is affected; per the authority
+    rule (ADR-028 D3/ADR-041) it never manufactures the break itself, since
+    the triggering change is already independently artifact-proven.
+
+    Requires an embedded L5 graph on at least one snapshot (see
+    :func:`compute_call_graph_leak_paths`); returns ``[]`` otherwise.
+    """
+    from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS
+
+    internal_set = tuple(internal_namespaces)
+    triggering_kinds = BREAKING_KINDS | API_BREAK_KINDS
+    by_symbol: dict[str, list[Change]] = collections.defaultdict(list)
+    for c in changes:
+        if c.kind not in triggering_kinds:
+            continue
+        root = _root_type_name_for_change(c)
+        if not is_internal_type(root, internal_set):
+            continue
+        by_symbol[root].append(c)
+    if not by_symbol:
+        return []
+
+    old_call_paths = compute_call_graph_leak_paths(old, internal_set)
+    new_call_paths = compute_call_graph_leak_paths(new, internal_set)
+    if not old_call_paths and not new_call_paths:
+        return []
+
+    out: list[Change] = []
+    for dname, triggers in by_symbol.items():
+        old_pp = old_call_paths.get(dname, [])
+        new_pp = new_call_paths.get(dname, [])
+        proof_paths = old_pp + [p for p in new_pp if p not in old_pp]
+        if not proof_paths:
+            continue
+        out.append(_build_call_graph_leak_change(dname, triggers, proof_paths))
 
     return out
 

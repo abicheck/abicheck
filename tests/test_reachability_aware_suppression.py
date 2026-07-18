@@ -572,6 +572,150 @@ class TestMarkReachability:
         assert raw_change in ctx.suppressed
 
 
+def _graph_snap(
+    functions=None, *, nodes=None, edges=None,
+) -> AbiSnapshot:
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_graph import SourceGraphSummary
+
+    graph = SourceGraphSummary(nodes=list(nodes or []), edges=list(edges or []))
+    return AbiSnapshot(
+        library="libtest.so",
+        version="1.0",
+        functions=list(functions or []),
+        build_source=BuildSourcePack(root="", source_graph=graph),
+    )
+
+
+def _decl_node(node_id: str, label: str, visibility: str):
+    from abicheck.buildsource.source_graph import GraphNode
+
+    return GraphNode(
+        id=node_id, kind="source_decl", label=label, attrs={"visibility": visibility}
+    )
+
+
+class TestCallGraphReachability:
+    """ADR-044 P1 items 1-2: the call-graph analogue of the layout-only
+    reachability walk above, closing the exact oneDAL dispatcher gap the P0
+    slice's own "What this ADR does not fix" section named — a public
+    inline function's body calling into a removed internal template
+    specialization has no field/base/signature evidence at all, only a
+    DECL_CALLS_DECL edge in the optional L5 source graph."""
+
+    def test_mark_reachability_tags_call_graph_only_change(self) -> None:
+        from abicheck.buildsource.source_graph import GraphEdge
+
+        old = _graph_snap(
+            [_public_fn("pubFn")],
+            nodes=[
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", "ns::detail::train_ops_dispatcher", "source"),
+            ],
+            edges=[GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        new = _graph_snap([_public_fn("pubFn")])
+        raw_change = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="ns::detail::train_ops_dispatcher",
+            description="removed",
+        )
+        ctx = DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_REMOVED]
+        assert len(found) == 1
+        assert found[0].public_reachable is True
+        assert found[0].reachability_kind == "symbol_availability"
+        assert "pubFn" in (found[0].reachability_proof_path or "")
+
+    def test_detect_internal_leaks_emits_call_graph_overlay_finding(self) -> None:
+        from abicheck.buildsource.source_graph import GraphEdge
+
+        old = _graph_snap(
+            [_public_fn("pubFn")],
+            nodes=[
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", "ns::detail::train_ops_dispatcher", "source"),
+            ],
+            edges=[GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        new = _graph_snap([_public_fn("pubFn")])
+        raw_change = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="ns::detail::train_ops_dispatcher",
+            description="removed",
+        )
+        ctx = DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        overlay = [
+            c for c in ctx.kept
+            if c.kind == ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API
+        ]
+        assert len(overlay) == 1
+        assert overlay[0].symbol == "ns::detail::train_ops_dispatcher"
+
+    def test_broad_suppression_cannot_hide_call_graph_reachable_break(self) -> None:
+        """The exact oneDAL scenario end-to-end: a blanket detail:: namespace
+        suppression must not silently hide the func_removed break once the
+        call graph proves it is public-reachable — it must survive, tagged,
+        with the withheld-rule diagnostic explaining why."""
+        from abicheck.buildsource.source_graph import GraphEdge
+
+        old = _graph_snap(
+            [_public_fn("pubFn")],
+            nodes=[
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node(
+                    "decl://int",
+                    "oneapi::dal::kmeans::detail::train_ops_dispatcher",
+                    "source",
+                ),
+            ],
+            edges=[GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        new = _graph_snap([_public_fn("pubFn")])
+        raw_change = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="oneapi::dal::kmeans::detail::train_ops_dispatcher",
+            description="removed",
+        )
+        suppression = SuppressionList([
+            Suppression(namespace="oneapi::dal::**::detail::**", reason="detail churn")
+        ])
+        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_REMOVED]
+        assert len(found) == 1
+        assert found[0] not in ctx.suppressed
+        overlay = [
+            c for c in ctx.kept
+            if c.kind == ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API
+        ]
+        assert len(overlay) == 1
+        assert overlay[0] not in ctx.suppressed
+        # Two distinct changes are each withheld by the same broad rule here
+        # — the raw FUNC_REMOVED (tagged reachable by MarkReachability's
+        # call-graph fallback, withheld by ApplySuppression) and the
+        # synthetic overlay finding DetectInternalLeaks builds afterwards
+        # (withheld via _merge_findings_respecting_suppression) — mirroring
+        # the layout case's identical two-diagnostic shape above.
+        diag = [
+            c for c in ctx.kept
+            if c.kind == ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK
+        ]
+        assert len(diag) == 2
+
+    def test_without_embedded_graph_no_behavior_change(self) -> None:
+        """No --sources/--build-info/--header-graph evidence: behaves exactly
+        as before this P1 slice — degrades cleanly, no crash."""
+        old, new, raw_change = _unreachable_scenario()
+        DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        assert raw_change.public_reachable is False
+
+
 class TestLateSyntheticLeakFindingsNotSuppressible:
     """Codex review: DetectTemplatePatterns (and any other detector running
     after ApplySuppression) creates fresh Change objects MarkReachability

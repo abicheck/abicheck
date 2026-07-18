@@ -866,3 +866,205 @@ class TestExampleCaseParity:
         assert leaks, "case76 pattern: leak must be detected"
         assert leaks[0].symbol == "mylib::detail::algorithm_iface"
         assert "mylib::svm_algorithm" in leaks[0].description
+
+
+# ---------------------------------------------------------------------------
+# compute_call_graph_leak_paths / detect_call_graph_leaks (ADR-044 P1 items 1-2)
+# ---------------------------------------------------------------------------
+
+
+def _decl_node(node_id: str, label: str, visibility: str):
+    from abicheck.buildsource.source_graph import GraphNode
+
+    return GraphNode(
+        id=node_id, kind="source_decl", label=label, attrs={"visibility": visibility}
+    )
+
+
+def _graph_snap(nodes: list, edges: list) -> AbiSnapshot:
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_graph import SourceGraphSummary
+
+    graph = SourceGraphSummary(nodes=list(nodes), edges=list(edges))
+    return AbiSnapshot(
+        library="libtest.so",
+        version="1.0",
+        build_source=BuildSourcePack(root="", source_graph=graph),
+    )
+
+
+class TestComputeCallGraphLeakPaths:
+    def test_no_build_source_returns_empty(self) -> None:
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        assert compute_call_graph_leak_paths(_snap()) == {}
+
+    def test_no_relevant_edges_returns_empty(self) -> None:
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_graph import GraphEdge, SourceGraphSummary
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        graph = SourceGraphSummary(
+            nodes=[_decl_node("decl://pub", "pubFn", "public_header")],
+            edges=[GraphEdge(src="decl://pub", dst="decl://x", kind="DECL_HAS_TYPE")],
+        )
+        snap = AbiSnapshot(
+            library="libtest.so",
+            version="1.0",
+            build_source=BuildSourcePack(root="", source_graph=graph),
+        )
+        assert compute_call_graph_leak_paths(snap) == {}
+
+    def test_public_entry_calling_internal_decl_is_a_leak_path(self) -> None:
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        snap = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", "ns::detail::helper", "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        paths = compute_call_graph_leak_paths(snap)
+        assert "ns::detail::helper" in paths
+        assert "pubFn" in paths["ns::detail::helper"][0]
+        assert "DECL_CALLS_DECL" in paths["ns::detail::helper"][0]
+
+    def test_reference_edge_also_counts(self) -> None:
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        snap = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", "ns::detail::Const", "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_REFERENCES_DECL")],
+        )
+        paths = compute_call_graph_leak_paths(snap)
+        assert "ns::detail::Const" in paths
+
+    def test_non_internal_target_not_recorded(self) -> None:
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        snap = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://other", "ns::otherPublicFn", "public_header"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://other", kind="DECL_CALLS_DECL")],
+        )
+        assert compute_call_graph_leak_paths(snap) == {}
+
+    def test_no_public_entry_returns_empty(self) -> None:
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        snap = _graph_snap(
+            [
+                _decl_node("decl://a", "ns::detail::a", "source"),
+                _decl_node("decl://b", "ns::detail::b", "source"),
+            ],
+            [GraphEdge(src="decl://a", dst="decl://b", kind="DECL_CALLS_DECL")],
+        )
+        assert compute_call_graph_leak_paths(snap) == {}
+
+    def test_custom_namespaces_recognizes_convention(self) -> None:
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        snap = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", "ns::priv::helper", "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        assert compute_call_graph_leak_paths(snap) == {}
+        assert "ns::priv::helper" in compute_call_graph_leak_paths(snap, ("priv",))
+
+
+class TestDetectCallGraphLeaks:
+    def test_func_removed_on_internal_decl_reachable_via_call_graph(self) -> None:
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import detect_call_graph_leaks
+
+        old = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", "ns::detail::train_ops_dispatcher", "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        new = _graph_snap(
+            [_decl_node("decl://pub", "pubFn", "public_header")],
+            [],
+        )
+        triggering = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="ns::detail::train_ops_dispatcher",
+            description="removed",
+        )
+        extra = detect_call_graph_leaks([triggering], old, new)
+        assert len(extra) == 1
+        overlay = extra[0]
+        assert overlay.kind == ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API
+        assert overlay.symbol == "ns::detail::train_ops_dispatcher"
+        assert overlay.public_reachable is True
+        assert overlay.reachability_kind == "symbol_availability"
+        assert "pubFn" in (overlay.reachability_proof_path or "")
+
+    def test_no_op_without_triggering_change(self) -> None:
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import detect_call_graph_leaks
+
+        old = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", "ns::detail::helper", "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        new = _graph_snap([], [])
+        assert detect_call_graph_leaks([], old, new) == []
+
+    def test_non_breaking_kind_is_not_a_trigger(self) -> None:
+        """A COMPATIBLE finding on an internal decl must not compose an
+        overlay finding — the authority rule (only an already artifact-proven
+        BREAKING/API_BREAK change may be explained/correlated, never
+        manufactured)."""
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import detect_call_graph_leaks
+
+        old = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", "ns::detail::helper", "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        new = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", "ns::detail::helper", "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        compatible_change = Change(
+            kind=ChangeKind.FUNC_ADDED,
+            symbol="ns::detail::helper",
+            description="added an overload",
+        )
+        assert detect_call_graph_leaks([compatible_change], old, new) == []
+
+    def test_no_call_graph_evidence_no_overlay(self) -> None:
+        from abicheck.internal_leak import detect_call_graph_leaks
+
+        triggering = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="ns::detail::train_ops_dispatcher",
+            description="removed",
+        )
+        assert detect_call_graph_leaks([triggering], _snap(), _snap()) == []

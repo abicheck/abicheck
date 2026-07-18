@@ -12,19 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Suppression-diagnostic ChangeKind registry entries (ADR-044).
+"""ADR-044 ChangeKind registry extension entries.
 
 Split out of ``change_registry.py`` to keep that module under the
 AI-readiness 2000-line hard cap, following the same pattern as
 ``change_registry_coverage.py``/``change_registry_composition.py``. These
 entries are spliced into the single ``REGISTRY`` at import time — declaring a
 kind here is exactly equivalent to declaring it in ``change_registry.py``.
+Covers both the P0 slice's suppression diagnostic and the P1 call-graph
+overlay kind.
 """
 from __future__ import annotations
 
 from .change_registry_types import ChangeKindMeta, Verdict
 
 _R = Verdict.COMPATIBLE_WITH_RISK
+_B = Verdict.BREAKING
 _E = ChangeKindMeta
 
 SUPPRESSION_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
@@ -35,4 +38,17 @@ SUPPRESSION_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
               "break rather than internal noise. Review the finding; if the "
               "suppression is intentional even though the symbol is "
               "public-reachable, add `allow_public_break: true` to that rule."),
+    _E("internal_symbol_required_by_public_api", _B,
+       impact="An internal-namespaced decl (e.g. ::detail::, ::impl::, "
+              "::internal::) that already changed in an artifact-proven "
+              "breaking way (e.g. func_removed) is called or referenced from "
+              "a public entry point over the optional L5 source/call graph "
+              "(--sources/--build-info/--header-graph). Although the symbol "
+              "is conceptually internal, it is part of the effective public "
+              "ABI: an application built against the old public entry point "
+              "can fail to resolve it at load time. Call-graph analogue of "
+              "INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API (ADR-044 P1 items 1-2), for "
+              "the pure-call shape that walk's layout-only reachability model "
+              "cannot see (no field/base/signature evidence, only a call "
+              "edge)."),
 ]
