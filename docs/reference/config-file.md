@@ -169,7 +169,7 @@ cross-compile flags stay CLI overrides (`CLI > config`).
 
 | Sub-key | Type | Default | Purpose |
 |---------|------|---------|---------|
-| `frontend` | `auto` \| `castxml` \| `clang` (case-insensitive) | unset | AST frontend for header parsing. |
+| `frontend` | `auto` \| `castxml` \| `clang` \| `hybrid` (case-insensitive) | unset | AST frontend for header parsing; `hybrid` runs castxml and clang together and merges them. |
 | `std` | string (single option atom, no whitespace) | unset | C/C++ standard, e.g. `c++17`. |
 | `include_dirs` | list of strings | `[]` | Include roots added to the compile context. |
 | `defines` | list of strings (each a single option atom) | `[]` | Preprocessor defines, e.g. `FEATURE=1`. |

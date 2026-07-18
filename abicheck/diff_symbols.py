@@ -69,6 +69,12 @@ from .elf_symbol_filter import (
     exported_symbol_names,
     is_abi_relevant_elf_symbol,
 )
+from .fact_provenance import (
+    both_castxml_backed_fact,
+    fact_producer,
+    func_fact_key,
+    var_fact_key,
+)
 from .model import (
     AbiSnapshot,
     AccessLevel,
@@ -1219,41 +1225,45 @@ def _both_header_aware(old: AbiSnapshot, new: AbiSnapshot) -> bool:
     )
 
 
-def _both_castxml_backed(old: AbiSnapshot, new: AbiSnapshot) -> bool:
-    """True only when BOTH snapshots are confirmed header-aware AND were
-    produced by the castxml L2 backend specifically.
-
-    Stricter than :func:`_both_header_aware`: the clang header backend
-    (``--ast-frontend clang``) ALSO sets ``from_headers=True``, but its
-    parser (``dumper_clang._ClangAstParser``) does not yet populate several
-    facts this gate protects — ``TypeField.default``/``deprecated``,
-    ``RecordType.is_abstract``/``deprecated``, ``EnumType.is_scoped``/
-    ``deprecated``, ``Function.is_override``/``deprecated``,
-    ``Variable.deprecated``. Gating on ``_both_header_aware`` alone would let
-    a castxml-parsed old snapshot compared against a clang-parsed new
-    snapshot read as "every one of these facts was removed", since the new
-    side is always ``None`` for a reason unrelated to the actual source
-    (Codex review, PR #582). ``ast_producer`` is ``None`` for snapshots
-    predating this field, which correctly fails this gate too (unknown
-    producer, not assumed castxml).
-    """
-    return (
-        _both_header_aware(old, new)
-        and old.ast_producer == "castxml"
-        and new.ast_producer == "castxml"
-    )
-
-
 @registry.detector("param_defaults")
 def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect parameter default value changes/removals.
 
-    Header-tier only: default-argument values are populated solely from castxml
-    header parsing. If either side was NOT (confirmed) parsed from headers
-    (DWARF/symbols mode, or a legacy/inferred headerless snapshot),
-    ``Param.default`` is ``None`` only because the value is *unavailable*, not
-    removed — comparing would report every defaulted parameter as
-    ``PARAM_DEFAULT_VALUE_REMOVED``. Skip unless both sides are header-aware.
+    Header-tier only: default-argument values are populated by both header-AST
+    backends (castxml directly; ``dumper_clang.py`` too, falling back to a
+    structural placeholder for anything beyond a bare literal). If either side
+    was NOT (confirmed) parsed from headers (DWARF/symbols mode, or a
+    legacy/inferred headerless snapshot), ``Param.default`` is ``None`` only
+    because the value is *unavailable*, not removed — comparing would report
+    every defaulted parameter as ``PARAM_DEFAULT_VALUE_REMOVED``. Skip unless
+    both sides are header-aware.
+
+    Additionally gated per-function-pair, whenever either side has a known
+    header-AST producer (castxml, clang, or a hybrid merge — G28 Phase 3): the
+    two backends' default VALUE representations are not cross-comparable
+    (castxml keeps the real source expression; clang's is a placeholder/
+    fingerprint for anything non-trivial) even though both now capture
+    presence/absence correctly. This applies not only to a hybrid snapshot
+    mixing both backends internally, but equally to a comparison between two
+    pure single-backend snapshots — e.g. a pure ``--ast-frontend clang`` run
+    on one side against a pure ``--ast-frontend castxml`` run on the other —
+    since ``fact_producer`` already returns the (unconditional) producer for
+    those non-hybrid cases too (Codex review). Requiring the SAME producer on
+    both sides of a pair (not "castxml on both sides", which would wrongly
+    suppress a same-producer clang-vs-clang pair that a plain
+    ``--ast-frontend clang`` run compares just fine) avoids a false
+    CHANGED/REMOVED from a representation mismatch while still catching a
+    real change on either same-producer pairing.
+
+    The per-pair skip itself only fires when BOTH producers are POSITIVELY
+    known and DIFFER — never merely because one side's producer is unknown.
+    An unset/``None`` ``ast_producer`` (e.g. a hand-built snapshot in a test,
+    or a legacy pre-provenance baseline) makes ``fact_producer(...) is None``,
+    so comparing it against a genuinely castxml-backed function on the other
+    side is a perfectly legitimate same-producer comparison that must not be
+    silently dropped just because one side lacks metadata it never had a
+    chance to record — that would regress a previously-working legacy-
+    baseline comparison into a silent miss (Codex review).
     """
     if not _both_header_aware(old, new):
         return []
@@ -1264,6 +1274,15 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     for mangled, f_old in old_map.items():
         f_new = new_map.get(mangled)
         if f_new is None:
+            continue
+        key = func_fact_key(mangled, "param_defaults")
+        old_producer = fact_producer(old, key)
+        new_producer = fact_producer(new, key)
+        if (
+            old_producer is not None
+            and new_producer is not None
+            and old_producer != new_producer
+        ):
             continue
         # Compare parameter defaults pairwise
         for i, (p_old, p_new) in enumerate(zip(f_old.params, f_new.params)):
@@ -1697,14 +1716,16 @@ def _diff_func_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     ``Function.deprecated`` is ``None`` both for "not deprecated" and "the
     dumper doesn't capture this" (see its docstring in model.py), so a
     per-pair None check would silently miss every real transition (one side
-    of a real add/remove is always None by construction). Gates on
-    ``_both_castxml_backed`` rather than plain ``_both_header_aware``: the
-    clang header backend doesn't populate ``Function.deprecated`` yet, so a
-    castxml-vs-clang comparison would otherwise read as every deprecation
-    having been removed (Codex review, PR #582).
+    of a real add/remove is always None by construction). Gates per-pair on
+    :func:`fact_provenance.both_castxml_backed_fact` rather than plain
+    ``_both_header_aware``: the clang header backend doesn't populate
+    ``Function.deprecated`` yet, so a castxml-vs-clang comparison would
+    otherwise read as every deprecation having been removed (Codex review,
+    PR #582). A per-pair check (rather than the whole-snapshot
+    ``_both_castxml_backed``) also correctly handles a ``--ast-frontend
+    hybrid`` snapshot (G28 Phase 3), where this fact is castxml-backed per
+    *declaration*, not uniformly across the whole snapshot.
     """
-    if not _both_castxml_backed(old, new):
-        return []
     changes: list[Change] = []
     old_map = _public_functions(old)
     new_map = _public_functions(new)
@@ -1712,6 +1733,8 @@ def _diff_func_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     for mangled, f_old in old_map.items():
         f_new = new_map.get(mangled)
         if f_new is None:
+            continue
+        if not both_castxml_backed_fact(old, new, func_fact_key(mangled, "deprecated")):
             continue
         if f_old.deprecated is None and f_new.deprecated is not None:
             changes.append(make_change(
@@ -1738,13 +1761,14 @@ def _diff_func_override_specifier(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
     only fire when BOTH sides record it (and only for a member-function form
     that can carry the specifier at all — see ``Function.is_override``'s
     docstring); ``None`` means not applicable / not determined, not "no
-    override". Also gated on ``_both_castxml_backed``: unlike ``is_final``,
+    override". Also gated per-pair on
+    :func:`fact_provenance.both_castxml_backed_fact`: unlike ``is_final``,
     ``is_override`` is castxml-only today, so a clang-parsed side's
     unconditional ``None`` must not be misread as "override was removed"
-    (Codex review, PR #582).
+    (Codex review, PR #582) — and a per-declaration check (rather than the
+    whole-snapshot ``_both_castxml_backed``) is what correctly supports a
+    ``--ast-frontend hybrid`` snapshot (G28 Phase 3).
     """
-    if not _both_castxml_backed(old, new):
-        return []
     changes: list[Change] = []
     old_map = _public_functions(old)
     new_map = _public_functions(new)
@@ -1754,6 +1778,8 @@ def _diff_func_override_specifier(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
         if f_new is None:
             continue
         if f_old.is_override is None or f_new.is_override is None:
+            continue
+        if not both_castxml_backed_fact(old, new, func_fact_key(mangled, "is_override")):
             continue
         if f_old.is_override == f_new.is_override:
             continue
@@ -1780,12 +1806,11 @@ def _diff_func_override_specifier(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
 def _diff_var_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect a variable gaining or losing `[[deprecated]]` (header-tier only).
 
-    Gates on ``_both_castxml_backed`` — see ``FUNC_DEPRECATED_ADDED``'s
-    docstring above (the clang backend doesn't populate
-    ``Variable.deprecated`` yet).
+    Gates per-pair on :func:`fact_provenance.both_castxml_backed_fact` — see
+    ``FUNC_DEPRECATED_ADDED``'s docstring above (the clang backend doesn't
+    populate ``Variable.deprecated`` yet; per-declaration gating is what
+    correctly supports a ``--ast-frontend hybrid`` snapshot, G28 Phase 3).
     """
-    if not _both_castxml_backed(old, new):
-        return []
     changes: list[Change] = []
     old_map = _public_variables(old)
     new_map = _public_variables(new)
@@ -1793,6 +1818,8 @@ def _diff_var_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     for mangled, v_old in old_map.items():
         v_new = new_map.get(mangled)
         if v_new is None:
+            continue
+        if not both_castxml_backed_fact(old, new, var_fact_key(mangled, "deprecated")):
             continue
         if v_old.deprecated is None and v_new.deprecated is not None:
             changes.append(make_change(

@@ -756,33 +756,36 @@ def perform_elf_dump(
         # would otherwise resolve headers with only the user's explicit -I,
         # silently degrading to a declaration-only graph (no type/call edges)
         # even though the main snapshot parsed cleanly (Codex review).
+        # effective_gcc_options folds in the -p/--compile-db-derived -D/-I/
+        # -std flags (_merge_gcc_options, above the main dump() call) that
+        # `compile_context` itself does not carry -- it was resolved earlier,
+        # from the plain --gcc-options CLI value only. Without this, a header
+        # that only parses successfully with those compile-DB flags would
+        # produce a valid main snapshot while a second clang pass parses it
+        # without them and silently degrades (declaration-only graph / no
+        # layout enrichment) even though the main snapshot parsed cleanly
+        # (Codex review). Shared by BOTH post-processing steps below, since
+        # each runs its own independent second clang pass over the same
+        # headers and needs the identical fix for the identical reason.
+        effective_compile_context = compile_context
+        if effective_gcc_options != (
+            compile_context.gcc_options if compile_context is not None else None
+        ):
+            import dataclasses
+
+            if compile_context is not None:
+                effective_compile_context = dataclasses.replace(
+                    compile_context, gcc_options=effective_gcc_options
+                )
+            else:
+                from .service_scan import CompileContext
+
+                effective_compile_context = CompileContext(
+                    gcc_options=effective_gcc_options
+                )
+
         if header_graph:
             from .service import _attach_header_graph
-
-            # effective_gcc_options folds in the -p/--compile-db-derived -D/-I/
-            # -std flags (_merge_gcc_options, above the main dump() call) that
-            # `compile_context` itself does not carry -- it was resolved earlier,
-            # from the plain --gcc-options CLI value only. Without this, a header
-            # that only parses successfully with those compile-DB flags would
-            # produce a valid main snapshot while this second clang pass parses
-            # it without them and silently degrades to a declaration-only graph
-            # (Codex review).
-            header_graph_compile_context = compile_context
-            if effective_gcc_options != (
-                compile_context.gcc_options if compile_context is not None else None
-            ):
-                import dataclasses
-
-                if compile_context is not None:
-                    header_graph_compile_context = dataclasses.replace(
-                        compile_context, gcc_options=effective_gcc_options
-                    )
-                else:
-                    from .service_scan import CompileContext
-
-                    header_graph_compile_context = CompileContext(
-                        gcc_options=effective_gcc_options
-                    )
 
             snap = _attach_header_graph(
                 snap,
@@ -791,10 +794,30 @@ def perform_elf_dump(
                 list(headers),
                 list(eff_includes),
                 lang,
-                header_graph_compile_context,
+                effective_compile_context,
                 list(public_headers),
                 list(public_header_dirs),
             )
+
+        # G28 Phase 4: same "this ELF dump CLI path reaches dumper.dump
+        # directly, not service.run_dump" attach point as header_graph above.
+        # attach_clang_layout is a no-op unless the snapshot's L2 backend was
+        # actually "clang" AND the optional companion tool is resolvable
+        # (ABICHECK_CLANG_LAYOUT_TOOL / a bare abicheck-clang-layout-tool on
+        # PATH), so no extra CLI flag gates this call. Without it, a saved
+        # JSON baseline written via `abicheck dump --ast-frontend clang`
+        # never carried the tool's size/offset/base/vptr facts even though
+        # `compare`'s implicit-dump path (service.run_dump) already got them
+        # (Codex review).
+        from .clang_layout_tool import attach_clang_layout
+
+        snap = attach_clang_layout(
+            snap,
+            list(headers),
+            list(eff_includes),
+            lang=lang,
+            compile=effective_compile_context,
+        )
     finally:
         # The header-graph pass above (when requested) reuses the same seeded
         # include dirs the main dump() parse used, so cleanup must wait until

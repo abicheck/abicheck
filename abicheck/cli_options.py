@@ -516,14 +516,16 @@ def compile_context_options(func: F) -> F:
         "header_backend",
         default="auto",
         show_default=True,
-        type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
+        type=click.Choice(["auto", "castxml", "clang", "hybrid"], case_sensitive=False),
         help="C/C++ AST frontend (ADR-037 D8): castxml (default schema reference) "
         "or clang (-ast-dump=json; for hosts where castxml is absent or its "
-        "bundled frontend chokes). auto resolves to castxml (or the "
-        "ABICHECK_AST_FRONTEND pin) and does NOT fall back merely because "
-        "castxml is absent; it only falls back to clang for two narrow castxml "
-        "runtime failures (a toolchain-version mismatch or a direct-include "
-        "#error guard). Env: ABICHECK_AST_FRONTEND.",
+        "bundled frontend chokes). hybrid (G28 Phase 3) runs BOTH and merges "
+        "them (dumper_hybrid.merge_snapshots) — needs both tools installed and "
+        "costs roughly 2x a single-backend dump; never selected by auto. auto "
+        "resolves to castxml (or the ABICHECK_AST_FRONTEND pin) and does NOT "
+        "fall back merely because castxml is absent; it only falls back to "
+        "clang for two narrow castxml runtime failures (a toolchain-version "
+        "mismatch or a direct-include #error guard). Env: ABICHECK_AST_FRONTEND.",
     )(func)
     return func
 

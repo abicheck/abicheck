@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING, Any
 from .api_types import CompareRequest, InputSpec
 from .checker import compare
 from .checker_types import DiffResult, LibraryMetadata
+from .clang_layout_tool import attach_clang_layout
 from .errors import AbicheckError, SnapshotError, ValidationError
 from .header_utils import deferred_token_dirs, resolve_inferred_header_roots
 from .model import AbiSnapshot, EnumType, Function, RecordType, Visibility
@@ -507,6 +508,59 @@ def run_dump(
         else header_backend
     )
 
+    from .dumper import _resolve_header_backend
+
+    if _resolve_header_backend(eff_backend) == "hybrid":
+        # G28 Phase 3: this is the real Tier-2 entry point the CLI routes
+        # through (unlike dumper.dump(), which has its own, simpler hybrid
+        # recursion for direct Python-API callers) — recurse into run_dump()
+        # itself once per real backend, forcing frontend via a *replaced*
+        # CompileContext (frozen dataclass) so it wins eff_backend's own
+        # precedence check above regardless of what header_backend carries,
+        # then merge. Every other kwarg (SYCL/python-ext/numpy-capi/
+        # header-graph attachment, debug roots, ...) runs identically on
+        # both recursive calls; only the merge step is new.
+        from dataclasses import replace as _dc_replace
+
+        from .dumper_hybrid import merge_snapshots
+
+        def _forced_compile(frontend: str) -> CompileContext:
+            return _dc_replace(compile, frontend=frontend) if compile is not None else CompileContext(frontend=frontend)
+
+        common_kwargs: dict[str, Any] = dict(
+            headers=headers, includes=includes, version=version, lang=lang,
+            pdb_path=pdb_path, dwarf_only=dwarf_only, debug_roots=debug_roots,
+            enable_debuginfod=enable_debuginfod, debuginfod_url=debuginfod_url,
+            debug_format=debug_format, symbols_only=symbols_only,
+            debug_presence_only=debug_presence_only,
+            public_headers=public_headers, public_header_dirs=public_header_dirs,
+            # header_graph is deliberately NOT forwarded to either recursive
+            # sub-dump below (each would attach its OWN graph, seeded from
+            # only ITS OWN backend's declarations) — attached once, after the
+            # merge, to the union of both backends' declarations instead (see
+            # the _attach_header_graph call below; Codex review).
+            notify=notify,
+        )
+        castxml_snap = run_dump(
+            path, binary_fmt, header_backend="castxml",
+            compile=_forced_compile("castxml"), **common_kwargs,
+        )
+        clang_snap = run_dump(
+            path, binary_fmt, header_backend="clang",
+            compile=_forced_compile("clang"), **common_kwargs,
+        )
+        merged = merge_snapshots(castxml_snap, clang_snap)
+        # No attach_clang_layout call here: clang_snap's own recursive
+        # run_dump(header_backend="clang") call above already got it (this
+        # function's ELF/PE/Mach-O tail below calls it unconditionally), so
+        # re-running it on merged would just re-invoke the external tool for
+        # nothing left to backfill (review finding).
+        return _attach_header_graph(
+            merged, header_graph, header_graph_includes,
+            _headers, _includes, lang, compile,
+            public_headers, public_header_dirs,
+        )
+
     if binary_fmt == "elf":
         snap = _dump_elf(
             path,
@@ -531,7 +585,7 @@ def run_dump(
         _try_attach_python_ext_metadata(snap)
         _try_attach_python_api_surface(snap)
         _try_attach_numpy_capi_surface(snap, path)
-        return _attach_header_graph(
+        snap = _attach_header_graph(
             snap,
             header_graph,
             header_graph_includes,
@@ -542,6 +596,7 @@ def run_dump(
             public_headers,
             public_header_dirs,
         )
+        return attach_clang_layout(snap, _headers, _includes, lang=lang, compile=compile)
     if binary_fmt == "pe":
         snap = _dump_pe(
             path,
@@ -557,7 +612,7 @@ def run_dump(
         _try_attach_python_ext_metadata(snap)
         _try_attach_python_api_surface(snap)
         _try_attach_numpy_capi_surface(snap, path)
-        return _attach_header_graph(
+        snap = _attach_header_graph(
             snap,
             header_graph,
             header_graph_includes,
@@ -568,6 +623,7 @@ def run_dump(
             public_headers,
             public_header_dirs,
         )
+        return attach_clang_layout(snap, _headers, _includes, lang=lang, compile=compile)
     if binary_fmt == "macho":
         snap = _dump_macho(
             path,
@@ -582,7 +638,7 @@ def run_dump(
         _try_attach_python_ext_metadata(snap)
         _try_attach_python_api_surface(snap)
         _try_attach_numpy_capi_surface(snap, path)
-        return _attach_header_graph(
+        snap = _attach_header_graph(
             snap,
             header_graph,
             header_graph_includes,
@@ -593,6 +649,7 @@ def run_dump(
             public_headers,
             public_header_dirs,
         )
+        return attach_clang_layout(snap, _headers, _includes, lang=lang, compile=compile)
     raise ValidationError(f"Unsupported binary format: {binary_fmt}")
 
 

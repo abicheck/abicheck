@@ -55,7 +55,7 @@ class AbiSnapshot:
 ### 2. Integer schema versioning
 
 ```python
-SCHEMA_VERSION: int = 8
+SCHEMA_VERSION: int = 10
 ```
 
 Version history (`abicheck/serialization.py`; kept current — check that module's
@@ -71,6 +71,8 @@ header comment before trusting this table, since it is the source of truth):
 | 6 | Declaration provenance: `source_header` + `origin` on functions/variables/types/enums (ADR-015 §3a) | — |
 | 7 | Optional `evidence_pack` reference (ADR-028; lightweight ref to an out-of-band build/source pack) | — |
 | 8 | Pack-ref key renamed `evidence_pack` → `build_source_pack`, plus an optional inline-embedded `build_source` payload (single-artifact UX). The rename forces a bump: a v7-only reader knows only the old key, so without the bump a v8 snapshot's renamed provenance would be silently dropped instead of triggering the forward-version warning below. | PR #356 |
+| 9 | CastXML field const/volatile/mutable facts (`TypeField.is_const`/`is_volatile`/`is_mutable`) and full CV-qualifier type spelling became reliably populated. A pre-v9 snapshot has real but WRONG data (permanently `False` booleans) rather than a missing key, so `snapshot_from_dict` marks it `header_cv_facts_reliable=False` instead of relying on the bump alone. | PR #582 |
+| 10 | `--ast-frontend hybrid` (G28 Phase 3): `ast_producer` can be `"hybrid"`, and a new `fact_provenance` map records per-fact producer for a snapshot mixing castxml- and clang-backed declarations. A pre-v10 reader's detectors have no concept of per-fact provenance (they gate on whole-snapshot `from_headers` only), so reading a v10 hybrid snapshot with pre-v10 code can misread a producer coverage gap as a real change — the bump at least surfaces the forward-version warning below. | — |
 
 **Integer versioning** was chosen over semver because:
 

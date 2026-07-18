@@ -42,14 +42,18 @@ from .errors import ValidationError
 SUPPORTED_LANGS = frozenset({"c", "c++"})
 
 #: AST frontends the ``--ast-frontend`` flag accepts (ADR-037 D8). ``auto`` /
-#: ``castxml`` / ``clang`` drive header-AST parsing *and* L4 source-ABI replay;
-#: ``android`` is a source-ABI-only value (it reuses a pre-captured header-abi
-#: dump and has no header-AST path), so selecting it without source inputs is a
-#: validation error (D9).
-SUPPORTED_FRONTENDS = frozenset({"auto", "castxml", "clang", "android"})
+#: ``castxml`` / ``clang`` / ``hybrid`` drive header-AST parsing *and* L4
+#: source-ABI replay; ``android`` is a source-ABI-only value (it reuses a
+#: pre-captured header-abi dump and has no header-AST path), so selecting it
+#: without source inputs is a validation error (D9).
+SUPPORTED_FRONTENDS = frozenset({"auto", "castxml", "clang", "hybrid", "android"})
 
 #: The subset of :data:`SUPPORTED_FRONTENDS` valid for header-AST parsing.
-HEADER_AST_FRONTENDS = frozenset({"auto", "castxml", "clang"})
+#: "hybrid" (G28 Phase 3) runs both castxml and clang and merges them —
+#: without it here, ``run_compare``'s own frontend resolution (below) would
+#: silently fall back to "auto" for a "hybrid" request instead of running
+#: dumper_hybrid.merge_snapshots.
+HEADER_AST_FRONTENDS = frozenset({"auto", "castxml", "clang", "hybrid"})
 
 
 def _path_tuple(paths: Iterable[Path | str] | None) -> tuple[Path, ...]:

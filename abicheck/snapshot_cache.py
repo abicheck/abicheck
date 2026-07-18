@@ -42,7 +42,17 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "1"
+_SNAPSHOT_CACHE_VERSION: str = "2"
+# v2: castxml's CvQualifiedType type-name spelling changed for a
+# volatile-qualified pointer/reference VALUE (now a suffix, "T * volatile",
+# matching clang's own convention, rather than always a prefix) -- an
+# unconditional change to the default/most common cacheable dump path (Codex
+# review). Any G28 Phase 3/4 hybrid-provenance or clang-layout-tool fact this
+# PR also introduced is additionally covered by AbiSnapshot.SCHEMA_VERSION
+# (serialization.py) for the on-disk snapshot JSON format itself; this
+# constant is specifically for the separate whole-snapshot disk cache
+# (snapshot_cache.py), which persists across process invocations and isn't
+# gated by that schema version at all.
 
 
 def _get_cache_dir() -> Path:

@@ -60,6 +60,7 @@
   },
   "elf_only_mode": false,
   "enums": [],
+  "fact_provenance": {},
   "from_headers": true,
   "functions": [
     {
@@ -140,7 +141,7 @@
   "platform": null,
   "python_api": null,
   "python_ext": null,
-  "schema_version": 9,
+  "schema_version": 10,
   "scope_fallback": null,
   "source_mtime": null,
   "source_mtime_epoch": false,

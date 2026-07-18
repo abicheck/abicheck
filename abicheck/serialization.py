@@ -67,7 +67,19 @@ from .model import (
 #     FIELD_BECAME_CONST/VOLATILE/MUTABLE or TYPE_FIELD_TYPE_CHANGED purely
 #     from a tool upgrade comparing a legacy snapshot to a fresh dump of
 #     unchanged headers (Codex review, PR #582).
-SCHEMA_VERSION: int = 9
+# v10: `--ast-frontend hybrid` (G28 Phase 3) — `AbiSnapshot.ast_producer` can
+#     now be `"hybrid"`, and `AbiSnapshot.fact_provenance` records per-fact
+#     producer for a snapshot that mixes castxml- and clang-backed
+#     declarations. A pre-v10 reader's own detector code has no concept of
+#     per-fact provenance at all (it gates purely on whole-snapshot
+#     `from_headers`, which a hybrid snapshot also satisfies) — reading a v10
+#     hybrid snapshot with pre-v10 code can misread a legitimate producer
+#     coverage gap (e.g. a clang-only function's placeholder default value)
+#     as a real removal, exactly the false positive the provenance map exists
+#     to prevent. Bumping bumps the version-mismatch `UserWarning` in
+#     `snapshot_from_dict` for such a reader, giving a visible "upgrade
+#     abicheck" signal instead of silence (Codex review).
+SCHEMA_VERSION: int = 10
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
@@ -854,6 +866,10 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         # from schema_version scoped to the CastXML header path specifically
         # (Codex review, PR #582).
         header_cv_facts_reliable=header_cv_facts_reliable_value,
+        # G28 Phase 3 — per-fact provenance map for a hybrid (castxml+clang
+        # merged) snapshot. Absent on every non-hybrid / pre-Phase-3 snapshot,
+        # loads as the empty dict (same "unknown" default as a fresh snapshot).
+        fact_provenance=dict(d.get("fact_provenance", {})),
         constants=d.get("constants", {}),
         platform=d.get("platform"),
         language_profile=d.get("language_profile"),

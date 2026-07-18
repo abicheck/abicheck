@@ -558,6 +558,42 @@ def test_run_inline_source_abi_no_compile_units_returns_empty_selection():
     assert units == []
 
 
+def test_run_inline_source_abi_hybrid_extractor_skipped_not_silently_clang(
+    monkeypatch, tmp_path
+):
+    # Codex review: L4 source-ABI replay has no dual-backend hybrid extractor
+    # (unlike the L2 header-AST snapshot dumper_hybrid.py provides) --
+    # `--ast-frontend hybrid` reaches here unchanged via the shared
+    # compile_context_options flag, and `_make_source_extractor` would
+    # otherwise silently pick clang while the ExtractorRecord's name still
+    # claims "source_abi:hybrid", implying both backends ran when only one
+    # did. It must be recorded as skipped instead, even with real L3 compile
+    # units present (not merely falling through the "no compile units" path).
+    called = False
+
+    def _fail_if_called(*_a, **_k):
+        nonlocal called
+        called = True
+        raise AssertionError("_make_source_extractor must not run for hybrid")
+
+    monkeypatch.setattr(inline, "_make_source_extractor", _fail_if_called)
+    extractors: list = []
+    surface, units = inline._run_inline_source_abi(
+        tmp_path,
+        _build_with_one_unit(),
+        extractors,
+        extractor="hybrid",
+        scope="headers-only",
+        clang_bin="clang",
+    )
+    assert not called
+    assert surface is None
+    assert units == []
+    assert len(extractors) == 1
+    assert extractors[0].name == "source_abi:hybrid"
+    assert extractors[0].status == "skipped"
+
+
 def test_run_inline_source_abi_returns_selected_units(monkeypatch, tmp_path):
     # A real build + stubbed replay: select_compile_units runs for real and its
     # result is returned alongside the surface (fed to the call-graph scope).

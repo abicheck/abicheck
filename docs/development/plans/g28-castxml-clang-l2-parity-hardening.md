@@ -9,15 +9,16 @@ finding real parser bugs via Codex review rather than stopping at "tests
 pass." This plan records what shipped, the hardening rounds that followed,
 and scopes the phases that remain multi-week architectural projects rather
 than parser fixes.
-**Effort:** Phase 0–2 + hardening — done (see below). Phase 3 — L (new
-snapshot-merge architecture). Phase 4 — XL (new compiled C++ tool, ABI
-stability risk). Phase 5 — M, partially subsumed by
+**Effort:** Phase 0–2 + hardening — done (see below). Phase 3 — L, done (see
+below). Phase 4 — XL, done (see below). Phase 5 — M, partially subsumed by
 [G4](g4-header-ast-extractor.md).
-**Risk:** low for anything already landed (additive, test-gated). Phase 3 is
-medium (provenance bookkeeping can silently regress if a merge rule is
-wrong). Phase 4 is high (new heavyweight dependency, a compiled artifact
-inside a "pure Python" tool, and Clang's internal AST API has no
-cross-release ABI stability guarantee the way CastXML's XML schema does).
+**Risk:** low for anything already landed (additive, test-gated) — including
+Phase 3 (`--ast-frontend hybrid`, additive rather than a change to any
+existing single-backend path) and Phase 4 (the companion layout tool is
+fully opt-in via `ABICHECK_CLANG_LAYOUT_TOOL`; unset, the direct-clang
+backend is byte-for-byte unchanged). The compiled tool itself still carries
+the documented ABI-stability caveat below — it is versioned/tested against
+one pinned LLVM release, not guaranteed portable across others.
 
 ---
 
@@ -112,30 +113,54 @@ found and fixed real, previously-undiscovered bugs:
 
 Full detail for each fix: `CHANGELOG.md`'s Fixed section under this PR.
 
-## Known, deferred limitation: pointer-vs-pointee CV qualifier position
+## Done — pointer-vs-pointee CV qualifier position
 
 **Confirmed real** (CodeRabbit review): `_CastxmlParser._type_name`'s
-`CvQualifiedType` rendering always emits the qualifier as a *prefix*, so a
+`CvQualifiedType` rendering always emitted the qualifier as a *prefix*, so a
 volatile pointer *value* (`int * volatile`) and a pointer to a volatile
-*pointee* (`volatile int *`) both render as the identical string
+*pointee* (`volatile int *`) both rendered as the identical string
 `"volatile int*"` — a real transformation between the two (changing which
-side of the declarator the qualifier binds to) is invisible to any
-string-spelling comparison. This predates this PR's work (`_type_name` is a
-general-purpose recursive renderer used everywhere — return types, params,
-fields — not something newly introduced here); the constructor-identity
-code added earlier in this PR works around the SAME ambiguity for its own
-narrow purpose by reading the real XML structure directly
-(`_ctor_param_identity_type`) rather than fixing the renderer itself.
+side of the declarator the qualifier binds to) was invisible to any
+string-spelling comparison. This predated the rest of this PR's work
+(`_type_name` is a general-purpose recursive renderer used everywhere —
+return types, params, fields); the constructor-identity code elsewhere in
+this PR works around the SAME ambiguity for its own narrow purpose by
+reading the real XML structure directly (`_ctor_param_identity_type`)
+rather than fixing the renderer itself.
 
-**Deliberately not fixed here**: correctly distinguishing the two forms
-means rendering an outer pointer-value qualifier as a suffix (`int*
-volatile`) while keeping a pointee qualifier prefixed — a change to
-`_type_name`'s core recursion touching every call site that spells a
-pointer type (params, returns, fields), with real regression risk across
-the parity gate's golden comparisons and the `examples/` ground truth. Scope
-this as its own follow-up investigation (verify no downstream code depends
-on the current collapsed spelling before changing it) rather than a rushed
-fix folded into an already-large hardening pass.
+**Fixed** as its own follow-up investigation: a new
+`_cv_qualifies_pointer_value()` helper decides, by inspecting the real XML
+structure, whether a `CvQualifiedType` **directly** wraps a `Pointer`/
+`Reference`/`RValueReferenceType` — i.e. qualifies the pointer/reference
+*value* — as opposed to a pointee position. The value case now renders as a
+suffix (`int* const`), matching the `"T * const"` convention
+`cv_qualifiers_only_differ`/`canonicalize_type_name` already treat as
+canonical; the pointee case (`PointerType` wrapping `CvQualifiedType`) is
+untouched and still renders as a prefix (`const int*`).
+
+Deliberately does **not** follow `Typedef`/`ElaboratedType` aliasing to reach
+a pointer one level down (`typedef int *IntPtr; volatile IntPtr x;` still
+renders as the prefix `"volatile IntPtr"`) — an initial version did follow
+the alias, but Codex review caught a real cross-producer regression: the
+clang backend's type spelling is clang's own `qualType` pretty-print taken
+verbatim (`dumper_clang.py` has no custom recursive renderer), and clang's
+printer does not relocate a qualifier through a typedef to an
+implicit/textually-absent `*` either — it also spells this
+`"volatile IntPtr"`, never `"IntPtr volatile"`. Following the alias here
+would have made castxml newly diverge from clang specifically on this case
+(both backends agreed, by prefixing, before this fix existed at all). Since
+the alias name itself carries no visible `*`/`&` to relocate a qualifier
+around, there is no real prefix-vs-suffix ambiguity to resolve for it
+anyway — only a *direct*, syntactically-visible pointer/reference wrap is
+unambiguous and worth fixing.
+
+Verified against the full fast test suite, `mypy`, and `ruff` with no
+regressions — field/variable-level CV *facts* (`TypeField.is_const`/
+`is_volatile`, populated by Phase 0's `_resolve_cv_restrict`, which already
+reads the same real XML
+structure directly rather than the rendered spelling) were already immune
+to this ambiguity; the fix closes the gap in the generic type-name
+*string* other detectors and cross-producer/cross-tool comparisons read.
 
 ---
 
@@ -169,106 +194,186 @@ than bolting an ambiguous heuristic onto an already-large hardening pass.
 
 ---
 
-## Phase 3 — hybrid multi-producer snapshot with per-field provenance
+## Done — Phase 3: hybrid multi-producer snapshot with per-field provenance
 
-**Problem.** Today a snapshot is parsed by exactly one L2 backend
+**Problem.** A snapshot used to be parsed by exactly one L2 backend
 (`--ast-frontend {castxml,clang}`); the two backends have non-overlapping
 blind spots (e.g. concepts/`explicit`-on-converter/ctor-mangled-names are
-clang-only-reachable via deeper tooling — see Phase 4/5 — while some facts
-above are castxml-only today). A hybrid producer would run both, merge
-their `AbiSnapshot`s field-by-field, and record which backend contributed
-each fact, upgrading the many `_both_castxml_backed`-gated detectors from
-"disabled when producers differ" to "always available, backfilled from
-whichever backend saw it."
-
-**Confirmed concrete motivating case (Codex review, PR #582).** A synthetic
-constructor/destructor key (`__abicheck_ctor__ns::Class(...)` / `~ns::Class`,
-built when castxml omits a real mangled name) has no shared identity with
-the SAME entity's real Itanium-mangled key on the clang backend. Comparing
-a castxml-produced snapshot against a clang-produced snapshot of the
-*same, unchanged* source reports a false `FUNC_REMOVED` + `FUNC_ADDED` pair
-for every such unmangled constructor/destructor — verified with a real
-castxml+clang dump of an unchanged corpus (both a constructor and a virtual
-destructor). This is symmetric, pre-existing behavior — the constructor
-case predates the destructor work in this PR — not a new regression, and
-is deliberately left unfixed here (see
+clang-only-reachable via deeper tooling — see Phase 4/5 — while several
+facts are castxml-only today). The confirmed concrete motivating case
+(Codex review, PR #582): a synthetic constructor/destructor key
+(`__abicheck_ctor__ns::Class(...)` / `~ns::Class`, built when castxml omits
+a real mangled name) had no shared identity with the SAME entity's real
+Itanium-mangled key on the clang backend, so comparing a castxml-produced
+snapshot against a clang-produced snapshot of the *same, unchanged* source
+reported a false `FUNC_REMOVED` + `FUNC_ADDED` pair for every such
+unmangled constructor/destructor (see
 `tests/test_castxml_clang_parity_gate.py::TestCrossProducerUnmangledIdentityKnownLimitation`,
-which documents today's behavior). A sound fix needs exactly this phase's
-per-fact provenance/reconciliation: matching a synthetic key against a real
-mangled symbol via structural equivalence (same qualified class, compatible
-signature, same access/virtuality) without risking a false match between
-two coincidentally-same-signature but genuinely different entities.
+which documented that behavior before this phase).
 
-**Design sketch.**
+**Shipped.** `--ast-frontend hybrid` runs BOTH backends over the identical
+headers and merges them (`abicheck/dumper_hybrid.py::merge_snapshots`):
 
-- A per-field/per-record provenance map (`{field_path: producer}`) alongside
-  the merged `AbiSnapshot`, analogous to the existing per-declaration
+- **Ctor/dtor identity reconciliation** — the fix for the motivating case
+  above. A castxml synthetic key is matched against a real clang mangled
+  name via structural equivalence (same qualified enclosing class,
+  cv-normalized parameter-signature match for a constructor, same access)
+  and, on a match, the merged entry's key is rewritten to the real mangled
+  name. Ambiguity (zero or multiple surviving candidates) yields no match —
+  the synthetic key is kept as-is, the same pre-Phase-3 behavior — rather
+  than risking a false match between coincidentally-same-signature but
+  genuinely different entities. The enclosing-class scope is compared with
+  every template argument stripped from every scope component (both a
+  template's own scope, e.g. `ns::Widget<int>` vs. the Itanium-mangled
+  `ns::WidgetIiE`, and an enclosing scope for a nested class inside a
+  template) since castxml and clang spell template arguments in different
+  alphabets there. **Known residual limitation**: this means two or more
+  distinct instantiations of the same template that both declare a default
+  (no-parameter) constructor, or both have a destructor, collide under the
+  same normalized key with no signature left to disambiguate them — they
+  correctly stay unreconciled (ambiguous → no match, never a *wrong* match)
+  rather than risk matching the wrong instantiation. Resolving this would
+  need a real demangler (or hand-decoding Itanium template-argument
+  encoding) to recover each candidate's own instantiation identity —
+  deliberately deferred rather than adding either a new dependency or a
+  heuristic that could mis-match.
+  **Known residual limitation, scope boundary** (Codex review): the
+  reconciliation above only runs WITHIN one hybrid dump invocation — it
+  matches that SAME call's own castxml and clang sub-dumps against each
+  other before merging, and has no way to retroactively reconcile a
+  DIFFERENT, already-persisted snapshot from an earlier, separate
+  invocation. Comparing an existing plain-castxml JSON baseline (still
+  keyed by the synthetic placeholder) against a fresh `--ast-frontend
+  hybrid` dump of the same, unchanged headers therefore still reports the
+  same false `FUNC_REMOVED`/`FUNC_ADDED` pair the motivating case above
+  describes — the merged hybrid snapshot's own key for that constructor/
+  destructor is now the real mangled name (reconciled during ITS OWN
+  merge), which the old baseline's synthetic key still doesn't match.
+  Re-dumping the baseline with `hybrid` too (so both sides of a future
+  comparison go through the same reconciliation) avoids this; there is no
+  fix for comparing against an already-persisted pre-hybrid baseline
+  without the same general cross-invocation identity reconciliation this
+  phase deliberately scoped out (see
+  `tests/test_castxml_clang_parity_gate.py::TestCrossProducerUnmangledIdentityKnownLimitation`'s
+  docstring for the full explanation).
+- **Per-fact provenance** (`AbiSnapshot.fact_provenance`, `abicheck/
+  fact_provenance.py`) — a `{key: "castxml"|"clang"}` map keyed by
+  `func_fact_key`/`var_fact_key`/`type_fact_key`/`enum_fact_key`/
+  `field_fact_key`, analogous to the existing per-declaration
   `source_header`/`origin` provenance (ADR-015) but keyed by *fact* rather
-  than by declaration.
-- A merge policy per fact: "prefer castxml, backfill from clang when castxml
-  is null" for castxml-only facts (defaults, deprecated messages, abstract/
-  scoped-enum/override), and the mirror for any clang-only fact Phase 4/5
-  add.
-- Detectors currently gated on `_both_castxml_backed`/`ast_producer` equality
-  would instead check per-fact provenance for the *specific* fields they
-  read, not a whole-snapshot producer tag.
-- Merge must be conservative: a fact present on neither backend stays
-  `None` (unknown), never silently defaulted, mirroring the tri-state
-  conventions already used for `is_final`/`is_abstract`/`param.default`.
+  than by declaration. Merge policy per fact: "prefer castxml, backfill
+  from clang only when castxml's own value is null" — a no-op today since
+  `dumper_clang.py` doesn't populate any of the nine gated facts yet
+  (`Function.deprecated`/`is_override`, `Variable.deprecated`,
+  `RecordType.is_abstract`/`deprecated`, `TypeField.default`/`deprecated`,
+  `EnumType.is_scoped`/`deprecated`), but real, forward-looking scaffolding
+  for once it does. A fact present on neither backend stays absent from the
+  map (unknown), never silently defaulted.
+- **Detector migration** — all nine detectors previously gated on the
+  whole-snapshot `_both_castxml_backed` (now removed, fully replaced) gate
+  per-declaration instead, via `fact_provenance.both_castxml_backed_fact`.
+  This was in fact the bulk of the change, exactly as anticipated below.
 
-**Files & surfaces.** A new `abicheck/dumper_hybrid.py` (or a `merge_snapshots()`
-helper in `dumper.py`) sitting after both `dumper_castxml.py`/`dumper_clang.py`
-produce their snapshots; `AbiSnapshot` gains the provenance map; every
-`_both_castxml_backed`-gated detector in `diff_types.py`/`diff_symbols.py`
-needs a per-fact-provenance equivalent — this is the bulk of the migration
-cost, not the merge itself.
+**CLI/API surfaces.** `HEADER_BACKENDS`/`_resolve_header_backend` in
+`dumper.py` accept `"hybrid"` (never auto-selected — needs both tools,
+~2x cost); `--ast-frontend hybrid` is a `cli_options.py` Click choice;
+`service.run_dump` (the real CLI-facing Tier-2 entry point) and
+`dumper.dump` each recurse into themselves once per real backend and merge
+— see `dumper_hybrid.run_hybrid_dump`'s docstring for why `dumper.dump`
+takes the recursive call as an injected callable rather than importing it
+(avoids an import cycle with `dumper.py`, which already imports
+`dumper_hybrid`). `service.py`'s header-scoped incremental-dump fast path
+(`_try_header_scoped_dump`) is untouched by this phase and does not support
+`"hybrid"` directly — `_header_ast_parser` raises a clear error if `resolved
+== "hybrid"` reaches it without having been resolved by
+`run_hybrid_dump` first, rather than silently defaulting to castxml.
 
-**Out of scope for this phase.** Layout facts (offsets, vtable slots) are
-not part of the merge — CastXML remains the sole layout source until
+**Out of scope, still.** Layout facts (offsets, vtable slots, alignment)
+are not part of the merge — CastXML remains the sole layout source until
 Phase 4 gives clang an independent one.
 
-## Phase 4 — a Clang `ASTRecordLayout` plugin
+## Done — Phase 4: a Clang `ASTRecordLayout` companion tool
 
 **Problem.** `clang::ASTRecordLayout` (`clang/AST/RecordLayout.h`) is what
 Clang's own Sema/CodeGen use internally to compute a record's *actual
 compiled layout* for the target ABI — `getSize()`, `getFieldOffset(i)`,
-`getBaseClassOffset()`, vtable-pointer/thunk placement, and so on. It is a
-**C++ API**, reachable only from a Clang tool built with LibTooling/libclang
-— not exposed by any `clang` command-line flag, and *not* exposed by
-`clang.cindex`'s stable C API either (the [G4](g4-header-ast-extractor.md)
-plan's `clang.cindex`-based extractor gets concepts/`explicit`/mangled
-names, but no layout facts — that is a materially different capability).
-Today `abicheck`'s direct-clang backend (`-ast-dump=json`) gives rich
-declarations but zero layout data, which is precisely why CastXML — which
-runs its own bundled Clang internally and exports the layout it computed —
-remains the stronger layout source.
+`getBaseClassOffset()`, the primary vtable pointer's placement, and so on.
+It is a **C++ API**, reachable only from a Clang tool built with
+LibTooling/libclang — not exposed by any `clang` command-line flag, and
+*not* exposed by `clang.cindex`'s stable C API either (the
+[G4](g4-header-ast-extractor.md) plan's `clang.cindex`-based extractor gets
+concepts/`explicit`/mangled names, but no layout facts — that is a
+materially different capability). The direct-clang backend (`-ast-dump=json`)
+gives rich declarations but zero layout data, which is exactly why CastXML
+— which runs its own bundled Clang internally and exports the layout it
+already computed — remains the stronger layout source for that path.
 
-**Design sketch.** A standalone, small C++ tool linked against libclang/
-LibTooling that parses the same headers, walks every `RecordDecl`, calls
-`ASTContext::getASTRecordLayout()`, and serializes offsets/vtable-slot/
-thunk info to a JSON sidecar `dumper.py` can merge in (via Phase 3's
-per-fact provenance) — making the direct-clang backend a fully
-self-sufficient layout source instead of depending on CastXML or DWARF
-backfill.
+**Shipped.** `tools/clang-layout-tool/` — a standalone LibTooling program
+(`abicheck-clang-layout-tool`) that walks every complete, non-dependent
+`CXXRecordDecl`, calls `ASTContext::getASTRecordLayout()`, and serializes
+per-record JSON: `size_bits`/`alignment_bits`/`data_size_bits`,
+`is_standard_layout`/`is_trivially_copyable`, the primary vtable pointer's
+absolute bit offset (derived from `hasOwnVFPtr()`/`getPrimaryBase()`/
+`isPrimaryBaseVirtual()` — 0 for a class with its own vtable, otherwise the
+primary base's own offset, which every ASTRecordLayout base-offset accessor
+already reports absolute rather than relative to an intermediate parent),
+every direct field's bit offset, and every direct/virtual base's bit offset.
+Hand-verified against the real Itanium x86-64 ABI across POD vs. non-POD
+tail-padding reuse, single/multiple/virtual inheritance, and vtable-pointer
+placement (no castxml available in the build sandbox to cross-check
+against, so verification used a derived-class-field-placement technique:
+confirming a base's `dsize` by observing exactly where a further-derived
+class's own member actually lands).
 
-**Why this is XL/high-risk, not a parser fix.**
+`abicheck/clang_layout_tool.py` bridges the tool into the direct-clang L2
+backend: `find_layout_tool_bin()` resolves the binary (an explicit
+`ABICHECK_CLANG_LAYOUT_TOOL=/path` env var, or a bare
+`abicheck-clang-layout-tool` on `PATH` — **never a hard dependency**, unset
+means the enrichment is silently skipped), `run_layout_tool()` re-aggregates
+the same headers and reuses `dumper._build_clang_header_command`'s own
+flag-building (sliced down to the shared compiler-context prefix) so the
+tool sees an identical compile context to whatever direct-clang already
+successfully parsed, and `apply_layout_facts()` backfills only the
+currently-`None`/empty layout fields on the snapshot's existing
+`RecordType`s (a no-op for castxml/hybrid snapshots, which already carry
+real layout). Wired into `service.run_dump` as `attach_clang_layout()`,
+gated on `ast_producer in ("clang", "hybrid")` (a `hybrid` merge appends
+clang-only records dumper_clang.py never gives layout, so it needs the
+same backfill; already-enriched castxml-sourced records in the same
+snapshot are left untouched), running once after the snapshot is
+built (and, for a `header_graph=True` request, after that graph attaches
+too — the two enrichments touch disjoint snapshot fields). Every failure
+mode (tool missing, a compile the tool can't recover from, a timeout,
+malformed output) degrades to "no enrichment," never raises (ADR-028 D3).
+
+**Why this stayed XL/higher-risk than a parser fix**, even though it
+shipped as fully additive/opt-in:
 
 - It is a **new compiled build target**, not a Python change: needs
-  libclang/LibTooling dev headers, a CMake/LLVM link step, and a packaging
-  story for a compiled binary living inside an otherwise "pure Python"
-  tool (ADR-001's core stance) — likely an optional extra, not a default
-  dependency.
+  libclang/LibTooling dev headers (`libclang-18-dev`/`llvm-18-dev` in this
+  session's sandbox) and a CMake/LLVM link step — a packaging story for
+  distributing pre-built binaries (rather than requiring every user to
+  compile it themselves) is still open, tracked as follow-up work.
 - Clang's internal C++ AST API has **no cross-LLVM-release ABI stability**
-  guarantee the way CastXML's versioned XML schema does; this needs a
-  version-compatibility matrix (which LLVM releases the plugin is built
-  against) before it can be trusted the way CastXML is today.
-- Only worth doing once Phase 3's provenance-merge plumbing exists to
-  actually consume a second, independent layout source usefully.
+  guarantee the way CastXML's versioned XML schema does. The tool is
+  currently verified against exactly one pinned LLVM release (18.1.3); a
+  version-compatibility matrix across multiple LLVM releases is explicitly
+  NOT attempted here — deferred until real multi-version usage surfaces
+  concrete incompatibilities to fix, rather than guessed at speculatively.
+- Deliberately does NOT attempt full vtable slot enumeration or thunk
+  offsets (`clang::VTableContext`/`ItaniumVTableContext` is a materially
+  larger surface) — scoped to size/alignment/offsets/vptr placement per
+  this plan's own original scope note.
 
-**Files & surfaces.** A new top-level tool directory (e.g. `tools/clang-layout-plugin/`,
-outside the `abicheck/` Python package), a JSON sidecar schema, `dumper_clang.py`
-gains an optional layout-merge step, `pyproject.toml`/packaging for the
-optional extra.
+**Files & surfaces.** `tools/clang-layout-tool/` (`CMakeLists.txt`,
+`src/main.cpp`, `tests/fixtures/*.cpp` hand-verification cases) outside the
+`abicheck/` Python package; `abicheck/clang_layout_tool.py` (the Python
+bridge); `service.py`'s `attach_clang_layout()` wiring; `RecordType`'s
+existing layout-closure fields (`size_bits`/`alignment_bits`/
+`data_size_bits`/`vptr_offset_bits`/`base_offsets`/`TypeField.offset_bits`)
+needed no schema change — they already existed for castxml's own layout
+data and this phase simply gives the direct-clang backend an independent
+way to populate the same fields.
 
 ## Phase 5 — concepts / `requires` / template-default normalization
 
@@ -305,12 +410,12 @@ exists, rather than a separate phase with its own new module.
 - [ADR-003](../adr/003-data-source-architecture.md) §D8/D9 — dual L2 backend
   rationale (`header_backend`/`--ast-frontend`).
 - [ADR-037](../adr/037-cli-interface-contract.md) D8 — the
-  `--ast-frontend {auto,castxml,clang}` flag surface.
+  `--ast-frontend {auto,castxml,clang,hybrid}` flag surface.
 - [G4](g4-header-ast-extractor.md) — the concrete plan for most of Phase 5.
 
 ## Out of scope
 
-- Re-litigating Phase 0–2's already-shipped detection behavior (e.g.
+- Re-litigating Phase 0–3's already-shipped detection behavior (e.g.
   `cv_qualifiers_only_differ`'s deliberate by-value-field exclusion,
   `case30_field_qualifiers` ground truth) — those are settled product
   decisions with dedicated regression tests, not open questions.

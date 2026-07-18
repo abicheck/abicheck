@@ -146,9 +146,10 @@ Reads native binary metadata using format-specific parsers:
 ### Layer L2: Header AST (castxml / Clang) — all platforms
 
 Parses C/C++ headers through a selectable frontend — `--ast-frontend
-auto|castxml|clang` (or `ABICHECK_AST_FRONTEND`);
+auto|castxml|clang|hybrid` (or `ABICHECK_AST_FRONTEND`);
 `auto` prefers castxml and
-falls back to clang `-ast-dump=json` on clang-only hosts (ADR-003). The rest of
+falls back to clang `-ast-dump=json` on clang-only hosts (ADR-003); `hybrid`
+(G28 Phase 3) runs both and merges them. The rest of
 this section describes the castxml backend. The clang backend exposes the same
 declaration surface (signatures, classes/bases, enums, typedefs, access,
 `noexcept`, templates) but is a **syntactic** AST: it does **not** compute record

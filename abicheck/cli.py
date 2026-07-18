@@ -1246,13 +1246,13 @@ def _embed_inline_source_side(
 @lang_option
 @click.option("--old-ast-frontend", "old_header_backend",
               default=None,
-              type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
+              type=click.Choice(["auto", "castxml", "clang", "hybrid"], case_sensitive=False),
               help="C/C++ AST frontend for the old side only (overrides "
                    "--ast-frontend for old). Use when the old release parses on "
                    "castxml but the new one needs clang (or vice versa).")
 @click.option("--new-ast-frontend", "new_header_backend",
               default=None,
-              type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
+              type=click.Choice(["auto", "castxml", "clang", "hybrid"], case_sensitive=False),
               help="C/C++ AST frontend for the new side only (overrides "
                    "--ast-frontend for new).")
 # ── Compare options (unchanged) ──────────────────────────────────────────────

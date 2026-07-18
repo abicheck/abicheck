@@ -482,6 +482,150 @@ class TestParamDefaultChanged:
         r = compare(_snap(functions=[f_v1]), _snap(functions=[f_v2]))
         assert ChangeKind.PARAM_DEFAULT_VALUE_REMOVED in _kinds(r)
 
+    def test_clang_only_hybrid_function_not_reported_as_removed(self):
+        # Codex review (G28 Phase 3 hybrid merge): a hybrid snapshot's
+        # per-function "param_defaults" provenance can be "clang" for a
+        # function castxml never produced at all — clang doesn't populate
+        # Param.default, so every one of its params looks default-less. That
+        # must NOT read as "the default was removed" against an unrelated
+        # castxml-backed declaration of the same function on the other side.
+        f_v1 = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="30")],
+        )
+        f_v2 = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default=None)],
+        )
+        old = AbiSnapshot(
+            library="libtest.so.1", version="1.0", functions=[f_v1],
+            from_headers=True, ast_producer="hybrid",
+            fact_provenance={"func:_Z7connectv:param_defaults": "castxml"},
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1", version="1.0", functions=[f_v2],
+            from_headers=True, ast_producer="hybrid",
+            fact_provenance={"func:_Z7connectv:param_defaults": "clang"},
+        )
+        r = compare(old, new)
+        assert ChangeKind.PARAM_DEFAULT_VALUE_REMOVED not in _kinds(r)
+
+    def test_clang_backed_hybrid_pair_on_both_sides_still_compared(self):
+        # Codex review: dumper_clang.py now populates Param.default too (a
+        # structural placeholder for anything beyond a bare literal), so a
+        # function that is clang-only on BOTH sides of a hybrid comparison is
+        # a legitimate same-producer pair -- exactly what a plain
+        # ``--ast-frontend clang`` run already compares with no gate at all.
+        # Requiring "castxml on both sides" (rather than "same producer on
+        # both sides") would wrongly suppress this real removal.
+        f_v1 = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="30")],
+        )
+        f_v2 = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default=None)],
+        )
+        old = AbiSnapshot(
+            library="libtest.so.1", version="1.0", functions=[f_v1],
+            from_headers=True, ast_producer="hybrid",
+            fact_provenance={"func:_Z7connectv:param_defaults": "clang"},
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1", version="1.0", functions=[f_v2],
+            from_headers=True, ast_producer="hybrid",
+            fact_provenance={"func:_Z7connectv:param_defaults": "clang"},
+        )
+        r = compare(old, new)
+        assert ChangeKind.PARAM_DEFAULT_VALUE_REMOVED in _kinds(r)
+
+    def test_legacy_pre_provenance_baseline_vs_hybrid_still_compared(self):
+        # Codex review: a persisted castxml baseline predating ast_producer
+        # entirely (ast_producer=None, no fact_provenance) has
+        # fact_producer(old, key) return None -- unknown, not "known and
+        # different". Comparing it against a genuinely castxml-backed
+        # function on a hybrid `new` side is a legitimate same-producer
+        # comparison and must still fire, exactly as it did before hybrid
+        # existed (when only _both_header_aware gated this detector at all).
+        f_old = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="30")],
+        )
+        f_new = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default=None)],
+        )
+        old = AbiSnapshot(
+            library="libtest.so.1", version="1.0", functions=[f_old],
+            from_headers=True, ast_producer=None,
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1", version="1.0", functions=[f_new],
+            from_headers=True, ast_producer="hybrid",
+            fact_provenance={"func:_Z7connectv:param_defaults": "castxml"},
+        )
+        r = compare(old, new)
+        assert ChangeKind.PARAM_DEFAULT_VALUE_REMOVED in _kinds(r)
+
+    def test_pure_clang_vs_pure_castxml_mismatch_not_reported(self):
+        # Codex review: the producer-mismatch skip previously only applied
+        # when either side was ast_producer=="hybrid". A comparison between
+        # two pure single-backend snapshots (no hybrid involved at all) --
+        # e.g. a --ast-frontend clang baseline against a --ast-frontend
+        # castxml one -- has the exact same representation-mismatch problem:
+        # fact_producer() already returns "clang"/"castxml" unconditionally
+        # for those non-hybrid producers, so the skip must fire here too.
+        f_old = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="30")],
+        )
+        f_new = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default=None)],
+        )
+        old = AbiSnapshot(
+            library="libtest.so.1", version="1.0", functions=[f_old],
+            from_headers=True, ast_producer="castxml",
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1", version="1.0", functions=[f_new],
+            from_headers=True, ast_producer="clang",
+        )
+        r = compare(old, new)
+        assert ChangeKind.PARAM_DEFAULT_VALUE_REMOVED not in _kinds(r)
+
+    def test_pure_clang_vs_pure_clang_still_compared(self):
+        # Same-producer pair on both sides (no hybrid): must still compare
+        # normally, exactly as a plain --ast-frontend clang run always did.
+        f_old = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="30")],
+        )
+        f_new = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default=None)],
+        )
+        old = AbiSnapshot(
+            library="libtest.so.1", version="1.0", functions=[f_old],
+            from_headers=True, ast_producer="clang",
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1", version="1.0", functions=[f_new],
+            from_headers=True, ast_producer="clang",
+        )
+        r = compare(old, new)
+        assert ChangeKind.PARAM_DEFAULT_VALUE_REMOVED in _kinds(r)
+
 
 # ── param_renamed ────────────────────────────────────────────────────────
 

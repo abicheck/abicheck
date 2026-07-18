@@ -465,10 +465,11 @@ class BuildConfig:
             "auto",
             "castxml",
             "clang",
+            "hybrid",
         ):
             raise ValueError(
-                "compile.frontend must be one of ('auto', 'castxml', 'clang'), "
-                f"got {compile_frontend!r}"
+                "compile.frontend must be one of ('auto', 'castxml', 'clang', "
+                f"'hybrid'), got {compile_frontend!r}"
             )
 
         return cls(
@@ -1489,6 +1490,17 @@ def _run_inline_source_abi(
     Requires L3 compile units to replay against (ADR-030 D5). A missing source
     extractor (clang/castxml) yields a partial surface and a clear note rather
     than aborting — the artifact tiers stay authoritative (ADR-028 D3).
+
+    ``extractor == "hybrid"`` is likewise recorded as skipped rather than run:
+    L4 source-ABI replay has only ever had ONE extractor implementation per
+    TU (``_make_source_extractor`` special-cases "castxml", else clang) —
+    there is no dual-backend merge here the way ``dumper_hybrid.py`` provides
+    for the L2 header-AST snapshot. ``--ast-frontend hybrid`` reaches this
+    function unchanged (it is the shared ``compile_context_options`` flag,
+    passed straight through as ``extractor`` by ``dump_source_only`` — see
+    `cli.py`), so treating it like any other extractor name would silently
+    run clang alone while recording ``source_abi:hybrid`` as if both
+    backends had (Codex review).
     """
     if sources is None:
         return None, []
@@ -1498,6 +1510,21 @@ def _run_inline_source_abi(
         public_header_roots_for,
         run_source_replay,
     )
+
+    if extractor == "hybrid":
+        extractors.append(
+            ExtractorRecord(
+                name="source_abi:hybrid",
+                status="skipped",
+                detail=(
+                    "L4 source-ABI replay has no dual-backend hybrid extractor "
+                    "(unlike the L2 header-AST snapshot); pass "
+                    "--ast-frontend castxml or --ast-frontend clang for a "
+                    "--sources/--build-info dump"
+                ),
+            )
+        )
+        return None, []
 
     if not merged.compile_units:
         # No L3 to replay against: source ABI replay needs compile commands to

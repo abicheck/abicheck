@@ -382,7 +382,8 @@ class _CastxmlParser:
         if tag == "RValueReferenceType":
             return self._type_name(el.get("type", ""), depth + 1) + "&&"
         if tag == "CvQualifiedType":
-            base = self._type_name(el.get("type", ""), depth + 1)
+            inner_id = el.get("type", "")
+            base = self._type_name(inner_id, depth + 1)
             # castxml's CvQualifiedType also carries `volatile`; only `const`
             # was read here previously, so a volatile-qualified type's name
             # silently dropped it instead of just missing a dedicated
@@ -407,8 +408,30 @@ class _CastxmlParser:
                 for q, attr in (("const", "const"), ("volatile", "volatile"))
                 if el.get(attr) == "1"
             ]
-            prefix = f"{' '.join(quals)} " if quals else ""
-            return f"{prefix}{base}"
+            if not quals:
+                return base
+            qual_str = " ".join(quals)
+            # A CvQualifiedType directly wrapping a Pointer/Reference type
+            # qualifies the pointer/reference VALUE itself (`int *
+            # volatile`), not what it points to (`volatile int *`) — two
+            # genuinely different declarations that a plain prefix always
+            # collapsed to the identical spelling (G28 "known, deferred
+            # limitation": confirmed via CodeRabbit review, PR #582). Render
+            # the value-qualifier as a suffix instead, matching the "T *
+            # const" convention cv_qualifiers_only_differ/
+            # canonicalize_type_name already treat as canonical for this
+            # case. A pointee-position qualifier (`const int *` —
+            # PointerType wrapping CvQualifiedType) is unaffected: this
+            # branch never sees it, since it fires from the CvQualifiedType
+            # side, not the PointerType side. Deliberately NOT extended
+            # through Typedef/ElaboratedType aliasing — see
+            # _cv_qualifies_pointer_value's docstring (Codex review): the
+            # clang backend takes clang's own `qualType` spelling verbatim,
+            # which does not relocate a qualifier through an alias either,
+            # so doing so here would newly diverge from clang on that case.
+            if self._cv_qualifies_pointer_value(inner_id):
+                return f"{base} {qual_str}"
+            return f"{qual_str} {base}"
         if tag == "ElaboratedType":
             # castxml wraps an elaborated-type-specifier (`struct Foo`, `union
             # Foo`, `enum Foo` used directly rather than via a typedef) in an
@@ -433,6 +456,30 @@ class _CastxmlParser:
             # detect the qualifier being added/removed on this slot.
             return "_Atomic"
         return el.get("name", tag)
+
+    def _cv_qualifies_pointer_value(self, type_id: str) -> bool:
+        """True if a ``CvQualifiedType`` wrapping *type_id* qualifies a
+        pointer/reference VALUE rather than pointee data.
+
+        Deliberately does NOT follow ``Typedef``/``ElaboratedType`` aliasing
+        (Codex review): the clang backend's type spelling is clang's own
+        ``qualType`` pretty-print, taken verbatim rather than re-derived —
+        and clang's printer does not "see through" a typedef to relocate a
+        qualifier after an implicit, textually-absent ``*`` either. For
+        ``typedef int *IntPtr; volatile IntPtr x;``, clang spells it
+        ``"volatile IntPtr"`` (prefix), not ``"IntPtr volatile"``. Following
+        the typedef here to detect the aliased pointer and render a suffix
+        would make castxml diverge from clang specifically on this case,
+        even though both agreed (by prefixing) before this qualifier-suffix
+        fix existed. Since the alias name itself carries no visible ``*``/
+        ``&`` to move a qualifier around, there is no real prefix-vs-suffix
+        ambiguity to resolve for it anyway (unlike a directly-spelled
+        pointer) — only a DIRECT wrap is unambiguous and worth fixing.
+        """
+        el = self._resolve(type_id)
+        if el is None:
+            return False
+        return el.tag in ("PointerType", "ReferenceType", "RValueReferenceType")
 
     def _resolve_cv_restrict(self, id_: str, depth: int = 0) -> tuple[bool, bool, bool]:
         """Whether *id_*'s own (top-level) qualification is const/volatile/restrict.

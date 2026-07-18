@@ -777,9 +777,20 @@ class _ClangAstParser:
         fields = self._parse_fields(node)
         bases, virtual_bases, base_access = _parse_bases(node)
         injected = _anonymous_member_names(node)
+        own_name = override_name or str(node.get("name", ""))
         return RecordType(
-            name=override_name or str(node.get("name", "")),
+            name=own_name,
             kind=kind,
+            # Namespace/enclosing-class-qualified spelling, set only when it
+            # actually differs from the bare name (mirrors castxml's own
+            # RecordType.qualified_name convention) -- without this, ANY
+            # namespaced/nested clang-parsed type had qualified_name=None, so
+            # a lookup keyed on the tool's own fully-qualified
+            # getQualifiedNameAsString() spelling (e.g. "ns::Foo") fell back
+            # to the bare "Foo" and never matched (Codex review, G28 Phase 4).
+            qualified_name=(
+                "::".join([*entry.scope, own_name]) if entry.scope else None
+            ),
             # clang's JSON AST does not compute layout — size/align/offsets are
             # left None so the layout detectors skip an unknown-vs-unknown
             # comparison (DWARF remains the layout authority on this host).

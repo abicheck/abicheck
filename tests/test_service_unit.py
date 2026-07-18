@@ -365,6 +365,152 @@ class TestRunDump:
         assert result is snap
 
 
+class TestRunDumpHybridNormalization:
+    """G28 Phase 3 (Codex review): eff_backend == "hybrid" was a raw string
+    comparison, so an indirectly-selected hybrid request (case-insensitive
+    value, or the documented ABICHECK_AST_FRONTEND=hybrid pin with auto)
+    fell through to the single-backend path instead of triggering the merge
+    recursion -- fixed by resolving through dumper._resolve_header_backend.
+    """
+
+    def _fake_dump_elf(self, castxml_snap, clang_snap):
+        def _fake(*args, **kwargs):
+            compile_ctx = kwargs.get("compile")
+            if compile_ctx is not None and compile_ctx.frontend == "clang":
+                return clang_snap
+            return castxml_snap
+
+        return _fake
+
+    def test_case_insensitive_header_backend_triggers_hybrid(self, tmp_path):
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        castxml_snap = AbiSnapshot(
+            library="test", version="1.0", from_headers=True, ast_producer="castxml"
+        )
+        clang_snap = AbiSnapshot(
+            library="test", version="1.0", from_headers=True, ast_producer="clang"
+        )
+        with patch(
+            "abicheck.service._dump_elf",
+            side_effect=self._fake_dump_elf(castxml_snap, clang_snap),
+        ):
+            result = run_dump(p, "elf", header_backend="HYBRID")
+        assert result.ast_producer == "hybrid"
+
+    def test_env_var_pin_with_auto_triggers_hybrid(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("ABICHECK_AST_FRONTEND", "hybrid")
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        castxml_snap = AbiSnapshot(
+            library="test", version="1.0", from_headers=True, ast_producer="castxml"
+        )
+        clang_snap = AbiSnapshot(
+            library="test", version="1.0", from_headers=True, ast_producer="clang"
+        )
+        with patch(
+            "abicheck.service._dump_elf",
+            side_effect=self._fake_dump_elf(castxml_snap, clang_snap),
+        ):
+            result = run_dump(p, "elf")  # header_backend defaults to "auto"
+        assert result.ast_producer == "hybrid"
+
+
+class TestRunDumpHybridHeaderGraphAttachedOnce:
+    """Codex review: ``header_graph=True`` must not be forwarded to either
+    hybrid sub-dump -- each would independently attach its OWN graph seeded
+    from only that one backend's declarations, so the FINAL merged
+    snapshot's embedded graph would miss any clang-only declaration the
+    merge appended (castxml never produced). Attach it exactly once, after
+    the merge, to the union of both backends' declarations instead."""
+
+    def _fake_dump_elf(self, castxml_snap, clang_snap):
+        def _fake(*args, **kwargs):
+            compile_ctx = kwargs.get("compile")
+            if compile_ctx is not None and compile_ctx.frontend == "clang":
+                return clang_snap
+            return castxml_snap
+
+        return _fake
+
+    def test_header_graph_attached_once_to_merged_snapshot(self, tmp_path):
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        castxml_snap = AbiSnapshot(
+            library="test", version="1.0", from_headers=True, ast_producer="castxml"
+        )
+        clang_snap = AbiSnapshot(
+            library="test", version="1.0", from_headers=True, ast_producer="clang"
+        )
+        calls: list[tuple[AbiSnapshot, bool | None]] = []
+
+        def _fake_attach(snap, header_graph, *_args, **_kwargs):
+            calls.append((snap, header_graph))
+            return snap
+
+        with patch(
+            "abicheck.service._dump_elf",
+            side_effect=self._fake_dump_elf(castxml_snap, clang_snap),
+        ), patch("abicheck.service._attach_header_graph", side_effect=_fake_attach):
+            result = run_dump(p, "elf", header_backend="hybrid", header_graph=True)
+
+        # _attach_header_graph is also invoked (as a fast no-op, header_graph
+        # defaulting False) inside each recursive sub-dump's OWN elf path --
+        # only the call with header_graph=True matters here, and it must run
+        # exactly once, on the already-merged (ast_producer="hybrid")
+        # snapshot, not on either single-backend sub-dump.
+        true_calls = [c for c in calls if c[1] is True]
+        assert len(true_calls) == 1
+        assert true_calls[0][0].ast_producer == "hybrid"
+        assert result.ast_producer == "hybrid"
+
+
+class TestRunDumpHybridDoesNotDoubleEnrichLayout:
+    """general-purpose review finding: run_dump's hybrid branch used to call
+    attach_clang_layout a SECOND time on the already-merged snapshot, even
+    though the recursive header_backend="clang" sub-dump already got it from
+    that same function's own ELF/PE/Mach-O tail before the merge -- a
+    provably redundant extra invocation of the compiled external tool
+    (apply_layout_facts backfills nothing new the second time)."""
+
+    def _fake_dump_elf(self, castxml_snap, clang_snap):
+        def _fake(*args, **kwargs):
+            compile_ctx = kwargs.get("compile")
+            if compile_ctx is not None and compile_ctx.frontend == "clang":
+                return clang_snap
+            return castxml_snap
+
+        return _fake
+
+    def test_attach_clang_layout_not_called_on_merged_snapshot(self, tmp_path):
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        castxml_snap = AbiSnapshot(
+            library="test", version="1.0", from_headers=True, ast_producer="castxml"
+        )
+        clang_snap = AbiSnapshot(
+            library="test", version="1.0", from_headers=True, ast_producer="clang"
+        )
+        calls: list[AbiSnapshot] = []
+
+        def _fake_attach(snap, *_args, **_kwargs):
+            calls.append(snap)
+            return snap
+
+        with patch(
+            "abicheck.service._dump_elf",
+            side_effect=self._fake_dump_elf(castxml_snap, clang_snap),
+        ), patch("abicheck.service.attach_clang_layout", side_effect=_fake_attach):
+            result = run_dump(p, "elf", header_backend="hybrid")
+
+        # attach_clang_layout is called once per recursive sub-dump's OWN
+        # elf-branch tail (castxml_snap's and clang_snap's) -- never a third
+        # time on the merged (ast_producer="hybrid") snapshot itself.
+        assert len(calls) == 2
+        assert all(c.ast_producer != "hybrid" for c in calls)
+        assert result.ast_producer == "hybrid"
+
+
 # ── _implicit_header_includes() (P3: -H umbrella resolves without -I) ────────
 
 
