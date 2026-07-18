@@ -508,6 +508,14 @@ def attach_clang_layout(
         binary,
         resolved_headers,
         eff_includes,
+        # Mirrors cli_dump_helpers.perform_elf_dump / service._attach_header_graph's
+        # own "cc" if lang == "c" else "c++" convention: the main clang dump
+        # resolves its driver the same way, so a C-only toolchain (no clang++
+        # at all) that successfully dumped via "cc" must not have this second,
+        # independent pass default to "c++" and fail to resolve any driver at
+        # all, silently losing every C struct's layout enrichment (Codex
+        # review).
+        compiler="cc" if lang == "c" else "c++",
         gcc_path=compile.gcc_path if compile is not None else None,
         gcc_prefix=compile.gcc_prefix if compile is not None else None,
         gcc_options=compile.gcc_options if compile is not None else None,

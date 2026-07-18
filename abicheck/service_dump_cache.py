@@ -106,23 +106,28 @@ def _dump_cache_extra_key(
     var in a different state could silently reuse the wrong producer's
     snapshot instead of ever calling the real dump (Codex review).
 
-    When the resolved backend is ``"clang"``, also hashes the resolved G28
-    Phase 4 layout-tool identity (``clang_layout_tool.find_layout_tool_bin()``
-    — the ``ABICHECK_CLANG_LAYOUT_TOOL`` path, or whatever a bare
+    When the resolved backend is ``"clang"`` OR ``"hybrid"``, also hashes the
+    resolved G28 Phase 4 layout-tool identity
+    (``clang_layout_tool.find_layout_tool_bin()`` — the
+    ``ABICHECK_CLANG_LAYOUT_TOOL`` path, or whatever a bare
     ``abicheck-clang-layout-tool`` resolves to on ``PATH``, or ``""`` if
     unavailable). ``service.run_dump`` calls ``attach_clang_layout`` for
     every ``"clang"``-backend dump, so the snapshot's layout fields depend on
     that tool's availability/identity too — omitting it let a snapshot
     cached before enabling/changing the tool get silently reused afterward
     (or vice versa), never re-running the real dump to pick up the change
-    (Codex review). Skipped for castxml/hybrid, whose snapshots never
-    involve this tool at all, so its presence/absence is irrelevant to them.
+    (Codex review). A ``"hybrid"`` dump ALSO depends on it: ``run_dump``'s
+    hybrid branch recurses into its own ``header_backend="clang"`` sub-dump
+    (which gets the same ``attach_clang_layout`` enrichment) before
+    ``merge_snapshots`` folds any clang-only declarations — carrying their
+    layout facts — into the merged result (Codex review). Skipped only for
+    ``"castxml"``, whose snapshots never involve this tool at all.
     """
     from .dumper import _resolve_header_backend
 
     resolved_backend = _resolve_header_backend(header_backend)
     layout_tool = ""
-    if resolved_backend == "clang":
+    if resolved_backend in ("clang", "hybrid"):
         from .clang_layout_tool import find_layout_tool_bin
 
         layout_tool = find_layout_tool_bin() or ""

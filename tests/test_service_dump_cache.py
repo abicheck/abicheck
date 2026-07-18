@@ -165,15 +165,32 @@ class TestDumpCacheExtraKey:
         k_after = _dump_cache_extra_key("elf", "clang", None, None)
         assert k_before != k_after
 
-    def test_layout_tool_identity_irrelevant_for_castxml_and_hybrid(self, monkeypatch):
-        # The tool only ever runs for the "clang" backend -- its
-        # availability/identity must not needlessly invalidate castxml/hybrid
-        # cache entries, which never involve it at all.
+    def test_layout_tool_identity_irrelevant_for_castxml(self, monkeypatch):
+        # The tool never runs for a pure "castxml" backend -- its
+        # availability/identity must not needlessly invalidate that cache
+        # entry, which never involves it at all.
         monkeypatch.delenv("ABICHECK_CLANG_LAYOUT_TOOL", raising=False)
         k1 = _dump_cache_extra_key("elf", "castxml", None, None)
         monkeypatch.setenv("ABICHECK_CLANG_LAYOUT_TOOL", "/opt/abicheck-clang-layout-tool")
         k2 = _dump_cache_extra_key("elf", "castxml", None, None)
         assert k1 == k2
+
+    def test_differs_when_layout_tool_becomes_available_for_hybrid(self, monkeypatch):
+        # Codex review: run_dump's hybrid branch recurses into its own
+        # header_backend="clang" sub-dump (which gets the SAME
+        # attach_clang_layout enrichment as a pure "clang" dump) before
+        # merge_snapshots folds any clang-only declarations -- carrying their
+        # layout facts -- into the merged hybrid result. A hybrid cache entry
+        # created before enabling/changing the tool must not be silently
+        # reused afterward either.
+        monkeypatch.delenv("ABICHECK_CLANG_LAYOUT_TOOL", raising=False)
+        with patch(
+            "abicheck.clang_layout_tool.shutil.which", return_value=None
+        ):
+            k_before = _dump_cache_extra_key("elf", "hybrid", None, None)
+        monkeypatch.setenv("ABICHECK_CLANG_LAYOUT_TOOL", "/opt/abicheck-clang-layout-tool")
+        k_after = _dump_cache_extra_key("elf", "hybrid", None, None)
+        assert k_before != k_after
 
 
 class TestCachedRunDump:

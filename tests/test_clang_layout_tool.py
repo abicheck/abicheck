@@ -521,3 +521,24 @@ class TestAttachClangLayout:
         mock_run.assert_called_once()
         # binary is the first positional arg
         assert mock_run.call_args[0][0] == "/fake/tool"
+        # Codex review: lang=None (not "c") must resolve to the c++ driver.
+        assert mock_run.call_args.kwargs["compiler"] == "c++"
+
+    def test_c_lang_uses_c_compiler_not_cxx(self, tmp_path):
+        # Codex review: the main clang dump resolves "cc" (not "c++") for a
+        # --lang c dump (cli_dump_helpers.perform_elf_dump /
+        # service._attach_header_graph's own convention). Without mirroring
+        # that here, a C-only toolchain with no clang++ at all would fail to
+        # resolve any driver for this second pass and silently lose every C
+        # struct's layout enrichment, even though the main dump succeeded.
+        header = tmp_path / "a.h"
+        header.write_text("struct Foo { int a; };")
+        snap = AbiSnapshot(library="lib", version="1.0", ast_producer="clang")
+        with patch(
+            "abicheck.clang_layout_tool.find_layout_tool_bin",
+            return_value="/fake/tool",
+        ), patch(
+            "abicheck.clang_layout_tool.run_layout_tool", return_value=None
+        ) as mock_run:
+            attach_clang_layout(snap, [header], [], lang="c", compile=None)
+        assert mock_run.call_args.kwargs["compiler"] == "cc"
