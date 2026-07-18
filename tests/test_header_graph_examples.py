@@ -90,6 +90,19 @@ pytestmark = [
         shutil.which("clang") is None,
         reason="clang required for the header-only type-graph pass",
     ),
+    # The `dump --header-graph` call below never passes --ast-frontend clang
+    # (nor sets ABICHECK_AST_FRONTEND), so the L2 header parse resolves to
+    # "auto" -> castxml (dumper.py: "auto resolves to castxml and never
+    # silently falls back to clang on castxml-less hosts" -- the automatic
+    # clang fallback only covers a toolchain-version mismatch or a
+    # direct-include #error guard, not castxml being absent outright).
+    # Without this, a host with g++/clang++ but no castxml would fail with a
+    # raw SnapshotError instead of skipping cleanly, unlike every sibling
+    # integration test that does a real --header dump (e.g.
+    # test_example_autodiscovery.py).
+    pytest.mark.skipif(
+        shutil.which("castxml") is None, reason="castxml required for header parsing"
+    ),
 ]
 
 
