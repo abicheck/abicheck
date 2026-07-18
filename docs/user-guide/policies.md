@@ -190,6 +190,27 @@ category, so existing runs are unchanged. Per ADR-028 D3 these knobs never turn
 a source/build-only finding into a hard (artifact-proven) `BREAKING` verdict —
 the strongest they reach is `API_BREAK`.
 
+### Your project's internal-namespace convention (`internal_namespaces`)
+
+Several detectors — the internal-leak walk, reachability-aware suppression
+(see [Suppressions § Reachability-aware suppression](suppressions.md#reachability-aware-suppression)),
+and the L5 call-graph reachability walk (see
+[the ABI guide § The L5 graph](../concepts/abi-api-handling.md#the-l5-graph-reachability-not-just-structure))
+— need to recognize which namespaces are your project's private-implementation
+convention, so a change inside one is a candidate for demotion/suppression
+instead of a hard break. The default token set is `detail`/`impl`/`internal`/
+`__detail`/`_impl`. If your project uses a different convention, declare it
+once instead of repeating it in every suppression rule:
+
+```yaml
+internal_namespaces:
+  - priv
+  - "*_internal"   # fnmatch glob against each `::`-joined namespace segment
+```
+
+An empty (or omitted) list keeps every detector's own built-in default —
+existing policy files are unaffected.
+
 ---
 
 ## Exit Codes

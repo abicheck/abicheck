@@ -297,6 +297,150 @@ depth it *actually reached*
 ([case147](../examples/case147_scan_depth_ladder.md)) — never a bare
 "scan failed".
 
+### The L5 graph: reachability, not just structure
+
+L0–L4 answer *what changed*: a struct grew a field, a function's signature
+changed, a macro's value differs. None of them answer a different question
+that turns out to matter just as much: **can anything outside this library
+actually observe that change?** A change buried in a namespace called
+`detail`/`impl`/`internal` (by convention, never part of the documented API)
+is usually safe to ship without a version bump — *unless* some public,
+consumer-facing declaration depends on it, in which case the "internal"
+label is a fiction and the change is exactly as breaking as if it were
+public. Telling these two cases apart requires *reachability*: a graph walk
+from the public surface, not a flat list of what's public and what isn't.
+
+That graph is **L5** — built by folding two kinds of edges on top of the L4
+source-fact surface (`--depth source`, or the standalone `abicheck scan`):
+
+- **Structural edges** — `TYPE_HAS_FIELD_TYPE`, `TYPE_INHERITS`,
+  `DECL_HAS_TYPE` — a public type embeds, inherits from, or is a field/base
+  of an internal one. This is the same relationship `compute_leak_paths`
+  (the type-layout leak walk) already followed before L5 existed; the graph
+  just makes it explicit and queryable.
+- **Behavioral edges** — `DECL_CALLS_DECL` / `DECL_REFERENCES_DECL` — one
+  declaration's *body* calls or references another. This is the genuinely
+  new capability: it answers "does the compiled code a consumer links
+  against actually execute a call into this internal symbol?", a question no
+  amount of type-layout analysis can answer, because a call is not a type
+  relationship.
+
+Nodes carry `visibility` (`public_header`/`private_header`/`source`/…) and,
+where the L4 surface can tell, `decl_kind` (ordinary declaration vs.
+`inline`/`template`) — the signal that decides whether a declaration's own
+body is compiled into *your* binary or only into the *library's*. Edges are
+built from a real build (`--sources`/`--build-info`, Clang AST calls/refs) or,
+with zero build integration, from a header-only Clang AST tree
+(`--header-graph`) that captures in-header inline/template bodies. Either
+way, evidence *degrades gracefully*: no graph, no compiler, no relevant
+edges — every feature described below simply sees nothing and stays silent,
+per the standing authority rule (L3–L5 evidence explains or corroborates an
+artifact-proven break; it never manufactures or deletes one).
+
+#### Why this distinction matters: the dispatcher scenario
+
+The scenario that motivated building this (ADR-044) is a shape real
+numerics/ML libraries hit constantly — a **public inline dispatcher**:
+
+```cpp
+// public header — compiled into every consumer's own translation unit
+namespace mylib {
+    inline Result compute(const Descriptor& d) {
+        return detail::compute_avx2(d);   // dispatches to an internal specialization
+    }
+}
+```
+
+`detail::compute_avx2` lives in the `detail` namespace — by convention,
+internal. A blanket suppression rule for `namespace: "mylib::detail::**"`
+looks obviously correct: nothing in `detail` is part of the documented API.
+But `compute()` is `inline`, so **its body — including the call to
+`compute_avx2`— is compiled directly into every consumer's binary**. If
+`compute_avx2`'s signature changes or it's removed, every consumer that
+already compiled against the old header now calls a symbol that no longer
+exists (or exists with an incompatible signature) — a real, consumer-visible
+break, hiding behind an internal-sounding name. Type-layout analysis alone
+cannot catch this: nothing about `compute_avx2`'s *type* changed from
+`compute()`'s point of view, because the dependency is a *call*, not a field
+or base class.
+
+This is exactly what the L5 call-graph walk is for. abicheck walks
+`DECL_CALLS_DECL`/`DECL_REFERENCES_DECL` from every entry whose own body is
+actually compiled into consumer code, and if that walk reaches the changed
+`detail::compute_avx2`, the change is tagged `public_reachable` with
+`reachability_kind: symbol_availability` and a proof path
+(`compute() --[DECL_CALLS_DECL]--> detail::compute_avx2()`) before
+suppression rules ever run. A broad `namespace: "mylib::detail::**"` rule is
+then refused for this specific change (a `suppression_would_hide_public_break`
+diagnostic explains why, naming the exact path) unless the rule author
+explicitly opts in with `allow_public_break: true` — turning a silent,
+accidental hole in the compatibility contract into a reviewable decision. See
+[Suppressions § Reachability-aware suppression](../user-guide/suppressions.md#reachability-aware-suppression)
+for the full mechanics (the `reachability` rule setting, the diagnostic
+format) and [ADR-044](../development/adr/044-reachability-aware-suppression.md)
+for the design rationale.
+
+#### What it does *not* flag — staying quiet on the common case
+
+The flip side matters equally: **most functions in most libraries are
+ordinary, out-of-line, non-inline, non-template** — an ordinary ".cpp-defined"
+exported function whose body compiles into the *library's* binary only. If
+that function's out-of-line body calls an internal helper, and the helper is
+later removed, no consumer is affected: either the library's own build fails
+first (a vendor-side problem, caught by their own CI, invisible to anyone
+downstream), or the recompiled function simply stops making that call — a
+consumer only ever links against the function's own exported symbol and
+never sees, references, or embeds the helper it happens to call internally.
+abicheck's call-graph walk only seeds itself from entries whose *own body* is
+actually emitted into consumer code (inline functions/methods and templates)
+— an ordinary exported function is public, but is not one of these entries,
+so a private helper it calls is never reported as "reachable" through it. A
+project can suppress broad internal-namespace churn with confidence that the
+tool is not silently blocking the common case while chasing the rare one.
+
+A safe pimpl (pointer-to-implementation) class follows the same logic from
+the type-layout side: an internal `Impl` type reached only through a public
+class's *pointer* member (`std::unique_ptr<Impl>`) can freely change its
+internal layout, because consumers never see `Impl`'s size or fields — only
+the pointer, whose own size/alignment is stable. The call-graph and
+type-layout walks agree here: neither reaches into `Impl`'s internals unless
+something public actually embeds it by value or calls into it from an
+inline/template body.
+
+#### Other scenarios the L5 graph catches
+
+Beyond the headline dispatcher case, the same graph backs several narrower,
+intra-version and cross-version findings:
+
+- **`internal_symbol_required_by_public_api`** — the inverse framing of the
+  dispatcher scenario as its own finding: a public declaration's dependency
+  on a specific internal symbol, surfaced even when nothing changed yet, so
+  a reviewer can see the coupling before it becomes a break.
+- **`public_api_internal_dependency_added`** (`crosscheck.py`, intra-version)
+  — a single-build hygiene check: a public declaration or type newly depends
+  on an internal one, elevated when the internal side is among the files a
+  PR actually touched. No previous version is needed for this one — it is a
+  same-build "does your public surface quietly depend on something
+  unexported?" audit, useful even on a first release.
+- **`call_graph_public_entry_reachability_changed`** — the set of internal
+  declarations reachable from an exported entry point changed shape between
+  versions, independent of whether any individual declaration's own diff
+  triggered a break — a widening or narrowing of the effective public
+  surface as a fact worth surfacing on its own.
+- **`include_graph_public_header_drift`** / **`build_option_reaches_public_symbol`**
+  — the graph also folds in include-file and build-option edges, so a public
+  header quietly pulling in a different private header, or a build flag that
+  reaches all the way to a public symbol's ABI-relevant layout, shows up the
+  same way a call-graph leak does.
+
+All of these are `RISK_KINDS` or (for the intra-version hygiene checks)
+advisory findings — per the authority rule, L5 evidence never manufactures a
+`BREAKING` verdict on its own. What it changes is whether a break that *is*
+independently proven (an exported symbol actually removed, an exported
+type's layout actually changed) gets correctly attributed to the public
+surface instead of silently absorbed by an internal-looking suppression
+rule.
+
 ### Now run it — the practical flow, plugin, and CI guides
 
 This page is the *concept*. When you are ready to enable a source scan on a real
