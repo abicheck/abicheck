@@ -985,6 +985,59 @@ class TestComputeCallGraphLeakPaths:
         assert compute_call_graph_leak_paths(snap) == {}
         assert "ns::priv::helper" in compute_call_graph_leak_paths(snap, ("priv",))
 
+    def test_result_also_keyed_by_mangled_exported_symbol(self) -> None:
+        """Codex review, fresh evidence: a real ``FUNC_REMOVED`` Change's
+        ``symbol`` is the mangled linker name (diff_symbols.py), not the
+        node's demangled qualified-name label — keying the result only by
+        ``node.label`` would silently never match a real compiled C++
+        removal. A target node's own SOURCE_DECL_MAPS_TO_SYMBOL edge (the
+        same binary_symbol:// identity localize_symbol() already uses) must
+        also produce a lookup key."""
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        snap = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", "ns::detail::train_ops_dispatcher", "source"),
+            ],
+            [
+                GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL"),
+                GraphEdge(
+                    src="decl://int",
+                    dst="binary_symbol://_ZN2ns6detail19train_ops_dispatcherEv",
+                    kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+                ),
+            ],
+        )
+        paths = compute_call_graph_leak_paths(snap)
+        # Both the demangled qualified-name key (compute_leak_paths's own
+        # convention, and what a hand-authored Change might use) ...
+        assert "ns::detail::train_ops_dispatcher" in paths
+        # ... and the mangled key a real diff_symbols.py FUNC_REMOVED
+        # Change.symbol actually holds must resolve to the same proof paths.
+        assert "_ZN2ns6detail19train_ops_dispatcherEv" in paths
+        assert paths["_ZN2ns6detail19train_ops_dispatcherEv"] == paths[
+            "ns::detail::train_ops_dispatcher"
+        ]
+
+    def test_no_symbol_mapping_keys_only_by_label(self) -> None:
+        """A call-graph-only target with no exported symbol at all (e.g.
+        fully inlined, no linkage) gets no mangled key — there is no
+        FUNC_REMOVED-shaped Change that could ever look one up anyway."""
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        snap = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", "ns::detail::helper", "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        paths = compute_call_graph_leak_paths(snap)
+        assert list(paths.keys()) == ["ns::detail::helper"]
+
 
 class TestDetectCallGraphLeaks:
     def test_func_removed_on_internal_decl_reachable_via_call_graph(self) -> None:
@@ -1015,6 +1068,42 @@ class TestDetectCallGraphLeaks:
         assert overlay.public_reachable is True
         assert overlay.reachability_kind == "symbol_availability"
         assert "pubFn" in (overlay.reachability_proof_path or "")
+
+    def test_func_removed_matches_via_mangled_symbol_not_label(self) -> None:
+        """Codex review, fresh evidence: the real-world shape. A real
+        FUNC_REMOVED Change's symbol is the mangled linker name, which does
+        NOT equal the graph node's demangled qualified-name label — the
+        overlay finding must still be produced via the node's own
+        SOURCE_DECL_MAPS_TO_SYMBOL edge, not only when a test hand-picks a
+        matching label/symbol pair."""
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import detect_call_graph_leaks
+
+        mangled = "_ZN2ns6detail19train_ops_dispatcherEv"
+        old = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://int", "ns::detail::train_ops_dispatcher", "source"),
+            ],
+            [
+                GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL"),
+                GraphEdge(
+                    src="decl://int",
+                    dst=f"binary_symbol://{mangled}",
+                    kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+                ),
+            ],
+        )
+        new = _graph_snap([_decl_node("decl://pub", "pubFn", "public_header")], [])
+        # symbol is the mangled name, exactly as diff_symbols.py builds it —
+        # NOT "ns::detail::train_ops_dispatcher" (the node's label).
+        triggering = Change(kind=ChangeKind.FUNC_REMOVED, symbol=mangled, description="removed")
+        extra = detect_call_graph_leaks([triggering], old, new)
+        assert len(extra) == 1
+        overlay = extra[0]
+        assert overlay.kind == ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API
+        assert overlay.symbol == mangled
+        assert overlay.public_reachable is True
 
     def test_no_op_without_triggering_change(self) -> None:
         from abicheck.buildsource.source_graph import GraphEdge

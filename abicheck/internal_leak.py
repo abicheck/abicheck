@@ -685,10 +685,26 @@ def compute_call_graph_leak_paths(
     ``DECL_REFERENCES_DECL`` edges from every public entry (exported-symbol
     decl or public-header-visible decl/type, per
     :func:`~abicheck.buildsource.source_graph.is_public_dependency_node`),
-    returning a mapping ``internal_decl_name -> list of formatted proof-path
+    returning a mapping ``lookup_key -> list of formatted proof-path
     strings`` (one per public entry that reaches it, edge-kind-annotated via
     :func:`~abicheck.buildsource.source_graph_findings._format_dependency_path`,
     e.g. ``"pub() --[DECL_CALLS_DECL]--> detail::helper()"``).
+
+    Each reachable internal target is recorded under **two** keys when both
+    are available (Codex review, fresh evidence): the graph node's own
+    ``label`` (a demangled qualified name, e.g. ``ns::detail::helper`` — the
+    format ``compute_leak_paths``'s type-layout walk already keys by, and
+    what a hand-authored/synthetic ``Change`` uses), and, when the node has
+    its own ``SOURCE_DECL_MAPS_TO_SYMBOL`` edge, the exported **mangled**
+    symbol name that edge maps to (the same ``binary_symbol://`` identity
+    :func:`~abicheck.buildsource.source_graph.localize_symbol` already
+    resolves for the reverse direction). The latter matters because
+    ``diff_symbols.py`` builds a real ``FUNC_REMOVED``/similar ``Change`` with
+    ``symbol=`` the **mangled** linker name, not the demangled qualified name
+    — a call-graph-only node's ``label`` can also be the mangled name or a
+    hash-suffixed qualified name depending on provenance (see
+    :mod:`abicheck.buildsource.call_graph`), so keying by ``label`` alone
+    would silently never match a real, compiled C++ removal.
 
     This is a *symbol-availability* signal, distinct from
     :func:`compute_leak_paths`'s layout/type-graph walk: a public inline
@@ -722,9 +738,12 @@ def compute_call_graph_leak_paths(
         return {}
 
     node_by_id = {n.id: n for n in graph.nodes}
-    exported_decls = {
-        e.src for e in graph.edges if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL"
-    }
+    decl_to_symbol: dict[str, str] = {}
+    symbol_prefix = "binary_symbol://"
+    for e in graph.edges:
+        if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL" and e.dst.startswith(symbol_prefix):
+            decl_to_symbol[e.src] = e.dst[len(symbol_prefix):]
+    exported_decls = set(decl_to_symbol)
     entries = [
         n.id
         for n in graph.nodes
@@ -747,7 +766,11 @@ def compute_call_graph_leak_paths(
             path_edges = _dependency_path(graph, edge_kinds, entry, target)
             if not path_edges:
                 continue
-            result[name].append(_format_dependency_path(graph, path_edges))
+            formatted = _format_dependency_path(graph, path_edges)
+            result[name].append(formatted)
+            mangled = decl_to_symbol.get(target)
+            if mangled and mangled != name:
+                result[mangled].append(formatted)
     return dict(result)
 
 
@@ -1113,14 +1136,22 @@ def detect_call_graph_leaks(
 
     internal_set = tuple(internal_namespaces)
     triggering_kinds = BREAKING_KINDS | API_BREAK_KINDS
+    # Deliberately NOT pre-filtered by is_internal_type(root, ...) here
+    # (Codex review, fresh evidence): _root_type_name_for_change(c) is
+    # c.symbol verbatim for a function-shaped kind like FUNC_REMOVED, and
+    # diff_symbols.py sets that to the *mangled* linker name (no "::"
+    # segments at all) — is_internal_type would reject every real C++
+    # removal before it ever reached the call-path lookup below, exactly the
+    # bug this review round caught. compute_call_graph_leak_paths already
+    # gates its own keys on is_internal_type(node.label, ...) (the qualified
+    # name, which does have "::" segments), so a dict hit below is already
+    # sufficient proof of "internal and call-graph-reachable" — checking it
+    # again here on the wrong string would only reintroduce the bug.
     by_symbol: dict[str, list[Change]] = collections.defaultdict(list)
     for c in changes:
         if c.kind not in triggering_kinds:
             continue
-        root = _root_type_name_for_change(c)
-        if not is_internal_type(root, internal_set):
-            continue
-        by_symbol[root].append(c)
+        by_symbol[_root_type_name_for_change(c)].append(c)
     if not by_symbol:
         return []
 

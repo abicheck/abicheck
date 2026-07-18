@@ -903,6 +903,44 @@ semantics) is closed to the extent described under its own entry.
   `ApplySuppression`/`_filter_pattern_synthetic` already produce, instead of
   the boolean `is_suppressed()`.
 
+**Post-merge review round (Codex), same P1 change:**
+
+- **Mangled symbol vs. demangled label — item 1 was inert on real binaries
+  (fresh evidence).** `compute_call_graph_leak_paths` keyed its result dict by
+  `node.label` — the L5 graph's demangled qualified name for a
+  `SOURCE_DECLARES`-backed decl (`ns::detail::train_ops_dispatcher`), or, for
+  a call-graph-only fallback node, either the mangled name or a
+  `#sha256:`-suffixed qualified name depending on provenance. But
+  `diff_symbols.py` builds a real `FUNC_REMOVED` `Change` with
+  `symbol=` the **mangled** linker name (`_ZN2ns6detail19train_ops_dispatcherEv`),
+  and `_root_type_name_for_change` returns that verbatim for a
+  function-shaped kind — so `detect_call_graph_leaks`'s lookup by `c.symbol`
+  almost never matched `compute_call_graph_leak_paths`'s label-keyed result
+  for a real, castxml/clang-parsed C++ removal; the whole item 1/2 mechanism
+  only appeared to work in unit tests that hand-construct a `Change.symbol`
+  equal to the graph label. Worse, `detect_call_graph_leaks` also
+  pre-filtered its triggering-change candidates with
+  `is_internal_type(root, ...)` — a check that splits on `"::"` — which a
+  bare mangled name (no `::` at all) always fails, rejecting every real
+  candidate before the (already-broken) lookup even ran.
+  Fixed both: `compute_call_graph_leak_paths` now also resolves each
+  internal target's own exported symbol via its `SOURCE_DECL_MAPS_TO_SYMBOL`
+  edge (the same `binary_symbol://` identity
+  `source_graph.localize_symbol()` already uses for the reverse direction)
+  and records the proof paths under that mangled key too, alongside the
+  existing label key — a node with no such edge (no linkage, e.g. fully
+  inlined) gets no mangled key, but no `FUNC_REMOVED`-shaped `Change` could
+  ever look one up anyway. `detect_call_graph_leaks` dropped its redundant
+  `is_internal_type` pre-filter entirely: a hit in the call-path dict is
+  already sufficient proof of "internal and call-graph-reachable", since
+  `compute_call_graph_leak_paths` gates its own key insertion on
+  `is_internal_type(node.label, ...)` (the qualified name, which does have
+  `::` segments) before ever adding either key. Added
+  `test_result_also_keyed_by_mangled_exported_symbol`/
+  `test_func_removed_matches_via_mangled_symbol_not_label` to
+  `test_internal_leak.py`, reproducing the real-world mangled-vs-label shape
+  the prior tests' hand-picked matching names had masked.
+
 ## Roadmap (not committed — scope/sequence per the usual planning process)
 
 P1 is implemented (above); P2 remains open, numbering mirrors the original
