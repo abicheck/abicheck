@@ -209,7 +209,7 @@ python scripts/benchmark_comparison.py --suite pinned74
 
 ### Detection by evidence source
 
-The [five sources of information](#how-it-works--multiple-sources-of-information) each find breaks the weaker sources are blind to. The table below is derived from the `examples/ground_truth.json` minimum-evidence labels of all 169 catalog cases. The `--evidence-tiers` mode empirically scans the runnable catalog at L0-L3; L4 source-pack measurement is tracked as a separate extension:
+The [five sources of information](#how-it-works--multiple-sources-of-information) each find breaks the weaker sources are blind to. The table below is derived from the `examples/ground_truth.json` minimum-evidence labels of the 182 compare-style catalog cases (181 excluding the one documented detector gap, `case111`). The `--evidence-tiers` mode empirically scans the runnable catalog at L0-L3; L4 source-pack measurement is tracked as a separate extension:
 
 ```bash
 python scripts/benchmark_comparison.py --evidence-tiers
@@ -217,14 +217,14 @@ python scripts/benchmark_comparison.py --evidence-tiers
 
 | Source you provide | Cumulative cases reaching the correct verdict |
 |--------------------|:---------------------------------------------:|
-| Just the binary (`L0`) | 52 / 169 (31%) |
-| + Debug symbols (`L1`) | 119 / 169 (70%) |
-| + Public headers (`L2`) | 150 / 169 (89%) |
-| + Build data (`L3`) | 160 / 169 (95%) |
-| + Sources (`L4`) | 166 / 169 (98%) |
-| + Source graph (`L5`) | 169 / 169 (100%) |
+| Just the binary (`L0`) | 64 / 181 (35%) |
+| + Debug symbols (`L1`) | 132 / 181 (73%) |
+| + Public headers (`L2`) | 157 / 181 (87%) |
+| + Build data (`L3`) | 167 / 181 (92%) |
+| + Sources (`L4`) | 172 / 181 (95%) |
+| + Source graph (`L5`) | 181 / 181 (100%) |
 
-More evidence also *removes* false positives (e.g. header scoping correctly dismisses internal-struct changes). This staircase is a **discoverability floor** — the minimum source that unlocks the correct verdict per case — not a blind accuracy score; for the stricter number that also penalizes false positives across the whole catalog, see the [full-catalog benchmark](https://abicheck.github.io/abicheck/reference/tool-comparison/#full-catalog-benchmark-2026-07-12-all-170-cases) (L3-L5 scores 90.0% there, with 7 known false positives). See [Evidence & Detectability](https://abicheck.github.io/abicheck/concepts/evidence-and-detectability/) for what each source reveals and [Benchmarking by evidence tier](https://abicheck.github.io/abicheck/reference/tool-comparison/#benchmarking-by-evidence-tier) for the methodology.
+More evidence also *removes* false positives (e.g. header scoping correctly dismisses internal-struct changes). This staircase is a **discoverability floor** — the minimum source that unlocks the correct verdict per case — not a blind accuracy score; for the stricter number that also penalizes false positives across the whole catalog, see the [full-catalog benchmark](https://abicheck.github.io/abicheck/reference/tool-comparison/#full-catalog-benchmark-2026-07-18-all-193-cases) (L3-L5 scores 99.5% there, with 0 false positives). See [Evidence & Detectability](https://abicheck.github.io/abicheck/concepts/evidence-and-detectability/) for what each source reveals and [Benchmarking by evidence tier](https://abicheck.github.io/abicheck/reference/tool-comparison/#benchmarking-by-evidence-tier) for the methodology.
 
 Per-case matrix, methodology, full-catalog notes, and the pinned cross-tool comparison table: [Tool Comparison & Benchmarks](https://abicheck.github.io/abicheck/reference/tool-comparison/).
 

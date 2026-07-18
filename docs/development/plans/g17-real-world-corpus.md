@@ -6,7 +6,8 @@
 ## Problem
 
 abicheck's correctness is exercised almost entirely by the **synthetic**
-`examples/case*` fixtures (141 minimal C/C++ cases) and unit tests. Those are
+`examples/case*` fixtures (193 minimal C/C++ cases today, 159 of them
+compilable `.so`-pair lanes) and unit tests. Those are
 precise but small and author-controlled. The 2026-06 field evaluation showed that
 **real upstream libraries** exercise shapes the fixtures don't: split packaging,
 multi-`.so` bundles, versioned-symbol schemes (ICU/OpenSSL/LLVM), DWARF-bearing
