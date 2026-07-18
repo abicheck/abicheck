@@ -60,8 +60,8 @@ README), so it is credited in the full example matrix via known-gap-oracle
 provenance — its own `source_smoke` proves the canonical `API_BREAK` — rather
 than direct coverage. See
 [the validation runbook](../development/examples-validation-runbook.md) for
-the direct-vs-known-gap-oracle accounting (180 direct + 1 known-gap-oracle
-= 181 `COVERED`).
+the direct-vs-known-gap-oracle accounting (190 direct + 1 known-gap-oracle
+= 191 `COVERED`).
 
 Current stripped-header signal-loss cases: `case103_toolchain_flag_drift`,
 `case117_no_unique_address`, `case129_struct_return_convention`,
@@ -382,7 +382,7 @@ and validated by `tests/test_evidence_tiers.py`. Aggregated over the 153 compare
 > not yet re-run empirically, see the caveat above); it does not penalize a
 > tier for *over-calling* elsewhere in the catalog. The
 > [full-catalog benchmark](#full-catalog-benchmark-2026-07-17-all-191-cases)
-> below is the stricter, empirically-measured number — it scores all 186 cases
+> below is the stricter, empirically-measured number — it scores all 191 cases
 > including false positives, which is why `L3-L5` reads 90.9% there rather
 > than the 100% this table's `L5` row shows.
 
@@ -714,7 +714,7 @@ ABI replay), and `case130`-`case133` need L3 — so an L2-only (headers, no
 ## Pinned vendor benchmark summary (2026-05-19, 74-case subset)
 
 > **Historical.** Superseded by the [full-catalog benchmark](#full-catalog-benchmark-2026-07-17-all-191-cases)
-> above, which covers all 186 cases with a stricter denominator (SKIP/ERROR/TIMEOUT
+> above, which covers all 191 cases with a stricter denominator (SKIP/ERROR/TIMEOUT
 > count as misses) plus an FP/FN breakdown. Kept here for the original 74-case
 > release-pinned methodology and historical numbers. The harness has since
 > dropped the standalone `abicheck_compat`/`abicheck_strict` tool lanes (the

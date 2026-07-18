@@ -37,11 +37,11 @@ move. That makes the break invisible to symbol-level tools.
 
 ```bash
 cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case77_detail_pimpl_vtable_changed_app case77_detail_pimpl_vtable_changed_v2
+cmake --build /tmp/abicheck-examples-build --target case76_detail_pimpl_vtable_changed_app case76_detail_pimpl_vtable_changed_v2
 
 tmp=$(mktemp -d)
-cp /tmp/abicheck-examples-build/case77_detail_pimpl_vtable_changed/app_v1 "$tmp/"
-cp /tmp/abicheck-examples-build/case77_detail_pimpl_vtable_changed/libv2.so "$tmp/libv1.so"
+cp /tmp/abicheck-examples-build/case76_detail_pimpl_vtable_changed/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case76_detail_pimpl_vtable_changed/libv2.so "$tmp/libv1.so"
 (cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
 # status=50 (expect 1)
 ```

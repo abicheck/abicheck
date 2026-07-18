@@ -55,11 +55,11 @@ python3 -m abicheck.cli compare /tmp/v1.json /tmp/v2.json
 
 ```bash
 cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case61_base_class_position_changed_app case61_base_class_position_changed_v2
+cmake --build /tmp/abicheck-examples-build --target case60_base_class_position_changed_app case60_base_class_position_changed_v2
 
 tmp=$(mktemp -d)
-cp /tmp/abicheck-examples-build/case61_base_class_position_changed/app_v1 "$tmp/"
-cp /tmp/abicheck-examples-build/case61_base_class_position_changed/libv2.so "$tmp/libv1.so"
+cp /tmp/abicheck-examples-build/case60_base_class_position_changed/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case60_base_class_position_changed/libv2.so "$tmp/libv1.so"
 (cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
 # id = <garbage>; CORRUPTION: base-class order changed, subobject offsets mismatch
 ```

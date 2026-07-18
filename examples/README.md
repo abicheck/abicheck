@@ -1,12 +1,20 @@
 # ABI Scenario Catalog
 
 <!-- BEGIN GENERATED: catalog-headline (keep counts in sync with examples/ground_truth.json) -->
-This directory contains **193 cases** (188 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
+This directory contains **193 cases** (188 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Most cases are a minimal, compilable C/C++ example with:
 <!-- END GENERATED: catalog-headline -->
 
 - Paired `v1/` and `v2/` source + headers.
 - A consumer `app.c` / `app.cpp` that demonstrates the actual failure at runtime.
 - A per-case `README.md` explaining what breaks and why.
+
+A minority of cases ship a committed fixture instead of a compilable `v1`/`v2`
+pair, by design — see `examples/CLAUDE.md`: the G20 audit/cross-source corpus
+(cases 143–151, a `snapshot.abi.json`), and the L5 source-graph corpus (cases
+187–191, hand-built `old.json`/`new.json` evidence packs, not compiled
+programs). Each such case's own README says so explicitly; check
+`ground_truth.json`/the per-case README before assuming a `v1`/`v2` source
+pair exists.
 
 The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pitfalls. For conceptual background on what ABI stability means and how to reason about it, see [ABI/API Handling & Recommendations](../docs/concepts/abi-api-handling.md).
 
@@ -76,10 +84,10 @@ Commands below use `PYTHONPATH=.`.
 | Check | Command | Executed where | Scope | Result | Status |
 |---|---|---|---:|---|---|
 | Build/autodiscovery | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | CI Linux, gcc/clang | 166 integration items | gcc: 137 passed / 29 skipped; clang: 138 passed / 28 skipped | Green default single-library build lane |
-| Default/debug verdicts | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 186 catalog cases | gcc: 149 PASS / 5 XFAIL / 37 SKIP; clang: 149 PASS / 6 XFAIL / 36 SKIP | Green default/debug verdict lane |
-| Runtime smoke | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 186 catalog cases | 85 DEMONSTRATED / 68 NO_RUNTIME_SIGNAL / 1 BASELINE_SIGNAL / 37 SKIP | Passing; no BUILD_ERROR. The runner now compares each app's baseline exit code against a per-case `runtime_baseline_exit` in `ground_truth.json` (default 0) instead of hardcoding zero, so apps that deliberately return a computed value (e.g. case111's `ets(42).local()` returning `42`) are no longer misread as a broken baseline. `case06_visibility` is the one remaining, intentionally-unwhitelisted case — see "Known validation gaps" below |
-| Release headers | `python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 186 catalog cases | 141 PASS / 1 FAIL / 5 XFAIL / 44 SKIP | Informational; one case regresses to a false-risk result under release (no-debug-info) headers — needs a root-cause pass, not yet fixed |
-| Stripped headers | `python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 186 catalog cases | 137 PASS / 5 FAIL / 5 XFAIL / 44 SKIP | Informational; reduced-evidence signal-loss backlog (below) |
+| Default/debug verdicts | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 191 catalog cases | gcc: 149 PASS / 5 XFAIL / 37 SKIP; clang: 149 PASS / 6 XFAIL / 36 SKIP | Green default/debug verdict lane |
+| Runtime smoke | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 191 catalog cases | 85 DEMONSTRATED / 68 NO_RUNTIME_SIGNAL / 1 BASELINE_SIGNAL / 37 SKIP | Passing; no BUILD_ERROR. The runner now compares each app's baseline exit code against a per-case `runtime_baseline_exit` in `ground_truth.json` (default 0) instead of hardcoding zero, so apps that deliberately return a computed value (e.g. case111's `ets(42).local()` returning `42`) are no longer misread as a broken baseline. `case06_visibility` is the one remaining, intentionally-unwhitelisted case — see "Known validation gaps" below |
+| Release headers | `python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 191 catalog cases | 141 PASS / 1 FAIL / 5 XFAIL / 44 SKIP | Informational; one case regresses to a false-risk result under release (no-debug-info) headers — needs a root-cause pass, not yet fixed |
+| Stripped headers | `python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 191 catalog cases | 137 PASS / 5 FAIL / 5 XFAIL / 44 SKIP | Informational; reduced-evidence signal-loss backlog (below) |
 | Build/source smoke | `python tests/validate_examples.py case01 case04 case98 case105 case122 case129 case130 case131 case132 case133 --artifact-variant build-source --json` | CI Linux artifact | 10 representative cases | 10 PASS | Informational, clean. Not full L3-L5 coverage — see "Known validation gaps" |
 
 Counts above are from the most recent full catalog run this table was refreshed against; re-run
@@ -115,19 +123,24 @@ the way it previously did (stale at a 169-case catalog for several releases).
     v1's for the pure-virtual-transition comparison; added a body (legal for a pure virtual function,
     reachable only via an explicit qualified call, so it changes no runtime behavior) so the two
     versions' `Processor::process()` can be compared.
-  - **13 are genuine, root-caused detector gaps**, documented in `ground_truth.json` via a
+  - **Genuine, root-caused detector gaps** are documented in `ground_truth.json` via a
     `known_kind_gap` (the specific missing/wrong kind) + `known_kind_gap_note` (the grounded root
     cause, cited to file:line) on each case, and surfaced by `validate_examples.py`'s `kinds_strict`
     as `documented-mismatch` (a triaged, tracked gap) rather than a bare `mismatch` (an unexplained
-    one): `case06_visibility`, `case39_var_const`, `case66_language_linkage_changed`,
-    `case72_covariant_return_changed`, `case74_detail_base_class_changed`,
-    `case75_detail_embedded_by_value`, `case76_detail_pimpl_vtable_changed`,
-    `case79_missing_template_instantiation`, `case82_sycl_overload_set_removed`,
-    `case87_default_template_arg_changed`, `case88_cpo_kind_changed`,
-    `case116_atomic_qualifier_changed`, `case141_versioned_symbol_scheme`. Several share one root
-    cause: castxml never namespace-qualifies `RecordType.name` (case74/75/76) nor parameter types
-    (case82), and no dumper backend ever produces a demangled, template-arg-embedded `Function.name`
-    (case79, case87) — see each case's `known_kind_gap_note` for specifics.
+    one). A prior pass triaged 13 such cases (`case06_visibility`, `case39_var_const`,
+    `case66_language_linkage_changed`, `case72_covariant_return_changed`,
+    `case74_detail_base_class_changed`, `case75_detail_embedded_by_value`,
+    `case76_detail_pimpl_vtable_changed`, `case79_missing_template_instantiation`,
+    `case82_sycl_overload_set_removed`, `case87_default_template_arg_changed`,
+    `case88_cpo_kind_changed`, `case116_atomic_qualifier_changed`,
+    `case141_versioned_symbol_scheme`); the CastXML schema-completeness/Clang-parity work in PR #582
+    subsequently closed all but one of those — `ground_truth.json` is the live count (grep it for
+    `known_kind_gap` rather than trusting a number here), and as of this writing
+    `case66_language_linkage_changed` is the only case still carrying one: castxml parses its v2
+    header in C mode (the header alone gives no C++ signal) and its pseudo-Itanium `mangled` guess
+    for a C-mode Variable/Function doesn't match either side's real export — see the case's
+    `known_kind_gap_note` for the full root cause. The verdict is still correct via a generic
+    `func_removed`; only the dedicated `func_language_linkage_changed` kind is missing.
   - `case59_func_became_inline` and (clang-only) `case115_bit_int_width_changed` no longer/don't
     reproduce as kind mismatches in this pass (the former is fixed upstream; the latter is a
     local castxml/`_BitInt` parsing limitation in this environment, not evaluated) — case membership

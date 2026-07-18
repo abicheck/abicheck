@@ -481,6 +481,31 @@ class _CastxmlParser:
             return False
         return el.tag in ("PointerType", "ReferenceType", "RValueReferenceType")
 
+    def _type_alignment_bits(self, id_: str, depth: int = 0) -> int | None:
+        """Natural (computed) alignment in bits for a type id, if castxml exposes it.
+
+        Distinct from a Variable's own ``align`` attribute (an *explicit*
+        alignas/``__attribute__((aligned))`` override on the declaration —
+        see ``parse_variables``): this walks through cv-qualifiers, typedefs,
+        and elaborated-type wrappers to the underlying type node and reads
+        its own ``align``, which castxml always populates with the compiler's
+        actual computed alignment (the same attribute ``_build_record_type``
+        already trusts unconditionally for structs/unions/classes). Used as
+        declared-alignment corroboration evidence for a plain variable with
+        no explicit override, so ``_check_object_alignment_reduced`` isn't
+        left with two ``None``s (and therefore no corroboration at all) for
+        the overwhelming majority of exported globals that never carry an
+        explicit alignment attribute.
+        """
+        if depth > 10 or not id_:
+            return None
+        el = self._resolve(id_)
+        if el is None:
+            return None
+        if el.tag in ("CvQualifiedType", "Typedef", "ElaboratedType"):
+            return self._type_alignment_bits(el.get("type", ""), depth + 1)
+        return self._optional_int_attr(el, "align")
+
     def _resolve_cv_restrict(self, id_: str, depth: int = 0) -> tuple[bool, bool, bool]:
         """Whether *id_*'s own (top-level) qualification is const/volatile/restrict.
 
@@ -844,7 +869,9 @@ class _CastxmlParser:
             return self._type_name(el.get("type", ""))
         return self._type_name(type_id)
 
-    def _parse_function_params(self, el: Element) -> tuple[list[Param], bool, list[str]]:
+    def _parse_function_params(
+        self, el: Element
+    ) -> tuple[list[Param], bool, list[str]]:
         """Collect a function element's parameters, whether it is
         C-variadic, and each parameter's ctor-identity-key type spelling
         (mirrors ``params`` positionally; see ``_ctor_param_identity_type``).
@@ -1202,9 +1229,15 @@ class _CastxmlParser:
                     visibility=vis,
                     is_const=is_const,
                     source_location=self._source_location(el),
-                    # Explicit alignas/aligned attribute when castxml emits an
-                    # ``align`` attribute on the Variable; None = unknown.
-                    alignment_bits=self._optional_int_attr(el, "align"),
+                    # Explicit alignas/aligned override when castxml emits an
+                    # ``align`` attribute on the Variable itself; falls back to
+                    # the type's own natural (computed) alignment when there is
+                    # no explicit override, so a plain scalar/aggregate global —
+                    # the common case — still carries real declared-alignment
+                    # evidence instead of leaving this None. See
+                    # _type_alignment_bits.
+                    alignment_bits=self._optional_int_attr(el, "align")
+                    or self._type_alignment_bits(el.get("type", "")),
                     # See RecordType.deprecated for the message-text convention.
                     deprecated=_deprecation_marker(el),
                 )

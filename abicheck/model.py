@@ -252,8 +252,10 @@ class Variable:
     # Provenance (ADR-015, schema v6) — see Function.source_header.
     source_header: str | None = None
     origin: ScopeOrigin = ScopeOrigin.UNKNOWN
-    # Declared alignment in bits (alignas / __attribute__((aligned))).
-    # None = not captured (older snapshots / dumpers without support).
+    # Declared alignment in bits: an explicit alignas / __attribute__((aligned))
+    # override when present, else the variable's type's natural (computed)
+    # alignment when a dumper can resolve it. None = not captured (older
+    # snapshots / dumpers without support).
     alignment_bits: int | None = None
     # See Function.deprecated for the message-string convention.
     deprecated: str | None = None

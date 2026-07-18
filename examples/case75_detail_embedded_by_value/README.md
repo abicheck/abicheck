@@ -33,11 +33,11 @@ This minimal app does not trip the corrupted field, but the public `table` embed
 
 ```bash
 cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case76_detail_embedded_by_value_app case76_detail_embedded_by_value_v2
+cmake --build /tmp/abicheck-examples-build --target case75_detail_embedded_by_value_app case75_detail_embedded_by_value_v2
 
 tmp=$(mktemp -d)
-cp /tmp/abicheck-examples-build/case76_detail_embedded_by_value/app_v1 "$tmp/"
-cp /tmp/abicheck-examples-build/case76_detail_embedded_by_value/libv2.so "$tmp/libv1.so"
+cp /tmp/abicheck-examples-build/case75_detail_embedded_by_value/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case75_detail_embedded_by_value/libv2.so "$tmp/libv1.so"
 (cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
 # rows=3 cols=4 (expect 3 4)
 ```
