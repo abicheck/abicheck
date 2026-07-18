@@ -509,9 +509,10 @@ python3 scripts/generate_benchmark_report.py \
 | ABICC (abi-dumper) | 86 | 44.6% | 8 | 99 | 872s (~15 min) |
 | ABICC (xml/legacy) | 78 | 40.4% | 7 | 108 | 1871s (~31 min) |
 
-**ABICC is roughly 150-1560× slower than libabigail** for the identical
-193-case catalog (872-1871s vs ~1-6s) while scoring *lower* on accuracy than
-abicheck's L2 lane. This is why ABICC/libabigail results are frozen
+**ABICC is roughly 340-727× slower than libabigail** for the identical
+193-case catalog — abi-dumper/`abidiff` is ~727× (872s vs 1.2s), xml/`abidiff_headers`
+is ~340× (1871s vs 5.5s) — while scoring *lower* on accuracy than abicheck's
+L2 lane. This is why ABICC/libabigail results are frozen
 (`--freeze`) into `scripts/frozen_competitor_results.json` — a committed
 reference file merged into every subsequent run automatically — rather than
 re-run on every abicheck iteration; nothing in a competitor's own verdict
@@ -605,9 +606,9 @@ branch-local docs commit, is the stable reference).
 `abicheck`, `abicheck_full`, `abidiff`, and `abidiff_headers` complete all
 74/74 cases cleanly. Only the two ABICC lanes leave cases unscored — the
 `Correct`/`Accuracy` columns above already fold this in, but not which
-specific cases: `abicc_dumper` scores 71/74 (`case09_cpp_vtable`,
+specific cases: `abicc_dumper` completes 71/74 (`case09_cpp_vtable`,
 `case59_func_became_inline` timeout; `case16_inline_to_non_inline` error);
-`abicc_xml` scores 72/74 (`case16_inline_to_non_inline`,
+`abicc_xml` completes 72/74 (`case16_inline_to_non_inline`,
 `case60_base_class_position_changed` timeout).
 
 ### Commands used
