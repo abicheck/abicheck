@@ -71,6 +71,15 @@ the identical command) — not just the fast command above.**
 these commands; if you change a check, change it in `scripts/verify.py` and
 let that test tell you what else needs updating.
 
+**`pip install -e ".[dev]"` alone is not full `pr`-profile parity.** The
+`docs-build` step needs `mkdocs`, which isn't in `[dev]` (matching the CI
+`lint-and-types` job's separate mkdocs install) — run
+`pip install -e ".[dev,docs]"` to get it. `verify.py` never silently claims
+success when a step like this is skipped for a missing tool: a `pr`-profile
+run with any skip prints an explicit `WARNING: this pr-profile run is
+INCOMPLETE` line and sets `"complete": false` in the `--json` receipt — don't
+treat a skip-containing run as equivalent to a clean CI pass.
+
 [pixi](https://pixi.sh) is also supported (`pixi install && pixi run test`,
 `pixi run check`) and additionally manages the `castxml`/compiler/`libabigail`/
 `abi-compliance-checker` system tools for the `integration`/`libabigail`/`abicc`

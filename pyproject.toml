@@ -77,6 +77,17 @@ dev = [
 validation = [
     "zstandard>=0.21",
 ]
+# Mirrors [tool.pixi.feature.docs.pypi-dependencies] and the `lint-and-types`
+# CI job's docs install — `pip install -e ".[dev,docs]"` is what
+# `scripts/verify.py --profile pr`'s docs-build step needs to actually run
+# instead of skipping (CLAUDE.md "M0-3": a skip must never be mistaken for a
+# pass — see verify.py's incomplete-run warning).
+docs = [
+    "mkdocs",
+    "mkdocs-material",
+    "pymdown-extensions",
+    "mkdocs-redirects",
+]
 
 [tool.mypy]
 python_version = "3.10"

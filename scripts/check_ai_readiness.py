@@ -20,9 +20,9 @@ from __future__ import annotations
 
 import argparse
 import ast
+import importlib.util
 import json
 import re
-import shutil
 import subprocess
 import sys
 from collections import defaultdict
@@ -828,15 +828,21 @@ def check_import_cycles(f: Findings) -> None:
 def check_mypy_baseline(f: Findings) -> None:
     """Run `mypy abicheck/` and ensure the error count hasn't drifted upward.
 
-    Skipped (with a single info line) when mypy is unavailable on PATH.
+    Skipped (with a single info line) when mypy is unavailable. Invoked as
+    ``sys.executable -m mypy`` rather than a bare ``mypy`` resolved via PATH
+    (`shutil.which`) — a bare command name can resolve to a *different*
+    install than the one pinned for this interpreter (`mypy==1.19.1` per
+    pyproject.toml's `[dev]` extra), which silently ran the wrong mypy
+    version here and reported a false baseline drift (CLAUDE.md "M0-3" —
+    the same PATH-ambiguity class scripts/verify.py's `_py()` helper exists
+    to close, just found again in this script's own bespoke invocation).
     """
-    mypy_bin = shutil.which("mypy")
-    if mypy_bin is None:
+    if importlib.util.find_spec("mypy") is None:
         print("mypy-baseline: mypy not installed, skipping")
         return
     try:
-        proc = subprocess.run(  # noqa: S603 — explicit binary path from PATH
-            [mypy_bin, "abicheck"],
+        proc = subprocess.run(
+            [sys.executable, "-m", "mypy", "abicheck"],
             cwd=ROOT,
             capture_output=True,
             text=True,

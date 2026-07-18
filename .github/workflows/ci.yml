@@ -55,13 +55,8 @@ jobs:
           pip install -e ".[dev]" build twine
       - name: Verify FAIR metadata and published schema copies
         run: python scripts/verify.py --profile pr --only schema-sync,fair-metadata
-      - name: Build distribution artifacts
-        run: python -m build
-      - name: Validate distribution metadata
-        run: |
-          twine check dist/*
-          python scripts/verify.py --profile full --only distribution-build
-          python scripts/check_distribution_metadata.py
+      - name: Build, twine check, and validate distribution metadata
+        run: python scripts/verify.py --profile full --only distribution-build
 
   lint-and-types:
     runs-on: ubuntu-latest
@@ -388,7 +383,11 @@ jobs:
         # every test and pass) — see tests/conftest.py silent-skip guard.
         env:
           ABICHECK_MIN_EXECUTED: '5'
-        run: pytest tests/test_abidiff_parity.py tests/test_abicompat_parity.py tests/test_abipkgdiff_parity.py -v -m libabigail --tb=short
+        # Marker-scoped (not a hardcoded file list): tests/test_abidiff_parity_extended.py
+        # and tests/test_surface_scope_parity.py also carry @pytest.mark.libabigail and
+        # would silently never run under the old hardcoded 3-file list — matches the
+        # `pixi run -e parity test-libabigail` task, which was already marker-scoped.
+        run: pytest tests/ -v -m libabigail --tb=short
 
   abicc-parity:
     needs: [heavy-parity-gate]
@@ -410,9 +409,12 @@ jobs:
       - name: Run ABICC parity tests
         # Fail loudly if abi-compliance-checker didn't install (lane would
         # otherwise skip every test and pass) — see tests/conftest.py guard.
+        # Marker-scoped (not a hardcoded file list): tests/test_abicc_parity_extended.py
+        # also carries @pytest.mark.abicc and would silently never run under the old
+        # hardcoded 2-file list.
         env:
           ABICHECK_MIN_EXECUTED: '10'
-        run: pytest tests/test_abicc_parity.py tests/test_xml_parity.py -v -m abicc --tb=short
+        run: pytest tests/ -v -m abicc --tb=short
       - name: Run XML schema validation tests (no ABICC required)
         run: pytest tests/test_xml_parity.py::TestXmlSchemaValidation tests/test_xml_report.py -v --tb=short
 

@@ -94,6 +94,10 @@ python scripts/verify.py --profile full   # + integration/parity/mutation/packag
 
 `pixi run check` is exactly `python scripts/verify.py --profile pr` — treat
 either as the real definition of done, not the fast-lane command alone.
+`pip install -e ".[dev,docs]"` (not just `[dev]`) gets the `docs-build` step's
+`mkdocs` dependency too — without it, that step is skipped rather than run,
+and `verify.py` prints a loud warning that the `pr`-profile run is incomplete
+rather than silently reporting success.
 
 ### Quick tests (default CI gate)
 

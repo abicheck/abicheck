@@ -259,33 +259,26 @@ STEPS: tuple[Step, ...] = (
         description="DWARF/header parsing against real castxml + a C/C++ compiler",
     ),
     Step(
+        # Marker-scoped over all of tests/ (not a hardcoded file list): matches
+        # `pixi run -e parity test-libabigail` — a hardcoded list silently misses
+        # any file added later that also carries @pytest.mark.libabigail (this
+        # already happened: tests/test_abidiff_parity_extended.py and
+        # tests/test_surface_scope_parity.py both carry the marker but were never
+        # in the old 3-file list).
         "libabigail-parity",
-        _py(
-            "pytest",
-            "tests/test_abidiff_parity.py",
-            "tests/test_abicompat_parity.py",
-            "tests/test_abipkgdiff_parity.py",
-            "-m",
-            "libabigail",
-            "--tb=short",
-        ),
+        _py("pytest", "tests/", "-m", "libabigail", "--tb=short"),
         frozenset({FULL}),
         precondition=_need_bins("abidiff"),
-        description="libabigail parity lane",
+        description="libabigail parity lane (marker-scoped)",
     ),
     Step(
+        # Marker-scoped for the same reason as libabigail-parity above —
+        # tests/test_abicc_parity_extended.py also carries @pytest.mark.abicc.
         "abicc-parity",
-        _py(
-            "pytest",
-            "tests/test_abicc_parity.py",
-            "tests/test_xml_parity.py",
-            "-m",
-            "abicc",
-            "--tb=short",
-        ),
+        _py("pytest", "tests/", "-m", "abicc", "--tb=short"),
         frozenset({FULL}),
         precondition=_need_bins("abi-compliance-checker", "abi-compliance-checker.pl"),
-        description="ABICC parity lane",
+        description="ABICC parity lane (marker-scoped)",
     ),
     Step(
         "slow",
@@ -301,11 +294,14 @@ STEPS: tuple[Step, ...] = (
         description="Mutation-score survivor-baseline gate",
     ),
     Step(
+        # Builds dist/ itself (`python -m build`), then `twine check`s the
+        # result, then validates its metadata — self-contained, so this step
+        # doesn't require a caller to have already populated dist/.
         "distribution-build",
-        _pyscript("scripts/check_distribution_metadata.py"),
+        _pyscript("scripts/build_and_check_distribution.py"),
         frozenset({FULL}),
         precondition=_need_modules("build", "twine"),
-        description="sdist/wheel metadata validation (build + twine check)",
+        description="Build sdist/wheel, twine check, validate metadata",
     ),
 )
 
@@ -414,23 +410,34 @@ def main(argv: Sequence[str] | None = None) -> int:
     n_failed = sum(1 for r in results if r["status"] == "failed")
     n_skipped = sum(1 for r in results if r["status"] == "skipped")
     overall = "failed" if n_failed else "passed"
+    skipped_names = [str(r["name"]) for r in results if r["status"] == "skipped"]
 
     print(
         f"\nverify.py --profile {args.profile}: {n_passed} passed, {n_failed} failed, {n_skipped} skipped"
     )
+    if args.profile == PR and n_skipped:
+        # `pr` steps are documented as "always-required CI-equivalent checks" —
+        # a skip here (missing tool/module, e.g. mkdocs not installed) means
+        # this run did NOT reproduce everything the real PR gate checks, even
+        # though `overall` above can still read "passed". Say so explicitly:
+        # a partial result must never be mistaken for a complete one.
+        print(
+            f"WARNING: this `pr`-profile run is INCOMPLETE — skipped "
+            f"{', '.join(skipped_names)}. It is not a full substitute for CI "
+            f"until the missing tool(s)/module(s) are installed."
+        )
 
     if args.json:
         receipt = {
             "profile": args.profile,
             "commit": _git_commit(),
+            "complete": n_skipped == 0,
             "environment": {
                 "python": sys.version.split()[0],
                 "platform": platform.platform(),
             },
             "checks": results,
-            "skipped_capabilities": [
-                r["name"] for r in results if r["status"] == "skipped"
-            ],
+            "skipped_capabilities": skipped_names,
             "overall": overall,
         }
         Path(args.json).write_text(
