@@ -94,6 +94,41 @@ def test_content_hash_changes_with_build_evidence(tmp_path):
     assert p1.content_hash() != p2.content_hash()
 
 
+def test_content_hash_stable_across_coverage_detail_and_elapsed_s(tmp_path):
+    # Regression (Codex review): build_inline_coverage() (inline.py) stamps
+    # each LayerCoverage row's "detail" with the same replay wall-clock/
+    # cache-hit text (e.g. "cache 2/3 hit (67%), 1.80s") that
+    # build_manifest.py's own digest already strips elsewhere -- but
+    # content_hash() itself still hashed the raw LayerCoverage.to_dict(),
+    # including "detail"/"elapsed_s", so two packs with identical evidence
+    # collected with different cache warmth or wall time still hashed
+    # differently, contradicting this method's own "identical evidence
+    # collected at different times hash the same" docstring promise.
+    from abicheck.buildsource.model import LayerCoverage
+
+    p1 = BuildSourcePack.empty(tmp_path / "a")
+    p1.manifest.coverage = [
+        LayerCoverage(
+            layer=DataLayer.L4_SOURCE_ABI.value,
+            status=CoverageStatus.PRESENT,
+            detail="cache 2/3 hit (67%), 1.80s",
+            elapsed_s=1.80,
+        )
+    ]
+    p1.write()
+    p2 = BuildSourcePack.empty(tmp_path / "b")
+    p2.manifest.coverage = [
+        LayerCoverage(
+            layer=DataLayer.L4_SOURCE_ABI.value,
+            status=CoverageStatus.PRESENT,
+            detail="cache 0/3 hit (0%), 9.42s",
+            elapsed_s=9.42,
+        )
+    ]
+    p2.write()
+    assert p1.content_hash() == p2.content_hash()
+
+
 def test_to_ref_roundtrip(tmp_path):
     pack = BuildSourcePack.empty(tmp_path / "p")
     pack.manifest.coverage = []
