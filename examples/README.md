@@ -10,11 +10,14 @@ This directory contains **193 cases** (188 single-library + 5 multi-library bund
 
 A minority of cases ship a committed fixture instead of a compilable `v1`/`v2`
 pair, by design — see `examples/CLAUDE.md`: the G20 audit/cross-source corpus
-(cases 143–151, a `snapshot.abi.json`), and the L5 source-graph corpus (cases
-187–191, hand-built `old.json`/`new.json` evidence packs, not compiled
-programs). Each such case's own README says so explicitly; check
-`ground_truth.json`/the per-case README before assuming a `v1`/`v2` source
-pair exists.
+(cases 143–151, a `snapshot.abi.json`), and one L5 source-graph case,
+[case190](case190_public_inline_function_references_internal_constant/README.md)
+(a hand-built `old.json`/`new.json` evidence pack, not a compiled program —
+its README explains why no compiled example can currently prove it live).
+Its siblings 187/188/189/191 are real compiled `v1`/`v2` pairs like the rest
+of the catalog. Each fixture-only case's own README says so explicitly;
+check `ground_truth.json`/the per-case README before assuming a `v1`/`v2`
+source pair exists.
 
 The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pitfalls. For conceptual background on what ABI stability means and how to reason about it, see [ABI/API Handling & Recommendations](../docs/concepts/abi-api-handling.md).
 
