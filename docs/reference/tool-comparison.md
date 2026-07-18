@@ -460,7 +460,11 @@ denominator than "accuracy over cases the tool managed to complete," so read
 it as the answer to *"if I pointed this tool at the whole catalog blind, how
 often would it tell me the truth?"*
 
-> **Reproducibility envelope.** abicheck `0.5.0`, commit `16b7a4150a65`,
+> **Reproducibility envelope.** abicheck `0.5.0`, code commit `ffa860c`
+> (this benchmark run's own commits were docs/data-only — `git diff ffa860c
+> HEAD -- abicheck/` is empty — so the code under test is `ffa860c`
+> regardless of which docs commit is checked out; that SHA is on `main` and
+> stable across a squash-merge, unlike a branch-local docs commit),
 > `ground_truth.json` sha256 `7836d8b79f96`. All six lanes below (`abicheck`,
 > `abicheck_full`, `abidiff`, `abidiff_headers`, `abicc_dumper`, `abicc_xml`)
 > were regenerated live against the current **193-case** catalog on
@@ -570,8 +574,9 @@ about a break failed to warn just as surely as one that said COMPATIBLE).
 > re-benchmarked as separate harness columns.
 
 Release-pinned scan status from `python3 scripts/benchmark_comparison.py --suite pinned74 --abicc-mode both`
-on the original 74-case benchmark subset (git commit `33b35a4b7a6d`, same `ground_truth.json` as the
-full-catalog run above).
+on the original 74-case benchmark subset (same code commit `ffa860c` and `ground_truth.json` as the
+full-catalog run above — see that section's reproducibility envelope for why the code commit, not a
+branch-local docs commit, is the stable reference).
 
 | Tool | Correct / 74 | Accuracy | False positives | False negatives | Total time |
 |------|:---:|:---:|:---:|:---:|:---:|
