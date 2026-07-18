@@ -940,12 +940,34 @@ def scope_diff_to_app(
 
     suppressed_missing: set[str] = set()
     for sym in uncovered_missing_symbols(missing_symbols, breaking_for_app):
+        # public_reachable=True (Codex review, fresh evidence): this overlay
+        # only ever exists because a real --used-by consumer binary's own
+        # undefined-symbol requirement genuinely resolved to nothing in the
+        # new library -- there is no "maybe internal, maybe not" ambiguity
+        # the way there is for an ordinary internal-namespace Change. Left at
+        # its dataclass default (False), a broad namespace/source_location
+        # suppression rule's default "unreachable-only" reachability would
+        # read it as unreachable and silently suppress a break that is, by
+        # construction, always consumer-proven real.
         overlay_change = make_change(
             ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
             symbol=sym,
             name=app_path.name,
+            public_reachable=True,
+            reachability_kind="consumer_proven",
         )
-        if suppression is not None and suppression.is_suppressed(overlay_change):
+        if suppression is None:
+            breaking_for_app.append(overlay_change)
+            continue
+        # evaluate() (not the cheaper is_suppressed) so a broad rule whose
+        # selectors matched but was withheld by the reachability/
+        # allow_public_break gate still emits the same
+        # SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK diagnostic ApplySuppression
+        # produces for changes it sees directly (mirrors checker.py's
+        # _filter_suppressed_changes / post_processing.py's
+        # _merge_findings_respecting_suppression).
+        outcome = suppression.evaluate(overlay_change)
+        if outcome.suppressed:
             # Codex review (fresh evidence): missing_symbols independently
             # forces Verdict.BREAKING in _compute_appcompat_verdict below
             # regardless of breaking_for_app, and feeds the scoped exit-code
@@ -958,6 +980,12 @@ def scope_diff_to_app(
             suppressed_missing.add(sym)
             continue
         breaking_for_app.append(overlay_change)
+        if outcome.withheld_rule is not None:
+            from .post_processing import _build_suppression_overreach_change
+
+            breaking_for_app.append(
+                _build_suppression_overreach_change(overlay_change, outcome.withheld_rule)
+            )
     if suppressed_missing:
         missing_symbols = [s for s in missing_symbols if s not in suppressed_missing]
 

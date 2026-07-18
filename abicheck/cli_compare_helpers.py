@@ -724,12 +724,36 @@ def _apply_used_by_scoping(
             probe = run_runtime_probe(app, old_lib, new_lib)
             regressed_symbol = probe.regressed_symbol
             if regressed_symbol:
+                # public_reachable=True (Codex review, fresh evidence, mirrors
+                # appcompat.scope_diff_to_app's identical fix for
+                # CONSUMER_REQUIRED_SYMBOL_REMOVED): this finding only exists
+                # because the dynamic linker itself failed to resolve a
+                # symbol for a real, executed --used-by consumer binary --
+                # left at the dataclass default (False), a broad
+                # namespace/source_location suppression rule's default
+                # "unreachable-only" reachability would read it as
+                # unreachable and silently suppress a runtime regression that
+                # is, by construction, always consumer-proven real.
                 runtime_change = make_change(
                     ChangeKind.CONSUMER_RUNTIME_LOAD_FAILED,
                     symbol=regressed_symbol,
                     name=app.name,
+                    public_reachable=True,
+                    reachability_kind="consumer_proven",
                 )
-                if suppression is None or not suppression.is_suppressed(runtime_change):
+                add_finding = suppression is None
+                if suppression is not None:
+                    outcome = suppression.evaluate(runtime_change)
+                    add_finding = not outcome.suppressed
+                    if add_finding and outcome.withheld_rule is not None:
+                        from .post_processing import _build_suppression_overreach_change
+
+                        scoped.breaking_for_app.append(
+                            _build_suppression_overreach_change(
+                                runtime_change, outcome.withheld_rule
+                            )
+                        )
+                if add_finding:
                     scoped.breaking_for_app.append(runtime_change)
                     # scope_diff_to_app already computed scoped.verdict before
                     # this RISK-tier finding existed -- recompute so a clean

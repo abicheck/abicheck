@@ -1898,6 +1898,45 @@ class TestVerifyRuntimeFlag:
         assert data["used_by"][0]["relevant_change_count"] == 0
         assert data["used_by"][0]["verdict"] == "COMPATIBLE"
 
+    def test_regression_not_hidden_by_broad_namespace_rule(
+        self, tmp_path, monkeypatch,
+    ) -> None:
+        """Codex review, fresh evidence: CONSUMER_RUNTIME_LOAD_FAILED only
+        ever exists because the dynamic linker itself failed to resolve a
+        symbol for a real, executed consumer binary -- built with
+        public_reachable at its dataclass default (False) before this fix, a
+        broad namespace rule's default "unreachable-only" reachability read
+        it as unreachable and silently suppressed a runtime regression that
+        is, by construction, always consumer-proven real. public_reachable
+        =True must keep it visible under a broad rule (mirrors
+        appcompat.scope_diff_to_app's identical fix for
+        CONSUMER_REQUIRED_SYMBOL_REMOVED)."""
+        from abicheck.runtime_probe import RuntimeProbeOutcome, RuntimeProbeResult
+
+        res = self._result(verdict=Verdict.COMPATIBLE)
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        self._patch_probe(
+            monkeypatch,
+            RuntimeProbeResult(
+                app_path=str(app), attempted=True,
+                old=RuntimeProbeOutcome(ok=True),
+                new=RuntimeProbeOutcome(ok=False, missing_symbol="ns::detail::foo_bar"),
+            ),
+        )
+        sup = tmp_path / "sup.yaml"
+        sup.write_text(
+            "version: 1\nsuppressions:\n"
+            "  - namespace: \"ns::detail::**\"\n    reason: detail churn\n",
+        )
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app),
+            "--verify-runtime", "--suppress", str(sup), "--format", "json",
+        )
+        data = json.loads(result.stdout)
+        assert data["used_by"][0]["relevant_change_count"] == 1
+        assert data["used_by"][0]["verdict"] == "COMPATIBLE_WITH_RISK"
+
     def test_flag_ignored_without_used_by(self, tmp_path, monkeypatch) -> None:
         """--verify-runtime alone (no --used-by) must not error or invoke
         the probe at all -- it's documented as ignored without --used-by."""

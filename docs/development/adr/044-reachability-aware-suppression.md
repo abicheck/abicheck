@@ -1256,6 +1256,42 @@ review's priority tiers.
    of `COMPATIBLE_WITH_RISK`, even though the finding list itself was
    correct. Fixed by recomputing `scoped.verdict` via
    `_compute_appcompat_verdict` immediately after the append.
+   **Post-merge review (Codex), one more finding: the reachability gate
+   itself, not just whether suppression ran at all.** Both overlays'
+   suppression evaluation (fixed above) still left `public_reachable` at the
+   `Change` dataclass default (`False`) — but unlike an ordinary
+   internal-namespace `Change`, where "maybe internal, maybe not" is exactly
+   the ambiguity `MarkReachability`'s walk exists to resolve, these two
+   overlays have **no such ambiguity at all**: `CONSUMER_REQUIRED_SYMBOL_REMOVED`
+   only ever exists because a real `--used-by` consumer's own
+   undefined-symbol requirement genuinely resolved to nothing in the new
+   library, and `CONSUMER_RUNTIME_LOAD_FAILED` only ever exists because the
+   dynamic linker itself failed to resolve a symbol for a real, executed
+   consumer binary — both are consumer-proven by construction. Left at the
+   default, `Suppression._passes_reachability_gate`'s `"unreachable-only"`
+   default for a broad `namespace`/`source_location` rule reads
+   `public_reachable=False` and matches, silently suppressing a break that
+   can never actually be safe to hide the way an ordinary internal-namespace
+   change sometimes is — precisely the failure mode this whole ADR exists to
+   prevent, just missed for these two synthesized overlays specifically.
+   Fixed by constructing both with `public_reachable=True` (a new
+   `reachability_kind` value, `"consumer_proven"`) before suppression
+   evaluation, and switching both call sites from the cheaper
+   `is_suppressed` to `evaluate` so a broad rule withheld by the
+   `allow_public_break` gate (`CONSUMER_REQUIRED_SYMBOL_REMOVED` is
+   `BREAKING`, so this gate applies to it) still emits the same
+   `SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK` diagnostic `ApplySuppression`
+   produces for changes it sees directly, reusing
+   `post_processing._build_suppression_overreach_change` rather than
+   duplicating its construction (mirrors `checker.py`'s own
+   `_filter_suppressed_changes`, already routed through `evaluate` per P1
+   item 6). `CONSUMER_RUNTIME_LOAD_FAILED` is `RISK`-tier, so
+   `would_withhold` never fires for it by design (a `RISK`-classified,
+   reachability-mismatched change is the rule correctly declining to apply,
+   not an overreach worth a diagnostic) — the same `evaluate`-based
+   plumbing is still used for consistency and to stay correct if that
+   kind's tier ever changes. A narrow `symbol:`/`change_kind:` rule is
+   unaffected either way (exempt from both gates, unchanged behavior).
 3. ~~New worked examples exercising this ADR's headline scenario end-to-end
    (public inline dispatch to an exported internal specialization; the same
    case under a blanket namespace suppression, asserting the break survives

@@ -1967,6 +1967,77 @@ class TestScopeDiffToAppWithSnapshots:
             ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED
         ]
 
+    def test_consumer_required_symbol_removed_not_hidden_by_broad_namespace_rule(
+        self, tmp_path,
+    ):
+        """Codex review, fresh evidence: this overlay only ever exists because
+        a real --used-by consumer's own undefined-symbol requirement
+        genuinely resolved to nothing in the new library -- there is no
+        "maybe internal, maybe not" ambiguity the way there is for an
+        ordinary internal-namespace Change. Before this fix the overlay was
+        built with public_reachable at its dataclass default (False), so a
+        broad namespace/source_location rule's default "unreachable-only"
+        reachability read it as unreachable and silently suppressed a break
+        that is, by construction, always consumer-proven real -- exactly the
+        failure mode this whole ADR exists to prevent for ordinary Changes,
+        just missed for this one synthesized overlay. public_reachable=True
+        must survive a broad rule (still visible, with the
+        suppression_would_hide_public_break diagnostic naming why) while a
+        narrow symbol:/change_kind: rule (already covered by the sibling
+        test above) is unaffected."""
+        from abicheck.suppression import Suppression, SuppressionList
+
+        old_snap = self._snap("1.0", "libfoo.so.1", ["foo_init", "ns::detail::foo"])
+        new_snap = self._snap("2.0", "libfoo.so.1", ["foo_init"])
+        diff = DiffResult(
+            old_version="1.0", new_version="2.0", library="libfoo.so.1",
+            changes=[], verdict=Verdict.COMPATIBLE,
+        )
+        app_reqs = AppRequirements(undefined_symbols={"foo_init", "ns::detail::foo"})
+        suppression = SuppressionList(
+            [Suppression(namespace="ns::detail::**", reason="detail churn")]
+        )
+        with patch(
+            "abicheck.appcompat.parse_app_requirements", return_value=app_reqs
+        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+            result = scope_diff_to_app(
+                diff, tmp_path / "app", old_snap, new_snap, suppression=suppression,
+            )
+        assert result.verdict == Verdict.BREAKING
+        assert result.missing_symbols == ["ns::detail::foo"]
+        kinds = [c.kind for c in result.breaking_for_app]
+        assert ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED in kinds
+        assert ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK in kinds
+
+    def test_consumer_required_symbol_removed_broad_rule_applies_with_override(
+        self, tmp_path,
+    ):
+        """The explicit-acknowledgment counterpart: allow_public_break: true
+        on the same broad rule does suppress it, same as any other
+        public-reachable BREAKING change."""
+        from abicheck.suppression import Suppression, SuppressionList
+
+        old_snap = self._snap("1.0", "libfoo.so.1", ["foo_init", "ns::detail::foo"])
+        new_snap = self._snap("2.0", "libfoo.so.1", ["foo_init"])
+        diff = DiffResult(
+            old_version="1.0", new_version="2.0", library="libfoo.so.1",
+            changes=[], verdict=Verdict.COMPATIBLE,
+        )
+        app_reqs = AppRequirements(undefined_symbols={"foo_init", "ns::detail::foo"})
+        suppression = SuppressionList([
+            Suppression(
+                namespace="ns::detail::**", reason="reviewed", allow_public_break=True,
+            )
+        ])
+        with patch(
+            "abicheck.appcompat.parse_app_requirements", return_value=app_reqs
+        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+            result = scope_diff_to_app(
+                diff, tmp_path / "app", old_snap, new_snap, suppression=suppression,
+            )
+        assert result.missing_symbols == []
+        assert result.breaking_for_app == []
+
 
 # ---------------------------------------------------------------------------
 # _lib_fmt / _lib_pe_meta / _lib_macho_meta: PE/Mach-O snapshot + Path branches
