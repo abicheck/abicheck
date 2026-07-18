@@ -326,6 +326,30 @@ def test_dump_source_only_depth_binary(tmp_path) -> None:  # type: ignore[no-unt
     assert (tmp_path / "out2.json").is_file()
 
 
+def test_dump_json_records_depth_provenance(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Audit finding: a persisted dump snapshot didn't record what --depth was
+    requested vs. actually reached anywhere a later reader could inspect --
+    the written JSON must carry a ``dump_provenance`` block."""
+    import json
+
+    src = tmp_path / "src3"
+    src.mkdir()
+    out = tmp_path / "out3.json"
+    res = CliRunner().invoke(
+        main,
+        ["dump", "--sources", str(src), "--depth", "binary", "-o", str(out)],
+    )
+    assert res.exit_code == 0, _all_output(res)
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data["dump_provenance"] == {
+        "requested_depth": "binary",
+        "effective_depth": "binary",
+        "degraded": False,
+        "frontend": None,
+        "source_scope": "target",
+    }
+
+
 def test_dump_depth_binary_ignores_compile_db(tmp_path) -> None:  # type: ignore[no-untyped-def]
     """``dump --depth binary`` discards a -H + --compile-db invocation's L2 inputs:
     it must NOT abort on the compile-DB header requirement just because binary depth

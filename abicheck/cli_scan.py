@@ -536,13 +536,14 @@ def _emit_scan_report(outcome: ScanOutcome, fmt: str, output: Path | None) -> No
 @click.option(
     "--against",
     "against",
-    type=click.Path(exists=True, path_type=Path),
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
     default=None,
-    help="Previous dump, library, directory, or package to compare ARTIFACT "
-    "against. Without --against, scan runs a one-build audit/hygiene/source "
-    "consistency scan only; with it, scan also compares ARTIFACT against this "
-    "(the two modes are not separate flags -- --against alone selects between "
-    "them).",
+    help="Previous native library or saved ABI dump to compare ARTIFACT "
+    "against (a single file -- not a directory or package; for those use "
+    "`abicheck compare OLD_PACKAGE NEW_PACKAGE`). Without --against, scan "
+    "runs a one-build audit/hygiene/source consistency scan only; with it, "
+    "scan also compares ARTIFACT against this (the two modes are not "
+    "separate flags -- --against alone selects between them).",
 )
 @click.option(
     "--depth",

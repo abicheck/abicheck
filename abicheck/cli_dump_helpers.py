@@ -442,6 +442,50 @@ def check_requested_depth_satisfied(
         )
 
 
+def fold_dump_provenance_into_json(text: str, depth: str | None, snap: AbiSnapshot) -> str:
+    """Record the depth contract this dump actually satisfied (audit finding:
+    "depth/scope provenance incomplete" -- a persisted ``.abi.json``/baseline
+    manifest didn't record ``requested_depth``/``effective_depth``/``frontend``,
+    so a downstream reader had no way to tell how deep it really goes short of
+    re-deriving it themselves, the same problem ``check_requested_depth_
+    satisfied`` already hard-fails on at dump time).
+
+    JSON-only augmentation -- mirrors ``cli_compare_helpers.
+    _fold_evidence_depth_into_json``'s pattern, not a new ``AbiSnapshot``
+    field: informational provenance about *this dump run*, not part of the
+    versioned snapshot schema, so it needs no ``SCHEMA_VERSION`` bump and
+    is silently dropped by ``snapshot_from_dict``'s defensive ``.get()``
+    parsing on any later object round-trip (load → re-save), same as
+    ``compare``'s own JSON-only ``full_verdict``/``old_evidence_depth``
+    folds. ``degraded`` is always ``False`` when *depth* is non-``None``, by
+    construction: ``check_requested_depth_satisfied`` (called before this,
+    in ``_write_snapshot_output``) already raised if the rank had come up
+    short, so reaching this point means it did not -- recorded anyway so a
+    reader sees a positive "no, this is not weaker than requested" signal
+    rather than an absent field.
+    """
+    import json
+
+    try:
+        payload = json.loads(text)
+    except ValueError:
+        return text
+    effective = evidence_depth_label(snap)
+    payload["dump_provenance"] = {
+        "requested_depth": depth,
+        "effective_depth": effective,
+        "degraded": (
+            depth is not None
+            and _DEPTH_RANK.get(effective, 0) < _DEPTH_RANK.get(depth, 0)
+        ),
+        "frontend": snap.ast_producer,
+        # dump always analyzes the resolved library target -- unlike `scan`,
+        # there is no --since/--changed-path narrowing concept here.
+        "source_scope": "target",
+    }
+    return json.dumps(payload, indent=2)
+
+
 def render_dump_dry_run(
     *,
     so_path: Path | None,

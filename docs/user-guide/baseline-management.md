@@ -248,9 +248,10 @@ See [Multi-Binary Releases](multi-binary.md) for the bundle/package flags and th
 ### `scan --against` for a one-off comparison
 
 `abicheck scan ARTIFACT` doesn't require a stored baseline at all — pass
-`--against` with any previous dump, library, directory, or package to compare
-against, and `scan` runs its always-on audit checks plus that comparison in
-one pass:
+`--against` with a previous native library or saved ABI dump (a single file,
+not a directory or package -- for those use
+`abicheck compare OLD_PACKAGE NEW_PACKAGE`) to compare against, and `scan`
+runs its always-on audit checks plus that comparison in one pass:
 
 ```bash
 abicheck scan new/libfoo.so --header new/include --against old/libfoo.so

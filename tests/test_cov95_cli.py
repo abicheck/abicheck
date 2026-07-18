@@ -1814,6 +1814,29 @@ class TestUsedByScoping:
         kinds = [c["kind"] for c in data["changes"]]
         assert "used_by_missing_symbol" in kinds
 
+    def test_json_summary_reflects_scoped_only_and_missing_findings(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Audit finding: `summary` is computed from the real diff's
+        result.changes *before* scoped-only/missing-contract entries are
+        folded into `changes` -- a scoped run whose only gating issue is one
+        of these synthetic entries (real diff: no changes; scoped gate:
+        BREAKING on a missing required symbol) used to report
+        verdict "BREAKING" next to summary.total_changes: 0, an internally
+        contradictory JSON body. `summary` must count the synthetic entries
+        too; the pre-scoped counts move to `full_summary`."""
+        res = self._result(verdict=Verdict.BREAKING, missing=["needed_symbol"])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
+        )
+        data = json.loads(result.stdout)
+        assert data["verdict"] == "BREAKING"
+        assert data["summary"]["total_changes"] == len(data["changes"]) == 1
+        assert data["summary"]["breaking"] == 1
+        assert data["full_summary"]["total_changes"] == 0
+
 
 class TestVerifyRuntimeFlag:
     """``compare --used-by APP --verify-runtime`` (ADR-044 P2 item 2), via a

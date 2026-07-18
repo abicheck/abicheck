@@ -1675,6 +1675,18 @@ def _resolve_scoped_gate_findings(
     return scoped_only, missing_labels, blocks, missing_kind
 
 
+# Maps a rendered change's "severity" label (report_model.VERDICT_PRESENTATION,
+# and the "breaking"/"compatible" literals _resolve_scoped_gate_findings' missing-
+# contract entries use) to the summary-block key it contributes to -- shared by
+# _fold_scoped_compat_into_text's post-append summary recompute.
+_SEVERITY_TO_SUMMARY_BUCKET = {
+    "breaking": "breaking",
+    "api_break": "source_breaks",
+    "risk": "risk_changes",
+    "compatible": "compatible_additions",
+}
+
+
 def _fold_scoped_compat_into_text(
     text: str, fmt: str, result: Any, severity_config: Any = None,
     show_only: str | None = None,
@@ -1819,6 +1831,40 @@ def _fold_scoped_compat_into_text(
                         "blocks_gate": blocks,
                     }
                 )
+            # `summary` above was computed from result.changes *before*
+            # scoped_only/missing_labels were appended to `changes` here --
+            # so a scoped run whose only gating issue is one of these
+            # synthetic entries could report e.g. verdict "BREAKING" next to
+            # summary.total_changes: 0, an internally contradictory JSON
+            # body (audit finding: scoped CLI JSON summary can be stale).
+            # Move the pre-scoped summary to `full_summary` (mirrors the
+            # verdict/full_verdict and severity/full_severity swap above)
+            # and recompute the count buckets `summary` reports from the
+            # now-complete `changes` array. `binary_compatibility_pct`/
+            # `affected_pct` describe the full library surface and are left
+            # as-is -- recomputing them for the scoped subset would need
+            # old_symbol_count context this fold-in doesn't have.
+            full_summary = payload.get("summary")
+            if isinstance(full_summary, dict):
+                payload["full_summary"] = full_summary
+                bucket_counts = {
+                    "breaking": 0,
+                    "source_breaks": 0,
+                    "risk_changes": 0,
+                    "compatible_additions": 0,
+                }
+                for entry in changes_list:
+                    severity = entry.get("severity") if isinstance(entry, dict) else None
+                    bucket = _SEVERITY_TO_SUMMARY_BUCKET.get(severity, "") if isinstance(
+                        severity, str
+                    ) else None
+                    if bucket:
+                        bucket_counts[bucket] += 1
+                payload["summary"] = {
+                    **full_summary,
+                    **bucket_counts,
+                    "total_changes": len(changes_list),
+                }
         return json.dumps(payload, indent=2)
 
     if fmt in ("markdown", "text", "review"):

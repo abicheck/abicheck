@@ -61,6 +61,7 @@ def _write_snapshot(
     git_commit: str | None = None,
     fact_set: dict | None = None,
     created_at: str = "2026-07-17T00:00:00+00:00",
+    dump_provenance: dict | None = None,
 ) -> None:
     data = {
         "library": library,
@@ -71,6 +72,8 @@ def _write_snapshot(
         "created_at": created_at,
         "build_id": None,
     }
+    if dump_provenance is not None:
+        data["dump_provenance"] = dump_provenance
     if fact_set is not None:
         # Matches the real SourceAbiSurface.to_dict() shape
         # (abicheck/buildsource/source_abi.py): there is no top-level
@@ -110,6 +113,33 @@ class TestBuildManifestBasics:
         entries = [{"name": "libfoo", "artifact": "build/libfoo.so"}]
         manifest = build_manifest_module.build_manifest(tmp_path, "", "", entries, None)
         assert manifest["snapshot_schema"] == 9
+
+    def test_dump_provenance_is_recorded_per_artifact(self, tmp_path: Path) -> None:
+        """Audit finding: the baseline manifest recorded profile/schema/
+        fact-set but never each library's actual --depth contract -- a
+        snapshot's dump_provenance block (cli_dump_helpers.
+        fold_dump_provenance_into_json) must flow through to the manifest."""
+        provenance = {
+            "requested_depth": "build",
+            "effective_depth": "build",
+            "degraded": False,
+            "frontend": None,
+            "source_scope": "target",
+        }
+        _write_snapshot(
+            tmp_path / "libfoo.abicheck.json",
+            library="libfoo",
+            dump_provenance=provenance,
+        )
+        entries = [{"name": "libfoo", "artifact": "build/libfoo.so"}]
+        manifest = build_manifest_module.build_manifest(tmp_path, "", "", entries, None)
+        assert manifest["artifacts"][0]["dump_provenance"] == provenance
+
+    def test_dump_provenance_absent_when_no_depth_requested(self, tmp_path: Path) -> None:
+        _write_snapshot(tmp_path / "libfoo.abicheck.json", library="libfoo")
+        entries = [{"name": "libfoo", "artifact": "build/libfoo.so"}]
+        manifest = build_manifest_module.build_manifest(tmp_path, "", "", entries, None)
+        assert manifest["artifacts"][0]["dump_provenance"] is None
 
     def test_fails_when_schema_version_inconsistent_across_libraries(
         self, tmp_path: Path

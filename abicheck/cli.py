@@ -41,6 +41,7 @@ from .cli_dump_helpers import (
     _dump_will_attempt_hybrid_l4_extraction,
     check_requested_depth_satisfied,
     evidence_depth_label,
+    fold_dump_provenance_into_json,
     handle_non_elf_dump,
     perform_elf_dump,
     resolve_dump_collect_context,
@@ -371,6 +372,10 @@ def _write_snapshot_output(
     # embed step above has had its chance to fill in build_source.
     check_requested_depth_satisfied(depth, snap)
     result = snapshot_to_json(snap)
+    # Audit finding: dump/baseline provenance didn't record requested vs.
+    # effective depth anywhere a later reader could inspect -- fold it into
+    # the written JSON now that the strict gate above has had its say.
+    result = fold_dump_provenance_into_json(result, depth, snap)
     if output:
         _safe_write_output(output, result)
         click.echo(f"Snapshot written to {output}", err=True)
