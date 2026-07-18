@@ -420,6 +420,19 @@ for tier in ['L0', 'L1', 'L2', 'L3', 'L4', 'L5']:
 > verdicts are genuine findings, so a verdict match suffices there (and avoids
 > penalising tier-appropriate variant kinds such as L0's `func_removed_elf_only`).
 >
+> **`L5`'s "first detectable" column is a kind-set floor, not a verdict floor,
+> for 4 of its 9 cases.** `case187`/`188`/`191` land in `L5` here even though
+> their `BREAKING` verdict is empirically reachable at `L1`, and `case189` at
+> `L0` (verified with `--evidence-tiers --cases case187 case188 case189
+> case191`) — each already fires from a real, artifact-level structural
+> break (a field/base/parameter type change). The one `L5` kind in their
+> `expected_kinds`, `public_api_internal_dependency_added`, is correlated
+> context on that already-detected break — naming which internal type the
+> new dependency reaches — not what makes the verdict fire. They're credited
+> to `L5` here purely because the crediting rule above requires *every*
+> cataloged kind, not because the source graph is required to catch the
+> break.
+>
 > **Not the same number as the full-catalog benchmark below.** This staircase
 > is a discoverability *floor* (the weakest source that reaches the correct
 > verdict per case, credited from `ground_truth.json` labels); it does not
