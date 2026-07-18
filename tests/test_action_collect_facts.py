@@ -496,9 +496,14 @@ class TestWrapperProducer:
         )
         assert result.returncode == 0, result.stdout + result.stderr
         env = _parse_kv_file(github_env)
-        assert env["ABICHECK_INPUTS_DIR"] == _native_abspath(
-            tmp_path / "abicheck_inputs"
-        )
+        # INPUT_OUTPUT is given here as an already-absolute path (str(tmp_path
+        # / ...) is native-backslash on a real Windows runner) --
+        # _is_absolute_path() in run.sh recognizes a drive-letter-prefixed
+        # path and passes it through verbatim, never routing it through
+        # _native_pwd/cygpath -m. Only a *relative* INPUT_OUTPUT triggers that
+        # resolution (see test_prepare_exports_absolute_inputs_dir below), so
+        # the expectation here is str(), not _native_abspath().
+        assert env["ABICHECK_INPUTS_DIR"] == str(tmp_path / "abicheck_inputs")
         assert env["ABICHECK_CC_EXTRACTOR"] == "clang"
         assert env["ABICHECK_CC_LIBRARY"] == "foo"
         # Resolved to absolute (Codex review): abicheck-cc runs with cwd set
