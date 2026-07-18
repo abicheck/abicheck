@@ -72,6 +72,11 @@ class TestTargetSpec:
         with pytest.raises(ValueError):
             TargetSpec("")
 
+    @pytest.mark.parametrize("bad_id", [123, True, 3.14, ["linux"], {"id": "linux"}])
+    def test_rejects_non_string_id(self, bad_id: object):
+        with pytest.raises(ValueError):
+            TargetSpec(bad_id)  # type: ignore[arg-type]
+
 
 class TestAssessmentManifest:
     def test_from_dict_round_trip(self):
@@ -251,6 +256,23 @@ class TestTargetOutcome:
     def test_unrecognized_state_string_raises(self):
         with pytest.raises(ValueError):
             TargetOutcome.unavailable(LINUX, "not_a_real_state")
+
+    @pytest.mark.parametrize("bad_attempt", ["2", True, 1.0, None])
+    def test_rejects_non_int_attempt(self, bad_attempt: object):
+        with pytest.raises(ValueError):
+            TargetOutcome.unavailable(
+                LINUX, TargetState.BUILD_FAILED, attempt=bad_attempt
+            )
+
+    def test_string_attempt_cannot_use_lexicographic_ordering_to_go_stale(self):
+        # The exact failure scenario a string attempt enables: "10" < "2"
+        # lexicographically, so a stale attempt="2" would otherwise beat a
+        # real attempt=10 rerun. Constructing either as a string must raise
+        # rather than let record() compare them incorrectly.
+        with pytest.raises(ValueError):
+            TargetOutcome.analyzed(LINUX, _diff(Verdict.COMPATIBLE), attempt="10")
+        with pytest.raises(ValueError):
+            TargetOutcome.unavailable(LINUX, TargetState.BUILD_FAILED, attempt="2")
 
 
 class TestAcceptanceCases:

@@ -112,7 +112,10 @@ class TargetSpec:
         # construction (TargetSpec(id, required=...)) can't bypass it.
         if not isinstance(self.required, bool):
             raise ValueError(f"'required' must be a boolean, got {self.required!r}")
-        if not self.id:
+        # Truthiness alone would accept a non-string id like 123 — it would
+        # then crash later in join()/sorted() calls over target ids (e.g.
+        # render_text()'s ", ".join(...) over unavailable_target_ids).
+        if not isinstance(self.id, str) or not self.id:
             raise ValueError(f"'id' must be a non-empty string, got {self.id!r}")
 
 
@@ -237,6 +240,14 @@ class TargetOutcome:
     findings: DiffResult | None = None
 
     def __post_init__(self) -> None:
+        # attempt is the *only* supersession guard Assessment.record() has
+        # for reruns (existing.attempt > outcome.attempt). A string attempt
+        # from an untyped/CLI payload would compare lexicographically
+        # ("10" < "2") or crash outright against an int, letting a stale
+        # low-numbered attempt overwrite a real rerun. bool is excluded
+        # since it's an int subclass but not a meaningful attempt number.
+        if not isinstance(self.attempt, int) or isinstance(self.attempt, bool):
+            raise ValueError(f"'attempt' must be an int, got {self.attempt!r}")
         # A caller hydrating an outcome from JSON/CLI input (or just passing
         # a bare string) hands us TargetState's *value*, not the enum member
         # — coerce it so every check below (which relies on `is` identity)
