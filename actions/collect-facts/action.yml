@@ -56,9 +56,13 @@ inputs:
       Public header root(s), one per line, as the compiler *resolves* them
       (not necessarily the install path — see the producing-source-facts.md
       "one trap"). Feeds the wrapper's ABICHECK_CC_HEADERS / the plugin's
-      public-roots=. Omit to let the wrapper/plugin auto-derive roots from
-      the compile's own -I/-iquote dirs (broader surface, but never an
-      empty pack from a forgotten flag).
+      public-roots=. Only the clang-plugin producer auto-derives roots from
+      the compile's own -I/-iquote dirs when this is omitted -- the wrapper
+      producer has no such fallback: an empty ABICHECK_CC_HEADERS makes
+      cc_wrapper.py's extractors classify every declaration as UNKNOWN/
+      non-public (provenance.classify_origin() is opt-in), so a pack still
+      collects TU records and passes phase: verify but carries no public
+      source facts. Set this explicitly for producer: wrapper.
     required: false
   library:
     description: 'Library name hint recorded in the pack manifest (wrapper ABICHECK_CC_LIBRARY / plugin library=).'

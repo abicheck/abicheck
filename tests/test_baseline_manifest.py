@@ -614,6 +614,50 @@ class TestMainCli:
             manifest1["artifacts"][0]["sha256"] == manifest2["artifacts"][0]["sha256"]
         )
 
+    def test_sha256_stable_when_only_build_source_pack_path_hint_changes(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review): BuildSourceRef.path_hint (abicheck/
+        # buildsource/model.py) is documented as "advisory only" -- it's the
+        # out-of-band pack's on-disk location, defaulted by
+        # cli_buildsource.embed_build_source() to the --sources/--build-info
+        # operand path. The same ABI/source facts dumped from a relative
+        # abicheck_inputs/ vs an absolute restored pack path therefore got a
+        # different top-level build_source_pack.path_hint and a different
+        # digest, even though nothing semantic changed.
+        snap_path = tmp_path / "libfoo.abicheck.json"
+
+        def _write(path_hint: str) -> None:
+            data = {
+                "library": "libfoo",
+                "version": "1.0.0",
+                "schema_version": 9,
+                "git_commit": "aaa",
+                "git_tag": None,
+                "created_at": "2026-07-17T00:00:00+00:00",
+                "build_id": None,
+                "build_source_pack": {
+                    "schema_version": 1,
+                    "content_hash": "sha256:same",
+                    "path_hint": path_hint,
+                    "coverage_summary": {},
+                },
+            }
+            snap_path.write_text(json.dumps(data), encoding="utf-8")
+
+        entries = [{"name": "libfoo", "artifact": "a.so"}]
+        _write("abicheck_inputs")
+        manifest1 = build_manifest_module.build_manifest(
+            tmp_path, "", "", entries, None
+        )
+        _write("/restored/path/abicheck_inputs")
+        manifest2 = build_manifest_module.build_manifest(
+            tmp_path, "", "", entries, None
+        )
+        assert (
+            manifest1["artifacts"][0]["sha256"] == manifest2["artifacts"][0]["sha256"]
+        )
+
     def test_sha256_stable_when_only_source_mtime_changes(self, tmp_path: Path) -> None:
         # Regression (Codex review): AbiSnapshot.source_mtime/source_mtime_epoch
         # (abicheck/model.py) reflect the dumped binary's filesystem mtime at

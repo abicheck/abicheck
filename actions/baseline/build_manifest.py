@@ -48,6 +48,16 @@ from typing import Any
 # one-off pop so the next volatile field lands here too (Codex review).
 _VOLATILE_TOP_LEVEL_KEYS = ("created_at", "source_mtime", "source_mtime_epoch")
 _VOLATILE_BUILD_SOURCE_MANIFEST_KEYS = ("created_at",)
+# BuildSourceRef.path_hint (abicheck/buildsource/model.py) -- the out-of-band
+# pack's on-disk location, documented on the field itself as "advisory only".
+# cli_buildsource.py's embed_build_source() defaults it to the --sources/
+# --build-info operand path when the caller doesn't pass a name hint, so the
+# same ABI/source facts dumped from a relative abicheck_inputs/ vs an
+# absolute restored pack path get a different path_hint and therefore a
+# different per-artifact sha256/content-digest, even though nothing semantic
+# changed (Codex review). content_hash/coverage_summary, the ref's other two
+# fields, are real content identity and stay.
+_VOLATILE_BUILD_SOURCE_PACK_KEYS = ("path_hint",)
 # Populated by abicheck/buildsource/source_replay.py's replay producer (and
 # inline.py's cache bookkeeping) -- wall-clock durations and cache hit/miss
 # counts that depend on the runner's cache warmth and load, not on the
@@ -100,6 +110,13 @@ def _strip_volatile_fields(raw: dict[str, Any]) -> dict[str, Any]:
     stable = dict(raw)
     for key in _VOLATILE_TOP_LEVEL_KEYS:
         stable.pop(key, None)
+
+    build_source_pack = stable.get("build_source_pack")
+    if isinstance(build_source_pack, dict):
+        build_source_pack = dict(build_source_pack)
+        for key in _VOLATILE_BUILD_SOURCE_PACK_KEYS:
+            build_source_pack.pop(key, None)
+        stable["build_source_pack"] = build_source_pack
 
     build_source = stable.get("build_source")
     if isinstance(build_source, dict):
