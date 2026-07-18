@@ -60,6 +60,7 @@
 #include "clang/Tooling/CommonOptionsParser.h"
 #include "clang/Tooling/Tooling.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <memory>
@@ -124,10 +125,67 @@ std::optional<uint64_t> vptrOffsetBits(const CXXRecordDecl *RD,
   return static_cast<uint64_t>(Offset.getQuantity()) * 8;
 }
 
+// Emits the JSON shared by every record kind (C struct/union or C++ class):
+// the opening brace, qualified_name/size/align/dsize, no trailing comma.
+void emitRecordHeader(llvm::raw_string_ostream &OS, const RecordDecl *RD,
+                      const ASTRecordLayout &Layout) {
+  OS << "{";
+  OS << "\"qualified_name\":\"" << jsonEscape(RD->getQualifiedNameAsString())
+     << "\",";
+  OS << "\"size_bits\":" << (Layout.getSize().getQuantity() * 8) << ",";
+  OS << "\"alignment_bits\":" << (Layout.getAlignment().getQuantity() * 8)
+     << ",";
+  OS << "\"data_size_bits\":" << (Layout.getDataSize().getQuantity() * 8)
+     << ",";
+}
+
+// Emits `"fields": [...]` (no trailing comma) -- FieldDecl/getFieldIndex()/
+// getFieldOffset() are all declared on the shared RecordDecl base, so this
+// is identical for a plain C record and a C++ class.
+void emitFields(llvm::raw_string_ostream &OS, const RecordDecl *RD,
+                const ASTRecordLayout &Layout) {
+  OS << "\"fields\":[";
+  bool firstField = true;
+  for (const FieldDecl *FD : RD->fields()) {
+    if (!firstField)
+      OS << ",";
+    firstField = false;
+    uint64_t OffsetBits = Layout.getFieldOffset(FD->getFieldIndex());
+    OS << "{\"name\":\"" << jsonEscape(FD->getNameAsString())
+       << "\",\"offset_bits\":" << OffsetBits << "}";
+  }
+  OS << "]";
+}
+
 class LayoutVisitor : public RecursiveASTVisitor<LayoutVisitor> {
 public:
   LayoutVisitor(ASTContext &Ctx, std::vector<std::string> &Records)
       : Context(Ctx), Records(Records) {}
+
+  // A plain C struct/union (`--lang c` / a C header) is an ordinary
+  // RecordDecl, not a CXXRecordDecl -- C has no classes, so
+  // VisitCXXRecordDecl below never fires for it at all. is_standard_layout/
+  // is_trivially_copyable/vptr_offset_bits/bases are C++-only concepts and
+  // are simply omitted (not emitted as null) for a C record.
+  bool VisitRecordDecl(const RecordDecl *RD) {
+    // A C++ class is fully handled by VisitCXXRecordDecl below --
+    // RecursiveASTVisitor's WalkUpFromCXXRecordDecl calls WalkUpFromRecordDecl
+    // (hence VisitRecordDecl) FIRST and then VisitCXXRecordDecl, so both fire
+    // for the SAME node; skip here to avoid emitting a C++ class twice.
+    if (isa<CXXRecordDecl>(RD))
+      return true;
+    if (!RD->isCompleteDefinition())
+      return true;
+
+    const ASTRecordLayout &Layout = Context.getASTRecordLayout(RD);
+    std::string json;
+    llvm::raw_string_ostream OS(json);
+    emitRecordHeader(OS, RD, Layout);
+    emitFields(OS, RD, Layout);
+    OS << "}";
+    Records.push_back(OS.str());
+    return true;
+  }
 
   bool VisitCXXRecordDecl(const CXXRecordDecl *RD) {
     if (!RD->isCompleteDefinition() || RD->isDependentType())
@@ -142,14 +200,7 @@ public:
 
     std::string json;
     llvm::raw_string_ostream OS(json);
-    OS << "{";
-    OS << "\"qualified_name\":\"" << jsonEscape(RD->getQualifiedNameAsString())
-       << "\",";
-    OS << "\"size_bits\":" << (Layout.getSize().getQuantity() * 8) << ",";
-    OS << "\"alignment_bits\":" << (Layout.getAlignment().getQuantity() * 8)
-       << ",";
-    OS << "\"data_size_bits\":" << (Layout.getDataSize().getQuantity() * 8)
-       << ",";
+    emitRecordHeader(OS, RD, Layout);
     OS << "\"is_standard_layout\":"
        << (RD->isStandardLayout() ? "true" : "false") << ",";
     OS << "\"is_trivially_copyable\":"
@@ -162,17 +213,8 @@ public:
       OS << "null";
     OS << ",";
 
-    OS << "\"fields\":[";
-    bool firstField = true;
-    for (const FieldDecl *FD : RD->fields()) {
-      if (!firstField)
-        OS << ",";
-      firstField = false;
-      uint64_t OffsetBits = Layout.getFieldOffset(FD->getFieldIndex());
-      OS << "{\"name\":\"" << jsonEscape(FD->getNameAsString())
-         << "\",\"offset_bits\":" << OffsetBits << "}";
-    }
-    OS << "],";
+    emitFields(OS, RD, Layout);
+    OS << ",";
 
     // Direct non-virtual bases, then every virtual base (clang already
     // de-duplicates a repeated virtual base reached via multiple paths).

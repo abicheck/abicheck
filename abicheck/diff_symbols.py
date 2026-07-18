@@ -1238,57 +1238,52 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     every defaulted parameter as ``PARAM_DEFAULT_VALUE_REMOVED``. Skip unless
     both sides are header-aware.
 
-    Additionally gated per-function-pair, but ONLY when either side is a
-    ``--ast-frontend hybrid`` snapshot (G28 Phase 3): a hybrid snapshot can mix
-    castxml-backed and clang-backed functions in the SAME snapshot, and the
+    Additionally gated per-function-pair, whenever either side has a known
+    header-AST producer (castxml, clang, or a hybrid merge — G28 Phase 3): the
     two backends' default VALUE representations are not cross-comparable
     (castxml keeps the real source expression; clang's is a placeholder/
     fingerprint for anything non-trivial) even though both now capture
-    presence/absence correctly. Requiring the SAME producer on both sides of a
-    pair (not "castxml on both sides", which would wrongly suppress a
-    same-producer clang-vs-clang pair that a plain ``--ast-frontend clang``
-    run compares just fine — Codex review) avoids a false CHANGED/REMOVED from
-    a representation mismatch while still catching a real change on either
-    same-producer pairing. Scoped to ``"hybrid" in (old.ast_producer,
-    new.ast_producer)`` rather than applying unconditionally: an unset/
-    ``None`` ``ast_producer`` (e.g. a hand-built snapshot in a test, or a
-    legacy pre-provenance one) must not silently skip every plain
-    castxml-vs-castxml or clang-vs-clang comparison that never set the field —
-    a behavior change entirely unrelated to the hybrid-mixing bug this exists
-    to fix.
+    presence/absence correctly. This applies not only to a hybrid snapshot
+    mixing both backends internally, but equally to a comparison between two
+    pure single-backend snapshots — e.g. a pure ``--ast-frontend clang`` run
+    on one side against a pure ``--ast-frontend castxml`` run on the other —
+    since ``fact_producer`` already returns the (unconditional) producer for
+    those non-hybrid cases too (Codex review). Requiring the SAME producer on
+    both sides of a pair (not "castxml on both sides", which would wrongly
+    suppress a same-producer clang-vs-clang pair that a plain
+    ``--ast-frontend clang`` run compares just fine) avoids a false
+    CHANGED/REMOVED from a representation mismatch while still catching a
+    real change on either same-producer pairing.
 
     The per-pair skip itself only fires when BOTH producers are POSITIVELY
     known and DIFFER — never merely because one side's producer is unknown.
-    A persisted castxml baseline predating ``ast_producer`` entirely (or any
-    other snapshot that never recorded it) has ``fact_producer(...) is
-    None``; comparing it against a genuinely castxml-backed function on a
-    hybrid ``new`` side is a perfectly legitimate same-producer comparison
-    that must not be silently dropped just because the OLD side lacks
-    metadata it never had a chance to record — that would regress a
-    previously-working legacy-baseline comparison into a silent miss (Codex
-    review).
+    An unset/``None`` ``ast_producer`` (e.g. a hand-built snapshot in a test,
+    or a legacy pre-provenance baseline) makes ``fact_producer(...) is None``,
+    so comparing it against a genuinely castxml-backed function on the other
+    side is a perfectly legitimate same-producer comparison that must not be
+    silently dropped just because one side lacks metadata it never had a
+    chance to record — that would regress a previously-working legacy-
+    baseline comparison into a silent miss (Codex review).
     """
     if not _both_header_aware(old, new):
         return []
     changes: list[Change] = []
     old_map = _public_functions(old)
     new_map = _public_functions(new)
-    check_hybrid_provenance = "hybrid" in (old.ast_producer, new.ast_producer)
 
     for mangled, f_old in old_map.items():
         f_new = new_map.get(mangled)
         if f_new is None:
             continue
-        if check_hybrid_provenance:
-            key = func_fact_key(mangled, "param_defaults")
-            old_producer = fact_producer(old, key)
-            new_producer = fact_producer(new, key)
-            if (
-                old_producer is not None
-                and new_producer is not None
-                and old_producer != new_producer
-            ):
-                continue
+        key = func_fact_key(mangled, "param_defaults")
+        old_producer = fact_producer(old, key)
+        new_producer = fact_producer(new, key)
+        if (
+            old_producer is not None
+            and new_producer is not None
+            and old_producer != new_producer
+        ):
+            continue
         # Compare parameter defaults pairwise
         for i, (p_old, p_new) in enumerate(zip(f_old.params, f_new.params)):
             if p_old.default is not None and p_new.default is None:

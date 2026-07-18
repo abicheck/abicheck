@@ -573,6 +573,59 @@ class TestParamDefaultChanged:
         r = compare(old, new)
         assert ChangeKind.PARAM_DEFAULT_VALUE_REMOVED in _kinds(r)
 
+    def test_pure_clang_vs_pure_castxml_mismatch_not_reported(self):
+        # Codex review: the producer-mismatch skip previously only applied
+        # when either side was ast_producer=="hybrid". A comparison between
+        # two pure single-backend snapshots (no hybrid involved at all) --
+        # e.g. a --ast-frontend clang baseline against a --ast-frontend
+        # castxml one -- has the exact same representation-mismatch problem:
+        # fact_producer() already returns "clang"/"castxml" unconditionally
+        # for those non-hybrid producers, so the skip must fire here too.
+        f_old = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="30")],
+        )
+        f_new = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default=None)],
+        )
+        old = AbiSnapshot(
+            library="libtest.so.1", version="1.0", functions=[f_old],
+            from_headers=True, ast_producer="castxml",
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1", version="1.0", functions=[f_new],
+            from_headers=True, ast_producer="clang",
+        )
+        r = compare(old, new)
+        assert ChangeKind.PARAM_DEFAULT_VALUE_REMOVED not in _kinds(r)
+
+    def test_pure_clang_vs_pure_clang_still_compared(self):
+        # Same-producer pair on both sides (no hybrid): must still compare
+        # normally, exactly as a plain --ast-frontend clang run always did.
+        f_old = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default="30")],
+        )
+        f_new = _pub_func(
+            "connect",
+            "_Z7connectv",
+            params=[Param(name="timeout", type="int", default=None)],
+        )
+        old = AbiSnapshot(
+            library="libtest.so.1", version="1.0", functions=[f_old],
+            from_headers=True, ast_producer="clang",
+        )
+        new = AbiSnapshot(
+            library="libtest.so.1", version="1.0", functions=[f_new],
+            from_headers=True, ast_producer="clang",
+        )
+        r = compare(old, new)
+        assert ChangeKind.PARAM_DEFAULT_VALUE_REMOVED in _kinds(r)
+
 
 # ── param_renamed ────────────────────────────────────────────────────────
 

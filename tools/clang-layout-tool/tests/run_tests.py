@@ -42,10 +42,11 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 failures: list[str] = []
 
 
-def run_tool(binary: str, fixture: str) -> dict:
+def run_tool(binary: str, fixture: str, *extra_flags: str) -> dict:
     path = FIXTURES_DIR / fixture
+    flags = list(extra_flags) if extra_flags else ["-std=c++17"]
     result = subprocess.run(
-        [binary, str(path), "--", "-std=c++17"],
+        [binary, str(path), "--", *flags],
         capture_output=True,
         text=True,
         timeout=30,
@@ -148,6 +149,20 @@ def main() -> int:
     assert c_bases["VBase"]["is_virtual"] is True
     assert c_bases["VBase"]["offset_bits"] == 256
     assert field_offset(records["C"], "c") == 224
+
+    # c_record.c: a plain C struct (parsed in C mode, -x c) is an ordinary
+    # RecordDecl, not a CXXRecordDecl -- VisitCXXRecordDecl never fires for
+    # it. Same layout as simple.cpp's Foo (identical member list), but
+    # WITHOUT the C++-only keys (is_standard_layout/is_trivially_copyable/
+    # vptr_offset_bits/bases), which don't apply to C at all.
+    records = run_tool(binary, "c_record.c", "-x", "c", "-std=gnu11")
+    check("c_record.c", "Foo", records, {"size_bits": 192, "data_size_bits": 192})
+    rec = records["Foo"]
+    assert field_offset(rec, "a") == 0
+    assert field_offset(rec, "b") == 64
+    assert field_offset(rec, "c") == 128
+    assert "is_standard_layout" not in rec
+    assert "bases" not in rec
 
     if failures:
         print(f"FAILED ({len(failures)}):")
