@@ -206,8 +206,34 @@ def test_header_graph_reproduces_documented_finding(
     assert report_path.is_file(), result.stderr
 
     payload = json.loads(report_path.read_text())
-    assert payload["verdict"] == expected_verdict, payload["verdict"]
     got_kinds = {c["kind"] for c in payload.get("changes", [])}
     expected_kinds = expected_extra_kinds | {"public_api_internal_dependency_added"}
     missing = expected_kinds - got_kinds
+    if payload["verdict"] != expected_verdict or missing:
+        # TEMPORARY diagnostic (not gated on -s; pytest only shows captured
+        # stdout for a failing test, so this is silent on green runs): dump
+        # the full old/new snapshot `types` + the emitted `changes` so a
+        # platform-specific miss (seen on macos-latest, never on
+        # ubuntu-latest, for this exact test) can be root-caused from CI
+        # log output alone, without local macOS/castxml access. Remove once
+        # the macOS-specific gap this is chasing is understood and fixed.
+        old_payload = json.loads(old_json.read_text())
+        new_payload = json.loads(new_json.read_text())
+        print(f"\n--- {case_name} diagnostic (sys.platform={sys.platform}) ---")
+        print(
+            "old ast_producer/from_headers:",
+            old_payload.get("ast_producer"),
+            old_payload.get("from_headers"),
+        )
+        print(
+            "new ast_producer/from_headers:",
+            new_payload.get("ast_producer"),
+            new_payload.get("from_headers"),
+        )
+        print("old types:", json.dumps(old_payload.get("types", []), indent=2))
+        print("new types:", json.dumps(new_payload.get("types", []), indent=2))
+        print("old functions:", json.dumps(old_payload.get("functions", []), indent=2))
+        print("new functions:", json.dumps(new_payload.get("functions", []), indent=2))
+        print("changes:", json.dumps(payload.get("changes", []), indent=2))
+    assert payload["verdict"] == expected_verdict, payload["verdict"]
     assert not missing, f"{case_name}: missing kinds {missing}; got {got_kinds}"
