@@ -229,6 +229,14 @@ class TargetOutcome:
     findings: DiffResult | None = None
 
     def __post_init__(self) -> None:
+        # A caller hydrating an outcome from JSON/CLI input (or just passing
+        # a bare string) hands us TargetState's *value*, not the enum member
+        # — coerce it so every check below (which relies on `is` identity)
+        # and every consumer of `.state.value` (e.g. render_text()) sees a
+        # real TargetState instead of crashing on a plain str. Raises
+        # ValueError for any value that isn't a recognized state.
+        if not isinstance(self.state, TargetState):
+            object.__setattr__(self, "state", TargetState(self.state))
         if self.state is TargetState.ANALYZED and self.findings is None:
             raise ValueError("an ANALYZED outcome must carry findings")
         if self.state is not TargetState.ANALYZED and self.findings is not None:
@@ -272,6 +280,8 @@ class TargetOutcome:
         reason: str | None = None,
         job_url: str | None = None,
     ) -> TargetOutcome:
+        if not isinstance(state, TargetState):
+            state = TargetState(state)
         if state is TargetState.ANALYZED:
             raise ValueError("use TargetOutcome.analyzed() for the analyzed state")
         if state is TargetState.INCOMPLETE:

@@ -176,6 +176,41 @@ class TestTargetOutcome:
 
         assert result.outcomes[LINUX].state is TargetState.ANALYZED
 
+    def test_raw_string_state_is_normalized_to_enum(self):
+        # A caller hydrating from JSON/CLI input hands us the TargetState's
+        # string *value*, not the enum member — it must still behave
+        # identically (in particular, outcome.state.value must not crash).
+        outcome = TargetOutcome.unavailable(LINUX, "build_failed")
+
+        assert outcome.state is TargetState.BUILD_FAILED
+        assert outcome.state.value == "build_failed"
+
+    def test_raw_string_analyzed_state_without_findings_still_raises(self):
+        with pytest.raises(ValueError):
+            TargetOutcome.unavailable(LINUX, "analyzed")
+
+    def test_raw_string_incomplete_state_still_rejected(self):
+        with pytest.raises(ValueError):
+            TargetOutcome.unavailable(LINUX, "incomplete")
+
+    def test_record_drops_incomplete_outcome_even_as_raw_string(self):
+        # The is-identity check in record() only works once __post_init__
+        # has normalized a raw string state to the real enum member.
+        assessment = Assessment(_manifest())
+        assessment.record(
+            TargetOutcome(target_id=LINUX, state="incomplete", attempt=99)
+        )
+        assessment.record(
+            TargetOutcome.analyzed(LINUX, _diff(Verdict.COMPATIBLE), attempt=1)
+        )
+        result = assessment.finalize()
+
+        assert result.outcomes[LINUX].state is TargetState.ANALYZED
+
+    def test_unrecognized_state_string_raises(self):
+        with pytest.raises(ValueError):
+            TargetOutcome.unavailable(LINUX, "not_a_real_state")
+
 
 class TestAcceptanceCases:
     """One test per row of the RFC §11 acceptance table."""
