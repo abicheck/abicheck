@@ -305,6 +305,31 @@ class TestDirVsDir:
         code, out = _invoke("compare", str(old_dir), str(new_dir))
         assert code == 2
 
+    def test_usage_error_from_release_engine_has_usage_header(self, tmp_path: Path) -> None:
+        """CLI-audit P2: `_dispatch_release_compare` now calls
+        `compare_release_cmd.callback` directly instead of
+        `ctx.invoke(compare_release_cmd, ...)` (no more Click-to-Click
+        orchestration). `ctx.invoke` used to backfill `UsageError.ctx` via
+        its `augment_usage_errors` wrapper so the formatted CLI error got a
+        "Usage: ..." header; `_dispatch_release_compare` now does that
+        backfill by hand -- this proves a validation error raised inside the
+        release engine (`--annotate-additions` without `--annotate`) still
+        exits 64 with the same "Usage:" header through a directory compare,
+        not just a degraded one-line "Error: ..." message."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        snap = _snap()
+        _write_snap(old_dir / "libfoo.json", snap)
+        _write_snap(new_dir / "libfoo.json", snap)
+        code, out = _invoke(
+            "compare", str(old_dir), str(new_dir), "--annotate-additions",
+        )
+        assert code == 64
+        assert "Usage:" in out
+        assert "--annotate-additions requires --annotate" in out
+
     def test_json_output_multi(self, tmp_path: Path) -> None:
         old_dir = tmp_path / "old"
         old_dir.mkdir()

@@ -86,4 +86,19 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `_public_header_names()` now recover the qualified identity by
   demangling the *mangled* linker symbol directly (backend-independent)
   when `.name` isn't already qualified.
+- **`compare`'s directory/package fan-out no longer routes through a fake
+  nested Click invocation** — `_dispatch_release_compare` called
+  `ctx.invoke(compare_release_cmd, ...)` even though every one of that
+  command's ~44 parameters was already supplied explicitly (no Click
+  default-filling was actually happening); it now calls
+  `compare_release_cmd.callback` directly, hand-preserving the one real
+  behavior `ctx.invoke` provided (backfilling `UsageError.ctx` for a
+  "Usage: ..." header on a validation error raised inside the release
+  engine). `dump`'s inline per-side embed (`compare --old/new-sources`)
+  keeps its `ctx.invoke(dump_cmd, ...)` — it genuinely relies on Click
+  filling in ~25 of `dump_cmd`'s 44 parameters from their declared
+  `@click.option` defaults, which cannot be replicated without either
+  duplicating those defaults by hand (silent-drift risk) or reimplementing
+  `ctx.invoke` via Click's private context/default-resolution internals for
+  no behavioral gain.
 

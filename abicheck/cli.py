@@ -1128,6 +1128,20 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
     compared here gets the identical verdict it would from a single-pair `compare`
     (ADR-037 D1/D7). The standalone `compare-release` command was removed; this is
     now its only entry point.
+
+    Calls ``compare_release_cmd.callback`` directly rather than
+    ``ctx.invoke(compare_release_cmd, ...)`` (CLI-audit P2: "business logic
+    depends on Click-to-Click orchestration") -- ``compare_release_cmd`` is
+    itself never registered on `main` and exists solely to be called this way
+    (see its own module comment), and every one of its ~44 parameters is
+    already supplied explicitly by the caller below, so there is no Click
+    default-filling for ``ctx.invoke`` to usefully do here; it was only ever
+    creating a throwaway sub-``Context`` to call the same plain function.
+    ``UsageError``/``BadParameter`` normally get ``e.ctx`` backfilled by
+    ``ctx.invoke``'s ``augment_usage_errors`` wrapper for display purposes
+    (a "Usage: ..." header on the formatted error) -- replicated by hand here
+    so a validation error raised inside the release engine still formats
+    identically to before.
     """
     fmt = kwargs.get("fmt", "markdown")
     if fmt not in _RELEASE_FORMATS:
@@ -1137,7 +1151,13 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
         )
     from .cli_compare_release import compare_release_cmd
 
-    ctx.invoke(compare_release_cmd, **kwargs)
+    assert compare_release_cmd.callback is not None
+    try:
+        compare_release_cmd.callback(**kwargs)
+    except click.UsageError as exc:
+        if exc.ctx is None:
+            exc.ctx = ctx
+        raise
 
 
 def _source_is_pack(path: Path) -> bool:
@@ -1316,6 +1336,27 @@ def _embed_inline_source_side(
             f"--{label}-ast-frontend clang (or the unscoped --ast-frontend) "
             "for a --depth source compare."
         )
+    # CLI-audit P2 ("business logic depends on Click-to-Click orchestration"):
+    # this ctx.invoke was investigated for removal alongside the
+    # compare_release_cmd one above (_dispatch_release_compare now calls its
+    # .callback directly) and deliberately kept. dump_cmd has 44 parameters;
+    # only ~19 are supplied here, so removing ctx.invoke would mean either
+    # hand-duplicating Click's own ~25 remaining @click.option defaults here
+    # (silently drifts the moment one of them changes) or reaching into
+    # Click's private Context._make_sub_context/get_default/type_cast_value
+    # machinery to resolve them correctly -- i.e. reimplementing ctx.invoke
+    # by hand for no behavioral gain, since dump_cmd's own
+    # resolve_dump_compile_context() genuinely needs a real, correctly-scoped
+    # click.get_current_context() on the path this caller doesn't take
+    # (resolved_compile_context is always non-None here, but that is an
+    # invariant of THIS call site, not something dump_cmd's general callback
+    # contract guarantees for a future caller). ctx.invoke is the public,
+    # documented Click API for exactly this "call another command with most
+    # params pre-resolved, let Click fill in the rest" case. The genuine fix
+    # for the architectural concern is extracting dump_cmd's resolve/dispatch
+    # body into a shared Tier-2-style function both the CLI wrapper and this
+    # embed path call directly -- a real refactor of a heavily-hardened,
+    # already-2000-line-adjacent file, out of scope for a contained change.
     ctx.invoke(
         dump_cmd,
         so_path=norm,
