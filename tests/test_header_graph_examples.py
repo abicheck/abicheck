@@ -37,6 +37,7 @@ clang; see ``header_graph.py``).
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -160,10 +161,28 @@ def test_header_graph_reproduces_documented_finding(
     old_json = tmp_path / "old.json"
     new_json = tmp_path / "new.json"
     dump_stderrs: dict[str, str] = {}
+    # dumper_cache._cache_path's own layout (mirrored here, not imported, so
+    # this stays a pure diagnostic with no production-code coupling): the raw
+    # castxml XML for each dump is content-addressed under this directory.
+    # Snapshotting its contents around each dump call recovers exactly what
+    # castxml produced on the runner, without needing production code changes
+    # to surface it.
+    _xdg_cache = os.environ.get("XDG_CACHE_HOME")
+    castxml_cache_dir = (
+        (Path(_xdg_cache) if _xdg_cache else Path.home() / ".cache")
+        / "abi_check"
+        / "castxml"
+    )
+    castxml_xml: dict[str, str] = {}
     for lib, header, out in (
         (libv1, "v1.h", old_json),
         (libv2, "v2.h", new_json),
     ):
+        before_xml = (
+            set(castxml_cache_dir.glob("*.xml"))
+            if castxml_cache_dir.is_dir()
+            else set()
+        )
         result = subprocess.run(
             [
                 sys.executable,
@@ -185,6 +204,16 @@ def test_header_graph_reproduces_documented_finding(
         )
         assert result.returncode == 0, result.stderr
         dump_stderrs[header] = result.stderr
+        after_xml = (
+            set(castxml_cache_dir.glob("*.xml"))
+            if castxml_cache_dir.is_dir()
+            else set()
+        )
+        for new_file in after_xml - before_xml:
+            try:
+                castxml_xml[header] = new_file.read_text(errors="replace")
+            except OSError:
+                pass
 
     report_path = tmp_path / "report.json"
     result = subprocess.run(
@@ -239,6 +268,8 @@ def test_header_graph_reproduces_documented_finding(
         # the final `compare` step's, since the fallback happens at dump time.
         print("v1.h dump stderr:", dump_stderrs.get("v1.h", ""))
         print("v2.h dump stderr:", dump_stderrs.get("v2.h", ""))
+        print("v1.h castxml XML:", castxml_xml.get("v1.h", "<not found in cache>"))
+        print("v2.h castxml XML:", castxml_xml.get("v2.h", "<not found in cache>"))
         print("old macho exports:", json.dumps(old_payload.get("macho", {}), indent=2))
         print("new macho exports:", json.dumps(new_payload.get("macho", {}), indent=2))
         print("old types:", json.dumps(old_payload.get("types", []), indent=2))
