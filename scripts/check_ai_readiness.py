@@ -494,6 +494,7 @@ def check_doc_count_sync(f: Findings) -> None:
     exempt_dirs = (adr_dir, archive_dir)
     sweep_files = [
         ROOT / "README.md",
+        ROOT / "AGENTS.md",
         ROOT / "CLAUDE.md",
         ROOT / "examples" / "README.md",
     ]

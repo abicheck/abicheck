@@ -25,18 +25,19 @@ jobs:
           python -m pip install --upgrade pip
           pip install "mypy==1.19.1"  # pin so the drift gate is reproducible (field-eval CI gap)
       - name: AI-readiness checks (file size, CLAUDE.md coverage, ChangeKind invariants, mypy drift, import cycles)
-        run: python scripts/check_ai_readiness.py
-      - name: Install package (for FP-rate gate)
+        run: python scripts/verify.py --profile pr --only ai-readiness
+      - name: Install package (for FP-rate / tier-accuracy / doc-sync gates)
         run: pip install -e .
-      - name: Scoping FP-rate gate (ADR-024 §7 — false positives/negatives vs baseline)
-        run: python scripts/check_fp_rate.py
-      - name: Per-tier accuracy gate (what each evidence level buys — FP-reduction + low-level insufficiency)
-        run: python scripts/check_tier_accuracy.py
+      # Scoping FP-rate gate (ADR-024 §7), per-tier accuracy gate, and the
+      # use-case docs sync gate — routed through scripts/verify.py, the same
+      # implementation `pixi run check` and `python scripts/verify.py
+      # --profile pr` run locally (CLAUDE.md "M0-3"), so this job can't
+      # silently diverge from the local PR-profile definition of done.
+      - name: Scoping / tier-accuracy / doc-sync gates
+        run: python scripts/verify.py --profile pr --only fp-rate,tier-accuracy,usecase-docs-sync
       - name: Per-tier accuracy matrix (step-summary artifact)
         if: always()
         run: python scripts/check_tier_accuracy.py --markdown >> "$GITHUB_STEP_SUMMARY"
-      - name: Use-case docs sync (registry vs. human scorecard/plan-index drift)
-        run: python scripts/check_usecase_docs_sync.py
 
   fair-metadata:
     name: FAIR metadata and packaging
@@ -53,14 +54,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]" build twine
       - name: Verify FAIR metadata and published schema copies
-        run: |
-          python scripts/publish_schemas.py --check
-          python scripts/check_fair_metadata.py
+        run: python scripts/verify.py --profile pr --only schema-sync,fair-metadata
       - name: Build distribution artifacts
         run: python -m build
       - name: Validate distribution metadata
         run: |
           twine check dist/*
+          python scripts/verify.py --profile full --only distribution-build
           python scripts/check_distribution_metadata.py
 
   lint-and-types:
@@ -76,14 +76,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev,mcp]"  # mypy is pinned in [dev]; no separate unpinned install
-      - name: Lint (ruff)
-        run: ruff check abicheck tests
-      - name: Type check (mypy)
-        run: mypy abicheck
       - name: Install docs dependencies
         run: pip install mkdocs mkdocs-material pymdown-extensions mkdocs-redirects
-      - name: Build docs (strict)
-        run: mkdocs build --strict
+      # lint / typecheck / docs-build routed through scripts/verify.py — see
+      # the ai-readiness job's comment above (CLAUDE.md "M0-3").
+      - name: Lint, type check, docs build (strict)
+        run: python scripts/verify.py --profile pr --only lint,typecheck,docs-build
 
   unit-tests:
     runs-on: ${{ matrix.os }}

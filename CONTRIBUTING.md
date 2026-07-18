@@ -2,6 +2,11 @@
 
 Thank you for your interest in contributing!
 
+> Using a coding agent? [`AGENTS.md`](AGENTS.md) is the canonical,
+> vendor-neutral repository contract (commands, architecture map,
+> invariants) — `CLAUDE.md`, `.github/copilot-instructions.md`, and
+> `.cursor/rules/` all point back to it rather than keeping their own copy.
+
 ## Requirements
 
 - Python >= 3.10
@@ -73,6 +78,22 @@ pip install -e ".[dev]"
 ## Testing
 
 abicheck uses a layered testing strategy with `pytest`.
+
+### Before opening a PR: `scripts/verify.py`
+
+The commands below are useful for iterating, but the single source of truth
+for "is this ready for review" is `scripts/verify.py` — the same
+orchestrator `pixi run check`, `.pre-commit-config.yaml`, and CI call
+through, so there's exactly one place check commands are defined:
+
+```bash
+python scripts/verify.py --profile fast   # inner-loop: lint, format, types, fast unit tests
+python scripts/verify.py --profile pr     # what CI actually requires: + golden tests, 95% coverage floor, ai-readiness, FP-rate/tier-accuracy/doc-sync/FAIR-metadata gates
+python scripts/verify.py --profile full   # + integration/parity/mutation/packaging lanes (skipped, not failed, if your environment lacks a tool)
+```
+
+`pixi run check` is exactly `python scripts/verify.py --profile pr` — treat
+either as the real definition of done, not the fast-lane command alone.
 
 ### Quick tests (default CI gate)
 

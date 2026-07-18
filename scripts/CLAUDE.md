@@ -8,7 +8,8 @@ Each must run with Python 3.10+ and the package installed in dev mode
 
 | Script | Purpose | Triggered by |
 |--------|---------|--------------|
-| `check_ai_readiness.py` | AI-readiness gate (file size, CLAUDE.md coverage, test ratio, ChangeKind invariants, mypy baseline drift, import cycles, test-assertion density). | CI (`ai-readiness`) and `pre-commit`. Exits 1 on errors. |
+| `verify.py` | **The** verification orchestrator (CLAUDE.md "M0-3"). Runs a named `--profile {fast,pr,full}` bundle of the checks below through one step catalog, so `pixi run check`, `.pre-commit-config.yaml`, and `.github/workflows/ci.yml` can't independently drift from the real PR gate. `--only`/`--skip`/`--list`/`--json` for local iteration and machine-readable receipts. | Pixi (`pixi run check` = `--profile pr`), pre-commit (ai-readiness hook), CI (`ai-readiness`/`lint-and-types`/`fair-metadata` jobs); manual. Mirrored in `tests/test_verify_profiles.py`. |
+| `check_ai_readiness.py` | AI-readiness gate (file size, CLAUDE.md coverage, test ratio, ChangeKind invariants, mypy baseline drift, import cycles, test-assertion density). | CI (`ai-readiness`) and `pre-commit`, both via `verify.py --only ai-readiness`. Exits 1 on errors. |
 | `check_fp_rate.py` | False-positive/false-negative gate for public-surface scoping (ADR-024 §7). Labelled `(old, new)` corpus; baselines FP=0/FN=0. Cases are tagged by scoping *axis* (`CASE_CATEGORY`): `--json` carries a `by_category` breakdown and `--markdown` renders a per-axis table for CI step-summary / release-over-release trend reading. | CI (`ai-readiness`). Mirrored in `tests/test_fp_rate_gate.py`. |
 | `check_tier_accuracy.py` | Per-evidence-tier accuracy gate — *what each level buys*. One labelled logical change per case, projected down to what each tier observes (L0 symbols → L1 debug → L2 headers → L3 build) and run through `compare`; verdicts collapse to a 3-band ordinal (non-breaking/risk/breaking). Measures per-tier **over-call (FP)** vs **under-call (FN)** and which transition removes each. Gates: top-tier correctness + under-call monotonicity (more evidence never hides a break — ADR-028 D3). `--markdown`/`--json` emit the per-tier matrix. | CI (`ai-readiness`, + step-summary artifact). Mirrored in `tests/test_tier_accuracy_gate.py`. |
 | `check_usecase_docs_sync.py` | Drift gate between `docs/development/usecase-registry.yaml` (the machine-checked source of truth) and its hand-maintained human summaries — the "Gaps that matter" table and "Proposed next steps" backlog in `usecase-coverage-evaluation.md`, and the remaining-vs-completed tables in `plans/index.md`. Not a generator (the prose isn't reconstructible from registry fields); a structural check that a gap's aggregate registry status (done vs. open) agrees with where it's mentioned in the docs. Requires PyYAML, so it runs after `pip install -e .`, unlike `check_ai_readiness.py`. | CI (`ai-readiness`). Mirrored in `tests/test_usecase_docs_sync.py`. |
@@ -45,7 +46,11 @@ Each must run with Python 3.10+ and the package installed in dev mode
 
 1. Place it here; give it an executable shebang (`#!/usr/bin/env python3`).
 2. Add a row to the inventory table above.
-3. If it runs in CI, wire it into `.github/workflows/ci.yml` and (where
-   sensible) `.pre-commit-config.yaml`.
+3. If it is a pass/fail gate, add a `Step` to `verify.py`'s `STEPS` catalog
+   with the right `profiles` membership instead of wiring the raw command
+   into CI/pre-commit directly — `verify.py` is what CI, pre-commit, and
+   `pixi run check` all call through (CLAUDE.md "M0-3"). Reporting-only
+   scripts (benchmarks, summaries) still wire directly into
+   `.github/workflows/ci.yml`.
 4. Document its arguments via `argparse` so `--help` is enough for an
    agent to use it.
