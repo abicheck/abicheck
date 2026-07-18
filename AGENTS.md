@@ -217,9 +217,12 @@ CI runs `mypy abicheck/` as a required gate. The baseline is currently **0 error
 
 | Check | Severity | What it enforces |
 |-------|----------|------------------|
-| `file-size` | ERROR > 2000 lines, WARN > 1500 | Source files stay legible (no allowlist) |
-| `claude-md-coverage` | ERROR | `CLAUDE.md` exists in each major sub-tree |
-| `test-ratio` | WARN | At least 20% test-to-source file ratio |
+| `file-size` | ERROR > 2000 lines, WARN > 1500 | Every first-party Python tree (`abicheck/`, `scripts/`, `tests/`, `eval/`, `validation/`, `action/`, the clang plugin's `tests/` — `FIRST_PARTY_PY_ROOTS`) stays legible. `LARGE_FILE_ALLOWLIST` downgrades a specific pre-existing violator to WARN with a reviewed reason — it is not a way to silently exempt a new file |
+| `claude-md-coverage` | ERROR | `CLAUDE.md` exists in each original major sub-tree (`REQUIRED_CLAUDE_MD_DIRS`) |
+| `agent-instructions-coverage` | ERROR | `AGENTS.md` or `CLAUDE.md` exists in `.github/`, `action/`, `contrib/abicheck-clang-plugin/` (`REQUIRED_AGENT_INSTRUCTION_DIRS`) |
+| `script-inventory` | WARN | Every `scripts/*.py` is named in `scripts/CLAUDE.md`'s inventory table — an unlisted script is invisible to that discovery path |
+| `generated-file-ownership` | ERROR | A known-generated file (`GENERATED_FILE_MARKERS`, plus every `docs/examples/case*.md`) still carries its "this is generated, don't hand-edit" marker comment |
+| `test-ratio` | WARN | At least 20% test-to-source file ratio; test files are discovered recursively under `tests/` (not just top-level) |
 | `future-annotations` | WARN | `from __future__ import annotations` per this file's convention |
 | `changekind-partition` | ERROR | Every `ChangeKind` is in exactly one of `BREAKING_KINDS` / `API_BREAK_KINDS` / `COMPATIBLE_KINDS` / `RISK_KINDS` |
 | `changekind-detector` | WARN | Every `ChangeKind` is produced somewhere (not orphaned) |

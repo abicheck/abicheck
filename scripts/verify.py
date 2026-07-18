@@ -252,9 +252,19 @@ STEPS: tuple[Step, ...] = (
         description="mkdocs strict build (dangling refs, nav coverage)",
     ),
     Step(
+        # ABICHECK_MIN_EXECUTED (tests/conftest.py's silent-skip guard, also
+        # used by every marker lane in ci.yml): `castxml` being on PATH
+        # doesn't guarantee gcc/g++ is too — without this, a partial
+        # toolchain could let pytest collect the `integration` marker, skip
+        # every single test, and still exit 0, which `run_step` would then
+        # report as "passed" having verified nothing. '1' (not CI's Linux
+        # '20') because this step runs on whatever OS/toolchain combination
+        # the caller has — the guard's job here is "did anything run at
+        # all", not asserting a platform-specific count.
         "integration",
         _py("pytest", "tests/", "-m", "integration", "--tb=short"),
         frozenset({FULL}),
+        env={"ABICHECK_MIN_EXECUTED": "1"},
         precondition=_need_bins("castxml"),
         description="DWARF/header parsing against real castxml + a C/C++ compiler",
     ),
@@ -264,19 +274,23 @@ STEPS: tuple[Step, ...] = (
         # any file added later that also carries @pytest.mark.libabigail (this
         # already happened: tests/test_abidiff_parity_extended.py and
         # tests/test_surface_scope_parity.py both carry the marker but were never
-        # in the old 3-file list).
+        # in the old 3-file list). ABICHECK_MIN_EXECUTED='5' matches the floor
+        # ci.yml's libabigail-parity job uses for the same marker-scoped run.
         "libabigail-parity",
         _py("pytest", "tests/", "-m", "libabigail", "--tb=short"),
         frozenset({FULL}),
+        env={"ABICHECK_MIN_EXECUTED": "5"},
         precondition=_need_bins("abidiff"),
         description="libabigail parity lane (marker-scoped)",
     ),
     Step(
         # Marker-scoped for the same reason as libabigail-parity above —
         # tests/test_abicc_parity_extended.py also carries @pytest.mark.abicc.
+        # ABICHECK_MIN_EXECUTED='10' matches ci.yml's abicc-parity job floor.
         "abicc-parity",
         _py("pytest", "tests/", "-m", "abicc", "--tb=short"),
         frozenset({FULL}),
+        env={"ABICHECK_MIN_EXECUTED": "10"},
         precondition=_need_bins("abi-compliance-checker", "abi-compliance-checker.pl"),
         description="ABICC parity lane (marker-scoped)",
     ),
@@ -297,9 +311,17 @@ STEPS: tuple[Step, ...] = (
         # Builds dist/ itself (`python -m build`), then `twine check`s the
         # result, then validates its metadata — self-contained, so this step
         # doesn't require a caller to have already populated dist/.
+        #
+        # In PR, not just FULL: ci.yml's `fair-metadata` job runs this
+        # unconditionally on every PR (no path filter) — it's a required
+        # check, not an optional parity/external-tool lane, so `pr` must
+        # include it to actually be CI-equivalent. Its precondition still
+        # lets it skip gracefully (flagged via the pr-profile incomplete-run
+        # warning above) rather than forcing every contributor to have
+        # `build`/`twine` installed just to run `--profile pr`.
         "distribution-build",
         _pyscript("scripts/build_and_check_distribution.py"),
-        frozenset({FULL}),
+        frozenset({PR, FULL}),
         precondition=_need_modules("build", "twine"),
         description="Build sdist/wheel, twine check, validate metadata",
     ),

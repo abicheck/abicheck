@@ -56,7 +56,7 @@ jobs:
       - name: Verify FAIR metadata and published schema copies
         run: python scripts/verify.py --profile pr --only schema-sync,fair-metadata
       - name: Build, twine check, and validate distribution metadata
-        run: python scripts/verify.py --profile full --only distribution-build
+        run: python scripts/verify.py --profile pr --only distribution-build
 
   lint-and-types:
     runs-on: ubuntu-latest

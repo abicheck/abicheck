@@ -189,7 +189,15 @@ def test_ci_canonical_unit_lane_matches_verify_pr_profile() -> None:
 def test_ci_fair_metadata_job_calls_verify_py() -> None:
     ci = _read(".github/workflows/ci.yml")
     assert "scripts/verify.py --profile pr --only schema-sync,fair-metadata" in ci
-    assert "scripts/verify.py --profile full --only distribution-build" in ci
+    assert "scripts/verify.py --profile pr --only distribution-build" in ci
+
+
+def test_distribution_build_is_a_pr_profile_step() -> None:
+    """ci.yml's `fair-metadata` job runs unconditionally on every PR (no path
+    filter) — distribution-build must be a `pr`-profile step, not FULL-only,
+    or `--profile pr` isn't actually CI-equivalent for this check."""
+    step = _step("distribution-build")
+    assert verify.PR in step.profiles
 
 
 # --- AGENTS.md / CLAUDE.md ---------------------------------------------
