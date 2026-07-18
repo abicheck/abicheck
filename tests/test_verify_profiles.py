@@ -82,14 +82,26 @@ def test_full_profile_is_superset_of_pr() -> None:
     assert pr_names <= full_names
 
 
-def test_pr_profile_run_with_a_skip_fails(capsys) -> None:
+def test_pr_profile_run_with_a_skip_fails(monkeypatch, capsys) -> None:
     """A skipped step in the `pr` profile must exit 1, not 0 — a partial
-    result must never be mistaken for a complete CI-equivalent pass."""
-    step = _step("docs-build")
-    assert step.precondition is not None and step.precondition() is not None, (
-        "this test needs a pr-profile step whose precondition genuinely "
-        "fails in this environment (mkdocs not installed) — if that's no "
-        "longer true, swap in another step with an unmet precondition"
+    result must never be mistaken for a complete CI-equivalent pass.
+
+    Uses a synthetic step with a precondition forced to fail, rather than
+    relying on a real tool (e.g. mkdocs) being absent from *this*
+    environment — a fully-provisioned dev setup (CLAUDE.md-recommended
+    `pip install -e ".[dev,docs]"`, or `pixi run check`) must still exercise
+    this invariant.
+    """
+    import dataclasses
+
+    synthetic = dataclasses.replace(
+        _step("docs-build"),
+        precondition=lambda: "synthetic: forced skip for this test",
+    )
+    monkeypatch.setattr(
+        verify,
+        "STEPS",
+        tuple(synthetic if s.name == "docs-build" else s for s in verify.STEPS),
     )
     rc = verify.main(["--profile", "pr", "--only", "docs-build"])
     assert rc == 1

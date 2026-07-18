@@ -39,10 +39,10 @@ environments layer on the system tools for the heavier marker lanes:
 
 | Environment | `pixi run -e <env> <task>` | Adds |
 |-------------|------------------------------|------|
-| `default` | `test`, `test-cov`, `lint`, `fmt`, `fmt-check`, `typecheck`, `check` | (base — no system tools) |
+| `default` | `test`, `test-cov`, `lint`, `fmt`, `fmt-check`, `typecheck`, `check` | `mkdocs` + plugins, `build`/`twine` (so `pixi run check` — the full `pr` profile — completes without skipping `docs-build`/`distribution-build`) |
 | `integration` | `test-integration` | `castxml`, C/C++ compiler, `cmake` (linux-64/osx-64/osx-arm64 only — no MSVC via conda-forge; see `integration` marker below) |
 | `parity` | `test-libabigail`, `test-abicc` | `libabigail` (`abidiff`) + `abi-compliance-checker` (linux-64 only, conda-forge doesn't ship these elsewhere) |
-| `docs` | `docs-build`, `docs-serve` | `mkdocs` + plugins |
+| `docs` | `docs-build`, `docs-serve` | `mkdocs` + plugins (standalone subset of `default`, for a docs-only environment) |
 
 Note: the `integration`/`parity` environments pull `castxml`/`libabigail`/
 `abi-compliance-checker` from conda-forge at whatever version is current,
@@ -94,10 +94,13 @@ python scripts/verify.py --profile full   # + integration/parity/mutation/packag
 
 `pixi run check` is exactly `python scripts/verify.py --profile pr` — treat
 either as the real definition of done, not the fast-lane command alone.
-`pip install -e ".[dev,docs]"` (not just `[dev]`) gets the `docs-build` step's
-`mkdocs` dependency too — without it, that step is skipped rather than run,
-and `verify.py` prints a loud warning that the `pr`-profile run is incomplete
-rather than silently reporting success.
+`pixi`'s `default` environment already provisions `mkdocs` and `build`/`twine`
+(the `docs-build`/`distribution-build` steps' dependencies), so `pixi run
+check` is complete out of the box. With plain pip, `pip install -e
+".[dev,docs,dist]"` (not just `[dev]`) is the equivalent — without it, those
+two steps are skipped rather than run, and `verify.py` prints a loud warning
+that the `pr`-profile run is incomplete rather than silently reporting
+success.
 
 ### Quick tests (default CI gate)
 

@@ -72,20 +72,24 @@ these commands; if you change a check, change it in `scripts/verify.py` and
 let that test tell you what else needs updating.
 
 **`pip install -e ".[dev]"` alone is not full `pr`-profile parity.** The
-`docs-build` step needs `mkdocs`, which isn't in `[dev]` (matching the CI
-`lint-and-types` job's separate mkdocs install) — run
-`pip install -e ".[dev,docs]"` to get it. `verify.py` never silently claims
-success when a step like this is skipped for a missing tool: a `pr`-profile
-run with any skip prints an explicit `WARNING: this pr-profile run is
-INCOMPLETE` line and sets `"complete": false` in the `--json` receipt — don't
-treat a skip-containing run as equivalent to a clean CI pass.
+`docs-build` step needs `mkdocs` (`pip install -e ".[dev,docs]"`) and the
+`distribution-build` step needs `build`/`twine` (`pip install -e ".[dev,dist]"`)
+— neither is in bare `[dev]`, matching the CI `lint-and-types`/`fair-metadata`
+jobs' separate installs. Run `pip install -e ".[dev,docs,dist]"` for full
+parity. `verify.py` never silently claims success when a step like this is
+skipped for a missing tool: a `pr`-profile run with any skip prints an
+explicit `WARNING: this pr-profile run is INCOMPLETE` line and sets
+`"complete": false` in the `--json` receipt — don't treat a skip-containing
+run as equivalent to a clean CI pass.
 
 [pixi](https://pixi.sh) is also supported (`pixi install && pixi run test`,
 `pixi run check`) and additionally manages the `castxml`/compiler/`libabigail`/
 `abi-compliance-checker` system tools for the `integration`/`libabigail`/`abicc`
 marker lanes below — see `[tool.pixi.*]` in `pyproject.toml` and
-`CONTRIBUTING.md`. Prefer `pip install -e ".[dev]"` above when pixi isn't
-available in your environment.
+`CONTRIBUTING.md`. Unlike bare `pip install -e ".[dev]"`, pixi's `default`
+environment includes the `docs` and `dist` features too, so `pixi run check`
+is complete out of the box. Prefer `pip install -e ".[dev]"` above when pixi
+isn't available in your environment (add `,docs,dist` for full parity).
 
 ## Test markers — know which tests you can run
 

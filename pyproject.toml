@@ -88,6 +88,14 @@ docs = [
     "pymdown-extensions",
     "mkdocs-redirects",
 ]
+# Mirrors [tool.pixi.feature.dist.pypi-dependencies] and the `fair-metadata`
+# CI job's install — `pip install -e ".[dev,dist]"` is what
+# `scripts/verify.py --profile pr`'s distribution-build step needs to
+# actually run instead of skipping (same M0-3 rationale as `docs` above).
+dist = [
+    "build",
+    "twine",
+]
 
 [tool.mypy]
 python_version = "3.10"
@@ -346,8 +354,20 @@ mkdocs-redirects = "*"
 docs-build = "mkdocs build --strict"
 docs-serve = "mkdocs serve"
 
+# `python -m build` + `twine check`, matching the `fair-metadata` CI job's
+# distribution-build step (now a required `pr`-profile gate — CLAUDE.md
+# "M0-3": a skip must never be mistaken for a pass, so `default` below must
+# provision this rather than let `pixi run check` skip-and-fail out of the box).
+[tool.pixi.feature.dist.pypi-dependencies]
+build = "*"
+twine = "*"
+
 [tool.pixi.environments]
-default = { features = ["dev", "mcp"], solve-group = "default" }
+# Includes `docs` and `dist` so `pixi run check` (== `--profile pr`) actually
+# completes rather than skipping docs-build/distribution-build and failing
+# the incomplete-run gate on a fresh `pixi install` — see the two features
+# above.
+default = { features = ["dev", "mcp", "docs", "dist"], solve-group = "default" }
 integration = { features = ["dev", "mcp", "native-toolchain", "integration"], solve-group = "default" }
 parity = { features = ["dev", "mcp", "native-toolchain", "parity"], solve-group = "parity" }
 docs = { features = ["docs"], solve-group = "docs" }

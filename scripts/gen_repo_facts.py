@@ -23,6 +23,14 @@ writes `repo_facts.json`; `--check` fails if the committed file disagrees
 with a freshly recomputed one (except `generated_utc`/`source_commit`, which
 are provenance stamps, not facts to diff).
 
+`fast_test_cases_collected` is interpreter-version sensitive — pytest's
+collection count can differ by interpreter minor version (observed: 17055 on
+3.11/3.13, 17075 on 3.14), so `--check` must run under the same Python that
+generated the committed file to avoid spurious drift failures. CI's
+`ai-readiness` job (the only job that runs `--check`) is pinned to the
+canonical Python (`canonical_python` below) for exactly this reason —
+regenerate locally with that same interpreter if `--check` disagrees with you.
+
 `latest_release` is deliberately NOT auto-derived from `git describe`/tags:
 a shallow CI checkout (the `actions/checkout` default) has no tags, so that
 would silently compute a wrong answer instead of a missing one. It is a
