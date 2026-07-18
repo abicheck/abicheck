@@ -302,6 +302,30 @@ class TestAcceptanceCases:
 
         assert result.outcomes[LINUX].state is TargetState.INCOMPLETE
 
+    def test_require_identity_rejects_outcome_with_no_identity_at_all(self):
+        # Simulates ingesting outcomes from an untrusted/async source (a
+        # queued artifact, a webhook payload): an outcome that omits both
+        # identity fields must not be trusted by default.
+        assessment = Assessment(_manifest(), require_identity=True)
+        assessment.record(TargetOutcome.analyzed(LINUX, _diff(Verdict.COMPATIBLE)))
+        result = assessment.finalize()
+
+        assert result.outcomes[LINUX].state is TargetState.INCOMPLETE
+
+    def test_require_identity_accepts_outcome_with_matching_identity(self):
+        assessment = Assessment(_manifest(), require_identity=True)
+        assessment.record(
+            TargetOutcome.analyzed(
+                LINUX,
+                _diff(Verdict.COMPATIBLE),
+                head_sha=HEAD_SHA,
+                assessment_id="abc123",
+            )
+        )
+        result = assessment.finalize()
+
+        assert result.outcomes[LINUX].state is TargetState.ANALYZED
+
     def test_required_target_removed_is_a_coverage_change_not_symbol_removal(self):
         previous = _manifest(required=(LINUX, WINDOWS))
         current = _manifest(required=(LINUX,))

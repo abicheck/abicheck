@@ -448,8 +448,24 @@ class Assessment:
     at which analysis starts.
     """
 
-    def __init__(self, manifest: AssessmentManifest) -> None:
+    def __init__(
+        self, manifest: AssessmentManifest, *, require_identity: bool = False
+    ) -> None:
+        """Create an aggregator for *manifest*.
+
+        ``require_identity`` controls how strictly :meth:`record` trusts an
+        incoming outcome's ``head_sha``/``assessment_id``. It defaults to
+        ``False`` for simple in-process use, where the caller constructs one
+        ``Assessment`` per commit directly and there is no serialization
+        boundary for a stale outcome to cross. Set it to ``True`` once
+        outcomes are ingested from an external/asynchronous source (a queued
+        artifact, a webhook payload, ...) — there, an outcome that omits
+        both identity fields is exactly what a delayed or malformed
+        submission from a superseded run looks like, and silently accepting
+        it would defeat the point of the stale-data guard.
+        """
         self.manifest = manifest
+        self.require_identity = require_identity
         self._outcomes: dict[str, TargetOutcome] = {}
         self._additional_outcomes: dict[str, TargetOutcome] = {}
 
@@ -461,10 +477,17 @@ class Assessment:
         *same* commit (``outcome.assessment_id`` set and not matching
         ``manifest.assessment_id`` — e.g. a delayed result from a superseded
         rerun with a changed target matrix) are dropped, since stale data
-        must never contaminate the current assessment. A lower ``attempt``
-        than one already recorded for the same target is also dropped, so a
-        late-arriving retry of an old attempt can't clobber a newer result.
+        must never contaminate the current assessment. When
+        ``require_identity`` is set, an outcome that omits either identity
+        field entirely is dropped too, rather than trusted by default. A
+        lower ``attempt`` than one already recorded for the same target is
+        also dropped, so a late-arriving retry of an old attempt can't
+        clobber a newer result.
         """
+        if self.require_identity and (
+            outcome.head_sha is None or outcome.assessment_id is None
+        ):
+            return
         if outcome.head_sha is not None and outcome.head_sha != self.manifest.head_sha:
             return
         if (
