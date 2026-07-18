@@ -792,19 +792,28 @@ class ClangCallGraphExtractor:
             self.diagnostics.append(f"{self.clang_bin} not found in PATH")
             return []
         cmd = [self.clang_bin, "-Xclang", "-ast-dump=json", "-fsyntax-only", *argv]
+        local_cap = 120.0
+        scan_remaining = deadline.remaining()
+        effective_timeout = (
+            local_cap if scan_remaining is None else min(local_cap, scan_remaining)
+        )
         try:
-            # Bound by the active --budget deadline (not just a fixed 120s) and
-            # process-group-safe on timeout, same as the L2/L4 clang calls. A
-            # deadline overflow degrades to the same diagnostic+[] contract as
-            # any other probe failure — this pass is advisory (ADR-028 D3),
-            # never authoritative, so it must never abort the scan (Codex review).
-            proc = deadline.run_bounded(  # noqa: S603 - fixed argv, never shell=True
-                cmd,
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
+            # Bound by min(local_cap, active --budget deadline) — run_bounded()
+            # alone would honor a generous outer deadline verbatim instead of
+            # this pass's own 120s cap, letting one hung TU eat the whole
+            # remaining scan budget — and process-group-safe on timeout, same
+            # as the L2/L4 clang calls. A deadline overflow degrades to the
+            # same diagnostic+[] contract as any other probe failure — this
+            # pass is advisory (ADR-028 D3), never authoritative, so it must
+            # never abort the scan (Codex review, PR #591, round 8).
+            with deadline.deadline_scope(effective_timeout):
+                proc = deadline.run_bounded(  # noqa: S603 - fixed argv, never shell=True
+                    cmd,
+                    cwd=cwd,
+                    capture_output=True,
+                    text=True,
+                    timeout=local_cap,
+                )
         except (OSError, subprocess.SubprocessError, deadline.DeadlineExceeded) as exc:
             self.diagnostics.append(f"clang invocation failed: {exc}")
             return []

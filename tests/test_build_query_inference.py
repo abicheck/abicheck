@@ -156,9 +156,9 @@ def test_gnu_make_probe_local_cap_hit_with_generous_scan_budget_returns_false(
     from abicheck import deadline
 
     monkeypatch.setattr(
-        _bq.deadline, "run_bounded", lambda *_a, **_k: (_ for _ in ()).throw(
-            deadline.DeadlineExceeded(-1.0)
-        )
+        _bq.deadline,
+        "run_bounded",
+        lambda *_a, **_k: (_ for _ in ()).throw(deadline.DeadlineExceeded(-1.0)),
     )
     with deadline.deadline_scope(1800.0):  # generous 30-minute --budget
         assert _bq._is_gnu_make_launcher("/usr/bin/make") is False
@@ -174,9 +174,9 @@ def test_gnu_make_probe_propagates_genuine_scan_deadline_exhaustion(monkeypatch)
     from abicheck import deadline
 
     monkeypatch.setattr(
-        _bq.deadline, "run_bounded", lambda *_a, **_k: (_ for _ in ()).throw(
-            deadline.DeadlineExceeded(-1.0)
-        )
+        _bq.deadline,
+        "run_bounded",
+        lambda *_a, **_k: (_ for _ in ()).throw(deadline.DeadlineExceeded(-1.0)),
     )
     with deadline.deadline_scope(0.0):  # already-exhausted outer budget
         with pytest.raises(deadline.DeadlineExceeded):
@@ -580,6 +580,38 @@ def test_trusted_query_is_bound_by_active_scan_deadline(tmp_path: Path, monkeypa
     assert any("scan deadline exceeded" in d for d in merged.diagnostics)
 
 
+def test_trusted_query_bounded_by_local_cap_not_full_scan_budget(
+    tmp_path: Path, monkeypatch
+):
+    """Codex review (PR #591), round 8: deadline.run_bounded() honors an
+    active outer deadline verbatim (not min(timeout, left)), so a bare
+    timeout=_QUERY_TIMEOUT_S (300s) on the trusted build.query call alone
+    did nothing once a scan --budget was active: the call stayed bound by
+    the FULL remaining scan budget instead of this query's own 300s local
+    cap. A hung configured query under a generous --budget could therefore
+    burn the whole remaining scan instead of degrading after 300s. Assert
+    the ContextVar deadline observed inside run_bounded is capped near the
+    local cap, not the much larger outer scan budget."""
+    from abicheck import deadline
+    from abicheck.buildsource import inline as _inline
+    from abicheck.buildsource.inline import BuildConfig, _run_build_query
+
+    seen_remaining: list[float | None] = []
+
+    def fake_run_bounded(*_a, **_k):
+        seen_remaining.append(deadline.remaining())
+        raise deadline.DeadlineExceeded(-1.0)
+
+    monkeypatch.setattr(_inline.deadline, "run_bounded", fake_run_bounded)
+    cfg = BuildConfig(query="my-configure")
+    merged, ext = BuildEvidence(), []
+    with deadline.deadline_scope(1800.0):  # a generous 30-minute --budget
+        _run_build_query(cfg, tmp_path, merged, ext)
+
+    assert seen_remaining
+    assert seen_remaining[0] is not None and seen_remaining[0] <= 300.5
+
+
 def test_trusted_query_without_configured_db_autodiscovers(tmp_path: Path, monkeypatch):
     # Contrast: with no build.compile_db configured, a zero-exit query's
     # conventional compile_commands.json is still auto-discovered (the no-mask rule
@@ -752,6 +784,35 @@ def test_run_is_bound_by_active_scan_deadline(tmp_path: Path, monkeypatch):
     assert ext[-1].status == "failed"
     assert "scan deadline exceeded" in ext[-1].detail
     assert any("scan deadline exceeded" in d for d in merged.diagnostics)
+
+
+def test_run_bounded_by_local_cap_not_full_scan_budget(tmp_path: Path, monkeypatch):
+    """Codex review (PR #591), round 8: deadline.run_bounded() honors an
+    active outer deadline verbatim (not min(timeout, left)), so a bare
+    timeout=timeout (default 600s, INFERRED_QUERY_TIMEOUT_S) on the
+    zero-config cmake/bazel/make query alone did nothing once a scan
+    --budget was active: the call stayed bound by the FULL remaining scan
+    budget instead of this query's own 600s local cap. A hung inferred
+    query under a generous --budget could therefore burn the whole
+    remaining scan instead of degrading after 600s. Assert the ContextVar
+    deadline observed inside run_bounded is capped near the local cap, not
+    the much larger outer scan budget."""
+    from abicheck import deadline
+
+    (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
+    seen_remaining: list[float | None] = []
+
+    def fake_run_bounded(*_a, **_k):
+        seen_remaining.append(deadline.remaining())
+        raise deadline.DeadlineExceeded(-1.0)
+
+    monkeypatch.setattr(_bq.deadline, "run_bounded", fake_run_bounded)
+    merged, ext = BuildEvidence(), []
+    with deadline.deadline_scope(1800.0):  # a generous 30-minute --budget
+        run_inferred_build_query(tmp_path, merged, ext)
+
+    assert seen_remaining
+    assert seen_remaining[0] is not None and seen_remaining[0] <= 600.5
 
 
 def test_run_make_ingests_dry_run_transcript(tmp_path: Path, monkeypatch):

@@ -923,6 +923,37 @@ def test_extract_from_args_deadline_exceeded_degrades_to_diagnostic(
     assert any("clang invocation failed" in d for d in ext.diagnostics)
 
 
+def test_extract_from_args_bounded_by_local_cap_not_full_scan_budget(
+    monkeypatch,
+) -> None:
+    """Codex review (PR #591), round 8: deadline.run_bounded() honors an
+    active outer deadline verbatim (not min(timeout, left)), so a bare
+    timeout=120 on this L5 clang call alone did nothing once a scan
+    --budget was active: the call stayed bound by the FULL remaining scan
+    budget instead of this pass's own 120s local cap. A hung per-TU clang
+    call under a generous --budget could therefore eat the whole remaining
+    scan instead of degrading after 120s. Assert the ContextVar deadline
+    observed inside run_bounded is capped near the local cap, not the much
+    larger outer scan budget."""
+    import abicheck.buildsource.call_graph as cg
+    from abicheck import deadline
+
+    monkeypatch.setattr(cg.shutil, "which", lambda _b: "/usr/bin/clang++")
+    seen_remaining: list[float | None] = []
+
+    def fake_run_bounded(*_a, **_k):
+        seen_remaining.append(deadline.remaining())
+        raise deadline.DeadlineExceeded(-1.0)
+
+    monkeypatch.setattr(cg.deadline, "run_bounded", fake_run_bounded)
+    ext = ClangCallGraphExtractor()
+    with deadline.deadline_scope(1800.0):  # a generous 30-minute --budget
+        ext.extract_from_args(["x.cpp"])
+
+    assert seen_remaining
+    assert seen_remaining[0] is not None and seen_remaining[0] <= 120.5
+
+
 def test_extract_from_args_rechecks_deadline_before_parsing_ast(monkeypatch) -> None:
     """Codex review (PR #591): the same post-subprocess gap as the L2/L4
     clang paths — clang can exit successfully right as the budget expires,

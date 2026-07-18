@@ -1309,19 +1309,28 @@ def _run_build_query(
         return None
     if not argv:
         return None
+    scan_remaining = deadline.remaining()
+    effective_timeout = (
+        _QUERY_TIMEOUT_S
+        if scan_remaining is None
+        else min(_QUERY_TIMEOUT_S, scan_remaining)
+    )
     try:
-        # Bound by the active scan --budget (not just the local 300s
-        # default) and process-group-safe on timeout — this operator-
-        # configured query runs inside run_scan_core's L2-L5 deadline scope
-        # just like the zero-config inferred query (Codex-review-class fix,
-        # PR #591).
-        proc = deadline.run_bounded(  # noqa: S603 - operator-configured, shell=False, opt-in
-            argv,
-            cwd=str(cwd) if cwd else None,
-            capture_output=True,
-            text=True,
-            timeout=_QUERY_TIMEOUT_S,
-        )
+        # Bound by min(local 300s default, active scan --budget) —
+        # run_bounded() alone would honor a generous outer deadline verbatim
+        # instead of this query's own cap, letting a hung configured query
+        # burn the whole remaining scan budget — and process-group-safe on
+        # timeout. This operator-configured query runs inside
+        # run_scan_core's L2-L5 deadline scope just like the zero-config
+        # inferred query (Codex review, PR #591, round 8).
+        with deadline.deadline_scope(effective_timeout):
+            proc = deadline.run_bounded(  # noqa: S603 - operator-configured, shell=False, opt-in
+                argv,
+                cwd=str(cwd) if cwd else None,
+                capture_output=True,
+                text=True,
+                timeout=_QUERY_TIMEOUT_S,
+            )
     except deadline.DeadlineExceeded as exc:
         extractors.append(
             ExtractorRecord(

@@ -383,3 +383,20 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   failures already fold into the existing `SourceExtractionError`/partial-
   per-TU-coverage contract, so this only changes *how fast* a hung TU is
   detected, not whether the scan aborts (Codex review, PR #591, round 7).
+- Four more instances of the same local-cap-vs-scan-deadline gap closed:
+  `call_graph.ClangCallGraphExtractor._extract_from_safe_args` and
+  `type_graph.ClangTypeGraphExtractor._extract_from_safe_args` (both L5,
+  120s local cap), `inline._run_build_query` (the operator-trusted
+  `build.query` command, 300s `_QUERY_TIMEOUT_S`), and
+  `build_query._run_query_process` (the zero-config inferred cmake/bazel/
+  make query, 600s `INFERRED_QUERY_TIMEOUT_S`). All four passed a bare
+  `timeout=` to `deadline.run_bounded()` with no nested `deadline_scope()`,
+  so a hung call under a generous `--budget` stayed bound by the full
+  remaining scan budget instead of degrading at its own local cap — for the
+  two L5 extractors that meant one stuck TU could starve the rest of the
+  call/type-graph fold; for the two build-query paths it meant a hung
+  configure/dry-run could burn the whole scan before reporting "no L3
+  evidence". All four now nest a `deadline.deadline_scope(min(local_cap,
+  scan_remaining))` around the call; every failure already degraded to the
+  same advisory diagnostic/failed-extractor contract, so this only changes
+  how fast the hang is detected (Codex review, PR #591, round 8).

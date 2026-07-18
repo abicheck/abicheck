@@ -532,20 +532,27 @@ def _run_query_process(
     extractors: list[ExtractorRecord],
 ) -> subprocess.CompletedProcess[str] | None:
     """Run the inferred query; None (+ failed record + diagnostic) if it cannot run."""
+    scan_remaining = deadline.remaining()
+    effective_timeout = (
+        timeout if scan_remaining is None else min(timeout, scan_remaining)
+    )
     try:
-        # Bound by the active scan --budget (not just the local 600s default)
-        # and process-group-safe on timeout — this cmake configure/bazel
-        # aquery/make dry-run runs inside run_scan_core's L2-L5 deadline
-        # scope just like the clang/castxml calls it feeds (Codex review,
-        # PR #591).
-        return deadline.run_bounded(  # noqa: S603 - fixed abicheck-authored argv, shell=False
-            cmd,
-            cwd=str(sources),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT if system == "make" else subprocess.PIPE,
-            text=True,
-            timeout=timeout,
-        )
+        # Bound by min(local timeout default, active scan --budget) —
+        # run_bounded() alone would honor a generous outer deadline verbatim
+        # instead of this query's own cap, letting a hung cmake configure/
+        # bazel aquery/make dry-run burn the whole remaining scan budget —
+        # and process-group-safe on timeout. Runs inside run_scan_core's
+        # L2-L5 deadline scope just like the clang/castxml calls it feeds
+        # (Codex review, PR #591, round 8).
+        with deadline.deadline_scope(effective_timeout):
+            return deadline.run_bounded(  # noqa: S603 - fixed abicheck-authored argv, shell=False
+                cmd,
+                cwd=str(sources),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT if system == "make" else subprocess.PIPE,
+                text=True,
+                timeout=timeout,
+            )
     except deadline.DeadlineExceeded as exc:
         extractors.append(
             ExtractorRecord(
