@@ -1,0 +1,154 @@
+name: 'abicheck collect-facts'
+description: >-
+  Collect L3/L4/L5 build/source facts for abicheck using the right producer
+  for your build (replay from a compile database, the abicheck-cc wrapper,
+  or the optional Clang plugin), so integrators stop hand-rolling shell
+  scripts and separately pinning a producer version.
+
+branding:
+  icon: 'database'
+  color: 'blue'
+
+inputs:
+  phase:
+    description: >
+      'prepare' (default for producer: replay, since nothing else is needed),
+      'verify', or 'auto'. Wrapper and clang-plugin producers need your own
+      build command to run *between* collection and verification (this
+      Action cannot run your build for you), so a workflow using either of
+      those two producers needs two separate steps: this Action with
+      `phase: prepare`, then your build step, then this Action again with
+      `phase: verify`. 'auto' runs both phases in one step, which only works
+      for producer: replay (a bare `sources:` pointer, no build step needed);
+      auto with wrapper/clang-plugin runs prepare only and prints a notice
+      to add a verify step after the build.
+    required: false
+    default: 'auto'
+  producer:
+    description: >
+      'auto' picks between replay and wrapper by inspecting `sources` for an
+      existing compile database or build-system files (never auto-selects
+      clang-plugin — see below); 'replay' (`dump --sources`, the portable
+      default); 'wrapper' (the abicheck-cc compiler wrapper, portable, needs
+      you to front your build command); 'clang-plugin' (zero extra parse,
+      but ABI-locked to the loading Clang's LLVM major — opt-in only, never
+      auto-selected, since owning the toolchain image can't be inferred).
+      See docs/user-guide/producing-source-facts.md for the full decision
+      tree this mirrors.
+    required: false
+    default: 'auto'
+  sources:
+    description: >
+      Source tree to collect facts from. Used directly by the replay
+      producer, and to auto-detect an existing compile database/build
+      system for producer: auto.
+    required: false
+    default: '.'
+  output:
+    description: >
+      Output directory for the collected abicheck_inputs/ pack (wrapper and
+      clang-plugin producers only — replay collects inline at dump/scan/
+      compare time, there is no separate pack directory).
+    required: false
+    default: 'abicheck_inputs'
+  public-roots:
+    description: >
+      Public header root(s), one per line, as the compiler *resolves* them
+      (not necessarily the install path — see the producing-source-facts.md
+      "one trap"). Feeds the wrapper's ABICHECK_CC_HEADERS / the plugin's
+      public-roots=. Only the clang-plugin producer auto-derives roots from
+      the compile's own -I/-iquote dirs when this is omitted -- the wrapper
+      producer has no such fallback: an empty ABICHECK_CC_HEADERS makes
+      cc_wrapper.py's extractors classify every declaration as UNKNOWN/
+      non-public (provenance.classify_origin() is opt-in), so a pack still
+      collects TU records and passes phase: verify but carries no public
+      source facts. Set this explicitly for producer: wrapper.
+    required: false
+  library:
+    description: 'Library name hint recorded in the pack manifest (wrapper ABICHECK_CC_LIBRARY / plugin library=).'
+    required: false
+  extractor:
+    description: >
+      Wrapper-producer only: which front-end extracts facts per TU -- 'auto'
+      (clang if present, else castxml), 'castxml', or 'clang'. Maps to
+      ABICHECK_CC_EXTRACTOR. Not used by producer: clang-plugin (the plugin
+      always reads the loading Clang's own AST) or producer: replay (dump's
+      --ast-frontend selects that side's frontend separately).
+    required: false
+    default: 'auto'
+  compiler:
+    description: >
+      Compiler used for the build (informational for replay/wrapper; for
+      clang-plugin this selects which clang the plugin is built against and
+      must match the clang that later loads it via -fplugin=).
+    required: false
+    default: 'clang++'
+  install-deps:
+    description: >
+      Install system dependencies needed by the selected producer (clang/
+      castxml for replay and wrapper; the matching libclang-<N>-dev package
+      for clang-plugin). Set to false if pre-installed.
+    required: false
+    default: 'true'
+  python-version:
+    description: 'Python version for setup-python.'
+    required: false
+    default: '3.13'
+
+outputs:
+  producer:
+    description: 'The producer actually used (replay, wrapper, or clang-plugin) after auto-resolution.'
+    value: ${{ steps.run-collect-facts.outputs.producer }}
+  mode:
+    description: >
+      'inline' (replay -- pass `sources` straight to dump/scan/compare, no
+      pack was collected) or 'pack' (wrapper/clang-plugin -- a pack
+      directory was collected at `pack-path`).
+    value: ${{ steps.run-collect-facts.outputs.mode }}
+  pack-path:
+    description: 'Path to the collected abicheck_inputs/ pack. Empty when mode is inline.'
+    value: ${{ steps.run-collect-facts.outputs.pack-path }}
+  ready:
+    description: >
+      'true' when the pack is ready to consume (replay always; wrapper/
+      clang-plugin only after phase: verify has run following your build
+      step). 'false' after phase: prepare for wrapper/clang-plugin -- your
+      build step must run next, then a phase: verify step.
+    value: ${{ steps.run-collect-facts.outputs.ready }}
+  producer-version:
+    description: >
+      Version identity of the producer used. Always empty for replay and
+      wrapper (this Action cannot know which compiler the caller's build
+      will actually invoke). For clang-plugin: the LLVM major plus a short
+      content digest of the built plugin binary, set at phase: prepare
+      (the plugin's identity is fixed the moment it's built, before your
+      build even runs) and re-emitted unchanged at phase: verify.
+    value: ${{ steps.run-collect-facts.outputs.producer-version }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install abicheck
+      shell: bash
+      run: pip install "${{ github.action_path }}/../.."
+
+    - name: Collect source facts
+      id: run-collect-facts
+      shell: bash
+      env:
+        INPUT_PHASE: ${{ inputs.phase }}
+        INPUT_PRODUCER: ${{ inputs.producer }}
+        INPUT_SOURCES: ${{ inputs.sources }}
+        INPUT_OUTPUT: ${{ inputs.output }}
+        INPUT_PUBLIC_ROOTS: ${{ inputs.public-roots }}
+        INPUT_LIBRARY: ${{ inputs.library }}
+        INPUT_EXTRACTOR: ${{ inputs.extractor }}
+        INPUT_COMPILER: ${{ inputs.compiler }}
+        INPUT_INSTALL_DEPS: ${{ inputs.install-deps }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: bash "${{ github.action_path }}/run.sh"

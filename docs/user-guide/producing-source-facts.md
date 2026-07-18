@@ -173,6 +173,113 @@ the portable defaults.
     explicit `public-roots=` when you want the surface scoped precisely to your
     installed public headers.
 
+## GitHub Actions: the `collect-facts` Action
+
+The three producers above are CLI-level (`dump --sources`, the `abicheck-cc`
+wrapper's environment variables, the plugin's `-fplugin=` flags) — wiring any
+of them into CI by hand means writing shell to pick a producer, install its
+dependencies, and (for the wrapper/plugin) export the right environment
+variables before your build runs. `abicheck/abicheck/actions/collect-facts`
+does that wiring once, so an integration doesn't need its own shell scripts
+or a separately pinned plugin version:
+
+Branch on `steps.facts.outputs.mode` rather than hard-coding a producer:
+`replay` needs nothing further (pass `sources:` straight to `dump`/`scan`),
+while `wrapper`/`clang-plugin` need the `phase: verify` step and
+`build-info: <pack-path>`. Skipping the branch and always wiring
+`build-info: ${{ steps.facts.outputs.pack-path }}` is a trap — for
+`producer: auto` resolving to `replay` (the common case on a project with a
+`compile_commands.json` or a CMake/Bazel build), `pack-path` is empty, so
+`build-info` silently receives nothing and the dump proceeds with **no**
+source facts at all, not an error:
+
+```yaml
+- uses: abicheck/abicheck/actions/collect-facts@<same-sha-as-below>
+  id: facts
+  with:
+    phase: prepare
+    producer: auto            # or: replay | wrapper | clang-plugin
+    sources: .
+    public-roots: |
+      include
+    output: abicheck_inputs
+
+- name: Build
+  # Always runs -- this produces build/libfoo.so itself, which the dump step
+  # below needs regardless of producer. Do NOT gate this on
+  # `steps.facts.outputs.mode == 'pack'`: `phase: prepare` only *exports* the
+  # env vars/flags wrapper and clang-plugin need (see the notices it prints);
+  # nothing invokes them for you, so the configure step below has to wire
+  # them in explicitly per producer. producer: replay needs neither -- it
+  # collects its facts separately, inline, from `sources:` at dump time
+  # below -- but the binary still has to actually get built either way.
+  run: |
+    case "${{ steps.facts.outputs.producer }}" in
+      wrapper)
+        # abicheck-cc reads ABICHECK_CC_* (exported by phase: prepare above)
+        # but only compiles anything it's actually invoked for -- CMake's
+        # compiler-launcher hooks are what puts it in front of every call.
+        cmake -DCMAKE_CXX_COMPILER_LAUNCHER=abicheck-cc \
+              -DCMAKE_C_COMPILER_LAUNCHER=abicheck-cc -S . -B build
+        ;;
+      clang-plugin)
+        # $ABICHECK_PLUGIN_FLAGS (exported by phase: prepare above) loads the
+        # plugin into the real compiler; nothing does this automatically.
+        cmake -DCMAKE_CXX_FLAGS="$ABICHECK_PLUGIN_FLAGS" -S . -B build
+        ;;
+      *)
+        cmake -S . -B build
+        ;;
+    esac
+    cmake --build build
+
+- uses: abicheck/abicheck/actions/collect-facts@<same-sha-as-below>
+  id: facts-verify
+  if: steps.facts.outputs.mode == 'pack'
+  with:
+    phase: verify
+    producer: ${{ steps.facts.outputs.producer }}
+    output: abicheck_inputs
+
+- uses: abicheck/abicheck@<same-sha-as-above>
+  with:
+    mode: dump
+    new-library: build/libfoo.so
+    header: include/
+    # mode: inline (replay) -> pass sources directly; mode: pack (wrapper/
+    # clang-plugin) -> pass the verified pack path. Never pass an empty
+    # build-info -- that's the silent-no-facts trap above.
+    sources: ${{ steps.facts.outputs.mode == 'inline' && '.' || '' }}
+    build-info: ${{ steps.facts-verify.outputs.pack-path }}
+```
+
+Pin both `uses:` lines to the **same commit SHA** and there is exactly one
+version to track: the Action builds the Clang plugin (when
+`producer: clang-plugin`) from its own checked-out copy of
+`contrib/abicheck-clang-plugin` at that SHA, not a separately versioned
+`plugin_ref` — the scanner and the producer can never drift apart the way a
+hand-rolled `plugin_ref: v0.5.0` variable next to a differently-pinned
+`uses: abicheck/abicheck@v0.5.0` line can.
+
+**`phase: prepare` / `phase: verify`, and why there are two steps.** Wrapper
+and Clang-plugin injection both need *your* build command to run in between —
+this Action cannot invoke it for you. `phase: prepare` resolves the producer,
+installs what it needs (the matching `libclang-<N>-dev` for `clang-plugin`,
+`castxml`/`clang` for `wrapper`), and exports the environment variables/flags
+your build step reads; `phase: verify` (run after your build) checks the
+resulting pack is non-empty and reports its path. `producer: replay` needs
+neither — `phase: auto` (the default) completes it in one step, since replay
+collects inline at `dump`/`scan`/`compare` time rather than producing a pack
+ahead of time; pass `sources:` straight to the next abicheck step and skip
+`collect-facts` for that producer entirely if you already know you're on the
+replay path.
+
+**`producer: auto`** inspects `sources` for an existing compile database or a
+CMake/Bazel project (→ `replay`) and falls back to `wrapper` otherwise. It
+never auto-selects `clang-plugin` — "you own the toolchain image and the
+second-parse cost is worth removing" is an operator decision the Action can't
+infer, matching the [decision tree](#which-producer-pick-one) above.
+
 ## Then: fold the facts onto the binary
 
 However you produced them, ingest is a single `dump` call — pass the

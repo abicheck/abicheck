@@ -144,6 +144,21 @@ and the policy recipes in [Getting Started](../getting-started.md).
     user-facing flag or command changes — a repo-internal mechanic for
     abicheck contributors, not something you configure for your own project.
 
+!!! warning "A label should relax the gate, not skip the check"
+    A common mistake: skipping the whole comparison job whenever a PR
+    carries an `intentional-breaking-change` label. That only defers the
+    problem — every subsequent, unrelated PR still diffs against the old
+    (pre-break) baseline, sees the same accepted break again, and fails.
+    Keep the comparison running unconditionally; use the label only to
+    relax **every** baseline's gate for that one PR (e.g. lower
+    `fail-on-breaking` on both the release-contract and accepted-main jobs —
+    that PR is expected to report a break against both), and refresh the
+    baseline other PRs compare against once the break lands on the default
+    branch, so the label doesn't carry over to unrelated PRs. See [Baseline
+    Management → Two kinds of
+    baseline](baseline-management.md#two-kinds-of-baseline-release-contract-vs-accepted-main)
+    for the release-contract vs. accepted-main split this implies.
+
 ## Related pages
 
 - [Baseline Management](baseline-management.md) — producing, storing, and

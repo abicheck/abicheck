@@ -224,6 +224,14 @@ if [[ "$MODE" == "dump" ]]; then
   # (`abicheck dump --sources ./src -o out.json`) needs no binary. Require
   # either a binary OR a source/build-evidence input.
   if [[ -n "${INPUT_NEW_LIBRARY:-}" ]]; then
+    # dump has no per-library fan-out (unlike compare) — a directory/package
+    # is normally caught early by action/validate-inputs.sh, before any
+    # dependency install; re-checked here for anyone invoking run.sh
+    # directly (e.g. tests) without that step.
+    if _is_release_style_operand "${INPUT_NEW_LIBRARY}"; then
+      echo "::error::mode: dump does not accept a directory or package for new-library ('${INPUT_NEW_LIBRARY}') — dump snapshots exactly one library. Dump each library individually, or use mode: compare with a directory/package operand instead."
+      exit 1
+    fi
     CMD+=("${INPUT_NEW_LIBRARY}")
   elif [[ -z "${INPUT_SOURCES:-}${INPUT_BUILD_INFO:-}${INPUT_COMPILE_DB:-}" ]]; then
     echo "::error::dump mode requires new-library, or one of sources/build-info/compile-db for a source-only dump."
@@ -392,11 +400,14 @@ elif [[ "$MODE" == "deps-tree" ]]; then
   add_flag "--search-path" "${INPUT_SEARCH_PATH:-}"
   add_single_flag "--ld-library-path" "${INPUT_LD_LIBRARY_PATH:-}"
 
-  # Format — deps-tree only supports markdown and json
+  # Format — deps-tree supports markdown, json, and html (`deps tree
+  # --help`; html renders via cli_stack.py's stack_to_html). Hard error on
+  # anything else (sarif), not a silent fallback — see the scan branch's
+  # format check above.
   FORMAT="${INPUT_FORMAT:-markdown}"
-  if [[ "$FORMAT" != "markdown" && "$FORMAT" != "json" ]]; then
-    echo "::warning::deps-tree mode only supports 'markdown' and 'json' formats. Falling back to 'markdown'."
-    FORMAT="markdown"
+  if [[ "$FORMAT" != "markdown" && "$FORMAT" != "json" && "$FORMAT" != "html" ]]; then
+    echo "::error::mode: deps-tree does not support format: $FORMAT. Only 'markdown', 'json', and 'html' are supported."
+    exit 1
   fi
   CMD+=(--format "$FORMAT")
 
@@ -419,11 +430,14 @@ elif [[ "$MODE" == "deps-compare" ]]; then
   add_flag "--search-path" "${INPUT_SEARCH_PATH:-}"
   add_single_flag "--ld-library-path" "${INPUT_LD_LIBRARY_PATH:-}"
 
-  # Format — deps-compare only supports markdown and json
+  # Format — deps-compare supports markdown, json, and html (`deps compare
+  # --help`; html renders via cli_stack.py's stack_to_html). Hard error on
+  # anything else (sarif), not a silent fallback — see the scan branch's
+  # format check above.
   FORMAT="${INPUT_FORMAT:-markdown}"
-  if [[ "$FORMAT" != "markdown" && "$FORMAT" != "json" ]]; then
-    echo "::warning::deps-compare mode only supports 'markdown' and 'json' formats. Falling back to 'markdown'."
-    FORMAT="markdown"
+  if [[ "$FORMAT" != "markdown" && "$FORMAT" != "json" && "$FORMAT" != "html" ]]; then
+    echo "::error::mode: deps-compare does not support format: $FORMAT. Only 'markdown', 'json', and 'html' are supported."
+    exit 1
   fi
   CMD+=(--format "$FORMAT")
 
@@ -445,7 +459,16 @@ elif [[ "$MODE" == "scan" ]]; then
   # — there is no separate --audit/--mode/--source-method/--estimate flag any
   # more (CLI simplification).
   CMD+=(scan)
-  CMD+=("${INPUT_NEW_LIBRARY:?new-library (the scanned binary or .abi.json) is required for scan mode}")
+  SCAN_ARTIFACT="${INPUT_NEW_LIBRARY:?new-library (the scanned binary or .abi.json) is required for scan mode}"
+  # scan has no per-library fan-out (unlike compare) — a directory/package
+  # is normally caught early by action/validate-inputs.sh, before any
+  # dependency install; re-checked here for anyone invoking run.sh directly
+  # (e.g. tests) without that step.
+  if _is_release_style_operand "$SCAN_ARTIFACT"; then
+    echo "::error::mode: scan does not accept a directory or package for new-library ('$SCAN_ARTIFACT') — scan analyses exactly one artifact. Use mode: compare against a directory/package for a multi-library binary comparison instead."
+    exit 1
+  fi
+  CMD+=("$SCAN_ARTIFACT")
 
   # -H/-I are side-aware on scan: a bare value applies to both ARTIFACT and
   # the --against side; old-header/old-include and new-header/new-include
@@ -490,11 +513,15 @@ elif [[ "$MODE" == "scan" ]]; then
     CMD+=(--allow-build-query)
   fi
 
-  # Format — scan only supports text and json.
+  # Format — scan only supports text and json. Normally caught early by
+  # action/validate-inputs.sh; re-checked here (hard error, not a silent
+  # fallback — a fallback here used to make a misconfigured `format: sarif`
+  # + `upload-sarif: true` scan step silently produce neither an error nor
+  # a SARIF report) for anyone invoking run.sh directly without that step.
   FORMAT="${INPUT_FORMAT:-text}"
   if [[ "$FORMAT" != "text" && "$FORMAT" != "json" ]]; then
-    echo "::warning::scan mode only supports 'text' and 'json' formats. Falling back to 'text'."
-    FORMAT="text"
+    echo "::error::mode: scan does not support format: $FORMAT. Only 'text' and 'json' are supported."
+    exit 1
   fi
   CMD+=(--format "$FORMAT")
 

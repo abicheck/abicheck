@@ -91,6 +91,14 @@ then compare with a separate step.
           new-header: ${{ matrix.lib.header }}
 ```
 
+If the release also carries build-emitted source facts from one shared
+`abicheck_inputs/` pack, see [Source Scans → Recommended flow: a
+multi-library release with one shared facts
+pack](github-action-source-scans.md#recommended-flow-a-multi-library-release-with-one-shared-facts-pack)
+for the full walkthrough — it chains this recipe with inline `build-info`
+embedding and the [post-matrix ABI gate](#post-matrix-abi-gate-unified-verdict)
+below.
+
 ## Matrix: multiple platforms (native scan per OS)
 
 Use native runners to get the best platform-specific signal (Linux/ELF, macOS/Mach-O, Windows/PE):
