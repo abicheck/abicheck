@@ -10,9 +10,13 @@ evidence wired into `MarkReachability`/`DetectInternalLeaks`, the new
 `reachability_kind` value (`symbol_availability`), structured JSON/SARIF
 reachability fields, `PolicyFile.internal_namespaces`, and the two remaining
 `checker.py` suppression call sites routed through the diagnostic-emitting
-helper. P2 (consumer-import evidence, old-consumer/new-library execution
-harness, new worked examples) remains roadmap, not committed to any
-timeline — see "Roadmap" below.
+helper. **P2 is now also implemented** — see "P2 — empirical validation"
+below: the `consumer_required_symbol_removed` `ChangeKind` promoting
+`--used-by`'s missing-symbol check to a first-class suppressible finding,
+the opt-in `--verify-runtime` old-consumer/new-library execution probe
+(`consumer_runtime_load_failed`, `RISK`-tier), and worked examples
+(`case192`/`case193`) exercising the headline scenario and its deliberate
+counter-example end to end.
 **Decision maker:** Nikolay Petrov (@napetrov)
 
 ---
@@ -1252,13 +1256,33 @@ review's priority tiers.
    of `COMPATIBLE_WITH_RISK`, even though the finding list itself was
    correct. Fixed by recomputing `scoped.verdict` via
    `_compute_appcompat_verdict` immediately after the append.
-3. New worked examples exercising this ADR's headline scenario end-to-end
+3. ~~New worked examples exercising this ADR's headline scenario end-to-end
    (public inline dispatch to an exported internal specialization; the same
    case under a blanket namespace suppression, asserting the break survives
    and the diagnostic fires; a safe pimpl counter-example) — the review's
    examples A/B/D are the most valuable regression coverage and are natural
    `examples/case*/` additions now that P1 item 1's call-graph reachability
-   is wired (previously blocked on it).
+   is wired (previously blocked on it).~~ **Closed for A/B combined into one
+   case, plus a deliberate negative-space counter-example in place of the
+   literal pimpl case.** `examples/case192_call_graph_break_survives_suppression`
+   ships the full A/B scenario in one case (a public inline dispatcher's call
+   into a removed internal specialization: `BREAKING` unmodified, refused
+   under a broad `namespace: "demo::detail::**"` suppression rule with the
+   `suppression_would_hide_public_break` diagnostic naming the proof path,
+   then `NO_CHANGE` once the same rule adds `allow_public_break: true`).
+   `examples/case193_ordinary_exported_fn_call_not_reachable` is the
+   counter-example this round actually needed more: not the type-layout
+   pimpl shape (already covered by `case118`-`case120`'s public-surface
+   scoping), but the call-graph walk's own negative-space check — an
+   ordinary out-of-line exported function's internal call is not
+   public-reachable, so the identical broad suppression rule applies
+   cleanly with no diagnostic at all. Building it is what surfaced the
+   transitive-traversal over-reach documented in the P1 slice above (a
+   third example, a literal pimpl-via-graph case, remains a nice-to-have
+   follow-up, not attempted in this round). Both ship hand-built
+   `AbiSnapshot` pairs with an embedded L5 graph
+   (`scripts/gen_reachability_examples.py`), validated compiler-free by
+   `tests/test_reachability_examples.py`.
 
 ## Consequences
 
