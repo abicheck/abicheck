@@ -44,6 +44,7 @@ VALIDATION = ROOT / "validation"
 ACTION = ROOT / "action"
 CONTRIB_CLANG_PLUGIN = ROOT / "contrib" / "abicheck-clang-plugin"
 GITHUB_DIR = ROOT / ".github"
+AGENT_EVALS = ROOT / "agent-evals"
 
 # ---------------------------------------------------------------------------
 # Tunables
@@ -63,6 +64,7 @@ FIRST_PARTY_PY_ROOTS: tuple[Path, ...] = (
     VALIDATION,
     ACTION,
     CONTRIB_CLANG_PLUGIN,
+    AGENT_EVALS,
 )
 
 # Directory *names* excluded from first-party scanning wherever they appear
@@ -153,6 +155,7 @@ REQUIRED_AGENT_INSTRUCTION_DIRS: tuple[Path, ...] = (
     GITHUB_DIR,
     ACTION,
     CONTRIB_CLANG_PLUGIN,
+    AGENT_EVALS,
 )
 
 # Minimum test-file ratio (test files / source files).

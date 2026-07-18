@@ -28,13 +28,16 @@ Profiles:
            The everyday inner-loop command.
     pr     The exact always-required CI-equivalent checks: everything `fast`
            runs, plus golden tests, coverage floor, and the ai-readiness /
-           FP-rate / tier-accuracy / doc-sync / changelog-fragment /
-           schema/FAIR-metadata gates the `ai-readiness` and `fair-metadata`
-           CI jobs run on every PR.
-    full   Everything in `pr`, plus external-tool, parity, performance, and
-           packaging lanes — each skipped (not failed) when the environment
-           lacks the tool it needs, so `full` is meaningful on a partial
-           toolchain.
+           FP-rate / tier-accuracy / doc-sync / schema/FAIR-metadata gates
+           the `ai-readiness` and `fair-metadata` CI jobs run on every PR.
+    full   Everything in `pr`, plus external-tool, parity, performance,
+           packaging, and changelog-fragment lanes — each skipped (not
+           failed) when the environment lacks the tool it needs (or, for
+           changelog-fragment, lacks a locally-resolvable `origin/main`), so
+           `full` is meaningful on a partial toolchain. changelog-fragment is
+           `full`-only, not `pr`: the real CI gate for it is the separate
+           `changelog-check.yml` workflow (uses the actual PR base/head SHAs
+           from the GitHub event), not this script.
 
 Usage:
 
@@ -232,11 +235,24 @@ STEPS: tuple[Step, ...] = (
         description="repo_facts.json freshness (test/example counts, version) — CLAUDE.md M1-4",
     ),
     Step(
+        # FULL only, NOT PR: this step's precondition depends on origin/main
+        # being locally resolvable, which is a checkout-topology fact (shallow
+        # clone, detached HEAD, a fresh CI checkout without an explicit
+        # `git fetch origin main`) rather than a "missing tool" a contributor
+        # can just install — so it doesn't fit the pr-profile's
+        # skip-means-incomplete contract (Codex review, PR #604). It also
+        # isn't redundant to drop from `pr`: the actual required CI gate for
+        # this check is the separate `changelog-check.yml` workflow, which
+        # always passes real PR base/head SHAs from the GitHub event rather
+        # than relying on a local `origin/main` ref — `verify.py --profile pr`
+        # was never how this check runs in CI. Kept in `full` as a
+        # best-effort local convenience for contributors who do have
+        # origin/main fetched.
         "changelog-fragment",
         _pyscript("scripts/check_changelog_fragment.py"),
-        frozenset({PR, FULL}),
+        frozenset({FULL}),
         precondition=_origin_main_available,
-        description="changelog.d/ fragment gate for abicheck/**/*.py diffs",
+        description="changelog.d/ fragment gate for abicheck/**/*.py diffs (local convenience; changelog-check.yml is the real CI gate)",
     ),
     Step(
         "schema-sync",

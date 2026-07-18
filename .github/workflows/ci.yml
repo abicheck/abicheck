@@ -22,11 +22,13 @@ jobs:
           # `canonical_python`, matching the coverage-floor lane in
           # unit-tests below) — NOT '3.14' like the other jobs. This job's
           # repo-facts step recomputes `fast_test_cases_collected` via
-          # `pytest --collect-only`, and that count is interpreter-version
-          # sensitive (observed: 17055 on 3.11/3.13, 17075 on 3.14). Running
-          # under a different Python than whoever committed repo_facts.json
-          # produces spurious drift failures unrelated to any real change —
-          # this pin keeps the check's generate/verify environment consistent.
+          # `pytest --collect-only`, which has been observed to drift by a
+          # small, unexplained amount even between environments that match on
+          # Python version and every dependency version — this pin removes
+          # one plausible variable. `gen_repo_facts.py --check` treats that
+          # one field's drift as non-fatal (WARN, not ERROR) precisely
+          # because it isn't reliably reproducible; see that script's
+          # docstring for what was actually tried.
           python-version: '3.13'
           cache: 'pip'
       - name: Install mypy (for baseline-drift check)
