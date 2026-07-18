@@ -16,7 +16,8 @@
 """Root command-surface behavior tests (ADR-043).
 
 The pre-1.0 CLI reset requires the public root surface to show *exactly*
-``dump``, ``compare``, ``scan``, ``deps``, ``compat`` — no hidden aliases, no
+``dump``, ``compare``, ``scan``, ``deps``, ``compat`` — plus ``aggregate``, the
+multi-target CI fan-in gate added afterward — with no hidden aliases, and no
 deprecated shims for the deleted commands (``appcompat``, ``plugin-check``,
 ``baseline``, ``collect``, ``merge``, ``recommend-collect-mode``,
 ``debian-symbols``, ``doctor``, ``config``, ``init``, ``surface-report``,
@@ -36,7 +37,9 @@ from click.testing import CliRunner
 
 from abicheck.cli import main
 
-_PUBLIC_COMMANDS = frozenset({"dump", "compare", "scan", "deps", "compat"})
+_PUBLIC_COMMANDS = frozenset(
+    {"dump", "compare", "scan", "deps", "compat", "aggregate"}
+)
 
 _REMOVED_COMMANDS = (
     "appcompat",
@@ -56,7 +59,7 @@ _REMOVED_COMMANDS = (
 )
 
 
-def test_root_surface_is_exactly_five_commands() -> None:
+def test_root_surface_is_exactly_the_public_commands() -> None:
     assert set(main.commands) == _PUBLIC_COMMANDS
 
 
@@ -95,7 +98,7 @@ def test_help_shows_exactly_the_public_commands() -> None:
 
 def test_python_dash_m_abicheck_shows_public_commands() -> None:
     """``python -m abicheck --help`` (the documented entry point) surfaces the
-    same five commands as in-process ``main.commands`` introspection."""
+    same public commands as in-process ``main.commands`` introspection."""
     result = subprocess.run(
         [sys.executable, "-m", "abicheck", "--help"],
         capture_output=True,
