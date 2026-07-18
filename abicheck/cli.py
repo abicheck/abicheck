@@ -1158,6 +1158,7 @@ def _embed_inline_source_side(
     collect_mode: str,
     out_dir: Path,
     label: str,
+    depth: str | None = None,
     debug_roots: tuple[Path, ...] = (),
     debuginfod: bool = False,
     debuginfod_url: str | None = None,
@@ -1185,6 +1186,23 @@ def _embed_inline_source_side(
     ``--old/new-sources`` tree bypassed ``--debug-root`` entirely (the inline
     dump used its own unset defaults), so a stripped binary on this side still
     lost its DWARF even though the sibling non-inline path was fixed.
+
+    ``depth`` is ``compare``'s own (unmodified) ``--depth`` string, used only
+    to reproduce ``dump_cmd``'s ``--depth source`` + ``--ast-frontend hybrid``
+    rejection for this side (Codex review): the ``ctx.invoke(dump_cmd, ...)``
+    call below never passes ``depth=``, so without this explicit check
+    ``dump_cmd``'s own guard silently never fires for a raw
+    ``--old/new-sources`` tree here even when ``compare --depth source
+    --ast-frontend hybrid`` would reject the identical tree via a plain
+    ``dump --sources <tree> --depth source --ast-frontend hybrid`` — an
+    inconsistent, silently-degrading escape hatch from the same command-line
+    surface the check was written to close. Deliberately narrower than
+    threading ``depth`` into the nested ``dump_cmd`` invocation itself, which
+    would also activate that call's ``check_requested_depth_satisfied`` hard
+    gate on this one side's snapshot in isolation — a larger behavior change
+    than this finding asked for, and not needed here since ``compare``'s own
+    ``--depth`` semantics (missing-evidence-layer warnings, not a hard
+    per-side gate) are unaffected by this narrowly-scoped check.
     """
     sources_raw = sources is not None and not _source_is_pack(sources)
     build_info_raw = build_info is not None and not _source_is_pack(build_info)
@@ -1253,6 +1271,23 @@ def _embed_inline_source_side(
         frontend_explicit=frontend_explicit,
         nostdinc_explicit=nostdinc_explicit,
     )
+    # Reproduce dump_cmd's --depth source + --ast-frontend hybrid rejection for
+    # this side -- see this function's own docstring for why the nested
+    # ctx.invoke(dump_cmd, ...) below does not surface that check itself
+    # (Codex review).
+    if (
+        depth == "source"
+        and frozen_cc.frontend == "hybrid"
+        and _dump_will_attempt_hybrid_l4_extraction(dump_sources)
+    ):
+        raise click.UsageError(
+            f"--depth source is incompatible with --ast-frontend hybrid for "
+            f"the --{label}-sources tree: L4 source-ABI replay has no "
+            "dual-backend hybrid extractor (unlike the L2 header-AST "
+            f"snapshot). Pass --{label}-ast-frontend castxml or "
+            f"--{label}-ast-frontend clang (or the unscoped --ast-frontend) "
+            "for a --depth source compare."
+        )
     ctx.invoke(
         dump_cmd,
         so_path=norm,

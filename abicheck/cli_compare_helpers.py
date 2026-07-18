@@ -1347,6 +1347,7 @@ def run_compare(
             debug_roots=tuple(resolved_old_debug),
             debuginfod=debuginfod, debuginfod_url=debuginfod_url,
             collect_mode=collect_mode, out_dir=Path(_src_tmp), label="old",
+            depth=depth,
         )
         new_input, new_sources, new_build_info = _embed_inline_source_side(
             ctx, input_path=new_input, sources=new_sources,
@@ -1363,6 +1364,7 @@ def run_compare(
             dwarf_only=dwarf_only, debug_format=effective_debug_format,
             pdb_path=new_pdb_path or pdb_path,
             collect_mode=collect_mode, out_dir=Path(_src_tmp), label="new",
+            depth=depth,
         )
 
     # Follow GNU ld linker scripts up front so the resolved DSO (not the text

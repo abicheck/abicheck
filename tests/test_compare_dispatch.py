@@ -469,6 +469,75 @@ def test_embed_inline_raw_build_info_dropped_at_off_depth(
     assert kept is None and kept_bi is None and called["n"] == 0
 
 
+def test_embed_inline_source_rejects_hybrid_frontend_at_depth_source(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Codex review: dump_cmd rejects --depth source + --ast-frontend hybrid
+    for a raw --sources tree, but the ctx.invoke(dump_cmd, ...) this function
+    makes never passes depth= -- so without an equivalent check here, the
+    identical `compare --depth source --sources <raw tree> --ast-frontend
+    hybrid` invocation silently reached the nested dump_cmd with depth=None,
+    skipping the rejection dump --sources <tree> --depth source --ast-frontend
+    hybrid would give for the same tree. This must raise the same
+    UsageError, without ever calling ctx.invoke (which would run a real,
+    silently-degraded L4 replay)."""
+    import abicheck.cli as climod
+    from abicheck.service_scan import CompileContext
+
+    tree = tmp_path / "src"
+    tree.mkdir()
+    called = {"n": 0}
+
+    class _Ctx:
+        def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
+            called["n"] += 1
+
+    monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), "elf"))
+    with pytest.raises(climod.click.UsageError, match="--ast-frontend hybrid"):
+        climod._embed_inline_source_side(
+            _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
+            headers=(), includes=(), version="1.0", lang="c++",
+            header_backend="hybrid", compile_context=CompileContext(),
+            frontend_explicit=True, nostdinc_explicit=False, build_info=None,
+            follow_deps=False, search_paths=(),
+            ld_library_path="", dwarf_only=False, debug_format=None,
+            pdb_path=None, collect_mode="source-target", out_dir=tmp_path,
+            label="old", depth="source",
+        )
+    assert called["n"] == 0  # rejected before the inline dump ever runs
+
+
+def test_embed_inline_source_hybrid_not_rejected_below_depth_source(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The hybrid rejection is scoped to --depth source specifically (mirrors
+    dump_cmd's own scoping) -- hybrid is the normal, supported dual-backend
+    choice for the L2 header AST at every other depth."""
+    import abicheck.cli as climod
+    from abicheck.service_scan import CompileContext
+
+    tree = tmp_path / "src"
+    tree.mkdir()
+    called = {"n": 0}
+
+    class _Ctx:
+        def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
+            called["n"] += 1
+
+    monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), "elf"))
+    climod._embed_inline_source_side(
+        _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
+        headers=(), includes=(), version="1.0", lang="c++",
+        header_backend="hybrid", compile_context=CompileContext(),
+        frontend_explicit=True, nostdinc_explicit=False, build_info=None,
+        follow_deps=False, search_paths=(),
+        ld_library_path="", dwarf_only=False, debug_format=None,
+        pdb_path=None, collect_mode="build", out_dir=tmp_path,
+        label="old", depth="build",
+    )
+    assert called["n"] == 1  # inline dump ran normally, no rejection
+
+
 def test_header_graph_rejected_with_raw_sources(tmp_path: Path) -> None:
     """--header-graph is rejected (not silently dropped) alongside a raw
     --old-sources tree: the inline-dump path it triggers goes through
