@@ -2634,6 +2634,40 @@ class TestDebExtractorExtended:
         # The planted payload file must have been wiped, not left in place.
         assert not (out / ".deb_control" / "symbols").exists()
 
+    def test_extract_data_tar_planted_deb_control_as_plain_file_is_removed(
+        self, tmp_path: Path,
+    ) -> None:
+        """Same collision as above, but data.tar.* plants .deb_control itself
+        as a plain file (not a directory) -- control_dir.mkdir() would raise
+        FileExistsError against a stale file the same way it would against a
+        stale directory; the pre-extraction cleanup must handle both shapes."""
+        f = tmp_path / "test.deb"
+        f.write_bytes(b"!<arch>\n" + b"\x00" * 100)
+        out = tmp_path / "output"
+        out.mkdir()
+        symbols_text = "libfoo.so.1 libfoo1 1.0\n _ZN3foo3barEv@Base 1.0\n"
+
+        def fake_run(*args, **kwargs):
+            staging = Path(kwargs.get("cwd", "."))
+            with tarfile.open(staging / "data.tar", "w") as tf:
+                data = b"not a directory"
+                info = tarfile.TarInfo(name=".deb_control")
+                info.size = len(data)
+                tf.addfile(info, io.BytesIO(data))
+            with tarfile.open(staging / "control.tar", "w") as tf:
+                data = symbols_text.encode()
+                info = tarfile.TarInfo(name="symbols")
+                info.size = len(data)
+                tf.addfile(info, io.BytesIO(data))
+            return mock.Mock(returncode=0)
+
+        with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
+            with mock.patch("abicheck.package.subprocess.run", side_effect=fake_run):
+                result = DebExtractor().extract(f, out)
+
+        assert result.symbols_file is not None
+        assert result.symbols_file.read_text() == symbols_text
+
     def test_extract_relative_deb_path_passes_absolute_path_to_ar(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
