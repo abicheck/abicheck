@@ -355,7 +355,7 @@ class TestLlvmMajorFromPredefinedMacros:
 
     def _fake_compiler(self, tmp_path: Path, *defines: str) -> Path:
         script = tmp_path / "fake-compiler"
-        printf_lines = "\n".join(f'  printf \'{line}\\n\'' for line in defines)
+        printf_lines = "\n".join(f"  printf '{line}\\n'" for line in defines)
         script.write_text(
             "#!/bin/sh\n"
             'if [ "$1" = "-dM" ]; then\n'
@@ -395,6 +395,7 @@ class TestLlvmMajorFromPredefinedMacros:
         script.write_text("#!/bin/sh\nexit 1\n")
         script.chmod(0o755)
         result = _run_predicate(f'_llvm_major_from_predefined_macros "{script}"')
+        assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == ""
 
     def test_returns_success_when_dump_succeeds_with_no_clang_major(
@@ -415,6 +416,7 @@ class TestLlvmMajorFromPredefinedMacros:
         result = _run_predicate(
             '_llvm_major_from_predefined_macros "/no/such/compiler-xyz"'
         )
+        assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == ""
 
 
@@ -473,6 +475,7 @@ class TestNormalizeWinPath:
         # No stubbing needed -- the empty-input check returns before ever
         # inspecting uname/cygpath, so this is platform-independent as-is.
         result = _run_predicate('_normalize_win_path ""')
+        assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == ""
 
     @pytest.mark.skipif(
@@ -584,6 +587,7 @@ class TestBundledLlvmCmakePrefix:
 
     def test_empty_when_cmplr_root_unset(self) -> None:
         result = _run_predicate('_bundled_llvm_cmake_prefix "" "" ""')
+        assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == ""
 
     def test_empty_when_cmplr_root_has_no_llvm_cmake_package(
@@ -598,6 +602,7 @@ class TestBundledLlvmCmakePrefix:
         result = _run_predicate(
             f'_bundled_llvm_cmake_prefix "" "{cmplr_root}" "{compiler_path}"'
         )
+        assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == ""
 
     def test_empty_when_compiler_not_under_cmplr_root(self, tmp_path: Path) -> None:
@@ -614,6 +619,7 @@ class TestBundledLlvmCmakePrefix:
         result = _run_predicate(
             f'_bundled_llvm_cmake_prefix "" "{cmplr_root}" "{unrelated_compiler}"'
         )
+        assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == ""
 
     @pytest.mark.skipif(
@@ -623,32 +629,39 @@ class TestBundledLlvmCmakePrefix:
         "the real, un-stubbed windows-latest behavior is covered by "
         "test_detects_cmplr_root_with_llvm_cmake_package above",
     )
-    def test_normalizes_both_paths_when_cygpath_available(
-        self, tmp_path: Path
-    ) -> None:
+    def test_normalizes_both_paths_when_cygpath_available(self, tmp_path: Path) -> None:
         # Full integration (Codex review): _bundled_llvm_cmake_prefix must
         # route both cmplr_root and compiler_path through
         # _normalize_win_path before comparing, on a simulated-Windows host
-        # where cygpath is present. Uses an identity-stub cygpath here --
-        # real directory-existence checks need a real filesystem path, so
-        # actual backslash<->POSIX translation is covered directly by
-        # TestNormalizeWinPath above; this test only proves the wiring
-        # calls through cygpath rather than comparing raw strings.
+        # where cygpath is present. Uses a non-identity cygpath stub that
+        # maps two distinct synthetic (non-path-shaped) inputs to the real
+        # cmplr_root/compiler_path -- an identity stub (CodeRabbit review)
+        # would pass even if normalization were dropped for either argument,
+        # since it always echoes its input back unchanged either way.
         fake_bin = tmp_path / "fakebin"
         fake_bin.mkdir()
         (fake_bin / "uname").write_text('#!/bin/sh\necho "MINGW64_NT-10.0-x86_64"\n')
         (fake_bin / "uname").chmod(0o755)
-        (fake_bin / "cygpath").write_text('#!/bin/sh\nprintf "%s" "$2"\n')
-        (fake_bin / "cygpath").chmod(0o755)
 
         cmplr_root = tmp_path / "cmplr"
         (cmplr_root / "lib" / "cmake" / "llvm").mkdir(parents=True)
         compiler_path = cmplr_root / "bin" / "icpx"
+        cygpath_script = (
+            "#!/bin/sh\n"
+            'case "$2" in\n'
+            f'  RAW_CMPLR_ROOT) printf "%s" "{cmplr_root.as_posix()}" ;;\n'
+            f'  RAW_COMPILER_PATH) printf "%s" "{compiler_path.as_posix()}" ;;\n'
+            '  *) printf "%s" "$2" ;;\n'
+            "esac\n"
+        )
+        (fake_bin / "cygpath").write_text(cygpath_script)
+        (fake_bin / "cygpath").chmod(0o755)
+
         result = _run_predicate(
-            f'_bundled_llvm_cmake_prefix "" "{cmplr_root}" "{compiler_path}"',
+            '_bundled_llvm_cmake_prefix "" "RAW_CMPLR_ROOT" "RAW_COMPILER_PATH"',
             env_extra={"PATH": str(fake_bin)},
         )
-        assert result.stdout.strip() == f"{cmplr_root}/lib/cmake"
+        assert result.stdout.strip() == f"{cmplr_root.as_posix()}/lib/cmake"
 
 
 @pytest.mark.skipif(
