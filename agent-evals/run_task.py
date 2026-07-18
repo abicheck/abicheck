@@ -24,11 +24,14 @@ of the task's `base_commit`:
 What it checks, in order (stopping at the first hard failure):
 
 1. The manifest itself validates against schema/task-manifest.schema.json.
-2. The working tree's diff from `base_commit` stays within `allowed_paths`,
+2. `base_commit` actually resolves in this checkout and the diff against it
+   can be computed (a bad/unresolvable base_commit fails closed as a
+   "git-error" stage — it is never silently treated as "no changes").
+3. The working tree's diff from `base_commit` stays within `allowed_paths`,
    and does not touch this task's own `hidden_tests/` directory (the
    "edit-hidden-tests" forbidden action).
-3. `required_checks` pass via `scripts/verify.py`.
-4. `hidden_tests` pass via pytest, run only after step 3 — a change that
+4. `required_checks` pass via `scripts/verify.py`.
+5. `hidden_tests` pass via pytest, run only after step 4 — a change that
    doesn't pass its own project's gates hasn't earned a hidden-test run.
 
 Emits a machine-readable JSON result to stdout (or `--json PATH`). This
@@ -88,12 +91,24 @@ def _validate_manifest(manifest: dict[str, Any]) -> list[str]:
     ]
 
 
+class GitError(RuntimeError):
+    """A git subprocess failed — never silently treated as "no output"."""
+
+
 def _git_names(*args: str) -> list[str]:
     proc = subprocess.run(
         ["git", *args], cwd=ROOT, capture_output=True, text=True, timeout=30
     )
     if proc.returncode != 0:
-        return []
+        # Fail closed, not open: an invalid base_commit (manifest typo, or a
+        # shallow checkout that doesn't contain that SHA) must not be
+        # silently treated as "git found no changes" — that would let
+        # _check_allowed_paths pass an arbitrary, unscoped diff (Codex
+        # review, PR #604).
+        raise GitError(
+            f"git {' '.join(args)} failed (exit {proc.returncode}): "
+            f"{proc.stderr.strip()}"
+        )
     return [line for line in proc.stdout.splitlines() if line]
 
 
@@ -193,7 +208,15 @@ def score_task(
         }
 
     base_commit = base_commit_override or manifest["base_commit"]
-    changed = _changed_paths(base_commit)
+    try:
+        changed = _changed_paths(base_commit)
+    except GitError as exc:
+        return {
+            "task": task_name,
+            "passed": False,
+            "stage": "git-error",
+            "error": str(exc),
+        }
     paths_ok, path_violations = _check_allowed_paths(
         changed, manifest["allowed_paths"], task_name
     )

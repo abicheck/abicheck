@@ -210,3 +210,27 @@ class TestChangedPaths:
         (tmp_path / "untracked.txt").write_text("x\n", encoding="utf-8")
         monkeypatch.setattr(run_task, "ROOT", tmp_path)
         assert "untracked.txt" in run_task._changed_paths(base)
+
+    def test_invalid_base_commit_fails_closed(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """An unresolvable base_commit (manifest typo, or a shallow checkout
+        missing that SHA) must raise, not silently report zero changed paths
+        — the latter would let an unscoped diff sail through allowed_paths
+        checking (Codex review, PR #604)."""
+        self._repo(tmp_path)
+        monkeypatch.setattr(run_task, "ROOT", tmp_path)
+        with pytest.raises(run_task.GitError):
+            run_task._changed_paths("0" * 40)
+
+    def test_invalid_base_commit_reported_as_git_error_stage(self) -> None:
+        """score_task() must surface a bad base_commit as a clean, early
+        "git-error" stage failure — not crash, and not silently proceed as
+        if nothing changed (this runs against the real repo checkout; "0"*40
+        is guaranteed not to resolve to a real commit here)."""
+        result = run_task.score_task(
+            "add-change-kind-small", base_commit_override="0" * 40
+        )
+        assert result["passed"] is False
+        assert result["stage"] == "git-error"
+        assert "error" in result

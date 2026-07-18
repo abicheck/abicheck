@@ -60,8 +60,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import tomllib
-
 ROOT = Path(__file__).resolve().parent.parent
 FACTS_PATH = ROOT / "repo_facts.json"
 
@@ -91,10 +89,29 @@ _FAST_MARKER = (
 
 _COLLECTED_RE = re.compile(r"(?:(\d+)/)?(\d+) tests? collected")
 
+# Scoped to the `[project]` table specifically (not a bare `^version\s*=`
+# match) so a same-named key elsewhere in pyproject.toml (e.g. `[tool.scriv]`
+# has its own unrelated `version = "..."` setting) can never false-match.
+_PROJECT_TABLE_RE = re.compile(
+    r"^\[project\]\s*$(.*?)(?=^\[|\Z)", re.MULTILINE | re.DOTALL
+)
+_PROJECT_VERSION_RE = re.compile(r'^version\s*=\s*"([^"]+)"\s*$', re.MULTILINE)
+
 
 def _project_version() -> str:
-    with (ROOT / "pyproject.toml").open("rb") as fh:
-        return str(tomllib.load(fh)["project"]["version"])
+    """`pyproject.toml`'s `project.version`, via a targeted regex rather than
+    `tomllib` — `tomllib` is stdlib only from Python 3.11 (CLAUDE.md
+    "M1-6"/Codex review: this repo advertises `requires-python = ">=3.10"`,
+    and adding a `tomli` backport dependency for one string field isn't
+    worth it — see CLAUDE.md "What NOT to do" on dependencies)."""
+    text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    table_match = _PROJECT_TABLE_RE.search(text)
+    if not table_match:
+        raise SystemExit("gen_repo_facts: no [project] table found in pyproject.toml")
+    version_match = _PROJECT_VERSION_RE.search(table_match.group(1))
+    if not version_match:
+        raise SystemExit('gen_repo_facts: no version = "..." found in [project]')
+    return version_match.group(1)
 
 
 def _example_cases() -> int:

@@ -31,31 +31,47 @@ prompt: |
   the repo-root CLAUDE.md:
 
   1. Add `TYPE_NODISCARD_ADDED` and `TYPE_NODISCARD_REMOVED` to the
-     `ChangeKind` enum in `abicheck/checker_policy.py`, and place both in
-     exactly one of `BREAKING_KINDS` / `API_BREAK_KINDS` / `COMPATIBLE_KINDS`
-     / `RISK_KINDS`. Model the verdict/severity on `TYPE_DEPRECATED_ADDED` /
-     `TYPE_DEPRECATED_REMOVED` (same directionality: gaining `[[nodiscard]]`
-     is a compile-time-only, source-level advisory — not an ABI break, and
-     not something callers must react to at the binary level — so it belongs
-     in the same category as the deprecated-type kinds, not in
-     `BREAKING_KINDS`/`API_BREAK_KINDS`).
-  2. Add a `nodiscard` field to `RecordType` in `abicheck/model.py`, matching
-     the existing tri-state/None convention documented on
-     `RecordType.deprecated`/`Function.deprecated` in that file (None = not
-     captured by this dumper backend; a real value on both sides of a
-     comparison is what a detector may safely diff).
+     `ChangeKind` enum in `abicheck/checker_policy.py`. Then add ONE
+     `ChangeKindMeta` entry per kind to `abicheck/change_registry_castxml.py`
+     (alongside `type_deprecated_added`/`type_deprecated_removed` there,
+     which this task's kinds are closest to) — do NOT hand-edit
+     `BREAKING_KINDS`/`API_BREAK_KINDS`/`COMPATIBLE_KINDS`/`RISK_KINDS` in
+     `checker_policy.py` directly; those are `frozenset`s *derived* from the
+     registry at import time, and the registry entry's `default_verdict` is
+     what actually places a kind into one of them. Model the verdict on
+     `type_deprecated_added`/`type_deprecated_removed`'s own registry
+     entries (`Verdict.COMPATIBLE`): gaining `[[nodiscard]]` is a
+     compile-time-only, source-level advisory — not an ABI break, and not
+     something callers must react to at the binary level — so it belongs in
+     the same category as the deprecated-type kinds, not
+     `Verdict.BREAKING`/`Verdict.API_BREAK`.
+  2. Add a `nodiscard` field to `RecordType` in `abicheck/model.py`. Unlike
+     `RecordType.deprecated` (which carries a message string, so `None` is
+     overloaded there — see that field's own docstring for why), `nodiscard`
+     is a plain presence/absence attribute: follow the SIMPLE tri-state
+     convention this file uses elsewhere instead (`RecordType.is_final`,
+     `Function.is_override`, `Function.is_explicit`,
+     `Function.is_hidden_friend`) — `True` = attribute present, `False` =
+     confirmed absent, `None` = this dumper backend didn't capture the fact
+     at all. A detector only compares two sides when BOTH are non-`None`.
   3. Populate it in `abicheck/dumper_castxml.py` for `RecordType`
      construction sites — castxml surfaces `[[nodiscard]]` as a token in an
      XML element's `attributes` string, the same mechanism already used for
      `deprecated` (see `_deprecation_marker`) and for the `is_final`
-     attribute.
+     attribute. Set it to `True`/`False` (never leave it unset/`None`) for
+     every `RecordType` this backend constructs — `None` is reserved for a
+     backend that doesn't populate the field at all (e.g. `dumper_clang.py`,
+     until it's extended), not for "this backend looked and found nothing".
   4. Implement a detector in `abicheck/diff_types.py` that emits
-     `TYPE_NODISCARD_ADDED` / `TYPE_NODISCARD_REMOVED`, gated the same way
-     `_diff_type_deprecated` is gated (per-type on
-     `fact_provenance.both_castxml_backed_fact`, since — like
-     `deprecated` — `dumper_clang.py` does not populate this field yet).
-     Register it with `detector_registry` the way the neighboring detectors
-     in that file are registered.
+     `TYPE_NODISCARD_ADDED` when `nodiscard` goes `False` → `True` and
+     `TYPE_NODISCARD_REMOVED` when it goes `True` → `False`, skipping a pair
+     where either side is `None` (mirror `is_final`'s comparison style, not
+     `deprecated`'s "was `None`, now not-`None`" style — the two are
+     different because of the message-string quirk in step 2 above). Still
+     gate per-type on `fact_provenance.both_castxml_backed_fact` the way
+     `_diff_type_deprecated` does, since `dumper_clang.py` doesn't populate
+     this field yet either way. Register it with `detector_registry` the way
+     the neighboring detectors in that file are registered.
   5. Add a unit test for the new detector (construct two snapshots directly,
      as `tests/test_diff_types_deep.py`'s `TestFieldDeprecated` does for the
      field-level case — no compiler needed).
@@ -71,6 +87,7 @@ prompt: |
 allowed_paths:
   - "abicheck/model.py"
   - "abicheck/checker_policy.py"
+  - "abicheck/change_registry_castxml.py"
   - "abicheck/dumper_castxml.py"
   - "abicheck/diff_types.py"
   - "docs/reference/detector-spec.md"
