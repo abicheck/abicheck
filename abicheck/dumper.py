@@ -898,16 +898,15 @@ def _castxml_version_note() -> str:
     """Probe ``castxml --version`` and, when its bundled Clang predates the
     recommended floor, return a one-line upgrade note (else "").
 
-    Best-effort: any probe failure yields "" so the base diagnostic still
-    stands. Only called on an actual parse failure, so the extra process is
-    incurred rarely.
+    Best-effort: an actual probe failure (missing tool, etc.) yields "" so the
+    base diagnostic still stands. DeadlineExceeded is NOT a probe failure —
+    this is on the authoritative L2 path, so it propagates uncaught like the
+    castxml/clang calls around it rather than masquerading as a parse failure
+    (Codex review, PR #591). Only called on an actual parse failure.
     """
     try:
-        # Bound by the active --budget too (Codex review, PR #591).
-        proc = deadline.run_bounded(
-            ["castxml", "--version"], capture_output=True, text=True, timeout=15
-        )
-    except (OSError, subprocess.SubprocessError, deadline.DeadlineExceeded):
+        proc = deadline.run_bounded(["castxml", "--version"], capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
         return ""
     raw, clang = _parse_castxml_version(f"{proc.stdout}\n{proc.stderr}")
     if clang is not None and clang[0] < _RECOMMENDED_CLANG_MAJOR:

@@ -131,5 +131,11 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   upgrade note into the diagnostic) used a bare 15s `subprocess.run`,
   reached on the castxml-*failure* path before `_validate_castxml_output`'s
   existing post-success `deadline.check()`. Now goes through
-  `deadline.run_bounded`, degrading to its existing best-effort `""`
-  fallback on `DeadlineExceeded` like any other probe failure.
+  `deadline.run_bounded`.
+- Correction to the above: a `DeadlineExceeded` from that probe is **not**
+  an ordinary probe failure — degrading it to `""` (as the first pass did)
+  let a budget overflow during the probe masquerade as a normal
+  `HeaderToolchainError`/`SnapshotError` (CLI exit 1) instead of the
+  documented budget-overflow exit 5. It now propagates uncaught, like the
+  castxml/clang subprocess calls around it on this authoritative L2 path
+  (ADR-028 D3 draws the advisory/authoritative line at L3+, not L2).

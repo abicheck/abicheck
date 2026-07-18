@@ -138,19 +138,25 @@ class TestVersionNote:
         ):
             assert _castxml_version_note() == ""
 
-    def test_probe_deadline_exceeded_is_silent(self) -> None:
-        # Codex review (PR #591): the version probe used to be a bare
-        # subprocess.run, ignoring an active scan --budget entirely — a
-        # DeadlineExceeded from the now-bounded probe must degrade like any
-        # other probe failure (best-effort note), never propagate and abort
-        # the castxml failure-diagnosis path.
+    def test_probe_deadline_exceeded_propagates(self) -> None:
+        # Second-round Codex review (PR #591): a DeadlineExceeded here is
+        # NOT an ordinary probe failure (missing tool, etc.) — this probe
+        # sits on the authoritative L2 castxml path. Silently degrading it
+        # to "" (as an earlier fix did) let a budget overflow during the
+        # probe masquerade as a normal HeaderToolchainError/SnapshotError
+        # (CLI exit 1) instead of the documented budget-overflow exit 5, so
+        # it must propagate uncaught like the castxml/clang subprocess
+        # calls around it.
         from abicheck import deadline
 
-        with patch(
-            "abicheck.dumper.deadline.run_bounded",
-            side_effect=deadline.DeadlineExceeded(-1.0),
+        with (
+            patch(
+                "abicheck.dumper.deadline.run_bounded",
+                side_effect=deadline.DeadlineExceeded(-1.0),
+            ),
+            pytest.raises(deadline.DeadlineExceeded),
         ):
-            assert _castxml_version_note() == ""
+            _castxml_version_note()
 
 
 class TestFailureHint:
@@ -231,6 +237,31 @@ class TestProbeGating:
         assert "newer castxml" in msg  # base sized-float hint
         assert "Detected castxml 0.5.1" in msg  # folded-in version note
         assert any("--version" in c for c in calls)  # probe happened
+
+    def test_version_probe_deadline_exceeded_propagates_end_to_end(
+        self, tmp_path: Path
+    ) -> None:
+        # Second-round Codex review (PR #591): when the scan budget expires
+        # during the `--version` probe (triggered by a frontend-too-old
+        # castxml failure), the DeadlineExceeded must escape _castxml_dump
+        # uncaught -- not get folded into a HeaderToolchainError/SnapshotError
+        # (CLI exit 1) the way an earlier fix incorrectly did.
+        from abicheck import deadline
+
+        def fake_run(cmd, **kwargs):  # noqa: ANN001
+            if "--version" in cmd:
+                raise deadline.DeadlineExceeded(-1.0)
+            return _completed(returncode=1, stderr=_FLOATN_STDERR)
+
+        with (
+            patch("abicheck.dumper._castxml_available", return_value=True),
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
+            patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
+            pytest.raises(deadline.DeadlineExceeded),
+        ):
+            header = tmp_path / "api.hpp"
+            header.write_text("int f();\n", encoding="utf-8")
+            _castxml_dump([header], [])
 
     def test_unrelated_failure_skips_version_probe(self, tmp_path: Path) -> None:
         calls: list[list[str]] = []
