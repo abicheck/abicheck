@@ -32,6 +32,7 @@ those paths are exercised only up to their first fast-failing precondition
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -86,17 +87,45 @@ def _helpers_region() -> str:
     return text[:idx]
 
 
-def _run_predicate(call: str) -> subprocess.CompletedProcess[str]:
-    """Source the pure-helper region and evaluate a call, capturing stdout."""
+def _run_predicate(
+    call: str, env_extra: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    """Source the pure-helper region and evaluate a call, capturing stdout.
+
+    env_extra, when given, overlays onto the inherited environment (e.g. to
+    prepend a fake_bin dir onto PATH so a stubbed uname/cygpath is found
+    before any real one already on the host's PATH -- constructing that
+    override as a raw PATH="..." string inside the bash call itself doesn't
+    work on Windows, where a native tmp_path is backslash-separated and its
+    drive-letter colon collides with bash's own ':'-delimited PATH parsing;
+    this instead overrides PATH at the OS-env level like _run_action does,
+    using os.pathsep so it's correct on both platforms.
+    """
     script = _helpers_region() + f"\n{call}\n"
     with tempfile.NamedTemporaryFile(
         "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n"
     ) as f:
         f.write(script)
         script_path = f.name
+    env = {**os.environ, **env_extra} if env_extra else None
+    # Resolve bash to an absolute path FIRST, using the real (unrestricted)
+    # PATH, when env_extra narrows PATH down to just a fake_bin stub dir --
+    # subprocess.run needs to find the bash executable itself via its own
+    # PATH lookup when given a bare "bash", and a PATH override that omits
+    # wherever the real bash lives would make that lookup fail before the
+    # script (which is what env_extra's PATH restriction is actually meant
+    # to control) ever runs.
+    bash_exe = _bash_executable()
+    if env is not None and not os.path.isabs(bash_exe):
+        resolved = shutil.which(bash_exe)
+        if resolved:
+            bash_exe = resolved
     try:
         return subprocess.run(
-            [_bash_executable(), script_path], capture_output=True, text=True
+            [bash_exe, script_path],
+            capture_output=True,
+            text=True,
+            env=env,
         )
     finally:
         os.unlink(script_path)
@@ -310,6 +339,379 @@ class TestLlvmMajorParsing:
     def test_parses_major(self, version_output: str, expected: str) -> None:
         result = _run_predicate(f'_llvm_major_from_version_string "{version_output}"')
         assert result.stdout.strip() == expected
+
+
+@pytest.mark.skipif(
+    not RUN_SH.is_file(), reason="actions/collect-facts/run.sh not found"
+)
+class TestLlvmMajorFromPredefinedMacros:
+    """Regression (Codex review): a vendor compiler built on top of Clang
+    (e.g. Intel's icpx/icx) prints its own product version in --version, not
+    an LLVM/Clang number -- _llvm_major_from_version_string's "clang version
+    N" regex cannot ever match it. __clang_major__ is the value that
+    actually has to match for the plugin to load, and every Clang-based
+    compiler (vendor or not) defines it, so this probe is compiler-agnostic
+    where the --version parser is not."""
+
+    def _fake_compiler(self, tmp_path: Path, *defines: str) -> Path:
+        script = tmp_path / "fake-compiler"
+        printf_lines = "\n".join(f"  printf '{line}\\n'" for line in defines)
+        script.write_text(
+            "#!/bin/sh\n"
+            'if [ "$1" = "-dM" ]; then\n'
+            f"{printf_lines}\n"
+            "  exit 0\n"
+            "fi\n"
+            "exit 1\n"
+        )
+        script.chmod(0o755)
+        return script
+
+    def test_parses_clang_major_from_macro_dump(self, tmp_path: Path) -> None:
+        # Simulates a vendor compiler (e.g. icpx) whose --version would not
+        # match "clang version N" at all, but which still defines
+        # __clang_major__ correctly under -dM -E.
+        compiler = self._fake_compiler(
+            tmp_path, "#define __clang_major__ 16", "#define __clang_minor__ 0"
+        )
+        result = _run_predicate(f'_llvm_major_from_predefined_macros "{compiler}"')
+        assert result.stdout.strip() == "16"
+
+    def test_ignores_other_defines(self, tmp_path: Path) -> None:
+        compiler = self._fake_compiler(
+            tmp_path,
+            "#define __clang_minor__ 3",
+            "#define __clang_major__ 18",
+            "#define __GNUC__ 4",
+        )
+        result = _run_predicate(f'_llvm_major_from_predefined_macros "{compiler}"')
+        assert result.stdout.strip() == "18"
+
+    def test_empty_when_compiler_does_not_support_dM(self, tmp_path: Path) -> None:
+        # gcc (or any non-Clang compiler) rejects -dM -E -x c++ - in a way
+        # that doesn't emit __clang_major__ -- callers must fall back to
+        # _llvm_major_from_version_string instead of failing outright.
+        script = tmp_path / "fake-gcc"
+        script.write_text("#!/bin/sh\nexit 1\n")
+        script.chmod(0o755)
+        result = _run_predicate(f'_llvm_major_from_predefined_macros "{script}"')
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == ""
+
+    def test_returns_success_when_dump_succeeds_with_no_clang_major(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review): a compiler that supports -dM -E and
+        # exits 0 but simply doesn't define __clang_major__ (e.g. a real
+        # gcc, unlike the exit-1 stub above) is a successful EMPTY result,
+        # not a failure -- without an explicit `return 0` after the final
+        # grep, its own no-match exit status (1) leaked out as this
+        # function's exit status instead.
+        compiler = self._fake_compiler(tmp_path, "#define __GNUC__ 13")
+        result = _run_predicate(f'_llvm_major_from_predefined_macros "{compiler}"')
+        assert result.stdout.strip() == ""
+        assert result.returncode == 0
+
+    def test_empty_when_compiler_not_found(self) -> None:
+        result = _run_predicate(
+            '_llvm_major_from_predefined_macros "/no/such/compiler-xyz"'
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == ""
+
+
+@pytest.mark.skipif(
+    not RUN_SH.is_file(), reason="actions/collect-facts/run.sh not found"
+)
+class TestNormalizeWinPath:
+    """Regression (Codex review): a native Windows env var like $CMPLR_ROOT
+    (set by a vendor batch/setup step, e.g. "C:\\Program Files (x86)\\
+    Intel\\oneAPI\\compiler\\latest") and Git Bash's own POSIX-style view of
+    `command -v icx` can be two entirely different-looking representations
+    of the same path, not just differently separated -- comparing them
+    without going through cygpath first can never match.
+
+    Scenarios that stub uname/cygpath via a PATH-prepended fake bin dir are
+    skipped on a real Windows host: this suite's OWN pre-existing
+    TestWrapperProducer Windows-simulation tests (test_output_dir_converted_
+    from_msys_path_on_windows and siblings, which predate this change) rely
+    on that exact same technique and already fail on the real windows-latest
+    CI lane for the same underlying reason -- a real cygpath is apparently
+    resolved ahead of a PATH-prepended stub there regardless of prepend
+    order, a pre-existing limitation of stubbing this specific pair of
+    tools on that host, not something a correct _normalize_win_path
+    implementation can control. On a real windows-latest runner, `uname -s`
+    already genuinely reports MINGW* and a real cygpath is already on PATH
+    -- the un-stubbed, real-environment behavior is exercised instead by
+    TestBundledLlvmCmakePrefix.test_detects_cmplr_root_with_llvm_cmake_package.
+    """
+
+    def _fake_bin(
+        self, tmp_path: Path, uname_output: str, cygpath_script: str | None = None
+    ) -> Path:
+        fake_bin = tmp_path / "fakebin"
+        fake_bin.mkdir()
+        (fake_bin / "uname").write_text(f'#!/bin/sh\necho "{uname_output}"\n')
+        (fake_bin / "uname").chmod(0o755)
+        if cygpath_script is not None:
+            (fake_bin / "cygpath").write_text(cygpath_script)
+            (fake_bin / "cygpath").chmod(0o755)
+        return fake_bin
+
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="PATH-prepended uname/cygpath stubbing is unreliable on real "
+        "Windows Git Bash -- see class docstring",
+    )
+    def test_noop_outside_windows(self, tmp_path: Path) -> None:
+        fake_bin = self._fake_bin(tmp_path, "Linux")
+        result = _run_predicate(
+            '_normalize_win_path "/opt/intel/oneapi"',
+            env_extra={"PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"},
+        )
+        assert result.stdout.strip() == "/opt/intel/oneapi"
+
+    def test_empty_input_stays_empty(self) -> None:
+        # No stubbing needed -- the empty-input check returns before ever
+        # inspecting uname/cygpath, so this is platform-independent as-is.
+        result = _run_predicate('_normalize_win_path ""')
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == ""
+
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="PATH-prepended uname/cygpath stubbing is unreliable on real "
+        "Windows Git Bash -- see class docstring",
+    )
+    def test_uses_cygpath_when_on_windows(self, tmp_path: Path) -> None:
+        # The stub cygpath prefixes its output so the test can tell it was
+        # actually invoked with -m and the given path, rather than silently
+        # falling back to the raw input.
+        fake_bin = self._fake_bin(
+            tmp_path, "MINGW64_NT-10.0-x86_64", '#!/bin/sh\necho "MIXED:$2"\n'
+        )
+        result = _run_predicate(
+            r'_normalize_win_path "C:\Program Files\Intel\oneAPI"',
+            env_extra={"PATH": str(fake_bin)},
+        )
+        assert result.stdout.strip() == r"MIXED:C:\Program Files\Intel\oneAPI"
+
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="PATH-prepended uname/cygpath stubbing is unreliable on real "
+        "Windows Git Bash -- see class docstring",
+    )
+    def test_falls_back_to_raw_path_without_cygpath(self, tmp_path: Path) -> None:
+        # PATH set to ONLY fake_bin (no cygpath stub in it, and the real
+        # ambient PATH is not appended) so `command -v cygpath` genuinely
+        # fails here rather than finding a real one.
+        fake_bin = self._fake_bin(tmp_path, "MINGW64_NT-10.0-x86_64")
+        result = _run_predicate(
+            r'_normalize_win_path "C:\Program Files\Intel\oneAPI"',
+            env_extra={"PATH": str(fake_bin)},
+        )
+        assert result.stdout.strip() == r"C:\Program Files\Intel\oneAPI"
+
+
+@pytest.mark.skipif(
+    not RUN_SH.is_file(), reason="actions/collect-facts/run.sh not found"
+)
+class TestBundledLlvmCmakePrefix:
+    """Regression (Codex review): the clang-plugin build previously always
+    apt-get-installed clang-N/llvm-N-dev/libclang-N-dev and looked up
+    llvm-config-N --cmakedir, with no way to point it at a vendor toolchain's
+    own bundled LLVM/Clang (e.g. Intel's icpx/icx under $CMPLR_ROOT, which
+    apt does not carry at all)."""
+
+    def test_explicit_override_wins_when_neither_shape_exists_on_disk(
+        self, tmp_path: Path
+    ) -> None:
+        # Neither {explicit}/lib/cmake/llvm nor {explicit}/llvm exists (the
+        # path is never created here) -- falls back to the documented
+        # installation-root contract. Regression (Codex review):
+        # llvm-cmake-prefix is documented (see action.yml) as an
+        # installation ROOT containing lib/cmake/{llvm,clang} -- same shape
+        # as $CMPLR_ROOT -- not the "lib/cmake" level directly. Returning
+        # $explicit completely unmodified used to silently expect the
+        # opposite, making a correctly-configured llvm-cmake-prefix input
+        # resolve one directory level too shallow.
+        result = _run_predicate(
+            f'_bundled_llvm_cmake_prefix "{tmp_path}/explicit" "{tmp_path}/cmplr" '
+            f'"{tmp_path}/cmplr/bin/icpx"'
+        )
+        assert result.stdout.strip() == f"{tmp_path}/explicit/lib/cmake"
+
+    def test_explicit_root_shape_appends_lib_cmake(self, tmp_path: Path) -> None:
+        explicit = tmp_path / "explicit"
+        (explicit / "lib" / "cmake" / "llvm").mkdir(parents=True)
+        result = _run_predicate(f'_bundled_llvm_cmake_prefix "{explicit}" "" ""')
+        assert result.stdout.strip() == f"{explicit}/lib/cmake"
+
+    def test_explicit_already_resolved_shape_passes_through(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review): a user might reasonably set
+        # llvm-cmake-prefix to the already-resolved "lib/cmake" level
+        # directly -- mirroring either $CMPLR_ROOT's own auto-detected
+        # internal shape, or this same script's existing
+        # $(llvm-config --cmakedir)/.. convention -- rather than the
+        # documented installation root. Unconditionally appending
+        # "lib/cmake" in that case would produce ".../lib/cmake/lib/cmake",
+        # which find_package(LLVM CONFIG) would never find. {explicit}/llvm
+        # existing (with no {explicit}/lib/cmake/llvm) means $explicit is
+        # already the "lib/cmake" level -- pass it through unmodified.
+        explicit = tmp_path / "already_resolved_lib_cmake"
+        (explicit / "llvm").mkdir(parents=True)
+        (explicit / "clang").mkdir()
+        result = _run_predicate(f'_bundled_llvm_cmake_prefix "{explicit}" "" ""')
+        assert result.stdout.strip() == str(explicit)
+
+    def test_detects_cmplr_root_with_llvm_cmake_package(self, tmp_path: Path) -> None:
+        cmplr_root = tmp_path / "cmplr"
+        (cmplr_root / "lib" / "cmake" / "llvm").mkdir(parents=True)
+        (cmplr_root / "lib" / "cmake" / "clang").mkdir()
+        # The resolved compiler must live under $CMPLR_ROOT for auto-use to
+        # apply -- see test_empty_when_compiler_not_under_cmplr_root below.
+        compiler_path = cmplr_root / "bin" / "icpx"
+        result = _run_predicate(
+            f'_bundled_llvm_cmake_prefix "" "{cmplr_root}" "{compiler_path}"'
+        )
+        # cmplr_root.as_posix() (forward slashes), not str(cmplr_root)
+        # (backslashes on Windows): _bundled_llvm_cmake_prefix routes
+        # cmplr_root through _normalize_win_path before emitting it, and on
+        # a real windows-latest runner that's a REAL cygpath -m call (this
+        # test doesn't stub uname/cygpath), producing the mixed form --
+        # forward-slash-joined, same as Path.as_posix() -- not the raw
+        # backslash Windows string this assertion used before
+        # _normalize_win_path was introduced (Codex review regression).
+        assert result.stdout.strip() == f"{cmplr_root.as_posix()}/lib/cmake"
+
+    def test_empty_when_cmplr_root_unset(self) -> None:
+        result = _run_predicate('_bundled_llvm_cmake_prefix "" "" ""')
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == ""
+
+    def test_empty_when_cmplr_root_has_no_llvm_cmake_package(
+        self, tmp_path: Path
+    ) -> None:
+        # $CMPLR_ROOT set (e.g. some other vendor env var reuse) but it
+        # doesn't actually bundle an LLVM CMake package -- must not be
+        # mistaken for one.
+        cmplr_root = tmp_path / "cmplr"
+        cmplr_root.mkdir()
+        compiler_path = cmplr_root / "bin" / "icpx"
+        result = _run_predicate(
+            f'_bundled_llvm_cmake_prefix "" "{cmplr_root}" "{compiler_path}"'
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == ""
+
+    def test_empty_when_cmplr_root_has_llvm_but_not_clang_cmake_package(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review): a partial SDK under $CMPLR_ROOT --
+        # LLVMConfig.cmake present but ClangConfig.cmake missing -- must
+        # not be auto-used. The plugin's CMakeLists.txt requires BOTH
+        # find_package(LLVM CONFIG) and find_package(Clang CONFIG); if this
+        # returned a prefix here, _prepare_clang_plugin would skip its
+        # apt-get fallback entirely (bundled_cmake_prefix non-empty bypasses
+        # INSTALL_DEPS) and then fail cmake configure -- strictly worse than
+        # not auto-detecting at all, since apt-get might have supplied a
+        # working libclang-$major-dev.
+        cmplr_root = tmp_path / "cmplr"
+        (cmplr_root / "lib" / "cmake" / "llvm").mkdir(parents=True)
+        compiler_path = cmplr_root / "bin" / "icpx"
+        result = _run_predicate(
+            f'_bundled_llvm_cmake_prefix "" "{cmplr_root}" "{compiler_path}"'
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == ""
+
+    def test_empty_when_compiler_not_under_cmplr_root(self, tmp_path: Path) -> None:
+        # Regression (Codex review): a job can source an Intel oneAPI
+        # environment (setting $CMPLR_ROOT) for unrelated tooling while
+        # `compiler:` still resolves to a different, unrelated Clang (e.g.
+        # the default clang++ on PATH) -- auto-using $CMPLR_ROOT's bundled
+        # LLVM in that case would build the plugin against a toolchain that
+        # is not the one -fplugin= actually loads later. Only auto-apply
+        # when the resolved compiler binary is itself under $CMPLR_ROOT.
+        cmplr_root = tmp_path / "cmplr"
+        (cmplr_root / "lib" / "cmake" / "llvm").mkdir(parents=True)
+        unrelated_compiler = tmp_path / "usr" / "bin" / "clang++"
+        result = _run_predicate(
+            f'_bundled_llvm_cmake_prefix "" "{cmplr_root}" "{unrelated_compiler}"'
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == ""
+
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="PATH-prepended uname/cygpath stubbing is unreliable on real "
+        "Windows Git Bash -- see TestNormalizeWinPath's class docstring; "
+        "the real, un-stubbed windows-latest behavior is covered by "
+        "test_detects_cmplr_root_with_llvm_cmake_package above",
+    )
+    def test_normalizes_both_paths_when_cygpath_available(self, tmp_path: Path) -> None:
+        # Full integration (Codex review): _bundled_llvm_cmake_prefix must
+        # route both cmplr_root and compiler_path through
+        # _normalize_win_path before comparing, on a simulated-Windows host
+        # where cygpath is present. Uses a non-identity cygpath stub that
+        # maps two distinct synthetic (non-path-shaped) inputs to the real
+        # cmplr_root/compiler_path -- an identity stub (CodeRabbit review)
+        # would pass even if normalization were dropped for either argument,
+        # since it always echoes its input back unchanged either way.
+        fake_bin = tmp_path / "fakebin"
+        fake_bin.mkdir()
+        (fake_bin / "uname").write_text('#!/bin/sh\necho "MINGW64_NT-10.0-x86_64"\n')
+        (fake_bin / "uname").chmod(0o755)
+
+        cmplr_root = tmp_path / "cmplr"
+        (cmplr_root / "lib" / "cmake" / "llvm").mkdir(parents=True)
+        (cmplr_root / "lib" / "cmake" / "clang").mkdir()
+        compiler_path = cmplr_root / "bin" / "icpx"
+        cygpath_script = (
+            "#!/bin/sh\n"
+            'case "$2" in\n'
+            f'  RAW_CMPLR_ROOT) printf "%s" "{cmplr_root.as_posix()}" ;;\n'
+            f'  RAW_COMPILER_PATH) printf "%s" "{compiler_path.as_posix()}" ;;\n'
+            '  *) printf "%s" "$2" ;;\n'
+            "esac\n"
+        )
+        (fake_bin / "cygpath").write_text(cygpath_script)
+        (fake_bin / "cygpath").chmod(0o755)
+
+        result = _run_predicate(
+            '_bundled_llvm_cmake_prefix "" "RAW_CMPLR_ROOT" "RAW_COMPILER_PATH"',
+            env_extra={"PATH": str(fake_bin)},
+        )
+        assert result.stdout.strip() == f"{cmplr_root.as_posix()}/lib/cmake"
+
+
+@pytest.mark.skipif(
+    not RUN_SH.is_file(), reason="actions/collect-facts/run.sh not found"
+)
+class TestCmakeConfigureFailureHint:
+    """Regression: the `cmake configure failed` remediation hint used to be
+    a single hardcoded string pointing at the apt-installed libclang-N-dev
+    package. Once the vendor-bundled path (_bundled_llvm_cmake_prefix) could
+    also reach that cmake invocation, the apt hint became actively wrong
+    there -- no apt package is involved when a vendor toolchain's own
+    LLVM/Clang CMake package was used instead."""
+
+    def test_apt_hint_when_no_bundled_prefix(self) -> None:
+        result = _run_predicate('_cmake_configure_failure_hint "" "" "18"')
+        assert "libclang-18-dev" in result.stdout
+        assert "vendor-bundled" not in result.stdout
+
+    def test_vendor_hint_when_bundled_prefix_set(self) -> None:
+        result = _run_predicate(
+            '_cmake_configure_failure_hint "/opt/intel/oneapi/lib/cmake" '
+            '"/opt/intel/oneapi/lib/cmake/llvm" "18"'
+        )
+        assert "vendor-bundled" in result.stdout
+        assert "/opt/intel/oneapi/lib/cmake" in result.stdout
+        assert "/opt/intel/oneapi/lib/cmake/llvm" in result.stdout
+        assert "libclang" not in result.stdout
 
 
 @pytest.mark.skipif(
