@@ -79,6 +79,20 @@ _detect_producer() {
     echo "replay"
     return
   fi
+  # Checked last, after cmake/bazel (same priority order as
+  # abicheck/buildsource/build_query.py's own _MARKERS -- a cmake project
+  # often ships a convenience Makefile that just drives cmake, so cmake/
+  # bazel take precedence when both are present). A bare Make/EPICS-style
+  # tree with no compile_commands.json is still replay-capable: the inline
+  # replay path auto-runs `make -B -n -k -w` and scrapes compile commands
+  # from the transcript -- this bash heuristic used to assume Make couldn't
+  # be replayed and fell through to wrapper, unnecessarily requiring
+  # wrapper instrumentation for a build build_query.py already knows how to
+  # query (Codex review).
+  if [[ -f "$src/GNUmakefile" || -f "$src/makefile" || -f "$src/Makefile" ]]; then
+    echo "replay"
+    return
+  fi
   echo "wrapper"
 }
 

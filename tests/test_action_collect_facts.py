@@ -158,13 +158,25 @@ class TestDetectProducer:
         result = _run_predicate(f'_detect_producer "{tmp_path}"')
         assert result.stdout.strip() == "wrapper"
 
-    def test_plain_makefile_means_wrapper(self, tmp_path: Path) -> None:
-        # A bare Makefile with no compile DB and no cmake/bazel project file
-        # cannot be replayed without generating one first -- wrapper is the
-        # safer default (never silently picks clang-plugin).
+    def test_plain_makefile_means_replay(self, tmp_path: Path) -> None:
+        # Regression (Codex review): this used to assert "wrapper" here, on
+        # the assumption a bare Make/EPICS-style tree with no
+        # compile_commands.json couldn't be replayed. But
+        # abicheck/buildsource/build_query.py's inline replay path
+        # auto-runs `make -B -n -k -w` and scrapes compile commands from
+        # the transcript, so Make projects are replay-capable the same way
+        # cmake/bazel ones are -- the bash heuristic was stale and
+        # unnecessarily required wrapper instrumentation for these builds.
         (tmp_path / "Makefile").write_text("")
         result = _run_predicate(f'_detect_producer "{tmp_path}"')
-        assert result.stdout.strip() == "wrapper"
+        assert result.stdout.strip() == "replay"
+
+    def test_makefile_variant_names_mean_replay(self, tmp_path: Path) -> None:
+        # GNUmakefile and lowercase makefile are the other two names
+        # build_query.py's marker set recognizes alongside Makefile.
+        (tmp_path / "GNUmakefile").write_text("")
+        result = _run_predicate(f'_detect_producer "{tmp_path}"')
+        assert result.stdout.strip() == "replay"
 
     def test_many_nested_compile_dbs_still_means_replay(self, tmp_path: Path) -> None:
         # Regression (Codex review): the nested-compile-DB check used to be
