@@ -534,7 +534,8 @@ def _resolve_estimate_level(
     # valid seed, else TARGET — an unseeded explicit-source estimate must not
     # under-project to the "source-changed" default (no seed → no TUs).
     collect_mode = level_to_collect_mode(
-        resolved, eff_depth,
+        resolved,
+        eff_depth,
         source_scope=SourceScope.CHANGED if seeded else SourceScope.TARGET,
     )
     return resolved, eff_depth, collect_mode
@@ -653,7 +654,13 @@ def _source_layer_estimates(
     # an unseeded explicit-source scan/estimate silently reports zero source
     # layers (the same zero-TU defect the collect-mode fix addresses).
     estimates: list[CostEstimate] = []
-    if collect_mode in ("build", "graph-build", "source-changed", "source-target", "graph-full"):
+    if collect_mode in (
+        "build",
+        "graph-build",
+        "source-changed",
+        "source-target",
+        "graph-full",
+    ):
         estimates.append(
             CostEstimate(
                 "s1",
@@ -851,7 +858,8 @@ def run_scan(req: ScanRequest) -> ScanResult:
     # target), so an explicit/pinned source depth with no diff seed never
     # silently collects zero translation units (parity with the CLI's scan).
     collect_mode = level_to_collect_mode(
-        resolved, eff_depth,
+        resolved,
+        eff_depth,
         source_scope=SourceScope.CHANGED if seeded else SourceScope.TARGET,
     )
     # --depth binary is symbols-only (L0/L1): suppress the L2 header AST (and its
@@ -950,6 +958,23 @@ def _scan_subprocess_worker(req: ScanRequest, q: Any) -> None:
     """
     import os
 
+    from . import deadline
+
+    # _kill_process_tree's _descendant_pgids() walk is a point-in-time
+    # snapshot taken before proc.terminate() fires; a clang/castxml child
+    # this worker spawns via deadline.run_bounded() in the gap between that
+    # snapshot and the terminate() call is invisible to it. Without this,
+    # proc.terminate() (default SIGTERM disposition, since this is a fresh
+    # `spawn`-context process with no inherited handler) would kill the
+    # worker immediately, leaving that just-spawned detached process group
+    # permanently orphaned — the worker's own _active_pgroups registry never
+    # gets a handler chance to sweep it. install_sigterm_cleanup() gives this
+    # worker the same in-process cleanup handler the plain CLI path and the
+    # L4 ProcessPoolExecutor workers already install, so its own SIGTERM
+    # handler kills every group *it* has registered before the process
+    # actually exits — independent of what the outer descendant-pgid
+    # snapshot did or didn't see (Codex review, PR #591, round 9).
+    deadline.install_sigterm_cleanup()
     try:
         os.setsid()  # new process group; killpg(parent) reaches clang subprocs
     except (OSError, AttributeError):

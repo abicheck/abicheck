@@ -400,3 +400,19 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   scan_remaining))` around the call; every failure already degraded to the
   same advisory diagnostic/failed-extractor contract, so this only changes
   how fast the hang is detected (Codex review, PR #591, round 8).
+- **The MCP `run_scan_subprocess` worker can still orphan a detached clang/
+  castxml process group under timeout cancellation.** `_kill_process_tree`'s
+  `_descendant_pgids()` walk is a point-in-time snapshot taken *before*
+  `proc.terminate()` fires; a child the worker spawns via
+  `deadline.run_bounded()` in the gap between that snapshot and the
+  `terminate()` call is invisible to it. Since the worker is a fresh
+  `multiprocessing.get_context("spawn")` process with nothing inherited,
+  `proc.terminate()` (default SIGTERM disposition) killed it immediately,
+  leaving that just-spawned group permanently orphaned — the worker's own
+  `_active_pgroups` registry never got a handler chance to sweep it.
+  `_scan_subprocess_worker` now calls `deadline.install_sigterm_cleanup()`
+  at startup, same as the plain CLI path and the L4 `ProcessPoolExecutor`
+  workers already do, so the worker's own in-process SIGTERM handler kills
+  every group *it* has registered before the process actually exits —
+  independent of what the outer descendant-pgid snapshot did or didn't see
+  (Codex review, PR #591, round 9).

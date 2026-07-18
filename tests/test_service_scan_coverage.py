@@ -302,6 +302,29 @@ def test_scan_subprocess_worker_ignores_setsid_failure(
     assert q.items and q.items[0][0] == "ok"
 
 
+def test_scan_subprocess_worker_installs_sigterm_cleanup(
+    monkeypatch: pytest.MonkeyPatch, snap_path: Path
+) -> None:
+    # Codex review (PR #591), round 9: _kill_process_tree's _descendant_pgids()
+    # walk is a point-in-time snapshot taken before proc.terminate() fires; a
+    # clang/castxml child this worker spawns via deadline.run_bounded() in the
+    # gap between that snapshot and the terminate() call is invisible to it.
+    # Without its own SIGTERM handler installed, proc.terminate() (default
+    # disposition, since this is a fresh spawn-context process with nothing
+    # inherited) would kill the worker immediately, orphaning that child. The
+    # worker must install its own cleanup handler so its own _active_pgroups
+    # registry gets a chance to sweep whatever it has registered, independent
+    # of what the outer snapshot did or didn't see.
+    from abicheck import deadline
+
+    monkeypatch.setattr(os, "setsid", lambda: None, raising=False)
+    calls: list[bool] = []
+    monkeypatch.setattr(deadline, "install_sigterm_cleanup", lambda: calls.append(True))
+    q = _FakeQueue()
+    _scan_subprocess_worker(ScanRequest(binaries=[snap_path], mode="audit"), q)
+    assert calls == [True]
+
+
 # ── _kill_process_tree: the terminate/killpg branches (lines 886-912) ─────────
 
 
@@ -384,7 +407,9 @@ def test_kill_process_tree_kills_detached_descendant_group(
 
     def _fake_ps(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         assert cmd[0] == "ps"
-        return subprocess.CompletedProcess(cmd, 0, stdout="4321 100\n5555 4321\n", stderr="")
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout="4321 100\n5555 4321\n", stderr=""
+        )
 
     monkeypatch.setattr(subprocess, "run", _fake_ps)
     proc = _FakeProc(pid=4321)  # stays alive → triggers the SIGKILL escalation
@@ -415,7 +440,9 @@ def test_kill_process_tree_terminates_worker_even_with_detached_descendants(
 
     def _fake_ps(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         assert cmd[0] == "ps"
-        return subprocess.CompletedProcess(cmd, 0, stdout="4321 100\n5555 4321\n", stderr="")
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout="4321 100\n5555 4321\n", stderr=""
+        )
 
     monkeypatch.setattr(subprocess, "run", _fake_ps)
     proc = _FakeProc(pid=4321)  # stays alive → also exercises the killpg sweep
@@ -519,7 +546,9 @@ def test_kill_process_tree_sigterm_failure_on_one_pgid_still_signals_others(
     monkeypatch.setattr(os, "killpg", _killpg)
 
     def _fake_ps(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(cmd, 0, stdout="4321 100\n5555 4321\n", stderr="")
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout="4321 100\n5555 4321\n", stderr=""
+        )
 
     monkeypatch.setattr(subprocess, "run", _fake_ps)
     proc = _FakeProc(pid=4321)
