@@ -372,6 +372,35 @@ class TestWrapperProducer:
         # phase: prepare's job is done before the caller's own build step --
         # nothing here should claim readiness prematurely.
 
+    def test_prepare_clears_stale_output_dir(self, tmp_path: Path) -> None:
+        # Regression (Codex review): init_inputs_pack() is idempotent across
+        # repeated per-TU calls *within one build*, so a stale pack left
+        # over from an earlier prepare/build/verify cycle (a reused
+        # workspace, or two cycles sharing the default abicheck_inputs
+        # path) used to survive a bare `mkdir -p` -- its old
+        # source_facts/*.jsonl TU records would make a later verify see a
+        # nonzero TU count and report ready=true even if this run's build
+        # never actually invoked abicheck-cc.
+        output = tmp_path / "abicheck_inputs"
+        output.mkdir()
+        (output / "manifest.json").write_text('{"kind": "abicheck_inputs"}')
+        stale_facts = output / "source_facts"
+        stale_facts.mkdir()
+        stale_record = stale_facts / "stale.jsonl"
+        stale_record.write_text('{"stale": true}\n')
+
+        result, _, _ = _run_action(
+            {
+                "INPUT_PHASE": "prepare",
+                "INPUT_PRODUCER": "wrapper",
+                "INPUT_OUTPUT": str(output),
+                "INPUT_INSTALL_DEPS": "false",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert not stale_record.exists()
+
     def test_multiple_public_roots_joined_for_env_var(self, tmp_path: Path) -> None:
         # Regression: this runs the real system uname (no stub, unlike the
         # Windows-simulation test below), so on an actual windows-latest CI
@@ -618,6 +647,23 @@ class TestClangPluginSmokeTestIsolation:
             "smoke-test compile must not write into $OUTPUT -- the real pack "
             "directory -- or a smoke record could mask a real collection "
             "failure at phase: verify"
+        )
+
+    def test_prepare_resets_output_dir_before_use(self) -> None:
+        # Regression (Codex review): same stale-pack-survives-mkdir-p issue
+        # as the wrapper producer's end-to-end test above, but
+        # _prepare_clang_plugin needs a real matching libclang-<N>-dev
+        # toolchain to run at all, so assert the invariant statically
+        # against the source instead (same technique as
+        # test_smoke_compile_never_targets_output_dir above).
+        text = RUN_SH.read_text(encoding="utf-8")
+        start = text.index("_prepare_clang_plugin() {")
+        end = text.index("\n_verify_pack() {", start)
+        plugin_block = text[start:end]
+        assert "_reset_output_dir\n" in plugin_block, (
+            "_prepare_clang_plugin must clear any stale pack at $OUTPUT "
+            "(via _reset_output_dir) before use, not a bare mkdir -p that "
+            "leaves old source_facts/*.jsonl in place"
         )
 
 

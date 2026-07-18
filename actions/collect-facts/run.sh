@@ -86,6 +86,22 @@ _write_output() {
   fi
 }
 
+# Start each pack from a genuinely empty directory. init_inputs_pack()
+# (abicheck/buildsource/inputs_emit.py) is deliberately idempotent across
+# repeated per-TU calls *within one build* -- it loads and preserves an
+# existing manifest.json rather than resetting it -- but that means a stale
+# pack left over from an earlier prepare/build/verify cycle (a reused
+# workspace, or two cycles sharing the default abicheck_inputs path) is
+# silently adopted here too: `mkdir -p` alone is a no-op on an already-
+# existing directory, so old source_facts/*.jsonl TU records survive into
+# this run. _verify_pack's TU-count check would then see the STALE nonzero
+# count and report ready=true even if this run's build never actually
+# invoked abicheck-cc/the plugin (Codex review).
+_reset_output_dir() {
+  rm -rf "$OUTPUT"
+  mkdir -p "$OUTPUT"
+}
+
 # ---------------------------------------------------------------------------
 # Resolve producer
 # ---------------------------------------------------------------------------
@@ -173,7 +189,7 @@ _prepare_wrapper() {
     bash "$(dirname "${BASH_SOURCE[0]}")/../../action/install-deps.sh" \
       || _fail "failed to install dependencies required by producer: wrapper -- see the output above."
   fi
-  mkdir -p "$OUTPUT"
+  _reset_output_dir
   _write_env "ABICHECK_INPUTS_DIR" "$OUTPUT"
   _write_env "ABICHECK_CC_EXTRACTOR" "$EXTRACTOR"
   [[ -n "$LIBRARY" ]] && _write_env "ABICHECK_CC_LIBRARY" "$LIBRARY"
@@ -267,7 +283,7 @@ $version_output"
     _fail "the built Clang plugin failed to load on a smoke-test translation unit -- see the compiler output above. This usually means '$COMPILER' is not the same LLVM major ($major) the plugin was built against."
   fi
   echo "Clang plugin smoke test passed ($plugin_so loads into $COMPILER)."
-  mkdir -p "$OUTPUT"
+  _reset_output_dir
 
   # Assemble the exact flags the caller's build needs to add, one -Xclang
   # pair per public root (public-roots= is repeatable per the plugin docs).
