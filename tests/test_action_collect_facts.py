@@ -32,6 +32,7 @@ those paths are exercised only up to their first fast-failing precondition
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -86,17 +87,45 @@ def _helpers_region() -> str:
     return text[:idx]
 
 
-def _run_predicate(call: str) -> subprocess.CompletedProcess[str]:
-    """Source the pure-helper region and evaluate a call, capturing stdout."""
+def _run_predicate(
+    call: str, env_extra: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    """Source the pure-helper region and evaluate a call, capturing stdout.
+
+    env_extra, when given, overlays onto the inherited environment (e.g. to
+    prepend a fake_bin dir onto PATH so a stubbed uname/cygpath is found
+    before any real one already on the host's PATH -- constructing that
+    override as a raw PATH="..." string inside the bash call itself doesn't
+    work on Windows, where a native tmp_path is backslash-separated and its
+    drive-letter colon collides with bash's own ':'-delimited PATH parsing;
+    this instead overrides PATH at the OS-env level like _run_action does,
+    using os.pathsep so it's correct on both platforms.
+    """
     script = _helpers_region() + f"\n{call}\n"
     with tempfile.NamedTemporaryFile(
         "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n"
     ) as f:
         f.write(script)
         script_path = f.name
+    env = {**os.environ, **env_extra} if env_extra else None
+    # Resolve bash to an absolute path FIRST, using the real (unrestricted)
+    # PATH, when env_extra narrows PATH down to just a fake_bin stub dir --
+    # subprocess.run needs to find the bash executable itself via its own
+    # PATH lookup when given a bare "bash", and a PATH override that omits
+    # wherever the real bash lives would make that lookup fail before the
+    # script (which is what env_extra's PATH restriction is actually meant
+    # to control) ever runs.
+    bash_exe = _bash_executable()
+    if env is not None and not os.path.isabs(bash_exe):
+        resolved = shutil.which(bash_exe)
+        if resolved:
+            bash_exe = resolved
     try:
         return subprocess.run(
-            [_bash_executable(), script_path], capture_output=True, text=True
+            [bash_exe, script_path],
+            capture_output=True,
+            text=True,
+            env=env,
         )
     finally:
         os.unlink(script_path)
@@ -384,45 +413,85 @@ class TestNormalizeWinPath:
     Intel\\oneAPI\\compiler\\latest") and Git Bash's own POSIX-style view of
     `command -v icx` can be two entirely different-looking representations
     of the same path, not just differently separated -- comparing them
-    without going through cygpath first can never match."""
+    without going through cygpath first can never match.
 
-    def test_noop_outside_windows(self) -> None:
-        result = _run_predicate('_normalize_win_path "/opt/intel/oneapi"')
+    Scenarios that stub uname/cygpath via a PATH-prepended fake bin dir are
+    skipped on a real Windows host: this suite's OWN pre-existing
+    TestWrapperProducer Windows-simulation tests (test_output_dir_converted_
+    from_msys_path_on_windows and siblings, which predate this change) rely
+    on that exact same technique and already fail on the real windows-latest
+    CI lane for the same underlying reason -- a real cygpath is apparently
+    resolved ahead of a PATH-prepended stub there regardless of prepend
+    order, a pre-existing limitation of stubbing this specific pair of
+    tools on that host, not something a correct _normalize_win_path
+    implementation can control. On a real windows-latest runner, `uname -s`
+    already genuinely reports MINGW* and a real cygpath is already on PATH
+    -- the un-stubbed, real-environment behavior is exercised instead by
+    TestBundledLlvmCmakePrefix.test_detects_cmplr_root_with_llvm_cmake_package.
+    """
+
+    def _fake_bin(
+        self, tmp_path: Path, uname_output: str, cygpath_script: str | None = None
+    ) -> Path:
+        fake_bin = tmp_path / "fakebin"
+        fake_bin.mkdir()
+        (fake_bin / "uname").write_text(f'#!/bin/sh\necho "{uname_output}"\n')
+        (fake_bin / "uname").chmod(0o755)
+        if cygpath_script is not None:
+            (fake_bin / "cygpath").write_text(cygpath_script)
+            (fake_bin / "cygpath").chmod(0o755)
+        return fake_bin
+
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="PATH-prepended uname/cygpath stubbing is unreliable on real "
+        "Windows Git Bash -- see class docstring",
+    )
+    def test_noop_outside_windows(self, tmp_path: Path) -> None:
+        fake_bin = self._fake_bin(tmp_path, "Linux")
+        result = _run_predicate(
+            '_normalize_win_path "/opt/intel/oneapi"',
+            env_extra={"PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"},
+        )
         assert result.stdout.strip() == "/opt/intel/oneapi"
 
     def test_empty_input_stays_empty(self) -> None:
+        # No stubbing needed -- the empty-input check returns before ever
+        # inspecting uname/cygpath, so this is platform-independent as-is.
         result = _run_predicate('_normalize_win_path ""')
         assert result.stdout.strip() == ""
 
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="PATH-prepended uname/cygpath stubbing is unreliable on real "
+        "Windows Git Bash -- see class docstring",
+    )
     def test_uses_cygpath_when_on_windows(self, tmp_path: Path) -> None:
-        # Stubs both uname and cygpath (via a PATH-prepended fake bin dir),
-        # since this test environment is Linux -- same technique the
-        # existing _native_pwd tests already use. The stub cygpath prefixes
-        # its output so the test can tell it was actually invoked with -m
-        # and the given path, rather than silently falling back to the raw
-        # input.
-        fake_bin = tmp_path / "fakebin"
-        fake_bin.mkdir()
-        (fake_bin / "uname").write_text('#!/bin/sh\necho "MINGW64_NT-10.0-x86_64"\n')
-        (fake_bin / "uname").chmod(0o755)
-        (fake_bin / "cygpath").write_text('#!/bin/sh\necho "MIXED:$2"\n')
-        (fake_bin / "cygpath").chmod(0o755)
-
+        # The stub cygpath prefixes its output so the test can tell it was
+        # actually invoked with -m and the given path, rather than silently
+        # falling back to the raw input.
+        fake_bin = self._fake_bin(
+            tmp_path, "MINGW64_NT-10.0-x86_64", '#!/bin/sh\necho "MIXED:$2"\n'
+        )
         result = _run_predicate(
-            f'PATH="{fake_bin}:$PATH"; '
-            r'_normalize_win_path "C:\Program Files\Intel\oneAPI"'
+            r'_normalize_win_path "C:\Program Files\Intel\oneAPI"',
+            env_extra={"PATH": str(fake_bin)},
         )
         assert result.stdout.strip() == r"MIXED:C:\Program Files\Intel\oneAPI"
 
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="PATH-prepended uname/cygpath stubbing is unreliable on real "
+        "Windows Git Bash -- see class docstring",
+    )
     def test_falls_back_to_raw_path_without_cygpath(self, tmp_path: Path) -> None:
-        fake_bin = tmp_path / "fakebin"
-        fake_bin.mkdir()
-        (fake_bin / "uname").write_text('#!/bin/sh\necho "MINGW64_NT-10.0-x86_64"\n')
-        (fake_bin / "uname").chmod(0o755)
-
+        # PATH set to ONLY fake_bin (no cygpath stub in it, and the real
+        # ambient PATH is not appended) so `command -v cygpath` genuinely
+        # fails here rather than finding a real one.
+        fake_bin = self._fake_bin(tmp_path, "MINGW64_NT-10.0-x86_64")
         result = _run_predicate(
-            f'PATH="{fake_bin}:$PATH"; '
-            r'_normalize_win_path "C:\Program Files\Intel\oneAPI"'
+            r'_normalize_win_path "C:\Program Files\Intel\oneAPI"',
+            env_extra={"PATH": str(fake_bin)},
         )
         assert result.stdout.strip() == r"C:\Program Files\Intel\oneAPI"
 
@@ -453,11 +522,15 @@ class TestBundledLlvmCmakePrefix:
         result = _run_predicate(
             f'_bundled_llvm_cmake_prefix "" "{cmplr_root}" "{compiler_path}"'
         )
-        # Plain string concatenation ("$cmplr_root/lib/cmake"), not a
-        # pathlib-style join -- str(cmplr_root / "lib" / "cmake") uses
-        # backslashes on Windows and would spuriously mismatch this
-        # function's forward-slash output there.
-        assert result.stdout.strip() == f"{cmplr_root}/lib/cmake"
+        # cmplr_root.as_posix() (forward slashes), not str(cmplr_root)
+        # (backslashes on Windows): _bundled_llvm_cmake_prefix routes
+        # cmplr_root through _normalize_win_path before emitting it, and on
+        # a real windows-latest runner that's a REAL cygpath -m call (this
+        # test doesn't stub uname/cygpath), producing the mixed form --
+        # forward-slash-joined, same as Path.as_posix() -- not the raw
+        # backslash Windows string this assertion used before
+        # _normalize_win_path was introduced (Codex review regression).
+        assert result.stdout.strip() == f"{cmplr_root.as_posix()}/lib/cmake"
 
     def test_empty_when_cmplr_root_unset(self) -> None:
         result = _run_predicate('_bundled_llvm_cmake_prefix "" "" ""')
@@ -493,6 +566,13 @@ class TestBundledLlvmCmakePrefix:
         )
         assert result.stdout.strip() == ""
 
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="PATH-prepended uname/cygpath stubbing is unreliable on real "
+        "Windows Git Bash -- see TestNormalizeWinPath's class docstring; "
+        "the real, un-stubbed windows-latest behavior is covered by "
+        "test_detects_cmplr_root_with_llvm_cmake_package above",
+    )
     def test_normalizes_both_paths_when_cygpath_available(
         self, tmp_path: Path
     ) -> None:
@@ -515,8 +595,8 @@ class TestBundledLlvmCmakePrefix:
         (cmplr_root / "lib" / "cmake" / "llvm").mkdir(parents=True)
         compiler_path = cmplr_root / "bin" / "icpx"
         result = _run_predicate(
-            f'PATH="{fake_bin}:$PATH"; '
-            f'_bundled_llvm_cmake_prefix "" "{cmplr_root}" "{compiler_path}"'
+            f'_bundled_llvm_cmake_prefix "" "{cmplr_root}" "{compiler_path}"',
+            env_extra={"PATH": str(fake_bin)},
         )
         assert result.stdout.strip() == f"{cmplr_root}/lib/cmake"
 
