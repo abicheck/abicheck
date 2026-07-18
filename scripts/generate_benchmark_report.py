@@ -139,14 +139,23 @@ def cache_state_for(bc_args: argparse.Namespace, tool_names: list[str]) -> dict[
     This is the reproducibility gap a plain accuracy table can't show: two
     reports with an identical-looking abidiff row might be one live run and
     one replaying a frozen cache from a different abicheck commit.
+
+    A frozen file whose ``ground_truth_sha256`` no longer matches the current
+    catalog is reported as ``"n/a"``, not ``"frozen@..."`` -- it mirrors
+    ``_merge_frozen_into_results``'s own digest guard, which refuses to merge
+    that stale data into ``results`` at all, so claiming "frozen" provenance
+    here for a tool whose columns are actually absent would be misleading.
     """
     selected = bc._resolve_selected_tools(bc_args)
     frozen = bc._load_frozen(bc.FROZEN_COMPETITOR_PATH)
+    frozen_current = bool(
+        frozen and frozen.get("ground_truth_sha256") == bc._ground_truth_digest()
+    )
     state: dict[str, str] = {}
     for name in tool_names:
         if name in selected:
             state[name] = "live"
-        elif frozen and name in frozen.get("tools", []):
+        elif frozen_current and name in frozen.get("tools", []):
             commit = str(frozen.get("git_commit", "?"))[:12]
             state[name] = f"frozen@{frozen.get('frozen_at', '?')} (commit {commit})"
         else:

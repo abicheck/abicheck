@@ -1517,7 +1517,19 @@ def _merge_frozen_into_results(
     *skip_tools* are tools actively run this session — frozen data must never
     overwrite a fresh result. Returns the tool names actually merged in, so
     the caller can fold them into the accuracy summary.
+
+    Trusted only when the frozen file's ``ground_truth_sha256`` stamp matches
+    the current catalog digest — mirrors ``_freeze_tools``'s own staleness
+    guard on the write side. Without this, a case converted from a
+    fixture-only case to a real compiled ``v1``/``v2`` pair (changing what a
+    frozen tool like ABICC can actually run against, e.g. SKIP -> a real
+    verdict) would keep silently merging its now-stale frozen row forward
+    forever, scoring the competitor as if the catalog hadn't changed (a
+    follow-up Codex review caught that this read-side merge had no digest
+    check even though the write-side ``_freeze_tools`` already gained one).
     """
+    if frozen.get("ground_truth_sha256") != _ground_truth_digest():
+        return []
     tools = [t for t in frozen.get("tools", []) if t not in skip_tools]
     if not tools:
         return []
@@ -2715,6 +2727,12 @@ def run_suite(args: argparse.Namespace) -> tuple[list[dict], list[Any], set[str]
                 print(f"  Merged frozen results for: {', '.join(merged_tools)} "
                       f"(frozen at {frozen.get('frozen_at', '?')}, "
                       f"commit {frozen.get('git_commit', '?')[:12]})\n")
+            elif frozen.get("ground_truth_sha256") != _ground_truth_digest():
+                print(f"  Ignoring stale frozen results at "
+                      f"{FROZEN_COMPETITOR_PATH.relative_to(REPO_DIR)} "
+                      f"(ground_truth_sha256 mismatch — the catalog changed "
+                      f"since {frozen.get('frozen_at', '?')}); re-run with "
+                      "--freeze to refresh.\n")
 
     return results, active_tools, selected_tools
 
