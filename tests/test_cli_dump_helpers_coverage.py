@@ -289,9 +289,12 @@ def test_non_elf_dump_stamps_build_context_when_compile_db_matched(
     PE/Mach-O path at all -- snap.parsed_with_build_context stayed False
     even when cli.py's _resolve_build_context_flags found a real match, so
     `dump foo.dll -H api.h -p build --depth build` was wrongly rejected as
-    only reaching "headers". Mirrors perform_elf_dump's identical stamp."""
+    only reaching "headers". Mirrors perform_elf_dump's identical stamp.
+    from_headers=True here represents a genuine header-scoped dump (as
+    opposed to service._try_header_scoped_dump()'s export-table fallback,
+    covered separately below)."""
     so = tmp_path / "lib.dll"
-    snap = AbiSnapshot(library="lib.dll", version="1.0")
+    snap = AbiSnapshot(library="lib.dll", version="1.0", from_headers=True)
     header = tmp_path / "api.h"
     header.write_text("void f(void);\n", encoding="utf-8")
 
@@ -347,6 +350,48 @@ def test_non_elf_dump_does_not_stamp_build_context_when_compile_db_unmatched(
         _noop_stamp,
         _record_write,
         compile_db_context_matched=False,
+    )
+    assert snap.parsed_with_build_context is False
+
+
+def test_non_elf_dump_does_not_stamp_build_context_on_mangling_fallback(
+    tmp_path: Path,
+) -> None:
+    """Codex review: service._try_header_scoped_dump() can silently fall back
+    to a fresh export-table-only snapshot (from_headers=False, scope_fallback
+    set) when the parsed headers don't match any exported symbol -- e.g. an
+    MSVC-mangled C++ DLL parsed with a mismatched compiler. The *request*
+    still had headers and a genuinely matched compile DB, but the snapshot
+    that was actually written never used either; stamping build-context
+    evidence on it would let `--depth build` wrongly accept a plain
+    export-table dump."""
+    so = tmp_path / "lib.dll"
+    snap = AbiSnapshot(
+        library="lib.dll", version="1.0", from_headers=False, scope_fallback="mangling-fallback"
+    )
+    header = tmp_path / "api.h"
+    header.write_text("void f(void);\n", encoding="utf-8")
+
+    def _dump_native(*a, **k):  # noqa: ANN002, ANN003
+        return snap
+
+    handle_non_elf_dump(
+        so,
+        "pe",
+        (header,),
+        (),
+        "1.0",
+        "c++",
+        None,
+        False,
+        None,
+        None,
+        False,
+        None,
+        _dump_native,
+        _noop_stamp,
+        _record_write,
+        compile_db_context_matched=True,
     )
     assert snap.parsed_with_build_context is False
 

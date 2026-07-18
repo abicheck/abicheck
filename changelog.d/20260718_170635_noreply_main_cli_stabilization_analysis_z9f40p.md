@@ -65,4 +65,13 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   replay ran over `--sources`; `frontend` now falls back to the build-source
   pack's extractor ledger so the actual L4 frontend identity (`clang`/
   `castxml`) is still recorded.
+- **PE/Mach-O `--depth build` no longer accepts a mangling-fallback dump
+  as build-context evidence** — `service._try_header_scoped_dump()` can
+  silently fall back to an export-table-only snapshot (e.g. an MSVC-mangled
+  C++ DLL parsed with a mismatched compiler); a `-p`/`--compile-db` match
+  against the *originally requested* headers was previously stamped onto
+  that fallback snapshot regardless, so `dump foo.dll -H api.h -p build
+  --depth build` could report success on a snapshot that never actually
+  used the headers or the compile database. The stamp is now also gated on
+  the returned snapshot being genuinely header-scoped (`from_headers`).
 

@@ -818,8 +818,16 @@ def handle_non_elf_dump(
     # compile_db_context_matched, not just headers' presence, for the same
     # reason perform_elf_dump's docstring gives: a syntactically valid but
     # empty/non-matching compile database must not be recorded as real
-    # build-context evidence.
-    if headers and compile_db_context_matched:
+    # build-context evidence. Also gated on snap.from_headers: unlike the ELF
+    # path, service._try_header_scoped_dump() can silently fall back to a
+    # fresh export-table-only snapshot (scope_fallback set, from_headers
+    # False) when the header backend fails or the parsed declarations don't
+    # match any exported symbol (e.g. an MSVC-mangled C++ DLL parsed with a
+    # mismatched compiler) -- the original *request* still had headers and a
+    # matched compile DB, but the snapshot that was actually written never
+    # used either, so stamping build-context evidence on it would let
+    # `--depth build` accept a plain export-table dump (Codex review).
+    if headers and compile_db_context_matched and snap.from_headers:
         snap.parsed_with_build_context = True
     stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
     write_snapshot_output(
