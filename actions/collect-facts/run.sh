@@ -13,6 +13,21 @@
 # build itself. See the `phase` input in action.yml.
 set -uo pipefail
 
+# Recognizes a leading /, a Windows drive letter (C:\ or C:/), or a UNC
+# path (\\server\share) as already-absolute. This script runs via Git
+# Bash/MSYS on windows-latest, where most GITHUB_*-derived paths are
+# already POSIX-style, but a workflow can still supply a native Windows
+# absolute path (e.g. output: ${{ runner.temp }}\abicheck_inputs, since
+# RUNNER_TEMP itself is Windows-style there) -- matching only `/*` treated
+# that as relative and produced a nonsensical mixed path like
+# /d/a/repo/C:\... when $(pwd)/ was prepended (Codex review).
+_is_absolute_path() {
+  case "$1" in
+    /* | [A-Za-z]:[/\\]* | \\\\*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 PHASE="${INPUT_PHASE:-auto}"
 PRODUCER_IN="${INPUT_PRODUCER:-auto}"
 SOURCES="${INPUT_SOURCES:-.}"
@@ -24,10 +39,9 @@ OUTPUT="${INPUT_OUTPUT:-abicheck_inputs}"
 # under build/ instead of the top-level pack _reset_output_dir/phase: verify/
 # pack-path all reference, so verification would report an empty pack even
 # though the build was actually instrumented (Codex review).
-case "$OUTPUT" in
-  /*) ;;
-  *) OUTPUT="$(pwd)/$OUTPUT" ;;
-esac
+if ! _is_absolute_path "$OUTPUT"; then
+  OUTPUT="$(pwd)/$OUTPUT"
+fi
 PUBLIC_ROOTS="${INPUT_PUBLIC_ROOTS:-}"
 LIBRARY="${INPUT_LIBRARY:-}"
 EXTRACTOR="${INPUT_EXTRACTOR:-auto}"
@@ -172,10 +186,11 @@ _reset_output_dir() {
 # doesn't exist yet), is passed through unchanged (Codex review).
 _resolve_public_root() {
   local root="$1"
-  case "$root" in
-    /*) printf '%s' "$root" ;;
-    *) printf '%s' "$(pwd)/$root" ;;
-  esac
+  if _is_absolute_path "$root"; then
+    printf '%s' "$root"
+  else
+    printf '%s' "$(pwd)/$root"
+  fi
 }
 
 # ---------------------------------------------------------------------------

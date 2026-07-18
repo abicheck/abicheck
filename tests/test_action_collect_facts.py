@@ -217,6 +217,51 @@ class TestDetectProducer:
 @pytest.mark.skipif(
     not RUN_SH.is_file(), reason="actions/collect-facts/run.sh not found"
 )
+class TestIsAbsolutePath:
+    """Regression guard (Codex review): OUTPUT/public-roots absolute-path
+    resolution only recognized a leading '/', so an already-absolute
+    Windows-style path (a drive letter, or a UNC share) was treated as
+    relative and got $(pwd)/ nonsensically prepended -- e.g. output:
+    'C:\\Users\\foo\\abicheck_inputs' became
+    '/d/a/repo/C:\\Users\\foo\\abicheck_inputs'. This can be reproduced with
+    Windows-style strings on a Linux test runner since it is pure string
+    matching, no real Windows filesystem semantics involved."""
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/tmp/abicheck_inputs",
+            r"C:\Users\foo\abicheck_inputs",
+            "D:/a/repo/abicheck_inputs",
+            r"\\server\share\abicheck_inputs",
+        ],
+    )
+    def test_recognizes_absolute_paths(self, path: str) -> None:
+        # Single-quoted in the generated bash source (not double-quoted):
+        # double quotes would collapse a UNC path's leading \\ to a single
+        # \ before the argument even reaches _is_absolute_path, corrupting
+        # the very prefix this test means to check. None of these fixture
+        # paths contain a single quote.
+        result = _run_predicate(
+            f"if _is_absolute_path '{path}'; then echo true; else echo false; fi"
+        )
+        assert result.stdout.strip() == "true"
+
+    @pytest.mark.parametrize("path", ["abicheck_inputs", "gen/include", "include"])
+    def test_rejects_relative_paths(self, path: str) -> None:
+        result = _run_predicate(
+            f"if _is_absolute_path '{path}'; then echo true; else echo false; fi"
+        )
+        assert result.stdout.strip() == "false"
+
+    def test_resolve_public_root_passes_through_windows_absolute_path(self) -> None:
+        result = _run_predicate(r"_resolve_public_root 'C:\Users\foo\include'")
+        assert result.stdout.strip() == r"C:\Users\foo\include"
+
+
+@pytest.mark.skipif(
+    not RUN_SH.is_file(), reason="actions/collect-facts/run.sh not found"
+)
 class TestLlvmMajorParsing:
     @pytest.mark.parametrize(
         ("version_output", "expected"),
