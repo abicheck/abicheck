@@ -859,6 +859,7 @@ def scope_diff_to_app(
     *,
     policy: str = "strict_abi",
     policy_file: PolicyFile | None = None,
+    suppression: SuppressionList | None = None,
 ) -> AppCompatResult:
     """Scope an already-computed library diff to one application's actual usage.
 
@@ -876,6 +877,13 @@ def scope_diff_to_app(
     so no re-parse of a real binary is required for those lookups. *app_path*
     is unaffected: the application itself always needs a real binary to read
     its DT_NEEDED/import table from.
+
+    *suppression* (ADR-044 P2, Codex review): the same rule set already used
+    to compute *diff* — evaluated again here because
+    :data:`ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED` is synthesized fresh
+    from ``missing_symbols`` *after* the pipeline's own suppression pass has
+    already run, so it would otherwise be unsuppressible even by an exact
+    ``symbol:``/``change_kind:`` rule that matches it precisely.
     """
     library_soname = _get_lib_soname(old_lib)
     app_reqs = parse_app_requirements(app_path, library_soname)
@@ -925,13 +933,14 @@ def scope_diff_to_app(
     # use) so a symbol already covered by a real diff Change is never
     # double-reported as both that Change and this overlay.
     for sym in uncovered_missing_symbols(missing_symbols, breaking_for_app):
-        breaking_for_app.append(
-            make_change(
-                ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
-                symbol=sym,
-                name=app_path.name,
-            )
+        overlay_change = make_change(
+            ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+            symbol=sym,
+            name=app_path.name,
         )
+        if suppression is not None and suppression.is_suppressed(overlay_change):
+            continue
+        breaking_for_app.append(overlay_change)
 
     # Compute app-specific verdict
     required_count = len(app_reqs.undefined_symbols)
@@ -1022,7 +1031,7 @@ def check_appcompat(
 
     return scope_diff_to_app(
         diff, app_path, old_lib_path, new_lib_path,
-        policy=policy, policy_file=policy_file,
+        policy=policy, policy_file=policy_file, suppression=suppression,
     )
 
 

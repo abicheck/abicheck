@@ -931,6 +931,49 @@ class TestComputeCallGraphLeakPaths:
         assert "pubFn" in paths["ns::detail::helper"][0]
         assert "DECL_CALLS_DECL" in paths["ns::detail::helper"][0]
 
+    def test_ordinary_out_of_line_exported_entry_is_not_a_leak_path(self) -> None:
+        """Codex review: an ordinary, out-of-line exported function's own body
+        is compiled into the *library's* binary only, never into any
+        consumer's -- its internal calls (e.g. to ns::detail::helper) are not
+        public-reachable the way an inline/template entry's calls are.
+        consumer_compiled_body=False (the build-integrated source_graph.py
+        signal for "not inline, not a template") must exclude it from the
+        walk's entry set entirely."""
+        from abicheck.buildsource.source_graph import GraphEdge, GraphNode
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        snap = _graph_snap(
+            [
+                GraphNode(
+                    id="decl://pub", kind="source_decl", label="api",
+                    attrs={"visibility": "public_header", "consumer_compiled_body": False},
+                ),
+                _decl_node("decl://int", "ns::detail::helper", "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        assert compute_call_graph_leak_paths(snap) == {}
+
+    def test_inline_entry_with_explicit_flag_is_still_a_leak_path(self) -> None:
+        """The positive counterpart: consumer_compiled_body=True (an inline
+        method/template entry) still seeds the walk, same as before this
+        signal existed -- this ADR's own headline scenario."""
+        from abicheck.buildsource.source_graph import GraphEdge, GraphNode
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        snap = _graph_snap(
+            [
+                GraphNode(
+                    id="decl://pub", kind="source_decl", label="pubInline",
+                    attrs={"visibility": "public_header", "consumer_compiled_body": True},
+                ),
+                _decl_node("decl://int", "ns::detail::helper", "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        paths = compute_call_graph_leak_paths(snap)
+        assert "ns::detail::helper" in paths
+
     def test_reference_edge_also_counts(self) -> None:
         from abicheck.buildsource.source_graph import GraphEdge
         from abicheck.internal_leak import compute_call_graph_leak_paths

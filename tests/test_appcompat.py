@@ -1912,6 +1912,53 @@ class TestScopeDiffToAppWithSnapshots:
         assert result.missing_symbols == ["foo_process"]
         assert [c.kind for c in result.breaking_for_app] == [ChangeKind.FUNC_REMOVED]
 
+    def test_consumer_required_symbol_removed_overlay_is_suppressible(self, tmp_path):
+        """Codex review: CONSUMER_REQUIRED_SYMBOL_REMOVED is synthesized after
+        the pipeline's own suppression pass already ran over diff.changes, so
+        without threading `suppression` through here an exact rule for this
+        symbol/kind could never actually suppress it."""
+        from abicheck.suppression import Suppression, SuppressionList
+
+        old_snap = self._snap("1.0", "libfoo.so.1", ["foo_init", "foo_process"])
+        new_snap = self._snap("2.0", "libfoo.so.1", ["foo_init"])
+        diff = DiffResult(
+            old_version="1.0", new_version="2.0", library="libfoo.so.1",
+            changes=[], verdict=Verdict.COMPATIBLE,
+        )
+        app_reqs = AppRequirements(undefined_symbols={"foo_init", "foo_process"})
+        suppression = SuppressionList([Suppression(symbol="foo_process")])
+        with patch(
+            "abicheck.appcompat.parse_app_requirements", return_value=app_reqs
+        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+            result = scope_diff_to_app(
+                diff, tmp_path / "app", old_snap, new_snap, suppression=suppression,
+            )
+        assert result.missing_symbols == ["foo_process"]
+        assert [c.kind for c in result.breaking_for_app] == []
+
+    def test_consumer_required_symbol_removed_overlay_survives_unmatched_suppression(
+        self, tmp_path,
+    ):
+        from abicheck.suppression import Suppression, SuppressionList
+
+        old_snap = self._snap("1.0", "libfoo.so.1", ["foo_init", "foo_process"])
+        new_snap = self._snap("2.0", "libfoo.so.1", ["foo_init"])
+        diff = DiffResult(
+            old_version="1.0", new_version="2.0", library="libfoo.so.1",
+            changes=[], verdict=Verdict.COMPATIBLE,
+        )
+        app_reqs = AppRequirements(undefined_symbols={"foo_init", "foo_process"})
+        suppression = SuppressionList([Suppression(symbol="unrelated_symbol")])
+        with patch(
+            "abicheck.appcompat.parse_app_requirements", return_value=app_reqs
+        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+            result = scope_diff_to_app(
+                diff, tmp_path / "app", old_snap, new_snap, suppression=suppression,
+            )
+        assert [c.kind for c in result.breaking_for_app] == [
+            ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED
+        ]
+
 
 # ---------------------------------------------------------------------------
 # _lib_fmt / _lib_pe_meta / _lib_macho_meta: PE/Mach-O snapshot + Path branches

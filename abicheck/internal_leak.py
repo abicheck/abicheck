@@ -682,9 +682,12 @@ def compute_call_graph_leak_paths(
     """Call-graph analogue of :func:`compute_leak_paths` (ADR-044 P1 item 1).
 
     Walks the optional L5 source graph's ``DECL_CALLS_DECL``/
-    ``DECL_REFERENCES_DECL`` edges from every public entry (exported-symbol
-    decl or public-header-visible decl/type, per
-    :func:`~abicheck.buildsource.source_graph.is_public_dependency_node`),
+    ``DECL_REFERENCES_DECL`` edges from every public entry whose own body is
+    actually compiled into consumer code (exported-symbol decl or
+    public-header-visible decl/type, restricted to an inline/template
+    rendition where the graph can tell the difference — Codex review; see
+    :func:`~abicheck.buildsource.source_graph.is_consumer_compiled_public_entry`
+    for why an ordinary out-of-line exported function does not qualify),
     returning a mapping ``lookup_key -> list of formatted proof-path
     strings`` (one per public entry that reaches it, edge-kind-annotated via
     :func:`~abicheck.buildsource.source_graph_findings._format_dependency_path`,
@@ -731,7 +734,7 @@ def compute_call_graph_leak_paths(
     if graph is None or not getattr(graph, "nodes", None):
         return {}
 
-    from .buildsource.source_graph import is_public_dependency_node
+    from .buildsource.source_graph import is_consumer_compiled_public_entry
     from .buildsource.source_graph_findings import (
         _dependency_path,
         _dependency_reachability,
@@ -749,10 +752,15 @@ def compute_call_graph_leak_paths(
         if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL" and e.dst.startswith(symbol_prefix):
             decl_to_symbol[e.src] = e.dst[len(symbol_prefix):]
     exported_decls = set(decl_to_symbol)
+    # is_consumer_compiled_public_entry (not the broader is_public_dependency_node
+    # crosscheck.py's advisory RISK-only check uses) -- an ordinary out-of-line
+    # exported function's own internal calls never reach consumer-compiled code
+    # at all, so seeding the walk from it would treat a purely internal
+    # implementation-detail dependency as public-reachable (Codex review).
     entries = [
         n.id
         for n in graph.nodes
-        if is_public_dependency_node(n.id, node_by_id, exported_decls)
+        if is_consumer_compiled_public_entry(n.id, node_by_id, exported_decls)
     ]
     if not entries:
         return {}

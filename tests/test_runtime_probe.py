@@ -145,6 +145,28 @@ class TestRunOnce:
         assert result.old is not None and result.old.ok is False
         assert "Exec format error" in result.old.stderr_tail
 
+    def test_relative_bare_name_resolved_before_exec(self, tmp_path, monkeypatch):
+        """A bare relative app name (no '/') must not be searched for on PATH
+        (Codex review): subprocess treats an argv[0] with no directory
+        component as a PATH lookup, not cwd-relative, so an unresolved
+        ``Path("app")`` would silently miss the app in its own directory
+        whenever '.' is not on PATH."""
+        monkeypatch.setattr(rp.sys, "platform", "linux")
+        monkeypatch.chdir(tmp_path)
+        captured_argv = []
+
+        def _fake_run(argv, env=None, capture_output=None, text=None, timeout=None, check=None):
+            captured_argv.append(argv)
+            return subprocess.CompletedProcess(argv, returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(rp.subprocess, "run", _fake_run)
+        app = _make_exec(tmp_path)
+        relative_app = rp.Path(app.name)
+        old_lib = _make_lib(tmp_path, "old.so")
+        new_lib = _make_lib(tmp_path, "new.so")
+        run_runtime_probe(relative_app, old_lib, new_lib)
+        assert all(argv[0] == str(app.resolve()) for argv in captured_argv)
+
 
 class TestRegressedSymbol:
     def test_regressed_when_old_ok_and_new_missing_symbol(self):

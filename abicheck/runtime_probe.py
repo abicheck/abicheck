@@ -105,7 +105,12 @@ def _run_once(app_path: Path, lib_path: Path, timeout: float) -> RuntimeProbeOut
     env["LD_LIBRARY_PATH"] = f"{lib_dir}:{existing}" if existing else lib_dir
     try:
         proc = subprocess.run(
-            [str(app_path)],
+            # A bare relative name with no directory component (e.g. Path("app")
+            # from a cwd-relative --used-by arg) would otherwise be searched for
+            # on PATH instead of the current directory, like a shell would do
+            # for an unqualified command (Codex review) -- resolve first, same
+            # as lib_path above.
+            [str(app_path.resolve())],
             env=env,
             capture_output=True,
             text=True,

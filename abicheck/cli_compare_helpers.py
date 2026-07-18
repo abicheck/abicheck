@@ -629,6 +629,7 @@ def _apply_used_by_scoping(
     policy: str, policy_file: PolicyFile | None,
     exit_code_scheme: str = "legacy", sev_config: Any = None,
     verify_runtime: bool = False,
+    suppression: Any = None,
 ) -> int:
     """Scope *result* to each ``--used-by`` app; worst-wins (ADR-043).
 
@@ -649,6 +650,13 @@ def _apply_used_by_scoping(
     binaries — a JSON-snapshot side has no file to execute against, so the
     probe is silently skipped for that app, same as the static check's own
     snapshot fallback degrades gracefully.
+
+    *suppression* (ADR-044 P2, Codex review) is forwarded to
+    :func:`~abicheck.appcompat.scope_diff_to_app` and also consulted here
+    directly for the ``CONSUMER_RUNTIME_LOAD_FAILED`` overlay: both findings
+    are synthesized *after* the pipeline's own suppression pass already ran
+    over ``result.changes``, so without this they would be unsuppressible
+    even by an exact rule.
     """
     from .appcompat import scope_diff_to_app
     from .service import detect_binary_format
@@ -706,7 +714,7 @@ def _apply_used_by_scoping(
     for app in used_by_apps:
         scoped = scope_diff_to_app(
             result, app, old_lib, new_lib,
-            policy=policy, policy_file=policy_file,
+            policy=policy, policy_file=policy_file, suppression=suppression,
         )
         if verify_runtime and isinstance(old_lib, Path) and isinstance(new_lib, Path):
             from .checker_policy import ChangeKind
@@ -716,13 +724,25 @@ def _apply_used_by_scoping(
             probe = run_runtime_probe(app, old_lib, new_lib)
             regressed_symbol = probe.regressed_symbol
             if regressed_symbol:
-                scoped.breaking_for_app.append(
-                    make_change(
-                        ChangeKind.CONSUMER_RUNTIME_LOAD_FAILED,
-                        symbol=regressed_symbol,
-                        name=app.name,
-                    )
+                runtime_change = make_change(
+                    ChangeKind.CONSUMER_RUNTIME_LOAD_FAILED,
+                    symbol=regressed_symbol,
+                    name=app.name,
                 )
+                if suppression is None or not suppression.is_suppressed(runtime_change):
+                    scoped.breaking_for_app.append(runtime_change)
+                    # scope_diff_to_app already computed scoped.verdict before
+                    # this RISK-tier finding existed -- recompute so a clean
+                    # static scope plus a runtime regression reports
+                    # COMPATIBLE_WITH_RISK instead of a stale COMPATIBLE
+                    # (Codex review).
+                    from .appcompat import _compute_appcompat_verdict
+
+                    scoped.verdict = _compute_appcompat_verdict(
+                        scoped.missing_symbols, scoped.missing_versions,
+                        scoped.breaking_for_app, scoped.required_symbol_count,
+                        policy, policy_file,
+                    )
         summaries.append(_app_compat_summary(scoped))
         relevant_finding_ids.update(_finding_id(c) for c in scoped.breaking_for_app)
         relevant_changes_by_id.update(
@@ -1448,7 +1468,7 @@ def run_compare(
             result, used_by_apps, used_by_old_input, used_by_new_input, old, new,
             policy, pf,
             exit_code_scheme=resolved_cfg.exit_code_scheme, sev_config=sev_config,
-            verify_runtime=verify_runtime,
+            verify_runtime=verify_runtime, suppression=suppression,
         )
     elif required_symbols:
         scoped_exit_code = _apply_required_symbol_scoping(

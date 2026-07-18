@@ -735,6 +735,13 @@ def is_public_dependency_node(
     """Whether *node_id* is public: exported-symbol-mapped or public-header visible.
 
     Shared with ``crosscheck.py``'s ``_is_public_decl`` (ADR-041 P0 slice 2).
+    Deliberately does not consider whether the node's own body is compiled
+    into consumer code (see :func:`is_consumer_compiled_public_entry`) — an
+    exported-or-header-visible declaration is exactly the "public API
+    surface" question ``crosscheck.py``'s advisory
+    ``public_to_internal_dependency`` check (RISK-only, never gates
+    suppression) wants to ask, regardless of where the declaration's body
+    lives.
     """
     if node_id in exported_decls:
         return True
@@ -742,6 +749,47 @@ def is_public_dependency_node(
     if node is None or node.kind not in DECL_NODE_KINDS:
         return False
     return str(node.attrs.get("visibility", "")) in PUBLIC_VISIBILITIES
+
+
+def is_consumer_compiled_public_entry(
+    node_id: str, node_by_id: dict[str, GraphNode], exported_decls: set[str]
+) -> bool:
+    """Whether *node_id* is a public entry whose own body is compiled into
+    consumer binaries — the correct "entry" set for a *call-graph*
+    reachability walk (Codex review, fresh evidence).
+
+    :func:`is_public_dependency_node` alone over-reaches here: an ordinary,
+    out-of-line exported function (e.g. ``api()`` defined in a ``.cpp``
+    file) is public, but its *body* — and therefore its own internal calls,
+    e.g. to ``ns::detail::helper()`` — is compiled into the **library's**
+    binary only, never into any consumer's. A consumer links against
+    ``api()``'s exported symbol alone; it never sees, references, or
+    embeds ``helper()``. So walking the call graph from *every* exported
+    function (as :func:`is_public_dependency_node` does) treats an ordinary
+    internal implementation-detail call as if it were public-reachable,
+    which either manufactures a spurious "still reachable" narrative on a
+    genuinely safe-to-suppress internal change, or (via
+    ``post_processing.MarkReachability``) blocks a broad internal-namespace
+    suppression rule from ever applying to the common case — most
+    functions in most libraries are ordinary, out-of-line, non-template.
+
+    The real criterion is whether the entry's own body is emitted into
+    every including translation unit — true for inline functions/methods
+    and templates, false for an ordinary out-of-line definition — captured
+    by ``GraphNode.attrs["consumer_compiled_body"]``
+    (:func:`build_source_graph`). A node without that attr at all (e.g. a
+    ``header_graph.py`` node, which by construction only ever gets outgoing
+    ``DECL_CALLS_DECL``/``DECL_REFERENCES_DECL`` edges from in-header
+    bodies in the first place — see that module's own docstring) defaults
+    permissively to ``True``, since the over-reach this guards against
+    cannot arise there.
+    """
+    if not is_public_dependency_node(node_id, node_by_id, exported_decls):
+        return False
+    node = node_by_id.get(node_id)
+    if node is None:
+        return True
+    return bool(node.attrs.get("consumer_compiled_body", True))
 
 
 def is_internal_dependency_node(
@@ -1298,6 +1346,24 @@ def _augment_with_source_abi(
         *surface.reachable_templates,
         *surface.reachable_inline_bodies,
     )
+    # An entity routed to reachable_templates/reachable_inline_bodies shares
+    # its identity() (mangled name, or qualified_name+signature_hash) with the
+    # plain "function"-kind declaration entity clang.py *also* emits for the
+    # same function -- both land on the same node id via _decl_node_id below,
+    # and add_node keeps only the first writer's attrs. reachable_declarations
+    # is iterated first in `declarations` above, so for any function that also
+    # has an inline/template rendition, the winning node's own attrs["decl_kind"]
+    # is always "function"/"method", never "inline"/"template" -- silently
+    # losing the one signal that distinguishes "body compiled into every
+    # consumer TU that includes this header" from "ordinary out-of-line body,
+    # compiled into this library's binary only" (Codex review). Compute the
+    # identity set up front so every entity sharing it gets the *same*
+    # attrs["consumer_compiled_body"] value regardless of which one wins the
+    # node-id race.
+    consumer_compiled_identities = {
+        ent.identity()
+        for ent in (*surface.reachable_templates, *surface.reachable_inline_bodies)
+    }
     for ent in declarations:
         did = _decl_node_id(ent.identity())
         conf = ent.confidence.value
@@ -1308,7 +1374,11 @@ def _augment_with_source_abi(
                 label=ent.qualified_name or ent.identity(),
                 provenance="source_abi",
                 confidence=conf,
-                attrs={"decl_kind": ent.kind, "visibility": ent.visibility},
+                attrs={
+                    "decl_kind": ent.kind,
+                    "visibility": ent.visibility,
+                    "consumer_compiled_body": ent.identity() in consumer_compiled_identities,
+                },
             )
         )
         header_declares(ent, did, conf)

@@ -1840,6 +1840,64 @@ class TestVerifyRuntimeFlag:
         data = json.loads(result.stdout)
         assert data["used_by"][0]["relevant_change_count"] == 0
 
+    def test_regression_recomputes_stale_compatible_verdict(
+        self, tmp_path, monkeypatch,
+    ) -> None:
+        """Codex review: scope_diff_to_app already computed `verdict` before
+        this RISK-tier finding existed, so appending it without recomputing
+        would still report COMPATIBLE even though breaking_for_app now
+        carries a real (RISK) finding -- the reported verdict must become
+        COMPATIBLE_WITH_RISK instead of staying stale."""
+        from abicheck.runtime_probe import RuntimeProbeOutcome, RuntimeProbeResult
+
+        res = self._result(verdict=Verdict.COMPATIBLE)
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        self._patch_probe(
+            monkeypatch,
+            RuntimeProbeResult(
+                app_path=str(app), attempted=True,
+                old=RuntimeProbeOutcome(ok=True),
+                new=RuntimeProbeOutcome(ok=False, missing_symbol="foo_bar"),
+            ),
+        )
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app),
+            "--verify-runtime", "--format", "json",
+        )
+        data = json.loads(result.stdout)
+        assert data["used_by"][0]["verdict"] == "COMPATIBLE_WITH_RISK"
+
+    def test_regression_suppressible_by_symbol(self, tmp_path, monkeypatch) -> None:
+        """Codex review: CONSUMER_RUNTIME_LOAD_FAILED is synthesized after the
+        pipeline's own suppression pass already ran, so an exact suppression
+        rule for the regressed symbol must still be able to hide it."""
+        from abicheck.runtime_probe import RuntimeProbeOutcome, RuntimeProbeResult
+
+        res = self._result(verdict=Verdict.COMPATIBLE)
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        self._patch_probe(
+            monkeypatch,
+            RuntimeProbeResult(
+                app_path=str(app), attempted=True,
+                old=RuntimeProbeOutcome(ok=True),
+                new=RuntimeProbeOutcome(ok=False, missing_symbol="foo_bar"),
+            ),
+        )
+        sup = tmp_path / "sup.yaml"
+        sup.write_text(
+            "version: 1\nsuppressions:\n"
+            "  - symbol: foo_bar\n    reason: known, tracked elsewhere\n",
+        )
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app),
+            "--verify-runtime", "--suppress", str(sup), "--format", "json",
+        )
+        data = json.loads(result.stdout)
+        assert data["used_by"][0]["relevant_change_count"] == 0
+        assert data["used_by"][0]["verdict"] == "COMPATIBLE"
+
     def test_flag_ignored_without_used_by(self, tmp_path, monkeypatch) -> None:
         """--verify-runtime alone (no --used-by) must not error or invoke
         the probe at all -- it's documented as ignored without --used-by."""

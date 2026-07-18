@@ -1037,6 +1037,62 @@ semantics) is closed to the extent described under its own entry.
   `"#sha256:..."`) alongside the existing label/mangled-symbol keys. Added
   `test_hash_suffixed_label_also_keyed_by_stripped_name` to
   `test_internal_leak.py`.
+- **The call-graph *entry set* itself over-reached (Codex, fresh
+  evidence).** Every fix above was about matching a *target* symbol
+  correctly once a walk from some public entry already reached it — this
+  one is about which nodes get to seed the walk at all.
+  `compute_call_graph_leak_paths` seeded entries via
+  `is_public_dependency_node` (shared with `crosscheck.py`'s advisory
+  `public_to_internal_dependency` check): exported-symbol-mapped **or**
+  public-header-visible, with no further distinction. But an ordinary,
+  out-of-line exported function (e.g. `api()` defined in a `.cpp` file) is
+  public in exactly that sense while its *body* — and therefore its own
+  internal calls, e.g. to `ns::detail::helper()` — is compiled into the
+  **library's** binary only, never into any consumer's; a consumer links
+  against `api()`'s exported symbol alone and never sees, references, or
+  embeds `helper()`. If `helper()` is removed, either the library's own
+  build breaks (the vendor's problem, nothing to do with any external
+  consumer) or `api()`'s recompiled body simply stops calling it — never a
+  consumer-visible break. Treating every exported function as a valid
+  call-graph entry (as the shared predicate does) therefore either
+  manufactured a spurious "still reachable" narrative on a genuinely
+  safe-to-suppress internal change, or — via
+  `post_processing.MarkReachability`'s `public_reachable` tag — blocked a
+  broad internal-namespace suppression rule from ever applying to the
+  *common* case, since most functions in most libraries are ordinary,
+  out-of-line, non-template. The real criterion is whether the entry's own
+  body is emitted into every including translation unit (true for inline
+  functions/methods and templates, false for an ordinary out-of-line
+  definition) — but that distinction, while computed at the L4
+  `SourceAbiSurface` layer (three separate `reachable_declarations`/
+  `reachable_templates`/`reachable_inline_bodies` buckets), was **lost**
+  when folded into the L5 graph: an inline function generates *two*
+  entities sharing one identity (a plain "function" declaration entity
+  clang.py always emits, plus a sibling "inline" body entity), both
+  collide onto the same graph node id, and `add_node`'s first-writer-wins
+  dedup keeps only the "function" entity's `attrs["decl_kind"]` (iterated
+  first) — so even a decl_kind-based check would silently never see
+  "inline" for exactly the functions that matter. Fixed in two parts,
+  scoped to `internal_leak.py`'s call-graph walk only (deliberately **not**
+  touching `crosscheck.py`'s advisory, RISK-only, non-suppression-gating
+  check, which has no comparable precision requirement): (1)
+  `build_source_graph` now computes the inline/template identity set
+  up front and stamps `attrs["consumer_compiled_body"]` on every decl
+  node from that set membership — so the attr is correct regardless of
+  which sibling entity wins the id race; (2) a new
+  `is_consumer_compiled_public_entry` predicate
+  (`buildsource/source_graph.py`) layers that attr on top of
+  `is_public_dependency_node`, defaulting permissively to `True` when the
+  attr is absent (e.g. a `header_graph.py` node, which by construction only
+  ever gets outgoing call/reference edges from in-header bodies in the
+  first place, so the over-reach cannot arise there) —
+  `compute_call_graph_leak_paths` now seeds its walk from this predicate
+  instead. Added `test_ordinary_function_decl_node_marked_not_consumer_compiled`/
+  `test_inline_function_decl_node_marked_consumer_compiled_despite_id_collision`
+  to `test_source_graph.py` (the id-collision case specifically) and
+  `test_ordinary_out_of_line_exported_entry_is_not_a_leak_path`/
+  `test_inline_entry_with_explicit_flag_is_still_a_leak_path` to
+  `test_internal_leak.py`.
 
 ## Roadmap (not committed — scope/sequence per the usual planning process)
 
@@ -1119,6 +1175,35 @@ review's priority tiers.
    `reporter._change_to_dict`'s existing one) and passing
    `EvidenceStatus.CONSUMER_PROVEN` at both `scoped_only_changes` render
    sites (JSON's `_fold_scoped_compat_into_text`, SARIF's `to_sarif`).
+   **Post-merge review (Codex), three more findings on the same P2 change:**
+   (a) `runtime_probe._run_once` passed a bare `Path` straight to
+   `subprocess.run([str(app_path)], ...)` — for a relative app name with no
+   `/` (e.g. a `--used-by app` invocation from the app's own directory),
+   that argv[0] shape makes the OS search `PATH`, not the current
+   directory, exactly like an unqualified shell command; with `.` typically
+   absent from `PATH` this silently raised `OSError` on both runs and the
+   probe never fired at all. Fixed by resolving to an absolute path first
+   (`app_path.resolve()`), same as `lib_path` already was. (b) Both
+   `CONSUMER_REQUIRED_SYMBOL_REMOVED` (`scope_diff_to_app`) and
+   `CONSUMER_RUNTIME_LOAD_FAILED` (`_apply_used_by_scoping`) are
+   synthesized *after* the comparison pipeline's own suppression pass has
+   already run over `diff.changes` — neither function received the active
+   `SuppressionList` at all, so an exact `symbol:`/`change_kind:`
+   suppression rule for either overlay finding could never actually
+   suppress it; the scoped gate would keep failing on a change the user had
+   explicitly (and correctly) waived. Fixed by threading `suppression`
+   through `scope_diff_to_app` (and its `check_appcompat`/MCP-server call
+   sites) and `_apply_used_by_scoping`, evaluating it against each
+   synthesized `Change` before appending — mirrors how the base diff was
+   already suppressed, just applied a second time to findings that did not
+   exist yet at that point. (c) `_apply_used_by_scoping` appended the
+   `CONSUMER_RUNTIME_LOAD_FAILED` finding to `scoped.breaking_for_app`
+   *after* `scope_diff_to_app` had already computed `scoped.verdict` from
+   the static scope alone — so a run with a clean static scope but a real
+   runtime regression still reported the stale `COMPATIBLE` verdict instead
+   of `COMPATIBLE_WITH_RISK`, even though the finding list itself was
+   correct. Fixed by recomputing `scoped.verdict` via
+   `_compute_appcompat_verdict` immediately after the append.
 3. New worked examples exercising this ADR's headline scenario end-to-end
    (public inline dispatch to an exported internal specialization; the same
    case under a blanket namespace suppression, asserting the break survives
