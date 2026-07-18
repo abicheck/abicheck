@@ -172,14 +172,20 @@ if [[ -n "$ABI_BASELINE" \
     [[ -n "${GITHUB_REPOSITORY:-}" ]] && _GH_REPO_FLAG=(-R "$GITHUB_REPOSITORY")
     if [[ "$ABI_BASELINE" == "latest-release" ]]; then
       echo "::group::Fetch ABI baseline from latest release"
-      if ! gh release download "${_GH_REPO_FLAG[@]}" --pattern '*.abicheck.json' -D "$BASELINE_DIR"; then
+      # ${arr[@]+"${arr[@]}"}, not a bare "${arr[@]}": under macOS's stock
+      # (GPLv2-frozen) bash 3.2's set -u, expanding an *empty* array as
+      # "${arr[@]}" is itself treated as an unbound-variable reference (bash
+      # 4.4+ special-cased this away) -- the same portability trap
+      # add_flag()'s callers already guard against elsewhere in this file
+      # (Codex review).
+      if ! gh release download ${_GH_REPO_FLAG[@]+"${_GH_REPO_FLAG[@]}"} --pattern '*.abicheck.json' -D "$BASELINE_DIR"; then
         _baseline_unavailable "No ABI baseline found in latest release. Run 'abicheck dump path/to/libfoo.so -o libfoo.abicheck.json' in your release workflow and upload the resulting *.abicheck.json file as a release asset."
       fi
       echo "::endgroup::"
     else
       # Treat as a tag name
       echo "::group::Fetch ABI baseline from release $ABI_BASELINE"
-      if ! gh release download "$ABI_BASELINE" "${_GH_REPO_FLAG[@]}" --pattern '*.abicheck.json' -D "$BASELINE_DIR"; then
+      if ! gh release download "$ABI_BASELINE" ${_GH_REPO_FLAG[@]+"${_GH_REPO_FLAG[@]}"} --pattern '*.abicheck.json' -D "$BASELINE_DIR"; then
         _baseline_unavailable "No ABI baseline found in release '$ABI_BASELINE'. Ensure the release has a *.abicheck.json asset."
       fi
       echo "::endgroup::"

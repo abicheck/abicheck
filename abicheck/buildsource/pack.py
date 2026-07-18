@@ -180,11 +180,27 @@ class BuildSourcePack:
             digests.append("sha256:" + _file_sha256(be_path))
         elif self.build_evidence is not None:
             digests.append("sha256:" + _payload_sha256(self.build_evidence.to_dict()))
+        # source_abi.json's own top-level "coverage" dict (SourceAbiSurface.
+        # coverage) is stamped by source_replay.py's replay producer (cache_
+        # lookup_s/extract_s/link_s/elapsed_s/extractor_jobs/cache_misses)
+        # and inline.py's cache bookkeeping (cache_hits) -- the same
+        # volatile-field shape actions/baseline/build_manifest.py already
+        # strips from the *embedded* snapshot's build_source.source_abi.
+        # coverage, but this method hashed the raw file/payload directly, so
+        # content_hash() was still unstable across runs with different
+        # cache warmth or runner load even after normalizing the manifest
+        # coverage rows (Codex review). Read+normalize+rehash instead of
+        # _file_sha256's raw-bytes shortcut so the strip applies uniformly.
         sa_path = self.root / SOURCE_ABI_REL
         if sa_path.is_file():
-            digests.append("sha256:" + _file_sha256(sa_path))
+            digests.append(
+                "sha256:" + _payload_sha256(_normalize_source_abi_payload(_read_json(sa_path)))
+            )
         elif self.source_abi is not None:
-            digests.append("sha256:" + _payload_sha256(self.source_abi.to_dict()))
+            digests.append(
+                "sha256:"
+                + _payload_sha256(_normalize_source_abi_payload(self.source_abi.to_dict()))
+            )
         sg_path = self.root / SOURCE_GRAPH_REL
         if sg_path.is_file():
             digests.append("sha256:" + _file_sha256(sg_path))
@@ -293,6 +309,33 @@ class BuildSourcePack:
                 for c in self.manifest.coverage
             },
         )
+
+
+# SourceAbiSurface.coverage keys populated by source_replay.py's replay
+# producer (wall-clock durations, its own parallelism setting) and
+# inline.py's per-TU cache bookkeeping -- runner/cache-warmth state, not a
+# property of the extracted source facts themselves.
+_VOLATILE_SOURCE_ABI_COVERAGE_KEYS = (
+    "cache_lookup_s",
+    "extract_s",
+    "link_s",
+    "elapsed_s",
+    "extractor_jobs",
+    "cache_misses",
+    "cache_hits",
+)
+
+
+def _normalize_source_abi_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Strip volatile coverage timing/cache fields before hashing a source_abi payload."""
+    coverage = payload.get("coverage")
+    if not isinstance(coverage, dict):
+        return payload
+    normalized = dict(payload)
+    normalized["coverage"] = {
+        k: v for k, v in coverage.items() if k not in _VOLATILE_SOURCE_ABI_COVERAGE_KEYS
+    }
+    return normalized
 
 
 def _read_json(path: Path) -> dict[str, Any]:
