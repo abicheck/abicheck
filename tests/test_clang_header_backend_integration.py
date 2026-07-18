@@ -36,6 +36,7 @@ from pathlib import Path
 
 import pytest
 
+from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.dumper import dump
 from abicheck.model import Visibility
 
@@ -201,3 +202,61 @@ def test_clang_and_castxml_snapshots_agree_on_public_surface(
         "Widget",
     }
     assert {e.name for e in clang_snap.enums} == {e.name for e in castxml_snap.enums}
+
+
+def test_clang_backend_still_false_positives_case61_alignment_risk(
+    tmp_path: Path,
+) -> None:
+    """Known gap (Codex review): the case61_var_added false-positive fix in
+    dumper_castxml.py (_type_alignment_bits, a Variable's natural type
+    alignment as declared-alignment corroboration for
+    EXPORTED_OBJECT_ALIGNMENT_REDUCED) has no clang-frontend equivalent.
+
+    clang's ``-ast-dump=json`` does not compute type layout at all (see this
+    module's and dumper_clang.py's docstrings) -- there is no compiler-derived
+    alignment to fall back to the way castxml's XML always carries one, so
+    _clang_var_alignment_bits can only ever report an *explicit*
+    ``AlignedAttr`` override, never a natural one. This is a pre-existing
+    architectural boundary of the clang JSON-AST backend, not a regression
+    from the castxml fix. This test locks in the current (undesired but
+    honest) behavior so a future attempt to close it changes a real
+    assertion instead of silently going unnoticed.
+    """
+    if not (_have("clang") and _have("gcc")):
+        pytest.skip("clang and gcc are required for the clang-frontend case61 regression")
+
+    old_header = tmp_path / "old.h"
+    old_header.write_text("extern int lib_version;\nint get_version(void);\n")
+    old_src = tmp_path / "old.c"
+    old_src.write_text("int lib_version = 1;\nint get_version(void) { return lib_version; }\n")
+    v1_so = tmp_path / "libv1.so"
+    subprocess.run(
+        ["gcc", "-O2", "-shared", "-fPIC", "-o", str(v1_so), str(old_src)],
+        check=True, capture_output=True,
+    )
+
+    new_header = tmp_path / "new.h"
+    new_header.write_text(
+        "extern int lib_version;\nextern int lib_build_number;\nint get_version(void);\n"
+    )
+    new_src = tmp_path / "new.c"
+    new_src.write_text(
+        "int lib_version = 1;\nint lib_build_number = 1042;\n"
+        "int get_version(void) { return lib_version; }\n"
+    )
+    v2_so = tmp_path / "libv2.so"
+    subprocess.run(
+        ["gcc", "-O2", "-shared", "-fPIC", "-o", str(v2_so), str(new_src)],
+        check=True, capture_output=True,
+    )
+
+    old_snap = dump(v1_so, [old_header], header_backend="clang")
+    new_snap = dump(v2_so, [new_header], header_backend="clang")
+    result = compare(old_snap, new_snap)
+
+    # Documents the gap: a purely additive change still trips the address-
+    # placement heuristic under clang, because no declared-alignment
+    # corroboration is available to suppress it -- castxml (dumper_castxml.py,
+    # TestCastxmlExtraction.test_variable_alignment) does not have this gap.
+    assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
+    assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in {c.kind for c in result.changes}

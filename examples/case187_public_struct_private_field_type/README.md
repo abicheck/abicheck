@@ -1,51 +1,88 @@
-# case187_public_struct_private_field_type — Public struct newly gains a private field type
+# case187_public_struct_private_field_type — Public struct field retyped to an internal type
 
-**Verdict:** 🟡 COMPATIBLE_WITH_RISK · **Finding:** `public_api_internal_dependency_added` · **Evidence tier:** L5
+**Verdict:** 🔴 BREAKING · **Findings:** `struct_field_type_changed` (artifact-proven) + `public_api_internal_dependency_added` (L5, correlated) · **Evidence tier:** L1 for the verdict; L5 (`--header-graph`) for the risk finding
 
-> These cases ship a hand-built pair of evidence-model fixtures (`old.json` +
-> `new.json`) instead of compiled `v1`/`v2` binaries, so the corpus is validated
-> compiler-free by `tests/test_l3l4l5_examples.py`. See
-> [`scripts/gen_l3l4l5_examples.py`](../../scripts/gen_l3l4l5_examples.py).
+This is a real, compiled `v1`/`v2` example, verified end-to-end against gcc
+and clang.
 
 ## What it demonstrates
 
-In the derived L5 source graph the public type `demo::Public` newly carries a
-`TYPE_HAS_FIELD_TYPE` edge to the internal (non-public-header) type
-`detail::PrivateType` that it did not reach in v1 — the ADR-041 headline
-scenario, `struct Public { detail::PrivateType* p; };`. Nothing was *called*;
-a public struct simply grew a field whose type is private. The public surface
-has taken on an undeclared dependency, so a later change to the internal
-type's layout or semantics becomes a hidden risk to the API.
+`demo::Public::reserved` is retyped from an opaque `void*` to
+`detail::PrivateType*` — a type declared only in an internal, non-public
+header (`detail_private.h`, never passed as `--public-header`/`-H`).
 
-This is the sibling of [case160](../case160_public_api_internal_dep_added/README.md),
-which demonstrates the same `public_api_internal_dependency_added` finding via
-a `DECL_CALLS_DECL` edge (a public function calling an internal one). Both
-finding kinds are produced by the same detector
-(`source_graph_findings._internal_dependency_findings`) over the shared
-`DEPENDENCY_EDGE_KINDS` family — the point of this case is that the "reaches"
-relationship is not calls-only: `TYPE_INHERITS` (a private base class),
-`TYPE_HAS_FIELD_TYPE` (this case, a private field type), `DECL_HAS_TYPE` (a
-private parameter/return type), and `DECL_REFERENCES_DECL` (a body reading an
-internal constant) all count, because `type_graph.py`'s clang-AST pass
-(ADR-041 P0 slice 1) populates the three non-call edge kinds the schema had
-reserved since ADR-031 but nothing produced until this ADR.
+This is a genuine, artifact-level ABI break on its own: old code that reads
+or writes `reserved` as a `void*` now misinterprets the pointee. abicheck
+correctly reports it as BREAKING via `struct_field_type_changed` (DWARF) and
+`type_field_type_changed` (headers) — no build integration needed, the
+default `debug-headers` lane catches this.
 
-## Why no single artifact layer sees it
+Layered on top, `dump --header-graph` additionally proves, via the L5 source
+graph, that `demo::Public` newly carries a `TYPE_HAS_FIELD_TYPE` edge to
+`demo::detail::PrivateType` — a dependency it did not have in v1 — and
+reports `public_api_internal_dependency_added`. This is *correlated context*
+on an already-detected break, not a standalone signal: it names exactly
+which internal type the public struct now depends on, which the generic
+field-type finding alone does not say.
 
-| Source | What it sees alone |
-|--------|--------------------|
-| Binary (L0/L1) | no exported symbol changed — a struct's field-type identity isn't part of the mangled/exported surface |
-| Header AST (L2) | `demo::Public`'s own declaration is unchanged from the outside; the private field's *type* being newly internal isn't visible from `Public`'s public-header shape alone |
-| **Source graph (L5)** | the derived type-dependency delta (`TYPE_HAS_FIELD_TYPE`) → the finding |
+### Why this isn't the original "invisible below L5" scenario
 
-The field's declared type is internal — it has no public declaration of its
-own — so a header-only or binary-only diff shows `demo::Public` unchanged.
-Only the L5 type graph reveals the new structural dependency.
+An earlier version of this catalog modeled this case as a hand-built L5
+graph fixture, with the premise that `public_api_internal_dependency_added`
+would be the *only* finding — verdict `COMPATIBLE_WITH_RISK`, invisible to
+every lower evidence tier. That premise was never verified against a real
+compiled example, and it does not hold: any real field-type change a person
+can see in the header is, by construction, something abicheck's existing
+type-layout detectors already catch. Only a *body-only* reference (no
+signature or field change at all — see
+[case190](../case190_public_inline_function_references_internal_constant/README.md))
+can stay genuinely invisible outside L5.
 
-Per ADR-028 D3 a build/source-evidence finding never decides a shipped-ABI
-break on its own — an artifact diff (e.g. a layout change proven by DWARF)
-proves any concrete break; this finding flags the elevated risk and localizes
-the cause for review.
+## How to reproduce
+
+```bash
+g++ -std=c++17 -shared -fPIC -g v1.cpp -o libv1.so
+g++ -std=c++17 -shared -fPIC -g v2.cpp -o libv2.so
+
+# Default debug-headers lane: BREAKING, via struct_field_type_changed alone.
+python3 -m abicheck.cli dump libv1.so --header v1.h -o v1.json
+python3 -m abicheck.cli dump libv2.so --header v2.h -o v2.json
+python3 -m abicheck.cli compare v1.json v2.json
+# → BREAKING: struct_field_type_changed, type_field_type_changed
+
+# With --header-graph: the same BREAKING verdict, plus the L5 risk finding.
+python3 -m abicheck.cli dump libv1.so --header v1.h --public-header v1.h --header-graph -o v1.json
+python3 -m abicheck.cli dump libv2.so --header v2.h --public-header v2.h --header-graph -o v2.json
+python3 -m abicheck.cli compare v1.json v2.json
+# → BREAKING: struct_field_type_changed, public_api_internal_dependency_added
+#   Proof path: use_public --[DECL_HAS_TYPE]--> demo::Public
+#               --[TYPE_HAS_FIELD_TYPE]--> demo::detail::PrivateType
+```
+
+## Real Failure Demo
+
+**Severity: INFORMATIONAL — no crash in this trivial fixture, but a real
+misinterpretation hazard in general**
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case187_public_struct_private_field_type_app case187_public_struct_private_field_type_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case187_public_struct_private_field_type/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case187_public_struct_private_field_type/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# exit 0 — this trivial app never dereferences `reserved`, so the pointer's
+# mere presence causes no visible symptom here. A real consumer that reads
+# `reserved` as its old (void*-derived) type would misinterpret the pointee.
+```
+
+## Sibling cases
+
+- [case160_public_api_internal_dep_added](../case160_public_api_internal_dep_added/README.md) — same finding via a `DECL_CALLS_DECL` edge (a public function calling an internal one), hand-built fixture.
+- [case188_public_class_private_base_class](../case188_public_class_private_base_class/README.md) — same finding family via `TYPE_INHERITS` (a private base class), real compiled example.
+- [case189_public_function_private_parameter_type](../case189_public_function_private_parameter_type/README.md) — same finding family via `DECL_HAS_TYPE` (a private parameter type), real compiled example.
+- [case191_header_only_graph_field_type](../case191_header_only_graph_field_type/README.md) — the same `TYPE_HAS_FIELD_TYPE` mechanism, proven via a genuine confirmed-pass zero (no sibling-edge trick) instead of case187's own `Meta` sibling field.
 
 ## How to fix
 

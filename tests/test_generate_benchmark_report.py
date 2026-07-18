@@ -258,6 +258,44 @@ def test_cache_state_for_absent_tool_is_n_a() -> None:
     assert state["a_tool_that_does_not_exist"] == "n/a"
 
 
+def test_cache_state_for_stale_frozen_digest_is_n_a(monkeypatch) -> None:
+    """A frozen file whose ground_truth_sha256 no longer matches the current
+    catalog must report "n/a", not "frozen@..." -- _merge_frozen_into_results
+    refuses to merge that stale data into the run's results at all, so
+    claiming frozen provenance here would describe data that isn't there."""
+    bc_args = gbr.bc.parse_args([])
+    bc_args.tools = ["abicheck"]
+    monkeypatch.setattr(
+        gbr.bc, "_load_frozen",
+        lambda _path: {
+            "ground_truth_sha256": "stale-digest",
+            "frozen_at": "2020-01-01T00:00:00Z",
+            "git_commit": "deadbeef",
+            "tools": ["abicc_xml"],
+        },
+    )
+    monkeypatch.setattr(gbr.bc, "_ground_truth_digest", lambda: "current-digest")
+    state = gbr.cache_state_for(bc_args, ["abicc_xml"])
+    assert state["abicc_xml"] == "n/a"
+
+
+def test_cache_state_for_matching_frozen_digest_is_frozen(monkeypatch) -> None:
+    bc_args = gbr.bc.parse_args([])
+    bc_args.tools = ["abicheck"]
+    monkeypatch.setattr(
+        gbr.bc, "_load_frozen",
+        lambda _path: {
+            "ground_truth_sha256": "current-digest",
+            "frozen_at": "2020-01-01T00:00:00Z",
+            "git_commit": "deadbeef",
+            "tools": ["abicc_xml"],
+        },
+    )
+    monkeypatch.setattr(gbr.bc, "_ground_truth_digest", lambda: "current-digest")
+    state = gbr.cache_state_for(bc_args, ["abicc_xml"])
+    assert state["abicc_xml"].startswith("frozen@2020-01-01T00:00:00Z")
+
+
 def test_display_path_is_relative_inside_repo() -> None:
     expected = str(Path("docs", "reference", "tool-comparison.md"))
     assert gbr._display_path(gbr.DOC_PATH) == expected

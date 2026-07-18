@@ -54,11 +54,11 @@ python3 -m abicheck.cli compare /tmp/v1.json /tmp/v2.json
 
 ```bash
 cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case58_enum_underlying_size_changed_app case58_enum_underlying_size_changed_v2
+cmake --build /tmp/abicheck-examples-build --target case57_enum_underlying_size_changed_app case57_enum_underlying_size_changed_v2
 
 tmp=$(mktemp -d)
-cp /tmp/abicheck-examples-build/case58_enum_underlying_size_changed/app_v1 "$tmp/"
-cp /tmp/abicheck-examples-build/case58_enum_underlying_size_changed/libv2.so "$tmp/libv1.so"
+cp /tmp/abicheck-examples-build/case57_enum_underlying_size_changed/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case57_enum_underlying_size_changed/libv2.so "$tmp/libv1.so"
 (cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
 # color = 2; alpha = 0 / WRONG RESULT: enum underlying size/layout changed
 ```

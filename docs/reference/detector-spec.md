@@ -125,7 +125,7 @@ One row per `ChangeKind` (388 total). Columns fuse the verdict partition (`check
 | `func_params_changed` | breaking | `BREAKING` | `error` | L1 | `func_params_changed` | [case02](../examples/case02_param_type_change.md), [case102](../examples/case102_frozen_runtime_signature_changed.md), [case46](../examples/case46_pointer_chain_type_change.md) |
 | `func_pure_virtual_added` | breaking | `BREAKING` | `error` | L1 | `func_pure_virtual_added` | — |
 | `func_ref_qual_changed` | breaking | `BREAKING` | `error` | L2 | `func_ref_qual_changed` | [case166](../examples/case166_ref_qualifier_added.md) |
-| `func_removed` | breaking | `BREAKING` | `error` | L0 | `func_removed` | [case01](../examples/case01_symbol_removal.md), [case100](../examples/case100_experimental_removed_without_replacement.md), [case104](../examples/case104_glibcxx_dual_abi_flip.md), [case107](../examples/case107_task_scheduler_init_removed.md), +10 |
+| `func_removed` | breaking | `BREAKING` | `error` | L0 | `func_removed` | [case01](../examples/case01_symbol_removal.md), [case100](../examples/case100_experimental_removed_without_replacement.md), [case104](../examples/case104_glibcxx_dual_abi_flip.md), [case107](../examples/case107_task_scheduler_init_removed.md), +11 |
 | `func_removed_elf_only` | breaking | `BREAKING` | `error` | L0 | `func_removed_elf_only` | [case182](../examples/case182_accidental_export_removed_still_breaking.md), [case59](../examples/case59_func_became_inline.md), [case97](../examples/case97_api_depends_on_consumer_env.md) |
 | `func_return_changed` | breaking | `BREAKING` | `error` | L1 | `func_return_changed` | [case102](../examples/case102_frozen_runtime_signature_changed.md), [case10](../examples/case10_return_type.md), [case46](../examples/case46_pointer_chain_type_change.md), [case70](../examples/case70_flexible_array_member_changed.md), +1 |
 | `func_static_changed` | breaking | `BREAKING` | `error` | L1 | `func_static_changed` | [case21](../examples/case21_method_became_static.md) |
@@ -280,11 +280,11 @@ One row per `ChangeKind` (388 total). Columns fuse the verdict partition (`check
 | `struct_alignment_changed` | breaking | `BREAKING` | `error` | unspecified | `struct_alignment_changed` | — |
 | `struct_field_offset_changed` | breaking | `BREAKING` | `error` | unspecified | `struct_field_offset_changed` | — |
 | `struct_field_removed` | breaking | `BREAKING` | `error` | unspecified | `struct_field_removed` | — |
-| `struct_field_type_changed` | breaking | `BREAKING` | `error` | unspecified | `struct_field_type_changed` | — |
+| `struct_field_type_changed` | breaking | `BREAKING` | `error` | L1 | `struct_field_type_changed` | [case187](../examples/case187_public_struct_private_field_type.md) |
 | `struct_packing_changed` | breaking | `BREAKING` | `error` | L1 | `struct_packing_changed` | [case56](../examples/case56_struct_packing_changed.md) |
 | `struct_packing_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `struct_packing_mode_changed` | [case153](../examples/case153_struct_packing_flip.md) |
 | `struct_return_convention_changed` | breaking | `BREAKING` | `error` | L1 | `struct_return_convention_changed` | [case129](../examples/case129_struct_return_convention.md) |
-| `struct_size_changed` | breaking | `BREAKING` | `error` | L1 | `struct_size_changed` | [case121](../examples/case121_kernel_btf_struct_field_added.md), [case126](../examples/case126_sycl_device_impl_ptr.md), [case80](../examples/case80_pimpl_shared_to_unique.md) |
+| `struct_size_changed` | breaking | `BREAKING` | `error` | L1 | `struct_size_changed` | [case121](../examples/case121_kernel_btf_struct_field_added.md), [case126](../examples/case126_sycl_device_impl_ptr.md), [case191](../examples/case191_header_only_graph_field_type.md), [case80](../examples/case80_pimpl_shared_to_unique.md) |
 | `suppression_would_hide_public_break` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L1 | `suppression_would_hide_public_break` | — |
 | `sycl_backend_driver_req_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `sycl_backend_driver_req_changed` | — |
 | `sycl_implementation_changed` | breaking | `BREAKING` | `error` | unspecified | `sycl_implementation_changed` | — |
@@ -333,7 +333,7 @@ One row per `ChangeKind` (388 total). Columns fuse the verdict partition (`check
 | `trivially_copyable_lost` | breaking | `BREAKING` | `error` | unspecified | `trivially_copyable_lost` | — |
 | `type_added` | addition | `COMPATIBLE` | `warning` | unspecified | `type_added` | — |
 | `type_alignment_changed` | breaking | `BREAKING` | `error` | L1 | `type_alignment_changed` | [case42](../examples/case42_type_alignment_changed.md) |
-| `type_base_changed` | breaking | `BREAKING` | `error` | L1 | `type_base_changed` | [case37](../examples/case37_base_class.md), [case72](../examples/case72_covariant_return_changed.md) |
+| `type_base_changed` | breaking | `BREAKING` | `error` | L1 | `type_base_changed` | [case188](../examples/case188_public_class_private_base_class.md), [case37](../examples/case37_base_class.md), [case72](../examples/case72_covariant_return_changed.md) |
 | `type_became_abstract` | api_break | `API_BREAK` | `warning` | L2 | `type_became_abstract` | — |
 | `type_became_final` | api_break | `API_BREAK` | `warning` | L2 | `type_became_final` | [case125](../examples/case125_class_became_final.md) |
 | `type_became_opaque` | breaking | `BREAKING` | `error` | L1 | `type_became_opaque` | [case28](../examples/case28_typedef_opaque.md) |

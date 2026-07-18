@@ -8,10 +8,13 @@ benchmark results across real-world test cases, and why the numbers come out the
 > `examples/` catalog (`case01`-`case73` + `case26b`); the full
 > `examples/ground_truth.json` catalog now has 193 entries. Tool-to-tool
 > competitor scans use the 134 binary shared-library `.so` lanes; fixture/source
-> L2/L5/source cases (`case152`-`case158`, `case160`-`case164`, `case187`-`case193`)
+> L2/L5/source cases (`case152`-`case158`, `case160`-`case164`, `case190`, `case192`-`case193`)
 > and the other audit, cross-source, bundle, BTF, and snapshot cases are tracked
 > in dedicated non-`.so` lanes. The subset is pinned so accuracy numbers stay
-> reproducible across releases.
+> reproducible across releases. (`case187`/`188`/`189`/`191` were fixture-only
+> at the "134" count above but are now real compiled `v1`/`v2` `.so` pairs —
+> not yet folded into that denominator; see the full-catalog benchmark's
+> "Known-stale as of this pass" note below.)
 >
 > **Which denominator is which.** **193** is the whole catalog. The binary
 > competitor lane is **134** shared-library pairs. The scan-depth matrix is
@@ -60,8 +63,8 @@ README), so it is credited in the full example matrix via known-gap-oracle
 provenance — its own `source_smoke` proves the canonical `API_BREAK` — rather
 than direct coverage. See
 [the validation runbook](../development/examples-validation-runbook.md) for
-the direct-vs-known-gap-oracle accounting (180 direct + 1 known-gap-oracle
-= 181 `COVERED`).
+the direct-vs-known-gap-oracle accounting (190 direct + 1 known-gap-oracle
+= 191 `COVERED`).
 
 Current stripped-header signal-loss cases: `case103_toolchain_flag_drift`,
 `case117_no_unique_address`, `case129_struct_return_convention`,
@@ -336,16 +339,30 @@ pipeline four times:
 ### Which source discovers what
 
 Each case in `examples/ground_truth.json`
-carries a `min_evidence` field — the weakest source at which abicheck reaches the
-correct verdict — derived by
+carries a `min_evidence` field — the weakest source at which abicheck reaches
+*every one of the case's cataloged `expected_kinds`*, not just its verdict —
+derived by
 `scripts/evidence_tiers.py`
-and validated by `tests/test_evidence_tiers.py`. Aggregated over the 153 compare-style cases, that yields the cumulative minimum-evidence coverage. The binary competitor `.so` lane is narrower (134 built shared-library pairs); fixture/source-only L2/L5/source cases are listed here by evidence tier instead of being treated as missing competitor binaries:
+(`compute_min_evidence()` takes the strongest tier across all `expected_kinds`,
+by design: "the whole break is only fully visible once every contributing
+kind is") and validated by `tests/test_evidence_tiers.py`. Aggregated over the 153 compare-style cases, that yields the cumulative minimum-evidence coverage. The binary competitor `.so` lane is narrower (134 built shared-library pairs); fixture/source-only L2/L5/source cases are listed here by evidence tier instead of being treated as missing competitor binaries:
 
 > **Freshness note.** `examples/ground_truth.json` now has 193 total entries
 > (verified via `len(json.load(open("examples/ground_truth.json"))["verdicts"])`),
 > not the 153/134 cited above — this table's per-tier breakdown predates
 > case growth since it was last regenerated and has not been re-derived from
-> `scripts/evidence_tiers.py` against the current catalog. Treat the *shape*
+> `scripts/evidence_tiers.py` against the current catalog. When it is:
+> `case187`/`188`/`189`/`191` will land in the `L5` row by this table's
+> kind-set-floor definition even though their `BREAKING` verdict alone is
+> empirically reachable at `L0`/`L1` (`public_api_internal_dependency_added`
+> is the only L5 kind in their `expected_kinds`, correlated context on an
+> already-detected structural break, not what makes the verdict fire) —
+> `--evidence-tiers`'s own "min_evidence vs empirical detect-tier
+> differences" report already flags exactly this divergence per case
+> (verified: `declared=L5 empirical=L0`/`L1` for all four), so a future
+> regeneration should read that drift report rather than assume this
+> staircase's `L5` percentage means "requires a source graph to detect the
+> break." Treat the *shape*
 > (evidence compounds, L0→L1 is the biggest single jump) as durable and the
 > exact counts/percentages as stale; regenerating this table against the
 > current catalog is a follow-up, not done as part of this pass.
@@ -382,7 +399,7 @@ and validated by `tests/test_evidence_tiers.py`. Aggregated over the 153 compare
 > not yet re-run empirically, see the caveat above); it does not penalize a
 > tier for *over-calling* elsewhere in the catalog. The
 > [full-catalog benchmark](#full-catalog-benchmark-2026-07-17-all-191-cases)
-> below is the stricter, empirically-measured number — it scores all 186 cases
+> below is the stricter, empirically-measured number — it scores all 191 cases
 > including false positives, which is why `L3-L5` reads 90.9% there rather
 > than the 100% this table's `L5` row shows.
 
@@ -414,6 +431,20 @@ denominator than "accuracy over cases the tool managed to complete," so read
 it as the answer to *"if I pointed this tool at the whole catalog blind, how
 often would it tell me the truth?"*
 
+> **Known-stale as of this pass.** The reproducibility envelope below
+> describes `case187`-`case191` as L5-only fixtures with no compilable
+> `v1`/`v2` `.so` pair — that stopped being true for `case187`/`188`/`189`/`191`
+> in this pass, which converted those four into real compiled CMake pairs
+> (`case190` is still fixture-only). Their frozen ABICC `SKIP` rows in
+> `scripts/frozen_competitor_results.json` no longer reflect what those tools
+> would actually report against a real `.so`. `_merge_frozen_into_results()`
+> now refuses to merge that cache at all once `ground_truth.json`'s digest no
+> longer matches the `164a517d66f3…` stamp below (its own staleness guard, see
+> `scripts/benchmark_comparison.py`), so `generate_benchmark_report.py --check`
+> will *not* currently reproduce this table byte-for-byte — it needs a fresh
+> `--freeze` run (ABICC/abidiff installed) before the numbers below can be
+> regenerated and this note removed.
+>
 > **Reproducibility envelope.** abicheck `0.5.0`, commit `1d2487c82ec5`,
 > `ground_truth.json` sha256 `164a517d66f3…`. `abicheck`/`abicheck_full`/
 > `abidiff`/`abidiff_headers` generated live via
@@ -714,7 +745,7 @@ ABI replay), and `case130`-`case133` need L3 — so an L2-only (headers, no
 ## Pinned vendor benchmark summary (2026-05-19, 74-case subset)
 
 > **Historical.** Superseded by the [full-catalog benchmark](#full-catalog-benchmark-2026-07-17-all-191-cases)
-> above, which covers all 186 cases with a stricter denominator (SKIP/ERROR/TIMEOUT
+> above, which covers all 191 cases with a stricter denominator (SKIP/ERROR/TIMEOUT
 > count as misses) plus an FP/FN breakdown. Kept here for the original 74-case
 > release-pinned methodology and historical numbers. The harness has since
 > dropped the standalone `abicheck_compat`/`abicheck_strict` tool lanes (the

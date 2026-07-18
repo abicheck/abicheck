@@ -28,10 +28,16 @@ recomputes each row's Result cell and either checks the README against that
 (default, for local refreshes).
 
 This is a narrow structural sync check, not a generator for the whole table:
-the Command/Executed-where/Scope columns and the free-form narrative bullets
-below the table stay hand-maintained, because they require judgment (why a
+the Command/Executed-where columns and the free-form narrative bullets below
+the table stay hand-maintained, because they require judgment (why a
 release-headers case regressed, whether a gap is release-blocking) that a
-script cannot manufacture from a status count alone.
+script cannot manufacture from a status count alone. The Scope column is the
+one exception: for the four lanes that always run the whole catalog
+(``Default/debug verdicts``, ``Runtime smoke``, ``Release headers``,
+``Stripped headers``), Scope is a plain "<N> catalog cases" count that must
+equal ``len(ground_truth.json["verdicts"])`` — checked/fixed unconditionally
+(no artifact needed), since a catalog-size bump (e.g. 186 -> 191) is otherwise
+silent here exactly like a stale Result cell was before this script existed.
 
 Usage:
 
@@ -58,6 +64,22 @@ from pathlib import Path
 
 REPO_DIR = Path(__file__).resolve().parents[1]
 README = REPO_DIR / "examples" / "README.md"
+GROUND_TRUTH = REPO_DIR / "examples" / "ground_truth.json"
+
+# Rows whose Scope column (4th cell) is a plain "<N> catalog cases" count that
+# must track the live case count in ground_truth.json — these lanes always
+# run every case (skips/xfails included), unlike the fixed representative
+# subsets ("Build/autodiscovery", "Build/source smoke"). Checked unconditionally
+# (no artifact needed): this caught the table claiming "186 catalog cases" in
+# every one of these rows for several releases after the catalog grew to 191,
+# because nothing previously compared the Scope cell to ground_truth.json.
+SCOPE_CATALOG_ROWS = (
+    "Default/debug verdicts",
+    "Runtime smoke",
+    "Release headers",
+    "Stripped headers",
+)
+_SCOPE_COUNT_RE = re.compile(r"\d+(?= catalog cases)")
 
 # Row label (must match the README table's first column verbatim) -> the
 # fixed status-count order this script renders it in. Renders only counts
@@ -119,6 +141,42 @@ def _replace_result_cell(text: str, label: str, new_result: str) -> str:
     return text[: match.start()] + new_row + text[match.end() :]
 
 
+def _row_cells(text: str, label: str) -> list[str]:
+    pattern = re.compile(rf"^\| {re.escape(label)} \|.*\|$", re.MULTILINE)
+    match = pattern.search(text)
+    if not match:
+        raise ValueError(f"{README}: no table row found for label {label!r}")
+    cells = match.group(0).split("|")
+    if len(cells) < 7:
+        raise ValueError(f"{README}: row for {label!r} has fewer than 6 columns")
+    return cells
+
+
+def _scope_catalog_count_mismatch(text: str, label: str, expected_n: int) -> str | None:
+    """Return a description if *label*'s Scope cell doesn't say
+    "<expected_n> catalog cases", else None.
+
+    Only fires when the cell already matches the "<N> catalog cases" shape —
+    a row using different wording (e.g. a fixed representative-subset count)
+    is left alone rather than forced into this shape.
+    """
+    scope_cell = _row_cells(text, label)[4]
+    m = _SCOPE_COUNT_RE.search(scope_cell)
+    if m is None or int(m.group(0)) == expected_n:
+        return None
+    return f"{label} Scope: was '{m.group(0)} catalog cases', ground_truth.json has {expected_n}"
+
+
+def _fix_scope_catalog_count(text: str, label: str, expected_n: int) -> str:
+    pattern = re.compile(rf"^\| {re.escape(label)} \|.*\|$", re.MULTILINE)
+    match = pattern.search(text)
+    assert match is not None
+    cells = match.group(0).split("|")
+    cells[4] = _SCOPE_COUNT_RE.sub(str(expected_n), cells[4])
+    new_row = "|".join(cells)
+    return text[: match.start()] + new_row + text[match.end() :]
+
+
 def _combine_gcc_clang(
     gcc: dict[str, object] | None, clang: dict[str, object] | None
 ) -> dict[str, object] | None:
@@ -171,6 +229,20 @@ def main(argv: list[str] | None = None) -> int:
 
     text = README.read_text(encoding="utf-8")
 
+    ground_truth = _load_json(GROUND_TRUTH)
+    verdicts = ground_truth.get("verdicts")
+    if not isinstance(verdicts, dict):
+        print(f"error: {GROUND_TRUTH} has no 'verdicts' object", file=sys.stderr)
+        return 1
+    catalog_count = len(verdicts)
+
+    changed: list[str] = []
+    for label in SCOPE_CATALOG_ROWS:
+        mismatch = _scope_catalog_count_mismatch(text, label, catalog_count)
+        if mismatch is not None:
+            changed.append(mismatch)
+            text = _fix_scope_catalog_count(text, label, catalog_count)
+
     combined = _combine_gcc_clang(gcc, clang)
     row_updates = {
         "Default/debug verdicts": _row_result_combined(combined),
@@ -180,7 +252,6 @@ def main(argv: list[str] | None = None) -> int:
         "Build/source smoke": _row_result("Build/source smoke", build_source),
     }
 
-    changed: list[str] = []
     for label, new_result in row_updates.items():
         if new_result is None:
             continue

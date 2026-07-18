@@ -32,12 +32,12 @@ policy checks.
 
 ```bash
 cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case53_rpath_leak_v1 case53_rpath_leak_v2
+cmake --build /tmp/abicheck-examples-build --target case52_rpath_leak_v1 case52_rpath_leak_v2
 
-readelf -d /tmp/abicheck-examples-build/case53_rpath_leak/libv1.so | grep RUNPATH
+readelf -d /tmp/abicheck-examples-build/case52_rpath_leak/libv1.so | grep RUNPATH
 # Library runpath: [/home/build/myproject/lib]
 
-readelf -d /tmp/abicheck-examples-build/case53_rpath_leak/libv2.so | grep RUNPATH
+readelf -d /tmp/abicheck-examples-build/case52_rpath_leak/libv2.so | grep RUNPATH
 # Library runpath: [$ORIGIN]
 ```
 

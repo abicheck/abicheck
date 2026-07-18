@@ -13,8 +13,15 @@ A consumer built against v1 passes/reads a 64-bit value where the v2 library
 expects 128 bits, so arguments, the struct field, and the returned value are
 all miscompiled.
 
-(128 bits is the maximum `_BitInt` width clang supports, so both versions stay
-buildable on every supported toolchain.)
+(128 bits is the maximum `_BitInt` width clang supports, keeping *this* limit
+portable — but `_BitInt` itself is C23, and as of this writing the CI/dev
+toolchain's GCC does not implement it at all (`-std=c2x`/`-std=gnu2x` reject
+`_BitInt` outright, not just width 128), so this fixture is GCC-unbuildable
+regardless of width; only a `_BitInt`-capable Clang builds it —
+`requires_feature: _BitInt` in `ground_truth.json` gates the case
+accordingly. CastXML's own bundled Clang frontend is also too old to parse
+`_BitInt`, independent of which compiler built the `.so` — `dump` needs
+`--ast-frontend clang` (a system Clang) for this case's headers.)
 
 ## How abicheck catches it
 

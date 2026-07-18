@@ -20,6 +20,7 @@ calling-convention attribute flips, dynamic exception specifications,
 variable alignment, per-function vtable-index moves, the BTF/CTF
 function/typedef bridge, and the castxml/clang extraction helpers.
 """
+
 from __future__ import annotations
 
 # Parse with defusedxml like production does (dumper_castxml feeds the parser
@@ -70,6 +71,7 @@ def _var(**kwargs) -> Variable:
 
 # ── Variadic transitions ─────────────────────────────────────────────────────
 
+
 class TestVariadic:
     def test_added_is_breaking(self):
         r = compare(
@@ -95,6 +97,7 @@ class TestVariadic:
 
 
 # ── Contract attributes ──────────────────────────────────────────────────────
+
 
 class TestContractAttributes:
     def test_attribute_added(self):
@@ -151,6 +154,7 @@ class TestContractAttributes:
 
 # ── Dynamic exception specifications ─────────────────────────────────────────
 
+
 class TestExceptionSpec:
     def test_spec_changed(self):
         r = compare(
@@ -175,6 +179,7 @@ class TestExceptionSpec:
 
 
 # ── Variable alignment ───────────────────────────────────────────────────────
+
 
 class TestVariableAlignment:
     def test_changed_is_breaking(self):
@@ -213,15 +218,20 @@ class TestVariableAlignment:
 
 # ── vtable index moves ───────────────────────────────────────────────────────
 
+
 class TestVtableIndexMove:
     def test_slot_move_reports_vtable_changed(self):
         old = _fn(
-            name="Widget::draw", mangled="_ZN6Widget4drawEv",
-            is_virtual=True, vtable_index=2,
+            name="Widget::draw",
+            mangled="_ZN6Widget4drawEv",
+            is_virtual=True,
+            vtable_index=2,
         )
         new = _fn(
-            name="Widget::draw", mangled="_ZN6Widget4drawEv",
-            is_virtual=True, vtable_index=3,
+            name="Widget::draw",
+            mangled="_ZN6Widget4drawEv",
+            is_virtual=True,
+            vtable_index=3,
         )
         r = compare(_snap([old]), _snap([new]))
         assert ChangeKind.TYPE_VTABLE_CHANGED in _kinds(r)
@@ -241,6 +251,7 @@ class TestVtableIndexMove:
 
 # ── BTF/CTF function bridge ──────────────────────────────────────────────────
 
+
 class TestTypeinfoFunctionBridge:
     def test_protos_become_functions(self):
         protos = {
@@ -254,12 +265,24 @@ class TestTypeinfoFunctionBridge:
         assert funcs[0].is_extern_c
 
     def test_param_change_detected_through_bridge(self):
-        old = _snap(_typeinfo_functions(
-            {"frob": FuncProto(name="frob", return_type="int", params=[("a", "int")])}
-        ))
-        new = _snap(_typeinfo_functions(
-            {"frob": FuncProto(name="frob", return_type="int", params=[("a", "long")])}
-        ))
+        old = _snap(
+            _typeinfo_functions(
+                {
+                    "frob": FuncProto(
+                        name="frob", return_type="int", params=[("a", "int")]
+                    )
+                }
+            )
+        )
+        new = _snap(
+            _typeinfo_functions(
+                {
+                    "frob": FuncProto(
+                        name="frob", return_type="int", params=[("a", "long")]
+                    )
+                }
+            )
+        )
         r = compare(old, new)
         assert ChangeKind.FUNC_PARAMS_CHANGED in _kinds(r)
 
@@ -268,7 +291,9 @@ class TestTypeinfoFunctionBridge:
         # non-zero linkages distinguishes them, so file-local helpers must
         # not surface as public ABI functions.
         protos = {
-            "helper": FuncProto(name="helper", return_type="void", params=[], linkage=0),
+            "helper": FuncProto(
+                name="helper", return_type="void", params=[], linkage=0
+            ),
             "api_fn": FuncProto(name="api_fn", return_type="int", params=[], linkage=1),
         }
         funcs = _typeinfo_functions(protos)
@@ -304,8 +329,13 @@ _CASTXML_DOC = """
     <Ellipsis/>
   </Function>
   <Variable id="_v1" name="g_buf" type="_t1" mangled="g_buf" align="64"/>
-  <FundamentalType id="_t1" name="int"/>
+  <Variable id="_v2" name="lib_version" type="_t1" mangled="lib_version"/>
+  <Variable id="_v3" name="g_typedef" type="_t3" mangled="g_typedef"/>
+  <Variable id="_v4" name="g_array" type="_t4" mangled="g_array"/>
+  <FundamentalType id="_t1" name="int" align="32"/>
   <FundamentalType id="_t2" name="char"/>
+  <Typedef id="_t3" name="my_int_t" type="_t1"/>
+  <ArrayType id="_t4" min="0" max="3" type="_t1"/>
 </CastXML>
 """
 
@@ -326,8 +356,30 @@ class TestCastxmlExtraction:
 
     def test_variable_alignment(self):
         variables = self._parser().parse_variables()
-        assert len(variables) == 1
-        assert variables[0].alignment_bits == 64
+        by_name = {v.name: v for v in variables}
+        # Explicit alignas/aligned override on the Variable wins outright.
+        assert by_name["g_buf"].alignment_bits == 64
+        # No explicit override: falls back to the type's own natural
+        # (computed) alignment instead of leaving this None — the corroboration
+        # evidence _check_object_alignment_reduced needs to tell a genuine
+        # declared-alignment reduction from address-placement noise (case61).
+        assert by_name["lib_version"].alignment_bits == 32
+        # Same fallback resolves through a Typedef to the underlying type.
+        assert by_name["g_typedef"].alignment_bits == 32
+        # An ArrayType carries no align/size of its own in real castxml output
+        # (confirmed against a live castxml dump) — the fallback must recurse
+        # into the element type, or every exported array global would be as
+        # exposed to the case61-style false positive as a bare scalar was.
+        assert by_name["g_array"].alignment_bits == 32
+
+    def test_type_alignment_bits_guards(self):
+        # Direct edge cases the Variable fixtures above can't reach: a real
+        # castxml Variable always carries a non-empty `type` id, and every id
+        # it references resolves — so the empty-id and unresolvable-id guards
+        # in _type_alignment_bits need their own coverage.
+        parser = self._parser()
+        assert parser._type_alignment_bits("") is None
+        assert parser._type_alignment_bits("_nonexistent") is None
 
     def test_extract_contract_attributes_filters_unknown(self):
         assert _extract_contract_attributes("noexcept final gnu:malloc") == ["malloc"]
@@ -355,6 +407,7 @@ class TestCastxmlExtraction:
 
 
 # ── clang extraction helpers ─────────────────────────────────────────────────
+
 
 class TestClangExtraction:
     def test_contract_attributes(self):
@@ -465,14 +518,22 @@ class TestClangExtraction:
         # clang may emit the evaluated constant as an int, not a string.
         node = {
             "inner": [
-                {"kind": "AlignedAttr", "inner": [{"kind": "ConstantExpr", "value": 32}]}
+                {
+                    "kind": "AlignedAttr",
+                    "inner": [{"kind": "ConstantExpr", "value": 32}],
+                }
             ]
         }
         assert _clang_var_alignment_bits(node) == 256
 
     def test_var_alignment_ignores_other_attributes(self):
-        node = {"inner": [{"kind": "NoReturnAttr"}, "junk",
-                          {"kind": "AlignedAttr", "inner": []}]}
+        node = {
+            "inner": [
+                {"kind": "NoReturnAttr"},
+                "junk",
+                {"kind": "AlignedAttr", "inner": []},
+            ]
+        }
         assert _clang_var_alignment_bits(node) is None
 
     def test_var_alignment_nested_and_junk_entries(self):
@@ -483,8 +544,11 @@ class TestClangExtraction:
                 {
                     "kind": "AlignedAttr",
                     "inner": [
-                        {"kind": "ConstantExpr", "value": "abc",
-                         "inner": [{"kind": "IntegerLiteral", "value": "16"}]},
+                        {
+                            "kind": "ConstantExpr",
+                            "value": "abc",
+                            "inner": [{"kind": "IntegerLiteral", "value": "16"}],
+                        },
                         "junk",
                     ],
                 }

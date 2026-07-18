@@ -33,11 +33,11 @@ From consumers' perspective it's a binary ABI break:
 
 ```bash
 cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
-cmake --build /tmp/abicheck-examples-build --target case75_detail_base_class_changed_app case75_detail_base_class_changed_v2
+cmake --build /tmp/abicheck-examples-build --target case74_detail_base_class_changed_app case74_detail_base_class_changed_v2
 
 tmp=$(mktemp -d)
-cp /tmp/abicheck-examples-build/case75_detail_base_class_changed/app_v1 "$tmp/"
-cp /tmp/abicheck-examples-build/case75_detail_base_class_changed/libv2.so "$tmp/libv1.so"
+cp /tmp/abicheck-examples-build/case74_detail_base_class_changed/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case74_detail_base_class_changed/libv2.so "$tmp/libv1.so"
 (cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
 # *** stack smashing detected ***: terminated
 ```

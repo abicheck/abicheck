@@ -256,6 +256,7 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "suppression_would_hide_public_break": "L1",  # ADR-044: needs struct/field layout (internal_leak.compute_leak_paths) to judge public reachability
     "struct_size_changed": "L1",
     "struct_packing_changed": "L1",
+    "struct_field_type_changed": "L1",
     "type_size_changed": "L1",
     "type_field_offset_changed": "L1",
     "type_field_added": "L1",

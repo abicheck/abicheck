@@ -2019,57 +2019,54 @@
    ]
   },
   "case187_public_struct_private_field_type": {
-   "abi_break": false,
-   "api_break": false,
+   "abi_break": true,
+   "api_break": true,
    "bad_practice": true,
-   "category": "risk",
-   "description": "In the derived L5 source graph the public type demo::Public newly carries a TYPE_HAS_FIELD_TYPE edge to the internal (non-public-header) type detail::PrivateType that it did not reach in v1 \u2014 ADR-041's own headline 'not a call at all' example (a public struct gaining a private field type). The public surface takes on an undeclared structural dependency, so a later change to the internal type becomes a hidden risk to the API. Sibling of case160 (which exercises the same finding via a DECL_CALLS_DECL edge instead); a source-graph risk, never on its own an artifact-proven break.",
-   "expected": "COMPATIBLE_WITH_RISK",
+   "category": "breaking",
+   "description": "demo::Public's `reserved` field is retyped from `void*` to `detail::PrivateType*`, an internal (non-public-header) type. The retyped field is itself a real, artifact-proven break (struct_field_type_changed/type_field_type_changed, BREAKING) -- verified against a real compiled example (gcc + clang, --header-graph). Layered on top, the L5 source graph independently confirms demo::Public newly carries a TYPE_HAS_FIELD_TYPE edge to detail::PrivateType it did not reach in v1 (public_api_internal_dependency_added), naming exactly which internal type the new dependency reaches -- correlated context on an already-detected break, not a standalone risk signal (a real compiled field/base/parameter-type change to an internal type is never invisible at L0-L2; only a body-only reference, case190, can be). Sibling of case160 (same finding via a DECL_CALLS_DECL edge) and case188/189 (TYPE_INHERITS/DECL_HAS_TYPE). The public_api_internal_dependency_added kind requires `dump --header-graph --public-header <header>`; the default debug-headers lane reaches the same BREAKING verdict without it, via the structural finding alone.",
+   "expected": "BREAKING",
    "expected_kinds": [
+    "struct_field_type_changed",
     "public_api_internal_dependency_added"
    ],
-   "fixtures": [
-    "old.json",
-    "new.json"
-   ],
+   "known_kind_gap": "public_api_internal_dependency_added",
+   "known_kind_gap_note": "public_api_internal_dependency_added is only emitted by `dump --header-graph`, an opt-in flag tests/validate_examples.py's default gcc/clang debug-headers lane does not pass (see tests/validate_examples.py's _kinds_strict_signal call site). The BREAKING verdict is still correct via struct_field_type_changed alone; --header-graph is exercised for real, separately, by tests/test_header_graph_examples.py (wired into the full-matrix proof gate via the header_graph OWNER_PROOFS/SPECIAL_PROOFS entry in validation/scripts/run_example_owner_proofs.py and collect_full_example_matrix.py).",
    "min_evidence": "L5",
    "platforms": [
     "linux"
    ]
   },
   "case188_public_class_private_base_class": {
-   "abi_break": false,
-   "api_break": false,
+   "abi_break": true,
+   "api_break": true,
    "bad_practice": true,
-   "category": "risk",
-   "description": "In the derived L5 source graph the public class demo::PublicHandle newly carries a TYPE_INHERITS edge to the internal (non-public-header) type detail::InternalBase that it did not reach in v1 -- a public class privately inheriting from an internal base. Sibling of case187 (TYPE_HAS_FIELD_TYPE) and case189 (DECL_HAS_TYPE); a source-graph risk, never on its own an artifact-proven break.",
-   "expected": "COMPATIBLE_WITH_RISK",
+   "category": "breaking",
+   "description": "demo::PublicHandle gains a second base class, detail::InternalBase, an internal (non-public-header) type, alongside its existing public Base. Adding a base class shifts every member declared after it -- a real, artifact-proven layout break (type_base_changed/struct_size_changed/struct_field_offset_changed, BREAKING) -- verified against a real compiled example (gcc + clang, --header-graph; a rebuilt app crashes with a real field-offset corruption). Layered on top, the L5 source graph independently confirms demo::PublicHandle newly carries a TYPE_INHERITS edge to detail::InternalBase it did not reach in v1 (public_api_internal_dependency_added), naming exactly which internal type the new dependency reaches -- correlated context on an already-detected break, not a standalone risk signal. Sibling of case187 (TYPE_HAS_FIELD_TYPE) and case189 (DECL_HAS_TYPE). The public_api_internal_dependency_added kind requires `dump --header-graph --public-header <header>`; the default debug-headers lane reaches the same BREAKING verdict without it, via the structural findings alone.",
+   "expected": "BREAKING",
    "expected_kinds": [
+    "type_base_changed",
     "public_api_internal_dependency_added"
    ],
-   "fixtures": [
-    "old.json",
-    "new.json"
-   ],
+   "known_kind_gap": "public_api_internal_dependency_added",
+   "known_kind_gap_note": "public_api_internal_dependency_added is only emitted by `dump --header-graph`, an opt-in flag tests/validate_examples.py's default gcc/clang debug-headers lane does not pass (see tests/validate_examples.py's _kinds_strict_signal call site). The BREAKING verdict is still correct via type_base_changed alone; --header-graph is exercised for real, separately, by tests/test_header_graph_examples.py (wired into the full-matrix proof gate via the header_graph OWNER_PROOFS/SPECIAL_PROOFS entry in validation/scripts/run_example_owner_proofs.py and collect_full_example_matrix.py).",
    "min_evidence": "L5",
    "platforms": [
     "linux"
    ]
   },
   "case189_public_function_private_parameter_type": {
-   "abi_break": false,
-   "api_break": false,
+   "abi_break": true,
+   "api_break": true,
    "bad_practice": true,
-   "category": "risk",
-   "description": "In the derived L5 source graph the public function demo::configure() newly carries a DECL_HAS_TYPE edge to the internal (non-public-header) type detail::Options that it did not reach in v1 -- a public function taking an internal type in its signature. Sibling of case187 (TYPE_HAS_FIELD_TYPE) and case188 (TYPE_INHERITS); a source-graph risk, never on its own an artifact-proven break.",
-   "expected": "COMPATIBLE_WITH_RISK",
+   "category": "breaking",
+   "description": "demo::configure()'s opaque `void*` parameter is retyped to `detail::Options*`, an internal (non-public-header) type. A parameter type change changes the function's mangled name in C++ -- the old exported symbol genuinely disappears, a real, artifact-proven break (func_removed, BREAKING) -- verified against a real compiled example (gcc + clang, --header-graph; a rebuilt app hits a real loader symbol-lookup error). Layered on top, the L5 source graph independently confirms demo::configure newly carries a DECL_HAS_TYPE edge to detail::Options it did not reach in v1 (public_api_internal_dependency_added), naming exactly which internal type the new dependency reaches -- correlated context on an already-detected break, not a standalone risk signal. Sibling of case187 (TYPE_HAS_FIELD_TYPE) and case188 (TYPE_INHERITS). The public_api_internal_dependency_added kind requires `dump --header-graph --public-header <header>`; the default debug-headers lane reaches the same BREAKING verdict without it, via func_removed alone.",
+   "expected": "BREAKING",
    "expected_kinds": [
+    "func_removed",
     "public_api_internal_dependency_added"
    ],
-   "fixtures": [
-    "old.json",
-    "new.json"
-   ],
+   "known_kind_gap": "public_api_internal_dependency_added",
+   "known_kind_gap_note": "public_api_internal_dependency_added is only emitted by `dump --header-graph`, an opt-in flag tests/validate_examples.py's default gcc/clang debug-headers lane does not pass (see tests/validate_examples.py's _kinds_strict_signal call site). The BREAKING verdict is still correct via func_removed alone; --header-graph is exercised for real, separately, by tests/test_header_graph_examples.py (wired into the full-matrix proof gate via the header_graph OWNER_PROOFS/SPECIAL_PROOFS entry in validation/scripts/run_example_owner_proofs.py and collect_full_example_matrix.py).",
    "min_evidence": "L5",
    "platforms": [
     "linux"
@@ -2095,19 +2092,18 @@
    ]
   },
   "case191_header_only_graph_field_type": {
-   "abi_break": false,
-   "api_break": false,
+   "abi_break": true,
+   "api_break": true,
    "bad_practice": true,
-   "category": "risk",
-   "description": "Demonstrates the same public-struct-gains-a-private-field-type scenario as case187, but proven entirely through the header-only-graph addendum (header_graph.py, ADR-041 addendum, service.run_dump(header_graph=True)) with no build integration at all -- extractor_passes['header_type_graph'] is trusted for the structural TYPE_HAS_FIELD_TYPE/TYPE_INHERITS/DECL_HAS_TYPE kinds without needing an edge-presence coverage trick, distinct from case187's build-integrated-style fixture. A source-graph risk, never on its own an artifact-proven break.",
-   "expected": "COMPATIBLE_WITH_RISK",
+   "category": "breaking",
+   "description": "demo::Config gains a field typed detail::RawConfig*, an internal (non-public-header) type -- verified against a real compiled example (gcc + clang, --header-graph). The new field grows Config's size (4 -> 16 bytes), itself a real, artifact-proven break (struct_size_changed/type_size_changed/type_alignment_changed, BREAKING) -- no build integration needed; a rebuilt app hits a real stack-smashing crash. Layered on top, --header-graph independently confirms demo::Config newly carries a TYPE_HAS_FIELD_TYPE edge to detail::RawConfig it did not reach in v1 (public_api_internal_dependency_added), naming exactly which internal type the new dependency reaches. Unlike case187 (which gives its struct a sibling Meta field so the L5 type-graph pass has a same-kind edge to confirm on both sides), Config's old side has zero TYPE_HAS_FIELD_TYPE edges of any kind -- the finding still fires correctly because extractor_passes['header_type_graph'] is trusted for the structural TYPE_HAS_FIELD_TYPE/TYPE_INHERITS/DECL_HAS_TYPE kinds without needing an edge-presence coverage trick. A real compiled field-type change to an internal type is never invisible at L0-L2; only a body-only reference (case190) can be.",
+   "expected": "BREAKING",
    "expected_kinds": [
+    "struct_size_changed",
     "public_api_internal_dependency_added"
    ],
-   "fixtures": [
-    "old.json",
-    "new.json"
-   ],
+   "known_kind_gap": "public_api_internal_dependency_added",
+   "known_kind_gap_note": "public_api_internal_dependency_added is only emitted by `dump --header-graph`, an opt-in flag tests/validate_examples.py's default gcc/clang debug-headers lane does not pass (see tests/validate_examples.py's _kinds_strict_signal call site). The BREAKING verdict is still correct via struct_size_changed alone; --header-graph is exercised for real, separately, by tests/test_header_graph_examples.py (wired into the full-matrix proof gate via the header_graph OWNER_PROOFS/SPECIAL_PROOFS entry in validation/scripts/run_example_owner_proofs.py and collect_full_example_matrix.py).",
    "min_evidence": "L5",
    "platforms": [
     "linux"

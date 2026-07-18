@@ -750,6 +750,51 @@ def test_freeze_tools_discards_stale_cache_instead_of_merging(tmp_path):
     assert entry == {"abicc_dumper": "BREAKING", "abicc_dumper_ms": 2}
 
 
+def test_merge_frozen_into_results_rejects_stale_digest():
+    """A frozen file stamped against a different ground_truth digest must not
+    be merged -- e.g. a case converted from a fixture-only SKIP to a real
+    compiled v1/v2 pair changes what ABICC can run against, so the frozen
+    SKIP row is no longer valid and must not be silently forwarded (mirrors
+    _freeze_tools's own write-side digest guard, this time on the read
+    side)."""
+    mod = _load_benchmark()
+    frozen = {
+        "ground_truth_sha256": "stale-digest-from-an-older-catalog",
+        "tools": ["abicc_xml"],
+        "results_by_case": {
+            "case187_public_struct_private_field_type": {
+                "abicc_xml": "SKIP", "abicc_xml_ms": 0,
+            },
+        },
+    }
+    results = [{"case": "case187_public_struct_private_field_type"}]
+
+    with patch.object(mod, "_ground_truth_digest", return_value="current-digest"):
+        merged = mod._merge_frozen_into_results(results, frozen, set())
+
+    assert merged == []
+    assert "abicc_xml" not in results[0]
+
+
+def test_merge_frozen_into_results_merges_on_matching_digest():
+    mod = _load_benchmark()
+    frozen = {
+        "ground_truth_sha256": "current-digest",
+        "tools": ["abicc_xml"],
+        "results_by_case": {
+            "case01": {"abicc_xml": "COMPATIBLE", "abicc_xml_ms": 5},
+        },
+    }
+    results = [{"case": "case01"}]
+
+    with patch.object(mod, "_ground_truth_digest", return_value="current-digest"):
+        merged = mod._merge_frozen_into_results(results, frozen, set())
+
+    assert merged == ["abicc_xml"]
+    assert results[0]["abicc_xml"] == "COMPATIBLE"
+    assert results[0]["abicc_xml_ms"] == 5
+
+
 def test_run_suite_rejects_freeze_with_cases_filter():
     """--freeze on a --cases-filtered run would merge a few fresh rows with
     stale rows for every untouched case, then stamp the whole file as if it

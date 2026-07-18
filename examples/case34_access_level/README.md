@@ -44,9 +44,9 @@ members is rebuilt against the v2 header.
 
 ```bash
 tmp=$(mktemp -d)
-cp examples/case35_access_level/app.cpp "$tmp/app.cpp"
-cp examples/case35_access_level/v1.hpp "$tmp/v1.hpp"
-cp examples/case35_access_level/v2.hpp "$tmp/v2.hpp"
+cp examples/case34_access_level/app.cpp "$tmp/app.cpp"
+cp examples/case34_access_level/v1.hpp "$tmp/v1.hpp"
+cp examples/case34_access_level/v2.hpp "$tmp/v2.hpp"
 g++ -std=c++17 -DUSE_V2 -I"$tmp" -c "$tmp/app.cpp" -o "$tmp/app.o"
 # error: 'void Widget::helper()' is private within this context
 # error: 'int Widget::cache' is private within this context

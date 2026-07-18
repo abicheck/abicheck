@@ -23,24 +23,24 @@ This is more severe than case107 because:
 ```bash
 cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
 cmake --build /tmp/abicheck-examples-build \
-  --target case95_task_class_removed_app case95_task_class_removed_v2
+  --target case108_task_class_removed_app case108_task_class_removed_v2
 
-/tmp/abicheck-examples-build/case95_task_class_removed/app_v1
+/tmp/abicheck-examples-build/case108_task_class_removed/app_v1
 # ref_count after dec = 2 (expect 2)
 
 # Runtime replacement: the v1 binary asks for the removed v1 factory/type
 # surface and fails as soon as the missing symbol is resolved.
 tmp=$(mktemp -d)
-cp /tmp/abicheck-examples-build/case95_task_class_removed/app_v1 "$tmp/"
-cp /tmp/abicheck-examples-build/case95_task_class_removed/libv2.so "$tmp/libv1.so"
+cp /tmp/abicheck-examples-build/case108_task_class_removed/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case108_task_class_removed/libv2.so "$tmp/libv1.so"
 (cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
 # ./app_v1: symbol lookup error: ./app_v1: undefined symbol: _ZN5mylib17mylib_spawn_dummyEv
 
 # Source rebuild against the v2 header also fails because the base class and
 # factory are gone.
 tmp=$(mktemp -d)
-cp examples/case95_task_class_removed/app.cpp "$tmp/app.cpp"
-cp examples/case95_task_class_removed/v2.h "$tmp/v1.h"
+cp examples/case108_task_class_removed/app.cpp "$tmp/app.cpp"
+cp examples/case108_task_class_removed/v2.h "$tmp/v1.h"
 g++ -std=c++17 -I"$tmp" -c "$tmp/app.cpp" -o "$tmp/app.o"
 # error: 'task' is not a member of 'mylib'
 # error: 'mylib_spawn_dummy' is not a member of 'mylib'

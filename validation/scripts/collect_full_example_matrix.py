@@ -58,6 +58,28 @@ BUILD_SOURCE_PROOF_CASES = {
     "case132_threadsafe_statics_flip",
     "case133_tls_model_flip",
 }
+#: Single-library L3+ cases whose L5 finding is proven via `dump
+#: --header-graph` (a real compiled binary + real headers, no build
+#: integration) instead of the `--sources`/`--build-info` build-integrated
+#: path `--artifact-variant build-source` exercises. These deliberately stay
+#: out of BUILD_SOURCE_PROOF_CASES: the build-integrated path cannot prove
+#: them at all (it needs `Target.private_headers`, populated only by CMake's
+#: File API FILE_SET feature, which this catalog's build files don't use).
+#: Their default gcc/clang debug-headers lane already proves the case's
+#: canonical BREAKING verdict via a real artifact-level structural finding;
+#: tests/test_header_graph_examples.py is the dedicated live proof that
+#: `--header-graph` additionally reproduces public_api_internal_dependency_added
+#: against the real compiled binary + headers, not a hand-built fixture --
+#: it is wired into the "header_graph" SPECIAL_PROOFS/OWNER_PROOFS entry
+#: below, so a broken or skipped proof hard-fails run_example_owner_proofs.py
+#: and, through it, the full-matrix job's _proof_artifact_errors gate, the
+#: same way l3l4l5/g20/etc. are gated.
+HEADER_GRAPH_PROOF_CASES = {
+    "case187_public_struct_private_field_type",
+    "case188_public_class_private_base_class",
+    "case189_public_function_private_parameter_type",
+    "case191_header_only_graph_field_type",
+}
 PROOF_ARTIFACT_RUNNER = "validation/scripts/run_example_owner_proofs.py"
 PROOF_ARTIFACT_SCHEMA = "example_owner_proofs.v1"
 
@@ -69,6 +91,16 @@ SPECIAL_PROOFS = {
     "g20": {
         "lane": "g20-crosscheck-fixtures",
         "proof": "tests/test_g20_catalog.py",
+    },
+    # Not a _case_owner() bucket -- case187/188/189/191 are owned as
+    # "single-library" (real compiled v1/v2 pairs) and already COVERED via
+    # the gcc/clang debug-headers lane's structural finding. This entry adds
+    # no per-case routing; it exists purely so _proof_artifact_errors below
+    # hard-fails the matrix job if the header-graph live proof breaks, same
+    # as every other dedicated-owner proof.
+    "header_graph": {
+        "lane": "header-graph-live-proof",
+        "proof": "tests/test_header_graph_examples.py",
     },
     "l3l4l5": {
         "lane": "l3l4l5-fixtures",
@@ -577,7 +609,9 @@ def build_matrix(
     # cause identified and recorded in ground_truth.json's known_kind_gap/
     # known_kind_gap_note) rather than being an unexplained backlog item.
     documented_kind_gap_cases = sorted(
-        row["case_id"] for row in rows if row.get("kinds_strict") == "documented-mismatch"
+        row["case_id"]
+        for row in rows
+        if row.get("kinds_strict") == "documented-mismatch"
     )
     return {
         "schema_version": SCHEMA_VERSION,

@@ -1080,7 +1080,7 @@
       "severity": "error",
       "min_evidence": "L0",
       "doc_slug": "func_removed",
-      "examples": "case01_symbol_removal,case100_experimental_removed_without_replacement,case104_glibcxx_dual_abi_flip,case107_task_scheduler_init_removed,case108_task_class_removed,case110_concurrent_unordered_map_api_drift,case12_function_removed,case141_versioned_symbol_scheme,case192_call_graph_break_survives_suppression,case193_ordinary_exported_fn_call_not_reachable,case41_type_changes,case53_namespace_pollution,case78_task_arena_attach_tag,case85_internal_template_signature_changed"
+      "examples": "case01_symbol_removal,case100_experimental_removed_without_replacement,case104_glibcxx_dual_abi_flip,case107_task_scheduler_init_removed,case108_task_class_removed,case110_concurrent_unordered_map_api_drift,case12_function_removed,case141_versioned_symbol_scheme,case189_public_function_private_parameter_type,case192_call_graph_break_survives_suppression,case193_ordinary_exported_fn_call_not_reachable,case41_type_changes,case53_namespace_pollution,case78_task_arena_attach_tag,case85_internal_template_signature_changed"
     },
     {
       "kind": "func_removed_elf_only",
@@ -2473,9 +2473,9 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "unspecified",
+      "min_evidence": "L1",
       "doc_slug": "struct_field_type_changed",
-      "examples": ""
+      "examples": "case187_public_struct_private_field_type"
     },
     {
       "kind": "struct_packing_changed",
@@ -2511,7 +2511,7 @@
       "severity": "error",
       "min_evidence": "L1",
       "doc_slug": "struct_size_changed",
-      "examples": "case121_kernel_btf_struct_field_added,case126_sycl_device_impl_ptr,case80_pimpl_shared_to_unique"
+      "examples": "case121_kernel_btf_struct_field_added,case126_sycl_device_impl_ptr,case191_header_only_graph_field_type,case80_pimpl_shared_to_unique"
     },
     {
       "kind": "suppression_would_hide_public_break",
@@ -2952,7 +2952,7 @@
       "severity": "error",
       "min_evidence": "L1",
       "doc_slug": "type_base_changed",
-      "examples": "case37_base_class,case72_covariant_return_changed"
+      "examples": "case188_public_class_private_base_class,case37_base_class,case72_covariant_return_changed"
     },
     {
       "kind": "type_became_abstract",

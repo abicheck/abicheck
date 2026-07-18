@@ -496,7 +496,7 @@ def _render_readme_headline(entries: list[ReadmeEntry]) -> str:
         f"({n_single} single-library + {n_bundle} multi-library bundle cases, "
         "the latter tracked under "
         "[ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) "
-        "demonstrating real-world ABI/API break scenarios. Each case is a "
+        "demonstrating real-world ABI/API break scenarios. Most cases are a "
         "minimal, compilable C/C++ example with:"
     )
 
