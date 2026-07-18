@@ -222,20 +222,33 @@ _llvm_major_from_predefined_macros() {
 # review). Empty output means neither applies -- caller falls back to the
 # apt-get install path.
 #
-# Both explicit and $CMPLR_ROOT-derived inputs are treated as the SAME
-# shape -- an installation root containing lib/cmake/{llvm,clang} (matching
-# the llvm-cmake-prefix input's own documented contract in action.yml) --
-# and this function always returns the "lib/cmake" level one directory
-# below that root. The explicit branch used to return $explicit completely
-# unmodified, silently expecting callers to already pass the "lib/cmake"
-# level instead of the documented installation root, a contract mismatch
-# between the docs and the code that made a correctly-configured
-# llvm-cmake-prefix input resolve one directory level too shallow
-# (Codex review).
+# The $CMPLR_ROOT-derived path is always an installation root containing
+# lib/cmake/{llvm,clang} (matching the llvm-cmake-prefix input's own
+# documented contract in action.yml), and this function always returns the
+# "lib/cmake" level one directory below that root. The explicit
+# llvm-cmake-prefix override accepts EITHER shape for that same reason it
+# exists as an escape hatch in the first place -- a user reasonably setting
+# it to the already-resolved "lib/cmake" prefix (mirroring either
+# $CMPLR_ROOT's own auto-detected internal shape, or this same script's
+# existing $(llvm-config --cmakedir)/.. convention a few lines down) must
+# not be double-suffixed into "lib/cmake/lib/cmake", which would make
+# find_package(LLVM/Clang CONFIG) miss the vendor package entirely (Codex
+# review). Disambiguated by directory existence rather than string shape:
+# if $explicit/lib/cmake/llvm exists, treat $explicit as the root and
+# append "lib/cmake"; else if $explicit/llvm exists, $explicit is already
+# the "lib/cmake" level -- pass it through unmodified. Neither existing
+# (e.g. the path doesn't exist yet) falls back to the documented root
+# contract, matching the explicit branch's original fix.
 _bundled_llvm_cmake_prefix() {
   local explicit="$1" cmplr_root="$2" compiler_path="$3"
   if [[ -n "$explicit" ]]; then
-    printf '%s' "$explicit/lib/cmake"
+    if [[ -d "$explicit/lib/cmake/llvm" ]]; then
+      printf '%s' "$explicit/lib/cmake"
+    elif [[ -d "$explicit/llvm" ]]; then
+      printf '%s' "$explicit"
+    else
+      printf '%s' "$explicit/lib/cmake"
+    fi
     return
   fi
   # Normalize both to the same representation before comparing -- on a real

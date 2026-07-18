@@ -520,18 +520,48 @@ class TestBundledLlvmCmakePrefix:
     own bundled LLVM/Clang (e.g. Intel's icpx/icx under $CMPLR_ROOT, which
     apt does not carry at all)."""
 
-    def test_explicit_override_wins(self, tmp_path: Path) -> None:
+    def test_explicit_override_wins_when_neither_shape_exists_on_disk(
+        self, tmp_path: Path
+    ) -> None:
+        # Neither {explicit}/lib/cmake/llvm nor {explicit}/llvm exists (the
+        # path is never created here) -- falls back to the documented
+        # installation-root contract. Regression (Codex review):
+        # llvm-cmake-prefix is documented (see action.yml) as an
+        # installation ROOT containing lib/cmake/{llvm,clang} -- same shape
+        # as $CMPLR_ROOT -- not the "lib/cmake" level directly. Returning
+        # $explicit completely unmodified used to silently expect the
+        # opposite, making a correctly-configured llvm-cmake-prefix input
+        # resolve one directory level too shallow.
         result = _run_predicate(
             f'_bundled_llvm_cmake_prefix "{tmp_path}/explicit" "{tmp_path}/cmplr" '
             f'"{tmp_path}/cmplr/bin/icpx"'
         )
-        # Regression (Codex review): llvm-cmake-prefix is documented (see
-        # action.yml) as an installation ROOT containing lib/cmake/{llvm,
-        # clang} -- same shape as $CMPLR_ROOT -- not the "lib/cmake" level
-        # directly. Returning $explicit completely unmodified used to
-        # silently expect the opposite, making a correctly-configured
-        # llvm-cmake-prefix input resolve one directory level too shallow.
         assert result.stdout.strip() == f"{tmp_path}/explicit/lib/cmake"
+
+    def test_explicit_root_shape_appends_lib_cmake(self, tmp_path: Path) -> None:
+        explicit = tmp_path / "explicit"
+        (explicit / "lib" / "cmake" / "llvm").mkdir(parents=True)
+        result = _run_predicate(f'_bundled_llvm_cmake_prefix "{explicit}" "" ""')
+        assert result.stdout.strip() == f"{explicit}/lib/cmake"
+
+    def test_explicit_already_resolved_shape_passes_through(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression (Codex review): a user might reasonably set
+        # llvm-cmake-prefix to the already-resolved "lib/cmake" level
+        # directly -- mirroring either $CMPLR_ROOT's own auto-detected
+        # internal shape, or this same script's existing
+        # $(llvm-config --cmakedir)/.. convention -- rather than the
+        # documented installation root. Unconditionally appending
+        # "lib/cmake" in that case would produce ".../lib/cmake/lib/cmake",
+        # which find_package(LLVM CONFIG) would never find. {explicit}/llvm
+        # existing (with no {explicit}/lib/cmake/llvm) means $explicit is
+        # already the "lib/cmake" level -- pass it through unmodified.
+        explicit = tmp_path / "already_resolved_lib_cmake"
+        (explicit / "llvm").mkdir(parents=True)
+        (explicit / "clang").mkdir()
+        result = _run_predicate(f'_bundled_llvm_cmake_prefix "{explicit}" "" ""')
+        assert result.stdout.strip() == str(explicit)
 
     def test_detects_cmplr_root_with_llvm_cmake_package(self, tmp_path: Path) -> None:
         cmplr_root = tmp_path / "cmplr"
