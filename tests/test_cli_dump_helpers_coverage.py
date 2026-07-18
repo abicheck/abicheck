@@ -1234,8 +1234,7 @@ def test_dump_will_attempt_hybrid_l4_extraction_false_for_prebuilt_pack(tmp_path
 
     pack_dir = tmp_path / "pack"
     BuildSourcePack.empty(pack_dir).write()
-    assert _dump_will_attempt_hybrid_l4_extraction(None, pack_dir) is False
-    assert _dump_will_attempt_hybrid_l4_extraction(pack_dir, None) is False
+    assert _dump_will_attempt_hybrid_l4_extraction(pack_dir) is False
 
 
 def test_dump_will_attempt_hybrid_l4_extraction_true_for_raw_source_tree(tmp_path) -> None:
@@ -1243,33 +1242,34 @@ def test_dump_will_attempt_hybrid_l4_extraction_true_for_raw_source_tree(tmp_pat
 
     tree = tmp_path / "src"
     tree.mkdir()
-    assert _dump_will_attempt_hybrid_l4_extraction(tree, None) is True
+    assert _dump_will_attempt_hybrid_l4_extraction(tree) is True
 
 
-def test_dump_will_attempt_hybrid_l4_extraction_false_without_any_input(tmp_path) -> None:
-    """Codex review (third finding): no --sources/--build-info at all means
+def test_dump_will_attempt_hybrid_l4_extraction_false_without_any_input() -> None:
+    """Codex review (third finding): no --sources at all means
     collect_inline_pack never runs regardless of frontend -- rejecting here
     would point the user at a fix (switch frontends) that would not
     actually satisfy --depth source; the real problem is reported
     downstream by check_requested_depth_satisfied instead."""
     from abicheck.cli_dump_helpers import _dump_will_attempt_hybrid_l4_extraction
 
-    assert _dump_will_attempt_hybrid_l4_extraction(None, None) is False
+    assert _dump_will_attempt_hybrid_l4_extraction(None) is False
 
 
-def test_dump_will_attempt_hybrid_l4_extraction_true_for_mixed_raw_and_pack(tmp_path) -> None:
-    """Codex review: one raw side is enough for collect_inline_pack (and
-    extractor/--ast-frontend) to actually run against it -- both provided
-    inputs must be prebuilt packs for this to be False, not just one."""
+def test_dump_will_attempt_hybrid_l4_extraction_ignores_build_info(tmp_path) -> None:
+    """Codex review (fourth finding): a raw --build-info tree never feeds L4
+    extraction -- embed_build_source passes raw_sources (never raw_build_info)
+    as _run_inline_source_abi's one 'sources' argument, so --build-info plays
+    no part in whether an extractor (hybrid or otherwise) runs. Only a raw
+    (non-pack) --sources tree does. The predicate takes a single 'sources'
+    argument for exactly this reason -- there is no build_info parameter to
+    pass a raw tree to."""
     from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.cli_dump_helpers import _dump_will_attempt_hybrid_l4_extraction
 
     pack_dir = tmp_path / "pack"
     BuildSourcePack.empty(pack_dir).write()
-    tree = tmp_path / "src"
-    tree.mkdir()
-    assert _dump_will_attempt_hybrid_l4_extraction(tree, pack_dir) is True
-    assert _dump_will_attempt_hybrid_l4_extraction(pack_dir, tree) is True
+    assert _dump_will_attempt_hybrid_l4_extraction(pack_dir) is False
 
 
 def test_check_requested_depth_satisfied_headers_without_header_ast_fails() -> None:
@@ -1441,3 +1441,66 @@ def test_check_requested_depth_satisfied_source_with_real_l4_facts_passes() -> N
     )
     snap.build_source = real_pack
     check_requested_depth_satisfied("source", snap)  # must not raise
+
+
+def test_l4_source_abi_was_attempted_false_for_unavailable_extractor() -> None:
+    """Codex review (fifth finding): _run_inline_source_abi returns the same
+    empty-surface, PARTIAL-coverage shape both when a source-only dump
+    legitimately links zero declarations (no binary to match against) AND
+    when the selected extractor is missing from PATH -- coverage *status*
+    alone cannot tell them apart. The gate must key off
+    SourceAbiSurface.coverage['compile_units_parsed'] (set only when replay
+    actually executed) rather than the coverage row's PRESENT/PARTIAL status,
+    so a categorically-failed extraction does not silently satisfy an
+    explicit --depth source."""
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.model import CoverageStatus, DataLayer, LayerCoverage
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+    from abicheck.cli_dump_helpers import _l4_source_abi_was_attempted
+
+    pack = BuildSourcePack(
+        root=Path(""),
+        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        # The exact shape _run_inline_source_abi returns when impl.available()
+        # is False: a bare SourceAbiSurface() with no coverage dict populated
+        # (replay never ran to set compile_units_parsed).
+        source_abi=SourceAbiSurface(),
+    )
+    pack.manifest.coverage = [
+        LayerCoverage(layer=DataLayer.L3_BUILD.value, status=CoverageStatus.PRESENT),
+        LayerCoverage(layer=DataLayer.L4_SOURCE_ABI.value, status=CoverageStatus.PARTIAL),
+        LayerCoverage(layer=DataLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.NOT_COLLECTED),
+    ]
+
+    assert _l4_source_abi_was_attempted(pack) is False
+
+
+def test_l4_source_abi_was_attempted_true_for_zero_linked_but_parsed_tus() -> None:
+    """The counterpart to the unavailable-extractor case above: replay
+    genuinely ran and parsed TUs (compile_units_parsed > 0) but linked zero
+    declarations -- the expected, warn-only outcome for a source-only `dump
+    --sources` with no binary to link against. This must still count as
+    "attempted", so it can still satisfy an explicit --depth source (matching
+    the existing G21.7 warn-not-error behavior for the same scenario)."""
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.model import CoverageStatus, DataLayer, LayerCoverage
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+    from abicheck.cli_dump_helpers import _l4_source_abi_was_attempted
+
+    surface = SourceAbiSurface()
+    surface.coverage["compile_units_selected"] = 1
+    surface.coverage["compile_units_parsed"] = 1
+    pack = BuildSourcePack(
+        root=Path(""),
+        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        source_abi=surface,
+    )
+    pack.manifest.coverage = [
+        LayerCoverage(layer=DataLayer.L3_BUILD.value, status=CoverageStatus.PRESENT),
+        LayerCoverage(layer=DataLayer.L4_SOURCE_ABI.value, status=CoverageStatus.PARTIAL),
+        LayerCoverage(layer=DataLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.NOT_COLLECTED),
+    ]
+
+    assert _l4_source_abi_was_attempted(pack) is True

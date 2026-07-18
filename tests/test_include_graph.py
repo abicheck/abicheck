@@ -450,12 +450,20 @@ def test_collect_evidence_include_graph_missing_clang_degrades(
     tmp_path, monkeypatch
 ) -> None:
     # Include-graph folding is automatic whenever L4 source-abi replay and the
-    # L5 graph are both collected (`--depth source` on the current `dump
-    # --sources` public surface; the deleted `collect --source-abi
-    # --source-graph summary` combo used to exercise the identical
-    # cli_buildsource_helpers._collect_source_graph -> inline_graph_fold path).
-    # A missing clang records a failed extractor row but still writes the
-    # pack with the build graph.
+    # L5 graph are both collected (`collect_mode="source-target"`, the `dump
+    # --sources` default -- collects L3+L4+L5 regardless of --depth; the
+    # deleted `collect --source-abi --source-graph summary` combo used to
+    # exercise the identical cli_buildsource_helpers._collect_source_graph ->
+    # inline_graph_fold path). A missing clang records a failed extractor row
+    # but still writes the pack with the build graph.
+    #
+    # No --depth here deliberately: this test only cares about the
+    # include-graph fold degrading gracefully, not about the strict --depth
+    # gate, and the L4 source-abi extractor itself (a *different* clang/
+    # castxml lookup from the one mocked missing above) is not guaranteed
+    # available in every unit-test environment -- an explicit --depth source
+    # would make this test's pass/fail depend on that unrelated tool
+    # availability instead of the thing it actually exercises.
     import json
 
     from click.testing import CliRunner
@@ -486,8 +494,6 @@ def test_collect_evidence_include_graph_missing_clang_degrades(
             "dump",
             "--sources",
             str(tree),
-            "--depth",
-            "source",
             "-o",
             str(out),
         ],

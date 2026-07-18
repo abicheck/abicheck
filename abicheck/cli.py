@@ -631,13 +631,15 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     #
     # Codex review: scoped to invocations that will actually attempt L4
     # extraction with the hybrid frontend -- see
-    # _dump_will_attempt_hybrid_l4_extraction's docstring for the three
-    # cases (prebuilt-pack input, mixed raw+pack input, and no
-    # --sources/--build-info at all) where it must not fire.
+    # _dump_will_attempt_hybrid_l4_extraction's docstring for the two cases
+    # (prebuilt-pack --sources, and no --sources at all) where it must not
+    # fire. --build-info never feeds L4 extraction (only L3 compile-DB
+    # resolution), so it plays no part in this predicate (Codex review,
+    # fourth finding).
     if (
         depth == "source"
         and header_backend == "hybrid"
-        and _dump_will_attempt_hybrid_l4_extraction(sources, build_info)
+        and _dump_will_attempt_hybrid_l4_extraction(sources)
     ):
         raise click.UsageError(
             "--depth source is incompatible with --ast-frontend hybrid: L4 "

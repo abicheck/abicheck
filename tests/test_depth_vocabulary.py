@@ -509,6 +509,45 @@ def test_dump_depth_source_hybrid_frontend_rejected_for_mixed_raw_and_pack(tmp_p
     assert "--depth source" in out
 
 
+def test_dump_depth_source_hybrid_frontend_not_rejected_for_pack_sources_raw_build_info(
+    tmp_path,
+) -> None:  # type: ignore[no-untyped-def]
+    """Codex review (fourth finding): the reverse of the mixed-raw-and-pack
+    case above -- a prebuilt --sources pack with a *raw* --build-info tree.
+    embed_build_source derives raw_sources solely from the --sources
+    argument (never from --build-info); collect_inline_pack forwards only
+    raw_sources to _run_inline_source_abi, so a raw --build-info tree next
+    to a pack --sources never reaches an L4 extractor either -- --ast-frontend
+    hybrid has no effect here and must not be rejected, matching the
+    prebuilt-pack case above rather than the mixed-raw-and-pack one (which
+    has the raw side on --sources, not --build-info)."""
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
+
+    pack_dir = tmp_path / "prebuilt-pack"
+    pack = BuildSourcePack(
+        root=pack_dir,
+        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        source_abi=SourceAbiSurface(
+            reachable_declarations=[SourceEntity(id="foo", kind="function")]
+        ),
+    )
+    pack.write()
+    build_info_tree = tmp_path / "raw-build-info"
+    build_info_tree.mkdir()
+    res = CliRunner().invoke(
+        main,
+        [
+            "dump", "--sources", str(pack_dir), "--build-info", str(build_info_tree),
+            "--depth", "source", "--ast-frontend", "hybrid",
+            "-o", str(tmp_path / "out3.json"),
+        ],
+    )
+    assert res.exit_code == 0, _all_output(res)
+    assert "--ast-frontend hybrid" not in _all_output(res)
+
+
 def test_dump_depth_headers_with_hybrid_frontend_not_rejected(tmp_path) -> None:  # type: ignore[no-untyped-def]
     """The hybrid-vs-source usage-error rejection is scoped to --depth source
     specifically -- hybrid is the normal, supported dual-backend choice for

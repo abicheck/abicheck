@@ -232,42 +232,46 @@ def evidence_depth_label(
 _DEPTH_RANK: dict[str, int] = {"binary": 0, "headers": 1, "build": 2, "source": 3}
 
 
-def _dump_will_attempt_hybrid_l4_extraction(
-    sources: Path | None, build_info: Path | None
-) -> bool:
+def _dump_will_attempt_hybrid_l4_extraction(sources: Path | None) -> bool:
     """True iff ``collect_inline_pack`` would actually run L4 extraction with
-    ``extractor="hybrid"`` for at least one of *sources*/*build_info*.
+    ``extractor="hybrid"`` for the ``--sources`` input.
 
     The ``--depth source`` + ``--ast-frontend hybrid`` rejection exists to
     stop a real, unsupported hybrid L4 extraction attempt from silently
     degrading — it must fire *only* when one would actually happen, and stay
     quiet otherwise so the more accurate error (or none at all) surfaces
-    instead. Three cases where it must NOT fire, each found by review:
+    instead. Only ``--sources`` gates whether L4 replay runs at all:
+    ``cli_buildsource.embed_build_source`` passes ``raw_sources`` (derived
+    solely from the ``sources`` CLI argument, never from ``build_info``) as
+    the one ``sources`` argument ``collect_inline_pack`` forwards to
+    ``_run_inline_source_abi``, which returns immediately (``None, []``, no
+    extraction) when that is ``None`` — ``--build-info`` only ever feeds L3
+    compile-DB resolution and is irrelevant to whether an L4 extractor runs
+    (Codex review, fourth finding: a raw ``--build-info`` tree alongside a
+    *prebuilt* ``--sources`` pack must not trigger this rejection, since no
+    extractor — hybrid or otherwise — ever runs for that combination). Two
+    cases where it must NOT fire, each found by review:
 
-    - **Prebuilt pack input** (Codex review): ``cli_buildsource.embed_build_source``
+    - **Prebuilt --sources pack input** (Codex review): ``embed_build_source``
       treats a ``BuildSourcePack`` directory (``is_pack_dir``) or a
       build-emitted ``abicheck_inputs/`` directory (``_is_inputs_pack_dir``)
-      as data to load and filter, not a tree to extract from — its
-      ``raw_sources``/``raw_build_info`` (the only inputs
-      ``collect_inline_pack``, and therefore ``extractor``, ever sees) are
-      forced to ``None`` for that side. A *mixed* raw+pack pair still counts
-      as "will attempt": the raw side alone reaches ``collect_inline_pack``
-      with ``extractor="hybrid"``.
-    - **No --sources/--build-info at all** (Codex review, third finding): a
-      bare ``dump lib.so -H api.h --depth source --ast-frontend hybrid``
-      never calls ``collect_inline_pack`` in the first place — L4 was never
-      going to run regardless of frontend. Rejecting here would tell the
-      user to switch frontends when that would not fix anything; the real
-      problem (no source/build evidence at all) is better reported by
+      as data to load and filter, not a tree to extract from — ``raw_sources``
+      is forced to ``None`` for that shape, so ``_run_inline_source_abi``
+      never runs regardless of ``extractor``.
+    - **No --sources at all** (Codex review, third finding): a bare
+      ``dump lib.so -H api.h --depth source --ast-frontend hybrid`` never
+      calls ``collect_inline_pack`` in the first place — L4 was never going
+      to run regardless of frontend. Rejecting here would tell the user to
+      switch frontends when that would not fix anything; the real problem
+      (no source/build evidence at all) is better reported by
       ``check_requested_depth_satisfied``'s own "reached 'headers'/'binary'"
       message, which fires downstream regardless.
     """
     from .buildsource.inline import is_pack_dir
     from .cli_buildsource_helpers import _is_inputs_pack_dir
 
-    return any(
-        p is not None and not (is_pack_dir(p) or _is_inputs_pack_dir(p))
-        for p in (sources, build_info)
+    return sources is not None and not (
+        is_pack_dir(sources) or _is_inputs_pack_dir(sources)
     )
 
 
@@ -281,32 +285,55 @@ class DumpDepthNotSatisfiedError(click.ClickException):
 
 
 def _l4_source_abi_was_attempted(build_source: BuildSourcePack) -> bool:
-    """True when L4 source-ABI extraction genuinely ran, regardless of
-    whether it linked any declarations.
+    """True when L4 source-ABI extraction genuinely parsed source, regardless
+    of whether it linked any declarations to a binary.
 
-    ``buildsource.inline`` stamps L4 coverage ``PRESENT``/``PARTIAL`` (never
-    ``NOT_COLLECTED``) the moment ``_run_inline_source_abi`` returns a
-    surface object at all — including the "ran but 0/N symbols matched"
-    case, which is the *expected*, warn-only outcome for a source-only
-    ``dump --sources`` (no binary to link declarations against; see
-    ``_write_snapshot_output``'s G21.7 "collected but linked no facts"
-    warning). ``NOT_COLLECTED`` only happens when L4 extraction never ran at
-    all — no ``--sources``/``--build-info``, or ``--ast-frontend hybrid``
-    (which ``buildsource.inline._run_inline_source_abi`` records as
-    ``"skipped"`` rather than running either backend).
+    Coverage *status* alone (``PRESENT``/``PARTIAL`` vs ``NOT_COLLECTED``) is
+    not enough: ``buildsource.inline._run_inline_source_abi`` stamps L4
+    ``PARTIAL`` (never ``NOT_COLLECTED``) both for the *expected*, warn-only
+    "ran but 0/N symbols matched" outcome of a source-only ``dump --sources``
+    (no binary to link declarations against; see ``_write_snapshot_output``'s
+    G21.7 "collected but linked no facts" warning) **and** for a genuinely
+    *failed* attempt — the selected extractor missing from ``PATH``, or every
+    selected TU failing to parse — which returns the same empty
+    ``SourceAbiSurface()`` shape with the same ``PARTIAL`` status (Codex
+    review, fifth finding: a missing/failing extractor must not satisfy an
+    explicit ``--depth source``, matching representation notwithstanding).
 
-    Falls back to the payload-based ``_layer_payload_empty`` check when no
-    coverage row exists at all, so a hand-built pack (a test fixture, or an
+    The reliable signal is the presence of
+    ``SourceAbiSurface.coverage["compile_units_parsed"]`` specifically — set
+    unconditionally by ``source_replay.run_source_replay`` whenever replay
+    actually executes, independent of whether anything downstream matched
+    against binary exports (parsing happens before, and regardless of,
+    linking). The *key* (not just a non-empty ``coverage`` dict) is what
+    matters: it is absent for the tool-unavailable short-circuit, which
+    returns a bare ``SourceAbiSurface()`` before replay ever runs, but a
+    non-empty ``coverage`` dict populated by a *different* stage —
+    ``link_source_abi``'s own ``reachable_declarations``/``matched_symbols``
+    stats, stamped on a Flow-2 ``inputs_pack.ingest_inputs_pack()`` pack that
+    never went through ``run_source_replay`` at all (pure per-TU-facts
+    parsing, no frontend re-run) — must not be mistaken for "replay ran"
+    just because it happens to be truthy. ``NOT_COLLECTED`` still covers the
+    "no extraction attempted at all" cases (no ``--sources``, no L3 to replay
+    against, or ``--ast-frontend hybrid``, which ``_run_inline_source_abi``
+    records as ``"skipped"``).
+
+    Falls back to the payload-based ``_layer_payload_empty`` check whenever
+    the ``compile_units_parsed`` key is absent — covering both the ingested
+    Flow-2 pack above and a hand-built pack (a test fixture, or an
     out-of-band ``--old/new-sources`` pack assembled without going through
-    ``inline.py``'s coverage stamping) with genuine ``source_abi`` facts but
-    no coverage row is not mistaken for "never attempted".
+    ``inline.py``'s replay) with genuine ``source_abi`` facts but no replay
+    coverage stats, so neither is mistaken for "never attempted".
     """
     from .buildsource.model import CoverageStatus, DataLayer
     from .cli import _layer_payload_empty
 
     cov = build_source.manifest.coverage_for(DataLayer.L4_SOURCE_ABI)
-    if cov is not None:
-        return cov.status != CoverageStatus.NOT_COLLECTED
+    if cov is not None and cov.status == CoverageStatus.NOT_COLLECTED:
+        return False
+    surface = build_source.source_abi
+    if surface is not None and "compile_units_parsed" in surface.coverage:
+        return int(surface.coverage.get("compile_units_parsed", 0) or 0) > 0
     return not _layer_payload_empty(build_source, "L4")
 
 
