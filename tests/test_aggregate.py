@@ -255,6 +255,39 @@ class TestUnexpectedTargets:
         )
         assert r.exit_code() == 1
 
+    def test_fail_on_unreadable_unexpected(self, tmp_path: Path):
+        # An unexpected report that never parsed to a verdict (unreadable /
+        # verdictless) is still a target outside the expected set — under
+        # `fail`, its mere presence fails the gate even though it has no gate
+        # of its own to contribute an exit code.
+        _write_report(tmp_path, LINUX, "COMPATIBLE")
+        (tmp_path / "abi-report-macos-arm64.json").write_text("{ not json")
+        r = aggregate_reports_dir(
+            tmp_path,
+            expected=_expect(LINUX),
+            on_unexpected_target=OnUnexpectedTarget.FAIL,
+        )
+        assert MACOS in {t.target_id for t in r.unbaselined}
+        assert not any(t.analyzed for t in r.unbaselined)
+        assert r.exit_code() == 1
+
+    def test_included_unexpected_break_shows_in_compatibility(self, tmp_path: Path):
+        # An unbaselined BREAKING report that drives the exit code under
+        # `include` must not be hidden behind a "compatible" compatibility
+        # summary — the compat axis has to see gated unexpected targets too.
+        _write_report(tmp_path, LINUX, "COMPATIBLE")
+        _write_report(tmp_path, MACOS, "BREAKING")  # not expected
+        r = aggregate_reports_dir(
+            tmp_path,
+            expected=_expect(LINUX),
+            on_unexpected_target=OnUnexpectedTarget.INCLUDE,
+        )
+        assert r.exit_code() == 4
+        assert r.compatibility_verdict is Verdict.BREAKING
+        assert r.to_dict()["compatibility"]["verdict"] == "BREAKING"
+        assert "No ABI regressions" not in r.render_text()
+        assert MACOS in r.render_text()
+
 
 class TestDiscoveredOnly:
     def test_discovered_only_aggregates_present_no_coverage_gate(self, tmp_path: Path):

@@ -192,6 +192,8 @@ jobs:
     if: ${{ always() }}             # run the gate even if a matrix leg failed
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4    # brings the committed abi-targets.json into the workspace
+
       - name: Download all ABI reports
         uses: actions/download-artifact@v4
         with:
@@ -204,6 +206,12 @@ jobs:
           pip install abicheck --quiet
           abicheck aggregate abi-reports/ --manifest abi-targets.json
 ```
+
+The `actions/checkout` step is what puts the committed `abi-targets.json` on
+disk for `--manifest` to read; without it the gate job only has the downloaded
+reports and `--manifest` (an existing-path flag) fails. If you prefer not to
+check out the repo in the gate job, use the inline `--expect` form below
+instead.
 
 `--manifest` names the **single source of truth** for the targets the matrix
 must produce — commit it next to the workflow and read it from both the matrix

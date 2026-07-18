@@ -254,10 +254,23 @@ class AggregateResult:
 
     # --- compatibility axis (reporting only) --------------------------------
     @property
+    def _compat_targets(self) -> tuple[TargetReport, ...]:
+        """Analyzed targets whose verdict feeds the compatibility summary.
+
+        This is *not* just the expected analyzed targets: any unexpected
+        target whose findings are gated (``--on-unexpected-target
+        include``/``fail``) also contributes, so the reported compatibility can
+        never say "clean" while a gated unbaselined break is driving the exit
+        code. Non-gated unexpected targets (``warn``/``ignore``) are excluded,
+        matching :attr:`_gated_unexpected`.
+        """
+        return self.analyzed + self._gated_unexpected
+
+    @property
     def compatibility_verdict(self) -> Verdict | None:
         verdicts = [
             t.compatibility_verdict
-            for t in self.analyzed
+            for t in self._compat_targets
             if t.compatibility_verdict is not None
         ]
         if not verdicts:
@@ -314,9 +327,10 @@ class AggregateResult:
         code = max((t.gate.exit_code for t in gated if t.gate is not None), default=0)
         if self.coverage_blocking:
             code = max(code, COVERAGE_INCOMPLETE_EXIT)
-        if self.on_unexpected_target is OnUnexpectedTarget.FAIL and any(
-            t.analyzed for t in self.unbaselined
-        ):
+        # ``fail`` fails the gate on *any* unexpected report — including one that
+        # is unreadable/verdictless (so has no gate to contribute above) — since
+        # the policy is "no target outside the expected set is tolerated".
+        if self.on_unexpected_target is OnUnexpectedTarget.FAIL and self.unbaselined:
             code = max(code, COVERAGE_INCOMPLETE_EXIT)
         return code
 
@@ -398,7 +412,7 @@ class AggregateResult:
         if verdict is Verdict.COMPATIBLE_WITH_RISK:
             risky = sorted(
                 t.target_id
-                for t in self.analyzed
+                for t in self._compat_targets
                 if t.compatibility_verdict is Verdict.COMPATIBLE_WITH_RISK
             )
             return f"No ABI regressions; compatible-with-risk on: {', '.join(risky)}."
@@ -408,7 +422,9 @@ class AggregateResult:
         by_verdict = []
         for v in (Verdict.BREAKING, Verdict.API_BREAK):
             hits = sorted(
-                t.target_id for t in self.analyzed if t.compatibility_verdict is v
+                t.target_id
+                for t in self._compat_targets
+                if t.compatibility_verdict is v
             )
             if hits:
                 by_verdict.append(f"{v.value} on: {', '.join(hits)}")
@@ -423,7 +439,7 @@ class AggregateResult:
             "status": "pass" if self.passed else "fail",
             "compatibility": {
                 "verdict": verdict.value if verdict is not None else None,
-                "analyzed_targets": len(self.analyzed),
+                "analyzed_targets": len(self._compat_targets),
             },
             "coverage": {
                 "status": self.coverage.value,
