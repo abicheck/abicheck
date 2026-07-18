@@ -331,9 +331,11 @@ _CASTXML_DOC = """
   <Variable id="_v1" name="g_buf" type="_t1" mangled="g_buf" align="64"/>
   <Variable id="_v2" name="lib_version" type="_t1" mangled="lib_version"/>
   <Variable id="_v3" name="g_typedef" type="_t3" mangled="g_typedef"/>
+  <Variable id="_v4" name="g_array" type="_t4" mangled="g_array"/>
   <FundamentalType id="_t1" name="int" align="32"/>
   <FundamentalType id="_t2" name="char"/>
   <Typedef id="_t3" name="my_int_t" type="_t1"/>
+  <ArrayType id="_t4" min="0" max="3" type="_t1"/>
 </CastXML>
 """
 
@@ -364,6 +366,11 @@ class TestCastxmlExtraction:
         assert by_name["lib_version"].alignment_bits == 32
         # Same fallback resolves through a Typedef to the underlying type.
         assert by_name["g_typedef"].alignment_bits == 32
+        # An ArrayType carries no align/size of its own in real castxml output
+        # (confirmed against a live castxml dump) — the fallback must recurse
+        # into the element type, or every exported array global would be as
+        # exposed to the case61-style false positive as a bare scalar was.
+        assert by_name["g_array"].alignment_bits == 32
 
     def test_type_alignment_bits_guards(self):
         # Direct edge cases the Variable fixtures above can't reach: a real

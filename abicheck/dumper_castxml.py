@@ -487,22 +487,28 @@ class _CastxmlParser:
         Distinct from a Variable's own ``align`` attribute (an *explicit*
         alignas/``__attribute__((aligned))`` override on the declaration —
         see ``parse_variables``): this walks through cv-qualifiers, typedefs,
-        and elaborated-type wrappers to the underlying type node and reads
-        its own ``align``, which castxml always populates with the compiler's
-        actual computed alignment (the same attribute ``_build_record_type``
-        already trusts unconditionally for structs/unions/classes). Used as
-        declared-alignment corroboration evidence for a plain variable with
-        no explicit override, so ``_check_object_alignment_reduced`` isn't
-        left with two ``None``s (and therefore no corroboration at all) for
-        the overwhelming majority of exported globals that never carry an
-        explicit alignment attribute.
+        elaborated-type wrappers, and array types to the underlying type node
+        and reads its own ``align``, which castxml always populates with the
+        compiler's actual computed alignment (the same attribute
+        ``_build_record_type`` already trusts unconditionally for
+        structs/unions/classes). ``ArrayType`` carries no ``align``/``size``
+        of its own (confirmed empirically: an array's alignment is always its
+        element type's) — recursing into its ``type`` is required, not just
+        an optimization, or every exported array global would silently fall
+        back to the same address-derived false-positive risk this method
+        exists to close for scalars. Used as declared-alignment corroboration
+        evidence for a plain variable with no explicit override, so
+        ``_check_object_alignment_reduced`` isn't left with two ``None``s
+        (and therefore no corroboration at all) for the overwhelming majority
+        of exported globals that never carry an explicit alignment
+        attribute.
         """
         if depth > 10 or not id_:
             return None
         el = self._resolve(id_)
         if el is None:
             return None
-        if el.tag in ("CvQualifiedType", "Typedef", "ElaboratedType"):
+        if el.tag in ("CvQualifiedType", "Typedef", "ElaboratedType", "ArrayType"):
             return self._type_alignment_bits(el.get("type", ""), depth + 1)
         return self._optional_int_attr(el, "align")
 
