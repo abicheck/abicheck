@@ -159,7 +159,16 @@ def _qualified_name_for_change(
     old_qualified: dict[str, str],
     new_qualified: dict[str, str],
 ) -> str | None:
-    """Safely recover a C++ qualified name for a function or variable change."""
+    """Safely recover a C++ qualified name for a function or variable change.
+
+    *old_qualified*/*new_qualified* are expected to already merge the
+    function and variable mangled-name indices (a global symbol name is
+    linker-unique regardless of whether it names a function or a variable,
+    so the merge can never collide) — this covers every "changed in place"
+    variable kind (``VAR_TYPE_CHANGED``, ``VAR_BECAME_CONST``,
+    ``VAR_ACCESS_CHANGED``, ...), not just additions/removals, the same way
+    it already did for functions (Codex review).
+    """
     if c.kind in (ChangeKind.FUNC_ADDED, ChangeKind.VAR_ADDED):
         return new_qualified.get(c.symbol)
     if c.kind in (
@@ -184,10 +193,8 @@ def _enrich_source_locations(
     """Fill in source_location and qualified_name on Changes from the model data."""
     type_loc, func_loc, var_loc = _build_location_index(old, new)
 
-    old_qualified = _qualified_functions_by_mangled(old)
-    new_qualified = _qualified_functions_by_mangled(new)
-    old_var_qualified = _qualified_variables_by_mangled(old)
-    new_var_qualified = _qualified_variables_by_mangled(new)
+    old_qualified = _qualified_functions_by_mangled(old) | _qualified_variables_by_mangled(old)
+    new_qualified = _qualified_functions_by_mangled(new) | _qualified_variables_by_mangled(new)
 
     for c in changes:
         if not c.source_location:
@@ -204,8 +211,6 @@ def _enrich_source_locations(
                 c.source_location = loc
         if not c.qualified_name:
             qual = _qualified_name_for_change(c, old_qualified, new_qualified)
-            if not qual and c.kind in (ChangeKind.VAR_ADDED, ChangeKind.VAR_REMOVED):
-                qual = _qualified_name_for_change(c, old_var_qualified, new_var_qualified)
             if qual:
                 c.qualified_name = qual
 

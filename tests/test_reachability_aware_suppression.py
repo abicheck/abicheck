@@ -263,6 +263,43 @@ class TestMarkReachability:
         assert found[0].public_reachable is True
         assert found[0].reachability_kind == "direct_public_symbol"
 
+    def test_public_header_cxx_variable_changed_in_place_is_reachable(self) -> None:
+        """Codex review: the mangled-vs-demangled identity gap is not unique
+        to VAR_ADDED/VAR_REMOVED -- diff_symbols.py sets Change.symbol to the
+        mangled linker name for every "changed in place" variable kind too
+        (VAR_TYPE_CHANGED, VAR_BECAME_CONST/VAR_LOST_CONST,
+        VAR_ALIGNMENT_CHANGED, VAR_VALUE_CHANGED, VAR_ACCESS_CHANGED/WIDENED,
+        VAR_DEPRECATED_ADDED/REMOVED). The variable exists on both sides with
+        the same mangled name, so this exercises _qualified_name_for_change's
+        generic "unchanged mangled symbol, old/new qualified names agree"
+        branch rather than the ADDED/REMOVED branches."""
+        mangled = "_ZN2ns6detail3varE"
+        old = AbiSnapshot(
+            library="libtest.so", version="1.0",
+            variables=[Variable(
+                name="ns::detail::var", mangled=mangled, type="int",
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            )],
+        )
+        new = AbiSnapshot(
+            library="libtest.so", version="1.0",
+            variables=[Variable(
+                name="ns::detail::var", mangled=mangled, type="long",
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            )],
+        )
+        raw_change = Change(
+            kind=ChangeKind.VAR_TYPE_CHANGED, symbol=mangled, description="type changed",
+        )
+        ctx = DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        found = [c for c in ctx.kept if c.kind == ChangeKind.VAR_TYPE_CHANGED]
+        assert len(found) == 1
+        assert found[0].qualified_name == "ns::detail::var"
+        assert found[0].public_reachable is True
+        assert found[0].reachability_kind == "direct_public_symbol"
+
     def test_public_header_enum_member_change_is_reachable(self) -> None:
         """Codex review (fresh evidence): an ENUM_MEMBER_* finding's symbol
         is "EnumName::member" (diff_types.py), not the plain enum name —
@@ -947,6 +984,42 @@ class TestSuppressionPipelineOrderFix:
         ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
 
         found = [c for c in ctx.kept if c.kind == ChangeKind.VAR_REMOVED]
+        assert len(found) == 1
+        assert found[0].public_reachable is True
+        assert ctx.suppressed == []
+
+    def test_broad_namespace_suppression_does_not_hide_reachable_variable_change(
+        self,
+    ) -> None:
+        """Codex review: same as the VAR_REMOVED counterpart above, but for a
+        variable changed in place (VAR_TYPE_CHANGED) -- the mangled-symbol
+        identity gap affects every "changed in place" variable kind, not
+        just additions/removals, since diff_symbols.py sets Change.symbol to
+        the mangled name there too."""
+        mangled = "_ZN2ns6detail3varE"
+        old = AbiSnapshot(
+            library="libtest.so", version="1.0",
+            variables=[Variable(
+                name="ns::detail::var", mangled=mangled, type="int",
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            )],
+        )
+        new = AbiSnapshot(
+            library="libtest.so", version="1.0",
+            variables=[Variable(
+                name="ns::detail::var", mangled=mangled, type="long",
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            )],
+        )
+        raw_change = Change(
+            kind=ChangeKind.VAR_TYPE_CHANGED, symbol=mangled, description="type changed",
+        )
+        suppression = SuppressionList([
+            Suppression(namespace="ns::detail::*", reason="Private implementation details")
+        ])
+        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+
+        found = [c for c in ctx.kept if c.kind == ChangeKind.VAR_TYPE_CHANGED]
         assert len(found) == 1
         assert found[0].public_reachable is True
         assert ctx.suppressed == []

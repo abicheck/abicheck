@@ -1076,11 +1076,21 @@ def test_recommend_collect_mode_cli():
 
 
 def test_dump_collect_mode_off_embeds_nothing(tmp_path):
-    """`--depth headers` collects no source evidence even with a source tree."""
+    """A depth rung that resolves to collect mode "off" collects no source
+    evidence even with a source tree.
+
+    CLI-audit P1: uses ``--depth binary`` rather than ``--depth headers`` --
+    both resolve to the same "off" collect mode (headers/binary depth reach
+    no source method, ADR-037 D5), but a source-only dump (no SO_PATH, no
+    ``-H``) structurally never parses headers, so an *explicit* ``--depth
+    headers`` here would now correctly hard-fail under the strict depth
+    contract (dump never reaches 'headers'). ``--depth binary`` is always
+    satisfied (the floor rung) and exercises the identical "off" suppression
+    path this test cares about."""
     tree = _source_tree(tmp_path)
     out = tmp_path / "s.json"
     result = CliRunner().invoke(main, [
-        "dump", "--sources", str(tree), "--depth", "headers", "-o", str(out),
+        "dump", "--sources", str(tree), "--depth", "binary", "-o", str(out),
     ])
     assert result.exit_code == 0, result.output
     assert load_snapshot(out).build_source is None
