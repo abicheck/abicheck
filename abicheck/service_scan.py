@@ -1049,11 +1049,17 @@ def _kill_process_tree(proc: Any) -> None:
     # that group is excluded and only its (already-detached) descendants, if
     # any, are targeted (Codex review).
     pgids.discard(own_pgid)
+    # Unconditional: proc itself never detached (own_pgid was excluded above
+    # precisely because it's still in the parent's group), so it is never
+    # reached by the killpg sweep below over *descendant* groups. Skipping
+    # this when pgids is non-empty left the direct worker process running
+    # forever whenever it had spawned a detached clang/castxml child but had
+    # not itself detached (CodeRabbit review, PR #591).
+    try:
+        proc.terminate()
+    except (OSError, AttributeError):
+        pass
     if not pgids:
-        try:
-            proc.terminate()
-        except (OSError, AttributeError):
-            pass
         proc.join(5)
         return
     for pgid in pgids:

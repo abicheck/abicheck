@@ -530,8 +530,14 @@ def _parse_clang_ast_result(
             root = json.load(fh)
     except ValueError as exc:
         raise SnapshotError(f"clang AST output was not valid JSON: {exc}") from exc
+    # json.load() above can itself consume the remaining budget on a
+    # multi-GB AST; re-check before the (also non-trivial, streamed) cache
+    # copy so an expired deadline doesn't still complete it and hand the
+    # caller a result for downstream AST walking (CodeRabbit review, PR #591).
+    deadline.check()
     try:
         _atomic_copy(ast_path, cached)
     except OSError:
         pass
+    deadline.check()
     return cast("dict[str, Any]", root)

@@ -368,6 +368,13 @@ class ClangIncludeExtractor:
             cwd = unredact_home(cu.directory) if cu.directory else None
             per_call_timeout = min(self.per_unit_timeout_s, remaining)
             scan_remaining = deadline.remaining()
+            # Whether the OUTER scan --budget (not this extractor's own
+            # per-unit/aggregate cap) is what will actually bind the nested
+            # scope below — decides how a DeadlineExceeded from it is
+            # classified (Codex review, PR #591, round 3).
+            bound_by_scan_deadline = (
+                scan_remaining is not None and scan_remaining < per_call_timeout
+            )
             if scan_remaining is not None:
                 # run_bounded() honors an active outer deadline verbatim (not
                 # min(timeout, left) — a generous --budget must not get
@@ -388,6 +395,16 @@ class ClangIncludeExtractor:
                         timeout=per_call_timeout,
                     )
             except deadline.DeadlineExceeded as exc:
+                if not bound_by_scan_deadline:
+                    # The nested scope was only ever bound by this
+                    # extractor's OWN per-unit/aggregate cap (no active
+                    # --budget, or one with plenty left) — an ordinary
+                    # per-CU timeout, not a scan-budget overflow. Degrade
+                    # like any other single-CU failure instead of
+                    # discarding include maps for every remaining compile
+                    # unit too (Codex review, PR #591, round 3).
+                    self.diagnostics.append(f"clang -M timed out for {cu.id}: {exc}")
+                    continue
                 self.diagnostics.append(
                     f"scan deadline exceeded during clang -M include-map: {exc}"
                 )

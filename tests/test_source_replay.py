@@ -46,13 +46,17 @@ def _cu(cu_id: str, source: str, target_id: str = "", **kw: object) -> CompileUn
     return CompileUnit(id=cu_id, source=source, target_id=target_id, language="CXX", **kw)  # type: ignore[arg-type]
 
 
-_seen_remaining: list[float | None] = []
+def _worker_records_remaining_deadline(cu: CompileUnit) -> tuple[None, str]:
+    """Module-level so it stays picklable if run under a process pool.
 
-
-def _worker_records_remaining_deadline(cu: CompileUnit) -> tuple[None, None]:
-    """Module-level so it stays picklable if run under a process pool."""
-    _seen_remaining.append(deadline.remaining())
-    return None, None
+    Reports the observed ``deadline.remaining()`` through the worker's own
+    return value rather than a module-level list: a ProcessPoolExecutor
+    worker mutates its own private copy of a global, leaving the parent's
+    list empty, so a module-level accumulator only works for the
+    ThreadPoolExecutor backend (CodeRabbit review, PR #591).
+    """
+    remaining = deadline.remaining()
+    return None, "none" if remaining is None else repr(remaining)
 
 
 def _build() -> BuildEvidence:
@@ -931,14 +935,23 @@ def test_extract_cache_misses_propagates_deadline_into_pool_workers() -> None:
     to see no active deadline at all and silently fall back to the extractor's
     fixed default timeout regardless of --budget. _extract_cache_misses must
     capture the deadline before dispatching and re-establish it in each
-    worker."""
-    _seen_remaining.clear()
+    worker.
+
+    Reads the observed values back from _extract_cache_misses's own return
+    value (not a module-level list) so this is valid for both the default
+    ThreadPoolExecutor and the opt-in ABICHECK_L4_EXECUTOR=process
+    ProcessPoolExecutor backend: a ProcessPoolExecutor worker mutates its
+    own private copy of a global list, leaving the parent's list empty
+    (CodeRabbit review, PR #591)."""
     units = [_cu(f"cu://u{i}", f"src/u{i}.cpp") for i in range(4)]
     with deadline.deadline_scope(30.0):
-        _extract_cache_misses(_worker_records_remaining_deadline, units, jobs=4)
-    assert len(_seen_remaining) == 4
-    assert all(r is not None for r in _seen_remaining), (
+        results = _extract_cache_misses(
+            _worker_records_remaining_deadline, units, jobs=4
+        )
+    seen = [None if raw == "none" else float(raw) for _, raw in results]
+    assert len(seen) == 4
+    assert all(r is not None for r in seen), (
         "pool worker saw no active deadline (remaining()=None) — the scan "
         "deadline did not cross the executor boundary"
     )
-    assert all(0 < r <= 30.0 for r in _seen_remaining)
+    assert all(0 < r <= 30.0 for r in seen)

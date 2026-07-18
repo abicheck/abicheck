@@ -1261,6 +1261,49 @@ def test_parse_clang_ast_result_swallows_cache_write_failure(
     assert root == {"kind": "TranslationUnitDecl", "inner": []}
 
 
+def test_parse_clang_ast_result_rechecks_deadline_after_json_load(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # CodeRabbit review (PR #591): json.load() on a multi-GB AST can itself
+    # consume the remaining budget; the existing pre-load deadline.check()
+    # doesn't catch that -- must re-check again before the (also non-trivial)
+    # streamed cache copy, or an expired budget still completes it and hands
+    # back a result for downstream AST walking.
+    ast_path = tmp_path / "ast.json"
+    ast_path.write_text('{"kind": "TranslationUnitDecl", "inner": []}', encoding="utf-8")
+    result = _fake_proc(stdout="", stderr="", returncode=0)
+    real_json_load = dumper_clang_errors.json.load
+
+    def _slow_load(fh):
+        time.sleep(0.05)
+        return real_json_load(fh)
+
+    monkeypatch.setattr(dumper_clang_errors.json, "load", _slow_load)
+    with dumper_clang_errors.deadline.deadline_scope(0.03):
+        with pytest.raises(dumper_clang_errors.deadline.DeadlineExceeded):
+            _parse_clang_ast_result(result, tmp_path / "cache.json", ast_path)
+
+
+def test_parse_clang_ast_result_rechecks_deadline_after_cache_copy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # CodeRabbit review (PR #591): the streamed cache copy (_atomic_copy) can
+    # also consume the remaining budget on a huge AST; re-check once more
+    # before returning so a budget that expired during the copy doesn't
+    # silently hand the result to the (also potentially expensive) caller.
+    ast_path = tmp_path / "ast.json"
+    ast_path.write_text('{"kind": "TranslationUnitDecl", "inner": []}', encoding="utf-8")
+    result = _fake_proc(stdout="", stderr="", returncode=0)
+
+    def _slow_copy(_src, _dst):
+        time.sleep(0.05)
+
+    monkeypatch.setattr(dumper_clang_errors, "_atomic_copy", _slow_copy)
+    with dumper_clang_errors.deadline.deadline_scope(0.03):
+        with pytest.raises(dumper_clang_errors.deadline.DeadlineExceeded):
+            _parse_clang_ast_result(result, tmp_path / "cache.json", ast_path)
+
+
 def test_clang_header_dump_streams_stdout_to_file_not_memory(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

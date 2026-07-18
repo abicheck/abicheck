@@ -371,7 +371,17 @@ def _is_gnu_make_launcher(tool: str) -> bool:
                 text=True,
                 timeout=probe_timeout,
             )
-    except (OSError, subprocess.SubprocessError, deadline.DeadlineExceeded):
+    except deadline.DeadlineExceeded:
+        # The nested scope above already restored the OUTER deadline by the
+        # time this except runs, so re-checking it here distinguishes "only
+        # this probe's local 10s cap expired" (an ordinary unavailable-tool
+        # result) from "the enclosing scan --budget is genuinely gone"
+        # (propagate, don't misreport it as launcher detection failing and
+        # potentially waste more time probing further candidates)
+        # (CodeRabbit review, PR #591).
+        deadline.check()
+        return False
+    except (OSError, subprocess.SubprocessError):
         return False
     return proc.returncode == 0 and "GNU Make" in (proc.stdout or "")
 

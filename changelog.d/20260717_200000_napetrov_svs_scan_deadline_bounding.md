@@ -203,3 +203,50 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   silently skipping registration — an external SIGTERM would then find no
   tracked group for that (still-alive) backgrounded compiler at all. Now
   uses `proc.pid` directly here as well.
+- `deadline._active_pgroups_lock` is now a `threading.RLock()`, not a plain
+  `Lock()`. Python only delivers signals on the main thread; if a SIGTERM
+  arrives mid-`_register_pgroup`/`_unregister_pgroup` while that thread
+  already holds the lock, `install_sigterm_cleanup`'s handler re-entering
+  the same lock on the same thread would self-deadlock with a plain `Lock`
+  (CodeRabbit review, PR #591).
+- Closed the same local-cap-vs-scan-deadline classification gap (see the
+  `include_graph.py`/`_probe_gnu_system_includes`/`build_query.py` fixes
+  above) in two more nested `deadline_scope()` call sites found on a
+  further review pass: `buildsource.include_graph.ClangIncludeExtractor
+  .extract_from_build`'s per-compile-unit `clang -M` probe now only
+  aborts the remaining compile units when the *outer scan* deadline (not
+  its own 120s per-unit cap) was the binding constraint — a local-cap
+  timeout on one compile unit now logs and continues to the next instead
+  of abandoning the rest of the include-map pass; and
+  `build_query._is_gnu_make_launcher`'s GNU Make `--version` probe now
+  re-checks the (by-then-restored) outer deadline after catching
+  `DeadlineExceeded` from its nested scope, propagating only when the
+  outer scan budget is truly exhausted rather than on every hit of its
+  own 10s local cap (CodeRabbit review, PR #591).
+- `service_scan._kill_process_tree` (the MCP worker-process outer
+  watchdog) had a CRITICAL-severity gap: it only called `proc.terminate()`
+  on the direct worker process when it found *no* detached descendant
+  process groups. A worker that spawned a detached clang/castxml child
+  (the common case — `run_bounded` always detaches its subprocess) but
+  had not itself detached would then never be terminated at all on
+  timeout — only its detached descendants were killed, leaving the worker
+  itself running indefinitely. `proc.terminate()` on the direct worker now
+  always runs, unconditionally (CodeRabbit review, PR #591).
+- `dumper_clang_errors._parse_clang_ast_result` re-checks the scan
+  deadline twice more it previously didn't: right after `json.load()`
+  (before the potentially-large AST is cached via `_atomic_copy`) and
+  again right after that cache copy completes (before returning) — a
+  multi-hundred-MB cached AST's load/copy cost was previously invisible
+  to `--budget` on this authoritative L2 path, mirroring the identical
+  post-subprocess gaps already closed elsewhere in this pass (CodeRabbit
+  review, PR #591).
+- `tests/test_source_replay.py`'s pool-worker deadline-propagation test
+  mutated a module-level list from inside the worker to observe
+  `deadline.remaining()` — which only works under the default
+  `ThreadPoolExecutor` backend; a `ProcessPoolExecutor` worker mutates its
+  own private copy, leaving the parent's list empty and the test
+  vacuously passing regardless of whether propagation actually worked.
+  The worker now reports the observed value through its own return value
+  (already threaded back through `_extract_cache_misses`'s result list),
+  which the test reads directly — verified correct under both backends,
+  including `ABICHECK_L4_EXECUTOR=process` (CodeRabbit review, PR #591).

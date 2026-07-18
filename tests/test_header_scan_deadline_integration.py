@@ -192,7 +192,12 @@ def test_pathological_header_aborts_within_bounded_time_under_tiny_budget(
     so, header = pathological_lib
     start = time.monotonic()
     with deadline.deadline_scope(0.05):
-        with pytest.raises((deadline.DeadlineExceeded, subprocess.TimeoutExpired)):
+        # Only DeadlineExceeded: under this active deadline_scope,
+        # run_bounded's own contract is to translate any in-flight timeout
+        # into DeadlineExceeded, never a raw TimeoutExpired (that's reserved
+        # for the fully-unbudgeted case) -- accepting either here would mask
+        # a real regression in that translation (CodeRabbit review, PR #591).
+        with pytest.raises(deadline.DeadlineExceeded):
             dump(so, [header], header_backend="clang")
     elapsed = time.monotonic() - start
     # Generous ceiling (kill-signal delivery + temp-file cleanup), but nowhere

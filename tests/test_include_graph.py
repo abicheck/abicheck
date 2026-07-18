@@ -339,7 +339,13 @@ def test_extractor_is_bound_by_active_scan_deadline(monkeypatch) -> None:
     `--budget`-bound scan deadline was never consulted, only this
     extractor's own local aggregate_timeout_s/per_unit_timeout_s. Must go
     through deadline.run_bounded and stop the loop (not just log and keep
-    going) once the active scan deadline is exhausted."""
+    going) once the active scan deadline is exhausted.
+
+    Round-3 note: the DeadlineExceeded here must be attributable to the
+    OUTER scan deadline (not just this extractor's own local cap) to
+    correctly stop the loop -- an active deadline_scope tighter than the
+    local per-unit/aggregate cap makes that the case (Codex review, PR
+    #591, round 3)."""
     import abicheck.buildsource.include_graph as ig
     from abicheck import deadline
 
@@ -356,9 +362,52 @@ def test_extractor_is_bound_by_active_scan_deadline(monkeypatch) -> None:
         ]
     )
     ext = ClangIncludeExtractor()
-    out = ext.extract_from_build(build)
+    with deadline.deadline_scope(5.0):  # tighter than the 120s per-unit cap
+        out = ext.extract_from_build(build)
     assert out == {}
     assert any("scan deadline exceeded" in d for d in ext.diagnostics)
+
+
+def test_extractor_local_cap_timeout_does_not_abort_remaining_compile_units(
+    monkeypatch,
+) -> None:
+    """Codex review (PR #591), round 3: when the extractor's OWN local
+    per-unit/aggregate cap is what fires (no active --budget, or one with
+    plenty left), that's an ordinary per-CU timeout -- not a scan-budget
+    overflow. Must degrade to a per-CU diagnostic and keep probing later
+    compile units, not discard include maps for all of them."""
+    import abicheck.buildsource.include_graph as ig
+    from abicheck import deadline
+
+    monkeypatch.setattr(ig.shutil, "which", lambda _b: "/usr/bin/clang++")
+    calls: list[str] = []
+
+    def _fake_run(cmd, **_kwargs):
+        calls.append(cmd[-1])
+        if cmd[-1] == "a.cpp":
+            raise deadline.DeadlineExceeded(-1.0)
+
+        class _R:
+            stdout = "foo.o: foo.cpp inc/foo.h"
+            stderr = ""
+
+        return _R()
+
+    monkeypatch.setattr(ig.deadline, "run_bounded", _fake_run)
+    build = BuildEvidence(
+        compile_units=[
+            CompileUnit(id="cu://a", source="a.cpp"),
+            CompileUnit(id="cu://b", source="b.cpp"),
+        ]
+    )
+    ext = ClangIncludeExtractor()
+    # No active outer --budget at all: the local cap is unambiguously what
+    # bound the nested scope.
+    out = ext.extract_from_build(build)
+    assert calls == ["a.cpp", "b.cpp"]  # b.cpp still probed after a.cpp's timeout
+    assert out == {"cu://b": ["foo.cpp", "inc/foo.h"]}
+    assert any("clang -M timed out for cu://a" in d for d in ext.diagnostics)
+    assert not any("scan deadline exceeded" in d for d in ext.diagnostics)
 
 
 def test_collect_evidence_include_graph_missing_clang_degrades(

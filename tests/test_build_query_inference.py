@@ -145,6 +145,44 @@ def test_gnu_make_probe_bounded_by_local_cap_not_full_scan_budget(monkeypatch):
     assert seen_remaining[0] is not None and seen_remaining[0] <= 10.5
 
 
+def test_gnu_make_probe_local_cap_hit_with_generous_scan_budget_returns_false(
+    monkeypatch,
+):
+    """CodeRabbit review (PR #591): hitting this probe's OWN 10s cap is an
+    ordinary "not GNU Make" result, even with an active outer --budget, as
+    long as that outer budget still had more than 10s left when the probe
+    started (so the local cap, not the scan deadline, was what actually
+    bound the nested scope)."""
+    from abicheck import deadline
+
+    monkeypatch.setattr(
+        _bq.deadline, "run_bounded", lambda *_a, **_k: (_ for _ in ()).throw(
+            deadline.DeadlineExceeded(-1.0)
+        )
+    )
+    with deadline.deadline_scope(1800.0):  # generous 30-minute --budget
+        assert _bq._is_gnu_make_launcher("/usr/bin/make") is False
+
+
+def test_gnu_make_probe_propagates_genuine_scan_deadline_exhaustion(monkeypatch):
+    """CodeRabbit review (PR #591): when the OUTER scan --budget (not this
+    probe's own 10s local cap) is what actually expired, the resulting
+    DeadlineExceeded must propagate -- silently returning False would
+    misreport a genuine budget overflow as "GNU Make isn't installed" and
+    could waste more time probing further launcher candidates instead of
+    aborting."""
+    from abicheck import deadline
+
+    monkeypatch.setattr(
+        _bq.deadline, "run_bounded", lambda *_a, **_k: (_ for _ in ()).throw(
+            deadline.DeadlineExceeded(-1.0)
+        )
+    )
+    with deadline.deadline_scope(0.0):  # already-exhausted outer budget
+        with pytest.raises(deadline.DeadlineExceeded):
+            _bq._is_gnu_make_launcher("/usr/bin/make")
+
+
 class _FakeProc:
     def __init__(self, returncode=0, stdout="", stderr=""):
         self.returncode = returncode

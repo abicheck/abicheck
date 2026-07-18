@@ -68,7 +68,12 @@ from typing import Any
 #: SIGTERM (see install_sigterm_cleanup) can find and kill them even though
 #: they are detached (start_new_session=True) from this process's own group.
 _active_pgroups: set[int] = set()
-_active_pgroups_lock = threading.Lock()
+#: RLock, not Lock: install_sigterm_cleanup's handler runs on whichever
+#: thread was interrupted (Python only delivers signals on the main
+#: thread) — if that's the main thread mid-registration, already holding
+#: this lock, a plain Lock would self-deadlock trying to re-acquire it
+#: from inside the handler (CodeRabbit review, PR #591).
+_active_pgroups_lock = threading.RLock()
 
 
 class DeadlineExceeded(Exception):

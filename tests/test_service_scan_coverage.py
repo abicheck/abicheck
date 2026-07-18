@@ -398,6 +398,33 @@ def test_kill_process_tree_kills_detached_descendant_group(
 
 
 @_posix_process_groups
+def test_kill_process_tree_terminates_worker_even_with_detached_descendants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CodeRabbit review (PR #591): when the worker itself never detached
+    (its pgid still equals the parent's group, so it's excluded from the
+    pgid set to avoid killpg-ing the MCP server) but it spawned a detached
+    clang/castxml descendant (pgids stays non-empty), proc.terminate() must
+    still run -- it used to be skipped whenever pgids was non-empty,
+    leaving the direct worker process running forever."""
+    monkeypatch.setattr(
+        os, "getpgid", lambda pid: {4321: 111, 5555: 5555}.get(pid, pid)
+    )
+    monkeypatch.setattr(os, "getpgrp", lambda: 111)  # worker never detached
+    monkeypatch.setattr(os, "killpg", lambda pgid, sig: None)
+
+    def _fake_ps(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert cmd[0] == "ps"
+        return subprocess.CompletedProcess(cmd, 0, stdout="4321 100\n5555 4321\n", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _fake_ps)
+    proc = _FakeProc(pid=4321)  # stays alive → also exercises the killpg sweep
+    _kill_process_tree(proc)
+
+    assert proc.terminated == 1
+
+
+@_posix_process_groups
 def test_kill_process_tree_falls_back_on_oserror(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
