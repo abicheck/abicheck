@@ -185,8 +185,20 @@ class AssessmentManifest:
 
         targets: list[TargetSpec] = []
         for entry in raw_targets:
-            if not isinstance(entry, dict) or not entry.get("id"):
+            if not isinstance(entry, dict):
                 raise ValueError(f"each target needs an 'id': {entry!r}")
+            target_id = entry.get("id")
+            if not isinstance(target_id, str) or not target_id:
+                # str(entry["id"]) would silently coerce a non-string id
+                # (e.g. 123) into "123" — but TargetOutcome.target_id
+                # requires a real str with no coercion, so a manifest id
+                # that only "looks like" the outcome's target_id after
+                # stringification would never actually match it, and
+                # finalize() would wrongly synthesize INCOMPLETE for a
+                # target that did report a matching outcome.
+                raise ValueError(
+                    f"each target needs a non-empty string 'id': {entry!r}"
+                )
             required = entry.get("required", True)
             if not isinstance(required, bool):
                 # bool(None) / bool("false") would silently coerce a null or
@@ -197,7 +209,7 @@ class AssessmentManifest:
                 raise ValueError(
                     f"'required' must be a boolean when present: {entry!r}"
                 )
-            targets.append(TargetSpec(id=str(entry["id"]), required=required))
+            targets.append(TargetSpec(id=target_id, required=required))
 
         # __post_init__ enforces non-empty/unique-id invariants uniformly.
         return cls(
@@ -317,6 +329,16 @@ class TargetOutcome:
             raise ValueError(
                 "INCOMPLETE is synthesized by Assessment.finalize() for a target "
                 "that never reported anything — it is not a state to submit"
+            )
+        if state is TargetState.PENDING:
+            # PENDING has no terminal meaning — it's not a result. Accepting
+            # it here would let record() file it as a normal outcome, and
+            # since it's never ANALYZED, finalize()/coverage_verdict() would
+            # then treat a target that's simply still running as a final
+            # unavailable result.
+            raise ValueError(
+                "PENDING is not a terminal outcome — submit a real result "
+                "(or don't record() anything until one is available)"
             )
         return cls(
             target_id=target_id,
@@ -537,12 +559,15 @@ class Assessment:
         field entirely is dropped too, rather than trusted by default. A
         lower ``attempt`` than one already recorded for the same target is
         also dropped, so a late-arriving retry of an old attempt can't
-        clobber a newer result. An ``INCOMPLETE`` outcome is always dropped —
-        that state is synthesized by :meth:`finalize`, not submitted; letting
-        one through here would let a bogus high-``attempt`` submission block
-        every legitimate result that follows for that target.
+        clobber a newer result. An ``INCOMPLETE`` or ``PENDING`` outcome is
+        always dropped — ``INCOMPLETE`` is synthesized by :meth:`finalize`,
+        not submitted, and ``PENDING`` isn't a terminal result at all;
+        letting either through here would let a bogus high-``attempt``
+        submission block every legitimate result that follows for that
+        target, or let a still-running target read as a final unavailable
+        one.
         """
-        if outcome.state is TargetState.INCOMPLETE:
+        if outcome.state in (TargetState.INCOMPLETE, TargetState.PENDING):
             return
         if self.require_identity and (
             outcome.head_sha is None or outcome.assessment_id is None

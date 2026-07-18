@@ -133,11 +133,23 @@ class TestAssessmentManifest:
                 {"assessment_id": "a", "head_sha": "s", "targets": "linux-x86_64"}
             )
 
-    @pytest.mark.parametrize("bad_entry", ["not-a-dict", {}, {"id": ""}])
+    @pytest.mark.parametrize(
+        "bad_entry", ["not-a-dict", {}, {"id": ""}, {"id": 123}, {"id": None}]
+    )
     def test_from_dict_rejects_malformed_target_entry(self, bad_entry: object):
         with pytest.raises(ValueError):
             AssessmentManifest.from_dict(
                 {"assessment_id": "a", "head_sha": "s", "targets": [bad_entry]}
+            )
+
+    def test_from_dict_does_not_silently_coerce_non_string_id(self):
+        # str(entry["id"]) would previously turn 123 into "123" without
+        # complaint. That could make a manifest id fail to match a
+        # TargetOutcome.target_id submitted for the same logical target,
+        # since TargetOutcome requires a genuine str with no coercion.
+        with pytest.raises(ValueError):
+            AssessmentManifest.from_dict(
+                {"assessment_id": "a", "head_sha": "s", "targets": [{"id": 123}]}
             )
 
     def test_direct_construction_rejects_empty_targets(self):
@@ -221,6 +233,23 @@ class TestTargetOutcome:
         result = assessment.finalize()
 
         assert result.outcomes[LINUX].state is TargetState.ANALYZED
+
+    def test_unavailable_rejects_pending_state(self):
+        # PENDING isn't a terminal result; it must not be constructible as a
+        # submitted outcome via the public factory.
+        with pytest.raises(ValueError):
+            TargetOutcome.unavailable(LINUX, TargetState.PENDING)
+
+    def test_record_drops_submitted_pending_outcome(self):
+        # A still-running target reported as PENDING must not read as a
+        # final unavailable result — record() must ignore it, the same as
+        # INCOMPLETE, even bypassing unavailable()'s guard via direct
+        # construction.
+        assessment = Assessment(_manifest())
+        assessment.record(TargetOutcome(target_id=LINUX, state=TargetState.PENDING))
+        result = assessment.finalize()
+
+        assert result.outcomes[LINUX].state is TargetState.INCOMPLETE
 
     def test_raw_string_state_is_normalized_to_enum(self):
         # A caller hydrating from JSON/CLI input hands us the TargetState's
