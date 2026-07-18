@@ -161,16 +161,25 @@ if [[ -n "$ABI_BASELINE" \
     # normal .json name; the input doc promises a path is used directly).
     BASELINE_FILE="$ABI_BASELINE"
   else
+    # gh release download relies on local git repo context (README: "the
+    # latest release in the project") when no -R/--repo is given -- a job
+    # that never ran actions/checkout (e.g. comparing downloaded release
+    # artifacts only) has none, so the documented auto-fetch would fail
+    # before it even reaches a missing-asset error. Pass -R whenever we
+    # know the repo, same rationale as _gh_pr_comment_fallback above
+    # (Codex review).
+    _GH_REPO_FLAG=()
+    [[ -n "${GITHUB_REPOSITORY:-}" ]] && _GH_REPO_FLAG=(-R "$GITHUB_REPOSITORY")
     if [[ "$ABI_BASELINE" == "latest-release" ]]; then
       echo "::group::Fetch ABI baseline from latest release"
-      if ! gh release download --pattern '*.abicheck.json' -D "$BASELINE_DIR"; then
+      if ! gh release download "${_GH_REPO_FLAG[@]}" --pattern '*.abicheck.json' -D "$BASELINE_DIR"; then
         _baseline_unavailable "No ABI baseline found in latest release. Run 'abicheck dump path/to/libfoo.so -o libfoo.abicheck.json' in your release workflow and upload the resulting *.abicheck.json file as a release asset."
       fi
       echo "::endgroup::"
     else
       # Treat as a tag name
       echo "::group::Fetch ABI baseline from release $ABI_BASELINE"
-      if ! gh release download "$ABI_BASELINE" --pattern '*.abicheck.json' -D "$BASELINE_DIR"; then
+      if ! gh release download "$ABI_BASELINE" "${_GH_REPO_FLAG[@]}" --pattern '*.abicheck.json' -D "$BASELINE_DIR"; then
         _baseline_unavailable "No ABI baseline found in release '$ABI_BASELINE'. Ensure the release has a *.abicheck.json asset."
       fi
       echo "::endgroup::"

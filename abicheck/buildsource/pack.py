@@ -203,12 +203,22 @@ class BuildSourcePack:
         """Stable ``sha256:<hex>`` over the manifest identity + artifact digests.
 
         Excludes volatile fields (``created_at``) so two packs with identical
-        evidence collected at different times hash the same.
+        evidence collected at different times hash the same. ``coverage``
+        rows drop ``detail``/``elapsed_s`` too: build_inline_coverage()
+        (inline.py) stamps those with the same replay wall-clock/cache-hit
+        text (e.g. "cache 2/3 hit (67%), 1.80s") this hash is otherwise
+        supposed to be stable against, so two identical-evidence packs
+        collected with different cache warmth or runner load still hashed
+        differently (Codex review) -- ``layer``/``status``/``confidence``
+        are the row's actual identity.
         """
         ident = {
             "build_source_pack_version": self.manifest.build_source_pack_version,
             "artifacts": sorted(self.manifest.artifacts or self._artifact_digests()),
-            "coverage": [c.to_dict() for c in self.manifest.coverage],
+            "coverage": [
+                {k: v for k, v in c.to_dict().items() if k not in ("detail", "elapsed_s")}
+                for c in self.manifest.coverage
+            ],
             "extractors": [e.name + "@" + e.version for e in self.manifest.extractors],
         }
         blob = json.dumps(ident, sort_keys=True, separators=(",", ":")).encode("utf-8")

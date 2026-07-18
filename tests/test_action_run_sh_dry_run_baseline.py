@@ -196,6 +196,101 @@ class TestAuditSkipsBaselineFetch:
         assert result.returncode == 1, result.stderr
 
 
+class TestGhReleaseDownloadRepoFlag:
+    """Regression (Codex review): `gh release download` relies on local git
+    repo context ("the latest release in the project") when no -R/--repo is
+    given, so a job that never ran actions/checkout (e.g. comparing
+    downloaded release artifacts only) would fail before ever reaching a
+    missing-asset error. Stubs `gh` to record its own argv to a file
+    (real gh isn't available/authenticated in the test environment) instead
+    of asserting behavior indirectly through exit codes.
+    """
+
+    def _run(
+        self, env_extra: dict[str, str], argv_file: Path
+    ) -> subprocess.CompletedProcess[str]:
+        script = (
+            'MODE="${INPUT_MODE:-compare}"\n'
+            'FORCE_AUDIT_ONLY="${INPUT_AUDIT:-false}"\n'
+            'gh() {\n'
+            '  printf "%s\\n" "$@" > "$GH_ARGV_FILE"\n'
+            '  local dir=""; while [[ $# -gt 0 ]]; do '
+            '[[ "$1" == "-D" ]] && dir="$2"; shift; done\n'
+            '  touch "$dir/lib.abicheck.json"\n'
+            '}\n'
+            + _baseline_region()
+            + '\necho "REACHED_END"\n'
+        )
+        env = {**os.environ, **env_extra, "GH_ARGV_FILE": str(argv_file)}
+        return subprocess.run(
+            [_bash_executable(), "-c", script],
+            capture_output=True, text=True, env=env, check=False,
+        )
+
+    def test_latest_release_passes_repo_flag(self, tmp_path: Path) -> None:
+        argv_file = tmp_path / "gh_argv"
+        result = self._run(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_ABI_BASELINE": "latest-release",
+                "GITHUB_REPOSITORY": "abicheck/abicheck",
+            },
+            argv_file,
+        )
+        assert result.returncode == 0, result.stderr
+        argv = argv_file.read_text(encoding="utf-8").splitlines()
+        assert "-R" in argv, argv
+        assert argv[argv.index("-R") + 1] == "abicheck/abicheck"
+
+    def test_tagged_release_passes_repo_flag(self, tmp_path: Path) -> None:
+        argv_file = tmp_path / "gh_argv"
+        result = self._run(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_ABI_BASELINE": "v1.2.3",
+                "GITHUB_REPOSITORY": "abicheck/abicheck",
+            },
+            argv_file,
+        )
+        assert result.returncode == 0, result.stderr
+        argv = argv_file.read_text(encoding="utf-8").splitlines()
+        assert "-R" in argv, argv
+        assert argv[argv.index("-R") + 1] == "abicheck/abicheck"
+
+    def test_no_repo_flag_when_github_repository_unset(self, tmp_path: Path) -> None:
+        """Sanity: -R is only added when the repo is actually known -- an
+        empty flag value would be worse than omitting it."""
+        argv_file = tmp_path / "gh_argv"
+        env = {**os.environ}
+        env.pop("GITHUB_REPOSITORY", None)
+        script = (
+            'MODE="${INPUT_MODE:-compare}"\n'
+            'FORCE_AUDIT_ONLY="${INPUT_AUDIT:-false}"\n'
+            'gh() {\n'
+            '  printf "%s\\n" "$@" > "$GH_ARGV_FILE"\n'
+            '  local dir=""; while [[ $# -gt 0 ]]; do '
+            '[[ "$1" == "-D" ]] && dir="$2"; shift; done\n'
+            '  touch "$dir/lib.abicheck.json"\n'
+            '}\n'
+            + _baseline_region()
+            + '\necho "REACHED_END"\n'
+        )
+        env.update(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_ABI_BASELINE": "latest-release",
+                "GH_ARGV_FILE": str(argv_file),
+            }
+        )
+        result = subprocess.run(
+            [_bash_executable(), "-c", script],
+            capture_output=True, text=True, env=env, check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        argv = argv_file.read_text(encoding="utf-8").splitlines()
+        assert "-R" not in argv, argv
+
+
 class TestAmbiguousBaselineAssets:
     def _run(self, gh_body: str) -> subprocess.CompletedProcess[str]:
         script = (
