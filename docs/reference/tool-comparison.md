@@ -8,10 +8,13 @@ benchmark results across real-world test cases, and why the numbers come out the
 > `examples/` catalog (`case01`-`case73` + `case26b`); the full
 > `examples/ground_truth.json` catalog now has 193 entries. Tool-to-tool
 > competitor scans use the 134 binary shared-library `.so` lanes; fixture/source
-> L2/L5/source cases (`case152`-`case158`, `case160`-`case164`, `case187`-`case193`)
+> L2/L5/source cases (`case152`-`case158`, `case160`-`case164`, `case190`, `case192`-`case193`)
 > and the other audit, cross-source, bundle, BTF, and snapshot cases are tracked
 > in dedicated non-`.so` lanes. The subset is pinned so accuracy numbers stay
-> reproducible across releases.
+> reproducible across releases. (`case187`/`188`/`189`/`191` were fixture-only
+> at the "134" count above but are now real compiled `v1`/`v2` `.so` pairs —
+> not yet folded into that denominator; see the full-catalog benchmark's
+> "Known-stale as of this pass" note below.)
 >
 > **Which denominator is which.** **193** is the whole catalog. The binary
 > competitor lane is **134** shared-library pairs. The scan-depth matrix is
@@ -414,6 +417,20 @@ denominator than "accuracy over cases the tool managed to complete," so read
 it as the answer to *"if I pointed this tool at the whole catalog blind, how
 often would it tell me the truth?"*
 
+> **Known-stale as of this pass.** The reproducibility envelope below
+> describes `case187`-`case191` as L5-only fixtures with no compilable
+> `v1`/`v2` `.so` pair — that stopped being true for `case187`/`188`/`189`/`191`
+> in this pass, which converted those four into real compiled CMake pairs
+> (`case190` is still fixture-only). Their frozen ABICC `SKIP` rows in
+> `scripts/frozen_competitor_results.json` no longer reflect what those tools
+> would actually report against a real `.so`. `_merge_frozen_into_results()`
+> now refuses to merge that cache at all once `ground_truth.json`'s digest no
+> longer matches the `164a517d66f3…` stamp below (its own staleness guard, see
+> `scripts/benchmark_comparison.py`), so `generate_benchmark_report.py --check`
+> will *not* currently reproduce this table byte-for-byte — it needs a fresh
+> `--freeze` run (ABICC/abidiff installed) before the numbers below can be
+> regenerated and this note removed.
+>
 > **Reproducibility envelope.** abicheck `0.5.0`, commit `1d2487c82ec5`,
 > `ground_truth.json` sha256 `164a517d66f3…`. `abicheck`/`abicheck_full`/
 > `abidiff`/`abidiff_headers` generated live via
