@@ -951,7 +951,7 @@ def test_extract_from_args_bounded_by_local_cap_not_full_scan_budget(
         ext.extract_from_args(["x.cpp"])
 
     assert seen_remaining
-    assert seen_remaining[0] is not None and seen_remaining[0] <= 120.5
+    assert seen_remaining[0] is not None and 0 < seen_remaining[0] <= 120.5
 
 
 def test_extract_from_args_rechecks_deadline_before_parsing_ast(monkeypatch) -> None:

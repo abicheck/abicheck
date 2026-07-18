@@ -482,9 +482,18 @@ def test_run_bounded_blocks_sigterm_across_spawn_and_registration(monkeypatch) -
     # across that whole window, unblocked only once registration is done, so
     # a SIGTERM that arrived mid-spawn is deferred until the handler can see
     # the group.
+    #
+    # CodeRabbit review (PR #591, round 10): the restore must use SIG_SETMASK
+    # with the exact previous mask pthread_sigmask(SIG_BLOCK, ...) returned,
+    # not an unconditional SIG_UNBLOCK — the latter would incorrectly clear
+    # SIGTERM even if the calling thread already had it blocked for its own
+    # reasons before entering run_bounded(). The fake pthread_sigmask below
+    # returns a distinguishable sentinel "previous mask" on SIG_BLOCK and
+    # asserts the restore call receives that exact value back.
     calls: list[str] = []
     real_popen = subprocess.Popen
     real_register = deadline._register_pgroup
+    sentinel_prev_mask = frozenset({signal.SIGUSR1})
 
     def _tracking_popen(*a, **kw):
         calls.append("popen")
@@ -495,8 +504,14 @@ def test_run_bounded_blocks_sigterm_across_spawn_and_registration(monkeypatch) -
         return real_register(proc)
 
     def _tracking_sigmask(how, mask):
-        assert signal.SIGTERM in mask
-        calls.append("block" if how == signal.SIG_BLOCK else "unblock")
+        if how == signal.SIG_BLOCK:
+            assert signal.SIGTERM in mask
+            calls.append("block")
+            return sentinel_prev_mask
+        assert how == signal.SIG_SETMASK
+        assert mask == sentinel_prev_mask
+        calls.append("setmask")
+        return mask
 
     monkeypatch.setattr(subprocess, "Popen", _tracking_popen)
     monkeypatch.setattr(deadline, "_register_pgroup", _tracking_register)
@@ -508,7 +523,7 @@ def test_run_bounded_blocks_sigterm_across_spawn_and_registration(monkeypatch) -
         [sys.executable, "-c", "print('hi')"], timeout=5, capture_output=True, text=True
     )
 
-    assert calls == ["block", "popen", "register", "unblock"]
+    assert calls == ["block", "popen", "register", "setmask"]
 
 
 def test_run_bounded_holds_registry_lock_across_spawn_and_registration(

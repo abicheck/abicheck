@@ -4,6 +4,7 @@ Covers _CastxmlParser methods, _castxml_available, _cache_key,
 _parse_vtable_index, _vt_sort_key, _pyelftools_exported_symbols,
 and _castxml_dump error paths.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -30,6 +31,7 @@ from abicheck.model import Visibility
 
 # ── _castxml_available ──────────────────────────────────────────────────
 
+
 class TestCastxmlAvailable:
     def test_returns_true_when_castxml_on_path(self, monkeypatch):
         monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/castxml")
@@ -41,6 +43,7 @@ class TestCastxmlAvailable:
 
 
 # ── _safe_mtime ──────────────────────────────────────────────────────────
+
 
 class TestSafeMtime:
     def test_returns_mtime_for_existing_file(self, tmp_path):
@@ -78,7 +81,9 @@ class TestSafeMtime:
         assert mtime == 0.0
         assert is_epoch is True
 
-    def test_invalid_source_date_epoch_falls_back_to_real_mtime(self, tmp_path, monkeypatch):
+    def test_invalid_source_date_epoch_falls_back_to_real_mtime(
+        self, tmp_path, monkeypatch
+    ):
         p = tmp_path / "lib.so"
         p.write_bytes(b"")
         monkeypatch.setenv("SOURCE_DATE_EPOCH", "not-a-number")
@@ -108,20 +113,25 @@ class TestSafeSize:
 
 # ── _parse_vtable_index ─────────────────────────────────────────────────
 
+
 class TestParseVtableIndex:
-    @pytest.mark.parametrize("input_val,expected", [
-        (None, None),
-        ("3", 3),
-        ("-1", -1),
-        ("abc", None),
-        ("", None),
-        ("0", 0),
-    ])
+    @pytest.mark.parametrize(
+        "input_val,expected",
+        [
+            (None, None),
+            ("3", 3),
+            ("-1", -1),
+            ("abc", None),
+            ("", None),
+            ("0", 0),
+        ],
+    )
     def test_parse_vtable_index(self, input_val, expected):
         assert _parse_vtable_index(input_val) == expected
 
 
 # ── _vt_sort_key ────────────────────────────────────────────────────────
+
 
 class TestVtSortKey:
     def test_with_index(self):
@@ -137,6 +147,7 @@ class TestVtSortKey:
 
 
 # ── _cache_key ──────────────────────────────────────────────────────────
+
 
 class TestCacheKey:
     def test_deterministic(self, tmp_path):
@@ -199,7 +210,17 @@ class TestCacheKey:
         umb.write_text("int a(void);\n", encoding="utf-8")
         root = tmp_path / "pkg"
         root.mkdir()
-        for ext in (".hh", ".hpp", ".hxx", ".h++", ".ipp", ".tpp", ".inc", ".inl", ".tcc"):
+        for ext in (
+            ".hh",
+            ".hpp",
+            ".hxx",
+            ".h++",
+            ".ipp",
+            ".tpp",
+            ".inc",
+            ".inl",
+            ".tcc",
+        ):
             detail = root / f"detail{ext}"
             detail.write_text("int b(void);\n", encoding="utf-8")
             k1 = _cache_key([umb], [], "c++", extra_hash_dirs=(root,))
@@ -232,6 +253,7 @@ class TestCacheKey:
 
 
 # ── _cache_path ─────────────────────────────────────────────────────────
+
 
 class TestCachePath:
     def test_returns_path(self):
@@ -269,6 +291,7 @@ class TestCachePath:
 
 
 # ── _resolve_debug_metadata ─────────────────────────────────────────────
+
 
 class TestResolveDebugMetadata:
     def test_forced_btf_uses_btf_parser(self, tmp_path, monkeypatch):
@@ -353,7 +376,9 @@ class TestResolveDebugMetadata:
         )
         format_out: list[str | None] = []
         dwarf_meta, _ = _resolve_debug_metadata(
-            tmp_path / "vmlinux", None, _format_out=format_out,
+            tmp_path / "vmlinux",
+            None,
+            _format_out=format_out,
         )
         assert dwarf_meta.has_dwarf  # BTF converted to DwarfMetadata
         assert format_out == ["btf"]
@@ -376,7 +401,9 @@ class TestResolveDebugMetadata:
         )
         format_out: list[str | None] = []
         dwarf_meta, _ = _resolve_debug_metadata(
-            tmp_path / "lib.so", None, _format_out=format_out,
+            tmp_path / "lib.so",
+            None,
+            _format_out=format_out,
         )
         assert dwarf_meta.has_dwarf
         assert format_out == ["btf"]
@@ -400,7 +427,9 @@ class TestResolveDebugMetadata:
         )
         format_out: list[str | None] = []
         dwarf_meta, _ = _resolve_debug_metadata(
-            tmp_path / "lib.so", None, _format_out=format_out,
+            tmp_path / "lib.so",
+            None,
+            _format_out=format_out,
         )
         assert dwarf_meta.has_dwarf
         assert format_out == ["ctf"]
@@ -501,6 +530,7 @@ class TestIsKernelBinary:
 
 # ── _pyelftools_exported_symbols ────────────────────────────────────────
 
+
 class TestPyelftoolsExportedSymbols:
     def test_raises_on_invalid_file(self, tmp_path):
         f = tmp_path / "bad.so"
@@ -515,6 +545,7 @@ class TestPyelftoolsExportedSymbols:
 
 # ── _castxml_dump ───────────────────────────────────────────────────────
 
+
 class TestCastxmlDump:
     def test_raises_when_castxml_missing(self, monkeypatch):
         monkeypatch.setattr(shutil, "which", lambda _: None)
@@ -528,6 +559,7 @@ class TestCastxmlDump:
         cache_xml = tmp_path / "cached.xml"
         root = Element("GCC_XML")
         from xml.etree.ElementTree import ElementTree
+
         ElementTree(root).write(str(cache_xml))
 
         # Patch _cache_key/_cache_path to return our cached file
@@ -583,9 +615,52 @@ class TestCastxmlDump:
             with pytest.raises(deadline.DeadlineExceeded):
                 _castxml_dump([Path("h.h")], [])
 
+    def test_fresh_run_rechecks_deadline_after_writing_cache(
+        self, tmp_path, monkeypatch
+    ):
+        """Codex review (PR #591, round 10): after a fresh (non-cached)
+        castxml run parses successfully, _castxml_dump() still re-reads the
+        whole output file (read_bytes) and writes it to the AST cache
+        (_atomic_write) before returning the parsed root -- that read+write
+        can itself consume real time on a huge fresh XML tree, but nothing
+        re-checked the deadline after it. Must re-check before returning."""
+        import subprocess
+        import time
+        from xml.etree.ElementTree import Element as _Element, ElementTree
+
+        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/castxml")
+        monkeypatch.setattr("abicheck.dumper._cache_key", lambda *a, **kw: "k")
+        monkeypatch.setattr("abicheck.dumper._cache_path", lambda k: tmp_path / "c.xml")
+
+        def fake_run(*args, **kwargs):
+            for a in args:
+                if isinstance(a, list):
+                    for part in a:
+                        if str(part).endswith(".xml") and "castxml" not in str(part):
+                            root = _Element("GCC_XML")
+                            root.append(_Element("File", id="f1", name="foo.h"))
+                            ElementTree(root).write(str(part))
+            return subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="", stderr=""
+            )
+
+        monkeypatch.setattr("abicheck.dumper.deadline.run_bounded", fake_run)
+
+        def _slow_atomic_write(path, data):
+            time.sleep(0.05)
+
+        monkeypatch.setattr("abicheck.dumper._atomic_write", _slow_atomic_write)
+
+        from abicheck import deadline
+
+        with deadline.deadline_scope(0.03):
+            with pytest.raises(deadline.DeadlineExceeded):
+                _castxml_dump([Path("h.h")], [])
+
     def test_corrupt_cache_is_discarded(self, tmp_path, monkeypatch):
         """Corrupt cache entry is removed before castxml is re-invoked."""
         import subprocess
+
         monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/castxml")
         # Write an unparseable (empty) XML cache file
         cache_xml = tmp_path / "cached.xml"
@@ -611,20 +686,25 @@ class TestCastxmlDump:
         # subprocess.run must have been called (cache didn't short-circuit)
         assert cache_existed_at_run, "subprocess.run was never called"
         # The corrupt cache must have been deleted BEFORE the re-run
-        assert not cache_existed_at_run[0], "Cache was not deleted before castxml re-run"
+        assert not cache_existed_at_run[0], (
+            "Cache was not deleted before castxml re-run"
+        )
         # And must still be gone after
         assert not cache_xml.exists()
 
     def test_castxml_empty_output_file_raises(self, tmp_path, monkeypatch):
         """castxml exits 0 but writes no output file → RuntimeError."""
         import subprocess
+
         monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/castxml")
         monkeypatch.setattr("abicheck.dumper._cache_key", lambda *a, **kw: "k")
         monkeypatch.setattr("abicheck.dumper._cache_path", lambda k: tmp_path / "c.xml")
 
         def fake_run(*args, **kwargs):
             # Do NOT write out_xml — simulate castxml exiting 0 with no output
-            return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+            return subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="", stderr=""
+            )
 
         monkeypatch.setattr("abicheck.dumper.deadline.run_bounded", fake_run)
         with pytest.raises(RuntimeError, match="no output file"):
@@ -633,6 +713,7 @@ class TestCastxmlDump:
     def test_castxml_invalid_xml_raises(self, tmp_path, monkeypatch):
         """castxml exits 0 but writes invalid XML → RuntimeError."""
         import subprocess
+
         monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/castxml")
         monkeypatch.setattr("abicheck.dumper._cache_key", lambda *a, **kw: "k")
         monkeypatch.setattr("abicheck.dumper._cache_path", lambda k: tmp_path / "c.xml")
@@ -644,7 +725,9 @@ class TestCastxmlDump:
                     for part in a:
                         if str(part).endswith(".xml") and "castxml" not in str(part):
                             Path(part).write_text("<<<not xml>>>")
-            return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+            return subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="", stderr=""
+            )
 
         monkeypatch.setattr("abicheck.dumper.deadline.run_bounded", fake_run)
         with pytest.raises(RuntimeError, match="invalid XML|no output file"):
@@ -654,6 +737,7 @@ class TestCastxmlDump:
         """castxml exits 0 but writes XML with empty root → RuntimeError."""
         import subprocess
         from xml.etree.ElementTree import ElementTree
+
         monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/castxml")
         monkeypatch.setattr("abicheck.dumper._cache_key", lambda *a, **kw: "k")
         monkeypatch.setattr("abicheck.dumper._cache_path", lambda k: tmp_path / "c.xml")
@@ -666,7 +750,9 @@ class TestCastxmlDump:
                         if str(part).endswith(".xml") and "castxml" not in str(part):
                             root = Element("CastXML")
                             ElementTree(root).write(str(part))
-            return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+            return subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="", stderr=""
+            )
 
         monkeypatch.setattr("abicheck.dumper.deadline.run_bounded", fake_run)
         with pytest.raises(RuntimeError, match="empty XML|no output file"):
@@ -674,6 +760,7 @@ class TestCastxmlDump:
 
 
 # ── _CastxmlParser ─────────────────────────────────────────────────────
+
 
 def _xml_root(*children: Element) -> Element:
     """Build a GCC_XML root with child elements."""
@@ -778,7 +865,7 @@ class TestCastxmlParserTypeName:
         # Create a deeply nested pointer chain
         elements = [_fund_type("t0", "int")]
         for i in range(12):
-            elements.append(Element("PointerType", id=f"t{i+1}", type=f"t{i}"))
+            elements.append(Element("PointerType", id=f"t{i + 1}", type=f"t{i}"))
         root = _xml_root(*elements)
         p = _CastxmlParser(root, set(), set())
         result = p._type_name("t12")
@@ -841,8 +928,15 @@ class TestCastxmlParserFunctions:
 
     def test_virtual_method(self):
         ft = _fund_type("t1", "void")
-        m = Element("Method", id="m1", name="render", mangled="_ZN6Widget6renderEv",
-                     returns="t1", virtual="1", vtable_index="0")
+        m = Element(
+            "Method",
+            id="m1",
+            name="render",
+            mangled="_ZN6Widget6renderEv",
+            returns="t1",
+            virtual="1",
+            vtable_index="0",
+        )
         root = _xml_root(ft, m)
         p = _CastxmlParser(root, {"_ZN6Widget6renderEv"}, set())
         funcs = p.parse_functions()
@@ -870,8 +964,14 @@ class TestCastxmlParserFunctions:
 
     def test_noexcept_attribute(self):
         ft = _fund_type("t1", "void")
-        fn = Element("Function", id="f1", name="safe", mangled="_Z4safev",
-                      returns="t1", attributes="noexcept")
+        fn = Element(
+            "Function",
+            id="f1",
+            name="safe",
+            mangled="_Z4safev",
+            returns="t1",
+            attributes="noexcept",
+        )
         root = _xml_root(ft, fn)
         p = _CastxmlParser(root, set(), set())
         funcs = p.parse_functions()
@@ -879,8 +979,16 @@ class TestCastxmlParserFunctions:
 
     def test_static_const_volatile(self):
         ft = _fund_type("t1", "void")
-        fn = Element("Method", id="m1", name="process", mangled="_Z7processv",
-                      returns="t1", static="1", const="1", volatile="1")
+        fn = Element(
+            "Method",
+            id="m1",
+            name="process",
+            mangled="_Z7processv",
+            returns="t1",
+            static="1",
+            const="1",
+            volatile="1",
+        )
         root = _xml_root(ft, fn)
         p = _CastxmlParser(root, set(), set())
         funcs = p.parse_functions()
@@ -890,8 +998,15 @@ class TestCastxmlParserFunctions:
 
     def test_pure_virtual(self):
         ft = _fund_type("t1", "void")
-        m = Element("Method", id="m1", name="draw", mangled="_ZN5Shape4drawEv",
-                     returns="t1", virtual="1", pure_virtual="1")
+        m = Element(
+            "Method",
+            id="m1",
+            name="draw",
+            mangled="_ZN5Shape4drawEv",
+            returns="t1",
+            virtual="1",
+            pure_virtual="1",
+        )
         root = _xml_root(ft, m)
         p = _CastxmlParser(root, set(), set())
         funcs = p.parse_functions()
@@ -899,8 +1014,14 @@ class TestCastxmlParserFunctions:
 
     def test_deleted_function(self):
         ft = _fund_type("t1", "void")
-        fn = Element("Function", id="f1", name="bad", mangled="_Z3badv",
-                      returns="t1", deleted="1")
+        fn = Element(
+            "Function",
+            id="f1",
+            name="bad",
+            mangled="_Z3badv",
+            returns="t1",
+            deleted="1",
+        )
         root = _xml_root(ft, fn)
         p = _CastxmlParser(root, set(), set())
         funcs = p.parse_functions()
@@ -922,7 +1043,9 @@ class TestCastxmlParserFunctions:
 class TestCastxmlParserVariables:
     def test_parse_variable(self):
         ft = _fund_type("t1", "int")
-        v = Element("Variable", id="v1", name="global_var", mangled="_Z10global_var", type="t1")
+        v = Element(
+            "Variable", id="v1", name="global_var", mangled="_Z10global_var", type="t1"
+        )
         root = _xml_root(ft, v)
         p = _CastxmlParser(root, {"_Z10global_var"}, set())
         variables = p.parse_variables()
@@ -1070,10 +1193,24 @@ class TestCastxmlParserTypes:
 class TestCastxmlParserVtable:
     def test_vtable_from_virtual_methods(self):
         cls = Element("Class", id="c1", name="Shape")
-        m1 = Element("Method", id="m1", name="draw", mangled="_ZN5Shape4drawEv",
-                      virtual="1", vtable_index="0", context="c1")
-        m2 = Element("Method", id="m2", name="area", mangled="_ZN5Shape4areaEv",
-                      virtual="1", vtable_index="1", context="c1")
+        m1 = Element(
+            "Method",
+            id="m1",
+            name="draw",
+            mangled="_ZN5Shape4drawEv",
+            virtual="1",
+            vtable_index="0",
+            context="c1",
+        )
+        m2 = Element(
+            "Method",
+            id="m2",
+            name="area",
+            mangled="_ZN5Shape4areaEv",
+            virtual="1",
+            vtable_index="1",
+            context="c1",
+        )
         root = _xml_root(cls, m1, m2)
         p = _CastxmlParser(root, set(), set())
         types = p.parse_types()
@@ -1081,8 +1218,15 @@ class TestCastxmlParserVtable:
 
     def test_vtable_inherited(self):
         base = Element("Class", id="c1", name="Base")
-        m1 = Element("Method", id="m1", name="foo", mangled="_ZN4Base3fooEv",
-                      virtual="1", vtable_index="0", context="c1")
+        m1 = Element(
+            "Method",
+            id="m1",
+            name="foo",
+            mangled="_ZN4Base3fooEv",
+            virtual="1",
+            vtable_index="0",
+            context="c1",
+        )
         derived = Element("Class", id="c2", name="Derived")
         SubElement(derived, "Base", type="c1")
         root = _xml_root(base, derived, m1)
@@ -1093,12 +1237,26 @@ class TestCastxmlParserVtable:
 
     def test_vtable_override(self):
         base = Element("Class", id="c1", name="Base")
-        m1 = Element("Method", id="m1", name="foo", mangled="_ZN4Base3fooEv",
-                      virtual="1", vtable_index="0", context="c1")
+        m1 = Element(
+            "Method",
+            id="m1",
+            name="foo",
+            mangled="_ZN4Base3fooEv",
+            virtual="1",
+            vtable_index="0",
+            context="c1",
+        )
         derived = Element("Class", id="c2", name="Derived")
         SubElement(derived, "Base", type="c1")
-        m2 = Element("Method", id="m2", name="foo", mangled="_ZN7Derived3fooEv",
-                      virtual="1", vtable_index="0", context="c2")
+        m2 = Element(
+            "Method",
+            id="m2",
+            name="foo",
+            mangled="_ZN7Derived3fooEv",
+            virtual="1",
+            vtable_index="0",
+            context="c2",
+        )
         root = _xml_root(base, derived, m1, m2)
         p = _CastxmlParser(root, set(), set())
         types = p.parse_types()
@@ -1113,12 +1271,25 @@ class TestCastxmlParserVtable:
         attribute is that fallback: it must still collapse to one slot.
         """
         base = Element("Class", id="c1", name="Base")
-        m1 = Element("Method", id="m1", name="paint", mangled="_ZN4Base5paintEi",
-                      virtual="1", context="c1")
+        m1 = Element(
+            "Method",
+            id="m1",
+            name="paint",
+            mangled="_ZN4Base5paintEi",
+            virtual="1",
+            context="c1",
+        )
         derived = Element("Class", id="c2", name="Derived")
         SubElement(derived, "Base", type="c1")
-        m2 = Element("Method", id="m2", name="paint", mangled="_ZN7Derived5paintEi",
-                      virtual="1", context="c2", overrides="m1")
+        m2 = Element(
+            "Method",
+            id="m2",
+            name="paint",
+            mangled="_ZN7Derived5paintEi",
+            virtual="1",
+            context="c2",
+            overrides="m1",
+        )
         root = _xml_root(base, derived, m1, m2)
         p = _CastxmlParser(root, set(), set())
         types = p.parse_types()
@@ -1132,12 +1303,24 @@ class TestCastxmlParserVtable:
         vtable by one entry rather than being collapsed away.
         """
         base = Element("Class", id="c1", name="Base")
-        m1 = Element("Method", id="m1", name="paint", mangled="_ZN4Base5paintEi",
-                      virtual="1", context="c1")
+        m1 = Element(
+            "Method",
+            id="m1",
+            name="paint",
+            mangled="_ZN4Base5paintEi",
+            virtual="1",
+            context="c1",
+        )
         derived = Element("Class", id="c2", name="Derived")
         SubElement(derived, "Base", type="c1")
-        m2 = Element("Method", id="m2", name="paint", mangled="_ZN7Derived5paintEd",
-                      virtual="1", context="c2")
+        m2 = Element(
+            "Method",
+            id="m2",
+            name="paint",
+            mangled="_ZN7Derived5paintEd",
+            virtual="1",
+            context="c2",
+        )
         root = _xml_root(base, derived, m1, m2)
         p = _CastxmlParser(root, set(), set())
         types = p.parse_types()
@@ -1150,16 +1333,36 @@ class TestCastxmlParserVtable:
         (not root) base declaration, must still collapse to a single slot.
         """
         base = Element("Class", id="c1", name="Base")
-        m1 = Element("Method", id="m1", name="foo", mangled="_ZN4Base3fooEv",
-                      virtual="1", context="c1")
+        m1 = Element(
+            "Method",
+            id="m1",
+            name="foo",
+            mangled="_ZN4Base3fooEv",
+            virtual="1",
+            context="c1",
+        )
         mid = Element("Class", id="c2", name="Mid")
         SubElement(mid, "Base", type="c1")
-        m2 = Element("Method", id="m2", name="foo", mangled="_ZN3Mid3fooEv",
-                      virtual="1", context="c2", overrides="m1")
+        m2 = Element(
+            "Method",
+            id="m2",
+            name="foo",
+            mangled="_ZN3Mid3fooEv",
+            virtual="1",
+            context="c2",
+            overrides="m1",
+        )
         derived = Element("Class", id="c3", name="Derived")
         SubElement(derived, "Base", type="c2")
-        m3 = Element("Method", id="m3", name="foo", mangled="_ZN7Derived3fooEv",
-                      virtual="1", context="c3", overrides="m2")
+        m3 = Element(
+            "Method",
+            id="m3",
+            name="foo",
+            mangled="_ZN7Derived3fooEv",
+            virtual="1",
+            context="c3",
+            overrides="m2",
+        )
         root = _xml_root(base, mid, derived, m1, m2, m3)
         p = _CastxmlParser(root, set(), set())
         types = p.parse_types()
@@ -1176,16 +1379,37 @@ class TestCastxmlParserVtable:
         through the hierarchy.
         """
         base = Element("Class", id="c1", name="Base")
-        m1 = Element("Method", id="m1", name="foo", mangled="_ZN4Base3fooEv",
-                      virtual="1", vtable_index="0", context="c1")
+        m1 = Element(
+            "Method",
+            id="m1",
+            name="foo",
+            mangled="_ZN4Base3fooEv",
+            virtual="1",
+            vtable_index="0",
+            context="c1",
+        )
         mid = Element("Class", id="c2", name="Mid")
         SubElement(mid, "Base", type="c1")
-        m2 = Element("Method", id="m2", name="foo", mangled="_ZN3Mid3fooEv",
-                      virtual="1", vtable_index="0", context="c2")
+        m2 = Element(
+            "Method",
+            id="m2",
+            name="foo",
+            mangled="_ZN3Mid3fooEv",
+            virtual="1",
+            vtable_index="0",
+            context="c2",
+        )
         derived = Element("Class", id="c3", name="Derived")
         SubElement(derived, "Base", type="c2")
-        m3 = Element("Method", id="m3", name="foo", mangled="_ZN7Derived3fooEv",
-                      virtual="1", context="c3", overrides="m2")
+        m3 = Element(
+            "Method",
+            id="m3",
+            name="foo",
+            mangled="_ZN7Derived3fooEv",
+            virtual="1",
+            context="c3",
+            overrides="m2",
+        )
         root = _xml_root(base, mid, derived, m1, m2, m3)
         p = _CastxmlParser(root, set(), set())
         types = p.parse_types()
@@ -1200,14 +1424,35 @@ class TestCastxmlParserVtable:
         read as a spurious vtable reorder even though nothing moved.
         """
         base = Element("Class", id="c1", name="Base")
-        m1 = Element("Method", id="m1", name="foo", mangled="_ZN4Base3fooEv",
-                      virtual="1", vtable_index="0", context="c1")
-        m2 = Element("Method", id="m2", name="bar", mangled="_ZN4Base3barEv",
-                      virtual="1", vtable_index="1", context="c1")
+        m1 = Element(
+            "Method",
+            id="m1",
+            name="foo",
+            mangled="_ZN4Base3fooEv",
+            virtual="1",
+            vtable_index="0",
+            context="c1",
+        )
+        m2 = Element(
+            "Method",
+            id="m2",
+            name="bar",
+            mangled="_ZN4Base3barEv",
+            virtual="1",
+            vtable_index="1",
+            context="c1",
+        )
         derived = Element("Class", id="c2", name="Derived")
         SubElement(derived, "Base", type="c1")
-        m3 = Element("Method", id="m3", name="foo", mangled="_ZN7Derived3fooEv",
-                      virtual="1", context="c2", overrides="m1")
+        m3 = Element(
+            "Method",
+            id="m3",
+            name="foo",
+            mangled="_ZN7Derived3fooEv",
+            virtual="1",
+            context="c2",
+            overrides="m1",
+        )
         root = _xml_root(base, derived, m1, m2, m3)
         p = _CastxmlParser(root, set(), set())
         types = p.parse_types()
@@ -1221,12 +1466,26 @@ class TestCastxmlParserVtable:
         rather than opening a second, int-keyed slot alongside it.
         """
         base = Element("Class", id="c1", name="Base")
-        m1 = Element("Method", id="m1", name="foo", mangled="_ZN4Base3fooEv",
-                      virtual="1", context="c1")
+        m1 = Element(
+            "Method",
+            id="m1",
+            name="foo",
+            mangled="_ZN4Base3fooEv",
+            virtual="1",
+            context="c1",
+        )
         derived = Element("Class", id="c2", name="Derived")
         SubElement(derived, "Base", type="c1")
-        m2 = Element("Method", id="m2", name="foo", mangled="_ZN7Derived3fooEv",
-                      virtual="1", vtable_index="0", context="c2", overrides="m1")
+        m2 = Element(
+            "Method",
+            id="m2",
+            name="foo",
+            mangled="_ZN7Derived3fooEv",
+            virtual="1",
+            vtable_index="0",
+            context="c2",
+            overrides="m1",
+        )
         root = _xml_root(base, derived, m1, m2)
         p = _CastxmlParser(root, set(), set())
         types = p.parse_types()
@@ -1243,14 +1502,34 @@ class TestCastxmlParserVtable:
         ``[Derived::bar, Base::foo]`` (a spurious reorder).
         """
         base = Element("Class", id="c1", name="Base")
-        m1 = Element("Method", id="m1", name="foo", mangled="_ZN4Base3fooEv",
-                      virtual="1", context="c1")
-        m2 = Element("Method", id="m2", name="bar", mangled="_ZN4Base3barEv",
-                      virtual="1", context="c1")
+        m1 = Element(
+            "Method",
+            id="m1",
+            name="foo",
+            mangled="_ZN4Base3fooEv",
+            virtual="1",
+            context="c1",
+        )
+        m2 = Element(
+            "Method",
+            id="m2",
+            name="bar",
+            mangled="_ZN4Base3barEv",
+            virtual="1",
+            context="c1",
+        )
         derived = Element("Class", id="c2", name="Derived")
         SubElement(derived, "Base", type="c1")
-        m3 = Element("Method", id="m3", name="bar", mangled="_ZN7Derived3barEv",
-                      virtual="1", vtable_index="1", context="c2", overrides="m2")
+        m3 = Element(
+            "Method",
+            id="m3",
+            name="bar",
+            mangled="_ZN7Derived3barEv",
+            virtual="1",
+            vtable_index="1",
+            context="c2",
+            overrides="m2",
+        )
         root = _xml_root(base, derived, m1, m2, m3)
         p = _CastxmlParser(root, set(), set())
         types = p.parse_types()
@@ -1268,12 +1547,25 @@ class TestCastxmlParserVtable:
         names.
         """
         base = Element("Class", id="c1", name="Base")
-        m1 = Element("Method", id="m1", name="foo", mangled="_ZN4Base3fooEv",
-                      virtual="1", context="c1")
+        m1 = Element(
+            "Method",
+            id="m1",
+            name="foo",
+            mangled="_ZN4Base3fooEv",
+            virtual="1",
+            context="c1",
+        )
         derived = Element("Class", id="c2", name="Derived")
         SubElement(derived, "Base", type="c1")
-        m2 = Element("Method", id="m2", name="foo", mangled="_ZN7Derived3fooEv",
-                      virtual="1", context="c2", overrides="m1 nonexistent")
+        m2 = Element(
+            "Method",
+            id="m2",
+            name="foo",
+            mangled="_ZN7Derived3fooEv",
+            virtual="1",
+            context="c2",
+            overrides="m1 nonexistent",
+        )
         root = _xml_root(base, derived, m1, m2)
         p = _CastxmlParser(root, set(), set())
         types = p.parse_types()
@@ -1291,16 +1583,35 @@ class TestCastxmlParserVtable:
         name.
         """
         base1 = Element("Class", id="c1", name="Base1")
-        m1 = Element("Method", id="m1", name="foo", mangled="_ZN5Base13fooEv",
-                      virtual="1", context="c1")
+        m1 = Element(
+            "Method",
+            id="m1",
+            name="foo",
+            mangled="_ZN5Base13fooEv",
+            virtual="1",
+            context="c1",
+        )
         base2 = Element("Class", id="c2", name="Base2")
-        m2 = Element("Method", id="m2", name="foo", mangled="_ZN5Base23fooEv",
-                      virtual="1", context="c2")
+        m2 = Element(
+            "Method",
+            id="m2",
+            name="foo",
+            mangled="_ZN5Base23fooEv",
+            virtual="1",
+            context="c2",
+        )
         derived = Element("Class", id="c3", name="Derived")
         SubElement(derived, "Base", type="c1")
         SubElement(derived, "Base", type="c2")
-        m3 = Element("Method", id="m3", name="foo", mangled="_ZN7Derived3fooEv",
-                      virtual="1", context="c3", overrides="m1 m2")
+        m3 = Element(
+            "Method",
+            id="m3",
+            name="foo",
+            mangled="_ZN7Derived3fooEv",
+            virtual="1",
+            context="c3",
+            overrides="m1 m2",
+        )
         root = _xml_root(base1, base2, derived, m1, m2, m3)
         p = _CastxmlParser(root, set(), set())
         types = p.parse_types()
@@ -1316,25 +1627,54 @@ class TestCastxmlParserVtable:
         to register as its primary key.
         """
         base1 = Element("Class", id="c1", name="Base1")
-        m1 = Element("Method", id="m1", name="foo", mangled="_ZN5Base13fooEv",
-                      virtual="1", context="c1")
+        m1 = Element(
+            "Method",
+            id="m1",
+            name="foo",
+            mangled="_ZN5Base13fooEv",
+            virtual="1",
+            context="c1",
+        )
         base2 = Element("Class", id="c2", name="Base2")
-        m2 = Element("Method", id="m2", name="foo", mangled="_ZN5Base23fooEv",
-                      virtual="1", context="c2")
+        m2 = Element(
+            "Method",
+            id="m2",
+            name="foo",
+            mangled="_ZN5Base23fooEv",
+            virtual="1",
+            context="c2",
+        )
         derived = Element("Class", id="c3", name="Derived")
         SubElement(derived, "Base", type="c1")
         SubElement(derived, "Base", type="c2")
-        m3 = Element("Method", id="m3", name="foo", mangled="_ZN7Derived3fooEv",
-                      virtual="1", context="c3", overrides="m1 m2")
+        m3 = Element(
+            "Method",
+            id="m3",
+            name="foo",
+            mangled="_ZN7Derived3fooEv",
+            virtual="1",
+            context="c3",
+            overrides="m1 m2",
+        )
         more_derived = Element("Class", id="c4", name="MoreDerived")
         SubElement(more_derived, "Base", type="c3")
-        m4 = Element("Method", id="m4", name="foo", mangled="_ZN11MoreDerived3fooEv",
-                      virtual="1", context="c4", overrides="m3")
+        m4 = Element(
+            "Method",
+            id="m4",
+            name="foo",
+            mangled="_ZN11MoreDerived3fooEv",
+            virtual="1",
+            context="c4",
+            overrides="m3",
+        )
         root = _xml_root(base1, base2, derived, more_derived, m1, m2, m3, m4)
         p = _CastxmlParser(root, set(), set())
         types = p.parse_types()
         more_derived_t = next(t for t in types if t.name == "MoreDerived")
-        assert more_derived_t.vtable == ["_ZN11MoreDerived3fooEv", "_ZN11MoreDerived3fooEv"]
+        assert more_derived_t.vtable == [
+            "_ZN11MoreDerived3fooEv",
+            "_ZN11MoreDerived3fooEv",
+        ]
 
     def test_vtable_overrides_all_ids_unresolvable_falls_back_to_composite_key(self):
         """An ``overrides`` id list where none of the listed ids resolve to a
@@ -1366,12 +1706,25 @@ class TestCastxmlParserVtable:
         keys must actually skip the repeat rather than double-applying it.
         """
         base = Element("Class", id="c1", name="Base")
-        m1 = Element("Method", id="m1", name="foo", mangled="_ZN4Base3fooEv",
-                      virtual="1", context="c1")
+        m1 = Element(
+            "Method",
+            id="m1",
+            name="foo",
+            mangled="_ZN4Base3fooEv",
+            virtual="1",
+            context="c1",
+        )
         derived = Element("Class", id="c2", name="Derived")
         SubElement(derived, "Base", type="c1")
-        m2 = Element("Method", id="m2", name="foo", mangled="_ZN7Derived3fooEv",
-                      virtual="1", context="c2", overrides="m1 m1")
+        m2 = Element(
+            "Method",
+            id="m2",
+            name="foo",
+            mangled="_ZN7Derived3fooEv",
+            virtual="1",
+            context="c2",
+            overrides="m1 m1",
+        )
         root = _xml_root(base, derived, m1, m2)
         p = _CastxmlParser(root, set(), set())
         types = p.parse_types()
@@ -1386,8 +1739,14 @@ class TestCastxmlParserVtable:
         it first.
         """
         base = Element("Class", id="c1", name="Base")
-        m1 = Element("Method", id="m1", name="foo", mangled="_ZN4Base3fooEv",
-                      virtual="1", context="c1")
+        m1 = Element(
+            "Method",
+            id="m1",
+            name="foo",
+            mangled="_ZN4Base3fooEv",
+            virtual="1",
+            context="c1",
+        )
         left = Element("Class", id="c2", name="Left")
         SubElement(left, "Base", type="c1")
         right = Element("Class", id="c3", name="Right")
@@ -1426,8 +1785,9 @@ class TestCastxmlParserVtable:
         castxml output) must still contribute its slot -- just without being
         recorded in `_vtable_slot_root`, since there's no id to key it by."""
         cls = Element("Class", id="c1", name="C")
-        method = Element("Method", name="foo", mangled="_ZN1C3fooEv",
-                          virtual="1", context="c1")
+        method = Element(
+            "Method", name="foo", mangled="_ZN1C3fooEv", virtual="1", context="c1"
+        )
         root = _xml_root(cls, method)
         p = _CastxmlParser(root, set(), set())
         types = p.parse_types()

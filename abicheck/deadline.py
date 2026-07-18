@@ -272,8 +272,15 @@ def run_bounded(
         #
         # Deferred/blocked here, released the instant registration
         # completes, by which point any handler invocation sees the tracked
-        # pgid.
-        signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
+        # pgid. Restoring the exact previous mask (SIG_SETMASK) rather than
+        # unconditionally SIG_UNBLOCK-ing SIGTERM: pthread_sigmask(SIG_BLOCK,
+        # ...) returns the mask as it was *before* this change, so if the
+        # calling thread already had SIGTERM blocked for its own reasons
+        # (e.g. a nested run_bounded() call, or a caller with its own
+        # signal-deferral scope), SIG_UNBLOCK would incorrectly clear that
+        # pre-existing block instead of leaving it exactly as found
+        # (CodeRabbit review, PR #591, round 10).
+        prev_sigmask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
         _active_pgroups_lock.acquire()
     try:
         proc = subprocess.Popen(  # noqa: S603 — cmd is caller-built argv, never shell text
@@ -289,7 +296,7 @@ def run_bounded(
     finally:
         if use_pgroup:
             _active_pgroups_lock.release()
-            signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM})
+            signal.pthread_sigmask(signal.SIG_SETMASK, prev_sigmask)
     try:
         try:
             out, err = proc.communicate(input=input, timeout=effective_timeout)

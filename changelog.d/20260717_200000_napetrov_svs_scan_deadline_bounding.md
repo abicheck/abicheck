@@ -416,3 +416,22 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   every group *it* has registered before the process actually exits —
   independent of what the outer descendant-pgid snapshot did or didn't see
   (Codex review, PR #591, round 9).
+- **A fresh (non-cached) castxml run still cost real time after its last
+  deadline check.** `_castxml_dump()` re-reads the whole output file
+  (`read_bytes()`) and writes it to the AST disk cache (`_atomic_write`)
+  *after* `_validate_castxml_output`'s post-parse `deadline.check()` and
+  before returning the parsed root — for a huge fresh XML tree that
+  read+write is not free, and nothing re-checked the deadline before handing
+  the root back to the L2 caller. Added a `deadline.check()` right before
+  `return root` (Codex review, PR #591, round 10).
+- **`run_bounded()`'s SIGTERM defer now restores the exact previous signal
+  mask instead of unconditionally unblocking SIGTERM.** The round-6/7 fix
+  blocked SIGTERM with `signal.pthread_sigmask(SIG_BLOCK, ...)` before
+  `Popen()`/`_register_pgroup()` and un-deferred it with `SIG_UNBLOCK`
+  afterward — but `SIG_UNBLOCK` unconditionally clears SIGTERM from the
+  blocked set, which would incorrectly un-defer it even if the calling
+  thread already had SIGTERM blocked for its own reasons before entering
+  `run_bounded()` (e.g. a nested call, or a caller with its own
+  signal-deferral scope). Now captures the mask `pthread_sigmask(SIG_BLOCK,
+  ...)` returns (the mask as it was *before* the change) and restores that
+  exact mask via `SIG_SETMASK` instead (CodeRabbit review, PR #591, round 10).

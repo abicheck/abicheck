@@ -1098,6 +1098,12 @@ def _castxml_dump(
             _atomic_write(cached, out_xml.read_bytes())
         except OSError as exc:
             log.warning("Could not write castxml AST cache %s: %s", cached, exc)
+        # Re-reading the whole XML file (read_bytes) and writing the cache copy
+        # can itself consume real time on a huge fresh tree; re-check before
+        # handing the already-parsed root back to the caller, mirroring the
+        # pre-cache-write check in _validate_castxml_output (Codex review,
+        # PR #591, round 10).
+        deadline.check()
         return root
     finally:
         out_xml.unlink(missing_ok=True)

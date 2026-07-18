@@ -2425,7 +2425,7 @@ def test_run_ast_to_file_bounded_by_local_cap_not_full_scan_budget(monkeypatch) 
 
     assert seen_remaining
     # Bound by the extractor's own ~10s local cap, not the 1800s scan budget.
-    assert seen_remaining[0] is not None and seen_remaining[0] <= 10.5
+    assert seen_remaining[0] is not None and 0 < seen_remaining[0] <= 10.5
 
 
 def test_run_bounded_by_local_cap_not_full_scan_budget(monkeypatch) -> None:
@@ -2447,7 +2447,7 @@ def test_run_bounded_by_local_cap_not_full_scan_budget(monkeypatch) -> None:
             extractor._run(["clang"], "", "x.cpp")
 
     assert seen_remaining
-    assert seen_remaining[0] is not None and seen_remaining[0] <= 10.5
+    assert seen_remaining[0] is not None and 0 < seen_remaining[0] <= 10.5
 
 
 def test_build_clang_macro_command_gnu_and_msvc() -> None:
