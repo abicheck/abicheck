@@ -387,18 +387,28 @@ class TestBundledLlvmCmakePrefix:
 
     def test_explicit_override_wins(self, tmp_path: Path) -> None:
         result = _run_predicate(
-            f'_bundled_llvm_cmake_prefix "{tmp_path}/explicit" "{tmp_path}/cmplr"'
+            f'_bundled_llvm_cmake_prefix "{tmp_path}/explicit" "{tmp_path}/cmplr" '
+            f'"{tmp_path}/cmplr/bin/icpx"'
         )
         assert result.stdout.strip() == f"{tmp_path}/explicit"
 
     def test_detects_cmplr_root_with_llvm_cmake_package(self, tmp_path: Path) -> None:
         cmplr_root = tmp_path / "cmplr"
         (cmplr_root / "lib" / "cmake" / "llvm").mkdir(parents=True)
-        result = _run_predicate(f'_bundled_llvm_cmake_prefix "" "{cmplr_root}"')
-        assert result.stdout.strip() == str(cmplr_root / "lib" / "cmake")
+        # The resolved compiler must live under $CMPLR_ROOT for auto-use to
+        # apply -- see test_empty_when_compiler_not_under_cmplr_root below.
+        compiler_path = cmplr_root / "bin" / "icpx"
+        result = _run_predicate(
+            f'_bundled_llvm_cmake_prefix "" "{cmplr_root}" "{compiler_path}"'
+        )
+        # Plain string concatenation ("$cmplr_root/lib/cmake"), not a
+        # pathlib-style join -- str(cmplr_root / "lib" / "cmake") uses
+        # backslashes on Windows and would spuriously mismatch this
+        # function's forward-slash output there.
+        assert result.stdout.strip() == f"{cmplr_root}/lib/cmake"
 
     def test_empty_when_cmplr_root_unset(self) -> None:
-        result = _run_predicate('_bundled_llvm_cmake_prefix "" ""')
+        result = _run_predicate('_bundled_llvm_cmake_prefix "" "" ""')
         assert result.stdout.strip() == ""
 
     def test_empty_when_cmplr_root_has_no_llvm_cmake_package(
@@ -409,7 +419,26 @@ class TestBundledLlvmCmakePrefix:
         # mistaken for one.
         cmplr_root = tmp_path / "cmplr"
         cmplr_root.mkdir()
-        result = _run_predicate(f'_bundled_llvm_cmake_prefix "" "{cmplr_root}"')
+        compiler_path = cmplr_root / "bin" / "icpx"
+        result = _run_predicate(
+            f'_bundled_llvm_cmake_prefix "" "{cmplr_root}" "{compiler_path}"'
+        )
+        assert result.stdout.strip() == ""
+
+    def test_empty_when_compiler_not_under_cmplr_root(self, tmp_path: Path) -> None:
+        # Regression (Codex review): a job can source an Intel oneAPI
+        # environment (setting $CMPLR_ROOT) for unrelated tooling while
+        # `compiler:` still resolves to a different, unrelated Clang (e.g.
+        # the default clang++ on PATH) -- auto-using $CMPLR_ROOT's bundled
+        # LLVM in that case would build the plugin against a toolchain that
+        # is not the one -fplugin= actually loads later. Only auto-apply
+        # when the resolved compiler binary is itself under $CMPLR_ROOT.
+        cmplr_root = tmp_path / "cmplr"
+        (cmplr_root / "lib" / "cmake" / "llvm").mkdir(parents=True)
+        unrelated_compiler = tmp_path / "usr" / "bin" / "clang++"
+        result = _run_predicate(
+            f'_bundled_llvm_cmake_prefix "" "{cmplr_root}" "{unrelated_compiler}"'
+        )
         assert result.stdout.strip() == ""
 
 

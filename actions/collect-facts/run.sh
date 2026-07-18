@@ -178,17 +178,23 @@ _llvm_major_from_predefined_macros() {
 # not even exist for a vendor major version (Codex review: Intel's icpx/icx
 # ship their own LLVM/Clang CMake package under $CMPLR_ROOT and are never
 # available as Ubuntu apt packages). Priority: an explicit override (the
-# llvm-cmake-prefix input) first, then $CMPLR_ROOT (the env var Intel's
-# oneAPI setvars.sh/environment sets to the compiler's own install root)
-# if it looks like it actually bundles an LLVM CMake package. Empty output
-# means neither applies -- caller falls back to the apt-get install path.
+# llvm-cmake-prefix input) always wins; otherwise $CMPLR_ROOT (the env var
+# Intel's oneAPI setvars.sh/environment sets to the compiler's own install
+# root) auto-applies ONLY if it looks like it bundles an LLVM CMake package
+# AND the resolved $COMPILER binary actually lives under that same root --
+# a job can source oneAPI for unrelated tools while `compiler:` still
+# resolves to a different, unrelated Clang (e.g. the default clang++), and
+# building against $CMPLR_ROOT's LLVM in that case would produce a plugin
+# that doesn't match the Clang that later loads it via -fplugin= (Codex
+# review). Empty output means neither applies -- caller falls back to the
+# apt-get install path.
 _bundled_llvm_cmake_prefix() {
-  local explicit="$1" cmplr_root="$2"
+  local explicit="$1" cmplr_root="$2" compiler_path="$3"
   if [[ -n "$explicit" ]]; then
     printf '%s' "$explicit"
     return
   fi
-  if [[ -n "$cmplr_root" && -d "$cmplr_root/lib/cmake/llvm" ]]; then
+  if [[ -n "$cmplr_root" && -d "$cmplr_root/lib/cmake/llvm" && "$compiler_path" == "$cmplr_root"/* ]]; then
     printf '%s' "$cmplr_root/lib/cmake"
     return
   fi
@@ -395,8 +401,9 @@ _prepare_clang_plugin() {
 $version_output"
   echo "detected LLVM major $major from $COMPILER"
 
-  local bundled_cmake_prefix
-  bundled_cmake_prefix=$(_bundled_llvm_cmake_prefix "$LLVM_CMAKE_PREFIX" "${CMPLR_ROOT:-}")
+  local bundled_cmake_prefix compiler_path
+  compiler_path=$(command -v "$COMPILER" 2>/dev/null || true)
+  bundled_cmake_prefix=$(_bundled_llvm_cmake_prefix "$LLVM_CMAKE_PREFIX" "${CMPLR_ROOT:-}" "$compiler_path")
 
   if [[ -n "$bundled_cmake_prefix" ]]; then
     # A vendor toolchain (e.g. Intel's icpx/icx oneAPI compilers) bundles

@@ -107,9 +107,13 @@ inputs:
       package. Needed for compilers that ship their own LLVM/Clang and are
       never available as an apt package for that major -- e.g. Intel's
       icpx/icx oneAPI compilers. When omitted, this Action auto-detects one
-      at "$CMPLR_ROOT/lib/cmake" if $CMPLR_ROOT is set and looks like it
+      at "$CMPLR_ROOT/lib/cmake" if $CMPLR_ROOT is set, looks like it
       bundles an LLVM CMake package (true for a sourced Intel oneAPI
-      environment) -- set this explicitly only to override that.
+      environment), AND the resolved `compiler` binary actually lives under
+      $CMPLR_ROOT (so a job that merely has oneAPI sourced for unrelated
+      tools, while `compiler:` resolves to a different Clang, does not
+      wrongly build the plugin against a mismatched LLVM) -- set this
+      explicitly only to override that.
     required: false
     default: ''
   python-version:
