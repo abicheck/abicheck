@@ -9,13 +9,16 @@ it should read in CHANGELOG.md. Delete the other sections.
 ### Fixed
 
 - **`BuildSourcePack.content_hash()` is now stable across replay runner
-  cache warmth/wall time for the on-disk `source_abi.json` artifact too.**
-  Its coverage dict carries the same replay timing/cache-hit fields
+  cache warmth/wall time for the on-disk `source_abi.json` artifact, and
+  for a combined `--build-info`/`--sources` pack too.** The surface's
+  coverage dict carries the same replay timing/cache-hit fields
   (`cache_lookup_s`, `extract_s`, `link_s`, `elapsed_s`, `extractor_jobs`,
   `cache_misses`, `cache_hits`) as the manifest coverage rows fixed
   previously, so two packs with identical source facts collected under
   different cache/timing conditions still produced different artifact
-  digests. **The GitHub Action's `abi-baseline` auto-fetch no longer
+  digests — including via the merge/combine path that hashes an
+  inline-collected `--sources` contributor's payload directly.
+  **The GitHub Action's `abi-baseline` auto-fetch no longer
   crashes under macOS's stock bash 3.2** when `GITHUB_REPOSITORY` is
   unset — expanding an empty array as `"${arr[@]}"` is itself an
   unbound-variable reference on bash < 4.4, so the `-R` flag array now

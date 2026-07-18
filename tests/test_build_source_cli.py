@@ -2268,6 +2268,70 @@ def test_mixed_build_pack_and_raw_sources_hash_distinguishes_trees(tmp_path):
     assert a.content_hash() == same.content_hash()
 
 
+def test_combined_pack_content_hash_stable_across_source_abi_coverage_timing(
+    tmp_path,
+):
+    # Regression (Codex review): _append_chosen_payload_digests() (merge_
+    # support.py), used for an inline-collected --sources contributor that
+    # was never written to disk, hashed the chosen SourceAbiSurface's raw
+    # payload directly -- bypassing the same replay wall-clock/cache-hit
+    # normalization BuildSourcePack._artifact_digests() already applies to
+    # an on-disk/self-contained pack's source_abi.json. A --build-info +
+    # --sources combine of identical source facts collected under
+    # different cache warmth or runner load therefore still produced a
+    # different content_hash().
+    from pathlib import Path
+
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+    from abicheck.cli_buildsource import _combine_packs
+
+    bi = BuildSourcePack.empty(tmp_path / "bi")
+    ev = BuildEvidence()
+    ev.compile_units.append(CompileUnit(id="cu://x", source="x.cpp"))
+    bi.build_evidence = ev
+    bi.write()
+    bi = BuildSourcePack.load(tmp_path / "bi")
+
+    def _inline_with(coverage: dict) -> BuildSourcePack:
+        return BuildSourcePack(
+            root=Path(""),
+            source_abi=SourceAbiSurface(library="libfoo.so", coverage=coverage),
+        )
+
+    a = _combine_packs(
+        bi,
+        None,
+        _inline_with(
+            {
+                "compile_units_parsed": 3,
+                "cache_lookup_s": 0.01,
+                "extract_s": 1.79,
+                "elapsed_s": 1.85,
+                "cache_misses": 3,
+                "cache_hits": 0,
+            }
+        ),
+    )
+    b = _combine_packs(
+        bi,
+        None,
+        _inline_with(
+            {
+                "compile_units_parsed": 3,
+                "cache_lookup_s": 0.02,
+                "extract_s": 0.11,
+                "elapsed_s": 0.17,
+                "cache_misses": 0,
+                "cache_hits": 3,
+            }
+        ),
+    )
+    assert a is not None and b is not None
+    assert a.content_hash() == b.content_hash()
+
+
 def test_inline_source_changed_falls_back_to_headers_only_scope(tmp_path, monkeypatch):
     """ADR-035 P3: inline dump has no PR diff, so a 'changed' scope falls back to
     'headers-only' (the public-API surface) — non-empty, but NOT the full-target
