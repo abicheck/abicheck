@@ -104,6 +104,17 @@ class TargetSpec:
     id: str
     required: bool = True
 
+    def __post_init__(self) -> None:
+        # required_target_ids filters on truthiness, so an untyped value
+        # like None or "" would silently read as optional and hide a real
+        # missing-required-target coverage failure. from_dict() validates
+        # this on its own parsing path; enforce it here too so direct
+        # construction (TargetSpec(id, required=...)) can't bypass it.
+        if not isinstance(self.required, bool):
+            raise ValueError(f"'required' must be a boolean, got {self.required!r}")
+        if not self.id:
+            raise ValueError(f"'id' must be a non-empty string, got {self.id!r}")
+
 
 @dataclass(frozen=True)
 class AssessmentManifest:
@@ -263,6 +274,11 @@ class TargetOutcome:
     ) -> TargetOutcome:
         if state is TargetState.ANALYZED:
             raise ValueError("use TargetOutcome.analyzed() for the analyzed state")
+        if state is TargetState.INCOMPLETE:
+            raise ValueError(
+                "INCOMPLETE is synthesized by Assessment.finalize() for a target "
+                "that never reported anything — it is not a state to submit"
+            )
         return cls(
             target_id=target_id,
             state=state,
@@ -482,8 +498,13 @@ class Assessment:
         field entirely is dropped too, rather than trusted by default. A
         lower ``attempt`` than one already recorded for the same target is
         also dropped, so a late-arriving retry of an old attempt can't
-        clobber a newer result.
+        clobber a newer result. An ``INCOMPLETE`` outcome is always dropped —
+        that state is synthesized by :meth:`finalize`, not submitted; letting
+        one through here would let a bogus high-``attempt`` submission block
+        every legitimate result that follows for that target.
         """
+        if outcome.state is TargetState.INCOMPLETE:
+            return
         if self.require_identity and (
             outcome.head_sha is None or outcome.assessment_id is None
         ):

@@ -43,7 +43,11 @@ WINDOWS = "windows-x86_64"
 HEAD_SHA = "0123456789abcdef"
 
 
-def _manifest(*, required=(LINUX, WINDOWS), optional=()) -> AssessmentManifest:
+def _manifest(
+    *,
+    required: tuple[str, ...] = (LINUX, WINDOWS),
+    optional: tuple[str, ...] = (),
+) -> AssessmentManifest:
     targets = tuple(TargetSpec(t, required=True) for t in required) + tuple(
         TargetSpec(t, required=False) for t in optional
     )
@@ -56,6 +60,17 @@ def _diff(verdict: Verdict, library: str = "libfoo.so") -> DiffResult:
     return DiffResult(
         old_version="1.0", new_version="1.1", library=library, verdict=verdict
     )
+
+
+class TestTargetSpec:
+    @pytest.mark.parametrize("bad_required", [None, "false", 0, 1, "yes"])
+    def test_rejects_non_boolean_required(self, bad_required: object):
+        with pytest.raises(ValueError):
+            TargetSpec(LINUX, required=bad_required)
+
+    def test_rejects_empty_id(self):
+        with pytest.raises(ValueError):
+            TargetSpec("")
 
 
 class TestAssessmentManifest:
@@ -94,7 +109,7 @@ class TestAssessmentManifest:
             AssessmentManifest.from_dict({"targets": [{"id": LINUX}]})
 
     @pytest.mark.parametrize("bad_required", [None, "false", 0, 1])
-    def test_from_dict_rejects_non_boolean_required(self, bad_required):
+    def test_from_dict_rejects_non_boolean_required(self, bad_required: object):
         data = {
             "assessment_id": "a",
             "head_sha": "s",
@@ -138,6 +153,28 @@ class TestTargetOutcome:
         assert not TargetOutcome.unavailable(
             LINUX, TargetState.BUILD_FAILED
         ).is_available
+
+    def test_unavailable_rejects_incomplete_state(self):
+        # INCOMPLETE is synthesized by Assessment.finalize(); it must not be
+        # constructible as a submitted outcome via the public factory.
+        with pytest.raises(ValueError):
+            TargetOutcome.unavailable(LINUX, TargetState.INCOMPLETE)
+
+    def test_record_drops_submitted_incomplete_outcome(self):
+        # Even a directly-constructed INCOMPLETE outcome (bypassing
+        # unavailable()'s guard) must not be accepted by record() — a bogus
+        # high-attempt submission must not be able to block a legitimate
+        # lower-attempt result that arrives afterward.
+        assessment = Assessment(_manifest())
+        assessment.record(
+            TargetOutcome(target_id=LINUX, state=TargetState.INCOMPLETE, attempt=99)
+        )
+        assessment.record(
+            TargetOutcome.analyzed(LINUX, _diff(Verdict.COMPATIBLE), attempt=1)
+        )
+        result = assessment.finalize()
+
+        assert result.outcomes[LINUX].state is TargetState.ANALYZED
 
 
 class TestAcceptanceCases:
