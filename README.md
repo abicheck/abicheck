@@ -185,7 +185,15 @@ for AI-agent workflows.
 
 ## Examples
 
-The [`examples/`](examples/README.md) directory contains **193 real-world ABI/API scenarios** (188 single-library cases plus 5 multi-library bundle cases) with ground-truth verdicts. Most are single-library `v1`/`v2` examples with a consumer app, including cases 187–189 and 191 (a public struct/class/function gaining a dependency on an internal type, proven both as a real artifact-level break and via `--header-graph`); the G20 audit/cross-source cases (143–151) are single-build snapshots demonstrating intra-version cross-checks; a handful of L3/L4/L5 build/source-only cases (152–158, 160–162, 190, 192–193) ship hand-built evidence-model fixture pairs demonstrating failures no artifact layer can see; case 164 ships a guard-annotated fixture pair demonstrating a build-context-cleared header false positive (ADR-039); bundle/release-level cases use release-style layouts. The full catalog is the development regression corpus; a smaller historical cross-tool subset is kept in the reference docs for release-to-release comparison with libabigail and ABICC.
+The [`examples/`](examples/README.md) directory contains **193 real-world ABI/API scenarios** (188 single-library cases plus 5 multi-library bundle cases) with ground-truth verdicts:
+
+- Most are single-library `v1`/`v2` examples with a consumer app, including cases 187–189 and 191 (a public struct/class/function gaining a dependency on an internal type, proven both as a real artifact-level break and via `--header-graph`).
+- The G20 audit/cross-source cases (143–151) are single-build snapshots demonstrating intra-version cross-checks.
+- A handful of L3/L4/L5 build/source-only cases (152–158, 160–162, 190, 192–193) ship hand-built evidence-model fixture pairs demonstrating failures no artifact layer can see.
+- Case 164 ships a guard-annotated fixture pair demonstrating a build-context-cleared header false positive (ADR-039).
+- Bundle/release-level cases use release-style layouts.
+
+The full catalog is the development regression corpus; a smaller historical cross-tool subset is kept in the reference docs for release-to-release comparison with libabigail and ABICC.
 
 The authoritative completeness gate is the full example matrix: compiler lanes, runtime smoke, bundle validation, and dedicated proof owners are aggregated into exactly one row per ground-truth case. A green single-library lane or a `libv1.so`/`libv2.so` pair scan is not full-catalog proof. See the [full example validation runbook](docs/development/examples-validation-runbook.md) for runner selection, the reproducible workflow, artifact semantics, and agent rules.
 

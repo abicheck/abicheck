@@ -1,7 +1,7 @@
 # Benchmark & Tool Comparison
 
-This document explains how each ABI checking tool works, what analysis method it uses,
-benchmark results across real-world test cases, and why the numbers come out the way they do.
+This document explains how each ABI checking tool works, what it measured on the
+`examples/` catalog, and why the numbers come out the way they do.
 
 > **Note:** abicheck detects 388 change kinds (see [Change Kind Reference](change-kinds.md)).
 > The `examples/` catalog currently has **193 cases** (`examples/ground_truth.json`
@@ -136,13 +136,14 @@ instead of snapshots:
 
 Used as a drop-in for ABICC-based CI pipelines (`abicheck compat check -lib foo -old v1.xml -new v2.xml`).
 
-**Why compat scores lower than compare mode:**
+**Why `compat` can't express everything `compare` can:**
 `compat` follows ABICC's verdict vocabulary: COMPATIBLE, BREAKING, NO_CHANGE.
-It cannot represent the full `compare` verdict vocabulary cleanly in ABICC-style
-pipelines, especially source-level-only breaks that are binary-safe (for example
-an enum/member rename or reduced access level in a class method). The examples
-still keep one canonical ground-truth verdict. If `compat` cannot express or
-detect it, that is a command/evidence limitation, not an alternate expectation.
+It has no way to represent source-level-only breaks that are binary-safe (for
+example an enum/member rename or reduced access level in a class method) —
+those collapse into COMPATIBLE or BREAKING depending on `--strict-mode`,
+losing the distinction `compare`'s `API_BREAK` verdict preserves. That's a
+command/evidence limitation of the ABICC-compatible vocabulary itself, not a
+detection gap in the underlying engine (same analysis passes as `compare`).
 
 **When to use `compat`:** When you have an existing ABICC XML pipeline and want to
 migrate to abicheck without rewriting scripts.
@@ -159,14 +160,13 @@ Two sub-modes via `--strict-mode`:
 - `full` (default with `-s`): `COMPATIBLE` + `API_BREAK` → `BREAKING` (matches ABICC `-strict`)
 - `api`: only `API_BREAK` → `BREAKING`, additive `COMPATIBLE` changes stay `COMPATIBLE`
 
-**Why strict scores lower than compat mode:**
+**Why strict deliberately disagrees with the ground truth:**
 Several catalog cases are legitimately `COMPATIBLE` or `API_BREAK`. `--strict-mode full`
-promotes these to `BREAKING` intentionally, just like ABICC `-strict`. These are correct
-tool outputs for the strict policy, but score as misses against the ground truth.
-
-**Why strict still has a full denominator:**
-`abicheck strict` runs on all 74 cases in the benchmark subset. ABICC and abidiff runs can time out or error on
-specific cases, so their scored denominators are lower in the benchmark matrix.
+promotes these to `BREAKING` on purpose, just like ABICC `-strict` — that's the
+policy working as designed, not a detection miss. (`compat`/`strict` are no
+longer separate columns in the benchmark tables below — see the "Historical"
+note under [Pinned vendor benchmark summary](#pinned-vendor-benchmark-summary-2026-07-18-74-case-subset)
+for why.)
 
 **When to use strict:** CI gates where any COMPATIBLE addition (e.g. new symbol) should
 fail the build. Use `--strict-mode api` to avoid false positives on purely additive changes.
@@ -191,7 +191,7 @@ modules), and finally to ELF symbol names only when no debug info is present.
 
 For our benchmark, all `.so` files are built with `-g` so DWARF is used throughout.
 
-**Current benchmark result:** see the 74-case benchmark-subset matrix below.
+**Current benchmark result:** see the [full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-193-cases) below.
 abidiff misses anything that is not directly a symbol removal or a change that DWARF
 fully describes. Specifically:
 - Struct layout, vtable, return type changes → DWARF often marks as COMPATIBLE because
@@ -245,7 +245,7 @@ It does not improve detection of semantic changes.
 **Header requirement:** Optional (pass `-public-headers` to filter to public API).
 **Compiler requirement:** None. Debug build (`-g`) required.
 
-**Current benchmark result:** see the 74-case benchmark-subset matrix below. The abi-dumper workflow
+**Current benchmark result:** see the [full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-193-cases) below. The abi-dumper workflow
 still times out or errors on specific C++ cases and can leave runaway
 `abi-compliance-checker` child processes if the outer wrapper is interrupted.
 
@@ -275,7 +275,7 @@ v2.xml (headers dir + .so path) ──┘
 **Current mitigation:** Pass a specific header file path instead of a directory
 in `<headers>`. This drops runtime from 120s → ~1s and fixes wrong verdicts.
 
-**Current benchmark result:** see the 74-case benchmark-subset matrix below.
+**Current benchmark result:** see the [full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-193-cases) below.
 
 ---
 
