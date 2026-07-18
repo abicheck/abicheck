@@ -48,7 +48,7 @@ jobs:
           jq '(.runs[].results) |= [.[] | select((.locations // []) | length > 0)]' "$f" > "$f.filtered"
           mv "$f.filtered" "$f"
       - name: Upload SARIF
-        if: always() && steps.agentready.outputs.sarif-report-path
+        if: always() && steps.agentready.outputs.sarif-report-path && steps.agentready.outputs.findings-count != '0'
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: ${{ steps.agentready.outputs.sarif-report-path }}
@@ -94,7 +94,7 @@ jobs:
           jq '(.runs[].results) |= [.[] | select((.locations // []) | length > 0)]' "$f" > "$f.filtered"
           mv "$f.filtered" "$f"
       - name: Upload SARIF
-        if: always() && steps.agentready.outputs.sarif-report-path
+        if: always() && steps.agentready.outputs.sarif-report-path && steps.agentready.outputs.findings-count != '0'
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: ${{ steps.agentready.outputs.sarif-report-path }}
