@@ -185,7 +185,15 @@ for AI-agent workflows.
 
 ## Examples
 
-The [`examples/`](examples/README.md) directory contains **193 real-world ABI/API scenarios** (188 single-library cases plus 5 multi-library bundle cases) with ground-truth verdicts. Most are single-library `v1`/`v2` examples with a consumer app, including cases 187–189 and 191 (a public struct/class/function gaining a dependency on an internal type, proven both as a real artifact-level break and via `--header-graph`); the G20 audit/cross-source cases (143–151) are single-build snapshots demonstrating intra-version cross-checks; a handful of L3/L4/L5 build/source-only cases (152–158, 160–162, 190, 192–193) ship hand-built evidence-model fixture pairs demonstrating failures no artifact layer can see; case 164 ships a guard-annotated fixture pair demonstrating a build-context-cleared header false positive (ADR-039); bundle/release-level cases use release-style layouts. The full catalog is the development regression corpus; a smaller historical cross-tool subset is kept in the reference docs for release-to-release comparison with libabigail and ABICC.
+The [`examples/`](examples/README.md) directory contains **193 real-world ABI/API scenarios** (188 single-library cases plus 5 multi-library bundle cases) with ground-truth verdicts:
+
+- Most are single-library `v1`/`v2` examples with a consumer app, including cases 187–189 and 191 (a public struct/class/function gaining a dependency on an internal type, proven both as a real artifact-level break and via `--header-graph`).
+- The G20 audit/cross-source cases (143–151) are single-build snapshots demonstrating intra-version cross-checks.
+- A handful of L3/L4/L5 build/source-only cases (152–158, 160–162, 190, 192–193) ship hand-built evidence-model fixture pairs demonstrating failures no artifact layer can see.
+- Case 164 ships a guard-annotated fixture pair demonstrating a build-context-cleared header false positive (ADR-039).
+- Bundle/release-level cases use release-style layouts.
+
+The full catalog is the development regression corpus; a smaller historical cross-tool subset is kept in the reference docs for release-to-release comparison with libabigail and ABICC.
 
 The authoritative completeness gate is the full example matrix: compiler lanes, runtime smoke, bundle validation, and dedicated proof owners are aggregated into exactly one row per ground-truth case. A green single-library lane or a `libv1.so`/`libv2.so` pair scan is not full-catalog proof. See the [full example validation runbook](docs/development/examples-validation-runbook.md) for runner selection, the reproducible workflow, artifact semantics, and agent rules.
 
@@ -209,22 +217,22 @@ python scripts/benchmark_comparison.py --suite pinned74
 
 ### Detection by evidence source
 
-The [five sources of information](#how-it-works--multiple-sources-of-information) each find breaks the weaker sources are blind to. The table below is derived from the `examples/ground_truth.json` minimum-evidence labels of all 169 catalog cases. The `--evidence-tiers` mode empirically scans the runnable catalog at L0-L3; L4 source-pack measurement is tracked as a separate extension:
+The [five sources of information](#how-it-works--multiple-sources-of-information) each find breaks the weaker sources are blind to. The table below is derived from the `examples/ground_truth.json` minimum-evidence labels of the 182 compare-style catalog cases (181 excluding the one documented detector gap, `case111`). The `--evidence-tiers` mode empirically scans the runnable catalog at L0-L3; L4 source-pack measurement is tracked as a separate extension:
 
 ```bash
 python scripts/benchmark_comparison.py --evidence-tiers
 ```
 
-| Source you provide | Cumulative cases reaching the correct verdict |
-|--------------------|:---------------------------------------------:|
-| Just the binary (`L0`) | 52 / 169 (31%) |
-| + Debug symbols (`L1`) | 119 / 169 (70%) |
-| + Public headers (`L2`) | 150 / 169 (89%) |
-| + Build data (`L3`) | 160 / 169 (95%) |
-| + Sources (`L4`) | 166 / 169 (98%) |
-| + Source graph (`L5`) | 169 / 169 (100%) |
+| Source you provide | Cumulative cases reaching full expected-kind coverage |
+|--------------------|:------------------------------------------------------:|
+| Just the binary (`L0`) | 64 / 181 (35%) |
+| + Debug symbols (`L1`) | 132 / 181 (73%) |
+| + Public headers (`L2`) | 157 / 181 (87%) |
+| + Build data (`L3`) | 167 / 181 (92%) |
+| + Sources (`L4`) | 172 / 181 (95%) |
+| + Source graph (`L5`) | 181 / 181 (100%) |
 
-More evidence also *removes* false positives (e.g. header scoping correctly dismisses internal-struct changes). This staircase is a **discoverability floor** — the minimum source that unlocks the correct verdict per case — not a blind accuracy score; for the stricter number that also penalizes false positives across the whole catalog, see the [full-catalog benchmark](https://abicheck.github.io/abicheck/reference/tool-comparison/#full-catalog-benchmark-2026-07-12-all-170-cases) (L3-L5 scores 90.0% there, with 7 known false positives). See [Evidence & Detectability](https://abicheck.github.io/abicheck/concepts/evidence-and-detectability/) for what each source reveals and [Benchmarking by evidence tier](https://abicheck.github.io/abicheck/reference/tool-comparison/#benchmarking-by-evidence-tier) for the methodology.
+More evidence also *removes* false positives (e.g. header scoping correctly dismisses internal-struct changes). This staircase is a **discoverability floor** — the minimum source that reaches every cataloged expected kind for a case, not a blind accuracy score. That's usually also the minimum source for the correct *verdict*, but not always: 4 of the 9 `L5` cases are verdict-detectable much earlier (L1 or L0) and land at `L5` only because one correlated, non-verdict-driving kind in their catalog entry needs the source graph — see the `L5` caveat in [Tool Comparison & Benchmarks](https://abicheck.github.io/abicheck/reference/tool-comparison/#which-source-discovers-what) for the specific cases. For the stricter number that also penalizes false positives across the whole catalog, see the [full-catalog benchmark](https://abicheck.github.io/abicheck/reference/tool-comparison/#full-catalog-benchmark-2026-07-18-all-193-cases) (L3-L5 scores 99.5% there, with 0 false positives). See [Evidence & Detectability](https://abicheck.github.io/abicheck/concepts/evidence-and-detectability/) for what each source reveals and [Benchmarking by evidence tier](https://abicheck.github.io/abicheck/reference/tool-comparison/#benchmarking-by-evidence-tier) for the methodology.
 
 Per-case matrix, methodology, full-catalog notes, and the pinned cross-tool comparison table: [Tool Comparison & Benchmarks](https://abicheck.github.io/abicheck/reference/tool-comparison/).
 
