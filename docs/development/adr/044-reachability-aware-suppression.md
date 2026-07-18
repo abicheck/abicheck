@@ -953,10 +953,12 @@ semantics) is closed to the extent described under its own entry.
   prior additive field (2.1 through 2.5) already followed with its own
   changelog comment — missed here even though the schema's
   `additionalProperties: true` meant no test caught it (unregistered keys
-  validate anyway). Bumped `REPORT_SCHEMA_VERSION` to `"2.6"` with a matching
-  changelog comment, added the three fields (with `reachability_kind`'s enum)
-  to `compare_report.schema.json`, and re-synced the published
-  `docs/schemas/v1/` copy via `scripts/publish_schemas.py`.
+  validate anyway). Bumped `REPORT_SCHEMA_VERSION` (originally to `"2.6"`;
+  renumbered to `"2.7"` when rebasing onto `main`'s own unrelated `2.6` bump
+  for `reviewer_action`, #595) with a matching changelog comment, added the
+  three fields (with `reachability_kind`'s enum) to
+  `compare_report.schema.json`, and re-synced the published `docs/schemas/v1/`
+  copy via `scripts/publish_schemas.py`.
 - **Header-graph mode still had the mangled-vs-label gap; `API_BREAK_KINDS`
   triggers were a category error (Codex, fresh evidence, two findings).**
   (1) The mangled-symbol-key fix above only helps when the L5 graph carries a
@@ -1334,8 +1336,9 @@ review's priority tiers.
    even though the report still advertised a passing `report_schema_version`.
    Fixed by adding `"consumer_proven"` to the enum (an additive change per
    the schema's own stability policy, `abicheck/schemas/__init__.py`) and
-   bumping `REPORT_SCHEMA_VERSION` to `2.7`, re-synced to
-   `docs/schemas/v1/` via `scripts/publish_schemas.py`. (b) Unrelated to the
+   bumping `REPORT_SCHEMA_VERSION` (originally to `2.7`; renumbered to `2.8`
+   in the same rebase mentioned above), re-synced to `docs/schemas/v1/` via
+   `scripts/publish_schemas.py`. (b) Unrelated to the
    reachability fix but on the same file: `runtime_probe._run_once`'s
    `subprocess.run(..., text=True)` has no `errors=` handling, and a real
    executable's stderr is arbitrary bytes with no guarantee of being valid
@@ -1563,10 +1566,13 @@ review's priority tiers.
   standard four-step procedure (`/CLAUDE.md` "Adding a new ChangeKind"). This
   P0 slice itself added no new CLI flags and no schema/serialization version
   bump; both since happened as the P1/P2 slices landed — `REPORT_SCHEMA_VERSION`
-  bumped to `2.6` (P1 item 4's structured `public_reachable`/`reachability_kind`/
-  `reachability_proof_path` fields) and again to `2.7` (P2's `"consumer_proven"`
-  `reachability_kind` enum member), and `--verify-runtime` is a new P2 CLI flag.
-  See `abicheck/schemas/__init__.py`'s own changelog for the exact history.
+  bumped to `2.7` (P1 item 4's structured `public_reachable`/`reachability_kind`/
+  `reachability_proof_path` fields) and again to `2.8` (P2's `"consumer_proven"`
+  `reachability_kind` enum member; both numbers shifted up by one from their
+  original `2.6`/`2.7` when this branch was rebased onto `main`'s own
+  unrelated `2.6` bump for `reviewer_action`, #595), and `--verify-runtime` is
+  a new P2 CLI flag. See `abicheck/schemas/__init__.py`'s own changelog for
+  the exact history.
 
 ## References
 
