@@ -1080,7 +1080,7 @@
       "severity": "error",
       "min_evidence": "L0",
       "doc_slug": "func_removed",
-      "examples": "case01_symbol_removal,case100_experimental_removed_without_replacement,case104_glibcxx_dual_abi_flip,case107_task_scheduler_init_removed,case108_task_class_removed,case110_concurrent_unordered_map_api_drift,case12_function_removed,case141_versioned_symbol_scheme,case41_type_changes,case53_namespace_pollution,case78_task_arena_attach_tag,case85_internal_template_signature_changed"
+      "examples": "case01_symbol_removal,case100_experimental_removed_without_replacement,case104_glibcxx_dual_abi_flip,case107_task_scheduler_init_removed,case108_task_class_removed,case110_concurrent_unordered_map_api_drift,case12_function_removed,case141_versioned_symbol_scheme,case192_call_graph_break_survives_suppression,case193_ordinary_exported_fn_call_not_reachable,case41_type_changes,case53_namespace_pollution,case78_task_arena_attach_tag,case85_internal_template_signature_changed"
     },
     {
       "kind": "func_removed_elf_only",
@@ -1386,7 +1386,7 @@
       "severity": "error",
       "min_evidence": "L5",
       "doc_slug": "internal_symbol_required_by_public_api",
-      "examples": ""
+      "examples": "case192_call_graph_break_survives_suppression"
     },
     {
       "kind": "internal_template_leaks_via_public_api",

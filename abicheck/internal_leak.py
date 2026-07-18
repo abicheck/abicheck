@@ -46,6 +46,7 @@ from .checker_policy import ChangeKind
 from .checker_types import Change
 
 if TYPE_CHECKING:
+    from .buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary
     from .model import AbiSnapshot, RecordType
 
 
@@ -675,6 +676,96 @@ def compute_leak_paths(
     return _dedup_paths(paths)
 
 
+def _is_consumer_compiled_node(node_id: str, node_by_id: dict[str, GraphNode]) -> bool:
+    """Whether *node_id*'s own body is compiled into consumer code.
+
+    Mirrors the permissive default in
+    :func:`~abicheck.buildsource.source_graph.is_consumer_compiled_public_entry`:
+    a node with no ``consumer_compiled_body`` attr at all (e.g. a
+    ``header_graph.py`` node, which by construction only ever gets outgoing
+    call/reference edges from in-header bodies) defaults to ``True``.
+    """
+    node = node_by_id.get(node_id)
+    if node is None:
+        return True
+    return bool(node.attrs.get("consumer_compiled_body", True))
+
+
+def _consumer_compiled_reachability(
+    graph: SourceGraphSummary,
+    edge_kinds: frozenset[str],
+    entries: Iterable[str],
+    node_by_id: dict[str, GraphNode],
+) -> dict[str, tuple[frozenset[str], dict[str, GraphEdge]]]:
+    """BFS from each *entry*, restricted to consumer-compiled call chains.
+
+    Unlike :func:`~abicheck.buildsource.source_graph_findings._dependency_reachability`
+    (which this call-graph walk used before this fix), the traversal does not
+    simply expand every edge transitively from an already-validated entry
+    (Codex review, fresh evidence): a public inline ``wrap()`` calling an
+    ordinary out-of-line exported ``api()``, which in turn calls
+    ``ns::detail::helper()``, has ``api()`` genuinely reachable from
+    ``wrap()``'s own compiled body (a consumer really does link against
+    ``api()``'s exported symbol) -- but ``helper()`` is not, since that call
+    happens entirely inside the library's binary, in a function
+    (``api()``) whose own body a consumer never compiles. The walk therefore
+    stops **expanding past** (not discovering) a node whose own
+    ``consumer_compiled_body`` is false: such a node is still recorded as
+    reachable (its own removal/change IS consumer-visible through the entry
+    that calls it), but whatever it calls is not queued for further descent.
+    Also returns each entry's predecessor-edge map so the caller can
+    reconstruct a proof path without a second, unrestricted graph walk that
+    could show a route the restriction above would have rejected.
+    """
+    adjacency: dict[str, list[GraphEdge]] = {}
+    for e in graph.edges:
+        if e.kind in edge_kinds:
+            adjacency.setdefault(e.src, []).append(e)
+    out: dict[str, tuple[frozenset[str], dict[str, GraphEdge]]] = {}
+    for entry in entries:
+        seen: set[str] = {entry}
+        came_from: dict[str, GraphEdge] = {}
+        queue: collections.deque[str] = collections.deque([entry])
+        while queue:
+            node = queue.popleft()
+            if node != entry and not _is_consumer_compiled_node(node, node_by_id):
+                continue
+            for e in adjacency.get(node, []):
+                if e.dst in seen:
+                    continue
+                seen.add(e.dst)
+                came_from[e.dst] = e
+                queue.append(e.dst)
+        seen.discard(entry)
+        out[entry] = (frozenset(seen), came_from)
+    return out
+
+
+def _reconstruct_path(
+    came_from: dict[str, GraphEdge], entry: str, target: str
+) -> list[GraphEdge] | None:
+    """Rebuild the entry-to-target edge chain from a predecessor map.
+
+    Mirrors :func:`~abicheck.buildsource.source_graph_findings._dependency_path`'s
+    return shape (``[]`` for ``entry == target``, ``None`` if unreachable) but
+    replays the *same* restricted walk's predecessors instead of re-deriving a
+    path from an unrestricted one, so the displayed proof path can never show
+    a route :func:`_consumer_compiled_reachability` would not itself take.
+    """
+    if entry == target:
+        return []
+    if target not in came_from:
+        return None
+    path: list[GraphEdge] = []
+    cur = target
+    while cur != entry:
+        e = came_from[cur]
+        path.append(e)
+        cur = e.src
+    path.reverse()
+    return path
+
+
 def compute_call_graph_leak_paths(
     snap: AbiSnapshot,
     internal_namespaces: Iterable[str] = DEFAULT_INTERNAL_NAMESPACES,
@@ -735,11 +826,7 @@ def compute_call_graph_leak_paths(
         return {}
 
     from .buildsource.source_graph import is_consumer_compiled_public_entry
-    from .buildsource.source_graph_findings import (
-        _dependency_path,
-        _dependency_reachability,
-        _format_dependency_path,
-    )
+    from .buildsource.source_graph_findings import _format_dependency_path
 
     edge_kinds = frozenset({"DECL_CALLS_DECL", "DECL_REFERENCES_DECL"})
     if not any(e.kind in edge_kinds for e in graph.edges):
@@ -766,10 +853,11 @@ def compute_call_graph_leak_paths(
         return {}
 
     internal_set = set(internal_namespaces)
-    reachability = _dependency_reachability(graph, edge_kinds)
+    reachability = _consumer_compiled_reachability(graph, edge_kinds, entries, node_by_id)
     result: dict[str, list[str]] = collections.defaultdict(list)
     for entry in entries:
-        for target in reachability.get(entry, frozenset()):
+        targets, came_from = reachability.get(entry, (frozenset(), {}))
+        for target in targets:
             node = node_by_id.get(target)
             if node is None:
                 continue
@@ -793,7 +881,7 @@ def compute_call_graph_leak_paths(
                 lookup_name = demangle(name) or name
             if not is_internal_type(lookup_name, internal_set):
                 continue
-            path_edges = _dependency_path(graph, edge_kinds, entry, target)
+            path_edges = _reconstruct_path(came_from, entry, target)
             if not path_edges:
                 continue
             formatted = _format_dependency_path(graph, path_edges)

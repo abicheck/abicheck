@@ -974,6 +974,49 @@ class TestComputeCallGraphLeakPaths:
         paths = compute_call_graph_leak_paths(snap)
         assert "ns::detail::helper" in paths
 
+    def test_walk_stops_expanding_past_non_consumer_compiled_intermediate(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: restricting the *entry set* to
+        consumer-compiled nodes is not enough on its own -- the walk itself
+        must also stop *expanding past* a non-consumer-compiled intermediate.
+        A public inline wrap() calls an ordinary out-of-line exported api()
+        (consumer_compiled_body=False), which in turn calls an internal
+        helper(). api() itself IS reachable from wrap() (a consumer really
+        does link against api()'s exported symbol), but helper() is not --
+        that call happens entirely inside the library's binary, in a
+        function whose own body no consumer ever compiles. Before this fix,
+        the walk expanded transitively past every intermediate regardless of
+        its own consumer_compiled_body, so helper()'s removal would have
+        been (wrongly) reported reachable through wrap()."""
+        from abicheck.buildsource.source_graph import GraphEdge, GraphNode
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        snap = _graph_snap(
+            [
+                GraphNode(
+                    id="decl://wrap", kind="source_decl", label="demo::wrap",
+                    attrs={"visibility": "public_header", "consumer_compiled_body": True},
+                ),
+                GraphNode(
+                    id="decl://api", kind="source_decl", label="demo::api",
+                    attrs={"visibility": "public_header", "consumer_compiled_body": False},
+                ),
+                _decl_node("decl://helper", "demo::detail::helper", "source"),
+            ],
+            [
+                GraphEdge(src="decl://wrap", dst="decl://api", kind="DECL_CALLS_DECL"),
+                GraphEdge(src="decl://api", dst="decl://helper", kind="DECL_CALLS_DECL"),
+            ],
+        )
+        paths = compute_call_graph_leak_paths(snap)
+        assert "demo::detail::helper" not in paths
+        # api() itself is a real, direct dependency of wrap() and is not in an
+        # internal namespace, so it never becomes a leak-path key either way --
+        # this asserts the walk didn't silently drop it from the graph, only
+        # that it correctly stopped expanding past it.
+        assert paths == {}
+
     def test_reference_edge_also_counts(self) -> None:
         from abicheck.buildsource.source_graph import GraphEdge
         from abicheck.internal_leak import compute_call_graph_leak_paths

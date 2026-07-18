@@ -1093,6 +1093,37 @@ semantics) is closed to the extent described under its own entry.
   `test_ordinary_out_of_line_exported_entry_is_not_a_leak_path`/
   `test_inline_entry_with_explicit_flag_is_still_a_leak_path` to
   `test_internal_leak.py`.
+- **Restricting the entry set was not enough on its own — the *walk* also
+  over-reached (Codex, fresh evidence).** The fix above stops an ordinary
+  out-of-line exported function from *seeding* the call-graph walk, but
+  `compute_call_graph_leak_paths` still computed reachability via the shared
+  `source_graph_findings._dependency_reachability`, which expands every
+  edge transitively from an already-validated entry with no further
+  restriction. So a public inline `wrap()` calling an ordinary out-of-line
+  exported `api()` (`consumer_compiled_body: false`), which itself calls an
+  internal `ns::detail::helper()`, still had `helper()` show up in
+  `wrap()`'s reachable set: `api()` is a legitimate entry-adjacent node (a
+  consumer really does link against `api()`'s exported symbol, so it must
+  stay *recorded* as reachable), but whatever `api()` calls happens entirely
+  inside the library's own binary — the walk must stop *expanding past*
+  such a node, not just refuse to *start* from one. Fixed by replacing the
+  shared (and, for `crosscheck.py`'s broader advisory use, correctly
+  unrestricted) reachability helper with a new, `internal_leak.py`-local
+  `_consumer_compiled_reachability`: a BFS that records every direct
+  successor of a node but only continues expanding past a successor whose
+  own `consumer_compiled_body` is true (defaulting permissively when the
+  attr is absent, same rule as the entry predicate). It also returns each
+  entry's predecessor-edge map so `_reconstruct_path` can rebuild the
+  displayed proof path by replaying the *same* restricted walk, rather than
+  calling the shared, unrestricted `_dependency_path` a second time and
+  risking a displayed route the restriction above would not itself take.
+  `crosscheck.py`'s `public_to_internal_dependency` (RISK-only, never
+  suppression-gating) is untouched — it still uses the original
+  unrestricted `_dependency_reachability`/`_dependency_path`, since its
+  broader "does any decl-dependency edge exist at all" question has no
+  comparable precision requirement. Added
+  `test_walk_stops_expanding_past_non_consumer_compiled_intermediate` to
+  `test_internal_leak.py`.
 
 ## Roadmap (not committed — scope/sequence per the usual planning process)
 

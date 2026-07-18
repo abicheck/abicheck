@@ -1,0 +1,4 @@
+version: 1
+suppressions:
+  - namespace: "demo::detail::**"
+    reason: "detail:: is our internal implementation namespace"

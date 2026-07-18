@@ -6,14 +6,14 @@ benchmark results across real-world test cases, and why the numbers come out the
 > **Note:** abicheck detects 388 change kinds (see [Change Kind Reference](change-kinds.md)).
 > The current cross-tool benchmark covers a pinned 74-case subset of the
 > `examples/` catalog (`case01`-`case73` + `case26b`); the full
-> `examples/ground_truth.json` catalog now has 191 entries. Tool-to-tool
+> `examples/ground_truth.json` catalog now has 193 entries. Tool-to-tool
 > competitor scans use the 134 binary shared-library `.so` lanes; fixture/source
-> L2/L5/source cases (`case152`-`case158`, `case160`-`case164`, `case187`-`case191`)
+> L2/L5/source cases (`case152`-`case158`, `case160`-`case164`, `case187`-`case193`)
 > and the other audit, cross-source, bundle, BTF, and snapshot cases are tracked
 > in dedicated non-`.so` lanes. The subset is pinned so accuracy numbers stay
 > reproducible across releases.
 >
-> **Which denominator is which.** **191** is the whole catalog. The binary
+> **Which denominator is which.** **193** is the whole catalog. The binary
 > competitor lane is **134** shared-library pairs. The scan-depth matrix is
 > compare-style and intentionally uses only comparable v1/v2 shared-library
 > targets: **141/141** of that scope are scanned at every depth. FP/FN math now
@@ -341,7 +341,7 @@ correct verdict — derived by
 `scripts/evidence_tiers.py`
 and validated by `tests/test_evidence_tiers.py`. Aggregated over the 153 compare-style cases, that yields the cumulative minimum-evidence coverage. The binary competitor `.so` lane is narrower (134 built shared-library pairs); fixture/source-only L2/L5/source cases are listed here by evidence tier instead of being treated as missing competitor binaries:
 
-> **Freshness note.** `examples/ground_truth.json` now has 191 total entries
+> **Freshness note.** `examples/ground_truth.json` now has 193 total entries
 > (verified via `len(json.load(open("examples/ground_truth.json"))["verdicts"])`),
 > not the 153/134 cited above — this table's per-tier breakdown predates
 > case growth since it was last regenerated and has not been re-derived from
@@ -405,7 +405,7 @@ Two directions matter, not just one:
 
 ---
 
-## Full-catalog benchmark (2026-07-17, all 191 cases)
+## Full-catalog benchmark (2026-07-17, all 193 cases)
 
 Every catalog case scored, with **SKIP/ERROR/TIMEOUT/incapacity all counted as
 misses** — a tool that hung, crashed, or simply has no mode for a case shape
@@ -439,6 +439,16 @@ often would it tell me the truth?"*
 > every other case the fix touches adjacent machinery for); the row's `Total
 > time` and this envelope's commit/wall-time/peak-RSS figures are carried
 > over from the prior full run pending the next full `--check` regeneration.
+>
+> **Update (2026-07-18).** The catalog grew from 191 to 193 cases
+> (`case192`-`case193`, ADR-044 P2 item 3) after this benchmark envelope was
+> frozen; like `case187`-`case191` before them, both are L5-only snapshot-pair
+> fixtures with no compilable `v1`/`v2` `.so` pair, so they are structurally
+> `SKIP` for every competitor tool (no hang risk) and are not yet folded into
+> the frozen cache or the table below — only the heading's headline count and
+> the freshness notes above reflect the current catalog size; the table's own
+> `/191` denominator and per-tool numbers are carried over pending the next
+> full regeneration.
 
 ```bash
 # ABICC lanes are frozen ahead of time (each mode run alone, ABICC hangs

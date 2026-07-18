@@ -1,0 +1,62 @@
+# case193 — An ordinary exported function's internal call is not public-reachable
+
+**Verdict:** 🔴 BREAKING (without suppression) · **Finding:** `func_removed` only · **Evidence tier:** L0
+
+> These cases ship committed snapshot fixtures (`old.abi.json` / `new.abi.json`)
+> with an embedded L5 source/call graph instead of a compilable v1/v2 pair.
+> `func_removed` alone is L0-detectable (`min_evidence` in `ground_truth.json`
+> reflects that, derived mechanically from `scripts/evidence_tiers.py` per
+> the corpus's own convention) — the embedded L5 graph is present so the
+> case can demonstrate its actual point, a *negative*: that the graph does
+> not manufacture an extra overlay finding here, which `expected_kinds`
+> (a positive-findings list) has no way to encode on its own. Validated
+> compiler-free by `tests/test_reachability_examples.py`.
+
+## What it demonstrates
+
+`demo::api()` is an **ordinary, out-of-line exported function** — defined in
+a `.cpp` file, not `inline`, not a template. Its body calls an internal
+helper, `detail::log_context()`, which is removed in v2:
+
+```cpp
+// api.cpp — compiled into libdemo.so only, never into any consumer's binary
+void demo::api() {
+    detail::log_context();   // internal call, resolved entirely inside libdemo.so
+    // ...
+}
+```
+
+This looks structurally identical to [case192](../case192_call_graph_break_survives_suppression/README.md)
+— a public function's `DECL_CALLS_DECL` edge reaches a `detail::` decl that
+gets removed — but the outcome is the opposite. `api()`'s body is compiled
+into **`libdemo.so`'s own binary only**: a consumer links against `api()`'s
+exported symbol alone and never sees, references, or embeds
+`detail::log_context()`. If `log_context()` is removed, either `libdemo.so`'s
+own build fails first (the vendor's problem, invisible to any consumer), or
+`api()`'s recompiled body simply stops calling it — never a consumer-visible
+break either way.
+
+abicheck's L5 call-graph walk only seeds itself from entries whose **own
+body** is actually emitted into consumer code (the node's
+`consumer_compiled_body` attribute) — `api()`'s node is tagged `false` here,
+unlike `compute()`'s `true` in case192, because it is an ordinary declaration,
+not an inline/template one. The walk therefore never treats
+`detail::log_context()` as public-reachable through `api()`, and a broad
+`namespace: "demo::detail::**"` suppression rule applies **cleanly, with no
+diagnostic at all** — exactly as it should.
+
+## Why this matters as its own case
+
+Most functions in most libraries are exactly this shape: ordinary, exported,
+out-of-line. Without this distinction, every internal helper called from
+*any* exported function would read as "public-reachable," defeating broad
+internal-namespace suppression for the common case while chasing a rare one.
+This case is the deliberate negative-space check alongside case192's positive
+one: the L5 graph must stay quiet here, not just loud there.
+
+## Reproduce
+
+```bash
+abicheck compare old.abi.json new.abi.json                          # BREAKING (func_removed alone)
+abicheck compare old.abi.json new.abi.json --suppress suppress.yaml # NO_CHANGE -- no diagnostic
+```

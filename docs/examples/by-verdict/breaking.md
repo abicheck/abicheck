@@ -3,7 +3,7 @@
 
 ABI breaks: existing consumers will fail at runtime.
 
-_101 case(s)._ [← back to all examples](../index.md)
+_103 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -108,3 +108,5 @@ _101 case(s)._ [← back to all examples](../index.md)
 | [case176_kabi_symbol_namespace_changed](../case176_kabi_symbol_namespace_changed.md) | kABI Export Namespace Changed | 🔴 BREAKING | Breaking |
 | [case177_long_double_abi_changed](../case177_long_double_abi_changed.md) | long double ABI Changed | 🔴 BREAKING | Breaking |
 | [case182_accidental_export_removed_still_breaking](../case182_accidental_export_removed_still_breaking.md) | Accidental export removed — still BREAKING under public-header scoping | 🔴 BREAKING | Breaking |
+| [case192_call_graph_break_survives_suppression](../case192_call_graph_break_survives_suppression.md) | Call-graph-reachable break survives a broad internal-namespace suppression | 🔴 BREAKING | Breaking |
+| [case193_ordinary_exported_fn_call_not_reachable](../case193_ordinary_exported_fn_call_not_reachable.md) | An ordinary exported function's internal call is not public-reachable | 🔴 BREAKING | Breaking |

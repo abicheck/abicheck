@@ -1,0 +1,186 @@
+{
+  "ast_producer": null,
+  "build_context_defines": [],
+  "build_id": null,
+  "build_mode": null,
+  "build_source": {
+    "manifest": {
+      "abicheck_version": "",
+      "artifacts": [],
+      "build_source_pack_version": 1,
+      "coverage": [],
+      "created_at": "",
+      "extractors": [],
+      "inputs": {},
+      "redaction": {},
+      "source_root": {
+        "path_redacted": true,
+        "repo_hash": ""
+      }
+    },
+    "source_graph": {
+      "coverage": {},
+      "degraded_passes": {},
+      "edges": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "dst": "decl://log_context",
+          "edge": "DECL_CALLS_DECL",
+          "provenance": "",
+          "src": "decl://api"
+        },
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "dst": "binary_symbol://_ZN4demo6detail11log_contextEv",
+          "edge": "SOURCE_DECL_MAPS_TO_SYMBOL",
+          "provenance": "",
+          "src": "decl://log_context"
+        }
+      ],
+      "external_graph_refs": [],
+      "extractor_passes": {},
+      "graph_id": "sha256:591ddbddbd619bfde925193d0aef7f0806d68f4f442d2eb3a8d7424c2e91f657",
+      "indexes": {
+        "by_binary_symbol": {},
+        "by_file": {},
+        "by_source_decl": {
+          "decl://log_context": [
+            "binary_symbol://_ZN4demo6detail11log_contextEv",
+            "decl://api"
+          ]
+        },
+        "by_target": {}
+      },
+      "narrowed_passes": {},
+      "narrowed_scope": {},
+      "nodes": [
+        {
+          "attrs": {
+            "consumer_compiled_body": false,
+            "decl_kind": "function",
+            "visibility": "public_header"
+          },
+          "confidence": "unknown",
+          "id": "decl://api",
+          "kind": "source_decl",
+          "label": "demo::api",
+          "provenance": ""
+        },
+        {
+          "attrs": {
+            "visibility": "source"
+          },
+          "confidence": "unknown",
+          "id": "decl://log_context",
+          "kind": "source_decl",
+          "label": "demo::detail::log_context",
+          "provenance": ""
+        }
+      ],
+      "schema_version": 1
+    }
+  },
+  "build_source_pack": null,
+  "conditional_fields": {},
+  "constants": {},
+  "created_at": null,
+  "dependency_info": null,
+  "dwarf": null,
+  "dwarf_advanced": null,
+  "elf": null,
+  "elf_only_mode": false,
+  "enums": [],
+  "from_headers": false,
+  "functions": [
+    {
+      "access": "public",
+      "contract_attributes": null,
+      "deleted_from_dwarf": false,
+      "deprecated": null,
+      "elf_visibility": null,
+      "exception_spec": null,
+      "is_const": false,
+      "is_deleted": false,
+      "is_explicit": null,
+      "is_extern_c": false,
+      "is_hidden_friend": null,
+      "is_inline": false,
+      "is_noexcept": false,
+      "is_override": null,
+      "is_pure_virtual": false,
+      "is_static": false,
+      "is_variadic": null,
+      "is_virtual": false,
+      "is_volatile": false,
+      "mangled": "_ZN4demo3apiEv",
+      "name": "demo::api",
+      "origin": "unknown",
+      "params": [],
+      "ref_qualifier": "",
+      "return_pointer_depth": 0,
+      "return_type": "void",
+      "source_header": null,
+      "source_location": null,
+      "visibility": "public",
+      "vtable_index": null
+    },
+    {
+      "access": "public",
+      "contract_attributes": null,
+      "deleted_from_dwarf": false,
+      "deprecated": null,
+      "elf_visibility": null,
+      "exception_spec": null,
+      "is_const": false,
+      "is_deleted": false,
+      "is_explicit": null,
+      "is_extern_c": false,
+      "is_hidden_friend": null,
+      "is_inline": false,
+      "is_noexcept": false,
+      "is_override": null,
+      "is_pure_virtual": false,
+      "is_static": false,
+      "is_variadic": null,
+      "is_virtual": false,
+      "is_volatile": false,
+      "mangled": "_ZN4demo6detail11log_contextEv",
+      "name": "demo::detail::log_context",
+      "origin": "unknown",
+      "params": [],
+      "ref_qualifier": "",
+      "return_pointer_depth": 0,
+      "return_type": "void",
+      "source_header": null,
+      "source_location": null,
+      "visibility": "public",
+      "vtable_index": null
+    }
+  ],
+  "git_commit": null,
+  "git_tag": null,
+  "header_cv_facts_reliable": true,
+  "kabi": null,
+  "language_profile": null,
+  "library": "libdemo.so.1",
+  "macho": null,
+  "numpy_capi": null,
+  "parsed_with_build_context": false,
+  "pe": null,
+  "platform": null,
+  "python_api": null,
+  "python_ext": null,
+  "schema_version": 9,
+  "scope_fallback": null,
+  "source_mtime": null,
+  "source_mtime_epoch": false,
+  "source_path": null,
+  "source_size": null,
+  "sycl": null,
+  "typedefs": {},
+  "types": [],
+  "variables": [],
+  "version": "1.0"
+}
