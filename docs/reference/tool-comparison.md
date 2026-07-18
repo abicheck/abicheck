@@ -9,7 +9,7 @@ benchmark results across real-world test cases, and why the numbers come out the
 >
 > - A **pinned 74-case cross-tool subset** (`case01`-`case73` + `case26b`),
 >   frozen so accuracy numbers stay reproducible release to release. See
->   [Pinned vendor benchmark summary](#pinned-vendor-benchmark-summary)
+>   [Pinned vendor benchmark summary](#pinned-vendor-benchmark-summary-2026-07-18-74-case-subset)
 >   (marked historical, superseded by the full-catalog benchmark below).
 > - A **full-catalog sweep** scoring every case, with SKIP/ERROR/TIMEOUT counted
 >   as misses. See [Full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-193-cases).
@@ -552,74 +552,60 @@ about a break failed to warn just as surely as one that said COMPATIBLE).
 
 ---
 
-## Pinned vendor benchmark summary (<<FILL:PINNED74_DATE>>, 74-case subset)
+## Pinned vendor benchmark summary (2026-07-18, 74-case subset)
 
 > **Historical.** Superseded by the [full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-193-cases)
 > above, which covers all 193 cases with a stricter denominator (SKIP/ERROR/TIMEOUT
-> count as misses) plus an FP/FN breakdown. Kept here for the original 74-case
-> release-pinned methodology, which stays useful as a small, fast, stable
+> count as misses) plus an FP/FN breakdown. Kept here because the original
+> 74-case release-pinned methodology stays useful as a small, fast, stable
 > corpus for spot-checking a tool change without paying the full-catalog
-> runtime. The harness has since dropped the standalone
-> `abicheck_compat`/`abicheck_strict` tool lanes (the cross-tool comparison
-> now benchmarks only the two evidence depths that matter for tool-vs-tool
-> comparison — `abicheck` at L2 and `abicheck_full` at L3-L5); `abicheck
-> compat`/`compat check -s` remain real CLI modes, documented above under
-> "How each tool analyses ABI", just no longer re-benchmarked as separate
-> harness columns.
+> runtime (this refresh: 86s for `abicheck`, vs 199s for the same lane over
+> the full 193-case catalog above). The harness has since dropped the
+> standalone `abicheck_compat`/`abicheck_strict` tool lanes — `--tools` only
+> accepts `abicheck`, `abicheck_full`, `abidiff`, `abidiff_headers`,
+> `abicc_dumper`, `abicc_xml` now, so the original 2026-05-19 run's compat
+> (71/74, 95%) and strict (62/74, 83%) numbers can no longer be reproduced
+> verbatim; `abicheck compat`/`compat check -s` remain real CLI modes,
+> documented above under "How each tool analyses ABI", just no longer
+> re-benchmarked as separate harness columns.
 
-Release-pinned scan status from `python3 scripts/benchmark_comparison.py --suite pinned74` on the original
-74-case benchmark subset. ABICC runs used `--abicc-timeout 20` to keep known hangs bounded.
+Release-pinned scan status from `python3 scripts/benchmark_comparison.py --suite pinned74 --abicc-mode both`
+on the original 74-case benchmark subset (git commit `33b35a4b7a6d`, same `ground_truth.json` as the
+full-catalog run above).
 
-| Tool | Cases attempted | Scored | Correct | Accuracy | Not scored / notes |
-|------|:---------------:|:------:|:-------:|:--------:|--------------------|
-| abicheck compare | 74 | 74 | 74 | **100%** | Full exact match after forcing Clang for `case64` |
-| abicheck compat | 74 | 74 | 71 | 95% | ABICC-style compatibility mode |
-| abicheck strict | 74 | 74 | 62 | 83% | Intentional strict promotion of compatible/API breaks |
-| abidiff | 74 | 73 | 22 | 30% of scored | `case16_inline_to_non_inline` hangs/timeouts |
-| abidiff+headers | 74 | 73 | 22 | 30% of scored | `case16_inline_to_non_inline` hangs/timeouts |
-| ABICC(dump) | 74 | 71 | 51 | 71% of scored | `case09`, `case59` timeout; `case16` error |
-| ABICC(xml) | 74 | 72 | 50 | 69% of scored | `case16`, `case60` timeout |
+| Tool | Correct / 74 | Accuracy | False positives | False negatives | Total time |
+|------|:---:|:---:|:---:|:---:|:---:|
+| **abicheck (L2, headers)** | 74 | **100%** | **0** | 0 | 86.0s |
+| **abicheck (L3-L5, +sources)** | 74 | **100%** | **0** | 0 | 454.1s |
+| libabigail (`abidiff`) | 21 | 28.4% | 2 | 51 | 0.5s |
+| libabigail + headers | 21 | 28.4% | 2 | 51 | 3.1s |
+| ABICC (abi-dumper) | 48 | 64.9% | 2 | 24 | 700s (~12 min) |
+| ABICC (xml/legacy) | 47 | 63.5% | 1 | 26 | 240s (~4 min) |
 
 ### Scan-status matrix
 
 | Check configuration | 74-case benchmark subset | Status |
 |---------------------|:----------------:|--------|
 | `abicheck` | ✅ 74/74 completed | 74/74 exact |
-| `abicheck_compat` | ✅ 74/74 completed | 71/74 exact |
-| `abicheck_strict` | ✅ 74/74 completed | 62/74 exact |
-| `abidiff` | ⚠️ 73/74 completed | `case16_inline_to_non_inline` hangs |
-| `abidiff_headers` | ⚠️ 73/74 completed | `case16_inline_to_non_inline` hangs |
-| `abicc_dumper` | ⚠️ 71/74 scored | `case09`, `case59` timeout; `case16` error |
-| `abicc_xml` | ⚠️ 72/74 scored | `case16`, `case60` timeout |
+| `abicheck_full` | ✅ 74/74 completed | 74/74 exact |
+| `abidiff` | ✅ 74/74 completed | 21/74 exact |
+| `abidiff_headers` | ✅ 74/74 completed | 21/74 exact |
+| `abicc_dumper` | ⚠️ 71/74 scored | `case09_cpp_vtable`, `case59_func_became_inline` timeout; `case16_inline_to_non_inline` error |
+| `abicc_xml` | ⚠️ 72/74 scored | `case16_inline_to_non_inline`, `case60_base_class_position_changed` timeout |
 
 ### Commands used
 
 ```bash
 python3 scripts/benchmark_comparison.py \
   --suite pinned74 \
-  --tools abicheck abicheck_compat abicheck_strict \
-  --skip-abicc
-
-# abidiff and abidiff+headers were run on all cases except case16,
-# which hangs in both modes in this environment.
-python3 scripts/benchmark_comparison.py \
-  --suite pinned74 \
-  --tools abidiff abidiff_headers \
-  --skip-abicc \
-  --cases case01_symbol_removal ... case73_typedef_underlying_changed
-
-timeout 600 python3 scripts/benchmark_comparison.py \
-  --suite pinned74 \
-  --tools abicc_xml \
-  --abicc-mode xml \
-  --abicc-timeout 20
-
-timeout 600 python3 scripts/benchmark_comparison.py \
-  --suite pinned74 \
-  --tools abicc_dumper \
-  --abicc-mode dumper \
-  --abicc-timeout 20
+  --abicc-mode both
 ```
+
+A single run now covers all six tools; the previous multi-invocation
+sequence (separate `--skip-abicc` and per-mode `--abicc-timeout 20` calls)
+was a workaround for an older, flakier ABICC integration and is no longer
+necessary — `--abicc-timeout` still exists if you need to bound a hang more
+aggressively than the 90s default.
 
 ---
 
@@ -651,4 +637,4 @@ python3 scripts/benchmark_comparison.py --tools abicheck abidiff
 | Migrating from ABICC XML pipeline | `abicheck compat check` |
 | Strict gate (any addition = fail) | `abicheck compat check -s` |
 | Debug build available, DWARF check | `abicheck compare` (castxml already better) |
-| Quick ELF-only sanity check | `abidiff` (fast, 30% (22/73) but catches symbol removals) |
+| Quick ELF-only sanity check | `abidiff` (fast, 28% (21/74) but catches symbol removals) |
