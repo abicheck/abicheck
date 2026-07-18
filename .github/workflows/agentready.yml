@@ -31,8 +31,17 @@ jobs:
           mode: scan
           job-summary: true
           upload-sarif: true
-      - name: Upload SARIF
+      - name: Check SARIF has findings
+        id: sarif_check
         if: always() && steps.agentready.outputs.sarif-report-path
+        run: |
+          count=$(jq '[.runs[].results[]?] | length' "${{ steps.agentready.outputs.sarif-report-path }}")
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+      - name: Upload SARIF
+        # codeql-action rejects a SARIF file with zero results
+        # ("locationFromSarifResult: expected at least one location"), so skip
+        # the upload entirely when there is nothing to report.
+        if: always() && steps.agentready.outputs.sarif-report-path && steps.sarif_check.outputs.count != '0'
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: ${{ steps.agentready.outputs.sarif-report-path }}
@@ -61,8 +70,17 @@ jobs:
           job-summary: true
           pr-comment: true
           upload-sarif: true
-      - name: Upload SARIF
+      - name: Check SARIF has findings
+        id: sarif_check
         if: always() && steps.agentready.outputs.sarif-report-path
+        run: |
+          count=$(jq '[.runs[].results[]?] | length' "${{ steps.agentready.outputs.sarif-report-path }}")
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+      - name: Upload SARIF
+        # codeql-action rejects a SARIF file with zero results
+        # ("locationFromSarifResult: expected at least one location"), so skip
+        # the upload entirely when there is nothing to report.
+        if: always() && steps.agentready.outputs.sarif-report-path && steps.sarif_check.outputs.count != '0'
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: ${{ steps.agentready.outputs.sarif-report-path }}
