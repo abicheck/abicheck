@@ -207,6 +207,31 @@ def test_parse_direct_call() -> None:
     ]
 
 
+def test_parse_strips_macos_mach_o_underscore_from_mangled_names() -> None:
+    # On Darwin, clang's own -ast-dump=json reports a C++ decl's mangledName
+    # with the Mach-O ABI's extra linker-symbol-table underscore still
+    # attached ("__Zcaller" rather than "_Zcaller") -- the same decoration
+    # macho_metadata.py already strips off the *binary's* export table, so a
+    # header_graph-seeded decl:// node for the same function is keyed on the
+    # one-underscore form. Left unstripped here, the call edge would land on
+    # a different, never-public node and public_api_internal_dependency_added
+    # would never fire for a function-rooted dependency on macOS.
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            _func(
+                "caller",
+                "__Zcaller",
+                [_direct_call(_ref("FunctionDecl", "callee", "__Zcallee"))],
+            ),
+        ],
+    }
+    edges = parse_clang_ast_calls(ast)
+    assert edges == [
+        CallEdge("_Zcaller", "_Zcallee", CALL_KIND_DIRECT, RESOLUTION_EXACT)
+    ]
+
+
 def test_parse_virtual_call_is_overapprox() -> None:
     ast = {
         "kind": "TranslationUnitDecl",
