@@ -585,3 +585,23 @@ class TestNoFailOnAdditionsFlag:
         from abicheck.cli import _EXIT_USAGE_ERROR
         assert result.exit_code == _EXIT_USAGE_ERROR
 
+
+def test_main_installs_sigterm_cleanup(monkeypatch) -> None:
+    """Codex review (PR #591): the plain CLI/CI path has no outer watchdog
+    (unlike the MCP path's service_scan._kill_process_tree) that would
+    otherwise clean up a run_bounded()-detached compiler process group on an
+    external SIGTERM. Every CLI invocation must install that cleanup via
+    deadline.install_sigterm_cleanup() before any subcommand runs."""
+    from abicheck import cli
+
+    calls: list[bool] = []
+    monkeypatch.setattr(
+        cli.deadline, "install_sigterm_cleanup", lambda: calls.append(True)
+    )
+    # `abicheck --help` alone is handled by click's eager root --help option,
+    # which exits before the group callback body runs; a subcommand
+    # invocation (its own --help is eager only for the *subcommand*) is what
+    # actually exercises `main()`'s body first.
+    CliRunner().invoke(main, ["dump", "--help"])
+    assert calls == [True]
+

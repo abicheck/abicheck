@@ -62,6 +62,10 @@ from .dumper_castxml import (
     _parse_vtable_index as _parse_vtable_index,
     _vt_sort_key as _vt_sort_key,
 )
+from .dumper_castxml_probe import (
+    _castxml_version_note as _castxml_version_note,
+    _parse_castxml_version as _parse_castxml_version,
+)
 from .dumper_clang import (
     _clang_available as _clang_available,
     _ClangAstParser as _ClangAstParser,
@@ -854,23 +858,6 @@ def _build_castxml_command(
 #   error: unknown type name '_Float32'
 _SIZED_FLOAT_RE = re.compile(r"_Float(?:16|32|64|128)(?:x)?\b")
 
-# castxml drives an internal Clang frontend; it must be new enough to parse
-# modern host headers. _Float32/_Float64/_Float128 land in Clang 16, and the
-# [[assume]] / __assume__ attribute (GCC 13+ libstdc++) in Clang 18. We
-# recommend a bundled Clang >= this so both are covered. This is the durable
-# fix for the header-scoped toolchain aborts (plan G16) — abicheck cannot
-# reliably work around a frontend that is simply older than the host headers,
-# so it detects the version and tells the user to upgrade.
-_RECOMMENDED_CLANG_MAJOR = 18
-
-_CASTXML_VERSION_RE = re.compile(r"castxml version\s+(\S+)", re.IGNORECASE)
-# `castxml --version` does not always print the bundled frontend version, and
-# when it does the spelling varies ("clang version 18.1.8", "LLVM version 18.1.8").
-# Accept either so the precise floor comparison can actually fire.
-_CLANG_VERSION_RE = re.compile(
-    r"(?:clang|LLVM) version\s+(\d+)(?:\.(\d+))?", re.IGNORECASE
-)
-
 
 def _is_toolchain_version_failure(stderr: str) -> bool:
     """True when a castxml failure is a bundled-Clang-too-old signature
@@ -879,52 +866,6 @@ def _is_toolchain_version_failure(stderr: str) -> bool:
     return bool(stderr) and (
         bool(_SIZED_FLOAT_RE.search(stderr)) or "__assume__" in stderr
     )
-
-
-def _parse_castxml_version(output: str) -> tuple[str | None, tuple[int, int] | None]:
-    """Parse ``castxml --version`` text into (castxml_version, clang_major_minor).
-
-    Either element is ``None`` when not found. Pure/string-only so it is fully
-    unit-testable without castxml installed.
-    """
-    cx = _CASTXML_VERSION_RE.search(output or "")
-    cl = _CLANG_VERSION_RE.search(output or "")
-    cx_ver = cx.group(1) if cx else None
-    clang = (int(cl.group(1)), int(cl.group(2) or 0)) if cl else None
-    return cx_ver, clang
-
-
-def _castxml_version_note() -> str:
-    """Probe ``castxml --version`` and, when its bundled Clang predates the
-    recommended floor, return a one-line upgrade note (else "").
-
-    Best-effort: an actual probe failure (missing tool, etc.) yields "" so the
-    base diagnostic still stands. DeadlineExceeded is NOT a probe failure —
-    this is on the authoritative L2 path, so it propagates uncaught like the
-    castxml/clang calls around it rather than masquerading as a parse failure
-    (Codex review, PR #591). Only called on an actual parse failure.
-    """
-    try:
-        proc = deadline.run_bounded(["castxml", "--version"], capture_output=True, text=True, timeout=15)
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    raw, clang = _parse_castxml_version(f"{proc.stdout}\n{proc.stderr}")
-    if clang is not None and clang[0] < _RECOMMENDED_CLANG_MAJOR:
-        detected = (
-            f"castxml {raw} (clang {clang[0]}.{clang[1]})"
-            if raw else f"clang {clang[0]}.{clang[1]}"
-        )
-        return (
-            f" Detected {detected}; these host headers need clang "
-            f">= {_RECOMMENDED_CLANG_MAJOR} — upgrade castxml to a build with a "
-            f"newer bundled Clang."
-        )
-    if raw and clang is None:
-        return (
-            f" Detected castxml {raw}; upgrade it if its bundled Clang predates "
-            f"the host gcc (clang >= {_RECOMMENDED_CLANG_MAJOR} recommended)."
-        )
-    return ""
 
 
 def _castxml_failure_hint(

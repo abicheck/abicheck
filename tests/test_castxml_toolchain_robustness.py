@@ -147,6 +147,10 @@ class TestVersionNote:
         # (CLI exit 1) instead of the documented budget-overflow exit 5, so
         # it must propagate uncaught like the castxml/clang subprocess
         # calls around it.
+        # Round-3 note: DeadlineExceeded propagates only when the *outer scan*
+        # deadline (not this probe's own 15s local cap) is what's binding —
+        # an active deadline_scope tighter than 15s makes that the case here
+        # (Codex review, PR #591, round 3).
         from abicheck import deadline
 
         with (
@@ -154,9 +158,50 @@ class TestVersionNote:
                 "abicheck.dumper.deadline.run_bounded",
                 side_effect=deadline.DeadlineExceeded(-1.0),
             ),
+            deadline.deadline_scope(5.0),
             pytest.raises(deadline.DeadlineExceeded),
         ):
             _castxml_version_note()
+
+    def test_probe_local_cap_hit_with_generous_scan_budget_is_silent(self) -> None:
+        # Codex review (PR #591), round 3: hitting this probe's OWN 15s cap
+        # is an ordinary probe failure -- even with an active outer --budget,
+        # as long as that outer budget still had *more* than 15s left when
+        # the probe started (so the local cap, not the scan deadline, was
+        # what actually bound the nested scope).
+        from abicheck import deadline
+
+        with (
+            patch(
+                "abicheck.dumper.deadline.run_bounded",
+                side_effect=deadline.DeadlineExceeded(-1.0),
+            ),
+            deadline.deadline_scope(1800.0),  # generous 30-minute --budget
+        ):
+            assert _castxml_version_note() == ""
+
+    def test_probe_bounded_by_local_cap_not_full_scan_budget(self) -> None:
+        # Codex review (PR #591), round 3: deadline.run_bounded() honors an
+        # active outer deadline verbatim (not min(timeout, left)), so a bare
+        # timeout=15 alone did nothing once a generous --budget was active --
+        # a hung `castxml --version` could consume the whole remaining scan
+        # budget instead of this probe's own 15s cap.
+        from abicheck import deadline
+
+        seen_remaining: list[float | None] = []
+
+        def fake_run(*_a, **_k):
+            seen_remaining.append(deadline.remaining())
+            return _completed(stdout="unrelated output\n")
+
+        with (
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
+            deadline.deadline_scope(1800.0),  # generous 30-minute --budget
+        ):
+            _castxml_version_note()
+
+        assert seen_remaining
+        assert seen_remaining[0] is not None and seen_remaining[0] <= 15.5
 
 
 class TestFailureHint:
@@ -257,6 +302,10 @@ class TestProbeGating:
             patch("abicheck.dumper._castxml_available", return_value=True),
             patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
+            # Round-3 note: propagation requires the *outer scan* deadline to
+            # be the binding constraint, not just this probe's own 15s local
+            # cap (Codex review, PR #591, round 3).
+            deadline.deadline_scope(5.0),
             pytest.raises(deadline.DeadlineExceeded),
         ):
             header = tmp_path / "api.hpp"

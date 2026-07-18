@@ -32,6 +32,7 @@ POSIX CI runner.
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -444,3 +445,92 @@ def test_run_bounded_kills_tree_on_unexpected_communicate_error(monkeypatch) -> 
     with pytest.raises(OSError, match="pipe broke"):
         deadline.run_bounded(["x"], timeout=1)
     assert killed == [True]
+
+
+# ── external SIGTERM cleanup (Codex review, PR #591 round 2) ────────────────
+#
+# run_bounded() detaches its child into its own session (start_new_session=
+# True) so a timeout *it detects itself* can kill the whole group. That
+# detachment also shields the child from an *external* SIGTERM sent to this
+# process (job-scheduler cancellation, a CI step's own timeout) — Python's
+# default SIGTERM disposition exits immediately without running run_bounded's
+# own except/finally cleanup, orphaning the detached compiler. These tests
+# prove the registry + handler installed by install_sigterm_cleanup() close
+# that gap for the plain CLI/CI path (no MCP-style outer watchdog there).
+
+
+def test_run_bounded_leaves_no_leftover_registered_pgroup() -> None:
+    with deadline._active_pgroups_lock:
+        deadline._active_pgroups.clear()
+    deadline.run_bounded(
+        [sys.executable, "-c", "print('hi')"], timeout=5, capture_output=True, text=True
+    )
+    with deadline._active_pgroups_lock:
+        assert deadline._active_pgroups == set()
+
+
+def test_sigterm_cleanup_handler_kills_tracked_process_group(
+    monkeypatch, tmp_path
+) -> None:
+    # Reproduces the orphan shape from the timeout-kill tests above (a
+    # backgrounded grandchild in the same process group), but proves the
+    # *external SIGTERM* path kills it too -- not just an internally detected
+    # timeout/deadline. os.kill is mocked so the handler's own
+    # self-re-SIGTERM at the end doesn't actually terminate this test process.
+    pid_file = tmp_path / "child.pid"
+    cmd = ["sh", "-c", f"sleep 60 & echo $! > {pid_file}; wait"]
+    proc = subprocess.Popen(cmd, start_new_session=True)  # noqa: S603 - fixed test argv
+    pgid = os.getpgid(proc.pid)
+    with deadline._active_pgroups_lock:
+        deadline._active_pgroups.add(pgid)
+    try:
+        deadline_check = time.monotonic() + 5
+        child_pid = None
+        while time.monotonic() < deadline_check:
+            if pid_file.exists() and pid_file.read_text().strip():
+                child_pid = int(pid_file.read_text().strip())
+                break
+            time.sleep(0.05)
+        assert child_pid is not None, "grandchild never recorded its PID"
+
+        monkeypatch.setattr(deadline.os, "kill", lambda *_a, **_k: None)
+        deadline._sigterm_cleanup_handler(signal.SIGTERM, None)
+
+        for _ in range(50):
+            if not _pid_alive(child_pid):
+                break
+            time.sleep(0.1)
+        assert not _pid_alive(child_pid), (
+            f"grandchild sleep process {child_pid} survived an external "
+            "SIGTERM cleanup pass — the whole tracked group must be killed"
+        )
+    finally:
+        with deadline._active_pgroups_lock:
+            deadline._active_pgroups.discard(pgid)
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+
+
+def test_install_sigterm_cleanup_installs_handler() -> None:
+    original = signal.getsignal(signal.SIGTERM)
+    try:
+        deadline.install_sigterm_cleanup()
+        assert signal.getsignal(signal.SIGTERM) is deadline._sigterm_cleanup_handler
+    finally:
+        signal.signal(signal.SIGTERM, original)
+
+
+def test_install_sigterm_cleanup_noop_on_non_posix(monkeypatch) -> None:
+    # Stubs the _is_posix() indirection rather than the real os.name -- os.name
+    # is read live by pathlib and other stdlib consumers, so mutating it
+    # process-wide (even via monkeypatch) corrupts unrelated code for the rest
+    # of the test session.
+    original = signal.getsignal(signal.SIGTERM)
+    try:
+        monkeypatch.setattr(deadline, "_is_posix", lambda: False)
+        deadline.install_sigterm_cleanup()
+        # Unchanged -- the non-POSIX branch returns before touching signal.signal.
+        assert signal.getsignal(signal.SIGTERM) is original
+    finally:
+        signal.signal(signal.SIGTERM, original)

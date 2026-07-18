@@ -158,3 +158,29 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `build_query._is_gnu_make_launcher` (the GNU Make `--version` check,
   10s local cap). Both now run inside a nested `deadline.deadline_scope()`
   bound to whichever is tighter, same as the include-map fix above.
+- **External SIGTERM can no longer orphan a detached compiler process
+  group on the plain CLI/CI path.** `deadline.run_bounded()` deliberately
+  detaches its child into its own session (`start_new_session=True`) so a
+  timeout *it detects itself* can kill the whole group — but that
+  detachment also shields the child from an *external* SIGTERM sent to
+  abicheck's own process (job-scheduler cancellation, a CI step's own
+  timeout): Python's default SIGTERM disposition exits immediately
+  without running `run_bounded`'s own `except`/`finally` cleanup. New
+  `deadline.install_sigterm_cleanup()` (called once from `cli.main`)
+  tracks every in-flight process group and, on SIGTERM, best-effort
+  SIGKILLs all of them before re-raising SIGTERM at itself so the process
+  still exits with normal signal semantics. Mirrors the MCP path's
+  existing `service_scan._kill_process_tree` outer watchdog, which the
+  plain CLI/CI path had no equivalent of (Codex review, PR #591).
+- Closed the same `run_bounded()`-ignores-`timeout=` gap in
+  `dumper._castxml_version_note` (the `castxml --version` upgrade-note
+  probe, 15s local cap) — the last remaining instance. Also refined its
+  round-2 fix: a `DeadlineExceeded` now propagates only when the *outer
+  scan* deadline (not this probe's own local cap) was the binding
+  constraint, so hitting the local cap alone under a generous `--budget`
+  still degrades to `""` like an ordinary probe failure, while a genuine
+  scan-budget overflow still propagates as before. Split out of
+  `dumper.py` (at the file-size hard cap) into `dumper_castxml_probe.py`,
+  re-exported so the public `dumper._castxml_version_note` surface is
+  unchanged — the same split-and-reexport pattern `dumper_sysinc.py`/
+  `dumper_clang_errors.py` already established earlier in this PR.

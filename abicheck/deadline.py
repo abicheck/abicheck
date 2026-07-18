@@ -58,10 +58,17 @@ import contextvars
 import os
 import signal
 import subprocess
+import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
+
+#: Process groups run_bounded() currently has in flight, so an external
+#: SIGTERM (see install_sigterm_cleanup) can find and kill them even though
+#: they are detached (start_new_session=True) from this process's own group.
+_active_pgroups: set[int] = set()
+_active_pgroups_lock = threading.Lock()
 
 
 class DeadlineExceeded(Exception):
@@ -239,25 +246,30 @@ def run_bounded(
         text=text,
         start_new_session=use_pgroup,
     )
+    pgid = _register_pgroup(proc) if use_pgroup else None
     try:
-        out, err = proc.communicate(input=input, timeout=effective_timeout)
-    except subprocess.TimeoutExpired as exc:
-        _kill_process_tree(proc, use_pgroup)
-        # Drain the now-dead process's pipes so it doesn't linger as a zombie;
-        # a short grace timeout, not the original (already-exhausted) one.
         try:
-            drained_out, drained_err = proc.communicate(timeout=5)
-            exc.output = drained_out
-            exc.stderr = drained_err
-        except subprocess.TimeoutExpired:
-            pass
-        if had_deadline:
-            left = remaining()
-            raise DeadlineExceeded(left if left is not None else 0.0) from exc
-        raise
-    except BaseException:
-        _kill_process_tree(proc, use_pgroup)
-        raise
+            out, err = proc.communicate(input=input, timeout=effective_timeout)
+        except subprocess.TimeoutExpired as exc:
+            _kill_process_tree(proc, use_pgroup)
+            # Drain the now-dead process's pipes so it doesn't linger as a zombie;
+            # a short grace timeout, not the original (already-exhausted) one.
+            try:
+                drained_out, drained_err = proc.communicate(timeout=5)
+                exc.output = drained_out
+                exc.stderr = drained_err
+            except subprocess.TimeoutExpired:
+                pass
+            if had_deadline:
+                left = remaining()
+                raise DeadlineExceeded(left if left is not None else 0.0) from exc
+            raise
+        except BaseException:
+            _kill_process_tree(proc, use_pgroup)
+            raise
+    finally:
+        if pgid is not None:
+            _unregister_pgroup(pgid)
     return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
 
 
@@ -306,4 +318,74 @@ def _kill_process_tree(proc: subprocess.Popen[Any], use_pgroup: bool) -> None:
     try:
         proc.wait(timeout=5)
     except subprocess.TimeoutExpired:
+        pass
+
+
+def _register_pgroup(proc: subprocess.Popen[Any]) -> int | None:
+    """Track *proc*'s process group for :func:`install_sigterm_cleanup`, if resolvable."""
+    try:
+        pgid = os.getpgid(proc.pid)
+    except (ProcessLookupError, OSError):
+        return None
+    with _active_pgroups_lock:
+        _active_pgroups.add(pgid)
+    return pgid
+
+
+def _unregister_pgroup(pgid: int) -> None:
+    with _active_pgroups_lock:
+        _active_pgroups.discard(pgid)
+
+
+def _sigterm_cleanup_handler(signum: int, frame: Any) -> None:  # noqa: ARG001 - signal handler signature
+    """Kill every ``run_bounded()`` process group still in flight, then re-exit via SIGTERM.
+
+    ``run_bounded`` deliberately detaches its child into its own session
+    (``start_new_session=True``) so a *timeout it detects itself* can kill the
+    whole group via :func:`_kill_process_tree`. That detachment has a side
+    effect: it also shields the child from an *external* SIGTERM sent to this
+    process (a job scheduler cancelling the run, a CI step's own timeout,
+    ``kill -TERM <pid>``) — Python's default SIGTERM disposition terminates
+    the process immediately, without running ``run_bounded``'s own
+    ``except``/``finally`` cleanup, so the detached compiler would be
+    orphaned. This handler (installed by :func:`install_sigterm_cleanup`)
+    closes that gap: best-effort SIGKILL every tracked group (no time for a
+    graceful SIGTERM+wait inside a signal handler), then restores the
+    default SIGTERM disposition and re-sends SIGTERM to this process so it
+    still exits with normal signal-termination semantics (exit status,
+    shell ``$?``, etc.) rather than swallowing the signal.
+    """
+    with _active_pgroups_lock:
+        pgids = list(_active_pgroups)
+    for pgid in pgids:
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    os.kill(os.getpid(), signal.SIGTERM)
+
+
+def _is_posix() -> bool:
+    """Indirection over ``os.name`` so tests can stub the platform check without
+    mutating the real ``os.name`` (which pathlib and other stdlib consumers
+    read live — patching it process-wide corrupts unrelated code)."""
+    return os.name == "posix"
+
+
+def install_sigterm_cleanup() -> None:
+    """Install the SIGTERM handler that kills orphaned ``run_bounded()`` process groups.
+
+    Call once from the CLI entry point (``cli.main``) — the plain CLI/CI path
+    has no outer watchdog analogous to the MCP path's
+    ``service_scan._kill_process_tree`` (Codex review, PR #591). A no-op on
+    non-POSIX platforms (no process groups) or off the main thread (Python
+    only allows installing signal handlers there) — best-effort by design,
+    same as the rest of this module's process cleanup.
+    """
+    if not _is_posix():
+        return
+    try:
+        signal.signal(signal.SIGTERM, _sigterm_cleanup_handler)
+    except ValueError:
         pass
