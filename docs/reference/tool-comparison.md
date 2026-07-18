@@ -12,7 +12,7 @@ benchmark results across real-world test cases, and why the numbers come out the
 >   [Pinned vendor benchmark summary](#pinned-vendor-benchmark-summary)
 >   (marked historical, superseded by the full-catalog benchmark below).
 > - A **full-catalog sweep** scoring every case, with SKIP/ERROR/TIMEOUT counted
->   as misses. See [Full-catalog benchmark](#full-catalog-benchmark).
+>   as misses. See [Full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-193-cases).
 >
 > **Which denominator is which.** Of the 193 catalog cases, **159** are
 > compilable `v1`/`v2` shared-library (`.so`) pairs that abidiff/ABICC can also
@@ -58,7 +58,7 @@ ABICC/libabigail on a stable cross-tool corpus?"
 | Catalog metadata | 193 ground-truth entries | `examples/ground_truth.json` + `tests/test_evidence_tiers.py` | 159 binary competitor `.so` lanes + 34 dedicated non-`.so` lanes | Single source of truth for examples, verdicts, expected kinds, and minimum evidence; split recomputed directly from `ground_truth.json`'s `mode`/`bundle`/`fixtures`/`skip` fields (see the "Which denominator is which" note above) |
 | Build/autodiscovery | 211 integration items | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | gcc: 146 passed / 60 skipped / 5 xfailed; clang: 146 passed / 59 skipped / 6 xfailed | Green default single-library build lane; skipped items are covered by dedicated bundle/source/audit/BTF tests |
 | Full example proof matrix | 193 catalog cases | `validation/scripts/collect_full_example_matrix.py` over CI artifacts + bundle/G20/L3-L5/BTF proofs | Dedicated full-catalog proof lane | Full-catalog source of truth; a `SKIP` in one lane is accepted only when a dedicated lane proves the case |
-| Default/debug verdicts | 193 catalog cases | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | `<<FILL:VALIDATE_GCC>>` | Single-library debug lane only; XFAIL is not green full-matrix scope |
+| Default/debug verdicts | 193 catalog cases | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | Single-library debug lane; dedicated non-`.so` cases skip here by design | Single-library debug lane only; XFAIL is not green full-matrix scope |
 | Bundle release verdicts | 5 bundle cases | `PYTHONPATH=. python validation/scripts/run_bundle_examples.py --json` | 5 PASS | Runs the ADR-023 multi-library examples through `abicheck compare old/ new/` |
 | Runtime smoke | 193 catalog cases | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Runtime-only proof lane | Runtime harness has no BUILD_ERROR/BASELINE_ERROR bucket |
 | Release headers | 193 catalog cases | `validate_examples.py --artifact-variant release-headers --json` in CI artifact | Reduced-evidence informational lane | False-positive guard passed |
@@ -420,7 +420,7 @@ for tier in ['L0', 'L1', 'L2', 'L3', 'L4', 'L5']:
 > is a discoverability *floor* (the weakest source that reaches the correct
 > verdict per case, credited from `ground_truth.json` labels); it does not
 > penalize a tier for *over-calling* elsewhere in the catalog. The
-> [full-catalog benchmark](#full-catalog-benchmark) below is the stricter,
+> [full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-193-cases) below is the stricter,
 > empirically-measured number — it scores all 193 cases including false
 > positives, which is why `L3-L5` reads lower there than the 100% this
 > table's `L5` row shows (`<<FILL:L3L5_PCT>>`).
@@ -444,7 +444,7 @@ Two directions matter, not just one:
 
 ---
 
-## Full-catalog benchmark
+## Full-catalog benchmark (2026-07-18, all 193 cases)
 
 Every catalog case scored, with **SKIP/ERROR/TIMEOUT/incapacity all counted as
 misses** — a tool that hung, crashed, or simply has no mode for a case shape
@@ -505,7 +505,7 @@ about a break failed to warn just as surely as one that said COMPATIBLE).
 
 ## Pinned vendor benchmark summary (<<FILL:PINNED74_DATE>>, 74-case subset)
 
-> **Historical.** Superseded by the [full-catalog benchmark](#full-catalog-benchmark)
+> **Historical.** Superseded by the [full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-193-cases)
 > above, which covers all 193 cases with a stricter denominator (SKIP/ERROR/TIMEOUT
 > count as misses) plus an FP/FN breakdown. Kept here for the original 74-case
 > release-pinned methodology, which stays useful as a small, fast, stable
