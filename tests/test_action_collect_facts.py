@@ -156,6 +156,24 @@ class TestDetectProducer:
         result = _run_predicate(f'_detect_producer "{tmp_path}"')
         assert result.stdout.strip() == "wrapper"
 
+    def test_many_nested_compile_dbs_still_means_replay(self, tmp_path: Path) -> None:
+        # Regression (Codex review): the nested-compile-DB check used to be
+        # `find ... | grep -q .`. Under this script's `set -o pipefail`, a
+        # tree with enough matches/entries that find is still writing when
+        # grep exits right after its first match gets find killed with
+        # SIGPIPE (exit 141) -- pipefail turns that into the pipeline's
+        # exit status even though grep itself matched, so the `if` silently
+        # took the false branch and fell through to "wrapper" instead of
+        # "replay". A small tree (like the sibling test above) essentially
+        # never triggers the race; this needs enough entries that find's
+        # write volume actually exceeds a pipe buffer while it is walking.
+        for i in range(2000):
+            d = tmp_path / f"dir{i}"
+            d.mkdir()
+            (d / "compile_commands.json").write_text("[]")
+        result = _run_predicate(f'_detect_producer "{tmp_path}"')
+        assert result.stdout.strip() == "replay"
+
 
 @pytest.mark.skipif(
     not RUN_SH.is_file(), reason="actions/collect-facts/run.sh not found"

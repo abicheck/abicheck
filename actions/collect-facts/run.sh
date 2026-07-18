@@ -44,7 +44,15 @@ _detect_producer() {
     echo "replay"
     return
   fi
-  if find "$src" -maxdepth 3 -name compile_commands.json 2>/dev/null | grep -q .; then
+  # -print -quit (not `| grep -q .`): under this script's `set -o pipefail`,
+  # a nested tree with multiple compile_commands.json matches can make grep
+  # exit right after the first line while find still has output queued --
+  # find's next write() then gets SIGPIPE (exit 141), pipefail treats that
+  # as the pipeline's failure even though grep itself matched, and this
+  # `if` silently takes the false branch instead. `-quit` makes find stop
+  # itself after the first match, so there is no pipe to race (Codex
+  # review; reproduced locally with a 5000-entry tree).
+  if [[ -n "$(find "$src" -maxdepth 3 -name compile_commands.json -print -quit 2>/dev/null)" ]]; then
     echo "replay"
     return
   fi
@@ -165,7 +173,10 @@ fi
 _prepare_replay() {
   [[ -d "$SOURCES" ]] || _fail "sources '$SOURCES' does not exist."
   local has_db=""
-  if [[ -f "$SOURCES/compile_commands.json" ]] || find "$SOURCES" -maxdepth 3 -name compile_commands.json 2>/dev/null | grep -q .; then
+  # -print -quit, not `| grep -q .` -- same pipefail/SIGPIPE race as
+  # _detect_producer above (Codex review).
+  if [[ -f "$SOURCES/compile_commands.json" ]] \
+    || [[ -n "$(find "$SOURCES" -maxdepth 3 -name compile_commands.json -print -quit 2>/dev/null)" ]]; then
     has_db="yes"
   fi
   if [[ -z "$has_db" ]]; then
