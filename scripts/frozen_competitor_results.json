@@ -1,1149 +1,779 @@
 {
-  "frozen_at": "2026-07-17T13:56:10Z",
-  "git_commit": "95581db822ce1f712c8ace561410ba5673d0127d",
-  "ground_truth_sha256": "164a517d66f308991eacf1d84fb02659e0c8ec1b633d04d26033b0467f8569a4",
+  "frozen_at": "2026-07-18T06:13:22Z",
+  "git_commit": "b3bad501690039c2ba51a6d00b1f64d6e4192bb2",
+  "ground_truth_sha256": "7836d8b79f96e0ccb783bdbfabb51860853af98119d00dfde99d3d0ef0d42c47",
   "results_by_case": {
     "case01_symbol_removal": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 461,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 1011
+      "abicc_dumper_ms": 454
     },
     "case02_param_type_change": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 443,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 822
+      "abicc_dumper_ms": 433
     },
     "case03_compat_addition": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 381,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 708
+      "abicc_dumper_ms": 391
     },
     "case04_no_change": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 448,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 698
+      "abicc_dumper_ms": 472
     },
     "case05_soname": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 11342,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 1002
+      "abicc_dumper_ms": 12114
     },
     "case06_visibility": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 11535,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 952
+      "abicc_dumper_ms": 12446
     },
     "case07_struct_layout": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 490,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 669
+      "abicc_dumper_ms": 534
     },
     "case08_enum_value_change": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 484,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 899
+      "abicc_dumper_ms": 542
     },
     "case09_cpp_vtable": {
       "abicc_dumper": "TIMEOUT",
-      "abicc_dumper_ms": 90417,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 1499
+      "abicc_dumper_ms": 90505
     },
     "case100_experimental_removed_without_replacement": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 761,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 967
+      "abicc_dumper_ms": 1232
     },
     "case101_inline_namespace_version_bumped": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 743,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 850
+      "abicc_dumper_ms": 793
     },
     "case102_frozen_runtime_signature_changed": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 740,
-      "abicc_xml": "TIMEOUT",
-      "abicc_xml_ms": 90094
+      "abicc_dumper_ms": 1233
     },
     "case103_toolchain_flag_drift": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 796,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 1287
+      "abicc_dumper_ms": 1160
     },
     "case104_glibcxx_dual_abi_flip": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 828,
-      "abicc_xml": "TIMEOUT",
-      "abicc_xml_ms": 90091
+      "abicc_dumper_ms": 1496
     },
     "case105_concept_tightening": {
       "abicc_dumper": "TIMEOUT",
-      "abicc_dumper_ms": 90547,
-      "abicc_xml": "TIMEOUT",
-      "abicc_xml_ms": 90111
+      "abicc_dumper_ms": 90860
     },
     "case106_ctor_became_explicit": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 1134,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 2610
+      "abicc_dumper_ms": 1492
     },
     "case107_task_scheduler_init_removed": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 870,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 2517
+      "abicc_dumper_ms": 593
     },
     "case108_task_class_removed": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 779,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 3449
+      "abicc_dumper_ms": 970
     },
     "case109_flow_graph_policy_renames": {
       "abicc_dumper": "TIMEOUT",
-      "abicc_dumper_ms": 90657,
-      "abicc_xml": "TIMEOUT",
-      "abicc_xml_ms": 90091
+      "abicc_dumper_ms": 91088
     },
     "case10_return_type": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 880,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 2503
+      "abicc_dumper_ms": 2286
     },
     "case110_concurrent_unordered_map_api_drift": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1013,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 3784
+      "abicc_dumper_ms": 1670
     },
     "case111_enumerable_thread_specific_lambda_ambiguity": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 1034,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 3635
+      "abicc_dumper_ms": 2245
     },
     "case112_lp64_ilp64": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1067,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 2564
+      "abicc_dumper_ms": 2737
     },
     "case113_abi_tag_changed": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 644,
-      "abicc_xml": "TIMEOUT",
-      "abicc_xml_ms": 90092
+      "abicc_dumper_ms": 1367
     },
     "case114_char8t_migration": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 751,
-      "abicc_xml": "TIMEOUT",
-      "abicc_xml_ms": 90115
+      "abicc_dumper_ms": 1654
     },
     "case115_bit_int_width_changed": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1159,
-      "abicc_xml": "TIMEOUT",
-      "abicc_xml_ms": 90092
+      "abicc_dumper_ms": 1866
     },
     "case116_atomic_qualifier_changed": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 1177,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 3596
+      "abicc_dumper_ms": 1967
     },
     "case117_no_unique_address": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 763,
-      "abicc_xml": "TIMEOUT",
-      "abicc_xml_ms": 90092
+      "abicc_dumper_ms": 1393
     },
     "case118_internal_struct_field_added_scoped": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 695,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 3878
+      "abicc_dumper_ms": 1414
     },
     "case119_internal_struct_field_removed_scoped": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 1043,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 4223
+      "abicc_dumper_ms": 2192
     },
     "case11_global_var_type": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1026,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 4634
+      "abicc_dumper_ms": 1991
     },
     "case120_internal_struct_reordered_scoped": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 1122,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 4786
+      "abicc_dumper_ms": 1907
     },
     "case121_kernel_btf_struct_field_added": {
       "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper_ms": 0
     },
     "case122_template_signature_uninstantiated": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 820,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 4666
+      "abicc_dumper_ms": 443
     },
     "case123_default_argument_removed": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 941,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 5113
+      "abicc_dumper_ms": 486
     },
     "case124_header_constant_value_changed": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 929,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 4637
+      "abicc_dumper_ms": 526
     },
     "case125_class_became_final": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 967,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 8879
+      "abicc_dumper_ms": 448
     },
     "case126_sycl_device_impl_ptr": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 1176,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 32399
+      "abicc_dumper_ms": 493
     },
     "case127_data_object_size_changed": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 930,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 3875
+      "abicc_dumper_ms": 552
     },
     "case128_symbol_binding_strengthened": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 1051,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 3951
+      "abicc_dumper_ms": 532
     },
     "case129_struct_return_convention": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 712,
-      "abicc_xml": "TIMEOUT",
-      "abicc_xml_ms": 90101
+      "abicc_dumper_ms": 377
     },
     "case12_function_removed": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1043,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 3579
+      "abicc_dumper_ms": 491
     },
     "case130_exceptions_mode_flip": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 714,
-      "abicc_xml": "TIMEOUT",
-      "abicc_xml_ms": 90100
+      "abicc_dumper_ms": 523
     },
     "case131_rtti_mode_flip": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 755,
-      "abicc_xml": "TIMEOUT",
-      "abicc_xml_ms": 90090
+      "abicc_dumper_ms": 399
     },
     "case132_threadsafe_statics_flip": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 799,
-      "abicc_xml": "TIMEOUT",
-      "abicc_xml_ms": 90124
+      "abicc_dumper_ms": 327
     },
     "case133_tls_model_flip": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 728,
-      "abicc_xml": "TIMEOUT",
-      "abicc_xml_ms": 90099
+      "abicc_dumper_ms": 326
     },
     "case134_relro_weakened": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 25784,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 7483
+      "abicc_dumper_ms": 15881
     },
     "case135_stack_canary_removed": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 22459,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 11544
+      "abicc_dumper_ms": 14688
     },
     "case136_executable_stack_removed": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 24046,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 9821
+      "abicc_dumper_ms": 15153
     },
     "case137_runpath_changed": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 24731,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 10482
+      "abicc_dumper_ms": 14633
     },
     "case138_needed_added": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 21960,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 9907
+      "abicc_dumper_ms": 15140
     },
     "case139_symbol_version_node_removed": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 23817,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 10421
+      "abicc_dumper_ms": 13854
     },
     "case13_symbol_versioning": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 22087,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 10183
+      "abicc_dumper_ms": 14942
     },
     "case140_empty_base_optimization_lost": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 1063,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 12646
+      "abicc_dumper_ms": 583
     },
     "case141_versioned_symbol_scheme": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 794,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 8785
+      "abicc_dumper_ms": 550
     },
     "case142_vtable_slot_count_binary_only": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 861,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 14804
+      "abicc_dumper_ms": 609
     },
     "case143_audit_accidental_export": {
       "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper_ms": 0
     },
     "case144_audit_private_header_leak": {
       "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper_ms": 0
     },
     "case145_audit_unversioned_export": {
       "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper_ms": 0
     },
     "case146_audit_rtti_for_internal": {
       "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper_ms": 0
     },
     "case147_scan_depth_ladder": {
       "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper_ms": 0
     },
     "case148_xcheck_header_build_mismatch": {
       "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper_ms": 0
     },
     "case149_xcheck_odr_variant": {
       "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper_ms": 0
     },
     "case14_cpp_class_size": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 941,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 15738
+      "abicc_dumper_ms": 621
     },
     "case150_xcheck_export_public_pair": {
       "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper_ms": 0
     },
     "case151_xcheck_provider_matrix": {
       "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper_ms": 0
     },
     "case152_enum_size_flag_flip": {
       "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper_ms": 0
     },
     "case153_struct_packing_flip": {
       "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper_ms": 0
     },
     "case154_lto_mode_flip": {
       "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper_ms": 0
     },
     "case155_char_signedness_flip": {
       "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper_ms": 0
     },
     "case156_public_macro_removed": {
       "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper_ms": 0
     },
     "case157_inline_function_removed": {
       "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper_ms": 0
     },
     "case158_public_typedef_removed": {
       "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper_ms": 0
     },
     "case15_noexcept_change": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 1098,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 14983
+      "abicc_dumper_ms": 762
     },
     "case160_public_api_internal_dep_added": {
       "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper_ms": 0
     },
     "case161_target_dependency_added": {
       "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper_ms": 0
     },
     "case162_symbol_source_owner_changed": {
       "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper_ms": 0
     },
     "case163_python_kwarg_renamed": {
       "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper_ms": 0
     },
     "case164_preproc_conditional_field": {
       "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper_ms": 0
     },
     "case165_polymorphic_nonvirtual_dtor": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 952,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 13105
+      "abicc_dumper_ms": 514
     },
     "case166_ref_qualifier_added": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 931,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 10107
+      "abicc_dumper_ms": 499
     },
     "case167_base_became_virtual": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1092,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 19875
+      "abicc_dumper_ms": 479
     },
     "case168_virtual_method_devirtualized": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1014,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 27520
+      "abicc_dumper_ms": 525
     },
     "case169_overload_added": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 946,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 10889
+      "abicc_dumper_ms": 437
     },
     "case16_inline_to_non_inline": {
       "abicc_dumper": "ERROR",
-      "abicc_dumper_ms": 219,
-      "abicc_xml": "TIMEOUT",
-      "abicc_xml_ms": 90136
+      "abicc_dumper_ms": 116
     },
     "case170_env_runtime_floor_raised": {
       "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper_ms": 0
     },
     "case171_static_tls_introduced": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 27231,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 9184
+      "abicc_dumper_ms": 15187
     },
     "case172_vtable_thunk_offset_changed": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 987,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 14931
+      "abicc_dumper_ms": 619
     },
     "case173_vtt_slot_count_changed": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1015,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 14162
+      "abicc_dumper_ms": 589
     },
     "case174_secondary_vtable_group_changed": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1077,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 13398
+      "abicc_dumper_ms": 510
     },
     "case175_kabi_crc_changed": {
       "abicc_dumper": "SKIP",
-      "abicc_xml": "SKIP"
+      "abicc_dumper_ms": 0
     },
     "case176_kabi_symbol_namespace_changed": {
       "abicc_dumper": "SKIP",
-      "abicc_xml": "SKIP"
+      "abicc_dumper_ms": 0
     },
     "case177_long_double_abi_changed": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1046,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 7898
+      "abicc_dumper_ms": 552
     },
     "case178_unnamed_type_in_public_abi": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 948,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 10329
+      "abicc_dumper_ms": 685
     },
     "case179_cet_protection_weakened": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 24432,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 9327
+      "abicc_dumper_ms": 14821
     },
     "case17_template_abi": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 982,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 15919
+      "abicc_dumper_ms": 518
     },
     "case180_symbol_binding_lost_unique": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 945,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 8255
+      "abicc_dumper_ms": 614
     },
     "case181_xcheck_public_to_internal_dependency": {
       "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper_ms": 0
     },
     "case182_accidental_export_removed_still_breaking": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 1026,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 6879
+      "abicc_dumper_ms": 613
     },
     "case183_internal_version_node_churn": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 874,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 7748
+      "abicc_dumper_ms": 548
     },
     "case184_internal_enum_churn_scoped": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 1362,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 7771
+      "abicc_dumper_ms": 836
     },
     "case185_inherited_override_reuses_slot": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 1021,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 16531
+      "abicc_dumper_ms": 522
     },
     "case186_c_api_pointee_const_abi_neutral": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 1021,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 7651
+      "abicc_dumper_ms": 577
     },
     "case187_public_struct_private_field_type": {
-      "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 625
     },
     "case188_public_class_private_base_class": {
-      "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 513
     },
     "case189_public_function_private_parameter_type": {
-      "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper": "BREAKING",
+      "abicc_dumper_ms": 526
     },
     "case18_dependency_leak": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 1184,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 8681
+      "abicc_dumper_ms": 671
     },
     "case190_public_inline_function_references_internal_constant": {
       "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper_ms": 0
     },
     "case191_header_only_graph_field_type": {
+      "abicc_dumper": "COMPATIBLE",
+      "abicc_dumper_ms": 546
+    },
+    "case192_call_graph_break_survives_suppression": {
       "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper_ms": 0
+    },
+    "case193_ordinary_exported_fn_call_not_reachable": {
+      "abicc_dumper": "SKIP",
+      "abicc_dumper_ms": 0
     },
     "case19_enum_member_removed": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 922,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 7444
+      "abicc_dumper_ms": 488
     },
     "case20_enum_member_value_changed": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 964,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 9429
+      "abicc_dumper_ms": 453
     },
     "case21_method_became_static": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 991,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 9335
+      "abicc_dumper_ms": 440
     },
     "case22_method_const_changed": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 963,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 8971
+      "abicc_dumper_ms": 515
     },
     "case23_pure_virtual_added": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 902,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 14515
+      "abicc_dumper_ms": 480
     },
     "case24_union_field_removed": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 926,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 6895
+      "abicc_dumper_ms": 553
     },
     "case25_enum_member_added": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 806,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 7352
+      "abicc_dumper_ms": 446
     },
     "case26_union_field_added": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 872,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 6603
+      "abicc_dumper_ms": 462
     },
     "case26b_union_field_added_compatible": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 904,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 7136
+      "abicc_dumper_ms": 521
     },
     "case27_symbol_binding_weakened": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 802,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 6324
+      "abicc_dumper_ms": 443
     },
     "case28_typedef_opaque": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 1058,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 6845
+      "abicc_dumper_ms": 570
     },
     "case29_ifunc_transition": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 891,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 8485
+      "abicc_dumper_ms": 399
     },
     "case30_field_qualifiers": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 996,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 6082
+      "abicc_dumper_ms": 695
     },
     "case31_enum_rename": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 1123,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 6551
+      "abicc_dumper_ms": 555
     },
     "case32_param_defaults": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 1004,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 8063
+      "abicc_dumper_ms": 489
     },
     "case33_pointer_level": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 996,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 5908
+      "abicc_dumper_ms": 465
     },
     "case34_access_level": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 943,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 8176
+      "abicc_dumper_ms": 477
     },
     "case35_field_rename": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 1062,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 6273
+      "abicc_dumper_ms": 556
     },
     "case36_anon_struct": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1066,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 7024
+      "abicc_dumper_ms": 525
     },
     "case37_base_class": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 918,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 13080
+      "abicc_dumper_ms": 646
     },
     "case38_virtual_methods": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 971,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 12795
+      "abicc_dumper_ms": 524
     },
     "case39_var_const": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1016,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 6614
+      "abicc_dumper_ms": 572
     },
     "case40_field_layout": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1022,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 6110
+      "abicc_dumper_ms": 540
     },
     "case41_type_changes": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1134,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 7307
+      "abicc_dumper_ms": 546
     },
     "case42_type_alignment_changed": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 27909,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 8452
+      "abicc_dumper_ms": 16022
     },
     "case43_base_class_member_added": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 934,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 12751
+      "abicc_dumper_ms": 886
     },
     "case44_cyclic_type_member_added": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1080,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 7084
+      "abicc_dumper_ms": 549
     },
     "case45_multi_dim_array_change": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1161,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 6387
+      "abicc_dumper_ms": 603
     },
     "case46_pointer_chain_type_change": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 994,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 6719
+      "abicc_dumper_ms": 581
     },
     "case47_inline_to_outlined": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 909,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 7641
+      "abicc_dumper_ms": 497
     },
     "case48_leaf_struct_through_pointer": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1060,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 6591
+      "abicc_dumper_ms": 532
     },
     "case49_executable_stack": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 24103,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 6833
+      "abicc_dumper_ms": 16292
     },
     "case50_soname_inconsistent": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 25685,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 8260
+      "abicc_dumper_ms": 16679
     },
     "case51_protected_visibility": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 926,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 9513
+      "abicc_dumper_ms": 520
     },
     "case52_rpath_leak": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 26074,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 9133
+      "abicc_dumper_ms": 14293
     },
     "case53_namespace_pollution": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 24423,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 8724
+      "abicc_dumper_ms": 15163
     },
     "case54_used_reserved_field": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 914,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 7679
+      "abicc_dumper_ms": 509
     },
     "case55_type_kind_changed": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 26296,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 8170
+      "abicc_dumper_ms": 15166
     },
     "case56_struct_packing_changed": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 24530,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 7835
+      "abicc_dumper_ms": 15580
     },
     "case57_enum_underlying_size_changed": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 25312,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 9642
+      "abicc_dumper_ms": 15771
     },
     "case58_var_removed": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 26844,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 5687
+      "abicc_dumper_ms": 22592
     },
     "case59_func_became_inline": {
       "abicc_dumper": "TIMEOUT",
-      "abicc_dumper_ms": 114810,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 724
+      "abicc_dumper_ms": 110054
     },
     "case60_base_class_position_changed": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 369,
-      "abicc_xml": "ERROR",
-      "abicc_xml_ms": 19348
+      "abicc_dumper_ms": 576
     },
     "case61_var_added": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 28546,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 660
+      "abicc_dumper_ms": 469
     },
     "case62_type_field_added_compatible": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 1195,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 585
+      "abicc_dumper_ms": 537
     },
     "case63_bitfield_changed": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 1116,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 575
+      "abicc_dumper_ms": 527
     },
     "case64_calling_convention_changed": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 1114,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 574
+      "abicc_dumper_ms": 521
     },
     "case65_symbol_version_removed": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1291,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 533
+      "abicc_dumper_ms": 502
     },
     "case66_language_linkage_changed": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1277,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 629
+      "abicc_dumper_ms": 484
     },
     "case67_tls_var_size_changed": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1219,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 627
+      "abicc_dumper_ms": 563
     },
     "case68_virtual_method_added": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1027,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 1073
+      "abicc_dumper_ms": 474
     },
     "case69_trivial_to_nontrivial": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 733,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 652
+      "abicc_dumper_ms": 483
     },
     "case70_flexible_array_member_changed": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1298,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 607
+      "abicc_dumper_ms": 590
     },
     "case71_inline_namespace_moved": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1240,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 713
+      "abicc_dumper_ms": 489
     },
     "case72_covariant_return_changed": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1284,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 1169
+      "abicc_dumper_ms": 497
     },
     "case73_typedef_underlying_changed": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 895,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 578
+      "abicc_dumper_ms": 536
     },
     "case74_detail_base_class_changed": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1115,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 1108
+      "abicc_dumper_ms": 460
     },
     "case75_detail_embedded_by_value": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1219,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 1126
+      "abicc_dumper_ms": 517
     },
     "case76_detail_pimpl_vtable_changed": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 437,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 1178
+      "abicc_dumper_ms": 458
     },
     "case77_detail_templated_base_changed": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 799,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 1195
+      "abicc_dumper_ms": 496
     },
     "case78_task_arena_attach_tag": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1056,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 724
+      "abicc_dumper_ms": 466
     },
     "case79_missing_template_instantiation": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 1246,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 675
+      "abicc_dumper_ms": 469
     },
     "case80_pimpl_shared_to_unique": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 1527,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 7336
+      "abicc_dumper_ms": 592
     },
     "case81_serialization_tag_reassigned": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 1363,
-      "abicc_xml": "ERROR",
-      "abicc_xml_ms": 27437
+      "abicc_dumper_ms": 590
     },
     "case82_sycl_overload_set_removed": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1118,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 634
+      "abicc_dumper_ms": 484
     },
     "case83_cpu_dispatch_isa_dropped": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1070,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 619
+      "abicc_dumper_ms": 462
     },
     "case84_bundle_soname_skew": {
       "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper_ms": 0
     },
     "case85_internal_template_signature_changed": {
       "abicc_dumper": "TIMEOUT",
-      "abicc_dumper_ms": 90684,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 608
+      "abicc_dumper_ms": 90424
     },
     "case86_tag_struct_renamed": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 1626,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 644
+      "abicc_dumper_ms": 434
     },
     "case87_default_template_arg_changed": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 1838,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 688
+      "abicc_dumper_ms": 450
     },
     "case88_cpo_kind_changed": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1212,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 640
+      "abicc_dumper_ms": 439
     },
     "case89_inline_accessor_renamed_pimpl_member": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 1571,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 6886
+      "abicc_dumper_ms": 564
     },
     "case90_bundle_intra_dep_removed": {
       "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper_ms": 0
     },
     "case91_bundle_intra_signature_drift": {
       "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper_ms": 0
     },
     "case92_bundle_provider_changed": {
       "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper_ms": 0
     },
     "case93_bundle_manifest_drift": {
       "abicc_dumper": "SKIP",
-      "abicc_dumper_ms": 0,
-      "abicc_xml": "SKIP",
-      "abicc_xml_ms": 0
+      "abicc_dumper_ms": 0
     },
     "case94_empty_tag_gained_state": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1428,
-      "abicc_xml": "BREAKING",
-      "abicc_xml_ms": 1107
+      "abicc_dumper_ms": 575
     },
     "case95_allocator_nested_typedef_removed": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 1314,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 747
+      "abicc_dumper_ms": 543
     },
     "case96_hidden_friend_removed": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 1222,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 718
+      "abicc_dumper_ms": 433
     },
     "case97_api_depends_on_consumer_env": {
       "abicc_dumper": "BREAKING",
-      "abicc_dumper_ms": 1363,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 665
+      "abicc_dumper_ms": 457
     },
     "case98_cxx_standard_floor_raised": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 1431,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 740
+      "abicc_dumper_ms": 445
     },
     "case99_experimental_graduated": {
       "abicc_dumper": "COMPATIBLE",
-      "abicc_dumper_ms": 1334,
-      "abicc_xml": "COMPATIBLE",
-      "abicc_xml_ms": 664
+      "abicc_dumper_ms": 473
     }
   },
   "schema": "abicheck-frozen-competitor/1.0",
@@ -1152,7 +782,6 @@
     "abidiff": "abidiff: 2.4.0"
   },
   "tools": [
-    "abicc_dumper",
-    "abicc_xml"
+    "abicc_dumper"
   ]
 }
