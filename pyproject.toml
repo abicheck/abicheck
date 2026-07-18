@@ -122,6 +122,7 @@ disable_error_code = ["attr-defined"]
 module = [
     "abicheck.cli",
     "abicheck.cli_resolve",
+    "abicheck.cli_aggregate",
     "abicheck.cli_appcompat",
     "abicheck.cli_compare_release",
     "abicheck.cli_debian_symbols",

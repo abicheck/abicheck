@@ -730,6 +730,13 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
             {
                 "appcompat",
                 "cli",
+                # `cli_aggregate` joins this SCC exactly like `cli_inputs`: its
+                # `aggregate` command reuses the shared `-o/--format` pair via
+                # `cli_options.output_options` (module-load import), and
+                # `cli_options` is already a member — so `cli -> cli_aggregate ->
+                # cli_options -> ... -> cli` closes through already-member
+                # modules, not a new dependency direction. No init deadlock.
+                "cli_aggregate",
                 "cli_appcompat",
                 "cli_baseline",
                 "cli_buildsource",
