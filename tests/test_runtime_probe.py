@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 
 import pytest
 
@@ -51,6 +52,18 @@ class TestRunRuntimeProbePlatformGuards:
         assert result.skipped_reason is not None
         assert "linux" in result.skipped_reason.lower()
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "monkeypatch.setattr(rp.sys, 'platform', 'linux') fakes the "
+            "code's own platform check, but the guard being tested "
+            "(os.access(path, os.X_OK)) reads the real OS -- on native "
+            "Windows os.access(..., os.X_OK) does not model a real execute "
+            "bit and returns True for any existing file, so the guard never "
+            "trips and _run_once actually execs the non-PE fixture, failing "
+            "with WinError 193 instead of skipping."
+        ),
+    )
     def test_non_executable_app_skips(self, tmp_path, monkeypatch):
         monkeypatch.setattr(rp.sys, "platform", "linux")
         app = tmp_path / "app"
@@ -243,6 +256,16 @@ class TestRunOnce:
         assert result.old is not None and result.old.ok is False
         assert "Exec format error" in result.old.stderr_tail
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "This test execs a real '#!/bin/sh' shebang script -- there is "
+            "no POSIX shebang interpreter on native Windows, so the exec "
+            "itself fails with WinError 193 ('not a valid Win32 "
+            "application') before the intended UTF-8-decoding behavior is "
+            "even reached."
+        ),
+    )
     def test_non_utf8_stderr_does_not_raise(self, tmp_path, monkeypatch):
         """Codex review, fresh evidence: a real executable's stderr is
         arbitrary bytes, not guaranteed valid UTF-8 -- subprocess.run(...,
@@ -278,6 +301,18 @@ class TestRunOnce:
         assert "before" in result.old.stderr_tail
         assert "after" in result.old.stderr_tail
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "_run_once() stages each candidate via staged.symlink_to(lib_path) "
+            "before the (here mocked) subprocess.run call, inside the same "
+            "try/except OSError block as the subprocess call itself -- on "
+            "native Windows, creating a symlink needs "
+            "SeCreateSymbolicLinkPrivilege/Developer Mode, so the symlink "
+            "call raises OSError, is silently caught, and the mocked "
+            "subprocess.run this test inspects is never reached."
+        ),
+    )
     def test_same_directory_old_new_libraries_resolve_independently(
         self, tmp_path, monkeypatch,
     ):

@@ -79,6 +79,22 @@ _NEVER_FILTER_KIND_NAMES: frozenset[str] = frozenset(
         "internal_type_leaks_via_public_api",
         "internal_template_leaks_via_public_api",
         "visibility_leak",
+        # Same "public entity newly reaches an internal one" shape as the two
+        # leak kinds above, but produced by the separate L5 source-graph pass
+        # (source_graph_findings._internal_dependency_findings) rather than
+        # internal_leak.py. ``symbol`` is the *public* entity's own qualified
+        # name (e.g. "demo::Public" or "demo::configure") -- a type or a
+        # function/variable that legitimately IS on the public surface, but
+        # the type-vs-symbol split above still runs it through
+        # ``_classify_symbol_level`` (not in ``_TYPE_LEVEL_KIND_NAMES``),
+        # which looks it up in the flat ``all_symbols``/``public_symbols``
+        # sets. A type name is never in those sets (only functions/variables
+        # are), so every type-rooted instance of this finding was silently
+        # demoted as "not-exported" -- defeating the one thing this L5 pass
+        # exists to report. The graph pass already has its own entry-point
+        # reachability gate (header_graph.is_public_dependency_node); this
+        # finding must not be re-filtered by a second, incompatible one.
+        "public_api_internal_dependency_added",
         # Preprocessor / const-constant findings. Their ``symbol`` is a
         # constant name, not an exported symbol or a reachable type, so the
         # normal symbol/type reachability classifier would always demote them.

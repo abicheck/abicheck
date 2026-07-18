@@ -40,7 +40,6 @@ from .clang_layout_tool import attach_clang_layout
 from .errors import AbicheckError, SnapshotError, ValidationError
 from .header_utils import deferred_token_dirs, resolve_inferred_header_roots
 from .model import AbiSnapshot, EnumType, Function, RecordType, Visibility
-from .reporter import to_json, to_markdown, to_stat, to_stat_json
 from .serialization import load_snapshot
 from .service_dump_cache import cached_run_dump
 
@@ -52,7 +51,6 @@ if TYPE_CHECKING:
     from .dwarf_metadata import DwarfMetadata
     from .environment_matrix import EnvironmentMatrix
     from .policy_file import PolicyFile
-    from .severity import SeverityConfig
     from .suppression import SuppressionList
 
 _logger = logging.getLogger(__name__)
@@ -526,15 +524,27 @@ def run_dump(
         from .dumper_hybrid import merge_snapshots
 
         def _forced_compile(frontend: str) -> CompileContext:
-            return _dc_replace(compile, frontend=frontend) if compile is not None else CompileContext(frontend=frontend)
+            return (
+                _dc_replace(compile, frontend=frontend)
+                if compile is not None
+                else CompileContext(frontend=frontend)
+            )
 
         common_kwargs: dict[str, Any] = dict(
-            headers=headers, includes=includes, version=version, lang=lang,
-            pdb_path=pdb_path, dwarf_only=dwarf_only, debug_roots=debug_roots,
-            enable_debuginfod=enable_debuginfod, debuginfod_url=debuginfod_url,
-            debug_format=debug_format, symbols_only=symbols_only,
+            headers=headers,
+            includes=includes,
+            version=version,
+            lang=lang,
+            pdb_path=pdb_path,
+            dwarf_only=dwarf_only,
+            debug_roots=debug_roots,
+            enable_debuginfod=enable_debuginfod,
+            debuginfod_url=debuginfod_url,
+            debug_format=debug_format,
+            symbols_only=symbols_only,
             debug_presence_only=debug_presence_only,
-            public_headers=public_headers, public_header_dirs=public_header_dirs,
+            public_headers=public_headers,
+            public_header_dirs=public_header_dirs,
             # header_graph is deliberately NOT forwarded to either recursive
             # sub-dump below (each would attach its OWN graph, seeded from
             # only ITS OWN backend's declarations) — attached once, after the
@@ -543,12 +553,18 @@ def run_dump(
             notify=notify,
         )
         castxml_snap = run_dump(
-            path, binary_fmt, header_backend="castxml",
-            compile=_forced_compile("castxml"), **common_kwargs,
+            path,
+            binary_fmt,
+            header_backend="castxml",
+            compile=_forced_compile("castxml"),
+            **common_kwargs,
         )
         clang_snap = run_dump(
-            path, binary_fmt, header_backend="clang",
-            compile=_forced_compile("clang"), **common_kwargs,
+            path,
+            binary_fmt,
+            header_backend="clang",
+            compile=_forced_compile("clang"),
+            **common_kwargs,
         )
         merged = merge_snapshots(castxml_snap, clang_snap)
         # No attach_clang_layout call here: clang_snap's own recursive
@@ -557,9 +573,15 @@ def run_dump(
         # re-running it on merged would just re-invoke the external tool for
         # nothing left to backfill (review finding).
         return _attach_header_graph(
-            merged, header_graph, header_graph_includes,
-            _headers, _includes, lang, compile,
-            public_headers, public_header_dirs,
+            merged,
+            header_graph,
+            header_graph_includes,
+            _headers,
+            _includes,
+            lang,
+            compile,
+            public_headers,
+            public_header_dirs,
         )
 
     if binary_fmt == "elf":
@@ -597,7 +619,9 @@ def run_dump(
             public_headers,
             public_header_dirs,
         )
-        return attach_clang_layout(snap, _headers, _includes, lang=lang, compile=compile)
+        return attach_clang_layout(
+            snap, _headers, _includes, lang=lang, compile=compile
+        )
     if binary_fmt == "pe":
         snap = _dump_pe(
             path,
@@ -624,7 +648,9 @@ def run_dump(
             public_headers,
             public_header_dirs,
         )
-        return attach_clang_layout(snap, _headers, _includes, lang=lang, compile=compile)
+        return attach_clang_layout(
+            snap, _headers, _includes, lang=lang, compile=compile
+        )
     if binary_fmt == "macho":
         snap = _dump_macho(
             path,
@@ -650,7 +676,9 @@ def run_dump(
             public_headers,
             public_header_dirs,
         )
-        return attach_clang_layout(snap, _headers, _includes, lang=lang, compile=compile)
+        return attach_clang_layout(
+            snap, _headers, _includes, lang=lang, compile=compile
+        )
     raise ValidationError(f"Unsupported binary format: {binary_fmt}")
 
 
@@ -1004,10 +1032,17 @@ def _dump_elf(
     # so it's read instead of `path`. Split DWARF (.dwo/.dwp) and dSYM are not
     # threaded here — narrower follow-up, not this fix's scope.
     debug_info_path: Path | None = None
-    if not symbols_only and not debug_presence_only and (debug_roots or enable_debuginfod):
+    if (
+        not symbols_only
+        and not debug_presence_only
+        and (debug_roots or enable_debuginfod)
+    ):
         from .debug_resolver import resolve_debug_info
+
         artifact = resolve_debug_info(
-            path, debug_roots=debug_roots, enable_debuginfod=enable_debuginfod,
+            path,
+            debug_roots=debug_roots,
+            enable_debuginfod=enable_debuginfod,
             debuginfod_urls=[debuginfod_url] if debuginfod_url else None,
         )
         if artifact is not None and artifact.dwarf_path is not None:
@@ -1763,144 +1798,17 @@ def run_compare(
 # ── Output rendering ────────────────────────────────────────────────────────
 
 
-def render_output(
-    fmt: str,
-    result: DiffResult,
-    old: AbiSnapshot,
-    new: AbiSnapshot | None = None,
-    *,
-    follow_deps: bool = False,
-    show_only: str | None = None,
-    report_mode: str = "full",
-    show_impact: bool = False,
-    stat: bool = False,
-    severity_config: SeverityConfig | None = None,
-    show_recommendation: bool = False,
-    demangle: bool = False,
-) -> str:
-    """Render comparison result in the requested output format.
-
-    Supported formats: ``'json'``, ``'markdown'``, ``'sarif'``, ``'html'``,
-    ``'junit'``.
-
-    ``demangle`` only affects human-facing formats (markdown, review); machine
-    formats (json/sarif/junit) always keep raw mangled symbols so downstream
-    tooling can match on them.
-
-    Raises:
-        ValidationError: For unrecognised output format.
-    """
-    if stat and fmt != "junit":
-        if fmt == "json":
-            return to_stat_json(result, severity_config=severity_config)
-        return to_stat(result, severity_config=severity_config)
-
-    if fmt == "json":
-        return _render_json_output(
-            result,
-            old,
-            new,
-            follow_deps=follow_deps,
-            show_only=show_only,
-            report_mode=report_mode,
-            show_impact=show_impact,
-            severity_config=severity_config,
-        )
-
-    if fmt == "sarif":
-        from .sarif import to_sarif_str
-
-        return to_sarif_str(result, show_only=show_only, severity_config=severity_config)
-
-    if fmt == "html":
-        from .html_report import generate_html_report
-
-        return generate_html_report(
-            result,
-            lib_name=old.library,
-            old_version=old.version,
-            new_version=new.version if new else "new",
-            old_symbol_count=result.old_symbol_count,
-            show_only=show_only,
-            show_impact=show_impact,
-            severity_config=severity_config,
-        )
-
-    if fmt == "junit":
-        from .junit_report import to_junit_xml
-
-        return to_junit_xml(
-            result,
-            old,
-            show_only=show_only,
-            severity_config=severity_config,
-        )
-
-    if fmt == "review":
-        from .reporter import to_review_digest
-
-        txt = to_review_digest(result, severity_config=severity_config)
-        if demangle:
-            from .demangle import demangle_text
-
-            txt = demangle_text(txt)
-        return txt
-
-    _SUPPORTED_FORMATS = {"json", "sarif", "html", "junit", "markdown", "md", "review"}
-    if fmt not in _SUPPORTED_FORMATS:
-        raise ValidationError(
-            f"Unsupported output format: {fmt!r} (expected one of {sorted(_SUPPORTED_FORMATS)})"
-        )
-
-    # Default: markdown
-    md = to_markdown(
-        result,
-        show_only=show_only,
-        report_mode=report_mode,
-        show_impact=show_impact,
-        severity_config=severity_config,
-        show_recommendation=show_recommendation,
-    )
-    if follow_deps and (old.dependency_info or (new and new.dependency_info)):
-        md += _render_deps_section_md(old, new)
-    if demangle:
-        from .demangle import demangle_text
-
-        md = demangle_text(md)
-    return md
-
-
-def _render_json_output(
-    result: DiffResult,
-    old: AbiSnapshot,
-    new: AbiSnapshot | None,
-    *,
-    follow_deps: bool,
-    show_only: str | None,
-    report_mode: str,
-    show_impact: bool,
-    severity_config: SeverityConfig | None,
-) -> str:
-    """Render comparison result as JSON, optionally including dependency info."""
-    base = to_json(
-        result,
-        show_only=show_only,
-        report_mode=report_mode,
-        show_impact=show_impact,
-        severity_config=severity_config,
-    )
-    if follow_deps and (old.dependency_info or (new and new.dependency_info)):
-        import json
-        from dataclasses import asdict
-
-        d = json.loads(base)
-        if old.dependency_info:
-            d["old_dependency_info"] = asdict(old.dependency_info)
-        if new and new.dependency_info:
-            d["new_dependency_info"] = asdict(new.dependency_info)
-        return json.dumps(d, indent=2)
-    return base
-
+# ── Output rendering (extracted to a leaf module) ────────────────────────────
+#
+# ``render_output`` and friends live in ``service_render`` so this module stays
+# under the AI-readiness size cap. Re-exported here verbatim so the public
+# Python API — ``from abicheck.service import render_output`` — is unchanged.
+# ``service_render`` is a leaf: it does not import this module at load time.
+from .service_render import (  # noqa: E402,F401
+    _render_deps_section_md,
+    _render_json_output,
+    render_output,
+)
 
 # ── Scan service (extracted to a leaf module) ────────────────────────────────
 #
@@ -1962,50 +1870,3 @@ __all__ = [
     "run_scan_subprocess",
     "sniff_text_format",
 ]
-
-
-def _render_deps_section_md(old: AbiSnapshot, new: AbiSnapshot | None) -> str:
-    """Append dependency summary section to markdown output."""
-    lines: list[str] = ["", "## Dependency Analysis", ""]
-
-    for label, snap in [("Old", old), ("New", new)]:
-        if snap is None or snap.dependency_info is None:
-            continue
-        info = snap.dependency_info
-        lines.append(f"### {label} version (`{snap.version}`)")
-        lines.append("")
-
-        if info.nodes:
-            lines.append(f"**Dependencies**: {len(info.nodes)} resolved DSOs")
-            for node in info.nodes:
-                raw_depth = node.get("depth", 0)
-                depth = raw_depth if isinstance(raw_depth, int) else 0
-                indent = "  " * depth
-                reason = node.get("resolution_reason", "")
-                lines.append(f"  {indent}- `{node.get('soname', '?')}` ({reason})")
-            lines.append("")
-
-        if info.bindings_summary:
-            lines.append("**Bindings**:")
-            for status, count in sorted(info.bindings_summary.items()):
-                lines.append(f"  - `{status}`: {count}")
-            lines.append("")
-
-        if info.unresolved:
-            lines.append("**Unresolved libraries**:")
-            for u in info.unresolved:
-                lines.append(
-                    f"  - `{u.get('soname', '?')}` needed by `{u.get('consumer', '?')}`"
-                )
-            lines.append("")
-
-        if info.missing_symbols:
-            lines.append(f"**Missing symbols**: {len(info.missing_symbols)}")
-            for ms in info.missing_symbols[:10]:
-                ver = f"@{ms['version']}" if ms.get("version") else ""
-                lines.append(f"  - `{ms['symbol']}{ver}`")
-            if len(info.missing_symbols) > 10:
-                lines.append(f"  - ... +{len(info.missing_symbols) - 10} more")
-            lines.append("")
-
-    return "\n".join(lines)

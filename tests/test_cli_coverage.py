@@ -264,7 +264,9 @@ class TestCompareApiBreakExitCode:
                 changes=[Change(ChangeKind.FUNC_REMOVED, "foo", "removed")],
             ),
         )
-        monkeypatch.setattr("abicheck.service.to_markdown", lambda _r, **_kw: "API_BREAK REPORT")
+        monkeypatch.setattr(
+            "abicheck.service_render.to_markdown", lambda _r, **_kw: "API_BREAK REPORT"
+        )
 
         runner = CliRunner()
         result = runner.invoke(main, ["compare", str(old_p), str(new_p)])

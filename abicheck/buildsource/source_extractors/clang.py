@@ -666,7 +666,7 @@ def _mangled(node: dict[str, Any]) -> str:
     mangled = node.get("mangledName")
     name = node.get("name", "")
     if isinstance(mangled, str) and mangled and mangled != name:
-        return mangled
+        return mangled[1:] if mangled.startswith("__Z") else mangled  # macOS ABI underscore (Codex review)
     return ""
 
 

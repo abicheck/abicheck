@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -60,6 +61,23 @@ def _bash_executable() -> str:
         if candidate and Path(candidate).is_file():
             return candidate
     return "bash"
+
+
+def _native_abspath(p: Path) -> str:
+    """Expected form of an absolute path as ``run.sh`` resolves it.
+
+    ``run.sh``'s ``_native_pwd`` helper always resolves absolute paths
+    through bash (forward-slash) or, on a real Windows runner where a genuine
+    ``cygpath.exe`` ships with Git for Windows and is always on ``PATH``,
+    through ``cygpath -m`` (drive letter + forward slashes, e.g.
+    ``C:/Users/...``) -- never through native Windows backslashes. A raw
+    ``str(Path)`` comparison only happens to match on Linux/macOS (where
+    ``Path`` is already forward-slash); on Windows it would compare against
+    ``str(WindowsPath)``'s backslashes, which ``run.sh`` never produces.
+    ``Path.as_posix()`` renders exactly the same drive+forward-slash form as
+    ``cygpath -m`` on any platform, so it is the correct expectation here.
+    """
+    return p.as_posix()
 
 
 def _helpers_region() -> str:
@@ -478,13 +496,20 @@ class TestWrapperProducer:
         )
         assert result.returncode == 0, result.stdout + result.stderr
         env = _parse_kv_file(github_env)
+        # INPUT_OUTPUT is given here as an already-absolute path (str(tmp_path
+        # / ...) is native-backslash on a real Windows runner) --
+        # _is_absolute_path() in run.sh recognizes a drive-letter-prefixed
+        # path and passes it through verbatim, never routing it through
+        # _native_pwd/cygpath -m. Only a *relative* INPUT_OUTPUT triggers that
+        # resolution (see test_prepare_exports_absolute_inputs_dir below), so
+        # the expectation here is str(), not _native_abspath().
         assert env["ABICHECK_INPUTS_DIR"] == str(tmp_path / "abicheck_inputs")
         assert env["ABICHECK_CC_EXTRACTOR"] == "clang"
         assert env["ABICHECK_CC_LIBRARY"] == "foo"
         # Resolved to absolute (Codex review): abicheck-cc runs with cwd set
         # to the build directory in the documented recipe, not this
         # script's cwd, so a relative root must be resolved here first.
-        assert env["ABICHECK_CC_HEADERS"] == str(tmp_path / "include")
+        assert env["ABICHECK_CC_HEADERS"] == _native_abspath(tmp_path / "include")
         outputs = _parse_kv_file(github_output)
         assert outputs["producer"] == "wrapper"
         assert outputs["mode"] == "pack"
@@ -511,9 +536,11 @@ class TestWrapperProducer:
         )
         assert result.returncode == 0, result.stdout + result.stderr
         env = _parse_kv_file(github_env)
-        assert env["ABICHECK_INPUTS_DIR"] == str(tmp_path / "abicheck_inputs")
+        assert env["ABICHECK_INPUTS_DIR"] == _native_abspath(
+            tmp_path / "abicheck_inputs"
+        )
         outputs = _parse_kv_file(github_output)
-        assert outputs["pack-path"] == str(tmp_path / "abicheck_inputs")
+        assert outputs["pack-path"] == _native_abspath(tmp_path / "abicheck_inputs")
 
     def test_prepare_clears_stale_output_dir(self, tmp_path: Path) -> None:
         # Regression (Codex review): init_inputs_pack() is idempotent across
@@ -597,7 +624,10 @@ class TestWrapperProducer:
         # Each root resolved to absolute (Codex review) before joining --
         # see test_prepare_writes_env_vars for why.
         expected = os.pathsep.join(
-            [str(tmp_path / "include"), str(tmp_path / "gen/include")]
+            [
+                _native_abspath(tmp_path / "include"),
+                _native_abspath(tmp_path / "gen/include"),
+            ]
         )
         assert _parse_kv_file(github_env)["ABICHECK_CC_HEADERS"] == expected
 
@@ -626,9 +656,21 @@ class TestWrapperProducer:
             tmp_path,
         )
         assert result.returncode == 0, result.stdout + result.stderr
-        expected = f"{tmp_path / 'include'};{tmp_path / 'gen/include'}"
+        expected = f"{_native_abspath(tmp_path / 'include')};{_native_abspath(tmp_path / 'gen/include')}"
         assert _parse_kv_file(github_env)["ABICHECK_CC_HEADERS"] == expected
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "This test fakes cygpath via a PATH-prepended stub to verify "
+            "run.sh invokes it -- on a real Windows runner, Git Bash's own "
+            "bash.exe launcher prepends its bundled usr/bin (with the "
+            "genuine cygpath.exe) ahead of any user-supplied PATH entry, so "
+            "the real cygpath always wins over the stub and the assertion "
+            "can never observe the stub's WINCONV: marker. Exercised on "
+            "Linux/macOS, where PATH prepending is respected normally."
+        ),
+    )
     def test_output_dir_converted_from_msys_path_on_windows(
         self, tmp_path: Path
     ) -> None:
@@ -664,6 +706,17 @@ class TestWrapperProducer:
         expected = f"WINCONV:{tmp_path / 'abicheck_inputs'}"
         assert _parse_kv_file(github_env)["ABICHECK_INPUTS_DIR"] == expected
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "This test relies on cygpath being genuinely absent from PATH "
+            "to exercise the raw-pwd fallback -- on a real Windows runner, "
+            "cygpath.exe ships with Git for Windows and is always present, "
+            "so 'unavailable' can never be reproduced there and run.sh "
+            "always takes the cygpath -m branch instead. Exercised on "
+            "Linux/macOS, which have no real cygpath to interfere."
+        ),
+    )
     def test_output_dir_uses_raw_pwd_when_cygpath_unavailable(
         self, tmp_path: Path
     ) -> None:

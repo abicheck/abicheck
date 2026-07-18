@@ -280,6 +280,39 @@ def test_param_type_resolves_template_argument_to_private_type() -> None:
     )
 
 
+def test_param_type_identity_strips_macos_mach_o_underscore() -> None:
+    # On Darwin, clang's own -ast-dump=json reports a C++ decl's mangledName
+    # with the Mach-O ABI's extra linker-symbol-table underscore still
+    # attached ("__ZN..." rather than "_ZN...") -- the same decoration
+    # macho_metadata.py already strips off the *binary's* export table, so a
+    # header_graph-seeded decl:// node for the same function is keyed on the
+    # one-underscore form. Left unstripped here, a public function's own
+    # DECL_HAS_TYPE edge to a private parameter type would land on a
+    # different, never-public node and public_api_internal_dependency_added
+    # would never fire for a function-rooted dependency on macOS.
+    ast = _tu(
+        {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Impl")]},
+        {
+            "kind": "FunctionDecl",
+            "name": "configure",
+            "mangledName": "__ZN9configureEPN6detail4ImplE",
+            "inner": [_param("p", "detail::Impl*")],
+        },
+    )
+    edges = parse_clang_ast_types(ast)
+    params = [e for e in edges if e.kind == "DECL_HAS_TYPE" and e.role == "param"]
+    assert (
+        TypeEdge(
+            "_ZN9configureEPN6detail4ImplE",
+            "detail::Impl",
+            "DECL_HAS_TYPE",
+            CONF_HIGH,
+            "param",
+        )
+        in params
+    )
+
+
 def test_base_type_name_strips_callback_signature_argument() -> None:
     # std::function<detail::Impl ()>'s single template argument spells as
     # the written function-signature form "detail::Impl ()", not a plain

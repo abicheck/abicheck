@@ -59,6 +59,12 @@ COMPARE_CASES: dict[str, CompareSpec] = {
     "case170_env_runtime_floor_raised": CompareSpec("old.abi.json", "new.abi.json"),
     "case175_kabi_crc_changed": CompareSpec("v1.symvers", "v2.symvers"),
     "case176_kabi_symbol_namespace_changed": CompareSpec("v1.symvers", "v2.symvers"),
+    "case192_call_graph_break_survives_suppression": CompareSpec(
+        "old.abi.json", "new.abi.json"
+    ),
+    "case193_ordinary_exported_fn_call_not_reachable": CompareSpec(
+        "old.abi.json", "new.abi.json"
+    ),
 }
 
 SCAN_CASES = {
