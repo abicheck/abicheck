@@ -289,3 +289,15 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   untracked and orphaned — the exact failure mode this whole PR set out to
   close, just one layer further into the parallel L4 replay path (Codex
   review, PR #591, round 3).
+- The same "check the deadline before, but not after, parsing a large
+  output" gap closed on the two L4 source extractors, mirroring the L2
+  fixes above: `CastxmlSourceExtractor.extract` now re-checks after
+  `DefusedET.parse()` of a per-TU castxml XML file, before walking it in
+  `_parse_root`; `ClangSourceExtractor.extract` now re-checks after
+  `json.load()` of a per-TU clang AST, before walking it in
+  `source_abi_from_clang_ast`/`_attach_source_edges`. Both fold into the
+  existing `SourceExtractionError` contract (L4 failures degrade to partial
+  coverage, never abort the scan, ADR-028 D3). The clang extractor's two
+  deadline re-checks (before and after the load) now share a small
+  `_recheck_deadline()` helper to keep the file under its 2000-line hard cap
+  (Codex review, PR #591, round 4).

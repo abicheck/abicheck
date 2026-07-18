@@ -1696,6 +1696,14 @@ def _emit_typedef(
     )
 
 
+def _recheck_deadline(source: str, when: str) -> None:
+    """Re-check the deadline mid-extraction; folds into SourceExtractionError."""
+    try:
+        deadline.check()
+    except deadline.DeadlineExceeded as exc:
+        raise SourceExtractionError(f"scan deadline exceeded {when} for {source}") from exc
+
+
 class ClangSourceExtractor:
     """Produce a :class:`SourceAbiTu` from one compile unit via clang (D3, phase 5).
 
@@ -1770,15 +1778,7 @@ class ClangSourceExtractor:
                     f"(exit {ast_rc}): {ast_stderr[:1000]}"
                     + _missing_generated_header_hint(ast_stderr)
                 )
-            # Re-check the deadline before loading a potentially huge AST (Codex
-            # review); folded into SourceExtractionError like an ordinary
-            # timeout — L4 failures degrade to partial coverage, never abort.
-            try:
-                deadline.check()
-            except deadline.DeadlineExceeded as exc:
-                raise SourceExtractionError(
-                    f"scan deadline exceeded before loading AST for {compile_unit.source}"
-                ) from exc
+            _recheck_deadline(compile_unit.source, "before loading AST")
             try:
                 with open(ast_path, "rb") as fh:  # bytes: json detects encoding
                     ast_root = json.load(fh)
@@ -1788,6 +1788,8 @@ class ClangSourceExtractor:
                 ) from exc
         finally:
             ast_path.unlink(missing_ok=True)
+        # The JSON load can itself consume the budget (Codex review, round 4).
+        _recheck_deadline(compile_unit.source, "after loading AST")
         # A non-zero exit with usable JSON means clang recovered from some errors;
         # record it as a diagnostic (partial coverage) rather than discarding the
         # dump (ADR-028 D7).

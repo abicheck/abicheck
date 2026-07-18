@@ -217,6 +217,16 @@ class CastxmlSourceExtractor:
         finally:
             out_xml.unlink(missing_ok=True)
 
+        # The parse itself can consume the rest of the budget on a large
+        # per-TU XML tree; re-check before walking it in _parse_root (Codex
+        # review, PR #591, round 4, mirrors the L2 castxml/clang paths).
+        try:
+            deadline.check()
+        except deadline.DeadlineExceeded as exc:
+            raise SourceExtractionError(
+                f"scan deadline exceeded after parsing castxml output for "
+                f"{compile_unit.source}"
+            ) from exc
         return self._parse_root(root, compile_unit, public_header_roots, target_id)
 
     def _parse_root(

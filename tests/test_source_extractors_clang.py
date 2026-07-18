@@ -2350,6 +2350,33 @@ def test_extract_rechecks_deadline_before_loading_ast(monkeypatch) -> None:  # t
             extractor.extract(_cu(), public_header_roots=["include/foo.h"])
 
 
+def test_extract_rechecks_deadline_after_loading_ast(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Codex review (PR #591, round 4): json.load() on a huge L4 AST can
+    itself consume the rest of the budget -- the existing pre-load
+    deadline.check() doesn't catch that; must re-check again after the load,
+    before walking the AST in source_abi_from_clang_ast/_attach_source_edges."""
+    import json
+    import time
+
+    from abicheck import deadline
+    from abicheck.buildsource.source_extractors import clang as clang_mod
+
+    def handler(cmd, **kw):  # type: ignore[no-untyped-def]
+        return _emit_ast(kw, json.dumps(_ast()))
+
+    extractor = _patch_run(monkeypatch, handler)
+    real_json_load = clang_mod.json.load
+
+    def _slow_load(fh):
+        time.sleep(0.05)
+        return real_json_load(fh)
+
+    monkeypatch.setattr(clang_mod.json, "load", _slow_load)
+    with deadline.deadline_scope(0.03):
+        with pytest.raises(SourceExtractionError, match="deadline exceeded"):
+            extractor.extract(_cu(), public_header_roots=["include/foo.h"])
+
+
 def test_extract_invalid_json_raises(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     extractor = _patch_run(monkeypatch, lambda cmd, **kw: _emit_ast(kw, "{not json"))
     with pytest.raises(SourceExtractionError, match="not valid JSON"):

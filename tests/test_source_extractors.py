@@ -415,6 +415,44 @@ def test_extract_rechecks_deadline_before_parsing_xml(monkeypatch) -> None:  # t
             extractor.extract(_cu(source="foo.cpp"), public_header_roots=["foo.h"])
 
 
+def test_extract_rechecks_deadline_after_parsing_xml(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Codex review (PR #591, round 4): DefusedET.parse() on a large per-TU
+    castxml XML file can itself consume the rest of the budget -- the
+    existing pre-parse deadline.check() doesn't catch that; must re-check
+    again after the parse, before walking the tree in _parse_root."""
+    import time
+
+    from abicheck import deadline
+    from abicheck.buildsource.source_extractors import (
+        SourceExtractionError,
+        castxml as castxml_mod,
+    )
+
+    extractor = CastxmlSourceExtractor()
+    monkeypatch.setattr(extractor, "available", lambda: True)
+
+    class _Result:
+        returncode = 0
+        stderr = ""
+
+    def _fake_run(cmd, **kw):  # type: ignore[no-untyped-def]
+        out = cmd[cmd.index("-o") + 1]
+        Path(out).write_text('<GCC_XML><File id="f1" name="foo.h"/></GCC_XML>')
+        return _Result()
+
+    monkeypatch.setattr(castxml_mod.deadline, "run_bounded", _fake_run)
+    real_parse = castxml_mod.DefusedET.parse
+
+    def _slow_parse(path):
+        time.sleep(0.05)
+        return real_parse(path)
+
+    monkeypatch.setattr(castxml_mod.DefusedET, "parse", _slow_parse)
+    with deadline.deadline_scope(0.03):
+        with pytest.raises(SourceExtractionError, match="deadline exceeded"):
+            extractor.extract(_cu(source="foo.cpp"), public_header_roots=["foo.h"])
+
+
 def test_unredact_home_expands_tilde() -> None:
     # The evidence redaction policy rewrites the home prefix to `~`; the replay
     # must expand it back since subprocess does not (Codex review #335, P2).
