@@ -605,7 +605,10 @@ def _check_object_alignment_reduced(
     declared-alignment change is instead owned by VAR_ALIGNMENT_CHANGED in
     diff_symbols.py). Falls back to the weak address-derived signal only when
     no declared-alignment evidence is available for corroboration (e.g.
-    symbols-only / stripped-without-headers snapshots).
+    symbols-only / stripped-without-headers snapshots, or -- a known,
+    documented gap, see dumper_clang.py's module docstring -- headers parsed
+    via the clang backend, which cannot compute a plain variable's natural
+    type alignment the way castxml's real compiler output can).
     """
     if s_new.sym_type not in (SymbolType.OBJECT, SymbolType.COMMON, SymbolType.TLS):
         return []

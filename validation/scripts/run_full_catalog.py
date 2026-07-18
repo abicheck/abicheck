@@ -69,15 +69,13 @@ BUILD_SOURCE_CASES = (
     "case132",
     "case133",
 )
-OWNER_NAMES = (
-    "btf",
-    "g20",
-    "kabi",
-    "l3l4l5",
-    "python_api",
-    "reconcile",
-    "snapshot_pair",
-)
+# Derived from the shared registry, not hand-duplicated: a hardcoded tuple
+# here silently drifted behind collect_full_example_matrix.SPECIAL_PROOFS
+# when the header_graph owner was added there (Codex review) -- run_example_
+# owner_proofs.py would then never be asked to run it, and
+# _matrix._proof_artifact_errors would report it "missing" on every run,
+# even a fully-provisioned one.
+OWNER_NAMES = tuple(sorted(_matrix.SPECIAL_PROOFS))
 RETRYABLE_SKIP_PREFIX = "compiler lacks required feature"
 _ALT_COMPILER_PROBE = {
     "gcc": ("gcc", "g++"),
