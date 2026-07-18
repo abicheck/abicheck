@@ -667,6 +667,33 @@ class TestBundledLlvmCmakePrefix:
 @pytest.mark.skipif(
     not RUN_SH.is_file(), reason="actions/collect-facts/run.sh not found"
 )
+class TestCmakeConfigureFailureHint:
+    """Regression: the `cmake configure failed` remediation hint used to be
+    a single hardcoded string pointing at the apt-installed libclang-N-dev
+    package. Once the vendor-bundled path (_bundled_llvm_cmake_prefix) could
+    also reach that cmake invocation, the apt hint became actively wrong
+    there -- no apt package is involved when a vendor toolchain's own
+    LLVM/Clang CMake package was used instead."""
+
+    def test_apt_hint_when_no_bundled_prefix(self) -> None:
+        result = _run_predicate('_cmake_configure_failure_hint "" "" "18"')
+        assert "libclang-18-dev" in result.stdout
+        assert "vendor-bundled" not in result.stdout
+
+    def test_vendor_hint_when_bundled_prefix_set(self) -> None:
+        result = _run_predicate(
+            '_cmake_configure_failure_hint "/opt/intel/oneapi/lib/cmake" '
+            '"/opt/intel/oneapi/lib/cmake/llvm" "18"'
+        )
+        assert "vendor-bundled" in result.stdout
+        assert "/opt/intel/oneapi/lib/cmake" in result.stdout
+        assert "/opt/intel/oneapi/lib/cmake/llvm" in result.stdout
+        assert "libclang" not in result.stdout
+
+
+@pytest.mark.skipif(
+    not RUN_SH.is_file(), reason="actions/collect-facts/run.sh not found"
+)
 class TestPhaseNeedsExternalBuildStep:
     @pytest.mark.parametrize(
         ("phase", "producer", "expected"),

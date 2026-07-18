@@ -272,6 +272,23 @@ _bundled_llvm_cmake_prefix() {
   fi
 }
 
+# Choose the right remediation hint for a `cmake configure` failure while
+# building the Clang plugin. The pre-existing message (the else branch)
+# assumed apt-get was the only way to have reached this cmake invocation and
+# told the user to check the libclang-<major>-dev package -- now that the
+# vendor-bundled path (_bundled_llvm_cmake_prefix above) can also reach it,
+# that hint is actively wrong there: no apt package was ever involved, so
+# "install libclang-N-dev" sends a user with e.g. a broken/partial Intel
+# oneAPI install chasing a package that doesn't exist for their toolchain.
+_cmake_configure_failure_hint() {
+  local bundled_cmake_prefix="$1" llvm_cmake_dir="$2" major="$3"
+  if [[ -n "$bundled_cmake_prefix" ]]; then
+    printf '%s' "the vendor-bundled LLVM/Clang CMake package at '$bundled_cmake_prefix' looks incomplete or mismatched for LLVM $major -- check that '$llvm_cmake_dir' actually contains a full LLVM+Clang CMake install (LLVMConfig.cmake, ClangConfig.cmake), or override llvm-cmake-prefix with a different path."
+  else
+    printf '%s' "see contrib/abicheck-clang-plugin/README.md#build (needs the full libclang-$major-dev package, not just clang-$major)."
+  fi
+}
+
 # Validate the phase/producer combination the way action.yml documents it:
 # phase=auto only completes standalone for producer=replay.
 _phase_needs_external_build_step() {
@@ -515,9 +532,11 @@ $version_output"
   else
     llvm_cmake_dir=$(llvm-config-"$major" --cmakedir 2>/dev/null || llvm-config --cmakedir 2>/dev/null || true)
   fi
+  local cmake_hint
+  cmake_hint=$(_cmake_configure_failure_hint "$bundled_cmake_prefix" "$llvm_cmake_dir" "$major")
   cmake -S "$plugin_src" -B "$build_dir" \
     ${llvm_cmake_dir:+-DCMAKE_PREFIX_PATH="$llvm_cmake_dir/.."} \
-    || _fail "cmake configure failed for the Clang plugin -- see contrib/abicheck-clang-plugin/README.md#build (needs the full libclang-$major-dev package, not just clang-$major)."
+    || _fail "cmake configure failed for the Clang plugin -- $cmake_hint"
   cmake --build "$build_dir" || _fail "cmake build failed for the Clang plugin."
   echo "::endgroup::"
 
