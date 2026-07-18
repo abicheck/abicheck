@@ -50,6 +50,29 @@ _native_pwd() {
   pwd
 }
 
+# Normalize an arbitrary path to the mixed form (drive letter + forward
+# slashes) via cygpath -m, same rationale as _native_pwd above but for a
+# path handed in rather than $(pwd). Needed because $CMPLR_ROOT (a native
+# Windows env var a vendor batch/setup step sets, e.g. "C:\Program Files
+# (x86)\Intel\oneAPI\compiler\latest") and Git Bash's own POSIX-style view
+# of `command -v icx`/`icpx` are two different representations of
+# potentially the same path -- comparing them as raw strings (as
+# _bundled_llvm_cmake_prefix below used to) can never match even after
+# accounting for separator differences alone (Codex review). A no-op
+# outside MINGW/MSYS/CYGWIN or when cygpath is unavailable.
+_normalize_win_path() {
+  local path="$1"
+  [[ -z "$path" ]] && return
+  case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN*)
+      if command -v cygpath >/dev/null 2>&1; then
+        cygpath -m "$path" 2>/dev/null && return
+      fi
+      ;;
+  esac
+  printf '%s' "$path"
+}
+
 PHASE="${INPUT_PHASE:-auto}"
 PRODUCER_IN="${INPUT_PRODUCER:-auto}"
 SOURCES="${INPUT_SOURCES:-.}"
@@ -194,13 +217,19 @@ _bundled_llvm_cmake_prefix() {
     printf '%s' "$explicit"
     return
   fi
-  # Match compiler_path against cmplr_root followed by EITHER separator --
-  # $CMPLR_ROOT is a caller-supplied/Action-detected path that may use
-  # either, and $(command -v "$COMPILER") on a Windows/Git-Bash runner can
-  # come back backslash-separated even though this script otherwise
-  # normalizes to forward slashes elsewhere. Hardcoding "/" here made the
-  # guard silently never match on Windows, defeating this function
-  # entirely on that platform (regression caught by
+  # Normalize both to the same representation before comparing -- on a real
+  # windows-latest runner, $CMPLR_ROOT (set natively by a vendor batch/
+  # setup step, e.g. "C:\Program Files (x86)\Intel\oneAPI\compiler\latest")
+  # and $(command -v "$COMPILER")'s Git-Bash-POSIX view of the same binary
+  # can be two entirely different-looking paths, not just differently
+  # separated -- a raw string/glob compare (even one accepting either
+  # separator) can never match them (Codex review).
+  cmplr_root=$(_normalize_win_path "$cmplr_root")
+  compiler_path=$(_normalize_win_path "$compiler_path")
+  # Still accept either separator after normalization: _normalize_win_path
+  # is a no-op outside MINGW/MSYS/CYGWIN or without cygpath on PATH, so on
+  # a plain POSIX host (or a Windows host missing cygpath) compiler_path
+  # can still legitimately be backslash-separated (regression caught by
   # test_detects_cmplr_root_with_llvm_cmake_package on windows-latest CI).
   if [[ -n "$cmplr_root" && -d "$cmplr_root/lib/cmake/llvm" \
       && ( "$compiler_path" == "$cmplr_root/"* || "$compiler_path" == "$cmplr_root"\\* ) ]]; then

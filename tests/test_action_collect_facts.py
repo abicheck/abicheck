@@ -378,6 +378,58 @@ class TestLlvmMajorFromPredefinedMacros:
 @pytest.mark.skipif(
     not RUN_SH.is_file(), reason="actions/collect-facts/run.sh not found"
 )
+class TestNormalizeWinPath:
+    """Regression (Codex review): a native Windows env var like $CMPLR_ROOT
+    (set by a vendor batch/setup step, e.g. "C:\\Program Files (x86)\\
+    Intel\\oneAPI\\compiler\\latest") and Git Bash's own POSIX-style view of
+    `command -v icx` can be two entirely different-looking representations
+    of the same path, not just differently separated -- comparing them
+    without going through cygpath first can never match."""
+
+    def test_noop_outside_windows(self) -> None:
+        result = _run_predicate('_normalize_win_path "/opt/intel/oneapi"')
+        assert result.stdout.strip() == "/opt/intel/oneapi"
+
+    def test_empty_input_stays_empty(self) -> None:
+        result = _run_predicate('_normalize_win_path ""')
+        assert result.stdout.strip() == ""
+
+    def test_uses_cygpath_when_on_windows(self, tmp_path: Path) -> None:
+        # Stubs both uname and cygpath (via a PATH-prepended fake bin dir),
+        # since this test environment is Linux -- same technique the
+        # existing _native_pwd tests already use. The stub cygpath prefixes
+        # its output so the test can tell it was actually invoked with -m
+        # and the given path, rather than silently falling back to the raw
+        # input.
+        fake_bin = tmp_path / "fakebin"
+        fake_bin.mkdir()
+        (fake_bin / "uname").write_text('#!/bin/sh\necho "MINGW64_NT-10.0-x86_64"\n')
+        (fake_bin / "uname").chmod(0o755)
+        (fake_bin / "cygpath").write_text('#!/bin/sh\necho "MIXED:$2"\n')
+        (fake_bin / "cygpath").chmod(0o755)
+
+        result = _run_predicate(
+            f'PATH="{fake_bin}:$PATH"; '
+            r'_normalize_win_path "C:\Program Files\Intel\oneAPI"'
+        )
+        assert result.stdout.strip() == r"MIXED:C:\Program Files\Intel\oneAPI"
+
+    def test_falls_back_to_raw_path_without_cygpath(self, tmp_path: Path) -> None:
+        fake_bin = tmp_path / "fakebin"
+        fake_bin.mkdir()
+        (fake_bin / "uname").write_text('#!/bin/sh\necho "MINGW64_NT-10.0-x86_64"\n')
+        (fake_bin / "uname").chmod(0o755)
+
+        result = _run_predicate(
+            f'PATH="{fake_bin}:$PATH"; '
+            r'_normalize_win_path "C:\Program Files\Intel\oneAPI"'
+        )
+        assert result.stdout.strip() == r"C:\Program Files\Intel\oneAPI"
+
+
+@pytest.mark.skipif(
+    not RUN_SH.is_file(), reason="actions/collect-facts/run.sh not found"
+)
 class TestBundledLlvmCmakePrefix:
     """Regression (Codex review): the clang-plugin build previously always
     apt-get-installed clang-N/llvm-N-dev/libclang-N-dev and looked up
@@ -440,6 +492,33 @@ class TestBundledLlvmCmakePrefix:
             f'_bundled_llvm_cmake_prefix "" "{cmplr_root}" "{unrelated_compiler}"'
         )
         assert result.stdout.strip() == ""
+
+    def test_normalizes_both_paths_when_cygpath_available(
+        self, tmp_path: Path
+    ) -> None:
+        # Full integration (Codex review): _bundled_llvm_cmake_prefix must
+        # route both cmplr_root and compiler_path through
+        # _normalize_win_path before comparing, on a simulated-Windows host
+        # where cygpath is present. Uses an identity-stub cygpath here --
+        # real directory-existence checks need a real filesystem path, so
+        # actual backslash<->POSIX translation is covered directly by
+        # TestNormalizeWinPath above; this test only proves the wiring
+        # calls through cygpath rather than comparing raw strings.
+        fake_bin = tmp_path / "fakebin"
+        fake_bin.mkdir()
+        (fake_bin / "uname").write_text('#!/bin/sh\necho "MINGW64_NT-10.0-x86_64"\n')
+        (fake_bin / "uname").chmod(0o755)
+        (fake_bin / "cygpath").write_text('#!/bin/sh\nprintf "%s" "$2"\n')
+        (fake_bin / "cygpath").chmod(0o755)
+
+        cmplr_root = tmp_path / "cmplr"
+        (cmplr_root / "lib" / "cmake" / "llvm").mkdir(parents=True)
+        compiler_path = cmplr_root / "bin" / "icpx"
+        result = _run_predicate(
+            f'PATH="{fake_bin}:$PATH"; '
+            f'_bundled_llvm_cmake_prefix "" "{cmplr_root}" "{compiler_path}"'
+        )
+        assert result.stdout.strip() == f"{cmplr_root}/lib/cmake"
 
 
 @pytest.mark.skipif(
