@@ -130,6 +130,30 @@ class TestAssessmentManifest:
                 targets=(TargetSpec(LINUX), TargetSpec(LINUX)),
             )
 
+    def test_direct_construction_rejects_empty_assessment_id(self):
+        with pytest.raises(ValueError):
+            AssessmentManifest(
+                assessment_id="", head_sha="s", targets=(TargetSpec(LINUX),)
+            )
+
+    def test_direct_construction_rejects_empty_head_sha(self):
+        with pytest.raises(ValueError):
+            AssessmentManifest(
+                assessment_id="a", head_sha="", targets=(TargetSpec(LINUX),)
+            )
+
+    def test_empty_identity_manifest_cannot_be_smuggled_through_stale_guard(self):
+        # Regression for the failure scenario the above guards close: an
+        # empty-identity manifest would give record()'s stale-data check
+        # nothing to compare against, so a malformed outcome that also
+        # carries empty identity fields would match instead of being
+        # rejected. Prove the manifest itself can no longer be constructed
+        # that way.
+        with pytest.raises(ValueError):
+            AssessmentManifest(
+                assessment_id="", head_sha="", targets=(TargetSpec(LINUX),)
+            )
+
 
 class TestTargetOutcome:
     def test_analyzed_requires_findings(self):
