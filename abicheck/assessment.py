@@ -136,14 +136,17 @@ class AssessmentManifest:
         # Enforced here (not just in from_dict) so a manifest built directly
         # via the constructor can't smuggle in an empty or duplicate-id
         # target set that would silently desync target_ids from len(targets)
-        # (progress()/render_text() key off the latter), or an empty
+        # (progress()/render_text() key off the latter), an empty
         # assessment_id/head_sha — an empty-identity manifest would give
         # Assessment.record()'s stale-data guards nothing to compare against,
         # so a malformed outcome carrying equally-empty identity fields would
-        # be accepted as current instead of rejected.
-        if not self.assessment_id:
+        # be accepted as current instead of rejected — or a non-string one:
+        # truthiness alone accepts assessment_id=12345, which would then
+        # compare unequal to a well-typed outcome's "12345" and get it
+        # dropped as foreign by record().
+        if not isinstance(self.assessment_id, str) or not self.assessment_id:
             raise ValueError("'assessment_id' must be a non-empty string")
-        if not self.head_sha:
+        if not isinstance(self.head_sha, str) or not self.head_sha:
             raise ValueError("'head_sha' must be a non-empty string")
         if not self.targets:
             raise ValueError("'targets' must be non-empty")

@@ -224,6 +224,24 @@ class TestAssessmentManifest:
                 assessment_id="", head_sha="", targets=(TargetSpec(LINUX),)
             )
 
+    @pytest.mark.parametrize("bad_id", [12345, True, 3.14])
+    def test_direct_construction_rejects_non_string_assessment_id(self, bad_id: object):
+        # Truthiness alone accepts assessment_id=12345 (mirrors the
+        # from_dict() gap): a well-typed outcome's "12345" would then
+        # compare unequal to the numeric manifest id and get dropped as
+        # foreign by record().
+        with pytest.raises(ValueError):
+            AssessmentManifest(
+                assessment_id=bad_id, head_sha="s", targets=(TargetSpec(LINUX),)
+            )
+
+    @pytest.mark.parametrize("bad_sha", [12345, True, 3.14])
+    def test_direct_construction_rejects_non_string_head_sha(self, bad_sha: object):
+        with pytest.raises(ValueError):
+            AssessmentManifest(
+                assessment_id="a", head_sha=bad_sha, targets=(TargetSpec(LINUX),)
+            )
+
 
 class TestTargetOutcome:
     def test_analyzed_requires_findings(self):
