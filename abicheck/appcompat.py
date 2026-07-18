@@ -932,6 +932,13 @@ def scope_diff_to_app(
     # (the same dedup _scoped_severity_summary/cli_compare_helpers.py already
     # use) so a symbol already covered by a real diff Change is never
     # double-reported as both that Change and this overlay.
+    # Compute coverage from the raw (pre-suppression) missing count -- it is
+    # an objective fact about the export table, not a gate, so a suppressed
+    # overlay finding should not make the reported coverage number lie.
+    required_count = len(app_reqs.undefined_symbols)
+    coverage = _compute_symbol_coverage(new_exports, required_count, len(missing_symbols))
+
+    suppressed_missing: set[str] = set()
     for sym in uncovered_missing_symbols(missing_symbols, breaking_for_app):
         overlay_change = make_change(
             ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
@@ -939,12 +946,20 @@ def scope_diff_to_app(
             name=app_path.name,
         )
         if suppression is not None and suppression.is_suppressed(overlay_change):
+            # Codex review (fresh evidence): missing_symbols independently
+            # forces Verdict.BREAKING in _compute_appcompat_verdict below
+            # regardless of breaking_for_app, and feeds the scoped exit-code
+            # floor / missing-label text output the same way -- dropping only
+            # the synthesized Change left the suppression cosmetic. This
+            # overlay IS the suppressible representation of a missing symbol
+            # (that was the point of promoting it out of a bespoke string),
+            # so a suppressed overlay must also remove its raw string from
+            # every one of those consumers.
+            suppressed_missing.add(sym)
             continue
         breaking_for_app.append(overlay_change)
-
-    # Compute app-specific verdict
-    required_count = len(app_reqs.undefined_symbols)
-    coverage = _compute_symbol_coverage(new_exports, required_count, len(missing_symbols))
+    if suppressed_missing:
+        missing_symbols = [s for s in missing_symbols if s not in suppressed_missing]
 
     verdict = _compute_appcompat_verdict(
         missing_symbols, missing_versions, breaking_for_app,

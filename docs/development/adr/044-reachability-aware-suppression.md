@@ -1175,6 +1175,23 @@ review's priority tiers.
    `reporter._change_to_dict`'s existing one) and passing
    `EvidenceStatus.CONSUMER_PROVEN` at both `scoped_only_changes` render
    sites (JSON's `_fold_scoped_compat_into_text`, SARIF's `to_sarif`).
+   **Post-merge review (Codex), one more finding after threading suppression
+   through:** the suppression fix above only dropped the suppressed symbol
+   from the synthesized `Change`; the same symbol was left in
+   `AppCompatResult.missing_symbols` (the raw string list), which
+   `_compute_appcompat_verdict` checks **independently** and unconditionally
+   forces `Verdict.BREAKING` on — and which the scoped exit-code floor and
+   missing-label text output also read directly. Suppressing the overlay
+   `Change` alone was therefore cosmetic: the verdict/exit code/report text
+   still failed on a symbol the user had explicitly (and correctly) waived.
+   Fixed by also removing the symbol from `missing_symbols` itself when its
+   overlay is suppressed — this overlay *is* the suppressible representation
+   of a missing symbol (the entire point of promoting it out of a bespoke
+   string), so a suppressed overlay must remove the raw string from every
+   consumer of it, not just the `Change` list. `symbol_coverage` is
+   deliberately computed from the pre-suppression count: it is a factual
+   metric about the export table, not a gate, and should not be made to lie
+   because a finding was waived.
    **Post-merge review (Codex), three more findings on the same P2 change:**
    (a) `runtime_probe._run_once` passed a bare `Path` straight to
    `subprocess.run([str(app_path)], ...)` — for a relative app name with no

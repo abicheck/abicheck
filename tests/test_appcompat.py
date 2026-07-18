@@ -1916,7 +1916,11 @@ class TestScopeDiffToAppWithSnapshots:
         """Codex review: CONSUMER_REQUIRED_SYMBOL_REMOVED is synthesized after
         the pipeline's own suppression pass already ran over diff.changes, so
         without threading `suppression` through here an exact rule for this
-        symbol/kind could never actually suppress it."""
+        symbol/kind could never actually suppress it. missing_symbols must
+        also drop the suppressed symbol (Codex review, fresh evidence): it
+        independently forces Verdict.BREAKING in _compute_appcompat_verdict
+        regardless of breaking_for_app, so dropping only the synthesized
+        Change would leave the suppression cosmetic."""
         from abicheck.suppression import Suppression, SuppressionList
 
         old_snap = self._snap("1.0", "libfoo.so.1", ["foo_init", "foo_process"])
@@ -1933,8 +1937,12 @@ class TestScopeDiffToAppWithSnapshots:
             result = scope_diff_to_app(
                 diff, tmp_path / "app", old_snap, new_snap, suppression=suppression,
             )
-        assert result.missing_symbols == ["foo_process"]
+        assert result.missing_symbols == []
         assert [c.kind for c in result.breaking_for_app] == []
+        assert result.verdict == Verdict.COMPATIBLE
+        # Coverage stays factual (the symbol really is absent from new
+        # exports) -- suppression silences the gate, not the reported metric.
+        assert result.symbol_coverage < 100.0
 
     def test_consumer_required_symbol_removed_overlay_survives_unmatched_suppression(
         self, tmp_path,
