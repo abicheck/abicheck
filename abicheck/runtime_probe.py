@@ -114,6 +114,15 @@ def _run_once(app_path: Path, lib_path: Path, timeout: float) -> RuntimeProbeOut
             env=env,
             capture_output=True,
             text=True,
+            # A real executable's stderr is arbitrary bytes, not guaranteed
+            # to be valid UTF-8 (or the locale's encoding) -- without this,
+            # decoding raises UnicodeDecodeError *after* the child exits,
+            # escaping this best-effort helper and aborting the whole
+            # compare instead of returning a RuntimeProbeOutcome (Codex
+            # review). Malformed bytes are replaced, not dropped, so the
+            # symbol-lookup-error regex still matches valid ASCII segments
+            # around them.
+            errors="replace",
             timeout=timeout,
             check=False,
         )

@@ -66,7 +66,7 @@ class TestRunOnce:
     def test_symbol_lookup_error_detected(self, tmp_path, monkeypatch):
         monkeypatch.setattr(rp.sys, "platform", "linux")
 
-        def _fake_run(argv, env=None, capture_output=None, text=None, timeout=None, check=None):
+        def _fake_run(argv, env=None, capture_output=None, text=None, errors=None, timeout=None, check=None):
             assert env["LD_BIND_NOW"] == "1"
             return subprocess.CompletedProcess(
                 argv, returncode=127, stdout="",
@@ -87,7 +87,7 @@ class TestRunOnce:
     def test_clean_run_is_ok(self, tmp_path, monkeypatch):
         monkeypatch.setattr(rp.sys, "platform", "linux")
 
-        def _fake_run(argv, env=None, capture_output=None, text=None, timeout=None, check=None):
+        def _fake_run(argv, env=None, capture_output=None, text=None, errors=None, timeout=None, check=None):
             return subprocess.CompletedProcess(argv, returncode=0, stdout="", stderr="")
 
         monkeypatch.setattr(rp.subprocess, "run", _fake_run)
@@ -104,7 +104,7 @@ class TestRunOnce:
         monkeypatch.setenv("LD_LIBRARY_PATH", "/existing/path")
         captured_envs = []
 
-        def _fake_run(argv, env=None, capture_output=None, text=None, timeout=None, check=None):
+        def _fake_run(argv, env=None, capture_output=None, text=None, errors=None, timeout=None, check=None):
             captured_envs.append(env["LD_LIBRARY_PATH"])
             return subprocess.CompletedProcess(argv, returncode=0, stdout="", stderr="")
 
@@ -119,7 +119,7 @@ class TestRunOnce:
     def test_timeout_marks_timed_out(self, tmp_path, monkeypatch):
         monkeypatch.setattr(rp.sys, "platform", "linux")
 
-        def _fake_run(argv, env=None, capture_output=None, text=None, timeout=None, check=None):
+        def _fake_run(argv, env=None, capture_output=None, text=None, errors=None, timeout=None, check=None):
             raise subprocess.TimeoutExpired(cmd=argv, timeout=timeout)
 
         monkeypatch.setattr(rp.subprocess, "run", _fake_run)
@@ -134,7 +134,7 @@ class TestRunOnce:
     def test_oserror_captured_not_raised(self, tmp_path, monkeypatch):
         monkeypatch.setattr(rp.sys, "platform", "linux")
 
-        def _fake_run(argv, env=None, capture_output=None, text=None, timeout=None, check=None):
+        def _fake_run(argv, env=None, capture_output=None, text=None, errors=None, timeout=None, check=None):
             raise OSError("Exec format error")
 
         monkeypatch.setattr(rp.subprocess, "run", _fake_run)
@@ -144,6 +144,41 @@ class TestRunOnce:
         result = run_runtime_probe(app, old_lib, new_lib)
         assert result.old is not None and result.old.ok is False
         assert "Exec format error" in result.old.stderr_tail
+
+    def test_non_utf8_stderr_does_not_raise(self, tmp_path, monkeypatch):
+        """Codex review, fresh evidence: a real executable's stderr is
+        arbitrary bytes, not guaranteed valid UTF-8 -- subprocess.run(...,
+        text=True) with no errors= handling raises UnicodeDecodeError *after*
+        the child exits, which would escape this best-effort helper and
+        abort the whole compare instead of degrading to a RuntimeProbeOutcome.
+        Uses a real subprocess (not a mocked subprocess.run) since the
+        decoding itself is exactly what's under test."""
+        monkeypatch.setattr(rp.sys, "platform", "linux")
+        app = tmp_path / "app"
+        # A lone 0xFF byte is invalid in UTF-8 in any position -- write it
+        # via printf's octal escape (portable across /bin/sh implementations)
+        # sandwiched in valid ASCII so the symbol-lookup regex can still be
+        # checked not to false-positive on it.
+        app.write_text(
+            "#!/bin/sh\n"
+            "printf 'before \\377 after\\n' >&2\n"
+            "exit 127\n"
+        )
+        app.chmod(0o755)
+        old_lib = _make_lib(tmp_path, "old.so")
+        new_lib = _make_lib(tmp_path, "new.so")
+        # The point under test is that this call returns at all (no
+        # UnicodeDecodeError escaping _run_once) -- no "symbol lookup
+        # error: ... undefined symbol: X" text is present, so per this
+        # probe's own deliberately-narrow design (only that exact glibc
+        # message is interpreted as a regression) ok stays True regardless
+        # of the script's exit code.
+        result = run_runtime_probe(app, old_lib, new_lib)
+        assert result.old is not None
+        assert result.old.ok is True
+        assert result.old.missing_symbol is None
+        assert "before" in result.old.stderr_tail
+        assert "after" in result.old.stderr_tail
 
     def test_relative_bare_name_resolved_before_exec(self, tmp_path, monkeypatch):
         """A bare relative app name (no '/') must not be searched for on PATH
@@ -155,7 +190,7 @@ class TestRunOnce:
         monkeypatch.chdir(tmp_path)
         captured_argv = []
 
-        def _fake_run(argv, env=None, capture_output=None, text=None, timeout=None, check=None):
+        def _fake_run(argv, env=None, capture_output=None, text=None, errors=None, timeout=None, check=None):
             captured_argv.append(argv)
             return subprocess.CompletedProcess(argv, returncode=0, stdout="", stderr="")
 

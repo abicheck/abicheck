@@ -100,7 +100,14 @@ from typing import Any
 #:       "symbol_availability"), and ``reachability_proof_path`` (string) —
 #:       previously surfaced only as prose inside the
 #:       ``suppression_would_hide_public_break`` diagnostic's description.
-REPORT_SCHEMA_VERSION = "2.7"
+#: 2.8 — added ``"consumer_proven"`` to ``reachability_kind``'s enum
+#:       (ADR-044 P2): set on the ``consumer_required_symbol_removed``/
+#:       ``consumer_runtime_load_failed`` overlays ``compare --used-by``
+#:       synthesizes, which are always consumer-verified real (a real
+#:       consumer binary's own requirement, or an actual dynamic-linker
+#:       failure) rather than established by the L0-L5 public-surface walk
+#:       the other four values describe. Additive enum member.
+REPORT_SCHEMA_VERSION = "2.8"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

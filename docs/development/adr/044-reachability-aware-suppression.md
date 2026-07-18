@@ -1292,6 +1292,31 @@ review's priority tiers.
    plumbing is still used for consistency and to stay correct if that
    kind's tier ever changes. A narrow `symbol:`/`change_kind:` rule is
    unaffected either way (exempt from both gates, unchanged behavior).
+   **Post-merge review (Codex), two more findings on the `public_reachable`
+   fix itself:** (a) the compare-report JSON schema's `reachability_kind`
+   enum only listed the four public-surface-walk values
+   (`direct_public_symbol`/`value_embedding`/`pointer_or_signature`/
+   `symbol_availability`) — a report containing either overlay now emits
+   `reachability_kind: "consumer_proven"`, which failed schema validation
+   even though the report still advertised a passing `report_schema_version`.
+   Fixed by adding `"consumer_proven"` to the enum (an additive change per
+   the schema's own stability policy, `abicheck/schemas/__init__.py`) and
+   bumping `REPORT_SCHEMA_VERSION` to `2.7`, re-synced to
+   `docs/schemas/v1/` via `scripts/publish_schemas.py`. (b) Unrelated to the
+   reachability fix but on the same file: `runtime_probe._run_once`'s
+   `subprocess.run(..., text=True)` has no `errors=` handling, and a real
+   executable's stderr is arbitrary bytes with no guarantee of being valid
+   UTF-8 (or the locale's encoding) — a non-UTF-8 byte would raise
+   `UnicodeDecodeError` *after* the child process exits, escaping this
+   best-effort probe entirely and aborting the whole `compare` invocation
+   instead of degrading to a `RuntimeProbeOutcome`, exactly the failure mode
+   the surrounding `try`/`except OSError` was meant to prevent. Fixed by
+   adding `errors="replace"` so malformed bytes are substituted, not fatal —
+   the symbol-lookup-error regex still matches the valid ASCII segments
+   around them. Added a real-subprocess regression test (not a mocked
+   `subprocess.run`, since the decoding itself is what's under test) to
+   `test_runtime_probe.py`, and a `jsonschema`-validating regression test to
+   `test_cov95_cli.py` for the enum fix.
 3. ~~New worked examples exercising this ADR's headline scenario end-to-end
    (public inline dispatch to an exported internal specialization; the same
    case under a blanket namespace suppression, asserting the break survives

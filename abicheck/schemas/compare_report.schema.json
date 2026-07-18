@@ -306,12 +306,13 @@
         },
         "reachability_kind": {
           "type": "string",
-          "description": "ADR-044: how public_reachable was established. 'direct_public_symbol' — the subject is itself public (ScopeOrigin.PUBLIC_HEADER, or a late detector's own Visibility.PUBLIC-filtered construction). 'value_embedding'/'pointer_or_signature' — layout/type-graph reachability from a public entry (by-value field/base vs. pointer/reference/template-argument only). 'symbol_availability' — reachable only via an L5 DECL_CALLS_DECL/DECL_REFERENCES_DECL call/reference edge (ADR-044 P1 items 1-3), with no layout evidence at all. Present only when public_reachable is true.",
+          "description": "ADR-044: how public_reachable was established. 'direct_public_symbol' — the subject is itself public (ScopeOrigin.PUBLIC_HEADER, or a late detector's own Visibility.PUBLIC-filtered construction). 'value_embedding'/'pointer_or_signature' — layout/type-graph reachability from a public entry (by-value field/base vs. pointer/reference/template-argument only). 'symbol_availability' — reachable only via an L5 DECL_CALLS_DECL/DECL_REFERENCES_DECL call/reference edge (ADR-044 P1 items 1-3), with no layout evidence at all. 'consumer_proven' — set on the consumer_required_symbol_removed/consumer_runtime_load_failed overlays compare --used-by synthesizes (ADR-044 P2): always consumer-verified real (a real consumer binary's own requirement, or an actual dynamic-linker failure) rather than established by the public-surface walk the other values describe. Present only when public_reachable is true.",
           "enum": [
             "direct_public_symbol",
             "value_embedding",
             "pointer_or_signature",
-            "symbol_availability"
+            "symbol_availability",
+            "consumer_proven"
           ]
         },
         "reachability_proof_path": {

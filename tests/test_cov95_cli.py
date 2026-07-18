@@ -1747,6 +1747,41 @@ class TestUsedByScoping:
         )
         assert entry["evidence_status"] == "consumer_proven"
 
+    def test_json_scoped_only_change_reachability_kind_validates_against_schema(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Codex review, fresh evidence: scope_diff_to_app now sets
+        public_reachable=True/reachability_kind="consumer_proven" on this
+        overlay (so a broad suppression rule can't silently hide a
+        consumer-proven break) -- the rendered JSON must actually validate
+        against the published schema, whose reachability_kind enum needed
+        "consumer_proven" added alongside the four public-surface-walk
+        values it already had."""
+        pytest.importorskip("jsonschema")
+        import jsonschema
+
+        from abicheck.schemas import load_compare_report_schema
+
+        scoped_only = Change(
+            kind=ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+            symbol="foo_removed",
+            description="Consumer requires foo_removed",
+            public_reachable=True,
+            reachability_kind="consumer_proven",
+        )
+        res = self._result(verdict=Verdict.BREAKING, breaking_for_app=[scoped_only])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
+        )
+        data = json.loads(result.stdout)
+        entry = next(
+            c for c in data["changes"] if c["kind"] == "consumer_required_symbol_removed"
+        )
+        assert entry["reachability_kind"] == "consumer_proven"
+        jsonschema.validate(instance=data, schema=load_compare_report_schema())
+
     def test_json_missing_symbol_respects_show_only(
         self, tmp_path, monkeypatch
     ) -> None:
