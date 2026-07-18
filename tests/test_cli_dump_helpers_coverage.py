@@ -24,6 +24,8 @@ import click
 import pytest
 
 from abicheck.cli_dump_helpers import (
+    check_dump_compile_db_error,
+    check_dump_debug_format_error,
     evidence_depth_label,
     handle_non_elf_dump,
     perform_elf_dump,
@@ -90,6 +92,43 @@ def test_compile_db_with_headers_returns_effective_path(tmp_path: Path) -> None:
     assert resolve_dump_compile_db(None, alt, (hdr,)) == alt
     # No DB at all → None (and no header requirement to enforce).
     assert resolve_dump_compile_db(None, None, ()) is None
+
+
+# ── check_dump_compile_db_error / check_dump_debug_format_error ────────────
+# Pure predicates factored out of resolve_dump_compile_db / the debug-format
+# BadParameter check so `dump --dry-run` can report the same condition as a
+# blocker instead of missing it entirely (previously both checks only ran in
+# the real path, after the dry-run branch had already returned).
+
+
+def test_check_compile_db_error_mirrors_resolve_dump_compile_db(tmp_path: Path) -> None:
+    db = tmp_path / "compile_commands.json"
+    db.write_text("[]", encoding="utf-8")
+    hdr = tmp_path / "h.h"
+    hdr.write_text("", encoding="utf-8")
+
+    assert check_dump_compile_db_error(db, None, ()) is not None
+    assert "requires -H/--header" in check_dump_compile_db_error(db, None, ())
+    assert check_dump_compile_db_error(None, db, ()) is not None
+    assert check_dump_compile_db_error(db, None, (hdr,)) is None
+    assert check_dump_compile_db_error(None, None, ()) is None
+
+    # resolve_dump_compile_db raises exactly when the predicate is non-None.
+    with pytest.raises(click.UsageError):
+        resolve_dump_compile_db(db, None, ())
+    assert resolve_dump_compile_db(db, None, (hdr,)) == db
+
+
+def test_check_debug_format_error_only_for_pe_macho() -> None:
+    assert check_dump_debug_format_error("dwarf", "pe") == (
+        "--dwarf is only supported for ELF binaries, not PE."
+    )
+    assert check_dump_debug_format_error("btf", "macho") == (
+        "--btf is only supported for ELF binaries, not MACHO."
+    )
+    assert check_dump_debug_format_error("dwarf", "elf") is None
+    assert check_dump_debug_format_error(None, "pe") is None
+    assert check_dump_debug_format_error(None, None) is None
 
 
 # ── handle_non_elf_dump error handling ──────────────────────────────────────

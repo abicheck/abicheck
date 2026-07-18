@@ -124,6 +124,33 @@ class TestDumpDryRun:
         )
         assert result.exit_code == 0, result.output
 
+    def test_compile_db_without_headers_blocks(self, tmp_path: Path) -> None:
+        # resolve_dump_compile_db raises a UsageError for -p without -H in
+        # the real run; dry-run previously never checked this at all (the
+        # check only existed in the real path, after the dry-run branch had
+        # already returned), so it used to report success here.
+        so = tmp_path / "libfoo.so"
+        so.write_bytes(b"\x7fELF" + b"\x00" * 60)
+        db = tmp_path / "compile_commands.json"
+        db.write_text("[]", encoding="utf-8")
+        result = CliRunner().invoke(
+            main, ["dump", str(so), "--dry-run", "-p", str(db)]
+        )
+        assert result.exit_code == 1, result.output
+        assert "requires -H/--header" in result.output
+
+    def test_debug_format_against_pe_binary_blocks(self, tmp_path: Path) -> None:
+        # --debug-format (and the legacy --dwarf/--btf/--ctf flags) is only
+        # meaningful for ELF; the real run raises BadParameter for a PE/
+        # Mach-O binary. Dry-run previously never checked this either.
+        pe = tmp_path / "foo.dll"
+        pe.write_bytes(b"MZ" + b"\x00" * 60)
+        result = CliRunner().invoke(
+            main, ["dump", str(pe), "--dry-run", "--debug-format", "dwarf"]
+        )
+        assert result.exit_code == 1, result.output
+        assert "only supported for ELF binaries" in result.output
+
     def test_depth_source_with_build_info_but_no_sources_blocks(
         self, tmp_path: Path
     ) -> None:

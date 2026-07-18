@@ -148,6 +148,28 @@ def resolve_dump_debug_format(
     return debug_format
 
 
+def check_dump_debug_format_error(
+    effective_debug_format: str | None,
+    binary_fmt: str | None,
+) -> str | None:
+    """Pure predicate for the --debug-format/PE-Mach-O incompatibility.
+
+    Mirrors the ``click.BadParameter`` cli.py's real dump path raises after
+    resolving the binary format, as a plain string instead of raising --
+    shared with ``dump --dry-run``, which previously never ran this check at
+    all (it only existed in the real path, after the dry-run branch), so a
+    ``--dwarf``/``--btf``/``--ctf``/``--debug-format`` dump of a PE/Mach-O
+    binary reported dry-run success on an invocation the real run would
+    immediately reject.
+    """
+    if effective_debug_format is not None and binary_fmt in ("pe", "macho"):
+        return (
+            f"--{effective_debug_format} is only supported for ELF binaries, "
+            f"not {binary_fmt.upper()}."
+        )
+    return None
+
+
 def resolve_dump_depth(
     depth: str | None,
     default_mode: str,
@@ -541,6 +563,8 @@ def render_dump_dry_run(
     output: Path | None,
     has_compile_db: bool = False,
     build_info_is_pack: bool = False,
+    compile_db_error: str | None = None,
+    debug_format_error: str | None = None,
 ) -> Any:
     """Build the ``dump --dry-run`` report (ADR-043 D4): resolve, never execute.
 
@@ -572,6 +596,20 @@ def render_dump_dry_run(
     second finding on this signal): that combination was wrongly treated as
     "--depth source has no path without --sources" and blocked even though
     the real (non-dry) run writes a valid source-depth snapshot from it.
+
+    ``compile_db_error``/``debug_format_error``: pre-computed results of
+    :func:`check_dump_compile_db_error`/:func:`check_dump_debug_format_error`
+    -- the same pure predicates the real (non-dry) run's
+    ``resolve_dump_compile_db``/PE-Mach-O ``BadParameter`` check use, called
+    by ``cli.dump_cmd`` *before* branching on ``dry_run`` so both paths agree
+    on the two checks that previously only ran in the real path, after the
+    dry-run branch (so a ``-p`` compile DB with no ``-H``, or a
+    ``--debug-format``/``--dwarf``/``--btf``/``--ctf`` selection against a
+    PE/Mach-O binary, reported dry-run success on an invocation the real run
+    would immediately reject). Threaded in rather than recomputed here to
+    keep this function itself free of the real-path's binary-format
+    detection (the "Available data layers" probe below already does its own,
+    unrelated, best-effort detection).
     """
     from .cli_helpers_compare import discover_project_config
     from .dry_run import DryRunResult, tool_status
@@ -687,7 +725,38 @@ def render_dump_dry_run(
             "check_requested_depth_satisfied would raise on this: the "
             "real run would exit 1."
         )
+    # These two checks previously only ran in the real (non-dry) path, after
+    # this function's caller had already returned/exited via emit_dry_run --
+    # a dry run could report success on an invocation click.UsageError/
+    # click.BadParameter would immediately reject for real.
+    if compile_db_error is not None:
+        result.block(compile_db_error)
+    if debug_format_error is not None:
+        result.block(debug_format_error)
     return result
+
+
+def check_dump_compile_db_error(
+    compile_db_path: Path | None,
+    compile_db_path_alt: Path | None,
+    headers: tuple[Path, ...],
+) -> str | None:
+    """Pure predicate for the -p/--compile-db-requires-headers check.
+
+    Mirrors :func:`resolve_dump_compile_db`'s ``click.UsageError`` condition as
+    a plain string instead of raising -- shared with ``dump --dry-run``, which
+    previously never ran this check at all (it only existed in the real path,
+    after the dry-run branch), so ``dump foo.so -p compile_commands.json``
+    with no ``-H`` reported dry-run success on an invocation the real run
+    would immediately reject.
+    """
+    effective_compile_db = compile_db_path or compile_db_path_alt
+    if effective_compile_db and not headers:
+        return (
+            "Compilation database (-p / --compile-db) requires -H/--header. "
+            "Without headers, CastXML has nothing to parse."
+        )
+    return None
 
 
 def resolve_dump_compile_db(
@@ -700,13 +769,10 @@ def resolve_dump_compile_db(
     Raises :class:`click.UsageError` if a compile DB is given but no headers.
     Returns the effective compile DB path (or *None*).
     """
-    effective_compile_db = compile_db_path or compile_db_path_alt
-    if effective_compile_db and not headers:
-        raise click.UsageError(
-            "Compilation database (-p / --compile-db) requires -H/--header. "
-            "Without headers, CastXML has nothing to parse."
-        )
-    return effective_compile_db
+    error = check_dump_compile_db_error(compile_db_path, compile_db_path_alt, headers)
+    if error is not None:
+        raise click.UsageError(error)
+    return compile_db_path or compile_db_path_alt
 
 
 def handle_non_elf_dump(

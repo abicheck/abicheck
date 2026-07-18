@@ -101,6 +101,16 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   duplicating those defaults by hand (silent-drift risk) or reimplementing
   `ctx.invoke` via Click's private context/default-resolution internals for
   no behavioral gain.
+- **`dump --dry-run` no longer misses two validations the real run enforces**
+  — a `-p`/`--compile-db` given without `-H`/`--header`, and a
+  `--debug-format`/`--dwarf`/`--btf`/`--ctf` selection against a PE/Mach-O
+  binary, both raised only in the real (non-dry) path, after the dry-run
+  branch had already returned — so `dump --dry-run` could report success on
+  an invocation the real run would immediately reject with a
+  `UsageError`/`BadParameter`. The two checks are now pure predicates
+  (`check_dump_compile_db_error`/`check_dump_debug_format_error`) shared
+  between both paths: the real run still raises for its "Usage: ..." exit
+  64, and the dry run now reports the same condition as a blocker (exit 1).
 
 ### Added
 

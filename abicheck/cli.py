@@ -654,10 +654,33 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             "--ast-frontend clang for a --depth source dump."
         )
 
+    # Resolve debug-format and binary-format identity once, shared between
+    # the dry-run report and the real run: these two validations
+    # (resolve_dump_compile_db's UsageError, and the debug-format/PE-Mach-O
+    # BadParameter below) previously only ran in the real path, after the
+    # dry-run branch -- so `dump --dry-run` could report success on an
+    # invocation the real run would immediately reject. Uses the pure,
+    # side-effect-free binary_utils.normalize_binary_input (no linker-script
+    # "Note:" echo) rather than _normalize_binary_input, matching dry-run's
+    # own "cheap, read-only resolution only" contract; the real path below
+    # still calls _normalize_binary_input itself for that echo and the
+    # so_path reassignment.
+    effective_debug_format: str | None = None
+    dry_run_binary_fmt: str | None = None
+    if so_path is not None:
+        effective_debug_format = resolve_dump_debug_format(debug_format_opt, debug_format)
+        from .binary_utils import normalize_binary_input as _peek_binary_format
+
+        _, dry_run_binary_fmt = _peek_binary_format(so_path)
+
     if dry_run:
         from .buildsource.inline import is_pack_dir
         from .cli_buildsource_helpers import _is_inputs_pack_dir
-        from .cli_dump_helpers import render_dump_dry_run
+        from .cli_dump_helpers import (
+            check_dump_compile_db_error,
+            check_dump_debug_format_error,
+            render_dump_dry_run,
+        )
 
         emit_dry_run(
             render_dump_dry_run(
@@ -674,6 +697,12 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
                 build_info_is_pack=(
                     is_pack_dir(build_info) or _is_inputs_pack_dir(build_info)
                 ),
+                compile_db_error=check_dump_compile_db_error(
+                    compile_db_path, compile_db_path_alt, headers
+                ),
+                debug_format_error=check_dump_debug_format_error(
+                    effective_debug_format, dry_run_binary_fmt
+                ),
             )
         )
 
@@ -683,7 +712,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db, extractor=header_backend, depth=depth)
         return
 
-    effective_debug_format = resolve_dump_debug_format(debug_format_opt, debug_format)
     effective_compile_db = resolve_dump_compile_db(compile_db_path, compile_db_path_alt, headers)
     # Resolved before the PE/Mach-O dispatch (Codex review): both binary-format
     # branches need the same -p/--compile-db -> castxml/clang flags and matched
