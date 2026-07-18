@@ -64,14 +64,18 @@ ABICC/libabigail on a stable cross-tool corpus?"
 | Release headers | 193 catalog cases | `validate_examples.py --artifact-variant release-headers --json` in CI artifact | Reduced-evidence informational lane | False-positive guard passed |
 | Stripped headers | 193 catalog cases | `validate_examples.py --artifact-variant stripped-headers --json` in CI artifact | Reduced-evidence informational lane | Expected signal-loss backlogs remain |
 | Build/source smoke | 10 representative cases | `validate_examples.py case01 case04 case98 case105 case122 case129 case130 case131 case132 case133 --artifact-variant build-source --json` in CI artifact | 10 PASS | Build/source evidence catches the build-flag mode cases in the smoke set |
-| Binary competitor scan | 159 shared-library pairs × 2 external tools | abicc/ABI Compliance Checker and libabigail `abidiff` over built `.so` pairs | `<<FILL:COMPETITOR_SCAN>>` | Competitor `.so` lane only; the 34 dedicated non-`.so` cases are represented in their own lanes, not as missing `.so` results |
-| Scan-depth matrix | `<<FILL:DEPTH_SCOPE>>` targets × 5 depths | `abicheck scan --depth {binary,headers,build,source,full}` | `<<FILL:DEPTH_RESULT>>` | Compare-style status by depth; full-catalog audit/cross-source/bundle/BTF/snapshot cases are covered by dedicated lanes |
+| Binary competitor scan | 159 shared-library pairs × 2 external tools (4 tool/mode combinations) | abicc (dumper + xml) and libabigail `abidiff` (+headers) over built `.so` pairs | 636 tool invocations attempted; per-tool correct/accuracy in the [full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-193-cases) below | Competitor `.so` lane only; the 34 dedicated non-`.so` cases are represented in their own lanes, not as missing `.so` results |
+| Scan-depth matrix | not independently re-run this pass | `abicheck scan --depth {binary,headers,build,source,full}` | see prior methodology note below | Compare-style status by depth; full-catalog audit/cross-source/bundle/BTF/snapshot cases are covered by dedicated lanes |
 
 Rows sourced from CI-artifact-generating scripts that this pass did not
 independently re-execute (full example proof matrix, runtime smoke, release/
-stripped headers, build/source smoke) keep their case-count denominator
-updated to the current 193-case catalog but carry forward their last-known
-CI result; re-run them via the commands above for a byte-for-byte refresh.
+stripped headers, build/source smoke, scan-depth matrix) keep their
+case-count denominator updated to the current 193-case catalog but carry
+forward their last-known CI result; re-run them via the commands above for a
+byte-for-byte refresh. The scan-depth matrix specifically needs a fresh run
+of `abicheck scan --depth` across the current comparable-target set (it was
+previously pinned to 141 targets against an older, smaller catalog) — that
+regeneration is a tracked follow-up, not fabricated here.
 
 `case97_api_depends_on_consumer_env` and `case105_concept_tightening` are
 resolved: the former is proven by its own source_smoke oracle at the default
@@ -422,8 +426,11 @@ for tier in ['L0', 'L1', 'L2', 'L3', 'L4', 'L5']:
 > penalize a tier for *over-calling* elsewhere in the catalog. The
 > [full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-193-cases) below is the stricter,
 > empirically-measured number — it scores all 193 cases including false
-> positives, which is why `L3-L5` reads lower there than the 100% this
-> table's `L5` row shows (`<<FILL:L3L5_PCT>>`).
+> positives, which is why `L3-L5` reads 99.5% there rather than the 100%
+> this table's `L5` row shows (the full-catalog run also treats `SKIP` on
+> the 34 dedicated-lane cases as no-signal until their own dedicated lane
+> proves them, whereas this staircase credits them by their cataloged
+> `min_evidence` label directly).
 
 Two directions matter, not just one:
 
@@ -453,13 +460,16 @@ denominator than "accuracy over cases the tool managed to complete," so read
 it as the answer to *"if I pointed this tool at the whole catalog blind, how
 often would it tell me the truth?"*
 
-> **Reproducibility envelope.** abicheck `<<FILL:VERSION>>`, commit
-> `<<FILL:COMMIT>>`, `ground_truth.json` sha256 `<<FILL:SHA>>`. All six lanes
-> below (`abicheck`, `abicheck_full`, `abidiff`, `abidiff_headers`,
-> `abicc_dumper`, `abicc_xml`) were regenerated live against the current
-> **193-case** catalog on `<<FILL:DATE>>` — no frozen/carried-over data.
-> Tool versions: castxml `<<FILL:CASTXML_VER>>`, libabigail `abidiff`
-> `<<FILL:ABIDIFF_VER>>`, `abi-compliance-checker` `<<FILL:ABICC_VER>>`.
+> **Reproducibility envelope.** abicheck `0.5.0`, commit `16b7a4150a65`,
+> `ground_truth.json` sha256 `7836d8b79f96`. All six lanes below (`abicheck`,
+> `abicheck_full`, `abidiff`, `abidiff_headers`, `abicc_dumper`, `abicc_xml`)
+> were regenerated live against the current **193-case** catalog on
+> **2026-07-18** — no frozen/carried-over data (ABICC's two modes are each
+> frozen right after their own live run since they can't run concurrently
+> with themselves, then merged into the same live pass that runs the other
+> four tools; see commands below). Tool versions: castxml `0.6.3`, libabigail
+> `abidiff` `2.4.0`, `abi-compliance-checker` `2.3`. Wall time 1396s (~23
+> min) for the live abicheck/abidiff pass; peak RSS 708.5 MiB.
 
 ```bash
 # ABICC lanes are frozen ahead of time (each mode run alone, ABICC hangs
@@ -475,12 +485,20 @@ python3 scripts/generate_benchmark_report.py \
 
 | Tool | Correct / 193 | Accuracy | False positives | False negatives | Total time |
 |------|:---:|:---:|:---:|:---:|:---:|
-| **abicheck (L2, headers)** | <<FILL>> | **<<FILL>>** | **<<FILL>>** | <<FILL>> | <<FILL>> |
-| **abicheck (L3-L5, +sources)** | <<FILL>> | **<<FILL>>** | **<<FILL>>** | <<FILL>> | <<FILL>> |
-| libabigail (`abidiff`) | <<FILL>> | <<FILL>> | <<FILL>> | <<FILL>> | <<FILL>> |
-| libabigail + headers | <<FILL>> | <<FILL>> | <<FILL>> | <<FILL>> | <<FILL>> |
-| ABICC (abi-dumper) | <<FILL>> | <<FILL>> | <<FILL>> | <<FILL>> | <<FILL>> |
-| ABICC (xml/legacy) | <<FILL>> | <<FILL>> | <<FILL>> | <<FILL>> | <<FILL>> |
+| **abicheck (L2, headers)** | 185 | **95.9%** | **0** | 8 | 199s (~3 min) |
+| **abicheck (L3-L5, +sources)** | 192 | **99.5%** | **0** | 1 | 916s (~15 min) |
+| libabigail (`abidiff`) | 55 | 28.5% | 5 | 133 | 1.2s |
+| libabigail + headers | 55 | 28.5% | 5 | 133 | 5.5s |
+| ABICC (abi-dumper) | 86 | 44.6% | 8 | 99 | 872s (~15 min) |
+| ABICC (xml/legacy) | 78 | 40.4% | 7 | 108 | 1871s (~31 min) |
+
+**ABICC is roughly 150-1560× slower than libabigail** for the identical
+193-case catalog (872-1871s vs ~1-6s) while scoring *lower* on accuracy than
+abicheck's L2 lane. This is why ABICC/libabigail results are frozen
+(`--freeze`) into `scripts/frozen_competitor_results.json` — a committed
+reference file merged into every subsequent run automatically — rather than
+re-run on every abicheck iteration; nothing in a competitor's own verdict
+changes when abicheck itself is patched.
 
 **Reading the false-positive/false-negative split:** a false positive is a
 tool *over-calling* severity (reporting a worse verdict than the true one —
@@ -488,7 +506,37 @@ crying wolf); a false negative is *under-calling* it (silence on a real
 break, including every SKIP/ERROR/TIMEOUT, since a tool that cannot tell you
 about a break failed to warn just as surely as one that said COMPATIBLE).
 
-<<FILL:MISSES_BREAKDOWN>>
+- **libabigail's misses are overwhelmingly false negatives** (133/193, DWARF
+  has no view into noexcept/static/const/layout-invisible changes) — it
+  rarely cries wolf (FP=5), it mostly stays silent. 34 of those misses are a
+  flat `SKIP` on the dedicated-lane cases (audit/cross-source, bundle,
+  BTF, snapshot-pair, build-source-pack, stub-pair — see the "Which
+  denominator is which" note up top) that have no ELF pair for
+  `abidw`/`abidiff` to read at all.
+- **ABICC's misses skew false-negative too** (99-108/193) for the same
+  reason plus its own timeout/error behavior: the same 34 non-`.so` cases
+  `SKIP` outright, and a further 5 (abi-dumper, plus 1 `ERROR` on
+  `case16_inline_to_non_inline`) / 16 (xml) hit the 90s per-case timeout in
+  this environment — `case09`, `case81`, `case104`, `case105`, `case109`,
+  `case114`, `case129`-`case133` are among the routine offenders on the xml
+  mode here.
+- **abicheck's false positives are 0 on both lanes.** The L3-L5 lane's raw
+  string mismatches include 6 cases (`case16`, `case47`, `case54`, `case62`,
+  `case99`, `case185`) where the harness correctly credits a `COMPATIBLE` →
+  `COMPATIBLE_WITH_RISK` promotion as *evidence enrichment* rather than a
+  miss (ADR-028 D3: the source-replay lane sees a real risk signal — a
+  reserved-field reuse, a stale-inlined-body risk, symbol-binding/ownership
+  drift — that a binary/header-only lane structurally cannot see). The one
+  genuine remaining miss on both lanes is
+  `case111_enumerable_thread_specific_lambda_ambiguity` (`API_BREAK`
+  expected, every evidence tier from L0 through L5 currently reaches
+  `COMPATIBLE` — a documented detector gap, see its README, not a harness
+  artifact).
+- **abicheck L2's other 7 misses** (`case98`, `case105`, `case122`,
+  `case130`-`case133`) are structurally below the L2 lane's evidence floor
+  per `ground_truth.json`'s `min_evidence` — build-mode flips and
+  concept/source-replay facts an L2 (headers, no `-p build/`) lane cannot
+  see by design, not by gap. The L3-L5 lane resolves all seven.
 
 > **Methodology history.** Earlier passes of this benchmark scored
 > substantially lower for the L3-L5 lane (as low as 61%) due to a mix of
@@ -499,7 +547,8 @@ about a break failed to warn just as surely as one that said COMPATIBLE).
 > inline-removal false positive, a `field_renamed` classification gap). Each
 > was root-caused and fixed individually; see git/PR history around commit
 > `1d2487c82ec5` for the full account rather than a narrated blow-by-blow
-> here. `<<FILL:KNOWN_GAPS>>`
+> here. The only genuine, currently unresolved gap across both abicheck
+> lanes is `case111_enumerable_thread_specific_lambda_ambiguity`.
 
 ---
 
