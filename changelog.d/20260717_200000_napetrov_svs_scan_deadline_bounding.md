@@ -258,3 +258,34 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   Same fix on the castxml side (`_castxml_dump`): re-checks after
   `DefusedET.parse()` of a large cached XML tree, before handing the root
   off to the rest of L2 processing (Codex review, PR #591, round 3).
+- Same warm-cache-hit gap on the *fresh* (non-cached) castxml parse path:
+  `_validate_castxml_output` re-checks the deadline after `DefusedET.parse()`
+  of the just-produced XML tree, not only before it — a large fresh output
+  can itself consume the rest of the budget between the pre-parse check and
+  the caller receiving the root (Codex review, PR #591, round 3).
+- Two more instances of the local-cap-vs-scan-deadline classification bug
+  closed, this time in a subtler shape than the earlier rounds: pre-computing
+  "was the outer scan deadline or my own local cap what's binding" *before*
+  the subprocess call is unreliable, because `run_bounded`'s own timeout
+  escalation (SIGTERM → grace period → SIGKILL, plus a fixed 5s pipe-drain)
+  can consume real wall-clock time *after* that snapshot was taken — enough
+  to drain an outer scan budget that looked comfortably ahead of the local
+  cap at entry. `dumper_castxml_probe._castxml_version_note` and
+  `buildsource.include_graph.ClangIncludeExtractor.extract_from_build` now
+  keep the existing entry-time pre-check (so the common, no-real-time-passed
+  case stays correctly classified) but add a `deadline.check()` re-check
+  after catching `DeadlineExceeded`, before falling back to "local cap only"
+  — so genuine scan-budget exhaustion is never silently misreported as an
+  ordinary per-call timeout just because it wasn't yet exhausted at the
+  moment the call started (Codex review, PR #591, round 3).
+- `source_replay._extract_cache_misses`'s opt-in `ABICHECK_L4_EXECUTOR=process`
+  `ProcessPoolExecutor` workers now run `deadline.install_sigterm_cleanup` as
+  their pool `initializer`. A process-pool worker is a genuinely separate OS
+  process — it never inherits the SIGTERM handler `cli.main` installs in the
+  main process (and fork-inherited handlers aren't guaranteed either, since
+  the pool's start method can be "spawn"). Without this, an external SIGTERM
+  landing on a worker mid-`run_bounded()` call would kill it via Python's
+  default disposition, leaving its detached clang/castxml process group
+  untracked and orphaned — the exact failure mode this whole PR set out to
+  close, just one layer further into the parallel L4 replay path (Codex
+  review, PR #591, round 3).

@@ -972,6 +972,10 @@ def _validate_castxml_output(
             f"Check that the header paths are correct and the compiler can "
             f"parse them.{detail}"
         )
+    # The parse itself can consume the rest of the budget on a huge fresh
+    # XML tree; re-check before handing it off (Codex review, PR #591,
+    # round 3, mirrors the cached-hit and clang-AST paths).
+    deadline.check()
     return root
 
 

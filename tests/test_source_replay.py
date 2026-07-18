@@ -955,3 +955,41 @@ def test_extract_cache_misses_propagates_deadline_into_pool_workers() -> None:
         "deadline did not cross the executor boundary"
     )
     assert all(0 < r <= 30.0 for r in seen)
+
+
+def test_extract_cache_misses_installs_sigterm_cleanup_in_process_pool_workers(
+    monkeypatch,
+) -> None:
+    """Codex review (PR #591, round 3): a ProcessPoolExecutor worker is a
+    genuinely separate OS process, so it never inherits the SIGTERM handler
+    cli.main installs in the main process (fork-inherited handlers aren't
+    guaranteed either -- ABICHECK_L4_EXECUTOR's pool can use the "spawn"
+    start method). Without deadline.install_sigterm_cleanup running inside
+    each worker, an external SIGTERM landing there mid-run_bounded() kills
+    the worker with Python's default disposition, leaving its detached
+    clang/castxml process group untracked and orphaned. Must pass it as
+    the pool's initializer."""
+    import abicheck.buildsource.source_replay as sr
+
+    captured: dict[str, object] = {}
+
+    class _FakeProcessPoolExecutor:
+        def __init__(self, *a, **kw):
+            captured.update(kw)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def map(self, fn, items):
+            return [fn(u) for u in items]
+
+    monkeypatch.setattr(sr, "ProcessPoolExecutor", _FakeProcessPoolExecutor)
+    monkeypatch.setattr(sr, "_l4_use_process_pool", lambda: True)
+
+    units = [_cu(f"cu://u{i}", f"src/u{i}.cpp") for i in range(2)]
+    sr._extract_cache_misses(lambda cu: (None, None), units, jobs=2)
+
+    assert captured.get("initializer") is deadline.install_sigterm_cleanup

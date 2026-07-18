@@ -407,7 +407,43 @@ def test_extractor_local_cap_timeout_does_not_abort_remaining_compile_units(
     assert calls == ["a.cpp", "b.cpp"]  # b.cpp still probed after a.cpp's timeout
     assert out == {"cu://b": ["foo.cpp", "inc/foo.h"]}
     assert any("clang -M timed out for cu://a" in d for d in ext.diagnostics)
-    assert not any("scan deadline exceeded" in d for d in ext.diagnostics)
+
+
+def test_extractor_local_cap_binding_at_entry_but_outer_deadline_drains_during_escalation_aborts(
+    monkeypatch,
+) -> None:
+    """Codex review (PR #591, round 3): run_bounded's own escalation
+    (SIGTERM -> grace -> SIGKILL, plus a fixed 5s pipe-drain) can push real
+    elapsed time past what scan_remaining showed when this extractor
+    decided whether its own local cap or the outer scan deadline was
+    binding. A call correctly classified 'local-cap-only' at entry must
+    still abort the loop if the outer deadline is exhausted by the time
+    the except clause runs -- trusting a stale entry-time snapshot alone
+    would misreport a genuine budget overflow as an ordinary per-CU
+    timeout."""
+    import abicheck.buildsource.include_graph as ig
+    from abicheck import deadline
+
+    monkeypatch.setattr(ig.shutil, "which", lambda _b: "/usr/bin/clang++")
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(deadline.time, "monotonic", lambda: clock["t"])
+
+    def _fake_run(cmd, **_kwargs):
+        clock["t"] += 40.0  # simulate run_bounded's real escalation cost
+        raise deadline.DeadlineExceeded(-1.0)
+
+    monkeypatch.setattr(ig.deadline, "run_bounded", _fake_run)
+    build = BuildEvidence(
+        compile_units=[
+            CompileUnit(id="cu://a", source="a.cpp"),
+            CompileUnit(id="cu://b", source="b.cpp"),
+        ]
+    )
+    ext = ClangIncludeExtractor()
+    with deadline.deadline_scope(35.0):  # just over the 30s local aggregate cap
+        out = ext.extract_from_build(build)
+    assert out == {}
+    assert any("scan deadline exceeded" in d for d in ext.diagnostics)
 
 
 def test_collect_evidence_include_graph_missing_clang_degrades(

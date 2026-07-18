@@ -542,3 +542,30 @@ def test_castxml_rechecks_deadline_before_parsing_xml(tmp_path: Path) -> None:
         with deadline.deadline_scope(0.01):
             with pytest.raises(deadline.DeadlineExceeded):
                 _castxml_dump([header], [])
+
+
+def test_validate_castxml_output_rechecks_deadline_after_parse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Codex review (PR #591, round 3): DefusedET.parse() on a large fresh
+    castxml XML output can itself consume the rest of the budget -- the
+    existing pre-parse deadline.check() doesn't catch that; must re-check
+    again after the parse before handing the root off to the caller."""
+    import time
+
+    from abicheck import deadline, dumper
+
+    out_xml = tmp_path / "out.xml"
+    out_xml.write_text('<GCC_XML><File id="f1" name="foo.h"/></GCC_XML>')
+    result = subprocess.CompletedProcess(args=["castxml"], returncode=0, stdout="", stderr="")
+
+    real_parse = dumper.DefusedET.parse
+
+    def _slow_parse(path):
+        time.sleep(0.05)
+        return real_parse(path)
+
+    monkeypatch.setattr(dumper.DefusedET, "parse", _slow_parse)
+    with deadline.deadline_scope(0.03):
+        with pytest.raises(deadline.DeadlineExceeded):
+            dumper._validate_castxml_output(result, out_xml, [], False)

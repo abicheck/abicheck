@@ -396,15 +396,30 @@ class ClangIncludeExtractor:
                     )
             except deadline.DeadlineExceeded as exc:
                 if not bound_by_scan_deadline:
-                    # The nested scope was only ever bound by this
-                    # extractor's OWN per-unit/aggregate cap (no active
-                    # --budget, or one with plenty left) — an ordinary
-                    # per-CU timeout, not a scan-budget overflow. Degrade
-                    # like any other single-CU failure instead of
-                    # discarding include maps for every remaining compile
-                    # unit too (Codex review, PR #591, round 3).
-                    self.diagnostics.append(f"clang -M timed out for {cu.id}: {exc}")
-                    continue
+                    # The entry-time snapshot said this extractor's OWN
+                    # per-unit/aggregate cap was binding, not the outer scan
+                    # deadline — but run_bounded's own escalation (SIGTERM
+                    # -> grace -> SIGKILL, plus a fixed 5s pipe-drain) can
+                    # push real elapsed time past that snapshot, so the
+                    # outer deadline can still be exhausted by now even
+                    # though it wasn't at entry. Re-check it directly
+                    # instead of trusting the stale snapshot alone (Codex
+                    # review, PR #591, round 3).
+                    try:
+                        deadline.check()
+                    except deadline.DeadlineExceeded:
+                        pass
+                    else:
+                        # Only this extractor's own per-unit/aggregate cap
+                        # expired (no active --budget, or one with plenty
+                        # left) — an ordinary per-CU timeout, not a
+                        # scan-budget overflow. Degrade like any other
+                        # single-CU failure instead of discarding include
+                        # maps for every remaining compile unit.
+                        self.diagnostics.append(
+                            f"clang -M timed out for {cu.id}: {exc}"
+                        )
+                        continue
                 self.diagnostics.append(
                     f"scan deadline exceeded during clang -M include-map: {exc}"
                 )

@@ -49,6 +49,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
+from typing import Any
 
 from .. import deadline
 from .build_evidence import BuildEvidence, CompileUnit, Target
@@ -1071,8 +1072,19 @@ def _extract_cache_misses(
         executor_cls = (
             ProcessPoolExecutor if _l4_use_process_pool() else ThreadPoolExecutor
         )
+        executor_kwargs: dict[str, Any] = {"max_workers": jobs}
+        if executor_cls is ProcessPoolExecutor:
+            # A process-pool worker is a genuinely separate OS process, so it
+            # never inherits the SIGTERM handler cli.main installed in the
+            # main process (fork-inherited handlers are also not guaranteed —
+            # ABICHECK_L4_EXECUTOR's default start method can be "spawn"). An
+            # external SIGTERM landing on this worker mid-run_bounded() would
+            # otherwise kill it with Python's default disposition, leaving its
+            # detached clang/castxml process group untracked and orphaned
+            # (Codex review, PR #591, round 3).
+            executor_kwargs["initializer"] = deadline.install_sigterm_cleanup
         try:
-            with executor_cls(max_workers=jobs) as pool:
+            with executor_cls(**executor_kwargs) as pool:
                 return list(pool.map(pool_worker, miss_units))
         except Exception as exc:  # noqa: BLE001
             # A process pool can fail to start (spawn import error, sandbox with

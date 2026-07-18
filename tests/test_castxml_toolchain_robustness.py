@@ -203,6 +203,34 @@ class TestVersionNote:
         assert seen_remaining
         assert seen_remaining[0] is not None and seen_remaining[0] <= 15.5
 
+    def test_probe_classified_as_local_cap_at_entry_still_propagates_if_outer_expires_by_return(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Codex review (PR #591, round 3): run_bounded's own escalation
+        # (SIGTERM -> grace -> SIGKILL, plus a fixed 5s pipe-drain) can push
+        # real elapsed time past what scan_remaining showed when this probe
+        # decided whether the local 15s cap or the outer scan deadline was
+        # binding. A probe correctly classified "local-cap-only" at entry
+        # (outer had *just over* 15s left) must still propagate if the
+        # outer deadline is exhausted by the time the except clause runs --
+        # trusting a snapshot taken before the call would silently swallow
+        # a genuine budget overflow as an ordinary probe failure.
+        from abicheck import deadline
+
+        clock = {"t": 1000.0}
+        monkeypatch.setattr(deadline.time, "monotonic", lambda: clock["t"])
+
+        def fake_run(*_a, **_k):
+            clock["t"] += 20.0  # simulate run_bounded's real escalation cost
+            raise deadline.DeadlineExceeded(-1.0)
+
+        with (
+            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
+            deadline.deadline_scope(15.5),  # just over the 15s local cap
+            pytest.raises(deadline.DeadlineExceeded),
+        ):
+            _castxml_version_note()
+
 
 class TestFailureHint:
     def test_floatn_hint_points_at_newer_castxml(self) -> None:

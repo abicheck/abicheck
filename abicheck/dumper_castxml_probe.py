@@ -92,6 +92,15 @@ def _castxml_version_note() -> str:
     except deadline.DeadlineExceeded:
         if bound_by_scan_deadline:
             raise
+        # The entry-time snapshot said the local 15s cap was binding, not
+        # the outer scan deadline — but run_bounded's own escalation
+        # (SIGTERM -> grace -> SIGKILL, plus a fixed 5s pipe-drain) can push
+        # real elapsed time past that snapshot, so the outer deadline can
+        # still be exhausted by now even though it wasn't at entry. The
+        # nested scope's exit already restored it, so re-check directly
+        # instead of trusting the stale snapshot alone (Codex review,
+        # PR #591, round 3).
+        deadline.check()
         return ""
     except (OSError, subprocess.SubprocessError):
         return ""
