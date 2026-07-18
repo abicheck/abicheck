@@ -94,12 +94,25 @@ def _dump_cache_extra_key(
     ``"a,b"`` vs. two paths ``"a"``/``"b"`` — collapsing to the same key. NUL
     can't appear in a filesystem path on any supported platform, so it can't
     collide regardless of what the caller's paths contain.
+
+    Hashes the RESOLVED backend (``dumper._resolve_header_backend``), not the
+    raw ``header_backend`` string as passed: an ``"auto"`` request consults
+    ``ABICHECK_AST_FRONTEND`` at dump time, so the raw string is the same
+    ``"auto"`` regardless of whether that env var is unset (-> castxml),
+    pinned to ``hybrid``, or pinned to ``clang``. Hashing the raw string let
+    a hybrid-pinned run's snapshot get cached under the identical key an
+    unpinned castxml run would also use (and vice versa) — this on-disk
+    cache persists across process invocations, so a later run with the env
+    var in a different state could silently reuse the wrong producer's
+    snapshot instead of ever calling the real dump (Codex review).
     """
+    from .dumper import _resolve_header_backend
+
     sep = "\x00"
     return sep.join(
         [
             binary_fmt,
-            header_backend,
+            _resolve_header_backend(header_backend),
             sep.join(sorted(str(p) for p in (public_headers or []))),
             sep.join(sorted(str(p) for p in (public_header_dirs or []))),
         ]

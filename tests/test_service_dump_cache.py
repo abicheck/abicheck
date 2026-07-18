@@ -122,6 +122,34 @@ class TestDumpCacheExtraKey:
         k2 = _dump_cache_extra_key("elf", "auto", two_paths, None)
         assert k1 != k2
 
+    def test_differs_by_env_pinned_frontend_even_though_raw_string_is_auto(
+        self, monkeypatch
+    ):
+        # Codex review: "auto" consults ABICHECK_AST_FRONTEND at dump time, so
+        # the raw header_backend string passed to this function is the same
+        # "auto" literal regardless of what that env var resolves to. Hashing
+        # the raw string let an env-pinned hybrid dump's key collide with an
+        # unpinned (or differently-pinned) auto dump's key on this
+        # PERSISTENT on-disk cache -- a later run with the env var in a
+        # different state could silently reuse the wrong producer's snapshot.
+        monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
+        k_unpinned = _dump_cache_extra_key("elf", "auto", None, None)
+        monkeypatch.setenv("ABICHECK_AST_FRONTEND", "hybrid")
+        k_hybrid_pinned = _dump_cache_extra_key("elf", "auto", None, None)
+        monkeypatch.setenv("ABICHECK_AST_FRONTEND", "clang")
+        k_clang_pinned = _dump_cache_extra_key("elf", "auto", None, None)
+        assert len({k_unpinned, k_hybrid_pinned, k_clang_pinned}) == 3
+
+    def test_auto_and_castxml_still_collide_when_env_unset(self, monkeypatch):
+        # Both resolve to the identical effective backend ("castxml") when no
+        # env pin is set, so they should still share a cache entry -- the fix
+        # hashes the RESOLVED backend, not merely "make every raw string
+        # distinct".
+        monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
+        k_auto = _dump_cache_extra_key("elf", "auto", None, None)
+        k_castxml = _dump_cache_extra_key("elf", "castxml", None, None)
+        assert k_auto == k_castxml
+
 
 class TestCachedRunDump:
     def test_cache_hit_skips_run_dump(self, tmp_path):
