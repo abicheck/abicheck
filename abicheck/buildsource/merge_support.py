@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .model import CoverageStatus, DataLayer, ExtractorRecord, LayerCoverage
-from .pack import BuildSourcePack, _payload_sha256
+from .pack import BuildSourcePack, _normalize_source_abi_payload, _payload_sha256
 
 if TYPE_CHECKING:
     from ..model import AbiSnapshot
@@ -198,7 +198,19 @@ def _append_chosen_payload_digests(
     for payload in chosen:
         if payload is None:
             continue
-        digest = "sha256:" + _payload_sha256(payload.to_dict())  # type: ignore[attr-defined]
+        # _normalize_source_abi_payload strips the same replay wall-clock/
+        # cache-hit fields BuildSourcePack._artifact_digests() already
+        # strips from an on-disk/self-contained pack's source_abi.json --
+        # without it here, a combined/embedded pack (this function's own
+        # docstring: an inline-collected --sources contributor that was
+        # never written to disk) hashed the chosen SourceAbiSurface's raw
+        # payload, bypassing that fix for the --sources/--build-info
+        # combine path (Codex review). A no-op for build_evidence/
+        # source_graph payloads, neither of which carries these keys under
+        # a top-level "coverage" dict.
+        digest = "sha256:" + _payload_sha256(
+            _normalize_source_abi_payload(payload.to_dict())  # type: ignore[attr-defined]
+        )
         if digest not in artifacts:
             artifacts.append(digest)
 

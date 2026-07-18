@@ -129,6 +129,53 @@ def test_content_hash_stable_across_coverage_detail_and_elapsed_s(tmp_path):
     assert p1.content_hash() == p2.content_hash()
 
 
+def test_content_hash_stable_across_source_abi_coverage_timing(tmp_path):
+    # Regression (Codex review): fresh evidence after the manifest-coverage
+    # fix above -- source_replay.py's replay producer and inline.py's cache
+    # bookkeeping stamp the *same* volatile timing/cache-hit fields
+    # (cache_lookup_s/extract_s/link_s/elapsed_s/extractor_jobs/
+    # cache_misses/cache_hits) directly onto SourceAbiSurface.coverage,
+    # which write() persists at source/source_abi.json. _artifact_digests()
+    # hashed that file's raw bytes (_file_sha256), so two packs with
+    # identical source facts collected under different cache warmth or
+    # runner load still produced different content_hash() values even
+    # after the manifest-row fix above only touched a different coverage
+    # location.
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+
+    p1 = BuildSourcePack.empty(tmp_path / "a")
+    p1.source_abi = SourceAbiSurface(
+        library="libfoo.so",
+        coverage={
+            "compile_units_parsed": 3,
+            "cache_lookup_s": 0.01,
+            "extract_s": 1.79,
+            "link_s": 0.05,
+            "elapsed_s": 1.85,
+            "extractor_jobs": 4,
+            "cache_misses": 3,
+            "cache_hits": 0,
+        },
+    )
+    p1.write()
+    p2 = BuildSourcePack.empty(tmp_path / "b")
+    p2.source_abi = SourceAbiSurface(
+        library="libfoo.so",
+        coverage={
+            "compile_units_parsed": 3,
+            "cache_lookup_s": 0.02,
+            "extract_s": 0.11,
+            "link_s": 0.04,
+            "elapsed_s": 0.17,
+            "extractor_jobs": 16,
+            "cache_misses": 0,
+            "cache_hits": 3,
+        },
+    )
+    p2.write()
+    assert p1.content_hash() == p2.content_hash()
+
+
 def test_to_ref_roundtrip(tmp_path):
     pack = BuildSourcePack.empty(tmp_path / "p")
     pack.manifest.coverage = []
