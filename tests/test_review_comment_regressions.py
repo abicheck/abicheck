@@ -567,15 +567,17 @@ def test_all_xfail_with_source_smoke_is_covered_known_gap_oracle(
 
 
 def test_build_source_proof_cases_cover_every_l3plus_single_library_case() -> None:
-    """BUILD_SOURCE_PROOF_CASES must include every single-library case whose
-    min_evidence is L3/L4/L5 — the only shape `--artifact-variant
-    build-source` can actually prove (it needs a real compilable v1/v2 pair).
-    g20/l3l4l5/reconcile-owned L3-L5 cases ship committed snapshot fixtures
-    instead and are proven by their own dedicated lanes
-    (test_g20_catalog.py, test_l3l4l5_examples.py, test_diff_reconcile.py),
-    not this variant — see examples/README.md's "Known validation gaps".
-    This guards against a newly-added single-library L3+ case silently
-    missing the build-source smoke."""
+    """Every single-library case whose min_evidence is L3/L4/L5 must be in
+    BUILD_SOURCE_PROOF_CASES or HEADER_GRAPH_PROOF_CASES — the two shapes
+    that can actually prove one (a real compilable v1/v2 pair run through
+    either `--artifact-variant build-source` (`--sources`/`--build-info`) or
+    a live `dump --header-graph` run — see
+    tests/test_header_graph_examples.py). g20/l3l4l5/reconcile-owned L3-L5
+    cases ship committed snapshot fixtures instead and are proven by their
+    own dedicated lanes (test_g20_catalog.py, test_l3l4l5_examples.py,
+    test_diff_reconcile.py), not either of these — see
+    examples/README.md's "Known validation gaps". This guards against a
+    newly-added single-library L3+ case silently missing both proof lanes."""
     matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
     with open(matrix.GROUND_TRUTH) as f:
         verdicts = json.load(f)["verdicts"]
@@ -585,9 +587,12 @@ def test_build_source_proof_cases_cover_every_l3plus_single_library_case() -> No
         if matrix._case_owner(name, entry) == "single-library"
         and entry.get("min_evidence") in ("L3", "L4", "L5")
     }
-    missing = required - matrix.BUILD_SOURCE_PROOF_CASES
+    missing = (
+        required - matrix.BUILD_SOURCE_PROOF_CASES - matrix.HEADER_GRAPH_PROOF_CASES
+    )
     assert not missing, (
-        f"single-library L3+ cases missing from BUILD_SOURCE_PROOF_CASES: {missing}"
+        "single-library L3+ cases missing from BUILD_SOURCE_PROOF_CASES and "
+        f"HEADER_GRAPH_PROOF_CASES: {missing}"
     )
 
 

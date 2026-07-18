@@ -16,9 +16,9 @@ Use this catalog to:
 
 | Verdict | Count | What it means |
 |---------|-------|---------------|
-| 🔴 [BREAKING](by-verdict/breaking.md) | 103 | ABI breaks: existing consumers will fail at runtime. |
+| 🔴 [BREAKING](by-verdict/breaking.md) | 107 | ABI breaks: existing consumers will fail at runtime. |
 | 🟠 [API_BREAK](by-verdict/api-break.md) | 17 | Source-level / API-only breaks; recompilation fails or behavior shifts. |
-| 🟡 [COMPATIBLE_WITH_RISK](by-verdict/compatible-risk.md) | 31 | Backward-compatible at the symbol level but with behavioral risk. |
+| 🟡 [COMPATIBLE_WITH_RISK](by-verdict/compatible-risk.md) | 27 | Backward-compatible at the symbol level but with behavioral risk. |
 | 🟢 [COMPATIBLE](by-verdict/compatible.md) | 30 | Backward-compatible changes (additions or quality-only). |
 | ✅ [NO_CHANGE](by-verdict/no-change.md) | 7 | Identical ABI/API — baseline control cases. |
 
@@ -39,9 +39,9 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 
 | Category | Cases | What it covers |
 |----------|-------|----------------|
-| [Breaking](by-category/breaking.md) | 103 | Listed in `BREAKING_KINDS` — runtime ABI break. |
+| [Breaking](by-category/breaking.md) | 107 | Listed in `BREAKING_KINDS` — runtime ABI break. |
 | [API Break](by-category/api_break.md) | 17 | Listed in `API_BREAK_KINDS` — source/API-level break. |
-| [Risk](by-category/risk.md) | 31 | Listed in `RISK_KINDS` — symbol-compatible but behaviorally risky. |
+| [Risk](by-category/risk.md) | 27 | Listed in `RISK_KINDS` — symbol-compatible but behaviorally risky. |
 | [Addition (Compatible)](by-category/addition.md) | 9 | Listed in `ADDITION_KINDS` — backward-compatible additions. |
 | [Quality (Compatible)](by-category/quality.md) | 21 | Listed in `QUALITY_KINDS` — metadata/quality issues, not ABI breaks. |
 | [No Change](by-category/no_change.md) | 7 | Identical ABI/API — sanity-check baselines. |
@@ -233,10 +233,10 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case184_internal_enum_churn_scoped](case184_internal_enum_churn_scoped.md) | Internal enum churn, scoped out by private-header origin | ✅ NO_CHANGE | No Change |
 | [case185_inherited_override_reuses_slot](case185_inherited_override_reuses_slot.md) | Inherited override reuses the base's vtable slot | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case186_c_api_pointee_const_abi_neutral](case186_c_api_pointee_const_abi_neutral.md) | C API pointee const-qualification is ABI-neutral | ✅ NO_CHANGE | No Change |
-| [case187_public_struct_private_field_type](case187_public_struct_private_field_type.md) | _public_struct_private_field_type — Public struct newly gains a private field type | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case188_public_class_private_base_class](case188_public_class_private_base_class.md) | _public_class_private_base_class — Public class newly gains a private base class | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case189_public_function_private_parameter_type](case189_public_function_private_parameter_type.md) | _public_function_private_parameter_type — Public function newly gains a private parameter type | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case187_public_struct_private_field_type](case187_public_struct_private_field_type.md) | _public_struct_private_field_type — Public struct field retyped to an internal type | 🔴 BREAKING | Breaking |
+| [case188_public_class_private_base_class](case188_public_class_private_base_class.md) | _public_class_private_base_class — Public class gains a private base class | 🔴 BREAKING | Breaking |
+| [case189_public_function_private_parameter_type](case189_public_function_private_parameter_type.md) | _public_function_private_parameter_type — Public function parameter retyped to an internal type | 🔴 BREAKING | Breaking |
 | [case190_public_inline_function_references_internal_constant](case190_public_inline_function_references_internal_constant.md) | _public_inline_function_references_internal_constant — Public inline function newly reads an internal constant | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case191_header_only_graph_field_type](case191_header_only_graph_field_type.md) | _header_only_graph_field_type — Same finding, proven with no build integration at all | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case191_header_only_graph_field_type](case191_header_only_graph_field_type.md) | _header_only_graph_field_type — Same finding, proven with a genuine confirmed-zero (no coverage trick) | 🔴 BREAKING | Breaking |
 | [case192_call_graph_break_survives_suppression](case192_call_graph_break_survives_suppression.md) | Call-graph-reachable break survives a broad internal-namespace suppression | 🔴 BREAKING | Breaking |
 | [case193_ordinary_exported_fn_call_not_reachable](case193_ordinary_exported_fn_call_not_reachable.md) | An ordinary exported function's internal call is not public-reachable | 🔴 BREAKING | Breaking |

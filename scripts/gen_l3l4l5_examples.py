@@ -51,9 +51,6 @@ from abicheck.buildsource.build_evidence import (  # noqa: E402
     Target,
     TargetKind,
 )
-from abicheck.buildsource.header_graph import (  # noqa: E402
-    HEADER_TYPE_GRAPH_PASS,
-)
 from abicheck.buildsource.source_abi import (  # noqa: E402
     SourceAbiSurface,
     SourceEntity,
@@ -295,122 +292,18 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
         ),
     )
 
-    # case187: a public struct newly gains a private field type — ADR-041 P0
-    # slice 1's own headline "not a call at all" example
-    # (`struct Public { detail::PrivateType* p; };`). Unlike case160 (a
-    # DECL_CALLS_DECL addition), this exercises the type-graph edge family
-    # (type_graph.py's TYPE_HAS_FIELD_TYPE/TYPE_INHERITS/DECL_HAS_TYPE/
-    # DECL_REFERENCES_DECL) that ADR-041 added alongside the pre-existing call
-    # graph. A self-loop TYPE_HAS_FIELD_TYPE edge on the public type is present
-    # on *both* sides (mirroring case160's self-loop DECL_CALLS_DECL trick) so
-    # `_common_dependency_edge_kinds` has per-kind edge-presence coverage for
-    # the family on the old side without needing extractor_passes bookkeeping.
-    l5d_nodes = [
-        _N(
-            "type:demo::Public",
-            "record_type",
-            "demo::Public",
-            attrs={"visibility": "public_header"},
-        ),
-        _N(
-            "type:detail::PrivateType",
-            "record_type",
-            "detail::PrivateType",
-            attrs={"visibility": "private_header"},
-        ),
-        _N("hdr:include/demo/api.h", "header", "demo/api.h"),
-    ]
-    l5d_base = [
-        _E("hdr:include/demo/api.h", "type:demo::Public", "SOURCE_DECLARES"),
-        _E("type:demo::Public", "type:demo::Public", "TYPE_HAS_FIELD_TYPE"),
-    ]
-    cases["case187_public_struct_private_field_type"] = (
-        "L5",
-        _graph(l5d_nodes, l5d_base),
-        _graph(
-            l5d_nodes,
-            l5d_base
-            + [
-                _E(
-                    "type:demo::Public",
-                    "type:detail::PrivateType",
-                    "TYPE_HAS_FIELD_TYPE",
-                ),
-            ],
-        ),
-    )
-
-    # case188: a public class newly gains a private base class (TYPE_INHERITS)
-    # — the other half of ADR-041's "not a call at all" headline pairing
-    # (private field type in case187, private base class here).
-    l5e_nodes = [
-        _N(
-            "type:demo::PublicHandle",
-            "record_type",
-            "demo::PublicHandle",
-            attrs={"visibility": "public_header"},
-        ),
-        _N(
-            "type:detail::InternalBase",
-            "record_type",
-            "detail::InternalBase",
-            attrs={"visibility": "private_header"},
-        ),
-        _N("hdr:include/demo/handle.h", "header", "demo/handle.h"),
-    ]
-    l5e_base = [
-        _E("hdr:include/demo/handle.h", "type:demo::PublicHandle", "SOURCE_DECLARES"),
-        _E("type:demo::PublicHandle", "type:demo::PublicHandle", "TYPE_INHERITS"),
-    ]
-    cases["case188_public_class_private_base_class"] = (
-        "L5",
-        _graph(l5e_nodes, l5e_base),
-        _graph(
-            l5e_nodes,
-            l5e_base
-            + [
-                _E(
-                    "type:demo::PublicHandle",
-                    "type:detail::InternalBase",
-                    "TYPE_INHERITS",
-                ),
-            ],
-        ),
-    )
-
-    # case189: a public function newly gains a private parameter type
-    # (DECL_HAS_TYPE) — the function's own signature-visible surface reaches
-    # an internal type through a parameter, not a call or a field.
-    l5f_nodes = [
-        _N(
-            "decl:demo::configure",
-            "source_decl",
-            "demo::configure()",
-            attrs={"visibility": "public_header"},
-        ),
-        _N(
-            "type:detail::Options",
-            "record_type",
-            "detail::Options",
-            attrs={"visibility": "private_header"},
-        ),
-        _N("hdr:include/demo/api.h", "header", "demo/api.h"),
-    ]
-    l5f_base = [
-        _E("hdr:include/demo/api.h", "decl:demo::configure", "SOURCE_DECLARES"),
-        _E("decl:demo::configure", "decl:demo::configure", "DECL_HAS_TYPE"),
-    ]
-    cases["case189_public_function_private_parameter_type"] = (
-        "L5",
-        _graph(l5f_nodes, l5f_base),
-        _graph(
-            l5f_nodes,
-            l5f_base
-            + [
-                _E("decl:demo::configure", "type:detail::Options", "DECL_HAS_TYPE"),
-            ],
-        ),
-    )
+    # case187, case188, case189, case191 (public struct/class/function
+    # reaching a private field/base/parameter type) are real compiled
+    # examples, not hand-built graph fixtures — see their own v1/v2 sources.
+    # A real field/base/parameter-type change is never invisible below L5 (a
+    # header/DWARF diff already catches the retyped/added member), so their
+    # canonical verdict is BREAKING via that structural finding; the L5
+    # public_api_internal_dependency_added risk finding is verified
+    # separately (real `--header-graph` runs, see each README). case191
+    # specifically proves the header-only pass's own confirmed-zero
+    # coverage-trust mechanism (no same-kind sibling edge needed), distinct
+    # from case187's sibling-edge coverage trick. Only a body-only reference
+    # (case190) can stay invisible everywhere but L5.
 
     # case190: a public inline function newly reads an internal constant
     # (DECL_REFERENCES_DECL) — ADR-041's *other* headline example verbatim:
@@ -448,57 +341,6 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
                     "DECL_REFERENCES_DECL",
                 ),
             ],
-        ),
-    )
-
-    # case191: the header-only-graph addendum (header_graph.py, ADR-041
-    # addendum) proving the same TYPE_HAS_FIELD_TYPE dependency with *no*
-    # build integration at all. Unlike case187 (which leans on a same-kind
-    # self-loop edge on both sides for coverage), this fixture stamps
-    # ``extractor_passes={"header_type_graph": True}`` — the header-only
-    # pass's own confirmed-pass marker — on both sides with *zero* type
-    # edges on the old side. ``_pass_trusted_kinds`` grants a header-only
-    # confirmation credit for exactly the three structural kinds it has true
-    # project-wide visibility of (``_HEADER_FULL_VISIBILITY_KINDS``, which
-    # includes TYPE_HAS_FIELD_TYPE), so the old side's *absence* of the edge
-    # is trusted as a real zero without needing the self-loop trick — the
-    # mechanism unique to header-only-graph coverage.
-    l5h_nodes = [
-        _N(
-            "type:demo::Config",
-            "record_type",
-            "demo::Config",
-            attrs={"visibility": "public_header"},
-        ),
-        _N(
-            "type:detail::RawConfig",
-            "record_type",
-            "detail::RawConfig",
-            attrs={"visibility": "private_header"},
-        ),
-        _N("hdr:include/demo/config.h", "header", "demo/config.h"),
-    ]
-    l5h_declares = _E(
-        "hdr:include/demo/config.h", "type:demo::Config", "SOURCE_DECLARES"
-    )
-    cases["case191_header_only_graph_field_type"] = (
-        "L5",
-        _graph(
-            l5h_nodes,
-            [l5h_declares],
-            extractor_passes={HEADER_TYPE_GRAPH_PASS: True},
-        ),
-        _graph(
-            l5h_nodes,
-            [
-                l5h_declares,
-                _E(
-                    "type:demo::Config",
-                    "type:detail::RawConfig",
-                    "TYPE_HAS_FIELD_TYPE",
-                ),
-            ],
-            extractor_passes={HEADER_TYPE_GRAPH_PASS: True},
         ),
     )
 

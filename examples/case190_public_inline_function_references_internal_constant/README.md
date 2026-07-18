@@ -6,6 +6,42 @@
 > `new.json`) instead of compiled `v1`/`v2` binaries, so the corpus is validated
 > compiler-free by `tests/test_l3l4l5_examples.py`. See
 > [`scripts/gen_l3l4l5_examples.py`](../../scripts/gen_l3l4l5_examples.py).
+>
+> **This case cannot currently be proven with a real compiled example**,
+> unlike its siblings [case187](../case187_public_struct_private_field_type/README.md)/
+> [188](../case188_public_class_private_base_class/README.md)/
+> [189](../case189_public_function_private_parameter_type/README.md), which
+> were converted after direct verification. Two real, independent blockers,
+> both confirmed empirically against this repository's current code (not
+> theoretical):
+>
+> 1. **Header-only-graph path** (`dump --header-graph`, case191's mechanism):
+>    `source_graph_findings._HEADER_FULL_VISIBILITY_KINDS` deliberately
+>    excludes `DECL_REFERENCES_DECL`/`DECL_CALLS_DECL` from what a header-only
+>    pass's "zero edges" can be trusted to mean — a header-only scan can only
+>    see a body if it happens to live *in* a header (inline/template), so its
+>    absence of a reference is not proof the whole project has none. This is
+>    a deliberate, well-reasoned false-positive guard (see the docstring at
+>    that name), not a bug, and it applies even when this exact scenario is
+>    compiled for real: a live test built and run with two header-only-graph
+>    sides still cannot get `DECL_REFERENCES_DECL` credited as "common"
+>    between old/new, so `public_api_internal_dependency_added` never fires.
+> 2. **Build-integrated path** (`dump --sources`/`--build-info`,
+>    `type_graph.py`): classifying a type/decl as genuinely internal requires
+>    either an explicit `private_header` visibility tag or `defined_in_project`
+>    provenance, both of which trace back to `Target.private_headers` —
+>    populated only by CMake's File API `FILE_SET` feature
+>    (`adapters/cmake_file_api.py`). Nothing in this catalog's CMake macros
+>    uses `FILE_SET` (nor does any other build adapter — Bazel/Ninja/Make
+>    never populate `private_headers` either), so this path currently
+>    classifies nothing as internal for *any* project that doesn't happen to
+>    use that specific, rarely-adopted CMake feature.
+>
+> Closing this gap needs one of: CMake `FILE_SET` wiring in this catalog's
+> build files plus File API querying in the validation harness, or a product
+> fix teaching the build-integrated path the same "not in the public root
+> set → private" fallback `header_graph.py` already uses. Tracked as
+> follow-up, not yet implemented.
 
 ## What it demonstrates
 

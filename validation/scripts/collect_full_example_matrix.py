@@ -58,6 +58,24 @@ BUILD_SOURCE_PROOF_CASES = {
     "case132_threadsafe_statics_flip",
     "case133_tls_model_flip",
 }
+#: Single-library L3+ cases whose L5 finding is proven via `dump
+#: --header-graph` (a real compiled binary + real headers, no build
+#: integration) instead of the `--sources`/`--build-info` build-integrated
+#: path `--artifact-variant build-source` exercises. These deliberately stay
+#: out of BUILD_SOURCE_PROOF_CASES: the build-integrated path cannot prove
+#: them at all (it needs `Target.private_headers`, populated only by CMake's
+#: File API FILE_SET feature, which this catalog's build files don't use).
+#: Their default gcc/clang debug-headers lane already proves the case's
+#: canonical BREAKING verdict via a real artifact-level structural finding;
+#: tests/test_header_graph_examples.py is the dedicated live proof that
+#: `--header-graph` additionally reproduces public_api_internal_dependency_added
+#: against the real compiled binary + headers, not a hand-built fixture.
+HEADER_GRAPH_PROOF_CASES = {
+    "case187_public_struct_private_field_type",
+    "case188_public_class_private_base_class",
+    "case189_public_function_private_parameter_type",
+    "case191_header_only_graph_field_type",
+}
 PROOF_ARTIFACT_RUNNER = "validation/scripts/run_example_owner_proofs.py"
 PROOF_ARTIFACT_SCHEMA = "example_owner_proofs.v1"
 
@@ -577,7 +595,9 @@ def build_matrix(
     # cause identified and recorded in ground_truth.json's known_kind_gap/
     # known_kind_gap_note) rather than being an unexplained backlog item.
     documented_kind_gap_cases = sorted(
-        row["case_id"] for row in rows if row.get("kinds_strict") == "documented-mismatch"
+        row["case_id"]
+        for row in rows
+        if row.get("kinds_strict") == "documented-mismatch"
     )
     return {
         "schema_version": SCHEMA_VERSION,

@@ -28,9 +28,9 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 <!-- BEGIN GENERATED: verdict-distribution (keep counts in sync with examples/ground_truth.json) -->
 | Verdict | Count | `checker_policy.py` set | Icon |
 |---------|-------|-------------------------|------|
-| BREAKING | 103 | `BREAKING_KINDS` | 🔴 |
+| BREAKING | 107 | `BREAKING_KINDS` | 🔴 |
 | API_BREAK | 17 | `API_BREAK_KINDS` | 🟠 |
-| COMPATIBLE_WITH_RISK | 31 | `RISK_KINDS` | 🟡 |
+| COMPATIBLE_WITH_RISK | 27 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 9 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 21 | `QUALITY_KINDS` | 🟡 |
 | NO_CHANGE | 7 | — | ✅ |
@@ -442,11 +442,11 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [184](case184_internal_enum_churn_scoped/README.md) | Internal enum churn, scoped out by private-header origin | No Change | ✅ NO_CHANGE |
 | [185](case185_inherited_override_reuses_slot/README.md) | Inherited override reuses the base's vtable slot | Addition | 🟢 COMPATIBLE |
 | [186](case186_c_api_pointee_const_abi_neutral/README.md) | C API pointee const-qualification is ABI-neutral | No Change | ✅ NO_CHANGE |
-| [187](case187_public_struct_private_field_type/README.md) | _public_struct_private_field_type — Public struct newly gains a private field type | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
-| [188](case188_public_class_private_base_class/README.md) | _public_class_private_base_class — Public class newly gains a private base class | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
-| [189](case189_public_function_private_parameter_type/README.md) | _public_function_private_parameter_type — Public function newly gains a private parameter type | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [187](case187_public_struct_private_field_type/README.md) | _public_struct_private_field_type — Public struct field retyped to an internal type | Breaking | 🔴 BREAKING (bad practice) |
+| [188](case188_public_class_private_base_class/README.md) | _public_class_private_base_class — Public class gains a private base class | Breaking | 🔴 BREAKING (bad practice) |
+| [189](case189_public_function_private_parameter_type/README.md) | _public_function_private_parameter_type — Public function parameter retyped to an internal type | Breaking | 🔴 BREAKING (bad practice) |
 | [190](case190_public_inline_function_references_internal_constant/README.md) | _public_inline_function_references_internal_constant — Public inline function newly reads an internal constant | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
-| [191](case191_header_only_graph_field_type/README.md) | _header_only_graph_field_type — Same finding, proven with no build integration at all | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [191](case191_header_only_graph_field_type/README.md) | _header_only_graph_field_type — Same finding, proven with a genuine confirmed-zero (no coverage trick) | Breaking | 🔴 BREAKING (bad practice) |
 | [192](case192_call_graph_break_survives_suppression/README.md) | Call-graph-reachable break survives a broad internal-namespace suppression | Breaking | 🔴 BREAKING |
 | [193](case193_ordinary_exported_fn_call_not_reachable/README.md) | An ordinary exported function's internal call is not public-reachable | Breaking | 🔴 BREAKING |
 <!-- END GENERATED: case-index -->

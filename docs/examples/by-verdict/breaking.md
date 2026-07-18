@@ -3,7 +3,7 @@
 
 ABI breaks: existing consumers will fail at runtime.
 
-_103 case(s)._ [← back to all examples](../index.md)
+_107 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -108,5 +108,9 @@ _103 case(s)._ [← back to all examples](../index.md)
 | [case176_kabi_symbol_namespace_changed](../case176_kabi_symbol_namespace_changed.md) | kABI Export Namespace Changed | 🔴 BREAKING | Breaking |
 | [case177_long_double_abi_changed](../case177_long_double_abi_changed.md) | long double ABI Changed | 🔴 BREAKING | Breaking |
 | [case182_accidental_export_removed_still_breaking](../case182_accidental_export_removed_still_breaking.md) | Accidental export removed — still BREAKING under public-header scoping | 🔴 BREAKING | Breaking |
+| [case187_public_struct_private_field_type](../case187_public_struct_private_field_type.md) | _public_struct_private_field_type — Public struct field retyped to an internal type | 🔴 BREAKING | Breaking |
+| [case188_public_class_private_base_class](../case188_public_class_private_base_class.md) | _public_class_private_base_class — Public class gains a private base class | 🔴 BREAKING | Breaking |
+| [case189_public_function_private_parameter_type](../case189_public_function_private_parameter_type.md) | _public_function_private_parameter_type — Public function parameter retyped to an internal type | 🔴 BREAKING | Breaking |
+| [case191_header_only_graph_field_type](../case191_header_only_graph_field_type.md) | _header_only_graph_field_type — Same finding, proven with a genuine confirmed-zero (no coverage trick) | 🔴 BREAKING | Breaking |
 | [case192_call_graph_break_survives_suppression](../case192_call_graph_break_survives_suppression.md) | Call-graph-reachable break survives a broad internal-namespace suppression | 🔴 BREAKING | Breaking |
 | [case193_ordinary_exported_fn_call_not_reachable](../case193_ordinary_exported_fn_call_not_reachable.md) | An ordinary exported function's internal call is not public-reachable | 🔴 BREAKING | Breaking |
