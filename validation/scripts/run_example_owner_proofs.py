@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import subprocess
 import sys
 from collections import Counter
@@ -28,6 +29,15 @@ OWNER_PROOFS = {
 }
 
 
+#: pytest's terse (`-q`) final summary line, e.g. "3 passed, 1 skipped in
+#: 0.5s" or "4 skipped in 0.3s". Used to catch a proof that "PASS"es on
+#: returncode alone while every one of its cases was skipped (e.g.
+#: header_graph on a host missing clang/g++) -- a skip runs zero assertions,
+#: so an all-skipped run is not proof and must not report PASS.
+_PASSED_RE = re.compile(r"(\d+) passed")
+_SKIPPED_RE = re.compile(r"(\d+) skipped")
+
+
 def _run_owner(owner: str, proof: str) -> dict[str, object]:
     command = [sys.executable, "-m", "pytest", proof, "-q"]
     try:
@@ -42,9 +52,18 @@ def _run_owner(owner: str, proof: str) -> dict[str, object]:
         output = "\n".join(
             part.strip() for part in (completed.stdout, completed.stderr) if part.strip()
         )
+        passed = sum(int(n) for n in _PASSED_RE.findall(completed.stdout))
+        skipped = sum(int(n) for n in _SKIPPED_RE.findall(completed.stdout))
+        status = "PASS" if completed.returncode == 0 else "FAIL"
+        if status == "PASS" and passed == 0 and skipped > 0:
+            status = "FAIL"
+            output = (
+                f"all {skipped} case(s) skipped -- zero assertions ran, "
+                f"not proof (missing toolchain?)\n{output}"
+            )
         return {
             "owner": owner,
-            "status": "PASS" if completed.returncode == 0 else "FAIL",
+            "status": status,
             "proof": proof,
             "command": command,
             "returncode": completed.returncode,
