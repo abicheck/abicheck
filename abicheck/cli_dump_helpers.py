@@ -210,6 +210,17 @@ def evidence_depth_label(
     clang is unavailable after L3 was found) -- checking presence alone would
     overstate ``source``/``build`` for a layer that ran but linked nothing
     (CodeRabbit review).
+
+    ``snap.parsed_with_build_context`` (ADR-020a/039: ``-p``/``--compile-db``,
+    a much older, narrower build-context mechanism than the ``BuildSourcePack``
+    machinery above -- it harvests the active ``-D`` set and ``#ifdef``-guarded
+    fields for the L2 header parse, with no ``BuildEvidence``/compile-unit
+    model of its own) also reaches "build": without this, a
+    ``dump lib.so -H api.h -p build/`` run has no ``snap.build_source`` at all
+    and this function would report "headers", even though the error message
+    this feeds (``check_requested_depth_satisfied``) already documents "build
+    via --build-info/a compile database" as a valid way to satisfy
+    ``--depth build`` (Codex review).
     """
     from .cli import _layer_payload_empty
 
@@ -221,6 +232,8 @@ def evidence_depth_label(
     ):
         return "source"
     if build_source is not None and not _layer_payload_empty(build_source, "L3"):
+        return "build"
+    if snap.parsed_with_build_context:
         return "build"
     if snap.from_headers:
         return "headers"
@@ -363,7 +376,8 @@ def _gated_source_label(build_source: BuildSourcePack | None, snap: AbiSnapshot)
     declarations (no binary to link against) yet must still satisfy an
     explicit ``--depth source`` the same way it already only warns (not
     errors) about that case; only a *never-attempted* L4 (the header-graph
-    cases above) is downgraded here, to "build" (real L3, none) or
+    cases above) is downgraded here, to "build" (real L3, or a ``-p``/
+    ``--compile-db`` build context, per ``evidence_depth_label``) or
     ``headers``/``binary`` (nothing).
     """
     from .cli import _layer_payload_empty
@@ -371,6 +385,11 @@ def _gated_source_label(build_source: BuildSourcePack | None, snap: AbiSnapshot)
     if build_source is not None and _l4_source_abi_was_attempted(build_source):
         return "source"
     if build_source is not None and not _layer_payload_empty(build_source, "L3"):
+        return "build"
+    # ADR-020a/039 build-context capture (-p/--compile-db) has no BuildSourcePack
+    # of its own to check above, but is still a legitimate "build" evidence
+    # source -- see evidence_depth_label's docstring (Codex review).
+    if snap.parsed_with_build_context:
         return "build"
     return "headers" if snap.from_headers else "binary"
 

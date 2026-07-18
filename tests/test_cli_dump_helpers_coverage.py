@@ -1146,6 +1146,20 @@ def test_evidence_depth_label_build_when_build_evidence_has_facts() -> None:
     assert evidence_depth_label(snap) == "build"
 
 
+def test_evidence_depth_label_build_when_parsed_with_compile_db_context() -> None:
+    """Codex review: `dump lib.so -H api.h -p build/` (ADR-020a/039
+    -p/--compile-db build-context capture) has no BuildSourcePack of its
+    own -- snap.build_source stays None -- but snap.parsed_with_build_context
+    is still a legitimate "build" evidence signal, distinct from the
+    BuildSourcePack machinery checked above."""
+    snap = AbiSnapshot(
+        library="libfoo.so", version="1.0", from_headers=True,
+        parsed_with_build_context=True,
+    )
+    assert snap.build_source is None
+    assert evidence_depth_label(snap) == "build"
+
+
 def test_evidence_depth_label_source_when_source_abi_has_reachable_entities() -> None:
     from abicheck.buildsource.build_evidence import BuildEvidence
     from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
@@ -1228,6 +1242,18 @@ def test_gated_source_label_without_a_pack_falls_back_to_headers_or_binary() -> 
     assert _gated_source_label(None, headers_snap) == "headers"
 
 
+def test_gated_source_label_without_a_pack_but_with_compile_db_context_is_build() -> None:
+    """Codex review: -p/--compile-db build context (no BuildSourcePack) must
+    still gate as "build", not fall through to "headers"."""
+    from abicheck.cli_dump_helpers import _gated_source_label
+
+    snap = AbiSnapshot(
+        library="libfoo.so", version="1.0", from_headers=True,
+        parsed_with_build_context=True,
+    )
+    assert _gated_source_label(None, snap) == "build"
+
+
 def test_dump_will_attempt_hybrid_l4_extraction_false_for_prebuilt_pack(tmp_path) -> None:
     from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.cli_dump_helpers import _dump_will_attempt_hybrid_l4_extraction
@@ -1299,6 +1325,27 @@ def test_check_requested_depth_satisfied_build_without_build_facts_fails() -> No
     snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
     with pytest.raises(DumpDepthNotSatisfiedError, match="--depth build"):
         check_requested_depth_satisfied("build", snap)
+
+
+def test_check_requested_depth_satisfied_build_with_compile_db_context_passes() -> None:
+    """Codex review: `dump lib.so -H api.h -p build/ --depth build` must be
+    accepted -- the strict gate's own error message already documents "build
+    via --build-info/a compile database" as a valid remedy, but the gate
+    itself only checked snap.build_source (the newer BuildSourcePack
+    machinery), never snap.parsed_with_build_context (the older -p/
+    --compile-db ADR-020a/039 signal perform_elf_dump sets, with no
+    BuildSourcePack of its own)."""
+    from abicheck.cli_dump_helpers import check_requested_depth_satisfied
+
+    snap = AbiSnapshot(
+        library="libfoo.so", version="1.0", from_headers=True,
+        parsed_with_build_context=True,
+    )
+    check_requested_depth_satisfied("build", snap)  # must not raise
+    # A compile-database build context is still not source-tier evidence --
+    # --depth source must still fail for the same snapshot.
+    with pytest.raises(Exception, match="--depth source"):
+        check_requested_depth_satisfied("source", snap)
 
 
 def test_check_requested_depth_satisfied_source_with_source_facts_passes() -> None:
