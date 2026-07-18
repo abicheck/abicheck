@@ -127,6 +127,35 @@ class TestRunOnce:
         assert result.old.missing_symbol is None
         assert result.new is not None and result.new.ok is True
 
+    def test_loader_failure_for_unrelated_reason_is_not_ok(self, tmp_path, monkeypatch):
+        """Codex review, fresh evidence: a dynamic-linker failure for a
+        reason *other* than an undefined symbol (e.g. a missing, unrelated
+        dependency: "error while loading shared libraries: ...") does not
+        match the symbol-lookup regex, so it must not silently fall through
+        to ok=True regardless of exit code -- that would let a probe run
+        that never actually loaded still count as a clean baseline for
+        regressed_symbol."""
+        monkeypatch.setattr(rp.sys, "platform", "linux")
+
+        def _fake_run(argv, env=None, capture_output=None, text=None, errors=None, timeout=None, check=None):
+            return subprocess.CompletedProcess(
+                argv, returncode=127, stdout="",
+                stderr=(
+                    "./app: error while loading shared libraries: "
+                    "libbar.so.2: cannot open shared object file: "
+                    "No such file or directory\n"
+                ),
+            )
+
+        monkeypatch.setattr(rp.subprocess, "run", _fake_run)
+        app = _make_exec(tmp_path)
+        old_lib = _make_lib(tmp_path, "old.so")
+        new_lib = _make_lib(tmp_path, "new.so")
+        result = run_runtime_probe(app, old_lib, new_lib)
+        assert result.old is not None
+        assert result.old.ok is False
+        assert result.old.missing_symbol is None
+
     def test_ld_library_path_prepended_not_overwritten(self, tmp_path, monkeypatch):
         monkeypatch.setattr(rp.sys, "platform", "linux")
         monkeypatch.setenv("LD_LIBRARY_PATH", "/existing/path")

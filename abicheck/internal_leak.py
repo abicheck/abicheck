@@ -121,6 +121,28 @@ def _strip_template_args(name: str) -> str:
     return cur
 
 
+def _strip_signature_params(name: str) -> str:
+    """Truncate a demangled C++ function signature at its own parameter list.
+
+    ``cxxfilt``/``c++filt`` demangle a mangled function name to the full
+    signature, e.g. ``ns::api::foo(ns::detail::T*)`` — not just the bare
+    qualified name. Tracks paren depth and cuts at the first depth-0 ``(``
+    (the function's own parameter list opening; a deeper ``(`` is a nested
+    parameter type, e.g. a function-pointer parameter, and must not be
+    mistaken for it). A name with no top-level ``(`` at all (already a bare
+    qualified name, or not a function) is returned unchanged.
+    """
+    depth = 0
+    for i, ch in enumerate(name):
+        if ch == "(":
+            if depth == 0:
+                return name[:i]
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+    return name
+
+
 def _name_segments(name: str) -> list[str]:
     """Return ``::``-separated identifier segments of *name*.
 
@@ -880,7 +902,15 @@ def compute_call_graph_leak_paths(
             if name.startswith("_Z"):
                 from .demangle import demangle
 
-                lookup_name = demangle(name) or name
+                # demangle() returns the full signature (e.g.
+                # "ns::api::foo(ns::detail::T*)"), not just the qualified
+                # name -- is_internal_type's segment scan would otherwise
+                # find "detail" inside the *parameter* type and misclassify
+                # an ordinary public function as an internal leak target
+                # merely because it takes/returns an internal type (Codex
+                # review, fresh evidence). Strip the signature's own
+                # parameter list before classifying.
+                lookup_name = _strip_signature_params(demangle(name) or name)
             if not is_internal_type(lookup_name, internal_set):
                 continue
             path_edges = _reconstruct_path(came_from, entry, target)

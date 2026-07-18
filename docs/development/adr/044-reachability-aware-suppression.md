@@ -1364,6 +1364,55 @@ review's priority tiers.
    unaffected since there is no comma to stop at. Added
    `test_versioned_symbol_lookup_error_strips_version_suffix` to
    `test_runtime_probe.py`.
+   **Post-merge review (Codex), two more findings, one per module.** (a)
+   `internal_leak.py`: `demangle()` returns the **full signature** (e.g.
+   `ns::api::foo(ns::detail::T*)`), not just the qualified name — the
+   classification check at the call-graph fallback-node site (see the
+   third-Codex-round fix above) passed this straight to `is_internal_type`,
+   whose segment scan finds `detail` inside the *parameter* type and
+   misclassifies an ordinary **public** function (`ns::api::foo`) as an
+   internal leak target merely because it takes/returns an internal type —
+   even though `foo` itself lives in the public `ns::api` namespace. A later
+   `func_removed` on `foo` would then spuriously also emit
+   `internal_symbol_required_by_public_api`, describing a genuinely public
+   symbol's removal as if it were an internal one leaking through. Fixed by
+   a new `_strip_signature_params` helper (tracks paren depth, cuts at the
+   first depth-0 `(` — the function's own parameter-list opening, not a
+   nested one from e.g. a function-pointer parameter type) applied before
+   classification; the stored lookup key is unaffected, only the
+   classification input. Added `TestStripSignatureParams` (unit-level) and
+   `test_public_fn_with_internal_param_type_not_misclassified`
+   (integration-level) to `test_internal_leak.py`. (b) `runtime_probe.py`:
+   a dynamic-linker failure for a reason *other* than an undefined symbol —
+   most commonly a missing, unrelated dependency (`"error while loading
+   shared libraries: libfoo.so.2: cannot open shared object file"`) — does
+   not match `_SYMBOL_LOOKUP_ERROR_RE`, so it fell through to `ok=True`
+   regardless of the actual (nonzero) exit code. An `old` probe run that
+   never actually loaded (for a reason unrelated to the library under
+   comparison) would then still satisfy `regressed_symbol`'s `old.ok` guard,
+   letting a `new` run's real undefined-symbol failure report a false
+   regression against a baseline that was never clean to begin with. Fixed
+   by adding a second, narrower regex (`_LOADER_ERROR_RE`) for this exact,
+   version-stable glibc substring, returning `ok=False` (no `missing_symbol`,
+   since the failure isn't attributable to a specific symbol) when it
+   matches — deliberately narrow, so the module's own documented "an app's
+   own nonzero exit code is common and meaningless on its own" principle
+   stays intact for every other failure shape; this is one more unambiguous
+   linker statement, the same class as the symbol-lookup-error case already
+   handled, not a general exit-code interpretation. Added
+   `test_loader_failure_for_unrelated_reason_is_not_ok` to
+   `test_runtime_probe.py`.
+   **A independent review pass (not Codex) of the full diff also found two
+   documentation-only inaccuracies:** `examples/case192_.../README.md`
+   described the `internal_symbol_required_by_public_api` overlay as
+   "`RISK`-classified" — it is actually `BREAKING`
+   (`change_registry_suppression.py`), confirmed by `ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API
+   in BREAKING_KINDS` at runtime; and this ADR's own "Consequences" section
+   still read "No new CLI flags; no schema/serialization version bump" — true
+   for the original P0 slice that bullet was written for, but directly
+   contradicted by the P1/P2 slices documented earlier in this same file
+   (`REPORT_SCHEMA_VERSION` bumped twice, `--verify-runtime` added). Both
+   fixed.
 3. ~~New worked examples exercising this ADR's headline scenario end-to-end
    (public inline dispatch to an exported internal specialization; the same
    case under a blanket namespace suppression, asserting the break survives
@@ -1408,9 +1457,14 @@ review's priority tiers.
 - `namespace`'s `caused_by_type` matching is removed outright (D3); a rule
   that depended on it (none found in this repo's own test suite/examples at
   authoring time) needs `cause_namespace` instead.
-- No new CLI flags; no schema/serialization version bump. `SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`
-  is a new `ChangeKind`, following the standard four-step procedure
-  (`/CLAUDE.md` "Adding a new ChangeKind").
+- `SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK` is a new `ChangeKind`, following the
+  standard four-step procedure (`/CLAUDE.md` "Adding a new ChangeKind"). This
+  P0 slice itself added no new CLI flags and no schema/serialization version
+  bump; both since happened as the P1/P2 slices landed — `REPORT_SCHEMA_VERSION`
+  bumped to `2.6` (P1 item 4's structured `public_reachable`/`reachability_kind`/
+  `reachability_proof_path` fields) and again to `2.7` (P2's `"consumer_proven"`
+  `reachability_kind` enum member), and `--verify-runtime` is a new P2 CLI flag.
+  See `abicheck/schemas/__init__.py`'s own changelog for the exact history.
 
 ## References
 

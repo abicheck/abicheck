@@ -47,10 +47,10 @@ suppression rules run, so the broad rule is refused for this specific change:
 a `suppression_would_hide_public_break` diagnostic explains exactly which
 path proved it (`demo::compute --[DECL_CALLS_DECL]--> demo::detail::compute_avx2`).
 
-This is the headline scenario ADR-044 is named for (a `RISK`-classified
-`internal_symbol_required_by_public_api` overlay explains *why*; the raw
-`func_removed` — already artifact-proven — is what actually keeps the verdict
-`BREAKING`).
+This is the headline scenario ADR-044 is named for (a `BREAKING`-classified
+`internal_symbol_required_by_public_api` overlay explains *why*, corroborating
+rather than duplicating the verdict; the raw `func_removed` — already
+artifact-proven — is what actually keeps the verdict `BREAKING` on its own).
 
 ## Why no earlier evidence layer sees the *reachability*
 

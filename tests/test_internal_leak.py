@@ -61,6 +61,36 @@ class TestNameSegments:
         assert _name_segments("") == []
 
 
+class TestStripSignatureParams:
+    def test_strips_params(self) -> None:
+        from abicheck.internal_leak import _strip_signature_params
+
+        assert (
+            _strip_signature_params("ns::api::foo(ns::detail::T*)")
+            == "ns::api::foo"
+        )
+
+    def test_stops_at_top_level_paren_not_nested_one(self) -> None:
+        """A function-pointer parameter type has its own nested parens
+        (e.g. "void (*)(int)") -- must not be mistaken for the function's
+        own parameter-list opening."""
+        from abicheck.internal_leak import _strip_signature_params
+
+        assert (
+            _strip_signature_params("ns::api::bar(void (*)(int))") == "ns::api::bar"
+        )
+
+    def test_no_parens_returned_unchanged(self) -> None:
+        from abicheck.internal_leak import _strip_signature_params
+
+        assert _strip_signature_params("ns::detail::helper") == "ns::detail::helper"
+
+    def test_empty_string(self) -> None:
+        from abicheck.internal_leak import _strip_signature_params
+
+        assert _strip_signature_params("") == ""
+
+
 class TestIsInternalType:
     @pytest.mark.parametrize("name", [
         "oneapi::dal::detail::pimpl",
@@ -1204,6 +1234,34 @@ class TestComputeCallGraphLeakPaths:
                 _decl_node("decl://int", mangled, "source"),
             ],
             [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+        )
+        assert compute_call_graph_leak_paths(snap) == {}
+
+    def test_public_fn_with_internal_param_type_not_misclassified(
+        self, monkeypatch,
+    ) -> None:
+        """Codex review, fresh evidence: demangle() returns the *full
+        signature* ("ns::api::foo(ns::detail::T*)"), not just the qualified
+        name. is_internal_type's segment scan would otherwise find "detail"
+        inside the *parameter* type and misclassify an ordinary public
+        function as an internal leak target merely because it takes an
+        internal-namespaced type -- even though the function itself lives in
+        the public ns::api namespace. The signature's own parameter list
+        must be stripped before classification."""
+        import abicheck.demangle as demangle_mod
+        from abicheck.buildsource.source_graph import GraphEdge
+        from abicheck.internal_leak import compute_call_graph_leak_paths
+
+        mangled = "_ZN2ns3api3fooEPNS_6detail1TE"
+        monkeypatch.setattr(
+            demangle_mod, "demangle", lambda s: "ns::api::foo(ns::detail::T*)"
+        )
+        snap = _graph_snap(
+            [
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://target", mangled, "source"),
+            ],
+            [GraphEdge(src="decl://pub", dst="decl://target", kind="DECL_CALLS_DECL")],
         )
         assert compute_call_graph_leak_paths(snap) == {}
 

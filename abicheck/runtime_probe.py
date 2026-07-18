@@ -58,6 +58,21 @@ _SYMBOL_LOOKUP_ERROR_RE = re.compile(
     r"symbol lookup error:.*undefined symbol:\s*([^,\s]+)"
 )
 
+#: glibc's ld.so emits this exact, version-stable substring when the dynamic
+#: linker itself fails to load the binary for any reason *other* than an
+#: undefined symbol (most commonly a missing dependency: "error while
+#: loading shared libraries: libfoo.so.2: cannot open shared object file").
+#: Recognized as ok=False (Codex review, fresh evidence): without this, a
+#: probe run whose stderr doesn't match the symbol-lookup regex falls
+#: through to ok=True regardless of exit code, so an OLD run that never
+#: actually loaded (e.g. missing an unrelated dependency) would still let
+#: regressed_symbol fire on the NEW run's real undefined-symbol failure --
+#: an app's own nonzero exit code stays deliberately uninterpreted (common
+#: and meaningless on its own), but an explicit loader-failure message is
+#: not that; it is the same class of unambiguous linker statement as the
+#: symbol-lookup-error case just above.
+_LOADER_ERROR_RE = re.compile(r"error while loading shared libraries")
+
 #: Tail of captured stderr kept on a probe outcome — enough for a human to
 #: see the failure, small enough not to bloat a JSON/SARIF report.
 _STDERR_TAIL_CHARS = 2000
@@ -142,6 +157,8 @@ def _run_once(app_path: Path, lib_path: Path, timeout: float) -> RuntimeProbeOut
             missing_symbol=match.group(1),
             stderr_tail=stderr[-_STDERR_TAIL_CHARS:],
         )
+    if _LOADER_ERROR_RE.search(stderr):
+        return RuntimeProbeOutcome(ok=False, stderr_tail=stderr[-_STDERR_TAIL_CHARS:])
     return RuntimeProbeOutcome(ok=True, stderr_tail=stderr[-_STDERR_TAIL_CHARS:])
 
 
