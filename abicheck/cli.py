@@ -43,7 +43,7 @@ from .cli_dump_helpers import (
     check_requested_depth_satisfied,
     fold_dump_provenance_into_json,
     handle_non_elf_dump,
-    has_explicit_l3_selector,
+    has_other_l3_source,
     perform_elf_dump,
     resolve_compile_db_l3_reuse,
     resolve_dump_collect_context,
@@ -736,8 +736,8 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         _dry_reused_bi, _ = resolve_compile_db_l3_reuse(
             depth, build_info, compile_db_path or compile_db_path_alt,
             matched=bool(_dry_matched), compile_db_filter=compile_db_filter,
-            explicit_l3_selector=has_explicit_l3_selector(
-                build_query, build_compile_db, build_config,
+            explicit_l3_selector=has_other_l3_source(
+                build_query, build_compile_db, build_config, sources,
             ),
         )
         emit_dry_run(
@@ -797,8 +797,8 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     build_info, _l3_note = resolve_compile_db_l3_reuse(
         depth, build_info, effective_compile_db,
         matched=compile_db_matched, compile_db_filter=compile_db_filter,
-        explicit_l3_selector=has_explicit_l3_selector(
-            build_query, build_compile_db, build_config,
+        explicit_l3_selector=has_other_l3_source(
+            build_query, build_compile_db, build_config, sources,
         ),
     )
     if _l3_note:

@@ -856,27 +856,35 @@ def check_dump_compile_db_error(
     return None
 
 
-def has_explicit_l3_selector(
+def has_other_l3_source(
     build_query: str | None,
     build_compile_db: str | None,
     build_config: Path | None,
+    sources: Path | None,
 ) -> bool:
-    """True when a dedicated L3 build-source selector was given.
+    """True when some L3 build source other than a bare ``-p``/``--compile-db``
+    could resolve.
 
-    AC-007's ``-p``/``--compile-db`` → L3 reuse hijacks ``build_info``, which
-    ``inline._resolve_compile_db`` ranks above the config's ``build.query`` /
-    ``build.compile_db``. So the reuse must be suppressed not only for an explicit
-    ``--build-info`` but for every other L3 selector: the CLI ``--build-query`` /
-    ``--build-compile-db`` flags **and** an explicit ``--config`` (trusted, and
-    able to set ``build.query`` / ``build.compile_db``). Gating on the ``--config``
-    *presence* is deliberately conservative — the config may set no L3 selector at
-    all — but never silently overriding one is the safe direction; the user can
-    still force the reuse by dropping ``--config`` or naming ``--build-info``
-    (Codex review)."""
+    AC-007's ``-p`` → L3 reuse hijacks ``build_info``, which
+    ``inline._resolve_compile_db`` ranks *above* every other L3 source (trusted
+    config ``build.query``, a ``build.compile_db`` glob from the CLI / an explicit
+    or auto-discovered ``.abicheck.yml``, and an auto-discovered
+    ``compile_commands.json``). Rather than guard each of those individually — a
+    losing game, as each new source becomes a fresh override (Codex reviews) —
+    observe that they **all** require a ``--sources`` tree to resolve, and that
+    the CLI ``--build-query``/``--build-compile-db`` flags and an explicit
+    ``--config`` are the only sources that don't. So the ``-p`` DB is the *sole*
+    possible L3 source — and can override nothing — exactly when none of those is
+    present. In every other case the reuse is suppressed and the tree's own
+    resolution (or the explicit selector) supplies L3. Conservative on
+    ``--sources``/``--config`` *presence* (they may resolve no L3 at all), but
+    never silently overriding a configured source is the safe direction; the user
+    can still force the ``-p`` reuse by naming ``--build-info``."""
     return (
         build_query is not None
         or build_compile_db is not None
         or build_config is not None
+        or sources is not None
     )
 
 

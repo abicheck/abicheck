@@ -162,15 +162,19 @@ def test_compile_db_not_reused_when_not_applicable(tmp_path: Path) -> None:
         assert note is None
 
 
-def test_has_explicit_l3_selector(tmp_path: Path) -> None:
-    """AC-007 (Codex): --build-query, --build-compile-db, and an explicit --config
-    are all dedicated L3 selectors that must suppress the -p→L3 reuse."""
-    from abicheck.cli_dump_helpers import has_explicit_l3_selector
+def test_has_other_l3_source(tmp_path: Path) -> None:
+    """AC-007 (Codex): the -p→L3 reuse must be suppressed whenever any other L3
+    source could resolve — the CLI --build-query/--build-compile-db flags, an
+    explicit --config, or a --sources tree (which carries its own config /
+    compile_db / auto-discovery resolution). Only a bare -p with none of those is
+    the sole L3 source and safe to reuse."""
+    from abicheck.cli_dump_helpers import has_other_l3_source
 
-    assert has_explicit_l3_selector(None, None, None) is False
-    assert has_explicit_l3_selector("some-query", None, None) is True
-    assert has_explicit_l3_selector(None, "build/compile_commands.json", None) is True
-    assert has_explicit_l3_selector(None, None, tmp_path / "cfg.yml") is True
+    assert has_other_l3_source(None, None, None, None) is False
+    assert has_other_l3_source("some-query", None, None, None) is True
+    assert has_other_l3_source(None, "build/compile_commands.json", None, None) is True
+    assert has_other_l3_source(None, None, tmp_path / "cfg.yml", None) is True
+    assert has_other_l3_source(None, None, None, tmp_path / "src") is True
 
 
 def test_compile_db_not_reused_when_explicit_l3_selector(tmp_path: Path) -> None:
