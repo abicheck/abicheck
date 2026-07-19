@@ -1000,12 +1000,16 @@ now-corrected claim) covers every depth a bundle-scoped check can request.
 This does not change `baseline-set.json`'s manifest shape (§6/§10) — it
 still records one entry per target, now with a pointer to the preserved
 binary alongside its snapshot digest. It does mean `check-target`'s
-bundle-mode `check_id`
-is bundle-scoped (`pvxs-release@profile#channel`, not
-`libpvxs@profile#channel`), and its report's `target_id`/`target` fields
-identify the bundle, not one member library — distinguishing S14's one
-bundle-level report from S15's N independent per-target reports, which is
-the boundary §1's domain model already requires them to keep separate.
+bundle-mode `check_id` is bundle-scoped
+(`pvxs-release@profile#channel@depth` — **including the same unconditional
+`@requested_depth` suffix as every other `check_id`, per §7's correction;
+an earlier draft of this bundle-specific note omitted it, which would let a
+bundle checked at both header and source depth for the same profile/channel
+collide exactly like the S26 case §7 exists to prevent**), not
+`libpvxs@profile#channel@depth`, and its report's `target_id`/`target`
+fields identify the bundle, not one member library — distinguishing S14's
+one bundle-level report from S15's N independent per-target reports, which
+is the boundary §1's domain model already requires them to keep separate.
 
 ---
 
