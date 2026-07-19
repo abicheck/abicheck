@@ -194,9 +194,19 @@ real extension — either a new `expected_target_id` parameter on
 `_target_id_issues`/`validate_inputs_pack`, or an equivalent comparison
 performed in the new build-output validator using that function's existing
 manifest/TU data — not a same-signature call to the function as it exists
-today. Test cases: (1) two targets sharing one pack with untagged TUs must
-fail, (2) a pack whose `manifest.library` doesn't match its referencing
-`build-output.json` target must fail, both currently unenforced.
+today. **Scope corrected in a further review round — do not reject every
+untagged-TU pack.** `abicheck/buildsource/inputs_emit.py:169-170` shows
+producers already establish the library at pack-creation time via
+`manifest.library`, and `inputs_validate.py:111-113` deliberately treats
+missing per-TU `target_id`s as additive, not invalid — a single-target,
+`manifest.library`-matched pack with untagged TUs is a legitimate legacy
+producer output and must still pass. Test cases: (1) two targets sharing
+one pack (whether or not its TUs carry `target_id`) must fail, (2) a pack
+whose `manifest.library` (or a tagged TU's `target_id`) disagrees with the
+specific target referencing it must fail, (3) a single-target,
+`manifest.library`-matched pack with untagged TUs must **pass** (regression
+guard against over-rejecting the legitimate legacy case). (1) and (2) are
+currently unenforced; (3) guards the fix from over-correcting.
 
 ### P1.2 — `actions/resolve-baseline`
 

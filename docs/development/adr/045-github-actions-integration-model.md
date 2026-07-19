@@ -718,7 +718,7 @@ in `check-target`, `check-single.yml`, or `check-project.yml`.
 
 ```json
 {
-  "report_schema": "abicheck.report/v1",
+  "report_schema_version": "1.x.y",
   "check_id": "libpvxs@linux-x86_64-gcc13-release#accepted-main@source",
   "target_id": "libpvxs@linux-x86_64-gcc13-release#accepted-main@source",
   "project": "epics-base/pvxs",
@@ -742,6 +742,18 @@ in `check-target`, `check-single.yml`, or `check-project.yml`.
   "severity": {"exit_code": 4, "blocking": true, "blocking_categories": ["abi_breaking"]}
 }
 ```
+
+**The schema-version field is `report_schema_version`, matching the
+existing report, not a new `report_schema` field — flagged by review.**
+`abicheck/reporter.py` (three call sites, e.g. line 429) already emits
+`report_schema_version`, and `abicheck/schemas/compare_report.schema.json`
+requires that exact key (`required: ["report_schema_version", ...]`). An
+earlier draft's example introduced a differently-named `report_schema`
+field instead — additive in spirit but not in fact, since a report copying
+this example would fail the *existing* schema/version contract the ADR
+claims to extend, not replace. Fixed to reuse `report_schema_version`
+(bumping its MINOR component per the schema's own versioning convention
+for additive changes, not introducing a parallel field).
 
 The last two fields, `verdict` and `severity`, are **not optional
 decoration** — they are the exact legacy fields `abicheck/aggregate.py`
@@ -1087,13 +1099,28 @@ Three new validation points, all hard failures (not warnings) when tripped:
    invoking it unmodified, as an earlier draft of this fix said, would still
    let unprojected evidence claim `"declared"` status. **The
    `build-output.json` validator must instead extend this check with the
-   externally-known expected target**: either add an `expected_target_id`
-   parameter to `_target_id_issues`/`validate_inputs_pack` that hard-fails
-   both an untagged-TU pack and a `manifest.library`/`build-output.json`
-   target mismatch, or perform that comparison itself in the new validator
-   using `validate_inputs_pack`'s existing manifest/TU data as an input —
-   not merely call the function today's signature already exposes and treat
-   a clean report as proof of isolation.
+   externally-known expected target — scoped narrowly, corrected in a
+   further review round.** An earlier version of this fix said the
+   extension "hard-fails both an untagged-TU pack and a
+   `manifest.library`/`build-output.json` target mismatch" — too broad: an
+   untagged-TU pack whose `manifest.library` correctly names the one target
+   referencing it, and that no *other* target also references, is a
+   legitimate legacy-producer pack (`abicheck/buildsource/inputs_emit.py:169-170`
+   shows producers already establish the library at pack-creation time via
+   the manifest, independent of per-TU tags), and `inputs_validate.py:111-113`
+   deliberately treats missing per-TU `target_id`s as additive, not invalid,
+   for exactly this reason. Rejecting every untagged-TU pack outright would
+   break that legitimate case. **Correct scope: fail a `"declared"` claim
+   only when (a) the pack is referenced by more than one `build-output.json`
+   target (shared pack — whether or not its TUs carry `target_id`), or (b)
+   the pack's `manifest.library` (or a tagged TU's `target_id`) disagrees
+   with the specific target referencing it.** A single-target,
+   `manifest.library`-matched pack with untagged TUs passes. Implement via
+   an `expected_target_id` parameter added to `_target_id_issues`/
+   `validate_inputs_pack`, or an equivalent comparison in the new validator
+   using `validate_inputs_pack`'s existing manifest/TU data — either way,
+   scoped to exactly these two failure conditions, not a blanket
+   untagged-TU rejection.
 2. **Requested-vs-effective depth gate** — reuses the mechanism PR #601
    introduces at the CLI layer (`DumpDepthNotSatisfiedError`, per this
    repo's Known Gaps section) but applied at `check-target` level so a
