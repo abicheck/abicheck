@@ -2564,6 +2564,23 @@ def test_source_surface_dso_mismatch_macho_cpp_keyspace_matches():
     assert _coverage(res, CHECK_SOURCE_SURFACE_DSO_MISMATCH)["status"] == "present"
 
 
+def test_source_surface_dso_mismatch_pe_export_keyspace():
+    # PE exports carry no underscore mangling quirk, so the L4-keyspace helper
+    # uses the raw export names directly. A surface mapped to a PE export that is
+    # present stays clean; one absent from this binary fires.
+    clean = _surface_with_mapping([("d0", "foo")])
+    snap = _snap(pe=PeMetadata(exports=[PeExport(name="foo")]))
+    snap.build_source = BuildSourcePack(root="", source_abi=clean)
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.SOURCE_SURFACE_DSO_MISMATCH) == []
+
+    stale = _surface_with_mapping([("d0", "other_dll_sym")])
+    snap2 = _snap(pe=PeMetadata(exports=[PeExport(name="foo")]))
+    snap2.build_source = BuildSourcePack(root="", source_abi=stale)
+    res2 = run_crosschecks(snap2)
+    assert len(_findings_of(res2, ChangeKind.SOURCE_SURFACE_DSO_MISMATCH)) == 1
+
+
 def test_source_surface_dso_mismatch_skipped_without_binary_exports():
     # A source-only snapshot (no export table) must skip, never false-positive.
     surface = _surface_with_mapping([("d0", "_Z3foov")])
