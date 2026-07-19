@@ -556,10 +556,15 @@ _PUBLIC_SOURCE_ABI_KINDS = frozenset({
     # kinds above, keyed from old.mappings["source_decl_to_binary_symbol"]
     # rather than a reachable_* bucket directly. Deliberately NOT extended to
     # SOURCE_BINARY_PROVENANCE_MISMATCH (an aggregate finding with symbol=""
-    # -- no single declaration name to misjudge) or ODR_SOURCE_CONFLICT (its
-    # odr_conflicts source isn't scoped to public/reachable types the way the
-    # other buckets are).
+    # -- no single declaration name to misjudge).
     ChangeKind.SOURCE_DECL_BINARY_SYMBOL_MISMATCH,
+    # Codex review, fourth pass: source_link.py's _route_type() appends every
+    # public type entity to reachable_types unconditionally, BEFORE its
+    # separate ODR-conflict check runs -- so a type that goes on to produce
+    # an ODR_SOURCE_CONFLICT is, by construction, already in reachable_types
+    # (the earlier "not scoped to public/reachable types" reasoning was
+    # wrong; verified against source_link.py's actual routing order).
+    ChangeKind.ODR_SOURCE_CONFLICT,
 })
 
 

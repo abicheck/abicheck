@@ -257,21 +257,24 @@ class TestMarkReachabilityTriState:
             ChangeKind.TEMPLATE_BODY_CHANGED,
             ChangeKind.GENERATED_HEADER_CHANGED,
             ChangeKind.SOURCE_DECL_BINARY_SYMBOL_MISMATCH,
+            ChangeKind.ODR_SOURCE_CONFLICT,
         ],
     )
     def test_other_public_source_abi_kinds_are_reachable_despite_internal_looking_name(
         self, kind
     ) -> None:
-        """Codex review, second and third passes: the same
+        """Codex review, second through fourth passes: the same
         public-by-construction gap applies to every other source_diff.py
         finding built from reachable_declarations/reachable_types/
         reachable_templates (or, for SOURCE_DECL_BINARY_SYMBOL_MISMATCH, the
         source_decl_to_binary_symbol mapping — whose own description text
-        says "Public declaration"), not just the typedef/macro/
-        inline-function/template-removal subset covered first —
-        CONCEPT_TIGHTENED, CONSTEXPR_VALUE_CHANGED, DEFAULT_ARGUMENT_CHANGED,
+        says "Public declaration"; or, for ODR_SOURCE_CONFLICT,
+        source_link.py's _route_type() appending the entity to
+        reachable_types before its ODR check even runs), not just the
+        typedef/macro/inline-function/template-removal subset covered first
+        — CONCEPT_TIGHTENED, CONSTEXPR_VALUE_CHANGED, DEFAULT_ARGUMENT_CHANGED,
         INLINE_BODY_CHANGED, TEMPLATE_BODY_CHANGED, GENERATED_HEADER_CHANGED,
-        SOURCE_DECL_BINARY_SYMBOL_MISMATCH."""
+        SOURCE_DECL_BINARY_SYMBOL_MISMATCH, ODR_SOURCE_CONFLICT."""
         old = _snap(functions=[_public_fn("foo", "int")])
         new = _snap(functions=[_public_fn("foo", "int")])
         raw_change = Change(
