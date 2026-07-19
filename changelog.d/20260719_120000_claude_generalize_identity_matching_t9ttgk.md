@@ -34,4 +34,14 @@
   namespaced class's constructors from `CTOR_OVERLOAD_AMBIGUITY_RISK`
   entirely, since `owner_class_of` derives the real qualified owner from the
   constructor's mangled symbol regardless of which side's `RecordType` lacks
-  `qualified_name`.
+  `qualified_name`. Two more gaps in the same area are fixed: (1)
+  `EnumType.qualified_name` is now deserialized (`serialization.py`'s
+  `_enum_type_from_dict` serialized but never read it back), so a save/load
+  round trip no longer silently loses an enum's namespace identity; (2) a
+  castxml constructor whose real mangled name is omitted gets a synthesized
+  snapshot key (`SYNTHETIC_CTOR_KEY_PREFIX + "scope(params)"`) that isn't
+  Itanium-mangled, so `owner_class_of` couldn't parse it and fell back to the
+  bare class name — dropping such namespaced constructors from
+  `CTOR_OVERLOAD_AMBIGUITY_RISK` even between two fully fresh snapshots;
+  `_diff_ctor_overload_ambiguity` now recovers the scope directly from the
+  synthetic key's own encoding.

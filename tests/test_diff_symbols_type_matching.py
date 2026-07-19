@@ -33,6 +33,7 @@ from __future__ import annotations
 
 from abicheck.checker import ChangeKind, compare
 from abicheck.diff_helpers import build_type_map
+from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
 from abicheck.model import (
     AbiSnapshot,
     AccessLevel,
@@ -209,6 +210,38 @@ class TestCtorOverloadAmbiguityIsAmbiguitySafe:
         r = compare(
             _snap(functions=old_funcs, types=[old_widget]),
             _snap(functions=new_funcs, types=[new_widget]),
+        )
+
+        risk = [c for c in r.changes if c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK]
+        assert len(risk) == 1
+
+    def test_synthetic_ctor_key_still_flags_risk(self):
+        """castxml omits a real mangled name for some public overloaded
+        constructors and synthesizes a key instead
+        (``SYNTHETIC_CTOR_KEY_PREFIX + "scope(params)"``). That key doesn't
+        start with the Itanium ``_Z`` prefix, so owner_class_of can't parse
+        it and used to fall back to the bare class name -- dropping every
+        namespaced synthetic-key constructor from its overload group even on
+        two fully fresh (non-legacy) snapshots (Codex review, PR #608
+        follow-up, third round).
+        """
+        widget_old = RecordType(name="Widget", qualified_name="ns::Widget", kind="class")
+        widget_new = RecordType(name="Widget", qualified_name="ns::Widget", kind="class")
+
+        def synth_ctor(param_type):
+            key = f"{SYNTHETIC_CTOR_KEY_PREFIX}ns::Widget({param_type})"
+            return Function(
+                name="Widget", mangled=key, return_type="void",
+                params=[Param(name="x", type=param_type)],
+                visibility=Visibility.PUBLIC, is_explicit=False,
+            )
+
+        old_funcs = [synth_ctor("int")]
+        new_funcs = [synth_ctor("int"), synth_ctor("char const *")]
+
+        r = compare(
+            _snap(functions=old_funcs, types=[widget_old]),
+            _snap(functions=new_funcs, types=[widget_new]),
         )
 
         risk = [c for c in r.changes if c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK]

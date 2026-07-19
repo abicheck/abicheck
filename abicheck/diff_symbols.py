@@ -71,7 +71,11 @@ from .diff_symbols_scalar import (  # noqa: F401  (public-surface re-exports)
     _scalar_repr as _scalar_repr,
 )
 from .diff_symbols_variables import _check_variable_alignment, _without_top_level_const
-from .dumper_castxml import is_synthetic_ctor_key, is_synthetic_dtor_key
+from .dumper_castxml import (
+    SYNTHETIC_CTOR_KEY_PREFIX,
+    is_synthetic_ctor_key,
+    is_synthetic_dtor_key,
+)
 from .elf_symbol_filter import (
     FUNCTION_SYMBOL_TYPES,
     exported_symbol_names,
@@ -912,12 +916,9 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     new_map = _public_functions(new)
 
     # Lookups for the virtual-method-addition check below: type records
-    # (keyed via TypeMap — qualified-name-first, ambiguity-safe bare-name
-    # fallback, not a naive bare-name dict, so two same-leaf-name classes in
-    # different namespaces can't cross-attribute a new virtual method; PR
-    # #608), the old surface's scope-qualified owner classes, and per-class
-    # virtual signatures (to skip inherited overrides). See
-    # ``virtual_method_addition``.
+    # (via ambiguity-safe TypeMap, not a naive bare-name dict — PR #608), the
+    # old surface's scope-qualified owner classes, and per-class virtual
+    # signatures (to skip inherited overrides). See ``virtual_method_addition``.
     old_types = build_type_map(old.types)
     new_types = build_type_map(new.types)
     old_owner_classes = {
@@ -990,39 +991,41 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 _CV_QUALIFIER_RE = re.compile(r"\b(?:const|volatile)\b")
 
 
+def _synthetic_ctor_scope(mangled: str) -> str | None:
+    """Qualified scope encoded in a castxml synthetic-ctor key
+    (``SYNTHETIC_CTOR_KEY_PREFIX + "scope(params)"``), or ``None``: it
+    doesn't start with ``_Z`` so ``owner_class_of`` can't parse it and would
+    otherwise fall back to the bare class name (Codex review, PR #608
+    follow-up).
+    """
+    if not is_synthetic_ctor_key(mangled):
+        return None
+    body = mangled[len(SYNTHETIC_CTOR_KEY_PREFIX):]
+    paren = body.find("(")
+    return body[:paren] if paren != -1 else None
+
+
 def _converting_ctors_by_class(
     snap: AbiSnapshot, class_names: set[str]
 ) -> dict[str, dict[tuple[str, ...], Function]]:
     """Group each class's non-explicit, single-required-argument constructors.
 
-    A castxml/DWARF Constructor's demangled ``name`` is always the bare class
-    name, so grouping is keyed by ``owner_class_of(f)`` — the scope-qualified
-    owner derived from the mangled symbol — not the bare ``f.name``. Two
-    distinct classes sharing a bare name in different namespaces would
-    otherwise conflate their constructor sets and fabricate a
-    ``CTOR_OVERLOAD_AMBIGUITY_RISK`` for the wrong class (Codex review, PR
-    #608 follow-up).
+    Grouped by ``owner_class_of(f)`` (scope-qualified) not bare ``f.name``,
+    so two classes sharing a bare name in different namespaces don't
+    conflate their constructor sets (Codex review, PR #608 follow-up).
 
-    "Converting constructor" here means: public, not deleted, definitively
-    non-explicit (``is_explicit is False`` — ``None`` is unknown evidence and
-    skipped), and callable with exactly one argument — at most one
-    *required* parameter, at least one parameter total. A leading defaulted
-    parameter still makes the constructor single-argument-callable
-    (``Widget(int x = 0)``), so the exclusion check below binds to the
-    *first* parameter regardless of whether it has a default. That first
-    parameter's type is checked against the class's own type to exclude
-    copy/move constructors. Keyed by the full parameter-type tuple so two
-    overloads are distinguished even when both qualify.
+    "Converting constructor": public, not deleted, definitively non-explicit
+    (``is_explicit is False``; ``None`` is unknown and skipped), callable
+    with exactly one argument (at most one *required* parameter, at least
+    one total). First parameter's type is checked against the class's own
+    type to exclude copy/move constructors. Keyed by param-type tuple.
 
-    ``class_names`` is expected to already be scope-qualified (see its call
-    site, ``_diff_ctor_overload_ambiguity``). Falls back to the bare
-    ``f.name`` when ``owner_class_of`` can't resolve a scope (e.g. a
-    hand-built snapshot with a non-Itanium placeholder mangled name) — real
-    constructors always have a real mangled symbol.
+    ``class_names`` is expected to already be scope-qualified. Falls back to
+    a synthetic-key-derived scope, then bare ``f.name``, when unresolvable.
     """
     by_class: dict[str, dict[tuple[str, ...], Function]] = {}
     for f in snap.functions:
-        owner = owner_class_of(f) or f.name
+        owner = owner_class_of(f) or _synthetic_ctor_scope(f.mangled) or f.name
         if owner not in class_names or f.is_deleted or f.is_explicit is not False:
             continue
         if f.access != AccessLevel.PUBLIC:
@@ -1044,16 +1047,13 @@ def _converting_ctors_by_class(
 
 def _common_class_identities(old_map: TypeMap[RecordType], new_map: TypeMap[RecordType]) -> set[str]:
     """Every identity string ``owner_class_of`` might spell for a class
-    present (ambiguity-safely matched) on both sides.
+    ambiguity-safely matched on both sides.
 
-    A raw ``set(old_map) & set(new_map)`` intersection only sees each
-    ``TypeMap``'s canonical key and misses schema-evolution mixes: a legacy
-    ``RecordType`` missing ``qualified_name`` keys as bare ``"Widget"``,
-    while ``owner_class_of`` (from the mangled symbol, independent of
-    ``RecordType``) always resolves ``"ns::Widget"`` when parseable —
-    silently dropping that class's constructors (Codex review, PR #608
-    follow-up). Recording both matched types' canonical keys via
-    ``lookup_matched_type`` covers the mix regardless of which side is legacy.
+    A raw ``set(old_map) & set(new_map)`` misses schema-evolution mixes: a
+    legacy ``RecordType`` missing ``qualified_name`` keys as bare
+    ``"Widget"``, while ``owner_class_of`` always resolves ``"ns::Widget"``
+    when parseable (Codex review, PR #608 follow-up). Recording both matched
+    keys via ``lookup_matched_type`` covers the mix either way.
     """
     identities: set[str] = set()
     for t_old in old_map.values():

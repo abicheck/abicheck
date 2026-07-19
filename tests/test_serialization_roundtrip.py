@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 
-from abicheck.model import AbiSnapshot, Function
+from abicheck.model import AbiSnapshot, EnumMember, EnumType, Function
 from abicheck.serialization import (
     load_snapshot,
     save_snapshot,
@@ -44,6 +44,34 @@ def _make_snap(**kwargs: object) -> AbiSnapshot:
     }
     defaults.update(kwargs)
     return AbiSnapshot(**defaults)  # type: ignore[arg-type]
+
+
+# ── EnumType.qualified_name (Codex review, PR #608 follow-up) ──────────────
+
+
+class TestEnumQualifiedNameRoundTrip:
+    def test_survives_roundtrip(self) -> None:
+        """EnumType.qualified_name is serialized by snapshot_to_dict but was
+        never read back by _enum_type_from_dict, so any dump/load comparison
+        lost the enum's namespace identity and fell back to bare
+        EnumType.name -- silently reopening the same cross-match/masked-
+        removal risk TypeMap was built to fix, for every enum that went
+        through a save/load cycle."""
+        e = EnumType(
+            name="Status", qualified_name="ns::Status",
+            members=[EnumMember(name="OK", value=0)],
+        )
+        snap = _make_snap(enums=[e])
+        d = snapshot_to_dict(snap)
+        assert d["enums"][0]["qualified_name"] == "ns::Status"
+        reloaded = snapshot_from_dict(d)
+        assert reloaded.enums[0].qualified_name == "ns::Status"
+
+    def test_defaults_to_none_when_absent(self) -> None:
+        """A pre-existing snapshot dict predating this field must still load."""
+        d = _minimal_dict(enums=[{"name": "Status", "members": []}])
+        reloaded = snapshot_from_dict(d)
+        assert reloaded.enums[0].qualified_name is None
 
 
 # ── elf_only_mode ─────────────────────────────────────────────────────────
