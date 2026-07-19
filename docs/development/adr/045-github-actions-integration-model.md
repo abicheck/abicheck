@@ -399,7 +399,20 @@ likely a `checks:` list per target (or per `bundle`) naming
 "channels that exist" and "checks that run" — which this ADR does not fully
 design. Treat P1.4/P1.5 as needing to define that list before a run-plan
 generator can be implemented, not as already specified by the `targets:`/
-`baseline:` excerpts shown so far.
+`baseline:` excerpts shown so far. **That `checks:` list also needs
+profile scoping, not just channel/depth/required — a second open gap,
+flagged in a further review round.** A target or bundle that only exists
+on a subset of contract profiles (a Windows-only library, a Linux-only
+`.so`) would still, under the "cross every `checks:` entry with every
+`contract: true` profile" model implied above, produce impossible cells
+for the profiles it doesn't exist on — no candidate binary, no baseline to
+compare, nothing for `check-target` to do. The generator needs either an
+explicit profile selector/condition on each `checks:` entry, or to derive
+candidate `(target, profile)` pairs from each profile's own
+`build-output.json` target list (only generate a cell where the target
+actually appears in that profile's declared `targets[]`) rather than a
+blind cross-product. This ADR does not pick between those two designs;
+P1.4/P1.5 must resolve it, not assume the naive cross-product is safe.
 
 **`targets:` needs a `kind` discriminator — missing from an earlier draft,
 flagged by review.** S22 (application compatibility) and S23
