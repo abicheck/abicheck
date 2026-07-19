@@ -201,8 +201,16 @@ the logic is non-trivial).
 
 ### P1.3 — `actions/check-target`
 
-Implements ADR-045 §4/§7. Composes root `action.yml` + `collect-facts` (if
-evidence required) + `resolve-baseline`; always emits the report envelope;
+Implements ADR-045 §4/§7. Composes root `action.yml` + `collect-facts`
+(**`phase: verify` for wrapper/clang-plugin evidence, `phase: auto` only
+for `producer: replay`** — see ADR-045 §4's "collect-facts composition"
+note, flagged by review: `check-target` runs after target
+resolution/build-output exists, so it structurally cannot run
+`collect-facts phase: prepare`, which must happen before the project's own
+build. `check-single.yml`/`check-project.yml` document the caller's
+required pre-build `collect-facts phase: prepare` step for S8/S9 as a
+separate, earlier step — not something folded into `check-target`.) +
+`resolve-baseline`; always emits the report envelope;
 `gate-mode: local|deferred|advisory` input. **Identity requirement flagged
 by review, corrected in a follow-up review pass:** `check-target` must write
 the check's full `check_id` (`target@profile#baseline_channel`, §7) into the
@@ -422,23 +430,34 @@ existing report recommends, and confirm:
 
 ### Second complex pilot — open gap (ADR-045 D9)
 
-No second pilot with a locatable validation record exists in this
-repository today (confirmed: zero matches for "Vandal"; oneDAL appears only
-as a scan-timing data point built from conda-forge release binaries, not a
-submitted integration PR with an acceptance report). **This is a real
-backlog item, not a documentation gap to paper over:**
+**Correction from an earlier draft, per review:** oneDAL PR #3693 is *not*
+an unlocatable pilot — a repo-wide search for "Vandal" does return zero
+matches (that part stands), but `docs/development/adr/044-reachability-aware-suppression.md`'s
+Context section documents a real field review of oneDAL PR #3693 that found
+a genuine tool-correctness defect and drove that ADR's entire redesign;
+`docs/development/plans/g21-oneshot-deep-compare.md` and
+`validation/REPORT.md` document the same evaluation's CLI-UX findings. That
+review is real and valuable — but it is a **package/binary-level compare
+evaluation** (conda-forge release artifacts, no source checkout, no build
+reuse, no CI workflow), not a **GitHub-Actions CI-integration pilot** in
+PVXS's sense (ADR-045 §"What the audit found," finding 5). **The remaining
+backlog item is narrower than "find a second pilot from scratch":**
 
-- Identify and get access to a second real C/C++ project with: a vendor
-  compiler/toolchain (icpx/SYCL or MSVC), multiple DSOs with distinct public
-  surfaces, an existing expensive build worth reusing, and (ideally) an
-  existing libabigail or ABICC gate to migrate alongside.
+- Identify and get access to a second real C/C++ project — possibly oneDAL
+  itself, revisited with a CI-integration lens this time, or a different
+  project — with: a vendor compiler/toolchain (icpx/SYCL or MSVC), multiple
+  DSOs with distinct public surfaces, an existing expensive build worth
+  reusing, and (ideally) an existing libabigail or ABICC gate to migrate
+  alongside.
 - Produce a validation report in the same format as
   `validation/pvxs-abi-validation-2026-07.md` — defects found/fixed,
   documented-not-fixed issues, a recommended workflow — before claiming any
   S9/S15/S17/S21/S26 acceptance criteria are met for a vendor-toolchain
   project. Until that report exists, treat those scenario rows in ADR-045
   §8 as **design-validated against PVXS's simpler case only**, not proven
-  for the vendor-toolchain class.
+  for the vendor-toolchain/multi-baseline-channel class — oneDAL's existing
+  field review does not substitute for it, however useful its own findings
+  were.
 
 ### Minimal generic pilots (P1 exit criteria)
 

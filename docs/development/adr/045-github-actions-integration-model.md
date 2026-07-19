@@ -81,21 +81,43 @@ and the doc corpus in `docs/user-guide/`:
    existing thing to a scenario front door and is the right foundation to
    build on, not replace.
 
-5. **One real pilot exists with a written validation report:**
-   `validation/pvxs-abi-validation-2026-07.md` (epics-base/pvxs, two
-   libraries `libpvxs`/`libpvxsIoc`, Make-based build, no compile DB). It
-   found and fixed three real defects (an O(N²) perf bug, RTTI-symbol false
-   positives, a zero-config `scan --sources` include-dir bug) and ends with a
-   recommended two-library `compare` workflow. **No second pilot with an
-   equivalent validation report exists.** A repo-wide search for "Vandal"
-   returned zero matches, and oneDAL appears only as a scan-timing data point
-   (`validation/uxl-scan-levels-timing-2026-06.md`, built from conda-forge
-   release binaries — not a submitted integration PR) and as an illustrative
-   example in `multi-binary.md`/`scan-levels.md`, never as a named
-   pilot-integration write-up. **This ADR treats PVXS as its only confirmed
-   pilot and does not fabricate a second one.** §14 records this as an open
-   validation gap rather than inventing findings for a repository that
-   cannot be located.
+5. **Two real pilots exist, but with materially different scope, and an
+   earlier draft of this finding mischaracterized the second one —
+   corrected here per review.** `validation/pvxs-abi-validation-2026-07.md`
+   (epics-base/pvxs, two libraries `libpvxs`/`libpvxsIoc`, Make-based build,
+   no compile DB) found and fixed three real defects (an O(N²) perf bug,
+   RTTI-symbol false positives, a zero-config `scan --sources` include-dir
+   bug) and ends with a recommended two-library `compare` workflow — this
+   is a genuine CI-*integration* pilot with a written validation report in
+   that format.
+   **A second real pilot does exist and was not fabricated, but an earlier
+   draft of this ADR wrongly said it "appears only as a scan-timing data
+   point," missing `docs/development/adr/044-reachability-aware-suppression.md`**,
+   whose Context section states plainly: "A field review of an oneDAL
+   integration (PR 3693) found that a blanket namespace suppression ...
+   silently hid a genuine ABI break" — a real, significant, PR-specific
+   finding that drove ADR-044's entire reachability-aware-suppression
+   redesign (`Suppression.reachability`, `internal_symbol_required_by_public_api`,
+   `--verify-runtime`). `docs/development/plans/g21-oneshot-deep-compare.md`
+   ("the oneDAL field evaluation (2026-06)") and `validation/REPORT.md`
+   document the same underlying evaluation from a different angle (CLI
+   staging friction — six manual pipeline stages to reach L4/L5 confidence
+   — which drove the G21 one-shot-compare UX plan).
+   **What this second pilot does and does not establish, precisely:** it is
+   a real, high-value field review that found a genuine tool-correctness
+   defect (arguably more architecturally significant than any single PVXS
+   finding) and a real CLI-UX defect — but by its own description it is a
+   **package/binary-level compare evaluation** (conda-forge `dal` release
+   artifacts, no source checkout, no build reuse, no CI workflow proposed),
+   not a **GitHub-Actions CI-integration pilot** in PVXS's sense. It does
+   not exercise vendor-toolchain build reuse, multi-DSO target resolution
+   from one build, or multiple baseline channels — the specific claims
+   §8's S9/S15/S17/S21 rows make. So the corrected, precise statement is:
+   **a second pilot exists and produced real, valuable findings, but it does
+   not substitute for the CI-integration-workflow validation those four
+   scenario rows still need.** §14 records that remaining gap accurately
+   now, instead of the earlier draft's inaccurate "no second pilot located"
+   framing.
 
 ---
 
@@ -330,7 +352,7 @@ flags — each keeps one unambiguous name, none is called bare `manifest.json`:
 | `actions/baseline` | Produce one baseline set (snapshot + `baseline-set.json`) from resolved targets. Read-only: never commits/pushes (already true — `actions/baseline/action.yml:6-8`). | Existing — kept as-is; consumes the new `targets:` block from `.abicheck.yml` instead of a flat `libraries:` list where available. |
 | `actions/resolve-baseline` | Resolve `channel × target × profile` → one baseline snapshot path, checking schema/digest/config-identity/evidence-producer compatibility; distinguishes not-found / ambiguous / wrong-profile / stale-schema / incompatible-evidence and never turns any of those into a compatibility verdict. | **New** — see rationale below. |
 | root `action.yml` | Execute one `compare`/`dump`/`scan`/`deps-tree`/`deps-compare` invocation. | Existing, unchanged surface; input-scoping documentation fixed per finding 2 (P0), not restructured. |
-| `actions/check-target` | Compose `resolve-baseline` + root action + `collect-facts` (if evidence required) for **one resolved target**; always emits the report envelope (§7); accepts `gate-mode: local\|deferred\|advisory`. | **New** — the single high-level primitive the task's "smaller surface" option asks to evaluate; adopted (see decision D6). |
+| `actions/check-target` | Compose `resolve-baseline` + root action + `collect-facts` (if evidence required, **`phase: verify`/`auto`-for-replay only** — see note below) for **one resolved target**; always emits the report envelope (§7); accepts `gate-mode: local\|deferred\|advisory`. | **New** — the single high-level primitive the task's "smaller surface" option asks to evaluate; adopted (see decision D6). |
 | — (no dedicated Action) | Fan-in. | `abicheck aggregate` stays a plain CLI step invoked from the `check-project` reusable workflow (§ below) — a dedicated `actions/aggregate` composite adds no value over one `run:` line, since aggregate's job is a single CLI call with no shell orchestration to hide. |
 
 **Why `resolve-baseline` is a new primitive, not folded into `check-target`
@@ -341,6 +363,30 @@ independent success/failure signal a caller can branch on. Separating it
 lets `check-target` treat "baseline not found" as a distinct, typed
 condition instead of falling through to whatever `compare`'s own
 missing-file error text happens to be.
+
+**`check-target`'s `collect-facts` composition cannot include `phase:
+prepare` for wrapper/clang-plugin producers — a real structural constraint,
+flagged by review.** `collect-facts`'s existing contract (§"What the audit
+found," finding 3, and `actions/collect-facts/action.yml`'s `phase` input)
+requires `prepare` to run **before** the project's own build (it sets
+`ABICHECK_CC_*`/`ABICHECK_PLUGIN_FLAGS` env vars the build's compiler
+invocations must pick up) and `verify` to run **after** that build produced
+its evidence pack. `check-target` is invoked *after* target
+resolution/build-output already exists (S3's whole point) or, in S4's
+single-job shortcut, as a step following the caller's own build steps — in
+neither case can it retroactively instrument a compiler invocation that
+already happened. So `check-target`'s internal `collect-facts` call is
+**`phase: verify`-only for wrapper/clang-plugin evidence** (checking a pack
+that a separate, earlier step already prepared) and **`phase: auto`
+only for `producer: replay`** (which needs no pre-build hook — replay reads
+the source tree directly, per finding 3's note that `auto` only completes
+standalone for `replay`). For S8/S9 (wrapper/plugin evidence), the caller's
+workflow is responsible for the `collect-facts phase: prepare` step *before*
+its build step — `check-single.yml`/`check-project.yml` document this as an
+explicit prerequisite step, not something `check-target` can do internally.
+This is not new capability lost, just precision about where the existing
+two-phase `collect-facts` contract's boundary actually falls relative to
+`check-target`'s own invocation point.
 
 ### Reusable workflows
 
@@ -627,7 +673,7 @@ scenario requires `aggregate` except S28.
 | S11 | Make/EPICS/custom build | `collect-facts producer: wrapper` over Make `CC=`/`CXX=` | any | The PVXS validated path (`validation/pvxs-abi-validation-2026-07.md`). |
 | S12 | Bazel/sandboxed build | `build-output.json` populated from `aquery`/declared outputs | any | Sandbox side effects must be declared artifacts, not filesystem scraping. |
 | S13 | Package-only / prebuilt artifacts | `check-project.yml` via a package→`build-output.json` adapter | any | No source checkout required; folds into `check-project`, no separate workflow (D7). |
-| S14 | Multi-DSO release bundle | one `check-target` over the bundle (directory/`--manifest` compare) | any | One report; distinct from S15. |
+| S14 | Multi-DSO release bundle | one `check-target` over the bundle (directory/`--manifest` compare); **`resolve-baseline`'s unit of resolution is the bundle, not a single target** — see the note below the table | any | One report; distinct from S15. |
 | S15 | Multiple independent targets, one build | `check-project.yml` matrix, no fan-in required unless gating jointly | any | oneDAL/PVXS-class; each target keeps its own header/compiler context. |
 | S16 | Shared source facts, multiple DSO | `collect-facts` + declared `evidence.projection` in `build-output.json` | any | Safe-model-now vs. full-model documented in §2/§9; never auto-assumed ownership. |
 | S17 | Multiple build profiles | `check-project.yml` matrix cells keyed by `profile.id`, one per-profile `build-output.json` artifact per cell (§2's "one artifact = one profile" design point) | per-profile | Which lanes are ABI contracts vs. test-only is an explicit `.abicheck.yml` `profiles:` allowlist, not "every CI lane." |
@@ -642,6 +688,30 @@ scenario requires `aggregate` except S28.
 | S26 | Shadow rollout / migration from another tool | `check-single.yml`/`check-project.yml` with `gate-mode: advisory` | any | Old tool kept running in parallel until acceptance criteria met; no forced removal. |
 | S27 | Intentional breaking change | unchanged check, PR-scoped gate relaxation only | accepted-main updates post-merge | Report stays visible; `release-contract` channel is untouched by the relaxation. |
 | S28 | Multi-target fan-out/fan-in | `check-project.yml`'s trailing `aggregate` job | n/a (consumes prior checks) | The only scenario `abicheck aggregate` is the entry point for. |
+
+**S14's baseline resolution is bundle-scoped, not target-scoped — a gap
+in an earlier draft, fixed per review.** §6 describes `resolve-baseline` as
+resolving `channel × target × profile` to *one* snapshot path, which is
+correct for S1–S13/S15's independent-target checks but cannot, as stated,
+serve S14: bundle-level `compare` (directory/`--manifest` mode) needs the
+*old build's full bundle* — every member library's baseline binary/snapshot
+staged together — to produce cross-library findings (soname skew,
+cross-library type drift, provider-set changes) that a single target's
+snapshot cannot express alone. **Resolution:** for a bundle-scoped check,
+`resolve-baseline`'s unit of resolution is the *bundle ID*, not a single
+target ID — it resolves and returns one snapshot per bundle member
+(`bundles[].targets[]` from `build-output.json`/`.abicheck.yml`, §2/§3),
+staged into one directory, which `check-target`'s bundle variant then hands
+to `compare`'s existing directory/`--manifest` mode as it does today. This
+does not change `baseline-set.json`'s shape (§6/§10) — a baseline set
+already holds one snapshot per target; bundle resolution is simply "resolve
+every target in `bundles[].targets[]` and return them together" rather than
+a new storage format. It does mean `check-target`'s bundle-mode `check_id`
+is bundle-scoped (`pvxs-release@profile#channel`, not
+`libpvxs@profile#channel`), and its report's `target_id`/`target` fields
+identify the bundle, not one member library — distinguishing S14's one
+bundle-level report from S15's N independent per-target reports, which is
+the boundary §1's domain model already requires them to keep separate.
 
 ---
 
@@ -829,21 +899,39 @@ partial zero-config compile-DB inference today), and shipping an
 Adopted the safe, explicitly-declared-or-build-wide model now (§9), deferred
 full attribution to P2.
 
-**D9 — No second pilot repository was fabricated.** The task named a
-"Vandal" repository and floated oneDAL PR #3693 as possible second pilots.
-Neither has a locatable validation record in this repository (finding 5).
-Rather than inventing acceptance findings for an unconfirmed integration,
-this ADR records PVXS as the sole confirmed pilot and lists acquiring a
-second real pilot's validation report as a P1/P2 backlog item (companion
-plan, "Pilot validation gap").
+**D9 — No pilot findings were fabricated; the second pilot's scope is
+scoped precisely rather than either dismissed or overclaimed.** The task
+named a "Vandal" repository (a repo-wide search found zero matches — that
+part of the earlier finding stands) and named oneDAL PR #3693 as a possible
+second pilot. Unlike "Vandal," oneDAL PR #3693 **is** a real, locatable
+field review in this repository (finding 5, corrected) —
+`docs/development/adr/044-reachability-aware-suppression.md`'s Context
+section, `docs/development/plans/g21-oneshot-deep-compare.md`, and
+`validation/REPORT.md` all document it, and it drove real code changes
+(ADR-044). An earlier draft of this ADR understated that evidence (finding
+5's original wording said oneDAL "appears only as a scan-timing data
+point," missing ADR-044 entirely) — corrected upon review rather than left
+as a stale claim. The precise position, not fabricated in either direction:
+oneDAL PR #3693 is a genuine, valuable field pilot for tool-correctness and
+CLI-UX findings, but it is a package/binary-level evaluation, not a
+GitHub-Actions CI-integration pilot — it does not establish S9/S15/S17/S21's
+vendor-toolchain-build-reuse/multi-DSO/multiple-baseline-channel claims, and
+this ADR does not claim it does. Acquiring a CI-integration-scoped second
+pilot (vendor toolchain, source-build reuse, multiple baseline channels)
+remains a real P1/P2 backlog item (companion plan, "Pilot validation gap") —
+narrower now than the earlier "no second pilot exists at all" framing, but
+still open.
 
 ---
 
 ## 14. Known gaps this ADR does not close
 
-- **No second validated pilot** (D9) — a real risk to the "vendor
+- **No second CI-integration-scoped validated pilot** (D9) — oneDAL PR #3693
+  is a real field review with real findings, but it is a package/binary-level
+  evaluation, not a GitHub-Actions/CI-integration pilot; the "vendor
   toolchain / multiple DSO / multiple baseline channels" claims in §8
-  (S9/S15/S21) staying aspirational until one exists.
+  (S9/S15/S17/S21) still need a pilot in PVXS's format before they stop
+  being design-only.
 - **Full source-evidence TU→DSO attribution** (§9, D8) is P2, not built
   here; S16's "required full model" is a documented target state only.
 - **`build-output.json` producer tooling** (a real `abicheck build-output
