@@ -733,7 +733,27 @@ must never render as an unqualified "source-depth check passed."
 
 `gate-mode` replaces the ad hoc combination of `fail-on-breaking` /
 `fail-on-api-break` for the new primitives (root `action.yml`'s existing
-flags are kept for backward compatibility — see migration mapping below):
+flags are kept for backward compatibility — see migration mapping below).
+
+**`check-target`'s internal analysis step must run with `continue-on-error:
+true` and a trailing step must own the composite's actual exit — a required
+implementation detail, flagged by review.** `check-target` composes root
+`action.yml` as one of its own internal steps (§4). GitHub's own composite/
+step semantics mean a nonzero exit from that internal step halts the
+remaining steps in `check-target` unless it is marked
+`continue-on-error: true` — so for `gate-mode: local` on a genuine ABI
+break (where the analysis step is *supposed* to exit nonzero), and for any
+`deferred`/`advisory` check that hits an operational failure mid-analysis,
+a naive implementation would never reach the later steps that write the
+report envelope (§7) with its `target_id`/legacy `verdict`/`severity`
+fields — exactly the reports `aggregate` and PR comments need to consume,
+for exactly the failing checks where that matters most. `check-target` must
+therefore: (1) run its internal analysis step with `continue-on-error: true`
+and capture its exit code/outputs explicitly, (2) always execute the
+report-envelope-writing step regardless of that outcome, and (3) make its
+own composite exit code — reflecting `gate-mode`'s actual semantics — the
+last thing it does, not an implicit pass-through of the internal step's
+raw exit code.
 
 - **`local`** — this one target's check sets the job's own exit code (today's
   root-action behavior; correct for S1/S2/S4/S6).
@@ -836,12 +856,36 @@ derived snapshots — `actions/baseline`'s archive for a bundle gains a
 `.abicheck.json` files (the snapshots stay for S15-style independent-target
 resolution and for `resolve-baseline`'s digest/schema checks; the binaries
 are what bundle analysis's old side actually consumes). `resolve-baseline`
-for a bundle-scoped check therefore returns paths to those staged binaries,
-not to the JSON snapshots, for `check-target`'s bundle variant to hand to
-`compare`'s existing directory/`--manifest` mode. This does not change
-`baseline-set.json`'s manifest shape (§6/§10) — it still records one entry
-per target, now with a pointer to the preserved binary alongside its
-snapshot digest. It does mean `check-target`'s bundle-mode `check_id`
+for a bundle-scoped check therefore returns paths to those staged binaries
+for `check-target`'s bundle variant to hand to `compare`'s existing
+directory/`--manifest` mode.
+
+**"Binaries only" is not the full answer for every requested depth — an
+honest open gap, flagged in a later review round, not fully resolved
+here.** The paragraph above is correct for bundle-graph findings (soname
+skew, provider-set changes) — those come from `build_bundle_snapshot()`'s
+ELF-only path. But `compare-release`'s *per-library* diffs within a bundle
+(the header/source-depth comparison for each member individually, not the
+cross-library graph) build their old-side per-library maps from whatever
+paths they're handed too — which for header/source-depth means old
+**headers**/compile-context, not JSON snapshots, matching how a plain
+non-bundle `compare` gets its old side. So a bundle-scoped check requesting
+header or source depth needs the archive to also preserve old-side
+**headers** per member (not the `.abicheck.json` snapshots, which
+`build_bundle_snapshot()` ignores just as much as it ignores anything
+non-ELF) — a `binaries/`-only archive under-serves that case, and handing
+the per-member snapshots instead doesn't help `compare-release`'s
+binary/header-based per-library flow either. **This ADR does not fully
+resolve the mixed-input shape a depth-aware bundle baseline needs** —
+whether that means the archive also gains a `headers/` directory per
+bundle member, or `compare-release` grows a snapshot-consuming input path
+it doesn't have today — and defers the concrete design to P1.6's
+implementation, which must not assume "binaries only" (this ADR's prior,
+now-corrected claim) covers every depth a bundle-scoped check can request.
+This does not change `baseline-set.json`'s manifest shape (§6/§10) — it
+still records one entry per target, now with a pointer to the preserved
+binary alongside its snapshot digest. It does mean `check-target`'s
+bundle-mode `check_id`
 is bundle-scoped (`pvxs-release@profile#channel`, not
 `libpvxs@profile#channel`), and its report's `target_id`/`target` fields
 identify the bundle, not one member library — distinguishing S14's one

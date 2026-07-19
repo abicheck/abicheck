@@ -281,6 +281,15 @@ scoped `aggregate` parser update to also read the new field names. Either
 way, this must land before P1.4, or `check-project.yml`'s `aggregate` step
 will see every `check-target` report as verdictless/ungated.
 
+**Third required sub-task, flagged by review:** the internal analysis step
+(the nested `uses:` invocation of root `action.yml`) must run with
+`continue-on-error: true`, with a trailing step owning `check-target`'s
+actual exit code. Without this, a genuine ABI break under
+`gate-mode: local` (where the internal step is *supposed* to exit nonzero)
+or an operational failure mid-analysis under `deferred`/`advisory` halts
+`check-target` before its report-writing step runs at all — the exact
+failing checks whose reports `aggregate`/PR comments most need to see.
+
 **Files:** new `actions/check-target/action.yml`, `run.sh`.
 
 **Dependencies:** P1.1, P1.2, P0.3.
@@ -359,6 +368,17 @@ bundle analysis, exactly the failure this correction exists to prevent).
 source binary into `binaries/` and record its path/digest in
 `baseline-set.json`) alongside the two new workflows — not treated as an
 unrelated, already-solved dependency.
+
+**Open design gap, not resolved by ADR-045, flagged by review:** `binaries/`
+alone serves bundle-graph findings (soname skew, provider-set changes) but
+not necessarily a header/source-depth per-library diff within the bundle —
+`compare-release`'s per-library flow needs old-side headers/compile-context
+for that, which `binaries/` doesn't carry and which `.abicheck.json`
+snapshots don't help either (`build_bundle_snapshot()` ignores non-ELF
+inputs regardless). Before this item is implemented, resolve whether the
+archive also needs a per-member `headers/` directory, or whether
+`compare-release` needs a new snapshot-consuming input path — do not ship
+S14 depth-aware bundle checks assuming `binaries/` alone is sufficient.
 
 **Required cache-key detail, flagged by review:** GitHub Actions cache
 entries are immutable once written (no overwrite-in-place); the workflow
