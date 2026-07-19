@@ -378,6 +378,48 @@ class TestMarkReachabilityTriState:
         # test_func_removed_with_no_graph_at_all_is_unknown, below) correctly
         # stays UNKNOWN — no walk of any kind could speak to it.
 
+    def test_dwarf_backend_bare_name_type_uses_qualified_name_for_internal_check(
+        self,
+    ) -> None:
+        """Codex review: RecordType.qualified_name is populated (only) in the
+        DWARF-backend case, where .name deliberately stays bare (e.g.
+        "Hidden") so type-map lookups match the same key as the castxml
+        backend, while .qualified_name carries the real namespace path (e.g.
+        "ns::detail::Hidden"). A type-shaped change's root/symbol is always
+        the bare name — is_internal_type(root, ...) alone sees no "::"
+        segments in "Hidden" and misses that this type is genuinely
+        internal, wrongly leaving a change the layout walk already proved
+        unreachable at UNKNOWN instead of PROVEN_UNREACHABLE."""
+        old = _snap(
+            functions=[_public_fn("foo", "int")],
+            types=[
+                RecordType(
+                    name="Hidden",
+                    kind="class",
+                    size_bits=64,
+                    qualified_name="ns::detail::Hidden",
+                ),
+            ],
+        )
+        new = _snap(
+            functions=[_public_fn("foo", "int")],
+            types=[
+                RecordType(
+                    name="Hidden",
+                    kind="class",
+                    size_bits=128,
+                    qualified_name="ns::detail::Hidden",
+                ),
+            ],
+        )
+        raw_change = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Hidden", description="size changed"
+        )
+        DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        assert raw_change.reachability_state == ReachabilityState.PROVEN_UNREACHABLE
+
     def test_degraded_call_graph_leaves_unexamined_change_unknown(self) -> None:
         """A change the layout walk never examines at all (a function-shaped
         FUNC_REMOVED with no field/base/signature evidence) whose only

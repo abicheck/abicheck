@@ -521,17 +521,21 @@ _ENUM_MEMBER_KINDS = frozenset({
     ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED,
 })
 
-# Codex review: buildsource/source_diff.py's L4 source-replay findings are
-# public *by construction* — each one is built only from an old/new
-# SourceAbiSurface's own ``reachable_types``/``reachable_macros``/
-# ``reachable_declarations``/``reachable_templates`` collections (entities
-# already proven reachable from the public surface by the L4 replay walk
-# itself), never from a namespace-name heuristic. Falling through to the
-# is_internal_type()-based layout/call-graph classification below would
-# misjudge one of these purely on its *name* (e.g. a genuinely public
-# typedef that happens to live in a namespace segment matching
-# DEFAULT_INTERNAL_NAMESPACES) and could mark it PROVEN_UNREACHABLE even
-# though the L4 surface that produced it already proved the opposite.
+# buildsource/source_diff.py's L4 source-replay findings are public *by
+# construction* -- each is built only from a SourceAbiSurface's own
+# reachable_types/reachable_macros/reachable_declarations/reachable_templates
+# collections (or, for SOURCE_DECL_BINARY_SYMBOL_MISMATCH, the
+# source_decl_to_binary_symbol mapping -- see _diff_mappings's own "Public
+# declaration ..." description; or, for ODR_SOURCE_CONFLICT, source_link.py's
+# _route_type() appending the entity to reachable_types before its ODR check
+# even runs) -- entities already proven reachable from the public surface,
+# never from a namespace-name heuristic. Falling through to the
+# is_internal_type()-based classification below would misjudge one of these
+# purely on its *name* and could mark it PROVEN_UNREACHABLE even though the
+# L4 surface that produced it already proved the opposite (Codex review,
+# four passes). Deliberately NOT extended to SOURCE_BINARY_PROVENANCE_MISMATCH
+# (aggregate, symbol="") or ODR_SOURCE_CONFLICT's `odr_conflicts` sibling
+# checks that aren't scoped to public/reachable types.
 _PUBLIC_SOURCE_ABI_KINDS = frozenset({
     ChangeKind.PUBLIC_TYPEDEF_REMOVED,
     ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED,
@@ -539,31 +543,13 @@ _PUBLIC_SOURCE_ABI_KINDS = frozenset({
     ChangeKind.PUBLIC_MACRO_VALUE_CHANGED,
     ChangeKind.INLINE_FUNCTION_REMOVED,
     ChangeKind.UNINSTANTIATED_TEMPLATE_REMOVED,
-    # Codex review, second pass: the rest of source_diff.py's findings are
-    # built from the same reachable_declarations/reachable_types/
-    # reachable_templates buckets as the six kinds above -- equally public
-    # by construction, not just the typedef/macro/inline-function/template
-    # subset first covered here.
     ChangeKind.CONCEPT_TIGHTENED,
     ChangeKind.CONSTEXPR_VALUE_CHANGED,
     ChangeKind.DEFAULT_ARGUMENT_CHANGED,
     ChangeKind.INLINE_BODY_CHANGED,
     ChangeKind.TEMPLATE_BODY_CHANGED,
     ChangeKind.GENERATED_HEADER_CHANGED,
-    # Codex review, third pass: _diff_mappings's own description text is
-    # explicit -- "Public declaration {name!r} no longer maps to an exported
-    # symbol" -- so this is the same public-by-construction claim as the
-    # kinds above, keyed from old.mappings["source_decl_to_binary_symbol"]
-    # rather than a reachable_* bucket directly. Deliberately NOT extended to
-    # SOURCE_BINARY_PROVENANCE_MISMATCH (an aggregate finding with symbol=""
-    # -- no single declaration name to misjudge).
     ChangeKind.SOURCE_DECL_BINARY_SYMBOL_MISMATCH,
-    # Codex review, fourth pass: source_link.py's _route_type() appends every
-    # public type entity to reachable_types unconditionally, BEFORE its
-    # separate ODR-conflict check runs -- so a type that goes on to produce
-    # an ODR_SOURCE_CONFLICT is, by construction, already in reachable_types
-    # (the earlier "not scoped to public/reachable types" reasoning was
-    # wrong; verified against source_link.py's actual routing order).
     ChangeKind.ODR_SOURCE_CONFLICT,
 })
 
@@ -850,6 +836,17 @@ class MarkReachability:
             | {t.name for t in ctx.new.types} | {e.name for e in ctx.new.enums}
             | set(ctx.old.typedefs) | set(ctx.new.typedefs)
         )
+        # RecordType.qualified_name (model.py) is set only in the DWARF-backend
+        # case, where .name stays bare (matching castxml's type-map key) but
+        # the real namespace path lives only here -- a type-shaped change's
+        # root is always the bare name, so is_internal_type(root, ...) alone
+        # misses a bare name like "Hidden" for "ns::detail::Hidden" (Codex
+        # review).
+        qualified_name_by_bare = {
+            t.name: t.qualified_name
+            for t in (*ctx.old.types, *ctx.new.types)
+            if t.qualified_name
+        }
 
         for c in changes:
             root = _root_type_name_for_change(c)
@@ -1029,11 +1026,15 @@ class MarkReachability:
                 # enum's ABI break unreachable. Test enum_owner (the bare
                 # enum name) instead of root for that case.
                 internal_check_subject = enum_owner if enum_owner is not None else root
+                type_qualified_name = qualified_name_by_bare.get(internal_check_subject)
                 subject_is_internal = is_internal_type(
                     internal_check_subject, namespaces
                 ) or (
                     c.qualified_name is not None
                     and is_internal_type(c.qualified_name, namespaces)
+                ) or (
+                    type_qualified_name is not None
+                    and is_internal_type(type_qualified_name, namespaces)
                 )
                 layout_domain = root in reachable_types or (
                     subject_is_internal
