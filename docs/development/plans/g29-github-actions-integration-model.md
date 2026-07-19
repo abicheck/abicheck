@@ -187,17 +187,22 @@ the logic is non-trivial).
 Implements ADR-045 §4/§7. Composes root `action.yml` + `collect-facts` (if
 evidence required) + `resolve-baseline`; always emits the report envelope;
 `gate-mode: local|deferred|advisory` input. **Identity requirement flagged
-by review:** `check-target` must write the check's full `check_id`
-(`target@profile#baseline_channel`, §7) into the report's own `target_id`
-field whenever the run plan has more than one check for the same target
-(S17 multi-profile, S21 multi-channel) — not the bare target name. This is
-required, not cosmetic: `abicheck/aggregate.py:642-729`'s `collect_reports`
-keys reports by `target_id` (preferring the report's own field over the
-filename) and hard-errors on a duplicate, so two checks sharing a bare
-target name would either collide or silently overwrite each other in a
-naive implementation. For the single-check-per-target majority case,
-`check_id` and the bare target name coincide — this only has to actually
-differ once a target has concurrent checks.
+by review, corrected in a follow-up review pass:** `check-target` must write
+the check's full `check_id` (`target@profile#baseline_channel`, §7) into the
+report's own `target_id` field for **every** check, unconditionally — not
+only when the run plan has more than one check for the same target. An
+earlier version of this item scoped the rule to the multi-check case (S17
+multi-profile, S21 multi-channel) "since it only matters once a target has
+concurrent checks" — that reasoning was wrong: `aggregate.py`'s manifest
+matching is an exact string comparison, so if the manifest projection (P1.4)
+always emits `check_id`-shaped IDs but `target_id` is only sometimes set to
+`check_id`, the *ordinary* single-check case (S1–S15's majority, including
+PVXS) mismatches too (report says `target_id: "libpvxs"`, manifest expects
+`"libpvxs@profile#channel"` — required target reported missing).
+`abicheck/aggregate.py:642-729`'s `collect_reports` keys reports by
+`target_id` (preferring the report's own field over the filename) and
+hard-errors on a duplicate, so this identity must be exact and consistent
+for every check, with no conditional branch.
 
 **Files:** new `actions/check-target/action.yml`, `run.sh`.
 
@@ -226,6 +231,19 @@ either an inline `jq`/Python step in the workflow, or a small
 out to need real validation logic beyond the `check_id` derivation. Decide
 which during implementation; do not skip this and assume `run-plan.json` can
 be passed straight through, and do not project down to bare target names.
+
+**Second required sub-task, flagged by review:** in `gate-mode: deferred`
+(ADR-045 §7), an individual matrix cell is *expected* to fail its own job on
+an operational error — that visibility is the point. Plain GitHub Actions
+`needs:` semantics skip a dependent job when any dependency fails, and a
+skipped job reports `success` — so the trailing `aggregate` job in
+`check-project.yml` **must** be defined with `if: always()` (or
+`!cancelled()`), never a bare `needs:` with no `if:`. Without this, one
+matrix cell's operational failure silently skips the aggregate job and the
+branch-protection-required status goes green with a missing target —
+exactly the failure mode ADR-045 is meant to close. Cover this with a
+fixture-workflow test that deliberately fails one matrix cell and asserts
+the aggregate job still runs and reports the failure.
 
 **Files:** `.github/workflows/check-single.yml`, `.github/workflows/check-project.yml`,
 possibly a new small CLI helper per the sub-task above.

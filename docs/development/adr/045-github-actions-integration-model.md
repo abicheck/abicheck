@@ -406,18 +406,32 @@ simultaneously, produces two reports for one bare target name — exactly the
 collision `collect_reports` rejects. The manifest projection therefore must
 use each check's full `check_id` (§7's `target@profile#baseline_channel`
 form) as the manifest `targets[].id`, **and** `check-target` (P1.3) must
-write that same `check_id` into each report's own `target_id` field — not
-the bare target name — whenever a project has more than one check per
-target. `aggregate`'s existing keying mechanism then handles S17/S21
-correctly with no CLI change, because it already prefers the report's own
-`target_id` field over the filename. For the common single-check-per-target
-case (S1–S15's single-profile/single-channel majority), `check_id` and
-`target_id` coincide, so this stays invisible in the simple case and only
-matters once a target legitimately has multiple concurrent checks. This
-resolution (not the one-line-rename version) is what P1.3/P1.4's companion
-plan entries now specify. Coverage is still checked against the same
-explicit plan, not an implicit job list — the fix is in how identity flows
-between the two artifacts, not in the coverage guarantee itself.
+write that same `check_id` into each report's own `target_id` field.
+
+**Third correction, from a follow-up review pass:** this must be
+**unconditional — every check, not just checks sharing a target with
+another check.** An earlier draft scoped the `target_id = check_id` rule to
+"whenever a project has more than one check per target," which is a real
+bug: `abicheck/aggregate.py`'s matching is an exact string comparison
+(`found.get(tid)` against the manifest's `targets[].id`, §"P1.3/P1.4"
+below). If the manifest projection always emits `check_id`-shaped IDs (which
+it must, to stay one consistent rule) but `check-target` only populates
+`target_id` with `check_id` for the multi-check case, then an *ordinary*
+single-target, single-profile, single-channel check (S1–S15's majority
+case, including PVXS/S15 itself) reports `target_id: "libpvxs"` while the
+manifest expects `"libpvxs@linux-x86_64-gcc13-release#accepted-main"` —
+an exact-match miss, so `aggregate` reports the required target *missing*
+and the real report *unexpected*, on the single most common flow this whole
+model is meant to make simple. There is no conditional case here: every
+`check-target` run writes `target_id = check_id` into its report, full
+stop, and every manifest projection uses `check_id` as `targets[].id`, full
+stop — the "simple case looks the same" property comes from `check_id`
+always being a stable, well-formed string (never from sometimes being the
+bare target name), so `aggregate`'s exact match always lines up. This is
+what P1.3/P1.4's companion plan entries now specify. Coverage is still
+checked against the same explicit plan, not an implicit job list — the fix
+is in how identity flows between the two artifacts, not in the coverage
+guarantee itself.
 
 ---
 
@@ -522,7 +536,22 @@ flags are kept for backward compatibility — see migration mapping below):
 - **`deferred`** — report is always produced; the *matrix's* final
   `aggregate` job computes gate status. Operational/config errors still fail
   the individual job — `deferred` only defers the *compatibility* verdict's
-  effect on exit code, never operational errors (S15/S28).
+  effect on exit code, never operational errors (S15/S28). **Required
+  workflow-contract detail, added per review:** because an individual
+  matrix cell is allowed to fail its own job (that's the point — an
+  operational error must be visible), `check-project.yml`'s trailing
+  `aggregate` job **must** run with `if: always()` (or the equivalent
+  `!cancelled()` / needs-result-bucket condition), never a bare `needs:` with
+  no `if:`. Plain GitHub Actions `needs:` semantics skip a dependent job when
+  any of its dependencies fail, and a *skipped* job reports status
+  `success` to branch protection — so without an explicit `if: always()`,
+  one matrix cell's operational failure would skip the aggregate job
+  entirely and the required branch-protection check would go *green*
+  despite a missing/failed target, exactly the "missing required report
+  silently becomes compatible" failure mode this ADR exists to close. This
+  is not implementation-detail trivia; it is a load-bearing correctness
+  requirement of the `deferred` gate-mode contract and is now specified as
+  such in `check-project.yml`'s definition (companion plan, P1.4).
 - **`advisory`** — report published, findings never affect exit code
   (shadow-rollout burn-in, S26).
 
