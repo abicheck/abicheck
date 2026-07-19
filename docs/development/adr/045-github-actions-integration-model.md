@@ -492,6 +492,25 @@ stays the contract target's name (`myapp-consumer@profile#channel@depth`)
 different fields for these two `kind`s, unlike `kind: library` where they
 coincide.
 
+**Candidate/new-side lookup needs the same `library` redirect, not just
+`resolve-baseline` — a follow-up gap in the fix above, flagged in a later
+review round.** `app-consumer`/`plugin-contract` targets have no
+`binary_pattern` of their own (§3's example shows `consumer_binary_pattern`/
+`contract_file` instead) — only their `library` field's target entry has a
+`binary_pattern` pointing at a real built DSO. Redirecting only
+`resolve-baseline` (the *old*/baseline side) to `library` while leaving
+candidate-artifact lookup (the *new* side — what `check-target` hands to
+`compare --used-by`/`--required-symbols` as the library under test)
+target-keyed would still have an S22/S23 implementation look for a
+`myapp-consumer`/`ioc-plugin-contract` binary in `build-output.json`'s
+`targets[]` and fail before ever invoking the scoped compare. **Same rule,
+applied consistently:** candidate artifact and public-header/compile-context
+lookup for `app-consumer`/`plugin-contract` targets also resolve through
+`library` — every binary/header/build-context lookup for these two `kind`s
+uses `library`, only the check's own reporting identity
+(`check_id`/`target_id`, `consumer_binary_pattern`/`contract_file` for the
+scoped input) stays keyed to the contract target's own name.
+
 **`profiles:` shape, missing from an earlier draft — flagged by review.**
 §8's S17 row and P1.5 rely on `.abicheck.yml` declaring which build
 profiles are ABI contracts (get a baseline, gate CI) versus test-only CI
@@ -740,9 +759,19 @@ moment two reports resolve to the same `target_id`. A project with `libfoo`
 checked on two profiles, or on both `release-contract` and `accepted-main`
 simultaneously, produces two reports for one bare target name — exactly the
 collision `collect_reports` rejects. The manifest projection therefore must
-use each check's full `check_id` (§7's `target@profile#baseline_channel`
-form) as the manifest `targets[].id`, **and** `check-target` (P1.3) must
-write that same `check_id` into each report's own `target_id` field.
+use each check's full `check_id` — **including the `@requested_depth`
+suffix §7 later makes unconditional, not the plain three-part
+`target@profile#baseline_channel` form** (a stale reference in an earlier
+draft of this very paragraph, flagged in a further review round: §7's
+depth-suffix correction landed after this paragraph was first written, and
+this sentence was never updated to match) — as the manifest `targets[].id`,
+**and** `check-target` (P1.3) must write that same fully-qualified
+`check_id` into each report's own `target_id` field. Without the depth
+suffix here specifically, any S26/header+source run for the same
+target/profile/channel would have `aggregate`'s exact-match lookup mark the
+depth-qualified reports "unexpected" and the plain three-part manifest
+entry "missing," even though every other correction in this ADR already
+requires the depth-qualified form everywhere else.
 
 **Third correction, from a follow-up review pass:** this must be
 **unconditional — every check, not just checks sharing a target with
