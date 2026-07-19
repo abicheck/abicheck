@@ -79,8 +79,20 @@ def _resolve_side_pack(
     snapshot's embedded payload per layer; when neither flag is given the
     embedded ``snap.build_source`` is used as-is (single-artifact UX).
     """
-    bi_pack = _load_side_pack_input(build_info)
-    src_pack = _load_side_pack_input(sources)
+    # AC-003 (compare side): seed the ingest of a Flow-2 `abicheck_inputs/` pack
+    # given via `--old/new-build-info`/`--old/new-sources` with this side's L0
+    # exports, so its source surface relinks onto the DSO (matched_symbols>0)
+    # instead of reporting 0 — the same fix the dump/embed path already applies
+    # (Codex/CodeRabbit review). Lazy import: `_exported_symbols_from_snapshot`
+    # lives in `cli_buildsource_merge`, which imports this leaf module, so a
+    # top-level import would re-form that cycle.
+    from .cli_buildsource_merge import _exported_symbols_from_snapshot
+
+    exported = (
+        _exported_symbols_from_snapshot(snap) if snap is not None else ()
+    )
+    bi_pack = _load_side_pack_input(build_info, exported_symbols=exported)
+    src_pack = _load_side_pack_input(sources, exported_symbols=exported)
     embedded = snap.build_source if snap is not None else None
     if bi_pack is None and src_pack is None:
         return embedded

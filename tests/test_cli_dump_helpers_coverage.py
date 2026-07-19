@@ -27,7 +27,6 @@ from abicheck.cli_dump_helpers import (
     check_dump_compile_db_error,
     check_dump_debug_format_error,
     compile_db_as_l3_build_info,
-    evidence_depth_label,
     handle_non_elf_dump,
     perform_elf_dump,
     resolve_dump_collect_context,

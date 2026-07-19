@@ -2460,12 +2460,14 @@ def test_coverage_row_for_present_layer_branches():
 
 
 def test_raw_sources_inline_wins_l4_l5_over_build_info_pack():
-    """AC-001: an explicit raw ``--sources`` cold scan (the inline pack, passed as
-    ``embedded``) must supply L4/L5, beating a pre-baked Flow-2 pack given via
-    ``--build-info`` (bi_pack) for its L3. A ``--build-info``-only run still
-    falls back to the pack's L4/L5."""
+    """AC-001: an explicit raw ``--sources`` cold scan (the inline pack) must
+    supply L4/L5, beating a pre-baked Flow-2 pack given via ``--build-info``
+    (bi_pack) for its L3. `embed_build_source` routes the inline pack into the
+    src_pack slot via `route_inline_source_supplier`; a ``--build-info``-only run
+    still falls back to the pack's L4/L5."""
     from pathlib import Path
 
+    from abicheck.buildsource.merge_support import route_inline_source_supplier
     from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.buildsource.source_abi import SourceAbiSurface
     from abicheck.buildsource.source_graph import SourceGraphSummary
@@ -2482,7 +2484,10 @@ def test_raw_sources_inline_wins_l4_l5_over_build_info_pack():
         source_graph=SourceGraphSummary(),
     )
 
-    combined = _combine_packs(bi, None, inline)
+    # No --sources pack → the inline scan takes the sources slot and wins L4/L5.
+    sources_supplier, backfill = route_inline_source_supplier(None, inline)
+    assert sources_supplier is inline and backfill is None
+    combined = _combine_packs(bi, sources_supplier, backfill)
     assert combined is not None and combined.source_abi is not None
     assert combined.source_abi.library == "from_sources"
     assert combined.source_graph is inline.source_graph
@@ -2491,6 +2496,35 @@ def test_raw_sources_inline_wins_l4_l5_over_build_info_pack():
     fallback = _combine_packs(bi, None, None)
     assert fallback is not None and fallback.source_abi is not None
     assert fallback.source_abi.library == "from_build_info"
+
+    # A real --sources pack keeps the sources slot; the inline pack backfills.
+    src = BuildSourcePack(
+        root=Path(""), source_abi=SourceAbiSurface(library="from_sources_pack")
+    )
+    keep, back = route_inline_source_supplier(src, inline)
+    assert keep is src and back is inline
+
+
+def test_compare_explicit_build_info_overrides_embedded_l4_l5():
+    """Codex: on the `compare` path `_combine_packs(bi_pack, None, embedded)`
+    must let an explicit ``--build-info`` pack's L4/L5 override the snapshot's
+    embedded payload (embedded is lowest priority) — the AC-001 reorder must not
+    regress this."""
+    from pathlib import Path
+
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+    from abicheck.cli_buildsource import _combine_packs
+
+    bi = BuildSourcePack(
+        root=Path(""), source_abi=SourceAbiSurface(library="from_build_info_pack")
+    )
+    embedded = BuildSourcePack(
+        root=Path(""), source_abi=SourceAbiSurface(library="stale_embedded")
+    )
+    combined = _combine_packs(bi, None, embedded)
+    assert combined is not None and combined.source_abi is not None
+    assert combined.source_abi.library == "from_build_info_pack"
 
 
 def test_l5_coverage_partial_when_call_type_passes_degraded():

@@ -34,6 +34,7 @@ from .buildsource.merge_support import (
     _combine_packs,
     _filter_pack_layers,
     _layer_value,
+    route_inline_source_supplier,
 )
 from .buildsource.model import DataLayer
 from .buildsource.pack import BuildSourcePack
@@ -254,9 +255,16 @@ def embed_build_source(
     bi_pack = _filter_pack_layers(bi_pack, layers)
     src_pack = _filter_pack_layers(src_pack, layers)
 
-    # --build-info (pack) wins L3, --sources (pack) wins L4/L5, the inline pack
-    # backfills both; coverage is rebuilt per layer from the supplying pack.
-    merged = _combine_packs(bi_pack, src_pack, inline_pack)
+    # --build-info (pack) wins L3; --sources wins L4/L5; the inline collection of
+    # a raw --sources/--build-info tree backfills. AC-001: a raw `--sources` cold
+    # scan is the *sources* contributor, so route it into the src_pack slot (which
+    # outranks --build-info for L4/L5); a real --sources pack keeps that slot and
+    # the inline pack backfills. Coverage is rebuilt per layer from the supplying
+    # pack.
+    sources_supplier, inline_backfill = route_inline_source_supplier(
+        src_pack, inline_pack
+    )
+    merged = _combine_packs(bi_pack, sources_supplier, inline_backfill)
     if merged is None:
         return
     # ADR-041 addendum: a `dump --header-graph` pass already attached a

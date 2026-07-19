@@ -275,6 +275,25 @@ def _build_combined_provenance(
     return artifacts, extractors
 
 
+def route_inline_source_supplier(
+    src_pack: BuildSourcePack | None,
+    inline_pack: BuildSourcePack | None,
+) -> tuple[BuildSourcePack | None, BuildSourcePack | None]:
+    """Split the inline-collected pack into ``(sources_supplier, backfill)``.
+
+    AC-001: a raw ``--sources`` cold scan (``inline_pack``) is the *sources*
+    contributor, so it must win L4/L5 over a Flow-2 ``--build-info`` pack. Route
+    it into ``_combine_packs``'s ``src_pack`` slot (which outranks ``bi_pack``
+    for L4/L5) when no ``--sources`` *pack* was given; a real ``--sources`` pack
+    keeps that slot and the inline pack becomes the lowest-priority backfill.
+    Keeping the inline pack out of the ``embedded`` slot on this path leaves that
+    slot free for ``compare``'s snapshot payload, so an explicit ``--build-info``
+    pack still overrides embedded facts there (Codex review)."""
+    if src_pack is not None:
+        return src_pack, inline_pack
+    return inline_pack, None
+
+
 def _combine_packs(
     bi_pack: BuildSourcePack | None,
     src_pack: BuildSourcePack | None,
@@ -291,22 +310,24 @@ def _combine_packs(
     flags point at different packs (Codex review). Returns ``None`` when no pack
     contributes any facts.
     """
-    # L3 comes from --build-info first (bi_pack), then --sources, then the inline
-    # collection. L4/L5 come from --sources first (src_pack), then the *inline*
-    # collection of a raw --sources/--build-info tree (embedded), and only then a
-    # --build-info pack (bi_pack) as a fallback: an explicitly requested cold
-    # source scan of a raw --sources tree must supply L4/L5, not lose them to a
-    # pre-baked Flow-2 pack passed via --build-info for its L3 (AC-001). `merge`
-    # calls this with embedded=None, so its accumulator/latest-input precedence
-    # (src_pack beats bi_pack) is unchanged.
+    # L3 comes from --build-info (bi_pack) first, then --sources, then the
+    # embedded/backfill pack. L4/L5 come from --sources (src_pack) first, then
+    # --build-info, then the embedded/backfill pack — an explicit --build-info
+    # pack's L4/L5 override the snapshot's embedded payload on the `compare`
+    # path (its documented "explicit flags override embedded" contract). The
+    # AC-001 need — a raw `--sources` cold scan winning L4/L5 over a Flow-2
+    # `--build-info` pack — is handled by `embed_build_source` routing that
+    # inline pack into *this* function's `src_pack` slot, not by reordering here
+    # (which would wrongly let a snapshot's embedded facts beat an explicit
+    # `--build-info` pack, Codex review).
     build_evidence, l3_supplier = _first_attr_with_supplier(
         "build_evidence", bi_pack, src_pack, embedded
     )
     source_abi, l4_supplier = _first_attr_with_supplier(
-        "source_abi", src_pack, embedded, bi_pack
+        "source_abi", src_pack, bi_pack, embedded
     )
     source_graph, l5_supplier = _first_attr_with_supplier(
-        "source_graph", src_pack, embedded, bi_pack
+        "source_graph", src_pack, bi_pack, embedded
     )
 
     base = bi_pack or src_pack or embedded

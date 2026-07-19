@@ -22,15 +22,19 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `_load_inputs_pack_or_raise` without forwarding the analyzed binary's L0
   exports, so the linked source surface reported `matched_symbols=0` and no
   `source_decl_to_binary_symbol` mapping — unlike the `--inputs` path, which
-  already relinked. The embed path now seeds the ingest with the snapshot's
-  exports, so the source declarations map onto the DSO's exported symbols.
+  already relinked. Both the `dump`/embed path and the `compare` side-pack path
+  (`_resolve_side_pack`, for `--old/new-build-info`/`--old/new-sources` inputs
+  packs) now seed the ingest with the snapshot's exports, so the source
+  declarations map onto the DSO's exported symbols.
 - **Build/source layer selection and honesty** (triage AC-001, AC-006,
   AC-007): three further fixes to how build/source evidence is chosen and
   reported. (AC-001) An explicit raw `--sources` cold scan now supplies L4/L5,
   beating a pre-baked Flow-2 pack passed via `--build-info` for its L3 —
-  `_combine_packs` orders the L4/L5 suppliers `--sources` → inline collection →
-  `--build-info`, while a `--build-info`-only run still falls back to the pack's
-  L4/L5 (and `merge`'s precedence is unchanged). (AC-006) The L5 source-graph
+  `embed_build_source` routes the raw-sources inline collection into
+  `_combine_packs`'s sources slot (which outranks `--build-info` for L4/L5),
+  while a `--build-info`-only run still falls back to the pack's L4/L5. The
+  `compare` side-pack precedence (an explicit `--build-info` pack still
+  overrides a snapshot's embedded L4/L5) is unchanged. (AC-006) The L5 source-graph
   coverage row now reports `partial` whenever a call/type pass is *degraded*
   (its live replay never completed and only structural/plugin edges were
   folded), instead of reading `present` just because those edges made the graph
