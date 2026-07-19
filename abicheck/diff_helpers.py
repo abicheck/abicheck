@@ -256,9 +256,11 @@ class TypeMap(Mapping[str, RecordType]):
             return t
         alias_key = self._bare_alias.get(key)
         if alias_key is not None:
-            t = self._primary.get(alias_key)
-            if t is not None:
-                return t
+            # _bare_alias values are always keys already present in
+            # _primary (built from it, see __init__) -- a plain indexing
+            # KeyError here would indicate a construction bug, not a normal
+            # "key absent" case.
+            return self._primary[alias_key]
         raise KeyError(key)
 
     def __len__(self) -> int:

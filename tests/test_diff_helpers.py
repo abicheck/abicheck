@@ -173,6 +173,16 @@ class TestTypeMap:
         assert m["ns1::Impl"] is a
         assert m["ns2::Impl"] is b
 
+    def test_duplicate_same_qualified_identity_does_not_mark_ambiguous(self) -> None:
+        # Two entries sharing both the same bare name AND the same qualified
+        # key (e.g. an ODR-duplicate re-parse of the identical declaration)
+        # is not an ambiguous collision -- the bare alias must still resolve.
+        a = RecordType(name="Foo", qualified_name="ns::Foo", kind="class")
+        b = RecordType(name="Foo", qualified_name="ns::Foo", kind="class")
+        m = build_type_map([a, b])
+        assert m.get("Foo") is b  # second entry wins the primary slot
+        assert "Foo" in m
+
     def test_global_scope_type_has_no_redundant_alias_entry(self) -> None:
         t = RecordType(name="Foo", qualified_name=None, kind="class")
         m = build_type_map([t])
