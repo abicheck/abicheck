@@ -73,6 +73,7 @@ class _WriteSnapshotOutput(Protocol):
         build_compile_db: str | None = ...,
         extractor: str = ...,
         inputs_pack: Path | None = ...,
+        depth: str | None = ...,
     ) -> None: ...
 
 
@@ -147,6 +148,28 @@ def resolve_dump_debug_format(
     return debug_format
 
 
+def check_dump_debug_format_error(
+    effective_debug_format: str | None,
+    binary_fmt: str | None,
+) -> str | None:
+    """Pure predicate for the --debug-format/PE-Mach-O incompatibility.
+
+    Mirrors the ``click.BadParameter`` cli.py's real dump path raises after
+    resolving the binary format, as a plain string instead of raising --
+    shared with ``dump --dry-run``, which previously never ran this check at
+    all (it only existed in the real path, after the dry-run branch), so a
+    ``--dwarf``/``--btf``/``--ctf``/``--debug-format`` dump of a PE/Mach-O
+    binary reported dry-run success on an invocation the real run would
+    immediately reject.
+    """
+    if effective_debug_format is not None and binary_fmt in ("pe", "macho"):
+        return (
+            f"--{effective_debug_format} is only supported for ELF binaries, "
+            f"not {binary_fmt.upper()}."
+        )
+    return None
+
+
 def resolve_dump_depth(
     depth: str | None,
     default_mode: str,
@@ -209,6 +232,17 @@ def evidence_depth_label(
     clang is unavailable after L3 was found) -- checking presence alone would
     overstate ``source``/``build`` for a layer that ran but linked nothing
     (CodeRabbit review).
+
+    ``snap.parsed_with_build_context`` (ADR-020a/039: ``-p``/``--compile-db``,
+    a much older, narrower build-context mechanism than the ``BuildSourcePack``
+    machinery above -- it harvests the active ``-D`` set and ``#ifdef``-guarded
+    fields for the L2 header parse, with no ``BuildEvidence``/compile-unit
+    model of its own) also reaches "build": without this, a
+    ``dump lib.so -H api.h -p build/`` run has no ``snap.build_source`` at all
+    and this function would report "headers", even though the error message
+    this feeds (``check_requested_depth_satisfied``) already documents "build
+    via --build-info/a compile database" as a valid way to satisfy
+    ``--depth build`` (Codex review).
     """
     from .cli import _layer_payload_empty
 
@@ -221,9 +255,332 @@ def evidence_depth_label(
         return "source"
     if build_source is not None and not _layer_payload_empty(build_source, "L3"):
         return "build"
+    if snap.parsed_with_build_context:
+        return "build"
     if snap.from_headers:
         return "headers"
     return "binary"
+
+
+# Same ordering as buildsource.scan_levels.USER_DEPTHS: each rung is a
+# strict superset of the facts below it.
+_DEPTH_RANK: dict[str, int] = {"binary": 0, "headers": 1, "build": 2, "source": 3}
+
+
+def _dump_will_attempt_hybrid_l4_extraction(sources: Path | None) -> bool:
+    """True iff ``collect_inline_pack`` would actually run L4 extraction with
+    ``extractor="hybrid"`` for the ``--sources`` input.
+
+    The ``--depth source`` + ``--ast-frontend hybrid`` rejection exists to
+    stop a real, unsupported hybrid L4 extraction attempt from silently
+    degrading — it must fire *only* when one would actually happen, and stay
+    quiet otherwise so the more accurate error (or none at all) surfaces
+    instead. Only ``--sources`` gates whether L4 replay runs at all:
+    ``cli_buildsource.embed_build_source`` passes ``raw_sources`` (derived
+    solely from the ``sources`` CLI argument, never from ``build_info``) as
+    the one ``sources`` argument ``collect_inline_pack`` forwards to
+    ``_run_inline_source_abi``, which returns immediately (``None, []``, no
+    extraction) when that is ``None`` — ``--build-info`` only ever feeds L3
+    compile-DB resolution and is irrelevant to whether an L4 extractor runs
+    (Codex review, fourth finding: a raw ``--build-info`` tree alongside a
+    *prebuilt* ``--sources`` pack must not trigger this rejection, since no
+    extractor — hybrid or otherwise — ever runs for that combination). Two
+    cases where it must NOT fire, each found by review:
+
+    - **Prebuilt --sources pack input** (Codex review): ``embed_build_source``
+      treats a ``BuildSourcePack`` directory (``is_pack_dir``) or a
+      build-emitted ``abicheck_inputs/`` directory (``_is_inputs_pack_dir``)
+      as data to load and filter, not a tree to extract from — ``raw_sources``
+      is forced to ``None`` for that shape, so ``_run_inline_source_abi``
+      never runs regardless of ``extractor``.
+    - **No --sources at all** (Codex review, third finding): a bare
+      ``dump lib.so -H api.h --depth source --ast-frontend hybrid`` never
+      calls ``collect_inline_pack`` in the first place — L4 was never going
+      to run regardless of frontend. Rejecting here would tell the user to
+      switch frontends when that would not fix anything; the real problem
+      (no source/build evidence at all) is better reported by
+      ``check_requested_depth_satisfied``'s own "reached 'headers'/'binary'"
+      message, which fires downstream regardless.
+    """
+    from .buildsource.inline import is_pack_dir
+    from .cli_buildsource_helpers import _is_inputs_pack_dir
+
+    return sources is not None and not (
+        is_pack_dir(sources) or _is_inputs_pack_dir(sources)
+    )
+
+
+class DumpDepthNotSatisfiedError(click.ClickException):
+    """Raised when an explicit ``--depth`` was requested but not reached.
+
+    Exit code 1 (the default for ``ClickException``) — the "requested depth
+    not satisfiable" code already documented by ``render_dump_dry_run``'s
+    "Output and exit-code behavior" section.
+    """
+
+
+def _l4_source_abi_was_attempted(build_source: BuildSourcePack) -> bool:
+    """True when L4 source-ABI extraction genuinely parsed source, regardless
+    of whether it linked any declarations to a binary.
+
+    Coverage *status* alone (``PRESENT``/``PARTIAL`` vs ``NOT_COLLECTED``) is
+    not enough: ``buildsource.inline._run_inline_source_abi`` stamps L4
+    ``PARTIAL`` (never ``NOT_COLLECTED``) both for the *expected*, warn-only
+    "ran but 0/N symbols matched" outcome of a source-only ``dump --sources``
+    (no binary to link declarations against; see ``_write_snapshot_output``'s
+    G21.7 "collected but linked no facts" warning) **and** for a genuinely
+    *failed* attempt — the selected extractor missing from ``PATH``, or every
+    selected TU failing to parse — which returns the same empty
+    ``SourceAbiSurface()`` shape with the same ``PARTIAL`` status (Codex
+    review, fifth finding: a missing/failing extractor must not satisfy an
+    explicit ``--depth source``, matching representation notwithstanding).
+
+    The reliable signal is the presence of
+    ``SourceAbiSurface.coverage["compile_units_parsed"]`` specifically — set
+    unconditionally by ``source_replay.run_source_replay`` whenever replay
+    actually executes, independent of whether anything downstream matched
+    against binary exports (parsing happens before, and regardless of,
+    linking). The *key* (not just a non-empty ``coverage`` dict) is what
+    matters: it is absent for the tool-unavailable short-circuit, which
+    returns a bare ``SourceAbiSurface()`` before replay ever runs, but a
+    non-empty ``coverage`` dict populated by a *different* stage —
+    ``link_source_abi``'s own ``reachable_declarations``/``matched_symbols``
+    stats, stamped on a Flow-2 ``inputs_pack.ingest_inputs_pack()`` pack that
+    never went through ``run_source_replay`` at all (pure per-TU-facts
+    parsing, no frontend re-run) — must not be mistaken for "replay ran"
+    just because it happens to be truthy. ``NOT_COLLECTED`` still covers the
+    "no extraction attempted at all" cases (no ``--sources``, no L3 to replay
+    against, or ``--ast-frontend hybrid``, which ``_run_inline_source_abi``
+    records as ``"skipped"``).
+
+    Falls back to the payload-based ``_layer_payload_empty`` check whenever
+    the ``compile_units_parsed`` key is absent — covering both the ingested
+    Flow-2 pack above and a hand-built pack (a test fixture, or an
+    out-of-band ``--old/new-sources`` pack assembled without going through
+    ``inline.py``'s replay) with genuine ``source_abi`` facts but no replay
+    coverage stats, so neither is mistaken for "never attempted".
+    """
+    from .buildsource.model import CoverageStatus, DataLayer
+    from .cli import _layer_payload_empty
+
+    cov = build_source.manifest.coverage_for(DataLayer.L4_SOURCE_ABI)
+    if cov is not None and cov.status == CoverageStatus.NOT_COLLECTED:
+        return False
+    surface = build_source.source_abi
+    if surface is not None and "compile_units_parsed" in surface.coverage:
+        return int(surface.coverage.get("compile_units_parsed", 0) or 0) > 0
+    return not _layer_payload_empty(build_source, "L4")
+
+
+def _gated_source_label(build_source: BuildSourcePack | None, snap: AbiSnapshot) -> str:
+    """Recompute the "source" evidence label for the *strict* depth gate.
+
+    ``evidence_depth_label`` honestly reports "source" whenever L4 or L5
+    carries facts — correct for its own honesty contract, since genuine
+    source-tier collection can legitimately populate L5 (``source_graph``)
+    without L4 (``source_abi``): ``source_graph.build_source_graph`` folds
+    ``BuildEvidence`` structure into a graph even when the L4 surface found
+    nothing. But that L4-or-L5 rule is too permissive for a *gate*: a
+    non-empty L5 can also come from a header-only (L2) declaration graph
+    that never ran any L4/L5 source-tier replay at all —
+    ``service._attach_header_graph`` (``--header-graph`` with no
+    ``--sources``/``--build-info``) attaches one directly, and
+    ``cli_buildsource.embed_build_source``'s backfill step (see its own
+    comment: "a genuine --sources L5 collection in merged always wins; the
+    header-only graph fills the gap only when merged carries none") can
+    graft that same header-only graph onto an otherwise-real, L3-only
+    ``--build-info`` pack — so "L3 present" does not rule out a
+    header-only-graph L5 either (Codex review, second finding).
+
+    The reliable signal is whether L4 extraction was genuinely *attempted*
+    (``_l4_source_abi_was_attempted``) — a coverage-status check, not a
+    payload-emptiness one: a source-only dump legitimately links zero
+    declarations (no binary to link against) yet must still satisfy an
+    explicit ``--depth source`` the same way it already only warns (not
+    errors) about that case; only a *never-attempted* L4 (the header-graph
+    cases above) is downgraded here, to "build" (real L3, or a ``-p``/
+    ``--compile-db`` build context, per ``evidence_depth_label``) or
+    ``headers``/``binary`` (nothing).
+    """
+    from .cli import _layer_payload_empty
+
+    if build_source is not None and _l4_source_abi_was_attempted(build_source):
+        return "source"
+    if build_source is not None and not _layer_payload_empty(build_source, "L3"):
+        return "build"
+    # ADR-020a/039 build-context capture (-p/--compile-db) has no BuildSourcePack
+    # of its own to check above, but is still a legitimate "build" evidence
+    # source -- see evidence_depth_label's docstring (Codex review).
+    if snap.parsed_with_build_context:
+        return "build"
+    return "headers" if snap.from_headers else "binary"
+
+
+def check_requested_depth_satisfied(
+    depth: str | None, snap: AbiSnapshot, build_source: BuildSourcePack | None = None,
+) -> None:
+    """Hard-fail when an *explicitly* requested ``--depth`` was not reached.
+
+    Depth-contract (CLAUDE.md / CLI-audit P1): when ``--depth`` is left
+    unspecified, degrading to whatever evidence is actually available is
+    fine as long as ``evidence_depth_label`` honestly reports it. But once
+    the user explicitly asks for ``headers``/``build``/``source``, silently
+    writing a weaker snapshot is a lie a downstream baseline/CI consumer has
+    no way to detect short of re-deriving the depth themselves — so this
+    raises instead of warning. ``--depth binary`` is always satisfied
+    (rank 0, the floor). A ``depth`` outside ``_DEPTH_RANK`` (defensively,
+    should never happen past CLI parsing) is treated as unconstrained.
+    """
+    if depth is None:
+        return
+    requested_rank = _DEPTH_RANK.get(depth)
+    if requested_rank is None:
+        return
+    effective_pack = build_source if build_source is not None else snap.build_source
+    # _gated_source_label is called unconditionally, not just when
+    # evidence_depth_label already says "source" -- evidence_depth_label's
+    # own payload-emptiness check requires *either* L4 *or* L5 to be
+    # non-empty, but a zero-match source-only dump (replay parsed TUs, linked
+    # nothing because there is no binary to link against, and folded no L5
+    # graph either) leaves both empty, so evidence_depth_label reports "build"
+    # directly -- which would skip the gated recompute entirely and wrongly
+    # reject that valid zero-match dump (CodeRabbit review). _gated_source_label
+    # is self-contained (it recomputes straight from build_source, not from
+    # evidence_depth_label's verdict) and never returns a *higher* rung than
+    # is justified -- for every other case (evidence_depth_label already
+    # "source", or genuinely no build_source at all) it reproduces the same
+    # result the old evidence_depth_label-first path did; see its own
+    # docstring for why evidence_depth_label's L4-or-L5 rule is not
+    # trustworthy enough for a hard gate on its own.
+    effective = _gated_source_label(effective_pack, snap)
+    if _DEPTH_RANK.get(effective, 0) < requested_rank:
+        raise DumpDepthNotSatisfiedError(
+            f"--depth {depth} was requested but the snapshot only reached "
+            f"'{effective}' evidence depth. Supply the evidence this rung "
+            "needs (headers via -H/--header, build via --build-info/a "
+            "compile database, source via --sources with linkable "
+            "declarations) or lower --depth to match what is actually "
+            "available."
+        )
+
+
+def fold_dump_provenance_into_json(
+    text: str, depth: str | None, snap: AbiSnapshot,
+) -> tuple[str, str]:
+    """Record the depth contract this dump actually satisfied (audit finding:
+    "depth/scope provenance incomplete" -- a persisted ``.abi.json``/baseline
+    manifest didn't record ``requested_depth``/``effective_depth``/``frontend``,
+    so a downstream reader had no way to tell how deep it really goes short of
+    re-deriving it themselves, the same problem ``check_requested_depth_
+    satisfied`` already hard-fails on at dump time).
+
+    JSON-only augmentation -- mirrors ``cli_compare_helpers.
+    _fold_evidence_depth_into_json``'s pattern, not a new ``AbiSnapshot``
+    field: informational provenance about *this dump run*, not part of the
+    versioned snapshot schema, so it needs no ``SCHEMA_VERSION`` bump and
+    is silently dropped by ``snapshot_from_dict``'s defensive ``.get()``
+    parsing on any later object round-trip (load → re-save), same as
+    ``compare``'s own JSON-only ``full_verdict``/``old_evidence_depth``
+    folds. ``degraded`` is always ``False`` when *depth* is non-``None``, by
+    construction: ``check_requested_depth_satisfied`` (called before this,
+    in ``_write_snapshot_output``) already raised if the rank had come up
+    short, so reaching this point means it did not -- recorded anyway so a
+    reader sees a positive "no, this is not weaker than requested" signal
+    rather than an absent field.
+
+    ``effective_depth`` uses ``_gated_source_label``, the same strict
+    recompute ``check_requested_depth_satisfied`` gates on -- not the plain
+    ``evidence_depth_label``. They disagree on exactly the case
+    ``_gated_source_label``'s docstring documents: a zero-match source-only
+    dump (L4 replay genuinely ran but linked nothing, no binary to link
+    against) reports "source" satisfied by the strict gate, but
+    ``evidence_depth_label`` still reports "build" (its own L4-or-L5
+    payload-emptiness check sees both empty). Using the plain label here
+    would serialize ``effective_depth: "build", degraded: true`` for a
+    ``--depth source`` dump the strict gate had just accepted moments
+    earlier in the same call -- self-contradictory (Codex review).
+
+    Returns ``(json_text, effective_depth)`` -- the caller's own "Resolved
+    evidence depth: ..." stderr echo must reuse this exact label rather than
+    recomputing via the plain ``evidence_depth_label``, or the two can
+    disagree on the identical zero-match-source-only case this docstring
+    just described: JSON says "source", stderr says "build", for the same
+    dump (external review).
+    """
+    import json
+
+    effective = _gated_source_label(snap.build_source, snap)
+    try:
+        payload = json.loads(text)
+    except ValueError:
+        return text, effective
+    # At "source" depth, the L4 replay extractor -- not the L2 header-AST
+    # backend -- is what actually produced the evidence that satisfied the
+    # requested depth: a header snapshot parsed with castxml/hybrid combined
+    # with a prebuilt Clang L4 pack (or vice versa) must record the L4
+    # extractor here, not the unrelated L2 one ast_producer names
+    # (CodeRabbit review). Below "source", ast_producer is the only
+    # frontend that ran at all, so it stays authoritative there.
+    frontend = (
+        (_l4_source_abi_frontend(snap) or snap.ast_producer)
+        if effective == "source"
+        else (snap.ast_producer or _l4_source_abi_frontend(snap))
+    )
+    # dump's own inline `--sources` embed always replays at "target" scope
+    # (ADR-043 D3) -- but dump also accepts a *prebuilt* `--build-info
+    # <pack>`/`abicheck_inputs` pack, which can have been collected with any
+    # scope (e.g. "changed"/"full" from a `collect --depth source --since
+    # ...`/`graph-full` run); hardcoding "target" unconditionally misreports
+    # that pack's actual replay scope (external review). The pack's own
+    # source_abi coverage already records which scope it was replayed at
+    # (buildsource.source_replay.scope_for_ci_mode's "off"/"changed"/
+    # "target"/"full"); read that when available instead of assuming, and
+    # report None (rather than fabricating "target") when there is no L4
+    # source_abi surface to read a scope from at all (e.g. a headers/binary-
+    # depth dump with no source replay).
+    source_abi = snap.build_source.source_abi if snap.build_source is not None else None
+    source_scope = source_abi.coverage.get("replay_scope") if source_abi is not None else None
+    payload["dump_provenance"] = {
+        "requested_depth": depth,
+        "effective_depth": effective,
+        "degraded": (
+            depth is not None
+            and _DEPTH_RANK.get(effective, 0) < _DEPTH_RANK.get(depth, 0)
+        ),
+        "frontend": frontend,
+        "source_scope": source_scope,
+    }
+    return json.dumps(payload, indent=2), effective
+
+
+def _l4_source_abi_frontend(snap: AbiSnapshot) -> str | None:
+    """Best-effort L4 source-ABI extractor identity for ``dump_provenance.frontend``.
+
+    ``snap.ast_producer`` is only ever stamped by the L2 header-AST pipeline
+    (``dumper.py``'s castxml/clang parser); a symbol-only ELF dump with no
+    ``-H`` headers (the common shape for a plain ``--sources``/``--build-info
+    --depth build|source`` run) returns *before* that pipeline ever runs, so
+    ``ast_producer`` stays ``None`` even though ``embed_build_source`` went on
+    to run a real L4 ``source_abi:<extractor>`` replay over the source tree --
+    losing the actual frontend identity from provenance (Codex review).
+
+    Falls back to the build-source pack's extractor ledger
+    (``buildsource.inline._run_inline_source_abi`` always records its result,
+    success or not, as ``source_abi:<extractor>``): the most recent
+    non-skipped/non-failed entry names the frontend that genuinely produced
+    the linked ``SourceAbiSurface``. ``None`` when no such record exists
+    (e.g. a headers-only or symbol-only dump with no L4 replay at all).
+    """
+    pack = snap.build_source
+    if pack is None:
+        return None
+    for record in reversed(pack.manifest.extractors):
+        if not record.name.startswith("source_abi:"):
+            continue
+        if record.status in ("skipped", "failed"):
+            continue
+        return record.name.removeprefix("source_abi:")
+    return None
 
 
 def render_dump_dry_run(
@@ -237,6 +594,9 @@ def render_dump_dry_run(
     collect_mode: str,
     header_backend: str,
     output: Path | None,
+    has_compile_db: bool = False,
+    compile_db_matched: bool | None = None,
+    build_info_is_pack: bool = False,
 ) -> Any:
     """Build the ``dump --dry-run`` report (ADR-043 D4): resolve, never execute.
 
@@ -244,6 +604,54 @@ def render_dump_dry_run(
     shows the resolved depth/collect-mode and available data layers, and
     checks tool availability on PATH. Never runs castxml/clang, a build query,
     or any I/O beyond stat()/PATH lookups.
+
+    ``has_compile_db`` (Codex review): whether ``-p``/``--compile-db`` was
+    given at all -- a bare presence flag, kept for the "nothing was given at
+    all" case below, distinct from whether it actually matches.
+
+    ``compile_db_matched`` (external review): the *real* result of loading
+    ``-p``/``--compile-db`` and checking it against the resolved headers --
+    ``cli.dump_cmd`` computes this the same way the real run does
+    (``cli_helpers_compare._resolve_build_context_flags``, the same JSON
+    load + path match the real run performs before castxml even runs) and
+    passes the outcome in, rather than this function loading it itself.
+    Loading and matching a compile database is cheap, deterministic,
+    read-only resolution (no compiler/frontend invocation) -- an earlier
+    version of this function treated it as "real work out of scope for a
+    dry run" and only checked bare presence, so a ``--depth build`` backed
+    by an empty/non-matching compile database dry-ran as merely a soft
+    warning even though the real run's strict depth gate would definitely
+    reject it. ``None`` when no compile database was given at all (the
+    "nothing was given" case is handled separately, below); ``True``/
+    ``False`` is now a definite verdict, not a "possibly satisfiable" guess.
+
+    ``build_info_is_pack`` (Codex review): whether ``--build-info`` names a
+    prebuilt ``BuildSourcePack`` *or* a Flow-2 ``abicheck_inputs/`` directory
+    rather than a raw compile DB / build dir -- the caller ORs
+    ``buildsource.inline.is_pack_dir`` and ``cli_buildsource_helpers.
+    _is_inputs_pack_dir`` (each a manifest-shape stat + small JSON read, not
+    a full pack load), the same two directory kinds ``cli_buildsource.
+    embed_build_source`` itself recognizes as pack-shaped (``bi_is_pack``/
+    ``bi_is_inputs``). Either one's ``_combine_packs`` fallback lets a
+    pack-shaped ``build_info``'s own ``source_abi`` (L4) satisfy ``--depth
+    source`` with no ``--sources`` pack given, unlike a raw compile
+    database, which never carries L4 facts of its own. Checking only
+    ``is_pack_dir`` missed the ``abicheck_inputs/`` case (Codex review,
+    second finding on this signal): that combination was wrongly treated as
+    "--depth source has no path without --sources" and blocked even though
+    the real (non-dry) run writes a valid source-depth snapshot from it.
+
+    A ``-p`` compile DB with no ``-H``, or a ``--debug-format``/``--dwarf``/
+    ``--btf``/``--ctf`` selection against a PE/Mach-O binary, are genuine
+    usage errors in the real run (``click.UsageError``/``BadParameter``,
+    exit 64) -- ``cli.dump_cmd`` checks both, via
+    :func:`check_dump_compile_db_error`/:func:`check_dump_debug_format_error`,
+    and raises directly *before* branching on ``dry_run`` at all, so this
+    function is never even reached for that input on either path. Do not
+    re-encode either as a :meth:`DryRunResult.block` (exit 1) here -- that
+    would silently downgrade a usage error into an evidence blocker and
+    disagree with the real run's actual exit code for the identical input
+    (CodeRabbit review).
     """
     from .cli_helpers_compare import discover_project_config
     from .dry_run import DryRunResult, tool_status
@@ -312,12 +720,130 @@ def render_dump_dry_run(
             "no artifact (SO_PATH) and no --sources/--build-info: dump has "
             "nothing to analyze."
         )
-    if depth is not None and depth != "binary" and sources is None and build_info is None:
+    if (
+        depth is not None
+        and depth != "binary"
+        and sources is None
+        and build_info is None
+        # A matched -p/--compile-db is genuine L3 "build" evidence -- this
+        # generic "only L0-L2 data" warning is accurate for --depth
+        # headers/source regardless of a compile database (neither rung is
+        # satisfiable from one), but not for --depth build once the database
+        # actually matches (external review): the more precise, definitive
+        # block/no-signal handling below covers that specific case instead.
+        and not (depth == "build" and compile_db_matched is True)
+    ):
         result.warn(
             f"--depth {depth} was requested but no --sources/--build-info was given; "
             "the snapshot would carry only L0-L2 data."
         )
+    # Cheaply, deterministically known to fail the real run's strict
+    # check_requested_depth_satisfied gate -- computed independently of the
+    # warn above (not nested under its both-absent condition), since
+    # --depth source has its own, narrower requirement: L4 source-ABI
+    # replay only ever runs over a source tree
+    # (buildsource.inline._run_inline_source_abi returns ``(None, [])``
+    # whenever ``sources`` is None) -- a raw --build-info/-p compile
+    # database supplies L3 "build" context only, never L4, even when
+    # --sources is absent. A --depth source dry-run with --build-info but
+    # no --sources previously fell through this whole block (the warn's
+    # "both absent" guard was false) and reported success even though the
+    # real dump would hard-fail (Codex review). --depth build has no path
+    # at all once --sources/--build-info AND -p are all absent. A
+    # pack-shaped --build-info is a "possibly satisfiable" case for
+    # --depth source: _combine_packs falls back to its own source_abi (L4)
+    # when no --sources pack is given, so it is left as a warning, not a
+    # blocker (Codex review, second finding on this signal) -- loading the
+    # pack to verify it actually carries L4 evidence is out of scope here.
+    if depth == "source" and sources is None and not build_info_is_pack:
+        result.block(
+            "--depth source was requested but no --sources was given -- a "
+            "raw --build-info/-p compile database supplies L3 build "
+            "context only, never L4 source-ABI replay -- the resolved "
+            "evidence depth check_requested_depth_satisfied would raise "
+            "on this: the real run would exit 1."
+        )
+    elif depth == "source" and sources is None and build_info_is_pack:
+        # CodeRabbit review: pack *shape* alone (is_pack_dir/
+        # _is_inputs_pack_dir -- a manifest-shape stat + small JSON read,
+        # not a full pack load per this function's own docstring) does not
+        # prove the pack's manifest actually carries usable L4 source_abi
+        # facts -- a manifest-only/empty pack is exactly as unsatisfiable
+        # as a raw compile database, but previously fell through with no
+        # signal at all here (neither the warn() above, which requires
+        # build_info to also be None, nor this block). Loading the pack to
+        # verify is real I/O a dry run must not perform, so -- mirroring
+        # the sibling "--depth build backed by some compile database"
+        # warning below -- this is only "possibly satisfiable", not
+        # "definitely satisfiable".
+        result.warn(
+            "--depth source was requested with no --sources; it depends "
+            "entirely on --build-info's own source_abi facts (a prebuilt "
+            "BuildSourcePack/abicheck_inputs pack). A dry run does not "
+            "load the pack to verify it actually carries L4 evidence -- "
+            "if it doesn't, the real run's evidence depth check would "
+            "reject it."
+        )
+    elif (
+        depth == "build"
+        and sources is None
+        and build_info is None
+        and not has_compile_db
+    ):
+        result.block(
+            "--depth build was requested but no --sources/--build-info/-p "
+            "was given -- the resolved evidence depth "
+            "check_requested_depth_satisfied would raise on this: the "
+            "real run would exit 1."
+        )
+    elif (
+        depth == "build"
+        and sources is None
+        and build_info is None
+        and has_compile_db
+        and compile_db_matched is False
+    ):
+        # External review: unlike the "nothing at all" case above, a
+        # compile database was given -- loading it and checking whether it
+        # matches the resolved headers is cheap, deterministic, read-only
+        # resolution (the same JSON load + path match the real run performs
+        # before castxml even runs), not the "real work" an earlier version
+        # of this function assumed it was. compile_db_matched=False (empty,
+        # entirely filtered-out, or malformed) is therefore now a definite
+        # verdict, not a guess: check_requested_depth_satisfied would
+        # certainly reject this in the real run (parsed_with_build_context
+        # never gets stamped), so this is a blocker, not a soft warning.
+        result.block(
+            "--depth build was requested with -p/--compile-db, but the "
+            "compilation database has no entry matching the resolved "
+            "headers (empty, entirely filtered-out, or malformed) -- the "
+            "resolved evidence depth check_requested_depth_satisfied would "
+            "raise on this: the real run would exit 1."
+        )
     return result
+
+
+def check_dump_compile_db_error(
+    compile_db_path: Path | None,
+    compile_db_path_alt: Path | None,
+    headers: tuple[Path, ...],
+) -> str | None:
+    """Pure predicate for the -p/--compile-db-requires-headers check.
+
+    Mirrors :func:`resolve_dump_compile_db`'s ``click.UsageError`` condition as
+    a plain string instead of raising -- shared with ``dump --dry-run``, which
+    previously never ran this check at all (it only existed in the real path,
+    after the dry-run branch), so ``dump foo.so -p compile_commands.json``
+    with no ``-H`` reported dry-run success on an invocation the real run
+    would immediately reject.
+    """
+    effective_compile_db = compile_db_path or compile_db_path_alt
+    if effective_compile_db and not headers:
+        return (
+            "Compilation database (-p / --compile-db) requires -H/--header. "
+            "Without headers, CastXML has nothing to parse."
+        )
+    return None
 
 
 def resolve_dump_compile_db(
@@ -330,13 +856,10 @@ def resolve_dump_compile_db(
     Raises :class:`click.UsageError` if a compile DB is given but no headers.
     Returns the effective compile DB path (or *None*).
     """
-    effective_compile_db = compile_db_path or compile_db_path_alt
-    if effective_compile_db and not headers:
-        raise click.UsageError(
-            "Compilation database (-p / --compile-db) requires -H/--header. "
-            "Without headers, CastXML has nothing to parse."
-        )
-    return effective_compile_db
+    error = check_dump_compile_db_error(compile_db_path, compile_db_path_alt, headers)
+    if error is not None:
+        raise click.UsageError(error)
+    return compile_db_path or compile_db_path_alt
 
 
 def handle_non_elf_dump(
@@ -369,6 +892,8 @@ def handle_non_elf_dump(
     inputs_pack: Path | None = None,
     header_graph: bool = False,
     header_graph_includes: bool = False,
+    depth: str | None = None,
+    compile_db_context_matched: bool = False,
 ) -> None:
     """Handle the PE/Mach-O native dump path and output writing (split from cli.py).
 
@@ -386,6 +911,17 @@ def handle_non_elf_dump(
     across ELF/PE/Mach-O — previously only the ELF ``perform_elf_dump`` path
     forwarded these, so ``dump --header-graph`` silently no-opped on PE/Mach-O
     input (Codex review).
+
+    ``compile_db_context_matched`` (Codex review): whether cli.py's
+    ``_resolve_build_context_flags(effective_compile_db, headers,
+    compile_db_filter)`` found a compile-DB entry for these headers —
+    computed there (before this function is even called) since that is the
+    one place the -p/--compile-db load happens. Mirrors
+    ``perform_elf_dump``'s identically-named parameter/stamp: without it, a
+    -p compile database's flags never reached the PE/Mach-O header parse at
+    all, and ``snap.parsed_with_build_context`` was never set here, so a
+    ``dump foo.dll -H api.h -p build --depth build`` was wrongly rejected
+    as only having reached "headers".
     """
     if follow_deps:
         click.echo("Warning: --follow-deps is only supported for ELF binaries.", err=True)
@@ -430,11 +966,27 @@ def handle_non_elf_dump(
     finally:
         if _l2_pending_cleanups:
             _run_cleanups(_l2_pending_cleanups)
+    # Record that the header AST was parsed with the real build context
+    # (mirrors perform_elf_dump's identical stamp) -- gated on
+    # compile_db_context_matched, not just headers' presence, for the same
+    # reason perform_elf_dump's docstring gives: a syntactically valid but
+    # empty/non-matching compile database must not be recorded as real
+    # build-context evidence. Also gated on snap.from_headers: unlike the ELF
+    # path, service._try_header_scoped_dump() can silently fall back to a
+    # fresh export-table-only snapshot (scope_fallback set, from_headers
+    # False) when the header backend fails or the parsed declarations don't
+    # match any exported symbol (e.g. an MSVC-mangled C++ DLL parsed with a
+    # mismatched compiler) -- the original *request* still had headers and a
+    # matched compile DB, but the snapshot that was actually written never
+    # used either, so stamping build-context evidence on it would let
+    # `--depth build` accept a plain export-table dump (Codex review).
+    if headers and compile_db_context_matched and snap.from_headers:
+        snap.parsed_with_build_context = True
     stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
     write_snapshot_output(
         snap, output, build_info, sources, build_config, allow_build_query,
         collect_mode, build_query=build_query, build_compile_db=build_compile_db,
-        extractor=header_backend, inputs_pack=inputs_pack,
+        extractor=header_backend, inputs_pack=inputs_pack, depth=depth,
     )
 
 
@@ -581,6 +1133,8 @@ def perform_elf_dump(
     header_graph: bool = False,
     header_graph_includes: bool = False,
     compile_context: CompileContext | None = None,
+    depth: str | None = None,
+    compile_db_context_matched: bool = False,
 ) -> None:
     """Run the ELF dump pipeline and write output.
 
@@ -600,6 +1154,19 @@ def perform_elf_dump(
     All helper callables (expand_header_inputs, populate_dependency_info,
     stamp_provenance, write_snapshot_output) are passed in from cli.py to avoid
     an import cycle — cli_dump_helpers must not import from cli.
+
+    ``compile_db_context_matched`` (Codex review): the second element of
+    cli.py's ``_resolve_build_context_flags(effective_compile_db, headers,
+    compile_db_filter)`` -- whether a compile-DB entry genuinely backed the
+    resolved ``BuildContext`` (its ``compile_db_path`` is set) — computed
+    there (before this function is even called) since that is the one place
+    both the compile-DB load and the header-context derivation already
+    happen. Distinct from both ``effective_compile_db`` merely being
+    non-``None`` (a syntactically valid but empty, or entirely filtered-out,
+    ``compile_commands.json`` still sets that, but matches nothing) *and*
+    from whether any castxml flags were derived (a genuinely matched TU with
+    no ABI-relevant flags to forward is still real build-context evidence,
+    not an absent one — Codex review, second finding on this signal).
     """
     compiler = "cc" if lang == "c" else "c++"
     resolved_headers = expand_header_inputs(list(headers)) if headers else []
@@ -685,8 +1252,25 @@ def perform_elf_dump(
         raise click.ClickException(str(exc)) from exc
 
     try:
-        # Record that the header AST was parsed with the real build context (ADR-029)
-        if effective_compile_db and resolved_headers:
+        # Record that the header AST was parsed with the real build context (ADR-029).
+        # Gated on compile_db_context_matched (whether the DB actually yielded usable
+        # castxml flags for these headers), not just effective_compile_db's presence --
+        # a syntactically valid but empty/non-matching compile_commands.json sets
+        # effective_compile_db without deriving anything, which must not silently
+        # satisfy the --depth build strict gate (evidence_depth_label reads this flag
+        # as "build" evidence; Codex review). Also gated on snap.from_headers -- mirrors
+        # handle_non_elf_dump's identical stamp/gate: --dwarf-only explicitly ignores
+        # -H headers (dumper._try_dwarf_snapshot warns "ignoring provided headers" and
+        # returns a DWARF-built snapshot with from_headers left False), so a -p compile
+        # database matching the originally *requested* headers must not be recorded as
+        # real build-context evidence for a snapshot that never actually parsed them
+        # (Codex review).
+        if (
+            effective_compile_db
+            and resolved_headers
+            and compile_db_context_matched
+            and snap.from_headers
+        ):
             snap.parsed_with_build_context = True
 
         # ADR-039 collection layer — when a compile DB is available, harvest the
@@ -848,4 +1432,5 @@ def perform_elf_dump(
         build_compile_db=build_compile_db,
         extractor=header_backend,
         inputs_pack=inputs_pack,
+        depth=depth,
     )

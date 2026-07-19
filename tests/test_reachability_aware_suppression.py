@@ -236,6 +236,132 @@ class TestMarkReachability:
         assert found[0].public_reachable is True
         assert found[0].reachability_kind == "direct_public_symbol"
 
+    def test_public_header_cxx_variable_removal_is_reachable(self) -> None:
+        """Mirror of test_public_header_cxx_function_removal_is_reachable for
+        variables: diff_symbols.py sets Change.symbol to Variable.mangled (the
+        linker name) for VAR_REMOVED, while _public_header_names collects the
+        demangled Variable.name -- so the direct-public-symbol check only
+        matches if EnrichSourceLocations also recovers qualified_name for
+        variable changes, not just function changes."""
+        mangled = "_ZN2ns6detail3varE"
+        old = AbiSnapshot(
+            library="libtest.so", version="1.0",
+            variables=[Variable(
+                name="ns::detail::var", mangled=mangled, type="int",
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            )],
+        )
+        new = AbiSnapshot(library="libtest.so", version="1.0", variables=[])
+        raw_change = Change(
+            kind=ChangeKind.VAR_REMOVED, symbol=mangled, description="removed",
+        )
+        ctx = DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        found = [c for c in ctx.kept if c.kind == ChangeKind.VAR_REMOVED]
+        assert len(found) == 1
+        assert found[0].public_reachable is True
+        assert found[0].reachability_kind == "direct_public_symbol"
+
+    def test_public_header_cxx_variable_changed_in_place_is_reachable(self) -> None:
+        """Codex review: the mangled-vs-demangled identity gap is not unique
+        to VAR_ADDED/VAR_REMOVED -- diff_symbols.py sets Change.symbol to the
+        mangled linker name for every "changed in place" variable kind too
+        (VAR_TYPE_CHANGED, VAR_BECAME_CONST/VAR_LOST_CONST,
+        VAR_ALIGNMENT_CHANGED, VAR_VALUE_CHANGED, VAR_ACCESS_CHANGED/WIDENED,
+        VAR_DEPRECATED_ADDED/REMOVED). The variable exists on both sides with
+        the same mangled name, so this exercises _qualified_name_for_change's
+        generic "unchanged mangled symbol, old/new qualified names agree"
+        branch rather than the ADDED/REMOVED branches."""
+        mangled = "_ZN2ns6detail3varE"
+        old = AbiSnapshot(
+            library="libtest.so", version="1.0",
+            variables=[Variable(
+                name="ns::detail::var", mangled=mangled, type="int",
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            )],
+        )
+        new = AbiSnapshot(
+            library="libtest.so", version="1.0",
+            variables=[Variable(
+                name="ns::detail::var", mangled=mangled, type="long",
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            )],
+        )
+        raw_change = Change(
+            kind=ChangeKind.VAR_TYPE_CHANGED, symbol=mangled, description="type changed",
+        )
+        ctx = DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        found = [c for c in ctx.kept if c.kind == ChangeKind.VAR_TYPE_CHANGED]
+        assert len(found) == 1
+        assert found[0].qualified_name == "ns::detail::var"
+        assert found[0].public_reachable is True
+        assert found[0].reachability_kind == "direct_public_symbol"
+
+    def test_public_header_cxx_variable_removal_reachable_with_bare_castxml_name(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: the default CastXML backend never
+        qualifies Function.name/Variable.name with namespace context --
+        dumper_castxml.py's parse_variables()/_function_display_name() both
+        store the bare declaration ``name`` XML attribute, so a real
+        public-header variable in namespace ``ns::detail`` reaches this
+        pipeline as ``Variable(name="var", ...)``, not
+        ``Variable(name="ns::detail::var", ...)`` as every other test in this
+        class hand-constructs it. The prior '"::" in name' guard silently
+        never fired for this (the only real) shape -- qualified identity must
+        be recovered from the mangled linker symbol via demangling instead."""
+        mangled = "_ZN2ns6detail3varE"
+        old = AbiSnapshot(
+            library="libtest.so", version="1.0",
+            variables=[Variable(
+                name="var", mangled=mangled, type="int",
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            )],
+        )
+        new = AbiSnapshot(library="libtest.so", version="1.0", variables=[])
+        raw_change = Change(
+            kind=ChangeKind.VAR_REMOVED, symbol=mangled, description="removed",
+        )
+        ctx = DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        found = [c for c in ctx.kept if c.kind == ChangeKind.VAR_REMOVED]
+        assert len(found) == 1
+        assert found[0].qualified_name == "ns::detail::var"
+        assert found[0].public_reachable is True
+        assert found[0].reachability_kind == "direct_public_symbol"
+
+    def test_public_header_cxx_function_removal_reachable_with_bare_castxml_name(
+        self,
+    ) -> None:
+        """Mirror of the variable case above for functions: the same
+        bare-name CastXML shape applies to Function.name, and this exact
+        mechanism predates this PR's variable extension -- confirming the gap
+        was never function-specific either."""
+        mangled = "_ZN2ns6detail3apiEv"
+        old = AbiSnapshot(
+            library="libtest.so", version="1.0",
+            functions=[Function(
+                name="api", mangled=mangled, return_type="void",
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            )],
+        )
+        new = AbiSnapshot(library="libtest.so", version="1.0", functions=[])
+        raw_change = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol=mangled, description="removed",
+        )
+        ctx = DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_REMOVED]
+        assert len(found) == 1
+        assert found[0].qualified_name == "ns::detail::api"
+        assert found[0].public_reachable is True
+        assert found[0].reachability_kind == "direct_public_symbol"
+
     def test_public_header_enum_member_change_is_reachable(self) -> None:
         """Codex review (fresh evidence): an ENUM_MEMBER_* finding's symbol
         is "EnumName::member" (diff_types.py), not the plain enum name —
@@ -893,6 +1019,72 @@ class TestSuppressionPipelineOrderFix:
             c for c in ctx.kept if c.kind == ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK
         )
         assert "Suppression rule 'oneapi::dal::**::detail::**' matched" in diag.description
+
+    def test_broad_namespace_suppression_does_not_hide_reachable_variable_removal(
+        self,
+    ) -> None:
+        """Variable counterpart of test_broad_namespace_suppression_does_not_hide_reachable_break:
+        a public-header C++ variable removed from a namespace covered by a
+        broad ``namespace`` suppression rule must survive, not be silently
+        dropped because the mangled Change.symbol never gets resolved back
+        to the demangled Variable.name that seeded public-header reachability."""
+        mangled = "_ZN2ns6detail3varE"
+        old = AbiSnapshot(
+            library="libtest.so", version="1.0",
+            variables=[Variable(
+                name="ns::detail::var", mangled=mangled, type="int",
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            )],
+        )
+        new = AbiSnapshot(library="libtest.so", version="1.0", variables=[])
+        raw_change = Change(
+            kind=ChangeKind.VAR_REMOVED, symbol=mangled, description="removed",
+        )
+        suppression = SuppressionList([
+            Suppression(namespace="ns::detail::*", reason="Private implementation details")
+        ])
+        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+
+        found = [c for c in ctx.kept if c.kind == ChangeKind.VAR_REMOVED]
+        assert len(found) == 1
+        assert found[0].public_reachable is True
+        assert ctx.suppressed == []
+
+    def test_broad_namespace_suppression_does_not_hide_reachable_variable_change(
+        self,
+    ) -> None:
+        """Codex review: same as the VAR_REMOVED counterpart above, but for a
+        variable changed in place (VAR_TYPE_CHANGED) -- the mangled-symbol
+        identity gap affects every "changed in place" variable kind, not
+        just additions/removals, since diff_symbols.py sets Change.symbol to
+        the mangled name there too."""
+        mangled = "_ZN2ns6detail3varE"
+        old = AbiSnapshot(
+            library="libtest.so", version="1.0",
+            variables=[Variable(
+                name="ns::detail::var", mangled=mangled, type="int",
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            )],
+        )
+        new = AbiSnapshot(
+            library="libtest.so", version="1.0",
+            variables=[Variable(
+                name="ns::detail::var", mangled=mangled, type="long",
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            )],
+        )
+        raw_change = Change(
+            kind=ChangeKind.VAR_TYPE_CHANGED, symbol=mangled, description="type changed",
+        )
+        suppression = SuppressionList([
+            Suppression(namespace="ns::detail::*", reason="Private implementation details")
+        ])
+        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+
+        found = [c for c in ctx.kept if c.kind == ChangeKind.VAR_TYPE_CHANGED]
+        assert len(found) == 1
+        assert found[0].public_reachable is True
+        assert ctx.suppressed == []
 
     def test_broad_namespace_suppression_still_suppresses_unreachable_churn(self) -> None:
         """Unreachable internal churn is unaffected — no regression for the

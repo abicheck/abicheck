@@ -2515,6 +2515,229 @@ class TestDebExtractorExtended:
         extract_zst.assert_called_once()
         assert extract_zst.call_args.args[0].name == "data.tar.zst"
 
+    def test_extract_control_tar_zst_uses_zstd_tar_helper(self, tmp_path: Path) -> None:
+        """control.tar.* can ship zstd-compressed too, same as data.tar.*;
+        _deb_extract must route it through the zstd tar helper rather than
+        the plain-tar extractor (which only exercised the .zst branch on
+        data.tar.*, not control.tar.*, before this test)."""
+        f = tmp_path / "test.deb"
+        f.write_bytes(b"!<arch>\n" + b"\x00" * 100)
+        out = tmp_path / "output"
+        out.mkdir()
+
+        def fake_run(*args, **kwargs):
+            staging = Path(kwargs.get("cwd", "."))
+            with tarfile.open(staging / "data.tar", "w"):
+                pass
+            (staging / "control.tar.zst").write_bytes(b"zstd payload")
+            return mock.Mock(returncode=0)
+
+        with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
+            with mock.patch("abicheck.package.subprocess.run", side_effect=fake_run):
+                with mock.patch(
+                    "abicheck.package.TarExtractor._safe_extract_zst_tar"
+                ) as extract_zst:
+                    DebExtractor().extract(f, out)
+
+        extract_zst.assert_called_once()
+        assert extract_zst.call_args.args[0].name == "control.tar.zst"
+        assert extract_zst.call_args.args[1] == out / ".deb_control"
+
+    def test_extract_symbols_file_from_control_tar(self, tmp_path: Path) -> None:
+        """CLI-audit P2: DebExtractor only ever read data.tar.*; control.tar.*
+        (which carries the dpkg-gensymbols(1) symbols contract) was never
+        extracted at all, so the Debian symbols contract could not
+        participate in a package compare. Builds a real (uncompressed)
+        control.tar containing a symbols file and verifies
+        ExtractResult.symbols_file points at the extracted copy with the
+        right content."""
+        f = tmp_path / "test.deb"
+        f.write_bytes(b"!<arch>\n" + b"\x00" * 100)
+        out = tmp_path / "output"
+        out.mkdir()
+        symbols_text = "libfoo.so.1 libfoo1 #MINVER#\n _ZN3foo3barEv@Base 1.0\n"
+
+        def fake_run(*args, **kwargs):
+            staging = Path(kwargs.get("cwd", "."))
+            with tarfile.open(staging / "data.tar", "w"):
+                pass
+            with tarfile.open(staging / "control.tar", "w") as tf:
+                data = symbols_text.encode()
+                info = tarfile.TarInfo(name="symbols")
+                info.size = len(data)
+                tf.addfile(info, io.BytesIO(data))
+            return mock.Mock(returncode=0)
+
+        with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
+            with mock.patch("abicheck.package.subprocess.run", side_effect=fake_run):
+                result = DebExtractor().extract(f, out)
+
+        assert result.symbols_file is not None
+        assert result.symbols_file.name == "symbols"
+        assert result.symbols_file.read_text() == symbols_text
+
+    def test_extract_no_control_tar_leaves_symbols_file_none(self, tmp_path: Path) -> None:
+        """A .deb with no control.tar.* member (malformed, but data.tar.*
+        alone is enough to raise SnapshotError only when data.tar.* itself
+        is missing) leaves symbols_file None rather than raising."""
+        f = tmp_path / "test.deb"
+        f.write_bytes(b"!<arch>\n" + b"\x00" * 100)
+        out = tmp_path / "output"
+        out.mkdir()
+
+        def fake_run(*args, **kwargs):
+            staging = Path(kwargs.get("cwd", "."))
+            with tarfile.open(staging / "data.tar", "w"):
+                pass
+            return mock.Mock(returncode=0)
+
+        with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
+            with mock.patch("abicheck.package.subprocess.run", side_effect=fake_run):
+                result = DebExtractor().extract(f, out)
+
+        assert result.symbols_file is None
+
+    def test_extract_control_tar_without_symbols_leaves_symbols_file_none(
+        self, tmp_path: Path,
+    ) -> None:
+        """A control.tar.* present but with no ./symbols member (the common
+        case -- most packages aren't built with dpkg-gensymbols) leaves
+        symbols_file None."""
+        f = tmp_path / "test.deb"
+        f.write_bytes(b"!<arch>\n" + b"\x00" * 100)
+        out = tmp_path / "output"
+        out.mkdir()
+
+        def fake_run(*args, **kwargs):
+            staging = Path(kwargs.get("cwd", "."))
+            with tarfile.open(staging / "data.tar", "w"):
+                pass
+            with tarfile.open(staging / "control.tar", "w") as tf:
+                data = b"Package: libfoo1\n"
+                info = tarfile.TarInfo(name="control")
+                info.size = len(data)
+                tf.addfile(info, io.BytesIO(data))
+            return mock.Mock(returncode=0)
+
+        with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
+            with mock.patch("abicheck.package.subprocess.run", side_effect=fake_run):
+                result = DebExtractor().extract(f, out)
+
+        assert result.symbols_file is None
+
+    def test_extract_data_tar_planted_deb_control_symbols_is_not_trusted(
+        self, tmp_path: Path,
+    ) -> None:
+        """Codex review: data.tar.*'s own payload can contain a member
+        literally named .deb_control/symbols (crafted or coincidental); if
+        control.tar.* then has no symbols member of its own, the fixed
+        .deb_control extraction directory must not silently keep the
+        payload's planted file and return it as though it were the genuine
+        dpkg-gensymbols(1) contract from control.tar.*."""
+        f = tmp_path / "test.deb"
+        f.write_bytes(b"!<arch>\n" + b"\x00" * 100)
+        out = tmp_path / "output"
+        out.mkdir()
+        planted = "libfoo.so.1 libfoo1 9999.0\n _ZN3foo3evilEv@Base 9999.0\n"
+
+        def fake_run(*args, **kwargs):
+            staging = Path(kwargs.get("cwd", "."))
+            with tarfile.open(staging / "data.tar", "w") as tf:
+                data = planted.encode()
+                info = tarfile.TarInfo(name=".deb_control/symbols")
+                info.size = len(data)
+                tf.addfile(info, io.BytesIO(data))
+            with tarfile.open(staging / "control.tar", "w") as tf:
+                data = b"Package: libfoo1\n"
+                info = tarfile.TarInfo(name="control")
+                info.size = len(data)
+                tf.addfile(info, io.BytesIO(data))
+            return mock.Mock(returncode=0)
+
+        with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
+            with mock.patch("abicheck.package.subprocess.run", side_effect=fake_run):
+                result = DebExtractor().extract(f, out)
+
+        assert result.symbols_file is None
+        # The planted payload file must have been wiped, not left in place.
+        assert not (out / ".deb_control" / "symbols").exists()
+
+    def test_extract_data_tar_planted_deb_control_as_plain_file_is_removed(
+        self, tmp_path: Path,
+    ) -> None:
+        """Same collision as above, but data.tar.* plants .deb_control itself
+        as a plain file (not a directory) -- control_dir.mkdir() would raise
+        FileExistsError against a stale file the same way it would against a
+        stale directory; the pre-extraction cleanup must handle both shapes."""
+        f = tmp_path / "test.deb"
+        f.write_bytes(b"!<arch>\n" + b"\x00" * 100)
+        out = tmp_path / "output"
+        out.mkdir()
+        symbols_text = "libfoo.so.1 libfoo1 1.0\n _ZN3foo3barEv@Base 1.0\n"
+
+        def fake_run(*args, **kwargs):
+            staging = Path(kwargs.get("cwd", "."))
+            with tarfile.open(staging / "data.tar", "w") as tf:
+                data = b"not a directory"
+                info = tarfile.TarInfo(name=".deb_control")
+                info.size = len(data)
+                tf.addfile(info, io.BytesIO(data))
+            with tarfile.open(staging / "control.tar", "w") as tf:
+                data = symbols_text.encode()
+                info = tarfile.TarInfo(name="symbols")
+                info.size = len(data)
+                tf.addfile(info, io.BytesIO(data))
+            return mock.Mock(returncode=0)
+
+        with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
+            with mock.patch("abicheck.package.subprocess.run", side_effect=fake_run):
+                result = DebExtractor().extract(f, out)
+
+        assert result.symbols_file is not None
+        assert result.symbols_file.read_text() == symbols_text
+
+    def test_control_tar_planted_shared_object_is_not_discovered(
+        self, tmp_path: Path,
+    ) -> None:
+        """Codex review: control.tar.* (package metadata -- control,
+        md5sums, the symbols contract) is extracted into target_dir/.deb_control/,
+        the same tree discover_shared_libraries() walks for package-compare
+        purposes. A crafted control.tar.* could plant a file shaped like a
+        shared object there and discover_shared_libraries()'s "accept any
+        .so-suffixed file at any depth" fallback would then report it as
+        real package payload. Verifies the planted file is excluded."""
+        f = tmp_path / "test.deb"
+        f.write_bytes(b"!<arch>\n" + b"\x00" * 100)
+        out = tmp_path / "output"
+        out.mkdir()
+
+        elf_path = tmp_path / "planted.so"
+        _make_minimal_elf_so(elf_path)
+        elf_bytes = elf_path.read_bytes()
+
+        def fake_run(*args, **kwargs):
+            staging = Path(kwargs.get("cwd", "."))
+            with tarfile.open(staging / "data.tar", "w") as tf:
+                info = tarfile.TarInfo(name="usr/lib/libgenuine.so")
+                info.size = len(elf_bytes)
+                tf.addfile(info, io.BytesIO(elf_bytes))
+            with tarfile.open(staging / "control.tar", "w") as tf:
+                info = tarfile.TarInfo(name="libevil.so")
+                info.size = len(elf_bytes)
+                tf.addfile(info, io.BytesIO(elf_bytes))
+            return mock.Mock(returncode=0)
+
+        with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
+            with mock.patch("abicheck.package.subprocess.run", side_effect=fake_run):
+                DebExtractor().extract(f, out)
+
+        assert (out / ".deb_control" / "libevil.so").exists()
+
+        result = discover_shared_libraries(out)
+        result_names = {p.name for p in result}
+        assert "libevil.so" not in result_names
+        assert "libgenuine.so" in result_names
+
     def test_extract_relative_deb_path_passes_absolute_path_to_ar(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:

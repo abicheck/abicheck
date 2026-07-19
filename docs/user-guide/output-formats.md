@@ -495,6 +495,22 @@ Every JSON report carries a top-level `report_schema_version` field
 }
 ```
 
+### Scoped vs. full-library results (`full_verdict`/`full_severity`/`full_summary`)
+
+A `--used-by`/`--required-symbol(s)` scoped compare gates its exit code and
+`verdict`/`severity`/`summary` on the *scoped* subset of changes (plus any
+scoped-only synthetic findings, e.g. `consumer_required_symbol_removed`) —
+that scoped result is what a CI gate should act on. When the scoped result
+differs from the unscoped, full-library comparison, the original full-library
+values are preserved alongside it: `full_verdict` (schema 2.1+, same enum as
+`verdict`), `full_severity` (schema 2.1+, same shape as `severity`), and
+`full_summary` (schema 2.9+, same shape as `summary`). All three are absent
+for an unscoped compare, where `verdict`/`severity`/`summary` already
+describe the whole library. `summary` itself is always recomputed from the
+complete (post-scoping) `changes` array, so it never contradicts the changes
+a consumer actually sees — `full_summary` exists only to preserve the
+pre-scoping counts a consumer might also want.
+
 **Stability policy:**
 
 - **Additive** changes — new optional keys, new enum members, relaxing a

@@ -190,6 +190,12 @@ def _read_snapshot_meta(path: Path) -> dict[str, Any]:
         "build_id": raw.get("build_id"),
         "fact_set": fact_set,
         "sha256": sha256,
+        # cli_dump_helpers.fold_dump_provenance_into_json's requested_depth/
+        # effective_depth/degraded/frontend/source_scope block -- absent (None)
+        # for a snapshot dumped without --depth (audit finding: the baseline
+        # manifest recorded profile/schema/fact-set but never the actual depth
+        # contract each library's dump satisfied).
+        "dump_provenance": raw.get("dump_provenance"),
     }
 
 
@@ -276,6 +282,7 @@ def build_manifest(
                 "git_tag": meta["git_tag"],
                 "created_at": meta["created_at"],
                 "build_id": meta["build_id"],
+                "dump_provenance": meta["dump_provenance"],
             }
         )
 

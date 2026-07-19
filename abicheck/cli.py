@@ -16,6 +16,7 @@
 """CLI — abicheck dump | compare | compat (dump | check)."""
 from __future__ import annotations
 
+import dataclasses
 import logging
 import sys
 from pathlib import Path
@@ -38,7 +39,9 @@ from . import deadline
 from .checker import DiffResult, LibraryMetadata
 from .cli_audit import echo_filtered_surface, echo_reconciled
 from .cli_dump_helpers import (
-    evidence_depth_label,
+    _dump_will_attempt_hybrid_l4_extraction,
+    check_requested_depth_satisfied,
+    fold_dump_provenance_into_json,
     handle_non_elf_dump,
     perform_elf_dump,
     resolve_dump_collect_context,
@@ -297,6 +300,7 @@ def _write_snapshot_output(
     build_compile_db: str | None = None,
     extractor: str = "auto",
     inputs_pack: Path | None = None,
+    depth: str | None = None,
 ) -> None:
     """Serialize snapshot and write to file or stdout.
 
@@ -310,6 +314,9 @@ def _write_snapshot_output(
     ``.abicheck.yml`` ``build.query`` / ``build.compile_db`` keys. *extractor* is
     the L4 source-ABI frontend — the same ``--ast-frontend`` knob that drives the
     L2 header AST (ADR-037 D8): one frontend choice across both pipeline stages.
+    *depth* is the raw ``--depth`` CLI value (``None`` when not passed); when
+    given, ``check_requested_depth_satisfied`` raises if the snapshot did not
+    actually reach it.
     """
     if build_info is not None or sources is not None:
         from .cli_buildsource import embed_build_source
@@ -359,7 +366,16 @@ def _write_snapshot_output(
     if inputs_pack is not None:
         from .cli_buildsource_merge import embed_inputs_pack
         embed_inputs_pack(snap, inputs_pack, output)
+    # CLI-audit P1: an *explicitly* requested --depth that was not actually
+    # reached is a hard failure, not a warning — see
+    # check_requested_depth_satisfied's docstring. Checked last, after every
+    # embed step above has had its chance to fill in build_source.
+    check_requested_depth_satisfied(depth, snap)
     result = snapshot_to_json(snap)
+    # Audit finding: dump/baseline provenance didn't record requested vs.
+    # effective depth anywhere a later reader could inspect -- fold it into
+    # the written JSON now that the strict gate above has had its say.
+    result, resolved_depth_label = fold_dump_provenance_into_json(result, depth, snap)
     if output:
         _safe_write_output(output, result)
         click.echo(f"Snapshot written to {output}", err=True)
@@ -369,7 +385,12 @@ def _write_snapshot_output(
         # collected nothing usable is never silently reported as if it had
         # succeeded. Only alongside the file-write notice above (never for
         # bare stdout output, which callers may pipe/parse as pure JSON).
-        click.echo(f"Resolved evidence depth: {evidence_depth_label(snap)}", err=True)
+        # Reuses fold_dump_provenance_into_json's own returned label (the
+        # strict _gated_source_label, not the plain evidence_depth_label)
+        # so this line can never disagree with the JSON's effective_depth
+        # for the same dump -- they previously could, on the documented
+        # zero-match-source-only case (external review).
+        click.echo(f"Resolved evidence depth: {resolved_depth_label}", err=True)
     else:
         click.echo(result)
 
@@ -585,43 +606,17 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         headers, compile_db_path, compile_db_path_alt,
     )
 
-    if dry_run:
-        from .cli_dump_helpers import render_dump_dry_run
-
-        emit_dry_run(
-            render_dump_dry_run(
-                so_path=so_path, headers=headers, sources=sources,
-                build_info=build_info, build_config=build_config,
-                depth=depth, collect_mode=collect_mode,
-                header_backend=header_backend, output=output,
-            )
-        )
-
-    # Source-only dump (no binary) for the parallel-baseline flow.
-    if so_path is None:
-        from .cli_buildsource import dump_source_only
-        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db, extractor=header_backend)
-        return
-
-    effective_debug_format = resolve_dump_debug_format(debug_format_opt, debug_format)
-    effective_compile_db = resolve_dump_compile_db(compile_db_path, compile_db_path_alt, headers)
-
-    # Auto-detect binary format — PE/Mach-O skip the ELF/castxml path. The
-    # conventional ``libfoo.so`` dev symlink is often a GNU ld linker script;
-    # follow it to the real shared library before dispatching.
-    so_path, binary_fmt = _normalize_binary_input(so_path)
-    if effective_debug_format is not None and binary_fmt in ("pe", "macho"):
-        raise click.BadParameter(
-            f"--{effective_debug_format} is only supported for ELF binaries, not {binary_fmt.upper()}."
-        )
-
     # Fold the project's .abicheck.yml compile: block into the L2 compile context
     # (compare↔dump↔scan parity, ADR-037 D3): the same shared resolver scan uses,
     # so a dump honors `compile.std`/`defines`/`sysroot`/`frontend`/`include_dirs`
     # for its header AST the way scan does. CLI > config; an explicit --config or
-    # the .abicheck.yml auto-discovered at the --sources root. Resolved *before*
-    # the format dispatch so the PE/Mach-O header-scoping path gets the same
-    # context as ELF (Codex review) — `_try_header_scoped_dump` consumes it.
+    # the .abicheck.yml auto-discovered at the --sources root. Resolved before the
+    # so_path-is-None dispatch (Codex review) -- resolve_dump_compile_context has
+    # no so_path/binary_fmt dependency, and dump_source_only needs the
+    # config-resolved frontend too: it drives the L4 source-ABI extractor (the
+    # same --ast-frontend knob as the L2 header AST, ADR-037 D8), so a
+    # .abicheck.yml `compile.frontend` must reach the source-only path exactly
+    # like it already does the binary-dump path, not just this validation check.
     _cc, includes = resolve_dump_compile_context(
         _resolved_compile_context,
         gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
@@ -633,22 +628,170 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     gcc_option_tokens, sysroot, nostdinc = _cc.gcc_option_tokens, _cc.sysroot, _cc.nostdinc
     header_backend = _cc.frontend
 
+    # CLI-audit P1: --ast-frontend hybrid dual-runs castxml+clang for the L2
+    # header AST, but L4 source-ABI replay has no such dual-backend merge —
+    # an explicit --depth source would silently reach no further than
+    # castxml/clang alone (or nothing) while still calling itself "hybrid".
+    # Reject the combination outright rather than let it look like a
+    # successful hybrid source analysis; the implicit default (no --depth)
+    # is left alone since it is already allowed to honestly degrade. Checked
+    # once here, after the CLI>config frontend resolution above and before
+    # either dispatch branch, so a config-selected `compile.frontend: hybrid`
+    # can't bypass it via either path (CodeRabbit + Codex review).
+    #
+    # Codex review: scoped to invocations that will actually attempt L4
+    # extraction with the hybrid frontend -- see
+    # _dump_will_attempt_hybrid_l4_extraction's docstring for the two cases
+    # (prebuilt-pack --sources, and no --sources at all) where it must not
+    # fire. --build-info never feeds L4 extraction (only L3 compile-DB
+    # resolution), so it plays no part in this predicate (Codex review,
+    # fourth finding).
+    if (
+        depth == "source"
+        and header_backend == "hybrid"
+        and _dump_will_attempt_hybrid_l4_extraction(sources)
+    ):
+        raise click.UsageError(
+            "--depth source is incompatible with --ast-frontend hybrid: L4 "
+            "source-ABI replay has no dual-backend hybrid extractor (unlike "
+            "the L2 header-AST snapshot). Pass --ast-frontend castxml or "
+            "--ast-frontend clang for a --depth source dump."
+        )
+
+    # A source-only dump (no SO_PATH) has no binary at all, so --depth binary
+    # -- rank 0, the floor everything else must exceed -- is trivially
+    # "satisfied" by check_requested_depth_satisfied even for a completely
+    # empty snapshot (--depth binary resolves collect_mode to "off", which
+    # skips L3-L5 embedding too): `dump --sources src --depth binary -o
+    # out.json` would exit 0 and write a snapshot with no binary, header,
+    # build, or source facts at all -- a baseline/CI consumer would read
+    # that success as proof the requested rung is genuinely present. Checked
+    # unconditionally, before the --dry-run branch, so both paths reject the
+    # same way (external review).
+    if so_path is None and depth == "binary":
+        raise click.UsageError(
+            "--depth binary requires a native artifact (SO_PATH); a "
+            "source-only dump (--sources/--build-info with no SO_PATH) has "
+            "no binary to report and needs at least --depth build or "
+            "--depth source to produce any evidence."
+        )
+
+    # Resolve debug-format and binary-format identity once, shared between
+    # the dry-run report and the real run, and raise the same UsageError/
+    # BadParameter a real run would for either -- unconditionally, before the
+    # --dry-run branch, exactly like the hybrid+depth UsageError check above.
+    # These two validations (resolve_dump_compile_db's UsageError, and the
+    # debug-format/PE-Mach-O BadParameter below) previously only ran in the
+    # real path, after the dry-run branch, so `dump --dry-run` could report
+    # success on an invocation the real run would immediately reject.
+    # CodeRabbit review: an earlier version of this fix instead encoded both
+    # as DryRunResult blockers (exit 1) -- silently downgrading what is a
+    # genuine usage error (exit 64) into an evidence-blocker mistakenly, and
+    # disagreeing with the real run's actual exit code for the identical
+    # input. Raising directly here keeps dry-run and the real run on the
+    # exact same code path for this check, not just the same message. Uses
+    # the pure, side-effect-free binary_utils.normalize_binary_input (no
+    # linker-script "Note:" echo) rather than _normalize_binary_input,
+    # matching dry-run's own "cheap, read-only resolution only" contract;
+    # the real path below still calls _normalize_binary_input itself for
+    # that echo and the so_path reassignment (a no-op re-validation once
+    # this has already passed).
+    effective_debug_format: str | None = None
+    if so_path is not None:
+        from .binary_utils import normalize_binary_input as _peek_binary_format
+        from .cli_dump_helpers import (
+            check_dump_compile_db_error,
+            check_dump_debug_format_error,
+        )
+
+        effective_debug_format = resolve_dump_debug_format(debug_format_opt, debug_format)
+        compile_db_error = check_dump_compile_db_error(
+            compile_db_path, compile_db_path_alt, headers
+        )
+        if compile_db_error is not None:
+            raise click.UsageError(compile_db_error)
+        _, dry_run_binary_fmt = _peek_binary_format(so_path)
+        debug_format_error = check_dump_debug_format_error(
+            effective_debug_format, dry_run_binary_fmt
+        )
+        if debug_format_error is not None:
+            raise click.BadParameter(debug_format_error)
+
+    if dry_run:
+        from .buildsource.inline import is_pack_dir
+        from .cli_buildsource_helpers import _is_inputs_pack_dir
+        from .cli_dump_helpers import render_dump_dry_run
+        from .cli_helpers_compare import dry_run_compile_db_matched
+
+        emit_dry_run(
+            render_dump_dry_run(
+                so_path=so_path, headers=headers, sources=sources,
+                build_info=build_info, build_config=build_config,
+                depth=depth, collect_mode=collect_mode,
+                header_backend=header_backend, output=output,
+                has_compile_db=bool(compile_db_path or compile_db_path_alt),
+                # External review: dry-run previously only checked bare -p/
+                # --compile-db presence; loading it and matching against the
+                # resolved headers is cheap, deterministic, read-only
+                # resolution, not "real work out of scope for a dry run".
+                compile_db_matched=dry_run_compile_db_matched(
+                    compile_db_path, compile_db_path_alt, headers, compile_db_filter,
+                ),
+                # embed_build_source's own classification: a source-capable
+                # --build-info is either a BuildSourcePack (is_pack_dir) or a
+                # Flow-2 abicheck_inputs/ directory (_is_inputs_pack_dir) --
+                # both can carry L4 source_abi facts, unlike a raw compile
+                # DB/build dir (Codex review, second finding on this signal).
+                build_info_is_pack=(
+                    is_pack_dir(build_info) or _is_inputs_pack_dir(build_info)
+                ),
+            )
+        )
+
+    # Source-only dump (no binary) for the parallel-baseline flow.
+    if so_path is None:
+        from .cli_buildsource import dump_source_only
+        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db, extractor=header_backend, depth=depth)
+        return
+
+    effective_compile_db = resolve_dump_compile_db(compile_db_path, compile_db_path_alt, headers)
+    # Resolved before the PE/Mach-O dispatch (Codex review): both binary-format
+    # branches need the same -p/--compile-db -> castxml/clang flags and matched
+    # signal -- the ELF path used to compute these only after the PE/Mach-O
+    # early return, so a compile database's flags were silently dropped for
+    # PE/Mach-O input, and --depth build backed only by -p was wrongly
+    # rejected there (parsed_with_build_context was never stamped either).
+    build_context_flags, compile_db_matched = _resolve_build_context_flags(
+        effective_compile_db, headers, compile_db_filter,
+    )
+    effective_gcc_options = _merge_gcc_options(build_context_flags, gcc_options)
+
+    # Auto-detect binary format — PE/Mach-O skip the ELF/castxml path. The
+    # conventional ``libfoo.so`` dev symlink is often a GNU ld linker script;
+    # follow it to the real shared library before dispatching.
+    so_path, binary_fmt = _normalize_binary_input(so_path)
+    if effective_debug_format is not None and binary_fmt in ("pe", "macho"):
+        raise click.BadParameter(
+            f"--{effective_debug_format} is only supported for ELF binaries, not {binary_fmt.upper()}."
+        )
+
     if binary_fmt in ("pe", "macho"):
+        native_cc = (
+            dataclasses.replace(_cc, gcc_options=effective_gcc_options)
+            if effective_gcc_options != _cc.gcc_options
+            else _cc
+        )
         handle_non_elf_dump(
             so_path, binary_fmt, headers, includes, version, lang, pdb_path,
             follow_deps, git_tag, build_id, no_git, output,
             _dump_native_binary, _stamp_provenance, _write_snapshot_output,
             public_headers, public_header_dirs, build_info, sources, build_config,
             allow_build_query, collect_mode, build_query, build_compile_db,
-            header_backend=header_backend, compile_context=_cc,
+            header_backend=header_backend, compile_context=native_cc,
             header_graph=header_graph, header_graph_includes=header_graph_includes,
+            depth=depth, compile_db_context_matched=compile_db_matched,
         )
         return
-
-    build_context_flags = _resolve_build_context_flags(
-        effective_compile_db, headers, compile_db_filter,
-    )
-    effective_gcc_options = _merge_gcc_options(build_context_flags, gcc_options)
 
     # Debug artifact resolution (ADR-021a): resolve before dump. P1.1: thread
     # a resolved detached debug file (build-id tree / path-mirror / debuginfod
@@ -706,6 +849,8 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         header_graph=header_graph,
         header_graph_includes=header_graph_includes,
         compile_context=_cc,
+        depth=depth,
+        compile_db_context_matched=compile_db_matched,
     )
 
 
@@ -1053,6 +1198,20 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
     compared here gets the identical verdict it would from a single-pair `compare`
     (ADR-037 D1/D7). The standalone `compare-release` command was removed; this is
     now its only entry point.
+
+    Calls ``compare_release_cmd.callback`` directly rather than
+    ``ctx.invoke(compare_release_cmd, ...)`` (CLI-audit P2: "business logic
+    depends on Click-to-Click orchestration") -- ``compare_release_cmd`` is
+    itself never registered on `main` and exists solely to be called this way
+    (see its own module comment), and every one of its ~44 parameters is
+    already supplied explicitly by the caller below, so there is no Click
+    default-filling for ``ctx.invoke`` to usefully do here; it was only ever
+    creating a throwaway sub-``Context`` to call the same plain function.
+    ``UsageError``/``BadParameter`` normally get ``e.ctx`` backfilled by
+    ``ctx.invoke``'s ``augment_usage_errors`` wrapper for display purposes
+    (a "Usage: ..." header on the formatted error) -- replicated by hand here
+    so a validation error raised inside the release engine still formats
+    identically to before.
     """
     fmt = kwargs.get("fmt", "markdown")
     if fmt not in _RELEASE_FORMATS:
@@ -1062,7 +1221,13 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
         )
     from .cli_compare_release import compare_release_cmd
 
-    ctx.invoke(compare_release_cmd, **kwargs)
+    assert compare_release_cmd.callback is not None
+    try:
+        compare_release_cmd.callback(**kwargs)
+    except click.UsageError as exc:
+        if exc.ctx is None:
+            exc.ctx = ctx
+        raise
 
 
 def _source_is_pack(path: Path) -> bool:
@@ -1111,6 +1276,7 @@ def _embed_inline_source_side(
     collect_mode: str,
     out_dir: Path,
     label: str,
+    depth: str | None = None,
     debug_roots: tuple[Path, ...] = (),
     debuginfod: bool = False,
     debuginfod_url: str | None = None,
@@ -1138,6 +1304,23 @@ def _embed_inline_source_side(
     ``--old/new-sources`` tree bypassed ``--debug-root`` entirely (the inline
     dump used its own unset defaults), so a stripped binary on this side still
     lost its DWARF even though the sibling non-inline path was fixed.
+
+    ``depth`` is ``compare``'s own (unmodified) ``--depth`` string, used only
+    to reproduce ``dump_cmd``'s ``--depth source`` + ``--ast-frontend hybrid``
+    rejection for this side (Codex review): the ``ctx.invoke(dump_cmd, ...)``
+    call below never passes ``depth=``, so without this explicit check
+    ``dump_cmd``'s own guard silently never fires for a raw
+    ``--old/new-sources`` tree here even when ``compare --depth source
+    --ast-frontend hybrid`` would reject the identical tree via a plain
+    ``dump --sources <tree> --depth source --ast-frontend hybrid`` — an
+    inconsistent, silently-degrading escape hatch from the same command-line
+    surface the check was written to close. Deliberately narrower than
+    threading ``depth`` into the nested ``dump_cmd`` invocation itself, which
+    would also activate that call's ``check_requested_depth_satisfied`` hard
+    gate on this one side's snapshot in isolation — a larger behavior change
+    than this finding asked for, and not needed here since ``compare``'s own
+    ``--depth`` semantics (missing-evidence-layer warnings, not a hard
+    per-side gate) are unaffected by this narrowly-scoped check.
     """
     sources_raw = sources is not None and not _source_is_pack(sources)
     build_info_raw = build_info is not None and not _source_is_pack(build_info)
@@ -1206,6 +1389,44 @@ def _embed_inline_source_side(
         frontend_explicit=frontend_explicit,
         nostdinc_explicit=nostdinc_explicit,
     )
+    # Reproduce dump_cmd's --depth source + --ast-frontend hybrid rejection for
+    # this side -- see this function's own docstring for why the nested
+    # ctx.invoke(dump_cmd, ...) below does not surface that check itself
+    # (Codex review).
+    if (
+        depth == "source"
+        and frozen_cc.frontend == "hybrid"
+        and _dump_will_attempt_hybrid_l4_extraction(dump_sources)
+    ):
+        raise click.UsageError(
+            f"--depth source is incompatible with --ast-frontend hybrid for "
+            f"the --{label}-sources tree: L4 source-ABI replay has no "
+            "dual-backend hybrid extractor (unlike the L2 header-AST "
+            f"snapshot). Pass --{label}-ast-frontend castxml or "
+            f"--{label}-ast-frontend clang (or the unscoped --ast-frontend) "
+            "for a --depth source compare."
+        )
+    # CLI-audit P2 ("business logic depends on Click-to-Click orchestration"):
+    # this ctx.invoke was investigated for removal alongside the
+    # compare_release_cmd one above (_dispatch_release_compare now calls its
+    # .callback directly) and deliberately kept. dump_cmd has 44 parameters;
+    # only ~19 are supplied here, so removing ctx.invoke would mean either
+    # hand-duplicating Click's own ~25 remaining @click.option defaults here
+    # (silently drifts the moment one of them changes) or reaching into
+    # Click's private Context._make_sub_context/get_default/type_cast_value
+    # machinery to resolve them correctly -- i.e. reimplementing ctx.invoke
+    # by hand for no behavioral gain, since dump_cmd's own
+    # resolve_dump_compile_context() genuinely needs a real, correctly-scoped
+    # click.get_current_context() on the path this caller doesn't take
+    # (resolved_compile_context is always non-None here, but that is an
+    # invariant of THIS call site, not something dump_cmd's general callback
+    # contract guarantees for a future caller). ctx.invoke is the public,
+    # documented Click API for exactly this "call another command with most
+    # params pre-resolved, let Click fill in the rest" case. The genuine fix
+    # for the architectural concern is extracting dump_cmd's resolve/dispatch
+    # body into a shared Tier-2-style function both the CLI wrapper and this
+    # embed path call directly -- a real refactor of a heavily-hardened,
+    # already-2000-line-adjacent file, out of scope for a contained change.
     ctx.invoke(
         dump_cmd,
         so_path=norm,

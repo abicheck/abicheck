@@ -378,6 +378,53 @@ class TestSmallHelpers:
         assert "will be ignored" not in result.output
         assert getattr(captured["compile_context"], "gcc_option_tokens") == ("-DX",)
 
+    def test_dump_compile_db_flags_and_match_threaded_to_non_elf(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Codex review: -p/--compile-db was resolved for ELF only -- a PE/
+        Mach-O dump silently dropped the compile database's castxml/clang
+        flags entirely, and never threaded the matched signal through to
+        handle_non_elf_dump either (so snap.parsed_with_build_context could
+        never be set, wrongly rejecting a --depth build backed only by -p).
+        """
+        import json
+        import struct
+
+        import abicheck.cli as cli_mod
+
+        header = tmp_path / "foo.h"
+        header.write_text("int f();\n", encoding="utf-8")
+        src = tmp_path / "foo.cpp"
+        src.write_text('#include "foo.h"\nint f() { return 0; }\n', encoding="utf-8")
+        db = tmp_path / "compile_commands.json"
+        db.write_text(
+            json.dumps(
+                [
+                    {
+                        "directory": str(tmp_path),
+                        "file": "foo.cpp",
+                        "arguments": ["c++", "-std=c++17", "-DFOO=1", "-c", "foo.cpp"],
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        dylib = tmp_path / "fake.dylib"
+        dylib.write_bytes(struct.pack("<I", 0xFEEDFACF) + b"\x00" * 64)
+
+        captured: dict[str, object] = {}
+        monkeypatch.setattr(
+            cli_mod, "handle_non_elf_dump", lambda *a, **k: captured.update(k)
+        )
+        result = CliRunner().invoke(
+            main, ["dump", str(dylib), "-H", str(header), "-p", str(db)]
+        )
+        assert result.exit_code == 0, result.output
+        assert captured["compile_db_context_matched"] is True
+        gcc_options = getattr(captured["compile_context"], "gcc_options")
+        assert "-std=c++17" in gcc_options
+        assert "-DFOO=1" in gcc_options
+
     def test_dump_gcc_option_help(self) -> None:
         # G21.5: the repeatable --gcc-option is documented on dump.
         out = CliRunner().invoke(main, ["dump", "--help"]).output
@@ -1813,6 +1860,67 @@ class TestUsedByScoping:
         data = json.loads(result.stdout)
         kinds = [c["kind"] for c in data["changes"]]
         assert "used_by_missing_symbol" in kinds
+
+    def test_json_summary_reflects_scoped_only_and_missing_findings(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Audit finding: `summary` is computed from the real diff's
+        result.changes *before* scoped-only/missing-contract entries are
+        folded into `changes` -- a scoped run whose only gating issue is one
+        of these synthetic entries (real diff: no changes; scoped gate:
+        BREAKING on a missing required symbol) used to report
+        verdict "BREAKING" next to summary.total_changes: 0, an internally
+        contradictory JSON body. `summary` must count the synthetic entries
+        too; the pre-scoped counts move to `full_summary`."""
+        res = self._result(verdict=Verdict.BREAKING, missing=["needed_symbol"])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
+        )
+        data = json.loads(result.stdout)
+        assert data["verdict"] == "BREAKING"
+        assert data["summary"]["total_changes"] == len(data["changes"]) == 1
+        assert data["summary"]["breaking"] == 1
+        assert data["full_summary"]["total_changes"] == 0
+
+        # Schema-validation regression (external review): full_summary is a
+        # schema-2.9 top-level key -- assert this exact scoped-only payload
+        # (the shape that motivated adding it) validates against the
+        # packaged compare_report.schema.json, not just that reading it by
+        # hand looks right.
+        try:
+            import jsonschema
+        except ImportError:
+            pytest.skip("jsonschema not installed")
+        from abicheck.schemas import load_compare_report_schema
+
+        jsonschema.validate(instance=data, schema=load_compare_report_schema())
+
+    def test_stat_json_summary_reflects_scoped_only_and_missing_findings(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Codex review: `--format json --stat` (to_stat_json) emits a
+        summary-only payload with no `changes` array at all, so the
+        changes_list-gated recompute above never ran for it -- `verdict`
+        still swapped to the scoped gate result, but `summary` stayed the
+        stale full-library counts and no `full_summary` was added. Same
+        contradiction as the non-stat case
+        (test_json_summary_reflects_scoped_only_and_missing_findings), just
+        reachable via --stat too."""
+        res = self._result(verdict=Verdict.BREAKING, missing=["needed_symbol"])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
+            "--stat",
+        )
+        data = json.loads(result.stdout)
+        assert "changes" not in data
+        assert data["verdict"] == "BREAKING"
+        assert data["summary"]["total_changes"] == 1
+        assert data["summary"]["breaking"] == 1
+        assert data["full_summary"]["total_changes"] == 0
 
 
 class TestVerifyRuntimeFlag:

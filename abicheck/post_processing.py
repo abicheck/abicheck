@@ -630,12 +630,41 @@ class MarkReachability:
             ``--public-header-dir`` scoping marked ``ScopeOrigin.PUBLIC_HEADER``
             — ``Function``/``Variable``/``RecordType``/``EnumType`` all carry
             this field. Without that flag every origin is ``ScopeOrigin.UNKNOWN``,
-            so this returns empty and degrades to the prior behavior."""
+            so this returns empty and degrades to the prior behavior.
+
+            ``Function``/``Variable`` also contribute their demangled-mangled
+            qualified name (:func:`diff_filtering._qualified_by_mangled`), not
+            just ``.name`` — the default CastXML backend never qualifies
+            ``.name`` with namespace context, so a bare-name-only set would
+            never match ``Change.qualified_name`` (itself recovered the same
+            way) for a namespaced public function/variable, silently
+            reproducing the exact identity gap this direct-match branch
+            exists to close (Codex review, fresh evidence)."""
+            from .diff_filtering import _qualified_by_mangled
+
             names: set[str] = set()
             names.update(f.name for f in snap.functions if f.origin == ScopeOrigin.PUBLIC_HEADER)
             names.update(v.name for v in snap.variables if v.origin == ScopeOrigin.PUBLIC_HEADER)
             names.update(t.name for t in snap.types if t.origin == ScopeOrigin.PUBLIC_HEADER)
             names.update(e.name for e in snap.enums if e.origin == ScopeOrigin.PUBLIC_HEADER)
+            names.update(
+                _qualified_by_mangled(
+                    [
+                        (f.mangled, f)
+                        for f in snap.functions
+                        if f.origin == ScopeOrigin.PUBLIC_HEADER
+                    ]
+                ).values()
+            )
+            names.update(
+                _qualified_by_mangled(
+                    [
+                        (v.mangled, v)
+                        for v in snap.variables
+                        if v.origin == ScopeOrigin.PUBLIC_HEADER
+                    ]
+                ).values()
+            )
             return names
 
         namespaces = self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES

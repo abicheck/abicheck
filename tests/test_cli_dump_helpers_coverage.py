@@ -24,7 +24,8 @@ import click
 import pytest
 
 from abicheck.cli_dump_helpers import (
-    evidence_depth_label,
+    check_dump_compile_db_error,
+    check_dump_debug_format_error,
     handle_non_elf_dump,
     perform_elf_dump,
     resolve_dump_compile_context,
@@ -90,6 +91,43 @@ def test_compile_db_with_headers_returns_effective_path(tmp_path: Path) -> None:
     assert resolve_dump_compile_db(None, alt, (hdr,)) == alt
     # No DB at all → None (and no header requirement to enforce).
     assert resolve_dump_compile_db(None, None, ()) is None
+
+
+# ── check_dump_compile_db_error / check_dump_debug_format_error ────────────
+# Pure predicates factored out of resolve_dump_compile_db / the debug-format
+# BadParameter check so `dump --dry-run` can report the same condition as a
+# blocker instead of missing it entirely (previously both checks only ran in
+# the real path, after the dry-run branch had already returned).
+
+
+def test_check_compile_db_error_mirrors_resolve_dump_compile_db(tmp_path: Path) -> None:
+    db = tmp_path / "compile_commands.json"
+    db.write_text("[]", encoding="utf-8")
+    hdr = tmp_path / "h.h"
+    hdr.write_text("", encoding="utf-8")
+
+    assert check_dump_compile_db_error(db, None, ()) is not None
+    assert "requires -H/--header" in check_dump_compile_db_error(db, None, ())
+    assert check_dump_compile_db_error(None, db, ()) is not None
+    assert check_dump_compile_db_error(db, None, (hdr,)) is None
+    assert check_dump_compile_db_error(None, None, ()) is None
+
+    # resolve_dump_compile_db raises exactly when the predicate is non-None.
+    with pytest.raises(click.UsageError):
+        resolve_dump_compile_db(db, None, ())
+    assert resolve_dump_compile_db(db, None, (hdr,)) == db
+
+
+def test_check_debug_format_error_only_for_pe_macho() -> None:
+    assert check_dump_debug_format_error("dwarf", "pe") == (
+        "--dwarf is only supported for ELF binaries, not PE."
+    )
+    assert check_dump_debug_format_error("btf", "macho") == (
+        "--btf is only supported for ELF binaries, not MACHO."
+    )
+    assert check_dump_debug_format_error("dwarf", "elf") is None
+    assert check_dump_debug_format_error(None, "pe") is None
+    assert check_dump_debug_format_error(None, None) is None
 
 
 # ── handle_non_elf_dump error handling ──────────────────────────────────────
@@ -282,6 +320,120 @@ def test_non_elf_dump_defaults_header_graph_off(tmp_path: Path) -> None:
     assert kwargs["header_graph_includes"] is False
 
 
+def test_non_elf_dump_stamps_build_context_when_compile_db_matched(
+    tmp_path: Path,
+) -> None:
+    """Codex review: a -p/--compile-db match was never threaded into the
+    PE/Mach-O path at all -- snap.parsed_with_build_context stayed False
+    even when cli.py's _resolve_build_context_flags found a real match, so
+    `dump foo.dll -H api.h -p build --depth build` was wrongly rejected as
+    only reaching "headers". Mirrors perform_elf_dump's identical stamp.
+    from_headers=True here represents a genuine header-scoped dump (as
+    opposed to service._try_header_scoped_dump()'s export-table fallback,
+    covered separately below)."""
+    so = tmp_path / "lib.dll"
+    snap = AbiSnapshot(library="lib.dll", version="1.0", from_headers=True)
+    header = tmp_path / "api.h"
+    header.write_text("void f(void);\n", encoding="utf-8")
+
+    def _dump_native(*a, **k):  # noqa: ANN002, ANN003
+        return snap
+
+    handle_non_elf_dump(
+        so,
+        "pe",
+        (header,),
+        (),
+        "1.0",
+        "c++",
+        None,
+        False,
+        None,
+        None,
+        False,
+        None,
+        _dump_native,
+        _noop_stamp,
+        _record_write,
+        compile_db_context_matched=True,
+    )
+    assert snap.parsed_with_build_context is True
+
+
+def test_non_elf_dump_does_not_stamp_build_context_when_compile_db_unmatched(
+    tmp_path: Path,
+) -> None:
+    so = tmp_path / "lib.dll"
+    snap = AbiSnapshot(library="lib.dll", version="1.0")
+    header = tmp_path / "api.h"
+    header.write_text("void f(void);\n", encoding="utf-8")
+
+    def _dump_native(*a, **k):  # noqa: ANN002, ANN003
+        return snap
+
+    handle_non_elf_dump(
+        so,
+        "pe",
+        (header,),
+        (),
+        "1.0",
+        "c++",
+        None,
+        False,
+        None,
+        None,
+        False,
+        None,
+        _dump_native,
+        _noop_stamp,
+        _record_write,
+        compile_db_context_matched=False,
+    )
+    assert snap.parsed_with_build_context is False
+
+
+def test_non_elf_dump_does_not_stamp_build_context_on_mangling_fallback(
+    tmp_path: Path,
+) -> None:
+    """Codex review: service._try_header_scoped_dump() can silently fall back
+    to a fresh export-table-only snapshot (from_headers=False, scope_fallback
+    set) when the parsed headers don't match any exported symbol -- e.g. an
+    MSVC-mangled C++ DLL parsed with a mismatched compiler. The *request*
+    still had headers and a genuinely matched compile DB, but the snapshot
+    that was actually written never used either; stamping build-context
+    evidence on it would let `--depth build` wrongly accept a plain
+    export-table dump."""
+    so = tmp_path / "lib.dll"
+    snap = AbiSnapshot(
+        library="lib.dll", version="1.0", from_headers=False, scope_fallback="mangling-fallback"
+    )
+    header = tmp_path / "api.h"
+    header.write_text("void f(void);\n", encoding="utf-8")
+
+    def _dump_native(*a, **k):  # noqa: ANN002, ANN003
+        return snap
+
+    handle_non_elf_dump(
+        so,
+        "pe",
+        (header,),
+        (),
+        "1.0",
+        "c++",
+        None,
+        False,
+        None,
+        None,
+        False,
+        None,
+        _dump_native,
+        _noop_stamp,
+        _record_write,
+        compile_db_context_matched=True,
+    )
+    assert snap.parsed_with_build_context is False
+
+
 def test_non_elf_dump_follow_deps_warns(tmp_path: Path, capsys) -> None:
     """--follow-deps is ELF-only; the native path emits a stderr warning (line 244)."""
     so = tmp_path / "lib.dylib"
@@ -369,6 +521,131 @@ def test_perform_elf_dump_stamps_build_context_and_attaches(
     db = tmp_path / "compile_commands.json"
     db.write_text(json.dumps([{"command": "cc -DKEEP -c config.c"}]), encoding="utf-8")
 
+    snap = AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", lambda **_kw: snap)
+
+    events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+
+    perform_elf_dump(
+        so,
+        (hdr,),
+        (),
+        "1.0",
+        "c",
+        None,
+        None,
+        None,
+        (),  # gcc_path/prefix/options/option_tokens
+        None,
+        True,  # sysroot, nostdinc
+        False,
+        None,  # dwarf_only, effective_debug_format
+        (),
+        (),  # public_headers, public_header_dirs
+        db,  # effective_compile_db
+        False,
+        (),
+        "",  # follow_deps, search_paths, ld_library_path
+        None,
+        None,
+        False,  # git_tag, build_id, no_git
+        None,
+        None,
+        None,
+        None,
+        False,
+        "off",  # output..collect_mode
+        _expand,
+        _populate,
+        _stamp,
+        _write,
+        compile_db_context_matched=True,
+    )
+
+    assert snap.parsed_with_build_context is True
+    # ADR-039 collector saw the DB's active -DKEEP and the guarded field.
+    assert snap.build_context_defines == {"KEEP"}
+    assert snap.conditional_fields["Config"]["legacy"]["guard"] == "KEEP"
+    assert events.get("stamped") and events.get("written")
+    assert "populated" not in events  # follow_deps was False
+
+
+def test_perform_elf_dump_does_not_stamp_build_context_for_dwarf_only(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Codex review: --dwarf-only explicitly ignores -H headers
+    (dumper._try_dwarf_snapshot warns "ignoring provided headers" and returns
+    a DWARF-built snapshot with from_headers left False) -- a -p compile
+    database matching the originally *requested* headers must not be
+    recorded as real build-context evidence for a snapshot that never
+    actually parsed them, even though compile_db_context_matched is True
+    (mirrors handle_non_elf_dump's identical from_headers gate)."""
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "config.h"
+    hdr.write_text("struct Config {\n int v;\n};", encoding="utf-8")
+    db = tmp_path / "compile_commands.json"
+    db.write_text(json.dumps([{"command": "cc -DKEEP -c config.c"}]), encoding="utf-8")
+
+    snap = AbiSnapshot(library="lib.so", version="1.0", from_headers=False)
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", lambda **_kw: snap)
+
+    events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+
+    perform_elf_dump(
+        so,
+        (hdr,),
+        (),
+        "1.0",
+        "c",
+        None,
+        None,
+        None,
+        (),  # gcc_path/prefix/options/option_tokens
+        None,
+        True,  # sysroot, nostdinc
+        True,  # dwarf_only
+        None,  # effective_debug_format
+        (),
+        (),  # public_headers, public_header_dirs
+        db,  # effective_compile_db
+        False,
+        (),
+        "",  # follow_deps, search_paths, ld_library_path
+        None,
+        None,
+        False,  # git_tag, build_id, no_git
+        None,
+        None,
+        None,
+        None,
+        False,
+        "off",  # output..collect_mode
+        _expand,
+        _populate,
+        _stamp,
+        _write,
+        compile_db_context_matched=True,
+    )
+
+    assert snap.parsed_with_build_context is False
+
+
+def test_perform_elf_dump_does_not_stamp_build_context_when_db_unmatched(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Codex review: a -p/--compile-db path that is present (effective_compile_db
+    is not None) but derived no usable castxml flags (compile_db_context_matched
+    is False -- e.g. an empty or non-matching compile_commands.json) must NOT
+    stamp parsed_with_build_context, since evidence_depth_label/
+    check_requested_depth_satisfied read that flag as genuine "build" evidence
+    for the strict --depth build gate. Otherwise a --compile-db pointing at an
+    unusable DB would silently satisfy --depth build with zero real facts."""
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "config.h"
+    hdr.write_text("struct Config {\n int v;\n};", encoding="utf-8")
+    db = tmp_path / "compile_commands.json"
+    db.write_text(json.dumps([]), encoding="utf-8")  # syntactically valid, empty
+
     snap = AbiSnapshot(library="lib.so", version="1.0")
     monkeypatch.setattr("abicheck.cli_dump_helpers.dump", lambda **_kw: snap)
 
@@ -407,14 +684,10 @@ def test_perform_elf_dump_stamps_build_context_and_attaches(
         _populate,
         _stamp,
         _write,
+        compile_db_context_matched=False,
     )
 
-    assert snap.parsed_with_build_context is True
-    # ADR-039 collector saw the DB's active -DKEEP and the guarded field.
-    assert snap.build_context_defines == {"KEEP"}
-    assert snap.conditional_fields["Config"]["legacy"]["guard"] == "KEEP"
-    assert events.get("stamped") and events.get("written")
-    assert "populated" not in events  # follow_deps was False
+    assert snap.parsed_with_build_context is False
 
 
 def test_perform_elf_dump_attaches_header_graph_when_requested(
@@ -1115,77 +1388,3 @@ def test_perform_elf_dump_wraps_dump_errors_still_cleans_up_seeded_dirs(
 # ── evidence_depth_label (CLI-audit P2 self-describing output) ──────────────
 
 
-def _pack(build_evidence=None, source_abi=None, source_graph=None):
-    from abicheck.buildsource.pack import BuildSourcePack
-
-    return BuildSourcePack(
-        root=Path("/nonexistent"),
-        build_evidence=build_evidence,
-        source_abi=source_abi,
-        source_graph=source_graph,
-    )
-
-
-def test_evidence_depth_label_binary_when_no_headers_no_build_source() -> None:
-    snap = AbiSnapshot(library="libfoo.so", version="1.0")
-    assert evidence_depth_label(snap) == "binary"
-
-
-def test_evidence_depth_label_headers_when_from_headers_set() -> None:
-    snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
-    assert evidence_depth_label(snap) == "headers"
-
-
-def test_evidence_depth_label_build_when_build_evidence_has_facts() -> None:
-    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
-
-    snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
-    snap.build_source = _pack(
-        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")])
-    )
-    assert evidence_depth_label(snap) == "build"
-
-
-def test_evidence_depth_label_source_when_source_abi_has_reachable_entities() -> None:
-    from abicheck.buildsource.build_evidence import BuildEvidence
-    from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
-
-    snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
-    snap.build_source = _pack(
-        build_evidence=BuildEvidence(),
-        source_abi=SourceAbiSurface(
-            reachable_declarations=[SourceEntity(id="foo", kind="function")]
-        ),
-    )
-    assert evidence_depth_label(snap) == "source"
-
-
-def test_evidence_depth_label_source_when_source_graph_has_nodes() -> None:
-    from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
-
-    snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
-    snap.build_source = _pack(
-        source_graph=SourceGraphSummary(nodes=[GraphNode(id="n1", kind="function")])
-    )
-    assert evidence_depth_label(snap) == "source"
-
-
-def test_evidence_depth_label_does_not_overstate_empty_source_abi() -> None:
-    # Regression (CodeRabbit review): source_abi/source_graph/build_evidence
-    # can be present (non-None) but carry no real facts -- e.g.
-    # _run_inline_source_abi returns an empty SourceAbiSurface() when clang is
-    # unavailable after L3 was found. Presence alone must not overstate
-    # "source"/"build" for a layer that ran but linked nothing.
-    from abicheck.buildsource.build_evidence import BuildEvidence
-    from abicheck.buildsource.source_abi import SourceAbiSurface
-    from abicheck.buildsource.source_graph import SourceGraphSummary
-
-    snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
-    snap.build_source = _pack(
-        build_evidence=BuildEvidence(),  # no targets/compile_units
-        source_abi=SourceAbiSurface(),  # no reachable entities
-        source_graph=SourceGraphSummary(),  # no nodes
-    )
-    # All three layers are present but empty -- falls all the way back to
-    # "headers" (from_headers=True), not "source" or "build".
-    assert evidence_depth_label(snap) == "headers"

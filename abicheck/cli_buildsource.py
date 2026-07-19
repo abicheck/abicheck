@@ -323,6 +323,7 @@ def dump_source_only(
     build_query: str | None = None,
     build_compile_db: str | None = None,
     extractor: str = "auto",
+    depth: str | None = None,
 ) -> None:
     """Write a binary-less snapshot carrying only the embedded build/source facts.
 
@@ -356,6 +357,7 @@ def dump_source_only(
         build_query=build_query,
         build_compile_db=build_compile_db,
         extractor=extractor,
+        depth=depth,
     )
 
 

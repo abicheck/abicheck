@@ -219,18 +219,26 @@ def _extract_if_package(
     make_temp_dir: Callable[[str], Path],
     is_package: Callable[[Path], bool],
     detect_extractor: Callable[[Path], PackageExtractor | None],
-) -> tuple[Path, Path | None, Path | None]:
-    """Extract package to tempdir if needed, return (lib_dir, debug_dir, header_dir).
+) -> tuple[Path, Path | None, Path | None, Path | None]:
+    """Extract package to tempdir if needed, return
+    (lib_dir, debug_dir, header_dir, symbols_file).
 
     When *input_path* is a plain directory (not a package archive), it is used
     as-is for lib_dir.  Side packages (*debug_pkg*, *devel_pkg*) are still
     extracted in that case so that standalone debug/devel packages paired with
     an already-extracted directory are not silently ignored.
+
+    *symbols_file* (CLI-audit P2) is the Debian dpkg-gensymbols(1) contract
+    file from *input_path*'s own control.tar.* when it is a .deb -- ``None``
+    for every other package format and for a .deb that ships none. Only the
+    primary package is consulted, not *debug_pkg*/*devel_pkg*: a `-dbg`/`-dev`
+    companion package does not carry the library's own symbols contract.
     """
     # Default: treat input_path as an already-extracted library directory.
     lib_dir: Path = input_path
     debug_dir: Path | None = None
     header_dir: Path | None = None
+    symbols_file: Path | None = None
 
     if is_package(input_path):
         extractor = detect_extractor(input_path)
@@ -241,6 +249,7 @@ def _extract_if_package(
         lib_dir = result.lib_dir
         debug_dir = result.debug_dir
         header_dir = result.header_dir
+        symbols_file = result.symbols_file
 
     if debug_pkg is not None:
         dbg_ext = detect_extractor(debug_pkg)
@@ -262,7 +271,44 @@ def _extract_if_package(
         dev_result = dev_ext.extract(devel_pkg, dev_target)
         header_dir = dev_result.header_dir or dev_result.lib_dir
 
-    return lib_dir, debug_dir, header_dir
+    return lib_dir, debug_dir, header_dir, symbols_file
+
+
+def _debian_symbols_warning(
+    old_symbols_file: Path | None, new_symbols_file: Path | None,
+) -> str | None:
+    """Compare two .deb packages' dpkg-gensymbols(1) contracts, if both sides
+    have one (CLI-audit P2: "Debian .symbols not integrated" -- extraction
+    alone does not make the contract participate in a package compare).
+
+    Returns a formatted diff report to fold into the release warnings list
+    when the contracts disagree, else ``None`` -- purely additive/informational
+    (never gates the compare's verdict/exit code): the binary ABI diff
+    already gates BREAKING/API_BREAK; a symbols-contract mismatch by itself
+    only means the *packaging* metadata (minimum versions, listed symbols)
+    has drifted from what the binary actually exports, which is useful
+    context but not on its own proof of an ABI break (ADR-028 D3's "evidence
+    may add context, never silently delete/invent a break" principle,
+    applied here to a cross-source packaging check the same way
+    crosscheck.py's D4 checks apply it to build/source evidence).
+    """
+    if old_symbols_file is None or new_symbols_file is None:
+        return None
+    from .debian_symbols import (
+        diff_symbols_files,
+        format_diff_report,
+        load_symbols_file,
+    )
+
+    try:
+        old_symbols = load_symbols_file(old_symbols_file)
+        new_symbols = load_symbols_file(new_symbols_file)
+    except (OSError, ValueError) as exc:
+        return f"Debian symbols file could not be parsed: {exc}"
+    diff = diff_symbols_files(old_symbols, new_symbols)
+    if not (diff.removed or diff.added or diff.version_changed):
+        return None
+    return "Debian symbols contract changed:\n" + format_diff_report(diff)
 
 
 def _collect_bundle_result(

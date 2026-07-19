@@ -218,6 +218,18 @@ def _reset_demangle_batch_cache() -> None:
     _BATCH_CACHE_FAIL.clear()
 
 
+def strip_signature(demangled: str) -> str:
+    """Strip a demangled C++ signature down to its qualified name.
+
+    ``"ns::detail::api(int) const"`` → ``"ns::detail::api"``. Pure string
+    operation on an already-demangled string (no subprocess call) — keeps
+    the full namespace/class qualification, unlike :func:`base_name`, which
+    also peels off everything but the leaf segment for display.
+    """
+    paren = demangled.find("(")
+    return (demangled[:paren] if paren != -1 else demangled).strip()
+
+
 def base_name(symbol: str) -> str:
     """Extract the unqualified function name from a symbol (best-effort).
 

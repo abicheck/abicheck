@@ -295,9 +295,10 @@ def test_compare_depth_over_snapshots(tmp_path, depth: str) -> None:  # type: ig
     assert res.exit_code == 0, _all_output(res)
 
 
-def test_dump_source_only_depth_build(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """A source-only ``dump --depth build`` resolves the L3 collect mode and runs
-    the source-only branch without error."""
+def test_dump_source_only_depth_build_without_facts_fails(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """CLI-audit P1: a source-only ``dump --depth build`` resolves the L3 collect
+    mode, but an explicitly requested depth that finds no usable compile_commands.json
+    must now hard-fail rather than silently write a weaker (binary-only) snapshot."""
     src = tmp_path / "src"
     src.mkdir()
     res = CliRunner().invoke(
@@ -305,22 +306,78 @@ def test_dump_source_only_depth_build(tmp_path) -> None:  # type: ignore[no-unty
         ["dump", "--sources", str(src), "--depth", "build",
          "-o", str(tmp_path / "out.json")],
     )
-    assert res.exit_code == 0, _all_output(res)
+    assert res.exit_code != 0, _all_output(res)
+    assert "--depth build was requested but the snapshot only reached" in _all_output(res)
+    assert not (tmp_path / "out.json").exists()
 
 
-def test_dump_source_only_depth_binary(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """``dump --depth binary`` resolves and runs the symbols-only branch."""
+def test_dump_source_only_depth_binary_is_usage_error(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """External review: a source-only dump (no SO_PATH) has no binary at
+    all, so --depth binary -- rank 0, the floor -- was trivially "satisfied"
+    by check_requested_depth_satisfied even for a completely empty snapshot
+    (--depth binary resolves collect_mode to "off", skipping L3-L5 embedding
+    too). `dump --sources src --depth binary -o out.json` used to exit 0 and
+    write a snapshot with no binary, header, build, or source facts at all --
+    a baseline/CI consumer would read that success as proof the requested
+    rung is genuinely present. Must now be rejected as a usage error."""
     src = tmp_path / "src2"
+    src.mkdir()
+    out = tmp_path / "out2.json"
+    res = CliRunner().invoke(
+        main,
+        ["dump", "--sources", str(src), "--depth", "binary", "-o", str(out)],
+    )
+    assert res.exit_code == 64, _all_output(res)
+    assert "--depth binary requires a native artifact" in _all_output(res)
+    assert not out.exists()
+
+
+def test_dump_source_only_depth_binary_rejected_in_dry_run_too(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    src = tmp_path / "src2b"
     src.mkdir()
     res = CliRunner().invoke(
         main,
-        ["dump", "--sources", str(src), "--depth", "binary",
-         "-o", str(tmp_path / "out2.json")],
+        ["dump", "--sources", str(src), "--depth", "binary", "--dry-run"],
     )
-    # Resolution + symbols-clearing ran; a source-only symbols dump writes an
-    # L0-L2 snapshot and exits clean.
+    assert res.exit_code == 64, _all_output(res)
+    assert "--depth binary requires a native artifact" in _all_output(res)
+
+
+def test_dump_json_records_depth_provenance(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Audit finding: a persisted dump snapshot didn't record what --depth was
+    requested vs. actually reached anywhere a later reader could inspect --
+    the written JSON must carry a ``dump_provenance`` block.
+
+    Uses --depth build (not binary -- a source-only dump has no binary at
+    all, so --depth binary is now a usage error, see
+    test_dump_source_only_depth_binary_is_usage_error) with a real matching
+    compile database so the requested rung is genuinely satisfiable."""
+    import json
+
+    src = tmp_path / "src3"
+    src.mkdir()
+    cdb = [{"directory": str(src), "file": "foo.cpp",
+            "arguments": ["c++", "-std=c++17", "-c", "foo.cpp"]}]
+    (src / "compile_commands.json").write_text(json.dumps(cdb), encoding="utf-8")
+    out = tmp_path / "out3.json"
+    res = CliRunner().invoke(
+        main,
+        ["dump", "--sources", str(src), "--depth", "build", "-o", str(out)],
+    )
     assert res.exit_code == 0, _all_output(res)
-    assert (tmp_path / "out2.json").is_file()
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data["dump_provenance"] == {
+        "requested_depth": "build",
+        "effective_depth": "build",
+        "degraded": False,
+        "frontend": None,
+        # --depth build only reaches L3 (no L4 source replay), so there is
+        # no source_abi coverage to read a replay scope from -- None, not a
+        # fabricated "target" (external review; see
+        # test_fold_dump_provenance_source_scope_* in
+        # test_cli_dump_helpers_coverage.py for the cases that do have one).
+        "source_scope": None,
+    }
 
 
 def test_dump_depth_binary_ignores_compile_db(tmp_path) -> None:  # type: ignore[no-untyped-def]
@@ -344,3 +401,218 @@ def test_dump_depth_binary_ignores_compile_db(tmp_path) -> None:  # type: ignore
     out = _all_output(res)
     assert "Compilation database" not in out
     assert "requires -H" not in out
+
+
+def test_dump_depth_source_with_hybrid_frontend_rejected(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """CLI-audit P1: L4 source-ABI replay has no dual-backend hybrid extractor
+    (unlike the L2 header AST), so --depth source + --ast-frontend hybrid must
+    be rejected up front rather than silently degrading while still calling
+    itself "hybrid". This is a usage error caught before any dump work runs,
+    so it needs no real binary/compiler on the test machine."""
+    src = tmp_path / "src3"
+    src.mkdir()
+    res = CliRunner().invoke(
+        main,
+        ["dump", "--sources", str(src), "--depth", "source",
+         "--ast-frontend", "hybrid", "-o", str(tmp_path / "out3.json")],
+    )
+    assert res.exit_code != 0, _all_output(res)
+    out = _all_output(res)
+    assert "--ast-frontend hybrid" in out
+    assert "--depth source" in out
+    assert not (tmp_path / "out3.json").exists()
+
+
+def test_dump_depth_source_hybrid_frontend_not_rejected_without_sources_or_build_info(
+    tmp_path,
+) -> None:  # type: ignore[no-untyped-def]
+    """Codex review (third finding): a bare
+    `dump lib.so -H api.h --depth source --ast-frontend hybrid` with no
+    --sources/--build-info never calls collect_inline_pack at all -- L4 was
+    never going to run regardless of frontend. Rejecting with "switch
+    frontends" guidance here would be actively misleading (it would not fix
+    anything); the real problem (--depth source not satisfied at all) must
+    surface via the depth-not-satisfied gate instead."""
+    so = tmp_path / "fake.so"
+    so.write_bytes(b"\x7fELF")
+    hdr = tmp_path / "api.h"
+    hdr.write_text("void api(void);\n", encoding="utf-8")
+    res = CliRunner().invoke(
+        main,
+        [
+            "dump", str(so), "-H", str(hdr), "--depth", "source",
+            "--ast-frontend", "hybrid",
+        ],
+    )
+    out = _all_output(res)
+    assert "--ast-frontend hybrid" not in out
+    assert "castxml or --ast-frontend clang" not in out
+
+
+def test_dump_depth_source_with_config_hybrid_frontend_rejected(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """CodeRabbit review: the hybrid+source rejection must also catch a
+    frontend selected via .abicheck.yml's `compile.frontend: hybrid`, not
+    just an explicit --ast-frontend flag -- the CLI value alone ("auto"
+    here) is not the whole story once resolve_dump_compile_context folds in
+    the config file's compile.frontend (CLI > config, but an unset CLI value
+    inherits it). The check runs once, after that resolution, for the
+    ordinary (non-source-only) binary dump path.
+
+    Includes --sources (Codex review, third finding): the rejection is
+    scoped to invocations that would actually attempt L4 extraction, so a
+    bare binary dump with no --sources/--build-info at all would no longer
+    trigger it, for an unrelated reason -- see
+    test_dump_depth_source_hybrid_frontend_not_rejected_without_sources_or_build_info."""
+    so = tmp_path / "fake.so"
+    so.write_bytes(b"\x7fELF")
+    src = tmp_path / "src-cfg"
+    src.mkdir()
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  frontend: hybrid\n")
+    res = CliRunner().invoke(
+        main,
+        ["dump", str(so), "--sources", str(src), "--depth", "source", "--config", str(cfg)],
+    )
+    assert res.exit_code != 0, _all_output(res)
+    out = _all_output(res)
+    assert "--ast-frontend hybrid" in out
+    assert "--depth source" in out
+
+
+def test_dump_source_only_depth_source_with_config_hybrid_frontend_rejected(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Codex review: the source-only dump path (no SO_PATH) used to return
+    via dump_source_only() before resolve_dump_compile_context ever ran, so
+    a config-selected `compile.frontend: hybrid` reached the L4 extractor
+    unchecked -- not just bypassing this validation, but genuinely using a
+    different frontend than the project's .abicheck.yml requested. The
+    compile-context resolution (and this check) now runs before the
+    so_path-is-None dispatch, so both paths see the same resolved frontend."""
+    src = tmp_path / "src5"
+    src.mkdir()
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  frontend: hybrid\n")
+    res = CliRunner().invoke(
+        main,
+        ["dump", "--sources", str(src), "--depth", "source", "--config", str(cfg)],
+    )
+    assert res.exit_code != 0, _all_output(res)
+    out = _all_output(res)
+    assert "--ast-frontend hybrid" in out
+    assert "--depth source" in out
+
+
+def test_dump_depth_source_hybrid_frontend_not_rejected_for_prebuilt_pack(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Codex review: --build-info pointing at a prebuilt BuildSourcePack
+    directory only loads and filters its existing L4/L5 facts
+    (cli_buildsource.embed_build_source's is_pack_dir branch forces
+    collect_inline_pack's raw_build_info to None) -- no L4 extractor ever
+    runs, so --ast-frontend hybrid has no effect and must not be rejected
+    for this input shape, unlike a raw source tree.
+
+    CodeRabbit review: the pack carries real L4 facts (not an empty
+    manifest-only pack) so the command runs to genuine completion (exit 0)
+    instead of failing for the unrelated "--depth source not satisfied"
+    reason -- an empty pack would make this test pass even if the hybrid
+    rejection fired but got masked by that other failure first."""
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
+
+    pack_dir = tmp_path / "prebuilt-pack"
+    pack = BuildSourcePack(
+        root=pack_dir,
+        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        source_abi=SourceAbiSurface(
+            reachable_declarations=[SourceEntity(id="foo", kind="function")]
+        ),
+    )
+    pack.write()
+    res = CliRunner().invoke(
+        main,
+        [
+            "dump", "--build-info", str(pack_dir), "--depth", "source",
+            "--ast-frontend", "hybrid", "-o", str(tmp_path / "out.json"),
+        ],
+    )
+    assert res.exit_code == 0, _all_output(res)
+    assert "--ast-frontend hybrid" not in _all_output(res)
+
+
+def test_dump_depth_source_hybrid_frontend_rejected_for_mixed_raw_and_pack(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Codex review: only ONE of --sources/--build-info being a prebuilt
+    pack must not skip the rejection -- the other (raw) side still reaches
+    collect_inline_pack with extractor=hybrid, so the unsupported L4 path
+    can still run for it."""
+    from abicheck.buildsource.pack import BuildSourcePack
+
+    pack_dir = tmp_path / "prebuilt-pack"
+    BuildSourcePack.empty(pack_dir).write()
+    src = tmp_path / "raw-src"
+    src.mkdir()
+    res = CliRunner().invoke(
+        main,
+        [
+            "dump", "--sources", str(src), "--build-info", str(pack_dir),
+            "--depth", "source", "--ast-frontend", "hybrid",
+            "-o", str(tmp_path / "out2.json"),
+        ],
+    )
+    assert res.exit_code != 0, _all_output(res)
+    out = _all_output(res)
+    assert "--ast-frontend hybrid" in out
+    assert "--depth source" in out
+
+
+def test_dump_depth_source_hybrid_frontend_not_rejected_for_pack_sources_raw_build_info(
+    tmp_path,
+) -> None:  # type: ignore[no-untyped-def]
+    """Codex review (fourth finding): the reverse of the mixed-raw-and-pack
+    case above -- a prebuilt --sources pack with a *raw* --build-info tree.
+    embed_build_source derives raw_sources solely from the --sources
+    argument (never from --build-info); collect_inline_pack forwards only
+    raw_sources to _run_inline_source_abi, so a raw --build-info tree next
+    to a pack --sources never reaches an L4 extractor either -- --ast-frontend
+    hybrid has no effect here and must not be rejected, matching the
+    prebuilt-pack case above rather than the mixed-raw-and-pack one (which
+    has the raw side on --sources, not --build-info)."""
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
+
+    pack_dir = tmp_path / "prebuilt-pack"
+    pack = BuildSourcePack(
+        root=pack_dir,
+        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        source_abi=SourceAbiSurface(
+            reachable_declarations=[SourceEntity(id="foo", kind="function")]
+        ),
+    )
+    pack.write()
+    build_info_tree = tmp_path / "raw-build-info"
+    build_info_tree.mkdir()
+    res = CliRunner().invoke(
+        main,
+        [
+            "dump", "--sources", str(pack_dir), "--build-info", str(build_info_tree),
+            "--depth", "source", "--ast-frontend", "hybrid",
+            "-o", str(tmp_path / "out3.json"),
+        ],
+    )
+    assert res.exit_code == 0, _all_output(res)
+    assert "--ast-frontend hybrid" not in _all_output(res)
+
+
+def test_dump_depth_headers_with_hybrid_frontend_not_rejected(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """The hybrid-vs-source usage-error rejection is scoped to --depth source
+    specifically -- hybrid is the normal, supported dual-backend choice for
+    the L2 header AST at every other depth, so it must not be blanket-rejected.
+    (The invocation may still fail for the unrelated reason that no headers
+    were actually parsed -- this test only checks it isn't *this* rejection.)"""
+    src = tmp_path / "src4"
+    src.mkdir()
+    res = CliRunner().invoke(
+        main,
+        ["dump", "--sources", str(src), "--depth", "headers",
+         "--ast-frontend", "hybrid", "-o", str(tmp_path / "out4.json")],
+    )
+    assert "--ast-frontend hybrid" not in _all_output(res)

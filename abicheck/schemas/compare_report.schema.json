@@ -35,29 +35,17 @@
       "type": "string",
       "enum": ["NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING"]
     },
+    "full_verdict": {
+      "type": "string",
+      "description": "Schema 2.9. The full-library verdict, present alongside verdict only when a --used-by/--required-symbol(s) scoped compare's gating verdict differs from the unscoped library-wide result (verdict becomes the scoped, gate-relevant one; full_verdict preserves the original).",
+      "enum": ["NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING"]
+    },
     "old_file": { "$ref": "#/$defs/fileMetadata" },
     "new_file": { "$ref": "#/$defs/fileMetadata" },
-    "summary": {
-      "type": "object",
-      "required": [
-        "breaking",
-        "source_breaks",
-        "risk_changes",
-        "compatible_additions",
-        "total_changes",
-        "binary_compatibility_pct",
-        "affected_pct"
-      ],
-      "additionalProperties": true,
-      "properties": {
-        "breaking": { "type": "integer", "minimum": 0 },
-        "source_breaks": { "type": "integer", "minimum": 0 },
-        "risk_changes": { "type": "integer", "minimum": 0 },
-        "compatible_additions": { "type": "integer", "minimum": 0 },
-        "total_changes": { "type": "integer", "minimum": 0 },
-        "binary_compatibility_pct": { "type": "number", "minimum": 0, "maximum": 100 },
-        "affected_pct": { "type": "number", "minimum": 0, "maximum": 100 }
-      }
+    "summary": { "$ref": "#/$defs/summary" },
+    "full_summary": {
+      "description": "Schema 2.9. The full-library summary counts, present alongside summary only for a scoped (--used-by/--required-symbol(s)) compare: summary is recomputed from the complete (post-scoping) changes array so it never contradicts it, and full_summary preserves the original pre-scoping counts (audit finding: a scoped run gated only by a scoped-only synthetic finding could report a non-zero verdict next to summary.total_changes: 0).",
+      "$ref": "#/$defs/summary"
     },
     "policy": { "type": "string" },
     "show_only_filter": { "type": "string" },
@@ -71,24 +59,10 @@
         "total_changes": { "type": "integer", "minimum": 0 }
       }
     },
-    "severity": {
-      "type": "object",
-      "description": "Present only when --severity-* configuration was active. config/categories mirror the resolved SeverityConfig and per-category counts; blocking/blocking_categories (schema 2.3) are a typed gate summary mirroring SARIF's severityGate block.",
-      "required": ["config", "categories", "exit_code", "blocking", "blocking_categories"],
-      "additionalProperties": true,
-      "properties": {
-        "config": { "type": "object" },
-        "categories": { "type": "object" },
-        "exit_code": { "type": "integer", "minimum": 0 },
-        "blocking": { "type": "boolean" },
-        "blocking_categories": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "enum": ["abi_breaking", "potential_breaking", "quality_issues", "addition"]
-          }
-        }
-      }
+    "severity": { "$ref": "#/$defs/severity" },
+    "full_severity": {
+      "description": "Schema 2.9. The full-library severity gate result, present alongside severity only for a scoped (--used-by/--required-symbol(s)) compare whose gating result was recomputed for the scoped changes array -- mirrors the verdict/full_verdict split.",
+      "$ref": "#/$defs/severity"
     },
     "changes": {
       "type": "array",
@@ -229,6 +203,47 @@
     }
   },
   "$defs": {
+    "summary": {
+      "type": "object",
+      "required": [
+        "breaking",
+        "source_breaks",
+        "risk_changes",
+        "compatible_additions",
+        "total_changes",
+        "binary_compatibility_pct",
+        "affected_pct"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "breaking": { "type": "integer", "minimum": 0 },
+        "source_breaks": { "type": "integer", "minimum": 0 },
+        "risk_changes": { "type": "integer", "minimum": 0 },
+        "compatible_additions": { "type": "integer", "minimum": 0 },
+        "total_changes": { "type": "integer", "minimum": 0 },
+        "binary_compatibility_pct": { "type": "number", "minimum": 0, "maximum": 100 },
+        "affected_pct": { "type": "number", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "severity": {
+      "type": "object",
+      "description": "Present only when --severity-* configuration was active. config/categories mirror the resolved SeverityConfig and per-category counts; blocking/blocking_categories (schema 2.3) are a typed gate summary mirroring SARIF's severityGate block.",
+      "required": ["config", "categories", "exit_code", "blocking", "blocking_categories"],
+      "additionalProperties": true,
+      "properties": {
+        "config": { "type": "object" },
+        "categories": { "type": "object" },
+        "exit_code": { "type": "integer", "minimum": 0 },
+        "blocking": { "type": "boolean" },
+        "blocking_categories": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["abi_breaking", "potential_breaking", "quality_issues", "addition"]
+          }
+        }
+      }
+    },
     "fileMetadata": {
       "type": ["object", "null"],
       "description": "File metadata for the compared library, or null when unavailable.",

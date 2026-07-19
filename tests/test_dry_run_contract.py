@@ -27,6 +27,7 @@ tree``/``deps compare``) that previously had none.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -75,6 +76,243 @@ class TestDumpDryRun:
         assert first.output == second.output
         assert _CONTRACT_FOOTER in first.output
         assert "Command: dump" in first.output
+
+    def test_depth_source_with_no_evidence_input_blocks(self, tmp_path: Path) -> None:
+        # Codex review: the real (non-dry) run's check_requested_depth_satisfied
+        # strict gate now hard-fails `--depth source`/`--depth build` with no
+        # way to reach that depth, but a --dry-run used to exit 0 for the
+        # identical inputs (only a soft "would carry only L0-L2 data"
+        # warning) -- silently accepting a baseline invocation that the real
+        # run would then reject. --depth source has no path but --sources/
+        # --build-info (a -p/--compile-db only ever supplies "build"
+        # context), so this is cheaply, deterministically known to fail
+        # without running anything.
+        snap = tmp_path / "lib.abi.json"
+        _write_snapshot(snap)
+        result = CliRunner().invoke(
+            main, ["dump", str(snap), "--dry-run", "--depth", "source"]
+        )
+        assert result.exit_code == 1, result.output
+        assert "Exit code: 1" in result.output
+
+    def test_depth_build_with_no_evidence_input_blocks(self, tmp_path: Path) -> None:
+        snap = tmp_path / "lib.abi.json"
+        _write_snapshot(snap)
+        result = CliRunner().invoke(
+            main, ["dump", str(snap), "--dry-run", "--depth", "build"]
+        )
+        assert result.exit_code == 1, result.output
+        assert "Exit code: 1" in result.output
+
+    def test_depth_build_with_matching_compile_db_does_not_block(
+        self, tmp_path: Path
+    ) -> None:
+        # External review: loading a -p/--compile-db and checking whether it
+        # matches the resolved headers is cheap, deterministic, read-only
+        # resolution -- not "real work out of scope for a dry run". A
+        # genuinely matching compile database is a definite pass, with no
+        # warning at all (it does supply real "build" evidence).
+        snap = tmp_path / "lib.abi.json"
+        _write_snapshot(snap)
+        header = tmp_path / "api.h"
+        header.write_text("void f(void);\n", encoding="utf-8")
+        db = tmp_path / "compile_commands.json"
+        db.write_text(
+            json.dumps([{
+                "directory": str(tmp_path),
+                "command": f"cc -c {header} -o f.o",
+                "file": str(header),
+            }]),
+            encoding="utf-8",
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(snap), "--dry-run", "--depth", "build",
+                "-H", str(header), "-p", str(db),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        # render_dump_dry_run's own compile-db-aware warning (distinct from
+        # resolve_dump_collect_context's separate, unconditional
+        # --sources/--build-info-absence echo, which still fires here and
+        # is not what this test targets).
+        assert "would carry only L0-L2 data." not in result.output
+
+    def test_depth_build_with_unmatched_compile_db_blocks(self, tmp_path: Path) -> None:
+        # The sibling case: an empty/non-matching compile database is now a
+        # *definite* verdict (the same load+match the real run performs),
+        # not a soft "possibly satisfiable" warning -- the real run's
+        # strict depth gate would certainly reject this.
+        snap = tmp_path / "lib.abi.json"
+        _write_snapshot(snap)
+        header = tmp_path / "api.h"
+        header.write_text("void f(void);\n", encoding="utf-8")
+        db = tmp_path / "compile_commands.json"
+        db.write_text("[]", encoding="utf-8")
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(snap), "--dry-run", "--depth", "build",
+                "-H", str(header), "-p", str(db),
+            ],
+        )
+        assert result.exit_code == 1, result.output
+        assert "no entry matching the resolved headers" in result.output
+
+    def test_compile_db_without_headers_is_usage_error(self, tmp_path: Path) -> None:
+        # resolve_dump_compile_db raises a UsageError (exit 64) for -p
+        # without -H in the real run; dry-run previously never checked this
+        # at all (the check only existed in the real path, after the
+        # dry-run branch had already returned), so it used to report
+        # success here. CodeRabbit review: an earlier fix encoded this as a
+        # DryRunResult blocker (exit 1) instead of matching the real run's
+        # actual exit code -- it must raise the identical UsageError, not a
+        # softer evidence-blocker.
+        so = tmp_path / "libfoo.so"
+        so.write_bytes(b"\x7fELF" + b"\x00" * 60)
+        db = tmp_path / "compile_commands.json"
+        db.write_text("[]", encoding="utf-8")
+        result = CliRunner().invoke(
+            main, ["dump", str(so), "--dry-run", "-p", str(db)]
+        )
+        assert result.exit_code == 64, result.output
+        assert "Usage:" in result.output
+        assert "requires -H/--header" in result.output
+
+    def test_debug_format_against_pe_binary_is_usage_error(self, tmp_path: Path) -> None:
+        # --debug-format (and the legacy --dwarf/--btf/--ctf flags) is only
+        # meaningful for ELF; the real run raises BadParameter (exit 64) for
+        # a PE/Mach-O binary. Dry-run previously never checked this either,
+        # and an earlier fix wrongly downgraded it to a blocker (exit 1) --
+        # see the sibling compile-db test above (CodeRabbit review).
+        pe = tmp_path / "foo.dll"
+        pe.write_bytes(b"MZ" + b"\x00" * 60)
+        result = CliRunner().invoke(
+            main, ["dump", str(pe), "--dry-run", "--debug-format", "dwarf"]
+        )
+        assert result.exit_code == 64, result.output
+        assert "Usage:" in result.output
+        assert "only supported for ELF binaries" in result.output
+
+    def test_depth_source_with_build_info_but_no_sources_blocks(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review: a raw --build-info compile database supplies L3
+        # "build" context only -- L4 source-ABI replay only ever runs over
+        # a --sources tree (buildsource.inline._run_inline_source_abi
+        # returns (None, []) whenever `sources` is None). The blocker below
+        # used to be nested under a "sources AND build_info both absent"
+        # warn condition, so --depth source with --build-info given (but no
+        # --sources) fell through untouched and the dry run exited 0 even
+        # though the real dump's strict depth gate would raise.
+        snap = tmp_path / "lib.abi.json"
+        _write_snapshot(snap)
+        header = tmp_path / "api.h"
+        header.write_text("void f(void);\n", encoding="utf-8")
+        db = tmp_path / "compile_commands.json"
+        db.write_text("[]", encoding="utf-8")
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(snap), "--dry-run", "--depth", "source",
+                "-H", str(header), "--build-info", str(db),
+            ],
+        )
+        assert result.exit_code == 1, result.output
+        assert "Exit code: 1" in result.output
+        assert "no --sources was given" in result.output
+
+    def test_depth_source_with_prebuilt_pack_build_info_does_not_block(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, second finding: a raw compile-DB --build-info never
+        # carries L4 facts, but a *pack-shaped* --build-info (e.g. from a
+        # previous `collect` or the abicheck-cc wrapper) can carry its own
+        # source_abi -- cli_buildsource.embed_build_source's _combine_packs
+        # falls back to that pack's source_abi when no --sources pack is
+        # given, so --depth source --build-info <pack> (no --sources) can
+        # genuinely succeed for real. The blocker above must not fire for
+        # this case -- unlike a raw compile database, checked via
+        # buildsource.inline.is_pack_dir (cheap manifest-shape read).
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_abi import SourceAbiSurface
+
+        snap = tmp_path / "lib.abi.json"
+        _write_snapshot(snap)
+        pack_dir = tmp_path / "pack"
+        pack_dir.mkdir()
+        surface = SourceAbiSurface()
+        surface.coverage["compile_units_selected"] = 1
+        surface.coverage["compile_units_parsed"] = 1
+        BuildSourcePack(root=pack_dir, source_abi=surface).write()
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(snap), "--dry-run", "--depth", "source",
+                "--build-info", str(pack_dir),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+
+    def test_depth_source_with_inputs_pack_build_info_does_not_block(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, second finding on this signal: embed_build_source
+        # recognizes TWO pack-shaped --build-info directory kinds --
+        # BuildSourcePack (is_pack_dir) and the Flow-2 abicheck_inputs/
+        # protocol (_is_inputs_pack_dir, ADR-035 D5) -- either can carry its
+        # own L4 source_abi and satisfy --depth source with no --sources.
+        # Checking only is_pack_dir missed this second kind.
+        import json
+
+        snap = tmp_path / "lib.abi.json"
+        _write_snapshot(snap)
+        inputs_dir = tmp_path / "abicheck_inputs"
+        inputs_dir.mkdir()
+        (inputs_dir / "manifest.json").write_text(
+            json.dumps({"kind": "abicheck_inputs", "version": 1}),
+            encoding="utf-8",
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(snap), "--dry-run", "--depth", "source",
+                "--build-info", str(inputs_dir),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+
+    def test_depth_source_with_pack_build_info_warns_not_verified(
+        self, tmp_path: Path
+    ) -> None:
+        # CodeRabbit review: pack *shape* alone (is_pack_dir) does not prove
+        # the pack's manifest actually carries usable L4 source_abi facts --
+        # a manifest-only/empty pack is exactly as unsatisfiable as a raw
+        # compile database, but previously produced no signal at all here.
+        # A dry run must not load the pack to verify (real I/O), so this
+        # stays a soft warning -- "possibly satisfiable" -- not a blocker,
+        # mirroring the sibling --depth build/some-compile-database warning.
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_abi import SourceAbiSurface
+
+        snap = tmp_path / "lib.abi.json"
+        _write_snapshot(snap)
+        pack_dir = tmp_path / "pack"
+        pack_dir.mkdir()
+        surface = SourceAbiSurface()
+        surface.coverage["compile_units_selected"] = 1
+        surface.coverage["compile_units_parsed"] = 1
+        BuildSourcePack(root=pack_dir, source_abi=surface).write()
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(snap), "--dry-run", "--depth", "source",
+                "--build-info", str(pack_dir),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "does not load the pack to verify" in result.output
 
 
 class TestCompareDryRun:

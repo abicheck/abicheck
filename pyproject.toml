@@ -137,7 +137,9 @@ disable_error_code = ["attr-defined"]
 # Click decorators (@click.command, @click.option, etc.) are untyped.
 # ``compat/cli.py`` additionally subclasses ``click.Group`` (typed as Any)
 # and threads click-managed list[str] values through helper accessors, so
-# we also relax ``no-any-return`` / ``misc`` there.
+# we also relax ``no-any-return`` / ``misc`` there. ``cli_dump_helpers``
+# similarly subclasses ``click.ClickException`` (typed as Any ->
+# "cannot subclass Any" / ``misc``) for ``DumpDepthNotSatisfiedError``.
 module = [
     "abicheck.cli",
     "abicheck.cli_resolve",
@@ -146,6 +148,7 @@ module = [
     "abicheck.cli_debian_symbols",
     "abicheck.cli_baseline",
     "abicheck.cli_buildsource",
+    "abicheck.cli_dump_helpers",
     "abicheck.cli_graph",
     "abicheck.cli_inputs",
     "abicheck.cli_plugin",
