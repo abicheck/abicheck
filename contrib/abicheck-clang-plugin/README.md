@@ -2,7 +2,7 @@
 
 > Status: **optional optimization**, implemented (ADR-038 Plugin injection).
 > Built and validated by the dedicated `clang-plugin` workflow across
-> LLVM/Clang 16/17/18 (the C.6 differential-conformance test), but **never a
+> LLVM/Clang 16-22 (the C.6 differential-conformance test), but **never a
 > required gate in the main abicheck CI** — it is ABI-locked to the loading
 > clang's LLVM major (ADR-038 C.5). The supported portable producers remain
 > Full source scan (`abicheck dump --sources`/`--build-info` +

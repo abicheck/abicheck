@@ -43,6 +43,7 @@ from abicheck.dumper_clang import (
     _ClangAstParser,
     _Decl,
     _function_qualifiers,
+    _is_clang_family_binary,
     _pointer_depth,
     _return_type,
 )
@@ -190,7 +191,11 @@ def test_explicit_is_tristate() -> None:
                     "mangledName": "_ZN1CC1Ei",
                     "explicit": True,
                     "inner": [
-                        {"kind": "ParmVarDecl", "name": "n", "type": {"qualType": "int"}}
+                        {
+                            "kind": "ParmVarDecl",
+                            "name": "n",
+                            "type": {"qualType": "int"},
+                        }
                     ],
                 },
                 {
@@ -238,9 +243,7 @@ def test_parse_constants_scoped_to_public_headers() -> None:
             "inner": [{"kind": "IntegerLiteral", "value": "7"}],
         },
     )
-    parser = _ClangAstParser(
-        root, set(), set(), public_header_paths=["include/foo.h"]
-    )
+    parser = _ClangAstParser(root, set(), set(), public_header_paths=["include/foo.h"])
     # Public constant kept and namespace-qualified; private-header one dropped.
     assert parser.parse_constants() == {"ns::kMax": "42"}
 
@@ -434,7 +437,11 @@ def test_parse_types_anonymous_aggregate_flattening_sets_flag() -> None:
                     "completeDefinition": True,
                     "inner": [
                         {"kind": "FieldDecl", "name": "i", "type": {"qualType": "int"}},
-                        {"kind": "FieldDecl", "name": "f", "type": {"qualType": "float"}},
+                        {
+                            "kind": "FieldDecl",
+                            "name": "f",
+                            "type": {"qualType": "float"},
+                        },
                     ],
                 },
                 {"kind": "IndirectFieldDecl", "name": "i"},
@@ -692,7 +699,9 @@ def test_resolve_header_backend_env_override(monkeypatch: pytest.MonkeyPatch) ->
     assert _resolve_header_backend("castxml") == "castxml"
 
 
-def test_resolve_header_backend_ast_frontend_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_header_backend_ast_frontend_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """ABICHECK_AST_FRONTEND is the canonical env knob."""
     monkeypatch.setenv("ABICHECK_AST_FRONTEND", "clang")
     assert _resolve_header_backend("auto") == "clang"
@@ -760,7 +769,9 @@ def _stub_clang_self_heal(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "abicheck.dumper._resolve_clang_system_includes", lambda *a, **k: ()
     )
-    fail = _sp.CompletedProcess(args=[], returncode=1, stdout="", stderr="fatal error: 'cstddef' file not found")
+    fail = _sp.CompletedProcess(
+        args=[], returncode=1, stdout="", stderr="fatal error: 'cstddef' file not found"
+    )
     ok = _sp.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
     calls = {"n": 0}
 
@@ -936,9 +947,12 @@ def test_constants_private_member_skipped() -> None:
         }
     )
     # The default class access is private → not part of the public constant set.
-    assert _ClangAstParser(
-        root, set(), set(), public_header_paths=["include/foo.h"]
-    ).parse_constants() == {}
+    assert (
+        _ClangAstParser(
+            root, set(), set(), public_header_paths=["include/foo.h"]
+        ).parse_constants()
+        == {}
+    )
 
 
 # ── records: union / C struct / field qualifiers ─────────────────────────────
@@ -1191,11 +1205,20 @@ def test_header_ast_parser_clang_branch(monkeypatch: pytest.MonkeyPatch) -> None
     )
     monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: ast)
     parser = _header_ast_parser(
-        [], [], backend="clang", compiler="c++",
-        gcc_path=None, gcc_prefix=None, gcc_options=None,
-        sysroot=None, nostdinc=False, lang=None,
-        exported_dynamic={"_Z3foov"}, exported_static=set(),
-        public_header_paths=[], public_dir_paths=[],
+        [],
+        [],
+        backend="clang",
+        compiler="c++",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options=None,
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic={"_Z3foov"},
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
     )
     assert isinstance(parser, _ClangAstParser)
     assert [f.name for f in parser.parse_functions()] == ["foo"]
@@ -1206,11 +1229,20 @@ def test_header_ast_parser_castxml_branch(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(dumper, "_castxml_dump", lambda *a, **k: sentinel)
     monkeypatch.setattr(dumper, "_CastxmlParser", lambda *a, **k: "castxml-parser")
     parser = _header_ast_parser(
-        [], [], backend="castxml", compiler="c++",
-        gcc_path=None, gcc_prefix=None, gcc_options=None,
-        sysroot=None, nostdinc=False, lang=None,
-        exported_dynamic=set(), exported_static=set(),
-        public_header_paths=[], public_dir_paths=[],
+        [],
+        [],
+        backend="castxml",
+        compiler="c++",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options=None,
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
     )
     assert parser == "castxml-parser"
 
@@ -1326,7 +1358,9 @@ def test_parse_clang_ast_result_swallows_cache_write_failure(
     # unwritable cache dir) must not turn a successful parse into an error —
     # the caller already has the parsed root; only the cache population is lost.
     ast_path = tmp_path / "ast.json"
-    ast_path.write_text('{"kind": "TranslationUnitDecl", "inner": []}', encoding="utf-8")
+    ast_path.write_text(
+        '{"kind": "TranslationUnitDecl", "inner": []}', encoding="utf-8"
+    )
     result = _fake_proc(stdout="", stderr="", returncode=0)
 
     def _boom(_src, _dst):
@@ -1346,7 +1380,9 @@ def test_parse_clang_ast_result_rechecks_deadline_after_json_load(
     # streamed cache copy, or an expired budget still completes it and hands
     # back a result for downstream AST walking.
     ast_path = tmp_path / "ast.json"
-    ast_path.write_text('{"kind": "TranslationUnitDecl", "inner": []}', encoding="utf-8")
+    ast_path.write_text(
+        '{"kind": "TranslationUnitDecl", "inner": []}', encoding="utf-8"
+    )
     result = _fake_proc(stdout="", stderr="", returncode=0)
     real_json_load = dumper_clang_errors.json.load
 
@@ -1368,7 +1404,9 @@ def test_parse_clang_ast_result_rechecks_deadline_after_cache_copy(
     # before returning so a budget that expired during the copy doesn't
     # silently hand the result to the (also potentially expensive) caller.
     ast_path = tmp_path / "ast.json"
-    ast_path.write_text('{"kind": "TranslationUnitDecl", "inner": []}', encoding="utf-8")
+    ast_path.write_text(
+        '{"kind": "TranslationUnitDecl", "inner": []}', encoding="utf-8"
+    )
     result = _fake_proc(stdout="", stderr="", returncode=0)
 
     def _slow_copy(_src, _dst):
@@ -1423,7 +1461,8 @@ def test_clang_header_dump_no_output_raises(
     # Exit 0 but empty stdout → the "no AST" path (a nonzero exit is the
     # earlier branch, covered by test_clang_header_dump_nonzero_exit_raises).
     monkeypatch.setattr(
-        dumper.deadline, "run_bounded",
+        dumper.deadline,
+        "run_bounded",
         lambda *a, **k: _fake_proc(stdout="", stderr="boom", returncode=0),
     )
     with pytest.raises(SnapshotError, match="no AST"):
@@ -1527,7 +1566,9 @@ def test_clang_header_dump_retries_cpp_on_missing_cpp_stdlib_header(
     def _run(cmd, **kwargs):
         cmds.append(list(cmd))
         if len(cmds) == 1:
-            return _fake_proc(stderr="fatal error: 'cstddef' file not found", returncode=1)
+            return _fake_proc(
+                stderr="fatal error: 'cstddef' file not found", returncode=1
+            )
         _write_stdout_file(kwargs, ast_json)
         return _fake_proc(returncode=0)
 
@@ -1662,7 +1703,9 @@ def test_typedef_desugared_fallback() -> None:
             "type": {"desugaredQualType": "unsigned long"},
         }
     )
-    assert _ClangAstParser(root, set(), set()).parse_typedefs() == {"t": "unsigned long"}
+    assert _ClangAstParser(root, set(), set()).parse_typedefs() == {
+        "t": "unsigned long"
+    }
 
 
 def test_function_with_no_type_defaults_to_void_return() -> None:
@@ -1905,10 +1948,18 @@ def test_anonymous_union_members_flattened() -> None:
                     "tagUsed": "union",
                     "inner": [
                         {"kind": "FieldDecl", "name": "i", "type": {"qualType": "int"}},
-                        {"kind": "FieldDecl", "name": "f", "type": {"qualType": "float"}},
+                        {
+                            "kind": "FieldDecl",
+                            "name": "f",
+                            "type": {"qualType": "float"},
+                        },
                     ],
                 },
-                {"kind": "FieldDecl", "name": "", "type": {"qualType": "union S::(anonymous)"}},
+                {
+                    "kind": "FieldDecl",
+                    "name": "",
+                    "type": {"qualType": "union S::(anonymous)"},
+                },
                 {"kind": "IndirectFieldDecl", "name": "i"},
                 {"kind": "IndirectFieldDecl", "name": "f"},
                 {"kind": "FieldDecl", "name": "tag", "type": {"qualType": "int"}},
@@ -1916,7 +1967,11 @@ def test_anonymous_union_members_flattened() -> None:
         }
     )
     (s,) = _ClangAstParser(root, set(), set()).parse_types()
-    assert [(f.name, f.type) for f in s.fields] == [("i", "int"), ("f", "float"), ("tag", "int")]
+    assert [(f.name, f.type) for f in s.fields] == [
+        ("i", "int"),
+        ("f", "float"),
+        ("tag", "int"),
+    ]
 
 
 def test_typedef_anonymous_record_inside_struct_not_flattened() -> None:
@@ -1935,7 +1990,9 @@ def test_typedef_anonymous_record_inside_struct_not_flattened() -> None:
                     "kind": "RecordDecl",
                     "name": "",
                     "tagUsed": "struct",
-                    "inner": [{"kind": "FieldDecl", "name": "z", "type": {"qualType": "int"}}],
+                    "inner": [
+                        {"kind": "FieldDecl", "name": "z", "type": {"qualType": "int"}}
+                    ],
                 },
                 {"kind": "TypedefDecl", "name": "T", "type": {"qualType": "struct T"}},
                 {"kind": "FieldDecl", "name": "a", "type": {"qualType": "int"}},
@@ -1968,8 +2025,16 @@ def test_hidden_friend_function_marked() -> None:
                             "mangledName": "_ZeqRK2PtS1_",
                             "type": {"qualType": "bool (Pt, Pt)"},
                             "inner": [
-                                {"kind": "ParmVarDecl", "name": "a", "type": {"qualType": "Pt"}},
-                                {"kind": "ParmVarDecl", "name": "b", "type": {"qualType": "Pt"}},
+                                {
+                                    "kind": "ParmVarDecl",
+                                    "name": "a",
+                                    "type": {"qualType": "Pt"},
+                                },
+                                {
+                                    "kind": "ParmVarDecl",
+                                    "name": "b",
+                                    "type": {"qualType": "Pt"},
+                                },
                             ],
                         }
                     ],
@@ -2038,6 +2103,32 @@ def test_clang_header_dump_nonzero_exit_raises(
         _clang_header_dump([header], [])
 
 
+@pytest.mark.parametrize(
+    "path,expected",
+    [
+        ("/usr/bin/clang", True),
+        ("/usr/bin/clang++-18", True),
+        ("clang-cl.exe", True),  # extension stripped via .stem, still matches
+        ("/opt/intel/oneapi/compiler/2026.1/bin/icx", True),
+        ("/opt/intel/oneapi/compiler/2026.1/bin/icpx", True),
+        ("/opt/intel/oneapi/compiler/2026.1/bin/dpcpp", True),
+        ("/opt/intel/oneapi/compiler/2026.1/bin/dpcpp-cl", True),
+        ("ICPX", True),  # case-insensitive
+        ("icpx.exe", True),  # extension stripped, still matches the alias set
+        ("/usr/bin/g++-13", False),
+        ("/usr/bin/x86_64-linux-gnu-gcc-13", False),
+        ("cl.exe", False),  # MSVC's own cl.exe is not clang-family
+        ("icc", False),  # Intel's older, non-clang-based Classic compiler
+    ],
+)
+def test_is_clang_family_binary(path: str, expected: bool) -> None:
+    """Pure-function unit test for the --gcc-path clang-family classifier,
+    directly exercising both the "clang" substring branch and the vendor
+    alias-set branch (icx/icpx/dpcpp/dpcpp-cl) in isolation from the larger
+    _clang_header_dump/_resolve_clang_bin call chain the tests below cover."""
+    assert _is_clang_family_binary(path) is expected
+
+
 def test_clang_header_dump_gcc_path_not_used_as_clang(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -2073,6 +2164,56 @@ def test_clang_header_dump_explicit_clang_path_honored(
     with pytest.raises(SnapshotError):
         _clang_header_dump([header], [], gcc_path="/opt/llvm/bin/clang-18")
     assert seen["bin"] == "/opt/llvm/bin/clang-18"
+
+
+@pytest.mark.parametrize(
+    "gcc_path",
+    [
+        "/opt/intel/oneapi/compiler/2026.1/bin/icpx",
+        "/opt/intel/oneapi/compiler/2026.1/bin/icx",
+        "/opt/intel/oneapi/compiler/2026.1/bin/dpcpp",
+        "/opt/intel/oneapi/compiler/2026.1/bin/dpcpp-cl",
+        "ICPX",  # case-insensitive
+    ],
+)
+def test_clang_header_dump_gcc_path_recognizes_icx_family(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, gcc_path: str
+) -> None:
+    # Intel's oneAPI DPC++/C++ compiler is clang-based (accepts -Xclang directly)
+    # but is not spelled "clang" -- --gcc-path must still be honored for it
+    # instead of silently falling back to a plain "clang" on PATH (a different,
+    # possibly differently-configured compiler than the one the real build used).
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    seen = {}
+
+    def _avail(b="clang"):
+        seen["bin"] = b
+        return False
+
+    monkeypatch.setattr(dumper_clang, "_clang_available", _avail)
+    with pytest.raises(SnapshotError):
+        _clang_header_dump([header], [], gcc_path=gcc_path)
+    assert seen["bin"] == gcc_path
+
+
+def test_clang_header_dump_gcc_path_gcc_binary_not_mistaken_for_icx(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # A real GCC binary must not accidentally match the icx/icpx alias set.
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    seen = {}
+
+    def _avail(b="clang"):
+        seen["bin"] = b
+        return False
+
+    monkeypatch.setattr(dumper_clang, "_clang_available", _avail)
+    with pytest.raises(SnapshotError):
+        _clang_header_dump([header], [], gcc_path="/usr/bin/x86_64-linux-gnu-gcc-13")
+    assert seen["bin"] != "/usr/bin/x86_64-linux-gnu-gcc-13"
+    assert "clang" in seen["bin"]
 
 
 def test_clang_header_dump_gcc_prefix_maps_to_prefixed_clang(
@@ -2309,16 +2450,20 @@ def test_resolve_clang_system_includes_gating(
         "c++", sysroot=None, nostdinc=False, **base
     ) == ("/usr/include/c++/13",)
     # nostdinc, explicit sysroot, or the env toggle each suppress the probe.
-    assert _resolve_clang_system_includes(
-        "c++", sysroot=None, nostdinc=True, **base
-    ) == ()
-    assert _resolve_clang_system_includes(
-        "c++", sysroot=Path("/sysroot"), nostdinc=False, **base
-    ) == ()
+    assert (
+        _resolve_clang_system_includes("c++", sysroot=None, nostdinc=True, **base) == ()
+    )
+    assert (
+        _resolve_clang_system_includes(
+            "c++", sysroot=Path("/sysroot"), nostdinc=False, **base
+        )
+        == ()
+    )
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
-    assert _resolve_clang_system_includes(
-        "c++", sysroot=None, nostdinc=False, **base
-    ) == ()
+    assert (
+        _resolve_clang_system_includes("c++", sysroot=None, nostdinc=False, **base)
+        == ()
+    )
 
 
 def test_resolve_clang_system_includes_no_compiler(
@@ -2328,17 +2473,27 @@ def test_resolve_clang_system_includes_no_compiler(
 
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "1")
     monkeypatch.setattr(dumper_sysinc, "_resolve_probe_compiler", lambda *a, **k: None)
-    assert _resolve_clang_system_includes(
-        "c++", gcc_path=None, gcc_prefix=None, sysroot=None,
-        nostdinc=False, force_cpp=True,
-    ) == ()
+    assert (
+        _resolve_clang_system_includes(
+            "c++",
+            gcc_path=None,
+            gcc_prefix=None,
+            sysroot=None,
+            nostdinc=False,
+            force_cpp=True,
+        )
+        == ()
+    )
 
 
 def test_build_clang_command_injects_isystem(tmp_path: Path) -> None:
     agg = tmp_path / "agg.hpp"
     agg.write_text("")
     cmd = _build_clang_header_command(
-        "clang++", "gnu", [tmp_path / "inc"], agg,
+        "clang++",
+        "gnu",
+        [tmp_path / "inc"],
+        agg,
         force_cpp=True,
         system_includes=("/usr/include/c++/13", "/usr/include"),
     )
@@ -2357,7 +2512,10 @@ def test_build_clang_command_probed_isystem_after_user_flags(tmp_path: Path) -> 
     agg = tmp_path / "agg.hpp"
     agg.write_text("")
     cmd = _build_clang_header_command(
-        "clang++", "gnu", [], agg,
+        "clang++",
+        "gnu",
+        [],
+        agg,
         force_cpp=True,
         gcc_options="-isystem /sdk/include",
         gcc_option_tokens=("-isystem", "/sdk2"),
@@ -2397,16 +2555,23 @@ def test_resolve_clang_system_includes_respects_passthrough(
     from abicheck import dumper_sysinc
 
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "1")
-    monkeypatch.setattr(
-        dumper_sysinc, "_resolve_probe_compiler", lambda *a, **k: "g++"
-    )
+    monkeypatch.setattr(dumper_sysinc, "_resolve_probe_compiler", lambda *a, **k: "g++")
     monkeypatch.setattr(
         dumper_sysinc, "_probe_gnu_system_includes", lambda *a, **k: ["/usr/x"]
     )
-    assert _resolve_clang_system_includes(
-        "c++", gcc_path=None, gcc_prefix=None, sysroot=None, nostdinc=False,
-        force_cpp=True, gcc_options=gcc_options, gcc_option_tokens=gcc_option_tokens,
-    ) == ()
+    assert (
+        _resolve_clang_system_includes(
+            "c++",
+            gcc_path=None,
+            gcc_prefix=None,
+            sysroot=None,
+            nostdinc=False,
+            force_cpp=True,
+            gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens,
+        )
+        == ()
+    )
 
 
 def test_resolve_clang_system_includes_probes_without_passthrough(
@@ -2416,15 +2581,19 @@ def test_resolve_clang_system_includes_probes_without_passthrough(
     from abicheck import dumper_sysinc
 
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "1")
-    monkeypatch.setattr(
-        dumper_sysinc, "_resolve_probe_compiler", lambda *a, **k: "g++"
-    )
+    monkeypatch.setattr(dumper_sysinc, "_resolve_probe_compiler", lambda *a, **k: "g++")
     monkeypatch.setattr(
         dumper_sysinc, "_probe_gnu_system_includes", lambda *a, **k: ["/usr/x"]
     )
     assert _resolve_clang_system_includes(
-        "c++", gcc_path=None, gcc_prefix=None, sysroot=None, nostdinc=False,
-        force_cpp=True, gcc_options="-DFOO=1", gcc_option_tokens=("-O2",),
+        "c++",
+        gcc_path=None,
+        gcc_prefix=None,
+        sysroot=None,
+        nostdinc=False,
+        force_cpp=True,
+        gcc_options="-DFOO=1",
+        gcc_option_tokens=("-O2",),
     ) == ("/usr/x",)
 
 
