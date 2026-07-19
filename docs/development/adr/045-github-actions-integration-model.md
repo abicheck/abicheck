@@ -355,7 +355,7 @@ targets:
     consumer_binary_pattern: "bin/myapp"
     library: libpvxs
   ioc-plugin-contract:
-    kind: plugin-contract  # S23 — abicheck plugin-check
+    kind: plugin-contract  # S23 -- compare --required-symbols (ADR-043)
     contract_file: "contracts/ioc-plugin.yml"
     library: libpvxsIoc
 
@@ -386,17 +386,24 @@ flagged by review.** S22 (application compatibility) and S23
 (plugin/dlopen contract) route through `check-target` too (§8), but the
 `targets:` shape shown in an earlier draft only modeled shared-library
 targets (`binary_pattern`, headers, `bundle`) — nothing told `check-target`
-to build an `--used-by` invocation for an app-consumer target or a
-`plugin-check` invocation for a contract-file target, so P1.4 generating a
-run plan from P1.5's config had no way to represent either scenario without
-inventing an incompatible schema later. Fixed: every target entry declares
-`kind` (`library` — the default, existing S1–S17 shape; `app-consumer` —
-S22, `consumer_binary_pattern` + `library` it consumes; `plugin-contract` —
-S23, `contract_file` + `library` it's a plugin for). `check-target`
-branches on `kind` to select which root-action mode/CLI invocation to build
-(`compare`, `compare --used-by`, or `plugin-check` respectively) — the
-report envelope (§7) stays the same shape across all three; only the
-underlying analysis command differs.
+to build an `--used-by` invocation for an app-consumer target or the right
+invocation for a contract-file target, so P1.4 generating a run plan from
+P1.5's config had no way to represent either scenario without inventing an
+incompatible schema later. Fixed: every target entry declares `kind`
+(`library` — the default, existing S1–S17 shape; `app-consumer` — S22,
+`consumer_binary_pattern` + `library` it consumes; `plugin-contract` — S23,
+`contract_file` + `library` it's a plugin for). `check-target` branches on
+`kind` to select which root-action mode/CLI invocation to build — `compare`
+for `library`, `compare --used-by` for `app-consumer`, and (**corrected per
+a further review round**) `compare --required-symbols <contract_file>` for
+`plugin-contract`, **not** a standalone `plugin-check` command: ADR-043
+removed `plugin-check` and folded it into `compare`'s `--required-symbol`/
+`--required-symbols` flags (`abicheck/cli_options.py:1419-1425`) — the root
+`action.yml` still only accepts `mode: compare|dump|scan|deps-tree|deps-compare`
+(§"What the audit found," finding 2), so an S23 implementation following an
+earlier draft's `plugin-check` invocation would call a mode that doesn't
+exist. The report envelope (§7) stays the same shape across all three kinds;
+only the underlying `compare` flags differ.
 
 **`profiles:` shape, missing from an earlier draft — flagged by review.**
 §8's S17 row and P1.5 rely on `.abicheck.yml` declaring which build
@@ -419,7 +426,7 @@ flags — each keeps one unambiguous name, none is called bare `manifest.json`:
 | Concept | Canonical name | Existing artifact it maps to |
 |---|---|---|
 | Bundle cross-library contract | `bundle-contract.yml` / the existing `--manifest` flag to `compare`/`multi-binary` | Already exists (`docs/user-guide/multi-binary.md`'s `--manifest`); flag name unchanged, doc term clarified. |
-| Baseline-set descriptor | `baseline-set.json` (**archive-internal name only — see correction below**) | `actions/baseline/build_manifest.py`'s `manifest.json` — renamed in docs/new schema id only, existing filename kept for compat. |
+| Baseline-set descriptor | `baseline-set.json` (**archive-internal name only — see correction below**) | `actions/baseline/build_manifest.py`'s `manifest.json` today — **but not a no-code-change rename, corrected per review**: §4's `actions/baseline` primitive row and P1.6 both require real producer changes (consuming `.abicheck.yml` `targets:`, staging bundle-member ELF binaries into a `binaries/` directory) beyond the existing `manifest.json` content. Treating this row as "just a doc rename" would leave `resolve-baseline`'s bundle path with no actual producer for the archive contents it needs — see §4's `actions/baseline` row and §10/P1.6 for the real contract. |
 | Aggregate expected-target set | `abicheck aggregate --manifest` (unchanged CLI flag) / doc term "target-manifest" | Existing `cli_aggregate.py` flag. |
 | Build evidence pack descriptor | `build-output.json` (§2) | New. |
 
