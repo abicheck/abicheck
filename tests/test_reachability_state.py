@@ -150,11 +150,17 @@ class TestMarkReachabilityTriState:
         assert raw_change.public_reachable is False
         assert raw_change.reachability_state == ReachabilityState.PROVEN_UNREACHABLE
 
-    def test_no_graph_evidence_at_all_stays_unknown(self) -> None:
-        """MarkReachability's early-return path (no reachable_types, no
-        public_header_names, no call_reachable at all) never tags anything —
-        Change.reachability_state keeps its honest UNKNOWN default rather
-        than silently becoming PROVEN_UNREACHABLE."""
+    def test_declared_type_never_reachable_anywhere_is_still_proven_unreachable(
+        self,
+    ) -> None:
+        """Codex review, fourth pass: even when compute_leak_paths finds
+        NOTHING reachable anywhere in the whole comparison (the walk's
+        result sets are empty on both sides), that is itself conclusive
+        proof for a change whose root is a *declared* type — the walk is a
+        complete closure over the snapshot's own declarations, so this must
+        not regress to the misleadingly-safe-looking UNKNOWN just because
+        the old "nothing to tag, bail out early" perf guard used to skip
+        the per-change loop entirely in this shape of comparison."""
         old = _snap(
             functions=[_public_fn("foo", "int")],
             types=[RecordType(name="ns::detail::Hidden", kind="class", size_bits=64)],
@@ -172,7 +178,11 @@ class TestMarkReachabilityTriState:
             [raw_change], old, new, suppression=_needs_evidence_suppression()
         )
         assert raw_change.public_reachable is False
-        assert raw_change.reachability_state == ReachabilityState.UNKNOWN
+        assert raw_change.reachability_state == ReachabilityState.PROVEN_UNREACHABLE
+        # Contrast: a function-shaped change with nothing reachable anywhere
+        # (TestFunctionShapedChangeWithNoCallGraphIsUnknown.
+        # test_func_removed_with_no_graph_at_all_is_unknown, below) correctly
+        # stays UNKNOWN — no walk of any kind could speak to it.
 
     def test_degraded_call_graph_leaves_unexamined_change_unknown(self) -> None:
         """A change the layout walk never examines at all (a function-shaped

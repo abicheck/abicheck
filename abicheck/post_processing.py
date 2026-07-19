@@ -698,8 +698,20 @@ class MarkReachability:
         # kind that carries the field (function/variable/type/enum), not
         # just RecordType.
         public_header_names = _public_header_names(ctx.old) | _public_header_names(ctx.new)
-        if not reachable_types and not public_header_names and not call_reachable:
-            return changes
+        # Codex review, fourth pass: this used to return early here when
+        # nothing at all was found reachable (no point tagging
+        # public_reachable/reachability_kind — they'd all stay at their
+        # False/None defaults either way). That is no longer true for
+        # reachability_state: compute_leak_paths above already ran to
+        # completion regardless, and its result being empty is itself
+        # conclusive proof that no declared type in this comparison is
+        # public-reachable — a per-change loop below still needs to run to
+        # translate that into PROVEN_UNREACHABLE for every type-shaped
+        # change, or a "nothing reachable anywhere" comparison would
+        # wrongly leave every declared-type change at the honest-looking
+        # but incorrect UNKNOWN default. The loop itself is cheap (simple
+        # dict/set membership checks) — the walk it would have skipped
+        # re-running already happened above, so this isn't a perf change.
 
         # impact-analysis-layer P0: whether a not-otherwise-tagged change's
         # only possible remaining signal (the optional L5 call/type graph)
