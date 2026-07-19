@@ -654,6 +654,56 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
         assert len(found) == 1
         assert found[0].reachability_state == ReachabilityState.UNKNOWN
 
+    def test_exported_public_symbol_not_proven_unreachable_by_call_graph_alone(
+        self,
+    ) -> None:
+        """Codex review, sixth pass: compute_call_graph_leak_paths only ever
+        walks dependencies of *consumer-compiled public entries*
+        (source_graph.is_consumer_compiled_public_entry() explicitly
+        excludes an ordinary out-of-line exported function) — a trusted
+        call graph can prove an *internal callee* absent, but says nothing
+        about a genuinely public, directly-exported symbol's own
+        reachability. Without gating on the subject actually being
+        internal-namespaced, a plain FUNC_REMOVED on a real public API
+        function with no inline caller would be misread as
+        call-graph-proven-unreachable, and a broad
+        `reachability: proven-unreachable-only` rule could suppress a
+        genuine ABI break instead of leaving it UNKNOWN."""
+        from abicheck.buildsource.source_graph import GraphEdge
+
+        old = _graph_snap(
+            [_public_fn("pubFn"), _public_fn("acme::PublicApi::doThing")],
+            nodes=[
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://other", "ns::detail::other", "source"),
+            ],
+            edges=[GraphEdge(src="decl://pub", dst="decl://other", kind="DECL_CALLS_DECL")],
+            extractor_passes={"call_graph": True, "type_graph": True},
+        )
+        new = _graph_snap(
+            [_public_fn("pubFn")],
+            nodes=[_decl_node("decl://pub", "pubFn", "public_header")],
+            edges=[],
+        )
+        raw_change = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="acme::PublicApi::doThing",
+            description="removed",
+        )
+        suppression = SuppressionList([
+            Suppression(
+                namespace="acme::**",
+                reachability="proven-unreachable-only",
+                reason="would wrongly suppress a real API removal",
+            )
+        ])
+        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_REMOVED]
+        assert len(found) == 1
+        assert found[0].reachability_state == ReachabilityState.UNKNOWN
+        # The break survives — the broad rule could not prove it unreachable.
+        assert raw_change not in ctx.suppressed
+
     def test_typedef_removed_examined_by_walk_is_proven_unreachable(self) -> None:
         """Codex review: typedef aliases (AbiSnapshot.typedefs, a flat
         {alias: underlying} map, not a RecordType/EnumType) are declared

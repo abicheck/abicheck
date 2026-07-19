@@ -622,6 +622,7 @@ class MarkReachability:
             _root_type_name_for_change,
             compute_call_graph_leak_paths,
             compute_leak_paths,
+            is_internal_type,
         )
         from .model import ScopeOrigin
 
@@ -901,10 +902,33 @@ class MarkReachability:
                 # incidental edges from a partial one may silently read the
                 # same as a trustworthy graph that looked and found
                 # nothing).
+                #
+                # Restricted to an *internal-namespaced* subject (Codex
+                # review, sixth pass): compute_call_graph_leak_paths only
+                # ever walks dependencies of consumer-compiled public
+                # entries — is_consumer_compiled_public_entry() explicitly
+                # excludes an ordinary out-of-line exported function — so a
+                # trusted call graph can prove an *internal callee* absent,
+                # but says nothing about an exported public symbol's own
+                # reachability. Without this gate, a plain FUNC_REMOVED on a
+                # real, directly-exported API function with no inline
+                # caller would be misread as call-graph-proven-unreachable
+                # and a broad proven-unreachable-only rule could suppress a
+                # genuine ABI break. root is typically the *mangled* symbol
+                # for a function/variable change (diff_symbols.py), which
+                # has no "::" segments for is_internal_type to see — check
+                # the demangled c.qualified_name too, same fallback pattern
+                # used elsewhere in this walk.
                 layout_domain = root in known_type_names or (
                     enum_owner is not None and enum_owner in known_type_names
                 )
-                if layout_domain or _relevant_call_graph_trusted(c):
+                subject_is_internal = is_internal_type(root, namespaces) or (
+                    c.qualified_name is not None
+                    and is_internal_type(c.qualified_name, namespaces)
+                )
+                if layout_domain or (
+                    subject_is_internal and _relevant_call_graph_trusted(c)
+                ):
                     c.reachability_state = ReachabilityState.PROVEN_UNREACHABLE
                 else:
                     c.reachability_state = ReachabilityState.UNKNOWN
