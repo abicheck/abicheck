@@ -179,13 +179,24 @@ per existing conventions), new `abicheck/cli_buildsource.py` subcommand,
 `docs/reference/build-output-schema.md` (new).
 
 **Tests:** unit tests for the validator's failure taxonomy (empty declared
-root, digest mismatch, `projection` inconsistency — ADR-045 §11.1). **Must
-include a shared-pack-across-two-targets case, flagged by review:** a
-non-empty-only check would pass a `build-output.json` whose two `targets[]`
-entries both point at the same `abicheck_inputs/` pack marked `"declared"`
-— the validator must call `abicheck.buildsource.inputs_validate.validate_inputs_pack`
-(reused, not reimplemented) per target and assert it rejects the shared/
-mismatched-`target_id` case, per ADR-045 §11.1's corrected description.
+root, digest mismatch, `projection` inconsistency — ADR-045 §11.1).
+**Must include a shared-pack-across-two-targets case, corrected across two
+review rounds:** a non-empty-only check would pass a `build-output.json`
+whose two `targets[]` entries both point at the same `abicheck_inputs/`
+pack marked `"declared"`. `abicheck.buildsource.inputs_validate._target_id_issues`
+only compares TU `target_id`s against the pack's **own** `manifest.library`
+field and explicitly does not flag untagged TUs — it has no parameter for
+an externally-known expected target, so calling `validate_inputs_pack`
+unmodified does **not** catch either (a) a legacy/untagged-TU pack shared
+across targets, or (b) a pack whose `manifest.library` disagrees with which
+`build-output.json` target actually references it. The validator needs a
+real extension — either a new `expected_target_id` parameter on
+`_target_id_issues`/`validate_inputs_pack`, or an equivalent comparison
+performed in the new build-output validator using that function's existing
+manifest/TU data — not a same-signature call to the function as it exists
+today. Test cases: (1) two targets sharing one pack with untagged TUs must
+fail, (2) a pack whose `manifest.library` doesn't match its referencing
+`build-output.json` target must fail, both currently unenforced.
 
 ### P1.2 — `actions/resolve-baseline`
 

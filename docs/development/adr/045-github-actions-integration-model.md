@@ -241,7 +241,8 @@ abicheck-build/
       "id": "libpvxs",
       "binary": "artifacts/lib/libpvxs.so.1.5",
       "public_header_roots": ["headers/pvxs"],
-      "compile_context": {"include_dirs": ["headers"], "defines": ["PVXS_ENABLE_EXPERT_API"]},
+      "generated_header_roots": ["generated-headers/pvxs"],
+      "compile_context": {"include_dirs": ["headers", "generated-headers"], "defines": ["PVXS_ENABLE_EXPERT_API"]},
       "bundle": "pvxs-release",
       "evidence": {"kind": "source-facts", "path": "evidence/abicheck_inputs", "projection": "declared"}
     },
@@ -260,7 +261,21 @@ Design points:
   silently claim a `headers/` root that a plain configure step didn't
   actually populate — the build-output *validator* (§11) treats an empty
   `generated-headers/` root declared non-empty in `build-output.json` as a
-  hard validation failure, not a warning.
+  hard validation failure, not a warning. **A target needs its own way to
+  say "some of my public headers are generated" — missing from an earlier
+  draft, flagged by review.** The validator's empty-root check operates on
+  the top-level `generated-headers/` directory, but nothing in a *target*
+  entry told it which targets actually depend on that directory being
+  populated — a project with generated public headers had no schema field
+  to declare that, forcing either folding generated roots back into
+  `public_header_roots` (silently defeating the S10 guard, since the
+  validator can no longer tell a target's claim is genuinely
+  codegen-dependent) or leaving the validator with nothing to check. Fixed:
+  each target entry gains `generated_header_roots` (see the example above),
+  parallel to `public_header_roots` — the validator's S10 check applies
+  specifically to the union of `generated_header_roots` across all targets
+  that declare one, and a target with an empty `generated_header_roots: []`
+  is simply not making an S10 claim at all (no failure, nothing to check).
 - **`evidence.projection` is `"declared"` or `"inferred"` in the schema, but
   P1's validator only *accepts* `"declared"` — a self-contradiction in an
   earlier draft, fixed per review.** `"declared"` means the build itself
@@ -903,22 +918,35 @@ Three new validation points, all hard failures (not warnings) when tripped:
    `"declared"` (any other value, including `"inferred"`, is a hard
    validation failure until P2's TU→DSO attribution exists — §2's
    correction above); for `"declared"`, a **non-empty TU count is
-   necessary but not sufficient — a gap caught in a follow-up review
-   round.** A multi-DSO `build-output.json` could point two `targets[]`
-   entries at the *same* shared `abicheck_inputs/` pack and mark both
-   `"declared"`; a check that only verifies the pack is non-empty would
+   necessary but not sufficient, and — a further correction from a
+   follow-up review round — invoking `validate_inputs_pack` as-is is
+   *also* not sufficient.** A multi-DSO `build-output.json` could point two
+   `targets[]` entries at the *same* shared `abicheck_inputs/` pack and mark
+   both `"declared"`; a check that only verifies the pack is non-empty would
    pass both, even though a pack shared across two targets is exactly the
    unprojected build-wide evidence §9's safe model says must never satisfy
    a per-target `"declared"` claim. `abicheck/buildsource/inputs_validate.py`'s
-   `_target_id_issues` already implements the real check this needs — it
-   rejects a pack that mixes more than one `target_id` across its TU
-   records, and rejects a TU's `target_id` disagreeing with the expected
-   `target://<library>`. **The `build-output.json` validator must invoke
-   this existing check** (via `validate_inputs_pack`, already called from
-   `actions/collect-facts`'s `phase: verify`) for every target claiming
-   `"declared"` evidence, confirming the pack is actually isolated to that
-   target — not reimplement a weaker non-empty-only check that a shared
-   pack could pass.
+   `_target_id_issues` implements a *related* check, but not this exact one:
+   read closely (`inputs_validate.py:96-133`), it (a) compares TU
+   `target_id`s only against the pack's **own** `manifest.library` field —
+   never against an externally supplied expected target — and (b)
+   explicitly does **not** flag TUs with no `target_id` at all ("this is
+   additive validation, not a new hard requirement on every producer").
+   `validate_inputs_pack`'s public signature (`inputs_validate.py:168`) also
+   takes only the pack root, no expected-target argument. So a legacy/shared
+   pack whose TUs carry no `target_id`, or a pack whose `manifest.library`
+   names one library while `build-output.json` references it from a
+   *different* target's entry, passes `validate_inputs_pack` cleanly today —
+   invoking it unmodified, as an earlier draft of this fix said, would still
+   let unprojected evidence claim `"declared"` status. **The
+   `build-output.json` validator must instead extend this check with the
+   externally-known expected target**: either add an `expected_target_id`
+   parameter to `_target_id_issues`/`validate_inputs_pack` that hard-fails
+   both an untagged-TU pack and a `manifest.library`/`build-output.json`
+   target mismatch, or perform that comparison itself in the new validator
+   using `validate_inputs_pack`'s existing manifest/TU data as an input —
+   not merely call the function today's signature already exposes and treat
+   a clean report as proof of isolation.
 2. **Requested-vs-effective depth gate** — reuses the mechanism PR #601
    introduces at the CLI layer (`DumpDepthNotSatisfiedError`, per this
    repo's Known Gaps section) but applied at `check-target` level so a
