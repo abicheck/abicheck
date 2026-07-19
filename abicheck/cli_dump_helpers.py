@@ -863,6 +863,7 @@ def resolve_compile_db_l3_reuse(
     *,
     matched: bool = True,
     compile_db_filter: str | None = None,
+    explicit_l3_selector: bool = False,
 ) -> tuple[Path | None, str | None]:
     """AC-007: decide whether to reuse a ``-p``/``--compile-db`` DB as L3.
 
@@ -891,10 +892,18 @@ def resolve_compile_db_l3_reuse(
       monorepo — ignoring the filter, so it is **not** reused when a filter is
       active; the note tells the user to pass a pre-filtered ``--build-info`` /
       ``--build-compile-db`` for filtered L3 (Codex review).
+    - *explicit_l3_selector*: whether another dedicated L3 build-source selector
+      (``--build-query`` / ``--build-compile-db``) was given. ``build_info is
+      None`` alone is not enough — ``inline._resolve_compile_db`` gives
+      ``build_info`` precedence over ``cfg.query``/``cfg.compile_db``, so reusing
+      the ``-p`` header DB as ``build_info`` would silently override an explicit
+      ``--build-query``/``--build-compile-db`` L3 selector. The ``-p`` DB is only
+      reused when *all* dedicated build-source inputs are absent (Codex review).
     """
     reuse_applies = (
         depth in ("build", "source")
         and build_info is None
+        and not explicit_l3_selector
         and effective_compile_db is not None
         and matched
     )

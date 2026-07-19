@@ -162,6 +162,21 @@ def test_compile_db_not_reused_when_not_applicable(tmp_path: Path) -> None:
         assert note is None
 
 
+def test_compile_db_not_reused_when_explicit_l3_selector(tmp_path: Path) -> None:
+    """AC-007 (Codex): --build-query/--build-compile-db are dedicated L3 selectors;
+    reusing the -p header DB as build_info would override them (build_info takes
+    precedence in _resolve_compile_db). The -p DB is only reused when all
+    dedicated build-source inputs are absent."""
+    db = tmp_path / "compile_commands.json"
+    assert resolve_compile_db_l3_reuse(
+        "build", None, db, matched=True, explicit_l3_selector=True
+    ) == (None, None)
+    # With no explicit L3 selector it is still reused.
+    assert resolve_compile_db_l3_reuse(
+        "build", None, db, matched=True, explicit_l3_selector=False
+    )[0] == db
+
+
 def test_compile_db_not_reused_when_unmatched(tmp_path: Path) -> None:
     """AC-007 (Codex): an unrelated/filtered compile DB that did not match the
     requested headers (`matched=False`) must NOT be embedded as L3 — that would

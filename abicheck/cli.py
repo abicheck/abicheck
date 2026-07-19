@@ -735,6 +735,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         _dry_reused_bi, _ = resolve_compile_db_l3_reuse(
             depth, build_info, compile_db_path or compile_db_path_alt,
             matched=bool(_dry_matched), compile_db_filter=compile_db_filter,
+            explicit_l3_selector=build_query is not None or build_compile_db is not None,
         )
         emit_dry_run(
             render_dump_dry_run(
@@ -788,6 +789,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     build_info, _l3_note = resolve_compile_db_l3_reuse(
         depth, build_info, effective_compile_db,
         matched=compile_db_matched, compile_db_filter=compile_db_filter,
+        explicit_l3_selector=build_query is not None or build_compile_db is not None,
     )
     if _l3_note:
         click.echo(_l3_note, err=True)
