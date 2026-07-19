@@ -2351,6 +2351,83 @@ def test_combined_pack_content_hash_stable_across_source_abi_coverage_timing(
     assert a.content_hash() == b.content_hash()
 
 
+def test_combined_coverage_present_layer_overrides_stale_not_collected_row():
+    """AC-002: when the combined pack carries a layer's facts, that layer's
+    coverage row must report present — never the supplying pack's own stale
+    ``not_collected`` row (the '63 compile units but L3_build: not_collected'
+    symptom)."""
+    from pathlib import Path
+
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.model import (
+        BuildSourceManifest,
+        CoverageStatus,
+        DataLayer,
+        LayerCoverage,
+    )
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.cli_buildsource import _combine_packs
+
+    ev = BuildEvidence()
+    ev.compile_units.append(CompileUnit(id="cu://x", source="x.cpp"))
+    stale = BuildSourceManifest(
+        coverage=[
+            LayerCoverage(
+                layer=DataLayer.L3_BUILD.value, status=CoverageStatus.NOT_COLLECTED
+            )
+        ]
+    )
+    bi = BuildSourcePack(root=Path(""), manifest=stale, build_evidence=ev)
+
+    combined = _combine_packs(bi, None, None)
+    assert combined is not None
+    assert combined.build_evidence is not None and combined.build_evidence.compile_units
+    row = combined.manifest.coverage_for("L3_build")
+    assert row is not None and row.status == CoverageStatus.PRESENT
+
+
+def test_combined_coverage_row_comes_from_payload_supplier_not_other_pack():
+    """AC-002: the L4 coverage row must reflect the pack that actually supplied
+    ``source_abi``, not a different pack in supplier order that merely carries an
+    (unrelated, not_collected) L4 row."""
+    from pathlib import Path
+
+    from abicheck.buildsource.model import (
+        BuildSourceManifest,
+        CoverageStatus,
+        DataLayer,
+        LayerCoverage,
+    )
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+    from abicheck.cli_buildsource import _combine_packs
+
+    # build-info pack: a stale L4 not_collected row but NO source_abi payload.
+    bi = BuildSourcePack(
+        root=Path(""),
+        manifest=BuildSourceManifest(
+            coverage=[
+                LayerCoverage(
+                    layer=DataLayer.L4_SOURCE_ABI.value,
+                    status=CoverageStatus.NOT_COLLECTED,
+                )
+            ]
+        ),
+    )
+    # sources pack: supplies the L4 payload but carries no L4 row of its own.
+    src = BuildSourcePack(
+        root=Path(""), source_abi=SourceAbiSurface(library="libfoo.so")
+    )
+
+    combined = _combine_packs(bi, src, None)
+    assert combined is not None
+    assert combined.source_abi is not None
+    row = combined.manifest.coverage_for("L4_source_abi")
+    # Pre-fix: returned bi_pack's not_collected row (wrong provenance). Fixed:
+    # present, because we do embed the L4 facts src_pack supplied.
+    assert row is not None and row.status == CoverageStatus.PRESENT
+
+
 def test_inline_source_changed_falls_back_to_headers_only_scope(tmp_path, monkeypatch):
     """ADR-035 P3: inline dump has no PR diff, so a 'changed' scope falls back to
     'headers-only' (the public-API surface) — non-empty, but NOT the full-target

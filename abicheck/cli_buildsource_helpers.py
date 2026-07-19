@@ -24,6 +24,7 @@ create an import cycle rejected by the CI gate) — this is a leaf module.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -343,13 +344,21 @@ def _is_inputs_pack_dir(path: Path | None) -> bool:
     return is_inputs_pack(path)
 
 
-def _load_inputs_pack_or_raise(path: Path) -> BuildSourcePack:
+def _load_inputs_pack_or_raise(
+    path: Path, *, exported_symbols: Iterable[str] = ()
+) -> BuildSourcePack:
     """Validate and ingest an ``abicheck_inputs/`` directory into a BuildSourcePack.
 
     Validation happens automatically whenever the pack is consumed -- there is
     no separate ``inputs validate`` command to run first (ADR-043 D1). A
     structurally invalid pack is a hard error; non-fatal findings are printed
     as warnings.
+
+    ``exported_symbols`` — the analyzed binary's L0 exports — seed the L4
+    decl→symbol linking so ``source_decl_to_binary_symbol`` resolves against the
+    DSO instead of leaving ``matched_symbols=0`` (AC-003). When empty (e.g. a
+    source-only pack with no artifact side yet), the surface is relinked against
+    the artifact exports later during ``merge``.
     """
     from .buildsource.inputs_pack import ingest_inputs_pack
     from .buildsource.inputs_validate import validate_inputs_pack
@@ -361,15 +370,17 @@ def _load_inputs_pack_or_raise(path: Path) -> BuildSourcePack:
         )
     for warning in report.warnings:
         click.echo(f"warning: {path}: {warning}", err=True)
-    return ingest_inputs_pack(path).pack
+    return ingest_inputs_pack(path, exported_symbols=exported_symbols).pack
 
 
-def _load_side_pack_input(path: Path | None) -> BuildSourcePack | None:
+def _load_side_pack_input(
+    path: Path | None, *, exported_symbols: Iterable[str] = ()
+) -> BuildSourcePack | None:
     """Load a compare-side out-of-band pack, auto-detecting its pack kind."""
     if path is None:
         return None
     if _is_inputs_pack_dir(path):
-        return _load_inputs_pack_or_raise(path)
+        return _load_inputs_pack_or_raise(path, exported_symbols=exported_symbols)
     return _load_pack_or_raise(path)
 
 

@@ -129,6 +129,14 @@ def embed_build_source(
     if not layers:  # 'off' (or an unknown mode) embeds nothing
         return
 
+    # The analyzed binary's L0 exports — used both to seed a Flow-2
+    # abicheck_inputs/ pack's decl→symbol linking at ingest (so a
+    # `dump --build-info <inputs pack>`'s source surface maps onto the DSO's
+    # exports instead of reporting matched_symbols=0, AC-003) and, below, to
+    # seed the inline replay's A1 linking. Empty in the source-only
+    # `dump --sources` flow (no binary), where it stays inert.
+    exported = _exported_symbols_from_snapshot(snap)
+
     bi_is_pack = is_pack_dir(build_info)
     src_is_pack = is_pack_dir(sources)
     # A build-emitted abicheck_inputs/ pack (ADR-035 D5) is auto-detected and
@@ -138,14 +146,14 @@ def embed_build_source(
     bi_is_inputs = (not bi_is_pack) and _is_inputs_pack_dir(build_info)
     src_is_inputs = (not src_is_pack) and _is_inputs_pack_dir(sources)
     bi_pack = (
-        _load_inputs_pack_or_raise(build_info)
+        _load_inputs_pack_or_raise(build_info, exported_symbols=exported)
         if (bi_is_inputs and build_info is not None)
         else _load_pack_or_raise(build_info)
         if (bi_is_pack and build_info is not None)
         else None
     )
     src_pack = (
-        _load_inputs_pack_or_raise(sources)
+        _load_inputs_pack_or_raise(sources, exported_symbols=exported)
         if (src_is_inputs and sources is not None)
         else _load_pack_or_raise(sources)
         if (src_is_pack and sources is not None)
@@ -188,11 +196,9 @@ def embed_build_source(
                 if build_compile_db is not None
                 else cfg.compile_db,
             )
-        # A1: plumb the binary's L0 exports (already parsed into this snapshot)
-        # into the inline replay, so the linked source surface knows which decls
-        # map to exports and the provenance/mapping checks have a signal. Empty in
-        # the source-only `dump --sources` flow (no binary) — then A1 stays inert.
-        exported = _exported_symbols_from_snapshot(snap)
+        # A1: plumb the binary's L0 exports (already computed above) into the
+        # inline replay, so the linked source surface knows which decls map to
+        # exports and the provenance/mapping checks have a signal.
         inline_pack = collect_inline_pack(
             sources=raw_sources,
             build_info=raw_build_info,

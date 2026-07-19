@@ -324,6 +324,38 @@ def test_dump_inputs_folds_pack_into_snapshot_like_merge(tmp_path: Path) -> None
     assert surface.coverage.get("unmatched_symbols", 1) == 0
 
 
+def test_embed_build_source_links_inputs_pack_against_binary_exports(
+    tmp_path: Path,
+) -> None:
+    """AC-003: `dump <binary> --build-info <abicheck_inputs pack>` must seed the
+    Flow-2 ingest with the analyzed binary's L0 exports, so the source surface
+    maps onto the DSO (matched_symbols>0) instead of reporting matched_symbols=0.
+
+    The `--inputs` path (test above) already relinked; the `--build-info` /
+    `--sources` embed path went through `_load_inputs_pack_or_raise`, which did
+    not forward the snapshot's exports at all.
+    """
+    from abicheck.cli_buildsource import embed_build_source
+    from abicheck.model import AbiSnapshot, Function
+
+    # The embed path runs `validate_inputs_pack`, which requires the TU target to
+    # agree with the manifest library (`libfoo.so` -> `target://libfoo.so`).
+    tu = _tu("foo", mangled="_Z3foov")
+    tu.target_id = "target://libfoo.so"
+    pack = _write_inputs_pack(tmp_path, [tu])
+    snap = AbiSnapshot(library="libfoo.so", version="1.0")
+    snap.functions.append(Function(name="foo", mangled="_Z3foov", return_type="void"))
+
+    embed_build_source(snap, pack, None)
+
+    assert snap.build_source is not None
+    surface = snap.build_source.source_abi
+    assert surface is not None
+    assert "_Z3foov" in surface.roots.get("exported_symbols", [])
+    assert surface.coverage.get("matched_symbols", 0) >= 1
+    assert surface.coverage.get("unmatched_symbols", 1) == 0
+
+
 def test_dump_inputs_preserves_source_edges_coverage_across_export_relink(
     tmp_path: Path,
 ) -> None:

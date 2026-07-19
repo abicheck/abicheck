@@ -47,25 +47,42 @@ def _filter_pack_layers(
         pack.source_graph = None
     return pack
 
-def _first_attr(attr: str, *packs: BuildSourcePack | None) -> Any:
-    """Return the first non-None value of *attr* across *packs*."""
+def _first_attr_with_supplier(
+    attr: str, *packs: BuildSourcePack | None
+) -> tuple[Any, BuildSourcePack | None]:
+    """Return ``(value, supplying_pack)`` for the first non-None *attr*.
+
+    The *supplier* is the pack whose facts we actually embed for this layer, so
+    its coverage row — and only its row — is the one that describes what landed
+    (AC-002 coverage provenance)."""
     for cand in packs:
         if cand is not None and getattr(cand, attr) is not None:
-            return getattr(cand, attr)
-    return None
+            return getattr(cand, attr), cand
+    return None, None
 
 
 def _coverage_row_for_present_layer(
     layer: str,
-    packs: tuple[BuildSourcePack | None, ...],
+    supplier: BuildSourcePack | None,
 ) -> LayerCoverage:
-    """Return the supplying pack's existing coverage row for *layer*, or a
-    synthetic PRESENT row when none of *packs* carries one."""
-    for cand in packs:
-        if cand is None:
-            continue
+    """Return the coverage row for a layer whose facts we *do* embed.
+
+    Read it from the *supplier* — the pack that actually supplied the payload —
+    not merely the first pack in supplier order that happens to carry a row for
+    this layer; those can differ and produce a manifest that describes facts a
+    different pack lacked (AC-002). A ``not_collected`` (or absent) row on the
+    supplier is discarded and replaced with a synthetic PRESENT row: we are
+    embedding this layer's facts, so the manifest must never advertise it as not
+    collected. A ``partial`` row (e.g. degraded call/type passes, ADR-041) is a
+    meaningful qualifier of present facts and is preserved."""
+    if supplier is not None:
         row = next(
-            (c for c in cand.manifest.coverage if _layer_value(c.layer) == layer),
+            (
+                c
+                for c in supplier.manifest.coverage
+                if _layer_value(c.layer) == layer
+                and c.status != CoverageStatus.NOT_COLLECTED
+            ),
             None,
         )
         if row is not None:
@@ -107,7 +124,7 @@ def _coverage_row_for_absent_layer(
 
 def _build_combined_coverage(
     base: BuildSourcePack,
-    supplier: dict[str, tuple[BuildSourcePack | None, ...]],
+    supplier_pack: dict[str, BuildSourcePack | None],
     present: dict[str, bool],
     bi_pack: BuildSourcePack | None,
     src_pack: BuildSourcePack | None,
@@ -116,18 +133,19 @@ def _build_combined_coverage(
     """Rebuild the coverage manifest for the combined pack.
 
     Non-managed rows (L0/L1/L2/…) come from the base manifest. Always emit one
-    row per managed layer (ADR-028 D7). When we carry the facts, reuse the
-    supplying pack's row; otherwise mark the layer not_collected so the report
-    never advertises a check with no facts behind it (Codex review) — and never
-    drops the row entirely either.
+    row per managed layer (ADR-028 D7). When we carry the facts, reuse the row
+    from the *pack that actually supplied them* (``supplier_pack[layer]``);
+    otherwise mark the layer not_collected so the report never advertises a
+    check with no facts behind it (Codex review) — and never drops the row
+    entirely either.
     """
-    managed = set(supplier)
+    managed = set(supplier_pack)
     coverage: list[LayerCoverage] = [
         c for c in base.manifest.coverage if _layer_value(c.layer) not in managed
     ]
-    for layer, packs in supplier.items():
+    for layer, supplier in supplier_pack.items():
         if present[layer]:
-            row = _coverage_row_for_present_layer(layer, packs)
+            row = _coverage_row_for_present_layer(layer, supplier)
         else:
             row = _coverage_row_for_absent_layer(layer, bi_pack, src_pack, embedded)
         coverage.append(row)
@@ -270,19 +288,26 @@ def _combine_packs(
     flags point at different packs (Codex review). Returns ``None`` when no pack
     contributes any facts.
     """
-    build_evidence = _first_attr("build_evidence", bi_pack, src_pack, embedded)
-    source_abi = _first_attr("source_abi", src_pack, bi_pack, embedded)
-    source_graph = _first_attr("source_graph", src_pack, bi_pack, embedded)
+    build_evidence, l3_supplier = _first_attr_with_supplier(
+        "build_evidence", bi_pack, src_pack, embedded
+    )
+    source_abi, l4_supplier = _first_attr_with_supplier(
+        "source_abi", src_pack, bi_pack, embedded
+    )
+    source_graph, l5_supplier = _first_attr_with_supplier(
+        "source_graph", src_pack, bi_pack, embedded
+    )
 
     base = bi_pack or src_pack or embedded
     if base is None:
         return None
 
-    # supplier order per managed layer, and whether we actually carry it
-    supplier: dict[str, tuple[BuildSourcePack | None, ...]] = {
-        DataLayer.L3_BUILD.value: (bi_pack, src_pack, embedded),
-        DataLayer.L4_SOURCE_ABI.value: (src_pack, bi_pack, embedded),
-        DataLayer.L5_SOURCE_GRAPH.value: (src_pack, bi_pack, embedded),
+    # The pack that actually supplied each managed layer's payload — its row is
+    # the one that honestly describes what we embedded (AC-002).
+    supplier_pack: dict[str, BuildSourcePack | None] = {
+        DataLayer.L3_BUILD.value: l3_supplier,
+        DataLayer.L4_SOURCE_ABI.value: l4_supplier,
+        DataLayer.L5_SOURCE_GRAPH.value: l5_supplier,
     }
     present = {
         DataLayer.L3_BUILD.value: build_evidence is not None,
@@ -292,7 +317,7 @@ def _combine_packs(
 
     chosen = (build_evidence, source_abi, source_graph)
     coverage = _build_combined_coverage(
-        base, supplier, present, bi_pack, src_pack, embedded
+        base, supplier_pack, present, bi_pack, src_pack, embedded
     )
     artifacts, extractors = _build_combined_provenance(
         bi_pack, src_pack, embedded, chosen
