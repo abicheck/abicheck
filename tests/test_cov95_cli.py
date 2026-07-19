@@ -1897,6 +1897,31 @@ class TestUsedByScoping:
 
         jsonschema.validate(instance=data, schema=load_compare_report_schema())
 
+    def test_stat_json_summary_reflects_scoped_only_and_missing_findings(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Codex review: `--format json --stat` (to_stat_json) emits a
+        summary-only payload with no `changes` array at all, so the
+        changes_list-gated recompute above never ran for it -- `verdict`
+        still swapped to the scoped gate result, but `summary` stayed the
+        stale full-library counts and no `full_summary` was added. Same
+        contradiction as the non-stat case
+        (test_json_summary_reflects_scoped_only_and_missing_findings), just
+        reachable via --stat too."""
+        res = self._result(verdict=Verdict.BREAKING, missing=["needed_symbol"])
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        self._patch_scope(monkeypatch, res)
+        result = _invoke(
+            "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
+            "--stat",
+        )
+        data = json.loads(result.stdout)
+        assert "changes" not in data
+        assert data["verdict"] == "BREAKING"
+        assert data["summary"]["total_changes"] == 1
+        assert data["summary"]["breaking"] == 1
+        assert data["full_summary"]["total_changes"] == 0
+
 
 class TestVerifyRuntimeFlag:
     """``compare --used-by APP --verify-runtime`` (ADR-044 P2 item 2), via a

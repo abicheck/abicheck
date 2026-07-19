@@ -214,6 +214,18 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `fold_dump_provenance_into_json` now returns its computed label for the
   stderr line to reuse verbatim, so the two can no longer diverge (external
   review).
+- **`compare --format json --stat --used-by`/`--required-symbol(s)` could
+  report a scoped `verdict` next to stale full-library `summary` counts** —
+  the JSON `summary`/`full_summary` recompute that keeps a scoped run's
+  `verdict` and `summary.total_changes` consistent only ran when the
+  rendered payload had a `changes` array; `--stat` (`to_stat_json`) omits
+  `changes` entirely, so a `--stat --used-by` run whose only gating issue
+  was a scoped-only finding or a missing required symbol still swapped
+  `verdict` to the scoped result but left `summary` untouched and never
+  added `full_summary` — the same self-contradictory JSON shape the earlier
+  fix above addressed for the non-`--stat` case. `--stat` now adds each
+  scoped-only/missing-contract finding's own contribution on top of the
+  existing full-library counts (Codex review).
 
 ### Added
 

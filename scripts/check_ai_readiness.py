@@ -1008,6 +1008,16 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         # modules rather than introducing a new one. No init deadlock — the
         # package still imports cleanly.
         #
+        # `cli_compare_fold` also joins this same SCC: it is the post-render
+        # JSON/text fold-in half of `cli_compare_helpers.run_compare` (size-
+        # split out for the same file-size-cap reason as every other member
+        # here), reached only by `cli_compare_helpers` (already a member) and
+        # itself reaching only `cli_dump_helpers`/`cli_buildsource_helpers`/
+        # `reporter`/`reporter_markdown`/`severity`/`checker_policy`
+        # function-locally -- `cli_dump_helpers` is already a member too, so
+        # this closes exclusively through already-member modules, not a new
+        # dependency direction. No init deadlock.
+        #
         # `cli_config`, `cli_doctor`, and `cli_graph` also join this same SCC —
         # each already had its own standalone `{"cli", "cli_X"}` entry above,
         # which covers the trivial two-node cycle from `cli`'s tail-of-module
@@ -1032,6 +1042,7 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 "cli_baseline",
                 "cli_buildsource",
                 "cli_buildsource_helpers",
+                "cli_compare_fold",
                 "cli_compare_helpers",
                 "cli_compare_release",
                 "cli_config",
