@@ -325,9 +325,24 @@ Implements ADR-045 §6/§10. `publish-baseline.yml`: release-triggered,
 `actions/baseline` → atomic archive → release-asset upload.
 `update-main-baseline.yml`: default-branch-push-triggered, targets the
 `accepted-main` channel's storage backend (Actions cache by default per
-ADR-045 §10). Both use `actions/baseline` unchanged (it already documents
-itself as read-only/non-publishing — `actions/baseline/action.yml:6-8` — so
-these workflows own the publish step, matching that existing contract).
+ADR-045 §10). Both use `actions/baseline`'s existing publish contract
+unchanged (it already documents itself as read-only/non-publishing —
+`actions/baseline/action.yml:6-8` — so these workflows own the publish
+step) **but `actions/baseline` itself is not unchanged — correction, flagged
+by review:** today it only writes per-library `.abicheck.json` files plus
+`manifest.json` (`actions/baseline/run.sh`, `actions/baseline/build_manifest.py`);
+it has no code path that stages the member ELF binaries §6/§10's S14
+correction requires for a bundle-scoped baseline archive's `binaries/`
+directory. Without that change, P1.2's bundle-scoped `resolve-baseline` has
+no producer for the binaries it must return — S14 bundle baselines fail at
+resolution time (or worse, silently fall back to snapshots and lose old-side
+bundle analysis, exactly the failure this correction exists to prevent).
+**This item must therefore include a real `actions/baseline` code change**
+(extend `run.sh`/`build_manifest.py` to also copy each bundle member's
+source binary into `binaries/` and record its path/digest in
+`baseline-set.json`) alongside the two new workflows — not treated as an
+unrelated, already-solved dependency.
+
 **Required cache-key detail, flagged by review:** GitHub Actions cache
 entries are immutable once written (no overwrite-in-place); the workflow
 must write a new key on every refresh — e.g.

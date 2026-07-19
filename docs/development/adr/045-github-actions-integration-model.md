@@ -580,9 +580,22 @@ update to also read the new field names, must ship before P1.4's
   "operational_errors": [],
   "publication": {"state": "published", "channels": ["job_summary", "pr_comment"]},
   "tool_version": "abicheck 0.x.y",
-  "action_version": "abicheck/abicheck@v1"
+  "action_version": "abicheck/abicheck@v1",
+  "verdict": "breaking",
+  "severity": {"exit_code": 4, "blocking": true, "blocking_categories": ["abi_breaking"]}
 }
 ```
+
+The last two fields, `verdict` and `severity`, are **not optional
+decoration** — they are the exact legacy fields `abicheck/aggregate.py`
+already parses (`parse_report_verdict`'s top-level `verdict`;
+`GateInfo.from_report_data`'s `severity` block, shape matching
+`GateInfo.to_dict()`), included here in the canonical example precisely so
+an implementer copying this schema for P0.3/P1.3 doesn't reproduce the
+verdictless/ungated bug the dual-write paragraph above describes. A
+`scan`-mode report's equivalent legacy field is a top-level `exit_code` plus
+`scan_schema_version` instead of a `severity` block — omitted from this
+`compare`-shaped example for space, but required the same way.
 
 **`target_id` is not redundant with `check_id`/`target` — it exists solely
 so `aggregate` reads the right value** (a second review catch, from
