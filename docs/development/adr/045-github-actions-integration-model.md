@@ -105,7 +105,7 @@ Reorganize the GitHub Actions integration surface around a **project
 integration lifecycle** instead of the CLI command set, with `aggregate`
 demoted to one terminal fan-in scenario within that lifecycle:
 
-```
+```text
 project configuration
     → existing or instrumented product build
     → build outputs and evidence
@@ -187,7 +187,7 @@ design built around `aggregate` naturally collapses several of them into
 
 `abicheck-build/` (versioned artifact directory), producer-agnostic:
 
-```
+```text
 abicheck-build/
   build-output.json          # schema below
   artifacts/                 # binaries as published by the real build
@@ -326,10 +326,22 @@ missing-file error text happens to be.
 
 | Workflow | Composes | Primary scenarios |
 |---|---|---|
-| `check-single.yml` | `resolve-baseline` → `check-target` (one target, one profile) | S1, S2, S4, S5, S6 |
+| `check-single.yml` | a single `check-target` call (one target, one profile) — `check-target` owns baseline resolution internally, see below | S1, S2, S4, S5, S6 |
 | `check-project.yml` | consumes a `build-output.json` artifact → dynamic matrix over `targets[]`/`profiles[]` → `check-target` per cell → optional `aggregate` job if `>1` cell | S3, S14 (via one `check-target` call per bundle), S15, S17, S25, S28 |
 | `publish-baseline.yml` | build/consume `build-output.json` → `actions/baseline` → upload as release asset (atomic archive, §10) | S19 |
 | `update-main-baseline.yml` | same as above, targeting the `accepted-main` channel storage backend, triggered on default-branch push | S20 |
+
+**Resolution ownership, made explicit (review caught this was ambiguous in
+an earlier draft):** `resolve-baseline` is invoked exactly once per check,
+*inside* `check-target` (§4's primitive table already states `check-target`
+"composes root `action.yml` + `collect-facts` ... + `resolve-baseline`").
+Neither reusable workflow calls `resolve-baseline` a second time at the
+workflow level — `check-single.yml` and `check-project.yml`'s matrix cells
+each call `check-target` once and get an already-resolved baseline as part
+of that one call. A caller who needs the resolved baseline path *outside*
+`check-target` (e.g. to display it in a workflow-level summary before the
+check runs) reads it back from `check-target`'s own output, not by invoking
+`resolve-baseline` separately.
 
 `check-packages.yml` was considered and **rejected as a fifth workflow**
 (decision D7): a package/prebuilt-artifact target (S13) is just another
@@ -350,7 +362,9 @@ fourth composite action, whenever more than one target/profile is in play.
 `run-plan.json` (schema `abicheck.run-plan/v1`) — the machine-readable
 output of resolving `.abicheck.yml` + dynamic CI inputs into an exact set of
 checks, generated once per `check-project.yml` invocation and consumed by
-the matrix and by `aggregate`'s `--manifest`:
+the matrix directly, and by `aggregate`'s `--manifest` only after the
+required projection described immediately below (not passed to `aggregate`
+as-is):
 
 ```json
 {
@@ -448,6 +462,7 @@ schema break to detector output):
 {
   "report_schema": "abicheck.report/v1",
   "check_id": "libpvxs@linux-x86_64-gcc13-release#accepted-main",
+  "target_id": "libpvxs@linux-x86_64-gcc13-release#accepted-main",
   "project": "epics-base/pvxs",
   "target": "libpvxs",
   "profile_id": "linux-x86_64-gcc13-release",
@@ -462,14 +477,39 @@ schema break to detector output):
   "compatibility_verdict": "breaking",
   "policy_gate_decision": "fail",
   "operational_errors": [],
+  "publication": {"state": "published", "channels": ["job_summary", "pr_comment"]},
   "tool_version": "abicheck 0.x.y",
   "action_version": "abicheck/abicheck@v1"
 }
 ```
 
+**`target_id` is not redundant with `check_id`/`target` — it exists solely
+so `aggregate` reads the right value** (a second review catch, from
+`chatgpt-codex-connector`): `abicheck/aggregate.py`'s `_load_report_file`
+reads `data.get("target_id")` specifically (not `check_id`, not `target`)
+when deciding which key to collect a report under, falling back to the
+report's filename only if `target_id` is absent. §5's fix requires
+multi-profile/multi-channel reports to key by `check_id`, so P1.3's
+`check-target` implementation must populate this exact field — `target_id`
+— with the `check_id` value, not rely on `check_id` alone being present and
+not rely on artifact/filename naming to carry that identity implicitly.
+`target` stays the plain, human-readable library name (`libpvxs`) for
+display; `target_id` is `aggregate`'s only working input for identity.
+
 Five axes kept explicitly distinct, per the task's requirement (§11 there):
-**compatibility**, **evidence coverage**, **operational status**, **policy
-gate**, **report publication**. `requested_depth != effective_depth` is
+**compatibility** (`compatibility_verdict`), **evidence coverage**
+(`evidence_coverage`), **operational status** (`operational_errors` — empty
+means clean; `verdict: "ERROR"`-class failures populate it, mirroring how
+`abicheck/aggregate.py` already special-cases `verdict == "ERROR"` as an
+operational, not compatibility, signal), **policy gate**
+(`policy_gate_decision`), and **report publication** — the field added
+above, `publication.state` (`published`/`skipped`/`failed`) plus which
+channels actually received it. Making this a field, not an implicit
+inference from "a report file exists," matters because a report can be
+fully computed and still fail to *publish* (PR-comment API error, SARIF
+upload rejected) — a downstream consumer must be able to tell "no
+publication happened" apart from "no report was produced at all," which an
+absent-report inference cannot distinguish. `requested_depth != effective_depth` is
 always surfaced — a request for `source` depth that only achieved `headers`
 must never render as an unqualified "source-depth check passed."
 
@@ -598,7 +638,15 @@ Three new validation points, all hard failures (not warnings) when tripped:
    extends the acknowledged gap rather than duplicating a second enforcement
    path.
 3. **`resolve-baseline` taxonomy** (§6 table) — every failure mode has a
-   distinct, tested exit condition; none of them may exit 0/"compatible."
+   distinct, tested exit condition; none of them may exit 0/"compatible." The
+   one documented exception is the §6 bootstrap row (`not_found` on a check
+   explicitly marked `required: false`), which exits 0/"advisory" —
+   deliberately *not* "compatible" — precisely so a first-ever
+   `release-contract` publish isn't blocked by "no baseline exists yet." This
+   is a narrow, explicit opt-in (a check must set `required: false` to get
+   it), not a general relaxation of the fail-loud rule: every other resolver
+   outcome, and every `required: true` check (the default), stays a hard
+   failure with no exit-0 path.
 
 ---
 
@@ -737,8 +785,8 @@ The report envelope (§7) gives every downstream consumer (PR comment, SARIF,
 branch protection, `aggregate` itself) one unambiguous identity/status
 contract instead of inferring it from verdict text.
 
-**Negative / cost:** two new composite Actions, one new reusable-workflow
-pair, three new JSON schemas, and a `.abicheck.yml` schema extension are net
+**Negative / cost:** two new composite Actions, four new reusable
+workflows, three new JSON schemas, and a `.abicheck.yml` schema extension are net
 new maintenance surface. The scenario-first documentation reorganization
 (companion plan) touches most of `docs/user-guide/`. None of this is free,
 and it is sequenced in the companion plan specifically so it lands as
