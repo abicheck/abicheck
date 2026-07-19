@@ -247,6 +247,34 @@ class TestCtorOverloadAmbiguityIsAmbiguitySafe:
         risk = [c for c in r.changes if c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK]
         assert len(risk) == 1
 
+    def test_doubly_legacy_snapshot_still_flags_risk(self):
+        """Both old and new RecordType lack qualified_name entirely (a
+        producer/schema predating that field on both sides), so
+        common_classes only has the bare leaf ("Widget"). A real
+        Itanium-mangled constructor's owner_class_of is always fully
+        qualified ("ns::Widget") regardless of RecordType's own schema --
+        the pre-fix membership check required an exact match and dropped
+        every such constructor, even though pre-PR#608 bare-f.name-based
+        grouping covered this legacy-vs-legacy comparison fine (Codex
+        review, PR #608 follow-up, fourth round).
+        """
+        old_widget = RecordType(name="Widget", qualified_name=None, kind="class")
+        new_widget = RecordType(name="Widget", qualified_name=None, kind="class")
+
+        old_funcs = [self._ctor("_ZN2ns6WidgetC1Ei", "ns", "Widget", "int")]
+        new_funcs = [
+            self._ctor("_ZN2ns6WidgetC1Ei", "ns", "Widget", "int"),
+            self._ctor("_ZN2ns6WidgetC1EPKc", "ns", "Widget", "char const *"),
+        ]
+
+        r = compare(
+            _snap(functions=old_funcs, types=[old_widget]),
+            _snap(functions=new_funcs, types=[new_widget]),
+        )
+
+        risk = [c for c in r.changes if c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK]
+        assert len(risk) == 1
+
 
 class TestVirtualMethodOwnerResolutionAmbiguitySafe:
     """``_diff_functions`` feeds ``old_types``/``new_types`` into

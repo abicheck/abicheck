@@ -992,11 +992,10 @@ _CV_QUALIFIER_RE = re.compile(r"\b(?:const|volatile)\b")
 
 
 def _synthetic_ctor_scope(mangled: str) -> str | None:
-    """Qualified scope encoded in a castxml synthetic-ctor key
-    (``SYNTHETIC_CTOR_KEY_PREFIX + "scope(params)"``), or ``None``: it
-    doesn't start with ``_Z`` so ``owner_class_of`` can't parse it and would
-    otherwise fall back to the bare class name (Codex review, PR #608
-    follow-up).
+    """Qualified scope in a castxml synthetic-ctor key
+    (``SYNTHETIC_CTOR_KEY_PREFIX + "scope(params)"``), or ``None`` (it
+    doesn't start with ``_Z`` so ``owner_class_of`` can't parse it; Codex
+    review, PR #608 follow-up).
     """
     if not is_synthetic_ctor_key(mangled):
         return None
@@ -1010,23 +1009,23 @@ def _converting_ctors_by_class(
 ) -> dict[str, dict[tuple[str, ...], Function]]:
     """Group each class's non-explicit, single-required-argument constructors.
 
-    Grouped by ``owner_class_of(f)`` (scope-qualified) not bare ``f.name``,
-    so two classes sharing a bare name in different namespaces don't
-    conflate their constructor sets (Codex review, PR #608 follow-up).
+    Grouped by ``owner_class_of(f)`` (scope-qualified), not bare ``f.name``
+    (Codex review, PR #608 follow-up).
 
     "Converting constructor": public, not deleted, definitively non-explicit
     (``is_explicit is False``; ``None`` is unknown and skipped), callable
     with exactly one argument (at most one *required* parameter, at least
-    one total). First parameter's type is checked against the class's own
-    type to exclude copy/move constructors. Keyed by param-type tuple.
-
-    ``class_names`` is expected to already be scope-qualified. Falls back to
-    a synthetic-key-derived scope, then bare ``f.name``, when unresolvable.
+    one total). First parameter's type excludes copy/move constructors.
+    Keyed by param-type tuple. Falls back to a synthetic-key-derived scope,
+    then bare ``f.name``, when ``owner_class_of`` is unresolvable.
     """
     by_class: dict[str, dict[tuple[str, ...], Function]] = {}
     for f in snap.functions:
         owner = owner_class_of(f) or _synthetic_ctor_scope(f.mangled) or f.name
-        if owner not in class_names or f.is_deleted or f.is_explicit is not False:
+        # Doubly-legacy fallback (Codex review, PR #608 follow-up).
+        if owner not in class_names and owner.rsplit("::", 1)[-1] not in class_names:
+            continue
+        if f.is_deleted or f.is_explicit is not False:
             continue
         if f.access != AccessLevel.PUBLIC:
             continue

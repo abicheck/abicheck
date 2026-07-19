@@ -44,4 +44,9 @@
   bare class name — dropping such namespaced constructors from
   `CTOR_OVERLOAD_AMBIGUITY_RISK` even between two fully fresh snapshots;
   `_diff_ctor_overload_ambiguity` now recovers the scope directly from the
-  synthetic key's own encoding.
+  synthetic key's own encoding. (3) A doubly-legacy mix (neither side's
+  RecordType carries `qualified_name`) left `common_classes` holding only
+  the bare leaf, while a real Itanium-mangled constructor's owner is always
+  fully qualified regardless of `RecordType`'s own schema — the class-
+  membership check now also accepts the bare leaf of a fully-qualified
+  owner when the qualified form isn't present.
