@@ -521,15 +521,11 @@ _ENUM_MEMBER_KINDS = frozenset({
     ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED,
 })
 
-# buildsource/source_diff.py's L4 (and source_graph_findings.py's L5)
-# findings below are public *by construction* -- each is built only from an
-# already-proven-public entity (a reachable_*/exported-symbol-mapped
-# declaration, never a bare namespace-name heuristic). Falling through to
-# the is_internal_type()-based classification below would misjudge one of
-# these purely on its *name* (Codex review, many passes). Deliberately NOT
-# extended to SOURCE_BINARY_PROVENANCE_MISMATCH (aggregate, symbol="") or
-# ODR_SOURCE_CONFLICT's `odr_conflicts` sibling checks not scoped to
-# public/reachable types.
+# L4 (source_diff.py) / L5 (source_graph_findings.py) findings below are
+# public *by construction* -- each built only from an already-proven-public
+# entity, never a bare namespace-name heuristic (Codex review, many passes).
+# NOT extended to SOURCE_BINARY_PROVENANCE_MISMATCH (aggregate, symbol="")
+# or ODR_SOURCE_CONFLICT's sibling checks not scoped to public types.
 _PUBLIC_SOURCE_ABI_KINDS = frozenset({
     ChangeKind.PUBLIC_TYPEDEF_REMOVED,
     ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED,
@@ -1025,7 +1021,14 @@ class MarkReachability:
                 # enum_owner (bare name) or a member literally named e.g.
                 # "detail" would read as internal-namespaced (Codex review).
                 internal_check_subject = enum_owner if enum_owner is not None else root
-                type_qualified_name = qualified_name_by_bare.get(internal_check_subject)
+                # qualified_name_by_bare is keyed from RecordType names only
+                # -- an enum's bare owner could collide with an unrelated
+                # record's bare name, wrongly feeding the record's namespace
+                # onto the enum (Codex review). Never resolve it for
+                # enum_owner.
+                type_qualified_name = (
+                    qualified_name_by_bare.get(root) if enum_owner is None else None
+                )
                 subject_is_internal = is_internal_type(
                     internal_check_subject, namespaces
                 ) or (

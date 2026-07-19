@@ -480,6 +480,58 @@ class TestMarkReachabilityTriState:
         )
         assert raw_change.reachability_state == ReachabilityState.UNKNOWN
 
+    def test_enum_owner_does_not_inherit_colliding_record_qualified_name(
+        self,
+    ) -> None:
+        """Codex review: qualified_name_by_bare is keyed only from
+        RecordType names (DWARF-backend bare-name resolution) -- an enum's
+        bare owner name (also DWARF-backend-bare, e.g. "Status") could
+        collide with an unrelated internal record sharing that bare name
+        (e.g. a public enum "Status" and an internal "ns::detail::Status"
+        record). Feeding the record's namespace onto the enum subject would
+        wrongly mark a public enum's member change PROVEN_UNREACHABLE. The
+        fix never resolves qualified_name_by_bare for enum_owner, so this
+        must stay UNKNOWN (neither type examined it) rather than either
+        REACHABLE or UNREACHABLE."""
+        from abicheck.model import EnumMember, EnumType
+
+        old = _snap(
+            functions=[_public_fn("foo", "int")],
+            types=[
+                RecordType(
+                    name="Status", kind="class",
+                    qualified_name="ns::detail::Status",
+                ),
+            ],
+            enums=[
+                EnumType(
+                    name="Status",
+                    members=[EnumMember(name="OK", value=0), EnumMember(name="ERR", value=1)],
+                ),
+            ],
+        )
+        new = _snap(
+            functions=[_public_fn("foo", "int")],
+            types=[
+                RecordType(
+                    name="Status", kind="class",
+                    qualified_name="ns::detail::Status",
+                ),
+            ],
+            enums=[
+                EnumType(name="Status", members=[EnumMember(name="OK", value=0)]),
+            ],
+        )
+        raw_change = Change(
+            kind=ChangeKind.ENUM_MEMBER_REMOVED,
+            symbol="Status::ERR",
+            description="member removed",
+        )
+        DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        assert raw_change.reachability_state == ReachabilityState.UNKNOWN
+
     def test_degraded_call_graph_leaves_unexamined_change_unknown(self) -> None:
         """A change the layout walk never examines at all (a function-shaped
         FUNC_REMOVED with no field/base/signature evidence) whose only
