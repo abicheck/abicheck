@@ -1029,13 +1029,13 @@ class _Decl:
     """
 
     __slots__ = (
-        "node",
-        "scope",
-        "file",
         "access",
         "extern_c",
+        "file",
         "in_friend",
         "in_template",
+        "node",
+        "scope",
     )
 
     def __init__(
