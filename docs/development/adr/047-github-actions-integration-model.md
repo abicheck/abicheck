@@ -1,8 +1,8 @@
-# ADR-045: GitHub Actions Integration Model — Project Lifecycle Over Aggregate-Centric Design
+# ADR-047: GitHub Actions Integration Model — Project Lifecycle Over Aggregate-Centric Design
 
 **Date:** 2026-07-19
 **Status:** Proposed — not implemented. This ADR records the target domain
-model and component surface; `docs/development/plans/g29-github-actions-integration-model.md`
+model and component surface; `docs/development/plans/g30-github-actions-integration-model.md`
 carries the phased backlog that implements it.
 **Decision maker:** Nikolay Petrov
 
@@ -1202,7 +1202,7 @@ Full 15-field cards for all 28 scenarios would run several thousand lines;
 this ADR keeps the domain-model decisions above scenario-anchored and
 defers exhaustive per-scenario cards (user story, copy-pasteable YAML,
 acceptance criteria) to
-`docs/development/plans/g29-github-actions-integration-model.md` §Scenario
+`docs/development/plans/g30-github-actions-integration-model.md` §Scenario
 backlog, where each scenario becomes a tracked, independently
 implementable/testable unit. Table below maps each scenario to the primary
 workflow/primitive from §4 and its baseline requirement, confirming no

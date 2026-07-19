@@ -1,6 +1,6 @@
-# G29 — GitHub Actions Integration Model: Project Lifecycle Backlog
+# G30 — GitHub Actions Integration Model: Project Lifecycle Backlog
 
-**ADR:** [ADR-045](../adr/045-github-actions-integration-model.md)
+**ADR:** [ADR-047](../adr/047-github-actions-integration-model.md)
 **Type:** Initiative plan (multi-phase); no `usecase-registry.yaml` entries yet
 — GH-Actions integration is a cross-cutting CI/UX surface, not a detector
 capability, so it is tracked here rather than in the registry (consistent
@@ -11,7 +11,7 @@ reorganization touches most of `docs/user-guide/`.
 
 ## Problem
 
-ADR-045 records the target domain model and component surface: a project
+ADR-047 records the target domain model and component surface: a project
 integration lifecycle (config → build → evidence → target/baseline
 resolution → check → report → optional fan-in → baseline publish) that
 demotes `abicheck aggregate` from an implicit architectural center to one
@@ -32,7 +32,7 @@ doc PRs need `mkdocs build --strict` + `check_ai_readiness.py`).
 
 ## P0 — Onboarding blockers (no architecture change required)
 
-These fix real defects the audit (ADR-045 §"What the audit found")
+These fix real defects the audit (ADR-047 §"What the audit found")
 identified in the *existing* surface. None require the new primitives.
 
 ### P0.1 — Runtime warning when a mode-scoped input is set on an incompatible mode
@@ -94,14 +94,14 @@ the new output value per producer.
 
 **PR boundary:** one PR.
 
-### P0.3 — Report identity envelope (subset of ADR-045 §7)
+### P0.3 — Report identity envelope (subset of ADR-047 §7)
 
 **Problem:** JSON reports don't carry `check_id`/`profile_id`/
 `requested_depth`/`effective_depth`/`baseline_channel` today — a P1
 prerequisite, but valuable standalone since it's what makes `aggregate`'s
 existing coverage/gate logic auditable.
 
-**Change:** Add the identity fields from ADR-045 §7 to the existing
+**Change:** Add the identity fields from ADR-047 §7 to the existing
 `compare`/`scan` JSON report schema as **additive, optional** fields (schema
 version bump, backward compatible — old consumers ignore unknown fields).
 Do *not* yet build `resolve-baseline`/`check-target` (P1) — this item only
@@ -119,14 +119,14 @@ schema-contract test if one doesn't already assert report schema stability.
 
 **PR boundary:** one PR for the schema/model change, a separate PR to wire
 `requested_depth`/`effective_depth` population through the CLI (depends on
-PR #601's `DumpDepthNotSatisfiedError` work landing first per ADR-045 §11.2
+PR #601's `DumpDepthNotSatisfiedError` work landing first per ADR-047 §11.2
 and the repo's existing Known Gaps entry — do not duplicate that
 enforcement, extend it).
 
 ### P0.4 — Canonical single-library and multi-DSO doc pages
 
 **Problem:** multi-DSO guidance is split three ways with no single canonical
-page (ADR-045 finding 4).
+page (ADR-047 finding 4).
 
 **Change:** Promote `docs/user-guide/github-action-source-scans.md`'s
 "Recommended flow: multi-library release with one shared facts pack"
@@ -137,7 +137,7 @@ full scenario-first IA (that's P1's `docs/integration/` tree).
 
 **Required caveat, flagged by review — do not skip:** the existing recipe
 being promoted has every library in a multi-DSO release point at the *same*
-shared `abicheck_inputs/` pack with no per-target projection check. ADR-045
+shared `abicheck_inputs/` pack with no per-target projection check. ADR-047
 §9 requires exactly that projection (`evidence.projection: "declared"` vs.
 "inferred") before a per-target check may claim `effective_depth: source` —
 but the validator that enforces it doesn't exist until P1.1
@@ -162,11 +162,11 @@ pages yet).
 
 ---
 
-## P1 — Integration model (ADR-045's new primitives)
+## P1 — Integration model (ADR-047's new primitives)
 
 ### P1.1 — `build-output.json` schema + validator
 
-Implements ADR-045 §2/§11.1. New schema module (e.g.
+Implements ADR-047 §2/§11.1. New schema module (e.g.
 `abicheck/buildsource/build_output.py` or a sibling of `inputs_pack.py`,
 following the existing `abicheck/buildsource/CLAUDE.md` module-table
 convention), plus `python -m abicheck build-output validate <dir>` CLI
@@ -179,7 +179,7 @@ per existing conventions), new `abicheck/cli_buildsource.py` subcommand,
 `docs/reference/build-output-schema.md` (new).
 
 **Tests:** unit tests for the validator's failure taxonomy (empty declared
-root, digest mismatch, `projection` inconsistency — ADR-045 §11.1).
+root, digest mismatch, `projection` inconsistency — ADR-047 §11.1).
 **Must include a shared-pack-across-two-targets case, corrected across two
 review rounds:** a non-empty-only check would pass a `build-output.json`
 whose two `targets[]` entries both point at the same `abicheck_inputs/`
@@ -210,7 +210,7 @@ currently unenforced; (3) guards the fix from over-correcting.
 
 ### P1.2 — `actions/resolve-baseline`
 
-Implements ADR-045 §4/§6. New composite Action; consumes a baseline-set
+Implements ADR-047 §4/§6. New composite Action; consumes a baseline-set
 archive/cache entry + `channel`/`target`/`profile` inputs; outputs a
 resolved snapshot path or one of the five typed failure states.
 **Input gap, flagged by review: candidate evidence metadata is missing
@@ -246,7 +246,7 @@ principle applies — factor the manifest reader into
 the logic is non-trivial).
 
 **Tests:** shell-mapping tests for each of the five failure taxonomy rows
-(ADR-045 §6 table); a bundle-scoped resolution fixture asserting binaries
+(ADR-047 §6 table); a bundle-scoped resolution fixture asserting binaries
 (not snapshots) come back for a bundle target.
 
 **Files:** new `actions/resolve-baseline/action.yml`, `run.sh`. Reuses
@@ -259,12 +259,12 @@ principle applies — factor the manifest reader into
 the logic is non-trivial).
 
 **Tests:** shell-mapping tests for each of the five failure taxonomy rows
-(ADR-045 §6 table).
+(ADR-047 §6 table).
 
 ### P1.3 — `actions/check-target`
 
 **Scope note, required by review — this item is not done until the S22/S23
-root-action gap is resolved, not merely acknowledged.** ADR-045 §4 flags
+root-action gap is resolved, not merely acknowledged.** ADR-047 §4 flags
 that `action.yml`/`run.sh` today have no `--used-by`/`--required-symbol(s)`
 input or forwarding path, so `app-consumer`/`plugin-contract` kinds cannot
 actually route through the root Action as `kind: library` does. This P1.3
@@ -277,7 +277,7 @@ for someone else. Landing P1.3 without resolving this means S22/S23
 
 **Second scope note, flagged by review: `baseline: none` (S5) must skip
 `resolve-baseline` entirely, not just be documented as doing so in the
-ADR.** ADR-045 §6 corrects an earlier draft that routed S5's no-baseline
+ADR.** ADR-047 §6 corrects an earlier draft that routed S5's no-baseline
 audit through the normal `check-target` → `resolve-baseline` path (which
 would hit `not_found`/bootstrap handling for a check that never wanted a
 baseline in the first place) to an explicit bypass: `check-target` must
@@ -288,9 +288,9 @@ implementation must include that branch and a fixture asserting a
 produces a `not_found`/bootstrap-shaped outcome — not just cite the ADR
 section as though the behavior is already guaranteed by it.
 
-Implements ADR-045 §4/§7. Composes root `action.yml` + `collect-facts`
+Implements ADR-047 §4/§7. Composes root `action.yml` + `collect-facts`
 (**`phase: verify` for wrapper/clang-plugin evidence, `phase: auto` only
-for `producer: replay`** — see ADR-045 §4's "collect-facts composition"
+for `producer: replay`** — see ADR-047 §4's "collect-facts composition"
 note, flagged by review: `check-target` runs after target
 resolution/build-output exists, so it structurally cannot run
 `collect-facts phase: prepare`, which must happen before the project's own
@@ -318,7 +318,7 @@ for every check, with no conditional branch.
 
 **Depth-qualified `check_id`, corrected across two further review rounds —
 this task must track the final §7 identity, not either intermediate form
-above.** ADR-045 §7 first added `requested_depth` to `check_id` only
+above.** ADR-047 §7 first added `requested_depth` to `check_id` only
 *conditionally* (when a run-plan generator detected a collision across its
 own `checks[]`), then corrected that to **unconditional**: every
 `check_id`/`target_id` always includes `@requested_depth`
@@ -338,7 +338,7 @@ with no shared state between the calls.
 
 **Second required sub-task, flagged by review:** `check-target`'s report
 must populate `aggregate`'s *existing* verdict/gate fields, not only the new
-ADR-045 §7 ones. `abicheck/aggregate.py`'s `parse_report_verdict` reads
+ADR-047 §7 ones. `abicheck/aggregate.py`'s `parse_report_verdict` reads
 top-level `verdict` (a `Verdict` enum string); its gate parsing
 (`GateInfo.from_report_data`/`from_scan_report`) reads a `severity` block or
 a scan report's own `exit_code`/`scan_schema_version` — none of these read
@@ -393,7 +393,7 @@ collide/error.
 
 ### P1.4 — `check-single.yml` / `check-project.yml` reusable workflows
 
-Implements ADR-045 §4/§5 (`run-plan.json` generation + matrix + trailing
+Implements ADR-047 §4/§5 (`run-plan.json` generation + matrix + trailing
 `aggregate` job for `check-project.yml`). **Includes a required sub-task
 flagged by review**: `run-plan.json`'s `checks[]` schema is not
 wire-compatible with `abicheck aggregate --manifest`'s existing
@@ -410,7 +410,7 @@ which during implementation; do not skip this and assume `run-plan.json` can
 be passed straight through, and do not project down to bare target names.
 
 **Second required sub-task, flagged by review:** in `gate-mode: deferred`
-(ADR-045 §7), an individual matrix cell is *expected* to fail its own job on
+(ADR-047 §7), an individual matrix cell is *expected* to fail its own job on
 an operational error — that visibility is the point. Plain GitHub Actions
 `needs:` semantics skip a dependent job when any dependency fails, and a
 skipped job reports `success` — so the trailing `aggregate` job in
@@ -418,7 +418,7 @@ skipped job reports `success` — so the trailing `aggregate` job in
 `!cancelled()`), never a bare `needs:` with no `if:`. Without this, one
 matrix cell's operational failure silently skips the aggregate job and the
 branch-protection-required status goes green with a missing target —
-exactly the failure mode ADR-045 is meant to close. Cover this with a
+exactly the failure mode ADR-047 is meant to close. Cover this with a
 fixture-workflow test that deliberately fails one matrix cell and asserts
 the aggregate job still runs and reports the failure.
 
@@ -449,7 +449,7 @@ config schema to generate the matrix from. P1.5 must land first.
 
 ### P1.5 — `.abicheck.yml` `targets:`/`profiles:`/`baseline:` block
 
-Implements ADR-045 §3. Config schema extension + `abicheck/policy_file.py`
+Implements ADR-047 §3. Config schema extension + `abicheck/policy_file.py`
 (or wherever `.abicheck.yml` is parsed) support; `docs/reference/config-file.md`
 update. **Real design gap this item must close, flagged by review:** §3's
 excerpt declares which baseline channels *exist* but not which
@@ -459,7 +459,7 @@ schema shown so far provides it. This item must design and add a `checks:`
 list (per target, or per `bundle`) naming explicit
 `{channel, depth, required, gate_mode}` tuples — supporting S21/S26's
 same-target-multiple-channels-or-depths case — not just the
-`targets:`/`profiles:`/`baseline: channels:` blocks ADR-045 §3 already
+`targets:`/`profiles:`/`baseline: channels:` blocks ADR-047 §3 already
 shows. Do not treat those existing excerpts as a complete config schema;
 this new `checks:` shape is the missing piece P1.4 actually consumes.
 
@@ -470,11 +470,11 @@ numbering.
 
 ### P1.6 — `publish-baseline.yml` / `update-main-baseline.yml`
 
-Implements ADR-045 §6/§10. `publish-baseline.yml`: release-triggered,
+Implements ADR-047 §6/§10. `publish-baseline.yml`: release-triggered,
 `actions/baseline` → atomic archive → release-asset upload.
 `update-main-baseline.yml`: default-branch-push-triggered, targets the
 `accepted-main` channel's storage backend (Actions cache by default per
-ADR-045 §10). Both use `actions/baseline`'s existing publish contract
+ADR-047 §10). Both use `actions/baseline`'s existing publish contract
 unchanged (it already documents itself as read-only/non-publishing —
 `actions/baseline/action.yml:6-8` — so these workflows own the publish
 step) **but `actions/baseline` itself is not unchanged — correction, flagged
@@ -492,7 +492,7 @@ source binary into `binaries/` and record its path/digest in
 `baseline-set.json`) alongside the two new workflows — not treated as an
 unrelated, already-solved dependency.
 
-**Open design gap, not resolved by ADR-045, flagged by review:** `binaries/`
+**Open design gap, not resolved by ADR-047, flagged by review:** `binaries/`
 alone serves bundle-graph findings (soname skew, provider-set changes) but
 not necessarily a header/source-depth per-library diff within the bundle —
 `compare-release`'s per-library flow needs old-side headers/compile-context
@@ -521,13 +521,13 @@ baselines.
 
 ### P1.7 — Scenario-first documentation IA
 
-Implements ADR-045 §8's scenario catalog and the task's requested
+Implements ADR-047 §8's scenario catalog and the task's requested
 `docs/integration/` tree. **File tree and migration map:**
 
 ```
 docs/integration/
   index.md                                  # NEW — the "answer these questions" landing page
-  concepts.md                               # NEW — glossary (ADR-045 §1's table, prose form)
+  concepts.md                               # NEW — glossary (ADR-047 §1's table, prose form)
   scenarios/
     single-library.md                       # NEW — absorbs github-action.md quick-start (S1)
     existing-build-artifact.md              # NEW — S3, the preferred large-repo flow
@@ -545,11 +545,11 @@ docs/integration/
     monorepo.md                             # NEW (S25)
     migration-and-rollout.md                # NEW — absorbs ci-gating.md's rollout guidance (S26, S27)
   baselines/
-    lifecycle.md                            # NEW — ADR-045 §6, prose form
+    lifecycle.md                            # NEW — ADR-047 §6, prose form
     release-contract.md                     # NEW (S19)
     accepted-main.md                        # NEW (S20)
     baseline-sets.md                        # NEW — schema reference
-    storage.md                              # NEW — ADR-045 §10 table, prose form
+    storage.md                              # NEW — ADR-047 §10 table, prose form
   reference/
     actions.md                              # NEW — replaces scattered per-Action doc sections
     reusable-workflows.md                   # NEW
@@ -588,14 +588,14 @@ baselines/ + reference/), each verified independently against
 
 ## P2 — Deeper architecture (not started here)
 
-- **Full TU→link-unit→DSO source-evidence attribution** (ADR-045 §9/D8) —
+- **Full TU→link-unit→DSO source-evidence attribution** (ADR-047 §9/D8) —
   needs linker-invocation capture, extending
   `abicheck/buildsource/build_query.py`'s existing partial zero-config
   compile-DB inference. Its own follow-up ADR when undertaken.
 - **Monorepo changed-component planning** at scale (S25's `run-plan.json`
   filtering beyond a simple path-prefix diff).
 - **Richer cross-platform baseline storage** (external object store backend,
-  ADR-045 §10's fourth row) — no P0/P1 user story currently justifies it.
+  ADR-047 §10's fourth row) — no P0/P1 user story currently justifies it.
 - **Provider plugins for build systems** beyond the CMake/Bazel/Make
   adapters `abicheck/buildsource/adapters/` already has.
 - **Generalized external artifact stores** for baseline sets beyond GitHub
@@ -619,7 +619,7 @@ existing report recommends, and confirm:
   `bundles:` entry, each keeping its own `public_headers:` scope
   (`--scope-public-headers` — finding F3 in the existing report).
 - `resolve-baseline` produces per-target reports distinguishable in the PR
-  UI (two `check_id`s, ADR-045 §8 S21 row).
+  UI (two `check_id`s, ADR-047 §8 S21 row).
 - Fast-PR default does not force full source-depth scan (F1's O(N²)
   perf-bug fix should keep this affordable, but the *policy default*
   — changed-scope, not full-unseeded — is a separate acceptance check).
@@ -627,7 +627,7 @@ existing report recommends, and confirm:
   recommendation) can run in parallel as a `gate-mode: advisory` burn-in
   lane without modification.
 
-### Second complex pilot — open gap (ADR-045 D9)
+### Second complex pilot — open gap (ADR-047 D9)
 
 **Correction from an earlier draft, per review:** oneDAL PR #3693 is *not*
 an unlocatable pilot — a repo-wide search for "Vandal" does return zero
@@ -639,7 +639,7 @@ a genuine tool-correctness defect and drove that ADR's entire redesign;
 review is real and valuable — but it is a **package/binary-level compare
 evaluation** (conda-forge release artifacts, no source checkout, no build
 reuse, no CI workflow), not a **GitHub-Actions CI-integration pilot** in
-PVXS's sense (ADR-045 §"What the audit found," finding 5). **The remaining
+PVXS's sense (ADR-047 §"What the audit found," finding 5). **The remaining
 backlog item is narrower than "find a second pilot from scratch":**
 
 - Identify and get access to a second real C/C++ project — possibly oneDAL
@@ -652,7 +652,7 @@ backlog item is narrower than "find a second pilot from scratch":**
   `validation/pvxs-abi-validation-2026-07.md` — defects found/fixed,
   documented-not-fixed issues, a recommended workflow — before claiming any
   S9/S15/S17/S21/S26 acceptance criteria are met for a vendor-toolchain
-  project. Until that report exists, treat those scenario rows in ADR-045
+  project. Until that report exists, treat those scenario rows in ADR-047
   §8 as **design-validated against PVXS's simpler case only**, not proven
   for the vendor-toolchain/multi-baseline-channel class — oneDAL's existing
   field review does not substitute for it, however useful its own findings
@@ -664,7 +664,7 @@ Each should record: initial integration LOC/YAML complexity, custom shell
 line count, build duplication (did abicheck rebuild anything the project's
 CI already builds), wall time, evidence depth achieved, report quality,
 failure behavior on a deliberately broken case, and remaining manual steps
-— the same "ease of enablement" measurements ADR-045/the task both call for,
+— the same "ease of enablement" measurements ADR-047/the task both call for,
 not just correctness:
 
 - Simple CMake single-library repository (S1/S6 acceptance).
@@ -675,7 +675,7 @@ not just correctness:
   needs a fixture or a real small Bazel C++ project.
 - Package-only RPM/Deb/tar comparison (S13 acceptance).
 - Linux/macOS/Windows matrix (S17 acceptance) — the existing CI matrix
-  (ADR-045-unrelated, `.github/workflows/ci.yml`) already exercises
+  (ADR-047-unrelated, `.github/workflows/ci.yml`) already exercises
   cross-platform *parsing*; this pilot is specifically about the
   *integration workflow* (`check-project.yml` multi-profile matrix), a
   distinct claim.
