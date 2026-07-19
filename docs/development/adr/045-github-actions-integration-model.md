@@ -549,7 +549,18 @@ described matrix generates that check. **Fix: `run-plan.json`'s generator
 whose `bundle_only: true` — see §3's `targets:` schema, added per a
 follow-up review round precisely so the generator has an explicit signal
 instead of having to infer or guess "bundle-only" from `bundle:` membership
-alone) crossed with `profiles[]` for S15-class checks, and `bundles[]`
+alone) crossed with `profiles[]` filtered to `contract: true` entries
+only — a missing constraint an earlier draft left implicit, flagged in a
+further review round: §3's `profiles:` example shows a `contract: false`
+test-only lane (`ubuntu-latest-clang-debug-sanitizer`) specifically because
+"not every CI lane gets a baseline" is the whole point of that field
+(§8's S17 row); a generator that crossed *every* `profiles[]` entry
+regardless of `contract` would generate baseline-resolving checks for that
+lane too, which then either hard-fails as `not_found` (§6, since no
+baseline was ever published for a non-contract lane) or produces a bogus
+report for a profile that was never meant to be checked. `contract: false`
+profiles are excluded from `run-plan.json` generation entirely — for
+S15-class checks and S14-class bundle checks alike — and `bundles[]`
 crossed with `profiles[]` for one S14-class bundle-scoped check per bundle
 per profile.** `bundle_only` defaults to `false` (run both the standalone
 S15 check and the bundle-scoped S14 check for that member — matching the
@@ -852,9 +863,24 @@ string match **before** falling through to `parse_report_verdict()`'s
 `Verdict(raw)` parsing — `"ERROR"` is not a `Verdict` enum member at all
 (the enum has five members: `NO_CHANGE`, `COMPATIBLE`,
 `COMPATIBLE_WITH_RISK`, `API_BREAK`, `BREAKING`), it's a separate sentinel
-this exact string triggers dedicated operational-failure handling for
-(floors `GateInfo.exit_code` to 4, marks `blocking_categories:
-("operational_error",)`). If `check-target` (P1.3) coerced every legacy
+this exact string triggers dedicated operational-failure handling for —
+`_load_report_file` returns early on this branch and **synthesizes** its
+own `GateInfo(exit_code=4, blocking=True, blocking_categories=("operational_error",))`
+in Python, without ever reading the report's own `severity` JSON block for
+this path. **Ambiguity worth closing explicitly, flagged in a follow-up
+review round:** an earlier phrasing of this paragraph could be misread as
+instructing `check-target` to *write* `blocking_categories: ["operational_error"]`
+into its own report JSON — it must not. `"operational_error"` is not in
+`compare_report.schema.json`'s `severity.blocking_categories` enum
+(`abi_breaking`, `potential_breaking`, `quality_issues`, `addition` only),
+so a report that included it would fail schema validation even though
+`aggregate` never reads that field for the `ERROR` path anyway.
+`check-target`'s operational-failure report needs `verdict: "ERROR"` and a
+non-empty `operational_errors` (§7) — it either omits `severity` entirely
+for this case, or includes one using only the schema's real enum values;
+`"operational_error"` as a category is `aggregate`'s own internal synthesis,
+never a value read from or written to report JSON. If `check-target` (P1.3)
+coerced every legacy
 `verdict` value into one of the five `Verdict` members as the preceding
 paragraph's "must use the real `Verdict` enum's exact casing" rule reads in
 isolation, a genuine resolver/config/operational failure would either be
