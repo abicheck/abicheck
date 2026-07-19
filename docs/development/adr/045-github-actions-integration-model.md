@@ -50,10 +50,17 @@ and the doc corpus in `docs/user-guide/`:
    resolved unconditionally at `run.sh:150-233` but only consumed by
    `compare`/`scan`; setting it on `mode: dump` silently no-ops with no
    warning. `estimate`/`audit` are scan-only aliases declared generically.
-   None of this is a bug — `run.sh` comments document the intent — but a
-   flat 51-input schema presents all of them as always-live, which is the
-   documentation/UX problem this ADR addresses structurally rather than by
-   patching individual inputs.
+   None of this is a bug — `run.sh` comments document the intent, and
+   `action.yml`'s `description:` text for every one of these inputs already
+   states its scope inline (e.g. `debug-info1`: "compare mode,
+   directory/package operands only"; `abi-baseline`: "for compare mode ...
+   or scan mode"; `estimate`/`audit`: "scan mode only" — confirmed by
+   re-reading `action.yml`). The remaining gap is narrower than a first
+   read suggests: there is no *runtime* signal when one of these is set on
+   an incompatible mode — a reader who doesn't check the description text
+   gets silent no-op behavior instead of a warning. §"P0" in the companion
+   plan scopes this correctly as a runtime-validation item, not a
+   documentation rewrite.
 
 3. **`collect-facts`'s `phase: auto` doesn't complete for two of three
    producers.** For `producer: wrapper` or `producer: clang-plugin`,

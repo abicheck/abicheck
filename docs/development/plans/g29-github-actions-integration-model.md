@@ -35,25 +35,32 @@ doc PRs need `mkdocs build --strict` + `check_ai_readiness.py`).
 These fix real defects the audit (ADR-045 §"What the audit found")
 identified in the *existing* surface. None require the new primitives.
 
-### P0.1 — Input-scoping documentation and validation for `action.yml`
+### P0.1 — Runtime warning when a mode-scoped input is set on an incompatible mode
 
 **Problem:** `debug-info1/2`, `devel-pkg1/2`, `dso-only`,
-`include-private-dso`, `keep-extracted`, `fail-on-removed-library`, `jobs`
-are declared unconditionally but only forwarded by `run.sh` inside
-`_is_release_style_operand()` (`action/run.sh:387-407`); `abi-baseline` is
-resolved but silently inert on `mode: dump`/`deps-tree`/`deps-compare`
-(`run.sh:150-233`); `estimate`/`audit` are undeclared as scan-only.
+`include-private-dso`, `keep-extracted`, `fail-on-removed-library`, `jobs`,
+`abi-baseline`, `estimate`, and `audit` are all declared as
+unconditional top-level inputs but each is only forwarded/consumed in a
+subset of modes (`action/run.sh:387-407`'s `_is_release_style_operand()`
+guard for the first seven; `run.sh:150-233` for `abi-baseline`;
+`estimate`/`audit` are scan-mode-only). **Correction from an earlier draft
+of this item:** `action.yml`'s `description:` text for all of these already
+states the scope inline (e.g. `debug-info1`: "compare mode, directory/package
+operands only"; `abi-baseline`: "for compare mode ... or scan mode";
+`estimate`/`audit`: "scan mode only") — confirmed by re-reading `action.yml`
+lines 49-76, 252-266, 284-289. So the documentation half of this item is
+**already done**; the remaining gap is purely a *runtime* one: setting one of
+these inputs on an incompatible `mode` produces no feedback at all today
+(silent no-op), which a reader of the description text would only catch by
+reading carefully, not by CI telling them.
 
 **Change:** Add a `validate-inputs.sh` check that **warns** (job summary
 annotation, not a hard failure — these are legal-but-inert combinations, not
-errors) when a mode-scoped input is set on an incompatible `mode`. Update
-`action.yml` input `description:` text for each of the 9 flagged inputs to
-state its actual scope inline (today the description text doesn't say
-"release/package mode only" or "compare/scan mode only").
+errors) when a mode-scoped input is set on an incompatible `mode`.
 
-**Files:** `action/validate-inputs.sh`, `action.yml` (description text
-only), `tests/` — action shell-mapping tests already exist per the audit;
-extend with cases asserting the new warning fires/doesn't fire.
+**Files:** `action/validate-inputs.sh`, `tests/` — action shell-mapping
+tests already exist per the audit; extend with cases asserting the new
+warning fires/doesn't fire.
 
 **Tests:** New `test_action_input_scope_warnings` case(s) in the existing
 Action shell-mapping test suite (mirroring however `debug-info1` forwarding
