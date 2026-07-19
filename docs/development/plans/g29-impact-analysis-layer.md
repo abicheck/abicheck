@@ -150,7 +150,13 @@ field alongside `public_reachable`/`reachability_kind`/`reachability_proof_path`
 each producer still sets it independently, and the proof path is still one
 formatted string.
 
-### Phase 2 — Graph core v2
+### Phase 2 — Graph core v2 — **ADR drafted, implementation not started**
+
+[ADR-046](../adr/046-source-graph-identity-v2-and-evidence-merge.md) records
+the D1-D6 decisions below (Proposed, pending sign-off) — the "needs its own
+ADR" gate this phase set for itself. Implementation (schema changes to
+`source_graph.py` and the audit of every module that reads `GraphNode.attrs`/
+`GraphEdge.attrs` directly) has not started.
 
 - `abicheck/buildsource/source_graph.py`: split edge identity into a
   `relation_key = (src, dst, kind, semantic_role)` (used for closure/diff) and
@@ -188,8 +194,9 @@ formatted string.
   replacing plain shortest-BFS; keep `primary_path`/`alternative_paths[0..N]`/
   `discarded_path_count` on the finding.
 
-**Needs its own ADR** before implementation (identity/version bump + merge
-semantics change is exactly ADR-044's own bar for "needs a recorded decision").
+**ADR-046 drafted** (identity/version bump + merge semantics change is
+exactly ADR-044's own bar for "needs a recorded decision"). Implementation
+proceeds once the ADR is reviewed/accepted.
 
 ### Phase 3 — Reporting & root causes
 
