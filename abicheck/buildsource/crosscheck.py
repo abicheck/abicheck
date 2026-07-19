@@ -119,6 +119,8 @@ CHECK_PUBLIC_TO_INTERNAL_DEPENDENCY = "public_to_internal_dependency"
 CHECK_UNVERSIONED_EXPORTED_SYMBOL = "unversioned_exported_symbol"
 CHECK_RTTI_FOR_INTERNAL_TYPE = "rtti_for_internal_type"
 CHECK_IDENTITY_COLLISION = "identity_collision_detected"
+CHECK_COMPILE_CONTEXT_CONFLICT = "compile_context_conflict"
+CHECK_SOURCE_SURFACE_DSO_MISMATCH = "source_surface_dso_mismatch"
 
 #: Every check the engine knows, in cheapest-first order (ADR-035 D4 table).
 ALL_CHECKS: tuple[str, ...] = (
@@ -131,15 +133,33 @@ ALL_CHECKS: tuple[str, ...] = (
     CHECK_UNVERSIONED_EXPORTED_SYMBOL,
     CHECK_RTTI_FOR_INTERNAL_TYPE,
     CHECK_IDENTITY_COLLISION,
+    CHECK_COMPILE_CONTEXT_CONFLICT,
+    CHECK_SOURCE_SURFACE_DSO_MISMATCH,
 )
 
-#: The §6.8 provider-agreement vocabulary (ADR-035 D4) — which evidence source
-#: corroborates a finding, driving its confidence tag.
-PROVIDER_BINARY_EXPORTS = "binary_exports"
-PROVIDER_PUBLIC_HEADER_AST = "public_header_ast"
-PROVIDER_DEBUG_INFO = "debug_info"
-PROVIDER_BUILD_CONFIG = "build_config"
-PROVIDER_SOURCE_INDEX = "source_index"
+# The finding/coverage primitives and the §6.8 provider-agreement vocabulary
+# (ADR-035 D4) live in the leaf ``crosscheck_base`` so a split-out check module
+# (``crosscheck_coherence``) can share them without forming an import cycle back
+# to this engine. Re-exported so existing ``from .crosscheck import _change``
+# call sites and the tests keep resolving these names here.
+from .crosscheck_base import (  # noqa: E402
+    PROVIDER_BINARY_EXPORTS,
+    PROVIDER_BUILD_CONFIG,
+    PROVIDER_PUBLIC_HEADER_AST,
+    PROVIDER_SOURCE_INDEX,
+    _change,
+    _CheckOutput,
+    _exported_symbol_names,
+)
+
+# The two evidence-coherence checks (AC-008/AC-009) live in their own module to
+# keep this file under the 2000-line cap. That module depends only on the leaf
+# ``crosscheck_base`` (never on this engine), so this is a one-directional edge
+# — no import cycle (CLAUDE.md "M1-3").
+from .crosscheck_coherence import (  # noqa: E402
+    _check_compile_context_conflict,
+    _check_source_surface_dso_mismatch,
+)
 
 
 @dataclass(frozen=True)
@@ -158,21 +178,6 @@ class CrosscheckConfig:
     enabled: frozenset[str] = frozenset(ALL_CHECKS)
     max_per_check: int = 200
     changed_paths: frozenset[str] = frozenset()
-
-
-@dataclass(frozen=True)
-class _CheckOutput:
-    """One check's result: findings, its coverage row, and the providers used."""
-
-    findings: list[Change]
-    status: str  # "present" | "skipped"
-    detail: str
-    providers: list[str]
-    #: Optional ADR-035 D4 source-surface boundary integrity numbers (e.g.
-    #: exported/matched/unmatched symbols) carried onto the coverage row so a
-    #: degraded link is named, never folded in as clean. ``facts`` anchors the row.
-    facts: int = 0
-    counters: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -228,6 +233,8 @@ def run_crosschecks(
         CHECK_UNVERSIONED_EXPORTED_SYMBOL: _check_unversioned_exported_symbol,
         CHECK_RTTI_FOR_INTERNAL_TYPE: _check_rtti_for_internal_type,
         CHECK_IDENTITY_COLLISION: _check_identity_collision,
+        CHECK_COMPILE_CONTEXT_CONFLICT: _check_compile_context_conflict,
+        CHECK_SOURCE_SURFACE_DSO_MISMATCH: _check_source_surface_dso_mismatch,
     }
     for name in ALL_CHECKS:
         if name not in cfg.enabled:
@@ -1404,34 +1411,6 @@ def _candidate_symbols(decl: Function | Variable) -> tuple[str, ...]:
     return tuple({s for s in (decl.mangled, decl.name) if s})
 
 
-def _exported_symbol_names(snapshot: AbiSnapshot) -> set[str] | None:
-    """The binary's exported symbol names, or ``None`` if no export table exists.
-
-    Only **default/unversioned** ELF exports count toward the obligation set: a
-    symbol that exists *only* as a non-default version alias (``foo@LIB_1``,
-    ``is_default == False``) does not satisfy an unversioned consumer link
-    (which needs ``foo@@…``), so including it would mask the exact
-    missing-export case this set feeds (Codex review).
-
-    Mach-O names are normalized the same way the dumper normalizes
-    ``Function.mangled`` (strip the platform's single leading underscore:
-    ``_foo`` → ``foo``, ``__Z...`` → ``_Z...``) so the comparison set matches the
-    header-side mangled spelling instead of flagging every C/C++ symbol as
-    missing (Codex review).
-    """
-    if snapshot.elf is not None:
-        return {s.name for s in snapshot.elf.symbols if s.name and s.is_default}
-    if snapshot.pe is not None:
-        return {e.name for e in snapshot.pe.exports if e.name}
-    if snapshot.macho is not None:
-        return {
-            e.name[1:] if e.name.startswith("_") else e.name
-            for e in snapshot.macho.exports
-            if e.name
-        }
-    return None
-
-
 def _l4_reconciled_symbols(snapshot: AbiSnapshot, exported: set[str]) -> set[str]:
     """Decl mangled names the L4 source-linker tied to a *currently-exported* symbol.
 
@@ -1740,32 +1719,6 @@ def _private_type_names(snapshot: AbiSnapshot) -> dict[str, str]:
         if origin in _PRIVATE_TYPE_ORIGINS and name:
             _register(name)
     return names
-
-
-def _change(
-    kind: ChangeKind,
-    symbol: str,
-    description: str,
-    *,
-    old_value: str | None = None,
-    new_value: str | None = None,
-    source_location: str | None = None,
-    confidence: Confidence = Confidence.MEDIUM,
-    caused_by_type: str | None = None,
-    evidence_category: str = "source_only",
-) -> Change:
-    """Build a cross-check :class:`Change` with the shared metadata defaults."""
-    return Change(
-        kind=kind,
-        symbol=symbol,
-        description=description,
-        old_value=old_value,
-        new_value=new_value,
-        source_location=source_location,
-        confidence=confidence,
-        caused_by_type=caused_by_type,
-        evidence_category=evidence_category,
-    )
 
 
 def _coverage_row(

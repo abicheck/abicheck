@@ -3,7 +3,7 @@
 This document explains how each ABI checking tool works, what it measured on the
 `examples/` catalog, and why the numbers come out the way they do.
 
-> **Note:** abicheck detects 388 change kinds (see [Change Kind Reference](change-kinds.md)).
+> **Note:** abicheck detects 390 change kinds (see [Change Kind Reference](change-kinds.md)).
 > The `examples/` catalog currently has **193 cases** (`examples/ground_truth.json`
 > is the source of truth — see `examples/README.md`). Two benchmarks run against it:
 >

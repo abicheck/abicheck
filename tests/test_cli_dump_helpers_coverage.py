@@ -28,6 +28,8 @@ from abicheck.cli_dump_helpers import (
     check_dump_debug_format_error,
     handle_non_elf_dump,
     perform_elf_dump,
+    resolve_compile_db_l3_reuse,
+    resolve_dump_collect_context,
     resolve_dump_compile_context,
     resolve_dump_compile_db,
     resolve_dump_debug_format,
@@ -128,6 +130,109 @@ def test_check_debug_format_error_only_for_pe_macho() -> None:
     assert check_dump_debug_format_error("dwarf", "elf") is None
     assert check_dump_debug_format_error(None, "pe") is None
     assert check_dump_debug_format_error(None, None) is None
+
+
+# ── AC-007: compile DB reused as the L3 build source ────────────────────────
+
+
+def test_compile_db_reused_as_l3_for_explicit_deep_depth(tmp_path: Path) -> None:
+    """AC-007: an explicit --depth build/source with a -p/--compile-db but no
+    --build-info reuses that DB as the L3 build source, with an echoed note."""
+    db = tmp_path / "compile_commands.json"
+    for depth in ("build", "source"):
+        bi, note = resolve_compile_db_l3_reuse(depth, None, db)
+        assert bi == db
+        assert note is not None and "L3 build source" in note
+
+
+def test_compile_db_not_reused_when_not_applicable(tmp_path: Path) -> None:
+    """No reuse (and no note) without an explicit deep depth, with an explicit
+    --build-info already set, or with no compile DB — a plain L2 dump is
+    unaffected."""
+    db = tmp_path / "compile_commands.json"
+    explicit_bi = tmp_path / "build"
+    for args in (
+        (None, None, db),          # default depth
+        ("headers", None, db),     # shallow depth
+        ("source", explicit_bi, db),  # explicit --build-info wins
+        ("build", None, None),     # no compile DB
+    ):
+        bi, note = resolve_compile_db_l3_reuse(*args)
+        assert bi is args[1]
+        assert note is None
+
+
+def test_has_other_l3_source(tmp_path: Path) -> None:
+    """AC-007 (Codex): the -p→L3 reuse must be suppressed whenever any other L3
+    source could resolve — the CLI --build-query/--build-compile-db flags, an
+    explicit --config, or a --sources tree (which carries its own config /
+    compile_db / auto-discovery resolution). Only a bare -p with none of those is
+    the sole L3 source and safe to reuse."""
+    from abicheck.cli_dump_helpers import has_other_l3_source
+
+    assert has_other_l3_source(None, None, None, None) is False
+    assert has_other_l3_source("some-query", None, None, None) is True
+    assert has_other_l3_source(None, "build/compile_commands.json", None, None) is True
+    assert has_other_l3_source(None, None, tmp_path / "cfg.yml", None) is True
+    assert has_other_l3_source(None, None, None, tmp_path / "src") is True
+
+
+def test_compile_db_not_reused_when_explicit_l3_selector(tmp_path: Path) -> None:
+    """AC-007 (Codex): --build-query/--build-compile-db are dedicated L3 selectors;
+    reusing the -p header DB as build_info would override them (build_info takes
+    precedence in _resolve_compile_db). The -p DB is only reused when all
+    dedicated build-source inputs are absent."""
+    db = tmp_path / "compile_commands.json"
+    assert resolve_compile_db_l3_reuse(
+        "build", None, db, matched=True, explicit_l3_selector=True
+    ) == (None, None)
+    # With no explicit L3 selector it is still reused.
+    assert resolve_compile_db_l3_reuse(
+        "build", None, db, matched=True, explicit_l3_selector=False
+    )[0] == db
+
+
+def test_compile_db_not_reused_when_unmatched(tmp_path: Path) -> None:
+    """AC-007 (Codex): an unrelated/filtered compile DB that did not match the
+    requested headers (`matched=False`) must NOT be embedded as L3 — that would
+    let the strict --depth gate accept a header snapshot parsed without that
+    build context. A matched DB is still reused."""
+    db = tmp_path / "compile_commands.json"
+    assert resolve_compile_db_l3_reuse("build", None, db, matched=False) == (None, None)
+    assert resolve_compile_db_l3_reuse("source", None, db, matched=False) == (None, None)
+    assert resolve_compile_db_l3_reuse("build", None, db, matched=True)[0] == db
+
+
+def test_compile_db_not_reused_when_filter_active(tmp_path: Path) -> None:
+    """AC-007 (Codex): --compile-db-filter scopes the L2 header parse only, so the
+    raw DB must NOT be reused as L3 (it would load every entry, ignoring the
+    filter). The note points the user at a pre-filtered --build-info."""
+    db = tmp_path / "compile_commands.json"
+    bi, note = resolve_compile_db_l3_reuse(
+        "source", None, db, matched=True, compile_db_filter="src/lib/**"
+    )
+    assert bi is None  # not reused
+    assert note is not None and "--compile-db-filter" in note
+    # Without a filter it is still reused.
+    bi2, _ = resolve_compile_db_l3_reuse(
+        "source", None, db, matched=True, compile_db_filter=None
+    )
+    assert bi2 == db
+
+
+def test_collect_context_no_warn_when_compile_db_serves_l3(
+    tmp_path: Path, capsys
+) -> None:
+    """AC-007: the 'no build/source input' warning is suppressed when a compile
+    DB (which will serve as L3) is present, but still fires without one."""
+    hdr = tmp_path / "h.h"
+    db = tmp_path / "compile_commands.json"
+
+    resolve_dump_collect_context("build", None, None, None, (hdr,), db, None)
+    assert "only L0-L2 data" not in capsys.readouterr().err
+
+    resolve_dump_collect_context("build", None, None, None, (hdr,), None, None)
+    assert "only L0-L2 data" in capsys.readouterr().err
 
 
 # ── handle_non_elf_dump error handling ──────────────────────────────────────

@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (388 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (390 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -42,6 +42,7 @@ One row per `ChangeKind` (388 total). Columns fuse the verdict partition (`check
 | `char_signedness_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `char_signedness_changed` | [case155](../examples/case155_char_signedness_flip.md) |
 | `common_symbol_risk` | quality | `COMPATIBLE` | `warning` | unspecified | `common_symbol_risk` | — |
 | `compat_version_changed` | breaking | `BREAKING` | `error` | unspecified | `compat_version_changed` | — |
+| `compile_context_conflict` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `compile_context_conflict` | — |
 | `concept_tightened` | api_break | `API_BREAK` | `warning` | L4 | `concept_tightened` | [case105](../examples/case105_concept_tightening.md) |
 | `constant_added` | addition | `COMPATIBLE` | `warning` | unspecified | `constant_added` | — |
 | `constant_changed` | api_break | `API_BREAK` | `warning` | L2 | `constant_changed` | [case124](../examples/case124_header_constant_value_changed.md) |
@@ -269,6 +270,7 @@ One row per `ChangeKind` (388 total). Columns fuse the verdict partition (`check
 | `source_decl_binary_symbol_mismatch` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `source_decl_binary_symbol_mismatch` | — |
 | `source_fact_coverage_incomplete` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L4 | `source_fact_coverage_incomplete` | — |
 | `source_level_kind_changed` | api_break | `API_BREAK` | `warning` | unspecified | `source_level_kind_changed` | — |
+| `source_surface_dso_mismatch` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L4 | `source_surface_dso_mismatch` | — |
 | `source_to_binary_mapping_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `source_to_binary_mapping_changed` | — |
 | `stack_canary_removed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `stack_canary_removed` | [case135](../examples/case135_stack_canary_removed.md) |
 | `standard_layout_lost` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `standard_layout_lost` | — |

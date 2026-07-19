@@ -2351,6 +2351,332 @@ def test_combined_pack_content_hash_stable_across_source_abi_coverage_timing(
     assert a.content_hash() == b.content_hash()
 
 
+def test_combined_coverage_honors_supplier_present_row():
+    """AC-002: the combined pack takes each layer's row from the pack that
+    actually supplied the payload, so real L3 facts keep their ``present`` row
+    (the '63 compile units but L3_build: not_collected' symptom is gone)."""
+    from pathlib import Path
+
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.model import (
+        BuildSourceManifest,
+        CoverageStatus,
+        DataLayer,
+        LayerCoverage,
+    )
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.cli_buildsource import _combine_packs
+
+    ev = BuildEvidence()
+    ev.compile_units.append(CompileUnit(id="cu://x", source="x.cpp"))
+    manifest = BuildSourceManifest(
+        coverage=[
+            LayerCoverage(
+                layer=DataLayer.L3_BUILD.value, status=CoverageStatus.PRESENT
+            )
+        ]
+    )
+    bi = BuildSourcePack(root=Path(""), manifest=manifest, build_evidence=ev)
+
+    combined = _combine_packs(bi, None, None)
+    assert combined is not None
+    assert combined.build_evidence is not None and combined.build_evidence.compile_units
+    row = combined.manifest.coverage_for("L3_build")
+    assert row is not None and row.status == CoverageStatus.PRESENT
+
+
+def test_combined_coverage_preserves_empty_placeholder_not_collected():
+    """Codex P2: a non-``None`` but *empty* payload (e.g. an explicit empty
+    ``compile_commands.json`` yields an empty ``BuildEvidence``) whose supplier
+    honestly recorded ``not_collected`` must keep that row — the combined pack
+    must not advertise build context with no compile units behind it."""
+    from pathlib import Path
+
+    from abicheck.buildsource.build_evidence import BuildEvidence
+    from abicheck.buildsource.model import (
+        BuildSourceManifest,
+        CoverageStatus,
+        DataLayer,
+        LayerCoverage,
+    )
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.cli_buildsource import _combine_packs
+
+    # Mirrors ingest_inputs_pack for an empty compile DB: a non-None but empty
+    # BuildEvidence paired with an honest not_collected L3 row.
+    empty = BuildEvidence()
+    bi = BuildSourcePack(
+        root=Path(""),
+        manifest=BuildSourceManifest(
+            coverage=[
+                LayerCoverage(
+                    layer=DataLayer.L3_BUILD.value,
+                    status=CoverageStatus.NOT_COLLECTED,
+                )
+            ]
+        ),
+        build_evidence=empty,
+    )
+
+    combined = _combine_packs(bi, None, None)
+    assert combined is not None
+    row = combined.manifest.coverage_for("L3_build")
+    assert row is not None and row.status == CoverageStatus.NOT_COLLECTED
+
+
+def test_coverage_row_for_present_layer_branches():
+    """Direct coverage of the supplier-row lookup: honor a supplier's own row,
+    else synthesize present; a missing supplier also synthesizes present."""
+    from pathlib import Path
+
+    from abicheck.buildsource.merge_support import _coverage_row_for_present_layer
+    from abicheck.buildsource.model import (
+        BuildSourceManifest,
+        CoverageStatus,
+        DataLayer,
+        LayerCoverage,
+    )
+    from abicheck.buildsource.pack import BuildSourcePack
+
+    layer = DataLayer.L5_SOURCE_GRAPH.value
+    # No supplier at all → synthetic present.
+    assert _coverage_row_for_present_layer(layer, None).status == CoverageStatus.PRESENT
+    # Supplier with no row for this layer → synthetic present.
+    empty = BuildSourcePack(root=Path(""), manifest=BuildSourceManifest())
+    assert (
+        _coverage_row_for_present_layer(layer, empty).status == CoverageStatus.PRESENT
+    )
+    # Supplier with its own row → that row, verbatim (here a partial qualifier).
+    partial = BuildSourcePack(
+        root=Path(""),
+        manifest=BuildSourceManifest(
+            coverage=[LayerCoverage(layer=layer, status=CoverageStatus.PARTIAL)]
+        ),
+    )
+    assert (
+        _coverage_row_for_present_layer(layer, partial).status
+        == CoverageStatus.PARTIAL
+    )
+
+
+def test_raw_sources_inline_wins_l4_l5_over_build_info_pack():
+    """AC-001: an explicit raw ``--sources`` cold scan (the inline pack) must
+    supply L4/L5, beating a pre-baked Flow-2 pack given via ``--build-info``
+    (bi_pack) for its L3. `embed_build_source` routes the inline pack into the
+    src_pack slot via `route_inline_source_supplier`; a ``--build-info``-only run
+    still falls back to the pack's L4/L5."""
+    from pathlib import Path
+
+    from abicheck.buildsource.merge_support import route_inline_source_supplier
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+    from abicheck.buildsource.source_graph import SourceGraphSummary
+    from abicheck.cli_buildsource import _combine_packs
+
+    bi = BuildSourcePack(
+        root=Path(""),
+        source_abi=SourceAbiSurface(library="from_build_info"),
+        source_graph=SourceGraphSummary(),
+    )
+    inline = BuildSourcePack(
+        root=Path(""),
+        source_abi=SourceAbiSurface(library="from_sources"),
+        source_graph=SourceGraphSummary(),
+    )
+
+    # No --sources pack → the inline scan takes the sources slot and wins L4/L5.
+    sources_supplier, backfill = route_inline_source_supplier(None, inline)
+    assert sources_supplier is inline and backfill is None
+    combined = _combine_packs(bi, sources_supplier, backfill)
+    assert combined is not None and combined.source_abi is not None
+    assert combined.source_abi.library == "from_sources"
+    assert combined.source_graph is inline.source_graph
+
+    # --build-info-only (no inline) still supplies L4/L5 from the pack.
+    fallback = _combine_packs(bi, None, None)
+    assert fallback is not None and fallback.source_abi is not None
+    assert fallback.source_abi.library == "from_build_info"
+
+    # A real --sources pack keeps the sources slot; the inline pack backfills.
+    src = BuildSourcePack(
+        root=Path(""), source_abi=SourceAbiSurface(library="from_sources_pack")
+    )
+    keep, back = route_inline_source_supplier(src, inline)
+    assert keep is src and back is inline
+
+
+def test_empty_inline_l4_does_not_mask_build_info_pack_l4():
+    """Codex: when the raw-`--sources` inline pack is routed into the L4 slot but
+    its replay produced only an empty placeholder surface (clang missing), it must
+    NOT mask a `--build-info` pack's real L4 — payload selection prefers non-empty
+    facts."""
+    from pathlib import Path
+
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
+    from abicheck.cli_buildsource import _combine_packs
+
+    # build-info pack with real L4 facts.
+    real = SourceAbiSurface(library="libfoo.so")
+    real.reachable_declarations.append(
+        SourceEntity(id="decl://foo", kind="function", qualified_name="foo")
+    )
+    bi = BuildSourcePack(root=Path(""), source_abi=real)
+    # inline scan produced an empty placeholder surface (no reachable facts).
+    inline = BuildSourcePack(root=Path(""), source_abi=SourceAbiSurface(library="libfoo.so"))
+
+    # embed routes the inline pack into the src slot (AC-001); it must still lose
+    # L4 to the build-info pack because its surface is empty.
+    combined = _combine_packs(bi, inline, None)
+    assert combined is not None and combined.source_abi is not None
+    assert combined.source_abi.reachable_declarations  # bi's real facts kept
+
+
+def test_compare_explicit_build_info_overrides_embedded_l4_l5():
+    """Codex: on the `compare` path `_combine_packs(bi_pack, None, embedded)`
+    must let an explicit ``--build-info`` pack's L4/L5 override the snapshot's
+    embedded payload (embedded is lowest priority) — the AC-001 reorder must not
+    regress this."""
+    from pathlib import Path
+
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+    from abicheck.cli_buildsource import _combine_packs
+
+    bi = BuildSourcePack(
+        root=Path(""), source_abi=SourceAbiSurface(library="from_build_info_pack")
+    )
+    embedded = BuildSourcePack(
+        root=Path(""), source_abi=SourceAbiSurface(library="stale_embedded")
+    )
+    combined = _combine_packs(bi, None, embedded)
+    assert combined is not None and combined.source_abi is not None
+    assert combined.source_abi.library == "from_build_info_pack"
+
+
+def test_compare_explicit_empty_pack_overrides_embedded_l4_l5():
+    """Codex #11: on the `compare` path (`prefer_nonempty=False`) an explicit
+    ``--build-info``/``--sources`` pack must override the snapshot's embedded
+    payload **even when the explicit layer is intentionally empty** (a
+    failed/absent replay). The dump-path non-empty preference would otherwise
+    fall through to stale embedded facts, silently reviving a surface the
+    operator explicitly replaced with an empty one."""
+    from pathlib import Path
+
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
+    from abicheck.cli_buildsource import _combine_packs
+
+    # Explicit pack: a present-but-empty L4 surface (replay ran, found nothing).
+    empty = BuildSourcePack(
+        root=Path(""), source_abi=SourceAbiSurface(library="explicit_empty")
+    )
+    # Embedded snapshot payload: stale real facts from an earlier dump.
+    stale = SourceAbiSurface(library="stale_embedded")
+    stale.reachable_declarations.append(
+        SourceEntity(id="decl://gone", kind="function", qualified_name="gone")
+    )
+    embedded = BuildSourcePack(root=Path(""), source_abi=stale)
+
+    # Dump/merge default (prefer_nonempty=True) skips the empty explicit layer
+    # and falls through to the embedded facts — correct for backfill.
+    dump_fold = _combine_packs(empty, None, embedded)
+    assert dump_fold is not None and dump_fold.source_abi is not None
+    assert dump_fold.source_abi.library == "stale_embedded"
+
+    # Compare path (prefer_nonempty=False) honors the explicit empty pack,
+    # discarding the stale embedded surface.
+    compare_fold = _combine_packs(empty, None, embedded, prefer_nonempty=False)
+    assert compare_fold is not None and compare_fold.source_abi is not None
+    assert compare_fold.source_abi.library == "explicit_empty"
+    assert not compare_fold.source_abi.reachable_declarations
+
+
+def test_l5_coverage_partial_when_call_type_passes_degraded():
+    """AC-006: structural/plugin edges make ``graph.edges`` non-empty, but if a
+    call/type pass is degraded (its live replay never completed) L5 must read
+    ``partial`` — not ``present`` — so the failed walk is not hidden."""
+    from abicheck.buildsource.build_evidence import BuildEvidence
+    from abicheck.buildsource.inline import build_inline_coverage
+    from abicheck.buildsource.model import CoverageStatus
+    from abicheck.buildsource.source_graph import (
+        GraphEdge,
+        GraphNode,
+        SourceGraphSummary,
+    )
+
+    graph = SourceGraphSummary()
+    graph.nodes.append(GraphNode(id="a", kind="source_decl"))
+    graph.nodes.append(GraphNode(id="b", kind="source_decl"))
+    graph.edges.append(GraphEdge(src="a", dst="b", kind="DECL_CALLS_DECL"))
+    graph.degraded_passes["call_graph"] = True
+
+    rows = {
+        r.layer: r
+        for r in build_inline_coverage(
+            BuildEvidence(), has_build=False, surface=None, graph=graph
+        )
+    }
+    l5 = rows["L5_source_graph"]
+    assert l5.status == CoverageStatus.PARTIAL
+    assert "call_graph" in (l5.detail or "")
+
+    # A graph with edges and no degraded pass is still present.
+    ok = SourceGraphSummary()
+    ok.nodes.append(GraphNode(id="a", kind="source_decl"))
+    ok.nodes.append(GraphNode(id="b", kind="source_decl"))
+    ok.edges.append(GraphEdge(src="a", dst="b", kind="DECL_CALLS_DECL"))
+    rows_ok = {
+        r.layer: r
+        for r in build_inline_coverage(
+            BuildEvidence(), has_build=False, surface=None, graph=ok
+        )
+    }
+    assert rows_ok["L5_source_graph"].status == CoverageStatus.PRESENT
+
+
+def test_combined_coverage_row_comes_from_payload_supplier_not_other_pack():
+    """AC-002: the L4 coverage row must reflect the pack that actually supplied
+    ``source_abi``, not a different pack in supplier order that merely carries an
+    (unrelated, not_collected) L4 row."""
+    from pathlib import Path
+
+    from abicheck.buildsource.model import (
+        BuildSourceManifest,
+        CoverageStatus,
+        DataLayer,
+        LayerCoverage,
+    )
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+    from abicheck.cli_buildsource import _combine_packs
+
+    # build-info pack: a stale L4 not_collected row but NO source_abi payload.
+    bi = BuildSourcePack(
+        root=Path(""),
+        manifest=BuildSourceManifest(
+            coverage=[
+                LayerCoverage(
+                    layer=DataLayer.L4_SOURCE_ABI.value,
+                    status=CoverageStatus.NOT_COLLECTED,
+                )
+            ]
+        ),
+    )
+    # sources pack: supplies the L4 payload but carries no L4 row of its own.
+    src = BuildSourcePack(
+        root=Path(""), source_abi=SourceAbiSurface(library="libfoo.so")
+    )
+
+    combined = _combine_packs(bi, src, None)
+    assert combined is not None
+    assert combined.source_abi is not None
+    row = combined.manifest.coverage_for("L4_source_abi")
+    # Pre-fix: returned bi_pack's not_collected row (wrong provenance). Fixed:
+    # present, because we do embed the L4 facts src_pack supplied.
+    assert row is not None and row.status == CoverageStatus.PRESENT
+
+
 def test_inline_source_changed_falls_back_to_headers_only_scope(tmp_path, monkeypatch):
     """ADR-035 P3: inline dump has no PR diff, so a 'changed' scope falls back to
     'headers-only' (the public-API surface) — non-empty, but NOT the full-target

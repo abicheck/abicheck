@@ -138,6 +138,9 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.UNVERSIONED_EXPORTED_SYMBOL,
     ChangeKind.RTTI_FOR_INTERNAL_TYPE,
     ChangeKind.IDENTITY_COLLISION_DETECTED,
+    # Evidence-coherence cross-checks (tests/test_crosscheck.py, AC-008/AC-009).
+    ChangeKind.COMPILE_CONTEXT_CONFLICT,
+    ChangeKind.SOURCE_SURFACE_DSO_MISMATCH,
     # Cross-implementation stdlib compatibility (tests/test_diff_stdlib_impl.py).
     ChangeKind.STDLIB_IMPLEMENTATION_CHANGED,
     ChangeKind.LIBCPP_ABI_VERSION_CHANGED,

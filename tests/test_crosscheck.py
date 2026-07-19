@@ -28,6 +28,7 @@ import pytest
 from abicheck.buildsource.build_evidence import BuildEvidence, BuildOption
 from abicheck.buildsource.crosscheck import (
     ALL_CHECKS,
+    CHECK_COMPILE_CONTEXT_CONFLICT,
     CHECK_EXPORTED_NOT_PUBLIC,
     CHECK_HEADER_BUILD_CONTEXT_MISMATCH,
     CHECK_IDENTITY_COLLISION,
@@ -36,9 +37,11 @@ from abicheck.buildsource.crosscheck import (
     CHECK_PUBLIC_NOT_EXPORTED,
     CHECK_PUBLIC_TO_INTERNAL_DEPENDENCY,
     CHECK_RTTI_FOR_INTERNAL_TYPE,
+    CHECK_SOURCE_SURFACE_DSO_MISMATCH,
     CHECK_UNVERSIONED_EXPORTED_SYMBOL,
     CROSSCHECK_VERSION,
     PROVIDER_BINARY_EXPORTS,
+    PROVIDER_BUILD_CONFIG,
     PROVIDER_PUBLIC_HEADER_AST,
     PROVIDER_SOURCE_INDEX,
     CrosscheckConfig,
@@ -2267,3 +2270,338 @@ def test_odr_type_variant_present_with_parsed_tu_coverage():
     snap = _snap(build_source=BuildSourcePack(root="", source_abi=surface))
     res = run_crosschecks(snap)
     assert _coverage(res, CHECK_ODR_TYPE_VARIANT)["status"] == "present"
+
+
+# --------------------------------------------------------------------------- #
+# compile_context_conflict (AC-008)
+# --------------------------------------------------------------------------- #
+
+
+def _pack_with_units(*units) -> BuildSourcePack:
+    from abicheck.buildsource.build_evidence import CompileUnit  # noqa: F401
+
+    be = BuildEvidence(compile_units=list(units))
+    return BuildSourcePack(root="", build_evidence=be)
+
+
+def _cu(uid: str, target: str, *, flags=(), defines=None, language="CXX"):
+    from abicheck.buildsource.build_evidence import CompileUnit
+
+    return CompileUnit(
+        id=uid,
+        target_id=target,
+        abi_relevant_flags=list(flags),
+        defines=dict(defines or {}),
+        language=language,
+    )
+
+
+def test_compile_context_conflict_flags_rtti_disagreement():
+    # AC-008: one build target compiled part of itself -frtti and part -fno-rtti
+    # (oneTBB umbrella case) — aggregating hides it, so flag it as RISK.
+    snap = _snap(
+        build_source=_pack_with_units(
+            _cu("a", "target://libtbb.so", flags=["-frtti"]),
+            _cu("b", "target://libtbb.so", flags=["-fno-rtti"]),
+        )
+    )
+    res = run_crosschecks(snap)
+    hits = _findings_of(res, ChangeKind.COMPILE_CONTEXT_CONFLICT)
+    assert len(hits) == 1
+    assert hits[0].old_value == "-frtti" and hits[0].new_value == "-fno-rtti"
+    assert "target://libtbb.so" in hits[0].symbol
+    assert res.providers[CHECK_COMPILE_CONTEXT_CONFLICT] == [PROVIDER_BUILD_CONFIG]
+    # RISK partition, never an artifact break.
+    assert ChangeKind.COMPILE_CONTEXT_CONFLICT not in _api_break_kinds()
+
+
+def test_compile_context_conflict_flags_default_vs_negative():
+    # AC-008 (Codex): the common umbrella case — most TUs compiled with the
+    # language default (RTTI on, no flag) and one built -fno-rtti. The default
+    # unit carries no explicit -frtti, so an explicit-positive-only check would
+    # miss it; effective-mode comparison must still flag the conflict.
+    snap = _snap(
+        build_source=_pack_with_units(
+            _cu("a", "target://libtbb.so"),  # default RTTI (no flag)
+            _cu("b", "target://libtbb.so", flags=["-fno-rtti"]),
+        )
+    )
+    res = run_crosschecks(snap)
+    hits = _findings_of(res, ChangeKind.COMPILE_CONTEXT_CONFLICT)
+    assert len(hits) == 1
+    assert hits[0].old_value == "-frtti" and hits[0].new_value == "-fno-rtti"
+
+
+def test_compile_context_conflict_clean_when_all_negative():
+    # All units share the same -fno-rtti mode → coherent, no conflict (the
+    # effective-mode fix must not fire when every unit is negative).
+    snap = _snap(
+        build_source=_pack_with_units(
+            _cu("a", "target://libtbb.so", flags=["-fno-rtti"]),
+            _cu("b", "target://libtbb.so", flags=["-fno-rtti"]),
+        )
+    )
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.COMPILE_CONTEXT_CONFLICT) == []
+
+
+def test_compile_context_conflict_ignores_c_units_for_cpp_only_family():
+    # AC-008 (Codex): RTTI is a C++-only ABI. A C TU (no RTTI) mixed with a C++
+    # TU built -fno-rtti is coherent, not a conflict — the C unit must not be
+    # counted as the "positive" side.
+    snap = _snap(
+        build_source=_pack_with_units(
+            _cu("c", "target://lib.so", language="C"),  # C: no RTTI at all
+            _cu("cxx", "target://lib.so", flags=["-fno-rtti"], language="CXX"),
+        )
+    )
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.COMPILE_CONTEXT_CONFLICT) == []
+
+
+def test_compile_context_conflict_honors_last_wins_flag_order():
+    # AC-008 (Codex): abi_relevant_flags preserves argv order, so a later token
+    # overrides an earlier one. `-fno-rtti -frtti` is effectively RTTI-on and must
+    # NOT read as negative when every other unit is also on.
+    snap = _snap(
+        build_source=_pack_with_units(
+            _cu("a", "target://lib.so", flags=["-fno-rtti", "-frtti"]),  # eff. on
+            _cu("b", "target://lib.so", flags=["-frtti"]),
+        )
+    )
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.COMPILE_CONTEXT_CONFLICT) == []
+
+    # …but an effective-on unit mixed with a genuinely-negative one still conflicts.
+    snap2 = _snap(
+        build_source=_pack_with_units(
+            _cu("a", "target://lib.so", flags=["-fno-rtti", "-frtti"]),  # eff. on
+            _cu("b", "target://lib.so", flags=["-frtti", "-fno-rtti"]),  # eff. off
+        )
+    )
+    res2 = run_crosschecks(snap2)
+    assert len(_findings_of(res2, ChangeKind.COMPILE_CONTEXT_CONFLICT)) == 1
+
+
+def test_compile_context_conflict_flags_define_value_disagreement():
+    snap = _snap(
+        build_source=_pack_with_units(
+            _cu("a", "target://libdal.so", defines={"DAL_VARIANT": "avx2"}),
+            _cu("b", "target://libdal.so", defines={"DAL_VARIANT": "avx512"}),
+        )
+    )
+    res = run_crosschecks(snap)
+    hits = _findings_of(res, ChangeKind.COMPILE_CONTEXT_CONFLICT)
+    assert len(hits) == 1
+    assert "DAL_VARIANT" in hits[0].description
+    assert "avx2" in hits[0].new_value and "avx512" in hits[0].new_value
+
+
+def test_compile_context_conflict_clean_when_units_agree():
+    snap = _snap(
+        build_source=_pack_with_units(
+            _cu("a", "target://libtbb.so", flags=["-fno-rtti"]),
+            _cu("b", "target://libtbb.so", flags=["-fno-rtti"], defines={"X": "1"}),
+        )
+    )
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.COMPILE_CONTEXT_CONFLICT) == []
+    assert _coverage(res, CHECK_COMPILE_CONTEXT_CONFLICT)["status"] == "present"
+
+
+def test_compile_context_conflict_does_not_cross_targets():
+    # Two DIFFERENT targets legitimately differ on -frtti — not a conflict.
+    snap = _snap(
+        build_source=_pack_with_units(
+            _cu("a", "target://libone.so", flags=["-frtti"]),
+            _cu("b", "target://libtwo.so", flags=["-fno-rtti"]),
+        )
+    )
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.COMPILE_CONTEXT_CONFLICT) == []
+
+
+def test_compile_context_conflict_bare_define_no_value_is_not_conflict():
+    # A bare -DFOO (no value) on one unit and -DFOO=1 on another: only value-
+    # carrying binds are compared, so a bare/valued mix is not flagged as a
+    # two-value conflict.
+    snap = _snap(
+        build_source=_pack_with_units(
+            _cu("a", "target://lib.so", defines={"FOO": ""}),
+            _cu("b", "target://lib.so", defines={"FOO": "1"}),
+        )
+    )
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.COMPILE_CONTEXT_CONFLICT) == []
+
+
+def test_compile_context_conflict_skipped_without_l3():
+    snap = _snap()
+    res = run_crosschecks(snap)
+    assert _coverage(res, CHECK_COMPILE_CONTEXT_CONFLICT)["status"] == "skipped"
+    assert _findings_of(res, ChangeKind.COMPILE_CONTEXT_CONFLICT) == []
+
+
+# --------------------------------------------------------------------------- #
+# source_surface_dso_mismatch (AC-009)
+# --------------------------------------------------------------------------- #
+
+
+def _surface_with_mapping(
+    decl_symbols, *, synthesized=(), linked_exports=None, library="libfoo.so"
+) -> SourceAbiSurface:
+    """Build a surface with an explicit decl→binary-symbol mapping.
+
+    ``decl_symbols`` is a list of ``(decl_id, mapped_symbol)`` — ``""`` for an
+    unmatched decl. ``synthesized`` are binary symbols attributed via the
+    synthesized tier. ``linked_exports`` sets ``roots['exported_symbols']`` (the
+    export set the surface was linked against); defaults to the mapped symbols.
+    """
+    from abicheck.buildsource.source_abi import SourceEntity
+
+    surface = SourceAbiSurface(
+        library=library,
+        reachable_declarations=[
+            SourceEntity(id=d, kind="function", qualified_name=d)
+            for d, _ in decl_symbols
+        ],
+    )
+    surface.mappings["source_decl_to_binary_symbol"] = {d: s for d, s in decl_symbols}
+    if synthesized:
+        surface.mappings["synthesized_symbol_to_owner"] = {s: {} for s in synthesized}
+    mapped = [s for _, s in decl_symbols if s] + list(synthesized)
+    surface.roots["exported_symbols"] = sorted(
+        linked_exports if linked_exports is not None else mapped
+    )
+    return surface
+
+
+def test_source_surface_dso_mismatch_flags_stale_surface_mapped_to_other_dso():
+    # AC-009 (Codex): a shared/stale surface linked against ANOTHER DSO carries
+    # positive match counters, but its mapped symbols are that other DSO's — none
+    # in THIS binary's exports. Must fire (the exact mis-scoped case).
+    surface = _surface_with_mapping(
+        [("d0", "_Z9otherlibv"), ("d1", "_Z9otherfn2v")],  # DSO-B's symbols
+    )
+    snap = _snap(elf=_elf("_Z3foov", "_Z3barv"))  # this binary's exports
+    snap.build_source = BuildSourcePack(root="", source_abi=surface)
+    res = run_crosschecks(snap)
+    hits = _findings_of(res, ChangeKind.SOURCE_SURFACE_DSO_MISMATCH)
+    assert len(hits) == 1
+    assert hits[0].symbol == "libfoo.so"
+    assert res.providers[CHECK_SOURCE_SURFACE_DSO_MISMATCH] == [
+        PROVIDER_SOURCE_INDEX,
+        PROVIDER_BINARY_EXPORTS,
+    ]
+    assert ChangeKind.SOURCE_SURFACE_DSO_MISMATCH not in _api_break_kinds()
+
+
+def test_source_surface_dso_mismatch_clean_when_stale_counter_but_current_match():
+    # The stale surface's coverage counter claims matches, but what matters is the
+    # live intersection: here the mapping DOES hit this binary's exports → clean,
+    # regardless of any counter.
+    surface = _surface_with_mapping([("d0", "_Z3foov"), ("d1", "_Z3barv")])
+    surface.coverage = {"matched_symbols": 999}  # stale/irrelevant counter
+    snap = _snap(elf=_elf("_Z3foov", "_Z3barv"))
+    snap.build_source = BuildSourcePack(root="", source_abi=surface)
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.SOURCE_SURFACE_DSO_MISMATCH) == []
+    assert _coverage(res, CHECK_SOURCE_SURFACE_DSO_MISMATCH)["status"] == "present"
+
+
+def test_source_surface_dso_mismatch_clean_when_matched_via_synthesized():
+    # AC-009 (Codex): a C++ surface whose exports are attributed entirely through
+    # the synthesized (RTTI/vtable) tier — with zero direct decl matches — DID
+    # match this DSO (the synth symbols ARE in the export table), so no finding.
+    surface = _surface_with_mapping(
+        [("d0", "")],  # decl unmatched directly
+        synthesized=("_ZTV6Widget", "_ZTI6Widget"),  # attributed via synth tier
+    )
+    snap = _snap(elf=_elf("_ZTV6Widget", "_ZTI6Widget"))
+    snap.build_source = BuildSourcePack(root="", source_abi=surface)
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.SOURCE_SURFACE_DSO_MISMATCH) == []
+    assert _coverage(res, CHECK_SOURCE_SURFACE_DSO_MISMATCH)["status"] == "present"
+
+
+def test_source_surface_dso_mismatch_flags_linked_but_zero_match():
+    # A surface linked against this binary (roots set) that mapped none of its
+    # decls to an export → the original zero-match case, still fires.
+    surface = _surface_with_mapping(
+        [("d0", ""), ("d1", "")],  # linked, but nothing matched
+        linked_exports=["_Z3foov", "_Z3barv"],
+    )
+    snap = _snap(elf=_elf("_Z3foov", "_Z3barv"))
+    snap.build_source = BuildSourcePack(root="", source_abi=surface)
+    res = run_crosschecks(snap)
+    assert len(_findings_of(res, ChangeKind.SOURCE_SURFACE_DSO_MISMATCH)) == 1
+
+
+def test_source_surface_dso_mismatch_skipped_when_unlinked():
+    # A surface with decls but no attribution mappings AND never linked (empty
+    # roots) — cannot distinguish "wrong DSO" from "link never ran" → skip.
+    surface = _surface_with_mapping([("d0", ""), ("d1", "")], linked_exports=[])
+    snap = _snap(elf=_elf("_Z3foov", "_Z3barv"))
+    snap.build_source = BuildSourcePack(root="", source_abi=surface)
+    res = run_crosschecks(snap)
+    assert _coverage(res, CHECK_SOURCE_SURFACE_DSO_MISMATCH)["status"] == "skipped"
+    assert _findings_of(res, ChangeKind.SOURCE_SURFACE_DSO_MISMATCH) == []
+
+
+def test_source_surface_dso_mismatch_macho_cpp_keyspace_matches():
+    # AC-009 (Codex): on a Mach-O C++ dylib the parser stores an export as `_Z…`
+    # (one underscore already stripped) and the L4 linker keeps that spelling, so
+    # the mismatch check must compare in the same keyspace — not the dumper's
+    # double-stripped `Z…` form — or a correctly relinked macOS C++ surface
+    # falsely trips. MachoExport carries the raw `__Z…`; the parser's single strip
+    # is simulated here by the export name `_ZN1A3fooEv`.
+    surface = _surface_with_mapping([("d0", "_ZN1A3fooEv")])
+    snap = _snap(macho=MachoMetadata(exports=[MachoExport(name="_ZN1A3fooEv")]))
+    snap.build_source = BuildSourcePack(root="", source_abi=surface)
+    res = run_crosschecks(snap)
+    # The surface's mapped `_ZN1A3fooEv` is in the binary's exports → clean.
+    assert _findings_of(res, ChangeKind.SOURCE_SURFACE_DSO_MISMATCH) == []
+    assert _coverage(res, CHECK_SOURCE_SURFACE_DSO_MISMATCH)["status"] == "present"
+
+
+def test_source_surface_dso_mismatch_pe_export_keyspace():
+    # PE exports carry no underscore mangling quirk, so the L4-keyspace helper
+    # uses the raw export names directly. A surface mapped to a PE export that is
+    # present stays clean; one absent from this binary fires.
+    clean = _surface_with_mapping([("d0", "foo")])
+    snap = _snap(pe=PeMetadata(exports=[PeExport(name="foo")]))
+    snap.build_source = BuildSourcePack(root="", source_abi=clean)
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.SOURCE_SURFACE_DSO_MISMATCH) == []
+
+    stale = _surface_with_mapping([("d0", "other_dll_sym")])
+    snap2 = _snap(pe=PeMetadata(exports=[PeExport(name="foo")]))
+    snap2.build_source = BuildSourcePack(root="", source_abi=stale)
+    res2 = run_crosschecks(snap2)
+    assert len(_findings_of(res2, ChangeKind.SOURCE_SURFACE_DSO_MISMATCH)) == 1
+
+
+def test_source_surface_dso_mismatch_skipped_without_binary_exports():
+    # A source-only snapshot (no export table) must skip, never false-positive.
+    surface = _surface_with_mapping([("d0", "_Z3foov")])
+    snap = _snap(build_source=BuildSourcePack(root="", source_abi=surface))
+    res = run_crosschecks(snap)
+    assert _coverage(res, CHECK_SOURCE_SURFACE_DSO_MISMATCH)["status"] == "skipped"
+    assert _findings_of(res, ChangeKind.SOURCE_SURFACE_DSO_MISMATCH) == []
+
+
+def test_source_surface_dso_mismatch_skipped_without_l4_surface():
+    snap = _snap(elf=_elf("_Z3foov"))
+    res = run_crosschecks(snap)
+    assert _coverage(res, CHECK_SOURCE_SURFACE_DSO_MISMATCH)["status"] == "skipped"
+
+
+def test_source_surface_dso_mismatch_present_empty_surface_no_findings():
+    # Surface with an export table on the binary but no reachable decls: present,
+    # no finding (nothing to mis-scope).
+    surface = SourceAbiSurface(library="libfoo.so")
+    snap = _snap(elf=_elf("_Z3foov"))
+    snap.build_source = BuildSourcePack(root="", source_abi=surface)
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.SOURCE_SURFACE_DSO_MISMATCH) == []
+    assert _coverage(res, CHECK_SOURCE_SURFACE_DSO_MISMATCH)["status"] == "present"

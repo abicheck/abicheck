@@ -24,6 +24,7 @@ create an import cycle rejected by the CI gate) — this is a leaf module.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -78,8 +79,20 @@ def _resolve_side_pack(
     snapshot's embedded payload per layer; when neither flag is given the
     embedded ``snap.build_source`` is used as-is (single-artifact UX).
     """
-    bi_pack = _load_side_pack_input(build_info)
-    src_pack = _load_side_pack_input(sources)
+    # AC-003 (compare side): seed the ingest of a Flow-2 `abicheck_inputs/` pack
+    # given via `--old/new-build-info`/`--old/new-sources` with this side's L0
+    # exports, so its source surface relinks onto the DSO (matched_symbols>0)
+    # instead of reporting 0 — the same fix the dump/embed path already applies
+    # (Codex/CodeRabbit review). Lazy import: `_exported_symbols_from_snapshot`
+    # lives in `cli_buildsource_merge`, which imports this leaf module, so a
+    # top-level import would re-form that cycle.
+    from .cli_buildsource_merge import _exported_symbols_from_snapshot
+
+    exported = (
+        _exported_symbols_from_snapshot(snap) if snap is not None else ()
+    )
+    bi_pack = _load_side_pack_input(build_info, exported_symbols=exported)
+    src_pack = _load_side_pack_input(sources, exported_symbols=exported)
     embedded = snap.build_source if snap is not None else None
     if bi_pack is None and src_pack is None:
         return embedded
@@ -88,7 +101,13 @@ def _resolve_side_pack(
     # hold build + source + graph together). --build-info wins for
     # L3, --sources wins for L4/L5, the embedded payload backfills, and the
     # coverage manifest is rebuilt per-layer from the supplying pack.
-    return _combine_packs(bi_pack, src_pack, embedded)
+    # `prefer_nonempty=False`: an explicit `--*-build-info`/`--*-sources` pack
+    # overrides the snapshot's embedded payload even when its layer is
+    # intentionally empty (a failed/absent replay) — the documented "explicit
+    # flags override embedded" contract, which the dump-path non-empty
+    # preference would otherwise break by falling through to stale embedded
+    # facts (Codex review).
+    return _combine_packs(bi_pack, src_pack, embedded, prefer_nonempty=False)
 
 
 def diff_embedded_build_source(
@@ -343,13 +362,21 @@ def _is_inputs_pack_dir(path: Path | None) -> bool:
     return is_inputs_pack(path)
 
 
-def _load_inputs_pack_or_raise(path: Path) -> BuildSourcePack:
+def _load_inputs_pack_or_raise(
+    path: Path, *, exported_symbols: Iterable[str] = ()
+) -> BuildSourcePack:
     """Validate and ingest an ``abicheck_inputs/`` directory into a BuildSourcePack.
 
     Validation happens automatically whenever the pack is consumed -- there is
     no separate ``inputs validate`` command to run first (ADR-043 D1). A
     structurally invalid pack is a hard error; non-fatal findings are printed
     as warnings.
+
+    ``exported_symbols`` — the analyzed binary's L0 exports — seed the L4
+    decl→symbol linking so ``source_decl_to_binary_symbol`` resolves against the
+    DSO instead of leaving ``matched_symbols=0`` (AC-003). When empty (e.g. a
+    source-only pack with no artifact side yet), the surface is relinked against
+    the artifact exports later during ``merge``.
     """
     from .buildsource.inputs_pack import ingest_inputs_pack
     from .buildsource.inputs_validate import validate_inputs_pack
@@ -361,15 +388,17 @@ def _load_inputs_pack_or_raise(path: Path) -> BuildSourcePack:
         )
     for warning in report.warnings:
         click.echo(f"warning: {path}: {warning}", err=True)
-    return ingest_inputs_pack(path).pack
+    return ingest_inputs_pack(path, exported_symbols=exported_symbols).pack
 
 
-def _load_side_pack_input(path: Path | None) -> BuildSourcePack | None:
+def _load_side_pack_input(
+    path: Path | None, *, exported_symbols: Iterable[str] = ()
+) -> BuildSourcePack | None:
     """Load a compare-side out-of-band pack, auto-detecting its pack kind."""
     if path is None:
         return None
     if _is_inputs_pack_dir(path):
-        return _load_inputs_pack_or_raise(path)
+        return _load_inputs_pack_or_raise(path, exported_symbols=exported_symbols)
     return _load_pack_or_raise(path)
 
 

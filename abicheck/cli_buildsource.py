@@ -34,6 +34,7 @@ from .buildsource.merge_support import (
     _combine_packs,
     _filter_pack_layers,
     _layer_value,
+    route_inline_source_supplier,
 )
 from .buildsource.model import DataLayer
 from .buildsource.pack import BuildSourcePack
@@ -129,6 +130,14 @@ def embed_build_source(
     if not layers:  # 'off' (or an unknown mode) embeds nothing
         return
 
+    # The analyzed binary's L0 exports — used both to seed a Flow-2
+    # abicheck_inputs/ pack's decl→symbol linking at ingest (so a
+    # `dump --build-info <inputs pack>`'s source surface maps onto the DSO's
+    # exports instead of reporting matched_symbols=0, AC-003) and, below, to
+    # seed the inline replay's A1 linking. Empty in the source-only
+    # `dump --sources` flow (no binary), where it stays inert.
+    exported = _exported_symbols_from_snapshot(snap)
+
     bi_is_pack = is_pack_dir(build_info)
     src_is_pack = is_pack_dir(sources)
     # A build-emitted abicheck_inputs/ pack (ADR-035 D5) is auto-detected and
@@ -138,14 +147,14 @@ def embed_build_source(
     bi_is_inputs = (not bi_is_pack) and _is_inputs_pack_dir(build_info)
     src_is_inputs = (not src_is_pack) and _is_inputs_pack_dir(sources)
     bi_pack = (
-        _load_inputs_pack_or_raise(build_info)
+        _load_inputs_pack_or_raise(build_info, exported_symbols=exported)
         if (bi_is_inputs and build_info is not None)
         else _load_pack_or_raise(build_info)
         if (bi_is_pack and build_info is not None)
         else None
     )
     src_pack = (
-        _load_inputs_pack_or_raise(sources)
+        _load_inputs_pack_or_raise(sources, exported_symbols=exported)
         if (src_is_inputs and sources is not None)
         else _load_pack_or_raise(sources)
         if (src_is_pack and sources is not None)
@@ -188,11 +197,9 @@ def embed_build_source(
                 if build_compile_db is not None
                 else cfg.compile_db,
             )
-        # A1: plumb the binary's L0 exports (already parsed into this snapshot)
-        # into the inline replay, so the linked source surface knows which decls
-        # map to exports and the provenance/mapping checks have a signal. Empty in
-        # the source-only `dump --sources` flow (no binary) — then A1 stays inert.
-        exported = _exported_symbols_from_snapshot(snap)
+        # A1: plumb the binary's L0 exports (already computed above) into the
+        # inline replay, so the linked source surface knows which decls map to
+        # exports and the provenance/mapping checks have a signal.
         inline_pack = collect_inline_pack(
             sources=raw_sources,
             build_info=raw_build_info,
@@ -248,9 +255,16 @@ def embed_build_source(
     bi_pack = _filter_pack_layers(bi_pack, layers)
     src_pack = _filter_pack_layers(src_pack, layers)
 
-    # --build-info (pack) wins L3, --sources (pack) wins L4/L5, the inline pack
-    # backfills both; coverage is rebuilt per layer from the supplying pack.
-    merged = _combine_packs(bi_pack, src_pack, inline_pack)
+    # --build-info (pack) wins L3; --sources wins L4/L5; the inline collection of
+    # a raw --sources/--build-info tree backfills. AC-001: a raw `--sources` cold
+    # scan is the *sources* contributor, so route it into the src_pack slot (which
+    # outranks --build-info for L4/L5); a real --sources pack keeps that slot and
+    # the inline pack backfills. Coverage is rebuilt per layer from the supplying
+    # pack.
+    sources_supplier, inline_backfill = route_inline_source_supplier(
+        src_pack, inline_pack
+    )
+    merged = _combine_packs(bi_pack, sources_supplier, inline_backfill)
     if merged is None:
         return
     # ADR-041 addendum: a `dump --header-graph` pass already attached a

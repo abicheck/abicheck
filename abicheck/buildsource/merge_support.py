@@ -47,25 +47,86 @@ def _filter_pack_layers(
         pack.source_graph = None
     return pack
 
-def _first_attr(attr: str, *packs: BuildSourcePack | None) -> Any:
-    """Return the first non-None value of *attr* across *packs*."""
+def _payload_empty(attr: str, payload: Any) -> bool:
+    """True when a non-``None`` layer payload carries no real facts.
+
+    A layer object can be present but empty — e.g. ``_run_inline_source_abi``
+    returns a bare ``SourceAbiSurface()`` when clang/castxml is missing, or an
+    inline replay yields an empty ``BuildEvidence``. Mirrors
+    ``cli._layer_payload_empty``'s per-layer emptiness so an empty placeholder is
+    treated like absence when choosing which pack supplies a layer."""
+    if payload is None:
+        return True
+    if attr == "build_evidence":
+        return not (getattr(payload, "targets", None) or getattr(payload, "compile_units", None))
+    if attr == "source_abi":
+        buckets = payload.reachable_buckets() if hasattr(payload, "reachable_buckets") else {}
+        return not any(buckets.values())
+    if attr == "source_graph":
+        return not getattr(payload, "nodes", None)
+    return False
+
+
+def _first_attr_with_supplier(
+    attr: str, *packs: BuildSourcePack | None, prefer_nonempty: bool = True
+) -> tuple[Any, BuildSourcePack | None]:
+    """Return ``(value, supplying_pack)`` for the pack that supplies *attr*.
+
+    With ``prefer_nonempty`` (the default, the dump/merge fold): prefer the first
+    pack whose payload is **non-empty**, so a non-``None`` but empty placeholder
+    (e.g. an empty ``SourceAbiSurface()`` from a clang-less inline replay routed
+    into the L4 slot) never masks a lower-priority pack's real facts (Codex
+    review); fall back to the first non-``None`` payload only when no candidate
+    carries real facts, so a genuinely empty layer still embeds with its row.
+
+    With ``prefer_nonempty=False`` (``compare``'s ``_resolve_side_pack``): plain
+    first-non-``None``, so an explicit ``--*-build-info``/``--*-sources`` pack
+    overrides the snapshot's embedded payload **even when the explicit layer is
+    intentionally empty** (a failed/absent replay) — the documented "explicit
+    flags override embedded" contract, which the non-empty preference would
+    otherwise break by falling through to stale embedded facts (Codex review).
+
+    The *supplier* is the pack whose facts we embed, so its coverage row — and
+    only its row — describes what landed (AC-002)."""
+    first_present: tuple[Any, BuildSourcePack | None] | None = None
     for cand in packs:
-        if cand is not None and getattr(cand, attr) is not None:
-            return getattr(cand, attr)
-    return None
+        if cand is None:
+            continue
+        val = getattr(cand, attr)
+        if val is None:
+            continue
+        if not prefer_nonempty or not _payload_empty(attr, val):
+            return val, cand
+        if first_present is None:
+            first_present = (val, cand)
+    return first_present if first_present is not None else (None, None)
 
 
 def _coverage_row_for_present_layer(
     layer: str,
-    packs: tuple[BuildSourcePack | None, ...],
+    supplier: BuildSourcePack | None,
 ) -> LayerCoverage:
-    """Return the supplying pack's existing coverage row for *layer*, or a
-    synthetic PRESENT row when none of *packs* carries one."""
-    for cand in packs:
-        if cand is None:
-            continue
+    """Return the coverage row for a layer whose payload we *do* embed.
+
+    Read it from the *supplier* — the pack that actually supplied the payload —
+    not merely the first pack in supplier order that happens to carry a row for
+    this layer; those can differ and produce a manifest that describes facts a
+    different pack lacked (AC-002). The supplier's own row is honored **as-is**,
+    whatever its status: ``ingest_inputs_pack`` (and the collectors) already
+    emit ``not_collected`` for a non-``None`` but *empty* placeholder payload —
+    e.g. an explicit empty ``compile_commands.json`` yields a non-``None`` but
+    empty ``BuildEvidence`` — and ``present``/``partial`` for real facts, so
+    trusting it keeps the combined manifest honest instead of advertising build
+    context that has no compile units behind it (Codex P2). Only when the
+    supplier carries no row for this layer at all do we synthesize a PRESENT row
+    — we embed the payload and have no more precise statement to make."""
+    if supplier is not None:
         row = next(
-            (c for c in cand.manifest.coverage if _layer_value(c.layer) == layer),
+            (
+                c
+                for c in supplier.manifest.coverage
+                if _layer_value(c.layer) == layer
+            ),
             None,
         )
         if row is not None:
@@ -107,7 +168,7 @@ def _coverage_row_for_absent_layer(
 
 def _build_combined_coverage(
     base: BuildSourcePack,
-    supplier: dict[str, tuple[BuildSourcePack | None, ...]],
+    supplier_pack: dict[str, BuildSourcePack | None],
     present: dict[str, bool],
     bi_pack: BuildSourcePack | None,
     src_pack: BuildSourcePack | None,
@@ -116,18 +177,19 @@ def _build_combined_coverage(
     """Rebuild the coverage manifest for the combined pack.
 
     Non-managed rows (L0/L1/L2/…) come from the base manifest. Always emit one
-    row per managed layer (ADR-028 D7). When we carry the facts, reuse the
-    supplying pack's row; otherwise mark the layer not_collected so the report
-    never advertises a check with no facts behind it (Codex review) — and never
-    drops the row entirely either.
+    row per managed layer (ADR-028 D7). When we carry the facts, reuse the row
+    from the *pack that actually supplied them* (``supplier_pack[layer]``);
+    otherwise mark the layer not_collected so the report never advertises a
+    check with no facts behind it (Codex review) — and never drops the row
+    entirely either.
     """
-    managed = set(supplier)
+    managed = set(supplier_pack)
     coverage: list[LayerCoverage] = [
         c for c in base.manifest.coverage if _layer_value(c.layer) not in managed
     ]
-    for layer, packs in supplier.items():
+    for layer, supplier in supplier_pack.items():
         if present[layer]:
-            row = _coverage_row_for_present_layer(layer, packs)
+            row = _coverage_row_for_present_layer(layer, supplier)
         else:
             row = _coverage_row_for_absent_layer(layer, bi_pack, src_pack, embedded)
         coverage.append(row)
@@ -254,10 +316,31 @@ def _build_combined_provenance(
     return artifacts, extractors
 
 
+def route_inline_source_supplier(
+    src_pack: BuildSourcePack | None,
+    inline_pack: BuildSourcePack | None,
+) -> tuple[BuildSourcePack | None, BuildSourcePack | None]:
+    """Split the inline-collected pack into ``(sources_supplier, backfill)``.
+
+    AC-001: a raw ``--sources`` cold scan (``inline_pack``) is the *sources*
+    contributor, so it must win L4/L5 over a Flow-2 ``--build-info`` pack. Route
+    it into ``_combine_packs``'s ``src_pack`` slot (which outranks ``bi_pack``
+    for L4/L5) when no ``--sources`` *pack* was given; a real ``--sources`` pack
+    keeps that slot and the inline pack becomes the lowest-priority backfill.
+    Keeping the inline pack out of the ``embedded`` slot on this path leaves that
+    slot free for ``compare``'s snapshot payload, so an explicit ``--build-info``
+    pack still overrides embedded facts there (Codex review)."""
+    if src_pack is not None:
+        return src_pack, inline_pack
+    return inline_pack, None
+
+
 def _combine_packs(
     bi_pack: BuildSourcePack | None,
     src_pack: BuildSourcePack | None,
     embedded: BuildSourcePack | None = None,
+    *,
+    prefer_nonempty: bool = True,
 ) -> BuildSourcePack | None:
     """Combine a build-info pack and a sources pack into one embeddable pack.
 
@@ -269,20 +352,45 @@ def _combine_packs(
     This keeps a later compare's coverage/capability report honest when the two
     flags point at different packs (Codex review). Returns ``None`` when no pack
     contributes any facts.
+
+    ``prefer_nonempty`` (default True — the dump/merge fold) skips a non-``None``
+    but *empty* layer placeholder so a lower-priority pack's real facts still win
+    (see ``_first_attr_with_supplier``). ``compare``'s ``_resolve_side_pack``
+    passes ``prefer_nonempty=False`` so an explicit ``--*-build-info``/
+    ``--*-sources`` pack overrides the snapshot's embedded payload **even when the
+    explicit layer is intentionally empty** — the documented "explicit flags
+    override embedded" contract (Codex review).
     """
-    build_evidence = _first_attr("build_evidence", bi_pack, src_pack, embedded)
-    source_abi = _first_attr("source_abi", src_pack, bi_pack, embedded)
-    source_graph = _first_attr("source_graph", src_pack, bi_pack, embedded)
+    # L3 comes from --build-info (bi_pack) first, then --sources, then the
+    # embedded/backfill pack. L4/L5 come from --sources (src_pack) first, then
+    # --build-info, then the embedded/backfill pack — an explicit --build-info
+    # pack's L4/L5 override the snapshot's embedded payload on the `compare`
+    # path (its documented "explicit flags override embedded" contract). The
+    # AC-001 need — a raw `--sources` cold scan winning L4/L5 over a Flow-2
+    # `--build-info` pack — is handled by `embed_build_source` routing that
+    # inline pack into *this* function's `src_pack` slot, not by reordering here
+    # (which would wrongly let a snapshot's embedded facts beat an explicit
+    # `--build-info` pack, Codex review).
+    build_evidence, l3_supplier = _first_attr_with_supplier(
+        "build_evidence", bi_pack, src_pack, embedded, prefer_nonempty=prefer_nonempty
+    )
+    source_abi, l4_supplier = _first_attr_with_supplier(
+        "source_abi", src_pack, bi_pack, embedded, prefer_nonempty=prefer_nonempty
+    )
+    source_graph, l5_supplier = _first_attr_with_supplier(
+        "source_graph", src_pack, bi_pack, embedded, prefer_nonempty=prefer_nonempty
+    )
 
     base = bi_pack or src_pack or embedded
     if base is None:
         return None
 
-    # supplier order per managed layer, and whether we actually carry it
-    supplier: dict[str, tuple[BuildSourcePack | None, ...]] = {
-        DataLayer.L3_BUILD.value: (bi_pack, src_pack, embedded),
-        DataLayer.L4_SOURCE_ABI.value: (src_pack, bi_pack, embedded),
-        DataLayer.L5_SOURCE_GRAPH.value: (src_pack, bi_pack, embedded),
+    # The pack that actually supplied each managed layer's payload — its row is
+    # the one that honestly describes what we embedded (AC-002).
+    supplier_pack: dict[str, BuildSourcePack | None] = {
+        DataLayer.L3_BUILD.value: l3_supplier,
+        DataLayer.L4_SOURCE_ABI.value: l4_supplier,
+        DataLayer.L5_SOURCE_GRAPH.value: l5_supplier,
     }
     present = {
         DataLayer.L3_BUILD.value: build_evidence is not None,
@@ -292,7 +400,7 @@ def _combine_packs(
 
     chosen = (build_evidence, source_abi, source_graph)
     coverage = _build_combined_coverage(
-        base, supplier, present, bi_pack, src_pack, embedded
+        base, supplier_pack, present, bi_pack, src_pack, embedded
     )
     artifacts, extractors = _build_combined_provenance(
         bi_pack, src_pack, embedded, chosen
