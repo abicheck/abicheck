@@ -155,10 +155,11 @@ def aggregate_cmd(
     ``--expect``/``--optional``; or opt into ``--discovered-only`` to aggregate
     whatever is present with no coverage gate.
 
-    Exit code: 0 pass / 1 required-coverage gap or a policy-blocked
-    addition-or-quality finding / 2 a source-API break / 4 an ABI break / 64
-    usage error. Each target's own recorded gate decision is used — the gate is
-    never recomputed from the compatibility verdict (ADR-042).
+    Exit code: 0 pass / 1 required-coverage gap, a policy-blocked
+    addition-or-quality finding, or a non-verdict per-report failure (e.g. a
+    `scan` budget overflow) / 2 a source-API break / 4 an ABI break / 64 usage
+    error. Each target's own recorded gate decision is used — the gate is never
+    recomputed from the compatibility verdict (ADR-042).
     """
     _setup_verbosity(verbose)
 
@@ -204,6 +205,12 @@ def _resolve_expected(
     expect_list = _split_csv(expect)
     optional_list = _split_csv(optional)
     flags_given = bool(expect_list or optional_list)
+
+    if optional_list and not expect_list:
+        # --optional is a modifier on --expect (a target set that is all
+        # optional has no required coverage to gate, turning an omitted
+        # --expect into a fail-open gate). Reject it explicitly.
+        raise click.UsageError("--optional requires at least one --expect target")
 
     if discovered_only:
         if manifest is not None or flags_given:

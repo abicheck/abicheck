@@ -449,7 +449,13 @@ class AggregateResult:
 
         lines.append("Gate:")
         if self.passed:
-            lines.append("  Passed — no blocking findings, required coverage complete.")
+            # Deliberately does NOT claim "coverage complete": under
+            # --on-missing-required warn a required gap is reported above but
+            # does not fail the gate, so a passing result can still have an
+            # (advisory) coverage gap.
+            lines.append(
+                "  Passed — no gate-blocking findings under the configured policies."
+            )
         else:
             blockers = ", ".join(self.blocking_targets) or "(none)"
             parts = [f"exit {self.exit_code()}"]
@@ -457,6 +463,12 @@ class AggregateResult:
                 parts.append(f"blocking: {blockers}")
             if self.coverage_blocking:
                 parts.append("required coverage incomplete")
+            if (
+                self.on_unexpected_target is OnUnexpectedTarget.FAIL
+                and self.unexpected_targets
+            ):
+                ids = ", ".join(t.target_id for t in self.unexpected_targets)
+                parts.append(f"unexpected target(s) present: {ids}")
             lines.append("  Failed — " + "; ".join(parts) + ".")
 
         return "\n".join(lines)
@@ -697,10 +709,12 @@ class ExpectedTargets:
                 )
             targets[tid] = required
         head_sha = data.get("head_sha")
-        return cls(
-            targets=targets,
-            head_sha=str(head_sha) if isinstance(head_sha, str) else None,
-        )
+        if "head_sha" in data and (not isinstance(head_sha, str) or not head_sha):
+            # A present-but-malformed head_sha must not silently become None —
+            # that would disable the commit-identity guard the manifest asked
+            # for. Fail loud instead.
+            raise AggregateError("manifest 'head_sha' must be a non-empty string")
+        return cls(targets=targets, head_sha=head_sha)
 
     @classmethod
     def from_lists(
@@ -814,6 +828,12 @@ def aggregate_reports_dir(
     cannot detect a missing target. Raises :class:`AggregateError` for
     malformed input (a usage error, exit 64).
     """
+    if discovered_only and expected is not None:
+        # Exactly one mode — never silently drop the expected set (which would
+        # disable its required-coverage and commit-identity checks).
+        raise AggregateError(
+            "expected targets and discovered-only mode are mutually exclusive"
+        )
     if not discovered_only and expected is None:
         raise AggregateError(
             "no expected-target set: pass a manifest / expected targets, or "

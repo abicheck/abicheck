@@ -96,7 +96,7 @@ If the release also carries build-emitted source facts from one shared
 multi-library release with one shared facts
 pack](github-action-source-scans.md#recommended-flow-a-multi-library-release-with-one-shared-facts-pack)
 for the full walkthrough — it chains this recipe with inline `build-info`
-embedding and the [post-matrix ABI gate](#post-matrix-abi-gate-unified-verdict)
+embedding and the [post-matrix ABI gate](#post-matrix-abi-gate-fan-out-builds-fan-in-verdict)
 below.
 
 ## Matrix: multiple platforms (native scan per OS)
@@ -249,9 +249,11 @@ then guarantees the properties the old hand-written gate loop silently violated:
   carries its own severity gate decision; `aggregate` *combines* those (a
   policy-blocked `COMPATIBLE` still fails, a demoted `BREAKING` can pass) rather
   than recomputing a gate from the verdict. The exit code is `0` pass / `1`
-  coverage gap or an addition/quality-only block / `2` source break / `4` ABI
-  break. A missing required build is a **coverage** failure at `1` — never
-  promoted to a fake ABI-break exit `4`.
+  coverage gap, an addition/quality-only block, or another non-verdict per-report
+  failure (e.g. a `scan` budget overflow) / `2` source break / `4` ABI break
+  (see [`abicheck aggregate`](../reference/exit-codes.md#abicheck-aggregate) for
+  the full contract). A missing required build is a **coverage** failure at `1`
+  — never promoted to a fake ABI-break exit `4`.
 
 !!! tip
     Set `fail-on-breaking: false` in each matrix job and let the gate decide.

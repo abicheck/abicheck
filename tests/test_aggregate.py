@@ -365,6 +365,16 @@ class TestDiscoveredOnly:
         with pytest.raises(AggregateError):
             aggregate_reports_dir(tmp_path)
 
+    def test_discovered_only_with_expected_is_an_error(self, tmp_path: Path):
+        # The public helper must not silently drop the expected set (which
+        # would disable its required-coverage/commit checks) — reject the
+        # conflicting combination instead.
+        _write_report(tmp_path, LINUX, "COMPATIBLE")
+        with pytest.raises(AggregateError):
+            aggregate_reports_dir(
+                tmp_path, expected=_expect(LINUX, WINDOWS), discovered_only=True
+            )
+
 
 class TestManifestAndIdentity:
     def test_manifest_round_trip(self, tmp_path: Path):
@@ -389,6 +399,8 @@ class TestManifestAndIdentity:
             {"targets": [42]},  # non-object entry
             {"nope": 1},
             [1, 2],
+            {"targets": [{"id": LINUX}], "head_sha": 123},  # non-string head_sha
+            {"targets": [{"id": LINUX}], "head_sha": ""},  # empty head_sha
         ],
     )
     def test_manifest_rejects_malformed(self, bad):
@@ -519,6 +531,35 @@ class TestRendering:
         assert f"API_BREAK on: {LINUX}." in text
         assert "BREAKING on:" not in text
 
+    def test_text_pass_under_warn_does_not_claim_coverage_complete(
+        self, tmp_path: Path
+    ):
+        # A required target is missing but --on-missing-required warn lets the
+        # gate pass; the Gate line must NOT claim required coverage is complete.
+        _write_report(tmp_path, LINUX, "COMPATIBLE")
+        r = aggregate_reports_dir(
+            tmp_path,
+            expected=_expect(LINUX, WINDOWS),
+            on_missing_required=OnMissingRequired.WARN,
+        )
+        assert r.passed
+        text = r.render_text()
+        assert "no gate-blocking findings" in text
+        assert "required coverage complete" not in text
+        assert "(advisory)" in text  # the coverage gap is still surfaced
+
+    def test_text_fail_names_unexpected_targets(self, tmp_path: Path):
+        # Under --on-unexpected-target fail, the failure reason names the
+        # offending unexpected target(s), not just the exit code.
+        _write_report(tmp_path, LINUX, "COMPATIBLE")
+        _write_report(tmp_path, MACOS, "COMPATIBLE")  # unexpected, but clean
+        text = aggregate_reports_dir(
+            tmp_path,
+            expected=_expect(LINUX),
+            on_unexpected_target=OnUnexpectedTarget.FAIL,
+        ).render_text()
+        assert f"unexpected target(s) present: {MACOS}" in text
+
 
 class TestAggregateCLI:
     def _run(self, args):
@@ -575,6 +616,13 @@ class TestAggregateCLI:
     def test_discovered_only_conflicts_with_expect(self, tmp_path: Path):
         _write_report(tmp_path, LINUX, "COMPATIBLE")
         res = self._run(["--discovered-only", "--expect", LINUX, str(tmp_path)])
+        assert res.exit_code == 64
+
+    def test_optional_without_expect_is_usage_error(self, tmp_path: Path):
+        # --optional alone would make an all-optional (never-gated) target set —
+        # a fail-open gate. It must be a usage error, not a silent exit 0.
+        _write_report(tmp_path, LINUX, "COMPATIBLE")
+        res = self._run(["--optional", MACOS, str(tmp_path)])
         assert res.exit_code == 64
 
     def test_duplicate_target_id_usage_error(self, tmp_path: Path):

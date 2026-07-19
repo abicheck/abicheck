@@ -15,9 +15,9 @@
   `BREAKING` can pass; reports with no severity block fall back to the legacy
   verdict→exit mapping), and **coverage** (did every required target report?).
   A required-coverage gap is a *coverage* failure at exit `1`, never promoted to
-  an ABI-break exit `4`. Exit scheme: `0` pass / `1` coverage gap or an
-  addition/quality-only gate block / `2` source-API break / `4` ABI break / `64`
-  usage. The expected-target set is first-class and explicit — one of
+  an ABI-break exit `4`. Exit scheme: `0` pass / `1` coverage gap, an
+  addition/quality-only gate block, or a non-verdict per-report failure (e.g. a
+  `scan` budget overflow) / `2` source-API break / `4` ABI break / `64` usage. The expected-target set is first-class and explicit — one of
   `--manifest` (a committed source of truth fed to both matrix and gate),
   `--expect`/`--optional`, or an explicit `--discovered-only` opt-out is
   required; a bare `aggregate reports/`, a malformed manifest, or a duplicate

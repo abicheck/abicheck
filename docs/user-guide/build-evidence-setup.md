@@ -121,11 +121,20 @@ cc_library(
     # ... srcs/hdrs ...
     copts = [
         "-fplugin=$(location //tools:libabicheck-facts.so)",
-        "-Xclang", "-plugin-arg-abicheck-facts", "-Xclang", "out=abicheck_inputs",
+        # Absolute out= (see the notes below) — a relative path scatters across
+        # per-target working dirs and is discarded by Bazel's sandbox.
+        "-Xclang", "-plugin-arg-abicheck-facts", "-Xclang", "out=/abs/path/to/abicheck_inputs",
         "-Xclang", "-plugin-arg-abicheck-facts", "-Xclang", "public-roots=include",
     ],
 )
 ```
+
+!!! warning "Bazel sandboxes the compile — the pack is discarded by default"
+    The plugin writes `out=` as a side effect Bazel does not declare as an
+    action output, so the sandbox throws it away. Run the fact-collecting build
+    with the compile step un-sandboxed (`--strategy=CppCompile=local`, or
+    `--spawn_strategy=local`) and point `out=` at one **absolute** path outside
+    the sandbox so the pack survives and every TU converges on it.
 
 !!! danger "Compiler caches skip the compile — and the plugin with it"
     `ccache`/`sccache` key on preprocessed output plus arguments, **not** on

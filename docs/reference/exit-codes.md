@@ -189,7 +189,7 @@ the worst contribution across them:
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | Every required target analyzed, no blocking findings |
-| `1` | A required target was unavailable (coverage gap, default `--on-missing-required fail`) **or** an analyzed target's gate blocks on an `addition`/`quality` finding only |
+| `1` | A required target was unavailable (coverage gap, default `--on-missing-required fail`); an analyzed target's gate blocks on an `addition`/`quality` finding only; **or** a non-verdict per-report failure folds here (e.g. a `scan` report's budget-overflow exit `5`) |
 | `2` | An analyzed target's gate is a source-level / API break |
 | `4` | An analyzed target's gate is an ABI break |
 | `64` | Invalid invocation (bad arguments/options, malformed manifest, duplicate target id, or no expected-target set given) |

@@ -83,9 +83,10 @@ the breaking cleanup now, in one pass, is cheaper than deprecating twice.
 > deleted commands are a usage error" invariants below are unchanged; only the
 > count and the explicit verb list grow by one.
 
-`dump`, `compare`, `scan`, `deps`, `compat`. Nothing else is registered on the
-root `Click` group; nothing removed below leaves a hidden alias. Every deleted
-command produces the ordinary Click "No such command" usage error (exit 64) —
+`dump`, `compare`, `scan`, `deps`, `compat` — plus `aggregate` per the D13
+amendment above. Nothing else is registered on the root `Click` group; nothing
+removed below leaves a hidden alias. Every deleted command produces the ordinary
+Click "No such command" usage error (exit 64) —
 indistinguishable from a typo. `deps` keeps its two subcommands (`tree`,
 `compare`); `pr-comment` moves **off** the public tree entirely (see D3).
 
@@ -338,10 +339,11 @@ a shell loop over whatever files happen to be present cannot express that.
   usage error, because with no declared target set the gate cannot tell a
   missing required target from an intentionally absent one. Duplicate target ids
   and malformed manifests are hard usage errors (exit 64), never silent drops.
-- **Exit scheme:** `0` pass / `1` coverage gap or an addition/quality-only gate
-  block / `2` source-API break / `4` ABI break / `64` usage. The `--format json`
-  output is versioned (`aggregate_schema_version`) with the three axes kept
-  under separate `gate`/`coverage`/`compatibility` keys.
+- **Exit scheme:** `0` pass / `1` coverage gap, an addition/quality-only gate
+  block, or a non-verdict per-report failure (e.g. a `scan` budget overflow) /
+  `2` source-API break / `4` ABI break / `64` usage. The `--format json` output
+  is versioned (`aggregate_schema_version`) with the three axes kept under
+  separate `gate`/`coverage`/`compatibility` keys.
 
 `aggregate` is registered via the same sibling-module pattern as the other
 split-out commands (`abicheck/cli_aggregate.py`, imported for side-effect at the
