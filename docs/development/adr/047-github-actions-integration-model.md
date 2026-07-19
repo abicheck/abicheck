@@ -1,0 +1,1624 @@
+# ADR-047: GitHub Actions Integration Model — Project Lifecycle Over Aggregate-Centric Design
+
+**Date:** 2026-07-19
+**Status:** Proposed — not implemented. This ADR records the target domain
+model and component surface; `docs/development/plans/g30-github-actions-integration-model.md`
+carries the phased backlog that implements it.
+**Decision maker:** Nikolay Petrov
+
+---
+
+## Context
+
+ADR-017 chose a composite action as the GitHub Actions delivery mechanism and
+has held up structurally. What has drifted is everything *above* that
+mechanism: `action.yml` has grown to 51 inputs across five modes, two more
+composite actions (`collect-facts`, `baseline`) were added for source
+evidence and snapshot production, and `abicheck aggregate` was added as a
+fan-in CLI command. Each addition was locally reasonable; the result read
+command-first rather than scenario-first — a project owner had to already
+know which CLI mode maps to their build before they could pick an Action
+input.
+
+This ADR is scoped to the *integration model*: the domain vocabulary, the
+component surface, and the artifacts that flow between jobs. It does not
+change detector logic, snapshot schemas, or the core `compare`/`scan`/`dump`
+CLI semantics.
+
+### What the audit found
+
+Grounded in reading `action.yml`, `action/run.sh`, `actions/collect-facts/`,
+`actions/baseline/`, `abicheck/cli_aggregate.py`, `abicheck/aggregate.py`,
+and the doc corpus in `docs/user-guide/`:
+
+1. **`abicheck aggregate` is confirmed fan-in-only.** `abicheck/aggregate.py:16-24`
+   states it directly: it "does not analyze a binary — it reconciles
+   already-produced reports." It combines worst-verdict, each report's own
+   pre-computed gate decision, and target-coverage — it never re-runs a
+   comparison. There is no `actions/aggregate` composite action; today it's
+   invoked as a raw CLI step in recipe docs. This confirms the premise of
+   this ADR: aggregate is one scenario (S28 below), not a load-bearing
+   abstraction the rest of the model should be built around.
+
+2. **Root `action.yml` has real per-mode input scoping the schema doesn't
+   express.** `debug-info1/2`, `devel-pkg1/2`, `dso-only`,
+   `include-private-dso`, `keep-extracted`, `fail-on-removed-library`, and
+   `jobs` are declared as unconditional top-level inputs but are only
+   forwarded by `run.sh` inside the `_is_release_style_operand()` guard
+   (`action/run.sh:387-407`) — i.e. only when `old-library`/`new-library` is
+   a directory or package, not a single binary pair. `abi-baseline` is
+   resolved unconditionally at `run.sh:150-233` but only consumed by
+   `compare`/`scan`; setting it on `mode: dump` silently no-ops with no
+   warning. `estimate`/`audit` are scan-only aliases declared generically.
+   None of this is a bug — `run.sh` comments document the intent, and
+   `action.yml`'s `description:` text for every one of these inputs already
+   states its scope inline (e.g. `debug-info1`: "compare mode,
+   directory/package operands only"; `abi-baseline`: "for compare mode ...
+   or scan mode"; `estimate`/`audit`: "scan mode only" — confirmed by
+   re-reading `action.yml`). The remaining gap is narrower than a first
+   read suggests: there is no *runtime* signal when one of these is set on
+   an incompatible mode — a reader who doesn't check the description text
+   gets silent no-op behavior instead of a warning. §"P0" in the companion
+   plan scopes this correctly as a runtime-validation item, not a
+   documentation rewrite.
+
+3. **`collect-facts`'s `phase: auto` doesn't complete for two of three
+   producers.** For `producer: wrapper` or `producer: clang-plugin`,
+   `phase: auto` silently only runs `prepare` (`actions/collect-facts/run.sh:714-716`)
+   — the caller's own build step still has to run before `verify` means
+   anything, so `auto` is only actually a single self-contained step for
+   `producer: replay`. This is exactly the kind of implicit two-step
+   choreography that S8/S9 need to surface explicitly rather than bury in a
+   `phase: auto` default.
+
+4. **Documentation is scenario-adjacent but command-organized.** Multi-DSO
+   guidance is split three ways (`github-action.md`, `github-action-recipes.md`,
+   `github-action-source-scans.md`) with no single canonical page (confirmed by
+   research into `docs/user-guide/*`). The L0–L5 evidence-layer table is
+   deliberately restated in five places per `docs/CLAUDE.md`'s own note — by
+   design, but it means any layer-model or producer change has a five-file
+   blast radius. `docs/user-guide/choose-your-workflow.md` is the closest
+   existing thing to a scenario front door and is the right foundation to
+   build on, not replace.
+
+5. **Two real pilots exist, but with materially different scope, and an
+   earlier draft of this finding mischaracterized the second one —
+   corrected here per review.** `validation/pvxs-abi-validation-2026-07.md`
+   (epics-base/pvxs, two libraries `libpvxs`/`libpvxsIoc`, Make-based build,
+   no compile DB) found and fixed three real defects (an O(N²) perf bug,
+   RTTI-symbol false positives, a zero-config `scan --sources` include-dir
+   bug) and ends with a recommended two-library `compare` workflow — this
+   is a genuine CI-*integration* pilot with a written validation report in
+   that format.
+   **A second real pilot does exist and was not fabricated, but an earlier
+   draft of this ADR wrongly said it "appears only as a scan-timing data
+   point," missing `docs/development/adr/044-reachability-aware-suppression.md`**,
+   whose Context section states plainly: "A field review of an oneDAL
+   integration (PR 3693) found that a blanket namespace suppression ...
+   silently hid a genuine ABI break" — a real, significant, PR-specific
+   finding that drove ADR-044's entire reachability-aware-suppression
+   redesign (`Suppression.reachability`, `internal_symbol_required_by_public_api`,
+   `--verify-runtime`). `docs/development/plans/g21-oneshot-deep-compare.md`
+   ("the oneDAL field evaluation (2026-06)") and `validation/REPORT.md`
+   document the same underlying evaluation from a different angle (CLI
+   staging friction — six manual pipeline stages to reach L4/L5 confidence
+   — which drove the G21 one-shot-compare UX plan).
+   **What this second pilot does and does not establish, precisely:** it is
+   a real, high-value field review that found a genuine tool-correctness
+   defect (arguably more architecturally significant than any single PVXS
+   finding) and a real CLI-UX defect — but by its own description it is a
+   **package/binary-level compare evaluation** (conda-forge `dal` release
+   artifacts, no source checkout, no build reuse, no CI workflow proposed),
+   not a **GitHub-Actions CI-integration pilot** in PVXS's sense. It does
+   not exercise vendor-toolchain build reuse, multi-DSO target resolution
+   from one build, or multiple baseline channels — the specific claims
+   §8's S9/S15/S17/S21 rows make. So the corrected, precise statement is:
+   **a second pilot exists and produced real, valuable findings, but it does
+   not substitute for the CI-integration-workflow validation those four
+   scenario rows still need.** §14 records that remaining gap accurately
+   now, instead of the earlier draft's inaccurate "no second pilot located"
+   framing.
+
+---
+
+## Decision
+
+Reorganize the GitHub Actions integration surface around a **project
+integration lifecycle** instead of the CLI command set, with `aggregate`
+demoted to one terminal fan-in scenario within that lifecycle:
+
+```text
+project configuration
+    → existing or instrumented product build
+    → build outputs and evidence
+    → target discovery/resolution
+    → baseline resolution
+    → scan/compare/audit          (per resolved target — this is "check")
+    → reporting
+    → fan-in                      (aggregate — required for any `deferred`-gate check, §7's correction; optional otherwise)
+    → baseline publication/refresh
+```
+
+Concretely, this means:
+
+- A stable **domain vocabulary** (§1) that every Action input, schema field,
+  and doc page reuses instead of ad hoc terms.
+- A small number of **primitives** (existing `collect-facts`/`baseline`,
+  plus new `resolve-baseline` and `check-target`) that each do one lifecycle
+  step, and **reusable workflows** that compose them for the common
+  end-to-end paths (§4).
+- A **standardized build-output contract** so "build once, check many
+  targets" is a real artifact, not an implicit convention (§2, §5).
+- A **baseline lifecycle** with two named channels — release-contract and
+  accepted-main — resolved fail-loud, never silently degraded to "no
+  baseline = compatible" (§2, §6).
+- A **report envelope** that separates compatibility, evidence coverage,
+  operational status, and policy-gate decision as four distinct fields, so
+  `aggregate` (or any consumer) never has to infer one from another (§7).
+- **`.abicheck.yml` gains a portable `targets:`/`profiles:` block**; GitHub
+  runner/token/artifact concerns stay in workflow inputs, never migrate into
+  the portable config (§3, decision D5 below).
+
+---
+
+## 1. Domain model
+
+| Term | Definition | Where it's new vs. existing |
+|---|---|---|
+| **Project** | A repository or shipped product containing one or more ABI/API contracts. | Implicit today (= "the repo"); made explicit as the top-level config scope. |
+| **Build profile** | One ABI-significant build configuration: OS, arch, compiler/toolchain, C++ ABI/stdlib, debug/release, ISA, feature flags — the axis that makes two binaries comparable or not. | New explicit identity. Today only encoded loosely via directory/matrix-lane naming. |
+| **Target** | One independently checkable ABI/API contract — usually one shared library, but also a plugin contract, an app-consumer contract, or a build-wide source audit. | New explicit identity. Today conflated with "library" or "the binary passed to `compare`". |
+| **Release bundle** | A set of binaries shipped together with cross-library dependencies — the scope `abicheck compare` (directory/package mode) and `--manifest` bundle analysis already operate on (`docs/user-guide/multi-binary.md`). | Existing capability, newly named distinctly from "multiple independent targets" (S14 vs. S15). |
+| **Build output** | The standardized, portable artifact a build publishes: binaries, headers, profile identity, commit identity, toolchain provenance, target mapping, compile DB / source facts, digests. | **New** (§2, §5). Closest existing analog is the ad hoc directory a user points `--library`/`--header` at; this makes it a defined, versioned contract. |
+| **Source evidence** | L3/L4/L5 evidence from replay/wrapper/plugin (`abicheck/buildsource/`), either build-wide or target-specific. | Existing (`actions/collect-facts`, ADR-028/030/038); this ADR requires every evidence pack to declare which targets it projects onto (§9 — the S16 boundary). |
+| **Baseline channel** | Named lifecycle source of a baseline: `release-contract`, `accepted-main`, `explicit` (tag/version), or `custom`. | Existing informally in `docs/user-guide/baseline-management.md`'s "two kinds of baseline"; made a first-class enum here. |
+| **Baseline set** | One atomic manifest + one snapshot per target, for one build profile or release bundle. | **New name** for what `actions/baseline`'s `manifest.json` already produces (`actions/baseline/build_manifest.py`) — no code change, just the vocabulary this ADR standardizes on. |
+| **Check** | One application of policy to `target × profile × baseline channel × evidence requirement`. | New unit of accounting — today implicit in "one `compare`/`scan` invocation." |
+| **Run plan** | The exact, immutable description of which checks a CI run performs. | **New artifact** (§5) — today implicit in workflow YAML + matrix, not machine-readable. |
+| **Report** | The result of one check, carrying full identity (target, profile, candidate, baseline, config, commit, evidence depth) — §7. | Existing JSON report, extended with the identity fields §7 requires. |
+| **Fan-in** | Combining multiple reports into one CI status. | Existing (`abicheck aggregate`) — explicitly scoped to S28, not the architecture's center. |
+
+### Why these seven boundaries matter (per the task's explicit ask)
+
+The following are easy to conflate and have different failure semantics — a
+design built around `aggregate` naturally collapses several of them into
+"multiple reports," which loses the distinction:
+
+1. **Multi-binary bundle analysis** (S14) — one `compare`/`--manifest`
+   invocation, one report, cross-library findings. A missing library in the
+   bundle is itself a finding.
+2. **Multiple independent targets** (S15) — N separate checks, N reports,
+   each with its own header/compiler context; one target's failure doesn't
+   invalidate another's report.
+3. **Multiple build profiles** (S17) — the *same* target checked under
+   different profiles; a profile is a baseline-set axis, not a target axis.
+4. **Multiple baseline channels** (S21) — the *same* target/profile checked
+   against two different baselines answering two different questions
+   ("did I break the last release" vs. "did I break what main already
+   accepted").
+5. **Shared source facts** (S16) — one evidence pack, multiple target
+   *projections*; a pack is never automatically "for" every DSO in the repo.
+6. **Multiple GitHub Actions jobs** — an orchestration/scaling concern
+   (matrix, artifact upload/download), orthogonal to all of the above.
+7. **Aggregate report** (S28) — a specific fan-in of items 2–4, needed only
+   when more than one check's result must produce one CI status.
+
+---
+
+## 2. Standardized build output
+
+`abicheck-build/` (versioned artifact directory), producer-agnostic:
+
+```text
+abicheck-build/
+  build-output.json          # schema below
+  artifacts/                 # binaries as published by the real build
+  headers/                   # public header roots, as-installed layout
+  generated-headers/         # codegen/configure output, kept separate from headers/
+  evidence/
+    compile_commands.json    # if produced
+    abicheck_inputs/         # source-facts pack, per ADR-028's inputs-pack protocol
+  provenance/                # toolchain version dumps, build logs digest, etc.
+```
+
+`build-output.json` (schema `abicheck.build-output/v1`):
+
+```json
+{
+  "schema": "abicheck.build-output/v1",
+  "project": "epics-base/pvxs",
+  "head_sha": "b7e2c1a...",
+  "source_tree_digest": "sha256:...",
+  "profile": {
+    "id": "linux-x86_64-gcc13-release",
+    "os": "linux", "arch": "x86_64",
+    "compiler": {"family": "gcc", "version": "13.2.0"},
+    "cxx_abi": "itanium", "stdlib": "libstdc++",
+    "config": "release"
+  },
+  "targets": [
+    {
+      "id": "libpvxs",
+      "binary": "artifacts/lib/libpvxs.so.1.5",
+      "public_header_roots": ["headers/pvxs"],
+      "generated_header_roots": ["generated-headers/pvxs"],
+      "compile_context": {"include_dirs": ["headers", "generated-headers"], "defines": ["PVXS_ENABLE_EXPERT_API"]},
+      "bundle": "pvxs-release",
+      "evidence": {"kind": "source-facts", "path": "evidence/abicheck_inputs", "projection": "declared"}
+    },
+    {"id": "libpvxsIoc", "binary": "artifacts/lib/libpvxsIoc.so.1.5", "...": "..."}
+  ],
+  "bundles": [{"id": "pvxs-release", "targets": ["libpvxs", "libpvxsIoc"]}],
+  "evidence_producer": {"kind": "wrapper", "tool": "abicheck-cc", "version": "0.x.y"},
+  "digests": {"artifacts/lib/libpvxs.so.1.5": "sha256:..."},
+  "diagnostics": {"warnings": [], "skipped_targets": []}
+}
+```
+
+Design points:
+
+- **`generated-headers/` is separate from `headers/`** so S10 (codegen) can't
+  silently claim a `headers/` root that a plain configure step didn't
+  actually populate — the build-output *validator* (§11) treats an empty
+  `generated-headers/` root declared non-empty in `build-output.json` as a
+  hard validation failure, not a warning. **A target needs its own way to
+  say "some of my public headers are generated" — missing from an earlier
+  draft, flagged by review.** The validator's empty-root check operates on
+  the top-level `generated-headers/` directory, but nothing in a *target*
+  entry told it which targets actually depend on that directory being
+  populated — a project with generated public headers had no schema field
+  to declare that, forcing either folding generated roots back into
+  `public_header_roots` (silently defeating the S10 guard, since the
+  validator can no longer tell a target's claim is genuinely
+  codegen-dependent) or leaving the validator with nothing to check. Fixed:
+  each target entry gains `generated_header_roots` (see the example above),
+  parallel to `public_header_roots` — the validator's S10 check applies
+  specifically to the union of `generated_header_roots` across all targets
+  that declare one, and a target with an empty `generated_header_roots: []`
+  is simply not making an S10 claim at all (no failure, nothing to check).
+- **`evidence.projection` is `"declared"` or `"inferred"` in the schema, but
+  P1's validator only *accepts* `"declared"` — a self-contradiction in an
+  earlier draft, fixed per review.** `"declared"` means the build itself
+  asserted this evidence pack belongs to this target (e.g. per-target
+  compile DB filtering, or a wrapper invoked once per link step); `"inferred"`
+  would mean abicheck derived it from a build-wide pack via TU→target
+  mapping. §9/D8 are explicit that the TU→link-unit→DSO attribution needed
+  to do that *safely* is P2, not built here — so a build-output validator
+  that accepted `projection: "inferred"` today would let a build-wide,
+  unattributed pack validate as legitimate per-target evidence before the
+  safety mechanism that would justify trusting it exists, silently
+  reintroducing the "claim source-depth evidence for every DSO from an
+  unprojected pack" failure P0.4's caveat and §9's safe model both exist to
+  prevent. **Fix: the `"inferred"` enum value is schema-reserved for P2 —
+  P1.1's `build-output.json` validator (§11) treats any `evidence.projection`
+  value other than `"declared"` as a hard validation failure**, not merely
+  lower-confidence-but-accepted. Until P2 ships real attribution, a
+  build-wide pack may only feed build-wide source audits (S5) and
+  per-target header-depth scans, exactly as §9's safe model already says —
+  never a per-target `effective_depth: source` claim, regardless of what a
+  future `"inferred"` value might one day represent.
+- **abicheck does not produce `build-output.json` by building the project.**
+  A thin `abicheck build-output emit` helper (new, §11) or direct authoring
+  is how a project's existing build (or a CMake/Meson `install` step)
+  populates it — this is the mechanism for "build once, scan many" (S3)
+  without abicheck ever owning the build.
+- **One `build-output.json` = one build profile, always — confirmed gap from
+  review.** `profile` above is a singular object, not a list, by design: a
+  single build produces binaries for exactly one OS/arch/compiler/config
+  combination, so one artifact can only ever describe one profile. An
+  earlier draft of §8's S17 row said `check-project.yml` "consumes a
+  `build-output.json` artifact" (singular) while also matrixing over
+  `profiles[]` (plural) with no stated mapping — under-specified, since a
+  reader could not tell whether that meant one artifact holding multiple
+  profiles (which the schema doesn't support) or something else. **S17's
+  actual model:** each build profile in `.abicheck.yml`'s `profiles:` block
+  corresponds to its own CI **build job**, each publishing its own
+  uniquely-named artifact — `abicheck-build-<profile.id>/` (e.g.
+  `abicheck-build-linux-x86_64-gcc13-release/`,
+  `abicheck-build-windows-x86_64-msvc-release/`) — so `check-project.yml`'s
+  matrix has one cell per `(target, profile)` pair, and each cell downloads
+  the *one* `build-output.json` artifact matching its own `profile.id`, not
+  a shared artifact it has to disambiguate at runtime. This keeps the
+  build-output schema itself unchanged (still one profile per artifact) and
+  puts the multi-profile fan-out where it structurally belongs: in the
+  artifact-naming/matrix contract, not in `build-output.json`'s shape.
+
+---
+
+## 3. Project contract: extending `.abicheck.yml`, not inventing a manifest zoo
+
+Four config-surface options were compared (§13, decision D5); the chosen
+answer is **B+C hybrid**: `.abicheck.yml` gains a portable
+`targets:`/`profiles:`/`baseline:` block (stable, project-owned, checked into
+the repo), while GitHub-runner-specific and per-run values (candidate
+artifact path, current SHA, gate mode, token) stay as **workflow/Action
+inputs**, never migrate into `.abicheck.yml`. This avoids both extremes: a
+config file polluted with `runs-on`-flavored values, and a second
+un-versioned YAML dialect duplicating what `.abicheck.yml` already owns
+(policy, suppression, severity).
+
+```yaml
+# .abicheck.yml (excerpt — new top-level keys)
+targets:
+  libpvxs:
+    kind: library          # default; the schema's discriminator (see below)
+    binary_pattern: "lib/libpvxs.so*"
+    public_headers: ["headers/pvxs"]
+    bundle: pvxs-release
+    bundle_only: false     # default; run libpvxs both standalone (S15) AND as a pvxs-release bundle member (S14)
+  libpvxsIoc:
+    kind: library
+    binary_pattern: "lib/libpvxsIoc.so*"
+    public_headers: ["headers/pvxsIoc"]
+    bundle: pvxs-release
+    bundle_only: false
+  myapp-consumer:
+    kind: app-consumer     # S22 — abicheck compare --used-by
+    consumer_binary_pattern: "bin/myapp"
+    library: libpvxs
+  ioc-plugin-contract:
+    kind: plugin-contract  # S23 -- compare --required-symbols (ADR-043)
+    contract_file: "contracts/ioc-plugin.syms"  # one required symbol per line, see note below
+    library: libpvxsIoc
+
+bundles:
+  pvxs-release:
+    targets: [libpvxs, libpvxsIoc]
+
+profiles:
+  linux-x86_64-gcc13-release:
+    contract: true          # this lane IS an ABI contract — gets a baseline, gates CI
+    os: linux
+    arch: x86_64
+  windows-x86_64-msvc-release:
+    contract: true
+    os: windows
+    arch: x86_64
+  ubuntu-latest-clang-debug-sanitizer:
+    contract: false         # test-only CI lane — never gets a baseline (S17's point)
+
+baseline:
+  channels:
+    release-contract: {source: github-release, asset_pattern: "abicheck-baseline-*.tar.zst"}
+    accepted-main: {source: actions-cache, key_prefix: "abicheck-baseline-main"}
+```
+
+**Open gap, not resolved by this excerpt: `baseline: channels:` declares
+which channels *exist*, not which channel(s)/depth/`required` policy each
+target/profile should actually run — flagged in a further review round.**
+§5's `run-plan.json` requires `baseline_channel`, `evidence_depth`, and
+`required` per check, and S21/S26 need the *same* target/profile checked
+against more than one channel or depth simultaneously (§8). Nothing shown
+here assigns those per-check values — a P1.4 generator following only this
+excerpt would have to invent a default (e.g. "run every declared channel at
+`headers` depth, `required: true`") or silently drop the S21/S26
+multi-channel/multi-depth cases this ADR's own report-envelope corrections
+(§7) were written to support. This needs a genuine schema addition — most
+likely a `checks:` list per target (or per `bundle`) naming
+`{channel, depth, required, gate_mode}` tuples, closing the gap between
+"channels that exist" and "checks that run" — which this ADR does not fully
+design. Treat P1.4/P1.5 as needing to define that list before a run-plan
+generator can be implemented, not as already specified by the `targets:`/
+`baseline:` excerpts shown so far. **That `checks:` list also needs
+profile scoping, not just channel/depth/required — a second open gap,
+flagged in a further review round.** A target or bundle that only exists
+on a subset of contract profiles (a Windows-only library, a Linux-only
+`.so`) would still, under the "cross every `checks:` entry with every
+`contract: true` profile" model implied above, produce impossible cells
+for the profiles it doesn't exist on — no candidate binary, no baseline to
+compare, nothing for `check-target` to do. The generator needs either an
+explicit profile selector/condition on each `checks:` entry, or to derive
+candidate `(target, profile)` pairs from each profile's own
+`build-output.json` target list (only generate a cell where the target
+actually appears in that profile's declared `targets[]`) rather than a
+blind cross-product. This ADR does not pick between those two designs;
+P1.4/P1.5 must resolve it, not assume the naive cross-product is safe.
+
+**`targets:` needs a `kind` discriminator — missing from an earlier draft,
+flagged by review.** S22 (application compatibility) and S23
+(plugin/dlopen contract) route through `check-target` too (§8), but the
+`targets:` shape shown in an earlier draft only modeled shared-library
+targets (`binary_pattern`, headers, `bundle`) — nothing told `check-target`
+to build an `--used-by` invocation for an app-consumer target or the right
+invocation for a contract-file target, so P1.4 generating a run plan from
+P1.5's config had no way to represent either scenario without inventing an
+incompatible schema later. Fixed: every target entry declares `kind`
+(`library` — the default, existing S1–S17 shape; `app-consumer` — S22,
+`consumer_binary_pattern` + `library` it consumes; `plugin-contract` — S23,
+`contract_file` + `library` it's a plugin for). `check-target` branches on
+`kind` to select which root-action mode/CLI invocation to build — `compare`
+for `library`, `compare --used-by` for `app-consumer`, and (**corrected per
+a further review round**) `compare --required-symbols <contract_file>` for
+`plugin-contract`, **not** a standalone `plugin-check` command: ADR-043
+removed `plugin-check` and folded it into `compare`'s `--required-symbol`/
+`--required-symbols` flags (`abicheck/cli_options.py:1419-1425`) — the root
+`action.yml` still only accepts `mode: compare|dump|scan|deps-tree|deps-compare`
+(§"What the audit found," finding 2), so an S23 implementation following an
+earlier draft's `plugin-check` invocation would call a mode that doesn't
+exist. The report envelope (§7) stays the same shape across all three kinds;
+only the underlying `compare` flags differ.
+
+**The root `action.yml` cannot express `--used-by`/`--required-symbols`
+today — an unresolved gap this ADR's `kind` routing depends on, flagged in
+a further review round.** `check-target`'s S22/S23 branches (above) say it
+composes root `action.yml` for `app-consumer`/`plugin-contract` kinds, same
+as `library`, but `action.yml`/`action/run.sh` have no input or forwarding
+path for `--used-by` or `--required-symbol(s)` at all — that CLI support
+exists only in `abicheck/cli_compare_helpers.py`, never surfaced through
+the composite Action. If `check-target` is implemented by composing the
+root Action unchanged, S22/S23 have no way to pass the consumer binary
+path or symbol-contract file through. **P1.3 must resolve this one of two
+ways, and this ADR does not pick for it:** (a) extend `action.yml`/
+`run.sh` with `used-by`/`required-symbols` inputs and forwarding — the more
+consistent option, keeping `check-target` uniform across all three
+`kind`s, but a real `action.yml` code change beyond this ADR's scope to
+spec in detail; or (b) `check-target` invokes the `abicheck` CLI directly
+for `app-consumer`/`plugin-contract` kinds, bypassing the root composite
+Action's mode dispatch entirely for just those two kinds. Either is
+workable; leaving the root Action surface unchanged while claiming
+`check-target` "composes root action.yml" for these kinds, as an earlier
+draft implied, is not.
+
+**`contract_file`'s format is a `.syms` line file, not YAML — a second
+correction, from a follow-up review round.** `--required-symbols`'s loader
+(`abicheck/cli_compare_helpers.py`'s `_load_required_symbols`) reads one
+linker symbol name per line, ignoring blank lines and `#`-prefixed comments
+— it is not a structured/YAML parser. An earlier draft of this correction's
+own example showed `contract_file: "contracts/ioc-plugin.yml"`, which would
+feed YAML syntax (keys, list markers, indentation) into that line-based
+loader as if each line were a literal required-symbol name — producing
+bogus "missing entrypoint" findings for symbols that were never real symbol
+names, just YAML structure. Fixed: `contract_file` is documented as a
+`.syms` file (one required linker symbol per line, `#` comments allowed),
+matching `--required-symbols`'s actual format exactly — not a YAML
+manifest a P2 parser would need to be built to consume.
+
+**`app-consumer`/`plugin-contract` targets resolve their baseline through
+`library`, not their own target name — an unstated rule an earlier draft
+left implicit, flagged in a further review round.** `resolve-baseline` is
+defined as `channel × target × profile` (§6), and `actions/baseline`
+produces one snapshot per `library` target (`kind: library`), never one
+named after an `app-consumer`/`plugin-contract` entry — there is no
+`myapp-consumer.abicheck.json` or `ioc-plugin-contract.abicheck.json` in
+any baseline set, because those aren't things `actions/baseline` snapshots.
+Without an explicit rule, `resolve-baseline` for an S22/S23 check would
+look for a baseline named after the contract target itself and report it
+`not_found` every time. **Rule:** for `kind: app-consumer` or
+`kind: plugin-contract`, `resolve-baseline` resolves the baseline for the
+target's `library` field (e.g. `myapp-consumer` → resolves `libpvxs`'s
+snapshot), while the check's own identity (`check_id`/`target_id`, §7)
+stays the contract target's name (`myapp-consumer@profile#channel@depth`)
+— the *baseline lookup key* and the *check identity* are deliberately
+different fields for these two `kind`s, unlike `kind: library` where they
+coincide.
+
+**Candidate/new-side lookup needs the same `library` redirect, not just
+`resolve-baseline` — a follow-up gap in the fix above, flagged in a later
+review round.** `app-consumer`/`plugin-contract` targets have no
+`binary_pattern` of their own (§3's example shows `consumer_binary_pattern`/
+`contract_file` instead) — only their `library` field's target entry has a
+`binary_pattern` pointing at a real built DSO. Redirecting only
+`resolve-baseline` (the *old*/baseline side) to `library` while leaving
+candidate-artifact lookup (the *new* side — what `check-target` hands to
+`compare --used-by`/`--required-symbols` as the library under test)
+target-keyed would still have an S22/S23 implementation look for a
+`myapp-consumer`/`ioc-plugin-contract` binary in `build-output.json`'s
+`targets[]` and fail before ever invoking the scoped compare. **Same rule,
+applied consistently:** candidate artifact and public-header/compile-context
+lookup for `app-consumer`/`plugin-contract` targets also resolve through
+`library` — every binary/header/build-context lookup for these two `kind`s
+uses `library`, only the check's own reporting identity
+(`check_id`/`target_id`, `consumer_binary_pattern`/`contract_file` for the
+scoped input) stays keyed to the contract target's own name.
+
+**`profiles:` shape, missing from an earlier draft — flagged by review.**
+§8's S17 row and P1.5 rely on `.abicheck.yml` declaring which build
+profiles are ABI contracts (get a baseline, gate CI) versus test-only CI
+lanes (never do) — that's the whole point of "not every CI lane gets a
+baseline." An earlier draft of this excerpt defined `targets`/`bundles`/
+`baseline` but never actually showed `profiles:`, leaving a P1.5
+implementer to invent an incompatible shape. Each `profiles:` entry's `id`
+(the map key) is the same `profile.id` string used throughout §2/§5/§7
+(`build-output.json`'s `profile.id`, `run-plan.json`'s `checks[].profile`,
+the report envelope's `profile_id`) — `.abicheck.yml` is where that ID
+space is declared and where `contract: true/false` decides run-plan
+inclusion; `build-output.json` still carries the *detailed* profile identity
+(compiler version, stdlib, etc., §2) per actual build, keyed by this same
+`id`.
+
+Naming resolution for the four overloaded "manifest" meanings the task
+flags — each keeps one unambiguous name, none is called bare `manifest.json`:
+
+| Concept | Canonical name | Existing artifact it maps to |
+|---|---|---|
+| Bundle cross-library contract | `bundle-contract.yml` / the existing `--manifest` flag to `compare`/`multi-binary` | Already exists (`docs/user-guide/multi-binary.md`'s `--manifest`); flag name unchanged, doc term clarified. |
+| Baseline-set descriptor | `baseline-set.json` (**archive-internal name only — see correction below**) | `actions/baseline/build_manifest.py`'s `manifest.json` today — **but not a no-code-change rename, corrected per review**: §4's `actions/baseline` primitive row and P1.6 both require real producer changes (consuming `.abicheck.yml` `targets:`, staging bundle-member ELF binaries into a `binaries/` directory) beyond the existing `manifest.json` content. Treating this row as "just a doc rename" would leave `resolve-baseline`'s bundle path with no actual producer for the archive contents it needs — see §4's `actions/baseline` row and §10/P1.6 for the real contract. |
+| Aggregate expected-target set | `abicheck aggregate --manifest` (unchanged CLI flag) / doc term "target-manifest" | Existing `cli_aggregate.py` flag. |
+| Build evidence pack descriptor | `build-output.json` (§2) | New. |
+
+**Filename reconciliation, flagged by review — `baseline-set.json` is an
+archive-internal name, not `actions/baseline`'s raw output filename.**
+`actions/baseline` keeps emitting `manifest.json` exactly as it does today
+(`actions/baseline/action.yml`'s `manifest-path` output, `run.sh`,
+`build_manifest.py` — none of that changes name). §6/§10's `baseline-set.json`
+references describe the file **as staged inside a `publish-baseline.yml`/
+`update-main-baseline.yml`-built archive or cache entry** — those workflows
+are what copies `actions/baseline`'s `manifest.json` output into the archive
+under the `baseline-set.json` name (or, more simply, keep the on-disk name
+`manifest.json` inside the archive too and treat "`baseline-set.json`"
+as this ADR's schema/doc term for that file's *content*, not a mandated
+filename — implementation should pick whichever is less churn and record
+the choice when P1.2/P1.6 land). What must **not** happen is what an
+earlier draft's inconsistency risked: `resolve-baseline` looking for a
+literal `baseline-set.json` inside an archive that only ever contains
+`manifest.json`, silently failing to find it. `resolve-baseline` (P1.2) must
+be written against whichever filename the archiving workflow (P1.6)
+actually produces, not against this ADR's schema-id term assumed to be a
+filename.
+
+---
+
+## 4. Component surface
+
+### Low-level primitives (kept, one gains a sibling)
+
+| Action | Responsibility | Status |
+|---|---|---|
+| `actions/collect-facts` | Prepare/verify source evidence for one producer (replay/wrapper/clang-plugin). Does not decide project topology. | Existing — kept as-is; `phase: auto`'s two-producer partial-completion (finding 3 above) gets a fail-loud diagnostic, not silent truncation (P0 item). |
+| `actions/baseline` | Produce one baseline set (snapshot + `baseline-set.json`) from resolved targets. Read-only: never commits/pushes (already true — `actions/baseline/action.yml:6-8`). | **Existing, but not kept as-is — corrected across two review passes.** Today it accepts only a flat `libraries:` input and writes `.abicheck.json` snapshots + `manifest.json` (`actions/baseline/run.sh`, `build_manifest.py`); this model requires it to also (a) consume the new `targets:` block from `.abicheck.yml` where available, and (b) — the change P1.6's correction made explicit — copy each bundle member's source **ELF binary** into a `binaries/` directory and record its path/digest in `baseline-set.json`, since bundle-scoped `resolve-baseline` has no other producer for the inputs S14's baseline correction requires. Listing this as "kept as-is" in an earlier draft risked an implementer skipping both changes. |
+| `actions/resolve-baseline` | Resolve `channel × target × profile` → a *kind-dependent* result (**corrected below**: one baseline snapshot path for `kind: library`/`app-consumer`/`plugin-contract` targets, but a **set of staged member binaries** for `kind: bundle` — never a single scalar snapshot path for every case), checking schema/digest/config-identity/evidence-producer compatibility; distinguishes not-found / ambiguous / wrong-profile / stale-schema / incompatible-evidence and never turns any of those into a compatibility verdict. | **New** — see rationale below. |
+| root `action.yml` | Execute one `compare`/`dump`/`scan`/`deps-tree`/`deps-compare` invocation. | Existing, unchanged surface; input-scoping documentation fixed per finding 2 (P0), not restructured. |
+| `actions/check-target` | Compose `resolve-baseline` + root action + `collect-facts` (if evidence required, **`phase: verify`/`auto`-for-replay only** — see note below) for **one resolved target**; always emits the report envelope (§7); accepts `gate-mode: local\|deferred\|advisory`. | **New** — the single high-level primitive the task's "smaller surface" option asks to evaluate; adopted (see decision D6). |
+| — (no dedicated Action) | Fan-in. | `abicheck aggregate` stays a plain CLI step invoked from the `check-project` reusable workflow (§ below) — a dedicated `actions/aggregate` composite adds no value over one `run:` line, since aggregate's job is a single CLI call with no shell orchestration to hide. |
+
+**Why `resolve-baseline` is a new primitive, not folded into `check-target`
+or the root action:** every one of S2/S19/S20/S21's failure modes is a
+baseline-resolution failure, and today that logic is inlined and duplicated
+inside `action/run.sh:150-233` (the `abi-baseline` resolution block) with no
+independent success/failure signal a caller can branch on. Separating it
+lets `check-target` treat "baseline not found" as a distinct, typed
+condition instead of falling through to whatever `compare`'s own
+missing-file error text happens to be.
+
+**`check-target`'s `collect-facts` composition cannot include `phase:
+prepare` for wrapper/clang-plugin producers — a real structural constraint,
+flagged by review.** `collect-facts`'s existing contract (§"What the audit
+found," finding 3, and `actions/collect-facts/action.yml`'s `phase` input)
+requires `prepare` to run **before** the project's own build (it sets
+`ABICHECK_CC_*`/`ABICHECK_PLUGIN_FLAGS` env vars the build's compiler
+invocations must pick up) and `verify` to run **after** that build produced
+its evidence pack. `check-target` is invoked *after* target
+resolution/build-output already exists (S3's whole point) or, in S4's
+single-job shortcut, as a step following the caller's own build steps — in
+neither case can it retroactively instrument a compiler invocation that
+already happened. So `check-target`'s internal `collect-facts` call is
+**`phase: verify`-only for wrapper/clang-plugin evidence** (checking a pack
+that a separate, earlier step already prepared) and **`phase: auto`
+only for `producer: replay`** (which needs no pre-build hook — replay reads
+the source tree directly, per finding 3's note that `auto` only completes
+standalone for `replay`). For S8/S9 (wrapper/plugin evidence), the caller's
+workflow is responsible for the `collect-facts phase: prepare` step *before*
+its build step — `check-single.yml`/`check-project.yml` document this as an
+explicit prerequisite step, not something `check-target` can do internally.
+This is not new capability lost, just precision about where the existing
+two-phase `collect-facts` contract's boundary actually falls relative to
+`check-target`'s own invocation point.
+
+### Reusable workflows
+
+| Workflow | Composes | Primary scenarios |
+|---|---|---|
+| `check-single.yml` | a single `check-target` call (one target, one profile) — `check-target` owns baseline resolution internally, see below | S1, S2, S5, S6 |
+| `check-project.yml` | consumes a `build-output.json` artifact → dynamic matrix over `targets[]`/`profiles[]` **and, separately, `bundles[]`/`profiles[]`** → `check-target` per cell → `aggregate` job whenever any cell uses `gate-mode: deferred` (**not** merely "if `>1` cell" — see correction below), otherwise optional | S3, S14 (via one `check-target` call per bundle), S15, S17, S25, S28 |
+| `publish-baseline.yml` | build/consume `build-output.json` → `actions/baseline` → upload as release asset (atomic archive, §10) | S19 |
+| `update-main-baseline.yml` | same as above, targeting the `accepted-main` channel storage backend, triggered on default-branch push | S20 |
+
+**Resolution ownership, made explicit (review caught this was ambiguous in
+an earlier draft):** `resolve-baseline` is invoked exactly once per check,
+*inside* `check-target` (§4's primitive table already states `check-target`
+"composes root `action.yml` + `collect-facts` ... + `resolve-baseline`").
+Neither reusable workflow calls `resolve-baseline` a second time at the
+workflow level — `check-single.yml` and `check-project.yml`'s matrix cells
+each call `check-target` once and get an already-resolved baseline as part
+of that one call. A caller who needs the resolved baseline path *outside*
+`check-target` (e.g. to display it in a workflow-level summary before the
+check runs) reads it back from `check-target`'s own output, not by invoking
+`resolve-baseline` separately.
+
+**`check-project.yml`'s matrix has two independent sources, not one — a gap
+in an earlier draft, flagged by review.** `.abicheck.yml`/`build-output.json`
+keep `bundles[]` as a separate map from `targets[]` (§2/§3) precisely
+because S14 (release bundle) and S15 (independent targets) are deliberately
+distinct scopes (§1). A run-plan generator that only iterates `targets[]`
+therefore emits per-target cells for every bundle *member* (e.g. `libpvxs`,
+`libpvxsIoc` individually) but never the promised bundle-scoped
+`pvxs-release` cell itself — silently dropping S14's cross-library
+`--manifest` findings, since nothing else in `check-project.yml`'s
+described matrix generates that check. **Fix: `run-plan.json`'s generator
+(P1.4) iterates two independent sources — `targets[]` (minus any target
+whose `bundle_only: true` — see §3's `targets:` schema, added per a
+follow-up review round precisely so the generator has an explicit signal
+instead of having to infer or guess "bundle-only" from `bundle:` membership
+alone) crossed with `profiles[]` filtered to `contract: true` entries
+only — a missing constraint an earlier draft left implicit, flagged in a
+further review round: §3's `profiles:` example shows a `contract: false`
+test-only lane (`ubuntu-latest-clang-debug-sanitizer`) specifically because
+"not every CI lane gets a baseline" is the whole point of that field
+(§8's S17 row); a generator that crossed *every* `profiles[]` entry
+regardless of `contract` would generate baseline-resolving checks for that
+lane too, which then either hard-fails as `not_found` (§6, since no
+baseline was ever published for a non-contract lane) or produces a bogus
+report for a profile that was never meant to be checked. `contract: false`
+profiles are excluded from `run-plan.json` generation entirely — for
+S15-class checks and S14-class bundle checks alike — and `bundles[]`
+crossed with `profiles[]` for one S14-class bundle-scoped check per bundle
+per profile.** `bundle_only` defaults to `false` (run both the standalone
+S15 check and the bundle-scoped S14 check for that member — matching the
+PVXS example, where both `libpvxs`/`libpvxsIoc` are checked individually
+and as the `pvxs-release` bundle); a project sets `bundle_only: true` on a
+target only when it explicitly wants to skip that member's independent
+check and rely on the bundle-scoped one alone. Both produce `checks[]`
+entries in the same `run-plan.json` (§5), just with different `target`/
+`bundle` identity and different `check_id` shape (§8's S14 correction);
+`check-project.yml`'s matrix has one cell per resulting entry regardless of
+which source it came from.
+
+`check-packages.yml` was considered and **rejected as a fifth workflow**
+(decision D7): a package/prebuilt-artifact target (S13) is just another
+`build-output.json` producer (a thin adapter unpacks RPM/Deb/tar/conda into
+the same `artifacts/`/`headers/` layout) — it reuses `check-project.yml`
+rather than duplicating matrix/aggregate logic.
+
+Composite Actions structurally cannot create jobs or a dynamic matrix
+(confirmed against current `action.yml`/`actions/*/action.yml`, which are
+plain `runs.using: composite` — no `jobs:` key is a valid composite-action
+key); this is why `check-project.yml` must be a reusable *workflow*, not a
+fourth composite action, whenever more than one target/profile is in play.
+
+---
+
+## 5. Run plan
+
+`run-plan.json` (schema `abicheck.run-plan/v1`) — the machine-readable
+output of resolving `.abicheck.yml` + dynamic CI inputs into an exact set of
+checks, generated once per `check-project.yml` invocation and consumed by
+the matrix directly, and by `aggregate`'s `--manifest` only after the
+required projection described immediately below (not passed to `aggregate`
+as-is):
+
+```json
+{
+  "schema": "abicheck.run-plan/v1",
+  "project": "epics-base/pvxs",
+  "head_sha": "b7e2c1a...",
+  "checks": [
+    {"kind": "target", "target": "libpvxs", "profile": "linux-x86_64-gcc13-release",
+     "baseline_channel": "accepted-main", "required": true, "evidence_depth": "headers",
+     "gate_mode": "local"},
+    {"kind": "target", "target": "libpvxsIoc", "profile": "linux-x86_64-gcc13-release",
+     "baseline_channel": "accepted-main", "required": true, "evidence_depth": "headers",
+     "gate_mode": "local"},
+    {"kind": "bundle", "bundle": "pvxs-release", "profile": "linux-x86_64-gcc13-release",
+     "baseline_channel": "accepted-main", "required": true, "evidence_depth": "headers",
+     "gate_mode": "local"}
+  ]
+}
+```
+
+**Each `checks[]` entry needs an explicit `kind` discriminator, not just a
+`target`/`bundle` field — a further gap flagged in a later review round.**
+§4 says `bundles[]` also produces `checks[]` entries (the run-plan
+generator's second source, alongside `targets[]`), but an earlier draft's
+run-plan example only ever showed `target`-keyed entries — a `pvxs-release`
+entry generated from `bundles[]` would be indistinguishable from a library
+target sharing that name, and `check-target` has no reliable way to know
+"resolve this as a bundle (directory/`--manifest` compare, bundle-scoped
+baseline) vs. a single library." Fixed: every `checks[]` entry carries
+`kind: "target"` or `kind: "bundle"` (matching §3's `targets:` `kind`
+discriminator conceptually, though these are different enums — a
+run-plan-level `target`/`bundle` distinction, not §3's `library`/
+`app-consumer`/`plugin-contract` target-kind values), and uses `target` or
+`bundle` as the matching identity field, never both. `check-project.yml`'s
+matrix step branches on this `kind` to decide whether to invoke
+`check-target` in single-library mode or bundle mode.
+
+**`checks[]` needs `gate_mode` per entry — missing from an earlier draft,
+flagged in a further review round.** §4/§7 require `check-target` to
+receive an explicit `gate-mode: local|deferred|advisory`, and
+`check-project.yml`'s trailing `aggregate` job runs whenever *any* cell is
+`deferred` (§4's correction above). A mixed plan — e.g. a required
+header-depth `local` gate plus an advisory source-depth shadow check (S26)
+on the same target — needs each `checks[]` entry to carry its own
+`gate_mode` so the matrix generator can honor per-check semantics; without
+it, a generator either can't tell which cells should gate the aggregate
+job and which shouldn't, or has to force one workflow-wide mode and forbid
+exactly the mixed-mode scenarios S21/S26 exist to support. Added
+`gate_mode` to both entries in the example above.
+
+This is the artifact `check-project.yml`'s matrix step reads to fan out.
+**Correction from an earlier draft:** `run-plan.json`'s `checks[]` schema is
+*not* wire-compatible with `abicheck aggregate --manifest` as it exists
+today — confirmed by reading `abicheck/aggregate.py:753-769`
+(`ExpectedTargets.from_manifest_data`), which requires a top-level
+`{"targets": [{"id", "required"}]}` shape and raises `AggregateError`
+("manifest 'targets' must be a non-empty list") on anything else, including
+a `checks[]`-shaped document. `run-plan.json` is deliberately richer than
+that format (it carries `profile`/`baseline_channel`/`evidence_depth` per
+check, which `aggregate` has no use for — it only needs to know which
+target IDs are required). So `check-project.yml`'s aggregate step must
+*project* `run-plan.json` down to the existing `{"targets": [...]}` shape
+rather than pass `run-plan.json` straight through as `--manifest`.
+
+**Second correction, also from review:** that projection is not the trivial
+one-line rename it first looks like once S17 (multiple profiles) or S21
+(multiple baseline channels) are in play. `abicheck/aggregate.py:642-729`
+(`collect_reports`) keys every loaded report strictly by `target_id` — read
+from the report's own `target_id` field, falling back to the report
+filename — and **hard-errors** (`AggregateError: duplicate target id`) the
+moment two reports resolve to the same `target_id`. A project with `libfoo`
+checked on two profiles, or on both `release-contract` and `accepted-main`
+simultaneously, produces two reports for one bare target name — exactly the
+collision `collect_reports` rejects. The manifest projection therefore must
+use each check's full `check_id` — **including the `@requested_depth`
+suffix §7 later makes unconditional, not the plain three-part
+`target@profile#baseline_channel` form** (a stale reference in an earlier
+draft of this very paragraph, flagged in a further review round: §7's
+depth-suffix correction landed after this paragraph was first written, and
+this sentence was never updated to match) — as the manifest `targets[].id`,
+**and** `check-target` (P1.3) must write that same fully-qualified
+`check_id` into each report's own `target_id` field. Without the depth
+suffix here specifically, any S26/header+source run for the same
+target/profile/channel would have `aggregate`'s exact-match lookup mark the
+depth-qualified reports "unexpected" and the plain three-part manifest
+entry "missing," even though every other correction in this ADR already
+requires the depth-qualified form everywhere else.
+
+**Third correction, from a follow-up review pass:** this must be
+**unconditional — every check, not just checks sharing a target with
+another check.** An earlier draft scoped the `target_id = check_id` rule to
+"whenever a project has more than one check per target," which is a real
+bug: `abicheck/aggregate.py`'s matching is an exact string comparison
+(`found.get(tid)` against the manifest's `targets[].id`, §"P1.3/P1.4"
+below). If the manifest projection always emits `check_id`-shaped IDs (which
+it must, to stay one consistent rule) but `check-target` only populates
+`target_id` with `check_id` for the multi-check case, then an *ordinary*
+single-target, single-profile, single-channel check (S1–S15's majority
+case, including PVXS/S15 itself) reports `target_id: "libpvxs"` while the
+manifest expects `"libpvxs@linux-x86_64-gcc13-release#accepted-main"` —
+an exact-match miss, so `aggregate` reports the required target *missing*
+and the real report *unexpected*, on the single most common flow this whole
+model is meant to make simple. There is no conditional case here: every
+`check-target` run writes `target_id = check_id` into its report, full
+stop, and every manifest projection uses `check_id` as `targets[].id`, full
+stop — the "simple case looks the same" property comes from `check_id`
+always being a stable, well-formed string (never from sometimes being the
+bare target name), so `aggregate`'s exact match always lines up. This is
+what P1.3/P1.4's companion plan entries now specify. Coverage is still
+checked against the same explicit plan, not an implicit job list — the fix
+is in how identity flows between the two artifacts, not in the coverage
+guarantee itself.
+
+---
+
+## 6. Baseline lifecycle
+
+Two named channels, each with distinct semantics (existing informal
+distinction in `baseline-management.md`, made structural):
+
+- **`release-contract`** — immutable; built from a shipping-equivalent
+  build (ideally the *same* `build-output.json` the release itself
+  publishes, not a second divergent build); published as one atomic
+  baseline-set archive (`baseline-<profile>.tar.zst` containing
+  `baseline-set.json` + one snapshot per target, mirroring the task's
+  proposed layout — **plus a `binaries/` directory for any bundle-scoped
+  target**, per §8's S14 correction below: bundle analysis reads real ELF
+  binaries, not JSON snapshots, so a bundle baseline that omitted them would
+  silently produce no old-side bundle data); changes only on release.
+- **`accepted-main`** — mutable; refreshed by `update-main-baseline.yml` on
+  every default-branch push; answers "did this PR introduce a break vs. what
+  main already accepted," never substitutes for `release-contract`.
+
+`resolve-baseline` failure taxonomy (all fail-loud, never silently
+degraded to a *compatibility* verdict — but "fail-loud" and "advisory" are
+not the same thing, and an earlier draft of the `not_found` row conflated
+them; corrected below per review):
+
+| Condition | Resolver outcome | What the check does |
+|---|---|---|
+| No baseline set exists for `channel` yet, and this check's `run-plan.json` entry has `required: false` (explicit bootstrap opt-in — e.g. the very first `release-contract` publish, before any release exists) | `not_found` (bootstrap) | Advisory pass with an explicit "no baseline yet" report field — never a compatibility verdict. |
+| No baseline set exists for `channel` yet, and the check is `required: true` (the default) | `not_found` (required) | **Hard operational failure**, exit non-zero. A typo in the channel name, a missing release asset, or a cache-resolution bug must never produce a green branch-protection status with zero comparison performed — `not_found` on a required check is exactly the silent-shallow-success failure mode this ADR exists to eliminate, so it does not get an advisory carve-out by default. |
+| Baseline set exists but this target isn't in it | `ambiguous` (target missing from set) | Coverage failure, distinct from a compatibility break. |
+| Baseline set is for a different `profile.id` | `wrong_profile` | Hard failure — never silently compare across profiles. |
+| `baseline-set.json` schema version newer/older than resolver understands | `stale_schema` | Hard failure with an upgrade-path message. |
+| Baseline's `evidence_producer` incompatible with candidate's (e.g. wrapper vs. replay) | `incompatible_evidence` | Hard failure — evidence-producer mismatch is an infrastructure problem, not an ABI finding (S16/S8/S9 boundary). |
+
+---
+
+## 7. Report envelope
+
+Every check's report gains these identity/status fields (existing JSON
+report body is additive-compatible — this is new required metadata, not a
+schema break to detector output). **The JSON example below is an excerpt
+of the new/relevant fields, not a complete standalone report — spelled out
+explicitly per a further review round, since an implementer could
+otherwise copy it verbatim and get a schema-invalid document.**
+`compare_report.schema.json`'s own `required` list includes `library`,
+`old_version`, `new_version`, `old_file`, `new_file`, `summary`, `policy`,
+`changes`, `suppression`, `detectors`, `confidence`, `evidence_tier`, and
+`evidence_tiers` — all present in `reporter.py`'s real output today, none
+shown below because they're unchanged by this ADR and would just be noise
+in an already-long example. §7's fields **layer onto** that existing
+required body; `check-target`'s actual output is the full existing
+`reporter.py` report plus these additions, never this excerpt standing
+alone. **Additive means additive, including for
+the fields `aggregate` itself reads — this needed spelling out per review:**
+`compatibility_verdict`/`policy_gate_decision` below are *new*, richer
+field names; they do not replace the fields `abicheck/aggregate.py` already
+parses today (`parse_report_verdict` reads top-level `verdict`;
+`GateInfo.from_report_data`/`from_scan_report` read a `severity` block or a
+`scan`-report `exit_code`, never `compatibility_verdict`/
+`policy_gate_decision`). If `check-target` emitted only the new field names,
+every one of its reports would look verdictless/ungated to `aggregate` as it
+exists today, silently losing coverage in exactly the multi-target/
+`deferred`-gate-mode flows this ADR is meant to make reliable. So
+`check-target` (P1.3) must populate **both**: the legacy `verdict` (a
+`Verdict` enum string) and `severity`/`exit_code` block `aggregate` already
+understands, *and* the new `compatibility_verdict`/`policy_gate_decision`
+pair for the richer consumers (PR comment, SARIF, humans) described below.
+This is carried as an explicit P1.3 requirement in the companion plan, not
+left implicit — either that dual-write, or a scoped `aggregate` parser
+update to also read the new field names, must ship before P1.4's
+`check-project.yml` can rely on `aggregate` seeing real verdicts.
+
+**`@`/`#`-delimited concatenation is not injective for arbitrary
+user-defined IDs — a correctness gap flagged in a later review round.**
+`check_id`/`target_id` are built by joining `target`/`bundle`, `profile`,
+`baseline_channel`, and (per the correction below) `evidence_depth` with
+literal `@`/`#` separators. If those component IDs themselves may contain
+`@` or `#` (nothing in §2's `profile.id` or §3's `targets:`/`profiles:` key
+naming ruled that out), the concatenation is ambiguous: `target: "a@b"`,
+`profile: "c"` and `target: "a"`, `profile: "b@c"` produce the identical
+string `a@b@c...`, and `aggregate`'s duplicate-`target_id` hard-error would
+either falsely collide two genuinely different checks or (worse) silently
+merge them. **Fix: every ID component — `target`/`bundle` names (§3's
+`targets:`/`bundles:` map keys), `profile.id` (§2/§3), `baseline_channel`
+names (§3's `baseline: channels:` map keys) — is constrained to a safe
+identifier charset, `^[A-Za-z0-9][A-Za-z0-9._-]*$` (no `@`, `#`, or other
+delimiter-conflicting characters), enforced by the same `.abicheck.yml`/
+`build-output.json` validators (§11) that already check other structural
+constraints.** This makes plain delimiter concatenation unambiguous by
+construction — simpler than escaping arbitrary strings, and consistent
+with how CI-facing identifiers (GitHub Actions job/artifact names, cache
+keys) are conventionally restricted anyway.
+
+**`check_id`'s `target@profile#baseline_channel` form under-identifies a
+check when a project intentionally runs the same target/profile/channel at
+two different evidence requirements — flagged by review.** A project might
+run a header-depth check as the required gate *and* a source-depth check on
+the same target/profile/channel as an advisory/shadow lane (S26) — two
+distinct checks by this ADR's own definition (§1: "a `check` is one
+application of policy to `target × profile × baseline channel × evidence
+requirement`" — evidence requirement is part of the tuple). The three-part
+`check_id` collapses them to one identical string, and
+`abicheck.aggregate.collect_reports` hard-errors on the resulting duplicate
+`target_id`.
+
+**Correction, a further review round later: the conditional suffix ("only
+when a collision would occur") doesn't work outside `check-project.yml`'s
+run plan.** The rule above relied on P1.4's run-plan generator scanning its
+own `checks[]` for collisions before deciding whether to add the depth
+suffix — but S26's shadow/advisory checks (and any standalone
+`check-single.yml`/direct `check-target` call) have **no run-plan
+generator** to do that scan; each call is independent, with nothing that
+sees both the header-depth gate and the source-depth shadow check together
+to detect they'd collide. Under the conditional rule, both would emit the
+plain three-part ID and collide in `aggregate`/PR publication exactly as
+before. **Fixed: `check_id` always includes `requested_depth` — unconditionally,
+not only when a collision is detected** —
+`libpvxs@linux-x86_64-gcc13-release#accepted-main@source`, every time,
+including the common single-depth case (which was the whole point of the
+conditional version, but a stable, always-present suffix is simpler and
+correct in every calling context, at the cost of every `check_id` being one
+segment longer than strictly necessary in the common case — the same
+trade-off already made for `target_id = check_id` unconditionally,
+elsewhere in this section). No collision-scanning logic is needed anywhere,
+in `check-target`, `check-single.yml`, or `check-project.yml`.
+
+```json
+{
+  "report_schema_version": "2.11",
+  "check_id": "libpvxs@linux-x86_64-gcc13-release#accepted-main@source",
+  "target_id": "libpvxs@linux-x86_64-gcc13-release#accepted-main@source",
+  "project": "epics-base/pvxs",
+  "target": "libpvxs",
+  "profile_id": "linux-x86_64-gcc13-release",
+  "head_sha": "b7e2c1a...",
+  "base_ref": "main",
+  "candidate_digest": "sha256:...",
+  "baseline_channel": "accepted-main",
+  "baseline_digest": "sha256:...",
+  "requested_depth": "source",
+  "effective_depth": "headers",
+  "check_evidence_coverage": {"state": "degraded", "reasons": ["wrapper_pack_empty_for_target"]},
+  "compatibility_verdict": "BREAKING",
+  "policy_gate_decision": "fail",
+  "operational_errors": [],
+  "publication": {"state": "published", "channels": ["job_summary", "pr_comment"]},
+  "tool_version": "abicheck 0.x.y",
+  "action_version": "abicheck/abicheck@v1",
+  "verdict": "BREAKING",
+  "severity": {
+    "config": {},
+    "categories": {},
+    "exit_code": 4,
+    "blocking": true,
+    "blocking_categories": ["abi_breaking"]
+  }
+}
+```
+
+**Two more field-naming corrections from this review round, both real
+schema conflicts, not cosmetic:**
+
+- **`evidence_coverage` collides with a *retired* key, not a free name.**
+  `abicheck/schemas/__init__.py` documents that schema 2.0 renamed the old
+  per-layer coverage array's key from `evidence_coverage` to
+  `layer_coverage` (ADR-028 D7) — reusing `evidence_coverage` here for this
+  ADR's differently-shaped `{state, reasons}` object would give the same
+  key two incompatible meanings across schema versions. Renamed to
+  `check_evidence_coverage` throughout §7 to avoid the collision entirely
+  (not `layer_coverage`, which already means something specific and
+  differently-shaped — a per-L0–L5-layer array, not this check-level
+  state/reasons summary).
+- **`severity` needs its full required shape, not the minimal `GateInfo`
+  subset.** `abicheck/schemas/compare_report.schema.json`'s `$defs/severity`
+  requires `config` and `categories` in addition to `exit_code`/`blocking`/
+  `blocking_categories` — `reporter._build_severity_json()` always emits
+  all five. The earlier three-field example was enough for `aggregate`'s
+  own parser (which only reads `exit_code`/`blocking`/`blocking_categories`)
+  but would fail the *report* schema's own validation, contradicting §7's
+  "additive, not a schema break" claim. Filled in `config`/`categories`
+  (empty objects here since severity-preset configuration is orthogonal to
+  this example) to match the real required shape.
+
+**The schema-version field is `report_schema_version`, matching the
+existing report, not a new `report_schema` field — flagged by review.**
+`abicheck/reporter.py` (three call sites, e.g. line 429) already emits
+`report_schema_version`, and `abicheck/schemas/compare_report.schema.json`
+requires that exact key (`required: ["report_schema_version", ...]`). An
+earlier draft's example introduced a differently-named `report_schema`
+field instead — additive in spirit but not in fact, since a report copying
+this example would fail the *existing* schema/version contract the ADR
+claims to extend, not replace. Fixed to reuse `report_schema_version`
+(bumping its MINOR component per the schema's own versioning convention
+for additive changes, not introducing a parallel field). **The example
+value must also be schema-valid, not a placeholder — a follow-up review
+catch:** `compare_report.schema.json` requires `report_schema_version` to
+match `^[0-9]+\.[0-9]+$` (a real `MAJOR.MINOR` pair), and the live value
+today is `abicheck/schemas/__init__.py`'s `REPORT_SCHEMA_VERSION = "2.10"`
+(bumped from `2.9` by an unrelated `reachability_kind` addition that landed
+on `main` independently of this ADR) — an earlier draft's placeholder
+`"1.x.y"` would itself fail schema validation. Set to `"2.11"` (the next
+free MINOR bump from the current `2.10`, matching this section's own
+"additive changes bump MINOR" convention) as a concrete, schema-valid
+example value that doesn't collide with the already-shipped `2.10`.
+
+The last two fields, `verdict` and `severity`, are **not optional
+decoration** — they are the exact legacy fields `abicheck/aggregate.py`
+already parses (`parse_report_verdict`'s top-level `verdict`;
+`GateInfo.from_report_data`'s `severity` block, shape matching
+`GateInfo.to_dict()`), included here in the canonical example precisely so
+an implementer copying this schema for P0.3/P1.3 doesn't reproduce the
+verdictless/ungated bug the dual-write paragraph above describes.
+**`verdict` must use the real `Verdict` enum's exact casing — a bug in a
+follow-up review pass caught this too:** `abicheck.change_registry_types.Verdict`
+is `str, Enum` with uppercase values (`NO_CHANGE`, `COMPATIBLE`,
+`COMPATIBLE_WITH_RISK`, `API_BREAK`, `BREAKING`), and
+`parse_report_verdict()` calls `Verdict(raw)` directly — a lower-case
+`"breaking"` (this example's value until this fix) raises `ValueError`
+inside that constructor, is swallowed by `parse_report_verdict`'s
+`except ValueError: return None`, and produces exactly the
+"verdictless"/`report carried no ABI verdict` outcome the dual-write was
+meant to prevent, even with a syntactically-present `severity` block sitting
+right next to it. The lower-case value earlier in this same fix was itself
+wrong — corrected to the real enum casing above. A
+`scan`-mode report's equivalent legacy field is a top-level `exit_code` plus
+`scan_schema_version` instead of a `severity` block — omitted from this
+`compare`-shaped example for space, but required the same way.
+
+**`"ERROR"` is a required exception to "`verdict` is a `Verdict` enum
+value" — flagged by a further review round.** `abicheck/aggregate.py:658`
+(`_load_report_file`) checks `data.get("verdict") == "ERROR"` as a literal
+string match **before** falling through to `parse_report_verdict()`'s
+`Verdict(raw)` parsing — `"ERROR"` is not a `Verdict` enum member at all
+(the enum has five members: `NO_CHANGE`, `COMPATIBLE`,
+`COMPATIBLE_WITH_RISK`, `API_BREAK`, `BREAKING`), it's a separate sentinel
+this exact string triggers dedicated operational-failure handling for —
+`_load_report_file` returns early on this branch and **synthesizes** its
+own `GateInfo(exit_code=4, blocking=True, blocking_categories=("operational_error",))`
+in Python, without ever reading the report's own `severity` JSON block for
+this path. **Ambiguity worth closing explicitly, flagged in a follow-up
+review round:** an earlier phrasing of this paragraph could be misread as
+instructing `check-target` to *write* `blocking_categories: ["operational_error"]`
+into its own report JSON — it must not. `"operational_error"` is not in
+`compare_report.schema.json`'s `severity.blocking_categories` enum
+(`abi_breaking`, `potential_breaking`, `quality_issues`, `addition` only),
+so a report that included it would fail schema validation even though
+`aggregate` never reads that field for the `ERROR` path anyway.
+`check-target`'s operational-failure report needs `verdict: "ERROR"` and a
+non-empty `operational_errors` (§7) — it either omits `severity` entirely
+for this case, or includes one using only the schema's real enum values;
+`"operational_error"` as a category is `aggregate`'s own internal synthesis,
+never a value read from or written to report JSON. If `check-target` (P1.3)
+coerced every legacy
+`verdict` value into one of the five `Verdict` members as the preceding
+paragraph's "must use the real `Verdict` enum's exact casing" rule reads in
+isolation, a genuine resolver/config/operational failure would either be
+misreported as an ordinary ABI-compatibility verdict or lose `aggregate`'s
+dedicated operational-error gate entirely. **Corrected rule:** `verdict`
+must be the literal string `"ERROR"` for an operational failure (matching
+§7's own `operational_errors` field being non-empty), and one of the five
+real `Verdict` enum values only when the check completed and produced an
+actual compatibility result — the two cases are mutually exclusive, and
+`"ERROR"` is the one deliberate exception to the "must be a `Verdict`
+member" casing rule above, not an oversight to close.
+
+**`"ERROR"` is not in `compare_report.schema.json`'s `verdict` enum
+either — but this is a pre-existing gap this ADR inherits, not one it
+introduces, flagged for accuracy in a further review round.**
+`compare_report.schema.json`'s `verdict` field is a closed five-value enum
+(`NO_CHANGE`, `COMPATIBLE`, `COMPATIBLE_WITH_RISK`, `API_BREAK`,
+`BREAKING`) with no `"ERROR"` member — yet `aggregate.py`'s own comment
+(`aggregate.py:651-653`) confirms `verdict: "ERROR"` already appears in
+real, production `compare-release` per-library reports today, predating
+this ADR entirely. `check-target`'s operational-failure reports following
+the same `"ERROR"` convention are consistent with that existing (if
+schema-inconsistent) precedent, not a new problem this ADR creates. Whether
+to add `"ERROR"` to the schema enum, treat operational reports as a
+distinct un-schema'd envelope, or something else is a real open question —
+but it is `compare-release`'s pre-existing question, and P1.3 should follow
+whatever resolution the core report-schema maintainers choose for that
+existing case rather than inventing a separate answer for `check-target`.
+
+**The *new* `compatibility_verdict` field needed the same casing fix, one
+more review round later.** `abicheck/aggregate.py` already has a field
+named `compatibility_verdict` in its own output (`TargetReport.to_dict()`,
+`aggregate.py:313-315`), serialized as `self.compatibility_verdict.value` —
+i.e. the same uppercase `Verdict` casing as the legacy `verdict` field
+above, not a separate lower-case vocabulary. This example's
+`compatibility_verdict` value is fixed to `"BREAKING"` to match — using a
+different casing convention for the "new" field than the "legacy" one would
+mean any consumer that treats both fields as the same `Verdict` domain (or
+round-trips one into `Verdict(raw)`) needs special-case translation between
+a per-check `check-target` report and `aggregate`'s own existing
+per-target output, for no reason. `policy_gate_decision`, by contrast, is
+genuinely new vocabulary with no existing enum to match, so its lower-case
+`fail`/`pass` values are a free choice, not a casing bug — don't over-apply
+this fix to that field.
+
+**`target_id` is not redundant with `check_id`/`target` — it exists solely
+so `aggregate` reads the right value** (a second review catch, from
+`chatgpt-codex-connector`): `abicheck/aggregate.py`'s `_load_report_file`
+reads `data.get("target_id")` specifically (not `check_id`, not `target`)
+when deciding which key to collect a report under, falling back to the
+report's filename only if `target_id` is absent. §5's fix requires
+multi-profile/multi-channel reports to key by `check_id`, so P1.3's
+`check-target` implementation must populate this exact field — `target_id`
+— with the `check_id` value, not rely on `check_id` alone being present and
+not rely on artifact/filename naming to carry that identity implicitly.
+`target` stays the plain, human-readable library name (`libpvxs`) for
+display; `target_id` is `aggregate`'s only working input for identity.
+
+Five axes kept explicitly distinct, per the task's requirement (§11 there):
+**compatibility** (`compatibility_verdict`), **evidence coverage**
+(`check_evidence_coverage`), **operational status** (`operational_errors` — empty
+means clean; `verdict: "ERROR"`-class failures populate it, mirroring how
+`abicheck/aggregate.py` already special-cases `verdict == "ERROR"` as an
+operational, not compatibility, signal), **policy gate**
+(`policy_gate_decision`), and **report publication** — the field added
+above, `publication.state` (`published`/`skipped`/`failed`) plus which
+channels actually received it. Making this a field, not an implicit
+inference from "a report file exists," matters because a report can be
+fully computed and still fail to *publish* (PR-comment API error, SARIF
+upload rejected) — a downstream consumer must be able to tell "no
+publication happened" apart from "no report was produced at all," which an
+absent-report inference cannot distinguish. `requested_depth != effective_depth` is
+always surfaced — a request for `source` depth that only achieved `headers`
+must never render as an unqualified "source-depth check passed."
+
+`gate-mode` replaces the ad hoc combination of `fail-on-breaking` /
+`fail-on-api-break` for the new primitives (root `action.yml`'s existing
+flags are kept for backward compatibility — see migration mapping below).
+
+**`check-target`'s internal analysis step must run with `continue-on-error:
+true` and a trailing step must own the composite's actual exit — a required
+implementation detail, flagged by review.** `check-target` composes root
+`action.yml` as one of its own internal steps (§4). GitHub's own composite/
+step semantics mean a nonzero exit from that internal step halts the
+remaining steps in `check-target` unless it is marked
+`continue-on-error: true` — so for `gate-mode: local` on a genuine ABI
+break (where the analysis step is *supposed* to exit nonzero), and for any
+`deferred`/`advisory` check that hits an operational failure mid-analysis,
+a naive implementation would never reach the later steps that write the
+report envelope (§7) with its `target_id`/legacy `verdict`/`severity`
+fields — exactly the reports `aggregate` and PR comments need to consume,
+for exactly the failing checks where that matters most. `check-target` must
+therefore: (1) run its internal analysis step with `continue-on-error: true`
+and capture its exit code/outputs explicitly, (2) always execute the
+report-envelope-writing step regardless of that outcome, and (3) make its
+own composite exit code — reflecting `gate-mode`'s actual semantics — the
+last thing it does, not an implicit pass-through of the internal step's
+raw exit code.
+
+- **`local`** — this one target's check sets the job's own exit code (today's
+  root-action behavior; correct for S1/S2/S4/S6).
+- **`deferred`** — report is always produced; the *matrix's* final
+  `aggregate` job computes gate status. Operational/config errors still fail
+  the individual job — `deferred` only defers the *compatibility* verdict's
+  effect on exit code, never operational errors (S15/S28). **Required
+  workflow-contract detail, added per review:** because an individual
+  matrix cell is allowed to fail its own job (that's the point — an
+  operational error must be visible), `check-project.yml`'s trailing
+  `aggregate` job **must** run with `if: always()` (or the equivalent
+  `!cancelled()` / needs-result-bucket condition), never a bare `needs:` with
+  no `if:`. Plain GitHub Actions `needs:` semantics skip a dependent job when
+  any of its dependencies fail, and a *skipped* job reports status
+  `success` to branch protection — so without an explicit `if: always()`,
+  one matrix cell's operational failure would skip the aggregate job
+  entirely and the required branch-protection check would go *green*
+  despite a missing/failed target, exactly the "missing required report
+  silently becomes compatible" failure mode this ADR exists to close. This
+  is not implementation-detail trivia; it is a load-bearing correctness
+  requirement of the `deferred` gate-mode contract and is now specified as
+  such in `check-project.yml`'s definition (companion plan, P1.4).
+  **`aggregate` must run for a single-cell `deferred` run too, not only
+  `>1` cells — a further correction, flagged in a later review round.**
+  §4's `check-project.yml` row originally said the trailing `aggregate` job
+  is "optional if `>1` cell." That is wrong for `deferred` mode
+  specifically: `deferred`'s entire point is that `check-target` does
+  **not** fail its own job on a compatibility finding — the aggregate job
+  is what computes the real gate. A changed-component-filtered run (S25) or
+  a one-target expensive-build flow (S3) can legitimately produce exactly
+  one matrix cell; skipping `aggregate` there (because "only one cell,
+  doesn't need fan-in") leaves nothing to ever compute the gate, so a real
+  ABI/API break under `deferred` mode would report a plain green matrix job
+  and never turn the workflow red. **Corrected rule:** `aggregate` runs
+  whenever *any* cell in the matrix uses `gate-mode: deferred`, regardless
+  of cell count — `>1` cells was never the right condition; "any `deferred`
+  cell" is. `local`/`advisory`-only runs (no `deferred` cell in the plan)
+  are the only case where skipping `aggregate` is safe, since those modes
+  already set their own job's exit code.
+- **`advisory`** — report published, findings never affect exit code
+  (shadow-rollout burn-in, S26).
+
+Migration mapping: `fail-on-breaking: true` + `fail-on-api-break: false`
+(root action's current default) ≡ `gate-mode: local` with the existing
+severity thresholds unchanged; `check-target`'s `gate-mode` is additive, not
+a breaking change to the root action's existing flags.
+
+---
+
+## 8. Condensed scenario catalog (S1–S28)
+
+Full 15-field cards for all 28 scenarios would run several thousand lines;
+this ADR keeps the domain-model decisions above scenario-anchored and
+defers exhaustive per-scenario cards (user story, copy-pasteable YAML,
+acceptance criteria) to
+`docs/development/plans/g30-github-actions-integration-model.md` §Scenario
+backlog, where each scenario becomes a tracked, independently
+implementable/testable unit. Table below maps each scenario to the primary
+workflow/primitive from §4 and its baseline requirement. `abicheck aggregate`
+is the *entry point* for S28 alone (the only scenario whose primary command
+is `aggregate`), but per §4/§7's correction it is also *invoked* as a
+trailing job by any `check-project.yml` run containing a `gate-mode:
+deferred` cell — including single-cell S3/S25 runs after filtering — so
+"only S28 touches aggregate" is not the same claim as "only S28 needs the
+aggregate job to run."
+
+| # | Scenario | Primary entry point | Baseline | Notes |
+|---|---|---|---|---|
+| S1 | Single library, committed baseline | `check-single.yml` | explicit (committed file) | Minimal YAML; root action alone suffices, no new primitive needed. |
+| S2 | Single library, latest-release baseline | `check-single.yml` | release-contract | Needs `resolve-baseline`'s fail-loud `not_found` handling. |
+| S3 | Reuse existing expensive build | `check-project.yml` | either | The `build-output.json` consumer path; no rebuild inside abicheck. |
+| S4 | Build+check in one job | `actions/check-target` used as a **step** inside the caller's own job, *not* `check-single.yml` | either | Small-project shortcut; not the default for large repos. Correction from an earlier draft: GitHub's own reusable-workflow docs (`jobs.<job_id>.uses`) confirm a reusable workflow always runs as a separate job with its own runner/workspace, so it structurally cannot share a filesystem with a build step that ran earlier in the caller's job — `check-single.yml` is therefore the wrong entry point for "build and check in one job." S4's real entry point is `actions/check-target` invoked directly as a step (`uses: abicheck/abicheck/actions/check-target@vN`) right after the project's own build steps in the same job, giving it direct access to the just-built artifacts on disk. `check-single.yml` stays correct for S1/S2/S5/S6, where the candidate binary is a git-committed/downloaded artifact and no in-job build step needs to be shared. |
+| S5 | Single-build audit, no baseline | `check-single.yml` (`baseline: none`) — **`check-target` skips `resolve-baseline` entirely, see note below** | none | Advisory by default (§7 `local` vs `advisory`). |
+| S6 | Header-aware compatibility | `check-single.yml` | any | Public-header floor; `check_evidence_coverage` must confirm header parse reached (finding-driven — no silent L0 fallback). |
+| S7 | Source scan via compile-DB replay | `check-single.yml`/`check-project.yml` + `collect-facts producer: replay` | any | PR = changed-TU scope; nightly/release = full unseeded. |
+| S8 | Source facts via `abicheck-cc` wrapper | `collect-facts producer: wrapper` (prepare) → real build → (verify) | any | Two-step; `phase: auto` limitation (finding 3) documented, not hidden. |
+| S9 | Source facts via Clang plugin | `collect-facts producer: clang-plugin` | any | Opt-in optimization, not onboarding default (LLVM-major coupling). |
+| S10 | Generated headers / codegen-before-scan | `build-output.json`'s `generated-headers/` root | any | Empty-but-declared root is a hard validation failure (§2). |
+| S11 | Make/EPICS/custom build | `collect-facts producer: wrapper` over Make `CC=`/`CXX=` | any | The PVXS validated path (`validation/pvxs-abi-validation-2026-07.md`). |
+| S12 | Bazel/sandboxed build | `build-output.json` populated from `aquery`/declared outputs | any | Sandbox side effects must be declared artifacts, not filesystem scraping. |
+| S13 | Package-only / prebuilt artifacts | `check-project.yml` via a package→`build-output.json` adapter | any | No source checkout required; folds into `check-project`, no separate workflow (D7). |
+| S14 | Multi-DSO release bundle | one `check-target` over the bundle (directory/`--manifest` compare); **`resolve-baseline`'s unit of resolution is the bundle, not a single target** — see the note below the table | any | One report; distinct from S15. |
+| S15 | Multiple independent targets, one build | `check-project.yml` matrix, no fan-in required unless gating jointly | any | oneDAL/PVXS-class; each target keeps its own header/compiler context. |
+| S16 | Shared source facts, multiple DSO | `collect-facts` + declared `evidence.projection` in `build-output.json` | any | Safe-model-now vs. full-model documented in §2/§9; never auto-assumed ownership. |
+| S17 | Multiple build profiles | `check-project.yml` matrix cells keyed by `profile.id`, one per-profile `build-output.json` artifact per cell (§2's "one artifact = one profile" design point) | per-profile | Which lanes are ABI contracts vs. test-only is an explicit `.abicheck.yml` `profiles:` allowlist, not "every CI lane." |
+| S18 | Cross compilation | `build-output.json` authored on build host, `check-target` run offline/elsewhere | any | No host auto-detection of target context; dump-producer and compare are decoupled steps. |
+| S19 | Release-contract baseline | `publish-baseline.yml` | — (producer) | See §6. |
+| S20 | Accepted-main baseline | `update-main-baseline.yml` | — (producer) | See §6. |
+| S21 | Multiple baseline channels at once | two `check-target` calls (same target/profile, different `baseline_channel`) | both | Two distinct `check_id`s in the PR UI, never one ambiguous "ABI Check." |
+| S22 | Application compatibility (`--used-by`) | `check-target` with an app-consumer target kind | any | App-scoped verdict kept a distinct report field from the library's own verdict. |
+| S23 | Plugin/dlopen/dlsym contract | `check-target` with a contract-file target kind | any | Not a public-header compare; a distinct target type in `.abicheck.yml`. |
+| S24 | Dependency/container/rootfs checks | root action `deps-tree`/`deps-compare` modes, unchanged | n/a | Explicitly not modeled as a library baseline scan. |
+| S25 | Monorepo / multiple components | `check-project.yml` with changed-component-filtered `run-plan.json` | per-component | Run plan may be filtered by diff, but required-target coverage stays fail-closed (§5). |
+| S26 | Shadow rollout / migration from another tool | `check-single.yml`/`check-project.yml` with `gate-mode: advisory` | any | Old tool kept running in parallel until acceptance criteria met; no forced removal. |
+| S27 | Intentional breaking change | unchanged check, PR-scoped gate relaxation only | accepted-main updates post-merge | Report stays visible; `release-contract` channel is untouched by the relaxation. |
+| S28 | Multi-target fan-out/fan-in | `check-project.yml`'s trailing `aggregate` job | n/a (consumes prior checks) | The only scenario `abicheck aggregate` is the entry point for. |
+
+**S14's baseline resolution is bundle-scoped, not target-scoped — a gap
+in an earlier draft, fixed per review, then corrected further by a second
+review pass on what "resolve" must actually return.** §6 describes
+`resolve-baseline` as resolving `channel × target × profile` to *one*
+snapshot path, which is correct for S1–S13/S15's independent-target checks
+but cannot, as stated, serve S14: bundle-level `compare` (directory/
+`--manifest` mode) needs the *old build's full bundle* — every member
+library's baseline artifacts staged together — to produce cross-library
+findings (soname skew, cross-library type drift, provider-set changes) that
+a single target's snapshot cannot express alone. **First-pass resolution**
+(resolve every bundle member's `.abicheck.json` **snapshot** and stage them
+together) **turns out to be wrong, not just incomplete:** bundle analysis's
+actual implementation, `build_bundle_snapshot()`
+(`abicheck/bundle.py:80-103`), builds its cross-library resolution graph
+from real **ELF binaries** and explicitly **skips non-ELF inputs — including
+JSON snapshots** — "so `parse_elf_metadata` never emits its 'Magic number
+does not match' warning on legitimately-non-ELF inputs." A baseline set
+containing only per-member `.abicheck.json` files therefore cannot feed
+bundle analysis's old side at all; it would silently skip every baseline
+member and produce a bundle report with no old-side data. **Corrected
+resolution:** a bundle-scoped `release-contract`/`accepted-main` baseline
+set must **preserve the member ELF binaries themselves**, not just their
+derived snapshots — `actions/baseline`'s archive for a bundle gains a
+`binaries/` directory alongside `baseline-set.json` and the per-target
+`.abicheck.json` files (the snapshots stay for S15-style independent-target
+resolution and for `resolve-baseline`'s digest/schema checks; the binaries
+are what bundle analysis's old side actually consumes). `resolve-baseline`
+for a bundle-scoped check therefore returns paths to those staged binaries
+for `check-target`'s bundle variant to hand to `compare`'s existing
+directory/`--manifest` mode.
+
+**"Binaries only" is not the full answer for every requested depth — an
+honest open gap, flagged in a later review round, not fully resolved
+here.** The paragraph above is correct for bundle-graph findings (soname
+skew, provider-set changes) — those come from `build_bundle_snapshot()`'s
+ELF-only path. But `compare-release`'s *per-library* diffs within a bundle
+(the header/source-depth comparison for each member individually, not the
+cross-library graph) build their old-side per-library maps from whatever
+paths they're handed too — which for header/source-depth means old
+**headers**/compile-context, not JSON snapshots, matching how a plain
+non-bundle `compare` gets its old side. So a bundle-scoped check requesting
+header or source depth needs the archive to also preserve old-side
+**headers** per member (not the `.abicheck.json` snapshots, which
+`build_bundle_snapshot()` ignores just as much as it ignores anything
+non-ELF) — a `binaries/`-only archive under-serves that case, and handing
+the per-member snapshots instead doesn't help `compare-release`'s
+binary/header-based per-library flow either. **This ADR does not fully
+resolve the mixed-input shape a depth-aware bundle baseline needs** —
+whether that means the archive also gains a `headers/` directory per
+bundle member, or `compare-release` grows a snapshot-consuming input path
+it doesn't have today — and defers the concrete design to P1.6's
+implementation, which must not assume "binaries only" (this ADR's prior,
+now-corrected claim) covers every depth a bundle-scoped check can request.
+This does not change `baseline-set.json`'s manifest shape (§6/§10) — it
+still records one entry per target, now with a pointer to the preserved
+binary alongside its snapshot digest. It does mean `check-target`'s
+bundle-mode `check_id` is bundle-scoped
+(`pvxs-release@profile#channel@depth` — **including the same unconditional
+`@requested_depth` suffix as every other `check_id`, per §7's correction;
+an earlier draft of this bundle-specific note omitted it, which would let a
+bundle checked at both header and source depth for the same profile/channel
+collide exactly like the S26 case §7 exists to prevent**), not
+`libpvxs@profile#channel@depth`, and its report's `target_id`/`target`
+fields identify the bundle, not one member library — distinguishing S14's
+one bundle-level report from S15's N independent per-target reports, which
+is the boundary §1's domain model already requires them to keep separate.
+
+---
+
+## 9. Source evidence: safe model now vs. full model later
+
+Per the task's explicit instruction not to assume a shared source surface
+belongs to every DSO: this ADR adopts the **safe model now** as the P0/P1
+contract and defers the **full model** to P2 (tracked in the companion plan,
+§ "P2").
+
+**Safe model (adopt now):** an evidence pack's `abicheck_inputs/` content is
+either (a) target-specific (one wrapper/plugin invocation scoped to one
+link unit, or a compile-DB filtered to one target's TUs — `projection:
+"declared"`), or (b) explicitly build-wide, in which case it feeds only
+build-wide source audits (S5-class checks) and per-target *header* scans,
+never an unqualified per-target *source*-depth claim. `build-output.json`'s
+`evidence.projection` field (§2) is what a target-specific `check-target`
+run inspects before claiming `effective_depth: source` in its report (§7).
+
+**Full model (P2, not built here):** TU → object/link-unit → output-DSO
+attribution via linker command/output identity, so a build-wide pack can be
+safely and automatically projected onto the correct subset of targets.
+Requires linker-invocation capture (`abicheck/buildsource/build_query.py`
+already has partial zero-config compile-DB inference for CMake/Bazel/Make
+this could extend) — scoped as its own follow-up ADR when undertaken, not
+retrofitted into this one.
+
+---
+
+## 10. Baseline storage backends compared
+
+| Backend | Atomic set? | Write access needed | Recommended for |
+|---|---|---|---|
+| GitHub Release asset | Yes (single tarball upload) | `contents: write` on a release, not a branch | `release-contract` (S19) — matches "publish atomically" requirement. |
+| Actions cache | Yes (single cache key **per refresh**, see note below) | none (cache API only) | `accepted-main` (S20) — cheap, no push, naturally ages out. |
+| git-committed | No (per-file commits) unless staged via a PR | `contents: write` to a branch | S1's minimal single-library case only; **must go through a PR**, never a direct push to a protected branch (security requirement, §12 below). |
+| External object store | Yes | store-specific credentials | Large fleets / long retention; out of scope for P0/P1, noted for P2. |
+
+Direct-commit-to-`main` is explicitly **not** the default `accepted-main`
+update path for any backend that supports Actions cache or Releases — only
+the git-committed backend needs a write, and that write goes through a PR
+opened by the workflow, matching the task's "no direct push to protected
+main as required path" acceptance criterion.
+
+**Actions cache key contract, made explicit per review:** GitHub's own
+Actions-cache documentation states a cache's contents cannot be changed
+once written — a new version requires a new key, not an overwrite of an
+existing one. `update-main-baseline.yml`'s cache key must therefore
+incorporate something that changes on every default-branch refresh (e.g.
+`abicheck-baseline-main-<profile.id>-<head_sha>`, per §5's
+`key_prefix: "abicheck-baseline-main"` config value), with `restore-keys:
+abicheck-baseline-main-<profile.id>-` as the prefix `resolve-baseline` uses
+to find the *latest* matching entry. An implementation that reuses one
+stable key across refreshes (e.g. just `key_prefix` with no per-run suffix)
+would silently fail to update after the first write — the cache action
+would report the write as a no-op cache hit rather than an error, so this
+is exactly the kind of silent-shallow-success failure mode this ADR exists
+to close, and is called out here so P1.6 doesn't reintroduce it.
+
+---
+
+## 11. Validators (fail-loud, no silent shallow success)
+
+Three new validation points, all hard failures (not warnings) when tripped:
+
+1. **`build-output.json` validator** — every declared `headers/`/
+   `generated-headers/` root is non-empty; every `targets[].binary` exists
+   and its digest matches `digests{}`; `evidence.projection` must be
+   `"declared"` (any other value, including `"inferred"`, is a hard
+   validation failure until P2's TU→DSO attribution exists — §2's
+   correction above); for `"declared"`, a **non-empty TU count is
+   necessary but not sufficient, and — a further correction from a
+   follow-up review round — invoking `validate_inputs_pack` as-is is
+   *also* not sufficient.** A multi-DSO `build-output.json` could point two
+   `targets[]` entries at the *same* shared `abicheck_inputs/` pack and mark
+   both `"declared"`; a check that only verifies the pack is non-empty would
+   pass both, even though a pack shared across two targets is exactly the
+   unprojected build-wide evidence §9's safe model says must never satisfy
+   a per-target `"declared"` claim. `abicheck/buildsource/inputs_validate.py`'s
+   `_target_id_issues` implements a *related* check, but not this exact one:
+   read closely (`inputs_validate.py:96-133`), it (a) compares TU
+   `target_id`s only against the pack's **own** `manifest.library` field —
+   never against an externally supplied expected target — and (b)
+   explicitly does **not** flag TUs with no `target_id` at all ("this is
+   additive validation, not a new hard requirement on every producer").
+   `validate_inputs_pack`'s public signature (`inputs_validate.py:168`) also
+   takes only the pack root, no expected-target argument. So a legacy/shared
+   pack whose TUs carry no `target_id`, or a pack whose `manifest.library`
+   names one library while `build-output.json` references it from a
+   *different* target's entry, passes `validate_inputs_pack` cleanly today —
+   invoking it unmodified, as an earlier draft of this fix said, would still
+   let unprojected evidence claim `"declared"` status. **The
+   `build-output.json` validator must instead extend this check with the
+   externally-known expected target — scoped narrowly, corrected in a
+   further review round.** An earlier version of this fix said the
+   extension "hard-fails both an untagged-TU pack and a
+   `manifest.library`/`build-output.json` target mismatch" — too broad: an
+   untagged-TU pack whose `manifest.library` correctly names the one target
+   referencing it, and that no *other* target also references, is a
+   legitimate legacy-producer pack (`abicheck/buildsource/inputs_emit.py:169-170`
+   shows producers already establish the library at pack-creation time via
+   the manifest, independent of per-TU tags), and `inputs_validate.py:111-113`
+   deliberately treats missing per-TU `target_id`s as additive, not invalid,
+   for exactly this reason. Rejecting every untagged-TU pack outright would
+   break that legitimate case. **Correct scope: fail a `"declared"` claim
+   only when (a) the pack is referenced by more than one `build-output.json`
+   target (shared pack — whether or not its TUs carry `target_id`), or (b)
+   the pack's `manifest.library` (or a tagged TU's `target_id`) disagrees
+   with the specific target referencing it.** A single-target,
+   `manifest.library`-matched pack with untagged TUs passes. Implement via
+   an `expected_target_id` parameter added to `_target_id_issues`/
+   `validate_inputs_pack`, or an equivalent comparison in the new validator
+   using `validate_inputs_pack`'s existing manifest/TU data — either way,
+   scoped to exactly these two failure conditions, not a blanket
+   untagged-TU rejection.
+2. **Requested-vs-effective depth gate** — reuses the mechanism PR #601
+   introduces at the CLI layer (`DumpDepthNotSatisfiedError`, per this
+   repo's Known Gaps section) but applied at `check-target` level so a
+   `required-depth: source` check that only achieved `headers` is a hard
+   failure of that check, never a silently-downgraded pass. This directly
+   extends the acknowledged gap rather than duplicating a second enforcement
+   path.
+3. **`resolve-baseline` taxonomy** (§6 table) — every failure mode has a
+   distinct, tested exit condition; none of them may exit 0/"compatible." The
+   one documented exception is the §6 bootstrap row (`not_found` on a check
+   explicitly marked `required: false`), which exits 0/"advisory" —
+   deliberately *not* "compatible" — precisely so a first-ever
+   `release-contract` publish isn't blocked by "no baseline exists yet." This
+   is a narrow, explicit opt-in (a check must set `required: false` to get
+   it), not a general relaxation of the fail-loud rule: every other resolver
+   outcome, and every `required: true` check (the default), stays a hard
+   failure with no exit-0 path.
+
+**`baseline: none` (S5) is a distinct bypass, not another row in this
+taxonomy — flagged by review.** An earlier draft routed S5's no-baseline
+audit through `check-single.yml`/`check-target` without saying how it
+avoids hitting `resolve-baseline`'s `not_found` outcome (or being
+mislabeled as the `required: false` bootstrap case above) — both of which
+are about a baseline that's *expected but missing*, not a check that never
+wanted one. S5's audit-only flow is semantically the existing scan/compare
+behavior of simply omitting `against`/`abi-baseline` (§"What the audit
+found" describes `scan` as already running audit-only whenever no
+`against` is configured). **Fix:** `baseline: none` on a `check-target`
+invocation skips the `resolve-baseline` step entirely — `check-target`
+never calls it, so no taxonomy row applies — and invokes the underlying
+audit/scan path directly, exactly as today's CLI already supports. This is
+a `check-target` input-level branch (bypass baseline resolution), not a
+sixth `resolve-baseline` outcome to add to the table above.
+
+---
+
+## 12. Security and reproducibility
+
+- All new composite Actions/reusable workflows referenced from documentation
+  examples use the same pinning discipline already established for
+  elevated-permission workflows (AGENTS.md's "Action pinning is deliberately
+  partial" note) — `check-target`/`resolve-baseline` carry no elevated
+  permissions themselves (they read artifacts and write job outputs only),
+  so tag-pinning is acceptable there, matching the existing policy's
+  blast-radius reasoning; `publish-baseline.yml`/`update-main-baseline.yml`
+  (which write releases/caches) get the same SHA-pinning bar as the existing
+  `security.yml`/`publish.yml` gate.
+- Fork PRs: `check-single.yml`/`check-project.yml` run under `pull_request`
+  (not `pull_request_target`) by default in every example, so fork PRs never
+  get write-scoped tokens; baseline-publishing workflows are `push`/
+  `workflow_dispatch`-triggered only, never PR-triggered.
+- `resolve-baseline` treats a baseline produced by a different tool/scanner
+  version as `incompatible_evidence` unless explicitly allowlisted — this
+  closes the "producer/scanner/aggregator version desync" class of finding
+  the task calls out.
+- Report `candidate_digest`/`baseline_digest` fields (§7) let a consumer
+  detect a stale artifact from a previous run before trusting the verdict.
+
+---
+
+## 13. Decision log
+
+**D1 — Center the model on the project lifecycle, not `aggregate`.**
+Alternative: keep extending `abicheck aggregate` and the root action's input
+surface incrementally. Rejected because the audit (finding 1) confirms
+`aggregate` structurally cannot represent single-target, single-build, or
+baseline-lifecycle scenarios — it consumes reports, it doesn't produce
+checks. Recommendation: lifecycle-first, as decided above.
+
+**D2 — New `resolve-baseline` primitive vs. folding into `check-target`.**
+Alternative: keep baseline resolution inlined in each consumer, as
+`action/run.sh:150-233` does today. Rejected because every S2/S19/S20/S21
+failure mode is a resolution failure with no independent typed signal today
+— duplicating that logic into `check-target` would recreate the same
+untestable inline branch it's meant to replace. Recommendation: separate
+primitive, per §4.
+
+**D3 — Reusable workflows for matrix/fan-out, not more composite Actions.**
+Alternative: a fourth+ composite action attempting matrix-like behavior via
+nested `run:` loops. Rejected: composite actions cannot create GitHub jobs
+(confirmed — no `runs.using: composite` schema supports `jobs:`), so any
+dynamic matrix needs a reusable *workflow*. Recommendation: §4's four
+reusable workflows, no composite-action alternative considered viable.
+
+**D4 — Minimal primitive count: evaluated "one `check-target` + two
+workflows" per the task's explicit prompt.** Considered collapsing
+`resolve-baseline` into `check-target` and cutting `check-single.yml` (fold
+into `check-project.yml` with a one-cell matrix). Rejected the full
+collapse: `check-single.yml` is the *entire* onboarding experience for S1
+(the single most common case) and a one-cell matrix workflow imposes matrix
+overhead (artifact upload/download round-trip) on the simplest scenario
+users will hit first. Kept `resolve-baseline` separate per D2. Net surface:
+5 primitives (3 existing + 2 new) + 4 reusable workflows — smaller than a
+literal per-scenario Action count (would be 28), larger than the task's
+minimal-floor suggestion, justified by D2/D3's failure-mode reasoning.
+
+**D5 — `.abicheck.yml` extension (B+C hybrid) vs. a new project-schema
+file.** Compared all four options the task lists. Rejected "A: everything in
+`.abicheck.yml`" because GitHub-runner-specific dynamic values (candidate
+artifact path, SHA, token) don't belong in a portable, checked-in config —
+they'd force a config edit on every CI run. Rejected "D: new versioned
+project schema" as an unjustified second file format duplicating
+`.abicheck.yml`'s existing policy/suppression sections. Chose B+C: portable
+`targets:`/`profiles:`/`baseline:` block added to `.abicheck.yml` (B), plus
+the separate, build-produced (not hand-authored) `build-output.json` (C) —
+because build-output is generated data with a different lifecycle (one per
+CI run) from project config (one per repo, hand-edited).
+
+**D6 — Adopt `check-target` as the single new high-level primitive.**
+Directly answers the task's "consider one `check-target` primitive plus two
+reusable workflows" prompt: adopted `check-target` as proposed, but kept
+four reusable workflows (not two) because `publish-baseline.yml`/
+`update-main-baseline.yml` have materially different triggers (release vs.
+default-branch-push) and write-permission scopes that would otherwise force
+a workflow-level conditional on write access inside one shared workflow —
+judged a worse blast-radius/readability trade than two small workflows.
+
+**D7 — No `check-packages.yml`.** A package-only target (S13) differs from a
+source-build target only in how `build-output.json` gets populated (a thin
+unpack-adapter vs. a real build). Giving it a fifth workflow would duplicate
+`check-project.yml`'s matrix/aggregate logic for no behavioral difference.
+Rejected a dedicated workflow; the adapter is a P1 backlog item (companion
+plan), not a new workflow.
+
+**D8 — Safe vs. full source-evidence-projection model (S16).** Adopting the
+full TU→link-unit→DSO attribution model now was rejected as premature: it
+requires linker-invocation capture not yet built (`build_query.py` has only
+partial zero-config compile-DB inference today), and shipping an
+"automatic" projection before that exists would recreate exactly the
+"silent shallow success" failure mode this ADR is meant to eliminate.
+Adopted the safe, explicitly-declared-or-build-wide model now (§9), deferred
+full attribution to P2.
+
+**D9 — No pilot findings were fabricated; the second pilot's scope is
+scoped precisely rather than either dismissed or overclaimed.** The task
+named a "Vandal" repository (a repo-wide search found zero matches — that
+part of the earlier finding stands) and named oneDAL PR #3693 as a possible
+second pilot. Unlike "Vandal," oneDAL PR #3693 **is** a real, locatable
+field review in this repository (finding 5, corrected) —
+`docs/development/adr/044-reachability-aware-suppression.md`'s Context
+section, `docs/development/plans/g21-oneshot-deep-compare.md`, and
+`validation/REPORT.md` all document it, and it drove real code changes
+(ADR-044). An earlier draft of this ADR understated that evidence (finding
+5's original wording said oneDAL "appears only as a scan-timing data
+point," missing ADR-044 entirely) — corrected upon review rather than left
+as a stale claim. The precise position, not fabricated in either direction:
+oneDAL PR #3693 is a genuine, valuable field pilot for tool-correctness and
+CLI-UX findings, but it is a package/binary-level evaluation, not a
+GitHub-Actions CI-integration pilot — it does not establish S9/S15/S17/S21's
+vendor-toolchain-build-reuse/multi-DSO/multiple-baseline-channel claims, and
+this ADR does not claim it does. Acquiring a CI-integration-scoped second
+pilot (vendor toolchain, source-build reuse, multiple baseline channels)
+remains a real P1/P2 backlog item (companion plan, "Pilot validation gap") —
+narrower now than the earlier "no second pilot exists at all" framing, but
+still open.
+
+---
+
+## 14. Known gaps this ADR does not close
+
+- **No second CI-integration-scoped validated pilot** (D9) — oneDAL PR #3693
+  is a real field review with real findings, but it is a package/binary-level
+  evaluation, not a GitHub-Actions/CI-integration pilot; the "vendor
+  toolchain / multiple DSO / multiple baseline channels" claims in §8
+  (S9/S15/S17/S21) still need a pilot in PVXS's format before they stop
+  being design-only.
+- **Full source-evidence TU→DSO attribution** (§9, D8) is P2, not built
+  here; S16's "required full model" is a documented target state only.
+- **`build-output.json` producer tooling** (a real `abicheck build-output
+  emit` helper, or documented hand-authoring path for CMake/Meson/Bazel/Make)
+  does not exist yet — this ADR specifies the schema and consumer contract;
+  the companion plan tracks building the producer side.
+- This ADR does not itself change `action.yml`, `action/run.sh`,
+  `abicheck/cli_aggregate.py`, or any schema file — see the companion plan
+  for the PR sequence that implements it.
+
+---
+
+## Consequences
+
+**Positive:** a project owner can now describe their situation in the
+domain vocabulary above and land on exactly one canonical entry point
+(§4/§8), instead of reverse-engineering which of five CLI modes and 51
+inputs applies. `aggregate` stops being an implicit architectural center,
+which removes the temptation to route single-target scenarios through it.
+The report envelope (§7) gives every downstream consumer (PR comment, SARIF,
+branch protection, `aggregate` itself) one unambiguous identity/status
+contract instead of inferring it from verdict text.
+
+**Negative / cost:** two new composite Actions, four new reusable
+workflows, three new JSON schemas, and a `.abicheck.yml` schema extension are net
+new maintenance surface. The scenario-first documentation reorganization
+(companion plan) touches most of `docs/user-guide/`. None of this is free,
+and it is sequenced in the companion plan specifically so it lands as
+independently reviewable PRs rather than one large rewrite.

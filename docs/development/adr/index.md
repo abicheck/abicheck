@@ -85,3 +85,4 @@ against the code as unverified, regardless of how confident it reads.
 | [044](044-reachability-aware-suppression.md) | Reachability-Aware Suppression and the Effective Public ABI | Accepted — P0 slice implemented |
 | [045](045-identity-based-old-new-entity-matching.md) | Identity-Based Old/New Entity Matching | Accepted — implemented for `RecordType` and `EnumType` |
 | [046](046-source-graph-identity-v2-and-evidence-merge.md) | Source Graph Identity v2 — USR-Based Entity Resolution and Evidence-Preserving Merge | Proposed |
+| [047](047-github-actions-integration-model.md) | GitHub Actions Integration Model — Project Lifecycle Over Aggregate-Centric Design | Proposed — not implemented; see [G30](../plans/g30-github-actions-integration-model.md) |

@@ -31,6 +31,7 @@ Initiative plans (cross-cutting, not tied to a single registry gap):
 | **G24** | [Linux ABI/API detection gap closure](g24-linux-abi-gap-closure.md) | — · L (phased: ELF facts → vtable machinery → clang flag extraction → kABI/ecosystem; macOS/Windows gaps recorded as deferred) |
 | **G28** | [CastXML/Clang L2 parity: hardening & remaining phases](g28-castxml-clang-l2-parity-hardening.md) | [ADR-001](../adr/001-technology-stack.md), [ADR-003](../adr/003-data-source-architecture.md) D8/D9, [ADR-037](../adr/037-cli-interface-contract.md) D8 · Phase 0–4 done; Phase 5 M (overlaps [G4](g4-header-ast-extractor.md)) |
 | **G29** | [Impact-analysis layer: unified graph-driven impact model](g29-impact-analysis-layer.md) | [ADR-044](../adr/044-reachability-aware-suppression.md), [ADR-031](../adr/031-source-implementation-graph-augmentation.md), [ADR-046](../adr/046-source-graph-identity-v2-and-evidence-merge.md) · XL (phased: Phase 1 done — tri-state reachability, [PR #607](https://github.com/abicheck/abicheck/pull/607); Phase 2 ADR drafted (ADR-046, Proposed), implementation not started; Phases 3–6 open) |
+| **G30** | [GitHub Actions integration model: project lifecycle backlog](g30-github-actions-integration-model.md) | [ADR-047](../adr/047-github-actions-integration-model.md) · XL (phased P0/P1/P2, not started) |
 
 Completed or decided plans are retained for implementation history:
 
