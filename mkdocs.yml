@@ -206,6 +206,7 @@ nav:
       - "044: Reachability-Aware Suppression": development/adr/044-reachability-aware-suppression.md
       - "045: Identity-Based Old/New Entity Matching": development/adr/045-identity-based-old-new-entity-matching.md
       - "046: Source Graph Identity v2": development/adr/046-source-graph-identity-v2-and-evidence-merge.md
+      - "045: GitHub Actions Integration Model": development/adr/045-github-actions-integration-model.md
 
 # Agent instructions are repo-internal context, not published documentation.
 exclude_docs: |
