@@ -673,15 +673,35 @@ as-is):
   "project": "epics-base/pvxs",
   "head_sha": "b7e2c1a...",
   "checks": [
-    {"target": "libpvxs", "profile": "linux-x86_64-gcc13-release",
+    {"kind": "target", "target": "libpvxs", "profile": "linux-x86_64-gcc13-release",
      "baseline_channel": "accepted-main", "required": true, "evidence_depth": "headers",
      "gate_mode": "local"},
-    {"target": "libpvxsIoc", "profile": "linux-x86_64-gcc13-release",
+    {"kind": "target", "target": "libpvxsIoc", "profile": "linux-x86_64-gcc13-release",
+     "baseline_channel": "accepted-main", "required": true, "evidence_depth": "headers",
+     "gate_mode": "local"},
+    {"kind": "bundle", "bundle": "pvxs-release", "profile": "linux-x86_64-gcc13-release",
      "baseline_channel": "accepted-main", "required": true, "evidence_depth": "headers",
      "gate_mode": "local"}
   ]
 }
 ```
+
+**Each `checks[]` entry needs an explicit `kind` discriminator, not just a
+`target`/`bundle` field — a further gap flagged in a later review round.**
+§4 says `bundles[]` also produces `checks[]` entries (the run-plan
+generator's second source, alongside `targets[]`), but an earlier draft's
+run-plan example only ever showed `target`-keyed entries — a `pvxs-release`
+entry generated from `bundles[]` would be indistinguishable from a library
+target sharing that name, and `check-target` has no reliable way to know
+"resolve this as a bundle (directory/`--manifest` compare, bundle-scoped
+baseline) vs. a single library." Fixed: every `checks[]` entry carries
+`kind: "target"` or `kind: "bundle"` (matching §3's `targets:` `kind`
+discriminator conceptually, though these are different enums — a
+run-plan-level `target`/`bundle` distinction, not §3's `library`/
+`app-consumer`/`plugin-contract` target-kind values), and uses `target` or
+`bundle` as the matching identity field, never both. `check-project.yml`'s
+matrix step branches on this `kind` to decide whether to invoke
+`check-target` in single-library mode or bundle mode.
 
 **`checks[]` needs `gate_mode` per entry — missing from an earlier draft,
 flagged in a further review round.** §4/§7 require `check-target` to
@@ -820,6 +840,27 @@ This is carried as an explicit P1.3 requirement in the companion plan, not
 left implicit — either that dual-write, or a scoped `aggregate` parser
 update to also read the new field names, must ship before P1.4's
 `check-project.yml` can rely on `aggregate` seeing real verdicts.
+
+**`@`/`#`-delimited concatenation is not injective for arbitrary
+user-defined IDs — a correctness gap flagged in a later review round.**
+`check_id`/`target_id` are built by joining `target`/`bundle`, `profile`,
+`baseline_channel`, and (per the correction below) `evidence_depth` with
+literal `@`/`#` separators. If those component IDs themselves may contain
+`@` or `#` (nothing in §2's `profile.id` or §3's `targets:`/`profiles:` key
+naming ruled that out), the concatenation is ambiguous: `target: "a@b"`,
+`profile: "c"` and `target: "a"`, `profile: "b@c"` produce the identical
+string `a@b@c...`, and `aggregate`'s duplicate-`target_id` hard-error would
+either falsely collide two genuinely different checks or (worse) silently
+merge them. **Fix: every ID component — `target`/`bundle` names (§3's
+`targets:`/`bundles:` map keys), `profile.id` (§2/§3), `baseline_channel`
+names (§3's `baseline: channels:` map keys) — is constrained to a safe
+identifier charset, `^[A-Za-z0-9][A-Za-z0-9._-]*$` (no `@`, `#`, or other
+delimiter-conflicting characters), enforced by the same `.abicheck.yml`/
+`build-output.json` validators (§11) that already check other structural
+constraints.** This makes plain delimiter concatenation unambiguous by
+construction — simpler than escaping arbitrary strings, and consistent
+with how CI-facing identifiers (GitHub Actions job/artifact names, cache
+keys) are conventionally restricted anyway.
 
 **`check_id`'s `target@profile#baseline_channel` form under-identifies a
 check when a project intentionally runs the same target/profile/channel at
