@@ -345,11 +345,13 @@ targets:
     binary_pattern: "lib/libpvxs.so*"
     public_headers: ["headers/pvxs"]
     bundle: pvxs-release
+    bundle_only: false     # default; run libpvxs both standalone (S15) AND as a pvxs-release bundle member (S14)
   libpvxsIoc:
     kind: library
     binary_pattern: "lib/libpvxsIoc.so*"
     public_headers: ["headers/pvxsIoc"]
     bundle: pvxs-release
+    bundle_only: false
   myapp-consumer:
     kind: app-consumer     # S22 — abicheck compare --used-by
     consumer_binary_pattern: "bin/myapp"
@@ -544,11 +546,17 @@ therefore emits per-target cells for every bundle *member* (e.g. `libpvxs`,
 `--manifest` findings, since nothing else in `check-project.yml`'s
 described matrix generates that check. **Fix: `run-plan.json`'s generator
 (P1.4) iterates two independent sources — `targets[]` (minus any target
-whose *only* required check is bundle-scoped, to avoid double-checking a
-member both individually and as part of its bundle unless the project
-config explicitly wants both) crossed with `profiles[]` for S15-class
-checks, and `bundles[]` crossed with `profiles[]` for one S14-class
-bundle-scoped check per bundle per profile.** Both produce `checks[]`
+whose `bundle_only: true` — see §3's `targets:` schema, added per a
+follow-up review round precisely so the generator has an explicit signal
+instead of having to infer or guess "bundle-only" from `bundle:` membership
+alone) crossed with `profiles[]` for S15-class checks, and `bundles[]`
+crossed with `profiles[]` for one S14-class bundle-scoped check per bundle
+per profile.** `bundle_only` defaults to `false` (run both the standalone
+S15 check and the bundle-scoped S14 check for that member — matching the
+PVXS example, where both `libpvxs`/`libpvxsIoc` are checked individually
+and as the `pvxs-release` bundle); a project sets `bundle_only: true` on a
+target only when it explicitly wants to skip that member's independent
+check and rely on the bundle-scoped one alone. Both produce `checks[]`
 entries in the same `run-plan.json` (§5), just with different `target`/
 `bundle` identity and different `check_id` shape (§8's S14 correction);
 `check-project.yml`'s matrix has one cell per resulting entry regardless of
@@ -752,7 +760,7 @@ in `check-target`, `check-single.yml`, or `check-project.yml`.
   "baseline_digest": "sha256:...",
   "requested_depth": "source",
   "effective_depth": "headers",
-  "evidence_coverage": {"state": "degraded", "reasons": ["wrapper_pack_empty_for_target"]},
+  "check_evidence_coverage": {"state": "degraded", "reasons": ["wrapper_pack_empty_for_target"]},
   "compatibility_verdict": "BREAKING",
   "policy_gate_decision": "fail",
   "operational_errors": [],
@@ -760,9 +768,39 @@ in `check-target`, `check-single.yml`, or `check-project.yml`.
   "tool_version": "abicheck 0.x.y",
   "action_version": "abicheck/abicheck@v1",
   "verdict": "BREAKING",
-  "severity": {"exit_code": 4, "blocking": true, "blocking_categories": ["abi_breaking"]}
+  "severity": {
+    "config": {},
+    "categories": {},
+    "exit_code": 4,
+    "blocking": true,
+    "blocking_categories": ["abi_breaking"]
+  }
 }
 ```
+
+**Two more field-naming corrections from this review round, both real
+schema conflicts, not cosmetic:**
+
+- **`evidence_coverage` collides with a *retired* key, not a free name.**
+  `abicheck/schemas/__init__.py` documents that schema 2.0 renamed the old
+  per-layer coverage array's key from `evidence_coverage` to
+  `layer_coverage` (ADR-028 D7) — reusing `evidence_coverage` here for this
+  ADR's differently-shaped `{state, reasons}` object would give the same
+  key two incompatible meanings across schema versions. Renamed to
+  `check_evidence_coverage` throughout §7 to avoid the collision entirely
+  (not `layer_coverage`, which already means something specific and
+  differently-shaped — a per-L0–L5-layer array, not this check-level
+  state/reasons summary).
+- **`severity` needs its full required shape, not the minimal `GateInfo`
+  subset.** `abicheck/schemas/compare_report.schema.json`'s `$defs/severity`
+  requires `config` and `categories` in addition to `exit_code`/`blocking`/
+  `blocking_categories` — `reporter._build_severity_json()` always emits
+  all five. The earlier three-field example was enough for `aggregate`'s
+  own parser (which only reads `exit_code`/`blocking`/`blocking_categories`)
+  but would fail the *report* schema's own validation, contradicting §7's
+  "additive, not a schema break" claim. Filled in `config`/`categories`
+  (empty objects here since severity-preset configuration is orthogonal to
+  this example) to match the real required shape.
 
 **The schema-version field is `report_schema_version`, matching the
 existing report, not a new `report_schema` field — flagged by review.**
@@ -852,7 +890,7 @@ display; `target_id` is `aggregate`'s only working input for identity.
 
 Five axes kept explicitly distinct, per the task's requirement (§11 there):
 **compatibility** (`compatibility_verdict`), **evidence coverage**
-(`evidence_coverage`), **operational status** (`operational_errors` — empty
+(`check_evidence_coverage`), **operational status** (`operational_errors` — empty
 means clean; `verdict: "ERROR"`-class failures populate it, mirroring how
 `abicheck/aggregate.py` already special-cases `verdict == "ERROR"` as an
 operational, not compatibility, signal), **policy gate**
@@ -941,7 +979,7 @@ scenario requires `aggregate` except S28.
 | S3 | Reuse existing expensive build | `check-project.yml` | either | The `build-output.json` consumer path; no rebuild inside abicheck. |
 | S4 | Build+check in one job | `actions/check-target` used as a **step** inside the caller's own job, *not* `check-single.yml` | either | Small-project shortcut; not the default for large repos. Correction from an earlier draft: GitHub's own reusable-workflow docs (`jobs.<job_id>.uses`) confirm a reusable workflow always runs as a separate job with its own runner/workspace, so it structurally cannot share a filesystem with a build step that ran earlier in the caller's job — `check-single.yml` is therefore the wrong entry point for "build and check in one job." S4's real entry point is `actions/check-target` invoked directly as a step (`uses: abicheck/abicheck/actions/check-target@vN`) right after the project's own build steps in the same job, giving it direct access to the just-built artifacts on disk. `check-single.yml` stays correct for S1/S2/S5/S6, where the candidate binary is a git-committed/downloaded artifact and no in-job build step needs to be shared. |
 | S5 | Single-build audit, no baseline | `check-single.yml` (`baseline: none`) — **`check-target` skips `resolve-baseline` entirely, see note below** | none | Advisory by default (§7 `local` vs `advisory`). |
-| S6 | Header-aware compatibility | `check-single.yml` | any | Public-header floor; `evidence_coverage` must confirm header parse reached (finding-driven — no silent L0 fallback). |
+| S6 | Header-aware compatibility | `check-single.yml` | any | Public-header floor; `check_evidence_coverage` must confirm header parse reached (finding-driven — no silent L0 fallback). |
 | S7 | Source scan via compile-DB replay | `check-single.yml`/`check-project.yml` + `collect-facts producer: replay` | any | PR = changed-TU scope; nightly/release = full unseeded. |
 | S8 | Source facts via `abicheck-cc` wrapper | `collect-facts producer: wrapper` (prepare) → real build → (verify) | any | Two-step; `phase: auto` limitation (finding 3) documented, not hidden. |
 | S9 | Source facts via Clang plugin | `collect-facts producer: clang-plugin` | any | Opt-in optimization, not onboarding default (LLVM-major coupling). |
