@@ -846,6 +846,30 @@ def check_dump_compile_db_error(
     return None
 
 
+def compile_db_as_l3_build_info(
+    depth: str | None,
+    build_info: Path | None,
+    effective_compile_db: Path | None,
+) -> Path | None:
+    """AC-007: reuse a ``-p``/``--compile-db`` database as the L3 build source.
+
+    When an explicit ``--depth build``/``source`` is requested and a real compile
+    database was supplied for the L2 header parse but no dedicated ``--build-info``
+    was given, that same ``compile_commands.json`` is authoritative L3 evidence —
+    returning it as ``build_info`` reuses it instead of re-running a build-system
+    query (cmake/bazel/make). Returns the original *build_info* unchanged in every
+    other case (no explicit deep depth, an explicit ``--build-info`` already set,
+    or no compile DB), so a plain ``dump -p db -H h.h`` L2-only run is unaffected.
+    """
+    if (
+        depth in ("build", "source")
+        and build_info is None
+        and effective_compile_db is not None
+    ):
+        return effective_compile_db
+    return build_info
+
+
 def resolve_dump_compile_db(
     compile_db_path: Path | None,
     compile_db_path_alt: Path | None,
@@ -1035,11 +1059,18 @@ def resolve_dump_collect_context(
     # silent -- embedding is a no-op there by design. G21.7-style fail-loud (a
     # warning, not an error).
     depth_requested = depth is not None
+    # AC-007: a real compile DB supplied via -p/--compile-db serves as the L3
+    # build source for an explicit --depth build/source (the caller wires it into
+    # build_info), so it is not a "no build/source input" case — don't warn.
+    _compile_db_serves_l3 = (
+        compile_db_path is not None or compile_db_path_alt is not None
+    )
     if (
         depth_requested
         and collect_mode != "off"
         and sources is None and build_info is None
         and inputs_pack is None
+        and not _compile_db_serves_l3
     ):
         click.echo(
             f"Warning: evidence depth '{collect_mode}' was requested but no "

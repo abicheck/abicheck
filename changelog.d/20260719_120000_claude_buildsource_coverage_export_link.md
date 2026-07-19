@@ -24,3 +24,18 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `source_decl_to_binary_symbol` mapping — unlike the `--inputs` path, which
   already relinked. The embed path now seeds the ingest with the snapshot's
   exports, so the source declarations map onto the DSO's exported symbols.
+- **Build/source layer selection and honesty** (triage AC-001, AC-006,
+  AC-007): three further fixes to how build/source evidence is chosen and
+  reported. (AC-001) An explicit raw `--sources` cold scan now supplies L4/L5,
+  beating a pre-baked Flow-2 pack passed via `--build-info` for its L3 —
+  `_combine_packs` orders the L4/L5 suppliers `--sources` → inline collection →
+  `--build-info`, while a `--build-info`-only run still falls back to the pack's
+  L4/L5 (and `merge`'s precedence is unchanged). (AC-006) The L5 source-graph
+  coverage row now reports `partial` whenever a call/type pass is *degraded*
+  (its live replay never completed and only structural/plugin edges were
+  folded), instead of reading `present` just because those edges made the graph
+  non-empty — the missing passes are named in the coverage detail. (AC-007) An
+  explicit `--depth build`/`source` with a real compile database supplied via
+  `-p`/`--compile-db` (for the L2 header parse) but no dedicated `--build-info`
+  now reuses that same `compile_commands.json` as the L3 build source, instead
+  of ignoring it for L3 and re-running a build-system query.

@@ -1940,7 +1940,7 @@ def build_inline_coverage(
                 "degraded passes (structural/plugin edges only, live replay "
                 f"incomplete): {', '.join(degraded)}"
                 if degraded
-                else None
+                else ""
             ),
         )
     else:

@@ -41,6 +41,7 @@ from .cli_audit import echo_filtered_surface, echo_reconciled
 from .cli_dump_helpers import (
     _dump_will_attempt_hybrid_l4_extraction,
     check_requested_depth_satisfied,
+    compile_db_as_l3_build_info,
     fold_dump_provenance_into_json,
     handle_non_elf_dump,
     perform_elf_dump,
@@ -755,6 +756,20 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         return
 
     effective_compile_db = resolve_dump_compile_db(compile_db_path, compile_db_path_alt, headers)
+
+    # AC-007: an explicit `--depth build`/`source` with a real compile database
+    # supplied via `-p`/`--compile-db` (for the L2 header parse) but no dedicated
+    # `--build-info` reuses that same DB as the L3 build source, instead of
+    # re-running the build system (cmake/bazel/make query). See helper docstring.
+    _l3_from_compile_db = compile_db_as_l3_build_info(depth, build_info, effective_compile_db)
+    if _l3_from_compile_db is not build_info:
+        build_info = _l3_from_compile_db
+        click.echo(
+            f"Using compile database {effective_compile_db} as the L3 build "
+            "source (from -p/--compile-db; pass --build-info to override).",
+            err=True,
+        )
+
     # Resolved before the PE/Mach-O dispatch (Codex review): both binary-format
     # branches need the same -p/--compile-db -> castxml/clang flags and matched
     # signal -- the ELF path used to compute these only after the PE/Mach-O

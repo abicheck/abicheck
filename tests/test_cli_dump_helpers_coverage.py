@@ -26,8 +26,11 @@ import pytest
 from abicheck.cli_dump_helpers import (
     check_dump_compile_db_error,
     check_dump_debug_format_error,
+    compile_db_as_l3_build_info,
+    evidence_depth_label,
     handle_non_elf_dump,
     perform_elf_dump,
+    resolve_dump_collect_context,
     resolve_dump_compile_context,
     resolve_dump_compile_db,
     resolve_dump_debug_format,
@@ -128,6 +131,46 @@ def test_check_debug_format_error_only_for_pe_macho() -> None:
     assert check_dump_debug_format_error("dwarf", "elf") is None
     assert check_dump_debug_format_error(None, "pe") is None
     assert check_dump_debug_format_error(None, None) is None
+
+
+# ── AC-007: compile DB reused as the L3 build source ────────────────────────
+
+
+def test_compile_db_reused_as_l3_for_explicit_deep_depth(tmp_path: Path) -> None:
+    """AC-007: an explicit --depth build/source with a -p/--compile-db but no
+    --build-info reuses that DB as the L3 build source."""
+    db = tmp_path / "compile_commands.json"
+    for depth in ("build", "source"):
+        assert compile_db_as_l3_build_info(depth, None, db) == db
+
+
+def test_compile_db_not_reused_when_not_applicable(tmp_path: Path) -> None:
+    """No reuse without an explicit deep depth, with an explicit --build-info
+    already set, or with no compile DB — a plain L2 dump is unaffected."""
+    db = tmp_path / "compile_commands.json"
+    explicit_bi = tmp_path / "build"
+    # No explicit deep depth (default / headers / binary) → unchanged.
+    assert compile_db_as_l3_build_info(None, None, db) is None
+    assert compile_db_as_l3_build_info("headers", None, db) is None
+    # An explicit --build-info wins; the DB does not override it.
+    assert compile_db_as_l3_build_info("source", explicit_bi, db) == explicit_bi
+    # No compile DB → nothing to reuse.
+    assert compile_db_as_l3_build_info("build", None, None) is None
+
+
+def test_collect_context_no_warn_when_compile_db_serves_l3(
+    tmp_path: Path, capsys
+) -> None:
+    """AC-007: the 'no build/source input' warning is suppressed when a compile
+    DB (which will serve as L3) is present, but still fires without one."""
+    hdr = tmp_path / "h.h"
+    db = tmp_path / "compile_commands.json"
+
+    resolve_dump_collect_context("build", None, None, None, (hdr,), db, None)
+    assert "only L0-L2 data" not in capsys.readouterr().err
+
+    resolve_dump_collect_context("build", None, None, None, (hdr,), None, None)
+    assert "only L0-L2 data" in capsys.readouterr().err
 
 
 # ── handle_non_elf_dump error handling ──────────────────────────────────────
