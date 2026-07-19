@@ -21,7 +21,8 @@ says needs a recorded decision, not a routine PR.
 **Effort:** XL (phased) · **Risk:** high overall — Phase 2 changes graph
 identity, Phase 3 changes reporting-contract shape, Phase 4 adds a whole new
 evidence source (consumer/use-case), Phase 5 adds ~15-20 new graph edge
-kinds, Phase 6 adds ~8 new `ChangeKind`s. Mitigated by shipping each phase
+kinds, Phase 6 adds ~8 new detector surfaces (6 `ChangeKind`s and 2
+report-level overlays). Mitigated by shipping each phase
 independently, keeping every new signal additive/opt-in (mirrors how L3-L5
 evidence already never overrides L0-L2 authority — ADR-028 D3), and requiring
 the shared new-`ChangeKind` checklist (below) per kind.
@@ -99,9 +100,10 @@ model:
   dispatch, macro/config, callback/function-pointer, object/archive link
   provenance) implemented behind the same coverage-honesty discipline as the
   existing call/type graph (narrowed/degraded flags, `extractor_passes`).
-- **G29.7** — The minimal new user-facing detector set from the review (8
-  kinds — see Phase 6) plus `case194`-`case205` positive/negative example
-  pairs and the corresponding FP-rate-gate corpus entries.
+- **G29.7** — The minimal new user-facing detector set from the review
+  (8 detector surfaces: 6 `ChangeKind`s and 2 report-level overlays — see
+  Phase 6) plus `case194`-`case205` positive/negative example pairs and the
+  corresponding FP-rate-gate corpus entries.
 - **Acceptance gate (every phase):** the shared new-`ChangeKind` checklist
   from [G24](g24-linux-abi-gap-closure.md#shared-checklist-every-new-changekind-in-this-plan)
   applies verbatim here too — partition assertion, registry entry, detector,
