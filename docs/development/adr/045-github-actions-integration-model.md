@@ -640,12 +640,27 @@ as-is):
   "head_sha": "b7e2c1a...",
   "checks": [
     {"target": "libpvxs", "profile": "linux-x86_64-gcc13-release",
-     "baseline_channel": "accepted-main", "required": true, "evidence_depth": "headers"},
+     "baseline_channel": "accepted-main", "required": true, "evidence_depth": "headers",
+     "gate_mode": "local"},
     {"target": "libpvxsIoc", "profile": "linux-x86_64-gcc13-release",
-     "baseline_channel": "accepted-main", "required": true, "evidence_depth": "headers"}
+     "baseline_channel": "accepted-main", "required": true, "evidence_depth": "headers",
+     "gate_mode": "local"}
   ]
 }
 ```
+
+**`checks[]` needs `gate_mode` per entry — missing from an earlier draft,
+flagged in a further review round.** §4/§7 require `check-target` to
+receive an explicit `gate-mode: local|deferred|advisory`, and
+`check-project.yml`'s trailing `aggregate` job runs whenever *any* cell is
+`deferred` (§4's correction above). A mixed plan — e.g. a required
+header-depth `local` gate plus an advisory source-depth shadow check (S26)
+on the same target — needs each `checks[]` entry to carry its own
+`gate_mode` so the matrix generator can honor per-check semantics; without
+it, a generator either can't tell which cells should gate the aggregate
+job and which shouldn't, or has to force one workflow-wide mode and forbid
+exactly the mixed-mode scenarios S21/S26 exist to support. Added
+`gate_mode` to both entries in the example above.
 
 This is the artifact `check-project.yml`'s matrix step reads to fan out.
 **Correction from an earlier draft:** `run-plan.json`'s `checks[]` schema is
@@ -740,7 +755,19 @@ them; corrected below per review):
 
 Every check's report gains these identity/status fields (existing JSON
 report body is additive-compatible — this is new required metadata, not a
-schema break to detector output). **Additive means additive, including for
+schema break to detector output). **The JSON example below is an excerpt
+of the new/relevant fields, not a complete standalone report — spelled out
+explicitly per a further review round, since an implementer could
+otherwise copy it verbatim and get a schema-invalid document.**
+`compare_report.schema.json`'s own `required` list includes `library`,
+`old_version`, `new_version`, `old_file`, `new_file`, `summary`, `policy`,
+`changes`, `suppression`, `detectors`, `confidence`, `evidence_tier`, and
+`evidence_tiers` — all present in `reporter.py`'s real output today, none
+shown below because they're unchanged by this ADR and would just be noise
+in an already-long example. §7's fields **layer onto** that existing
+required body; `check-target`'s actual output is the full existing
+`reporter.py` report plus these additions, never this excerpt standing
+alone. **Additive means additive, including for
 the fields `aggregate` itself reads — this needed spelling out per review:**
 `compatibility_verdict`/`policy_gate_decision` below are *new*, richer
 field names; they do not replace the fields `abicheck/aggregate.py` already
