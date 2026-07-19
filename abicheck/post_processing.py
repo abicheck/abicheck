@@ -1019,7 +1019,19 @@ class MarkReachability:
                 # regardless of naming; absence from it is only conclusive
                 # for a type the walk's internal-only domain could have
                 # classified in the first place.
-                subject_is_internal = is_internal_type(root, namespaces) or (
+                # An enum-member finding's root keeps its "::member" suffix
+                # (Codex review): is_internal_type is segment-based, so an
+                # enumerator whose own name happens to match an internal
+                # namespace segment (e.g. `enum class Status { ok, detail
+                # };`) would make a fully public `ns::Status::detail` read as
+                # internal-namespaced purely from the *member name*, letting
+                # a broad `namespace: ns::*` rule wrongly prove a public
+                # enum's ABI break unreachable. Test enum_owner (the bare
+                # enum name) instead of root for that case.
+                internal_check_subject = enum_owner if enum_owner is not None else root
+                subject_is_internal = is_internal_type(
+                    internal_check_subject, namespaces
+                ) or (
                     c.qualified_name is not None
                     and is_internal_type(c.qualified_name, namespaces)
                 )

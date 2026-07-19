@@ -207,6 +207,56 @@ class TestMarkReachabilityTriState:
         assert found[0].public_reachable is True
         assert found[0].reachability_state == ReachabilityState.PROVEN_REACHABLE
 
+    def test_enum_member_named_like_internal_namespace_stays_unknown(self) -> None:
+        """Codex review: is_internal_type is segment-based, and an
+        enum-member finding's root keeps its "::member" suffix at the point
+        subject_is_internal is computed. An enumerator whose own *name*
+        happens to match an internal-namespace segment (e.g. a member
+        literally named ``detail``) would make a fully public
+        ``ns::Status::detail`` read as internal-namespaced from the member
+        name alone, letting a broad `namespace: ns::*` rule wrongly treat a
+        genuinely public enum's member change as proven-unreachable. Basing
+        the check on enum_owner (the bare enum name) instead must leave this
+        UNKNOWN — ns::Status is public, never examined by the internal-only
+        layout walk, and no other evidence proves it unreachable."""
+        from abicheck.model import EnumMember, EnumType
+
+        old = _snap(
+            functions=[_public_fn("make", "ns::Status")],
+            enums=[
+                EnumType(
+                    name="ns::Status",
+                    members=[
+                        EnumMember(name="ok", value=0),
+                        EnumMember(name="detail", value=1),
+                    ],
+                ),
+            ],
+        )
+        new = _snap(
+            functions=[_public_fn("make", "ns::Status")],
+            enums=[
+                EnumType(name="ns::Status", members=[EnumMember(name="ok", value=0)]),
+            ],
+        )
+        raw_change = Change(
+            kind=ChangeKind.ENUM_MEMBER_REMOVED,
+            symbol="ns::Status::detail",
+            description="member removed",
+        )
+        suppression = SuppressionList([
+            Suppression(
+                namespace="ns::*",
+                reachability="proven-unreachable-only",
+                reason="would wrongly suppress a real public enum-member break",
+            )
+        ])
+        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        found = [c for c in ctx.kept if c.kind == ChangeKind.ENUM_MEMBER_REMOVED]
+        assert len(found) == 1
+        assert found[0].reachability_state == ReachabilityState.UNKNOWN
+        assert raw_change not in ctx.suppressed
+
     def test_public_source_abi_finding_is_reachable_despite_internal_looking_name(
         self,
     ) -> None:
