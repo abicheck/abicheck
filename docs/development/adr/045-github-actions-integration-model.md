@@ -636,7 +636,7 @@ update to also read the new field names, must ship before P1.4's
   "requested_depth": "source",
   "effective_depth": "headers",
   "evidence_coverage": {"state": "degraded", "reasons": ["wrapper_pack_empty_for_target"]},
-  "compatibility_verdict": "breaking",
+  "compatibility_verdict": "BREAKING",
   "policy_gate_decision": "fail",
   "operational_errors": [],
   "publication": {"state": "published", "channels": ["job_summary", "pr_comment"]},
@@ -669,6 +669,22 @@ wrong — corrected to the real enum casing above. A
 `scan`-mode report's equivalent legacy field is a top-level `exit_code` plus
 `scan_schema_version` instead of a `severity` block — omitted from this
 `compare`-shaped example for space, but required the same way.
+
+**The *new* `compatibility_verdict` field needed the same casing fix, one
+more review round later.** `abicheck/aggregate.py` already has a field
+named `compatibility_verdict` in its own output (`TargetReport.to_dict()`,
+`aggregate.py:313-315`), serialized as `self.compatibility_verdict.value` —
+i.e. the same uppercase `Verdict` casing as the legacy `verdict` field
+above, not a separate lower-case vocabulary. This example's
+`compatibility_verdict` value is fixed to `"BREAKING"` to match — using a
+different casing convention for the "new" field than the "legacy" one would
+mean any consumer that treats both fields as the same `Verdict` domain (or
+round-trips one into `Verdict(raw)`) needs special-case translation between
+a per-check `check-target` report and `aggregate`'s own existing
+per-target output, for no reason. `policy_gate_decision`, by contrast, is
+genuinely new vocabulary with no existing enum to match, so its lower-case
+`fail`/`pass` values are a free choice, not a casing bug — don't over-apply
+this fix to that field.
 
 **`target_id` is not redundant with `check_id`/`target` — it exists solely
 so `aggregate` reads the right value** (a second review catch, from
@@ -886,8 +902,23 @@ Three new validation points, all hard failures (not warnings) when tripped:
    and its digest matches `digests{}`; `evidence.projection` must be
    `"declared"` (any other value, including `"inferred"`, is a hard
    validation failure until P2's TU→DSO attribution exists — §2's
-   correction above); for `"declared"`, `evidence/abicheck_inputs/` must
-   have a non-empty TU count.
+   correction above); for `"declared"`, a **non-empty TU count is
+   necessary but not sufficient — a gap caught in a follow-up review
+   round.** A multi-DSO `build-output.json` could point two `targets[]`
+   entries at the *same* shared `abicheck_inputs/` pack and mark both
+   `"declared"`; a check that only verifies the pack is non-empty would
+   pass both, even though a pack shared across two targets is exactly the
+   unprojected build-wide evidence §9's safe model says must never satisfy
+   a per-target `"declared"` claim. `abicheck/buildsource/inputs_validate.py`'s
+   `_target_id_issues` already implements the real check this needs — it
+   rejects a pack that mixes more than one `target_id` across its TU
+   records, and rejects a TU's `target_id` disagreeing with the expected
+   `target://<library>`. **The `build-output.json` validator must invoke
+   this existing check** (via `validate_inputs_pack`, already called from
+   `actions/collect-facts`'s `phase: verify`) for every target claiming
+   `"declared"` evidence, confirming the pack is actually isolated to that
+   target — not reimplement a weaker non-empty-only check that a shared
+   pack could pass.
 2. **Requested-vs-effective depth gate** — reuses the mechanism PR #601
    introduces at the CLI layer (`DumpDepthNotSatisfiedError`, per this
    repo's Known Gaps section) but applied at `check-target` level so a

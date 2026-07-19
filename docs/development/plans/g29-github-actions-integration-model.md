@@ -179,7 +179,13 @@ per existing conventions), new `abicheck/cli_buildsource.py` subcommand,
 `docs/reference/build-output-schema.md` (new).
 
 **Tests:** unit tests for the validator's failure taxonomy (empty declared
-root, digest mismatch, `projection` inconsistency — ADR-045 §11.1).
+root, digest mismatch, `projection` inconsistency — ADR-045 §11.1). **Must
+include a shared-pack-across-two-targets case, flagged by review:** a
+non-empty-only check would pass a `build-output.json` whose two `targets[]`
+entries both point at the same `abicheck_inputs/` pack marked `"declared"`
+— the validator must call `abicheck.buildsource.inputs_validate.validate_inputs_pack`
+(reused, not reimplemented) per target and assert it rejects the shared/
+mismatched-`target_id` case, per ADR-045 §11.1's corrected description.
 
 ### P1.2 — `actions/resolve-baseline`
 
