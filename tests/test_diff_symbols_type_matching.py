@@ -275,6 +275,65 @@ class TestCtorOverloadAmbiguityIsAmbiguitySafe:
         risk = [c for c in r.changes if c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK]
         assert len(risk) == 1
 
+    def test_legacy_vs_fresh_synthetic_key_format_no_false_risk(self):
+        """A persisted snapshot from before synthetic ctor keys were
+        namespace-qualified (``__abicheck_ctor__Widget(...)``) compared
+        against a fresh one (``__abicheck_ctor__ns::Widget(...)``): the SAME
+        two overloads on both sides must not be reported as newly gained
+        just because old and new spell the class's ctor key differently
+        (Codex review, PR #608 follow-up, fifth round).
+        """
+        widget_old = RecordType(name="Widget", qualified_name="ns::Widget", kind="class")
+        widget_new = RecordType(name="Widget", qualified_name="ns::Widget", kind="class")
+
+        def ctor(scope, param_type):
+            key = f"{SYNTHETIC_CTOR_KEY_PREFIX}{scope}({param_type})"
+            return Function(
+                name="Widget", mangled=key, return_type="void",
+                params=[Param(name="x", type=param_type)],
+                visibility=Visibility.PUBLIC, is_explicit=False,
+            )
+
+        old_funcs = [ctor("Widget", "int"), ctor("Widget", "char const *")]
+        new_funcs = [ctor("ns::Widget", "int"), ctor("ns::Widget", "char const *")]
+
+        r = compare(
+            _snap(functions=old_funcs, types=[widget_old]),
+            _snap(functions=new_funcs, types=[widget_new]),
+        )
+
+        assert ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK not in _kinds(r)
+
+    def test_legacy_vs_fresh_synthetic_key_format_genuine_addition_still_flags(self):
+        """Same legacy/fresh key-format mix, but the new side genuinely
+        gains a 3rd converting ctor -- must still be reported."""
+        widget_old = RecordType(name="Widget", qualified_name="ns::Widget", kind="class")
+        widget_new = RecordType(name="Widget", qualified_name="ns::Widget", kind="class")
+
+        def ctor(scope, param_type):
+            key = f"{SYNTHETIC_CTOR_KEY_PREFIX}{scope}({param_type})"
+            return Function(
+                name="Widget", mangled=key, return_type="void",
+                params=[Param(name="x", type=param_type)],
+                visibility=Visibility.PUBLIC, is_explicit=False,
+            )
+
+        old_funcs = [ctor("Widget", "int"), ctor("Widget", "char const *")]
+        new_funcs = [
+            ctor("ns::Widget", "int"),
+            ctor("ns::Widget", "char const *"),
+            ctor("ns::Widget", "double"),
+        ]
+
+        r = compare(
+            _snap(functions=old_funcs, types=[widget_old]),
+            _snap(functions=new_funcs, types=[widget_new]),
+        )
+
+        risk = [c for c in r.changes if c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK]
+        assert len(risk) == 1
+        assert "double" in risk[0].description
+
 
 class TestVirtualMethodOwnerResolutionAmbiguitySafe:
     """``_diff_functions`` feeds ``old_types``/``new_types`` into

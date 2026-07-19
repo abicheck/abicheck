@@ -992,10 +992,8 @@ _CV_QUALIFIER_RE = re.compile(r"\b(?:const|volatile)\b")
 
 
 def _synthetic_ctor_scope(mangled: str) -> str | None:
-    """Qualified scope in a castxml synthetic-ctor key
-    (``SYNTHETIC_CTOR_KEY_PREFIX + "scope(params)"``), or ``None`` (it
-    doesn't start with ``_Z`` so ``owner_class_of`` can't parse it; Codex
-    review, PR #608 follow-up).
+    """Qualified scope in a castxml synthetic-ctor key (``SYNTHETIC_CTOR_KEY_PREFIX
+    + "scope(params)"``), or ``None`` (Codex review, PR #608 follow-up).
     """
     if not is_synthetic_ctor_key(mangled):
         return None
@@ -1005,25 +1003,23 @@ def _synthetic_ctor_scope(mangled: str) -> str | None:
 
 
 def _converting_ctors_by_class(
-    snap: AbiSnapshot, class_names: set[str]
+    snap: AbiSnapshot, class_aliases: dict[str, str]
 ) -> dict[str, dict[tuple[str, ...], Function]]:
     """Group each class's non-explicit, single-required-argument constructors.
 
-    Grouped by ``owner_class_of(f)`` (scope-qualified), not bare ``f.name``
-    (Codex review, PR #608 follow-up).
+    Grouped by ``class_aliases``' normalized canonical identity, not the raw
+    spelling (Codex review, PR #608 follow-up) -- see ``_class_identity_aliases``.
 
     "Converting constructor": public, not deleted, definitively non-explicit
     (``is_explicit is False``; ``None`` is unknown and skipped), callable
-    with exactly one argument (at most one *required* parameter, at least
-    one total). First parameter's type excludes copy/move constructors.
-    Keyed by param-type tuple. Falls back to a synthetic-key-derived scope,
-    then bare ``f.name``, when ``owner_class_of`` is unresolvable.
+    with exactly one argument. First parameter's type excludes copy/move
+    constructors. Keyed by param-type tuple.
     """
     by_class: dict[str, dict[tuple[str, ...], Function]] = {}
     for f in snap.functions:
         owner = owner_class_of(f) or _synthetic_ctor_scope(f.mangled) or f.name
-        # Doubly-legacy fallback (Codex review, PR #608 follow-up).
-        if owner not in class_names and owner.rsplit("::", 1)[-1] not in class_names:
+        canonical = class_aliases.get(owner) or class_aliases.get(owner.rsplit("::", 1)[-1])
+        if canonical is None:
             continue
         if f.is_deleted or f.is_explicit is not False:
             continue
@@ -1040,28 +1036,33 @@ def _converting_ctors_by_class(
         if arg_type == f.name:
             continue
         sig = tuple(p.type for p in f.params)
-        by_class.setdefault(owner, {})[sig] = f
+        by_class.setdefault(canonical, {})[sig] = f
     return by_class
 
 
-def _common_class_identities(old_map: TypeMap[RecordType], new_map: TypeMap[RecordType]) -> set[str]:
-    """Every identity string ``owner_class_of`` might spell for a class
-    ambiguity-safely matched on both sides.
-
-    A raw ``set(old_map) & set(new_map)`` misses schema-evolution mixes: a
-    legacy ``RecordType`` missing ``qualified_name`` keys as bare
-    ``"Widget"``, while ``owner_class_of`` always resolves ``"ns::Widget"``
-    when parseable (Codex review, PR #608 follow-up). Recording both matched
-    keys via ``lookup_matched_type`` covers the mix either way.
+def _class_identity_aliases(old_map: TypeMap[RecordType], new_map: TypeMap[RecordType]) -> dict[str, str]:
+    """Map every raw spelling ``owner_class_of``/synthetic-ctor-scope might
+    produce for a matched class, on either side, to ONE shared canonical
+    identity -- so old/new agree on a grouping key even when they spell the
+    SAME class differently (e.g. a persisted snapshot predating namespace-
+    qualified synthetic ctor keys vs. a fresh one), instead of every
+    unchanged overload looking new on one side (Codex review, PR #608
+    follow-up).
     """
-    identities: set[str] = set()
+    aliases: dict[str, str] = {}
     for t_old in old_map.values():
         t_new = lookup_matched_type(old_map, new_map, t_old)
         if t_new is None:
             continue
-        identities.add(type_map_key(t_old))
-        identities.add(type_map_key(t_new))
-    return identities
+        canonical = t_old.qualified_name or t_new.qualified_name or t_old.name
+        aliases[type_map_key(t_old)] = canonical
+        aliases[type_map_key(t_new)] = canonical
+        # Bare-name alias only when unambiguous on both sides (mirrors
+        # TypeMap's alias-safety rule) -- an unrelated class mustn't steal it.
+        bare = t_old.name
+        if old_map.bare_name_is_unambiguous(bare) and new_map.bare_name_is_unambiguous(bare):
+            aliases[bare] = canonical
+    return aliases
 
 
 @registry.detector("ctor_overload_ambiguity")
@@ -1077,13 +1078,13 @@ def _diff_ctor_overload_ambiguity(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
     don't cross this threshold and, rarely, flag an addition that never
     collides with a real call site — see ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK.
     """
-    # Ambiguity-safe intersection, not a raw canonical-key set intersection
-    # (Codex review, PR #608 follow-up) — see _common_class_identities.
-    common_classes = _common_class_identities(build_type_map(old.types), build_type_map(new.types))
-    if not common_classes:
+    # Ambiguity-safe, spelling-normalized matching (Codex review, PR #608
+    # follow-up) — see _class_identity_aliases.
+    aliases = _class_identity_aliases(build_type_map(old.types), build_type_map(new.types))
+    if not aliases:
         return []
-    old_ctors = _converting_ctors_by_class(old, common_classes)
-    new_ctors = _converting_ctors_by_class(new, common_classes)
+    old_ctors = _converting_ctors_by_class(old, aliases)
+    new_ctors = _converting_ctors_by_class(new, aliases)
     changes: list[Change] = []
     for cls in sorted(new_ctors):
         old_sigs = old_ctors.get(cls, {})

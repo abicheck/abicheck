@@ -49,4 +49,11 @@
   the bare leaf, while a real Itanium-mangled constructor's owner is always
   fully qualified regardless of `RecordType`'s own schema — the class-
   membership check now also accepts the bare leaf of a fully-qualified
-  owner when the qualified form isn't present.
+  owner when the qualified form isn't present. (4) `_diff_ctor_overload_ambiguity`
+  now groups constructors by a normalized *canonical* class identity
+  (`_class_identity_aliases`) instead of the raw owner spelling: a persisted
+  snapshot from before synthetic ctor keys were namespace-qualified
+  (`__abicheck_ctor__Widget(...)`) compared against a fresh one
+  (`__abicheck_ctor__ns::Widget(...)`) previously grouped the SAME class's
+  unchanged overloads under two different keys, fabricating a
+  `CTOR_OVERLOAD_AMBIGUITY_RISK` for every one of them.
