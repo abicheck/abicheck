@@ -725,6 +725,16 @@ class MarkReachability:
         # sibling walks trust elsewhere — so require it explicitly, on both
         # sides being compared, rather than inferring completeness from mere
         # edge presence plus the absence of a narrowed/degraded flag.
+        #
+        # Both families, not either (Codex review, third pass):
+        # compute_call_graph_leak_paths's walk mixes DECL_CALLS_DECL edges
+        # (produced only by the "call_graph" pass, call_graph.py) with
+        # DECL_REFERENCES_DECL edges (produced only by the "type_graph"
+        # pass, type_graph.py) into a single combined reachability walk — a
+        # build where only one of the two producer passes completed still
+        # has a real coverage gap in the other edge family, so trusting the
+        # walk's absence-of-edge conclusion requires *both* passes
+        # confirmed complete, not just one.
         def _call_graph_fully_trusted(snap: AbiSnapshot) -> bool:
             build_source = getattr(snap, "build_source", None)
             graph = getattr(build_source, "source_graph", None) if build_source is not None else None
@@ -732,7 +742,7 @@ class MarkReachability:
                 return False
             return bool(
                 graph.extractor_passes.get("call_graph")
-                or graph.extractor_passes.get("type_graph")
+                and graph.extractor_passes.get("type_graph")
             )
 
         call_graph_trusted = _call_graph_fully_trusted(ctx.old) and _call_graph_fully_trusted(

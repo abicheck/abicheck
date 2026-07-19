@@ -443,9 +443,12 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
         self,
     ) -> None:
         """A call graph whose extractor_passes confirms a full, completed
-        (not narrowed/degraded) pass on *both* sides, and which simply does
-        not reach this decl, is real negative evidence — merely having a
-        few unrelated edges present is not enough (Codex review)."""
+        (not narrowed/degraded) pass for *both* edge families
+        (call_graph.py's DECL_CALLS_DECL and type_graph.py's
+        DECL_REFERENCES_DECL — the combined walk mixes both) on *both*
+        sides, and which simply does not reach this decl, is real negative
+        evidence — merely having a few unrelated edges present is not
+        enough (Codex review)."""
         from abicheck.buildsource.source_graph import GraphEdge
 
         old = _graph_snap(
@@ -455,13 +458,13 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
                 _decl_node("decl://other", "ns::detail::other", "source"),
             ],
             edges=[GraphEdge(src="decl://pub", dst="decl://other", kind="DECL_CALLS_DECL")],
-            extractor_passes={"call_graph": True},
+            extractor_passes={"call_graph": True, "type_graph": True},
         )
         new = _graph_snap(
             [_public_fn("pubFn")],
             nodes=[_decl_node("decl://pub", "pubFn", "public_header")],
             edges=[],
-            extractor_passes={"call_graph": True},
+            extractor_passes={"call_graph": True, "type_graph": True},
         )
         raw_change = Change(
             kind=ChangeKind.FUNC_REMOVED,
@@ -496,6 +499,43 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
             [_public_fn("pubFn")],
             nodes=[_decl_node("decl://pub", "pubFn", "public_header")],
             edges=[],
+        )
+        raw_change = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="ns::detail::unrelated_and_never_called",
+            description="removed",
+        )
+        ctx = DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_REMOVED]
+        assert len(found) == 1
+        assert found[0].reachability_state == ReachabilityState.UNKNOWN
+
+    def test_only_one_confirmed_pass_family_is_still_unknown(self) -> None:
+        """Codex review, third pass: compute_call_graph_leak_paths's combined
+        walk mixes DECL_CALLS_DECL edges (only ever produced by the
+        "call_graph" pass) with DECL_REFERENCES_DECL edges (only ever
+        produced by the "type_graph" pass) — a build where only the
+        type_graph pass completed still has a real coverage gap in the
+        call_graph family, so trust requires *both* extractor_passes
+        entries, not just one."""
+        from abicheck.buildsource.source_graph import GraphEdge
+
+        old = _graph_snap(
+            [_public_fn("pubFn")],
+            nodes=[
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://other", "ns::detail::other", "source"),
+            ],
+            edges=[GraphEdge(src="decl://pub", dst="decl://other", kind="DECL_REFERENCES_DECL")],
+            extractor_passes={"type_graph": True},
+        )
+        new = _graph_snap(
+            [_public_fn("pubFn")],
+            nodes=[_decl_node("decl://pub", "pubFn", "public_header")],
+            edges=[],
+            extractor_passes={"type_graph": True},
         )
         raw_change = Change(
             kind=ChangeKind.FUNC_REMOVED,
