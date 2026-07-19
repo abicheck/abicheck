@@ -747,7 +747,7 @@ in `check-target`, `check-single.yml`, or `check-project.yml`.
 
 ```json
 {
-  "report_schema_version": "1.x.y",
+  "report_schema_version": "2.10",
   "check_id": "libpvxs@linux-x86_64-gcc13-release#accepted-main@source",
   "target_id": "libpvxs@linux-x86_64-gcc13-release#accepted-main@source",
   "project": "epics-base/pvxs",
@@ -812,7 +812,15 @@ field instead — additive in spirit but not in fact, since a report copying
 this example would fail the *existing* schema/version contract the ADR
 claims to extend, not replace. Fixed to reuse `report_schema_version`
 (bumping its MINOR component per the schema's own versioning convention
-for additive changes, not introducing a parallel field).
+for additive changes, not introducing a parallel field). **The example
+value must also be schema-valid, not a placeholder — a follow-up review
+catch:** `compare_report.schema.json` requires `report_schema_version` to
+match `^[0-9]+\.[0-9]+$` (a real `MAJOR.MINOR` pair), and the live value
+today is `abicheck/schemas/__init__.py`'s `REPORT_SCHEMA_VERSION = "2.9"` —
+an earlier draft's placeholder `"1.x.y"` would itself fail schema
+validation. Set to `"2.10"` (the next MINOR bump from the current `2.9`,
+matching this section's own "additive changes bump MINOR" convention) as a
+concrete, schema-valid example value.
 
 The last two fields, `verdict` and `severity`, are **not optional
 decoration** — they are the exact legacy fields `abicheck/aggregate.py`
