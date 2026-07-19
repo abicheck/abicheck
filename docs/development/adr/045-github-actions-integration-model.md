@@ -251,6 +251,26 @@ Design points:
   is how a project's existing build (or a CMake/Meson `install` step)
   populates it — this is the mechanism for "build once, scan many" (S3)
   without abicheck ever owning the build.
+- **One `build-output.json` = one build profile, always — confirmed gap from
+  review.** `profile` above is a singular object, not a list, by design: a
+  single build produces binaries for exactly one OS/arch/compiler/config
+  combination, so one artifact can only ever describe one profile. An
+  earlier draft of §8's S17 row said `check-project.yml` "consumes a
+  `build-output.json` artifact" (singular) while also matrixing over
+  `profiles[]` (plural) with no stated mapping — under-specified, since a
+  reader could not tell whether that meant one artifact holding multiple
+  profiles (which the schema doesn't support) or something else. **S17's
+  actual model:** each build profile in `.abicheck.yml`'s `profiles:` block
+  corresponds to its own CI **build job**, each publishing its own
+  uniquely-named artifact — `abicheck-build-<profile.id>/` (e.g.
+  `abicheck-build-linux-x86_64-gcc13-release/`,
+  `abicheck-build-windows-x86_64-msvc-release/`) — so `check-project.yml`'s
+  matrix has one cell per `(target, profile)` pair, and each cell downloads
+  the *one* `build-output.json` artifact matching its own `profile.id`, not
+  a shared artifact it has to disambiguate at runtime. This keeps the
+  build-output schema itself unchanged (still one profile per artifact) and
+  puts the multi-profile fan-out where it structurally belongs: in the
+  artifact-naming/matrix contract, not in `build-output.json`'s shape.
 
 ---
 
@@ -326,7 +346,7 @@ missing-file error text happens to be.
 
 | Workflow | Composes | Primary scenarios |
 |---|---|---|
-| `check-single.yml` | a single `check-target` call (one target, one profile) — `check-target` owns baseline resolution internally, see below | S1, S2, S4, S5, S6 |
+| `check-single.yml` | a single `check-target` call (one target, one profile) — `check-target` owns baseline resolution internally, see below | S1, S2, S5, S6 |
 | `check-project.yml` | consumes a `build-output.json` artifact → dynamic matrix over `targets[]`/`profiles[]` → `check-target` per cell → optional `aggregate` job if `>1` cell | S3, S14 (via one `check-target` call per bundle), S15, S17, S25, S28 |
 | `publish-baseline.yml` | build/consume `build-output.json` → `actions/baseline` → upload as release asset (atomic archive, §10) | S19 |
 | `update-main-baseline.yml` | same as above, targeting the `accepted-main` channel storage backend, triggered on default-branch push | S20 |
@@ -579,7 +599,7 @@ scenario requires `aggregate` except S28.
 | S1 | Single library, committed baseline | `check-single.yml` | explicit (committed file) | Minimal YAML; root action alone suffices, no new primitive needed. |
 | S2 | Single library, latest-release baseline | `check-single.yml` | release-contract | Needs `resolve-baseline`'s fail-loud `not_found` handling. |
 | S3 | Reuse existing expensive build | `check-project.yml` | either | The `build-output.json` consumer path; no rebuild inside abicheck. |
-| S4 | Build+check in one job | `check-single.yml` (local mode) | either | Small-project shortcut; not the default for large repos. |
+| S4 | Build+check in one job | `actions/check-target` used as a **step** inside the caller's own job, *not* `check-single.yml` | either | Small-project shortcut; not the default for large repos. Correction from an earlier draft: GitHub's own reusable-workflow docs (`jobs.<job_id>.uses`) confirm a reusable workflow always runs as a separate job with its own runner/workspace, so it structurally cannot share a filesystem with a build step that ran earlier in the caller's job — `check-single.yml` is therefore the wrong entry point for "build and check in one job." S4's real entry point is `actions/check-target` invoked directly as a step (`uses: abicheck/abicheck/actions/check-target@vN`) right after the project's own build steps in the same job, giving it direct access to the just-built artifacts on disk. `check-single.yml` stays correct for S1/S2/S5/S6, where the candidate binary is a git-committed/downloaded artifact and no in-job build step needs to be shared. |
 | S5 | Single-build audit, no baseline | `check-single.yml` (`baseline: none`) | none | Advisory by default (§7 `local` vs `advisory`). |
 | S6 | Header-aware compatibility | `check-single.yml` | any | Public-header floor; `evidence_coverage` must confirm header parse reached (finding-driven — no silent L0 fallback). |
 | S7 | Source scan via compile-DB replay | `check-single.yml`/`check-project.yml` + `collect-facts producer: replay` | any | PR = changed-TU scope; nightly/release = full unseeded. |
@@ -592,7 +612,7 @@ scenario requires `aggregate` except S28.
 | S14 | Multi-DSO release bundle | one `check-target` over the bundle (directory/`--manifest` compare) | any | One report; distinct from S15. |
 | S15 | Multiple independent targets, one build | `check-project.yml` matrix, no fan-in required unless gating jointly | any | oneDAL/PVXS-class; each target keeps its own header/compiler context. |
 | S16 | Shared source facts, multiple DSO | `collect-facts` + declared `evidence.projection` in `build-output.json` | any | Safe-model-now vs. full-model documented in §2/§9; never auto-assumed ownership. |
-| S17 | Multiple build profiles | multiple `check-project.yml` matrix cells keyed by `profile.id` | per-profile | Which lanes are ABI contracts vs. test-only is an explicit `.abicheck.yml` `profiles:` allowlist, not "every CI lane." |
+| S17 | Multiple build profiles | `check-project.yml` matrix cells keyed by `profile.id`, one per-profile `build-output.json` artifact per cell (§2's "one artifact = one profile" design point) | per-profile | Which lanes are ABI contracts vs. test-only is an explicit `.abicheck.yml` `profiles:` allowlist, not "every CI lane." |
 | S18 | Cross compilation | `build-output.json` authored on build host, `check-target` run offline/elsewhere | any | No host auto-detection of target context; dump-producer and compare are decoupled steps. |
 | S19 | Release-contract baseline | `publish-baseline.yml` | — (producer) | See §6. |
 | S20 | Accepted-main baseline | `update-main-baseline.yml` | — (producer) | See §6. |

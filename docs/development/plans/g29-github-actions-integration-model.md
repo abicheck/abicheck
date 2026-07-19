@@ -135,6 +135,23 @@ section to the canonical multi-DSO recipe; the other two pages
 restating it. No new scenario content yet — this is de-duplication, not the
 full scenario-first IA (that's P1's `docs/integration/` tree).
 
+**Required caveat, flagged by review — do not skip:** the existing recipe
+being promoted has every library in a multi-DSO release point at the *same*
+shared `abicheck_inputs/` pack with no per-target projection check. ADR-045
+§9 requires exactly that projection (`evidence.projection: "declared"` vs.
+"inferred") before a per-target check may claim `effective_depth: source` —
+but the validator that enforces it doesn't exist until P1.1
+(`build-output.json` validator). If P0.4 lands (as a docs-only, no-code PR)
+before P1.1 ships, promoting the recipe *as-is* to "the" canonical multi-DSO
+page teaches exactly the anti-pattern §9 exists to prevent: claiming
+source-depth evidence for every DSO from one unprojected, build-wide pack.
+**This PR must add an explicit caveat to the promoted section** — e.g. "this
+shared-pack recipe currently supports build-wide source audits and
+per-target *header*-depth checks; claiming per-target *source*-depth
+coverage from a shared pack requires the per-target projection validator
+tracked in P1.1, not yet implemented" — rather than promoting the recipe
+silently as if it already satisfies §9's safe model.
+
 **Files:** the three docs pages listed; `mkdocs.yml` nav unaffected (no new
 pages yet).
 
