@@ -746,3 +746,47 @@ class TestBaseClassChanges:
         r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
         assert ChangeKind.BASE_CLASS_POSITION_CHANGED in _kinds(r)
         assert r.verdict == Verdict.BREAKING
+
+
+# ── Bare-name collision across distinct qualified scopes (pvxs FP) ────────
+
+class TestQualifiedNameMatching:
+    """Two unrelated types that only share a short/leaf name (e.g. two
+    distinct ``std::*::_Impl`` template internals pulled in transitively via
+    different headers) must not be diffed against each other. Header-mode
+    dumpers set ``RecordType.qualified_name`` alongside the deliberately-bare
+    ``name`` (see model.py); matching must prefer it.
+    """
+
+    def test_unrelated_same_leaf_name_types_not_cross_matched(self):
+        # old: two distinct scopes' "_Impl", each losing/gaining an unrelated field.
+        old_a = RecordType(name="_Impl", qualified_name="std::locale::_Impl",
+                           kind="class", size_bits=64,
+                           fields=[TypeField("_M_refcount", "int", 0)])
+        old_b = RecordType(name="_Impl", qualified_name="ns::Other::_Impl",
+                           kind="class", size_bits=32,
+                           fields=[TypeField("_M_storage", "int", 0)])
+        # new: each scope's own _Impl is unchanged; only cross-matching by the
+        # bare "_Impl" name would fabricate a field-removed/field-added diff.
+        new_a = RecordType(name="_Impl", qualified_name="std::locale::_Impl",
+                           kind="class", size_bits=64,
+                           fields=[TypeField("_M_refcount", "int", 0)])
+        new_b = RecordType(name="_Impl", qualified_name="ns::Other::_Impl",
+                           kind="class", size_bits=32,
+                           fields=[TypeField("_M_storage", "int", 0)])
+
+        r = compare(_snap(types=[old_a, old_b]), _snap(types=[new_a, new_b]))
+
+        assert ChangeKind.TYPE_FIELD_REMOVED not in _kinds(r)
+        assert ChangeKind.TYPE_FIELD_ADDED not in _kinds(r)
+
+    def test_genuine_change_still_detected_when_qualified(self):
+        t_old = RecordType(name="_Impl", qualified_name="ns::Scope::_Impl",
+                           kind="class", size_bits=64,
+                           fields=[TypeField("count", "int", 0)])
+        t_new = RecordType(name="_Impl", qualified_name="ns::Scope::_Impl",
+                           kind="class", size_bits=32, fields=[])
+
+        r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
+
+        assert ChangeKind.TYPE_FIELD_REMOVED in _kinds(r)
