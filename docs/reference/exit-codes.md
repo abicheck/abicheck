@@ -172,9 +172,14 @@ the worst contribution across them:
   (`severity.{exit_code,blocking,blocking_categories}`); `aggregate` *combines*
   those, it never recomputes a gate from the compatibility verdict. So a
   `COMPATIBLE` report with an `addition=error` policy still contributes exit
-  `1`, and a `BREAKING` report under a demoted preset can contribute `0`.
-  Reports produced without any `--severity-*` policy carry no gate block and
-  fall back to the legacy verdict→exit mapping (`0`/`2`/`4`).
+  `1`, and a `BREAKING` report under a demoted preset can contribute `0`. A
+  `scan` report is read via its own top-level `exit_code` (keyed on
+  `scan_schema_version`). Reports produced without any gate block fall back to
+  the legacy verdict→exit mapping (`0`/`2`/`4`). Reading is **fail-closed**: a
+  report whose gate block is *present but corrupt* (an out-of-range or
+  non-integer `exit_code`, a `blocking` flag that contradicts it, non-string
+  categories) makes that target *unavailable* — never silently reverting to the
+  greener legacy path.
 - **coverage** — did every *required* expected target actually report? An
   incomplete required coverage is a *coverage* failure at exit `1`; it is
   **never** promoted to an ABI-break exit `4`.

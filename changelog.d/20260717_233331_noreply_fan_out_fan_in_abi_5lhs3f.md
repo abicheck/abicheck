@@ -24,4 +24,11 @@
   target id is a usage error. `--on-missing-required {fail,warn}` and
   `--on-unexpected-target {include,warn,fail,ignore}` tune the policy, and
   `--format json` emits a versioned (`aggregate_schema_version`) result with the
-  three axes kept separate. See ADR-043 D13.
+  three axes kept separate (including an `unexpected_targets` list). The gate is
+  read **fail-closed**: a report whose `severity` block is present but corrupt
+  (bad/out-of-range `exit_code`, `blocking` contradicting `exit_code`,
+  non-string categories) makes that target *unavailable* rather than reverting
+  to the greener legacy path; only an entirely absent gate block legacy-falls-back.
+  `scan` reports are read via their own top-level `exit_code`
+  (`scan_schema_version`), and when a manifest pins a `head_sha`, a report that
+  is missing or mismatches it is treated as unavailable. See ADR-043 D13.

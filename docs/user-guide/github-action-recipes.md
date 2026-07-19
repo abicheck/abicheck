@@ -146,22 +146,43 @@ Each platform builds and compares on its own matrix leg (fan-out) and uploads
 a JSON report; a gate job downloads them all and folds them into one verdict
 (fan-in) with **`abicheck aggregate`**:
 
+A single committed `abi-targets.json` is the **source of truth**: a plan job
+reads it into the build matrix, and the gate job reads the *same* file to
+reconcile coverage — so the two cannot drift. The manifest carries the
+per-target build metadata (`os`/`ext`) alongside `id`/`required`; `aggregate`
+reads only `id`/`required` and ignores the rest.
+
+```json
+{
+  "targets": [
+    {"id": "linux-x86_64",   "required": true, "os": "ubuntu-latest",  "ext": "so"},
+    {"id": "macos-arm64",    "required": true, "os": "macos-latest",   "ext": "dylib"},
+    {"id": "windows-x86_64", "required": true, "os": "windows-latest", "ext": "dll"}
+  ]
+}
+```
+
 ```yaml
 jobs:
+  abi-plan:                          # read the manifest → matrix, exactly once
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: plan
+        run: |
+          echo "matrix={\"include\":$(jq -c '.targets' abi-targets.json)}" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4   # hand the SAME file to the gate job
+        with:
+          name: abi-target-manifest
+          path: abi-targets.json
+
   abi-scan:
+    needs: abi-plan
     strategy:
-      fail-fast: false            # don't cancel other legs when one fails
-      matrix:
-        include:
-          - target: linux-x86_64
-            os: ubuntu-latest
-            ext: so
-          - target: macos-arm64
-            os: macos-latest
-            ext: dylib
-          - target: windows-x86_64
-            os: windows-latest
-            ext: dll
+      fail-fast: false                 # don't cancel other legs when one fails
+      matrix: ${{ fromJSON(needs.abi-plan.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -172,27 +193,30 @@ jobs:
       - name: ABI compare (native)
         uses: abicheck/abicheck@v0.3.0
         with:
-          old-library: baselines/${{ matrix.target }}/abi-old.json
+          old-library: baselines/${{ matrix.id }}/abi-old.json
           new-library: build/libfoo.${{ matrix.ext }}
           new-header: include/foo.h
           format: json
-          output-file: abi-report-${{ matrix.target }}.json
-          fail-on-breaking: false   # let the gate job decide
+          output-file: abi-report-${{ matrix.id }}.json
+          fail-on-breaking: false      # let the gate job decide
 
       - name: Upload platform ABI report
-        if: ${{ always() }}         # upload even if the build/compare failed
+        if: ${{ always() }}            # upload even if the build/compare failed
         uses: actions/upload-artifact@v4
         with:
-          name: abi-report-${{ matrix.target }}
-          path: abi-report-${{ matrix.target }}.json
+          name: abi-report-${{ matrix.id }}
+          path: abi-report-${{ matrix.id }}.json
           if-no-files-found: ignore
 
   abi-gate:
-    needs: abi-scan
-    if: ${{ always() }}             # run the gate even if a matrix leg failed
+    needs: [abi-plan, abi-scan]
+    if: ${{ always() }}                # run the gate even if a matrix leg failed
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4    # brings the committed abi-targets.json into the workspace
+      - name: Download the target manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: abi-target-manifest    # the exact abi-targets.json the plan used
 
       - name: Download all ABI reports
         uses: actions/download-artifact@v4
@@ -207,31 +231,13 @@ jobs:
           abicheck aggregate abi-reports/ --manifest abi-targets.json
 ```
 
-The `actions/checkout` step is what puts the committed `abi-targets.json` on
-disk for `--manifest` to read; without it the gate job only has the downloaded
-reports and `--manifest` (an existing-path flag) fails. If you prefer not to
-check out the repo in the gate job, use the inline `--expect` form below
-instead.
-
-`--manifest` names the **single source of truth** for the targets the matrix
-must produce — commit it next to the workflow and read it from both the matrix
-and the gate so the two can never drift:
-
-```json
-{
-  "targets": [
-    {"id": "linux-x86_64",   "required": true},
-    {"id": "macos-arm64",    "required": true},
-    {"id": "windows-x86_64", "required": true}
-  ]
-}
-```
-
-(For a quick inline set, `--expect linux-x86_64,macos-arm64,windows-x86_64`
+The gate downloads the manifest as an artifact (not `actions/checkout`), so it
+gates against the exact target set the matrix was planned from. For a quick
+inline set instead of a manifest, `--expect linux-x86_64,macos-arm64,windows-x86_64`
 with optional `--optional <ids>` is equivalent; `--discovered-only` opts out of
 the coverage gate entirely. One of the three is **required** — a bare
 `aggregate abi-reports/` is a usage error, because with no declared target set
-the gate cannot tell a missing required target from an absent one.) `aggregate`
+the gate cannot tell a missing required target from an absent one. `aggregate`
 then guarantees the properties the old hand-written gate loop silently violated:
 
 * **A required target with no report is _unavailable_ (unknown), never counted
@@ -278,8 +284,8 @@ Gate:
 Add `--format json` for a versioned, machine-readable result — the three axes
 are kept separate under `gate` (`passed`/`exit_code`/`blocking_targets`),
 `coverage` (`status`/counts/`missing_required_targets`), and `compatibility`
-(`verdict`/`analyzed_targets`), plus a per-`targets` breakdown — to post
-elsewhere.
+(`verdict`/`analyzed_targets`), plus a per-`targets` breakdown and an
+`unexpected_targets` list — to post elsewhere.
 
 ## Skip system dependency installation
 

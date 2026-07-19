@@ -181,14 +181,78 @@ class TestGateVsVerdict:
         target = r.targets[0]
         assert target.gate is not None and target.gate.from_report is False
 
-    def test_malformed_gate_block_falls_back_to_legacy(self, tmp_path: Path):
-        # severity present but exit_code is not an int → ignore the block,
-        # fall back to the verdict-derived legacy gate.
-        _write_report(tmp_path, LINUX, "BREAKING", severity={"exit_code": "nope"})
+    @pytest.mark.parametrize(
+        "bad_severity",
+        [
+            {"exit_code": "1"},  # exit_code is a string, not an int
+            {"exit_code": True},  # bool is not a valid exit code
+            {"exit_code": 3},  # not one of {0,1,2,4}
+            {"exit_code": 1, "blocking": "yes"},  # blocking is not a boolean
+            {"exit_code": 0, "blocking": True},  # blocking contradicts exit_code
+            {"exit_code": 4, "blocking": False},  # blocking contradicts exit_code
+            {"exit_code": 1, "blocking_categories": "addition"},  # not a list
+            {"exit_code": 1, "blocking_categories": [1, 2]},  # not strings
+            {"blocking": True},  # exit_code missing entirely
+            "not-an-object",  # severity is not even a dict
+        ],
+    )
+    def test_malformed_gate_block_fails_closed(self, tmp_path: Path, bad_severity):
+        # A *present but corrupt* gate block must NOT silently revert to the
+        # (possibly greener) legacy verdict path — the target becomes
+        # unavailable (unknown), so a required target failing this way is a
+        # coverage gap, never a green pass.
+        _write_report(tmp_path, LINUX, "COMPATIBLE", severity=bad_severity)
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert not r.targets[0].analyzed
+        assert "malformed" in (r.targets[0].reason or "")
+        assert r.exit_code() == 1  # required coverage gap, not a green 0
+
+    def test_absent_gate_block_still_legacy_falls_back(self, tmp_path: Path):
+        # The distinction: NO severity block at all is an old/policy-less
+        # report and legacy-falls-back to the verdict mapping.
+        _write_report(tmp_path, LINUX, "BREAKING")  # no severity key
         r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
         assert r.targets[0].gate is not None
         assert r.targets[0].gate.from_report is False
         assert r.exit_code() == 4
+
+    def test_scan_report_top_level_exit_code_is_the_gate(self, tmp_path: Path):
+        # A scan report records its gate as a top-level exit_code, not a
+        # severity block; keyed on scan_schema_version.
+        (tmp_path / "abi-report-linux-x86_64.json").write_text(
+            json.dumps(
+                {"verdict": "API_BREAK", "scan_schema_version": "1.0", "exit_code": 2}
+            )
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert r.targets[0].gate is not None
+        assert r.targets[0].gate.from_report is True
+        assert r.exit_code() == 2
+
+    def test_scan_report_with_non_int_exit_code_fails_closed(self, tmp_path: Path):
+        (tmp_path / "abi-report-linux-x86_64.json").write_text(
+            json.dumps(
+                {
+                    "verdict": "COMPATIBLE",
+                    "scan_schema_version": "1.0",
+                    "exit_code": "2",
+                }
+            )
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert not r.targets[0].analyzed
+        assert r.exit_code() == 1  # required coverage gap, not a green pass
+
+    def test_scan_budget_overflow_folds_to_exit_1(self, tmp_path: Path):
+        # scan's exit 5 (budget overflow) is a non-ABI scan failure — it still
+        # blocks, but folds to exit 1, never a fake ABI-break 4.
+        (tmp_path / "abi-report-linux-x86_64.json").write_text(
+            json.dumps(
+                {"verdict": "COMPATIBLE", "scan_schema_version": "1.0", "exit_code": 5}
+            )
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert r.exit_code() == 1
 
 
 class TestCoveragePolicy:
@@ -220,7 +284,7 @@ class TestUnexpectedTargets:
             on_unexpected_target=OnUnexpectedTarget.INCLUDE,
         )
         assert r.coverage is CoverageStatus.COMPLETE  # expected set is fine
-        assert MACOS in {t.target_id for t in r.unbaselined}
+        assert MACOS in {t.target_id for t in r.unexpected_targets}
         assert r.exit_code() == 4  # macos's break IS gated under include
 
     def test_warn_does_not_gate_unexpected(self, tmp_path: Path):
@@ -232,7 +296,7 @@ class TestUnexpectedTargets:
             on_unexpected_target=OnUnexpectedTarget.WARN,
         )
         assert r.exit_code() == 0
-        assert MACOS in {t.target_id for t in r.unbaselined}
+        assert MACOS in {t.target_id for t in r.unexpected_targets}
 
     def test_ignore_drops_unexpected(self, tmp_path: Path):
         _write_report(tmp_path, LINUX, "COMPATIBLE")
@@ -242,7 +306,7 @@ class TestUnexpectedTargets:
             expected=_expect(LINUX),
             on_unexpected_target=OnUnexpectedTarget.IGNORE,
         )
-        assert r.unbaselined == ()
+        assert r.unexpected_targets == ()
         assert r.exit_code() == 0
 
     def test_fail_on_any_unexpected(self, tmp_path: Path):
@@ -267,12 +331,12 @@ class TestUnexpectedTargets:
             expected=_expect(LINUX),
             on_unexpected_target=OnUnexpectedTarget.FAIL,
         )
-        assert MACOS in {t.target_id for t in r.unbaselined}
-        assert not any(t.analyzed for t in r.unbaselined)
+        assert MACOS in {t.target_id for t in r.unexpected_targets}
+        assert not any(t.analyzed for t in r.unexpected_targets)
         assert r.exit_code() == 1
 
     def test_included_unexpected_break_shows_in_compatibility(self, tmp_path: Path):
-        # An unbaselined BREAKING report that drives the exit code under
+        # An unexpected BREAKING report that drives the exit code under
         # `include` must not be hidden behind a "compatible" compatibility
         # summary — the compat axis has to see gated unexpected targets too.
         _write_report(tmp_path, LINUX, "COMPATIBLE")
@@ -362,6 +426,33 @@ class TestManifestAndIdentity:
         assert not r.targets[0].analyzed
         assert "different commit" in (r.targets[0].reason or "")
 
+    def test_missing_head_sha_under_pinned_manifest_is_unverifiable(
+        self, tmp_path: Path
+    ):
+        # Manifest pins a commit but the report carries no head_sha: identity is
+        # unverifiable (a delayed artifact from an older run without metadata),
+        # so the target is unavailable — fail closed, not accepted as current.
+        _write_report(tmp_path, LINUX, "COMPATIBLE")  # no head_sha
+        manifest = ExpectedTargets(targets={LINUX: True}, head_sha="newsha")
+        r = aggregate_reports_dir(tmp_path, expected=manifest)
+        assert not r.targets[0].analyzed
+        assert "no head_sha" in (r.targets[0].reason or "")
+        assert r.exit_code() == 1  # required coverage gap
+
+    def test_matching_head_sha_is_current(self, tmp_path: Path):
+        _write_report(tmp_path, LINUX, "COMPATIBLE", head_sha="thesha")
+        manifest = ExpectedTargets(targets={LINUX: True}, head_sha="thesha")
+        r = aggregate_reports_dir(tmp_path, expected=manifest)
+        assert r.targets[0].analyzed
+        assert r.exit_code() == 0
+
+    def test_no_pinned_sha_accepts_report_without_head_sha(self, tmp_path: Path):
+        # When the manifest does NOT pin a commit, a report without head_sha is
+        # accepted as usual — the identity guard is opt-in.
+        _write_report(tmp_path, LINUX, "COMPATIBLE")
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert r.targets[0].analyzed
+
 
 class TestRendering:
     def test_json_schema_shape(self, tmp_path: Path):
@@ -375,12 +466,12 @@ class TestRendering:
         assert d["coverage"]["required_targets"] == 2
         assert d["compatibility"]["analyzed_targets"] == 1
 
-    def test_json_includes_unbaselined_targets(self, tmp_path: Path):
+    def test_json_includes_unexpected_targets(self, tmp_path: Path):
         _write_report(tmp_path, LINUX, "COMPATIBLE")
         _write_report(tmp_path, MACOS, "COMPATIBLE")  # unexpected
         d = aggregate_reports_dir(tmp_path, expected=_expect(LINUX)).to_dict()
-        assert d["unbaselined"]
-        assert d["unbaselined"][0]["unexpected"] is True
+        assert d["unexpected_targets"]
+        assert d["unexpected_targets"][0]["unexpected"] is True
 
     def test_unavailable_property_names_missing_targets(self, tmp_path: Path):
         _write_report(tmp_path, LINUX, "COMPATIBLE")

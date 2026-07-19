@@ -125,6 +125,24 @@ class AggregateError(ValueError):
     """A malformed input the caller must fix (usage error / exit 64)."""
 
 
+class _MalformedGate(ValueError):
+    """A gate/severity block that is *present but invalid*.
+
+    Distinct from "no gate block at all": a report that never carried a
+    ``severity`` block is an old/policy-less report and may legacy-fall-back to
+    the verdict mapping, but a report that *does* carry a gate block which is
+    corrupt must **fail closed** — the target becomes unavailable rather than
+    silently reverting to the (possibly greener) legacy verdict path.
+    """
+
+
+#: The exit codes a report's own gate decision is allowed to declare — the
+#: severity-aware scheme ``compare`` emits (0 pass / 1 addition-or-quality /
+#: 2 potential-breaking / 4 abi-breaking). Anything else in a ``severity`` block
+#: is a corrupt gate, not a value we silently reinterpret.
+_VALID_GATE_EXIT = frozenset({0, 1, 2, 4})
+
+
 @dataclass(frozen=True)
 class GateInfo:
     """One target's own CI gate decision, as it recorded it.
@@ -144,20 +162,69 @@ class GateInfo:
 
     @classmethod
     def from_report_data(cls, data: Mapping[str, Any]) -> GateInfo | None:
+        """Read the ``severity`` gate block, fail-closed.
+
+        Returns ``None`` only when the report carries **no** ``severity`` key
+        (an old/policy-less report the caller may legacy-fall-back). When a
+        ``severity`` block is present it is validated strictly and a
+        :class:`_MalformedGate` is raised on any inconsistency — a corrupt
+        policy-blocked report must never silently revert to the greener legacy
+        verdict path.
+        """
+        if "severity" not in data:
+            return None
         sev = data.get("severity")
         if not isinstance(sev, dict):
-            return None
+            raise _MalformedGate("'severity' is not an object")
         exit_code = sev.get("exit_code")
         if not isinstance(exit_code, int) or isinstance(exit_code, bool):
-            return None
-        cats = sev.get("blocking_categories")
-        categories = tuple(str(c) for c in cats) if isinstance(cats, list) else ()
+            raise _MalformedGate("'severity.exit_code' is missing or not an integer")
+        if exit_code not in _VALID_GATE_EXIT:
+            raise _MalformedGate(
+                f"'severity.exit_code' {exit_code} is not one of "
+                f"{sorted(_VALID_GATE_EXIT)}"
+            )
+        blocking = sev.get("blocking", exit_code != 0)
+        if not isinstance(blocking, bool):
+            raise _MalformedGate("'severity.blocking' is not a boolean")
+        if blocking != (exit_code != 0):
+            raise _MalformedGate(
+                f"'severity.blocking'={blocking} contradicts exit_code={exit_code}"
+            )
+        cats = sev.get("blocking_categories", [])
+        if not isinstance(cats, list) or any(not isinstance(c, str) for c in cats):
+            raise _MalformedGate(
+                "'severity.blocking_categories' is not a list of strings"
+            )
         return cls(
             exit_code=exit_code,
-            blocking=bool(sev.get("blocking", exit_code > 0)),
-            blocking_categories=categories,
+            blocking=blocking,
+            blocking_categories=tuple(cats),
             from_report=True,
         )
+
+    @classmethod
+    def from_scan_report(cls, data: Mapping[str, Any]) -> GateInfo | None:
+        """Read a ``scan`` report's own top-level ``exit_code`` as the gate.
+
+        A ``scan`` JSON report records its gate as a top-level ``exit_code``
+        (scheme 0 pass / 2 source break / 4 abi break / 5 budget overflow)
+        rather than a ``compare``-style ``severity`` block. Keyed on
+        ``scan_schema_version`` so arbitrary JSON that merely happens to carry
+        an ``exit_code`` is not mistaken for a scan gate. Fails closed on a
+        scan report whose ``exit_code`` is unusable.
+        """
+        if "scan_schema_version" not in data:
+            return None
+        code = data.get("exit_code")
+        if not isinstance(code, int) or isinstance(code, bool):
+            raise _MalformedGate("scan report 'exit_code' is missing or not an integer")
+        # Map scan's own scheme onto the aggregate gate scheme: 0/2/4 pass
+        # through; any other scan failure (e.g. 5 budget overflow, or a
+        # nonsensical value) is a non-ABI failure that still blocks, folded to
+        # exit 1 — fail toward blocking, never toward a fake ABI-break 4.
+        mapped = code if code in (0, 2, 4) else COVERAGE_INCOMPLETE_EXIT
+        return cls(exit_code=mapped, blocking=mapped != 0, from_report=True)
 
     @classmethod
     def legacy_from_verdict(cls, verdict: Verdict | None) -> GateInfo:
@@ -181,7 +248,7 @@ class TargetReport:
     *unavailable* — its report was expected but never arrived or was
     unreadable — in which case ``gate`` is also ``None`` and ``reason``
     explains why. ``unexpected`` marks a report whose target was not in the
-    expected set (RFC §7 "new/unbaselined target").
+    expected set (a new/not-yet-declared matrix target).
     """
 
     target_id: str
@@ -224,9 +291,10 @@ class AggregateResult:
 
     #: Every expected target, in stable id order — analyzed or unavailable.
     targets: tuple[TargetReport, ...]
-    #: Reports for ids not in the expected set (a candidate matrix leg with no
-    #: corresponding expected entry). Graded by ``on_unexpected_target``.
-    unbaselined: tuple[TargetReport, ...] = ()
+    #: Reports for ids not in the expected set (a matrix leg with no
+    #: corresponding expected entry — e.g. a manifest that has not caught up to
+    #: a newly-added target). Graded by ``on_unexpected_target``.
+    unexpected_targets: tuple[TargetReport, ...] = ()
     on_missing_required: OnMissingRequired = OnMissingRequired.FAIL
     on_unexpected_target: OnUnexpectedTarget = OnUnexpectedTarget.INCLUDE
     #: True when the caller ran in explicit discovered-only mode (no declared
@@ -249,7 +317,7 @@ class AggregateResult:
             OnUnexpectedTarget.INCLUDE,
             OnUnexpectedTarget.FAIL,
         ):
-            return tuple(t for t in self.unbaselined if t.analyzed)
+            return tuple(t for t in self.unexpected_targets if t.analyzed)
         return ()
 
     # --- compatibility axis (reporting only) --------------------------------
@@ -260,7 +328,7 @@ class AggregateResult:
         This is *not* just the expected analyzed targets: any unexpected
         target whose findings are gated (``--on-unexpected-target
         include``/``fail``) also contributes, so the reported compatibility can
-        never say "clean" while a gated unbaselined break is driving the exit
+        never say "clean" while a gated unexpected break is driving the exit
         code. Non-gated unexpected targets (``warn``/``ignore``) are excluded,
         matching :attr:`_gated_unexpected`.
         """
@@ -330,7 +398,10 @@ class AggregateResult:
         # ``fail`` fails the gate on *any* unexpected report — including one that
         # is unreadable/verdictless (so has no gate to contribute above) — since
         # the policy is "no target outside the expected set is tolerated".
-        if self.on_unexpected_target is OnUnexpectedTarget.FAIL and self.unbaselined:
+        if (
+            self.on_unexpected_target is OnUnexpectedTarget.FAIL
+            and self.unexpected_targets
+        ):
             code = max(code, COVERAGE_INCOMPLETE_EXIT)
         return code
 
@@ -359,7 +430,7 @@ class AggregateResult:
 
         for target in self.targets:
             lines.append("  " + self._render_target_line(target))
-        for extra in self.unbaselined:
+        for extra in self.unexpected_targets:
             lines.append("  " + self._render_target_line(extra))
 
         lines.append("")
@@ -393,7 +464,7 @@ class AggregateResult:
     def _render_target_line(self, t: TargetReport) -> str:
         tag = "" if t.required else " (optional)"
         if t.unexpected:
-            tag = " (unbaselined)"
+            tag = " (unexpected)"
         if not t.analyzed:
             return f"{t.target_id}{tag}: ⚠ unavailable — {t.reason or 'no report'}"
         assert t.compatibility_verdict is not None
@@ -455,7 +526,7 @@ class AggregateResult:
                 "coverage_blocking": self.coverage_blocking,
             },
             "targets": [t.to_dict() for t in self.targets],
-            "unbaselined": [t.to_dict() for t in self.unbaselined],
+            "unexpected_targets": [t.to_dict() for t in self.unexpected_targets],
         }
 
 
@@ -523,16 +594,37 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
         else target_id_from_path(path, prefix=prefix)
     )
     verdict = parse_report_verdict(data)
+    head_sha_raw = data.get("head_sha")
+    head_sha = str(head_sha_raw) if isinstance(head_sha_raw, str) else None
     gate: GateInfo | None = None
     if verdict is not None:
-        gate = GateInfo.from_report_data(data) or GateInfo.legacy_from_verdict(verdict)
-    head_sha = data.get("head_sha")
+        try:
+            # A ``compare`` severity block wins; else a ``scan`` top-level gate;
+            # else the legacy verdict mapping. Only an *absent* gate block
+            # legacy-falls-back — a *malformed* one fails closed below.
+            gate = GateInfo.from_report_data(data)
+            if gate is None:
+                gate = GateInfo.from_scan_report(data)
+        except _MalformedGate as exc:
+            # Fail closed: a present-but-corrupt gate makes the target
+            # unavailable (unknown), never silently the greener legacy path.
+            return _LoadedReport(
+                target_id=target_id,
+                verdict=None,
+                gate=None,
+                library=data.get("library"),
+                head_sha=head_sha,
+                reason=f"report gate decision is malformed: {exc}",
+                path=path,
+            )
+        if gate is None:
+            gate = GateInfo.legacy_from_verdict(verdict)
     return _LoadedReport(
         target_id=target_id,
         verdict=verdict,
         gate=gate,
         library=data.get("library"),
-        head_sha=str(head_sha) if isinstance(head_sha, str) else None,
+        head_sha=head_sha,
         reason=None if verdict is not None else "report carried no ABI verdict",
         path=path,
     )
@@ -651,20 +743,26 @@ def aggregate(
                 reason="no report was produced for this expected target",
                 unexpected=unexpected,
             )
-        # A report for a superseded commit (manifest head_sha set and the
-        # report's own head_sha present and different) is stale — unavailable.
-        if (
-            expected.head_sha is not None
-            and report.head_sha is not None
-            and report.head_sha != expected.head_sha
-        ):
+        # Commit-identity guard, opt-in via the manifest's own ``head_sha``.
+        # When the manifest pins a commit, a report is only current if it
+        # carries a *matching* head_sha: a mismatch is a superseded run, and a
+        # *missing* head_sha is unverifiable (a delayed artifact from an older
+        # run without identity metadata must not slip through). Both are
+        # unavailable — fail closed.
+        if expected.head_sha is not None and report.head_sha != expected.head_sha:
+            why = (
+                f"report is for a different commit ({report.head_sha})"
+                if report.head_sha is not None
+                else "report carries no head_sha; cannot confirm it is for commit "
+                f"{expected.head_sha}"
+            )
             return TargetReport(
                 target_id=tid,
                 required=required,
                 compatibility_verdict=None,
                 report_path=str(report.path),
                 library=report.library,
-                reason=f"report is for a different commit ({report.head_sha})",
+                reason=why,
                 unexpected=unexpected,
             )
         return TargetReport(
@@ -683,16 +781,16 @@ def aggregate(
         for tid in sorted(expected.targets)
     )
 
-    unbaselined: tuple[TargetReport, ...] = ()
+    unexpected_targets: tuple[TargetReport, ...] = ()
     if on_unexpected_target is not OnUnexpectedTarget.IGNORE:
-        unbaselined = tuple(
+        unexpected_targets = tuple(
             _target(tid, required=False, unexpected=True)
             for tid in sorted(set(found) - set(expected.targets))
         )
 
     return AggregateResult(
         targets=targets,
-        unbaselined=unbaselined,
+        unexpected_targets=unexpected_targets,
         on_missing_required=on_missing_required,
         on_unexpected_target=on_unexpected_target,
         discovered_only=discovered_only,
