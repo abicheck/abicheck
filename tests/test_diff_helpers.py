@@ -212,38 +212,76 @@ class TestTypeMap:
         else:
             raise AssertionError("expected KeyError")
 
+    def test_bare_name_is_unambiguous(self) -> None:
+        unique = RecordType(name="Foo", qualified_name="ns::Foo", kind="class")
+        m = build_type_map([unique])
+        assert m.bare_name_is_unambiguous("Foo") is True
+        assert m.bare_name_is_unambiguous("Bar") is False  # no such bare name at all
+
+    def test_bare_name_is_ambiguous_when_shared_by_distinct_types(self) -> None:
+        a = RecordType(name="Impl", qualified_name="ns1::Impl", kind="class")
+        b = RecordType(name="Impl", qualified_name="ns2::Impl", kind="class")
+        m = build_type_map([a, b])
+        assert m.bare_name_is_unambiguous("Impl") is False
+
 
 class TestLookupMatchedType:
     """Codex review, PR #608 (second round): a plain ``other.get(type_map_key(t))``
     lookup only resolves the legacy-old/fresh-new direction (via the fresh
     side's bare-name alias). The reverse -- fresh old, legacy new -- has no
     alias to hit, since aliases only map bare -> qualified, never qualified ->
-    bare. ``lookup_matched_type`` retries with the bare name to cover both.
+    bare. ``lookup_matched_type`` retries with the bare name to cover both --
+    but ONLY when ``t``'s own bare name is unambiguous in its own map
+    (``own``), or a genuine same-leaf-name collision on the probing side
+    would retry into an unrelated survivor on the other side (Codex review,
+    PR #608, third round).
     """
 
     def test_fresh_side_against_legacy_other_falls_back_to_bare(self) -> None:
         t = RecordType(name="Handle", qualified_name="ns::Handle", kind="class")
+        own = build_type_map([t])
         legacy_counterpart = RecordType(name="Handle", qualified_name=None, kind="class")
         other = build_type_map([legacy_counterpart])
 
-        assert lookup_matched_type(other, t) is legacy_counterpart
+        assert lookup_matched_type(own, other, t) is legacy_counterpart
 
     def test_direct_qualified_hit_needs_no_fallback(self) -> None:
         t = RecordType(name="Handle", qualified_name="ns::Handle", kind="class")
+        own = build_type_map([t])
         counterpart = RecordType(name="Handle", qualified_name="ns::Handle", kind="class")
         other = build_type_map([counterpart])
 
-        assert lookup_matched_type(other, t) is counterpart
+        assert lookup_matched_type(own, other, t) is counterpart
 
     def test_global_scope_type_key_equals_bare_no_redundant_lookup(self) -> None:
         t = RecordType(name="Foo", qualified_name=None, kind="class")
+        own = build_type_map([t])
         counterpart = RecordType(name="Foo", qualified_name=None, kind="class")
         other = build_type_map([counterpart])
 
-        assert lookup_matched_type(other, t) is counterpart
+        assert lookup_matched_type(own, other, t) is counterpart
 
     def test_genuinely_absent_returns_none(self) -> None:
         t = RecordType(name="Handle", qualified_name="ns::Handle", kind="class")
+        own = build_type_map([t])
         other = build_type_map([])
 
-        assert lookup_matched_type(other, t) is None
+        assert lookup_matched_type(own, other, t) is None
+
+    def test_ambiguous_probing_side_does_not_fall_back_to_survivor(self) -> None:
+        """The exact scenario Codex flagged: old side has two distinct
+        namespaced types sharing the bare name 'Impl'; the new side kept
+        only one of them. Probing the REMOVED one must not retry into the
+        unrelated SURVIVING one just because it also happens to be the
+        other map's sole 'Impl'.
+        """
+        removed = RecordType(name="Impl", qualified_name="ns1::Impl", kind="class")
+        survivor_old = RecordType(name="Impl", qualified_name="ns2::Impl", kind="class")
+        own = build_type_map([removed, survivor_old])  # ambiguous bare "Impl" in own
+        survivor_new = RecordType(name="Impl", qualified_name="ns2::Impl", kind="class")
+        other = build_type_map([survivor_new])
+
+        assert lookup_matched_type(own, other, removed) is None
+        # The genuinely-unchanged type still matches fine via its own
+        # qualified key -- ambiguity in `own` doesn't block direct hits.
+        assert lookup_matched_type(own, other, survivor_old) is survivor_new

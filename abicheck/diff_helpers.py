@@ -232,21 +232,31 @@ class TypeMap(Mapping[str, RecordType]):
 
     def __init__(self, types: Iterable[RecordType]) -> None:
         self._primary: dict[str, RecordType] = {}
-        bare_owner: dict[str, str | None] = {}
+        self._bare_owner: dict[str, str | None] = {}
         for t in types:
             key = type_map_key(t)
             self._primary[key] = t
             bare = t.name
-            if bare in bare_owner:
-                if bare_owner[bare] != key:
-                    bare_owner[bare] = None  # ambiguous: >1 distinct qualified identity
+            if bare in self._bare_owner:
+                if self._bare_owner[bare] != key:
+                    self._bare_owner[bare] = None  # ambiguous: >1 distinct qualified identity
             else:
-                bare_owner[bare] = key
+                self._bare_owner[bare] = key
         self._bare_alias: dict[str, str] = {
             bare: key
-            for bare, key in bare_owner.items()
+            for bare, key in self._bare_owner.items()
             if key is not None and bare not in self._primary
         }
+
+    def bare_name_is_unambiguous(self, bare: str) -> bool:
+        """True if exactly one distinct qualified identity in this map
+        shares the bare declaration name *bare* (including the trivial case
+        of a single global-scope type whose own key already equals its bare
+        name). False for "no type has this bare name" and "two-or-more
+        *distinct* qualified identities share it" alike — both are unsafe to
+        treat as a single unambiguous target.
+        """
+        return self._bare_owner.get(bare) is not None
 
     def __getitem__(self, key: str) -> RecordType:
         # get()/__contains__ come from the Mapping mixin, implemented in
@@ -280,10 +290,10 @@ def build_type_map(types: Iterable[RecordType]) -> TypeMap:
     return TypeMap(types)
 
 
-def lookup_matched_type(other: TypeMap, t: RecordType) -> RecordType | None:
-    """Look up *t*'s counterpart in *other* (the opposite old/new ``TypeMap``),
-    trying both *t*'s own qualified matching key and its bare declaration
-    name.
+def lookup_matched_type(own: TypeMap, other: TypeMap, t: RecordType) -> RecordType | None:
+    """Look up *t*'s counterpart in *other* (the opposite old/new ``TypeMap``
+    from the one *t* itself came from, ``own``), trying both *t*'s own
+    qualified matching key and its bare declaration name.
 
     ``TypeMap``'s bare-name alias only maps bare -> qualified (see its
     docstring): a legacy snapshot keyed by the bare name resolves fine
@@ -292,18 +302,26 @@ def lookup_matched_type(other: TypeMap, t: RecordType) -> RecordType | None:
     mapping, so when *t* itself comes from the *fresh* (qualified-keyed) side
     and *other* is the *legacy* one, looking ``other`` up by ``type_map_key(t)``
     alone misses — ``other`` only has the bare key, never learns the
-    qualified spelling. A plain ``old_map.items()`` iteration only ever
-    tries the qualified key when the *old* side is legacy-vs-fresh-new is
-    the one direction that already worked; the reverse (fresh old,
-    legacy new) manufactured a phantom ``TYPE_REMOVED``/``TYPE_ADDED``
-    (Codex review, PR #608). Retrying with the bare name makes the
-    schema-evolution compatibility symmetric regardless of which side is
-    legacy.
+    qualified spelling. Retrying with the bare name makes the schema-
+    evolution compatibility symmetric regardless of which side is legacy
+    (Codex review, PR #608).
+
+    That bare-name retry is only safe when *t*'s own bare name is itself
+    unambiguous within ``own`` — i.e. *t* is the one and only type in its own
+    snapshot with that bare spelling. Without this check, a genuine
+    same-leaf-name collision on the probing side (e.g. old ``ns1::Impl`` +
+    ``ns2::Impl`` vs. a new side that only kept ``ns2::Impl``) would retry
+    ``ns1::Impl``'s failed qualified lookup with the bare name ``Impl``,
+    hit ``other``'s alias for the *unrelated* surviving ``ns2::Impl``, and
+    diff two distinct types against each other — reopening the exact
+    short/leaf-name collision ``type_map_key`` was introduced to fix, this
+    time through the compatibility fallback instead of naive bare matching
+    (Codex review, PR #608, second round).
     """
     key = type_map_key(t)
     found = other.get(key)
     if found is not None:
         return found
-    if t.name != key:
+    if t.name != key and own.bare_name_is_unambiguous(t.name):
         return other.get(t.name)
     return None

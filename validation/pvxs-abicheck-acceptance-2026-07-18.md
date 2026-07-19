@@ -60,8 +60,8 @@ see `dwarf_snapshot.py`). Global-scope types (`qualified_name is None`) fall
 back to the bare name exactly as before, so the change is a no-op for the
 common case and only removes the same-leaf-name collision.
 
-Two follow-up defects were caught by automated PR review (`chatgpt-codex-
-connector`) on the first version of this fix and closed in the same PR
+Three follow-up defects were caught by automated PR review (`chatgpt-codex-
+connector`) across successive versions of this fix and closed in the same PR
 before merge:
 
 1. **Schema-evolution regression.** A snapshot pair where only one side
@@ -91,6 +91,38 @@ before merge:
    sourced `ChangeKind` survives on Linux) failing in CI on the pushed PR.
    Fixed by re-deriving the bare name (`t_old.name`) at every emission/
    provenance-lookup site instead of reusing the qualified matching key.
+3. **One-directional schema-evolution fix.** F#1's `TypeMap` alias only maps
+   bare -> qualified (built from the *target* side's own contents), so it
+   only resolved the "legacy old / fresh new" direction: iterating a legacy
+   old snapshot's bare keys against a fresh new snapshot's alias worked, but
+   the reverse (fresh old, keyed `ns::Handle`, vs. legacy new, keyed only
+   `Handle`) looked the new side up by the qualified key alone, found
+   nothing, and manufactured the same phantom `TYPE_REMOVED` + `TYPE_ADDED`
+   pair. Fixed by `diff_helpers.lookup_matched_type()`, used at all 9 old/new
+   lookup call sites: try the qualified key first, then retry with the bare
+   declaration name. That retry is itself only safe when the *probing* type's
+   own bare name is unambiguous within its own snapshot — reviewed a second
+   time by the same bot, which found that an unconditional retry reopens the
+   original short-leaf-name collision through the back door: two distinct
+   namespaced types sharing a bare name on the probing side (one genuinely
+   removed, one genuinely kept) would retry the removed one's failed lookup
+   with the bare name and land on the unrelated survivor, diffing two
+   different types against each other. Fixed by tracking bare-name ambiguity
+   per `TypeMap` (`bare_name_is_unambiguous()`) and gating the fallback on
+   the *probing* side's own ambiguity, not just the target side's.
+
+All three were genuine defects, not false alarms — each was verified with a
+standalone repro before and after the fix (shown in the PR review thread)
+and closed with dedicated regression tests (`tests/test_diff_helpers.py`
+`TestLookupMatchedType`/`TestTypeMap`, `tests/test_diff_types_deep.py`
+`TestQualifiedNameMatching`/`TestHybridProvenanceKeys`/
+`TestEmittedSymbolStaysBare`) rather than just a manual assertion that the
+fix looked right. The pattern across all three: each fix closed one
+direction/axis of the compatibility-alias problem without testing its
+interaction with the *other* axis already in play (ambiguity, direction,
+identity-leak) — a reminder that this kind of "old/new matching with a
+compatibility fallback" logic needs pairwise (not just per-mechanism) test
+coverage before it's trustworthy.
 
 Tests: `tests/test_diff_helpers.py::TestTypeMapKey`/`TestTypeMap` (direct
 unit coverage of the moved matching primitives), `tests/test_diff_types_deep.py`
@@ -242,10 +274,10 @@ unit fixtures:
 
 ## Status
 
-- **Fixed & tested in this branch:** FP-1 (type-matching key, plus the two
-  Codex-caught regressions on the first version of that fix), FP-2
+- **Fixed & tested in this branch:** FP-1 (type-matching key, plus the three
+  Codex-caught regressions across successive versions of that fix), FP-2
   (anonymous-type path leak in `canonicalize_type_name`). Full fast unit
-  suite green (17268 tests), `mypy`/`ruff`/AI-readiness clean.
+  suite green (17274+ tests), `mypy`/`ruff`/AI-readiness clean.
 - **FP-2 additionally re-verified against real tools** (real pvxs source,
   real `clang`-frontend dump, before/after on a real `.so` pair) — see
   "Real-tool re-verification" above.

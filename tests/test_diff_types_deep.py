@@ -881,6 +881,59 @@ class TestQualifiedNameMatching:
         assert ChangeKind.TYPE_FIELD_REMOVED not in _kinds(r)
         assert ChangeKind.TYPE_FIELD_ADDED not in _kinds(r)
 
+    def test_ambiguous_probing_side_bare_fallback_does_not_cross_match(self):
+        """Codex review, PR #608 (third round): the mirror of the case
+        above, with the ambiguity on the *probing* (old) side instead of the
+        lookup target. Old has two distinct namespaced ``Impl`` types; new
+        kept only one of them (the other was genuinely removed). The
+        genuinely-removed old type must not retry its failed qualified
+        lookup with the bare name and land on the unrelated survivor.
+        """
+        old_removed = RecordType(name="Impl", qualified_name="ns1::Impl",
+                                 kind="class", size_bits=64,
+                                 fields=[TypeField("x", "int", 0)])
+        old_kept = RecordType(name="Impl", qualified_name="ns2::Impl",
+                              kind="class", size_bits=32,
+                              fields=[TypeField("y", "int", 0)])
+        new_kept = RecordType(name="Impl", qualified_name="ns2::Impl",
+                              kind="class", size_bits=32,
+                              fields=[TypeField("y", "int", 0)])
+
+        r = compare(_snap(types=[old_removed, old_kept]), _snap(types=[new_kept]))
+
+        kinds = _kinds(r)
+        # ns1::Impl is genuinely gone -> TYPE_REMOVED, not a cross-matched
+        # field/size diff against the unrelated surviving ns2::Impl.
+        assert ChangeKind.TYPE_REMOVED in kinds
+        assert ChangeKind.TYPE_SIZE_CHANGED not in kinds
+        assert ChangeKind.TYPE_FIELD_REMOVED not in kinds
+        assert ChangeKind.FIELD_RENAMED not in kinds
+        # ns2::Impl itself is genuinely unchanged.
+        assert ChangeKind.TYPE_ADDED not in kinds
+
+    def test_ambiguous_bare_name_on_both_sides_still_matches_by_qualified_key(self):
+        """Ambiguity on BOTH sides at once: each qualified pair should still
+        match directly on its own qualified key (the fallback never needs to
+        engage), so a real per-type change is correctly attributed to the
+        right one and an unchanged one produces nothing.
+        """
+        old_a = RecordType(name="Impl", qualified_name="ns1::Impl", kind="class",
+                           size_bits=64, fields=[TypeField("x", "int", 0)])
+        old_b = RecordType(name="Impl", qualified_name="ns2::Impl", kind="class",
+                           size_bits=32, fields=[TypeField("y", "int", 0)])
+        new_a = RecordType(name="Impl", qualified_name="ns1::Impl", kind="class",
+                           size_bits=32, fields=[])  # ns1::Impl genuinely shrinks
+        new_b = RecordType(name="Impl", qualified_name="ns2::Impl", kind="class",
+                           size_bits=32, fields=[TypeField("y", "int", 0)])  # unchanged
+
+        r = compare(_snap(types=[old_a, old_b]), _snap(types=[new_a, new_b]))
+
+        kinds = _kinds(r)
+        assert ChangeKind.TYPE_SIZE_CHANGED in kinds
+        assert ChangeKind.TYPE_FIELD_REMOVED in kinds
+        assert ChangeKind.TYPE_REMOVED not in kinds
+        assert ChangeKind.TYPE_ADDED not in kinds
+
 
 class TestHybridProvenanceKeys:
     """Codex review, PR #608: ``dumper_hybrid`` records per-fact provenance
