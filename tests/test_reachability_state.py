@@ -559,6 +559,101 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
         assert len(found) == 1
         assert found[0].reachability_state == ReachabilityState.UNKNOWN
 
+    def test_removed_decl_only_needs_old_side_call_graph_trusted(self) -> None:
+        """Codex review, fifth pass: a REMOVED decl only ever existed on the
+        old side, so only the old graph's coverage speaks to whether some
+        old public entry called it. An untrusted/absent *new*-side graph
+        (unsurprising — the decl is gone there, so there was nothing left
+        to extract a fresh graph from) must not turn a real old-side proof
+        into UNKNOWN."""
+        from abicheck.buildsource.source_graph import GraphEdge
+
+        old = _graph_snap(
+            [_public_fn("pubFn")],
+            nodes=[
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://other", "ns::detail::other", "source"),
+            ],
+            edges=[GraphEdge(src="decl://pub", dst="decl://other", kind="DECL_CALLS_DECL")],
+            extractor_passes={"call_graph": True, "type_graph": True},
+        )
+        new = _snap(functions=[_public_fn("pubFn")])
+        raw_change = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="ns::detail::unrelated_and_never_called",
+            description="removed",
+        )
+        ctx = DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_REMOVED]
+        assert len(found) == 1
+        assert found[0].reachability_state == ReachabilityState.PROVEN_UNREACHABLE
+
+    def test_added_decl_only_needs_new_side_call_graph_trusted(self) -> None:
+        """Symmetric case: an ADDED decl only ever exists on the new side,
+        so only the new graph's coverage matters — an absent old-side graph
+        (the decl didn't exist yet) must not force UNKNOWN."""
+        from abicheck.buildsource.source_graph import GraphEdge
+
+        old = _snap(functions=[_public_fn("pubFn")])
+        new = _graph_snap(
+            [_public_fn("pubFn")],
+            nodes=[
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://other", "ns::detail::other", "source"),
+            ],
+            edges=[GraphEdge(src="decl://pub", dst="decl://other", kind="DECL_CALLS_DECL")],
+            extractor_passes={"call_graph": True, "type_graph": True},
+        )
+        raw_change = Change(
+            kind=ChangeKind.FUNC_ADDED,
+            symbol="ns::detail::unrelated_and_never_called",
+            description="added",
+        )
+        ctx = DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_ADDED]
+        assert len(found) == 1
+        assert found[0].reachability_state == ReachabilityState.PROVEN_UNREACHABLE
+
+    def test_changed_in_place_kind_still_needs_both_sides_trusted(self) -> None:
+        """Contrast case: a decl that exists on both sides (a
+        "changed-in-place" kind, not *_removed/*_added) still needs both
+        sides' call graph trusted for a symmetric proof — one trusted side
+        is not enough."""
+        from abicheck.buildsource.source_graph import GraphEdge
+
+        old = _graph_snap(
+            [_public_fn("pubFn")],
+            nodes=[
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://other", "ns::detail::other", "source"),
+            ],
+            edges=[GraphEdge(src="decl://pub", dst="decl://other", kind="DECL_CALLS_DECL")],
+            extractor_passes={"call_graph": True, "type_graph": True},
+        )
+        new = _graph_snap(
+            [_public_fn("pubFn")],
+            nodes=[
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://other", "ns::detail::other", "source"),
+            ],
+            edges=[GraphEdge(src="decl://pub", dst="decl://other", kind="DECL_CALLS_DECL")],
+        )
+        raw_change = Change(
+            kind=ChangeKind.FUNC_RETURN_CHANGED,
+            symbol="ns::detail::unrelated_and_never_called",
+            description="return type changed",
+        )
+        ctx = DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_RETURN_CHANGED]
+        assert len(found) == 1
+        assert found[0].reachability_state == ReachabilityState.UNKNOWN
+
     def test_typedef_removed_examined_by_walk_is_proven_unreachable(self) -> None:
         """Codex review: typedef aliases (AbiSnapshot.typedefs, a flat
         {alias: underlying} map, not a RecordType/EnumType) are declared

@@ -757,9 +757,24 @@ class MarkReachability:
                 and graph.extractor_passes.get("type_graph")
             )
 
-        call_graph_trusted = _call_graph_fully_trusted(ctx.old) and _call_graph_fully_trusted(
-            ctx.new
-        )
+        old_call_graph_trusted = _call_graph_fully_trusted(ctx.old)
+        new_call_graph_trusted = _call_graph_fully_trusted(ctx.new)
+
+        def _relevant_call_graph_trusted(change: Change) -> bool:
+            """Only require trust from the side(s) *change*'s target can
+            actually exist on (Codex review, fifth pass): a REMOVED decl
+            only ever existed on the old side, so only the old graph's
+            coverage speaks to whether some old public entry called it —
+            an untrusted/absent *new*-side graph (unsurprising, since the
+            decl is gone there) must not turn a real old-side proof into
+            UNKNOWN. Symmetric for ADDED; a changed-in-place decl exists on
+            both sides, so both must be trusted for a symmetric proof."""
+            kind_value = change.kind.value
+            if kind_value.endswith("_removed"):
+                return old_call_graph_trusted
+            if kind_value.endswith("_added"):
+                return new_call_graph_trusted
+            return old_call_graph_trusted and new_call_graph_trusted
 
         # Typedef aliases (Codex review) are declared snapshot type surface
         # too — AbiSnapshot.typedefs is a flat {alias: underlying} map, not
@@ -880,15 +895,16 @@ class MarkReachability:
                 # variable-shaped change — e.g. func_removed on an internal
                 # decl) was never in that walk's domain to begin with; only
                 # the call graph could speak to it, so its verdict is
-                # conclusive only when both sides' call graph is a fully
-                # trusted, completed pass (Codex review — neither an absent
-                # graph nor a handful of incidental edges from a partial one
-                # may silently read the same as a trustworthy graph that
-                # looked and found nothing).
+                # conclusive only when the side(s) its target could actually
+                # exist on have a fully trusted, completed call-graph pass
+                # (Codex review — neither an absent graph nor a handful of
+                # incidental edges from a partial one may silently read the
+                # same as a trustworthy graph that looked and found
+                # nothing).
                 layout_domain = root in known_type_names or (
                     enum_owner is not None and enum_owner in known_type_names
                 )
-                if layout_domain or call_graph_trusted:
+                if layout_domain or _relevant_call_graph_trusted(c):
                     c.reachability_state = ReachabilityState.PROVEN_UNREACHABLE
                 else:
                     c.reachability_state = ReachabilityState.UNKNOWN
