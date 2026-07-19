@@ -846,38 +846,61 @@ def check_dump_compile_db_error(
     return None
 
 
-def compile_db_as_l3_build_info(
+def resolve_compile_db_l3_reuse(
     depth: str | None,
     build_info: Path | None,
     effective_compile_db: Path | None,
     *,
     matched: bool = True,
-) -> Path | None:
-    """AC-007: reuse a ``-p``/``--compile-db`` database as the L3 build source.
+    compile_db_filter: str | None = None,
+) -> tuple[Path | None, str | None]:
+    """AC-007: decide whether to reuse a ``-p``/``--compile-db`` DB as L3.
+
+    Returns ``(build_info, note)`` — the (possibly rewritten) ``build_info`` and
+    an optional message to echo to stderr. Kept pure so the whole decision is
+    unit-tested and only the ``click.echo`` stays in the CLI.
 
     When an explicit ``--depth build``/``source`` is requested and a real compile
     database was supplied for the L2 header parse but no dedicated ``--build-info``
-    was given, that same ``compile_commands.json`` is authoritative L3 evidence —
-    returning it as ``build_info`` reuses it instead of re-running a build-system
-    query (cmake/bazel/make). Returns the original *build_info* unchanged in every
-    other case (no explicit deep depth, an explicit ``--build-info`` already set,
-    or no compile DB), so a plain ``dump -p db -H h.h`` L2-only run is unaffected.
+    was given, that same ``compile_commands.json`` is authoritative L3 evidence,
+    so it is returned as ``build_info`` instead of re-running a build-system query
+    (cmake/bazel/make). Every other case leaves ``build_info`` unchanged (no
+    explicit deep depth, an explicit ``--build-info`` already set, or no compile
+    DB), so a plain ``dump -p db -H h.h`` L2-only run is unaffected.
 
-    *matched* is whether the compile DB actually matched the requested headers
-    (``_resolve_build_context_flags``'s ``compile_db_matched``). An unrelated or
-    entirely filtered-out DB (``matched`` is False) is **not** reused: embedding
-    its unrelated compile units as L3 would let the strict ``--depth`` gate accept
-    a header snapshot parsed without that build context, and would disagree with
-    the dry-run's own ``compile_db_matched is False`` blocker (Codex review).
+    Two guards keep the reuse honest:
+
+    - *matched* (``_resolve_build_context_flags``'s ``compile_db_matched``): an
+      unrelated or entirely filtered-out DB is **not** reused, or the strict
+      ``--depth`` gate would accept a header snapshot parsed without that build
+      context and disagree with the dry-run's ``compile_db_matched is False``
+      blocker (Codex review).
+    - *compile_db_filter*: ``--compile-db-filter`` scopes only the **L2** header
+      parse (``_resolve_build_context_flags`` proves the match on the filtered
+      subset). Reusing the raw DB path as L3 would load *every* entry — the whole
+      monorepo — ignoring the filter, so it is **not** reused when a filter is
+      active; the note tells the user to pass a pre-filtered ``--build-info`` /
+      ``--build-compile-db`` for filtered L3 (Codex review).
     """
-    if (
+    reuse_applies = (
         depth in ("build", "source")
         and build_info is None
         and effective_compile_db is not None
         and matched
-    ):
-        return effective_compile_db
-    return build_info
+    )
+    if not reuse_applies:
+        return build_info, None
+    if compile_db_filter:
+        return build_info, (
+            "warning: --compile-db-filter scopes the L2 header parse only, so the "
+            "-p/--compile-db database was not reused as the L3 build source (it "
+            "would load every entry, ignoring the filter). Pass a pre-filtered "
+            "--build-info/--build-compile-db for filtered L3."
+        )
+    return effective_compile_db, (
+        f"Using compile database {effective_compile_db} as the L3 build source "
+        "(from -p/--compile-db; pass --build-info to override)."
+    )
 
 
 def resolve_dump_compile_db(

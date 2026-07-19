@@ -26,9 +26,9 @@ import pytest
 from abicheck.cli_dump_helpers import (
     check_dump_compile_db_error,
     check_dump_debug_format_error,
-    compile_db_as_l3_build_info,
     handle_non_elf_dump,
     perform_elf_dump,
+    resolve_compile_db_l3_reuse,
     resolve_dump_collect_context,
     resolve_dump_compile_context,
     resolve_dump_compile_db,
@@ -137,24 +137,29 @@ def test_check_debug_format_error_only_for_pe_macho() -> None:
 
 def test_compile_db_reused_as_l3_for_explicit_deep_depth(tmp_path: Path) -> None:
     """AC-007: an explicit --depth build/source with a -p/--compile-db but no
-    --build-info reuses that DB as the L3 build source."""
+    --build-info reuses that DB as the L3 build source, with an echoed note."""
     db = tmp_path / "compile_commands.json"
     for depth in ("build", "source"):
-        assert compile_db_as_l3_build_info(depth, None, db) == db
+        bi, note = resolve_compile_db_l3_reuse(depth, None, db)
+        assert bi == db
+        assert note is not None and "L3 build source" in note
 
 
 def test_compile_db_not_reused_when_not_applicable(tmp_path: Path) -> None:
-    """No reuse without an explicit deep depth, with an explicit --build-info
-    already set, or with no compile DB — a plain L2 dump is unaffected."""
+    """No reuse (and no note) without an explicit deep depth, with an explicit
+    --build-info already set, or with no compile DB — a plain L2 dump is
+    unaffected."""
     db = tmp_path / "compile_commands.json"
     explicit_bi = tmp_path / "build"
-    # No explicit deep depth (default / headers / binary) → unchanged.
-    assert compile_db_as_l3_build_info(None, None, db) is None
-    assert compile_db_as_l3_build_info("headers", None, db) is None
-    # An explicit --build-info wins; the DB does not override it.
-    assert compile_db_as_l3_build_info("source", explicit_bi, db) == explicit_bi
-    # No compile DB → nothing to reuse.
-    assert compile_db_as_l3_build_info("build", None, None) is None
+    for args in (
+        (None, None, db),          # default depth
+        ("headers", None, db),     # shallow depth
+        ("source", explicit_bi, db),  # explicit --build-info wins
+        ("build", None, None),     # no compile DB
+    ):
+        bi, note = resolve_compile_db_l3_reuse(*args)
+        assert bi is args[1]
+        assert note is None
 
 
 def test_compile_db_not_reused_when_unmatched(tmp_path: Path) -> None:
@@ -163,9 +168,26 @@ def test_compile_db_not_reused_when_unmatched(tmp_path: Path) -> None:
     let the strict --depth gate accept a header snapshot parsed without that
     build context. A matched DB is still reused."""
     db = tmp_path / "compile_commands.json"
-    assert compile_db_as_l3_build_info("build", None, db, matched=False) is None
-    assert compile_db_as_l3_build_info("source", None, db, matched=False) is None
-    assert compile_db_as_l3_build_info("build", None, db, matched=True) == db
+    assert resolve_compile_db_l3_reuse("build", None, db, matched=False) == (None, None)
+    assert resolve_compile_db_l3_reuse("source", None, db, matched=False) == (None, None)
+    assert resolve_compile_db_l3_reuse("build", None, db, matched=True)[0] == db
+
+
+def test_compile_db_not_reused_when_filter_active(tmp_path: Path) -> None:
+    """AC-007 (Codex): --compile-db-filter scopes the L2 header parse only, so the
+    raw DB must NOT be reused as L3 (it would load every entry, ignoring the
+    filter). The note points the user at a pre-filtered --build-info."""
+    db = tmp_path / "compile_commands.json"
+    bi, note = resolve_compile_db_l3_reuse(
+        "source", None, db, matched=True, compile_db_filter="src/lib/**"
+    )
+    assert bi is None  # not reused
+    assert note is not None and "--compile-db-filter" in note
+    # Without a filter it is still reused.
+    bi2, _ = resolve_compile_db_l3_reuse(
+        "source", None, db, matched=True, compile_db_filter=None
+    )
+    assert bi2 == db
 
 
 def test_collect_context_no_warn_when_compile_db_serves_l3(
