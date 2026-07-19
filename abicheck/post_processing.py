@@ -550,6 +550,16 @@ _PUBLIC_SOURCE_ABI_KINDS = frozenset({
     ChangeKind.INLINE_BODY_CHANGED,
     ChangeKind.TEMPLATE_BODY_CHANGED,
     ChangeKind.GENERATED_HEADER_CHANGED,
+    # Codex review, third pass: _diff_mappings's own description text is
+    # explicit -- "Public declaration {name!r} no longer maps to an exported
+    # symbol" -- so this is the same public-by-construction claim as the
+    # kinds above, keyed from old.mappings["source_decl_to_binary_symbol"]
+    # rather than a reachable_* bucket directly. Deliberately NOT extended to
+    # SOURCE_BINARY_PROVENANCE_MISMATCH (an aggregate finding with symbol=""
+    # -- no single declaration name to misjudge) or ODR_SOURCE_CONFLICT (its
+    # odr_conflicts source isn't scoped to public/reachable types the way the
+    # other buckets are).
+    ChangeKind.SOURCE_DECL_BINARY_SYMBOL_MISMATCH,
 })
 
 
