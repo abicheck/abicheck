@@ -120,7 +120,13 @@ from typing import Any
 #:       ``summary`` is now always recomputed from the complete (post-scoping)
 #:       ``changes`` array, and ``full_summary`` preserves the original
 #:       pre-scoping counts. Additive optional keys (external review).
-REPORT_SCHEMA_VERSION = "2.9"
+#:   2.10: ``reachability_kind`` gained a new enum member,
+#:       ``"public_source_abi_surface"`` -- set by ``MarkReachability`` for
+#:       an L4/L5 source-graph finding (e.g. ``public_typedef_removed``)
+#:       whose kind is public by construction, not established by the
+#:       public-surface layout/call-graph walk the other values describe
+#:       (Codex review). Additive.
+REPORT_SCHEMA_VERSION = "2.10"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

@@ -775,10 +775,19 @@ class MarkReachability:
             graph = getattr(build_source, "source_graph", None) if build_source is not None else None
             if graph is None:
                 return False
-            return bool(
-                graph.extractor_passes.get("call_graph")
-                and graph.extractor_passes.get("type_graph")
-            )
+            if not (graph.extractor_passes.get("call_graph") and graph.extractor_passes.get("type_graph")):
+                return False
+            # Both passes completed is not enough on its own (Codex review):
+            # compute_call_graph_leak_paths only ever walks from public
+            # roots, so a graph that completed both passes but captured no
+            # public declaration/type at all has nothing to seed the walk
+            # with -- indistinguishable from "walked thoroughly and found
+            # nothing" but actually never walked. Mirrors
+            # source_graph_findings._has_internal_reach_coverage's own
+            # public-closure requirement.
+            from .buildsource.source_graph_findings import _public_decls, _public_types
+
+            return bool(_public_decls(graph) or _public_types(graph))
 
         old_call_graph_trusted = _call_graph_fully_trusted(ctx.old)
         new_call_graph_trusted = _call_graph_fully_trusted(ctx.new)

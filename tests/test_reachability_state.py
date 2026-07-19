@@ -67,10 +67,26 @@ def _graph_snap(
     functions, *, nodes, edges, degraded_passes=None, extractor_passes=None,
 ) -> AbiSnapshot:
     from abicheck.buildsource.pack import BuildSourcePack
-    from abicheck.buildsource.source_graph import SourceGraphSummary
+    from abicheck.buildsource.source_graph import (
+        GraphEdge,
+        GraphNode,
+        SourceGraphSummary,
+    )
 
+    nodes = list(nodes)
+    edges = list(edges)
+    # source_graph_findings._public_decls requires a real "header" node with
+    # a SOURCE_DECLARES edge to the public decl -- not just the decl node's
+    # own visibility attr -- so MarkReachability's "trust requires a real
+    # public closure, not just completed passes" check (Codex review) has
+    # something to find in these fixtures too.
+    for n in nodes:
+        if n.kind == "source_decl" and n.attrs.get("visibility") == "public_header":
+            hdr_id = f"hdr://{n.id}"
+            nodes.append(GraphNode(id=hdr_id, kind="header", label=hdr_id, attrs={}))
+            edges.append(GraphEdge(src=hdr_id, dst=n.id, kind="SOURCE_DECLARES"))
     graph = SourceGraphSummary(
-        nodes=list(nodes), edges=list(edges),
+        nodes=nodes, edges=edges,
         degraded_passes=dict(degraded_passes or {}),
         extractor_passes=dict(extractor_passes or {}),
     )
@@ -803,6 +819,48 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
         found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_REMOVED]
         assert len(found) == 1
         assert found[0].reachability_state == ReachabilityState.PROVEN_UNREACHABLE
+
+    def test_completed_passes_with_no_public_roots_is_unknown(self) -> None:
+        """Codex review: extractor_passes confirming both families completed
+        is not enough on its own -- compute_call_graph_leak_paths only ever
+        walks from public roots, so a graph that completed both passes but
+        captured no public declaration/type at all has nothing to seed the
+        walk with. That is indistinguishable from "walked thoroughly and
+        found nothing" but is actually "never walked" -- must not read as
+        trustworthy negative evidence."""
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
+
+        # No "header" node / SOURCE_DECLARES edge at all -- unlike
+        # _graph_snap's normal fixtures, this graph has zero public closure
+        # even though both passes report complete.
+        graph = SourceGraphSummary(
+            nodes=[
+                GraphNode(
+                    id="decl://other", kind="source_decl",
+                    label="ns::detail::other", attrs={"visibility": "source"},
+                ),
+            ],
+            edges=[],
+            extractor_passes={"call_graph": True, "type_graph": True},
+        )
+        old = AbiSnapshot(
+            library="libtest.so", version="1.0",
+            functions=[_public_fn("pubFn")],
+            build_source=BuildSourcePack(root="", source_graph=graph),
+        )
+        new = _snap(functions=[_public_fn("pubFn")])
+        raw_change = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="ns::detail::unrelated_and_never_called",
+            description="removed",
+        )
+        ctx = DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_REMOVED]
+        assert len(found) == 1
+        assert found[0].reachability_state == ReachabilityState.UNKNOWN
 
     def test_func_removed_with_edges_but_no_extractor_pass_confirmation_is_unknown(
         self,
