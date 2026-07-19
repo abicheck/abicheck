@@ -27,3 +27,11 @@
   across whichever detector happens to be affected rather than requiring a
   hand-written scenario per detector. See ADR-045 for the underlying
   principle ("identity-based old/new entity matching") this codifies.
+  `_diff_ctor_overload_ambiguity`'s class-existence filter also now uses
+  `lookup_matched_type`'s ambiguity-safe matching instead of a raw canonical-
+  key set intersection, fixing a schema-evolution mix (a legacy snapshot
+  missing `RecordType.qualified_name` on one side) that previously dropped a
+  namespaced class's constructors from `CTOR_OVERLOAD_AMBIGUITY_RISK`
+  entirely, since `owner_class_of` derives the real qualified owner from the
+  constructor's mangled symbol regardless of which side's `RecordType` lacks
+  `qualified_name`.

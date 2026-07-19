@@ -30,11 +30,13 @@ from .diff_cxx_rules import (
     virtual_method_addition,
 )
 from .diff_helpers import (
+    TypeMap,
     bool_transition,
     build_type_map,
     diff_by_key,
     lookup_matched_type,
     make_change,
+    type_map_key,
 )
 from .diff_symbols_renames import (  # noqa: F401  (public-surface re-exports)
     _CTOR_DTOR_CODE_RE as _CTOR_DTOR_CODE_RE,
@@ -86,6 +88,7 @@ from .model import (
     AccessLevel,
     Function,
     Param,
+    RecordType,
     Variable,
     Visibility,
     canonicalize_type_name,
@@ -908,17 +911,13 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     old_map = _public_functions(old)
     new_map = _public_functions(new)
 
-    # Lookups for the virtual-method-addition check below: type records, the
-    # old surface's scope-qualified owner classes (disambiguates same-leaf
-    # classes across namespaces), and per-class virtual signatures (to skip
-    # inherited overrides). See ``virtual_method_addition``.
-    #
-    # Keyed via TypeMap (qualified-name-first, ambiguity-safe bare-name
-    # fallback), not a naive bare-name dict: two distinct classes sharing a
-    # leaf name in different namespaces must not let a new virtual method on
-    # one get attributed to the other's stale vtable state (the same
-    # short-leaf-name collision class fixed for diff_types.py in PR #608,
-    # never previously propagated here).
+    # Lookups for the virtual-method-addition check below: type records
+    # (keyed via TypeMap — qualified-name-first, ambiguity-safe bare-name
+    # fallback, not a naive bare-name dict, so two same-leaf-name classes in
+    # different namespaces can't cross-attribute a new virtual method; PR
+    # #608), the old surface's scope-qualified owner classes, and per-class
+    # virtual signatures (to skip inherited overrides). See
+    # ``virtual_method_addition``.
     old_types = build_type_map(old.types)
     new_types = build_type_map(new.types)
     old_owner_classes = {
@@ -997,39 +996,29 @@ def _converting_ctors_by_class(
     """Group each class's non-explicit, single-required-argument constructors.
 
     A castxml/DWARF Constructor's demangled ``name`` is always the bare class
-    name (C++ forbids any other member from sharing it), so grouping is keyed
-    by ``owner_class_of(f)`` — the scope-qualified owner derived from the
-    mangled symbol (``diff_cxx_rules.owner_class_of``), the same source of
-    truth ``virtual_method_addition`` uses — not the bare ``f.name``. Two
+    name, so grouping is keyed by ``owner_class_of(f)`` — the scope-qualified
+    owner derived from the mangled symbol — not the bare ``f.name``. Two
     distinct classes sharing a bare name in different namespaces would
     otherwise conflate their constructor sets and fabricate a
-    ``CTOR_OVERLOAD_AMBIGUITY_RISK`` for the wrong (or an unrelated) class
-    (Codex review, PR #608 follow-up).
+    ``CTOR_OVERLOAD_AMBIGUITY_RISK`` for the wrong class (Codex review, PR
+    #608 follow-up).
 
-    "Converting constructor" here means: public (a private/protected
-    constructor isn't callable at an ordinary consumer call site, so it
-    cannot create the implicit-conversion collision this heuristic looks
-    for), not deleted, definitively non-explicit (``is_explicit is False`` —
-    ``None`` is unknown evidence and skipped, same tri-state convention as
-    ``_check_explicit_change``), and callable with exactly one argument — at
-    most one *required* parameter (everything after it defaulted), and at
-    least one parameter total (excludes the zero-arg default constructor). A
-    leading defaulted parameter still makes the constructor
-    single-argument-callable (``Widget(int x = 0)`` accepts ``Widget w =
-    5;`` the same as ``Widget(int x)`` would), so the exclusion check below
-    binds to the *first* parameter regardless of whether it has a default,
-    not to the (possibly empty) required-parameter list. That first
+    "Converting constructor" here means: public, not deleted, definitively
+    non-explicit (``is_explicit is False`` — ``None`` is unknown evidence and
+    skipped), and callable with exactly one argument — at most one
+    *required* parameter, at least one parameter total. A leading defaulted
+    parameter still makes the constructor single-argument-callable
+    (``Widget(int x = 0)``), so the exclusion check below binds to the
+    *first* parameter regardless of whether it has a default. That first
     parameter's type is checked against the class's own type to exclude
     copy/move constructors. Keyed by the full parameter-type tuple so two
     overloads are distinguished even when both qualify.
 
     ``class_names`` is expected to already be scope-qualified (see its call
     site, ``_diff_ctor_overload_ambiguity``). Falls back to the bare
-    ``f.name`` when ``owner_class_of`` can't resolve a scope from the mangled
-    symbol (e.g. a hand-built snapshot with a non-Itanium placeholder mangled
-    name) -- every real castxml/DWARF-derived constructor carries a real
-    mangled symbol, so this only affects synthetic/malformed input, where the
-    bare name is the best available identity anyway.
+    ``f.name`` when ``owner_class_of`` can't resolve a scope (e.g. a
+    hand-built snapshot with a non-Itanium placeholder mangled name) — real
+    constructors always have a real mangled symbol.
     """
     by_class: dict[str, dict[tuple[str, ...], Function]] = {}
     for f in snap.functions:
@@ -1053,6 +1042,29 @@ def _converting_ctors_by_class(
     return by_class
 
 
+def _common_class_identities(old_map: TypeMap[RecordType], new_map: TypeMap[RecordType]) -> set[str]:
+    """Every identity string ``owner_class_of`` might spell for a class
+    present (ambiguity-safely matched) on both sides.
+
+    A raw ``set(old_map) & set(new_map)`` intersection only sees each
+    ``TypeMap``'s canonical key and misses schema-evolution mixes: a legacy
+    ``RecordType`` missing ``qualified_name`` keys as bare ``"Widget"``,
+    while ``owner_class_of`` (from the mangled symbol, independent of
+    ``RecordType``) always resolves ``"ns::Widget"`` when parseable —
+    silently dropping that class's constructors (Codex review, PR #608
+    follow-up). Recording both matched types' canonical keys via
+    ``lookup_matched_type`` covers the mix regardless of which side is legacy.
+    """
+    identities: set[str] = set()
+    for t_old in old_map.values():
+        t_new = lookup_matched_type(old_map, new_map, t_old)
+        if t_new is None:
+            continue
+        identities.add(type_map_key(t_old))
+        identities.add(type_map_key(t_new))
+    return identities
+
+
 @registry.detector("ctor_overload_ambiguity")
 def _diff_ctor_overload_ambiguity(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect a class gaining a 2nd+ non-explicit converting constructor.
@@ -1060,16 +1072,15 @@ def _diff_ctor_overload_ambiguity(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
     Best-effort RISK heuristic (case111): a real ambiguity depends on the
     consumer's actual call-site argument types, which no snapshot-level
     detector can see — only *count crossing from at most one converting
-    constructor to two or more* is checked here, on classes present on both
-    sides (a brand-new class starting with 2+ is a fresh API decision, not a
-    regression). This is deliberately conservative: it will miss ambiguities
-    that don't cross this threshold and, rarely, flag an addition that never
+    constructor to two or more* is checked, on classes present on both sides
+    (a brand-new class starting with 2+ is a fresh API decision, not a
+    regression). Deliberately conservative: it will miss ambiguities that
+    don't cross this threshold and, rarely, flag an addition that never
     collides with a real call site — see ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK.
     """
-    # Qualified-key intersection (not bare t.name): two distinct classes
-    # sharing a leaf name in different namespaces must not conflate their
-    # constructor sets (Codex review, PR #608 follow-up).
-    common_classes = set(build_type_map(old.types)) & set(build_type_map(new.types))
+    # Ambiguity-safe intersection, not a raw canonical-key set intersection
+    # (Codex review, PR #608 follow-up) — see _common_class_identities.
+    common_classes = _common_class_identities(build_type_map(old.types), build_type_map(new.types))
     if not common_classes:
         return []
     old_ctors = _converting_ctors_by_class(old, common_classes)

@@ -165,6 +165,55 @@ class TestCtorOverloadAmbiguityIsAmbiguitySafe:
 
         assert ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK not in _kinds(r)
 
+    def test_legacy_snapshot_missing_qualified_name_still_flags_risk(self):
+        """A schema-evolution mix: the old side's RecordType predates
+        RecordType.qualified_name (None on a namespaced class), while the
+        new side is a fresh, fully-qualified snapshot. owner_class_of is
+        derived purely from the constructor's mangled symbol, independent of
+        RecordType at all, so it resolves the real 'ns::Widget' on BOTH
+        sides regardless of which snapshot's RecordType lacks
+        qualified_name -- a raw canonical-key set intersection between the
+        two TypeMaps missed this class entirely (Codex review, PR #608
+        follow-up second round), silently dropping its constructors.
+        """
+        old_widget = RecordType(name="Widget", qualified_name=None, kind="class")
+        new_widget = RecordType(name="Widget", qualified_name="ns::Widget", kind="class")
+
+        old_funcs = [self._ctor("_ZN2ns6WidgetC1Ei", "ns", "Widget", "int")]
+        new_funcs = [
+            self._ctor("_ZN2ns6WidgetC1Ei", "ns", "Widget", "int"),
+            self._ctor("_ZN2ns6WidgetC1EPKc", "ns", "Widget", "char const *"),
+        ]
+
+        r = compare(
+            _snap(functions=old_funcs, types=[old_widget]),
+            _snap(functions=new_funcs, types=[new_widget]),
+        )
+
+        risk = [c for c in r.changes if c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK]
+        assert len(risk) == 1
+        assert "ns::Widget" in risk[0].description
+
+    def test_legacy_snapshot_on_new_side_still_flags_risk(self):
+        """Same schema-evolution mix, reversed: legacy (unqualified) new
+        side, fresh (qualified) old side."""
+        old_widget = RecordType(name="Widget", qualified_name="ns::Widget", kind="class")
+        new_widget = RecordType(name="Widget", qualified_name=None, kind="class")
+
+        old_funcs = [self._ctor("_ZN2ns6WidgetC1Ei", "ns", "Widget", "int")]
+        new_funcs = [
+            self._ctor("_ZN2ns6WidgetC1Ei", "ns", "Widget", "int"),
+            self._ctor("_ZN2ns6WidgetC1EPKc", "ns", "Widget", "char const *"),
+        ]
+
+        r = compare(
+            _snap(functions=old_funcs, types=[old_widget]),
+            _snap(functions=new_funcs, types=[new_widget]),
+        )
+
+        risk = [c for c in r.changes if c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK]
+        assert len(risk) == 1
+
 
 class TestVirtualMethodOwnerResolutionAmbiguitySafe:
     """``_diff_functions`` feeds ``old_types``/``new_types`` into
