@@ -186,6 +186,27 @@ root, digest mismatch, `projection` inconsistency — ADR-045 §11.1).
 Implements ADR-045 §4/§6. New composite Action; consumes a baseline-set
 archive/cache entry + `channel`/`target`/`profile` inputs; outputs a
 resolved snapshot path or one of the five typed failure states.
+**Bundle-scoped resolution requirement, flagged by review:** when the
+resolved unit is a bundle (S14), the Action's output must be the staged
+member **binaries** from the archive's `binaries/` directory (added to the
+baseline archive per §6's S14 correction), not the `.abicheck.json`
+snapshots — `abicheck/bundle.py:80-103`'s `build_bundle_snapshot()` reads
+real ELF inputs and silently skips non-ELF (including JSON) ones, so
+handing `check-target`'s bundle variant snapshot paths instead of binary
+paths would make bundle analysis's old side silently empty, not error out.
+
+**Files:** new `actions/resolve-baseline/action.yml`, `run.sh`. Reuses
+`actions/baseline/build_manifest.py`'s manifest-reading logic — extract a
+shared helper rather than duplicating the schema/digest-check code (avoid
+recreating `IMPORT_CYCLE_ALLOWLIST`-style coupling; this is shell, not
+Python import structure, but the same "don't duplicate the parsing logic"
+principle applies — factor the manifest reader into
+`abicheck/buildsource/`-adjacent Python invoked by both Actions' `run.sh` if
+the logic is non-trivial).
+
+**Tests:** shell-mapping tests for each of the five failure taxonomy rows
+(ADR-045 §6 table); a bundle-scoped resolution fixture asserting binaries
+(not snapshots) come back for a bundle target.
 
 **Files:** new `actions/resolve-baseline/action.yml`, `run.sh`. Reuses
 `actions/baseline/build_manifest.py`'s manifest-reading logic — extract a

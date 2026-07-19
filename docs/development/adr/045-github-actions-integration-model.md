@@ -511,7 +511,10 @@ distinction in `baseline-management.md`, made structural):
   publishes, not a second divergent build); published as one atomic
   baseline-set archive (`baseline-<profile>.tar.zst` containing
   `baseline-set.json` + one snapshot per target, mirroring the task's
-  proposed layout); changes only on release.
+  proposed layout — **plus a `binaries/` directory for any bundle-scoped
+  target**, per §8's S14 correction below: bundle analysis reads real ELF
+  binaries, not JSON snapshots, so a bundle baseline that omitted them would
+  silently produce no old-side bundle data); changes only on release.
 - **`accepted-main`** — mutable; refreshed by `update-main-baseline.yml` on
   every default-branch push; answers "did this PR introduce a break vs. what
   main already accepted," never substitutes for `release-contract`.
@@ -690,23 +693,38 @@ scenario requires `aggregate` except S28.
 | S28 | Multi-target fan-out/fan-in | `check-project.yml`'s trailing `aggregate` job | n/a (consumes prior checks) | The only scenario `abicheck aggregate` is the entry point for. |
 
 **S14's baseline resolution is bundle-scoped, not target-scoped — a gap
-in an earlier draft, fixed per review.** §6 describes `resolve-baseline` as
-resolving `channel × target × profile` to *one* snapshot path, which is
-correct for S1–S13/S15's independent-target checks but cannot, as stated,
-serve S14: bundle-level `compare` (directory/`--manifest` mode) needs the
-*old build's full bundle* — every member library's baseline binary/snapshot
-staged together — to produce cross-library findings (soname skew,
-cross-library type drift, provider-set changes) that a single target's
-snapshot cannot express alone. **Resolution:** for a bundle-scoped check,
-`resolve-baseline`'s unit of resolution is the *bundle ID*, not a single
-target ID — it resolves and returns one snapshot per bundle member
-(`bundles[].targets[]` from `build-output.json`/`.abicheck.yml`, §2/§3),
-staged into one directory, which `check-target`'s bundle variant then hands
-to `compare`'s existing directory/`--manifest` mode as it does today. This
-does not change `baseline-set.json`'s shape (§6/§10) — a baseline set
-already holds one snapshot per target; bundle resolution is simply "resolve
-every target in `bundles[].targets[]` and return them together" rather than
-a new storage format. It does mean `check-target`'s bundle-mode `check_id`
+in an earlier draft, fixed per review, then corrected further by a second
+review pass on what "resolve" must actually return.** §6 describes
+`resolve-baseline` as resolving `channel × target × profile` to *one*
+snapshot path, which is correct for S1–S13/S15's independent-target checks
+but cannot, as stated, serve S14: bundle-level `compare` (directory/
+`--manifest` mode) needs the *old build's full bundle* — every member
+library's baseline artifacts staged together — to produce cross-library
+findings (soname skew, cross-library type drift, provider-set changes) that
+a single target's snapshot cannot express alone. **First-pass resolution**
+(resolve every bundle member's `.abicheck.json` **snapshot** and stage them
+together) **turns out to be wrong, not just incomplete:** bundle analysis's
+actual implementation, `build_bundle_snapshot()`
+(`abicheck/bundle.py:80-103`), builds its cross-library resolution graph
+from real **ELF binaries** and explicitly **skips non-ELF inputs — including
+JSON snapshots** — "so `parse_elf_metadata` never emits its 'Magic number
+does not match' warning on legitimately-non-ELF inputs." A baseline set
+containing only per-member `.abicheck.json` files therefore cannot feed
+bundle analysis's old side at all; it would silently skip every baseline
+member and produce a bundle report with no old-side data. **Corrected
+resolution:** a bundle-scoped `release-contract`/`accepted-main` baseline
+set must **preserve the member ELF binaries themselves**, not just their
+derived snapshots — `actions/baseline`'s archive for a bundle gains a
+`binaries/` directory alongside `baseline-set.json` and the per-target
+`.abicheck.json` files (the snapshots stay for S15-style independent-target
+resolution and for `resolve-baseline`'s digest/schema checks; the binaries
+are what bundle analysis's old side actually consumes). `resolve-baseline`
+for a bundle-scoped check therefore returns paths to those staged binaries,
+not to the JSON snapshots, for `check-target`'s bundle variant to hand to
+`compare`'s existing directory/`--manifest` mode. This does not change
+`baseline-set.json`'s manifest shape (§6/§10) — it still records one entry
+per target, now with a pointer to the preserved binary alongside its
+snapshot digest. It does mean `check-target`'s bundle-mode `check_id`
 is bundle-scoped (`pvxs-release@profile#channel`, not
 `libpvxs@profile#channel`), and its report's `target_id`/`target` fields
 identify the bundle, not one member library — distinguishing S14's one
