@@ -35,12 +35,11 @@ new policy.
 from __future__ import annotations
 
 from collections.abc import Callable, ItemsView, Iterable, Iterator, Mapping, ValuesView
-from typing import Any, TypeVar, cast
+from typing import Any, Protocol, TypeVar, cast
 
 from .change_registry import REGISTRY
 from .checker_policy import ChangeKind
 from .checker_types import Change
-from .model import RecordType
 
 K = TypeVar("K")
 V = TypeVar("V")
@@ -186,11 +185,27 @@ def diff_by_key(
 
 
 # ── Type-level old/new matching (moved out of diff_types.py, PR #608) ──────
+#
+# Generalized (PR #608 follow-up) over any entity kind that has the same
+# bare-``name`` / optional-``qualified_name`` split — ``RecordType`` was the
+# original motivating case, ``EnumType`` shares the identical ambiguity
+# (two distinct enums sharing a bare leaf name in different namespaces) and
+# the identical fix, so both are expressed as one generic implementation
+# via the ``_QualifiedNamed`` structural protocol rather than duplicating
+# ``TypeMap`` per entity kind.
 
 
-def type_map_key(t: RecordType) -> str:
-    """Key a ``RecordType`` for old/new matching by its namespace-qualified
-    identity, not its bare declaration name.
+class _QualifiedNamed(Protocol):
+    name: str
+    qualified_name: str | None
+
+
+Q = TypeVar("Q", bound=_QualifiedNamed)
+
+
+def type_map_key(t: _QualifiedNamed) -> str:
+    """Key a ``RecordType``/``EnumType`` for old/new matching by its
+    namespace-qualified identity, not its bare declaration name.
 
     The header-mode dumpers (castxml, clang) deliberately keep ``t.name``
     bare (see its docstring in model.py) and carry the real namespace path in
@@ -206,9 +221,10 @@ def type_map_key(t: RecordType) -> str:
     return t.qualified_name or t.name
 
 
-class TypeMap(Mapping[str, RecordType]):
-    """An old/new ``RecordType`` matching map keyed by :func:`type_map_key`,
-    with a collision-safe bare-``name`` alias used only for lookups.
+class TypeMap(Mapping[str, Q]):
+    """An old/new matching map (``RecordType`` or ``EnumType``) keyed by
+    :func:`type_map_key`, with a collision-safe bare-``name`` alias used
+    only for lookups.
 
     The alias exists for schema-evolution compatibility: an older serialized/
     header snapshot that predates ``qualified_name`` (or a producer that
@@ -230,8 +246,8 @@ class TypeMap(Mapping[str, RecordType]):
     :func:`type_map_key` itself was introduced to fix.
     """
 
-    def __init__(self, types: Iterable[RecordType]) -> None:
-        self._primary: dict[str, RecordType] = {}
+    def __init__(self, types: Iterable[Q]) -> None:
+        self._primary: dict[str, Q] = {}
         self._bare_owner: dict[str, str | None] = {}
         for t in types:
             key = type_map_key(t)
@@ -258,7 +274,7 @@ class TypeMap(Mapping[str, RecordType]):
         """
         return self._bare_owner.get(bare) is not None
 
-    def __getitem__(self, key: str) -> RecordType:
+    def __getitem__(self, key: str) -> Q:
         # get()/__contains__ come from the Mapping mixin, implemented in
         # terms of this — alias resolution lives in exactly one place.
         t = self._primary.get(key)
@@ -279,18 +295,18 @@ class TypeMap(Mapping[str, RecordType]):
     def __iter__(self) -> Iterator[str]:
         return iter(self._primary)
 
-    def items(self) -> ItemsView[str, RecordType]:
+    def items(self) -> ItemsView[str, Q]:
         return self._primary.items()
 
-    def values(self) -> ValuesView[RecordType]:
+    def values(self) -> ValuesView[Q]:
         return self._primary.values()
 
 
-def build_type_map(types: Iterable[RecordType]) -> TypeMap:
+def build_type_map(types: Iterable[Q]) -> TypeMap[Q]:
     return TypeMap(types)
 
 
-def lookup_matched_type(own: TypeMap, other: TypeMap, t: RecordType) -> RecordType | None:
+def lookup_matched_type(own: TypeMap[Q], other: TypeMap[Q], t: Q) -> Q | None:
     """Look up *t*'s counterpart in *other* (the opposite old/new ``TypeMap``
     from the one *t* itself came from, ``own``), trying both *t*'s own
     qualified matching key and its bare declaration name.

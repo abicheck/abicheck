@@ -514,6 +514,19 @@ _SCOPED_ENUM_XML = """<?xml version="1.0"?>
   <File id="f1" name="test.h"/>
 </CastXML>"""
 
+_NAMESPACED_ENUM_XML = """<?xml version="1.0"?>
+<CastXML>
+  <Namespace id="_1" name="::"/>
+  <Namespace id="_2" name="ns" context="_1"/>
+  <Enumeration id="_3" name="Status" context="_2" file="f1" line="1">
+    <EnumValue name="OK" init="0"/>
+  </Enumeration>
+  <Enumeration id="_4" name="Global" context="_1" file="f1" line="2">
+    <EnumValue name="A" init="0"/>
+  </Enumeration>
+  <File id="f1" name="test.h"/>
+</CastXML>"""
+
 _DEPRECATED_XML = """<?xml version="1.0"?>
 <CastXML>
   <Function id="_2" name="old_api" returns="_v" context="_1" mangled="_Z7old_apiv"
@@ -589,6 +602,15 @@ class TestCastxmlParserPopulatesNewAttributes:
     def test_scoped_enum_attribute(self) -> None:
         p = _make_parser(_SCOPED_ENUM_XML)
         assert p.parse_enums()[0].is_scoped is True
+
+    def test_namespaced_enum_qualified_name(self) -> None:
+        # EnumType.qualified_name (PR #608 follow-up), mirroring
+        # RecordType.qualified_name: populated only when it differs from
+        # the bare name.
+        p = _make_parser(_NAMESPACED_ENUM_XML)
+        enums = {e.name: e for e in p.parse_enums()}
+        assert enums["Status"].qualified_name == "ns::Status"
+        assert enums["Global"].qualified_name is None
 
     def test_deprecation_attribute_function_variable_type(self) -> None:
         p = _make_parser(_DEPRECATED_XML)

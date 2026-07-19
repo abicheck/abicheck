@@ -203,6 +203,7 @@ nav:
       - "042: CompatibilityDecision/GateDecision Separation": development/adr/042-compatibility-and-gate-decision-separation.md
       - "043: Pre-1.0 CLI Surface Reset": development/adr/043-cli-pre-1.0-surface-reset.md
       - "044: Reachability-Aware Suppression": development/adr/044-reachability-aware-suppression.md
+      - "045: Identity-Based Old/New Entity Matching": development/adr/045-identity-based-old-new-entity-matching.md
 
 # Agent instructions are repo-internal context, not published documentation.
 exclude_docs: |

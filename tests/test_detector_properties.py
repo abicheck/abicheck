@@ -64,6 +64,7 @@ from abicheck.checker_policy import (
 )
 from abicheck.model import (
     AbiSnapshot,
+    AccessLevel,
     EnumMember,
     EnumType,
     Function,
@@ -204,6 +205,159 @@ def test_emitted_kinds_are_partitioned(pair: tuple[AbiSnapshot, AbiSnapshot]) ->
         assert membership == 1, (
             f"{change.kind.name} appears in {membership} policy sets (must be 1)"
         )
+
+
+# ---------------------------------------------------------------------------
+# Layer 1b — ambiguous-bare-name matching safety (PR #608 generalization)
+# ---------------------------------------------------------------------------
+#
+# PR #608 fixed a class of false positive: two unrelated RecordTypes sharing a
+# short/leaf declaration name (but distinct namespace-qualified identities)
+# getting cross-matched across old/new snapshots, fabricating spurious
+# findings (or missing real ones) for the wrong type. The bug's signature was
+# always the same regardless of which detector hit it: whichever same-bare-
+# name entity a naive `{t.name: t for t in types}` dict happened to keep
+# (last-write-wins) determined the result, so the diff depended on *snapshot
+# list insertion order* -- a property that must never hold for a correct
+# comparison. This property generalizes the fix's regression coverage beyond
+# the specific detectors patched by hand (diff_types.py, then diff_symbols.py
+# once this same class of bug was found live there too): it doesn't know or
+# care which detector fires, only that the result is order-independent.
+
+
+@st.composite
+def _ambiguous_bare_name_pair(draw: st.DrawFn) -> tuple[AbiSnapshot, AbiSnapshot]:
+    """Two distinct namespace-qualified ``RecordType``s sharing one bare leaf
+    name, each independently varied between old and new, plus a random
+    shuffle of insertion order on both sides.
+    """
+    leaf = draw(_ident)
+    ns_a, ns_b = "nsA", "nsB"
+
+    def _field() -> st.SearchStrategy[TypeField]:
+        # A field is sometimes an anonymous-union/struct member (drives
+        # diff_symbols._diff_anon_fields) and its access level varies (drives
+        # diff_symbols._diff_access_levels) -- both detectors independently
+        # built their own bare-name old/new RecordType maps before this PR.
+        return st.builds(
+            TypeField,
+            name=st.one_of(_ident, st.just("__anon0")),
+            type=_types,
+            access=st.sampled_from(list(AccessLevel)),
+        )
+
+    def _variant(qualified: str) -> RecordType:
+        return RecordType(
+            name=leaf,
+            qualified_name=qualified,
+            kind=draw(st.sampled_from(["struct", "class"])),
+            size_bits=draw(st.sampled_from([32, 64, 128])),
+            fields=draw(st.lists(_field(), max_size=3, unique_by=lambda f: f.name)),
+        )
+
+    old_a, new_a = _variant(f"{ns_a}::{leaf}"), _variant(f"{ns_a}::{leaf}")
+    old_b, new_b = _variant(f"{ns_b}::{leaf}"), _variant(f"{ns_b}::{leaf}")
+
+    old_types = [old_a, old_b]
+    new_types = [new_a, new_b]
+    if draw(st.booleans()):
+        old_types.reverse()
+    if draw(st.booleans()):
+        new_types.reverse()
+
+    return (
+        AbiSnapshot(library="libtest.so.1", version="1.0", types=old_types),
+        AbiSnapshot(library="libtest.so.1", version="2.0", types=new_types),
+    )
+
+
+def _change_fingerprint(result: object) -> frozenset[tuple[str, str]]:
+    return frozenset((c.kind.value, c.description) for c in result.changes)  # type: ignore[attr-defined]
+
+
+@given(pair=_ambiguous_bare_name_pair())
+@_HSETTINGS
+def test_same_leaf_name_matching_is_order_independent(
+    pair: tuple[AbiSnapshot, AbiSnapshot],
+) -> None:
+    """Two distinct namespace-qualified types sharing a bare leaf name must
+    diff identically no matter what order they appear in ``snap.types`` --
+    correct old/new matching is keyed by identity, never by list position.
+    A detector keying its matching map by bare name alone (the PR #608 bug
+    class) makes the result insertion-order-dependent, since a naive
+    last-write-wins dict silently picks whichever same-bare-name entity was
+    inserted last; this property catches that regardless of *which*
+    detector does it, without needing a scenario tailored to each one.
+    """
+    old, new = pair
+    baseline = _change_fingerprint(compare(old, new))
+
+    old_reordered = AbiSnapshot(
+        library=old.library, version=old.version, types=list(reversed(old.types))
+    )
+    new_reordered = AbiSnapshot(
+        library=new.library, version=new.version, types=list(reversed(new.types))
+    )
+    reordered = _change_fingerprint(compare(old_reordered, new_reordered))
+
+    assert baseline == reordered
+
+
+@st.composite
+def _ambiguous_bare_name_enum_pair(draw: st.DrawFn) -> tuple[AbiSnapshot, AbiSnapshot]:
+    """Same shape as :func:`_ambiguous_bare_name_pair` but for ``EnumType``
+    (PR #608 follow-up: ``EnumType.qualified_name`` + ``diff_types.py``'s
+    ``_diff_enums``/``_diff_enum_renames``/``_diff_enum_deprecated`` gained
+    the identical ambiguity-safe matching ``RecordType`` detectors already
+    had).
+    """
+    leaf = draw(_ident)
+    ns_a, ns_b = "nsA", "nsB"
+
+    def _member() -> st.SearchStrategy[EnumMember]:
+        return st.builds(EnumMember, name=_ident, value=st.integers(min_value=0, max_value=10))
+
+    def _variant(qualified: str) -> EnumType:
+        return EnumType(
+            name=leaf,
+            qualified_name=qualified,
+            members=draw(st.lists(_member(), max_size=3, unique_by=lambda m: m.name)),
+        )
+
+    old_a, new_a = _variant(f"{ns_a}::{leaf}"), _variant(f"{ns_a}::{leaf}")
+    old_b, new_b = _variant(f"{ns_b}::{leaf}"), _variant(f"{ns_b}::{leaf}")
+
+    old_enums = [old_a, old_b]
+    new_enums = [new_a, new_b]
+    if draw(st.booleans()):
+        old_enums.reverse()
+    if draw(st.booleans()):
+        new_enums.reverse()
+
+    return (
+        AbiSnapshot(library="libtest.so.1", version="1.0", enums=old_enums),
+        AbiSnapshot(library="libtest.so.1", version="2.0", enums=new_enums),
+    )
+
+
+@given(pair=_ambiguous_bare_name_enum_pair())
+@_HSETTINGS
+def test_same_leaf_name_enum_matching_is_order_independent(
+    pair: tuple[AbiSnapshot, AbiSnapshot],
+) -> None:
+    """Enum counterpart of ``test_same_leaf_name_matching_is_order_independent``."""
+    old, new = pair
+    baseline = _change_fingerprint(compare(old, new))
+
+    old_reordered = AbiSnapshot(
+        library=old.library, version=old.version, enums=list(reversed(old.enums))
+    )
+    new_reordered = AbiSnapshot(
+        library=new.library, version=new.version, enums=list(reversed(new.enums))
+    )
+    reordered = _change_fingerprint(compare(old_reordered, new_reordered))
+
+    assert baseline == reordered
 
 
 # ---------------------------------------------------------------------------

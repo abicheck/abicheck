@@ -983,12 +983,16 @@ def _diff_type_vtable(
 def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
-    old_map: dict[str, EnumType] = {
-        e.name: e for e in old.enums if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
-    }
-    new_map: dict[str, EnumType] = {
-        e.name: e for e in new.enums if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
-    }
+    # Namespace-qualified matching (build_type_map/lookup_matched_type,
+    # generalized from RecordType in PR #608 follow-up): two distinct enums
+    # sharing a bare leaf name in different namespaces must not cross-match
+    # across old/new the way a plain ``{e.name: e}`` dict would.
+    old_map = _build_type_map(
+        e for e in old.enums if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
+    )
+    new_map = _build_type_map(
+        e for e in new.enums if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
+    )
     # A wholly-removed enum is stored in snap.enums, NOT snap.types, so the
     # TYPE_REMOVED loop in _diff_types() never sees it — the old "TYPE_REMOVED
     # covers this" comment was wrong and the removal went silently undetected
@@ -996,8 +1000,10 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # _diff_types uses so a stripped new side can't manufacture phantom removals.
     suppress_removed = _removals_are_unconfirmed(old, new)
 
-    for name, e_old in old_map.items():
-        if name not in new_map:
+    for e_old in old_map.values():
+        name = e_old.name
+        e_new = _lookup_matched_type(old_map, new_map, e_old)
+        if e_new is None:
             if not suppress_removed:
                 changes.append(make_change(
                     ChangeKind.TYPE_REMOVED,
@@ -1005,7 +1011,6 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     description=f"Enum removed: {name}",
                 ))
             continue
-        e_new = new_map[name]
         # Per-enum key, not the whole-snapshot _both_castxml_backed: correctly
         # supports a --ast-frontend hybrid snapshot (G28 Phase 3).
         if both_castxml_backed_fact(old, new, enum_fact_key(name, "is_scoped")):
@@ -1372,17 +1377,18 @@ def _diff_enum_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect enum member renames: same value present under different name."""
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
-    old_map: dict[str, EnumType] = {
-        e.name: e for e in old.enums if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
-    }
-    new_map: dict[str, EnumType] = {
-        e.name: e for e in new.enums if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
-    }
+    old_map = _build_type_map(
+        e for e in old.enums if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
+    )
+    new_map = _build_type_map(
+        e for e in new.enums if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
+    )
 
-    for name, e_old in old_map.items():
-        if name not in new_map:
+    for e_old in old_map.values():
+        name = e_old.name
+        e_new = _lookup_matched_type(old_map, new_map, e_old)
+        if e_new is None:
             continue
-        e_new = new_map[name]
         old_by_name = {m.name: m.value for m in e_old.members}
         new_by_name = {m.name: m.value for m in e_new.members}
         # One-to-one guard: only treat as rename when the value maps to
@@ -1698,15 +1704,16 @@ def _diff_enum_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
-    old_map = {
-        e.name: e for e in old.enums if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
-    }
-    new_map = {
-        e.name: e for e in new.enums if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
-    }
+    old_map = _build_type_map(
+        e for e in old.enums if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
+    )
+    new_map = _build_type_map(
+        e for e in new.enums if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
+    )
 
-    for name, e_old in old_map.items():
-        e_new = new_map.get(name)
+    for e_old in old_map.values():
+        name = e_old.name
+        e_new = _lookup_matched_type(old_map, new_map, e_old)
         if e_new is None:
             continue
         if not both_castxml_backed_fact(old, new, enum_fact_key(name, "deprecated")):

@@ -1866,6 +1866,9 @@ class _CastxmlParser:
                     is_scoped=el.get("scoped") == "1",
                     # See RecordType.deprecated for the message-text convention.
                     deprecated=_deprecation_marker(el),
+                    # See RecordType.qualified_name for the bare-vs-qualified
+                    # name convention this mirrors.
+                    qualified_name=self._qualified_type_name(el, leaf_name=name),
                 )
             )
         return enums

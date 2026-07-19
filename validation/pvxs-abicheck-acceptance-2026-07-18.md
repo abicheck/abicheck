@@ -272,12 +272,69 @@ unit fixtures:
   `dlopen` of the compared library), matching the existing security posture
   this repo already documents.
 
+## Broader-scale generalization: closing the same bug class everywhere it hides
+
+FP-1's fix (and the three Codex-caught regressions it took to make it fully
+ambiguity-safe) was applied to `diff_types.py` only. A follow-up review asked
+the more useful question directly: is this specific `RecordType` file the
+only place this bug class exists, or was it just the first place someone
+happened to look? The answer was no — the same bare-leaf-name collision was
+found live in two more places, and fixing it there the same way it was fixed
+in `diff_types.py` (rather than leaving each as a standing gap) is the work
+recorded here. ADR-045 (`docs/development/adr/045-identity-based-old-new-entity-matching.md`)
+records the underlying principle this generalizes.
+
+- **`diff_symbols.py` had never adopted the ambiguity-safe matching at
+  all.** Its own four call sites — `_diff_functions`'s virtual-method-owner
+  resolution (feeding `diff_cxx_rules._resolve_owner_type`),
+  `_diff_ctor_overload_ambiguity`'s class grouping, `_diff_access_levels`,
+  and `_diff_anon_fields` — still built plain `{t.name: t for t in ...}`
+  dicts, independently reintroducing FP-1's exact false-positive/false-
+  negative risk in four different detectors. All four now route through
+  `diff_helpers.build_type_map`/`lookup_matched_type`. Regression tests in
+  `tests/test_diff_symbols_type_matching.py` (7 tests, 5 confirmed via
+  `git stash` to fail against the pre-fix code) pin the fix per call site;
+  `_converting_ctors_by_class` additionally needed a fallback to the bare
+  name when `owner_class_of` can't resolve a scope from a non-Itanium-
+  mangled test symbol, to avoid breaking `tests/test_explicit_ctor.py`'s
+  existing synthetic-mangled-name fixtures (real castxml/DWARF-derived
+  constructors always have real mangled symbols and are unaffected).
+- **`EnumType` had no `qualified_name` equivalent at all.** Added, populated
+  the same way as `RecordType.qualified_name` on both the castxml
+  (`_qualified_type_name`) and clang (`entry.scope`) header dumpers.
+  `diff_types.py`'s `_diff_enums`, `_diff_enum_renames`, and
+  `_diff_enum_deprecated` now match old/new enums through the same
+  `build_type_map`/`lookup_matched_type` machinery. Regression tests in
+  `tests/test_diff_enum_type_matching.py` (5 tests, all confirmed via
+  `git stash` to fail against the pre-fix `diff_types.py`) plus dumper-level
+  unit tests (`test_dumper_clang.py::test_parse_enums_sets_qualified_name_for_namespaced_enum`,
+  `test_castxml_schema_completeness.py::TestCastxmlParserPopulatesNewAttributes::test_namespaced_enum_qualified_name`)
+  confirm both backends populate the new field correctly.
+- **`diff_helpers.TypeMap`/`type_map_key`/`lookup_matched_type` are now
+  generic** (a `Protocol`-bound `TypeVar` over any `name`/`qualified_name`
+  shape) instead of hard-typed to `RecordType`, so `RecordType` and
+  `EnumType` share one implementation rather than duplicating the matching/
+  ambiguity logic per entity kind.
+- **A generalized Hypothesis property**
+  (`test_same_leaf_name_matching_is_order_independent` /
+  `test_same_leaf_name_enum_matching_is_order_independent` in
+  `tests/test_detector_properties.py`) generates two distinct qualified
+  entities sharing a bare leaf name, randomizes snapshot list insertion
+  order on both old and new sides, and asserts the emitted diff is
+  order-independent regardless of which detector fires. This is the actual
+  point of doing this at "broader scale" rather than per-file: it does not
+  need to know which detector is vulnerable, so it also catches any future
+  detector that reintroduces this pattern, closing the discovery gap (each
+  of the two live gaps above was found only because someone went looking by
+  hand) rather than just the two instances found this time.
+
 ## Status
 
 - **Fixed & tested in this branch:** FP-1 (type-matching key, plus the three
-  Codex-caught regressions across successive versions of that fix), FP-2
-  (anonymous-type path leak in `canonicalize_type_name`). Full fast unit
-  suite green (17274+ tests), `mypy`/`ruff`/AI-readiness clean.
+  Codex-caught regressions across successive versions of that fix, plus the
+  broader-scale generalization to `diff_symbols.py` and `EnumType` above),
+  FP-2 (anonymous-type path leak in `canonicalize_type_name`). Full fast unit
+  suite green, `mypy`/`ruff`/AI-readiness clean.
 - **FP-2 additionally re-verified against real tools** (real pvxs source,
   real `clang`-frontend dump, before/after on a real `.so` pair) — see
   "Real-tool re-verification" above.

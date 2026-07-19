@@ -29,7 +29,13 @@ from .diff_cxx_rules import (
     owner_class_of,
     virtual_method_addition,
 )
-from .diff_helpers import bool_transition, diff_by_key, make_change
+from .diff_helpers import (
+    bool_transition,
+    build_type_map,
+    diff_by_key,
+    lookup_matched_type,
+    make_change,
+)
 from .diff_symbols_renames import (  # noqa: F401  (public-surface re-exports)
     _CTOR_DTOR_CODE_RE as _CTOR_DTOR_CODE_RE,
     _FUNC_LIKE_TYPES as _FUNC_LIKE_TYPES,
@@ -906,8 +912,15 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # old surface's scope-qualified owner classes (disambiguates same-leaf
     # classes across namespaces), and per-class virtual signatures (to skip
     # inherited overrides). See ``virtual_method_addition``.
-    old_types = {t.name: t for t in old.types}
-    new_types = {t.name: t for t in new.types}
+    #
+    # Keyed via TypeMap (qualified-name-first, ambiguity-safe bare-name
+    # fallback), not a naive bare-name dict: two distinct classes sharing a
+    # leaf name in different namespaces must not let a new virtual method on
+    # one get attributed to the other's stale vtable state (the same
+    # short-leaf-name collision class fixed for diff_types.py in PR #608,
+    # never previously propagated here).
+    old_types = build_type_map(old.types)
+    new_types = build_type_map(new.types)
     old_owner_classes = {
         owner for f in old_map.values() if (owner := owner_class_of(f)) is not None
     }
@@ -983,11 +996,15 @@ def _converting_ctors_by_class(
 ) -> dict[str, dict[tuple[str, ...], Function]]:
     """Group each class's non-explicit, single-required-argument constructors.
 
-    A castxml/DWARF Constructor's demangled ``name`` is the bare class name
-    (C++ forbids any other member from sharing it), so ``f.name in
-    class_names`` reliably identifies constructors without needing a real
-    Itanium mangled name — public overloaded constructors that castxml never
-    ODR-uses may have none (see ``dumper_castxml.SYNTHETIC_CTOR_KEY_PREFIX``).
+    A castxml/DWARF Constructor's demangled ``name`` is always the bare class
+    name (C++ forbids any other member from sharing it), so grouping is keyed
+    by ``owner_class_of(f)`` — the scope-qualified owner derived from the
+    mangled symbol (``diff_cxx_rules.owner_class_of``), the same source of
+    truth ``virtual_method_addition`` uses — not the bare ``f.name``. Two
+    distinct classes sharing a bare name in different namespaces would
+    otherwise conflate their constructor sets and fabricate a
+    ``CTOR_OVERLOAD_AMBIGUITY_RISK`` for the wrong (or an unrelated) class
+    (Codex review, PR #608 follow-up).
 
     "Converting constructor" here means: public (a private/protected
     constructor isn't callable at an ordinary consumer call site, so it
@@ -1006,13 +1023,18 @@ def _converting_ctors_by_class(
     copy/move constructors. Keyed by the full parameter-type tuple so two
     overloads are distinguished even when both qualify.
 
-    Caveat shared with ``diff_cxx_rules._resolve_owner_type``: ``class_names``
-    is unqualified/leaf, so two distinct classes sharing a bare name in
-    different namespaces are not disambiguated here.
+    ``class_names`` is expected to already be scope-qualified (see its call
+    site, ``_diff_ctor_overload_ambiguity``). Falls back to the bare
+    ``f.name`` when ``owner_class_of`` can't resolve a scope from the mangled
+    symbol (e.g. a hand-built snapshot with a non-Itanium placeholder mangled
+    name) -- every real castxml/DWARF-derived constructor carries a real
+    mangled symbol, so this only affects synthetic/malformed input, where the
+    bare name is the best available identity anyway.
     """
     by_class: dict[str, dict[tuple[str, ...], Function]] = {}
     for f in snap.functions:
-        if f.name not in class_names or f.is_deleted or f.is_explicit is not False:
+        owner = owner_class_of(f) or f.name
+        if owner not in class_names or f.is_deleted or f.is_explicit is not False:
             continue
         if f.access != AccessLevel.PUBLIC:
             continue
@@ -1027,7 +1049,7 @@ def _converting_ctors_by_class(
         if arg_type == f.name:
             continue
         sig = tuple(p.type for p in f.params)
-        by_class.setdefault(f.name, {})[sig] = f
+        by_class.setdefault(owner, {})[sig] = f
     return by_class
 
 
@@ -1044,7 +1066,10 @@ def _diff_ctor_overload_ambiguity(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
     that don't cross this threshold and, rarely, flag an addition that never
     collides with a real call site — see ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK.
     """
-    common_classes = {t.name for t in old.types} & {t.name for t in new.types}
+    # Qualified-key intersection (not bare t.name): two distinct classes
+    # sharing a leaf name in different namespaces must not conflate their
+    # constructor sets (Codex review, PR #608 follow-up).
+    common_classes = set(build_type_map(old.types)) & set(build_type_map(new.types))
     if not common_classes:
         return []
     old_ctors = _converting_ctors_by_class(old, common_classes)
@@ -1457,15 +1482,18 @@ def _check_method_access_changes(
 
 
 def _check_field_access_changes(
-    old_types: dict[str, Any],
-    new_types: dict[str, Any],
+    old_types: Any,
+    new_types: Any,
 ) -> list[Change]:
     """Emit FIELD_ACCESS_CHANGED for narrowing field access transitions."""
     changes: list[Change] = []
-    for name, t_old in old_types.items():
-        t_new = new_types.get(name)
+    for t_old in old_types.values():
+        t_new = lookup_matched_type(old_types, new_types, t_old)
         if t_new is None:
             continue
+        # Bare, not the qualified matching key -- matches the identity
+        # diff_types.py detectors report field-level findings under.
+        name = t_old.name
         old_fields = {f.name: f for f in t_old.fields}
         new_fields = {f.name: f for f in t_new.fields}
         for fname, f_old_f in old_fields.items():
@@ -1500,16 +1528,14 @@ def _diff_access_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         _check_method_access_changes(_public_functions(old), _public_functions(new))
     )
     excl = stdlib_namespaces_excluded(old, new)
-    old_types = {
-        t.name: t
-        for t in old.types
+    old_types = build_type_map(
+        t for t in old.types
         if not t.is_union and is_abi_surface_type_name(t.name, exclude_stdlib=excl)
-    }
-    new_types = {
-        t.name: t
-        for t in new.types
+    )
+    new_types = build_type_map(
+        t for t in new.types
         if not t.is_union and is_abi_surface_type_name(t.name, exclude_stdlib=excl)
-    }
+    )
     changes.extend(_check_field_access_changes(old_types, new_types))
     return changes
 
@@ -1575,21 +1601,19 @@ def _diff_anon_fields(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect changes in anonymous struct/union members."""
     changes: list[Change] = []
     excl = stdlib_namespaces_excluded(old, new)
-    old_map = {
-        t.name: t
-        for t in old.types
-        if is_abi_surface_type_name(t.name, exclude_stdlib=excl)
-    }
-    new_map = {
-        t.name: t
-        for t in new.types
-        if is_abi_surface_type_name(t.name, exclude_stdlib=excl)
-    }
+    old_map = build_type_map(
+        t for t in old.types if is_abi_surface_type_name(t.name, exclude_stdlib=excl)
+    )
+    new_map = build_type_map(
+        t for t in new.types if is_abi_surface_type_name(t.name, exclude_stdlib=excl)
+    )
 
-    for name, t_old in old_map.items():
-        t_new = new_map.get(name)
+    for t_old in old_map.values():
+        t_new = lookup_matched_type(old_map, new_map, t_old)
         if t_new is None:
             continue
+        # Bare, not the qualified matching key.
+        name = t_old.name
         changes.extend(_check_anon_fields_for_type(name, t_old, t_new))
 
     return changes
