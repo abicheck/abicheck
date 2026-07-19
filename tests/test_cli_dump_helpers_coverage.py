@@ -162,6 +162,17 @@ def test_compile_db_not_reused_when_not_applicable(tmp_path: Path) -> None:
         assert note is None
 
 
+def test_has_explicit_l3_selector(tmp_path: Path) -> None:
+    """AC-007 (Codex): --build-query, --build-compile-db, and an explicit --config
+    are all dedicated L3 selectors that must suppress the -p→L3 reuse."""
+    from abicheck.cli_dump_helpers import has_explicit_l3_selector
+
+    assert has_explicit_l3_selector(None, None, None) is False
+    assert has_explicit_l3_selector("some-query", None, None) is True
+    assert has_explicit_l3_selector(None, "build/compile_commands.json", None) is True
+    assert has_explicit_l3_selector(None, None, tmp_path / "cfg.yml") is True
+
+
 def test_compile_db_not_reused_when_explicit_l3_selector(tmp_path: Path) -> None:
     """AC-007 (Codex): --build-query/--build-compile-db are dedicated L3 selectors;
     reusing the -p header DB as build_info would override them (build_info takes

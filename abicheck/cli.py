@@ -43,6 +43,7 @@ from .cli_dump_helpers import (
     check_requested_depth_satisfied,
     fold_dump_provenance_into_json,
     handle_non_elf_dump,
+    has_explicit_l3_selector,
     perform_elf_dump,
     resolve_compile_db_l3_reuse,
     resolve_dump_collect_context,
@@ -735,7 +736,9 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         _dry_reused_bi, _ = resolve_compile_db_l3_reuse(
             depth, build_info, compile_db_path or compile_db_path_alt,
             matched=bool(_dry_matched), compile_db_filter=compile_db_filter,
-            explicit_l3_selector=build_query is not None or build_compile_db is not None,
+            explicit_l3_selector=has_explicit_l3_selector(
+                build_query, build_compile_db, build_config,
+            ),
         )
         emit_dry_run(
             render_dump_dry_run(
@@ -783,13 +786,20 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # AC-007: reuse a `-p`/`--compile-db` database as the L3 build source for an
     # explicit `--depth build`/`source` with no dedicated `--build-info`. Gated on
     # the just-computed `compile_db_matched` (an unrelated/filtered DB must not
-    # embed as L3) and on `compile_db_filter` (which scopes L2 only, so the raw DB
-    # can't be reused for L3 without pulling every entry). All the decision logic
-    # is in the pure helper; only the echo stays here.
+    # embed as L3), on `compile_db_filter` (which scopes L2 only, so the raw DB
+    # can't be reused for L3 without pulling every entry), and on every other
+    # dedicated L3 selector being absent — the CLI `--build-query`/
+    # `--build-compile-db` flags AND an explicit `--config`, which may set
+    # `build.query`/`build.compile_db`. Hijacking `build_info` would otherwise
+    # override those lower-precedence selectors in `inline._resolve_compile_db`
+    # (Codex review). All the decision logic is in the pure helper; only the echo
+    # stays here.
     build_info, _l3_note = resolve_compile_db_l3_reuse(
         depth, build_info, effective_compile_db,
         matched=compile_db_matched, compile_db_filter=compile_db_filter,
-        explicit_l3_selector=build_query is not None or build_compile_db is not None,
+        explicit_l3_selector=has_explicit_l3_selector(
+            build_query, build_compile_db, build_config,
+        ),
     )
     if _l3_note:
         click.echo(_l3_note, err=True)

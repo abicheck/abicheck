@@ -856,6 +856,30 @@ def check_dump_compile_db_error(
     return None
 
 
+def has_explicit_l3_selector(
+    build_query: str | None,
+    build_compile_db: str | None,
+    build_config: Path | None,
+) -> bool:
+    """True when a dedicated L3 build-source selector was given.
+
+    AC-007's ``-p``/``--compile-db`` → L3 reuse hijacks ``build_info``, which
+    ``inline._resolve_compile_db`` ranks above the config's ``build.query`` /
+    ``build.compile_db``. So the reuse must be suppressed not only for an explicit
+    ``--build-info`` but for every other L3 selector: the CLI ``--build-query`` /
+    ``--build-compile-db`` flags **and** an explicit ``--config`` (trusted, and
+    able to set ``build.query`` / ``build.compile_db``). Gating on the ``--config``
+    *presence* is deliberately conservative — the config may set no L3 selector at
+    all — but never silently overriding one is the safe direction; the user can
+    still force the reuse by dropping ``--config`` or naming ``--build-info``
+    (Codex review)."""
+    return (
+        build_query is not None
+        or build_compile_db is not None
+        or build_config is not None
+    )
+
+
 def resolve_compile_db_l3_reuse(
     depth: str | None,
     build_info: Path | None,
