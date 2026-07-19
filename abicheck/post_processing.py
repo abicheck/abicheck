@@ -521,8 +521,9 @@ _ENUM_MEMBER_KINDS = frozenset({
     ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED,
 })
 
-# buildsource/source_diff.py's L4 source-replay findings are public *by
-# construction* -- each is built only from a SourceAbiSurface's own
+# buildsource/source_diff.py's L4 (and source_graph_findings.py's L5)
+# findings below are public *by construction* -- each is built only from a
+# SourceAbiSurface's own
 # reachable_types/reachable_macros/reachable_declarations/reachable_templates
 # collections (or, for SOURCE_DECL_BINARY_SYMBOL_MISMATCH, the
 # source_decl_to_binary_symbol mapping -- see _diff_mappings's own "Public
@@ -551,6 +552,18 @@ _PUBLIC_SOURCE_ABI_KINDS = frozenset({
     ChangeKind.GENERATED_HEADER_CHANGED,
     ChangeKind.SOURCE_DECL_BINARY_SYMBOL_MISMATCH,
     ChangeKind.ODR_SOURCE_CONFLICT,
+    # L5 (source_graph_findings.py) kinds whose subject is itself a
+    # proven-public entry/decl/symbol, not just something touching one
+    # (Codex review). NOT extended to SOURCE_TO_BINARY_MAPPING_CHANGED
+    # (unfiltered decl), BUILD_OPTION_REACHES_PUBLIC_SYMBOL, or
+    # TARGET_DEPENDENCY_ADDED -- those are keyed on a build option/target
+    # that merely reaches something public, not a public entity itself.
+    ChangeKind.PUBLIC_REACHABILITY_CHANGED,
+    ChangeKind.GENERATED_HEADER_REACHES_PUBLIC_API,
+    ChangeKind.CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED,
+    ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED,
+    ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT,
+    ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED,
 })
 
 
@@ -746,40 +759,17 @@ class MarkReachability:
         # dict/set membership checks) — the walk it would have skipped
         # re-running already happened above, so this isn't a perf change.
 
-        # impact-analysis-layer P0: whether a not-otherwise-tagged change's
-        # only possible remaining signal (the optional L5 call/type graph)
-        # is trustworthy enough to treat its absence-of-edge as absence of
-        # dependency. The layout/type-graph walk above (compute_leak_paths)
-        # is a complete closure over the snapshot's own *declared types*, so
-        # it alone never downgrades the verdict to UNKNOWN — but only for a
-        # change whose root actually names a declared type (Codex review):
-        # a function/variable-shaped change's root is never a key in that
-        # walk's domain at all, so treating its absence from reachable_types
-        # as the walk's own "examined, not found" proof is wrong — that
-        # walk never had the chance to examine a function/variable in the
-        # first place, and only the call graph could ever speak to it.
-        #
-        # A trustworthy call graph requires more than "at least one relevant
-        # edge exists somewhere" (Codex review, second pass): a header-only
-        # graph, or a build graph where only one family was collected, can
-        # carry a handful of unrelated edges while never having examined the
-        # decl in question at all. ``extractor_passes[name]`` is the graph's
-        # own "this pass ran to completion, unnarrowed, over the full
-        # project" signal (source_graph.py) — the same one
-        # mark_source_edges_extractor_coverage() and compute_call_graph_leak_paths's
-        # sibling walks trust elsewhere — so require it explicitly, on both
-        # sides being compared, rather than inferring completeness from mere
-        # edge presence plus the absence of a narrowed/degraded flag.
-        #
-        # Both families, not either (Codex review, third pass):
-        # compute_call_graph_leak_paths's walk mixes DECL_CALLS_DECL edges
-        # (produced only by the "call_graph" pass, call_graph.py) with
-        # DECL_REFERENCES_DECL edges (produced only by the "type_graph"
-        # pass, type_graph.py) into a single combined reachability walk — a
-        # build where only one of the two producer passes completed still
-        # has a real coverage gap in the other edge family, so trusting the
-        # walk's absence-of-edge conclusion requires *both* passes
-        # confirmed complete, not just one.
+        # A change whose root names a declared type is fully covered by the
+        # layout/type-graph walk above (compute_leak_paths); a function/
+        # variable-shaped root never was, so only a trustworthy call graph
+        # can speak to it. "Trustworthy" means both producer passes ran to
+        # completion (extractor_passes["call_graph"]/["type_graph"]) on both
+        # sides -- not merely "some edge exists somewhere", since a
+        # header-only or partially-collected graph can carry unrelated edges
+        # while never examining the decl in question, and the combined walk
+        # below mixes DECL_CALLS_DECL (call_graph.py) with
+        # DECL_REFERENCES_DECL (type_graph.py) edges, each gated by its own
+        # pass (Codex review, three passes).
         def _call_graph_fully_trusted(snap: AbiSnapshot) -> bool:
             build_source = getattr(snap, "build_source", None)
             graph = getattr(build_source, "source_graph", None) if build_source is not None else None
