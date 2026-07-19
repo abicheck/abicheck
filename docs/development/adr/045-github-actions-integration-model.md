@@ -356,7 +356,7 @@ targets:
     library: libpvxs
   ioc-plugin-contract:
     kind: plugin-contract  # S23 -- compare --required-symbols (ADR-043)
-    contract_file: "contracts/ioc-plugin.yml"
+    contract_file: "contracts/ioc-plugin.syms"  # one required symbol per line, see note below
     library: libpvxsIoc
 
 bundles:
@@ -404,6 +404,20 @@ removed `plugin-check` and folded it into `compare`'s `--required-symbol`/
 earlier draft's `plugin-check` invocation would call a mode that doesn't
 exist. The report envelope (§7) stays the same shape across all three kinds;
 only the underlying `compare` flags differ.
+
+**`contract_file`'s format is a `.syms` line file, not YAML — a second
+correction, from a follow-up review round.** `--required-symbols`'s loader
+(`abicheck/cli_compare_helpers.py`'s `_load_required_symbols`) reads one
+linker symbol name per line, ignoring blank lines and `#`-prefixed comments
+— it is not a structured/YAML parser. An earlier draft of this correction's
+own example showed `contract_file: "contracts/ioc-plugin.yml"`, which would
+feed YAML syntax (keys, list markers, indentation) into that line-based
+loader as if each line were a literal required-symbol name — producing
+bogus "missing entrypoint" findings for symbols that were never real symbol
+names, just YAML structure. Fixed: `contract_file` is documented as a
+`.syms` file (one required linker symbol per line, `#` comments allowed),
+matching `--required-symbols`'s actual format exactly — not a YAML
+manifest a P2 parser would need to be built to consume.
 
 **`profiles:` shape, missing from an earlier draft — flagged by review.**
 §8's S17 row and P1.5 rely on `.abicheck.yml` declaring which build
@@ -879,7 +893,7 @@ scenario requires `aggregate` except S28.
 | S2 | Single library, latest-release baseline | `check-single.yml` | release-contract | Needs `resolve-baseline`'s fail-loud `not_found` handling. |
 | S3 | Reuse existing expensive build | `check-project.yml` | either | The `build-output.json` consumer path; no rebuild inside abicheck. |
 | S4 | Build+check in one job | `actions/check-target` used as a **step** inside the caller's own job, *not* `check-single.yml` | either | Small-project shortcut; not the default for large repos. Correction from an earlier draft: GitHub's own reusable-workflow docs (`jobs.<job_id>.uses`) confirm a reusable workflow always runs as a separate job with its own runner/workspace, so it structurally cannot share a filesystem with a build step that ran earlier in the caller's job — `check-single.yml` is therefore the wrong entry point for "build and check in one job." S4's real entry point is `actions/check-target` invoked directly as a step (`uses: abicheck/abicheck/actions/check-target@vN`) right after the project's own build steps in the same job, giving it direct access to the just-built artifacts on disk. `check-single.yml` stays correct for S1/S2/S5/S6, where the candidate binary is a git-committed/downloaded artifact and no in-job build step needs to be shared. |
-| S5 | Single-build audit, no baseline | `check-single.yml` (`baseline: none`) | none | Advisory by default (§7 `local` vs `advisory`). |
+| S5 | Single-build audit, no baseline | `check-single.yml` (`baseline: none`) — **`check-target` skips `resolve-baseline` entirely, see note below** | none | Advisory by default (§7 `local` vs `advisory`). |
 | S6 | Header-aware compatibility | `check-single.yml` | any | Public-header floor; `evidence_coverage` must confirm header parse reached (finding-driven — no silent L0 fallback). |
 | S7 | Source scan via compile-DB replay | `check-single.yml`/`check-project.yml` + `collect-facts producer: replay` | any | PR = changed-TU scope; nightly/release = full unseeded. |
 | S8 | Source facts via `abicheck-cc` wrapper | `collect-facts producer: wrapper` (prepare) → real build → (verify) | any | Two-step; `phase: auto` limitation (finding 3) documented, not hidden. |
@@ -1083,6 +1097,22 @@ Three new validation points, all hard failures (not warnings) when tripped:
    it), not a general relaxation of the fail-loud rule: every other resolver
    outcome, and every `required: true` check (the default), stays a hard
    failure with no exit-0 path.
+
+**`baseline: none` (S5) is a distinct bypass, not another row in this
+taxonomy — flagged by review.** An earlier draft routed S5's no-baseline
+audit through `check-single.yml`/`check-target` without saying how it
+avoids hitting `resolve-baseline`'s `not_found` outcome (or being
+mislabeled as the `required: false` bootstrap case above) — both of which
+are about a baseline that's *expected but missing*, not a check that never
+wanted one. S5's audit-only flow is semantically the existing scan/compare
+behavior of simply omitting `against`/`abi-baseline` (§"What the audit
+found" describes `scan` as already running audit-only whenever no
+`against` is configured). **Fix:** `baseline: none` on a `check-target`
+invocation skips the `resolve-baseline` step entirely — `check-target`
+never calls it, so no taxonomy row applies — and invokes the underlying
+audit/scan path directly, exactly as today's CLI already supports. This is
+a `check-target` input-level branch (bypass baseline resolution), not a
+sixth `resolve-baseline` outcome to add to the table above.
 
 ---
 
