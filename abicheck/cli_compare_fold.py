@@ -13,65 +13,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Post-render JSON/text fold-in helpers for the ``compare`` command.
+"""Scoped-gate (``--used-by``/``--required-symbol(s)``) summary fold-in for
+the ``compare`` command's rendered report text.
 
 Size-split from :mod:`abicheck.cli_compare_helpers` (AI-readiness file-size
-cap) -- these functions all operate on the *already-rendered* report text
-``run_compare`` produced (evidence-depth annotation, scoped-gate summary
-fold-in), not on the comparison pipeline itself, so they factor cleanly into
-their own leaf module. No import back to ``cli_compare_helpers`` or ``cli``
-is needed here.
+cap). These functions only reach leaf report-formatting modules
+(:mod:`abicheck.reporter`, :mod:`abicheck.reporter_markdown`,
+:mod:`abicheck.severity`, :mod:`abicheck.checker_policy`) -- unlike
+:func:`abicheck.cli_compare_helpers._fold_evidence_depth_into_json` (which
+stayed in ``cli_compare_helpers.py``), none of them touch
+``cli_dump_helpers``/``cli_buildsource_helpers``, so this module does not
+join the CLI-registration import-cycle SCC those do (CLAUDE.md "What NOT to
+do": extending ``IMPORT_CYCLE_ALLOWLIST`` needs an ADR, so the split
+boundary was chosen specifically to avoid needing one).
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
-
-
-def _fold_evidence_depth_into_json(
-    text: str, fmt: str, old: Any, new: Any,
-    old_build_info: Path | None = None, new_build_info: Path | None = None,
-    old_sources: Path | None = None, new_sources: Path | None = None,
-) -> str:
-    """Add ``old_evidence_depth``/``new_evidence_depth`` to a JSON report (CLI-audit P2).
-
-    Self-describing output: the evidence depth each side *actually* reached
-    (``binary``/``headers``/``build``/``source``), computed from what was
-    resolved rather than the requested ``--depth`` -- so a report is never
-    silently mismatched against what was actually collected. JSON only; other
-    formats already show depth-related context in their own ways (or, for
-    binary/structured formats, are left untouched per
-    :func:`_fold_scoped_compat_into_text`'s convention).
-
-    An out-of-band ``--old/new-build-info``/``--old/new-sources`` *pack
-    directory* (as opposed to a raw checkout, which gets embedded into the
-    snapshot before this point) is resolved via ``_resolve_side_pack`` and
-    never attached back to ``old``/``new`` themselves -- reading only
-    ``old.build_source``/``new.build_source`` would then report the
-    snapshot's own (absent or unrelated) embedded depth instead of the pack
-    that was actually used to produce this comparison's build/source
-    findings (Codex review). Re-resolving here is cheap (pure pack-directory
-    metadata load, no diffing) and mirrors the same resolution
-    ``prepare_embedded_build_source``/``diff_embedded_build_source`` already
-    performed to run the comparison itself.
-    """
-    if fmt != "json":
-        return text
-    import json
-
-    from .cli_buildsource_helpers import _resolve_side_pack
-    from .cli_dump_helpers import evidence_depth_label
-
-    try:
-        payload = json.loads(text)
-    except ValueError:
-        return text
-    old_pack = _resolve_side_pack(old_build_info, old_sources, old)
-    new_pack = _resolve_side_pack(new_build_info, new_sources, new)
-    payload["old_evidence_depth"] = evidence_depth_label(old, old_pack)
-    payload["new_evidence_depth"] = evidence_depth_label(new, new_pack)
-    return json.dumps(payload, indent=2)
 
 
 def _resolve_scoped_gate_findings(
