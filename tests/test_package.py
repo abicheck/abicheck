@@ -2515,6 +2515,34 @@ class TestDebExtractorExtended:
         extract_zst.assert_called_once()
         assert extract_zst.call_args.args[0].name == "data.tar.zst"
 
+    def test_extract_control_tar_zst_uses_zstd_tar_helper(self, tmp_path: Path) -> None:
+        """control.tar.* can ship zstd-compressed too, same as data.tar.*;
+        _deb_extract must route it through the zstd tar helper rather than
+        the plain-tar extractor (which only exercised the .zst branch on
+        data.tar.*, not control.tar.*, before this test)."""
+        f = tmp_path / "test.deb"
+        f.write_bytes(b"!<arch>\n" + b"\x00" * 100)
+        out = tmp_path / "output"
+        out.mkdir()
+
+        def fake_run(*args, **kwargs):
+            staging = Path(kwargs.get("cwd", "."))
+            with tarfile.open(staging / "data.tar", "w"):
+                pass
+            (staging / "control.tar.zst").write_bytes(b"zstd payload")
+            return mock.Mock(returncode=0)
+
+        with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
+            with mock.patch("abicheck.package.subprocess.run", side_effect=fake_run):
+                with mock.patch(
+                    "abicheck.package.TarExtractor._safe_extract_zst_tar"
+                ) as extract_zst:
+                    DebExtractor().extract(f, out)
+
+        extract_zst.assert_called_once()
+        assert extract_zst.call_args.args[0].name == "control.tar.zst"
+        assert extract_zst.call_args.args[1] == out / ".deb_control"
+
     def test_extract_symbols_file_from_control_tar(self, tmp_path: Path) -> None:
         """CLI-audit P2: DebExtractor only ever read data.tar.*; control.tar.*
         (which carries the dpkg-gensymbols(1) symbols contract) was never

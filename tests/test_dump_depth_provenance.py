@@ -452,6 +452,24 @@ def test_fold_dump_provenance_uses_gated_label_for_zero_match_source_case() -> N
     assert resolved_label == provenance["effective_depth"] == "source"
 
 
+def test_fold_dump_provenance_malformed_json_returns_gated_label() -> None:
+    """The pre-json.loads early-return path: if `text` isn't valid JSON at
+    all, fold_dump_provenance_into_json must still return the same
+    (text, effective_depth) tuple shape the caller relies on for its stderr
+    echo -- effective computed via the same _gated_source_label used on the
+    happy path, not left unset or recomputed differently."""
+    from abicheck.cli_dump_helpers import fold_dump_provenance_into_json
+
+    snap = AbiSnapshot(library="libfoo.so", version="1.0")
+
+    text, resolved_label = fold_dump_provenance_into_json(
+        "not valid json {{{", "binary", snap,
+    )
+
+    assert text == "not valid json {{{"
+    assert resolved_label == "binary"
+
+
 def test_fold_dump_provenance_falls_back_to_l4_extractor_when_ast_producer_absent() -> None:
     """Codex review: a symbol-only ELF dump (no -H headers) returns from
     dumper._build_symbol_only_snapshot before the L2 header-AST pipeline ever
