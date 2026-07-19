@@ -103,6 +103,12 @@ COVERAGE_INCOMPLETE_EXIT = 1
 #: report file's stem, if the report does not self-identify a ``target_id``.
 DEFAULT_REPORT_PREFIX = "abi-report-"
 
+#: Sentinel top-level ``verdict`` a compare-release report emits for an
+#: *operational* failure (a library failed to dump/extract/compare). Not a
+#: :class:`Verdict` enum member — the release path floors it to exit 4, and the
+#: fan-in preserves it as a blocking gate rather than a verdictless report.
+_OPERATIONAL_ERROR_VERDICT = "ERROR"
+
 
 def _check_manifest_version(raw: Any) -> None:
     """Validate an optional manifest ``aggregate_manifest_version`` field.
@@ -640,9 +646,31 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
         if isinstance(own_id, str) and own_id
         else target_id_from_path(path, prefix=prefix)
     )
-    verdict = parse_report_verdict(data)
     head_sha_raw = data.get("head_sha")
     head_sha = str(head_sha_raw) if isinstance(head_sha_raw, str) else None
+    # A compare-release *operational* failure carries top-level ``verdict:
+    # "ERROR"`` (a library failed to dump/extract/compare) — the release path
+    # ranks it above BREAKING and floors its exit to 4. "ERROR" is not a
+    # ``Verdict`` enum member, so preserve it here as a blocking gate: otherwise
+    # it falls through as a verdictless (unavailable) report that a warn /
+    # optional / unexpected policy could let pass, silently downgrading a hard
+    # operational failure to a coverage gap.
+    if data.get("verdict") == _OPERATIONAL_ERROR_VERDICT:
+        return _LoadedReport(
+            target_id=target_id,
+            verdict=Verdict.BREAKING,
+            gate=GateInfo(
+                exit_code=4,
+                blocking=True,
+                blocking_categories=("operational_error",),
+                from_report=True,
+            ),
+            library=data.get("library"),
+            head_sha=head_sha,
+            reason=None,
+            path=path,
+        )
+    verdict = parse_report_verdict(data)
     gate: GateInfo | None = None
     if verdict is not None:
         try:

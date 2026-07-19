@@ -30,8 +30,10 @@
   non-string categories) makes that target *unavailable* rather than reverting
   to the greener legacy path; only an entirely absent gate block legacy-falls-back.
   `scan` reports are read via their own top-level `exit_code`
-  (`scan_schema_version`), and when a manifest pins a `head_sha`, a report that
-  is missing or mismatches it is treated as unavailable. The `--format json`
+  (`scan_schema_version`); a compare-release *operational* failure (top-level
+  `verdict: "ERROR"`) is preserved as a blocking exit-4 gate rather than
+  decaying to a verdictless coverage gap; and when a manifest pins a `head_sha`,
+  a report that is missing or mismatches it is treated as unavailable. The `--format json`
   output has a published JSON Schema
   (`abicheck/schemas/aggregate_report.schema.json`, mirrored at
   `docs/schemas/v1/`), and the manifest may carry an optional

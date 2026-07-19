@@ -260,6 +260,38 @@ class TestGateVsVerdict:
         r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
         assert r.exit_code() == 1
 
+    def test_operational_error_verdict_blocks_at_4(self, tmp_path: Path):
+        # A compare-release operational failure (top-level verdict "ERROR", not
+        # a Verdict enum member) must stay a blocking exit-4 gate, not decay to
+        # a verdictless/unavailable coverage gap.
+        _write_report(tmp_path, LINUX, "ERROR")
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert r.targets[0].analyzed
+        assert r.exit_code() == 4
+        assert LINUX in r.blocking_targets
+        assert r.targets[0].gate is not None
+        assert r.targets[0].gate.blocking_categories == ("operational_error",)
+
+    def test_operational_error_blocks_even_under_warn(self, tmp_path: Path):
+        # Under --on-missing-required warn a coverage gap is advisory, but an
+        # operational ERROR is a real per-report failure and must still block.
+        _write_report(tmp_path, LINUX, "ERROR")
+        _write_report(tmp_path, WINDOWS, "COMPATIBLE")
+        r = aggregate_reports_dir(
+            tmp_path,
+            expected=_expect(LINUX, WINDOWS),
+            on_missing_required=OnMissingRequired.WARN,
+        )
+        assert r.exit_code() == 4
+
+    def test_operational_error_on_optional_target_still_blocks(self, tmp_path: Path):
+        # Even an *optional* target that operationally errored is a hard failure
+        # (it ran and failed), unlike an optional target that simply never ran.
+        _write_report(tmp_path, MACOS, "ERROR")
+        _write_report(tmp_path, LINUX, "COMPATIBLE")
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX, optional=(MACOS,)))
+        assert r.exit_code() == 4
+
 
 class TestCoveragePolicy:
     def test_missing_required_warn_lets_gate_decide(self, tmp_path: Path):
