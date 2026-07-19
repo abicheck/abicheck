@@ -757,19 +757,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
 
     effective_compile_db = resolve_dump_compile_db(compile_db_path, compile_db_path_alt, headers)
 
-    # AC-007: an explicit `--depth build`/`source` with a real compile database
-    # supplied via `-p`/`--compile-db` (for the L2 header parse) but no dedicated
-    # `--build-info` reuses that same DB as the L3 build source, instead of
-    # re-running the build system (cmake/bazel/make query). See helper docstring.
-    _l3_from_compile_db = compile_db_as_l3_build_info(depth, build_info, effective_compile_db)
-    if _l3_from_compile_db is not build_info:
-        build_info = _l3_from_compile_db
-        click.echo(
-            f"Using compile database {effective_compile_db} as the L3 build "
-            "source (from -p/--compile-db; pass --build-info to override).",
-            err=True,
-        )
-
     # Resolved before the PE/Mach-O dispatch (Codex review): both binary-format
     # branches need the same -p/--compile-db -> castxml/clang flags and matched
     # signal -- the ELF path used to compute these only after the PE/Mach-O
@@ -780,6 +767,26 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         effective_compile_db, headers, compile_db_filter,
     )
     effective_gcc_options = _merge_gcc_options(build_context_flags, gcc_options)
+
+    # AC-007: an explicit `--depth build`/`source` with a real compile database
+    # supplied via `-p`/`--compile-db` (for the L2 header parse) but no dedicated
+    # `--build-info` reuses that same DB as the L3 build source, instead of
+    # re-running the build system (cmake/bazel/make query). Gated on
+    # `compile_db_matched` (computed just above): an unrelated/filtered DB whose
+    # entries do not match the requested headers must NOT be embedded as L3 — it
+    # would let the strict `--depth` gate accept a header snapshot parsed without
+    # that build context, and disagree with the dry-run's own
+    # `compile_db_matched is False` blocker (Codex review).
+    _l3_from_compile_db = compile_db_as_l3_build_info(
+        depth, build_info, effective_compile_db, matched=compile_db_matched
+    )
+    if _l3_from_compile_db is not build_info:
+        build_info = _l3_from_compile_db
+        click.echo(
+            f"Using compile database {effective_compile_db} as the L3 build "
+            "source (from -p/--compile-db; pass --build-info to override).",
+            err=True,
+        )
 
     # Auto-detect binary format — PE/Mach-O skip the ELF/castxml path. The
     # conventional ``libfoo.so`` dev symlink is often a GNU ld linker script;

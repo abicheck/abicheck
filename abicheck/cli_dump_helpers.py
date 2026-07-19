@@ -850,6 +850,8 @@ def compile_db_as_l3_build_info(
     depth: str | None,
     build_info: Path | None,
     effective_compile_db: Path | None,
+    *,
+    matched: bool = True,
 ) -> Path | None:
     """AC-007: reuse a ``-p``/``--compile-db`` database as the L3 build source.
 
@@ -860,11 +862,19 @@ def compile_db_as_l3_build_info(
     query (cmake/bazel/make). Returns the original *build_info* unchanged in every
     other case (no explicit deep depth, an explicit ``--build-info`` already set,
     or no compile DB), so a plain ``dump -p db -H h.h`` L2-only run is unaffected.
+
+    *matched* is whether the compile DB actually matched the requested headers
+    (``_resolve_build_context_flags``'s ``compile_db_matched``). An unrelated or
+    entirely filtered-out DB (``matched`` is False) is **not** reused: embedding
+    its unrelated compile units as L3 would let the strict ``--depth`` gate accept
+    a header snapshot parsed without that build context, and would disagree with
+    the dry-run's own ``compile_db_matched is False`` blocker (Codex review).
     """
     if (
         depth in ("build", "source")
         and build_info is None
         and effective_compile_db is not None
+        and matched
     ):
         return effective_compile_db
     return build_info

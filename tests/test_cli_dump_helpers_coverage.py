@@ -157,6 +157,17 @@ def test_compile_db_not_reused_when_not_applicable(tmp_path: Path) -> None:
     assert compile_db_as_l3_build_info("build", None, None) is None
 
 
+def test_compile_db_not_reused_when_unmatched(tmp_path: Path) -> None:
+    """AC-007 (Codex): an unrelated/filtered compile DB that did not match the
+    requested headers (`matched=False`) must NOT be embedded as L3 — that would
+    let the strict --depth gate accept a header snapshot parsed without that
+    build context. A matched DB is still reused."""
+    db = tmp_path / "compile_commands.json"
+    assert compile_db_as_l3_build_info("build", None, db, matched=False) is None
+    assert compile_db_as_l3_build_info("source", None, db, matched=False) is None
+    assert compile_db_as_l3_build_info("build", None, db, matched=True) == db
+
+
 def test_collect_context_no_warn_when_compile_db_serves_l3(
     tmp_path: Path, capsys
 ) -> None:
