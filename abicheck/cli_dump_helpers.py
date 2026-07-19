@@ -597,6 +597,7 @@ def render_dump_dry_run(
     has_compile_db: bool = False,
     compile_db_matched: bool | None = None,
     build_info_is_pack: bool = False,
+    compile_db_reused_as_l3: bool = False,
 ) -> Any:
     """Build the ``dump --dry-run`` report (ADR-043 D4): resolve, never execute.
 
@@ -678,8 +679,17 @@ def render_dump_dry_run(
         "Build/source inputs",
         f"--sources: {sources}" if sources else None,
         f"--build-info: {build_info}" if build_info else None,
+        # AC-007: the real run reuses a matched -p/--compile-db as the L3 build
+        # source when no --build-info is given, so report that here and do not
+        # also claim "L0-L2 only" (Codex review).
+        "L3 build source: reused from -p/--compile-db (no --build-info needed)"
+        if compile_db_reused_as_l3
+        else None,
         "no --sources/--build-info given -- L0-L2 only"
-        if sources is None and build_info is None and collect_mode != "off"
+        if sources is None
+        and build_info is None
+        and not compile_db_reused_as_l3
+        and collect_mode != "off"
         else None,
     )
     result.add("Tools and frontends", *tool_status("castxml", "clang", "gcc", "g++"))

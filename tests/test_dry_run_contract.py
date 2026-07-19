@@ -139,6 +139,36 @@ class TestDumpDryRun:
         # is not what this test targets).
         assert "would carry only L0-L2 data." not in result.output
 
+    def test_depth_build_dry_run_reports_compile_db_reused_as_l3(
+        self, tmp_path: Path
+    ) -> None:
+        # AC-007 (Codex): the real run reuses a matched -p/--compile-db as the L3
+        # build source when no --build-info is given, so the dry-run report must
+        # describe that (its L3 source), not claim "no --build-info given".
+        snap = tmp_path / "lib.abi.json"
+        _write_snapshot(snap)
+        header = tmp_path / "api.h"
+        header.write_text("void f(void);\n", encoding="utf-8")
+        db = tmp_path / "compile_commands.json"
+        db.write_text(
+            json.dumps([{
+                "directory": str(tmp_path),
+                "command": f"cc -c {header} -o f.o",
+                "file": str(header),
+            }]),
+            encoding="utf-8",
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump", str(snap), "--dry-run", "--depth", "build",
+                "-H", str(header), "-p", str(db),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "reused from -p/--compile-db" in result.output
+        assert "no --sources/--build-info given -- L0-L2 only" not in result.output
+
     def test_depth_build_with_unmatched_compile_db_blocks(self, tmp_path: Path) -> None:
         # The sibling case: an empty/non-matching compile database is now a
         # *definite* verdict (the same load+match the real run performs),

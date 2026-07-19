@@ -724,6 +724,18 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         from .cli_dump_helpers import render_dump_dry_run
         from .cli_helpers_compare import dry_run_compile_db_matched
 
+        _dry_matched = dry_run_compile_db_matched(
+            compile_db_path, compile_db_path_alt, headers, compile_db_filter,
+        )
+        # AC-007 dry-run parity (Codex review): the real run below reuses a
+        # matched -p/--compile-db as the L3 build source when no --build-info is
+        # given, but that decision runs after this branch. Compute it here with
+        # the same pure helper so the dry-run report describes the invocation it
+        # is validating (its L3 source), instead of claiming "L0-L2 only".
+        _dry_reused_bi, _ = resolve_compile_db_l3_reuse(
+            depth, build_info, compile_db_path or compile_db_path_alt,
+            matched=bool(_dry_matched), compile_db_filter=compile_db_filter,
+        )
         emit_dry_run(
             render_dump_dry_run(
                 so_path=so_path, headers=headers, sources=sources,
@@ -735,9 +747,8 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
                 # --compile-db presence; loading it and matching against the
                 # resolved headers is cheap, deterministic, read-only
                 # resolution, not "real work out of scope for a dry run".
-                compile_db_matched=dry_run_compile_db_matched(
-                    compile_db_path, compile_db_path_alt, headers, compile_db_filter,
-                ),
+                compile_db_matched=_dry_matched,
+                compile_db_reused_as_l3=_dry_reused_bi is not build_info,
                 # embed_build_source's own classification: a source-capable
                 # --build-info is either a BuildSourcePack (is_pack_dir) or a
                 # Flow-2 abicheck_inputs/ directory (_is_inputs_pack_dir) --
