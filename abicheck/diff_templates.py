@@ -622,6 +622,11 @@ def detect_mandatory_template_param_added(
             name=stem,
             old=str(old_min),
             public_reachable=subject_is_public,
+            reachability_state=(
+                ReachabilityState.PROVEN_REACHABLE
+                if subject_is_public
+                else ReachabilityState.UNKNOWN
+            ),
             reachability_kind="direct_public_symbol" if subject_is_public else None,
             new=str(new_min),
             old_value=f"min_arity={old_min}",

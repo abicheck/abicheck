@@ -701,43 +701,53 @@ class MarkReachability:
         if not reachable_types and not public_header_names and not call_reachable:
             return changes
 
-        # impact-analysis-layer P0: whether the *only* signal that could still
-        # speak to a not-otherwise-tagged change (the optional L5 call/type
-        # graph) is itself flagged narrowed/degraded, or absent entirely — in
-        # either case its absence of an edge is not trustworthy negative
-        # evidence. The layout/type-graph walk above (compute_leak_paths) is
-        # a complete closure over the snapshot's own *declared types*, so it
-        # alone never downgrades the verdict to UNKNOWN — but only for a
+        # impact-analysis-layer P0: whether a not-otherwise-tagged change's
+        # only possible remaining signal (the optional L5 call/type graph)
+        # is trustworthy enough to treat its absence-of-edge as absence of
+        # dependency. The layout/type-graph walk above (compute_leak_paths)
+        # is a complete closure over the snapshot's own *declared types*, so
+        # it alone never downgrades the verdict to UNKNOWN — but only for a
         # change whose root actually names a declared type (Codex review):
         # a function/variable-shaped change's root is never a key in that
         # walk's domain at all, so treating its absence from reachable_types
         # as the walk's own "examined, not found" proof is wrong — that
         # walk never had the chance to examine a function/variable in the
         # first place, and only the call graph could ever speak to it.
-        def _call_graph_status(snap: AbiSnapshot) -> tuple[bool, bool]:
-            """Return (present, untrusted) for snap's embedded call graph."""
+        #
+        # A trustworthy call graph requires more than "at least one relevant
+        # edge exists somewhere" (Codex review, second pass): a header-only
+        # graph, or a build graph where only one family was collected, can
+        # carry a handful of unrelated edges while never having examined the
+        # decl in question at all. ``extractor_passes[name]`` is the graph's
+        # own "this pass ran to completion, unnarrowed, over the full
+        # project" signal (source_graph.py) — the same one
+        # mark_source_edges_extractor_coverage() and compute_call_graph_leak_paths's
+        # sibling walks trust elsewhere — so require it explicitly, on both
+        # sides being compared, rather than inferring completeness from mere
+        # edge presence plus the absence of a narrowed/degraded flag.
+        def _call_graph_fully_trusted(snap: AbiSnapshot) -> bool:
             build_source = getattr(snap, "build_source", None)
             graph = getattr(build_source, "source_graph", None) if build_source is not None else None
-            if graph is None or not getattr(graph, "nodes", None):
-                return False, False
-            edge_kinds = frozenset({"DECL_CALLS_DECL", "DECL_REFERENCES_DECL"})
-            present = any(e.kind in edge_kinds for e in graph.edges)
-            untrusted = bool(
-                graph.degraded_passes.get("call_graph")
-                or graph.degraded_passes.get("type_graph")
-                or graph.narrowed_passes.get("call_graph")
-                or graph.narrowed_passes.get("type_graph")
+            if graph is None:
+                return False
+            return bool(
+                graph.extractor_passes.get("call_graph")
+                or graph.extractor_passes.get("type_graph")
             )
-            return present, untrusted
 
-        old_call_graph_present, old_call_graph_untrusted = _call_graph_status(ctx.old)
-        new_call_graph_present, new_call_graph_untrusted = _call_graph_status(ctx.new)
-        call_graph_present = old_call_graph_present or new_call_graph_present
-        call_graph_untrusted = old_call_graph_untrusted or new_call_graph_untrusted
+        call_graph_trusted = _call_graph_fully_trusted(ctx.old) and _call_graph_fully_trusted(
+            ctx.new
+        )
 
+        # Typedef aliases (Codex review) are declared snapshot type surface
+        # too — AbiSnapshot.typedefs is a flat {alias: underlying} map, not
+        # a list of records/enums, so it needs its own membership check
+        # alongside types/enums for TYPEDEF_REMOVED/TYPEDEF_BASE_CHANGED's
+        # root (the alias name) to be recognized as layout-walk domain.
         known_type_names = (
             {t.name for t in ctx.old.types} | {e.name for e in ctx.old.enums}
             | {t.name for t in ctx.new.types} | {e.name for e in ctx.new.enums}
+            | set(ctx.old.typedefs) | set(ctx.new.typedefs)
         )
 
         for c in changes:
@@ -848,16 +858,15 @@ class MarkReachability:
                 # variable-shaped change — e.g. func_removed on an internal
                 # decl) was never in that walk's domain to begin with; only
                 # the call graph could speak to it, so its verdict is
-                # conclusive only when a call graph is actually present and
-                # not itself flagged narrowed/degraded (Codex review — an
-                # *absent* call graph must not silently read the same as a
-                # trustworthy graph that looked and found nothing).
+                # conclusive only when both sides' call graph is a fully
+                # trusted, completed pass (Codex review — neither an absent
+                # graph nor a handful of incidental edges from a partial one
+                # may silently read the same as a trustworthy graph that
+                # looked and found nothing).
                 layout_domain = root in known_type_names or (
                     enum_owner is not None and enum_owner in known_type_names
                 )
-                if layout_domain:
-                    c.reachability_state = ReachabilityState.PROVEN_UNREACHABLE
-                elif call_graph_present and not call_graph_untrusted:
+                if layout_domain or call_graph_trusted:
                     c.reachability_state = ReachabilityState.PROVEN_UNREACHABLE
                 else:
                     c.reachability_state = ReachabilityState.UNKNOWN

@@ -313,6 +313,11 @@ def _emit_experimental_change(
             old=old_q,
             new=new_q,
             public_reachable=subject_is_public,
+            reachability_state=(
+                ReachabilityState.PROVEN_REACHABLE
+                if subject_is_public
+                else ReachabilityState.UNKNOWN
+            ),
             reachability_kind="direct_public_symbol" if subject_is_public else None,
         )
     subject_is_public = (
@@ -326,6 +331,11 @@ def _emit_experimental_change(
         old=old_q,
         new_value=None,
         public_reachable=subject_is_public,
+        reachability_state=(
+            ReachabilityState.PROVEN_REACHABLE
+            if subject_is_public
+            else ReachabilityState.UNKNOWN
+        ),
         reachability_kind="direct_public_symbol" if subject_is_public else None,
     )
 
@@ -680,6 +690,11 @@ def _emit_version_bumps(
             new=new_q,
             detail=f"{sorted(old_versions)} to {sorted(new_versions)}",
             public_reachable=subject_is_public,
+            reachability_state=(
+                ReachabilityState.PROVEN_REACHABLE
+                if subject_is_public
+                else ReachabilityState.UNKNOWN
+            ),
             reachability_kind="direct_public_symbol" if subject_is_public else None,
         ))
     return changes

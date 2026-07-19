@@ -62,13 +62,16 @@ def _needs_evidence_suppression() -> SuppressionList:
     ])
 
 
-def _graph_snap(functions, *, nodes, edges, degraded_passes=None) -> AbiSnapshot:
+def _graph_snap(
+    functions, *, nodes, edges, degraded_passes=None, extractor_passes=None,
+) -> AbiSnapshot:
     from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.buildsource.source_graph import SourceGraphSummary
 
     graph = SourceGraphSummary(
         nodes=list(nodes), edges=list(edges),
         degraded_passes=dict(degraded_passes or {}),
+        extractor_passes=dict(extractor_passes or {}),
     )
     return AbiSnapshot(
         library="libtest.so", version="1.0",
@@ -439,8 +442,46 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
     def test_func_removed_with_present_trusted_call_graph_not_found_is_proven_unreachable(
         self,
     ) -> None:
-        """A call graph that IS present, is NOT flagged degraded/narrowed,
-        and simply does not reach this decl is real negative evidence."""
+        """A call graph whose extractor_passes confirms a full, completed
+        (not narrowed/degraded) pass on *both* sides, and which simply does
+        not reach this decl, is real negative evidence — merely having a
+        few unrelated edges present is not enough (Codex review)."""
+        from abicheck.buildsource.source_graph import GraphEdge
+
+        old = _graph_snap(
+            [_public_fn("pubFn")],
+            nodes=[
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://other", "ns::detail::other", "source"),
+            ],
+            edges=[GraphEdge(src="decl://pub", dst="decl://other", kind="DECL_CALLS_DECL")],
+            extractor_passes={"call_graph": True},
+        )
+        new = _graph_snap(
+            [_public_fn("pubFn")],
+            nodes=[_decl_node("decl://pub", "pubFn", "public_header")],
+            edges=[],
+            extractor_passes={"call_graph": True},
+        )
+        raw_change = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="ns::detail::unrelated_and_never_called",
+            description="removed",
+        )
+        ctx = DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_REMOVED]
+        assert len(found) == 1
+        assert found[0].reachability_state == ReachabilityState.PROVEN_UNREACHABLE
+
+    def test_func_removed_with_edges_but_no_extractor_pass_confirmation_is_unknown(
+        self,
+    ) -> None:
+        """Codex review: a graph with real edges but no
+        extractor_passes["call_graph"]/["type_graph"] confirmation (e.g. a
+        header-only or partially-scoped pass) must not be trusted as
+        complete just because it happens to carry some edges."""
         from abicheck.buildsource.source_graph import GraphEdge
 
         old = _graph_snap(
@@ -466,7 +507,44 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
         )
         found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_REMOVED]
         assert len(found) == 1
-        assert found[0].reachability_state == ReachabilityState.PROVEN_UNREACHABLE
+        assert found[0].reachability_state == ReachabilityState.UNKNOWN
+
+    def test_typedef_removed_examined_by_walk_is_proven_unreachable(self) -> None:
+        """Codex review: typedef aliases (AbiSnapshot.typedefs, a flat
+        {alias: underlying} map, not a RecordType/EnumType) are declared
+        snapshot type surface too and must be recognized as layout-walk
+        domain, not misread as an unexamined function/variable-shaped
+        change."""
+        old = _snap(
+            functions=[_public_fn("make", "ns::Widget*")],
+            types=[
+                RecordType(name="ns::Widget", kind="class", bases=["ns::detail::Base"]),
+                RecordType(name="ns::detail::Base", kind="class", size_bits=64),
+            ],
+        )
+        old.typedefs["ns::detail::Alias"] = "int"
+        new = _snap(
+            functions=[_public_fn("make", "ns::Widget*")],
+            types=[
+                RecordType(name="ns::Widget", kind="class", bases=["ns::detail::Base"]),
+                RecordType(name="ns::detail::Base", kind="class", size_bits=64),
+            ],
+        )
+        raw_change = Change(
+            kind=ChangeKind.TYPEDEF_REMOVED,
+            symbol="ns::detail::Alias",
+            description="typedef removed",
+        )
+        suppression = SuppressionList([
+            Suppression(
+                namespace="ns::detail::*",
+                reachability="proven-unreachable-only",
+                reason="wants proof",
+            )
+        ])
+        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        assert raw_change in ctx.suppressed
+        assert ChangeKind.SUPPRESSION_REACHABILITY_UNKNOWN not in [c.kind for c in ctx.kept]
 
 
 class TestCheckerFilterSuppressedChangesUnknownDiagnostic:
