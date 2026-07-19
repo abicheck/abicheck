@@ -38,6 +38,14 @@ SUPPRESSION_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
               "break rather than internal noise. Review the finding; if the "
               "suppression is intentional even though the symbol is "
               "public-reachable, add `allow_public_break: true` to that rule."),
+    _E("suppression_reachability_unknown", _R,
+       impact="A suppression rule using `reachability: proven-unreachable-only` "
+              "matched this change, but it was not applied because graph "
+              "coverage was insufficient to prove the change unreachable from "
+              "the public ABI surface — the change stays in the report instead "
+              "of being silently hidden by absence-of-evidence. Add "
+              "`allow_unknown_reachability: true` to the rule to suppress it "
+              "anyway once you have manually confirmed it is safe."),
     _E("internal_symbol_required_by_public_api", _B,
        impact="An internal-namespaced decl (e.g. ::detail::, ::impl::, "
               "::internal::) that already changed in an artifact-proven "

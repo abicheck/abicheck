@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .checker import Change, DiffResult
-from .checker_policy import ChangeKind, Verdict, compute_verdict
+from .checker_policy import ChangeKind, ReachabilityState, Verdict, compute_verdict
 from .diff_helpers import make_change
 from .model import AbiSnapshot, Visibility
 
@@ -955,6 +955,7 @@ def scope_diff_to_app(
             name=app_path.name,
             public_reachable=True,
             reachability_kind="consumer_proven",
+            reachability_state=ReachabilityState.PROVEN_REACHABLE,
         )
         if suppression is None:
             breaking_for_app.append(overlay_change)
@@ -980,6 +981,10 @@ def scope_diff_to_app(
             suppressed_missing.add(sym)
             continue
         breaking_for_app.append(overlay_change)
+        # outcome.withheld_unknown_rule is never set here: overlay_change is
+        # always constructed with reachability_state=PROVEN_REACHABLE above
+        # (it is by construction consumer-proven), and
+        # would_withhold_unknown_reachability only ever fires on UNKNOWN.
         if outcome.withheld_rule is not None:
             from .post_processing import _build_suppression_overreach_change
 

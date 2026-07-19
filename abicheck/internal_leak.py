@@ -42,7 +42,7 @@ import re
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
-from .checker_policy import ChangeKind
+from .checker_policy import ChangeKind, ReachabilityState
 from .checker_types import Change
 
 if TYPE_CHECKING:
@@ -1148,6 +1148,7 @@ def _build_leak_change(
         # Change and wrongly treat it as unreachable) cannot suppress it
         # either, mirroring the raw trigger changes MarkReachability tags.
         public_reachable=True,
+        reachability_state=ReachabilityState.PROVEN_REACHABLE,
         reachability_kind="value_embedding" if embedded_by_value else "pointer_or_signature",
         reachability_proof_path=path_strs[0] if path_strs else None,
     )
@@ -1264,6 +1265,7 @@ def _build_call_graph_leak_change(
         # call graph, so a broad suppression rule's reachability gate must
         # not treat it as unreachable either.
         public_reachable=True,
+        reachability_state=ReachabilityState.PROVEN_REACHABLE,
         reachability_kind="symbol_availability",
         reachability_proof_path=path_strs[0] if path_strs else None,
     )

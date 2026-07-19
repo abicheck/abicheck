@@ -254,6 +254,7 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "bundle_soname_skew": "L0",
     # ── L1: needs debug info (layout, offsets, sizes, enum values, calling conv) ──
     "suppression_would_hide_public_break": "L1",  # ADR-044: needs struct/field layout (internal_leak.compute_leak_paths) to judge public reachability
+    "suppression_reachability_unknown": "L1",  # impact-analysis-layer P0: same reachability walk as suppression_would_hide_public_break, refined by the optional L5 call/type graph's coverage flags
     "struct_size_changed": "L1",
     "struct_packing_changed": "L1",
     "struct_field_type_changed": "L1",

@@ -23,7 +23,12 @@ from pathlib import Path
 
 import yaml
 
-from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS, ChangeKind
+from .checker_policy import (
+    API_BREAK_KINDS,
+    BREAKING_KINDS,
+    ChangeKind,
+    ReachabilityState,
+)
 from .checker_types import Change
 
 # Pre-build valid change_kind values for fast validation
@@ -34,12 +39,17 @@ _KNOWN_ENTRY_KEYS: frozenset[str] = frozenset({
     "symbol", "symbol_pattern", "type_pattern", "member_name",
     "change_kind", "reason", "label", "source_location", "expires",
     "namespace", "entity_namespace", "cause_namespace",
-    "reachability", "allow_public_break",
+    "reachability", "allow_public_break", "allow_unknown_reachability",
 })
 
 # ADR-044 D2: valid values for Suppression.reachability.
+# "proven-unreachable-only" (impact-analysis-layer P0) is a stricter variant
+# of "unreachable-only": it additionally refuses to match a change whose
+# Change.reachability_state is UNKNOWN (graph coverage insufficient to prove
+# unreachability), rather than treating UNKNOWN the same as proven-unreachable
+# the way the original boolean-only "unreachable-only" gate does.
 _VALID_REACHABILITY: frozenset[str] = frozenset({
-    "unreachable-only", "any", "public-only",
+    "unreachable-only", "any", "public-only", "proven-unreachable-only",
 })
 
 # ChangeKind values that represent type-level changes (matched by type_pattern)
@@ -241,8 +251,9 @@ class Suppression:
     to be internal must not be suppressible by a rule aimed at hiding
     internal-namespace churn on the *symbol itself*."""
     reachability: str | None = None
-    """``"unreachable-only" | "any" | "public-only"`` — gates whether this
-    rule may match a change flagged ``Change.public_reachable`` (ADR-044 D1,
+    """``"unreachable-only" | "any" | "public-only" | "proven-unreachable-only"``
+    — gates whether this rule may match a change flagged
+    ``Change.public_reachable``/``Change.reachability_state`` (ADR-044 D1,
     set by the ``MarkReachability`` pipeline step before suppression runs).
 
     Default depends on the selector shape: a rule using only broad selectors
@@ -259,6 +270,16 @@ class Suppression:
     ``API_BREAK_KINDS`` — normally refused regardless of :attr:`reachability`
     (ADR-044 D2). Makes an unsafe suppression explicit and reviewable rather
     than an accident of a broad glob."""
+    allow_unknown_reachability: bool = False
+    """When True, permits this rule — if :attr:`reachability` resolves to
+    ``"proven-unreachable-only"`` — to also match a change whose
+    ``Change.reachability_state`` is ``ReachabilityState.UNKNOWN`` (graph
+    coverage was insufficient to positively prove the change unreachable).
+    Has no effect under any other :attr:`reachability` value, since only
+    ``"proven-unreachable-only"`` ever distinguishes UNKNOWN from
+    proven-unreachable in the first place. Makes an audit-worthy
+    absence-of-evidence suppression explicit rather than accidental
+    (impact-analysis-layer P0 slice)."""
     expires: date | None = None
     """Optional expiry date (ISO 8601). After this date, the suppression is inactive
     and a warning is emitted. Format: ``expires: 2026-06-01``."""
@@ -323,6 +344,11 @@ class Suppression:
             raise ValueError(
                 "'allow_public_break' must be a boolean (true/false), got "
                 f"{self.allow_public_break!r}"
+            )
+        if not isinstance(self.allow_unknown_reachability, bool):
+            raise ValueError(
+                "'allow_unknown_reachability' must be a boolean (true/false), "
+                f"got {self.allow_unknown_reachability!r}"
             )
         # ADR-044 D2: a rule with no explicit reachability defaults to
         # "unreachable-only" when it has a broad selector (namespace/
@@ -449,6 +475,13 @@ class Suppression:
             return True
         if self._resolved_reachability == "unreachable-only":
             return not change.public_reachable
+        if self._resolved_reachability == "proven-unreachable-only":
+            if change.reachability_state == ReachabilityState.PROVEN_UNREACHABLE:
+                return True
+            return (
+                change.reachability_state == ReachabilityState.UNKNOWN
+                and self.allow_unknown_reachability
+            )
         return change.public_reachable  # "public-only"
 
     def _passes_public_break_gate(self, change: Change) -> bool:
@@ -512,6 +545,30 @@ class Suppression:
             return False
         return not self._passes_public_break_gate(change)
 
+    def would_withhold_unknown_reachability(
+        self, change: Change, today: date | None = None
+    ) -> bool:
+        """True if this rule's selectors match *change*, its resolved
+        :attr:`reachability` is ``"proven-unreachable-only"``, *change*'s
+        ``Change.reachability_state`` is ``ReachabilityState.UNKNOWN``, and
+        ``allow_unknown_reachability`` is not set — i.e. exactly the case the
+        ``suppression_reachability_unknown`` diagnostic describes
+        (impact-analysis-layer P0 slice).
+
+        Only ``"proven-unreachable-only"`` ever distinguishes UNKNOWN from
+        proven-unreachable at all — the original ``"unreachable-only"``
+        default treats both identically (via the boolean
+        ``Change.public_reachable``) for backward compatibility, so a rule
+        using that default can never trigger this diagnostic.
+        """
+        if self._resolved_reachability != "proven-unreachable-only":
+            return False
+        if not self._selector_match(change, today):
+            return False
+        if change.reachability_state != ReachabilityState.UNKNOWN:
+            return False
+        return not self.allow_unknown_reachability
+
 
 def _parse_expires(expires_raw: object, entry_index: int) -> date | None:
     """Parse and validate an ``expires`` value from a suppression entry.
@@ -558,12 +615,34 @@ def _parse_allow_public_break(raw: object, entry_index: int) -> bool:
     )
 
 
+def _parse_allow_unknown_reachability(raw: object, entry_index: int) -> bool:
+    """Parse and validate ``allow_unknown_reachability`` from a suppression
+    entry — same strict-boolean contract as :func:`_parse_allow_public_break`
+    (impact-analysis-layer P0 slice)."""
+    if raw is None:
+        return False
+    if isinstance(raw, bool):
+        return raw
+    raise ValueError(
+        f"Suppression entry {entry_index}: 'allow_unknown_reachability' must be "
+        f"a boolean (true/false), got {raw!r}"
+    )
+
+
 @dataclass
 class SuppressionOutcome:
-    """Result of :meth:`SuppressionList.evaluate` for one change (ADR-044 D4)."""
+    """Result of :meth:`SuppressionList.evaluate` for one change (ADR-044 D4).
+
+    ``withheld_unknown_rule`` (impact-analysis-layer P0 slice) is the
+    ``"proven-unreachable-only"`` analogue of ``withheld_rule``: set when a
+    rule's selectors matched but the change's ``reachability_state`` was
+    ``UNKNOWN`` rather than proven-unreachable, distinct from the
+    public-reachable-break case ``withheld_rule`` covers.
+    """
 
     suppressed: bool
     withheld_rule: Suppression | None = None
+    withheld_unknown_rule: Suppression | None = None
 
 
 class SuppressionList:
@@ -623,6 +702,9 @@ class SuppressionList:
             # Parse expires date
             expires = _parse_expires(item.get("expires"), i)
             allow_public_break = _parse_allow_public_break(item.get("allow_public_break"), i)
+            allow_unknown_reachability = _parse_allow_unknown_reachability(
+                item.get("allow_unknown_reachability"), i
+            )
             try:
                 sup = Suppression(
                     symbol=item.get("symbol"),
@@ -638,6 +720,7 @@ class SuppressionList:
                     cause_namespace=item.get("cause_namespace"),
                     reachability=item.get("reachability"),
                     allow_public_break=allow_public_break,
+                    allow_unknown_reachability=allow_unknown_reachability,
                     expires=expires,
                 )
             except ValueError as e:
@@ -688,14 +771,29 @@ class SuppressionList:
         ``SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`` diagnostic explaining why.
         A rule that actually suppresses the change always wins outright (no
         diagnostic needed — the change is gone from the report either way).
+
+        Independently (impact-analysis-layer P0 slice), the first rule
+        withheld because its ``"proven-unreachable-only"`` gate could not
+        prove *change* unreachable (:meth:`Suppression.would_withhold_unknown_reachability`)
+        is returned as ``withheld_unknown_rule``, so the caller can emit a
+        ``SUPPRESSION_REACHABILITY_UNKNOWN`` diagnostic.
         """
         withheld_rule: Suppression | None = None
+        withheld_unknown_rule: Suppression | None = None
         for s in self._suppressions:
             if s.matches(change, today=today):
-                return SuppressionOutcome(suppressed=True, withheld_rule=None)
+                return SuppressionOutcome(suppressed=True)
             if withheld_rule is None and s.would_withhold(change, today=today):
                 withheld_rule = s
-        return SuppressionOutcome(suppressed=False, withheld_rule=withheld_rule)
+            if withheld_unknown_rule is None and s.would_withhold_unknown_reachability(
+                change, today=today
+            ):
+                withheld_unknown_rule = s
+        return SuppressionOutcome(
+            suppressed=False,
+            withheld_rule=withheld_rule,
+            withheld_unknown_rule=withheld_unknown_rule,
+        )
 
     def expired_rules(self, today: date | None = None) -> list[Suppression]:
         """Return all rules that have passed their expiry date."""

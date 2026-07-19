@@ -189,6 +189,7 @@ class ChangeKind(str, Enum):
     EVIDENCE_REQUIRED_MISSING = "evidence_required_missing"  # policy require_evidence layer absent (ADR-033 D7)
     VERSIONED_SYMBOL_SCHEME_DETECTED = "versioned_symbol_scheme_detected"  # bulk removed↔added differ only by a version token (ICU u_*_NN / GNU symver); advisory
     SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK = "suppression_would_hide_public_break"  # a suppression rule matched but was withheld because the change is public-reachable (ADR-044 D4); advisory
+    SUPPRESSION_REACHABILITY_UNKNOWN = "suppression_reachability_unknown"  # a suppression rule using reachability: proven-unreachable-only matched but was withheld because graph coverage could not prove the change unreachable (impact-analysis-layer P0); advisory
     STRUCT_SIZE_CHANGED = "struct_size_changed"  # sizeof(T) changed
     STRUCT_FIELD_OFFSET_CHANGED = "struct_field_offset_changed"  # field moved
     STRUCT_FIELD_REMOVED = "struct_field_removed"  # field deleted
@@ -1007,6 +1008,36 @@ _EVIDENCE_TIER_RANK: dict[EvidenceTier, int] = {
     EvidenceTier.DWARF_AWARE: 1,
     EvidenceTier.HEADER_AWARE: 2,
 }
+
+
+class ReachabilityState(str, Enum):
+    """Tri-state public-reachability verdict for a single ``Change`` (ADR-044
+    follow-up — impact-analysis-layer P0 slice).
+
+    ``MarkReachability`` (``post_processing.py``) used to tag a change with
+    only a boolean (``Change.public_reachable``), which conflates two
+    genuinely different situations under the same ``False`` value: "the
+    reachability walk ran and positively proved this change is not part of
+    the effective public ABI" versus "no walk — or an incomplete one — ever
+    reached a verdict on this change at all". A broad suppression rule's
+    default ``unreachable-only`` gate (:mod:`abicheck.suppression`) has
+    always treated both as equivalent, which is safe for the common
+    no-graph-evidence case (the layout/type-graph walk is a complete closure
+    over the snapshot's own declarations) but is a real gap for the optional
+    L5 source/call graph, whose coverage can be narrowed or degraded
+    (``SourceGraphSummary.narrowed_passes``/``degraded_passes``) — absence of
+    an edge there does not always prove absence of a dependency.
+
+    ``Change.reachability_state`` makes the distinction explicit and
+    available to any rule that opts into the stricter
+    ``reachability: proven-unreachable-only`` gate; the existing
+    ``unreachable-only`` default keeps its original boolean semantics
+    unchanged for backward compatibility.
+    """
+
+    PROVEN_REACHABLE = "reachable"
+    PROVEN_UNREACHABLE = "unreachable"
+    UNKNOWN = "unknown"
 
 
 class EvidenceStatus(str, Enum):

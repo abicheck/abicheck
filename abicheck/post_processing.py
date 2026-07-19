@@ -26,7 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
-from .checker_policy import ChangeKind
+from .checker_policy import ChangeKind, ReachabilityState
 
 if TYPE_CHECKING:
     from .checker_types import Change
@@ -521,6 +521,45 @@ _ENUM_MEMBER_KINDS = frozenset({
     ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED,
 })
 
+# L4 (source_diff.py) / L5 (source_graph_findings.py) findings below are
+# public *by construction* -- each built only from an already-proven-public
+# entity, never a bare namespace-name heuristic (Codex review, many passes).
+# NOT extended to SOURCE_BINARY_PROVENANCE_MISMATCH (aggregate, symbol="")
+# or ODR_SOURCE_CONFLICT's sibling checks not scoped to public types.
+_PUBLIC_SOURCE_ABI_KINDS = frozenset({
+    ChangeKind.PUBLIC_TYPEDEF_REMOVED,
+    ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED,
+    ChangeKind.PUBLIC_MACRO_REMOVED,
+    ChangeKind.PUBLIC_MACRO_VALUE_CHANGED,
+    ChangeKind.INLINE_FUNCTION_REMOVED,
+    ChangeKind.UNINSTANTIATED_TEMPLATE_REMOVED,
+    ChangeKind.CONCEPT_TIGHTENED,
+    ChangeKind.CONSTEXPR_VALUE_CHANGED,
+    ChangeKind.DEFAULT_ARGUMENT_CHANGED,
+    ChangeKind.INLINE_BODY_CHANGED,
+    ChangeKind.TEMPLATE_BODY_CHANGED,
+    ChangeKind.GENERATED_HEADER_CHANGED,
+    ChangeKind.SOURCE_DECL_BINARY_SYMBOL_MISMATCH,
+    ChangeKind.ODR_SOURCE_CONFLICT,
+    # L5 (source_graph_findings.py) kinds whose subject is itself a
+    # proven-public entry/decl/symbol, not just something touching one.
+    # NOT extended to BUILD_OPTION_REACHES_PUBLIC_SYMBOL/TARGET_DEPENDENCY_
+    # ADDED -- keyed on an option/target that merely reaches something
+    # public, not a public entity itself.
+    ChangeKind.PUBLIC_REACHABILITY_CHANGED,
+    ChangeKind.GENERATED_HEADER_REACHES_PUBLIC_API,
+    ChangeKind.CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED,
+    ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED,
+    ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT,
+    ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED,
+    # _mapping_drift_findings fires only on old_sym != new_sym, and a
+    # SOURCE_DECL_MAPS_TO_SYMBOL edge's target is always a genuinely
+    # *exported* symbol (source_link.relink_surface_exports matches only
+    # against the real export set) -- so at least one side has this decl
+    # actually exported whenever it fires (Codex review).
+    ChangeKind.SOURCE_TO_BINARY_MAPPING_CHANGED,
+})
+
 
 class MarkReachability:
     """Tag each change with public-reachability metadata, before suppression runs.
@@ -622,6 +661,7 @@ class MarkReachability:
             _root_type_name_for_change,
             compute_call_graph_leak_paths,
             compute_leak_paths,
+            is_internal_type,
         )
         from .model import ScopeOrigin
 
@@ -698,8 +738,116 @@ class MarkReachability:
         # kind that carries the field (function/variable/type/enum), not
         # just RecordType.
         public_header_names = _public_header_names(ctx.old) | _public_header_names(ctx.new)
-        if not reachable_types and not public_header_names and not call_reachable:
-            return changes
+        # Codex review, fourth pass: this used to return early here when
+        # nothing at all was found reachable (no point tagging
+        # public_reachable/reachability_kind — they'd all stay at their
+        # False/None defaults either way). That is no longer true for
+        # reachability_state: compute_leak_paths above already ran to
+        # completion regardless, and its result being empty is itself
+        # conclusive proof that no declared type in this comparison is
+        # public-reachable — a per-change loop below still needs to run to
+        # translate that into PROVEN_UNREACHABLE for every type-shaped
+        # change, or a "nothing reachable anywhere" comparison would
+        # wrongly leave every declared-type change at the honest-looking
+        # but incorrect UNKNOWN default. The loop itself is cheap (simple
+        # dict/set membership checks) — the walk it would have skipped
+        # re-running already happened above, so this isn't a perf change.
+
+        # A change whose root names a declared type is fully covered by the
+        # layout/type-graph walk above (compute_leak_paths); a function/
+        # variable-shaped root never was, so only a trustworthy call graph
+        # can speak to it. "Trustworthy" means both producer passes ran to
+        # completion (extractor_passes["call_graph"]/["type_graph"]) on both
+        # sides -- not merely "some edge exists somewhere", since a
+        # header-only or partially-collected graph can carry unrelated edges
+        # while never examining the decl in question, and the combined walk
+        # below mixes DECL_CALLS_DECL (call_graph.py) with
+        # DECL_REFERENCES_DECL (type_graph.py) edges, each gated by its own
+        # pass (Codex review, three passes).
+        def _call_graph_fully_trusted(snap: AbiSnapshot) -> bool:
+            build_source = getattr(snap, "build_source", None)
+            graph = getattr(build_source, "source_graph", None) if build_source is not None else None
+            if graph is None:
+                return False
+            if not (graph.extractor_passes.get("call_graph") and graph.extractor_passes.get("type_graph")):
+                return False
+            # Both passes completed is not enough on its own: the walk only
+            # ever seeds from is_consumer_compiled_public_entry() nodes, not
+            # merely "declared by some header" (source_graph_findings'
+            # _public_decls() doesn't filter by visibility, so a
+            # private-header decl would still count there) -- require the
+            # walk's own actual seed predicate to find a match (Codex
+            # review, two passes).
+            from .buildsource.source_graph import is_consumer_compiled_public_entry
+
+            node_by_id = {n.id: n for n in graph.nodes}
+            exported_decls = {
+                e.src for e in graph.edges if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL"
+            }
+            return any(
+                is_consumer_compiled_public_entry(n.id, node_by_id, exported_decls)
+                for n in graph.nodes
+            )
+
+        old_call_graph_trusted = _call_graph_fully_trusted(ctx.old)
+        new_call_graph_trusted = _call_graph_fully_trusted(ctx.new)
+
+        # Codex review, eighth pass: a ``kind.value.endswith("_removed"/"_added")``
+        # heuristic also matches changed-in-place attribute toggles on a decl
+        # that exists on *both* sides — e.g. FUNC_VIRTUAL_ADDED,
+        # FUNC_NOEXCEPT_REMOVED, CTOR_EXPLICIT_ADDED, *_DEPRECATED_ADDED/REMOVED.
+        # For those, requiring trust from only the suffix-selected side would
+        # let a change on the untrusted/never-examined side slip through as
+        # PROVEN_UNREACHABLE. Check the decl's *actual* presence on each
+        # snapshot instead of pattern-matching the kind name, which is immune
+        # to new one-sided or attribute-toggle kinds being added later.
+        old_decl_names = {f.mangled for f in ctx.old.functions} | {f.name for f in ctx.old.functions}
+        old_decl_names |= {v.mangled for v in ctx.old.variables} | {v.name for v in ctx.old.variables}
+        new_decl_names = {f.mangled for f in ctx.new.functions} | {f.name for f in ctx.new.functions}
+        new_decl_names |= {v.mangled for v in ctx.new.variables} | {v.name for v in ctx.new.variables}
+
+        def _relevant_call_graph_trusted(change: Change, root: str) -> bool:
+            """Only require trust from the side(s) *change*'s target actually
+            exists on. A decl removed entirely (gone from the new snapshot)
+            only ever existed on the old side, so only the old graph's
+            coverage speaks to whether some old public entry called it — an
+            untrusted/absent *new*-side graph (unsurprising, since the decl
+            is gone there) must not turn a real old-side proof into UNKNOWN.
+            Symmetric for a decl that's newly added. A decl present on both
+            sides (a genuine changed-in-place attribute toggle) needs both
+            sides trusted for a symmetric proof."""
+            names = (root, change.qualified_name)
+            existed_before = any(n is not None and n in old_decl_names for n in names)
+            existed_after = any(n is not None and n in new_decl_names for n in names)
+            if existed_before and not existed_after:
+                return old_call_graph_trusted
+            if existed_after and not existed_before:
+                return new_call_graph_trusted
+            return old_call_graph_trusted and new_call_graph_trusted
+
+        # Typedef aliases (Codex review) are declared snapshot type surface
+        # too — AbiSnapshot.typedefs is a flat {alias: underlying} map, not
+        # a list of records/enums, so it needs its own membership check
+        # alongside types/enums for TYPEDEF_REMOVED/TYPEDEF_BASE_CHANGED's
+        # root (the alias name) to be recognized as layout-walk domain.
+        known_type_names = (
+            {t.name for t in ctx.old.types} | {e.name for e in ctx.old.enums}
+            | {t.name for t in ctx.new.types} | {e.name for e in ctx.new.enums}
+            | set(ctx.old.typedefs) | set(ctx.new.typedefs)
+        )
+        # RecordType.qualified_name (DWARF-backend only) resolves a bare name
+        # like "Hidden" ("ns::detail::Hidden") for is_internal_type below --
+        # only when unambiguous, else a colliding public/internal type of
+        # the same bare name could leak the wrong namespace (Codex review).
+        qualified_names_by_bare: dict[str, set[str]] = {}
+        for t in (*ctx.old.types, *ctx.new.types):
+            if t.qualified_name:
+                qualified_names_by_bare.setdefault(t.name, set()).add(t.qualified_name)
+        qualified_name_by_bare = {
+            bare: next(iter(names))
+            for bare, names in qualified_names_by_bare.items()
+            if len(names) == 1
+        }
 
         for c in changes:
             root = _root_type_name_for_change(c)
@@ -735,11 +883,32 @@ class MarkReachability:
             ):
                 c.public_reachable = True
                 c.reachability_kind = "direct_public_symbol"
+                c.reachability_state = ReachabilityState.PROVEN_REACHABLE
+                continue
+            if c.kind in _PUBLIC_SOURCE_ABI_KINDS:
+                c.public_reachable = True
+                c.reachability_kind = "public_source_abi_surface"
+                c.reachability_state = ReachabilityState.PROVEN_REACHABLE
                 continue
             tagged = False
-            if root in reachable_types:
-                old_pl = old_paths.get(root, [])
-                new_pl = new_paths.get(root, [])
+            # An enum-member finding's root still carries the "::member"
+            # suffix here (only stripped into enum_owner just above), so it
+            # never matches a reachable_types key by itself even when the
+            # owning enum genuinely was walked and found reachable —
+            # compute_leak_paths records leaf types like enums under their
+            # bare name (CodeRabbit review). Fall back to enum_owner so a
+            # reachable enum's member change is tagged from this same walk
+            # instead of only being caught by the coarser known_type_names
+            # fallback below (which cannot distinguish reachable from
+            # merely-declared).
+            layout_key = (
+                root
+                if root in reachable_types
+                else (enum_owner if enum_owner in reachable_types else None)
+            )
+            if layout_key is not None:
+                old_pl = old_paths.get(layout_key, [])
+                new_pl = new_paths.get(layout_key, [])
                 paths = old_pl + [p for p in new_pl if p not in old_pl]
                 # Mirror DetectInternalLeaks's own value/indirection judgment
                 # (Codex review): a pure-layout change reached *only* through
@@ -762,6 +931,7 @@ class MarkReachability:
                         else "pointer_or_signature"
                     )
                     c.reachability_proof_path = _format_path(min(paths, key=len))
+                    c.reachability_state = ReachabilityState.PROVEN_REACHABLE
                     tagged = True
             # ADR-044 P1 items 1/3: independent of (and checked regardless of
             # the outcome of) the layout walk above — a change can be
@@ -792,6 +962,95 @@ class MarkReachability:
                     c.public_reachable = True
                     c.reachability_kind = "symbol_availability"
                     c.reachability_proof_path = min(call_paths, key=len)
+                    c.reachability_state = ReachabilityState.PROVEN_REACHABLE
+                    tagged = True
+            if not tagged:
+                # Not proven reachable. A change whose root names a declared
+                # type is squarely in the layout/type-graph walk's domain —
+                # that walk is a complete closure over every internal type
+                # reachable from the public surface, so its absence there is
+                # conclusive proof regardless of call-graph coverage
+                # (PROVEN_UNREACHABLE either way: whether the walk found no
+                # path at all, or found only a demoted pointer-only path).
+                #
+                # A change whose root is *not* a declared type (a function/
+                # variable-shaped change — e.g. func_removed on an internal
+                # decl) was never in that walk's domain to begin with; only
+                # the call graph could speak to it, so its verdict is
+                # conclusive only when the side(s) its target could actually
+                # exist on have a fully trusted, completed call-graph pass
+                # (Codex review — neither an absent graph nor a handful of
+                # incidental edges from a partial one may silently read the
+                # same as a trustworthy graph that looked and found
+                # nothing).
+                #
+                # Restricted to an *internal-namespaced* subject (Codex
+                # review, sixth pass): compute_call_graph_leak_paths only
+                # ever walks dependencies of consumer-compiled public
+                # entries — is_consumer_compiled_public_entry() explicitly
+                # excludes an ordinary out-of-line exported function — so a
+                # trusted call graph can prove an *internal callee* absent,
+                # but says nothing about an exported public symbol's own
+                # reachability. Without this gate, a plain FUNC_REMOVED on a
+                # real, directly-exported API function with no inline
+                # caller would be misread as call-graph-proven-unreachable
+                # and a broad proven-unreachable-only rule could suppress a
+                # genuine ABI break. root is typically the *mangled* symbol
+                # for a function/variable change (diff_symbols.py), which
+                # has no "::" segments for is_internal_type to see — check
+                # the demangled c.qualified_name too, same fallback pattern
+                # used elsewhere in this walk.
+                #
+                # Restricted the same way for the layout walk itself
+                # (Codex review, seventh pass): compute_leak_paths only ever
+                # records *internal* types it finds reached from the public
+                # surface — it never records the public seed types
+                # themselves (see _public_header_names's own docstring
+                # above). A genuinely public declared type absent from
+                # reachable_types was therefore never examined by this walk
+                # at all, not proven unreachable by it — treating any known
+                # declared type as "layout domain" let a broad
+                # `namespace: ns::*` rule suppress a real public-type
+                # layout break with no diagnostic. root already having been
+                # a key in reachable_types (even if later demoted to
+                # pointer-only/non-value) is real positive evidence
+                # regardless of naming; absence from it is only conclusive
+                # for a type the walk's internal-only domain could have
+                # classified in the first place.
+                # An enum-member root keeps its "::member" suffix, so use
+                # enum_owner (bare name) or a member literally named e.g.
+                # "detail" would read as internal-namespaced (Codex review).
+                internal_check_subject = enum_owner if enum_owner is not None else root
+                # qualified_name_by_bare is keyed from RecordType names only
+                # -- an enum's bare owner could collide with an unrelated
+                # record's bare name, wrongly feeding the record's namespace
+                # onto the enum (Codex review). Never resolve it for
+                # enum_owner.
+                type_qualified_name = (
+                    qualified_name_by_bare.get(root) if enum_owner is None else None
+                )
+                subject_is_internal = is_internal_type(
+                    internal_check_subject, namespaces
+                ) or (
+                    c.qualified_name is not None
+                    and is_internal_type(c.qualified_name, namespaces)
+                ) or (
+                    type_qualified_name is not None
+                    and is_internal_type(type_qualified_name, namespaces)
+                )
+                layout_domain = root in reachable_types or (
+                    subject_is_internal
+                    and (
+                        root in known_type_names
+                        or (enum_owner is not None and enum_owner in known_type_names)
+                    )
+                )
+                if layout_domain or (
+                    subject_is_internal and _relevant_call_graph_trusted(c, root)
+                ):
+                    c.reachability_state = ReachabilityState.PROVEN_UNREACHABLE
+                else:
+                    c.reachability_state = ReachabilityState.UNKNOWN
         return changes
 
 
@@ -822,6 +1081,12 @@ class ApplySuppression:
             if outcome.withheld_rule is not None:
                 diagnostics.append(
                     _build_suppression_overreach_change(c, outcome.withheld_rule)
+                )
+            if outcome.withheld_unknown_rule is not None:
+                diagnostics.append(
+                    _build_suppression_unknown_reachability_change(
+                        c, outcome.withheld_unknown_rule
+                    )
                 )
         filtered.extend(diagnostics)
         return filtered
@@ -870,6 +1135,42 @@ def _build_suppression_overreach_change(change: Change, rule: Suppression) -> Ch
     )
 
 
+def _build_suppression_unknown_reachability_change(change: Change, rule: Suppression) -> Change:
+    """Build the ``SUPPRESSION_REACHABILITY_UNKNOWN`` diagnostic for *change*.
+
+    impact-analysis-layer P0 slice. *rule* is the suppression whose selectors
+    matched *change*, whose resolved ``reachability`` is
+    ``"proven-unreachable-only"``, but whose graph coverage could not prove
+    *change* unreachable (``Change.reachability_state`` is ``UNKNOWN``).
+    """
+    from .checker_policy import ChangeKind
+    from .checker_types import Change
+
+    selector = (
+        rule.symbol
+        or rule.symbol_pattern
+        or rule.type_pattern
+        or rule.namespace
+        or rule.entity_namespace
+        or rule.cause_namespace
+        or rule.source_location
+        or "?"
+    )
+    return Change(
+        kind=ChangeKind.SUPPRESSION_REACHABILITY_UNKNOWN,
+        symbol=change.symbol,
+        description=(
+            f"Suppression rule {selector!r} matched {change.symbol!r} "
+            f"({change.kind.value}) but was not applied: graph coverage was "
+            "insufficient to prove the change unreachable from the public ABI "
+            "surface (reachability: proven-unreachable-only). Add "
+            "`allow_unknown_reachability: true` to this rule to suppress it "
+            "anyway once you have manually confirmed it is safe."
+        ),
+        caused_by_type=change.symbol,
+    )
+
+
 def _merge_findings_respecting_suppression(
     changes: list[Change],
     new_findings: list[Change],
@@ -903,6 +1204,12 @@ def _merge_findings_respecting_suppression(
             if outcome.withheld_rule is not None:
                 diagnostics.append(
                     _build_suppression_overreach_change(c, outcome.withheld_rule)
+                )
+            if outcome.withheld_unknown_rule is not None:
+                diagnostics.append(
+                    _build_suppression_unknown_reachability_change(
+                        c, outcome.withheld_unknown_rule
+                    )
                 )
         key = (c.kind, c.symbol)
         if key in seen_keys:

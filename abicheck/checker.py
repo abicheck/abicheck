@@ -183,7 +183,10 @@ def _filter_suppressed_changes(
     """
     if suppression is None or not changes:
         return changes
-    from .post_processing import _build_suppression_overreach_change
+    from .post_processing import (
+        _build_suppression_overreach_change,
+        _build_suppression_unknown_reachability_change,
+    )
 
     visible: list[Change] = []
     diagnostics: list[Change] = []
@@ -195,6 +198,10 @@ def _filter_suppressed_changes(
         visible.append(c)
         if outcome.withheld_rule is not None:
             diagnostics.append(_build_suppression_overreach_change(c, outcome.withheld_rule))
+        if outcome.withheld_unknown_rule is not None:
+            diagnostics.append(
+                _build_suppression_unknown_reachability_change(c, outcome.withheld_unknown_rule)
+            )
     visible.extend(diagnostics)
     return visible
 
@@ -257,7 +264,10 @@ def _filter_pattern_synthetic(
     after ``post_processing.DEFAULT_PIPELINE`` runs, so nothing else would
     ever emit that diagnostic for them.
     """
-    from .post_processing import _build_suppression_overreach_change
+    from .post_processing import (
+        _build_suppression_overreach_change,
+        _build_suppression_unknown_reachability_change,
+    )
 
     retained = kept[:pre_pattern_count]
     diagnostics: list[Change] = []
@@ -275,6 +285,10 @@ def _filter_pattern_synthetic(
         retained.append(c)
         if outcome.withheld_rule is not None:
             diagnostics.append(_build_suppression_overreach_change(c, outcome.withheld_rule))
+        if outcome.withheld_unknown_rule is not None:
+            diagnostics.append(
+                _build_suppression_unknown_reachability_change(c, outcome.withheld_unknown_rule)
+            )
     retained.extend(diagnostics)
     if suppressed_synthetic:
         pattern_modulations = [

@@ -49,7 +49,7 @@ import logging
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
-from .checker_policy import ChangeKind, EvidenceTier, Verdict
+from .checker_policy import ChangeKind, EvidenceTier, ReachabilityState, Verdict
 from .checker_types import Change
 from .idioms import (
     AntiPattern,
@@ -345,6 +345,7 @@ def _emit_lost_invariants(
             # post_processing.DEFAULT_PIPELINE), so nothing else would ever tag
             # this Change.
             public_reachable=True,
+            reachability_state=ReachabilityState.PROVEN_REACHABLE,
             reachability_kind="direct_public_symbol",
         )
         existing.add(key)

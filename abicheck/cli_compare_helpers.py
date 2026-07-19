@@ -720,7 +720,7 @@ def _apply_used_by_scoping(
             policy=policy, policy_file=policy_file, suppression=suppression,
         )
         if verify_runtime and isinstance(old_lib, Path) and isinstance(new_lib, Path):
-            from .checker_policy import ChangeKind
+            from .checker_policy import ChangeKind, ReachabilityState
             from .diff_helpers import make_change
             from .runtime_probe import run_runtime_probe
 
@@ -743,11 +743,18 @@ def _apply_used_by_scoping(
                     name=app.name,
                     public_reachable=True,
                     reachability_kind="consumer_proven",
+                    reachability_state=ReachabilityState.PROVEN_REACHABLE,
                 )
                 add_finding = suppression is None
                 if suppression is not None:
                     outcome = suppression.evaluate(runtime_change)
                     add_finding = not outcome.suppressed
+                    # outcome.withheld_unknown_rule is never set here:
+                    # runtime_change is always constructed with
+                    # reachability_state=PROVEN_REACHABLE above (it is by
+                    # construction consumer-proven), and
+                    # would_withhold_unknown_reachability only ever fires on
+                    # UNKNOWN.
                     if add_finding and outcome.withheld_rule is not None:
                         from .post_processing import _build_suppression_overreach_change
 

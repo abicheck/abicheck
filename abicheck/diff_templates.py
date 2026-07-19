@@ -47,7 +47,7 @@ import re
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
-from .checker_policy import ChangeKind
+from .checker_policy import ChangeKind, ReachabilityState
 from .checker_types import Change
 from .diff_helpers import make_change
 
@@ -262,6 +262,7 @@ def _leak_change(
         # ApplySuppression (DetectTemplatePatterns), so MarkReachability never
         # sees this Change to tag it itself.
         public_reachable=True,
+        reachability_state=ReachabilityState.PROVEN_REACHABLE,
         reachability_kind="value_embedding",
     )
 
@@ -396,6 +397,7 @@ def detect_cpo_kind_changed(
             new="variable (function-object / CPO)",
             new_value="variable",
             public_reachable=True,
+            reachability_state=ReachabilityState.PROVEN_REACHABLE,
             reachability_kind="direct_public_symbol",
         ))
 
@@ -409,6 +411,7 @@ def detect_cpo_kind_changed(
             new="function",
             old_value="variable",
             public_reachable=True,
+            reachability_state=ReachabilityState.PROVEN_REACHABLE,
             reachability_kind="direct_public_symbol",
         ))
 
@@ -504,6 +507,7 @@ def detect_overload_set_rerouted(
             # proves its subject is public — same reliable-signal tagging as
             # CPO_KIND_CHANGED above.
             public_reachable=True,
+            reachability_state=ReachabilityState.PROVEN_REACHABLE,
             reachability_kind="direct_public_symbol",
         ))
 
@@ -618,6 +622,11 @@ def detect_mandatory_template_param_added(
             name=stem,
             old=str(old_min),
             public_reachable=subject_is_public,
+            reachability_state=(
+                ReachabilityState.PROVEN_REACHABLE
+                if subject_is_public
+                else ReachabilityState.UNKNOWN
+            ),
             reachability_kind="direct_public_symbol" if subject_is_public else None,
             new=str(new_min),
             old_value=f"min_arity={old_min}",
@@ -714,6 +723,7 @@ def detect_unspecified_return_now_named(
             # Visibility.PUBLIC functions only, so this finding's mere
             # existence already proves its subject is public.
             public_reachable=True,
+            reachability_state=ReachabilityState.PROVEN_REACHABLE,
             reachability_kind="direct_public_symbol",
         ))
 
@@ -791,6 +801,7 @@ def detect_missing_instantiations(
             # detect_template_patterns. Runs via DetectCppPatterns, also
             # after ApplySuppression.
             public_reachable=True,
+            reachability_state=ReachabilityState.PROVEN_REACHABLE,
             reachability_kind="direct_public_symbol",
         ))
     return findings

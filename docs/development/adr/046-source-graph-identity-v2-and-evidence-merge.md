@@ -1,0 +1,346 @@
+# ADR-046: Source Graph Identity v2 — USR-Based Entity Resolution and Evidence-Preserving Merge
+
+**Date:** 2026-07-19
+**Status:** Proposed
+**Decision maker:** (pending)
+
+---
+
+## Context
+
+ADR-031 defined the L5 `SourceGraphSummary` schema (`GraphNode`/`GraphEdge`,
+`SOURCE_GRAPH_VERSION = 1`) and its node-id scheme (`abicheck/buildsource/
+source_graph.py`'s `_decl_node_id`/`_type_node_id`/`_symbol_node_id`/…, each a
+deterministic string hash of one identity signal — a mangled symbol, a
+qualified name, a `SourceEntity.identity()` tuple). ADR-044's P0/P1 slices
+(this repository's tri-state reachability work, most recently PR #607) then
+built two independent walks on top of that v1 graph —
+`internal_leak.compute_leak_paths` (layout/type-graph reachability) and
+`internal_leak.compute_call_graph_leak_paths` (L5 call/reference-graph
+reachability) — and, through eight-plus rounds of automated review on that
+PR, exposed the same underlying shape of gap over and over: **the v1 graph
+identifies an entity by exactly one signal at a time, chosen ad hoc per
+producer, with no reconciliation when two producers disagree or use a
+different signal for the same real declaration.**
+
+Concretely, three problems recur across the codebase today:
+
+1. **Identity fragmentation.** A single C++ declaration is name-addressed
+   differently by different evidence: `dwarf_snapshot.py`/`elf_metadata.py`
+   see its mangled linker symbol; `dumper_castxml.py`/`dumper_clang.py` see
+   its demangled qualified name; `source_link.py`'s L4 replay sees a
+   `SourceEntity.identity()` tuple (kind + qualified name + signature hash);
+   `call_graph.py`/`type_graph.py`'s L5 extractors see whatever clang's AST
+   dump names the node. `post_processing.py`'s `MarkReachability` (PR #607)
+   already had to hand-roll a "try `root`, then try `c.qualified_name`"
+   fallback at *every* lookup site into `reachable_types`/`call_reachable`/
+   `known_type_names` — the graph itself does not resolve these to one
+   entity, so every consumer re-implements a partial version of that
+   resolution, and each hand-rolled fallback is a fresh chance to miss a
+   case (as PR #607's review history shows).
+2. **First-writer-wins merge.** `SourceGraphSummary.add_node` (`source_graph.py:344-348`)
+   literally drops a second node registration for the same `id`, keeping
+   only the first producer's `attrs`/`confidence`/`provenance`. When a
+   build-integrated pass and a header-only pass (`header_graph.py`) both see
+   the same declaration with different confidence or a different
+   `consumer_compiled_body` value, whichever ran first silently wins — there
+   is no `conflicts` record, and no way for a later consumer to know a
+   disagreement even happened.
+3. **Coverage is family-grained, not (kind, role)-grained.** `extractor_passes`
+   (the completeness signal Phase 1's `_call_graph_fully_trusted` gates on)
+   is one boolean per pass name (`"call_graph"`, `"type_graph"`). A producer
+   that reliably covers a function's *return type* but has a known gap on
+   *parameter types* (a real clang-plugin limitation noted in ADR-041) has no
+   way to say so — the family flag is all-or-nothing, so a consumer either
+   over-trusts a partially-covered family or under-trusts a fully-covered
+   one.
+
+This ADR is the "own ADR" gate the impact-analysis-layer plan
+(`docs/development/plans/g29-impact-analysis-layer.md`, Phase 2) set for
+itself: an identity/version-bump and merge-semantics change carries the same
+bar ADR-044 D1 set for a pipeline-order fix — a recorded decision, not a
+drive-by refactor.
+
+## The one rule that does not change
+
+Everything below is new L5 *graph* machinery. ADR-028 D3's authority rule is
+unchanged: L3/L4/L5 evidence — however it is resolved, merged, or scored for
+confidence — may explain, localize, or corroborate a break, but **never**
+silently deletes one an artifact diff (L0/L1/L2) already proved. Nothing in
+this ADR touches that boundary; `checker_policy.BREAKING_KINDS` membership
+still requires artifact-level evidence.
+
+## Decision
+
+### D1. Split edge identity: `relation_key` vs. `occurrence_id`
+
+`GraphEdge.key()` today is `(src, dst, kind)` — the same signature two
+structurally different call sites collapse onto if they share endpoints and
+kind (e.g. "used as return type" and "used as parameter type" both produce a
+`DECL_HAS_TYPE` edge with the same `(src, dst)`; two calls to the same
+function under different `#ifdef` branches both produce the same
+`DECL_CALLS_DECL` edge). Split the identity two ways:
+
+- **`relation_key = (src, dst, kind, semantic_role)`** — adds one more
+  discriminator (`attrs.get("role")`, e.g. `"return"` vs. `"parameter"` vs.
+  `"field"`) to the existing triple. This is what closure/diff computations
+  key on — the same shape `EdgeKind`-level reasoning uses today, just finer.
+- **`occurrence_id = (relation_key, source_location, configuration_id,
+  instantiation_id, callsite_id)`** — the full, non-deduplicated evidence
+  trail. A `relation_key` can back many `occurrence_id`s (the same
+  `DECL_CALLS_DECL:direct` relation observed at three call sites); collapsing
+  to `relation_key` for graph-shape reasoning must never discard the
+  `occurrence_id` list, since a `graph explain` / proof-path answer wants the
+  concrete call site, not just "some call exists."
+
+`GraphEdge.key()` keeps its current `(src, dst, kind)` return type and
+becomes a documented alias for the *coarsest* projection of `relation_key`
+(role-blind) — existing callers (`diff_source_graph`'s edge-set comparison)
+are unaffected; new code that needs role-awareness calls a new
+`GraphEdge.relation_key()` instead.
+
+### D2. Evidence-preserving node/edge merge, replacing first-writer-wins
+
+Replace `add_node`'s silent drop-on-duplicate with an explicit merge:
+
+```python
+@dataclass
+class GraphNode:
+    id: str
+    kind: str
+    label: str = ""
+    facts: list[NodeFact] = field(default_factory=list)   # NEW
+    resolved: dict[str, Any] = field(default_factory=dict) # NEW
+    conflicts: list[FactConflict] = field(default_factory=list)  # NEW
+    # attrs/provenance/confidence become derived *views* over facts[0]
+    # (the highest-confidence fact) for read-compatibility with v1 code.
+```
+
+- `NodeFact = {producer: str, confidence: str, attrs: dict[str, Any]}` — one
+  entry per producer that ever registered this node id. Order of insertion
+  is irrelevant to the final `resolved` dict (see next point) but is kept for
+  provenance/debugging.
+- `resolved` is a deterministic, **order-independent** fold over `facts`: for
+  each key present in more than one fact, resolution precedence is fixed
+  (higher `confidence` wins; a tie between equal-confidence facts is broken
+  by a stable producer-name sort, never by arrival order) — the same result
+  regardless of which producer's pass ran first. This is the property PR
+  #607's own review repeatedly needed and had to hand-verify per call site
+  ("both sides", "trusted graph on the relevant side only") — making the
+  merge itself order-independent removes a whole class of that bug.
+- A genuine disagreement (two facts disagree on a key `resolved` cannot
+  silently pick a winner for — e.g. `is_virtual: true` vs. `is_virtual:
+  false` from two producers of equal confidence) is recorded in `conflicts`,
+  not dropped. `conflicts` is advisory (RISK-tier, never authoritative on
+  its own — ADR-028 D3) but visible, unlike today's silent first-writer-wins.
+- `GraphEdge` gets the analogous `facts`/`resolved`/`conflicts` treatment.
+
+Backward compatibility: `GraphNode.attrs`/`.provenance`/`.confidence` remain
+real fields (not removed), populated from `resolved` at write time — any v1
+reader touching `.attrs` directly keeps working unchanged; only code that
+wants merge-awareness needs to look at `.facts`/`.conflicts`.
+
+### D3. Per-(kind, role) coverage matrix
+
+Extend `extractor_passes`/`narrowed_passes`/`degraded_passes` (currently
+`dict[str, bool]` / `dict[str, ...]` keyed by pass name only) with an
+additional finer key form: `"{pass_name}:{edge_kind}:{role}"` (e.g.
+`"call_graph:DECL_HAS_TYPE:parameter"`), populated *in addition to* the
+existing family-level key — the family key remains the union/AND of its role
+keys, so every existing consumer (`_call_graph_fully_trusted` in Phase 1,
+`mark_source_edges_extractor_coverage`) keeps working unchanged against the
+coarser key. New code (e.g. a future `TraversalPolicy.minimum_confidence`
+check, D5 below) can consult the finer key when it needs to know "did this
+specific role get examined," rather than being stuck with the family's
+weakest-covered role's honesty.
+
+### D4. `EntityResolver` — USR-based canonical identity, `SOURCE_GRAPH_VERSION = 2`
+
+New `abicheck/buildsource/entity_resolver.py`:
+
+```python
+@dataclass
+class EntityResolver:
+    """Canonical identity for one real declaration/definition, resolved
+    across every evidence source that can name it."""
+    canonical_id: str            # clang USR when available, else a v1-style hash
+    aliases: list[str]           # old_v1_node_id, mangled_symbol, qualified_name,
+                                  # signature_hash, source_location — every signal
+                                  # any producer used to name this entity
+    kind: str
+```
+
+- **Primary key is the clang USR** (`Unified Symbol Resolution` — clang's own
+  stable, mangling-independent, cross-TU identity string) when the producer
+  is clang-based (`call_graph.py`/`type_graph.py`/the clang AST frontend);
+  USRs are already available in clang's `-ast-dump=json` output and are the
+  standard "same declaration across TUs" key clang tooling (clangd, IWYU)
+  itself relies on.
+- **Every other identity signal a v1 node carried becomes an alias**, not a
+  replacement: `_decl_node_id`'s v1 hash, the mangled symbol, the demangled
+  qualified name, the `SourceEntity.identity()` signature hash, and the
+  declaring `source_location`. `EntityResolver.resolve(any_alias) ->
+  canonical_id` is the one lookup every consumer should use instead of
+  re-implementing the "try root, then qualified_name" fallback pattern.
+- A castxml-only or DWARF-only pipeline (no clang AST, hence no USR) falls
+  back to `canonical_id = _decl_node_id(...)` unchanged — v1 behavior,
+  degraded gracefully, not a hard requirement on clang.
+- `SOURCE_GRAPH_VERSION = 2`. A v2 reader (`GraphNode.from_dict`) accepts a
+  v1 pack's node/edge ids **as aliases** of a synthesized canonical id (there
+  is no USR in a v1 pack, so `canonical_id` falls back to the v1 id itself) —
+  an existing `collect`-produced pack on disk keeps loading and comparing
+  correctly against a v2-built pack; no forced re-collection.
+
+### D5. `TraversalPolicy` — formalize the five propagation shapes
+
+`internal_leak.py`'s `is_consumer_compiled_public_entry` today encodes one
+detector's implicit knowledge of "don't walk through an ordinary
+out-of-line helper" — a real, load-bearing rule (PR #607's sixth Codex
+round depended on it) that exists as one function's docstring, not a named,
+reusable policy. Formalize the five traversal shapes the original
+impact-analysis review distinguished — layout propagation (by-value
+embedding), symbol-availability propagation (does the symbol still link),
+source-contract propagation (does the source still compile — default args,
+concepts, etc.), behavioral propagation (does the runtime behavior change —
+inline/template body edits), deployment propagation (build-flag/toolchain
+drift) — as one shared type:
+
+```python
+@dataclass
+class TraversalPolicy:
+    allowed_edges: frozenset[str]        # which EDGE_KINDS this walk may follow
+    stop_conditions: Callable[[GraphNode], bool]  # e.g. is_consumer_compiled_node
+    effect_transitions: dict[str, str]   # how "effect" changes crossing an edge kind
+                                          # (e.g. crossing DECL_CALLS_DECL:virtual
+                                          # downgrades exact-path to over-approximation)
+    minimum_confidence: str              # walk ignores an edge below this confidence
+```
+
+`compute_leak_paths`/`compute_call_graph_leak_paths` become thin callers that
+each construct one named `TraversalPolicy` instance instead of hand-coding
+their stop/expand rules inline — the policy object is what a future detector
+reuses instead of re-deriving the same "don't cross an ordinary exported
+function's own body" rule PR #607 needed a targeted fix for.
+
+### D6. Proof-path selection preference order
+
+Replace plain shortest-BFS path selection (`min(paths, key=len)` in
+`post_processing.py` today) with an explicit preference order when multiple
+proof paths exist for the same finding:
+
+1. Consumer-proven (a real `--used-by` consumer binary actually references
+   this symbol — the strongest possible evidence)
+2. Exact, high-confidence path (a single, unambiguous edge chain at
+   `confidence >= CONF_HIGH`)
+3. Public-header structural path (a `ScopeOrigin.PUBLIC_HEADER`-tagged
+   direct match — today's `direct_public_symbol` tag)
+4. Multi-producer-confirmed (the same relation independently observed by ≥2
+   producers — visible via D2's `facts` list)
+5. Reduced-confidence name resolution (a bare-name/suffix match, no USR
+   confirmation)
+6. Virtual/indirect over-approximation (a vtable/function-pointer edge —
+   real but structurally imprecise)
+
+The finding keeps `primary_path` (the highest-preference path found) plus
+`alternative_paths[0..N]` and a `discarded_path_count` — visibility into
+"how much evidence was there, and how strong was the best of it," not just
+one arbitrary shortest path.
+
+## Non-goals
+
+- **Not** a change to any `ChangeKind`'s default verdict or to
+  `BREAKING_KINDS`/`API_BREAK_KINDS`/`RISK_KINDS` membership — this ADR is
+  graph plumbing underneath the existing tri-state reachability model
+  (ADR-044 P0/P1, PR #607), not a policy change.
+- **Not** a new CLI flag or user-facing behavior change in this ADR alone —
+  D1-D6 are internal `buildsource/` schema/API changes. A later G29 Phase 3
+  ADR is where `--report-mode root-cause` and structured proof-path JSON
+  output land.
+- **Not** retiring the v1 node-id functions (`_decl_node_id` et al.) — they
+  remain the non-USR fallback path (D4) and the v1-pack-compat alias source.
+- **Not** requiring every extractor to emit USRs immediately — D4's
+  `EntityResolver` degrades gracefully per-producer; a non-clang producer
+  keeps working exactly as it does today.
+
+## Consequences
+
+**Positive:**
+
+- Removes the class of bug PR #607's review repeatedly found by hand:
+  "which identity signal does this lookup use, and did the producer that
+  built the graph use the same one" — `EntityResolver` centralizes that
+  resolution once instead of at every call site.
+- `conflicts` gives cross-producer disagreement a visible home instead of
+  silent first-writer-wins — directly useful for `crosscheck.py`'s existing
+  provider-agreement matrix (ADR-035 D4/D8), which currently has no graph-
+  level disagreement signal to draw on.
+- `TraversalPolicy` turns "detector-specific tribal knowledge" into a named,
+  testable, reusable object — the next detector that needs a graph walk
+  (G29 Phase 6) starts from a policy, not a hand-rolled BFS.
+- Backward compatible at the pack level: a v1 pack on disk still loads and
+  compares correctly against v2-produced code (D4's alias fallback).
+
+**Costs / risks:**
+
+- Every `source_graph.py`/`internal_leak.py`/`crosscheck.py`/
+  `source_graph_findings.py` call site that reads `GraphNode.attrs`/
+  `GraphEdge.attrs` directly needs an audit to confirm the D2 derived-view
+  compatibility path actually covers its access pattern — a real,
+  non-trivial migration even though the field names don't change.
+  `buildsource/` is already at nine modules over the 1500-line AI-readiness
+  soft limit; this is schema surgery on the most heavily depended-on module
+  in that tree (`source_graph.py`, re-exported by `source_graph_findings.py`,
+  `internal_leak.py`, `crosscheck.py`, `header_graph.py`, `call_graph.py`,
+  `type_graph.py`, `poi.py`).
+- `EntityResolver`'s USR dependency means the improvement is clang-only in
+  its strongest form; a castxml-only pipeline sees no identity-fragmentation
+  improvement from D4 (still falls back to v1 hashing), only the D2/D3/D5/D6
+  benefits.
+- `occurrence_id`'s extra granularity (D1) grows pack size for a
+  template-heavy codebase (more distinct occurrences per relation) — needs a
+  measured check against the existing scan-level cost model
+  (`docs/development/performance.md`) before this lands on a default,
+  always-on path rather than an opt-in one.
+- This is explicitly **schema-only** groundwork: none of D1-D6 alone changes
+  a single `ChangeKind`'s output. The payoff is realized only once G29
+  Phases 3-6 (reporting, consumer join, new edge families, new detectors)
+  are built on top of it — shipping D1-D6 in isolation is infrastructure
+  investment with no immediately observable user-facing effect, and should
+  be communicated as such (e.g. in its own changelog fragment) rather than
+  implied to close a user-visible gap by itself.
+
+## Relationship to existing ADRs
+
+- **ADR-031** (source/implementation graph augmentation) defined the v1
+  schema this ADR versions past (`SOURCE_GRAPH_VERSION 1 -> 2`); D1-D6 are
+  additive/versioned changes to that schema, not a replacement of its node/
+  edge-kind vocabulary (`NODE_KINDS`/`EDGE_KINDS` are unchanged).
+- **ADR-041** (compiler-facts semantic impact graph) is where the
+  per-(kind,role) coverage gap (D3) and the `is_consumer_compiled_node`
+  predicate (D5's starting point) were first introduced; this ADR
+  generalizes both rather than duplicating them.
+- **ADR-044** (reachability-aware suppression) is the direct trigger: its
+  P0/P1 slices (and PR #607's eleven-plus rounds of review) are the concrete
+  evidence this ADR's Context section cites for identity fragmentation and
+  first-writer-wins merge being real, recurring correctness gaps, not a
+  speculative concern.
+- **`docs/development/plans/g29-impact-analysis-layer.md`** (Phase 2) is
+  this ADR's origin — the plan explicitly gated Phase 2 code on "needs its
+  own ADR," and this is that ADR. Phases 3-6 of the same plan consume D1-D6
+  but are out of scope here.
+
+## References
+
+- `abicheck/buildsource/source_graph.py` — v1 schema (`GraphNode`, `GraphEdge`,
+  `SourceGraphSummary`, `SOURCE_GRAPH_VERSION`), `add_node`'s current
+  first-writer-wins behavior.
+- `abicheck/internal_leak.py` — `compute_leak_paths`/
+  `compute_call_graph_leak_paths`, `is_consumer_compiled_node`/
+  `is_consumer_compiled_public_entry` (D5's starting point).
+- `abicheck/post_processing.py` — `MarkReachability` (PR #607), the
+  root/qualified_name fallback pattern D4 centralizes, `min(paths, key=len)`
+  proof-path selection D6 replaces.
+- PR #607 review history — the concrete, repeated instances of identity/
+  coverage-granularity bugs this ADR's Context section draws on.
+- [ADR-031](031-source-implementation-graph-augmentation.md), [ADR-041](041-compiler-facts-semantic-impact-graph.md), [ADR-044](044-reachability-aware-suppression.md)
+- `docs/development/plans/g29-impact-analysis-layer.md`
