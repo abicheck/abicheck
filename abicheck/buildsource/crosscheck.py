@@ -137,13 +137,29 @@ ALL_CHECKS: tuple[str, ...] = (
     CHECK_SOURCE_SURFACE_DSO_MISMATCH,
 )
 
-#: The §6.8 provider-agreement vocabulary (ADR-035 D4) — which evidence source
-#: corroborates a finding, driving its confidence tag.
-PROVIDER_BINARY_EXPORTS = "binary_exports"
-PROVIDER_PUBLIC_HEADER_AST = "public_header_ast"
-PROVIDER_DEBUG_INFO = "debug_info"
-PROVIDER_BUILD_CONFIG = "build_config"
-PROVIDER_SOURCE_INDEX = "source_index"
+# The finding/coverage primitives and the §6.8 provider-agreement vocabulary
+# (ADR-035 D4) live in the leaf ``crosscheck_base`` so a split-out check module
+# (``crosscheck_coherence``) can share them without forming an import cycle back
+# to this engine. Re-exported so existing ``from .crosscheck import _change``
+# call sites and the tests keep resolving these names here.
+from .crosscheck_base import (  # noqa: E402
+    PROVIDER_BINARY_EXPORTS,
+    PROVIDER_BUILD_CONFIG,
+    PROVIDER_PUBLIC_HEADER_AST,
+    PROVIDER_SOURCE_INDEX,
+    _change,
+    _CheckOutput,
+    _exported_symbol_names,
+)
+
+# The two evidence-coherence checks (AC-008/AC-009) live in their own module to
+# keep this file under the 2000-line cap. That module depends only on the leaf
+# ``crosscheck_base`` (never on this engine), so this is a one-directional edge
+# — no import cycle (CLAUDE.md "M1-3").
+from .crosscheck_coherence import (  # noqa: E402
+    _check_compile_context_conflict,
+    _check_source_surface_dso_mismatch,
+)
 
 
 @dataclass(frozen=True)
@@ -162,21 +178,6 @@ class CrosscheckConfig:
     enabled: frozenset[str] = frozenset(ALL_CHECKS)
     max_per_check: int = 200
     changed_paths: frozenset[str] = frozenset()
-
-
-@dataclass(frozen=True)
-class _CheckOutput:
-    """One check's result: findings, its coverage row, and the providers used."""
-
-    findings: list[Change]
-    status: str  # "present" | "skipped"
-    detail: str
-    providers: list[str]
-    #: Optional ADR-035 D4 source-surface boundary integrity numbers (e.g.
-    #: exported/matched/unmatched symbols) carried onto the coverage row so a
-    #: degraded link is named, never folded in as clean. ``facts`` anchors the row.
-    facts: int = 0
-    counters: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -1297,197 +1298,6 @@ def _check_identity_collision(
 
 
 # ---------------------------------------------------------------------------
-# compile_context_conflict (AC-008) — L3 units of one target disagree on an
-# ABI-relevant context that aggregation silently collapses to one value.
-# ---------------------------------------------------------------------------
-
-#: ABI-relevant compiler-flag families whose positive/negative both change the
-#: produced ABI. A build target whose compile units disagree on one of these
-#: compiled part of itself under a different ABI (the AC-008 oneTBB
-#: ``-fno-rtti`` umbrella case).
-_ABI_FLAG_FAMILIES: tuple[tuple[str, str], ...] = (
-    ("-frtti", "-fno-rtti"),
-    ("-fexceptions", "-fno-exceptions"),
-    ("-fthreadsafe-statics", "-fno-threadsafe-statics"),
-)
-
-
-def _check_compile_context_conflict(
-    snapshot: AbiSnapshot, cfg: CrosscheckConfig
-) -> _CheckOutput:
-    """L3 compile units of one build target carry conflicting ABI contexts, RISK.
-
-    Groups the L3 compile units by ``target_id`` (untargeted units share the one
-    ``""`` bucket — exactly the aggregation that hides the conflict) and flags a
-    target whose units disagree on an ABI-relevant flag family (``-frtti`` vs
-    ``-fno-rtti`` …) or bind the same value-carrying define to two values.
-    Aggregating such units into one synthetic context silently keeps one and
-    drops the other (AC-008: oneTBB's ``__TBB*BUILD``/``-fno-rtti`` umbrella,
-    oneDAL's per-value macros). Never an artifact-proven break — RISK. Skips
-    cleanly when no L3 build evidence is present.
-    """
-    providers = [PROVIDER_BUILD_CONFIG]
-    pack = snapshot.build_source
-    build = pack.build_evidence if pack is not None else None
-    if build is None or not build.compile_units:
-        return _CheckOutput(
-            [], "skipped", "no L3 build evidence on the snapshot", providers
-        )
-
-    by_target: dict[str, list[Any]] = {}
-    for cu in build.compile_units:
-        by_target.setdefault(cu.target_id or "", []).append(cu)
-
-    findings: list[Change] = []
-    for target_id, units in sorted(by_target.items()):
-        if len(units) < 2:
-            continue
-        label = target_id or "(unscoped compile units)"
-        for pos, neg in _ABI_FLAG_FAMILIES:
-            # Compare *effective* per-TU modes, not just explicit positive tokens.
-            # These families (RTTI, exceptions, thread-safe statics) are all ON by
-            # default, so a unit that carries neither spelling is in the positive
-            # mode — and mixing it with a `-fno-*` unit in the same link target is
-            # the exact AC-008 umbrella case (most TUs default-on, one built
-            # `-fno-rtti`). Requiring an explicit `-frtti` somewhere would miss it
-            # (Codex review). A unit is negative iff it carries the `-fno-*` token;
-            # every other unit (explicit positive or language default) is positive.
-            neg_units = [cu for cu in units if neg in cu.abi_relevant_flags]
-            pos_units = [cu for cu in units if neg not in cu.abi_relevant_flags]
-            if neg_units and pos_units:
-                findings.append(
-                    _change(
-                        ChangeKind.COMPILE_CONTEXT_CONFLICT,
-                        label,
-                        f"Build target {label} has compile units that disagree on "
-                        f"{pos}/{neg} (some built {neg}, others {pos} or the "
-                        "language default); aggregating them into one build context "
-                        "silently picks one ABI. Scope the evidence to a single "
-                        "link unit or pass a compile-DB filter.",
-                        old_value=pos,
-                        new_value=neg,
-                        evidence_category="build_context",
-                    )
-                )
-        define_values: dict[str, set[str]] = {}
-        for cu in units:
-            for k, v in cu.defines.items():
-                if v:  # a bare -DFOO (no value) carries no conflicting value
-                    define_values.setdefault(k, set()).add(v)
-        for key, values in sorted(define_values.items()):
-            if len(values) > 1:
-                vs = ", ".join(sorted(values))
-                findings.append(
-                    _change(
-                        ChangeKind.COMPILE_CONTEXT_CONFLICT,
-                        label,
-                        f"Build target {label} binds define {key!r} to conflicting "
-                        f"values ({vs}) across its compile units; the aggregated "
-                        "context keeps only one. Scope to a single build variant.",
-                        old_value=key,
-                        new_value=vs,
-                        evidence_category="build_context",
-                    )
-                )
-    n_targets = len(by_target)
-    detail = (
-        f"L3 compile-context coherence across {n_targets} target(s): "
-        f"{len(findings)} conflict(s)"
-    )
-    return _CheckOutput(
-        findings,
-        "present",
-        detail,
-        providers,
-        counters={"targets": n_targets, "conflicts": len(findings)},
-    )
-
-
-# ---------------------------------------------------------------------------
-# source_surface_dso_mismatch (AC-009) — the L4 surface maps to none of this
-# binary's exports, so it likely describes a different / shared DSO.
-# ---------------------------------------------------------------------------
-
-
-def _check_source_surface_dso_mismatch(
-    snapshot: AbiSnapshot, cfg: CrosscheckConfig
-) -> _CheckOutput:
-    """The linked L4 surface maps to none of this binary's exports, RISK (AC-009).
-
-    When a single source surface is folded from every target's sources and reused
-    across DSOs, the surface applied to one DSO describes a different export set —
-    its decl->export linking then matches none of *this* binary's exports. Fires
-    only when the surface has reachable declarations AND the binary has an export
-    table AND ``matched_symbols`` is 0, so a per-DSO-relinked surface (AC-003) or
-    a source-only snapshot never trips it. Never an artifact-proven break — RISK.
-    """
-    providers = [PROVIDER_SOURCE_INDEX, PROVIDER_BINARY_EXPORTS]
-    pack = snapshot.build_source
-    surface = pack.source_abi if pack is not None else None
-    if surface is None:
-        return _CheckOutput(
-            [], "skipped", "no L4 source surface on the snapshot", providers
-        )
-    if not surface.reachable_declarations:
-        return _CheckOutput(
-            [], "present", "L4 surface carries no reachable declarations", providers
-        )
-    exported = _exported_symbol_names(snapshot)
-    if not exported:
-        return _CheckOutput(
-            [], "skipped", "no binary export table on the snapshot", providers
-        )
-    # Count exports the surface attributed to this DSO by *any* tier, not just
-    # direct decl matches: a C++ surface can match a library entirely through
-    # compiler-synthesized (RTTI/vtable/thunk), template-instantiation, or
-    # allocator-interposer attributions while `matched_symbols` (decl matches)
-    # stays 0 (Codex review). ``link_source_abi`` records
-    # ``unmatched_symbols = exported - all_matched``, so the total attributed
-    # count is ``exported - unmatched``; fall back to summing the per-tier
-    # counters when the surface predates ``unmatched_symbols``.
-    cov = surface.coverage or {}
-    exported_cov = int(cov.get("exported_symbols", 0) or 0)
-    if "unmatched_symbols" in cov and exported_cov:
-        matched = exported_cov - int(cov.get("unmatched_symbols", 0) or 0)
-    else:
-        matched = sum(
-            int(cov.get(k, 0) or 0)
-            for k in (
-                "matched_symbols",
-                "synthesized_symbols_matched",
-                "template_instantiation_symbols_matched",
-                "allocator_interposer_symbols_matched",
-            )
-        )
-    if matched > 0:
-        return _CheckOutput(
-            [],
-            "present",
-            f"L4 surface maps to {matched} of the binary's exports",
-            providers,
-            counters={"matched_symbols": matched},
-        )
-    n_decls = len(surface.reachable_declarations)
-    finding = _change(
-        ChangeKind.SOURCE_SURFACE_DSO_MISMATCH,
-        surface.library or "(source surface)",
-        f"The L4 source surface carries {n_decls} declaration(s) but none map to "
-        f"this binary's {len(exported)} exported symbol(s) — it likely describes a "
-        "different or shared DSO. Relink/rebuild the source surface per-DSO "
-        "against this binary's own exports.",
-        new_value=str(len(exported)),
-    )
-    return _CheckOutput(
-        [finding],
-        "present",
-        f"L4 surface ↔ binary exports: 0/{len(exported)} matched",
-        providers,
-        facts=len(exported),
-        counters={"exported": len(exported), "matched": 0, "declarations": n_decls},
-    )
-
-
-# ---------------------------------------------------------------------------
 # shared helpers
 # ---------------------------------------------------------------------------
 
@@ -1599,34 +1409,6 @@ def _candidate_symbols(decl: Function | Variable) -> tuple[str, ...]:
     if decl.mangled.startswith(_MANGLE_SIGILS):
         return (decl.mangled,)
     return tuple({s for s in (decl.mangled, decl.name) if s})
-
-
-def _exported_symbol_names(snapshot: AbiSnapshot) -> set[str] | None:
-    """The binary's exported symbol names, or ``None`` if no export table exists.
-
-    Only **default/unversioned** ELF exports count toward the obligation set: a
-    symbol that exists *only* as a non-default version alias (``foo@LIB_1``,
-    ``is_default == False``) does not satisfy an unversioned consumer link
-    (which needs ``foo@@…``), so including it would mask the exact
-    missing-export case this set feeds (Codex review).
-
-    Mach-O names are normalized the same way the dumper normalizes
-    ``Function.mangled`` (strip the platform's single leading underscore:
-    ``_foo`` → ``foo``, ``__Z...`` → ``_Z...``) so the comparison set matches the
-    header-side mangled spelling instead of flagging every C/C++ symbol as
-    missing (Codex review).
-    """
-    if snapshot.elf is not None:
-        return {s.name for s in snapshot.elf.symbols if s.name and s.is_default}
-    if snapshot.pe is not None:
-        return {e.name for e in snapshot.pe.exports if e.name}
-    if snapshot.macho is not None:
-        return {
-            e.name[1:] if e.name.startswith("_") else e.name
-            for e in snapshot.macho.exports
-            if e.name
-        }
-    return None
 
 
 def _l4_reconciled_symbols(snapshot: AbiSnapshot, exported: set[str]) -> set[str]:
@@ -1937,32 +1719,6 @@ def _private_type_names(snapshot: AbiSnapshot) -> dict[str, str]:
         if origin in _PRIVATE_TYPE_ORIGINS and name:
             _register(name)
     return names
-
-
-def _change(
-    kind: ChangeKind,
-    symbol: str,
-    description: str,
-    *,
-    old_value: str | None = None,
-    new_value: str | None = None,
-    source_location: str | None = None,
-    confidence: Confidence = Confidence.MEDIUM,
-    caused_by_type: str | None = None,
-    evidence_category: str = "source_only",
-) -> Change:
-    """Build a cross-check :class:`Change` with the shared metadata defaults."""
-    return Change(
-        kind=kind,
-        symbol=symbol,
-        description=description,
-        old_value=old_value,
-        new_value=new_value,
-        source_location=source_location,
-        confidence=confidence,
-        caused_by_type=caused_by_type,
-        evidence_category=evidence_category,
-    )
 
 
 def _coverage_row(

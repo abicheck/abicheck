@@ -2284,7 +2284,7 @@ def _pack_with_units(*units) -> BuildSourcePack:
     return BuildSourcePack(root="", build_evidence=be)
 
 
-def _cu(uid: str, target: str, *, flags=(), defines=None):
+def _cu(uid: str, target: str, *, flags=(), defines=None, language="CXX"):
     from abicheck.buildsource.build_evidence import CompileUnit
 
     return CompileUnit(
@@ -2292,6 +2292,7 @@ def _cu(uid: str, target: str, *, flags=(), defines=None):
         target_id=target,
         abi_relevant_flags=list(flags),
         defines=dict(defines or {}),
+        language=language,
     )
 
 
@@ -2342,6 +2343,44 @@ def test_compile_context_conflict_clean_when_all_negative():
     )
     res = run_crosschecks(snap)
     assert _findings_of(res, ChangeKind.COMPILE_CONTEXT_CONFLICT) == []
+
+
+def test_compile_context_conflict_ignores_c_units_for_cpp_only_family():
+    # AC-008 (Codex): RTTI is a C++-only ABI. A C TU (no RTTI) mixed with a C++
+    # TU built -fno-rtti is coherent, not a conflict — the C unit must not be
+    # counted as the "positive" side.
+    snap = _snap(
+        build_source=_pack_with_units(
+            _cu("c", "target://lib.so", language="C"),  # C: no RTTI at all
+            _cu("cxx", "target://lib.so", flags=["-fno-rtti"], language="CXX"),
+        )
+    )
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.COMPILE_CONTEXT_CONFLICT) == []
+
+
+def test_compile_context_conflict_honors_last_wins_flag_order():
+    # AC-008 (Codex): abi_relevant_flags preserves argv order, so a later token
+    # overrides an earlier one. `-fno-rtti -frtti` is effectively RTTI-on and must
+    # NOT read as negative when every other unit is also on.
+    snap = _snap(
+        build_source=_pack_with_units(
+            _cu("a", "target://lib.so", flags=["-fno-rtti", "-frtti"]),  # eff. on
+            _cu("b", "target://lib.so", flags=["-frtti"]),
+        )
+    )
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.COMPILE_CONTEXT_CONFLICT) == []
+
+    # …but an effective-on unit mixed with a genuinely-negative one still conflicts.
+    snap2 = _snap(
+        build_source=_pack_with_units(
+            _cu("a", "target://lib.so", flags=["-fno-rtti", "-frtti"]),  # eff. on
+            _cu("b", "target://lib.so", flags=["-frtti", "-fno-rtti"]),  # eff. off
+        )
+    )
+    res2 = run_crosschecks(snap2)
+    assert len(_findings_of(res2, ChangeKind.COMPILE_CONTEXT_CONFLICT)) == 1
 
 
 def test_compile_context_conflict_flags_define_value_disagreement():
@@ -2408,24 +2447,43 @@ def test_compile_context_conflict_skipped_without_l3():
 # --------------------------------------------------------------------------- #
 
 
-def _surface_with_decls(n: int, *, matched: int) -> SourceAbiSurface:
+def _surface_with_mapping(
+    decl_symbols, *, synthesized=(), linked_exports=None, library="libfoo.so"
+) -> SourceAbiSurface:
+    """Build a surface with an explicit decl→binary-symbol mapping.
+
+    ``decl_symbols`` is a list of ``(decl_id, mapped_symbol)`` — ``""`` for an
+    unmatched decl. ``synthesized`` are binary symbols attributed via the
+    synthesized tier. ``linked_exports`` sets ``roots['exported_symbols']`` (the
+    export set the surface was linked against); defaults to the mapped symbols.
+    """
     from abicheck.buildsource.source_abi import SourceEntity
 
-    return SourceAbiSurface(
-        library="libfoo.so",
+    surface = SourceAbiSurface(
+        library=library,
         reachable_declarations=[
-            SourceEntity(id=f"d{i}", kind="function", qualified_name=f"f{i}")
-            for i in range(n)
+            SourceEntity(id=d, kind="function", qualified_name=d)
+            for d, _ in decl_symbols
         ],
-        coverage={"matched_symbols": matched},
     )
+    surface.mappings["source_decl_to_binary_symbol"] = {d: s for d, s in decl_symbols}
+    if synthesized:
+        surface.mappings["synthesized_symbol_to_owner"] = {s: {} for s in synthesized}
+    mapped = [s for _, s in decl_symbols if s] + list(synthesized)
+    surface.roots["exported_symbols"] = sorted(
+        linked_exports if linked_exports is not None else mapped
+    )
+    return surface
 
 
-def test_source_surface_dso_mismatch_flags_zero_match_surface():
-    # AC-009: one source surface reused across DSOs maps to none of THIS binary's
-    # exports — likely a different/shared DSO, RISK.
-    surface = _surface_with_decls(3, matched=0)
-    snap = _snap(elf=_elf("_Z3foov", "_Z3barv"))
+def test_source_surface_dso_mismatch_flags_stale_surface_mapped_to_other_dso():
+    # AC-009 (Codex): a shared/stale surface linked against ANOTHER DSO carries
+    # positive match counters, but its mapped symbols are that other DSO's — none
+    # in THIS binary's exports. Must fire (the exact mis-scoped case).
+    surface = _surface_with_mapping(
+        [("d0", "_Z9otherlibv"), ("d1", "_Z9otherfn2v")],  # DSO-B's symbols
+    )
+    snap = _snap(elf=_elf("_Z3foov", "_Z3barv"))  # this binary's exports
     snap.build_source = BuildSourcePack(root="", source_abi=surface)
     res = run_crosschecks(snap)
     hits = _findings_of(res, ChangeKind.SOURCE_SURFACE_DSO_MISMATCH)
@@ -2438,8 +2496,12 @@ def test_source_surface_dso_mismatch_flags_zero_match_surface():
     assert ChangeKind.SOURCE_SURFACE_DSO_MISMATCH not in _api_break_kinds()
 
 
-def test_source_surface_dso_mismatch_clean_when_surface_matches():
-    surface = _surface_with_decls(3, matched=2)
+def test_source_surface_dso_mismatch_clean_when_stale_counter_but_current_match():
+    # The stale surface's coverage counter claims matches, but what matters is the
+    # live intersection: here the mapping DOES hit this binary's exports → clean,
+    # regardless of any counter.
+    surface = _surface_with_mapping([("d0", "_Z3foov"), ("d1", "_Z3barv")])
+    surface.coverage = {"matched_symbols": 999}  # stale/irrelevant counter
     snap = _snap(elf=_elf("_Z3foov", "_Z3barv"))
     snap.build_source = BuildSourcePack(root="", source_abi=surface)
     res = run_crosschecks(snap)
@@ -2449,21 +2511,11 @@ def test_source_surface_dso_mismatch_clean_when_surface_matches():
 
 def test_source_surface_dso_mismatch_clean_when_matched_via_synthesized():
     # AC-009 (Codex): a C++ surface whose exports are attributed entirely through
-    # synthesized (RTTI/vtable) / template / allocator counters — with decl
-    # `matched_symbols` still 0 — DID match this DSO, so it must NOT be flagged.
-    from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
-
-    surface = SourceAbiSurface(
-        library="libfoo.so",
-        reachable_declarations=[
-            SourceEntity(id="d0", kind="record", qualified_name="Widget")
-        ],
-        coverage={
-            "matched_symbols": 0,
-            "synthesized_symbols_matched": 2,  # RTTI/vtable attributed to Widget
-            "exported_symbols": 2,
-            "unmatched_symbols": 0,  # all exports attributed
-        },
+    # the synthesized (RTTI/vtable) tier — with zero direct decl matches — DID
+    # match this DSO (the synth symbols ARE in the export table), so no finding.
+    surface = _surface_with_mapping(
+        [("d0", "")],  # decl unmatched directly
+        synthesized=("_ZTV6Widget", "_ZTI6Widget"),  # attributed via synth tier
     )
     snap = _snap(elf=_elf("_ZTV6Widget", "_ZTI6Widget"))
     snap.build_source = BuildSourcePack(root="", source_abi=surface)
@@ -2472,33 +2524,33 @@ def test_source_surface_dso_mismatch_clean_when_matched_via_synthesized():
     assert _coverage(res, CHECK_SOURCE_SURFACE_DSO_MISMATCH)["status"] == "present"
 
 
-def test_source_surface_dso_mismatch_uses_unmatched_symbols_counter():
-    # When unmatched_symbols == exported_symbols (nothing attributed by any tier)
-    # the surface truly matched nothing → fire, even though matched_symbols alone
-    # is not the signal used.
-    from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
-
-    surface = SourceAbiSurface(
-        library="libfoo.so",
-        reachable_declarations=[
-            SourceEntity(id="d0", kind="function", qualified_name="f")
-        ],
-        coverage={
-            "matched_symbols": 0,
-            "synthesized_symbols_matched": 0,
-            "exported_symbols": 3,
-            "unmatched_symbols": 3,  # nothing attributed
-        },
+def test_source_surface_dso_mismatch_flags_linked_but_zero_match():
+    # A surface linked against this binary (roots set) that mapped none of its
+    # decls to an export → the original zero-match case, still fires.
+    surface = _surface_with_mapping(
+        [("d0", ""), ("d1", "")],  # linked, but nothing matched
+        linked_exports=["_Z3foov", "_Z3barv"],
     )
-    snap = _snap(elf=_elf("_Z3barv", "_Z3bazv", "_Z3quxv"))
+    snap = _snap(elf=_elf("_Z3foov", "_Z3barv"))
     snap.build_source = BuildSourcePack(root="", source_abi=surface)
     res = run_crosschecks(snap)
     assert len(_findings_of(res, ChangeKind.SOURCE_SURFACE_DSO_MISMATCH)) == 1
 
 
+def test_source_surface_dso_mismatch_skipped_when_unlinked():
+    # A surface with decls but no attribution mappings AND never linked (empty
+    # roots) — cannot distinguish "wrong DSO" from "link never ran" → skip.
+    surface = _surface_with_mapping([("d0", ""), ("d1", "")], linked_exports=[])
+    snap = _snap(elf=_elf("_Z3foov", "_Z3barv"))
+    snap.build_source = BuildSourcePack(root="", source_abi=surface)
+    res = run_crosschecks(snap)
+    assert _coverage(res, CHECK_SOURCE_SURFACE_DSO_MISMATCH)["status"] == "skipped"
+    assert _findings_of(res, ChangeKind.SOURCE_SURFACE_DSO_MISMATCH) == []
+
+
 def test_source_surface_dso_mismatch_skipped_without_binary_exports():
     # A source-only snapshot (no export table) must skip, never false-positive.
-    surface = _surface_with_decls(3, matched=0)
+    surface = _surface_with_mapping([("d0", "_Z3foov")])
     snap = _snap(build_source=BuildSourcePack(root="", source_abi=surface))
     res = run_crosschecks(snap)
     assert _coverage(res, CHECK_SOURCE_SURFACE_DSO_MISMATCH)["status"] == "skipped"
@@ -2514,7 +2566,7 @@ def test_source_surface_dso_mismatch_skipped_without_l4_surface():
 def test_source_surface_dso_mismatch_present_empty_surface_no_findings():
     # Surface with an export table on the binary but no reachable decls: present,
     # no finding (nothing to mis-scope).
-    surface = SourceAbiSurface(library="libfoo.so", coverage={"matched_symbols": 0})
+    surface = SourceAbiSurface(library="libfoo.so")
     snap = _snap(elf=_elf("_Z3foov"))
     snap.build_source = BuildSourcePack(root="", source_abi=surface)
     res = run_crosschecks(snap)

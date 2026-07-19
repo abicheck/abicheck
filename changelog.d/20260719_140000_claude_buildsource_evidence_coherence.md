@@ -18,7 +18,15 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   the surface almost certainly describes a different or shared DSO (one surface
   folded from every target's sources and reused across libraries). Both skip
   cleanly when their evidence is absent (no L3 build evidence / no binary export
-  table) and are never artifact-proven breaks.
+  table) and are never artifact-proven breaks. `compile_context_conflict`
+  compares *effective, language-qualified* per-TU modes — last-wins over the
+  ordered `abi_relevant_flags` and C++-only for RTTI/exceptions/thread-safe
+  statics — so a C TU or a `-fno-rtti -frtti` override is not a false positive.
+  `source_surface_dso_mismatch` intersects the surface's own decl→export
+  attribution *mappings* with the binary's live export set rather than trusting
+  the summary `matched_symbols` counter, so a stale/shared surface linked
+  against a different DSO (whose counter is positive against that other binary)
+  is correctly caught.
 
 ### Fixed
 
