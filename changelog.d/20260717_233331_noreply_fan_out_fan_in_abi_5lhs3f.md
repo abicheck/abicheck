@@ -31,4 +31,11 @@
   to the greener legacy path; only an entirely absent gate block legacy-falls-back.
   `scan` reports are read via their own top-level `exit_code`
   (`scan_schema_version`), and when a manifest pins a `head_sha`, a report that
-  is missing or mismatches it is treated as unavailable. See ADR-043 D13.
+  is missing or mismatches it is treated as unavailable. The `--format json`
+  output has a published JSON Schema
+  (`abicheck/schemas/aggregate_report.schema.json`, mirrored at
+  `docs/schemas/v1/`), and the manifest may carry an optional
+  `aggregate_manifest_version` (a newer major is rejected). The root
+  `abicheck --help` now groups the verbs by role (core analysis / workflow
+  composition / legacy compatibility) so `aggregate` reads as report-level
+  composition rather than a sixth binary-analysis peer. See ADR-043 D13.

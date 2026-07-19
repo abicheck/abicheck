@@ -154,6 +154,7 @@ reads only `id`/`required` and ignores the rest.
 
 ```json
 {
+  "aggregate_manifest_version": "1.0",
   "targets": [
     {"id": "linux-x86_64",   "required": true, "os": "ubuntu-latest",  "ext": "so"},
     {"id": "macos-arm64",    "required": true, "os": "macos-latest",   "ext": "dylib"},
@@ -161,6 +162,10 @@ reads only `id`/`required` and ignores the rest.
   ]
 }
 ```
+
+The optional `aggregate_manifest_version` lets `aggregate` reject a manifest
+written for a newer major version it cannot interpret; omit it and the manifest
+is treated as the current major.
 
 ```yaml
 jobs:

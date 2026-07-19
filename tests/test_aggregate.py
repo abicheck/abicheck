@@ -30,6 +30,7 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck.aggregate import (
+    AGGREGATE_SCHEMA_VERSION,
     AggregateError,
     CoverageStatus,
     ExpectedTargets,
@@ -40,6 +41,11 @@ from abicheck.aggregate import (
     target_id_from_path,
 )
 from abicheck.change_registry_types import Verdict
+
+try:
+    import jsonschema
+except ImportError:  # pragma: no cover - exercised only when jsonschema absent
+    jsonschema = None
 
 LINUX = "linux-x86_64"
 WINDOWS = "windows-x86_64"
@@ -401,11 +407,23 @@ class TestManifestAndIdentity:
             [1, 2],
             {"targets": [{"id": LINUX}], "head_sha": 123},  # non-string head_sha
             {"targets": [{"id": LINUX}], "head_sha": ""},  # empty head_sha
+            {"targets": [{"id": LINUX}], "aggregate_manifest_version": 1},  # not str
+            {
+                "targets": [{"id": LINUX}],
+                "aggregate_manifest_version": "x.y",
+            },  # not num
+            {"targets": [{"id": LINUX}], "aggregate_manifest_version": "99.0"},  # newer
         ],
     )
     def test_manifest_rejects_malformed(self, bad):
         with pytest.raises(AggregateError):
             ExpectedTargets.from_manifest_data(bad)
+
+    def test_manifest_accepts_current_version(self):
+        exp = ExpectedTargets.from_manifest_data(
+            {"aggregate_manifest_version": "1.0", "targets": [{"id": LINUX}]}
+        )
+        assert exp.targets == {LINUX: True}
 
     def test_manifest_file_unreadable_is_error(self, tmp_path: Path):
         (tmp_path / "m.json").write_text("{ not json")
@@ -647,3 +665,45 @@ class TestAggregateCLI:
         )
         assert res.exit_code == 0
         assert json.loads(out.read_text())["status"] == "pass"
+
+
+class TestJsonSchema:
+    """The `--format json` output is a versioned, published machine contract."""
+
+    def test_schema_file_ships_and_is_well_formed(self):
+        from abicheck.schemas import load_aggregate_report_schema
+
+        schema = load_aggregate_report_schema()
+        assert schema["$id"].endswith("aggregate_report.schema.json")
+        assert "aggregate_schema_version" in schema["properties"]
+
+    @pytest.mark.skipif(jsonschema is None, reason="jsonschema not installed")
+    def test_real_output_validates_against_schema(self, tmp_path: Path):
+        from abicheck.schemas import load_aggregate_report_schema
+
+        # A representative document exercising every axis: an analyzed target
+        # with a real gate, an unavailable required target, and a gated
+        # unexpected target.
+        _write_report(
+            tmp_path,
+            LINUX,
+            "COMPATIBLE",
+            severity={
+                "exit_code": 1,
+                "blocking": True,
+                "blocking_categories": ["addition"],
+            },
+        )
+        _write_report(tmp_path, MACOS, "BREAKING")  # unexpected
+        d = aggregate_reports_dir(tmp_path, expected=_expect(LINUX, WINDOWS)).to_dict()
+        jsonschema.validate(d, load_aggregate_report_schema())
+        assert d["aggregate_schema_version"] == AGGREGATE_SCHEMA_VERSION
+        assert d["unexpected_targets"]
+
+    @pytest.mark.skipif(jsonschema is None, reason="jsonschema not installed")
+    def test_discovered_only_output_validates(self, tmp_path: Path):
+        from abicheck.schemas import load_aggregate_report_schema
+
+        _write_report(tmp_path, LINUX, "API_BREAK")
+        d = aggregate_reports_dir(tmp_path, discovered_only=True).to_dict()
+        jsonschema.validate(d, load_aggregate_report_schema())

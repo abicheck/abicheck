@@ -44,6 +44,27 @@ import click
 
 F = TypeVar("F", bound=Callable[..., object])
 
+# Root command panels — group the top-level verbs by role in `abicheck --help`
+# rather than one flat list, per the ADR-042/ADR-043 framing: the four
+# core-analysis verbs, the report-level `aggregate` fan-in (workflow
+# composition over already-produced reports, not a binary analysis), and the
+# ABICC-compat shim. rich-click keys these by the *exact* root command path,
+# which differs per entry point (the console script `abicheck`, `python -m
+# abicheck`, `python -m abicheck.cli`, and `main` under CliRunner) — a single
+# root token, so the `* <cmd>` wildcard the option panels use does not apply.
+# Registering the same panels under each keeps grouping consistent across every
+# documented invocation. A verb not listed still shows (rich-click falls it back
+# into a default panel), so a new command never silently vanishes.
+_ROOT_COMMAND_PANELS: list[dict[str, object]] = [
+    {"name": "Core analysis", "commands": ["dump", "compare", "scan", "deps"]},
+    {"name": "Workflow composition", "commands": ["aggregate"]},
+    {"name": "Legacy compatibility", "commands": ["compat"]},
+]
+COMMAND_GROUPS: dict[str, list[dict[str, object]]] = {
+    root: _ROOT_COMMAND_PANELS
+    for root in ("abicheck", "main", "python -m abicheck", "python -m abicheck.cli")
+}
+
 # Per-command option panels. Options not listed here land in rich-click's
 # default trailing panel, so a new flag never has to be added here to work.
 OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
@@ -261,7 +282,10 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
                 "--allow-build-query",
             ],
         },
-        {"name": "Output", "options": ["--format", "--output", "--dry-run", "--verbose"]},
+        {
+            "name": "Output",
+            "options": ["--format", "--output", "--dry-run", "--verbose"],
+        },
     ],
     # NB: the ABICC drop-in `compat check` (53 single-dash flags) renders with
     # plain Click help — its group is not under the rich-click `main`, so panel
@@ -305,6 +329,7 @@ def configure_rich_help() -> None:
     # rich-click types the values as its OptionGroupDict TypedDict; our plain
     # dict literal is structurally compatible but mypy can't prove it.
     rich_click.rich_click.OPTION_GROUPS.update(OPTION_GROUPS)  # type: ignore[arg-type]
+    rich_click.rich_click.COMMAND_GROUPS.update(COMMAND_GROUPS)  # type: ignore[arg-type]
     # Render help monochrome (no ANSI). CI runners set FORCE_COLOR/CI, which
     # would make rich emit colour escapes even into a pipe — env-dependent output
     # that breaks help-substring tests on some platforms but not others. The
@@ -372,7 +397,9 @@ COMPARE_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
 )
 
 
-def _compare_help_callback(ctx: click.Context, _param: click.Parameter, value: bool) -> None:
+def _compare_help_callback(
+    ctx: click.Context, _param: click.Parameter, value: bool
+) -> None:
     if not value or ctx.resilient_parsing:
         return
     cmd = ctx.command
@@ -405,7 +432,9 @@ def _compare_help_callback(ctx: click.Context, _param: click.Parameter, value: b
     ctx.exit()
 
 
-def _compare_help_all_callback(ctx: click.Context, _param: click.Parameter, value: bool) -> None:
+def _compare_help_all_callback(
+    ctx: click.Context, _param: click.Parameter, value: bool
+) -> None:
     if not value or ctx.resilient_parsing:
         return
     click.echo(ctx.get_help(), color=ctx.color)

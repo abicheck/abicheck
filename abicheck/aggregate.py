@@ -59,6 +59,13 @@ from .change_registry_types import Verdict
 #: output. Bump on any incompatible change to that structure.
 AGGREGATE_SCHEMA_VERSION = "1.0"
 
+#: SemVer-style (MAJOR.MINOR) version of the expected-target *manifest* input
+#: (``--manifest``). Independent of the report-output schema above. A manifest
+#: may carry ``"aggregate_manifest_version"``; a MAJOR component newer than this
+#: is rejected (the reader cannot know the newer structure), a matching or older
+#: one is accepted (additive-only within a MAJOR).
+AGGREGATE_MANIFEST_VERSION = "1.0"
+
 #: Legacy verdict → gate exit code, used only for reports that carry no
 #: ``severity`` gate block (i.e. produced without a ``--severity-*`` policy).
 #: Mirrors ``compare``'s legacy scheme: NO_CHANGE/COMPATIBLE/COMPATIBLE_WITH_RISK
@@ -95,6 +102,34 @@ COVERAGE_INCOMPLETE_EXIT = 1
 #: (``abi-report-<target>.json``). Stripped when deriving a target id from a
 #: report file's stem, if the report does not self-identify a ``target_id``.
 DEFAULT_REPORT_PREFIX = "abi-report-"
+
+
+def _check_manifest_version(raw: Any) -> None:
+    """Validate an optional manifest ``aggregate_manifest_version`` field.
+
+    Absent → accepted (an unversioned manifest is treated as the current
+    MAJOR). Present → must be a ``"MAJOR.MINOR"`` string whose MAJOR component
+    does not exceed :data:`AGGREGATE_MANIFEST_VERSION`'s (a newer MAJOR carries
+    structure this reader cannot interpret; fail loud rather than silently
+    mis-read it).
+    """
+    if raw is None:
+        return
+    if not isinstance(raw, str) or not raw:
+        raise AggregateError("manifest 'aggregate_manifest_version' must be a string")
+    try:
+        major = int(raw.split(".", 1)[0])
+        supported = int(AGGREGATE_MANIFEST_VERSION.split(".", 1)[0])
+    except ValueError as exc:
+        raise AggregateError(
+            f"manifest 'aggregate_manifest_version' is not a MAJOR.MINOR "
+            f"version: {raw!r}"
+        ) from exc
+    if major > supported:
+        raise AggregateError(
+            f"manifest 'aggregate_manifest_version' {raw!r} is newer than this "
+            f"tool supports (max major {supported}); upgrade abicheck"
+        )
 
 
 class CoverageStatus(str, Enum):
@@ -690,6 +725,7 @@ class ExpectedTargets:
     def from_manifest_data(cls, data: Any) -> ExpectedTargets:
         if not isinstance(data, dict):
             raise AggregateError("manifest must be a JSON object")
+        _check_manifest_version(data.get("aggregate_manifest_version"))
         raw = data.get("targets")
         if not isinstance(raw, list) or not raw:
             raise AggregateError("manifest 'targets' must be a non-empty list")

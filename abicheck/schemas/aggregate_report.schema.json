@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://abicheck.github.io/abicheck/schemas/v1/aggregate_report.schema.json",
+  "title": "abicheck aggregate report",
+  "description": "Schema for the JSON document produced by `abicheck aggregate --format json`, the multi-target CI fan-in gate. Three axes are kept separate (ADR-042): gate (each report's own recorded severity decision, combined), coverage (did every required target report?), and compatibility (worst verdict, for reporting). The document is versioned via aggregate_schema_version; additive changes (new optional keys) bump the MINOR component, breaking changes bump the MAJOR. Consumers should accept any document whose MAJOR matches theirs and ignore unknown keys.",
+  "type": "object",
+  "required": [
+    "aggregate_schema_version",
+    "status",
+    "compatibility",
+    "coverage",
+    "gate",
+    "targets",
+    "unexpected_targets"
+  ],
+  "properties": {
+    "aggregate_schema_version": {
+      "type": "string",
+      "description": "SemVer-style MAJOR.MINOR version of this document's structure."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["pass", "fail"],
+      "description": "Whether the gate passed (mirrors gate.passed)."
+    },
+    "compatibility": {
+      "type": "object",
+      "description": "The reporting-only compatibility axis — NOT the gate.",
+      "required": ["verdict", "analyzed_targets"],
+      "properties": {
+        "verdict": {
+          "type": ["string", "null"],
+          "description": "Worst compatibility verdict over the targets feeding this axis (expected analyzed targets plus gated unexpected ones); null when nothing was analyzed."
+        },
+        "analyzed_targets": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Count of targets contributing to the compatibility verdict."
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "description": "Did every required expected target actually report?",
+      "required": [
+        "status",
+        "required_targets",
+        "analyzed_required_targets",
+        "missing_required_targets",
+        "blocking"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["complete", "partial", "empty"]
+        },
+        "required_targets": {"type": "integer", "minimum": 0},
+        "analyzed_required_targets": {"type": "integer", "minimum": 0},
+        "missing_required_targets": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "blocking": {
+          "type": "boolean",
+          "description": "True when the required-coverage gap contributes to the exit code."
+        }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "description": "The single CI gate decision.",
+      "required": ["passed", "exit_code", "blocking_targets", "coverage_blocking"],
+      "properties": {
+        "passed": {"type": "boolean"},
+        "exit_code": {
+          "type": "integer",
+          "description": "0 pass / 1 coverage gap, addition-or-quality block, or a non-verdict per-report failure / 2 source-API break / 4 ABI break."
+        },
+        "blocking_targets": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "coverage_blocking": {"type": "boolean"}
+      }
+    },
+    "targets": {
+      "type": "array",
+      "description": "Every expected target, in stable id order — analyzed or unavailable.",
+      "items": {"$ref": "#/$defs/target"}
+    },
+    "unexpected_targets": {
+      "type": "array",
+      "description": "Reports for target ids not in the expected set (a matrix leg the manifest has not caught up to).",
+      "items": {"$ref": "#/$defs/target"}
+    }
+  },
+  "$defs": {
+    "target": {
+      "type": "object",
+      "required": ["target_id", "required", "state", "compatibility_verdict", "gate"],
+      "properties": {
+        "target_id": {"type": "string"},
+        "required": {"type": "boolean"},
+        "state": {
+          "type": "string",
+          "enum": ["analyzed", "unavailable"]
+        },
+        "compatibility_verdict": {"type": ["string", "null"]},
+        "gate": {
+          "anyOf": [{"type": "null"}, {"$ref": "#/$defs/gate"}]
+        },
+        "unexpected": {"type": "boolean"},
+        "report_path": {"type": "string"},
+        "library": {"type": "string"},
+        "reason": {
+          "type": "string",
+          "description": "Present when the target is unavailable — why it could not be analyzed."
+        }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "description": "One target's own recorded CI gate decision.",
+      "required": ["exit_code", "blocking", "blocking_categories", "from_report"],
+      "properties": {
+        "exit_code": {"type": "integer"},
+        "blocking": {"type": "boolean"},
+        "blocking_categories": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "from_report": {
+          "type": "boolean",
+          "description": "True when read from the report's own severity/scan gate; false when legacy-derived from the verdict."
+        }
+      }
+    }
+  }
+}

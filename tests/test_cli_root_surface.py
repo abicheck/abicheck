@@ -37,9 +37,7 @@ from click.testing import CliRunner
 
 from abicheck.cli import main
 
-_PUBLIC_COMMANDS = frozenset(
-    {"dump", "compare", "scan", "deps", "compat", "aggregate"}
-)
+_PUBLIC_COMMANDS = frozenset({"dump", "compare", "scan", "deps", "compat", "aggregate"})
 
 _REMOVED_COMMANDS = (
     "appcompat",
@@ -96,6 +94,22 @@ def test_help_shows_exactly_the_public_commands() -> None:
         )
 
 
+def test_help_groups_commands_by_role() -> None:
+    """Root help groups the verbs into role panels (rich-click COMMAND_GROUPS):
+    core-analysis verbs, `aggregate` under workflow composition, `compat` under
+    legacy — not one flat list. Falls back cleanly when rich-click is absent."""
+    pytest.importorskip("rich_click")
+    result = CliRunner().invoke(main, ["--help"])
+    assert result.exit_code == 0
+    # The panels render (grouping active) and aggregate is presented as workflow
+    # composition, not a sixth core-analysis peer.
+    assert "Core analysis" in result.output
+    assert "Workflow composition" in result.output
+    # Every public command is still reachable in the help regardless of panel.
+    for cmd in _PUBLIC_COMMANDS:
+        assert cmd in result.output
+
+
 def test_python_dash_m_abicheck_shows_public_commands() -> None:
     """``python -m abicheck --help`` (the documented entry point) surfaces the
     same public commands as in-process ``main.commands`` introspection."""
@@ -121,9 +135,15 @@ def test_deps_compare_rejects_old_flag_names(tmp_path) -> None:  # type: ignore[
         result = CliRunner().invoke(
             main,
             [
-                "deps", "compare", "usr/bin/myapp",
-                flag, str(old_root),
-                "--old-root", str(old_root), "--new-root", str(new_root),
+                "deps",
+                "compare",
+                "usr/bin/myapp",
+                flag,
+                str(old_root),
+                "--old-root",
+                str(old_root),
+                "--new-root",
+                str(new_root),
             ],
         )
         assert result.exit_code == 64, f"{flag} was unexpectedly accepted"
@@ -137,11 +157,17 @@ def test_python_dash_m_abicheck_cli_matches_python_dash_m_abicheck() -> None:
     invocation path (see test_main_entrypoint.py)."""
     via_package = subprocess.run(
         [sys.executable, "-m", "abicheck", "--help"],
-        capture_output=True, text=True, encoding="utf-8", check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
     ).stdout
     via_module = subprocess.run(
         [sys.executable, "-m", "abicheck.cli", "--help"],
-        capture_output=True, text=True, encoding="utf-8", check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
     ).stdout
     for cmd in _PUBLIC_COMMANDS:
         assert cmd in via_package
