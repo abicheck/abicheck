@@ -330,6 +330,7 @@ class TestMarkReachabilityTriState:
             ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED,
             ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT,
             ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED,
+            ChangeKind.SOURCE_TO_BINARY_MAPPING_CHANGED,
         ],
     )
     def test_other_public_source_abi_kinds_are_reachable_despite_internal_looking_name(

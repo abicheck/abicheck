@@ -522,21 +522,14 @@ _ENUM_MEMBER_KINDS = frozenset({
 })
 
 # buildsource/source_diff.py's L4 (and source_graph_findings.py's L5)
-# findings below are public *by construction* -- each is built only from a
-# SourceAbiSurface's own
-# reachable_types/reachable_macros/reachable_declarations/reachable_templates
-# collections (or, for SOURCE_DECL_BINARY_SYMBOL_MISMATCH, the
-# source_decl_to_binary_symbol mapping -- see _diff_mappings's own "Public
-# declaration ..." description; or, for ODR_SOURCE_CONFLICT, source_link.py's
-# _route_type() appending the entity to reachable_types before its ODR check
-# even runs) -- entities already proven reachable from the public surface,
-# never from a namespace-name heuristic. Falling through to the
-# is_internal_type()-based classification below would misjudge one of these
-# purely on its *name* and could mark it PROVEN_UNREACHABLE even though the
-# L4 surface that produced it already proved the opposite (Codex review,
-# four passes). Deliberately NOT extended to SOURCE_BINARY_PROVENANCE_MISMATCH
-# (aggregate, symbol="") or ODR_SOURCE_CONFLICT's `odr_conflicts` sibling
-# checks that aren't scoped to public/reachable types.
+# findings below are public *by construction* -- each is built only from an
+# already-proven-public entity (a reachable_*/exported-symbol-mapped
+# declaration, never a bare namespace-name heuristic). Falling through to
+# the is_internal_type()-based classification below would misjudge one of
+# these purely on its *name* (Codex review, many passes). Deliberately NOT
+# extended to SOURCE_BINARY_PROVENANCE_MISMATCH (aggregate, symbol="") or
+# ODR_SOURCE_CONFLICT's `odr_conflicts` sibling checks not scoped to
+# public/reachable types.
 _PUBLIC_SOURCE_ABI_KINDS = frozenset({
     ChangeKind.PUBLIC_TYPEDEF_REMOVED,
     ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED,
@@ -554,15 +547,21 @@ _PUBLIC_SOURCE_ABI_KINDS = frozenset({
     ChangeKind.ODR_SOURCE_CONFLICT,
     # L5 (source_graph_findings.py) kinds whose subject is itself a
     # proven-public entry/decl/symbol, not just something touching one.
-    # NOT extended to SOURCE_TO_BINARY_MAPPING_CHANGED/BUILD_OPTION_REACHES_
-    # PUBLIC_SYMBOL/TARGET_DEPENDENCY_ADDED -- keyed on a decl/option/target
-    # that merely reaches something public, not a public entity itself.
+    # NOT extended to BUILD_OPTION_REACHES_PUBLIC_SYMBOL/TARGET_DEPENDENCY_
+    # ADDED -- keyed on an option/target that merely reaches something
+    # public, not a public entity itself.
     ChangeKind.PUBLIC_REACHABILITY_CHANGED,
     ChangeKind.GENERATED_HEADER_REACHES_PUBLIC_API,
     ChangeKind.CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED,
     ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED,
     ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT,
     ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED,
+    # _mapping_drift_findings fires only on old_sym != new_sym, and a
+    # SOURCE_DECL_MAPS_TO_SYMBOL edge's target is always a genuinely
+    # *exported* symbol (source_link.relink_surface_exports matches only
+    # against the real export set) -- so at least one side has this decl
+    # actually exported whenever it fires (Codex review).
+    ChangeKind.SOURCE_TO_BINARY_MAPPING_CHANGED,
 })
 
 
