@@ -693,20 +693,34 @@ application of policy to `target × profile × baseline channel × evidence
 requirement`" — evidence requirement is part of the tuple). The three-part
 `check_id` collapses them to one identical string, and
 `abicheck.aggregate.collect_reports` hard-errors on the resulting duplicate
-`target_id`. **Fix: `check_id` includes `requested_depth` whenever more than
-one depth is requested for the same target/profile/channel** —
-`libpvxs@linux-x86_64-gcc13-release#accepted-main@source` alongside
-`...@headers` — and omits the depth suffix when only one depth is ever
-requested for that combination (keeping the common single-depth case's ID
-exactly the three-part form shown throughout this ADR, unchanged). The
-run-plan generator (P1.4) is what decides whether the suffix is needed, by
-checking for a collision across its own `checks[]` before emitting IDs.
+`target_id`.
+
+**Correction, a further review round later: the conditional suffix ("only
+when a collision would occur") doesn't work outside `check-project.yml`'s
+run plan.** The rule above relied on P1.4's run-plan generator scanning its
+own `checks[]` for collisions before deciding whether to add the depth
+suffix — but S26's shadow/advisory checks (and any standalone
+`check-single.yml`/direct `check-target` call) have **no run-plan
+generator** to do that scan; each call is independent, with nothing that
+sees both the header-depth gate and the source-depth shadow check together
+to detect they'd collide. Under the conditional rule, both would emit the
+plain three-part ID and collide in `aggregate`/PR publication exactly as
+before. **Fixed: `check_id` always includes `requested_depth` — unconditionally,
+not only when a collision is detected** —
+`libpvxs@linux-x86_64-gcc13-release#accepted-main@source`, every time,
+including the common single-depth case (which was the whole point of the
+conditional version, but a stable, always-present suffix is simpler and
+correct in every calling context, at the cost of every `check_id` being one
+segment longer than strictly necessary in the common case — the same
+trade-off already made for `target_id = check_id` unconditionally,
+elsewhere in this section). No collision-scanning logic is needed anywhere,
+in `check-target`, `check-single.yml`, or `check-project.yml`.
 
 ```json
 {
   "report_schema": "abicheck.report/v1",
-  "check_id": "libpvxs@linux-x86_64-gcc13-release#accepted-main",
-  "target_id": "libpvxs@linux-x86_64-gcc13-release#accepted-main",
+  "check_id": "libpvxs@linux-x86_64-gcc13-release#accepted-main@source",
+  "target_id": "libpvxs@linux-x86_64-gcc13-release#accepted-main@source",
   "project": "epics-base/pvxs",
   "target": "libpvxs",
   "profile_id": "linux-x86_64-gcc13-release",
