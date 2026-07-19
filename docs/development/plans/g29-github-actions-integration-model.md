@@ -221,6 +221,20 @@ PVXS) mismatches too (report says `target_id: "libpvxs"`, manifest expects
 hard-errors on a duplicate, so this identity must be exact and consistent
 for every check, with no conditional branch.
 
+**Second required sub-task, flagged by review:** `check-target`'s report
+must populate `aggregate`'s *existing* verdict/gate fields, not only the new
+ADR-045 §7 ones. `abicheck/aggregate.py`'s `parse_report_verdict` reads
+top-level `verdict` (a `Verdict` enum string); its gate parsing
+(`GateInfo.from_report_data`/`from_scan_report`) reads a `severity` block or
+a scan report's own `exit_code`/`scan_schema_version` — none of these read
+`compatibility_verdict` or `policy_gate_decision`, the new field names §7
+introduces. Ship one of: (a) `check-target` dual-writes both the legacy
+fields (`verdict`, `severity`/`exit_code`) *and* the new ones — the
+lower-risk default, since it needs no `aggregate` code change — or (b) a
+scoped `aggregate` parser update to also read the new field names. Either
+way, this must land before P1.4, or `check-project.yml`'s `aggregate` step
+will see every `check-target` report as verdictless/ungated.
+
 **Files:** new `actions/check-target/action.yml`, `run.sh`.
 
 **Dependencies:** P1.1, P1.2, P0.3.
@@ -285,6 +299,16 @@ Implements ADR-045 §6/§10. `publish-baseline.yml`: release-triggered,
 ADR-045 §10). Both use `actions/baseline` unchanged (it already documents
 itself as read-only/non-publishing — `actions/baseline/action.yml:6-8` — so
 these workflows own the publish step, matching that existing contract).
+**Required cache-key detail, flagged by review:** GitHub Actions cache
+entries are immutable once written (no overwrite-in-place); the workflow
+must write a new key on every refresh — e.g.
+`abicheck-baseline-main-<profile.id>-<head_sha>` — and `resolve-baseline`
+must use `restore-keys: abicheck-baseline-main-<profile.id>-` to find the
+latest match. A single stable key across refreshes silently stops updating
+after the first write (the cache action treats it as a hit, not an error) —
+this must be a tested behavior (a fixture asserting two consecutive
+`update-main-baseline.yml` runs produce two distinct baselines resolvable
+by `resolve-baseline`), not an assumption.
 
 **Dependencies:** P1.1, P1.5.
 

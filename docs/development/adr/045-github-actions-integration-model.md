@@ -490,7 +490,25 @@ them; corrected below per review):
 
 Every check's report gains these identity/status fields (existing JSON
 report body is additive-compatible — this is new required metadata, not a
-schema break to detector output):
+schema break to detector output). **Additive means additive, including for
+the fields `aggregate` itself reads — this needed spelling out per review:**
+`compatibility_verdict`/`policy_gate_decision` below are *new*, richer
+field names; they do not replace the fields `abicheck/aggregate.py` already
+parses today (`parse_report_verdict` reads top-level `verdict`;
+`GateInfo.from_report_data`/`from_scan_report` read a `severity` block or a
+`scan`-report `exit_code`, never `compatibility_verdict`/
+`policy_gate_decision`). If `check-target` emitted only the new field names,
+every one of its reports would look verdictless/ungated to `aggregate` as it
+exists today, silently losing coverage in exactly the multi-target/
+`deferred`-gate-mode flows this ADR is meant to make reliable. So
+`check-target` (P1.3) must populate **both**: the legacy `verdict` (a
+`Verdict` enum string) and `severity`/`exit_code` block `aggregate` already
+understands, *and* the new `compatibility_verdict`/`policy_gate_decision`
+pair for the richer consumers (PR comment, SARIF, humans) described below.
+This is carried as an explicit P1.3 requirement in the companion plan, not
+left implicit — either that dual-write, or a scoped `aggregate` parser
+update to also read the new field names, must ship before P1.4's
+`check-project.yml` can rely on `aggregate` seeing real verdicts.
 
 ```json
 {
@@ -658,7 +676,7 @@ retrofitted into this one.
 | Backend | Atomic set? | Write access needed | Recommended for |
 |---|---|---|---|
 | GitHub Release asset | Yes (single tarball upload) | `contents: write` on a release, not a branch | `release-contract` (S19) — matches "publish atomically" requirement. |
-| Actions cache | Yes (single cache key) | none (cache API only) | `accepted-main` (S20) — cheap, no push, naturally ages out. |
+| Actions cache | Yes (single cache key **per refresh**, see note below) | none (cache API only) | `accepted-main` (S20) — cheap, no push, naturally ages out. |
 | git-committed | No (per-file commits) unless staged via a PR | `contents: write` to a branch | S1's minimal single-library case only; **must go through a PR**, never a direct push to a protected branch (security requirement, §12 below). |
 | External object store | Yes | store-specific credentials | Large fleets / long retention; out of scope for P0/P1, noted for P2. |
 
@@ -667,6 +685,21 @@ update path for any backend that supports Actions cache or Releases — only
 the git-committed backend needs a write, and that write goes through a PR
 opened by the workflow, matching the task's "no direct push to protected
 main as required path" acceptance criterion.
+
+**Actions cache key contract, made explicit per review:** GitHub's own
+Actions-cache documentation states a cache's contents cannot be changed
+once written — a new version requires a new key, not an overwrite of an
+existing one. `update-main-baseline.yml`'s cache key must therefore
+incorporate something that changes on every default-branch refresh (e.g.
+`abicheck-baseline-main-<profile.id>-<head_sha>`, per §5's
+`key_prefix: "abicheck-baseline-main"` config value), with `restore-keys:
+abicheck-baseline-main-<profile.id>-` as the prefix `resolve-baseline` uses
+to find the *latest* matching entry. An implementation that reuses one
+stable key across refreshes (e.g. just `key_prefix` with no per-run suffix)
+would silently fail to update after the first write — the cache action
+would report the write as a no-op cache hit rather than an error, so this
+is exactly the kind of silent-shallow-success failure mode this ADR exists
+to close, and is called out here so P1.6 doesn't reintroduce it.
 
 ---
 
