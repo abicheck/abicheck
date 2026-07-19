@@ -2548,6 +2548,22 @@ def test_source_surface_dso_mismatch_skipped_when_unlinked():
     assert _findings_of(res, ChangeKind.SOURCE_SURFACE_DSO_MISMATCH) == []
 
 
+def test_source_surface_dso_mismatch_macho_cpp_keyspace_matches():
+    # AC-009 (Codex): on a Mach-O C++ dylib the parser stores an export as `_Z…`
+    # (one underscore already stripped) and the L4 linker keeps that spelling, so
+    # the mismatch check must compare in the same keyspace — not the dumper's
+    # double-stripped `Z…` form — or a correctly relinked macOS C++ surface
+    # falsely trips. MachoExport carries the raw `__Z…`; the parser's single strip
+    # is simulated here by the export name `_ZN1A3fooEv`.
+    surface = _surface_with_mapping([("d0", "_ZN1A3fooEv")])
+    snap = _snap(macho=MachoMetadata(exports=[MachoExport(name="_ZN1A3fooEv")]))
+    snap.build_source = BuildSourcePack(root="", source_abi=surface)
+    res = run_crosschecks(snap)
+    # The surface's mapped `_ZN1A3fooEv` is in the binary's exports → clean.
+    assert _findings_of(res, ChangeKind.SOURCE_SURFACE_DSO_MISMATCH) == []
+    assert _coverage(res, CHECK_SOURCE_SURFACE_DSO_MISMATCH)["status"] == "present"
+
+
 def test_source_surface_dso_mismatch_skipped_without_binary_exports():
     # A source-only snapshot (no export table) must skip, never false-positive.
     surface = _surface_with_mapping([("d0", "_Z3foov")])

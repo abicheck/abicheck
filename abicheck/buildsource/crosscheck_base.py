@@ -107,3 +107,29 @@ def _exported_symbol_names(snapshot: AbiSnapshot) -> set[str] | None:
             if e.name
         }
     return None
+
+
+def _linked_export_symbols(snapshot: AbiSnapshot) -> set[str] | None:
+    """Exported symbol names in the **L4 source-linker's** keyspace.
+
+    Matches ``cli_buildsource_merge._exported_symbols_from_snapshot`` — the set
+    that seeds ``source_link`` — so a comparison against the surface's
+    ``source_decl_to_binary_symbol`` mappings uses the *same spelling*. It reads
+    the raw platform dynamic-symbol-table names and, unlike
+    :func:`_exported_symbol_names`, does **not** apply the dumper's *second*
+    Mach-O underscore strip (``_Z…`` → ``Z…``). ``macho_metadata`` already strips
+    the one platform underscore, so a C++ export is stored as ``_Z…`` and the L4
+    linker keeps that form; stripping again (as ``_exported_symbol_names`` does,
+    to match the double-stripped ``Function.mangled`` the dumper produces) would
+    make a correctly relinked macOS C++ surface intersect nothing and falsely
+    trip ``source_surface_dso_mismatch`` (Codex review). ELF is still limited to
+    default-versioned exports — a non-default alias can't satisfy an unversioned
+    consumer link, mirroring both peers.
+    """
+    if snapshot.elf is not None:
+        return {s.name for s in snapshot.elf.symbols if s.name and s.is_default}
+    if snapshot.pe is not None:
+        return {e.name for e in snapshot.pe.exports if e.name}
+    if snapshot.macho is not None:
+        return {e.name for e in snapshot.macho.exports if e.name}
+    return None

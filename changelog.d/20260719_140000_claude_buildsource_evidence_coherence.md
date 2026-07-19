@@ -26,7 +26,10 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   attribution *mappings* with the binary's live export set rather than trusting
   the summary `matched_symbols` counter, so a stale/shared surface linked
   against a different DSO (whose counter is positive against that other binary)
-  is correctly caught.
+  is correctly caught. The comparison uses the L4 source-linker's export
+  keyspace (raw platform symbol names), not the dumper's double-stripped
+  Mach-O spelling, so a correctly relinked macOS C++ dylib surface (whose
+  mappings keep the `_Z…` form) is not a false positive.
 
 ### Fixed
 

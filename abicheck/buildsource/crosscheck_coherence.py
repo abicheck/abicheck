@@ -44,7 +44,7 @@ from .crosscheck_base import (
     PROVIDER_SOURCE_INDEX,
     _change,
     _CheckOutput,
-    _exported_symbol_names,
+    _linked_export_symbols,
 )
 
 #: ABI-relevant compiler-flag families whose positive/negative both change the
@@ -243,7 +243,11 @@ def _check_source_surface_dso_mismatch(
         return _CheckOutput(
             [], "present", "L4 surface carries no reachable declarations", providers
         )
-    exported = _exported_symbol_names(snapshot)
+    # Use the L4 source-linker's export keyspace (not the double-stripped
+    # `_exported_symbol_names`), so `mapped & exported` compares like-for-like on
+    # Mach-O C++ dylibs where the surface mappings keep the `_Z…` spelling (Codex
+    # review).
+    exported = _linked_export_symbols(snapshot)
     if not exported:
         return _CheckOutput(
             [], "skipped", "no binary export table on the snapshot", providers
