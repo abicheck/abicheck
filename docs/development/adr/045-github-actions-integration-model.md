@@ -425,6 +425,27 @@ earlier draft's `plugin-check` invocation would call a mode that doesn't
 exist. The report envelope (§7) stays the same shape across all three kinds;
 only the underlying `compare` flags differ.
 
+**The root `action.yml` cannot express `--used-by`/`--required-symbols`
+today — an unresolved gap this ADR's `kind` routing depends on, flagged in
+a further review round.** `check-target`'s S22/S23 branches (above) say it
+composes root `action.yml` for `app-consumer`/`plugin-contract` kinds, same
+as `library`, but `action.yml`/`action/run.sh` have no input or forwarding
+path for `--used-by` or `--required-symbol(s)` at all — that CLI support
+exists only in `abicheck/cli_compare_helpers.py`, never surfaced through
+the composite Action. If `check-target` is implemented by composing the
+root Action unchanged, S22/S23 have no way to pass the consumer binary
+path or symbol-contract file through. **P1.3 must resolve this one of two
+ways, and this ADR does not pick for it:** (a) extend `action.yml`/
+`run.sh` with `used-by`/`required-symbols` inputs and forwarding — the more
+consistent option, keeping `check-target` uniform across all three
+`kind`s, but a real `action.yml` code change beyond this ADR's scope to
+spec in detail; or (b) `check-target` invokes the `abicheck` CLI directly
+for `app-consumer`/`plugin-contract` kinds, bypassing the root composite
+Action's mode dispatch entirely for just those two kinds. Either is
+workable; leaving the root Action surface unchanged while claiming
+`check-target` "composes root action.yml" for these kinds, as an earlier
+draft implied, is not.
+
 **`contract_file`'s format is a `.syms` line file, not YAML — a second
 correction, from a follow-up review round.** `--required-symbols`'s loader
 (`abicheck/cli_compare_helpers.py`'s `_load_required_symbols`) reads one

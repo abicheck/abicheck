@@ -311,7 +311,29 @@ scoped `aggregate` parser update to also read the new field names. Either
 way, this must land before P1.4, or `check-project.yml`'s `aggregate` step
 will see every `check-target` report as verdictless/ungated.
 
-**Third required sub-task, flagged by review:** the internal analysis step
+**Third required sub-task, flagged by review — the dual-write above must
+not defeat `gate-mode: advisory` for mixed plans.**
+`abicheck/aggregate.py:425-437`'s `exit_code()` computes the aggregate gate
+as `max()` over every included report's legacy `severity.exit_code` — it
+has no concept of `gate_mode`/`policy_gate_decision` at all. In a mixed
+run-plan (e.g. a required `local`/`deferred` header-depth gate plus an
+`advisory` source-depth shadow check on the same target, per this ADR's own
+S21/S26 corrections), if `check-target` dual-writes the *real* legacy
+`severity.exit_code` for the advisory cell's finding, `aggregate` would
+still max it into the blocking gate — a real "advisory" break would fail
+CI, exactly the outcome `gate-mode: advisory`'s definition rules out.
+**Required fix:** `check-target`'s dual-write must be `gate_mode`-aware —
+for `gate-mode: advisory` checks specifically, the legacy `severity`
+block's `exit_code`/`blocking` must be written as non-blocking (`0`/`false`)
+regardless of the underlying finding, with the real finding still fully
+visible in `compatibility_verdict`/`policy_gate_decision` (the new,
+richer fields) for human/PR-comment/SARIF consumers. `local`/`deferred`
+checks keep the real legacy severity unchanged. Add a fixture: an advisory
+cell with a real BREAKING `compatibility_verdict` must not raise
+`aggregate`'s computed `exit_code()` above what the required cells alone
+would produce.
+
+**Fourth required sub-task, flagged by review:** the internal analysis step
 (the nested `uses:` invocation of root `action.yml`) must run with
 `continue-on-error: true`, with a trailing step owning `check-target`'s
 actual exit code. Without this, a genuine ABI break under
