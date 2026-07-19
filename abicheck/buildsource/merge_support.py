@@ -65,23 +65,26 @@ def _coverage_row_for_present_layer(
     layer: str,
     supplier: BuildSourcePack | None,
 ) -> LayerCoverage:
-    """Return the coverage row for a layer whose facts we *do* embed.
+    """Return the coverage row for a layer whose payload we *do* embed.
 
     Read it from the *supplier* — the pack that actually supplied the payload —
     not merely the first pack in supplier order that happens to carry a row for
     this layer; those can differ and produce a manifest that describes facts a
-    different pack lacked (AC-002). A ``not_collected`` (or absent) row on the
-    supplier is discarded and replaced with a synthetic PRESENT row: we are
-    embedding this layer's facts, so the manifest must never advertise it as not
-    collected. A ``partial`` row (e.g. degraded call/type passes, ADR-041) is a
-    meaningful qualifier of present facts and is preserved."""
+    different pack lacked (AC-002). The supplier's own row is honored **as-is**,
+    whatever its status: ``ingest_inputs_pack`` (and the collectors) already
+    emit ``not_collected`` for a non-``None`` but *empty* placeholder payload —
+    e.g. an explicit empty ``compile_commands.json`` yields a non-``None`` but
+    empty ``BuildEvidence`` — and ``present``/``partial`` for real facts, so
+    trusting it keeps the combined manifest honest instead of advertising build
+    context that has no compile units behind it (Codex P2). Only when the
+    supplier carries no row for this layer at all do we synthesize a PRESENT row
+    — we embed the payload and have no more precise statement to make."""
     if supplier is not None:
         row = next(
             (
                 c
                 for c in supplier.manifest.coverage
                 if _layer_value(c.layer) == layer
-                and c.status != CoverageStatus.NOT_COLLECTED
             ),
             None,
         )

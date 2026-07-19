@@ -2351,11 +2351,10 @@ def test_combined_pack_content_hash_stable_across_source_abi_coverage_timing(
     assert a.content_hash() == b.content_hash()
 
 
-def test_combined_coverage_present_layer_overrides_stale_not_collected_row():
-    """AC-002: when the combined pack carries a layer's facts, that layer's
-    coverage row must report present — never the supplying pack's own stale
-    ``not_collected`` row (the '63 compile units but L3_build: not_collected'
-    symptom)."""
+def test_combined_coverage_honors_supplier_present_row():
+    """AC-002: the combined pack takes each layer's row from the pack that
+    actually supplied the payload, so real L3 facts keep their ``present`` row
+    (the '63 compile units but L3_build: not_collected' symptom is gone)."""
     from pathlib import Path
 
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
@@ -2370,20 +2369,94 @@ def test_combined_coverage_present_layer_overrides_stale_not_collected_row():
 
     ev = BuildEvidence()
     ev.compile_units.append(CompileUnit(id="cu://x", source="x.cpp"))
-    stale = BuildSourceManifest(
+    manifest = BuildSourceManifest(
         coverage=[
             LayerCoverage(
-                layer=DataLayer.L3_BUILD.value, status=CoverageStatus.NOT_COLLECTED
+                layer=DataLayer.L3_BUILD.value, status=CoverageStatus.PRESENT
             )
         ]
     )
-    bi = BuildSourcePack(root=Path(""), manifest=stale, build_evidence=ev)
+    bi = BuildSourcePack(root=Path(""), manifest=manifest, build_evidence=ev)
 
     combined = _combine_packs(bi, None, None)
     assert combined is not None
     assert combined.build_evidence is not None and combined.build_evidence.compile_units
     row = combined.manifest.coverage_for("L3_build")
     assert row is not None and row.status == CoverageStatus.PRESENT
+
+
+def test_combined_coverage_preserves_empty_placeholder_not_collected():
+    """Codex P2: a non-``None`` but *empty* payload (e.g. an explicit empty
+    ``compile_commands.json`` yields an empty ``BuildEvidence``) whose supplier
+    honestly recorded ``not_collected`` must keep that row — the combined pack
+    must not advertise build context with no compile units behind it."""
+    from pathlib import Path
+
+    from abicheck.buildsource.build_evidence import BuildEvidence
+    from abicheck.buildsource.model import (
+        BuildSourceManifest,
+        CoverageStatus,
+        DataLayer,
+        LayerCoverage,
+    )
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.cli_buildsource import _combine_packs
+
+    # Mirrors ingest_inputs_pack for an empty compile DB: a non-None but empty
+    # BuildEvidence paired with an honest not_collected L3 row.
+    empty = BuildEvidence()
+    bi = BuildSourcePack(
+        root=Path(""),
+        manifest=BuildSourceManifest(
+            coverage=[
+                LayerCoverage(
+                    layer=DataLayer.L3_BUILD.value,
+                    status=CoverageStatus.NOT_COLLECTED,
+                )
+            ]
+        ),
+        build_evidence=empty,
+    )
+
+    combined = _combine_packs(bi, None, None)
+    assert combined is not None
+    row = combined.manifest.coverage_for("L3_build")
+    assert row is not None and row.status == CoverageStatus.NOT_COLLECTED
+
+
+def test_coverage_row_for_present_layer_branches():
+    """Direct coverage of the supplier-row lookup: honor a supplier's own row,
+    else synthesize present; a missing supplier also synthesizes present."""
+    from pathlib import Path
+
+    from abicheck.buildsource.merge_support import _coverage_row_for_present_layer
+    from abicheck.buildsource.model import (
+        BuildSourceManifest,
+        CoverageStatus,
+        DataLayer,
+        LayerCoverage,
+    )
+    from abicheck.buildsource.pack import BuildSourcePack
+
+    layer = DataLayer.L5_SOURCE_GRAPH.value
+    # No supplier at all → synthetic present.
+    assert _coverage_row_for_present_layer(layer, None).status == CoverageStatus.PRESENT
+    # Supplier with no row for this layer → synthetic present.
+    empty = BuildSourcePack(root=Path(""), manifest=BuildSourceManifest())
+    assert (
+        _coverage_row_for_present_layer(layer, empty).status == CoverageStatus.PRESENT
+    )
+    # Supplier with its own row → that row, verbatim (here a partial qualifier).
+    partial = BuildSourcePack(
+        root=Path(""),
+        manifest=BuildSourceManifest(
+            coverage=[LayerCoverage(layer=layer, status=CoverageStatus.PARTIAL)]
+        ),
+    )
+    assert (
+        _coverage_row_for_present_layer(layer, partial).status
+        == CoverageStatus.PARTIAL
+    )
 
 
 def test_combined_coverage_row_comes_from_payload_supplier_not_other_pack():
