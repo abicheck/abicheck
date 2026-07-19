@@ -390,7 +390,17 @@ config schema to generate the matrix from. P1.5 must land first.
 
 Implements ADR-045 §3. Config schema extension + `abicheck/policy_file.py`
 (or wherever `.abicheck.yml` is parsed) support; `docs/reference/config-file.md`
-update.
+update. **Real design gap this item must close, flagged by review:** §3's
+excerpt declares which baseline channels *exist* but not which
+channel(s)/depth/`required` policy each target/profile actually runs —
+P1.4's run-plan generator needs that per-check assignment and none of the
+schema shown so far provides it. This item must design and add a `checks:`
+list (per target, or per `bundle`) naming explicit
+`{channel, depth, required, gate_mode}` tuples — supporting S21/S26's
+same-target-multiple-channels-or-depths case — not just the
+`targets:`/`profiles:`/`baseline: channels:` blocks ADR-045 §3 already
+shows. Do not treat those existing excerpts as a complete config schema;
+this new `checks:` shape is the missing piece P1.4 actually consumes.
 
 **Dependencies:** none of the above strictly. **Must land before P1.4** —
 not merely "should" — since P1.4 depends on this item (corrected above);

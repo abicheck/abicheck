@@ -383,6 +383,24 @@ baseline:
     accepted-main: {source: actions-cache, key_prefix: "abicheck-baseline-main"}
 ```
 
+**Open gap, not resolved by this excerpt: `baseline: channels:` declares
+which channels *exist*, not which channel(s)/depth/`required` policy each
+target/profile should actually run — flagged in a further review round.**
+§5's `run-plan.json` requires `baseline_channel`, `evidence_depth`, and
+`required` per check, and S21/S26 need the *same* target/profile checked
+against more than one channel or depth simultaneously (§8). Nothing shown
+here assigns those per-check values — a P1.4 generator following only this
+excerpt would have to invent a default (e.g. "run every declared channel at
+`headers` depth, `required: true`") or silently drop the S21/S26
+multi-channel/multi-depth cases this ADR's own report-envelope corrections
+(§7) were written to support. This needs a genuine schema addition — most
+likely a `checks:` list per target (or per `bundle`) naming
+`{channel, depth, required, gate_mode}` tuples, closing the gap between
+"channels that exist" and "checks that run" — which this ADR does not fully
+design. Treat P1.4/P1.5 as needing to define that list before a run-plan
+generator can be implemented, not as already specified by the `targets:`/
+`baseline:` excerpts shown so far.
+
 **`targets:` needs a `kind` discriminator — missing from an earlier draft,
 flagged by review.** S22 (application compatibility) and S23
 (plugin/dlopen contract) route through `check-target` too (§8), but the
@@ -420,6 +438,25 @@ names, just YAML structure. Fixed: `contract_file` is documented as a
 `.syms` file (one required linker symbol per line, `#` comments allowed),
 matching `--required-symbols`'s actual format exactly — not a YAML
 manifest a P2 parser would need to be built to consume.
+
+**`app-consumer`/`plugin-contract` targets resolve their baseline through
+`library`, not their own target name — an unstated rule an earlier draft
+left implicit, flagged in a further review round.** `resolve-baseline` is
+defined as `channel × target × profile` (§6), and `actions/baseline`
+produces one snapshot per `library` target (`kind: library`), never one
+named after an `app-consumer`/`plugin-contract` entry — there is no
+`myapp-consumer.abicheck.json` or `ioc-plugin-contract.abicheck.json` in
+any baseline set, because those aren't things `actions/baseline` snapshots.
+Without an explicit rule, `resolve-baseline` for an S22/S23 check would
+look for a baseline named after the contract target itself and report it
+`not_found` every time. **Rule:** for `kind: app-consumer` or
+`kind: plugin-contract`, `resolve-baseline` resolves the baseline for the
+target's `library` field (e.g. `myapp-consumer` → resolves `libpvxs`'s
+snapshot), while the check's own identity (`check_id`/`target_id`, §7)
+stays the contract target's name (`myapp-consumer@profile#channel@depth`)
+— the *baseline lookup key* and the *check identity* are deliberately
+different fields for these two `kind`s, unlike `kind: library` where they
+coincide.
 
 **`profiles:` shape, missing from an earlier draft — flagged by review.**
 §8's S17 row and P1.5 rely on `.abicheck.yml` declaring which build
@@ -519,7 +556,7 @@ two-phase `collect-facts` contract's boundary actually falls relative to
 | Workflow | Composes | Primary scenarios |
 |---|---|---|
 | `check-single.yml` | a single `check-target` call (one target, one profile) — `check-target` owns baseline resolution internally, see below | S1, S2, S5, S6 |
-| `check-project.yml` | consumes a `build-output.json` artifact → dynamic matrix over `targets[]`/`profiles[]` **and, separately, `bundles[]`/`profiles[]`** → `check-target` per cell → optional `aggregate` job if `>1` cell | S3, S14 (via one `check-target` call per bundle), S15, S17, S25, S28 |
+| `check-project.yml` | consumes a `build-output.json` artifact → dynamic matrix over `targets[]`/`profiles[]` **and, separately, `bundles[]`/`profiles[]`** → `check-target` per cell → `aggregate` job whenever any cell uses `gate-mode: deferred` (**not** merely "if `>1` cell" — see correction below), otherwise optional | S3, S14 (via one `check-target` call per bundle), S15, S17, S25, S28 |
 | `publish-baseline.yml` | build/consume `build-output.json` → `actions/baseline` → upload as release asset (atomic archive, §10) | S19 |
 | `update-main-baseline.yml` | same as above, targeting the `accepted-main` channel storage backend, triggered on default-branch push | S20 |
 
@@ -893,6 +930,23 @@ actual compatibility result — the two cases are mutually exclusive, and
 `"ERROR"` is the one deliberate exception to the "must be a `Verdict`
 member" casing rule above, not an oversight to close.
 
+**`"ERROR"` is not in `compare_report.schema.json`'s `verdict` enum
+either — but this is a pre-existing gap this ADR inherits, not one it
+introduces, flagged for accuracy in a further review round.**
+`compare_report.schema.json`'s `verdict` field is a closed five-value enum
+(`NO_CHANGE`, `COMPATIBLE`, `COMPATIBLE_WITH_RISK`, `API_BREAK`,
+`BREAKING`) with no `"ERROR"` member — yet `aggregate.py`'s own comment
+(`aggregate.py:651-653`) confirms `verdict: "ERROR"` already appears in
+real, production `compare-release` per-library reports today, predating
+this ADR entirely. `check-target`'s operational-failure reports following
+the same `"ERROR"` convention are consistent with that existing (if
+schema-inconsistent) precedent, not a new problem this ADR creates. Whether
+to add `"ERROR"` to the schema enum, treat operational reports as a
+distinct un-schema'd envelope, or something else is a real open question —
+but it is `compare-release`'s pre-existing question, and P1.3 should follow
+whatever resolution the core report-schema maintainers choose for that
+existing case rather than inventing a separate answer for `check-target`.
+
 **The *new* `compatibility_verdict` field needed the same casing fix, one
 more review round later.** `abicheck/aggregate.py` already has a field
 named `compatibility_verdict` in its own output (`TargetReport.to_dict()`,
@@ -984,6 +1038,23 @@ raw exit code.
   is not implementation-detail trivia; it is a load-bearing correctness
   requirement of the `deferred` gate-mode contract and is now specified as
   such in `check-project.yml`'s definition (companion plan, P1.4).
+  **`aggregate` must run for a single-cell `deferred` run too, not only
+  `>1` cells — a further correction, flagged in a later review round.**
+  §4's `check-project.yml` row originally said the trailing `aggregate` job
+  is "optional if `>1` cell." That is wrong for `deferred` mode
+  specifically: `deferred`'s entire point is that `check-target` does
+  **not** fail its own job on a compatibility finding — the aggregate job
+  is what computes the real gate. A changed-component-filtered run (S25) or
+  a one-target expensive-build flow (S3) can legitimately produce exactly
+  one matrix cell; skipping `aggregate` there (because "only one cell,
+  doesn't need fan-in") leaves nothing to ever compute the gate, so a real
+  ABI/API break under `deferred` mode would report a plain green matrix job
+  and never turn the workflow red. **Corrected rule:** `aggregate` runs
+  whenever *any* cell in the matrix uses `gate-mode: deferred`, regardless
+  of cell count — `>1` cells was never the right condition; "any `deferred`
+  cell" is. `local`/`advisory`-only runs (no `deferred` cell in the plan)
+  are the only case where skipping `aggregate` is safe, since those modes
+  already set their own job's exit code.
 - **`advisory`** — report published, findings never affect exit code
   (shadow-rollout burn-in, S26).
 
