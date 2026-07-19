@@ -1921,12 +1921,27 @@ def build_inline_coverage(
         )
 
     if graph is not None:
+        # AC-006: a degraded call/type pass folded structural/plugin edges but the
+        # live replay it stands in for never completed (`degraded_passes`, set by
+        # `mark_source_edges_extractor_coverage` and the scoped-graph fold). Those
+        # edges make `graph.edges` non-empty, which must NOT let L5 read as a full
+        # `present` graph — the failed pass would be silently hidden. Downgrade to
+        # `partial` whenever any pass is degraded, and name the passes so the
+        # report says which live walk is missing.
+        degraded = sorted(k for k, v in graph.degraded_passes.items() if v)
+        l5_present = bool(graph.edges) and not degraded
         l5 = LayerCoverage(
             layer=DataLayer.L5_SOURCE_GRAPH.value,
-            status=CoverageStatus.PRESENT if graph.edges else CoverageStatus.PARTIAL,
+            status=CoverageStatus.PRESENT if l5_present else CoverageStatus.PARTIAL,
             confidence=LayerConfidence.REDUCED
-            if graph.edges
+            if l5_present
             else LayerConfidence.UNKNOWN,
+            detail=(
+                "degraded passes (structural/plugin edges only, live replay "
+                f"incomplete): {', '.join(degraded)}"
+                if degraded
+                else None
+            ),
         )
     else:
         l5 = LayerCoverage(

@@ -2459,6 +2459,83 @@ def test_coverage_row_for_present_layer_branches():
     )
 
 
+def test_raw_sources_inline_wins_l4_l5_over_build_info_pack():
+    """AC-001: an explicit raw ``--sources`` cold scan (the inline pack, passed as
+    ``embedded``) must supply L4/L5, beating a pre-baked Flow-2 pack given via
+    ``--build-info`` (bi_pack) for its L3. A ``--build-info``-only run still
+    falls back to the pack's L4/L5."""
+    from pathlib import Path
+
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+    from abicheck.buildsource.source_graph import SourceGraphSummary
+    from abicheck.cli_buildsource import _combine_packs
+
+    bi = BuildSourcePack(
+        root=Path(""),
+        source_abi=SourceAbiSurface(library="from_build_info"),
+        source_graph=SourceGraphSummary(),
+    )
+    inline = BuildSourcePack(
+        root=Path(""),
+        source_abi=SourceAbiSurface(library="from_sources"),
+        source_graph=SourceGraphSummary(),
+    )
+
+    combined = _combine_packs(bi, None, inline)
+    assert combined is not None and combined.source_abi is not None
+    assert combined.source_abi.library == "from_sources"
+    assert combined.source_graph is inline.source_graph
+
+    # --build-info-only (no inline) still supplies L4/L5 from the pack.
+    fallback = _combine_packs(bi, None, None)
+    assert fallback is not None and fallback.source_abi is not None
+    assert fallback.source_abi.library == "from_build_info"
+
+
+def test_l5_coverage_partial_when_call_type_passes_degraded():
+    """AC-006: structural/plugin edges make ``graph.edges`` non-empty, but if a
+    call/type pass is degraded (its live replay never completed) L5 must read
+    ``partial`` — not ``present`` — so the failed walk is not hidden."""
+    from abicheck.buildsource.build_evidence import BuildEvidence
+    from abicheck.buildsource.inline import build_inline_coverage
+    from abicheck.buildsource.model import CoverageStatus
+    from abicheck.buildsource.source_graph import (
+        GraphEdge,
+        GraphNode,
+        SourceGraphSummary,
+    )
+
+    graph = SourceGraphSummary()
+    graph.nodes.append(GraphNode(id="a", kind="source_decl"))
+    graph.nodes.append(GraphNode(id="b", kind="source_decl"))
+    graph.edges.append(GraphEdge(src="a", dst="b", kind="DECL_CALLS_DECL"))
+    graph.degraded_passes["call_graph"] = True
+
+    rows = {
+        r.layer: r
+        for r in build_inline_coverage(
+            BuildEvidence(), has_build=False, surface=None, graph=graph
+        )
+    }
+    l5 = rows["L5_source_graph"]
+    assert l5.status == CoverageStatus.PARTIAL
+    assert "call_graph" in (l5.detail or "")
+
+    # A graph with edges and no degraded pass is still present.
+    ok = SourceGraphSummary()
+    ok.nodes.append(GraphNode(id="a", kind="source_decl"))
+    ok.nodes.append(GraphNode(id="b", kind="source_decl"))
+    ok.edges.append(GraphEdge(src="a", dst="b", kind="DECL_CALLS_DECL"))
+    rows_ok = {
+        r.layer: r
+        for r in build_inline_coverage(
+            BuildEvidence(), has_build=False, surface=None, graph=ok
+        )
+    }
+    assert rows_ok["L5_source_graph"].status == CoverageStatus.PRESENT
+
+
 def test_combined_coverage_row_comes_from_payload_supplier_not_other_pack():
     """AC-002: the L4 coverage row must reflect the pack that actually supplied
     ``source_abi``, not a different pack in supplier order that merely carries an
