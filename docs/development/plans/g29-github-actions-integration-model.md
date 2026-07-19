@@ -331,10 +331,30 @@ exactly the failure mode ADR-045 is meant to close. Cover this with a
 fixture-workflow test that deliberately fails one matrix cell and asserts
 the aggregate job still runs and reports the failure.
 
+**Third required sub-task, flagged by review — the same always-on problem
+applies one step earlier.** `check-project.yml`'s per-cell report-artifact
+upload step (the pattern already used in
+`docs/user-guide/github-action-recipes.md`) runs *after* `check-target` in
+each matrix job. Under `gate-mode: deferred`, `check-target`'s own exit
+(per P1.3's continue-on-error fix) can still fail the matrix *job* on an
+operational error even though it wrote its report — and a subsequent step
+in a failed job is skipped by default unless it too carries
+`if: always()`/`!cancelled()`. Without that on the upload step specifically
+(not just on the trailing `aggregate` job), the report artifact for a
+failing cell never gets uploaded, and `aggregate` sees a missing target
+instead of the promised operational-error report. Both must carry an
+always-on condition: the aggregate job (already required above) and each
+matrix job's report-upload step.
+
 **Files:** `.github/workflows/check-single.yml`, `.github/workflows/check-project.yml`,
 possibly a new small CLI helper per the sub-task above.
 
-**Dependencies:** P1.3.
+**Dependencies:** P1.3, **P1.5** — corrected, flagged by review: this item
+generates `run-plan.json`/the matrix from `.abicheck.yml`'s `targets:`/
+`profiles:` block, which P1.5 defines. An earlier draft listed only P1.3 as
+a dependency while P1.5's own entry said it "should land before P1.4" —
+inconsistent instructions that would leave an implementer with no real
+config schema to generate the matrix from. P1.5 must land first.
 
 ### P1.5 — `.abicheck.yml` `targets:`/`profiles:`/`baseline:` block
 
@@ -342,8 +362,10 @@ Implements ADR-045 §3. Config schema extension + `abicheck/policy_file.py`
 (or wherever `.abicheck.yml` is parsed) support; `docs/reference/config-file.md`
 update.
 
-**Dependencies:** none of the above strictly, but should land before P1.4 so
-`check-project.yml`'s matrix generation has a real config source to read.
+**Dependencies:** none of the above strictly. **Must land before P1.4** —
+not merely "should" — since P1.4 depends on this item (corrected above);
+sequence P1.5 ahead of P1.4 in the actual PR order, not just in ordinal
+numbering.
 
 ### P1.6 — `publish-baseline.yml` / `update-main-baseline.yml`
 
