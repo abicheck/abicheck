@@ -141,7 +141,15 @@ detectors (`_diff_enums`, `_diff_enum_renames`, `_diff_enum_deprecated`);
   distinguish "confirmed global scope" from "unknown scope", which no
   current backend does) — this ADR does not attempt to close it, only to
   make sure it is the *one* remaining gap rather than one of several
-  independently-discovered ones.
+  independently-discovered ones. Confirmed (Codex review) to apply
+  identically to `EnumType` once it gained `qualified_name` and started
+  sharing this same generic `TypeMap` mechanism: a legacy (unqualified) enum
+  compared against a fresh side carrying both a real global enum and a
+  namespaced one with the same bare name can diff against the wrong one, the
+  same way `RecordType` already could. Because the mechanism is now generic
+  over any `_QualifiedNamed` entity, this is a property of the shared
+  mechanism itself, not something to re-verify per entity kind that adopts
+  it in the future.
 
 ## Alternatives considered
 
