@@ -47,18 +47,50 @@ def _filter_pack_layers(
         pack.source_graph = None
     return pack
 
+def _payload_empty(attr: str, payload: Any) -> bool:
+    """True when a non-``None`` layer payload carries no real facts.
+
+    A layer object can be present but empty — e.g. ``_run_inline_source_abi``
+    returns a bare ``SourceAbiSurface()`` when clang/castxml is missing, or an
+    inline replay yields an empty ``BuildEvidence``. Mirrors
+    ``cli._layer_payload_empty``'s per-layer emptiness so an empty placeholder is
+    treated like absence when choosing which pack supplies a layer."""
+    if payload is None:
+        return True
+    if attr == "build_evidence":
+        return not (getattr(payload, "targets", None) or getattr(payload, "compile_units", None))
+    if attr == "source_abi":
+        buckets = payload.reachable_buckets() if hasattr(payload, "reachable_buckets") else {}
+        return not any(buckets.values())
+    if attr == "source_graph":
+        return not getattr(payload, "nodes", None)
+    return False
+
+
 def _first_attr_with_supplier(
     attr: str, *packs: BuildSourcePack | None
 ) -> tuple[Any, BuildSourcePack | None]:
-    """Return ``(value, supplying_pack)`` for the first non-None *attr*.
+    """Return ``(value, supplying_pack)`` for the first pack with real *attr* facts.
 
-    The *supplier* is the pack whose facts we actually embed for this layer, so
-    its coverage row — and only its row — is the one that describes what landed
-    (AC-002 coverage provenance)."""
+    Prefers the first pack whose payload is **non-empty**, so a non-``None`` but
+    empty placeholder (e.g. an empty ``SourceAbiSurface()`` from a clang-less
+    inline replay routed into the L4 slot) never masks a lower-priority pack's
+    real facts (Codex review). Falls back to the first non-``None`` payload — so a
+    genuinely empty layer is still embedded with its coverage row — only when no
+    candidate carries real facts. The *supplier* is the pack whose facts we embed,
+    so its coverage row — and only its row — describes what landed (AC-002)."""
+    first_present: tuple[Any, BuildSourcePack | None] | None = None
     for cand in packs:
-        if cand is not None and getattr(cand, attr) is not None:
-            return getattr(cand, attr), cand
-    return None, None
+        if cand is None:
+            continue
+        val = getattr(cand, attr)
+        if val is None:
+            continue
+        if not _payload_empty(attr, val):
+            return val, cand
+        if first_present is None:
+            first_present = (val, cand)
+    return first_present if first_present is not None else (None, None)
 
 
 def _coverage_row_for_present_layer(

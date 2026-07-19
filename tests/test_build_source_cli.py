@@ -2505,6 +2505,33 @@ def test_raw_sources_inline_wins_l4_l5_over_build_info_pack():
     assert keep is src and back is inline
 
 
+def test_empty_inline_l4_does_not_mask_build_info_pack_l4():
+    """Codex: when the raw-`--sources` inline pack is routed into the L4 slot but
+    its replay produced only an empty placeholder surface (clang missing), it must
+    NOT mask a `--build-info` pack's real L4 — payload selection prefers non-empty
+    facts."""
+    from pathlib import Path
+
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
+    from abicheck.cli_buildsource import _combine_packs
+
+    # build-info pack with real L4 facts.
+    real = SourceAbiSurface(library="libfoo.so")
+    real.reachable_declarations.append(
+        SourceEntity(id="decl://foo", kind="function", qualified_name="foo")
+    )
+    bi = BuildSourcePack(root=Path(""), source_abi=real)
+    # inline scan produced an empty placeholder surface (no reachable facts).
+    inline = BuildSourcePack(root=Path(""), source_abi=SourceAbiSurface(library="libfoo.so"))
+
+    # embed routes the inline pack into the src slot (AC-001); it must still lose
+    # L4 to the build-info pack because its surface is empty.
+    combined = _combine_packs(bi, inline, None)
+    assert combined is not None and combined.source_abi is not None
+    assert combined.source_abi.reachable_declarations  # bi's real facts kept
+
+
 def test_compare_explicit_build_info_overrides_embedded_l4_l5():
     """Codex: on the `compare` path `_combine_packs(bi_pack, None, embedded)`
     must let an explicit ``--build-info`` pack's L4/L5 override the snapshot's
