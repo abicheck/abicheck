@@ -514,14 +514,12 @@ class DemoteOffPythonSurface:
 # containing type name directly) — MarkReachability.run needs this set to
 # know when to peel the member suffix before checking the owning EnumType's
 # public-header origin.
-_ENUM_MEMBER_KINDS = frozenset(
-    {
-        ChangeKind.ENUM_MEMBER_REMOVED,
-        ChangeKind.ENUM_MEMBER_ADDED,
-        ChangeKind.ENUM_MEMBER_VALUE_CHANGED,
-        ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED,
-    }
-)
+_ENUM_MEMBER_KINDS = frozenset({
+    ChangeKind.ENUM_MEMBER_REMOVED,
+    ChangeKind.ENUM_MEMBER_ADDED,
+    ChangeKind.ENUM_MEMBER_VALUE_CHANGED,
+    ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED,
+})
 
 
 class MarkReachability:
@@ -645,18 +643,10 @@ class MarkReachability:
             from .diff_filtering import _qualified_by_mangled
 
             names: set[str] = set()
-            names.update(
-                f.name for f in snap.functions if f.origin == ScopeOrigin.PUBLIC_HEADER
-            )
-            names.update(
-                v.name for v in snap.variables if v.origin == ScopeOrigin.PUBLIC_HEADER
-            )
-            names.update(
-                t.name for t in snap.types if t.origin == ScopeOrigin.PUBLIC_HEADER
-            )
-            names.update(
-                e.name for e in snap.enums if e.origin == ScopeOrigin.PUBLIC_HEADER
-            )
+            names.update(f.name for f in snap.functions if f.origin == ScopeOrigin.PUBLIC_HEADER)
+            names.update(v.name for v in snap.variables if v.origin == ScopeOrigin.PUBLIC_HEADER)
+            names.update(t.name for t in snap.types if t.origin == ScopeOrigin.PUBLIC_HEADER)
+            names.update(e.name for e in snap.enums if e.origin == ScopeOrigin.PUBLIC_HEADER)
             names.update(
                 _qualified_by_mangled(
                     [
@@ -677,9 +667,7 @@ class MarkReachability:
             )
             return names
 
-        namespaces = (
-            self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
-        )
+        namespaces = self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
         old_paths = compute_leak_paths(ctx.old, namespaces)
         new_paths = compute_leak_paths(ctx.new, namespaces)
         reachable_types = set(old_paths) | set(new_paths)
@@ -709,9 +697,7 @@ class MarkReachability:
         # diff_templates.py — apply it here too, across every declaration
         # kind that carries the field (function/variable/type/enum), not
         # just RecordType.
-        public_header_names = _public_header_names(ctx.old) | _public_header_names(
-            ctx.new
-        )
+        public_header_names = _public_header_names(ctx.old) | _public_header_names(ctx.new)
         if not reachable_types and not public_header_names and not call_reachable:
             return changes
 
@@ -724,11 +710,7 @@ class MarkReachability:
         # alone never downgrades the verdict to UNKNOWN.
         def _call_graph_untrusted(snap: AbiSnapshot) -> bool:
             build_source = getattr(snap, "build_source", None)
-            graph = (
-                getattr(build_source, "source_graph", None)
-                if build_source is not None
-                else None
-            )
+            graph = getattr(build_source, "source_graph", None) if build_source is not None else None
             if graph is None:
                 return False
             return bool(
@@ -738,9 +720,7 @@ class MarkReachability:
                 or graph.narrowed_passes.get("type_graph")
             )
 
-        call_graph_untrusted = _call_graph_untrusted(ctx.old) or _call_graph_untrusted(
-            ctx.new
-        )
+        call_graph_untrusted = _call_graph_untrusted(ctx.old) or _call_graph_untrusted(ctx.new)
 
         for c in changes:
             root = _root_type_name_for_change(c)
@@ -822,8 +802,7 @@ class MarkReachability:
             # label carries in EITHER mode — so it is a reliable fallback key
             # independent of which graph provenance produced the evidence.
             call_key = (
-                root
-                if root in call_reachable
+                root if root in call_reachable
                 else (c.qualified_name if c.qualified_name in call_reachable else None)
             )
             if not tagged and call_key is not None:
@@ -937,9 +916,7 @@ def _build_suppression_overreach_change(change: Change, rule: Suppression) -> Ch
     )
 
 
-def _build_suppression_unknown_reachability_change(
-    change: Change, rule: Suppression
-) -> Change:
+def _build_suppression_unknown_reachability_change(change: Change, rule: Suppression) -> Change:
     """Build the ``SUPPRESSION_REACHABILITY_UNKNOWN`` diagnostic for *change*.
 
     impact-analysis-layer P0 slice. *rule* is the suppression whose selectors
@@ -1302,9 +1279,7 @@ class DetectTemplatePatterns:
             detect_template_patterns,
         )
 
-        namespaces = (
-            self._namespaces or ctx.internal_namespaces or _INTERNAL_TEMPLATE_NAMESPACES
-        )
+        namespaces = self._namespaces or ctx.internal_namespaces or _INTERNAL_TEMPLATE_NAMESPACES
         new_findings = detect_template_patterns(ctx.old, ctx.new, namespaces)
         if not new_findings:
             return changes
@@ -1368,9 +1343,7 @@ class DetectInternalLeaks:
             detect_internal_leaks,
         )
 
-        namespaces = (
-            self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
-        )
+        namespaces = self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
         extra = detect_internal_leaks(changes, ctx.old, ctx.new, namespaces)
         # ADR-044 P1 items 1-2: the call-graph analogue, for a triggering
         # change with no layout/type-graph evidence at all (see
@@ -1427,9 +1400,7 @@ class DemoteUnreachableInternalChurn:
         )
         from .surface import REASON_PRIVATE_INTERNAL_UNREACHABLE
 
-        namespaces = (
-            self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
-        )
+        namespaces = self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
         frozen = list(ctx.frozen_namespaces)
 
         def _is_frozen(type_name: str) -> bool:

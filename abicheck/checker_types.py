@@ -293,8 +293,7 @@ class DiffResult:
     def breaking(self) -> list[Change]:
         """Changes classified as BREAKING under the active policy."""
         return [
-            c
-            for c in self.changes
+            c for c in self.changes
             if self._effective_verdict_for_change(c) == Verdict.BREAKING
         ]
 
@@ -302,8 +301,7 @@ class DiffResult:
     def source_breaks(self) -> list[Change]:
         """Changes classified as API_BREAK under the active policy."""
         return [
-            c
-            for c in self.changes
+            c for c in self.changes
             if self._effective_verdict_for_change(c) == Verdict.API_BREAK
         ]
 
@@ -311,8 +309,7 @@ class DiffResult:
     def compatible(self) -> list[Change]:
         """Changes classified as COMPATIBLE under the active policy."""
         return [
-            c
-            for c in self.changes
+            c for c in self.changes
             if self._effective_verdict_for_change(c) == Verdict.COMPATIBLE
         ]
 
@@ -320,8 +317,7 @@ class DiffResult:
     def risk(self) -> list[Change]:
         """Changes classified as COMPATIBLE_WITH_RISK under the active policy."""
         return [
-            c
-            for c in self.changes
+            c for c in self.changes
             if self._effective_verdict_for_change(c) == Verdict.COMPATIBLE_WITH_RISK
         ]
 

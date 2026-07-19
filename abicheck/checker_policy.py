@@ -152,9 +152,7 @@ class ChangeKind(str, Enum):
     PIE_DISABLED = "pie_disabled"  # PIE executable → non-PIE
     STACK_CANARY_REMOVED = "stack_canary_removed"  # -fstack-protector dropped
     FORTIFY_SOURCE_WEAKENED = "fortify_source_weakened"  # _FORTIFY_SOURCE dropped
-    WRITABLE_EXECUTABLE_SEGMENT = (
-        "writable_executable_segment"  # W^X violation introduced
-    )
+    WRITABLE_EXECUTABLE_SEGMENT = "writable_executable_segment"  # W^X violation introduced
 
     # Symbol metadata drift (ELF .dynsym)
     SYMBOL_BINDING_CHANGED = "symbol_binding_changed"  # GLOBAL→WEAK (breaking)
@@ -187,12 +185,8 @@ class ChangeKind(str, Enum):
 
     # DWARF layout (Sprint 3)
     DWARF_INFO_MISSING = "dwarf_info_missing"  # new binary stripped of -g
-    EVIDENCE_COVERAGE_ASYMMETRIC = (
-        "layer_coverage_asymmetric"  # base scanned with evidence the target lacks
-    )
-    EVIDENCE_REQUIRED_MISSING = (
-        "evidence_required_missing"  # policy require_evidence layer absent (ADR-033 D7)
-    )
+    EVIDENCE_COVERAGE_ASYMMETRIC = "layer_coverage_asymmetric"  # base scanned with evidence the target lacks
+    EVIDENCE_REQUIRED_MISSING = "evidence_required_missing"  # policy require_evidence layer absent (ADR-033 D7)
     VERSIONED_SYMBOL_SCHEME_DETECTED = "versioned_symbol_scheme_detected"  # bulk removed↔added differ only by a version token (ICU u_*_NN / GNU symver); advisory
     SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK = "suppression_would_hide_public_break"  # a suppression rule matched but was withheld because the change is public-reachable (ADR-044 D4); advisory
     SUPPRESSION_REACHABILITY_UNKNOWN = "suppression_reachability_unknown"  # a suppression rule using reachability: proven-unreachable-only matched but was withheld because graph coverage could not prove the change unreachable (impact-analysis-layer P0); advisory
@@ -237,11 +231,11 @@ class ChangeKind(str, Enum):
     # the binary carry no `final` information). Source-level: gaining `final`
     # breaks any consumer that derives from the class.
     TYPE_BECAME_FINAL = "type_became_final"  # gained `final` → derivation no longer compiles → API_BREAK
-    TYPE_LOST_FINAL = "type_lost_final"  # lost `final` → devirtualization desync risk on old binaries → COMPATIBLE_WITH_RISK
+    TYPE_LOST_FINAL = "type_lost_final"      # lost `final` → devirtualization desync risk on old binaries → COMPATIBLE_WITH_RISK
     # `abstract` (>=1 pure virtual) transitions (header/castxml only — DWARF
     # and the binary carry no such trait directly).
     TYPE_BECAME_ABSTRACT = "type_became_abstract"  # gained a pure virtual → direct instantiation no longer compiles → API_BREAK
-    TYPE_LOST_ABSTRACT = "type_lost_abstract"  # lost all pure virtuals → newly instantiable, purely additive → COMPATIBLE
+    TYPE_LOST_ABSTRACT = "type_lost_abstract"      # lost all pure virtuals → newly instantiable, purely additive → COMPATIBLE
     BASE_CLASS_POSITION_CHANGED = (
         "base_class_position_changed"  # base reorder → this-ptr offset change
     )
@@ -271,8 +265,12 @@ class ChangeKind(str, Enum):
     # Default member initializer changes (header/castxml only). Gaining one is
     # not tracked (matches PARAM_DEFAULT_VALUE_*'s convention: an added default
     # is purely additive, never itself flagged).
-    FIELD_DEFAULT_INITIALIZER_REMOVED = "field_default_initializer_removed"  # lost implicit init → uninitialized-read risk → COMPATIBLE_WITH_RISK
-    FIELD_DEFAULT_INITIALIZER_CHANGED = "field_default_initializer_changed"  # value changed → silent behavior change → COMPATIBLE
+    FIELD_DEFAULT_INITIALIZER_REMOVED = (
+        "field_default_initializer_removed"  # lost implicit init → uninitialized-read risk → COMPATIBLE_WITH_RISK
+    )
+    FIELD_DEFAULT_INITIALIZER_CHANGED = (
+        "field_default_initializer_changed"  # value changed → silent behavior change → COMPATIBLE
+    )
 
     # Pointer level changes
     PARAM_POINTER_LEVEL_CHANGED = "param_pointer_level_changed"  # T* → T** or T** → T*
@@ -566,19 +564,11 @@ class ChangeKind(str, Enum):
     # BREAKING. When a build-context change actually breaks the ABI, the
     # artifact diff (L0/L1/L2) emits the BREAKING finding separately; these
     # kinds explain and localize it.
-    BUILD_CONTEXT_CHANGED = (
-        "build_context_changed"  # non-ABI build metadata drift → COMPATIBLE (quality)
-    )
-    ABI_RELEVANT_BUILD_FLAG_CHANGED = (
-        "abi_relevant_build_flag_changed"  # ABI-affecting flag changed → RISK
-    )
+    BUILD_CONTEXT_CHANGED = "build_context_changed"  # non-ABI build metadata drift → COMPATIBLE (quality)
+    ABI_RELEVANT_BUILD_FLAG_CHANGED = "abi_relevant_build_flag_changed"  # ABI-affecting flag changed → RISK
     HEADER_PARSE_CONTEXT_DRIFT = "header_parse_context_drift"  # headers parsed under different context than the build → RISK
-    TOOLCHAIN_VERSION_CHANGED = (
-        "toolchain_version_changed"  # compiler/stdlib/sysroot changed → RISK
-    )
-    GENERATED_FILE_DEPENDENCY_UNSTABLE = (
-        "generated_file_dependency_unstable"  # generated-file dependency risk → RISK
-    )
+    TOOLCHAIN_VERSION_CHANGED = "toolchain_version_changed"  # compiler/stdlib/sysroot changed → RISK
+    GENERATED_FILE_DEPENDENCY_UNSTABLE = "generated_file_dependency_unstable"  # generated-file dependency risk → RISK
     LINK_EXPORT_POLICY_CHANGED = "link_export_policy_changed"  # version script / export map / .def changed → RISK
 
     # ── Runtime-model / build-mode flips (ADR-028 L3 — gap-analysis follow-up) ─
@@ -586,16 +576,10 @@ class ChangeKind(str, Enum):
     # between versions. Like the other L3 kinds these are never BREAKING on their
     # own (ADR-028 D3): the artifact diff proves an actual break; these flag the
     # elevated risk and localize the cause. They default to RISK.
-    EXCEPTIONS_MODE_CHANGED = (
-        "exceptions_mode_changed"  # -fexceptions ↔ -fno-exceptions flip → RISK
-    )
+    EXCEPTIONS_MODE_CHANGED = "exceptions_mode_changed"  # -fexceptions ↔ -fno-exceptions flip → RISK
     RTTI_MODE_CHANGED = "rtti_mode_changed"  # -frtti ↔ -fno-rtti flip → RISK
-    TLS_MODEL_CHANGED = (
-        "tls_model_changed"  # -ftls-model / -fextern-tls-init flip → RISK
-    )
-    THREADSAFE_STATICS_MODE_CHANGED = (
-        "threadsafe_statics_mode_changed"  # -fno-threadsafe-statics flip → RISK
-    )
+    TLS_MODEL_CHANGED = "tls_model_changed"  # -ftls-model / -fextern-tls-init flip → RISK
+    THREADSAFE_STATICS_MODE_CHANGED = "threadsafe_statics_mode_changed"  # -fno-threadsafe-statics flip → RISK
     ENUM_SIZE_FLAG_CHANGED = "enum_size_flag_changed"  # -fshort-enums flip → enum storage size changes → RISK
     STRUCT_PACKING_MODE_CHANGED = "struct_packing_mode_changed"  # -fpack-struct / /Zp flip → member offsets shift → RISK
     LTO_MODE_CHANGED = "lto_mode_changed"  # -flto ↔ no-LTO flip → cross-TU codegen/vtable emission differs → RISK
@@ -617,38 +601,18 @@ class ChangeKind(str, Enum):
     # inline/template bodies, constexpr values, uninstantiated templates. Per
     # ADR-028 D3 / ADR-030 D6 they are source/API findings, never sole authority
     # for a shipped-ABI BREAKING verdict — they default to API_BREAK or RISK.
-    PUBLIC_MACRO_VALUE_CHANGED = (
-        "public_macro_value_changed"  # public macro constant changed → API_BREAK
-    )
-    DEFAULT_ARGUMENT_CHANGED = (
-        "default_argument_changed"  # default argument value changed → API_BREAK
-    )
-    INLINE_BODY_CHANGED = (
-        "inline_body_changed"  # public inline body changed, no symbol change → RISK
-    )
-    CONSTEXPR_VALUE_CHANGED = (
-        "constexpr_value_changed"  # public constexpr value changed → API_BREAK
-    )
-    TEMPLATE_BODY_CHANGED = (
-        "template_body_changed"  # uninstantiated template body changed → RISK
-    )
-    UNINSTANTIATED_TEMPLATE_REMOVED = (
-        "uninstantiated_template_removed"  # public template removed → API_BREAK
-    )
-    SOURCE_DECL_BINARY_SYMBOL_MISMATCH = (
-        "source_decl_binary_symbol_mismatch"  # decl no longer maps to a symbol → RISK
-    )
+    PUBLIC_MACRO_VALUE_CHANGED = "public_macro_value_changed"  # public macro constant changed → API_BREAK
+    DEFAULT_ARGUMENT_CHANGED = "default_argument_changed"  # default argument value changed → API_BREAK
+    INLINE_BODY_CHANGED = "inline_body_changed"  # public inline body changed, no symbol change → RISK
+    CONSTEXPR_VALUE_CHANGED = "constexpr_value_changed"  # public constexpr value changed → API_BREAK
+    TEMPLATE_BODY_CHANGED = "template_body_changed"  # uninstantiated template body changed → RISK
+    UNINSTANTIATED_TEMPLATE_REMOVED = "uninstantiated_template_removed"  # public template removed → API_BREAK
+    SOURCE_DECL_BINARY_SYMBOL_MISMATCH = "source_decl_binary_symbol_mismatch"  # decl no longer maps to a symbol → RISK
     SOURCE_BINARY_PROVENANCE_MISMATCH = "source_binary_provenance_mismatch"  # source tree likely does not match the binary → RISK
-    ODR_SOURCE_CONFLICT = (
-        "odr_source_conflict"  # same type name differs across TUs → RISK
-    )
-    GENERATED_HEADER_CHANGED = (
-        "generated_header_changed"  # generated public header changed → RISK
-    )
+    ODR_SOURCE_CONFLICT = "odr_source_conflict"  # same type name differs across TUs → RISK
+    GENERATED_HEADER_CHANGED = "generated_header_changed"  # generated public header changed → RISK
     PUBLIC_TYPEDEF_TARGET_CHANGED = "public_typedef_target_changed"  # public typedef/alias underlying type changed → API_BREAK
-    PUBLIC_MACRO_REMOVED = (
-        "public_macro_removed"  # public macro removed from the headers → API_BREAK
-    )
+    PUBLIC_MACRO_REMOVED = "public_macro_removed"  # public macro removed from the headers → API_BREAK
     INLINE_FUNCTION_REMOVED = "inline_function_removed"  # public header-only inline function removed (no exported symbol) → API_BREAK
     PUBLIC_TYPEDEF_REMOVED = "public_typedef_removed"  # public typedef/alias removed (no exported symbol) → API_BREAK
     SOURCE_FACT_COVERAGE_INCOMPLETE = "source_fact_coverage_incomplete"  # a mandatory fact family was partial/failed, or the two sides' fact-set identity is incompatible (ADR-038 C.8) → RISK
@@ -698,12 +662,8 @@ class ChangeKind(str, Enum):
     # artifact/type diff emits the BREAKING size/offset finding separately;
     # these kinds explain and localize the cause without escalating on their
     # own (and stay silent when build-mode evidence is absent).
-    STDLIB_IMPLEMENTATION_CHANGED = (
-        "stdlib_implementation_changed"  # libstdc++ ↔ libc++ ↔ MSVC STL → RISK
-    )
-    LIBCPP_ABI_VERSION_CHANGED = (
-        "libcpp_abi_version_changed"  # _LIBCPP_ABI_VERSION 1 ↔ 2 → RISK
-    )
+    STDLIB_IMPLEMENTATION_CHANGED = "stdlib_implementation_changed"  # libstdc++ ↔ libc++ ↔ MSVC STL → RISK
+    LIBCPP_ABI_VERSION_CHANGED = "libcpp_abi_version_changed"  # _LIBCPP_ABI_VERSION 1 ↔ 2 → RISK
 
     # ── Fine-grained class-layout descriptor (layout-closure work) ───────────
     # Emitted by diff_layout.py from the optional layout fields on RecordType
@@ -749,9 +709,7 @@ class ChangeKind(str, Enum):
     CET_PROTECTION_WEAKENED = "cet_protection_weakened"  # IBT/SHSTK dropped → RISK
     BRANCH_PROTECTION_WEAKENED = "branch_protection_weakened"  # BTI/PAC dropped → RISK
     CET_PROTECTION_IMPROVED = "cet_protection_improved"  # IBT/SHSTK gained → COMPATIBLE
-    BRANCH_PROTECTION_IMPROVED = (
-        "branch_protection_improved"  # BTI/PAC gained → COMPATIBLE
-    )
+    BRANCH_PROTECTION_IMPROVED = "branch_protection_improved"  # BTI/PAC gained → COMPATIBLE
 
     # A3: ELF identity / ABI-flags guard. The ELF-side counterpart to
     # PE_MACHINE_CHANGED / MACHO_CPU_TYPE_CHANGED. ELF_ABI_FLAGS_CHANGED makes
@@ -759,9 +717,7 @@ class ChangeKind(str, Enum):
     # explanatory L3 signal).
     ELF_MACHINE_CHANGED = "elf_machine_changed"  # e_machine differs → BREAKING
     ELF_CLASS_CHANGED = "elf_class_changed"  # 32↔64-bit → BREAKING
-    ELF_ABI_FLAGS_CHANGED = (
-        "elf_abi_flags_changed"  # decoded float-ABI/EABI drift → BREAKING
-    )
+    ELF_ABI_FLAGS_CHANGED = "elf_abi_flags_changed"  # decoded float-ABI/EABI drift → BREAKING
     ELF_OSABI_CHANGED = "elf_osabi_changed"  # EI_OSABI differs → RISK
 
     # A4: STB_GNU_UNIQUE binding transitions. Uniqueness is enforced process-wide
@@ -784,9 +740,7 @@ class ChangeKind(str, Enum):
     SECONDARY_VTABLE_GROUP_CHANGED = "secondary_vtable_group_changed"  # secondary vtable group added/removed/reordered → BREAKING
     # A same-set reorder of virtual bases shifts the virtual-base offset table, so
     # this-pointer adjustments baked into old binaries land on the wrong subobject.
-    VIRTUAL_BASE_OFFSET_CHANGED = (
-        "virtual_base_offset_changed"  # vbase offset table reordered → BREAKING
-    )
+    VIRTUAL_BASE_OFFSET_CHANGED = "virtual_base_offset_changed"  # vbase offset table reordered → BREAKING
 
     # ── G23 Phase D — ecosystem detectors ───────────────────────────────────
     # D3: an exported symbol whose mangled name embeds an unnamed type — a lambda
@@ -802,14 +756,10 @@ class ChangeKind(str, Enum):
     # DWARF byte size on a persisting symbol.
     LONG_DOUBLE_ABI_CHANGED = "long_double_abi_changed"  # → BREAKING
     # D1: Linux kernel module ABI (kABI) facts from Module.symvers / genksyms.
-    KABI_SYMBOL_REMOVED = (
-        "kabi_symbol_removed"  # exported kernel symbol gone → BREAKING
-    )
+    KABI_SYMBOL_REMOVED = "kabi_symbol_removed"  # exported kernel symbol gone → BREAKING
     KABI_CRC_CHANGED = "kabi_crc_changed"  # genksyms CRC changed → modversions reject the module → BREAKING
     KABI_SYMBOL_NAMESPACE_CHANGED = "kabi_symbol_namespace_changed"  # export namespace gained/moved → module needs MODULE_IMPORT_NS → BREAKING
-    KABI_EXPORT_TYPE_CHANGED = (
-        "kabi_export_type_changed"  # EXPORT_SYMBOL ↔ EXPORT_SYMBOL_GPL → API_BREAK
-    )
+    KABI_EXPORT_TYPE_CHANGED = "kabi_export_type_changed"  # EXPORT_SYMBOL ↔ EXPORT_SYMBOL_GPL → API_BREAK
     KABI_SYMBOL_ADDED = "kabi_symbol_added"  # new exported kernel symbol → COMPATIBLE
     # ── Python-level API of an extension module (G23) ─────────────────────────
     # Emitted by diff_python_api.py from the Python-visible surface recovered
@@ -820,9 +770,7 @@ class ChangeKind(str, Enum):
     PYTHON_API_FUNCTION_REMOVED = "python_api_function_removed"  # a public top-level function disappeared from the module's Python API → callers importing it break → API_BREAK
     PYTHON_API_FUNCTION_ADDED = "python_api_function_added"  # a new public top-level function → additive, existing callers unaffected → COMPATIBLE
     PYTHON_API_CLASS_REMOVED = "python_api_class_removed"  # a public class disappeared from the module's Python API → callers referencing it break → API_BREAK
-    PYTHON_API_CLASS_ADDED = (
-        "python_api_class_added"  # a new public class → additive → COMPATIBLE
-    )
+    PYTHON_API_CLASS_ADDED = "python_api_class_added"  # a new public class → additive → COMPATIBLE
     PYTHON_API_METHOD_REMOVED = "python_api_method_removed"  # a public method disappeared from a class that still exists → callers of it break → API_BREAK
     PYTHON_API_METHOD_ADDED = "python_api_method_added"  # a new public method on an existing class → additive → COMPATIBLE
     PYTHON_API_PARAMETER_REMOVED = "python_api_parameter_removed"  # a parameter was dropped from a function/method signature → callers passing it hit a TypeError → API_BREAK
@@ -905,13 +853,9 @@ class ChangeKind(str, Enum):
     # ── Coverage extension: dynamic-loader / import-surface facts ────────────
     IMPORTED_SYMBOL_ADDED = "imported_symbol_added"  # binary gained an undefined (imported) symbol — new obligation on the consumer's link environment → RISK
     IMPORTED_SYMBOL_REMOVED = "imported_symbol_removed"  # binary dropped an undefined (imported) symbol — one fewer external obligation → COMPATIBLE (quality)
-    INTERPRETER_CHANGED = (
-        "interpreter_changed"  # PT_INTERP program interpreter path changed → RISK
-    )
+    INTERPRETER_CHANGED = "interpreter_changed"  # PT_INTERP program interpreter path changed → RISK
     BIND_NOW_DISABLED = "bind_now_disabled"  # DT_BIND_NOW/DF_BIND_NOW/DF_1_NOW dropped — eager→lazy binding, unresolved symbols surface at call time instead of load time → RISK
-    ELF_ENDIANNESS_CHANGED = (
-        "elf_endianness_changed"  # EI_DATA byte order flipped (LSB ↔ MSB) → BREAKING
-    )
+    ELF_ENDIANNESS_CHANGED = "elf_endianness_changed"  # EI_DATA byte order flipped (LSB ↔ MSB) → BREAKING
     X86_ISA_BASELINE_RAISED = "x86_isa_baseline_raised"  # GNU_PROPERTY_X86_ISA_1_NEEDED gained a level (e.g. x86-64-v2 → v3) — old CPUs can no longer run the library → RISK
     OS_DEPLOYMENT_FLOOR_RAISED = "os_deployment_floor_raised"  # minimum OS/kernel floor raised (Mach-O minos, PE subsystem version, ELF NT_GNU_ABI_TAG) → RISK
     DYNAMIC_LOADING_FLAGS_CHANGED = "dynamic_loading_flags_changed"  # DF_1_NODELETE / DF_1_NOOPEN / DF_1_ORIGIN toggled — dlopen/dlclose contract changed → RISK
@@ -942,7 +886,7 @@ class ChangeKind(str, Enum):
     # `enum class`/`enum struct` (C++11 scoped enumeration) transitions
     # (header/castxml only).
     ENUM_BECAME_SCOPED = "enum_became_scoped"  # unscoped → scoped: unqualified enumerator lookup and implicit-int conversions stop compiling → API_BREAK
-    ENUM_LOST_SCOPED = "enum_lost_scoped"  # scoped → unscoped: implicit-int conversions silently reappear → COMPATIBLE_WITH_RISK
+    ENUM_LOST_SCOPED = "enum_lost_scoped"      # scoped → unscoped: implicit-int conversions silently reappear → COMPATIBLE_WITH_RISK
     # Explicit C++11 `override` specifier on a virtual method (header/castxml
     # only — distinct from FUNC_VIRTUAL_REMOVED/vtable-slot kinds, which
     # already catch an actual dispatch break; this is the source-level
@@ -953,23 +897,13 @@ class ChangeKind(str, Enum):
     # only). One pair per surface kind, matching the existing per-entity-kind
     # convention (is_final on types, is_explicit on functions, ...).
     FUNC_DEPRECATED_ADDED = "func_deprecated_added"  # function gained [[deprecated]] → COMPATIBLE (quality: advance notice)
-    FUNC_DEPRECATED_REMOVED = (
-        "func_deprecated_removed"  # function lost [[deprecated]] → COMPATIBLE (quality)
-    )
-    VAR_DEPRECATED_ADDED = (
-        "var_deprecated_added"  # variable gained [[deprecated]] → COMPATIBLE (quality)
-    )
-    VAR_DEPRECATED_REMOVED = (
-        "var_deprecated_removed"  # variable lost [[deprecated]] → COMPATIBLE (quality)
-    )
+    FUNC_DEPRECATED_REMOVED = "func_deprecated_removed"  # function lost [[deprecated]] → COMPATIBLE (quality)
+    VAR_DEPRECATED_ADDED = "var_deprecated_added"  # variable gained [[deprecated]] → COMPATIBLE (quality)
+    VAR_DEPRECATED_REMOVED = "var_deprecated_removed"  # variable lost [[deprecated]] → COMPATIBLE (quality)
     TYPE_DEPRECATED_ADDED = "type_deprecated_added"  # class/struct/union gained [[deprecated]] → COMPATIBLE (quality)
     TYPE_DEPRECATED_REMOVED = "type_deprecated_removed"  # class/struct/union lost [[deprecated]] → COMPATIBLE (quality)
-    ENUM_DEPRECATED_ADDED = (
-        "enum_deprecated_added"  # enum gained [[deprecated]] → COMPATIBLE (quality)
-    )
-    ENUM_DEPRECATED_REMOVED = (
-        "enum_deprecated_removed"  # enum lost [[deprecated]] → COMPATIBLE (quality)
-    )
+    ENUM_DEPRECATED_ADDED = "enum_deprecated_added"  # enum gained [[deprecated]] → COMPATIBLE (quality)
+    ENUM_DEPRECATED_REMOVED = "enum_deprecated_removed"  # enum lost [[deprecated]] → COMPATIBLE (quality)
     FIELD_DEPRECATED_ADDED = "field_deprecated_added"  # struct/class field gained [[deprecated]] → COMPATIBLE (quality)
     FIELD_DEPRECATED_REMOVED = "field_deprecated_removed"  # struct/class field lost [[deprecated]] → COMPATIBLE (quality)
 
