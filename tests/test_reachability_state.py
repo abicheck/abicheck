@@ -207,6 +207,46 @@ class TestMarkReachabilityTriState:
         assert found[0].public_reachable is True
         assert found[0].reachability_state == ReachabilityState.PROVEN_REACHABLE
 
+    def test_public_source_abi_finding_is_reachable_despite_internal_looking_name(
+        self,
+    ) -> None:
+        """Codex review: buildsource/source_diff.py's L4 findings (e.g.
+        PUBLIC_TYPEDEF_REMOVED) are built only from a SourceAbiSurface's own
+        ``reachable_types`` collection — entities the L4 replay walk already
+        proved reachable from the public surface — never from a
+        namespace-name heuristic. Without special-casing these kinds, a
+        genuinely public alias that happens to live in a namespace segment
+        matching DEFAULT_INTERNAL_NAMESPACES (e.g. ``ns::detail::PublicAlias``
+        — unusual but real) would be misjudged by is_internal_type() purely
+        on its name and, since the plain header-parsed AbiSnapshot.typedefs
+        also commonly carries the same alias, fall into the
+        known_type_names layout-domain fallback and come out
+        PROVEN_UNREACHABLE — letting a broad `namespace: ns::detail::*` +
+        `proven-unreachable-only` rule hide a real source/API break that the
+        L4 surface itself already proved was public."""
+        old = _snap(functions=[_public_fn("foo", "int")])
+        old.typedefs["ns::detail::PublicAlias"] = "int"
+        new = _snap(functions=[_public_fn("foo", "int")])
+        raw_change = Change(
+            kind=ChangeKind.PUBLIC_TYPEDEF_REMOVED,
+            symbol="ns::detail::PublicAlias",
+            description="removed",
+        )
+        suppression = SuppressionList([
+            Suppression(
+                namespace="ns::detail::*",
+                reachability="proven-unreachable-only",
+                reason="would wrongly suppress a real public typedef removal",
+            )
+        ])
+        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        found = [c for c in ctx.kept if c.kind == ChangeKind.PUBLIC_TYPEDEF_REMOVED]
+        assert len(found) == 1
+        assert found[0].public_reachable is True
+        assert found[0].reachability_state == ReachabilityState.PROVEN_REACHABLE
+        # The break survives — the broad rule could not prove it unreachable.
+        assert raw_change not in ctx.suppressed
+
     def test_declared_type_never_reachable_anywhere_is_still_proven_unreachable(
         self,
     ) -> None:

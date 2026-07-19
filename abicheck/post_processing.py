@@ -521,6 +521,26 @@ _ENUM_MEMBER_KINDS = frozenset({
     ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED,
 })
 
+# Codex review: buildsource/source_diff.py's L4 source-replay findings are
+# public *by construction* — each one is built only from an old/new
+# SourceAbiSurface's own ``reachable_types``/``reachable_macros``/
+# ``reachable_declarations``/``reachable_templates`` collections (entities
+# already proven reachable from the public surface by the L4 replay walk
+# itself), never from a namespace-name heuristic. Falling through to the
+# is_internal_type()-based layout/call-graph classification below would
+# misjudge one of these purely on its *name* (e.g. a genuinely public
+# typedef that happens to live in a namespace segment matching
+# DEFAULT_INTERNAL_NAMESPACES) and could mark it PROVEN_UNREACHABLE even
+# though the L4 surface that produced it already proved the opposite.
+_PUBLIC_SOURCE_ABI_KINDS = frozenset({
+    ChangeKind.PUBLIC_TYPEDEF_REMOVED,
+    ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED,
+    ChangeKind.PUBLIC_MACRO_REMOVED,
+    ChangeKind.PUBLIC_MACRO_VALUE_CHANGED,
+    ChangeKind.INLINE_FUNCTION_REMOVED,
+    ChangeKind.UNINSTANTIATED_TEMPLATE_REMOVED,
+})
+
 
 class MarkReachability:
     """Tag each change with public-reachability metadata, before suppression runs.
@@ -839,6 +859,11 @@ class MarkReachability:
             ):
                 c.public_reachable = True
                 c.reachability_kind = "direct_public_symbol"
+                c.reachability_state = ReachabilityState.PROVEN_REACHABLE
+                continue
+            if c.kind in _PUBLIC_SOURCE_ABI_KINDS:
+                c.public_reachable = True
+                c.reachability_kind = "public_source_abi_surface"
                 c.reachability_state = ReachabilityState.PROVEN_REACHABLE
                 continue
             tagged = False
