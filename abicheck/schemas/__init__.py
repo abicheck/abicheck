@@ -136,6 +136,7 @@ SCAN_SCHEMA_VERSION = "1.0"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"
+AGGREGATE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "aggregate_report.schema.json"
 
 
 @cache
@@ -146,9 +147,19 @@ def load_compare_report_schema() -> dict[str, Any]:
     return data
 
 
+@cache
+def load_aggregate_report_schema() -> dict[str, Any]:
+    """Return the parsed aggregate-report JSON Schema as a dict."""
+    with AGGREGATE_REPORT_SCHEMA_PATH.open(encoding="utf-8") as fh:
+        data: dict[str, Any] = json.load(fh)
+    return data
+
+
 __all__ = [
     "REPORT_SCHEMA_VERSION",
     "SCAN_SCHEMA_VERSION",
     "COMPARE_REPORT_SCHEMA_PATH",
+    "AGGREGATE_REPORT_SCHEMA_PATH",
     "load_compare_report_schema",
+    "load_aggregate_report_schema",
 ]

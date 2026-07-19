@@ -96,7 +96,7 @@ If the release also carries build-emitted source facts from one shared
 multi-library release with one shared facts
 pack](github-action-source-scans.md#recommended-flow-a-multi-library-release-with-one-shared-facts-pack)
 for the full walkthrough — it chains this recipe with inline `build-info`
-embedding and the [post-matrix ABI gate](#post-matrix-abi-gate-unified-verdict)
+embedding and the [post-matrix ABI gate](#post-matrix-abi-gate-fan-out-builds-fan-in-verdict)
 below.
 
 ## Matrix: multiple platforms (native scan per OS)
@@ -140,23 +140,54 @@ jobs:
           path: abi-report-${{ runner.os }}.json
 ```
 
-## Post-matrix ABI gate (unified verdict)
+## Post-matrix ABI gate (fan-out builds, fan-in verdict)
 
-After per-platform matrix runs, a gate job downloads all JSON reports and
-produces one aggregated exit code for the entire workflow:
+Each platform builds and compares on its own matrix leg (fan-out) and uploads
+a JSON report; a gate job downloads them all and folds them into one verdict
+(fan-in) with **`abicheck aggregate`**:
+
+A single committed `abi-targets.json` is the **source of truth**: a plan job
+reads it into the build matrix, and the gate job reads the *same* file to
+reconcile coverage — so the two cannot drift. The manifest carries the
+per-target build metadata (`os`/`ext`) alongside `id`/`required`; `aggregate`
+reads only `id`/`required` and ignores the rest.
+
+```json
+{
+  "aggregate_manifest_version": "1.0",
+  "targets": [
+    {"id": "linux-x86_64",   "required": true, "os": "ubuntu-latest",  "ext": "so"},
+    {"id": "macos-arm64",    "required": true, "os": "macos-latest",   "ext": "dylib"},
+    {"id": "windows-x86_64", "required": true, "os": "windows-latest", "ext": "dll"}
+  ]
+}
+```
+
+The optional `aggregate_manifest_version` lets `aggregate` reject a manifest
+written for a newer major version it cannot interpret; omit it and the manifest
+is treated as the current major.
 
 ```yaml
 jobs:
+  abi-plan:                          # read the manifest → matrix, exactly once
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: plan
+        run: |
+          echo "matrix={\"include\":$(jq -c '.targets' abi-targets.json)}" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4   # hand the SAME file to the gate job
+        with:
+          name: abi-target-manifest
+          path: abi-targets.json
+
   abi-scan:
+    needs: abi-plan
     strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            ext: so
-          - os: macos-latest
-            ext: dylib
-          - os: windows-latest
-            ext: dll
+      fail-fast: false                 # don't cancel other legs when one fails
+      matrix: ${{ fromJSON(needs.abi-plan.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -167,23 +198,31 @@ jobs:
       - name: ABI compare (native)
         uses: abicheck/abicheck@v0.5.0
         with:
-          old-library: baselines/${{ runner.os }}/abi-old.json
+          old-library: baselines/${{ matrix.id }}/abi-old.json
           new-library: build/libfoo.${{ matrix.ext }}
           new-header: include/foo.h
           format: json
-          output-file: abi-report-${{ runner.os }}.json
-          fail-on-breaking: false   # let gate job decide
+          output-file: abi-report-${{ matrix.id }}.json
+          fail-on-breaking: false      # let the gate job decide
 
       - name: Upload platform ABI report
+        if: ${{ always() }}            # upload even if the build/compare failed
         uses: actions/upload-artifact@v4
         with:
-          name: abi-report-${{ runner.os }}
-          path: abi-report-${{ runner.os }}.json
+          name: abi-report-${{ matrix.id }}
+          path: abi-report-${{ matrix.id }}.json
+          if-no-files-found: ignore
 
   abi-gate:
-    needs: abi-scan
+    needs: [abi-plan, abi-scan]
+    if: ${{ always() }}                # run the gate even if a matrix leg failed
     runs-on: ubuntu-latest
     steps:
+      - name: Download the target manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: abi-target-manifest    # the exact abi-targets.json the plan used
+
       - name: Download all ABI reports
         uses: actions/download-artifact@v4
         with:
@@ -194,39 +233,66 @@ jobs:
       - name: Aggregate verdicts and gate
         run: |
           pip install abicheck --quiet
-          python3 - <<'PYEOF'
-          import json, sys, os, glob
-
-          SEVERITY = {"NO_CHANGE": 0, "COMPATIBLE": 0, "COMPATIBLE_WITH_RISK": 0,
-                      "API_BREAK": 2, "BREAKING": 4, "ERROR": 4}
-
-          worst = 0
-          rows = []
-          for path in sorted(glob.glob("abi-reports/*.json")):
-              with open(path) as f:
-                  data = json.load(f)
-              verdict = data.get("verdict", "ERROR")
-              platform = os.path.basename(path).replace("abi-report-", "").replace(".json", "")
-              rows.append(f"| {platform} | {verdict} |")
-              worst = max(worst, SEVERITY.get(verdict, 4))
-
-          table = "\n".join(rows)
-          print(f"## ABI Gate\n\n| Platform | Verdict |\n|---|---|\n{table}")
-
-          if worst >= 4:
-              print("BREAKING ABI change detected on at least one platform.", file=sys.stderr)
-              sys.exit(4)
-          elif worst >= 2:
-              print("API break detected on at least one platform.", file=sys.stderr)
-              sys.exit(2)
-          print("All platforms: compatible.")
-          PYEOF
+          abicheck aggregate abi-reports/ --manifest abi-targets.json
 ```
 
+The gate downloads the manifest as an artifact (not `actions/checkout`), so it
+gates against the exact target set the matrix was planned from. For a quick
+inline set instead of a manifest, `--expect linux-x86_64,macos-arm64,windows-x86_64`
+with optional `--optional <ids>` is equivalent; `--discovered-only` opts out of
+the coverage gate entirely. One of the three is **required** — a bare
+`aggregate abi-reports/` is a usage error, because with no declared target set
+the gate cannot tell a missing required target from an absent one. `aggregate`
+then guarantees the properties the old hand-written gate loop silently violated:
+
+* **A required target with no report is _unavailable_ (unknown), never counted
+  as compatible.** If the Windows leg fails before uploading
+  `abi-report-windows-x86_64.json`, the gate reports Windows as unavailable and
+  fails at exit `1` — it does **not** pass green as "all platforms compatible"
+  when a required platform was never analyzed.
+* **Gate, coverage, and compatibility stay orthogonal (ADR-042).** Each report
+  carries its own severity gate decision; `aggregate` *combines* those (a
+  policy-blocked `COMPATIBLE` still fails, a demoted `BREAKING` can pass) rather
+  than recomputing a gate from the verdict. The exit code is `0` pass / `1`
+  coverage gap, an addition/quality-only block, or another non-verdict per-report
+  failure (e.g. a `scan` budget overflow) / `2` source break / `4` ABI break
+  (see [`abicheck aggregate`](../reference/exit-codes.md#abicheck-aggregate) for
+  the full contract). A missing required build is a **coverage** failure at `1`
+  — never promoted to a fake ABI-break exit `4`.
+
 !!! tip
-    Set `fail-on-breaking: false` in each matrix job so runners don't fail
-    early. The gate job reads all JSON reports and exits `4` (breaking),
-    `2` (API break), or `0` (compatible).
+    Set `fail-on-breaking: false` in each matrix job and let the gate decide.
+    Use `fail-fast: false` on the matrix and `if: ${{ always() }}` on the
+    upload step and the gate job so one failed leg neither cancels the others
+    nor skips the fan-in. Pass `--on-missing-required warn` to `aggregate` if
+    you want a missing required target to be reported but not fail the gate (the
+    per-target gate decisions alone then decide the exit code); mark a target
+    `"required": false` in the manifest (or `--optional`) if its absence should
+    never fail coverage.
+
+Sample output when the Windows leg failed to produce a report:
+
+```text
+ABI aggregate gate: Failed (coverage: partial)
+Analyzed 2 of 3 required targets
+
+  linux-x86_64: COMPATIBLE
+  macos-arm64: COMPATIBLE
+  windows-x86_64: ⚠ unavailable — no report was produced for this expected target
+
+Compatibility:
+  No ABI regressions in the analyzed targets.
+Coverage:
+  Incomplete — required target(s) unknown: windows-x86_64.
+Gate:
+  Failed — exit 1; required coverage incomplete.
+```
+
+Add `--format json` for a versioned, machine-readable result — the three axes
+are kept separate under `gate` (`passed`/`exit_code`/`blocking_targets`),
+`coverage` (`status`/counts/`missing_required_targets`), and `compatibility`
+(`verdict`/`analyzed_targets`), plus a per-`targets` breakdown and an
+`unexpected_targets` list — to post elsewhere.
 
 ## Skip system dependency installation
 

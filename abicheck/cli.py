@@ -1806,6 +1806,7 @@ if __name__ == "__main__":
     sys.modules.setdefault("abicheck.cli", sys.modules[__name__])
 
 from . import (  # noqa: E402  — must run after `main` and helpers are defined
+    cli_aggregate,  # noqa: F401  — registers aggregate
     cli_buildsource,  # noqa: F401  — buildsource internals (no command of its own)
     cli_scan,  # noqa: F401  — registers scan
     cli_stack,  # noqa: F401  — registers deps (tree, compare)

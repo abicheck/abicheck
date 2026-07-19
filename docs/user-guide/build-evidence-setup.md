@@ -34,29 +34,134 @@ pass-through. The wrapper reuses the castxml/clang extractors, so it is the
 The **Clang plugin** (`contrib/abicheck-clang-plugin/`) emits the *same*
 `source_facts` schema straight from the AST Clang already built during the real
 compile, so — unlike the wrapper's companion parse — it adds **no second
-front-end pass**. Reach for it on large/template-heavy builds where that cost is
-measurable and you own the toolchain image (the plugin links the loading clang's
-libraries, so it is ABI-locked to that LLVM major — build it once against your
-pinned `clang`).
+front-end pass**. It registers as an `AddAfterMainAction`, so it runs *after*
+codegen and can never change or fail the object file (the authority rule,
+enforced not just claimed). Reach for it on large/template-heavy builds where
+the wrapper's second-parse cost is measurable **and** you own the toolchain
+image — because the plugin `.so` links the loading clang's libraries, it is
+**ABI-locked to that clang's LLVM major** (see the version-coupling box below).
+
+### Step 1 — build the plugin, once, against *your* clang
 
 ```bash
-# 1. Build the plugin against your toolchain's LLVM (once per image).
-#    Debian/Ubuntu needs the matching libclang-XX-dev package, not only clang-XX.
+# Debian/Ubuntu needs the matching libclang-XX-dev + llvm-XX-dev packages,
+# not only clang-XX. CMAKE_PREFIX_PATH pins WHICH LLVM the plugin links.
 cmake -S contrib/abicheck-clang-plugin -B build \
   -DCMAKE_PREFIX_PATH="$(llvm-config --cmakedir)/.."
-cmake --build build                                   # -> build/libabicheck-facts.so
+cmake --build build            # -> build/libabicheck-facts.so
+```
 
-# 2. Add it to the normal compile. Use the `-Xclang -plugin-arg-abicheck-facts`
-#    form (the `-fplugin-arg-` shorthand mis-parses the hyphenated plugin name).
-#    `public-roots=` is strongly recommended — it is the plugin's ABICHECK_CC_HEADERS.
-clang++ -std=c++17 -Iinclude \
-  -fplugin=./build/libabicheck-facts.so \
-  -Xclang -plugin-arg-abicheck-facts -Xclang out=abicheck_inputs \
-  -Xclang -plugin-arg-abicheck-facts -Xclang public-roots=include \
-  -c src/foo.cpp -o foo.o
+Validated across LLVM/Clang **16, 17, and 18** (ADR-038 C.6 differential
+conformance gate). The `.so` you build here must be loaded by a clang of the
+**same** major.
 
-# 3. Fold the emitted pack in — one step, no re-parse (the pack is
-#    auto-detected from its manifest.json, no separate merge command).
+!!! warning "The plugin is ABI-locked to one LLVM major"
+    A plugin built against LLVM *N* loaded into a clang of a different major
+    fails to `dlopen` — clang aborts the compile with an error like
+    `unable to load plugin '.../libabicheck-facts.so': undefined symbol: _ZN4llvm...`.
+    There is no auto-fallback. If your build image can ship more than one
+    clang, build (or fetch) one plugin `.so` per major and select it by the
+    compiler's version. Detect the major with
+    `clang --version` / `llvm-config --version` and keep the `.so` path keyed
+    on it (e.g. `plugins/clang-18/libabicheck-facts.so`). This coupling is the
+    single reason to prefer the portable `abicheck-cc` wrapper or
+    `compile_commands.json` replay unless the second-parse cost is a real
+    problem.
+
+### Step 2 — connect it to your build (not one hand-edited compile)
+
+The plugin is turned on by two things on the compile line: `-fplugin=<path>`
+to load it, and `-Xclang -plugin-arg-abicheck-facts -Xclang <key=value>` to
+configure it. Use the `-Xclang` form — the `-fplugin-arg-` shorthand
+mis-parses the hyphenated plugin name and silently hands the argument to a
+plugin called `abicheck`.
+
+Rather than hand-editing every compile, define the flags **once** and inject
+them into your build system's compile flags. `public-roots=` is strongly
+recommended — it is the plugin's equivalent of `ABICHECK_CC_HEADERS`, the
+public-header boundary that decides which declarations are ABI-relevant.
+
+```bash
+# Build the flag string once (absolute out= — see the parallel-build note).
+ABICHECK_PLUGIN_FLAGS="\
+-fplugin=$PWD/build/libabicheck-facts.so \
+-Xclang -plugin-arg-abicheck-facts -Xclang out=$PWD/abicheck_inputs \
+-Xclang -plugin-arg-abicheck-facts -Xclang public-roots=$PWD/include"
+```
+
+Then wire it into whichever build system you use.
+
+**CMake** — append the flags to your normal build:
+
+```bash
+# Separate arguments (not one quoted string) so CMake passes each token through.
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_CXX_FLAGS="$ABICHECK_PLUGIN_FLAGS"
+cmake --build build
+```
+
+Or, inside `CMakeLists.txt`, scope it to the library target only:
+
+```cmake
+separate_arguments(ABICHECK_FLAGS UNIX_COMMAND "$ENV{ABICHECK_PLUGIN_FLAGS}")
+target_compile_options(foo PRIVATE ${ABICHECK_FLAGS})
+```
+
+**Make / autotools**:
+
+```bash
+make CXXFLAGS="$CXXFLAGS $ABICHECK_PLUGIN_FLAGS"
+```
+
+**Bazel** — in the `cc_library`/`cc_binary` rule (or a `--per_file_copt`):
+
+```python
+cc_library(
+    name = "foo",
+    # ... srcs/hdrs ...
+    copts = [
+        "-fplugin=$(location //tools:libabicheck-facts.so)",
+        # Absolute out= (see the notes below) — a relative path scatters across
+        # per-target working dirs and is discarded by Bazel's sandbox.
+        "-Xclang", "-plugin-arg-abicheck-facts", "-Xclang", "out=/abs/path/to/abicheck_inputs",
+        "-Xclang", "-plugin-arg-abicheck-facts", "-Xclang", "public-roots=include",
+    ],
+)
+```
+
+!!! warning "Bazel sandboxes the compile — the pack is discarded by default"
+    The plugin writes `out=` as a side effect Bazel does not declare as an
+    action output, so the sandbox throws it away. Run the fact-collecting build
+    with the compile step un-sandboxed (`--strategy=CppCompile=local`, or
+    `--spawn_strategy=local`) and point `out=` at one **absolute** path outside
+    the sandbox so the pack survives and every TU converges on it.
+
+!!! danger "Compiler caches skip the compile — and the plugin with it"
+    `ccache`/`sccache` key on preprocessed output plus arguments, **not** on
+    plugin side effects. A cache **hit** replays the cached object file
+    *without running clang*, so **no facts are emitted for that TU** — a
+    silent coverage hole, not an error. Run the fact-collecting build with the
+    cache disabled (`CCACHE_DISABLE=1` / `SCCACHE_RECACHE=1`), or collect facts
+    in a dedicated pass separate from your cached incremental build.
+    `distcc`/`icecc` run the compile on a remote host, so `source_facts/` lands
+    on the remote filesystem — collect on the driver, or fetch the pack back.
+
+!!! note "Make `out=` absolute for parallel / out-of-tree builds"
+    `out=` resolves against each compile's working directory. A relative
+    `out=abicheck_inputs` in an out-of-tree build where the compiler runs in
+    per-target subdirectories scatters the pack into several
+    `abicheck_inputs/` trees. Point `out=` at one **absolute** path (as in the
+    `$PWD/abicheck_inputs` above) so every TU converges on one pack.
+    Parallelism *within* one directory is safe — the plugin uses per-TU
+    race-free filenames and publishes `manifest.json` atomically. For a fresh
+    baseline, collect into an empty `out=` so an earlier build's stale
+    per-TU facts (e.g. for a since-deleted source) don't linger in the pack.
+
+### Step 3 — fold the emitted pack in
+
+```bash
+# One step, no re-parse — the pack is auto-detected from its manifest.json,
+# no separate merge command.
 abicheck dump libfoo.so -H include/ --build-info ./abicheck_inputs/ \
   -o libfoo.baseline.json
 ```
@@ -66,9 +171,7 @@ symbols as a pack-quality problem, not as a clean success: choose a compile unit
 that includes the public API for the library target, and point `public-roots=` at
 the physical header path printed by `clang -H`.
 
-The plugin is validated as a drop-in for the clang backend by a differential
-conformance gate (ADR-038 C.6) that runs across LLVM/Clang 16, 17, and 18; its
-full contract, coverage, and limitations live in
+The plugin's full contract, coverage, and limitations live in
 `contrib/abicheck-clang-plugin/README.md`. GCC (`-fdump-lang-class`) and MSVC
 have documented wrapper fallbacks. In every case the output contract is
 identical, so `dump --build-info` folds them in the same way, with no separate

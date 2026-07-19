@@ -49,13 +49,21 @@ def diff_mod():  # type: ignore[no-untyped-def]
 
 
 def test_dump_surface_covers_root_commands(dump_mod) -> None:  # type: ignore[no-untyped-def]
-    """The dumped surface exposes exactly the five root commands (ADR-043).
+    """The dumped surface exposes exactly the public root commands (ADR-043,
+    plus ``aggregate`` — the multi-target CI fan-in gate added afterward).
 
     `pr-comment` is deliberately NOT here: it is Action/library-only tooling
     (`python -m abicheck.cli_pr_comment`), never a public `abicheck` subcommand.
     """
     surface = dump_mod.dump_surface()
-    assert set(surface) == {"compare", "compat", "deps", "dump", "scan"}
+    assert set(surface) == {
+        "aggregate",
+        "compare",
+        "compat",
+        "deps",
+        "dump",
+        "scan",
+    }
 
 
 def test_dump_surface_deps_has_subcommands(dump_mod) -> None:  # type: ignore[no-untyped-def]

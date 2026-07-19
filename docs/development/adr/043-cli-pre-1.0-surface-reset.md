@@ -4,6 +4,15 @@
 **Status:** Accepted — implemented.
 **Decision maker:** (pending)
 
+**Amendments:**
+
+- **2026-07-18 (D13):** The root surface grows from five verbs to **six** with
+  the addition of `aggregate`, a report-level multi-target CI fan-in gate. This
+  amends D1's "exactly five verbs" — see [D13](#d13-add-aggregate-a-report-level-multi-target-fan-in-gate)
+  for why a sixth verb clears the ADR-037 D7 "different question / different
+  operand shape" bar (it consumes *reports*, not binaries) rather than folding
+  into `compare`.
+
 ---
 
 ## Context
@@ -69,9 +78,15 @@ the breaking cleanup now, in one pass, is cheaper than deprecating twice.
 
 ### D1. Root command surface is exactly five verbs
 
-`dump`, `compare`, `scan`, `deps`, `compat`. Nothing else is registered on the
-root `Click` group; nothing removed below leaves a hidden alias. Every deleted
-command produces the ordinary Click "No such command" usage error (exit 64) —
+> **Amended 2026-07-18 (D13):** now **six** verbs — `aggregate` was added as a
+> report-level fan-in gate. The "nothing else is registered / no hidden alias /
+> deleted commands are a usage error" invariants below are unchanged; only the
+> count and the explicit verb list grow by one.
+
+`dump`, `compare`, `scan`, `deps`, `compat` — plus `aggregate` per the D13
+amendment above. Nothing else is registered on the root `Click` group; nothing
+removed below leaves a hidden alias. Every deleted command produces the ordinary
+Click "No such command" usage error (exit 64) —
 indistinguishable from a typo. `deps` keeps its two subcommands (`tree`,
 `compare`); `pr-comment` moves **off** the public tree entirely (see D3).
 
@@ -285,6 +300,59 @@ cannot miss that a PR touches the user-facing interaction surface. The label
 is removed automatically if a later push in the same PR reverts the surface
 back to parity with base.
 
+### D13. Add `aggregate` — a report-level multi-target fan-in gate
+
+*(Amendment, 2026-07-18.)* The five-verb surface of D1 covers *analysing one
+artifact pair*. It does not
+cover the multi-platform CI shape the GitHub Action recipes document: a build
+matrix fans out, each leg runs its own `compare`/`scan` and uploads a per-target
+JSON report, and a downstream job must fold those reports into one gate. Before
+this amendment that fan-in was a hand-written shell heredoc in the docs — and
+that heredoc had a latent, dangerous bug: its `for path in glob('*.json')` loop
+silently dropped any target whose build failed before uploading a report, so a
+matrix that never analysed Windows still passed green as "all platforms
+compatible". An unavailable target is *unknown*, not an empty (compatible) ABI;
+a shell loop over whatever files happen to be present cannot express that.
+
+`aggregate reports/` is added as the **sixth** root verb to own that fan-in:
+
+- **It clears the ADR-037 D7 bar rather than folding into `compare`.** D2 folded
+  `appcompat`/`plugin-check` into `compare` because they ask `compare`'s exact
+  question over a scoped diff. `aggregate` does *not*: its operand is a
+  *directory of already-produced reports*, not a binary/snapshot pair, and its
+  question is "did every target the matrix was supposed to build actually report,
+  and do their combined gate decisions pass?" That is a different question over a
+  fundamentally different operand shape — the D7 test for a genuinely new verb.
+  It analyses nothing itself; it reconciles.
+- **Three axes stay orthogonal, per ADR-042.** `aggregate` keeps **compatibility**
+  (worst verdict, for reporting), **gate** (each report's own recorded
+  `severity` decision, *combined* — never recomputed from the verdict, so a
+  policy-blocked `COMPATIBLE` still fails and a demoted `BREAKING` can pass), and
+  **coverage** (did every required target report?) as separate conclusions. A
+  required-coverage gap is a *coverage* failure at exit `1`; it is never
+  promoted to an ABI-break exit `4`. Reports with no `severity` block (produced
+  without a `--severity-*` policy) fall back to the legacy verdict→exit mapping.
+- **The expected-target set is first-class and explicit.** One of `--manifest`
+  (a committed `{"targets": [...]}` file, the recommended single source of truth
+  fed to both the matrix and the gate), `--expect`/`--optional`, or an explicit
+  `--discovered-only` opt-out is **required** — a bare `aggregate reports/` is a
+  usage error, because with no declared target set the gate cannot tell a
+  missing required target from an intentionally absent one. Duplicate target ids
+  and malformed manifests are hard usage errors (exit 64), never silent drops.
+- **Exit scheme:** `0` pass / `1` coverage gap, an addition/quality-only gate
+  block, or a non-verdict per-report failure (e.g. a `scan` budget overflow) /
+  `2` source-API break / `4` ABI break / `64` usage. The `--format json` output
+  is versioned (`aggregate_schema_version`) with the three axes kept under
+  separate `gate`/`coverage`/`compatibility` keys.
+
+`aggregate` is registered via the same sibling-module pattern as the other
+split-out commands (`abicheck/cli_aggregate.py`, imported for side-effect at the
+tail of `cli.py`); the core reconciliation logic is a front-end-independent
+`abicheck/aggregate.py`. The D12 CLI-surface gate and the D1 root-surface
+behaviour tests (`tests/test_cli_root_surface.py`,
+`tests/test_cli_surface_diff.py`) are updated to expect the sixth verb, so the
+surface change is recorded rather than silent.
+
 ---
 
 ## Non-goals
@@ -407,6 +475,10 @@ Explicitly out of scope for this reset (recorded so a future PR does not
   `plugin-check` command's host-contract semantics are preserved verbatim
   under D2's `scope_diff_to_required_symbols` — no behavior change, only a
   relocation.
+- **ADR-042** (compatibility-verdict / CI-gate separation) governs D13's
+  fan-in: `aggregate` combines each report's *recorded* gate decision and never
+  re-derives a gate from the compatibility verdict, extending ADR-042's
+  single-report rule to the multi-report aggregate.
 
 ## References
 
@@ -419,3 +491,5 @@ Explicitly out of scope for this reset (recorded so a future PR does not
   `scope_diff_to_required_symbols`) — the D2 shared-diff scoping core.
 - `tests/test_cli_root_surface.py`, `tests/test_dry_run_contract.py`,
   `tests/test_depth_vocabulary.py` — behavior tests for D1/D6/D9.
+- `abicheck/aggregate.py`, `abicheck/cli_aggregate.py`,
+  `tests/test_aggregate.py` — the D13 fan-in gate core, CLI, and tests.
