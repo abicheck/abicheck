@@ -14,6 +14,10 @@ on:
       - "tests/test_bundle.py"
       - ".github/workflows/realworld-validation.yml"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

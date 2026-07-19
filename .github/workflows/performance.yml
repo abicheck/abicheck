@@ -61,6 +61,10 @@ on:
       - "tests/test_benchmark_scaling.py"
       - ".github/workflows/performance.yml"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
