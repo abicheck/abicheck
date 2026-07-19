@@ -186,7 +186,18 @@ the logic is non-trivial).
 
 Implements ADR-045 §4/§7. Composes root `action.yml` + `collect-facts` (if
 evidence required) + `resolve-baseline`; always emits the report envelope;
-`gate-mode: local|deferred|advisory` input.
+`gate-mode: local|deferred|advisory` input. **Identity requirement flagged
+by review:** `check-target` must write the check's full `check_id`
+(`target@profile#baseline_channel`, §7) into the report's own `target_id`
+field whenever the run plan has more than one check for the same target
+(S17 multi-profile, S21 multi-channel) — not the bare target name. This is
+required, not cosmetic: `abicheck/aggregate.py:642-729`'s `collect_reports`
+keys reports by `target_id` (preferring the report's own field over the
+filename) and hard-errors on a duplicate, so two checks sharing a bare
+target name would either collide or silently overwrite each other in a
+naive implementation. For the single-check-per-target majority case,
+`check_id` and the bare target name coincide — this only has to actually
+differ once a target has concurrent checks.
 
 **Files:** new `actions/check-target/action.yml`, `run.sh`.
 
@@ -194,7 +205,9 @@ evidence required) + `resolve-baseline`; always emits the report envelope;
 
 **Tests:** end-to-end fixture workflow (`.github/workflows/test-action.yml`
 already exercises the root action per AGENTS.md's tag-pinning note on that
-file — extend it, don't create a parallel test harness).
+file — extend it, don't create a parallel test harness); add a
+multi-profile-same-target fixture case asserting `aggregate` does not
+collide/error.
 
 ### P1.4 — `check-single.yml` / `check-project.yml` reusable workflows
 
@@ -205,11 +218,14 @@ wire-compatible with `abicheck aggregate --manifest`'s existing
 `{"targets": [{"id", "required"}]}` shape (`abicheck/aggregate.py:753-769`
 hard-errors on anything else). The `check-project.yml` aggregate step must
 project `run-plan.json` down to that shape before invoking `aggregate
---manifest` — either as an inline `jq`/Python step in the workflow, or as a
-small `abicheck run-plan to-aggregate-manifest` CLI helper if the projection
-turns out to need real validation logic (e.g. `required` derivation) beyond
-a flat field rename. Decide which during implementation; do not skip this
-and assume `run-plan.json` can be passed straight through.
+--manifest` — using each check's `check_id` (not the bare target name) as
+`targets[].id`, matching P1.3's report-identity requirement above, so S17/S21
+don't collide in `aggregate`'s duplicate-target-id check. Implement as
+either an inline `jq`/Python step in the workflow, or a small
+`abicheck run-plan to-aggregate-manifest` CLI helper if the projection turns
+out to need real validation logic beyond the `check_id` derivation. Decide
+which during implementation; do not skip this and assume `run-plan.json` can
+be passed straight through, and do not project down to bare target names.
 
 **Files:** `.github/workflows/check-single.yml`, `.github/workflows/check-project.yml`,
 possibly a new small CLI helper per the sub-task above.

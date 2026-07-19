@@ -378,12 +378,32 @@ that format (it carries `profile`/`baseline_channel`/`evidence_depth` per
 check, which `aggregate` has no use for — it only needs to know which
 target IDs are required). So `check-project.yml`'s aggregate step must
 *project* `run-plan.json` down to the existing `{"targets": [...]}` shape
-(one line of `jq`/Python, not a CLI change) rather than pass `run-plan.json`
-straight through as `--manifest`. This is tracked as an explicit P1.4
-sub-task in the companion plan so it isn't lost between "run plan exists"
-and "aggregate consumes it." Coverage is still checked against the same
-explicit plan, not an implicit job list — the fix is in how the two
-artifacts connect, not in the coverage guarantee itself.
+rather than pass `run-plan.json` straight through as `--manifest`.
+
+**Second correction, also from review:** that projection is not the trivial
+one-line rename it first looks like once S17 (multiple profiles) or S21
+(multiple baseline channels) are in play. `abicheck/aggregate.py:642-729`
+(`collect_reports`) keys every loaded report strictly by `target_id` — read
+from the report's own `target_id` field, falling back to the report
+filename — and **hard-errors** (`AggregateError: duplicate target id`) the
+moment two reports resolve to the same `target_id`. A project with `libfoo`
+checked on two profiles, or on both `release-contract` and `accepted-main`
+simultaneously, produces two reports for one bare target name — exactly the
+collision `collect_reports` rejects. The manifest projection therefore must
+use each check's full `check_id` (§7's `target@profile#baseline_channel`
+form) as the manifest `targets[].id`, **and** `check-target` (P1.3) must
+write that same `check_id` into each report's own `target_id` field — not
+the bare target name — whenever a project has more than one check per
+target. `aggregate`'s existing keying mechanism then handles S17/S21
+correctly with no CLI change, because it already prefers the report's own
+`target_id` field over the filename. For the common single-check-per-target
+case (S1–S15's single-profile/single-channel majority), `check_id` and
+`target_id` coincide, so this stays invisible in the simple case and only
+matters once a target legitimately has multiple concurrent checks. This
+resolution (not the one-line-rename version) is what P1.3/P1.4's companion
+plan entries now specify. Coverage is still checked against the same
+explicit plan, not an implicit job list — the fix is in how identity flows
+between the two artifacts, not in the coverage guarantee itself.
 
 ---
 
@@ -403,11 +423,14 @@ distinction in `baseline-management.md`, made structural):
   main already accepted," never substitutes for `release-contract`.
 
 `resolve-baseline` failure taxonomy (all fail-loud, never silently
-degraded to a compatibility verdict):
+degraded to a *compatibility* verdict — but "fail-loud" and "advisory" are
+not the same thing, and an earlier draft of the `not_found` row conflated
+them; corrected below per review):
 
 | Condition | Resolver outcome | What the check does |
 |---|---|---|
-| No baseline set exists for `channel` yet | `not_found` | Advisory pass with an explicit "no baseline yet" report field — not a compatibility verdict of any kind. |
+| No baseline set exists for `channel` yet, and this check's `run-plan.json` entry has `required: false` (explicit bootstrap opt-in — e.g. the very first `release-contract` publish, before any release exists) | `not_found` (bootstrap) | Advisory pass with an explicit "no baseline yet" report field — never a compatibility verdict. |
+| No baseline set exists for `channel` yet, and the check is `required: true` (the default) | `not_found` (required) | **Hard operational failure**, exit non-zero. A typo in the channel name, a missing release asset, or a cache-resolution bug must never produce a green branch-protection status with zero comparison performed — `not_found` on a required check is exactly the silent-shallow-success failure mode this ADR exists to eliminate, so it does not get an advisory carve-out by default. |
 | Baseline set exists but this target isn't in it | `ambiguous` (target missing from set) | Coverage failure, distinct from a compatibility break. |
 | Baseline set is for a different `profile.id` | `wrong_profile` | Hard failure — never silently compare across profiles. |
 | `baseline-set.json` schema version newer/older than resolver understands | `stale_schema` | Hard failure with an upgrade-path message. |
