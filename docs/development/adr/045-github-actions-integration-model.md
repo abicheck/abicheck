@@ -261,13 +261,27 @@ Design points:
   actually populate — the build-output *validator* (§11) treats an empty
   `generated-headers/` root declared non-empty in `build-output.json` as a
   hard validation failure, not a warning.
-- **`evidence.projection` is `"declared"` or `"inferred"`.** `"declared"`
-  means the build itself asserted this evidence pack belongs to this target
-  (e.g. per-target compile DB filtering, or a wrapper invoked once per link
-  step); `"inferred"` means abicheck derived it from a build-wide pack via
-  TU→target mapping and it carries lower confidence — this is the safe
-  default for today's real capability (§9) versus the aspirational full
-  model.
+- **`evidence.projection` is `"declared"` or `"inferred"` in the schema, but
+  P1's validator only *accepts* `"declared"` — a self-contradiction in an
+  earlier draft, fixed per review.** `"declared"` means the build itself
+  asserted this evidence pack belongs to this target (e.g. per-target
+  compile DB filtering, or a wrapper invoked once per link step); `"inferred"`
+  would mean abicheck derived it from a build-wide pack via TU→target
+  mapping. §9/D8 are explicit that the TU→link-unit→DSO attribution needed
+  to do that *safely* is P2, not built here — so a build-output validator
+  that accepted `projection: "inferred"` today would let a build-wide,
+  unattributed pack validate as legitimate per-target evidence before the
+  safety mechanism that would justify trusting it exists, silently
+  reintroducing the "claim source-depth evidence for every DSO from an
+  unprojected pack" failure P0.4's caveat and §9's safe model both exist to
+  prevent. **Fix: the `"inferred"` enum value is schema-reserved for P2 —
+  P1.1's `build-output.json` validator (§11) treats any `evidence.projection`
+  value other than `"declared"` as a hard validation failure**, not merely
+  lower-confidence-but-accepted. Until P2 ships real attribution, a
+  build-wide pack may only feed build-wide source audits (S5) and
+  per-target header-depth scans, exactly as §9's safe model already says —
+  never a per-target `effective_depth: source` claim, regardless of what a
+  future `"inferred"` value might one day represent.
 - **abicheck does not produce `build-output.json` by building the project.**
   A thin `abicheck build-output emit` helper (new, §11) or direct authoring
   is how a project's existing build (or a CMake/Meson `install` step)
@@ -324,11 +338,38 @@ bundles:
   pvxs-release:
     targets: [libpvxs, libpvxsIoc]
 
+profiles:
+  linux-x86_64-gcc13-release:
+    contract: true          # this lane IS an ABI contract — gets a baseline, gates CI
+    os: linux
+    arch: x86_64
+  windows-x86_64-msvc-release:
+    contract: true
+    os: windows
+    arch: x86_64
+  ubuntu-latest-clang-debug-sanitizer:
+    contract: false         # test-only CI lane — never gets a baseline (S17's point)
+
 baseline:
   channels:
     release-contract: {source: github-release, asset_pattern: "abicheck-baseline-*.tar.zst"}
     accepted-main: {source: actions-cache, key_prefix: "abicheck-baseline-main"}
 ```
+
+**`profiles:` shape, missing from an earlier draft — flagged by review.**
+§8's S17 row and P1.5 rely on `.abicheck.yml` declaring which build
+profiles are ABI contracts (get a baseline, gate CI) versus test-only CI
+lanes (never do) — that's the whole point of "not every CI lane gets a
+baseline." An earlier draft of this excerpt defined `targets`/`bundles`/
+`baseline` but never actually showed `profiles:`, leaving a P1.5
+implementer to invent an incompatible shape. Each `profiles:` entry's `id`
+(the map key) is the same `profile.id` string used throughout §2/§5/§7
+(`build-output.json`'s `profile.id`, `run-plan.json`'s `checks[].profile`,
+the report envelope's `profile_id`) — `.abicheck.yml` is where that ID
+space is declared and where `contract: true/false` decides run-plan
+inclusion; `build-output.json` still carries the *detailed* profile identity
+(compiler version, stdlib, etc., §2) per actual build, keyed by this same
+`id`.
 
 Naming resolution for the four overloaded "manifest" meanings the task
 flags — each keeps one unambiguous name, none is called bare `manifest.json`:
@@ -336,9 +377,29 @@ flags — each keeps one unambiguous name, none is called bare `manifest.json`:
 | Concept | Canonical name | Existing artifact it maps to |
 |---|---|---|
 | Bundle cross-library contract | `bundle-contract.yml` / the existing `--manifest` flag to `compare`/`multi-binary` | Already exists (`docs/user-guide/multi-binary.md`'s `--manifest`); flag name unchanged, doc term clarified. |
-| Baseline-set descriptor | `baseline-set.json` | `actions/baseline/build_manifest.py`'s `manifest.json` — renamed in docs/new schema id only, existing filename kept for compat. |
+| Baseline-set descriptor | `baseline-set.json` (**archive-internal name only — see correction below**) | `actions/baseline/build_manifest.py`'s `manifest.json` — renamed in docs/new schema id only, existing filename kept for compat. |
 | Aggregate expected-target set | `abicheck aggregate --manifest` (unchanged CLI flag) / doc term "target-manifest" | Existing `cli_aggregate.py` flag. |
 | Build evidence pack descriptor | `build-output.json` (§2) | New. |
+
+**Filename reconciliation, flagged by review — `baseline-set.json` is an
+archive-internal name, not `actions/baseline`'s raw output filename.**
+`actions/baseline` keeps emitting `manifest.json` exactly as it does today
+(`actions/baseline/action.yml`'s `manifest-path` output, `run.sh`,
+`build_manifest.py` — none of that changes name). §6/§10's `baseline-set.json`
+references describe the file **as staged inside a `publish-baseline.yml`/
+`update-main-baseline.yml`-built archive or cache entry** — those workflows
+are what copies `actions/baseline`'s `manifest.json` output into the archive
+under the `baseline-set.json` name (or, more simply, keep the on-disk name
+`manifest.json` inside the archive too and treat "`baseline-set.json`"
+as this ADR's schema/doc term for that file's *content*, not a mandated
+filename — implementation should pick whichever is less churn and record
+the choice when P1.2/P1.6 land). What must **not** happen is what an
+earlier draft's inconsistency risked: `resolve-baseline` looking for a
+literal `baseline-set.json` inside an archive that only ever contains
+`manifest.json`, silently failing to find it. `resolve-baseline` (P1.2) must
+be written against whichever filename the archiving workflow (P1.6)
+actually produces, not against this ADR's schema-id term assumed to be a
+filename.
 
 ---
 
@@ -822,9 +883,11 @@ Three new validation points, all hard failures (not warnings) when tripped:
 
 1. **`build-output.json` validator** — every declared `headers/`/
    `generated-headers/` root is non-empty; every `targets[].binary` exists
-   and its digest matches `digests{}`; `evidence.projection` is consistent
-   with what's actually in `evidence/abicheck_inputs/` (non-empty TU count
-   for `"declared"`).
+   and its digest matches `digests{}`; `evidence.projection` must be
+   `"declared"` (any other value, including `"inferred"`, is a hard
+   validation failure until P2's TU→DSO attribution exists — §2's
+   correction above); for `"declared"`, `evidence/abicheck_inputs/` must
+   have a non-empty TU count.
 2. **Requested-vs-effective depth gate** — reuses the mechanism PR #601
    introduces at the CLI layer (`DumpDepthNotSatisfiedError`, per this
    repo's Known Gaps section) but applied at `check-target` level so a
