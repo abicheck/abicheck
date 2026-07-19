@@ -27,6 +27,7 @@ from .checker_policy import (
     ChangeKind,
     Confidence,
     EvidenceTier,
+    ReachabilityState,
     Verdict,
     policy_kind_sets as _policy_kind_sets,
 )
@@ -124,6 +125,20 @@ class Change:
     # matched reachability path, e.g. "fn:pub → base:detail::Base". None when
     # public_reachable is False.
     reachability_proof_path: str | None = None
+    # Tri-state refinement of public_reachable (impact-analysis-layer P0
+    # slice). Set by MarkReachability alongside public_reachable:
+    # PROVEN_REACHABLE whenever public_reachable is set True;
+    # PROVEN_UNREACHABLE when the walk ran and positively found this change
+    # not part of the effective public ABI; UNKNOWN when no walk reached a
+    # verdict at all, or the only evidence available (the optional L5
+    # call/type graph) is itself flagged narrowed/degraded for the relevant
+    # edge family. Suppression's default `unreachable-only` gate still keys
+    # off public_reachable alone for backward compatibility — only the
+    # opt-in `reachability: proven-unreachable-only` rule gate consults this
+    # field, refusing to match on UNKNOWN unless the rule also sets
+    # `allow_unknown_reachability: true`. Defaults to UNKNOWN, the honest
+    # "no evidence" state.
+    reachability_state: ReachabilityState = ReachabilityState.UNKNOWN
 
 
 @dataclass
@@ -278,7 +293,8 @@ class DiffResult:
     def breaking(self) -> list[Change]:
         """Changes classified as BREAKING under the active policy."""
         return [
-            c for c in self.changes
+            c
+            for c in self.changes
             if self._effective_verdict_for_change(c) == Verdict.BREAKING
         ]
 
@@ -286,7 +302,8 @@ class DiffResult:
     def source_breaks(self) -> list[Change]:
         """Changes classified as API_BREAK under the active policy."""
         return [
-            c for c in self.changes
+            c
+            for c in self.changes
             if self._effective_verdict_for_change(c) == Verdict.API_BREAK
         ]
 
@@ -294,7 +311,8 @@ class DiffResult:
     def compatible(self) -> list[Change]:
         """Changes classified as COMPATIBLE under the active policy."""
         return [
-            c for c in self.changes
+            c
+            for c in self.changes
             if self._effective_verdict_for_change(c) == Verdict.COMPATIBLE
         ]
 
@@ -302,7 +320,8 @@ class DiffResult:
     def risk(self) -> list[Change]:
         """Changes classified as COMPATIBLE_WITH_RISK under the active policy."""
         return [
-            c for c in self.changes
+            c
+            for c in self.changes
             if self._effective_verdict_for_change(c) == Verdict.COMPATIBLE_WITH_RISK
         ]
 

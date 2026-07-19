@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 390,
+  "count": 391,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -2530,6 +2530,15 @@
       "min_evidence": "L1",
       "doc_slug": "struct_size_changed",
       "examples": "case121_kernel_btf_struct_field_added,case126_sycl_device_impl_ptr,case191_header_only_graph_field_type,case80_pimpl_shared_to_unique"
+    },
+    {
+      "kind": "suppression_reachability_unknown",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L1",
+      "doc_slug": "suppression_reachability_unknown",
+      "examples": ""
     },
     {
       "kind": "suppression_would_hide_public_break",

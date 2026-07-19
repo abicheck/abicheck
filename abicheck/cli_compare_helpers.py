@@ -173,7 +173,8 @@ def _resolve_compare_config(
         # default ``False`` doesn't mask a configured ``True``. A typed legacy
         # --btf/--ctf/--dwarf must also beat config, so fold it into the CLI value.
         cli_debug_format=_merge_cli_debug_format(
-            debug_format_opt, debug_format,
+            debug_format_opt,
+            debug_format,
             legacy_from_cli=_param_from_cli("debug_format"),
         ),
         cli_dwarf_only=_cli_flag("dwarf_only", dwarf_only),
@@ -296,6 +297,7 @@ def _resolve_compare_collect_mode(
         return resolve_dump_depth(depth, "off"), f"--depth {depth}"
     if source_method:
         from .buildsource.scan_levels import SourceMethod, method_to_collect_mode
+
         try:
             mode = method_to_collect_mode(SourceMethod(source_method))
         except ValueError:
@@ -345,8 +347,12 @@ def _normalize_compare_options(
     # same way `dump` does; when omitted, infer it from --sources/--build-info
     # (or config source.method) rather than defaulting to "off" (P1 fix).
     collect_mode, _ = _resolve_compare_collect_mode(
-        depth, resolved_cfg.source_method,
-        old_sources, new_sources, old_build_info, new_build_info,
+        depth,
+        resolved_cfg.source_method,
+        old_sources,
+        new_sources,
+        old_build_info,
+        new_build_info,
     )
     if depth == "binary":
         headers, old_headers_only, new_headers_only = (), (), ()
@@ -370,20 +376,29 @@ def _normalize_compare_options(
         show_impact = True
 
     return _NormalizedCompareOptions(
-        collect_mode, headers, old_headers_only, new_headers_only,
-        effective_debug_format, demangle_resolved, report_mode, show_impact,
+        collect_mode,
+        headers,
+        old_headers_only,
+        new_headers_only,
+        effective_debug_format,
+        demangle_resolved,
+        report_mode,
+        show_impact,
     )
 
 
 def _needs_inline_embed(
-    old_sources: Path | None, new_sources: Path | None,
-    old_build_info: Path | None, new_build_info: Path | None,
+    old_sources: Path | None,
+    new_sources: Path | None,
+    old_build_info: Path | None,
+    new_build_info: Path | None,
 ) -> bool:
     """True when a side points at a raw checkout / build dir (not a `collect` pack).
 
     Those sides get dumped inline at --depth so their L3-L5 facts ride embedded in
     the snapshot; pre-built packs fall through to prepare_embedded_build_source.
     """
+
     def _raw_evidence(p: Path | None) -> bool:
         return p is not None and not _source_is_pack(p)
 
@@ -434,14 +449,13 @@ def _resolve_post_manifest_allowlist(
     try:
         manifest = load_manifest(post_manifest_path)
     except (ValueError, OSError) as exc:
-        raise click.UsageError(
-            f"--post-manifest {post_manifest_path}: {exc}"
-        ) from exc
+        raise click.UsageError(f"--post-manifest {post_manifest_path}: {exc}") from exc
     return contract_scope_allowlist(manifest, old, new)
 
 
 def _classify_and_reject_operands(
-    old_input: Path, new_input: Path,
+    old_input: Path,
+    new_input: Path,
 ) -> tuple[str, str]:
     """Classify both compare operands and reject an application/PIE operand.
 
@@ -468,7 +482,8 @@ def _resolve_debug_roots(
 
 
 def _warn_force_public_ignored(
-    force_public: object, scope_public_headers: bool,
+    force_public: object,
+    scope_public_headers: bool,
 ) -> None:
     """Warn that --public-symbol overlays need --scope-public-headers to apply."""
     if force_public and not scope_public_headers:
@@ -514,8 +529,11 @@ def _verdict_exit_code(verdict: object) -> int:
 
 
 _VERDICT_SEVERITY_RANK = {
-    "BREAKING": 3, "API_BREAK": 2, "COMPATIBLE_WITH_RISK": 1,
-    "COMPATIBLE": 0, "NO_CHANGE": 0,
+    "BREAKING": 3,
+    "API_BREAK": 2,
+    "COMPATIBLE_WITH_RISK": 1,
+    "COMPATIBLE": 0,
+    "NO_CHANGE": 0,
 }
 
 
@@ -535,10 +553,15 @@ def _verdict_severity_rank(verdict: object) -> int:
 
 
 def _scoped_exit_code(
-    scoped: Any, relevant_changes: list[Any],
-    result: Any, exit_code_scheme: str, sev_config: Any,
-    policy: str, policy_file: PolicyFile | None,
-    *, has_missing_contract: bool = False,
+    scoped: Any,
+    relevant_changes: list[Any],
+    result: Any,
+    exit_code_scheme: str,
+    sev_config: Any,
+    policy: str,
+    policy_file: PolicyFile | None,
+    *,
+    has_missing_contract: bool = False,
 ) -> int:
     """Compute a scoped result's exit code under the active exit-code scheme.
 
@@ -560,7 +583,8 @@ def _scoped_exit_code(
         from .severity import compute_exit_code, missing_contract_exit_code
 
         code = compute_exit_code(
-            relevant_changes, sev_config,
+            relevant_changes,
+            sev_config,
             policy=policy,
             kind_sets=result._effective_kind_sets(),
             policy_file=policy_file,
@@ -572,8 +596,12 @@ def _scoped_exit_code(
 
 
 def _scoped_severity_summary(
-    relevant_changes: list[Any], missing: Iterable[str],
-    result: Any, sev_config: Any, policy: str, policy_file: PolicyFile | None,
+    relevant_changes: list[Any],
+    missing: Iterable[str],
+    result: Any,
+    sev_config: Any,
+    policy: str,
+    policy_file: PolicyFile | None,
 ) -> tuple[tuple[str, ...], dict[str, int]]:
     """(blocking_categories, per-category counts) for one scoped result.
 
@@ -600,8 +628,10 @@ def _scoped_severity_summary(
     )
 
     categorized = categorize_changes(
-        relevant_changes, policy=policy,
-        kind_sets=result._effective_kind_sets(), policy_file=policy_file,
+        relevant_changes,
+        policy=policy,
+        kind_sets=result._effective_kind_sets(),
+        policy_file=policy_file,
     )
     counts = {
         "abi_breaking": len(categorized.abi_breaking),
@@ -610,8 +640,11 @@ def _scoped_severity_summary(
         "addition": len(categorized.addition),
     }
     gate = compute_gate_decision(
-        relevant_changes, sev_config,
-        policy=policy, kind_sets=result._effective_kind_sets(), policy_file=policy_file,
+        relevant_changes,
+        sev_config,
+        policy=policy,
+        kind_sets=result._effective_kind_sets(),
+        policy_file=policy_file,
     )
     categories = list(gate.blocking_categories)
     uncovered = uncovered_missing_symbols(missing, relevant_changes)
@@ -626,11 +659,16 @@ def _scoped_severity_summary(
 
 
 def _apply_used_by_scoping(
-    result: Any, used_by_apps: tuple[Path, ...],
-    old_input: Path, new_input: Path,
-    old_snapshot: Any, new_snapshot: Any,
-    policy: str, policy_file: PolicyFile | None,
-    exit_code_scheme: str = "legacy", sev_config: Any = None,
+    result: Any,
+    used_by_apps: tuple[Path, ...],
+    old_input: Path,
+    new_input: Path,
+    old_snapshot: Any,
+    new_snapshot: Any,
+    policy: str,
+    policy_file: PolicyFile | None,
+    exit_code_scheme: str = "legacy",
+    sev_config: Any = None,
     verify_runtime: bool = False,
     suppression: Any = None,
 ) -> int:
@@ -668,7 +706,8 @@ def _apply_used_by_scoping(
     new_lib = new_input if detect_binary_format(new_input) is not None else new_snapshot
 
     for lib, path, label in (
-        (old_lib, old_input, "OLD"), (new_lib, new_input, "NEW"),
+        (old_lib, old_input, "OLD"),
+        (new_lib, new_input, "NEW"),
     ):
         has_binary_evidence = isinstance(lib, Path) or any(
             getattr(lib, field, None) is not None for field in ("elf", "pe", "macho")
@@ -716,11 +755,16 @@ def _apply_used_by_scoping(
     missing_labels: set[str] = set()
     for app in used_by_apps:
         scoped = scope_diff_to_app(
-            result, app, old_lib, new_lib,
-            policy=policy, policy_file=policy_file, suppression=suppression,
+            result,
+            app,
+            old_lib,
+            new_lib,
+            policy=policy,
+            policy_file=policy_file,
+            suppression=suppression,
         )
         if verify_runtime and isinstance(old_lib, Path) and isinstance(new_lib, Path):
-            from .checker_policy import ChangeKind
+            from .checker_policy import ChangeKind, ReachabilityState
             from .diff_helpers import make_change
             from .runtime_probe import run_runtime_probe
 
@@ -743,6 +787,7 @@ def _apply_used_by_scoping(
                     name=app.name,
                     public_reachable=True,
                     reachability_kind="consumer_proven",
+                    reachability_state=ReachabilityState.PROVEN_REACHABLE,
                 )
                 add_finding = suppression is None
                 if suppression is not None:
@@ -756,6 +801,16 @@ def _apply_used_by_scoping(
                                 runtime_change, outcome.withheld_rule
                             )
                         )
+                    if add_finding and outcome.withheld_unknown_rule is not None:
+                        from .post_processing import (
+                            _build_suppression_unknown_reachability_change,
+                        )
+
+                        scoped.breaking_for_app.append(
+                            _build_suppression_unknown_reachability_change(
+                                runtime_change, outcome.withheld_unknown_rule
+                            )
+                        )
                 if add_finding:
                     scoped.breaking_for_app.append(runtime_change)
                     # scope_diff_to_app already computed scoped.verdict before
@@ -766,9 +821,12 @@ def _apply_used_by_scoping(
                     from .appcompat import _compute_appcompat_verdict
 
                     scoped.verdict = _compute_appcompat_verdict(
-                        scoped.missing_symbols, scoped.missing_versions,
-                        scoped.breaking_for_app, scoped.required_symbol_count,
-                        policy, policy_file,
+                        scoped.missing_symbols,
+                        scoped.missing_versions,
+                        scoped.breaking_for_app,
+                        scoped.required_symbol_count,
+                        policy,
+                        policy_file,
                     )
         summaries.append(_app_compat_summary(scoped))
         relevant_finding_ids.update(_finding_id(c) for c in scoped.breaking_for_app)
@@ -786,9 +844,16 @@ def _apply_used_by_scoping(
             )
         )
         exit_code = _scoped_exit_code(
-            scoped, scoped.breaking_for_app, result, exit_code_scheme, sev_config,
-            policy, policy_file,
-            has_missing_contract=bool(scoped.missing_symbols or scoped.missing_versions),
+            scoped,
+            scoped.breaking_for_app,
+            result,
+            exit_code_scheme,
+            sev_config,
+            policy,
+            policy_file,
+            has_missing_contract=bool(
+                scoped.missing_symbols or scoped.missing_versions
+            ),
         )
         # exit code (gating) and verdict (reporting) are maxed/ranked
         # independently: under a severity scheme the two can disagree (a
@@ -799,10 +864,16 @@ def _apply_used_by_scoping(
         if exit_code_scheme == "severity":
             if exit_code > worst_exit:
                 worst_changes = {_finding_id(c): c for c in scoped.breaking_for_app}
-                worst_missing = set(scoped.missing_symbols) | set(scoped.missing_versions)
+                worst_missing = set(scoped.missing_symbols) | set(
+                    scoped.missing_versions
+                )
             elif exit_code == worst_exit:
-                worst_changes.update({_finding_id(c): c for c in scoped.breaking_for_app})
-                worst_missing |= set(scoped.missing_symbols) | set(scoped.missing_versions)
+                worst_changes.update(
+                    {_finding_id(c): c for c in scoped.breaking_for_app}
+                )
+                worst_missing |= set(scoped.missing_symbols) | set(
+                    scoped.missing_versions
+                )
         worst_exit = max(worst_exit, exit_code)
         rank = _verdict_severity_rank(scoped.verdict)
         if worst_verdict is None or rank >= worst_verdict_rank:
@@ -821,8 +892,12 @@ def _apply_used_by_scoping(
     )
     if exit_code_scheme == "severity":
         categories, counts = _scoped_severity_summary(
-            list(worst_changes.values()), worst_missing,
-            result, sev_config, policy, policy_file,
+            list(worst_changes.values()),
+            worst_missing,
+            result,
+            sev_config,
+            policy,
+            policy_file,
         )
         result.scoped_blocking_categories = categories  # type: ignore[attr-defined]
         result.scoped_severity_counts = counts  # type: ignore[attr-defined]
@@ -830,18 +905,26 @@ def _apply_used_by_scoping(
 
 
 def _apply_required_symbol_scoping(
-    result: Any, required_symbols: tuple[str, ...],
-    old: Any, new: Any,
-    policy: str, policy_file: PolicyFile | None,
-    exit_code_scheme: str = "legacy", sev_config: Any = None,
+    result: Any,
+    required_symbols: tuple[str, ...],
+    old: Any,
+    new: Any,
+    policy: str,
+    policy_file: PolicyFile | None,
+    exit_code_scheme: str = "legacy",
+    sev_config: Any = None,
 ) -> int:
     """Scope *result* to an explicit ``--required-symbol(s)`` contract (ADR-043)."""
     from .appcompat import scope_diff_to_required_symbols, uncovered_missing_symbols
     from .reporter import _finding_id
 
     scoped = scope_diff_to_required_symbols(
-        result, old, new, required_symbols,
-        policy=policy, policy_file=policy_file,
+        result,
+        old,
+        new,
+        required_symbols,
+        policy=policy,
+        policy_file=policy_file,
     )
     result.required_symbols = _plugin_contract_summary(scoped)  # type: ignore[attr-defined]
     result.scoped_verdict = scoped.verdict  # type: ignore[attr-defined]
@@ -852,9 +935,13 @@ def _apply_required_symbol_scoping(
     # An entrypoint already covered by a relevant Change must not also
     # become a synthetic missing-contract finding (Codex review, mirrors
     # _apply_used_by_scoping's identical dedup).
-    result.scoped_missing_labels = tuple(sorted(  # type: ignore[attr-defined]
-        uncovered_missing_symbols(scoped.missing_entrypoints, scoped.breaking_for_host)
-    ))
+    result.scoped_missing_labels = tuple(
+        sorted(  # type: ignore[attr-defined]
+            uncovered_missing_symbols(
+                scoped.missing_entrypoints, scoped.breaking_for_host
+            )
+        )
+    )
     # Scoped-only changes: relevant to the host contract but never added to
     # result.changes (mirrors _apply_used_by_scoping's identical handling).
     _existing_ids = {_finding_id(c) for c in result.changes}
@@ -862,16 +949,25 @@ def _apply_required_symbol_scoping(
         c for c in scoped.breaking_for_host if _finding_id(c) not in _existing_ids
     )
     exit_code = _scoped_exit_code(
-        scoped, scoped.breaking_for_host, result, exit_code_scheme, sev_config,
-        policy, policy_file,
+        scoped,
+        scoped.breaking_for_host,
+        result,
+        exit_code_scheme,
+        sev_config,
+        policy,
+        policy_file,
         has_missing_contract=bool(scoped.missing_entrypoints),
     )
     result.scoped_exit_code = exit_code  # type: ignore[attr-defined]
     result.scoped_exit_code_scheme = exit_code_scheme  # type: ignore[attr-defined]
     if exit_code_scheme == "severity":
         categories, counts = _scoped_severity_summary(
-            scoped.breaking_for_host, scoped.missing_entrypoints,
-            result, sev_config, policy, policy_file,
+            scoped.breaking_for_host,
+            scoped.missing_entrypoints,
+            result,
+            sev_config,
+            policy,
+            policy_file,
         )
         result.scoped_blocking_categories = categories  # type: ignore[attr-defined]
         result.scoped_severity_counts = counts  # type: ignore[attr-defined]
@@ -879,7 +975,8 @@ def _apply_required_symbol_scoping(
 
 
 def _load_required_symbols(
-    symbols: tuple[str, ...], symbols_file: Path | None,
+    symbols: tuple[str, ...],
+    symbols_file: Path | None,
 ) -> tuple[str, ...]:
     """Combine ``--required-symbol`` values with a ``--required-symbols`` file.
 
@@ -898,14 +995,20 @@ def _load_required_symbols(
 
 def _render_compare_dry_run(
     *,
-    old_input: Path, new_input: Path,
-    old_kind: str, new_kind: str,
+    old_input: Path,
+    new_input: Path,
+    old_kind: str,
+    new_kind: str,
     depth: str | None,
     source_method: str | None = None,
-    headers: tuple[Path, ...], includes: tuple[Path, ...],
-    old_headers_only: tuple[Path, ...], new_headers_only: tuple[Path, ...],
-    old_sources: Path | None, new_sources: Path | None,
-    old_build_info: Path | None, new_build_info: Path | None,
+    headers: tuple[Path, ...],
+    includes: tuple[Path, ...],
+    old_headers_only: tuple[Path, ...],
+    new_headers_only: tuple[Path, ...],
+    old_sources: Path | None,
+    new_sources: Path | None,
+    old_build_info: Path | None,
+    new_build_info: Path | None,
     cfg_path: Path | None,
     fmt: str,
     exit_code_scheme: str | None,
@@ -927,7 +1030,12 @@ def _render_compare_dry_run(
     # inference _normalize_compare_options applies (--depth > source.method >
     # inferred from --sources/--build-info > off) drives this.
     collect_mode, effective_depth_label = _resolve_compare_collect_mode(
-        depth, source_method, old_sources, new_sources, old_build_info, new_build_info,
+        depth,
+        source_method,
+        old_sources,
+        new_sources,
+        old_build_info,
+        new_build_info,
     )
     result.add(
         "Resolved depth and source scope",
@@ -985,26 +1093,51 @@ def _render_compare_dry_run(
 def run_compare(
     ctx: click.Context,
     *,
-    old_input: Path, new_input: Path,
-    jobs: int, dso_only: bool, output_dir: Path | None,
+    old_input: Path,
+    new_input: Path,
+    jobs: int,
+    dso_only: bool,
+    output_dir: Path | None,
     fail_on_removed: bool,
-    debug_info1: Path | None, debug_info2: Path | None,
-    devel_pkg1: Path | None, devel_pkg2: Path | None,
-    include_private_dso: bool, keep_extracted: bool,
-    manifest_path: Path | None, bundle_system_providers: str,
-    bundle_cohorts: tuple[str, ...], no_bundle_analysis: bool,
-    headers: tuple[Path, ...], includes: tuple[Path, ...], lang: str,
+    debug_info1: Path | None,
+    debug_info2: Path | None,
+    devel_pkg1: Path | None,
+    devel_pkg2: Path | None,
+    include_private_dso: bool,
+    keep_extracted: bool,
+    manifest_path: Path | None,
+    bundle_system_providers: str,
+    bundle_cohorts: tuple[str, ...],
+    no_bundle_analysis: bool,
+    headers: tuple[Path, ...],
+    includes: tuple[Path, ...],
+    lang: str,
     header_backend: str,
-    gcc_path: str | None, gcc_prefix: str | None, gcc_options: str | None,
-    gcc_option_tokens: tuple[str, ...], sysroot: Path | None, nostdinc: bool,
-    old_header_backend: str | None, new_header_backend: str | None,
-    old_headers_only: tuple[Path, ...], new_headers_only: tuple[Path, ...],
-    old_includes_only: tuple[Path, ...], new_includes_only: tuple[Path, ...],
-    old_version: str, new_version: str,
-    fmt: str, demangle: bool | None, output: Path | None,
-    suppress: Path | None, strict_suppressions: bool, require_justification: bool,
-    policy: str, policy_file_path: Path | None,
-    pdb_path: Path | None, old_pdb_path: Path | None, new_pdb_path: Path | None,
+    gcc_path: str | None,
+    gcc_prefix: str | None,
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...],
+    sysroot: Path | None,
+    nostdinc: bool,
+    old_header_backend: str | None,
+    new_header_backend: str | None,
+    old_headers_only: tuple[Path, ...],
+    new_headers_only: tuple[Path, ...],
+    old_includes_only: tuple[Path, ...],
+    new_includes_only: tuple[Path, ...],
+    old_version: str,
+    new_version: str,
+    fmt: str,
+    demangle: bool | None,
+    output: Path | None,
+    suppress: Path | None,
+    strict_suppressions: bool,
+    require_justification: bool,
+    policy: str,
+    policy_file_path: Path | None,
+    pdb_path: Path | None,
+    old_pdb_path: Path | None,
+    new_pdb_path: Path | None,
     dwarf_only: bool,
     severity_preset: str | None,
     severity_abi_breaking: str | None,
@@ -1013,12 +1146,20 @@ def run_compare(
     severity_addition: str | None,
     config: Path | None,
     exit_code_scheme: str | None,
-    follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
-    show_redundant: bool, show_only: str | None, stat: bool,
-    scope_public_headers: bool, collapse_versioned_symbols: bool, show_filtered: bool,
-    public_symbols: tuple[str, ...], public_symbols_list: Path | None,
+    follow_deps: bool,
+    search_paths: tuple[Path, ...],
+    ld_library_path: str,
+    show_redundant: bool,
+    show_only: str | None,
+    stat: bool,
+    scope_public_headers: bool,
+    collapse_versioned_symbols: bool,
+    show_filtered: bool,
+    public_symbols: tuple[str, ...],
+    public_symbols_list: Path | None,
     post_manifest_path: Path | None,
-    report_mode: str, show_impact: bool,
+    report_mode: str,
+    show_impact: bool,
     recommend: bool,
     debug_format_opt: str | None,
     debug_format: str | None,
@@ -1035,8 +1176,10 @@ def run_compare(
     reconcile_build_context: bool,
     env_matrix_path: Path | None,
     verbose: bool,
-    old_build_info: Path | None = None, new_build_info: Path | None = None,
-    old_sources: Path | None = None, new_sources: Path | None = None,
+    old_build_info: Path | None = None,
+    new_build_info: Path | None = None,
+    old_sources: Path | None = None,
+    new_sources: Path | None = None,
     depth: str | None = None,
     probe_matrix_old: Path | None = None,
     probe_matrix_new: Path | None = None,
@@ -1084,7 +1227,9 @@ def run_compare(
             "report with the secondary one."
         )
 
-    required_symbols = _load_required_symbols(required_symbols_opt, required_symbols_file)
+    required_symbols = _load_required_symbols(
+        required_symbols_opt, required_symbols_file
+    )
     if used_by_apps and required_symbols:
         raise click.UsageError(
             "--used-by and --required-symbol/--required-symbols are mutually "
@@ -1093,7 +1238,10 @@ def run_compare(
         )
     # Required-symbol contracts default to the plugin-oriented policy unless the
     # user explicitly picked one -- an explicit --policy always wins (ADR-043).
-    if required_symbols and ctx.get_parameter_source("policy") != click.core.ParameterSource.COMMANDLINE:
+    if (
+        required_symbols
+        and ctx.get_parameter_source("policy") != click.core.ParameterSource.COMMANDLINE
+    ):
         policy = "plugin_abi"
 
     # ADR-037 D4: load the project config and merge CLI flags over it
@@ -1155,8 +1303,12 @@ def run_compare(
         # dispatch) so a dry run can't report "ok" for a flag combination the
         # real run would then reject (Codex review).
         _reject_set_input_flags(
-            exit_code_scheme, reconcile_build_context, env_matrix_path, secondary_fmt,
-            used_by_apps=used_by_apps, required_symbols=required_symbols,
+            exit_code_scheme,
+            reconcile_build_context,
+            env_matrix_path,
+            secondary_fmt,
+            used_by_apps=used_by_apps,
+            required_symbols=required_symbols,
         )
         _reject_compile_context_for_set_inputs(ctx, project_cfg)
         _reject_evidence_flags_for_set_inputs(ctx)
@@ -1164,18 +1316,30 @@ def run_compare(
     if dry_run:
         from .dry_run import emit_dry_run
 
-        emit_dry_run(_render_compare_dry_run(
-            old_input=old_input, new_input=new_input,
-            old_kind=old_kind, new_kind=new_kind,
-            depth=depth, source_method=resolved_cfg.source_method,
-            headers=headers, includes=includes,
-            old_headers_only=old_headers_only, new_headers_only=new_headers_only,
-            old_sources=old_sources, new_sources=new_sources,
-            old_build_info=old_build_info, new_build_info=new_build_info,
-            cfg_path=cfg_path, fmt=fmt, exit_code_scheme=exit_code_scheme,
-            header_backend=header_backend,
-            used_by_apps=used_by_apps, required_symbols=required_symbols,
-        ))
+        emit_dry_run(
+            _render_compare_dry_run(
+                old_input=old_input,
+                new_input=new_input,
+                old_kind=old_kind,
+                new_kind=new_kind,
+                depth=depth,
+                source_method=resolved_cfg.source_method,
+                headers=headers,
+                includes=includes,
+                old_headers_only=old_headers_only,
+                new_headers_only=new_headers_only,
+                old_sources=old_sources,
+                new_sources=new_sources,
+                old_build_info=old_build_info,
+                new_build_info=new_build_info,
+                cfg_path=cfg_path,
+                fmt=fmt,
+                exit_code_scheme=exit_code_scheme,
+                header_backend=header_backend,
+                used_by_apps=used_by_apps,
+                required_symbols=required_symbols,
+            )
+        )
 
     if {old_kind, new_kind} & {"directory", "package"}:
         # Resolved through the ``cli`` module (not a by-name import) so a test that
@@ -1183,23 +1347,38 @@ def run_compare(
         # ``compare`` is honoured — matching the pre-split resolution semantics.
         cli._dispatch_release_compare(
             ctx,
-            old_dir=old_input, new_dir=new_input,
-            headers=headers, includes=includes,
-            old_headers_only=old_headers_only, new_headers_only=new_headers_only,
-            old_includes_only=old_includes_only, new_includes_only=new_includes_only,
-            old_version=old_version, new_version=new_version, lang=lang,
-            fmt=fmt, output=output, output_dir=output_dir,
-            suppress=suppress, strict_suppressions=strict_suppressions,
+            old_dir=old_input,
+            new_dir=new_input,
+            headers=headers,
+            includes=includes,
+            old_headers_only=old_headers_only,
+            new_headers_only=new_headers_only,
+            old_includes_only=old_includes_only,
+            new_includes_only=new_includes_only,
+            old_version=old_version,
+            new_version=new_version,
+            lang=lang,
+            fmt=fmt,
+            output=output,
+            output_dir=output_dir,
+            suppress=suppress,
+            strict_suppressions=strict_suppressions,
             require_justification=require_justification,
-            policy=policy, policy_file_path=policy_file_path,
-            dso_only=dso_only, jobs=jobs,
+            policy=policy,
+            policy_file_path=policy_file_path,
+            dso_only=dso_only,
+            jobs=jobs,
             fail_on_removed=fail_on_removed,
-            debug_info1=debug_info1, debug_info2=debug_info2,
-            devel_pkg1=devel_pkg1, devel_pkg2=devel_pkg2,
-            include_private_dso=include_private_dso, keep_extracted=keep_extracted,
+            debug_info1=debug_info1,
+            debug_info2=debug_info2,
+            devel_pkg1=devel_pkg1,
+            devel_pkg2=devel_pkg2,
+            include_private_dso=include_private_dso,
+            keep_extracted=keep_extracted,
             manifest_path=manifest_path,
             bundle_system_providers=bundle_system_providers,
-            bundle_cohorts=bundle_cohorts, no_bundle_analysis=no_bundle_analysis,
+            bundle_cohorts=bundle_cohorts,
+            no_bundle_analysis=no_bundle_analysis,
             scope_public_headers=scope_public_headers,
             severity_preset=resolved_cfg.merged_severity_preset,
             severity_abi_breaking=resolved_cfg.merged_severity_abi_breaking,
@@ -1207,8 +1386,10 @@ def run_compare(
             severity_quality_issues=resolved_cfg.merged_severity_quality_issues,
             severity_addition=resolved_cfg.merged_severity_addition,
             release_exit_code_scheme=resolved_cfg.exit_code_scheme,
-            probe_matrix_old=probe_matrix_old, probe_matrix_new=probe_matrix_new,
-            annotate=annotate, annotate_additions=annotate_additions,
+            probe_matrix_old=probe_matrix_old,
+            probe_matrix_new=probe_matrix_new,
+            annotate=annotate,
+            annotate_additions=annotate_additions,
             verbose=verbose,
         )
         return
@@ -1226,19 +1407,32 @@ def run_compare(
     demangle_explicit = demangle
 
     (
-        collect_mode, headers, old_headers_only, new_headers_only,
-        effective_debug_format, demangle, report_mode, show_impact,
+        collect_mode,
+        headers,
+        old_headers_only,
+        new_headers_only,
+        effective_debug_format,
+        demangle,
+        report_mode,
+        show_impact,
     ) = _normalize_compare_options(
         resolved_cfg,
         depth=depth,
-        annotate=annotate, annotate_additions=annotate_additions,
+        annotate=annotate,
+        annotate_additions=annotate_additions,
         headers=headers,
-        old_headers_only=old_headers_only, new_headers_only=new_headers_only,
-        debug_format_opt=debug_format_opt, debug_format=debug_format,
-        demangle=demangle, fmt=fmt,
-        report_mode=report_mode, show_impact=show_impact,
-        old_sources=old_sources, new_sources=new_sources,
-        old_build_info=old_build_info, new_build_info=new_build_info,
+        old_headers_only=old_headers_only,
+        new_headers_only=new_headers_only,
+        debug_format_opt=debug_format_opt,
+        debug_format=debug_format,
+        demangle=demangle,
+        fmt=fmt,
+        report_mode=report_mode,
+        show_impact=show_impact,
+        old_sources=old_sources,
+        new_sources=new_sources,
+        old_build_info=old_build_info,
+        new_build_info=new_build_info,
     )
 
     # L2 header compile context (compare↔dump↔scan parity, ADR-037 D3): the one
@@ -1252,16 +1446,22 @@ def run_compare(
 
     compile_context, merged_includes = resolve_compile_context(
         ctx,
-        gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
-        gcc_option_tokens=gcc_option_tokens, sysroot=sysroot, nostdinc=nostdinc,
-        header_backend=header_backend, includes=includes, build_config=cfg_path,
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
+        gcc_options=gcc_options,
+        gcc_option_tokens=gcc_option_tokens,
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+        header_backend=header_backend,
+        includes=includes,
+        build_config=cfg_path,
     )
     # The dirs the config appended past the CLI -I roots. These are documented as
     # applying to *both* sides, so they must survive a per-side --old/new-include
     # override (which replaces the both-sides -I for that side). Keep them separate
     # and re-append after per-side resolution rather than folding into the shared
     # tuple, else the overridden side would lose them (Codex review).
-    config_includes = tuple(merged_includes[len(includes):])
+    config_includes = tuple(merged_includes[len(includes) :])
     # The merged frontend flows to both sides through the explicit header_backend
     # (so --old/new-ast-frontend can still override per side); neutralize the
     # frontend on the threaded context so run_dump's `compile.frontend` does NOT
@@ -1271,8 +1471,12 @@ def run_compare(
     side_compile_context = dataclasses.replace(compile_context, frontend="auto")
 
     old_h, new_h, old_inc, new_inc = _resolve_per_side_options(
-        headers, includes, old_headers_only, new_headers_only,
-        old_includes_only, new_includes_only,
+        headers,
+        includes,
+        old_headers_only,
+        new_headers_only,
+        old_includes_only,
+        new_includes_only,
     )
     if config_includes:
         old_inc = list(old_inc) + list(config_includes)
@@ -1332,8 +1536,13 @@ def run_compare(
         # inline dump or _resolve_compare_snapshots raises before we return.
         ctx.call_on_close(lambda: shutil.rmtree(_src_tmp, ignore_errors=True))
         old_input, old_sources, old_build_info = _embed_inline_source_side(
-            ctx, input_path=old_input, sources=old_sources,
-            headers=old_h, includes=old_inc, version=old_version, lang=lang,
+            ctx,
+            input_path=old_input,
+            sources=old_sources,
+            headers=old_h,
+            includes=old_inc,
+            version=old_version,
+            lang=lang,
             header_backend=old_header_backend or header_backend,
             compile_context=compile_context,
             frontend_explicit=_frontend_explicit or old_header_backend is not None,
@@ -1343,30 +1552,45 @@ def run_compare(
             # preserving.
             nostdinc_explicit=_nostdinc_explicit or compile_context.nostdinc,
             build_info=old_build_info,
-            follow_deps=follow_deps, search_paths=search_paths,
+            follow_deps=follow_deps,
+            search_paths=search_paths,
             ld_library_path=ld_library_path,
-            dwarf_only=dwarf_only, debug_format=effective_debug_format,
+            dwarf_only=dwarf_only,
+            debug_format=effective_debug_format,
             pdb_path=old_pdb_path or pdb_path,
             debug_roots=tuple(resolved_old_debug),
-            debuginfod=debuginfod, debuginfod_url=debuginfod_url,
-            collect_mode=collect_mode, out_dir=Path(_src_tmp), label="old",
+            debuginfod=debuginfod,
+            debuginfod_url=debuginfod_url,
+            collect_mode=collect_mode,
+            out_dir=Path(_src_tmp),
+            label="old",
             depth=depth,
         )
         new_input, new_sources, new_build_info = _embed_inline_source_side(
-            ctx, input_path=new_input, sources=new_sources,
-            headers=new_h, includes=new_inc, version=new_version, lang=lang,
+            ctx,
+            input_path=new_input,
+            sources=new_sources,
+            headers=new_h,
+            includes=new_inc,
+            version=new_version,
+            lang=lang,
             header_backend=new_header_backend or header_backend,
             compile_context=compile_context,
             frontend_explicit=_frontend_explicit or new_header_backend is not None,
             nostdinc_explicit=_nostdinc_explicit or compile_context.nostdinc,
             build_info=new_build_info,
-            follow_deps=follow_deps, search_paths=search_paths,
+            follow_deps=follow_deps,
+            search_paths=search_paths,
             debug_roots=tuple(resolved_new_debug),
-            debuginfod=debuginfod, debuginfod_url=debuginfod_url,
+            debuginfod=debuginfod,
+            debuginfod_url=debuginfod_url,
             ld_library_path=ld_library_path,
-            dwarf_only=dwarf_only, debug_format=effective_debug_format,
+            dwarf_only=dwarf_only,
+            debug_format=effective_debug_format,
             pdb_path=new_pdb_path or pdb_path,
-            collect_mode=collect_mode, out_dir=Path(_src_tmp), label="new",
+            collect_mode=collect_mode,
+            out_dir=Path(_src_tmp),
+            label="new",
             depth=depth,
         )
 
@@ -1385,25 +1609,45 @@ def run_compare(
     used_by_new_input, _ = cli._normalize_binary_input(used_by_new_input)
     _reject_debug_format_for_non_elf(effective_debug_format, old_fmt, new_fmt)
     _warn_ignored_flags(
-        old_fmt is not None, new_fmt is not None,
-        headers, includes,
-        old_headers_only, new_headers_only,
-        old_includes_only, new_includes_only,
+        old_fmt is not None,
+        new_fmt is not None,
+        headers,
+        includes,
+        old_headers_only,
+        new_headers_only,
+        old_includes_only,
+        new_includes_only,
     )
 
     _log_debug_resolution(
-        old_input, new_input,
-        resolved_old_debug, resolved_new_debug,
-        debuginfod=debuginfod, debuginfod_url=debuginfod_url,
+        old_input,
+        new_input,
+        resolved_old_debug,
+        resolved_new_debug,
+        debuginfod=debuginfod,
+        debuginfod_url=debuginfod_url,
     )
 
     old, new = _resolve_compare_snapshots(
-        old_input, new_input, old_fmt, new_fmt,
-        old_h, new_h, old_inc, new_inc,
-        old_version, new_version, lang,
-        pdb_path, old_pdb_path, new_pdb_path,
-        dwarf_only, effective_debug_format,
-        follow_deps, search_paths, ld_library_path,
+        old_input,
+        new_input,
+        old_fmt,
+        new_fmt,
+        old_h,
+        new_h,
+        old_inc,
+        new_inc,
+        old_version,
+        new_version,
+        lang,
+        pdb_path,
+        old_pdb_path,
+        new_pdb_path,
+        dwarf_only,
+        effective_debug_format,
+        follow_deps,
+        search_paths,
+        ld_library_path,
         header_backend=header_backend,
         old_header_backend=old_header_backend,
         new_header_backend=new_header_backend,
@@ -1417,7 +1661,9 @@ def run_compare(
     )
 
     suppression, pf = _load_suppression_and_policy(
-        suppress, policy, policy_file_path,
+        suppress,
+        policy,
+        policy_file_path,
         strict_suppressions=strict_suppressions,
         require_justification=require_justification,
     )
@@ -1443,10 +1689,17 @@ def run_compare(
     # Build-info + source facts (ADR-028/033): the helper times inline diffing
     # for the D6/D9 metrics and returns coverage/metrics to attach post-compare.
     from .cli_buildsource import attach_evidence_metrics, prepare_embedded_build_source
+
     extra_changes, layer_coverage_rows, evidence_metrics, _ev_changes = (
         prepare_embedded_build_source(
-            old, new, collect_mode, extra_changes,
-            old_build_info, new_build_info, old_sources, new_sources,
+            old,
+            new,
+            collect_mode,
+            extra_changes,
+            old_build_info,
+            new_build_info,
+            old_sources,
+            new_sources,
             policy_file=pf,
         )
     )
@@ -1459,12 +1712,17 @@ def run_compare(
 
     apply_patterns = pattern_verdicts or explain_patterns  # --explain implies on
     from .service import compare_snapshots, load_env_matrix
+
     try:
         env_matrix = load_env_matrix(env_matrix_path)
     except AbicheckError as exc:
         raise click.UsageError(str(exc)) from exc
     result = compare_snapshots(
-        old, new, suppression=suppression, policy=policy, policy_file=pf,
+        old,
+        new,
+        suppression=suppression,
+        policy=policy,
+        policy_file=pf,
         env_matrix=env_matrix,
         scope_to_public_surface=scope_public_headers,
         force_public_symbols=force_public,
@@ -1485,44 +1743,80 @@ def run_compare(
         echo_pattern_modulations(result)
 
     _finalize_compare_result(
-        result, old_input, new_input,
-        show_redundant=show_redundant, show_filtered=show_filtered,
-        annotate=annotate, annotate_additions=annotate_additions,
-        severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
+        result,
+        old_input,
+        new_input,
+        show_redundant=show_redundant,
+        show_filtered=show_filtered,
+        annotate=annotate,
+        annotate_additions=annotate_additions,
+        severity_config=sev_config
+        if resolved_cfg.exit_code_scheme == "severity"
+        else None,
     )
 
     scoped_exit_code: int | None = None
     if used_by_apps:
         scoped_exit_code = _apply_used_by_scoping(
-            result, used_by_apps, used_by_old_input, used_by_new_input, old, new,
-            policy, pf,
-            exit_code_scheme=resolved_cfg.exit_code_scheme, sev_config=sev_config,
-            verify_runtime=verify_runtime, suppression=suppression,
+            result,
+            used_by_apps,
+            used_by_old_input,
+            used_by_new_input,
+            old,
+            new,
+            policy,
+            pf,
+            exit_code_scheme=resolved_cfg.exit_code_scheme,
+            sev_config=sev_config,
+            verify_runtime=verify_runtime,
+            suppression=suppression,
         )
     elif required_symbols:
         scoped_exit_code = _apply_required_symbol_scoping(
-            result, required_symbols, old, new, policy, pf,
-            exit_code_scheme=resolved_cfg.exit_code_scheme, sev_config=sev_config,
+            result,
+            required_symbols,
+            old,
+            new,
+            policy,
+            pf,
+            exit_code_scheme=resolved_cfg.exit_code_scheme,
+            sev_config=sev_config,
         )
 
     text = _render_output(
-        fmt, result, old, new,
+        fmt,
+        result,
+        old,
+        new,
         follow_deps=follow_deps,
-        show_only=show_only, report_mode=report_mode,
-        show_impact=show_impact, stat=stat,
-        severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
+        show_only=show_only,
+        report_mode=report_mode,
+        show_impact=show_impact,
+        stat=stat,
+        severity_config=sev_config
+        if resolved_cfg.exit_code_scheme == "severity"
+        else None,
         show_recommendation=recommend,
         demangle=demangle,
     )
     text = _fold_scoped_compat_into_text(
-        text, fmt, result,
-        severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
+        text,
+        fmt,
+        result,
+        severity_config=sev_config
+        if resolved_cfg.exit_code_scheme == "severity"
+        else None,
         show_only=show_only,
     )
     text = _fold_evidence_depth_into_json(
-        text, fmt, old, new,
-        old_build_info=old_build_info, new_build_info=new_build_info,
-        old_sources=old_sources, new_sources=new_sources,
+        text,
+        fmt,
+        old,
+        new,
+        old_build_info=old_build_info,
+        new_build_info=new_build_info,
+        old_sources=old_sources,
+        new_sources=new_sources,
     )
 
     _write_or_echo(output, text)
@@ -1542,22 +1836,38 @@ def run_compare(
         # demangle=False into the secondary render (Codex review, PR #557).
         secondary_demangle = _resolve_demangle(secondary_fmt, demangle_explicit)
         secondary_text = _render_output(
-            secondary_fmt, result, old, new,
+            secondary_fmt,
+            result,
+            old,
+            new,
             follow_deps=follow_deps,
-            show_only=None, report_mode="full",
-            show_impact=show_impact, stat=False,
-            severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
+            show_only=None,
+            report_mode="full",
+            show_impact=show_impact,
+            stat=False,
+            severity_config=sev_config
+            if resolved_cfg.exit_code_scheme == "severity"
+            else None,
             show_recommendation=recommend,
             demangle=secondary_demangle,
         )
         secondary_text = _fold_scoped_compat_into_text(
-            secondary_text, secondary_fmt, result,
-            severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
+            secondary_text,
+            secondary_fmt,
+            result,
+            severity_config=sev_config
+            if resolved_cfg.exit_code_scheme == "severity"
+            else None,
         )
         secondary_text = _fold_evidence_depth_into_json(
-            secondary_text, secondary_fmt, old, new,
-            old_build_info=old_build_info, new_build_info=new_build_info,
-            old_sources=old_sources, new_sources=new_sources,
+            secondary_text,
+            secondary_fmt,
+            old,
+            new,
+            old_build_info=old_build_info,
+            new_build_info=new_build_info,
+            old_sources=old_sources,
+            new_sources=new_sources,
         )
         _write_or_echo(secondary_output, secondary_text)
 
@@ -1574,9 +1884,14 @@ def run_compare(
 
 
 def _fold_evidence_depth_into_json(
-    text: str, fmt: str, old: Any, new: Any,
-    old_build_info: Path | None = None, new_build_info: Path | None = None,
-    old_sources: Path | None = None, new_sources: Path | None = None,
+    text: str,
+    fmt: str,
+    old: Any,
+    new: Any,
+    old_build_info: Path | None = None,
+    new_build_info: Path | None = None,
+    old_sources: Path | None = None,
+    new_sources: Path | None = None,
 ) -> str:
     """Add ``old_evidence_depth``/``new_evidence_depth`` to a JSON report (CLI-audit P2).
 

@@ -26,7 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
-from .checker_policy import ChangeKind
+from .checker_policy import ChangeKind, ReachabilityState
 
 if TYPE_CHECKING:
     from .checker_types import Change
@@ -514,12 +514,14 @@ class DemoteOffPythonSurface:
 # containing type name directly) — MarkReachability.run needs this set to
 # know when to peel the member suffix before checking the owning EnumType's
 # public-header origin.
-_ENUM_MEMBER_KINDS = frozenset({
-    ChangeKind.ENUM_MEMBER_REMOVED,
-    ChangeKind.ENUM_MEMBER_ADDED,
-    ChangeKind.ENUM_MEMBER_VALUE_CHANGED,
-    ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED,
-})
+_ENUM_MEMBER_KINDS = frozenset(
+    {
+        ChangeKind.ENUM_MEMBER_REMOVED,
+        ChangeKind.ENUM_MEMBER_ADDED,
+        ChangeKind.ENUM_MEMBER_VALUE_CHANGED,
+        ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED,
+    }
+)
 
 
 class MarkReachability:
@@ -643,10 +645,18 @@ class MarkReachability:
             from .diff_filtering import _qualified_by_mangled
 
             names: set[str] = set()
-            names.update(f.name for f in snap.functions if f.origin == ScopeOrigin.PUBLIC_HEADER)
-            names.update(v.name for v in snap.variables if v.origin == ScopeOrigin.PUBLIC_HEADER)
-            names.update(t.name for t in snap.types if t.origin == ScopeOrigin.PUBLIC_HEADER)
-            names.update(e.name for e in snap.enums if e.origin == ScopeOrigin.PUBLIC_HEADER)
+            names.update(
+                f.name for f in snap.functions if f.origin == ScopeOrigin.PUBLIC_HEADER
+            )
+            names.update(
+                v.name for v in snap.variables if v.origin == ScopeOrigin.PUBLIC_HEADER
+            )
+            names.update(
+                t.name for t in snap.types if t.origin == ScopeOrigin.PUBLIC_HEADER
+            )
+            names.update(
+                e.name for e in snap.enums if e.origin == ScopeOrigin.PUBLIC_HEADER
+            )
             names.update(
                 _qualified_by_mangled(
                     [
@@ -667,7 +677,9 @@ class MarkReachability:
             )
             return names
 
-        namespaces = self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
+        namespaces = (
+            self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
+        )
         old_paths = compute_leak_paths(ctx.old, namespaces)
         new_paths = compute_leak_paths(ctx.new, namespaces)
         reachable_types = set(old_paths) | set(new_paths)
@@ -697,9 +709,38 @@ class MarkReachability:
         # diff_templates.py — apply it here too, across every declaration
         # kind that carries the field (function/variable/type/enum), not
         # just RecordType.
-        public_header_names = _public_header_names(ctx.old) | _public_header_names(ctx.new)
+        public_header_names = _public_header_names(ctx.old) | _public_header_names(
+            ctx.new
+        )
         if not reachable_types and not public_header_names and not call_reachable:
             return changes
+
+        # impact-analysis-layer P0: whether the *only* signal that could still
+        # speak to a not-otherwise-tagged change (the optional L5 call/type
+        # graph) is itself flagged narrowed/degraded — i.e. its absence of an
+        # edge is not trustworthy negative evidence. The layout/type-graph
+        # walk above (compute_leak_paths) is a complete closure over the
+        # snapshot's own declared types, not subject to this caveat, so it
+        # alone never downgrades the verdict to UNKNOWN.
+        def _call_graph_untrusted(snap: AbiSnapshot) -> bool:
+            build_source = getattr(snap, "build_source", None)
+            graph = (
+                getattr(build_source, "source_graph", None)
+                if build_source is not None
+                else None
+            )
+            if graph is None:
+                return False
+            return bool(
+                graph.degraded_passes.get("call_graph")
+                or graph.degraded_passes.get("type_graph")
+                or graph.narrowed_passes.get("call_graph")
+                or graph.narrowed_passes.get("type_graph")
+            )
+
+        call_graph_untrusted = _call_graph_untrusted(ctx.old) or _call_graph_untrusted(
+            ctx.new
+        )
 
         for c in changes:
             root = _root_type_name_for_change(c)
@@ -735,6 +776,7 @@ class MarkReachability:
             ):
                 c.public_reachable = True
                 c.reachability_kind = "direct_public_symbol"
+                c.reachability_state = ReachabilityState.PROVEN_REACHABLE
                 continue
             tagged = False
             if root in reachable_types:
@@ -762,6 +804,7 @@ class MarkReachability:
                         else "pointer_or_signature"
                     )
                     c.reachability_proof_path = _format_path(min(paths, key=len))
+                    c.reachability_state = ReachabilityState.PROVEN_REACHABLE
                     tagged = True
             # ADR-044 P1 items 1/3: independent of (and checked regardless of
             # the outcome of) the layout walk above — a change can be
@@ -779,7 +822,8 @@ class MarkReachability:
             # label carries in EITHER mode — so it is a reliable fallback key
             # independent of which graph provenance produced the evidence.
             call_key = (
-                root if root in call_reachable
+                root
+                if root in call_reachable
                 else (c.qualified_name if c.qualified_name in call_reachable else None)
             )
             if not tagged and call_key is not None:
@@ -792,6 +836,23 @@ class MarkReachability:
                     c.public_reachable = True
                     c.reachability_kind = "symbol_availability"
                     c.reachability_proof_path = min(call_paths, key=len)
+                    c.reachability_state = ReachabilityState.PROVEN_REACHABLE
+                    tagged = True
+            if not tagged:
+                # Not proven reachable. The layout/type-graph walk is always
+                # a trustworthy complete signal (it enumerates every root the
+                # snapshot itself declares), so a change it examined and
+                # found not-reachable is conclusively PROVEN_UNREACHABLE.
+                # When the *only* remaining possible signal was the call
+                # graph and that graph's coverage is itself untrusted
+                # (narrowed/degraded), the honest verdict is UNKNOWN rather
+                # than a false "proven" — an absent edge there does not
+                # prove an absent dependency.
+                layout_examined = root in reachable_types or root in public_header_names
+                if call_graph_untrusted and not layout_examined:
+                    c.reachability_state = ReachabilityState.UNKNOWN
+                else:
+                    c.reachability_state = ReachabilityState.PROVEN_UNREACHABLE
         return changes
 
 
@@ -822,6 +883,12 @@ class ApplySuppression:
             if outcome.withheld_rule is not None:
                 diagnostics.append(
                     _build_suppression_overreach_change(c, outcome.withheld_rule)
+                )
+            if outcome.withheld_unknown_rule is not None:
+                diagnostics.append(
+                    _build_suppression_unknown_reachability_change(
+                        c, outcome.withheld_unknown_rule
+                    )
                 )
         filtered.extend(diagnostics)
         return filtered
@@ -870,6 +937,44 @@ def _build_suppression_overreach_change(change: Change, rule: Suppression) -> Ch
     )
 
 
+def _build_suppression_unknown_reachability_change(
+    change: Change, rule: Suppression
+) -> Change:
+    """Build the ``SUPPRESSION_REACHABILITY_UNKNOWN`` diagnostic for *change*.
+
+    impact-analysis-layer P0 slice. *rule* is the suppression whose selectors
+    matched *change*, whose resolved ``reachability`` is
+    ``"proven-unreachable-only"``, but whose graph coverage could not prove
+    *change* unreachable (``Change.reachability_state`` is ``UNKNOWN``).
+    """
+    from .checker_policy import ChangeKind
+    from .checker_types import Change
+
+    selector = (
+        rule.symbol
+        or rule.symbol_pattern
+        or rule.type_pattern
+        or rule.namespace
+        or rule.entity_namespace
+        or rule.cause_namespace
+        or rule.source_location
+        or "?"
+    )
+    return Change(
+        kind=ChangeKind.SUPPRESSION_REACHABILITY_UNKNOWN,
+        symbol=change.symbol,
+        description=(
+            f"Suppression rule {selector!r} matched {change.symbol!r} "
+            f"({change.kind.value}) but was not applied: graph coverage was "
+            "insufficient to prove the change unreachable from the public ABI "
+            "surface (reachability: proven-unreachable-only). Add "
+            "`allow_unknown_reachability: true` to this rule to suppress it "
+            "anyway once you have manually confirmed it is safe."
+        ),
+        caused_by_type=change.symbol,
+    )
+
+
 def _merge_findings_respecting_suppression(
     changes: list[Change],
     new_findings: list[Change],
@@ -903,6 +1008,12 @@ def _merge_findings_respecting_suppression(
             if outcome.withheld_rule is not None:
                 diagnostics.append(
                     _build_suppression_overreach_change(c, outcome.withheld_rule)
+                )
+            if outcome.withheld_unknown_rule is not None:
+                diagnostics.append(
+                    _build_suppression_unknown_reachability_change(
+                        c, outcome.withheld_unknown_rule
+                    )
                 )
         key = (c.kind, c.symbol)
         if key in seen_keys:
@@ -1191,7 +1302,9 @@ class DetectTemplatePatterns:
             detect_template_patterns,
         )
 
-        namespaces = self._namespaces or ctx.internal_namespaces or _INTERNAL_TEMPLATE_NAMESPACES
+        namespaces = (
+            self._namespaces or ctx.internal_namespaces or _INTERNAL_TEMPLATE_NAMESPACES
+        )
         new_findings = detect_template_patterns(ctx.old, ctx.new, namespaces)
         if not new_findings:
             return changes
@@ -1255,7 +1368,9 @@ class DetectInternalLeaks:
             detect_internal_leaks,
         )
 
-        namespaces = self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
+        namespaces = (
+            self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
+        )
         extra = detect_internal_leaks(changes, ctx.old, ctx.new, namespaces)
         # ADR-044 P1 items 1-2: the call-graph analogue, for a triggering
         # change with no layout/type-graph evidence at all (see
@@ -1312,7 +1427,9 @@ class DemoteUnreachableInternalChurn:
         )
         from .surface import REASON_PRIVATE_INTERNAL_UNREACHABLE
 
-        namespaces = self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
+        namespaces = (
+            self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
+        )
         frozen = list(ctx.frozen_namespaces)
 
         def _is_frozen(type_name: str) -> bool:

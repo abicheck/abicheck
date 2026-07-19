@@ -43,7 +43,7 @@ from __future__ import annotations
 import re as _re
 from typing import TYPE_CHECKING
 
-from .checker_policy import ChangeKind
+from .checker_policy import ChangeKind, ReachabilityState
 from .checker_types import Change
 from .diff_helpers import make_change
 
@@ -135,7 +135,7 @@ def _strip_experimental(
     segs = _segments(qualified)
     for i, s in enumerate(segs):
         if s in experimental_namespaces:
-            return "::".join(segs[:i] + segs[i + 1:]), s
+            return "::".join(segs[:i] + segs[i + 1 :]), s
     return qualified, None
 
 
@@ -162,6 +162,7 @@ def _qualified_function_name(
         if demangled is not None:
             return demangled.get(mangled, name)
         from .demangle import demangle_batch
+
         return demangle_batch([mangled]).get(mangled, name)
     return name
 
@@ -176,10 +177,7 @@ def _split_experimental(
     experimental_namespaces: tuple[str, ...],
 ) -> tuple[list[str], list[str]]:
     """Split *qnames* into ``(experimental, stable)`` by namespace match."""
-    exp = [
-        q for q in qnames
-        if any(s in experimental_namespaces for s in _segments(q))
-    ]
+    exp = [q for q in qnames if any(s in experimental_namespaces for s in _segments(q))]
     stable = [q for q in qnames if q not in exp]
     return exp, stable
 
@@ -194,6 +192,7 @@ def _index_funcs_by_stable_key(
     ``experimental::`` don't get reported.
     """
     from .model import Visibility
+
     demangled = _batch_demangle_public(snap)
     out: dict[tuple[str, str], list[str]] = {}
     for f in snap.functions:
@@ -352,17 +351,28 @@ def _findings_for(
             continue
         new_qnames = new_index.get((stable_key, leaf), [])
         new_exp, new_stable = _split_experimental(
-            new_qnames, experimental_namespaces,
+            new_qnames,
+            experimental_namespaces,
         )
         event = _classify_experimental_event(
-            old_exp, old_stable, new_exp, new_stable,
+            old_exp,
+            old_stable,
+            new_exp,
+            new_stable,
         )
         if event is None:
             continue
-        out.append(_emit_experimental_change(
-            event, leaf, old_exp, new_stable, kind_label,
-            old_origins=old_origins, new_origins=new_origins,
-        ))
+        out.append(
+            _emit_experimental_change(
+                event,
+                leaf,
+                old_exp,
+                new_stable,
+                kind_label,
+                old_origins=old_origins,
+                new_origins=new_origins,
+            )
+        )
     return out
 
 
@@ -392,20 +402,24 @@ def detect_experimental_namespace_changes(
     graduation event.
     """
     out: list[Change] = []
-    out.extend(_findings_for(
-        _index_funcs_by_stable_key(old, experimental_namespaces),
-        _index_funcs_by_stable_key(new, experimental_namespaces),
-        experimental_namespaces,
-        "declaration",
-    ))
-    out.extend(_findings_for(
-        _index_types_by_stable_key(old, experimental_namespaces),
-        _index_types_by_stable_key(new, experimental_namespaces),
-        experimental_namespaces,
-        "type",
-        old_origins=_origin_by_name(old.types),
-        new_origins=_origin_by_name(new.types),
-    ))
+    out.extend(
+        _findings_for(
+            _index_funcs_by_stable_key(old, experimental_namespaces),
+            _index_funcs_by_stable_key(new, experimental_namespaces),
+            experimental_namespaces,
+            "declaration",
+        )
+    )
+    out.extend(
+        _findings_for(
+            _index_types_by_stable_key(old, experimental_namespaces),
+            _index_types_by_stable_key(new, experimental_namespaces),
+            experimental_namespaces,
+            "type",
+            old_origins=_origin_by_name(old.types),
+            new_origins=_origin_by_name(new.types),
+        )
+    )
     return out
 
 
@@ -459,6 +473,7 @@ def _looks_like_std_reexport(
 def _collect_public_declared_names(snap: AbiSnapshot) -> set[str]:
     """Return the set of qualified declared names of public functions in *snap*."""
     from .model import Visibility
+
     demangled = _batch_demangle_public(snap)
     out: set[str] = set()
     for f in snap.functions:
@@ -474,8 +489,10 @@ def _batch_demangle_public(snap: AbiSnapshot) -> dict[str, str]:
     """Demangle every public mangled name in *snap* in one batch call."""
     from .demangle import demangle_batch
     from .model import Visibility
+
     mangled = [
-        f.mangled for f in snap.functions
+        f.mangled
+        for f in snap.functions
         if f.mangled.startswith("_Z") and f.visibility == Visibility.PUBLIC
     ]
     return demangle_batch(mangled) if mangled else {}
@@ -497,6 +514,7 @@ def _build_std_reexport_change(declared: str, underlying: str) -> Change:
         old_value=f"{declared} → {underlying}",
         new_value=None,
         public_reachable=True,
+        reachability_state=ReachabilityState.PROVEN_REACHABLE,
         reachability_kind="direct_public_symbol",
     )
 
@@ -576,7 +594,7 @@ def _version_strip_segments(segs: list[str]) -> tuple[tuple[str, ...], int | Non
     for i, s in enumerate(segs):
         v = _version_suffix(s)
         if v is not None:
-            return tuple(segs[:i] + segs[i + 1:]), v
+            return tuple(segs[:i] + segs[i + 1 :]), v
     return tuple(segs), None
 
 
@@ -628,6 +646,7 @@ def _collect_versioned_entries(snap: AbiSnapshot) -> list[tuple[str, bool]]:
     untagged behavior automatically, not a regression for the common case.
     """
     from .model import ScopeOrigin, Visibility
+
     demangled = _batch_demangle_public(snap)
     items: list[tuple[str, bool]] = []
     for f in snap.functions:
@@ -672,15 +691,17 @@ def _emit_version_bumps(
         # only covers one side), so requiring both sides publicly-tagged
         # let a genuine old-consumer break stay untagged and suppressible.
         subject_is_public = old_list[0][2] or new_list[0][2]
-        changes.append(make_change(
-            ChangeKind.INLINE_NAMESPACE_VERSION_BUMPED,
-            symbol=new_q,
-            old=old_q,
-            new=new_q,
-            detail=f"{sorted(old_versions)} to {sorted(new_versions)}",
-            public_reachable=subject_is_public,
-            reachability_kind="direct_public_symbol" if subject_is_public else None,
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.INLINE_NAMESPACE_VERSION_BUMPED,
+                symbol=new_q,
+                old=old_q,
+                new=new_q,
+                detail=f"{sorted(old_versions)} to {sorted(new_versions)}",
+                public_reachable=subject_is_public,
+                reachability_kind="direct_public_symbol" if subject_is_public else None,
+            )
+        )
     return changes
 
 
@@ -696,9 +717,13 @@ def detect_namespace_patterns(
 ) -> list[Change]:
     """Run all namespace-shape detectors and return their concatenated findings."""
     out: list[Change] = []
-    out.extend(detect_experimental_namespace_changes(
-        old, new, experimental_namespaces=experimental_namespaces,
-    ))
+    out.extend(
+        detect_experimental_namespace_changes(
+            old,
+            new,
+            experimental_namespaces=experimental_namespaces,
+        )
+    )
     out.extend(detect_std_reexport_removed(old, new))
     out.extend(detect_inline_namespace_version_bump(old, new))
     return out

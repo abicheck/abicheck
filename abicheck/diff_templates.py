@@ -47,7 +47,7 @@ import re
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
-from .checker_policy import ChangeKind
+from .checker_policy import ChangeKind, ReachabilityState
 from .checker_types import Change
 from .diff_helpers import make_change
 
@@ -122,6 +122,7 @@ def _qualified_function_name(name: str, mangled: str) -> str:
         return name
     if mangled.startswith("_Z"):
         from .demangle import demangle_batch
+
         return demangle_batch([mangled]).get(mangled, name)
     return name
 
@@ -195,6 +196,7 @@ def _strip_leading_return_type(sig: str) -> str:
 def _public_functions(snap: AbiSnapshot) -> list[Function]:
     """Return the subset of public functions in *snap*."""
     from .model import Visibility
+
     return [f for f in snap.functions if f.visibility == Visibility.PUBLIC]
 
 
@@ -262,6 +264,7 @@ def _leak_change(
         # ApplySuppression (DetectTemplatePatterns), so MarkReachability never
         # sees this Change to tag it itself.
         public_reachable=True,
+        reachability_state=ReachabilityState.PROVEN_REACHABLE,
         reachability_kind="value_embedding",
     )
 
@@ -288,10 +291,9 @@ def detect_internal_template_leaks(
     """
     old_funcs = _public_functions(old)
     new_funcs = _public_functions(new)
-    internal_stems = (
-        _internal_template_stems(old_funcs, internal_namespaces)
-        | _internal_template_stems(new_funcs, internal_namespaces)
-    )
+    internal_stems = _internal_template_stems(
+        old_funcs, internal_namespaces
+    ) | _internal_template_stems(new_funcs, internal_namespaces)
     if not internal_stems:
         return []
 
@@ -388,29 +390,35 @@ def detect_cpo_kind_changed(
 
     # function → variable
     for name in sorted((old_funcs - old_vars) & (new_vars - new_funcs)):
-        changes.append(make_change(
-            ChangeKind.CPO_KIND_CHANGED,
-            symbol=name,
-            name=name,
-            old="function",
-            new="variable (function-object / CPO)",
-            new_value="variable",
-            public_reachable=True,
-            reachability_kind="direct_public_symbol",
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.CPO_KIND_CHANGED,
+                symbol=name,
+                name=name,
+                old="function",
+                new="variable (function-object / CPO)",
+                new_value="variable",
+                public_reachable=True,
+                reachability_state=ReachabilityState.PROVEN_REACHABLE,
+                reachability_kind="direct_public_symbol",
+            )
+        )
 
     # variable → function
     for name in sorted((old_vars - old_funcs) & (new_funcs - new_vars)):
-        changes.append(make_change(
-            ChangeKind.CPO_KIND_CHANGED,
-            symbol=name,
-            name=name,
-            old="variable (function-object / CPO)",
-            new="function",
-            old_value="variable",
-            public_reachable=True,
-            reachability_kind="direct_public_symbol",
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.CPO_KIND_CHANGED,
+                symbol=name,
+                name=name,
+                old="variable (function-object / CPO)",
+                new="function",
+                old_value="variable",
+                public_reachable=True,
+                reachability_state=ReachabilityState.PROVEN_REACHABLE,
+                reachability_kind="direct_public_symbol",
+            )
+        )
 
     return changes
 
@@ -492,20 +500,23 @@ def detect_overload_set_rerouted(
         # are not under-counted.
         if len(old_by_stem[stem]) < 2 and len(new_by_stem[stem]) < 2:
             continue
-        changes.append(make_change(
-            ChangeKind.OVERLOAD_SET_REROUTED,
-            symbol=stem,
-            name=stem,
-            detail=f"{len(removed)} overload(s) removed and {len(added)} added in the same revision",
-            old_value=str(sorted(_fmt_key(k) for k in old_sigs)),
-            new_value=str(sorted(_fmt_key(k) for k in new_sigs)),
-            # ADR-044 D1 (Codex review): _by_stem above filters to
-            # Visibility.PUBLIC, so this finding's mere existence already
-            # proves its subject is public — same reliable-signal tagging as
-            # CPO_KIND_CHANGED above.
-            public_reachable=True,
-            reachability_kind="direct_public_symbol",
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.OVERLOAD_SET_REROUTED,
+                symbol=stem,
+                name=stem,
+                detail=f"{len(removed)} overload(s) removed and {len(added)} added in the same revision",
+                old_value=str(sorted(_fmt_key(k) for k in old_sigs)),
+                new_value=str(sorted(_fmt_key(k) for k in new_sigs)),
+                # ADR-044 D1 (Codex review): _by_stem above filters to
+                # Visibility.PUBLIC, so this finding's mere existence already
+                # proves its subject is public — same reliable-signal tagging as
+                # CPO_KIND_CHANGED above.
+                public_reachable=True,
+                reachability_state=ReachabilityState.PROVEN_REACHABLE,
+                reachability_kind="direct_public_symbol",
+            )
+        )
 
     return changes
 
@@ -612,17 +623,19 @@ def detect_mandatory_template_param_added(
         # no-reliable-signal reasoning as before, now narrowed to exactly
         # the cases that do have one.
         subject_is_public = old_public.get(stem, False) or new_public.get(stem, False)
-        changes.append(make_change(
-            ChangeKind.MANDATORY_TEMPLATE_PARAM_ADDED,
-            symbol=stem,
-            name=stem,
-            old=str(old_min),
-            public_reachable=subject_is_public,
-            reachability_kind="direct_public_symbol" if subject_is_public else None,
-            new=str(new_min),
-            old_value=f"min_arity={old_min}",
-            new_value=f"min_arity={new_min}",
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.MANDATORY_TEMPLATE_PARAM_ADDED,
+                symbol=stem,
+                name=stem,
+                old=str(old_min),
+                public_reachable=subject_is_public,
+                reachability_kind="direct_public_symbol" if subject_is_public else None,
+                new=str(new_min),
+                old_value=f"min_arity={old_min}",
+                new_value=f"min_arity={new_min}",
+            )
+        )
 
     return changes
 
@@ -704,18 +717,21 @@ def detect_unspecified_return_now_named(
                 f"wrote out the type no longer compiles; only `auto` "
                 f"captures it now."
             )
-        changes.append(make_change(
-            ChangeKind.UNSPECIFIED_RETURN_NOW_NAMED,
-            symbol=qname,
-            description=desc,
-            old_value=old_rt,
-            new_value=new_rt,
-            # ADR-044 D1 (Codex review): _index() above filters to
-            # Visibility.PUBLIC functions only, so this finding's mere
-            # existence already proves its subject is public.
-            public_reachable=True,
-            reachability_kind="direct_public_symbol",
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.UNSPECIFIED_RETURN_NOW_NAMED,
+                symbol=qname,
+                description=desc,
+                old_value=old_rt,
+                new_value=new_rt,
+                # ADR-044 D1 (Codex review): _index() above filters to
+                # Visibility.PUBLIC functions only, so this finding's mere
+                # existence already proves its subject is public.
+                public_reachable=True,
+                reachability_state=ReachabilityState.PROVEN_REACHABLE,
+                reachability_kind="direct_public_symbol",
+            )
+        )
 
     return changes
 
@@ -778,21 +794,24 @@ def detect_missing_instantiations(
         stem = _strip_template_args(qname)
         if stem not in surviving_stems:
             continue
-        findings.append(make_change(
-            ChangeKind.INSTANTIATION_MISSING_FROM_BINARY,
-            symbol=fn.mangled,
-            name=fn.name,
-            detail=stem,
-            old_value=fn.mangled,
-            new_value=None,
-            # ADR-044 D1: both loops above filter to Visibility.PUBLIC, so
-            # this finding's mere existence already proves its subject is
-            # public — same reliable-signal tagging as the detectors in
-            # detect_template_patterns. Runs via DetectCppPatterns, also
-            # after ApplySuppression.
-            public_reachable=True,
-            reachability_kind="direct_public_symbol",
-        ))
+        findings.append(
+            make_change(
+                ChangeKind.INSTANTIATION_MISSING_FROM_BINARY,
+                symbol=fn.mangled,
+                name=fn.name,
+                detail=stem,
+                old_value=fn.mangled,
+                new_value=None,
+                # ADR-044 D1: both loops above filter to Visibility.PUBLIC, so
+                # this finding's mere existence already proves its subject is
+                # public — same reliable-signal tagging as the detectors in
+                # detect_template_patterns. Runs via DetectCppPatterns, also
+                # after ApplySuppression.
+                public_reachable=True,
+                reachability_state=ReachabilityState.PROVEN_REACHABLE,
+                reachability_kind="direct_public_symbol",
+            )
+        )
     return findings
 
 
@@ -807,9 +826,13 @@ def detect_template_patterns(
     internal_namespaces: tuple[str, ...] = _INTERNAL_TEMPLATE_NAMESPACES,
 ) -> list[Change]:
     out: list[Change] = []
-    out.extend(detect_internal_template_leaks(
-        old, new, internal_namespaces=internal_namespaces,
-    ))
+    out.extend(
+        detect_internal_template_leaks(
+            old,
+            new,
+            internal_namespaces=internal_namespaces,
+        )
+    )
     out.extend(detect_cpo_kind_changed(old, new))
     out.extend(detect_overload_set_rerouted(old, new))
     out.extend(detect_mandatory_template_param_added(old, new))

@@ -49,7 +49,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .binary_utils import strip_vendor_hash
-from .checker_policy import ChangeKind
+from .checker_policy import ChangeKind, ReachabilityState
 from .checker_types import Change
 from .diff_helpers import make_change
 
@@ -278,6 +278,7 @@ def detect_sycl_overload_set_removal(
                 # so every mangled name grouped into this finding is a real
                 # public-surface removal.
                 public_reachable=True,
+                reachability_state=ReachabilityState.PROVEN_REACHABLE,
                 reachability_kind="direct_public_symbol",
             )
         )
@@ -479,6 +480,7 @@ def _emit_isa_dropped_finding(
         # by definition, the public export surface) — both sources are
         # reliably public.
         public_reachable=True,
+        reachability_state=ReachabilityState.PROVEN_REACHABLE,
         reachability_kind="direct_public_symbol",
     )
 
@@ -614,6 +616,7 @@ def _find_tag_rename_for_removed(
             # same reliable signal the other Visibility.PUBLIC-filtered
             # late-detector findings have.
             public_reachable=True,
+            reachability_state=ReachabilityState.PROVEN_REACHABLE,
             reachability_kind="direct_public_symbol",
         )
     return None
@@ -869,6 +872,7 @@ def detect_default_template_arg_changed(
                     # above, so both the removed and added instantiation
                     # symbols are reliably public.
                     public_reachable=True,
+                    reachability_state=ReachabilityState.PROVEN_REACHABLE,
                     reachability_kind="direct_public_symbol",
                 )
             )

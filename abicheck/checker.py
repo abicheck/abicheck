@@ -183,7 +183,10 @@ def _filter_suppressed_changes(
     """
     if suppression is None or not changes:
         return changes
-    from .post_processing import _build_suppression_overreach_change
+    from .post_processing import (
+        _build_suppression_overreach_change,
+        _build_suppression_unknown_reachability_change,
+    )
 
     visible: list[Change] = []
     diagnostics: list[Change] = []
@@ -194,7 +197,15 @@ def _filter_suppressed_changes(
             continue
         visible.append(c)
         if outcome.withheld_rule is not None:
-            diagnostics.append(_build_suppression_overreach_change(c, outcome.withheld_rule))
+            diagnostics.append(
+                _build_suppression_overreach_change(c, outcome.withheld_rule)
+            )
+        if outcome.withheld_unknown_rule is not None:
+            diagnostics.append(
+                _build_suppression_unknown_reachability_change(
+                    c, outcome.withheld_unknown_rule
+                )
+            )
     visible.extend(diagnostics)
     return visible
 
@@ -257,7 +268,10 @@ def _filter_pattern_synthetic(
     after ``post_processing.DEFAULT_PIPELINE`` runs, so nothing else would
     ever emit that diagnostic for them.
     """
-    from .post_processing import _build_suppression_overreach_change
+    from .post_processing import (
+        _build_suppression_overreach_change,
+        _build_suppression_unknown_reachability_change,
+    )
 
     retained = kept[:pre_pattern_count]
     diagnostics: list[Change] = []
@@ -274,7 +288,15 @@ def _filter_pattern_synthetic(
             continue
         retained.append(c)
         if outcome.withheld_rule is not None:
-            diagnostics.append(_build_suppression_overreach_change(c, outcome.withheld_rule))
+            diagnostics.append(
+                _build_suppression_overreach_change(c, outcome.withheld_rule)
+            )
+        if outcome.withheld_unknown_rule is not None:
+            diagnostics.append(
+                _build_suppression_unknown_reachability_change(
+                    c, outcome.withheld_unknown_rule
+                )
+            )
     retained.extend(diagnostics)
     if suppressed_synthetic:
         pattern_modulations = [
@@ -323,7 +345,11 @@ def _apply_pattern_verdicts_step(
         )
 
     if pattern_modulations:
-        return kept, _compute_verdict_for(kept + verdict_redundant, policy, policy_file), pattern_modulations
+        return (
+            kept,
+            _compute_verdict_for(kept + verdict_redundant, policy, policy_file),
+            pattern_modulations,
+        )
     return kept, current_verdict, pattern_modulations
 
 
@@ -384,7 +410,15 @@ def _run_post_processing(
     force_public_symbols: set[str] | None,
     collapse_versioned_symbols: bool,
     public_surface_allowlist: set[str] | None = None,
-) -> tuple[list[Change], list[Change], list[Change], list[Change], list[Change], bool, PipelineContext]:
+) -> tuple[
+    list[Change],
+    list[Change],
+    list[Change],
+    list[Change],
+    list[Change],
+    bool,
+    PipelineContext,
+]:
     """Run the post-processing pipeline and unpack results.
 
     Returns ``(kept, redundant, opaque_filtered, suppressed, out_of_surface,
@@ -461,7 +495,8 @@ def _apply_soname_policy(
     )
     if versioned_scheme_soname_relink_required:
         soname_changes = [
-            c for c in soname_changes
+            c
+            for c in soname_changes
             if c.kind is not ChangeKind.SONAME_BUMP_UNNECESSARY
         ]
     soname_changes = _filter_suppressed_changes(soname_changes, suppression, suppressed)
@@ -554,12 +589,24 @@ def compare(
     # Run the post-processing pipeline (filtering, dedup, enrichment, suppression).
     # PolicyFile.frozen_namespaces is threaded in so the late-stage
     # EscalateFrozenNamespaceViolations step can tag matching findings.
-    kept, redundant, opaque_filtered, suppressed, out_of_surface, scope_resolved, pp_ctx = (
-        _run_post_processing(
-            changes, old, new, suppression, policy_file, scope_to_public_surface,
-            force_public_symbols, collapse_versioned_symbols,
-            public_surface_allowlist=public_surface_allowlist,
-        )
+    (
+        kept,
+        redundant,
+        opaque_filtered,
+        suppressed,
+        out_of_surface,
+        scope_resolved,
+        pp_ctx,
+    ) = _run_post_processing(
+        changes,
+        old,
+        new,
+        suppression,
+        policy_file,
+        scope_to_public_surface,
+        force_public_symbols,
+        collapse_versioned_symbols,
+        public_surface_allowlist=public_surface_allowlist,
     )
 
     # Verdict computed on unsuppressed semantic changes.
@@ -746,11 +793,15 @@ def compare(
     # label in the reporter is distinct from true display-dedup redundant changes.
     # redundant_count reflects only the display-dedup set; opaque_filtered is additive.
     redundant_for_report = redundant + opaque_filtered
-    true_redundant_count = len(redundant)  # dedup-only (not opaque); used for report label
+    true_redundant_count = len(
+        redundant
+    )  # dedup-only (not opaque); used for report label
 
     # Compute evidence tiers and confidence from detector results.
     evidence_tiers, confidence, coverage_warnings, evidence_tier = _compute_confidence(
-        detector_results, old, new,
+        detector_results,
+        old,
+        new,
     )
 
     # ADR-024 §D5.3: structured confidence in the surface resolution itself.
@@ -775,7 +826,15 @@ def compare(
     # breaking, so they leave the verdict unchanged unless NO_CHANGE flips to COMPATIBLE.
     if surface_metrics:
         kept, verdict = _apply_surface_metrics(
-            old, new, kept, verdict_redundant, suppressed, suppression, policy, policy_file, verdict
+            old,
+            new,
+            kept,
+            verdict_redundant,
+            suppressed,
+            suppression,
+            policy,
+            policy_file,
+            verdict,
         )
 
     # ADR-027 A4: pattern-aware verdict modulation. Runs after post-processing
@@ -786,7 +845,16 @@ def compare(
     pattern_modulations: list[dict[str, object]] = []
     if pattern_verdicts:
         kept, verdict, pattern_modulations = _apply_pattern_verdicts_step(
-            old, new, kept, verdict_redundant, suppressed, suppression, policy, policy_file, evidence_tier, verdict
+            old,
+            new,
+            kept,
+            verdict_redundant,
+            suppressed,
+            suppression,
+            policy,
+            policy_file,
+            evidence_tier,
+            verdict,
         )
 
     return DiffResult(

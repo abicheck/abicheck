@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Suppression — load and apply suppression rules to ABI changes."""
+
 from __future__ import annotations
 
 import fnmatch
@@ -23,37 +24,81 @@ from pathlib import Path
 
 import yaml
 
-from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS, ChangeKind
+from .checker_policy import (
+    API_BREAK_KINDS,
+    BREAKING_KINDS,
+    ChangeKind,
+    ReachabilityState,
+)
 from .checker_types import Change
 
 # Pre-build valid change_kind values for fast validation
 _VALID_CHANGE_KINDS: frozenset[str] = frozenset(ck.value for ck in ChangeKind)
 
 # Keys allowed in a suppression entry — unknown keys are rejected
-_KNOWN_ENTRY_KEYS: frozenset[str] = frozenset({
-    "symbol", "symbol_pattern", "type_pattern", "member_name",
-    "change_kind", "reason", "label", "source_location", "expires",
-    "namespace", "entity_namespace", "cause_namespace",
-    "reachability", "allow_public_break",
-})
+_KNOWN_ENTRY_KEYS: frozenset[str] = frozenset(
+    {
+        "symbol",
+        "symbol_pattern",
+        "type_pattern",
+        "member_name",
+        "change_kind",
+        "reason",
+        "label",
+        "source_location",
+        "expires",
+        "namespace",
+        "entity_namespace",
+        "cause_namespace",
+        "reachability",
+        "allow_public_break",
+        "allow_unknown_reachability",
+    }
+)
 
 # ADR-044 D2: valid values for Suppression.reachability.
-_VALID_REACHABILITY: frozenset[str] = frozenset({
-    "unreachable-only", "any", "public-only",
-})
+# "proven-unreachable-only" (impact-analysis-layer P0) is a stricter variant
+# of "unreachable-only": it additionally refuses to match a change whose
+# Change.reachability_state is UNKNOWN (graph coverage insufficient to prove
+# unreachability), rather than treating UNKNOWN the same as proven-unreachable
+# the way the original boolean-only "unreachable-only" gate does.
+_VALID_REACHABILITY: frozenset[str] = frozenset(
+    {
+        "unreachable-only",
+        "any",
+        "public-only",
+        "proven-unreachable-only",
+    }
+)
 
 # ChangeKind values that represent type-level changes (matched by type_pattern)
-_TYPE_CHANGE_KINDS: frozenset[str] = frozenset({
-    "type_size_changed", "type_alignment_changed", "type_field_removed",
-    "type_field_added", "type_field_offset_changed", "type_field_type_changed",
-    "type_base_changed", "type_vtable_changed", "type_added", "type_removed",
-    "type_field_added_compatible", "type_became_opaque", "type_visibility_changed",
-    "enum_member_removed", "enum_member_added", "enum_member_value_changed",
-    "enum_last_member_value_changed", "enum_member_renamed",
-    "enum_underlying_size_changed",
-    "typedef_removed", "typedef_base_changed",
-    "struct_field_type_changed", "union_field_type_changed",
-})
+_TYPE_CHANGE_KINDS: frozenset[str] = frozenset(
+    {
+        "type_size_changed",
+        "type_alignment_changed",
+        "type_field_removed",
+        "type_field_added",
+        "type_field_offset_changed",
+        "type_field_type_changed",
+        "type_base_changed",
+        "type_vtable_changed",
+        "type_added",
+        "type_removed",
+        "type_field_added_compatible",
+        "type_became_opaque",
+        "type_visibility_changed",
+        "enum_member_removed",
+        "enum_member_added",
+        "enum_member_value_changed",
+        "enum_last_member_value_changed",
+        "enum_member_renamed",
+        "enum_underlying_size_changed",
+        "typedef_removed",
+        "typedef_base_changed",
+        "struct_field_type_changed",
+        "union_field_type_changed",
+    }
+)
 
 
 def _compile_pattern(pattern: str | None, field_name: str) -> re.Pattern[str] | None:
@@ -86,7 +131,12 @@ def _validate_selectors(
 ) -> None:
     """Raise :class:`ValueError` if the selector combination is invalid."""
     selector_count = sum([has_symbol, has_sym_pattern, has_type_pattern])
-    if selector_count == 0 and not has_source_location and not has_member_name and not has_namespace:
+    if (
+        selector_count == 0
+        and not has_source_location
+        and not has_member_name
+        and not has_namespace
+    ):
         raise ValueError(
             "Suppression must have at least one of: "
             "'symbol', 'symbol_pattern', 'type_pattern', "
@@ -156,7 +206,9 @@ def _matches_entity_namespace(compiled: re.Pattern[str], change: Change) -> bool
     detail silently suppress an unrelated finding on a *public* symbol merely
     because its documented cause happens to live in that namespace.
     """
-    return _ns_match(compiled, change.symbol) or _ns_match(compiled, change.qualified_name)
+    return _ns_match(compiled, change.symbol) or _ns_match(
+        compiled, change.qualified_name
+    )
 
 
 def _matches_cause_namespace(compiled: re.Pattern[str], change: Change) -> bool:
@@ -176,7 +228,9 @@ def _matches_type_pattern(
     """Return True if *change* is a type-level change matching *compiled*."""
     if change.kind.value not in _TYPE_CHANGE_KINDS:
         return False
-    match_symbol = change.symbol.rsplit("::", 1)[0] if "::" in change.symbol else change.symbol
+    match_symbol = (
+        change.symbol.rsplit("::", 1)[0] if "::" in change.symbol else change.symbol
+    )
     if not compiled.fullmatch(match_symbol):
         return False
     if change_kind_filter is not None and change.kind.value != change_kind_filter:
@@ -259,13 +313,31 @@ class Suppression:
     ``API_BREAK_KINDS`` — normally refused regardless of :attr:`reachability`
     (ADR-044 D2). Makes an unsafe suppression explicit and reviewable rather
     than an accident of a broad glob."""
+    allow_unknown_reachability: bool = False
+    """When True, permits this rule — if :attr:`reachability` resolves to
+    ``"proven-unreachable-only"`` — to also match a change whose
+    ``Change.reachability_state`` is ``ReachabilityState.UNKNOWN`` (graph
+    coverage was insufficient to positively prove the change unreachable).
+    Has no effect under any other :attr:`reachability` value, since only
+    ``"proven-unreachable-only"`` ever distinguishes UNKNOWN from
+    proven-unreachable in the first place. Makes an audit-worthy
+    absence-of-evidence suppression explicit rather than accidental
+    (impact-analysis-layer P0 slice)."""
     expires: date | None = None
     """Optional expiry date (ISO 8601). After this date, the suppression is inactive
     and a warning is emitted. Format: ``expires: 2026-06-01``."""
-    _compiled_pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False)
-    _compiled_type_pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False)
-    _compiled_member_pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False)
-    _compiled_source_pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False)
+    _compiled_pattern: re.Pattern[str] | None = field(
+        default=None, init=False, repr=False
+    )
+    _compiled_type_pattern: re.Pattern[str] | None = field(
+        default=None, init=False, repr=False
+    )
+    _compiled_member_pattern: re.Pattern[str] | None = field(
+        default=None, init=False, repr=False
+    )
+    _compiled_source_pattern: re.Pattern[str] | None = field(
+        default=None, init=False, repr=False
+    )
     _compiled_entity_namespace_pattern: re.Pattern[str] | None = field(
         default=None, init=False, repr=False
     )
@@ -281,23 +353,36 @@ class Suppression:
                 "Suppression fields 'namespace' and 'entity_namespace' are "
                 "aliases for the same selector — specify only one"
             )
-        effective_entity_ns = self.entity_namespace if self.entity_namespace is not None else self.namespace
+        effective_entity_ns = (
+            self.entity_namespace
+            if self.entity_namespace is not None
+            else self.namespace
+        )
         _validate_selectors(
             has_symbol=self.symbol is not None,
             has_sym_pattern=self.symbol_pattern is not None,
             has_type_pattern=self.type_pattern is not None,
             has_member_name=self.member_name is not None,
             has_source_location=self.source_location is not None,
-            has_namespace=effective_entity_ns is not None or self.cause_namespace is not None,
+            has_namespace=effective_entity_ns is not None
+            or self.cause_namespace is not None,
         )
         # Compile regex eagerly — malformed patterns fail at load time, not match time.
         # Uses fullmatch semantics: the pattern must match the entire symbol name.
         # Use explicit '.*' anchors in the pattern if partial matching is intended.
         self._compiled_pattern = _compile_pattern(self.symbol_pattern, "symbol_pattern")
-        self._compiled_type_pattern = _compile_pattern(self.type_pattern, "type_pattern")
-        self._compiled_member_pattern = _compile_pattern(self.member_name, "member_name")
-        self._compiled_source_pattern = _compile_glob(self.source_location, "source_location")
-        self._compiled_entity_namespace_pattern = _compile_glob(effective_entity_ns, "namespace")
+        self._compiled_type_pattern = _compile_pattern(
+            self.type_pattern, "type_pattern"
+        )
+        self._compiled_member_pattern = _compile_pattern(
+            self.member_name, "member_name"
+        )
+        self._compiled_source_pattern = _compile_glob(
+            self.source_location, "source_location"
+        )
+        self._compiled_entity_namespace_pattern = _compile_glob(
+            effective_entity_ns, "namespace"
+        )
         self._compiled_cause_namespace_pattern = _compile_glob(
             self.cause_namespace, "cause_namespace"
         )
@@ -305,10 +390,12 @@ class Suppression:
         if self.change_kind is not None and self.change_kind not in _VALID_CHANGE_KINDS:
             valid = ", ".join(sorted(_VALID_CHANGE_KINDS))
             raise ValueError(
-                f"Unknown change_kind {self.change_kind!r}. "
-                f"Valid values: {valid}"
+                f"Unknown change_kind {self.change_kind!r}. Valid values: {valid}"
             )
-        if self.reachability is not None and self.reachability not in _VALID_REACHABILITY:
+        if (
+            self.reachability is not None
+            and self.reachability not in _VALID_REACHABILITY
+        ):
             raise ValueError(
                 f"Invalid reachability {self.reachability!r}. "
                 f"Valid values: {sorted(_VALID_REACHABILITY)}"
@@ -323,6 +410,11 @@ class Suppression:
             raise ValueError(
                 "'allow_public_break' must be a boolean (true/false), got "
                 f"{self.allow_public_break!r}"
+            )
+        if not isinstance(self.allow_unknown_reachability, bool):
+            raise ValueError(
+                "'allow_unknown_reachability' must be a boolean (true/false), "
+                f"got {self.allow_unknown_reachability!r}"
             )
         # ADR-044 D2: a rule with no explicit reachability defaults to
         # "unreachable-only" when it has a broad selector (namespace/
@@ -359,7 +451,9 @@ class Suppression:
             or self.cause_namespace is not None
             or self.source_location is not None
         )
-        self._is_broad_selector = has_broad_shaped_selector and not has_primary_narrow_selector
+        self._is_broad_selector = (
+            has_broad_shaped_selector and not has_primary_narrow_selector
+        )
         self._resolved_reachability = self.reachability or (
             "unreachable-only" if self._is_broad_selector else "any"
         )
@@ -405,18 +499,24 @@ class Suppression:
 
         # entity_namespace / namespace: match the change's own identity only.
         if self._compiled_entity_namespace_pattern is not None:
-            if not _matches_entity_namespace(self._compiled_entity_namespace_pattern, change):
+            if not _matches_entity_namespace(
+                self._compiled_entity_namespace_pattern, change
+            ):
                 return False
 
         # cause_namespace: match the change's caused_by_type only.
         if self._compiled_cause_namespace_pattern is not None:
-            if not _matches_cause_namespace(self._compiled_cause_namespace_pattern, change):
+            if not _matches_cause_namespace(
+                self._compiled_cause_namespace_pattern, change
+            ):
                 return False
 
         # type_pattern: only matches type-level changes (TYPE_*, ENUM_*, TYPEDEF_*, …).
         # Returns early (True/False) because type_pattern is a primary selector.
         if self._compiled_type_pattern is not None:
-            return _matches_type_pattern(self._compiled_type_pattern, self.change_kind, change)
+            return _matches_type_pattern(
+                self._compiled_type_pattern, self.change_kind, change
+            )
 
         # Check symbol match
         if not _matches_symbol(self.symbol, self._compiled_pattern, change):
@@ -449,6 +549,13 @@ class Suppression:
             return True
         if self._resolved_reachability == "unreachable-only":
             return not change.public_reachable
+        if self._resolved_reachability == "proven-unreachable-only":
+            if change.reachability_state == ReachabilityState.PROVEN_UNREACHABLE:
+                return True
+            return (
+                change.reachability_state == ReachabilityState.UNKNOWN
+                and self.allow_unknown_reachability
+            )
         return change.public_reachable  # "public-only"
 
     def _passes_public_break_gate(self, change: Change) -> bool:
@@ -484,7 +591,9 @@ class Suppression:
         """
         if not self._selector_match(change, today):
             return False
-        return self._passes_reachability_gate(change) and self._passes_public_break_gate(change)
+        return self._passes_reachability_gate(
+            change
+        ) and self._passes_public_break_gate(change)
 
     def would_withhold(self, change: Change, today: date | None = None) -> bool:
         """True if this rule's selectors match *change*, *change* is a
@@ -508,9 +617,36 @@ class Suppression:
         """
         if not self._selector_match(change, today):
             return False
-        if not (change.public_reachable and (change.kind in BREAKING_KINDS or change.kind in API_BREAK_KINDS)):
+        if not (
+            change.public_reachable
+            and (change.kind in BREAKING_KINDS or change.kind in API_BREAK_KINDS)
+        ):
             return False
         return not self._passes_public_break_gate(change)
+
+    def would_withhold_unknown_reachability(
+        self, change: Change, today: date | None = None
+    ) -> bool:
+        """True if this rule's selectors match *change*, its resolved
+        :attr:`reachability` is ``"proven-unreachable-only"``, *change*'s
+        ``Change.reachability_state`` is ``ReachabilityState.UNKNOWN``, and
+        ``allow_unknown_reachability`` is not set — i.e. exactly the case the
+        ``suppression_reachability_unknown`` diagnostic describes
+        (impact-analysis-layer P0 slice).
+
+        Only ``"proven-unreachable-only"`` ever distinguishes UNKNOWN from
+        proven-unreachable at all — the original ``"unreachable-only"``
+        default treats both identically (via the boolean
+        ``Change.public_reachable``) for backward compatibility, so a rule
+        using that default can never trigger this diagnostic.
+        """
+        if self._resolved_reachability != "proven-unreachable-only":
+            return False
+        if not self._selector_match(change, today):
+            return False
+        if change.reachability_state != ReachabilityState.UNKNOWN:
+            return False
+        return not self.allow_unknown_reachability
 
 
 def _parse_expires(expires_raw: object, entry_index: int) -> date | None:
@@ -558,12 +694,34 @@ def _parse_allow_public_break(raw: object, entry_index: int) -> bool:
     )
 
 
+def _parse_allow_unknown_reachability(raw: object, entry_index: int) -> bool:
+    """Parse and validate ``allow_unknown_reachability`` from a suppression
+    entry — same strict-boolean contract as :func:`_parse_allow_public_break`
+    (impact-analysis-layer P0 slice)."""
+    if raw is None:
+        return False
+    if isinstance(raw, bool):
+        return raw
+    raise ValueError(
+        f"Suppression entry {entry_index}: 'allow_unknown_reachability' must be "
+        f"a boolean (true/false), got {raw!r}"
+    )
+
+
 @dataclass
 class SuppressionOutcome:
-    """Result of :meth:`SuppressionList.evaluate` for one change (ADR-044 D4)."""
+    """Result of :meth:`SuppressionList.evaluate` for one change (ADR-044 D4).
+
+    ``withheld_unknown_rule`` (impact-analysis-layer P0 slice) is the
+    ``"proven-unreachable-only"`` analogue of ``withheld_rule``: set when a
+    rule's selectors matched but the change's ``reachability_state`` was
+    ``UNKNOWN`` rather than proven-unreachable, distinct from the
+    public-reachable-break case ``withheld_rule`` covers.
+    """
 
     suppressed: bool
     withheld_rule: Suppression | None = None
+    withheld_unknown_rule: Suppression | None = None
 
 
 class SuppressionList:
@@ -576,7 +734,9 @@ class SuppressionList:
         return cls(suppressions=[*a._suppressions, *b._suppressions])
 
     @classmethod
-    def load(cls, path: Path, *, require_justification: bool = False) -> SuppressionList:
+    def load(
+        cls, path: Path, *, require_justification: bool = False
+    ) -> SuppressionList:
         """Load suppression rules from a YAML file.
 
         If *require_justification* is True, every rule must have a non-empty
@@ -601,7 +761,9 @@ class SuppressionList:
 
         version = data.get("version")
         if version != 1:
-            raise ValueError(f"Unsupported suppression file version: {version!r} (expected 1)")
+            raise ValueError(
+                f"Unsupported suppression file version: {version!r} (expected 1)"
+            )
 
         raw_suppressions = data.get("suppressions")
         if raw_suppressions is None:
@@ -622,7 +784,12 @@ class SuppressionList:
                 )
             # Parse expires date
             expires = _parse_expires(item.get("expires"), i)
-            allow_public_break = _parse_allow_public_break(item.get("allow_public_break"), i)
+            allow_public_break = _parse_allow_public_break(
+                item.get("allow_public_break"), i
+            )
+            allow_unknown_reachability = _parse_allow_unknown_reachability(
+                item.get("allow_unknown_reachability"), i
+            )
             try:
                 sup = Suppression(
                     symbol=item.get("symbol"),
@@ -638,6 +805,7 @@ class SuppressionList:
                     cause_namespace=item.get("cause_namespace"),
                     reachability=item.get("reachability"),
                     allow_public_break=allow_public_break,
+                    allow_unknown_reachability=allow_unknown_reachability,
                     expires=expires,
                 )
             except ValueError as e:
@@ -688,14 +856,29 @@ class SuppressionList:
         ``SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`` diagnostic explaining why.
         A rule that actually suppresses the change always wins outright (no
         diagnostic needed — the change is gone from the report either way).
+
+        Independently (impact-analysis-layer P0 slice), the first rule
+        withheld because its ``"proven-unreachable-only"`` gate could not
+        prove *change* unreachable (:meth:`Suppression.would_withhold_unknown_reachability`)
+        is returned as ``withheld_unknown_rule``, so the caller can emit a
+        ``SUPPRESSION_REACHABILITY_UNKNOWN`` diagnostic.
         """
         withheld_rule: Suppression | None = None
+        withheld_unknown_rule: Suppression | None = None
         for s in self._suppressions:
             if s.matches(change, today=today):
-                return SuppressionOutcome(suppressed=True, withheld_rule=None)
+                return SuppressionOutcome(suppressed=True)
             if withheld_rule is None and s.would_withhold(change, today=today):
                 withheld_rule = s
-        return SuppressionOutcome(suppressed=False, withheld_rule=withheld_rule)
+            if withheld_unknown_rule is None and s.would_withhold_unknown_reachability(
+                change, today=today
+            ):
+                withheld_unknown_rule = s
+        return SuppressionOutcome(
+            suppressed=False,
+            withheld_rule=withheld_rule,
+            withheld_unknown_rule=withheld_unknown_rule,
+        )
 
     def expired_rules(self, today: date | None = None) -> list[Suppression]:
         """Return all rules that have passed their expiry date."""
@@ -745,7 +928,8 @@ class SuppressionList:
         expired = self.expired_rules(today)
 
         near_expiry = [
-            s for s in self._suppressions
+            s
+            for s in self._suppressions
             if s.expires is not None
             and not s.is_expired(today)
             and s.expires <= near_expiry_cutoff
@@ -760,7 +944,9 @@ class SuppressionList:
             total_rules=len(self._suppressions),
         )
 
-    def check_expired_strict(self, today: date | None = None) -> list[tuple[int, Suppression]]:
+    def check_expired_strict(
+        self, today: date | None = None
+    ) -> list[tuple[int, Suppression]]:
         """Return ``(index, rule)`` pairs for all expired rules.
 
         Used by ``--strict-suppressions`` to enumerate expired rules with
@@ -768,8 +954,7 @@ class SuppressionList:
         """
         check_date = today or date.today()
         return [
-            (i, s) for i, s in enumerate(self._suppressions)
-            if s.is_expired(check_date)
+            (i, s) for i, s in enumerate(self._suppressions) if s.is_expired(check_date)
         ]
 
     def __len__(self) -> int:
@@ -782,6 +967,7 @@ class SuppressionList:
 @dataclass
 class SuppressionAudit:
     """Result of auditing suppression rules against detected changes."""
+
     stale_rules: list[Suppression]
     """Rules that matched zero changes (likely stale or misconfigured)."""
     high_risk_matches: list[tuple[Suppression, Change]]
@@ -812,13 +998,21 @@ class SuppressionAudit:
             lines.append(f"  ⚠ {len(self.stale_rules)} stale rule(s) matched nothing")
             for s in self.stale_rules[:5]:
                 target = (
-                    s.symbol or s.symbol_pattern or s.type_pattern
-                    or s.member_name or s.source_location
-                    or s.namespace or s.entity_namespace or s.cause_namespace or "?"
+                    s.symbol
+                    or s.symbol_pattern
+                    or s.type_pattern
+                    or s.member_name
+                    or s.source_location
+                    or s.namespace
+                    or s.entity_namespace
+                    or s.cause_namespace
+                    or "?"
                 )
                 lines.append(f"    - {target} ({s.reason or 'no reason'})")
         if self.high_risk_matches:
-            lines.append(f"  ⚠ {len(self.high_risk_matches)} suppression(s) matched BREAKING changes")
+            lines.append(
+                f"  ⚠ {len(self.high_risk_matches)} suppression(s) matched BREAKING changes"
+            )
             for sup, change in self.high_risk_matches[:5]:
                 lines.append(f"    - {change.kind.value}: {change.symbol}")
         if self.expired_rules:

@@ -60,8 +60,9 @@ suppressions:
 | `source_location` | glob string | `fnmatch`-style match against `change.source_location` |
 | `namespace` (alias: `entity_namespace`) | glob string | Match the change's own `symbol`/qualified name against a `::`-namespace glob (`**` = any depth) |
 | `cause_namespace` | glob string | Match the change's `caused_by_type` (its documented *cause*, when different from its own subject) against a namespace glob |
-| `reachability` | `unreachable-only` \| `any` \| `public-only` | Gates whether this rule may match a change that is part of the effective public ABI — see below. Default depends on the selector shape. |
+| `reachability` | `unreachable-only` \| `any` \| `public-only` \| `proven-unreachable-only` | Gates whether this rule may match a change that is part of the effective public ABI — see below. Default depends on the selector shape. |
 | `allow_public_break` | bool | Required, for a **broad** rule (`namespace`/`source_location`), to suppress a change that is both public-reachable and classified `BREAKING`/`API_BREAK`. Not required for a narrow rule (`symbol`/`symbol_pattern`/`type_pattern`/`member_name`) — naming one exact symbol is already the deliberate, audited action. |
+| `allow_unknown_reachability` | bool | Only meaningful with `reachability: proven-unreachable-only` — permits the rule to also match a change whose reachability could not be positively proven or disproven (see below). |
 | `label` | string | Optional grouping tag |
 | `expires` | date/datetime | Expiry date; expired rule is ignored |
 | `reason` | string | Human-readable rationale |
@@ -127,6 +128,47 @@ whether it may still apply:
 | `unreachable-only` | The rule will not match a change that is part of the effective public ABI. **Default** for a rule using only broad selectors (`namespace`/`entity_namespace`/`cause_namespace`/`source_location`). |
 | `any` | No reachability filtering — matches regardless. **Default** for a rule using a narrow selector (`symbol`, `symbol_pattern`, `type_pattern`, `member_name`) — naming one exact symbol/type is already an audited decision, so behavior is unchanged from before this feature existed. |
 | `public-only` | Inverse of `unreachable-only` — matches only a public-reachable change. Mainly useful for temporarily isolating leak findings while investigating them. |
+| `proven-unreachable-only` | A stricter opt-in variant of `unreachable-only` — see "Proven vs. unknown reachability" below. |
+
+### Proven vs. unknown reachability
+
+`unreachable-only`'s default gate keys off a single boolean
+(`change.public_reachable`): a change is either public-reachable or it is
+not. That collapses two different situations into the same "not reachable"
+answer — the walk positively examined this change and found no path to the
+public surface, versus no walk (or an incomplete one) ever reached a verdict
+on it at all. For the type-layout walk (which enumerates every declaration
+the snapshot itself knows about) that distinction rarely matters in
+practice, which is why `unreachable-only` keeps its original, simpler
+semantics as the default — every existing suppression file behaves exactly
+as before.
+
+For the optional embedded L5 source/call graph, the distinction can matter:
+its coverage can be narrowed (restricted to a changed-paths subset) or
+degraded (a collection pass hit errors but still folded in whatever it
+managed to parse) — see [`docs/concepts/graph-coverage.md`](../concepts/graph-coverage.md)
+for the concept. An absent edge in that kind of graph is not reliable
+negative evidence.
+
+Opt into the stricter check with `reachability: proven-unreachable-only`. It
+refuses to match a change whose reachability is `unknown` — i.e. no walk
+reached a verdict, or the only walk that could have (the call graph) is
+itself flagged narrowed/degraded and the layout walk never examined the
+change at all:
+
+```yaml
+- namespace: "myns::detail::*"
+  reachability: proven-unreachable-only
+  reason: "Only suppress detail:: churn once graph coverage actually proves it unreachable"
+```
+
+When such a rule's selectors match but the change's reachability is
+`unknown`, the change is **not** suppressed and a
+`suppression_reachability_unknown` finding is added to the report explaining
+why, with the same shape as `suppression_would_hide_public_break` below. Set
+`allow_unknown_reachability: true` on the rule to accept the
+absence-of-evidence risk explicitly once you've manually confirmed it's
+safe.
 
 Independently of `reachability`, a **broad** rule (`namespace`/
 `entity_namespace`/`cause_namespace`/`source_location`) that would suppress a
