@@ -20,6 +20,10 @@ on:
       - '.github/workflows/test-action.yml'
       - 'tests/fixtures/action/**'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # ── Test B: compare mode with snapshot fixtures (no system deps) ──────────
   test-compare-breaking:

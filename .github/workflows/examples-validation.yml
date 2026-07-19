@@ -21,6 +21,10 @@ on:
       - ".github/workflows/examples-validation.yml"
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # Blocking core matrix: the full debug-headers catalog under both producers.
   # GCC is the historical lane; Clang is promoted to a first-class validator so
