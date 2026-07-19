@@ -862,6 +862,54 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
         assert len(found) == 1
         assert found[0].reachability_state == ReachabilityState.UNKNOWN
 
+    def test_completed_passes_with_only_private_header_decl_is_unknown(self) -> None:
+        """Codex review, second pass: source_graph_findings._public_decls()
+        only checks for a structural SOURCE_DECLARES edge from any
+        "header"-kind node -- it never checks the declaring header's or the
+        decl's own visibility, unlike its sibling _public_types(). A graph
+        whose only "public" root is actually a private-header decl (no
+        exported symbol, visibility != public_header) would satisfy that
+        looser check but never satisfy is_consumer_compiled_public_entry()
+        -- the real seed predicate compute_call_graph_leak_paths uses --
+        so it must not be read as trustworthy negative evidence either."""
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_graph import (
+            GraphEdge,
+            GraphNode,
+            SourceGraphSummary,
+        )
+
+        graph = SourceGraphSummary(
+            nodes=[
+                GraphNode(id="hdr://priv.h", kind="header", label="priv.h", attrs={}),
+                GraphNode(
+                    id="decl://priv", kind="source_decl",
+                    label="ns::detail::PrivHelper", attrs={"visibility": "private_header"},
+                ),
+            ],
+            edges=[
+                GraphEdge(src="hdr://priv.h", dst="decl://priv", kind="SOURCE_DECLARES"),
+            ],
+            extractor_passes={"call_graph": True, "type_graph": True},
+        )
+        old = AbiSnapshot(
+            library="libtest.so", version="1.0",
+            functions=[_public_fn("pubFn")],
+            build_source=BuildSourcePack(root="", source_graph=graph),
+        )
+        new = _snap(functions=[_public_fn("pubFn")])
+        raw_change = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="ns::detail::unrelated_and_never_called",
+            description="removed",
+        )
+        ctx = DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_REMOVED]
+        assert len(found) == 1
+        assert found[0].reachability_state == ReachabilityState.UNKNOWN
+
     def test_func_removed_with_edges_but_no_extractor_pass_confirmation_is_unknown(
         self,
     ) -> None:

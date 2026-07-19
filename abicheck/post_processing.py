@@ -553,10 +553,9 @@ _PUBLIC_SOURCE_ABI_KINDS = frozenset({
     ChangeKind.SOURCE_DECL_BINARY_SYMBOL_MISMATCH,
     ChangeKind.ODR_SOURCE_CONFLICT,
     # L5 (source_graph_findings.py) kinds whose subject is itself a
-    # proven-public entry/decl/symbol, not just something touching one
-    # (Codex review). NOT extended to SOURCE_TO_BINARY_MAPPING_CHANGED
-    # (unfiltered decl), BUILD_OPTION_REACHES_PUBLIC_SYMBOL, or
-    # TARGET_DEPENDENCY_ADDED -- those are keyed on a build option/target
+    # proven-public entry/decl/symbol, not just something touching one.
+    # NOT extended to SOURCE_TO_BINARY_MAPPING_CHANGED/BUILD_OPTION_REACHES_
+    # PUBLIC_SYMBOL/TARGET_DEPENDENCY_ADDED -- keyed on a decl/option/target
     # that merely reaches something public, not a public entity itself.
     ChangeKind.PUBLIC_REACHABILITY_CHANGED,
     ChangeKind.GENERATED_HEADER_REACHES_PUBLIC_API,
@@ -777,17 +776,23 @@ class MarkReachability:
                 return False
             if not (graph.extractor_passes.get("call_graph") and graph.extractor_passes.get("type_graph")):
                 return False
-            # Both passes completed is not enough on its own (Codex review):
-            # compute_call_graph_leak_paths only ever walks from public
-            # roots, so a graph that completed both passes but captured no
-            # public declaration/type at all has nothing to seed the walk
-            # with -- indistinguishable from "walked thoroughly and found
-            # nothing" but actually never walked. Mirrors
-            # source_graph_findings._has_internal_reach_coverage's own
-            # public-closure requirement.
-            from .buildsource.source_graph_findings import _public_decls, _public_types
+            # Both passes completed is not enough on its own: the walk only
+            # ever seeds from is_consumer_compiled_public_entry() nodes, not
+            # merely "declared by some header" (source_graph_findings'
+            # _public_decls() doesn't filter by visibility, so a
+            # private-header decl would still count there) -- require the
+            # walk's own actual seed predicate to find a match (Codex
+            # review, two passes).
+            from .buildsource.source_graph import is_consumer_compiled_public_entry
 
-            return bool(_public_decls(graph) or _public_types(graph))
+            node_by_id = {n.id: n for n in graph.nodes}
+            exported_decls = {
+                e.src for e in graph.edges if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL"
+            }
+            return any(
+                is_consumer_compiled_public_entry(n.id, node_by_id, exported_decls)
+                for n in graph.nodes
+            )
 
         old_call_graph_trusted = _call_graph_fully_trusted(ctx.old)
         new_call_graph_trusted = _call_graph_fully_trusted(ctx.new)
@@ -835,13 +840,10 @@ class MarkReachability:
             | {t.name for t in ctx.new.types} | {e.name for e in ctx.new.enums}
             | set(ctx.old.typedefs) | set(ctx.new.typedefs)
         )
-        # RecordType.qualified_name (DWARF-backend only, model.py) resolves a
-        # bare type name like "Hidden" ("ns::detail::Hidden") for
-        # is_internal_type below -- but only when unambiguous: a colliding
-        # public ns::api::Hidden and internal ns::detail::Hidden must not let
-        # the internal one's namespace leak onto a change about the public
-        # one (Codex review, two passes); an ambiguous bare name contributes
-        # no signal at all.
+        # RecordType.qualified_name (DWARF-backend only) resolves a bare name
+        # like "Hidden" ("ns::detail::Hidden") for is_internal_type below --
+        # only when unambiguous, else a colliding public/internal type of
+        # the same bare name could leak the wrong namespace (Codex review).
         qualified_names_by_bare: dict[str, set[str]] = {}
         for t in (*ctx.old.types, *ctx.new.types):
             if t.qualified_name:
@@ -1020,10 +1022,9 @@ class MarkReachability:
                 # regardless of naming; absence from it is only conclusive
                 # for a type the walk's internal-only domain could have
                 # classified in the first place.
-                # An enum-member root keeps its "::member" suffix, and a
-                # member literally named e.g. "detail" would otherwise read
-                # as internal-namespaced from the member name alone (Codex
-                # review) -- use enum_owner (the bare enum name) instead.
+                # An enum-member root keeps its "::member" suffix, so use
+                # enum_owner (bare name) or a member literally named e.g.
+                # "detail" would read as internal-namespaced (Codex review).
                 internal_check_subject = enum_owner if enum_owner is not None else root
                 type_qualified_name = qualified_name_by_bare.get(internal_check_subject)
                 subject_is_internal = is_internal_type(
