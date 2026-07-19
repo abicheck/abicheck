@@ -341,13 +341,23 @@ un-versioned YAML dialect duplicating what `.abicheck.yml` already owns
 # .abicheck.yml (excerpt — new top-level keys)
 targets:
   libpvxs:
+    kind: library          # default; the schema's discriminator (see below)
     binary_pattern: "lib/libpvxs.so*"
     public_headers: ["headers/pvxs"]
     bundle: pvxs-release
   libpvxsIoc:
+    kind: library
     binary_pattern: "lib/libpvxsIoc.so*"
     public_headers: ["headers/pvxsIoc"]
     bundle: pvxs-release
+  myapp-consumer:
+    kind: app-consumer     # S22 — abicheck compare --used-by
+    consumer_binary_pattern: "bin/myapp"
+    library: libpvxs
+  ioc-plugin-contract:
+    kind: plugin-contract  # S23 — abicheck plugin-check
+    contract_file: "contracts/ioc-plugin.yml"
+    library: libpvxsIoc
 
 bundles:
   pvxs-release:
@@ -370,6 +380,23 @@ baseline:
     release-contract: {source: github-release, asset_pattern: "abicheck-baseline-*.tar.zst"}
     accepted-main: {source: actions-cache, key_prefix: "abicheck-baseline-main"}
 ```
+
+**`targets:` needs a `kind` discriminator — missing from an earlier draft,
+flagged by review.** S22 (application compatibility) and S23
+(plugin/dlopen contract) route through `check-target` too (§8), but the
+`targets:` shape shown in an earlier draft only modeled shared-library
+targets (`binary_pattern`, headers, `bundle`) — nothing told `check-target`
+to build an `--used-by` invocation for an app-consumer target or a
+`plugin-check` invocation for a contract-file target, so P1.4 generating a
+run plan from P1.5's config had no way to represent either scenario without
+inventing an incompatible schema later. Fixed: every target entry declares
+`kind` (`library` — the default, existing S1–S17 shape; `app-consumer` —
+S22, `consumer_binary_pattern` + `library` it consumes; `plugin-contract` —
+S23, `contract_file` + `library` it's a plugin for). `check-target`
+branches on `kind` to select which root-action mode/CLI invocation to build
+(`compare`, `compare --used-by`, or `plugin-check` respectively) — the
+report envelope (§7) stays the same shape across all three; only the
+underlying analysis command differs.
 
 **`profiles:` shape, missing from an earlier draft — flagged by review.**
 §8's S17 row and P1.5 rely on `.abicheck.yml` declaring which build
@@ -635,6 +662,25 @@ left implicit — either that dual-write, or a scoped `aggregate` parser
 update to also read the new field names, must ship before P1.4's
 `check-project.yml` can rely on `aggregate` seeing real verdicts.
 
+**`check_id`'s `target@profile#baseline_channel` form under-identifies a
+check when a project intentionally runs the same target/profile/channel at
+two different evidence requirements — flagged by review.** A project might
+run a header-depth check as the required gate *and* a source-depth check on
+the same target/profile/channel as an advisory/shadow lane (S26) — two
+distinct checks by this ADR's own definition (§1: "a `check` is one
+application of policy to `target × profile × baseline channel × evidence
+requirement`" — evidence requirement is part of the tuple). The three-part
+`check_id` collapses them to one identical string, and
+`abicheck.aggregate.collect_reports` hard-errors on the resulting duplicate
+`target_id`. **Fix: `check_id` includes `requested_depth` whenever more than
+one depth is requested for the same target/profile/channel** —
+`libpvxs@linux-x86_64-gcc13-release#accepted-main@source` alongside
+`...@headers` — and omits the depth suffix when only one depth is ever
+requested for that combination (keeping the common single-depth case's ID
+exactly the three-part form shown throughout this ADR, unchanged). The
+run-plan generator (P1.4) is what decides whether the suffix is needed, by
+checking for a collision across its own `checks[]` before emitting IDs.
+
 ```json
 {
   "report_schema": "abicheck.report/v1",
@@ -684,6 +730,28 @@ wrong — corrected to the real enum casing above. A
 `scan`-mode report's equivalent legacy field is a top-level `exit_code` plus
 `scan_schema_version` instead of a `severity` block — omitted from this
 `compare`-shaped example for space, but required the same way.
+
+**`"ERROR"` is a required exception to "`verdict` is a `Verdict` enum
+value" — flagged by a further review round.** `abicheck/aggregate.py:658`
+(`_load_report_file`) checks `data.get("verdict") == "ERROR"` as a literal
+string match **before** falling through to `parse_report_verdict()`'s
+`Verdict(raw)` parsing — `"ERROR"` is not a `Verdict` enum member at all
+(the enum has five members: `NO_CHANGE`, `COMPATIBLE`,
+`COMPATIBLE_WITH_RISK`, `API_BREAK`, `BREAKING`), it's a separate sentinel
+this exact string triggers dedicated operational-failure handling for
+(floors `GateInfo.exit_code` to 4, marks `blocking_categories:
+("operational_error",)`). If `check-target` (P1.3) coerced every legacy
+`verdict` value into one of the five `Verdict` members as the preceding
+paragraph's "must use the real `Verdict` enum's exact casing" rule reads in
+isolation, a genuine resolver/config/operational failure would either be
+misreported as an ordinary ABI-compatibility verdict or lose `aggregate`'s
+dedicated operational-error gate entirely. **Corrected rule:** `verdict`
+must be the literal string `"ERROR"` for an operational failure (matching
+§7's own `operational_errors` field being non-empty), and one of the five
+real `Verdict` enum values only when the check completed and produced an
+actual compatibility result — the two cases are mutually exclusive, and
+`"ERROR"` is the one deliberate exception to the "must be a `Verdict`
+member" casing rule above, not an oversight to close.
 
 **The *new* `compatibility_verdict` field needed the same casing fix, one
 more review round later.** `abicheck/aggregate.py` already has a field
