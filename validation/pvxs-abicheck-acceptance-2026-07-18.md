@@ -9,14 +9,28 @@ found three new false positives on a real historical diff
 misses). Two of the three false positives are fixed in this change; the
 third is a known, documented gap.
 
-This environment has no network access to clone pvxs/EPICS Base and no
-`castxml` install, so the original end-to-end repro script (building both
-pvxs revisions and running `abicheck compare` against the real `.so`s) could
-not be re-executed here. The three findings below were instead root-caused
-directly against the reported symptoms and reproduced with minimal synthetic
-fixtures / targeted unit tests exercising the same code paths. Re-running the
-full pvxs repro is the acceptance step still owed before this can move off
-"local/experimental shadow" status for pvxs specifically (see "Status" below).
+The three findings below were root-caused against the reported symptoms and
+fixed. FP-2 was additionally re-verified end-to-end against a real, tool-
+compiled reproduction (`castxml`/`clang` installed, real pvxs source cloned
+from `github.com/epics-base/pvxs` — network access and `castxml` turned out
+to be available in this environment after all) using the *actual* `testCase`
+class body copied verbatim from pvxs's `src/pvxs/unittest.h` at
+`cc7bc72dd7676c72871889c8586014947567ed1d` (the exact revision named in the
+original spike) — see "Real-tool re-verification" below. FP-1 is verified at
+the unit level with a fixture that reproduces the exact reported mechanism
+(two distinct namespace-qualified types sharing the bare leaf name `_Impl`);
+a full real-libstdc++-header end-to-end repro hit unrelated host-toolchain
+friction (this host's clang can't parse glibc/libstdc++ 13 headers without
+additional GNU-dialect flags `abicheck`'s clang frontend doesn't currently
+pass — a distinct, pre-existing environment-compatibility gap, not a defect
+in this fix; see "What wasn't re-verified end-to-end" below). The full
+historical `1.5.2` → `cc7bc72` diff (both DSOs, built against EPICS Base 7.0)
+was not reproduced: pvxs's `.ci/cue.py prepare` is written for the GitHub
+Actions build matrix and exits immediately (`SETUP_PATH is empty`) without
+that matrix's environment variables — building EPICS Base 7.0 by hand was out
+of scope for this pass. That remains the acceptance step still owed before
+this can move off "local/experimental shadow" status for pvxs specifically
+(see "Status" below).
 
 ## FP-1 (fixed): unrelated types sharing a short/leaf name get cross-matched
 
@@ -37,16 +51,51 @@ type-matching dicts keyed by the bare `t.name` in every type-level detector,
 so two distinct `std::*::_Impl` instantiations that happen to share the leaf
 name `_Impl` collided in the same dict slot.
 
-**Fix.** `diff_types.py` now keys every old/new type-matching map through a
-new `_type_map_key(t)` helper: `t.qualified_name or t.name`. Header-mode
-snapshots get the real qualified identity; DWARF-only snapshots are
-unaffected (their `RecordType.name` is already the qualified spelling built
-by walking the DIE namespace chain — see `dwarf_snapshot.py`). Global-scope
-types (`qualified_name is None`) fall back to the bare name exactly as
-before, so the change is a no-op for the common case and only removes the
-same-leaf-name collision.
+**Fix.** Every old/new type-matching map in `diff_types.py` is now built
+through `diff_helpers.build_type_map()`, keyed by `diff_helpers.type_map_key(t)`
+(`t.qualified_name or t.name`). Header-mode snapshots get the real qualified
+identity; DWARF-only snapshots are unaffected (their `RecordType.name` is
+already the qualified spelling built by walking the DIE namespace chain —
+see `dwarf_snapshot.py`). Global-scope types (`qualified_name is None`) fall
+back to the bare name exactly as before, so the change is a no-op for the
+common case and only removes the same-leaf-name collision.
 
-Tests: `tests/test_diff_types_deep.py::TestQualifiedNameMatching`.
+Two follow-up defects were caught by automated PR review (`chatgpt-codex-
+connector`) on the first version of this fix and closed in the same PR
+before merge:
+
+1. **Schema-evolution regression.** A snapshot pair where only one side
+   populates `qualified_name` (an older serialized snapshot predating the
+   field, or a producer that never sets it) would key the two sides
+   differently (`Foo` vs. `ns::Foo`) and manufacture a phantom
+   `TYPE_REMOVED` + `TYPE_ADDED` for an unchanged type. Fixed by
+   `diff_helpers.TypeMap`, a `Mapping` wrapper that keeps a collision-safe
+   bare-name alias for `get`/`in` lookups (only added when the bare name is
+   unambiguous within that snapshot, so it can't reopen the FP-1 collision).
+   The alias is deliberately excluded from `items`/`values`/iteration, so a
+   detector's `for name, t in old_map.items()` loop still visits each type
+   exactly once — an initial version that leaked the alias into iteration
+   double-processed (and double-reported) every namespaced type, caught by
+   `tests/test_header_graph_examples.py`'s real castxml/clang-backed
+   integration lane before merge.
+2. **Downstream identity leak.** The qualified key is for old/new *matching*
+   only — `Change.symbol`, `dumper_hybrid`'s per-fact provenance dict
+   (`type_fact_key`/`field_fact_key`, keyed by the bare name), and
+   `diff_filtering._dedup_cross_kind`'s DWARF↔AST redundancy correlation
+   (which matches a DWARF field symbol's *bare* parent type name against the
+   AST-level type symbol, "FIX-F") all expect the bare declaration name. An
+   initial version let the qualified key leak into these paths, which
+   silently defeated the DWARF↔AST dedup for any namespaced type — caught by
+   the same real integration lane (case187/191 in
+   `tests/test_header_graph_examples.py`, which assert a specific DWARF-
+   sourced `ChangeKind` survives on Linux) failing in CI on the pushed PR.
+   Fixed by re-deriving the bare name (`t_old.name`) at every emission/
+   provenance-lookup site instead of reusing the qualified matching key.
+
+Tests: `tests/test_diff_helpers.py::TestTypeMapKey`/`TestTypeMap` (direct
+unit coverage of the moved matching primitives), `tests/test_diff_types_deep.py`
+`TestQualifiedNameMatching` (collision fix + both Codex regressions),
+`TestHybridProvenanceKeys`, `TestEmittedSymbolStaysBare`.
 
 ## FP-2 (fixed): anonymous-enum field spelling embeds an absolute path
 
@@ -122,6 +171,58 @@ unresolvable case, which the reported repro command hits because it never
 passes `--scope-public-headers` explicitly and relies on the CLI default
 without confirming header-provenance resolution.
 
+## Real-tool re-verification (FP-2)
+
+Re-ran the exact reported scenario with real tools rather than only synthetic
+unit fixtures:
+
+- Cloned `github.com/epics-base/pvxs` at `cc7bc72dd7676c72871889c8586014947567ed1d`
+  (the exact "new" revision the original spike names) and copied the real
+  `testCase` class body (including its private anonymous `enum { Nothing,
+  Diag, Pass, Fail } result;`) verbatim from `src/pvxs/unittest.h` into two
+  directories at different absolute paths (`.../old/pvxs/unittest.h` and
+  `.../new/pvxs/unittest.h`), mirroring the real old-checkout-vs-new-checkout
+  layout that triggers the bug.
+- Compiled a trivial `.so` for each side (`g++ -std=c++17 -g -Og -fPIC
+  -shared`) and ran `python -m abicheck compare` with `--ast-frontend clang`
+  (the fallback path the original spike documents hitting, since this host's
+  bundled castxml 0.6.3/clang-17 can't parse current glibc/libstdc++ 13
+  headers — the exact "CastXML fallback" friction §10 of the original spike
+  describes).
+- **Pre-fix baseline** (a `git worktree` checked out at
+  `6ad4016`, the commit this branch forked from, run via `PYTHONPATH`):
+  `rc=4`, `verdict: BREAKING`, `type_field_type_changed | testCase | Field
+  type changed: testCase::result` — the exact false positive reported.
+- **This branch (with the FP-2 fix applied):** `rc=0`, `verdict: NO_CHANGE`,
+  zero findings — identical headers at different absolute paths no longer
+  trip a false field-type-change.
+
+## What wasn't re-verified end-to-end
+
+- **FP-1 against real libstdc++ headers.** A direct repro (`std::locale`,
+  `std::shared_ptr`, `std::vector<bool>` all included from one header,
+  compiled with g++, dumped with `--ast-frontend clang`) hit a pre-existing,
+  unrelated environment gap: this host's system `clang`/`clang++` needs
+  additional flags (`-std=gnu++17` plus GNU-dialect predefines that `g++`'s
+  own driver sets automatically) to parse this glibc/libstdc++ 13 install
+  that `abicheck`'s clang-frontend invocation doesn't currently pass —
+  `clang++ -std=gnu++17 -fsyntax-only` parses the same header cleanly by
+  hand, confirming this is an invocation-flag gap rather than a genuine
+  parse failure. This is a distinct, pre-existing gap (not touched by this
+  PR) and out of scope to fix here; FP-1 itself is covered by direct,
+  deterministic unit tests that reproduce the exact reported matching
+  mechanism (two distinct namespace-qualified `_Impl` types sharing the bare
+  leaf name) rather than depending on this host's specific toolchain/header
+  compatibility.
+- **The full historical `1.5.2` → `cc7bc72` diff** (both `libpvxs.so`/
+  `libpvxsIoc.so`, built against a real EPICS Base 7.0). pvxs's own
+  `.ci/cue.py prepare` is written for the GitHub Actions build matrix
+  (`SETUP_PATH` comes from matrix env vars) and exits immediately when run
+  standalone; hand-building EPICS Base 7.0 to unblock it was out of scope
+  for this pass.
+- **FP-3** (system-header leakage) — unchanged from the original spike;
+  still documented, not fixed (see above).
+
 ## Positive results confirmed by this spike (no code change needed)
 
 - **Private C++ layout change detection** (§13 of the original spike,
@@ -141,15 +242,22 @@ without confirming header-provenance resolution.
 
 ## Status
 
-- **Fixed & tested in this branch:** FP-1 (type-matching key), FP-2
-  (anonymous-type path leak in `canonicalize_type_name`).
+- **Fixed & tested in this branch:** FP-1 (type-matching key, plus the two
+  Codex-caught regressions on the first version of that fix), FP-2
+  (anonymous-type path leak in `canonicalize_type_name`). Full fast unit
+  suite green (17268 tests), `mypy`/`ruff`/AI-readiness clean.
+- **FP-2 additionally re-verified against real tools** (real pvxs source,
+  real `clang`-frontend dump, before/after on a real `.so` pair) — see
+  "Real-tool re-verification" above.
 - **Documented, not fixed:** FP-3 (system-header leakage when public-header
   scoping is off or unresolvable) — needs a scoped follow-up touching the L2
   parse path in `dumper_castxml.py`.
-- **Not independently re-verified in this environment:** the original
-  end-to-end pvxs `1.5.2` → `cc7bc72` repro (no network/`castxml` access
-  here). Re-running `abicheck compare` over the real `libpvxs.so`/
-  `libpvxsIoc.so` pair with these fixes applied — confirming FP-1/FP-2 no
-  longer appear and quantifying whether FP-3 remains under
-  `--scope-public-headers` — is the acceptance step still owed before pvxs
-  can be recommended as more than a local/experimental shadow check.
+- **Not re-verified end-to-end:** FP-1 against real libstdc++ headers (blocked
+  by an unrelated clang-invocation-flag gap on this host, not this fix — see
+  above) and the full historical `1.5.2` → `cc7bc72` diff over the real
+  `libpvxs.so`/`libpvxsIoc.so` pair (needs a from-scratch EPICS Base 7.0
+  build; pvxs's `.ci/cue.py prepare` is CI-matrix-only and doesn't run
+  standalone). Completing both — and quantifying whether FP-3 remains under
+  `--scope-public-headers` on the real historical diff — is the acceptance
+  step still owed before pvxs can be recommended as more than a
+  local/experimental shadow check.

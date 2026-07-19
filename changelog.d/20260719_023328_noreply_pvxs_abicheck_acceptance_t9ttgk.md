@@ -12,4 +12,10 @@
   location clang's `-ast-dump=json` frontend embeds in an anonymous
   struct/union/enum field's type spelling, so comparing an old checkout root
   against a new checkout root of the identical declaration no longer reports
-  a false `type_field_type_changed`.
+  a false `type_field_type_changed`. The qualified matching key stays
+  entirely internal to old/new type matching (via a new `_TypeMap` wrapper
+  with a collision-safe bare-name compatibility alias for legacy/schema-
+  evolution snapshot pairs): emitted `Change.symbol`, `dumper_hybrid`'s
+  per-fact provenance lookups, and `diff_filtering`'s DWARF<->AST redundancy
+  correlation all continue to see the bare declaration name they always
+  have.

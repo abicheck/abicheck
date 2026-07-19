@@ -34,12 +34,13 @@ new policy.
 """
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, ItemsView, Iterable, Iterator, Mapping, ValuesView
 from typing import Any, TypeVar, cast
 
 from .change_registry import REGISTRY
 from .checker_policy import ChangeKind
 from .checker_types import Change
+from .model import RecordType
 
 K = TypeVar("K")
 V = TypeVar("V")
@@ -182,3 +183,96 @@ def diff_by_key(
         if key not in old_map and on_added is not None:
             changes.extend(on_added(key, new_val))
     return changes
+
+
+# ── Type-level old/new matching (moved out of diff_types.py, PR #608) ──────
+
+
+def type_map_key(t: RecordType) -> str:
+    """Key a ``RecordType`` for old/new matching by its namespace-qualified
+    identity, not its bare declaration name.
+
+    The header-mode dumpers (castxml, clang) deliberately keep ``t.name``
+    bare (see its docstring in model.py) and carry the real namespace path in
+    ``t.qualified_name`` instead; the DWARF backend has no such split and
+    already stores the qualified spelling directly in ``name``. Matching
+    old/new maps by bare ``t.name`` alone lets two unrelated types that only
+    share a short/leaf spelling (e.g. two distinct ``std::*::_Impl`` template
+    internals pulled in transitively) collide and diff against each other,
+    producing spurious field/base-class findings. Falling back to ``t.name``
+    when ``qualified_name`` is unset (global-scope types, DWARF-only
+    snapshots) keeps existing behaviour unchanged there.
+    """
+    return t.qualified_name or t.name
+
+
+class TypeMap(Mapping[str, RecordType]):
+    """An old/new ``RecordType`` matching map keyed by :func:`type_map_key`,
+    with a collision-safe bare-``name`` alias used only for lookups.
+
+    The alias exists for schema-evolution compatibility: an older serialized/
+    header snapshot that predates ``qualified_name`` (or a producer that
+    never populates it) keys its own map entries by the bare name alone.
+    Without an alias, matching that against a freshly-dumped snapshot side
+    where the same namespaced type *does* carry ``qualified_name`` would key
+    the two sides differently (``Foo`` vs. ``ns::Foo``) and manufacture a
+    false ``TYPE_REMOVED``/``TYPE_ADDED`` pair for an unchanged type (Codex
+    review, PR #608).
+
+    The alias is only used for ``get``/``in`` — deliberately kept OUT of
+    ``items``/``values``/iteration, which stay one entry per type under its
+    canonical key. A dict literally containing both the qualified key and a
+    bare-name alias for the same object would make every ``for name, t in
+    old_map.items()``-style detector loop process that type (and emit its
+    finding) twice. It is also only added when the bare name is unambiguous
+    within *this* snapshot — not already claimed by a distinct qualified
+    identity — so it cannot reopen the short/leaf-name collision
+    :func:`type_map_key` itself was introduced to fix.
+    """
+
+    def __init__(self, types: Iterable[RecordType]) -> None:
+        self._primary: dict[str, RecordType] = {}
+        bare_owner: dict[str, str | None] = {}
+        for t in types:
+            key = type_map_key(t)
+            self._primary[key] = t
+            bare = t.name
+            if bare in bare_owner:
+                if bare_owner[bare] != key:
+                    bare_owner[bare] = None  # ambiguous: >1 distinct qualified identity
+            else:
+                bare_owner[bare] = key
+        self._bare_alias: dict[str, str] = {
+            bare: key
+            for bare, key in bare_owner.items()
+            if key is not None and bare not in self._primary
+        }
+
+    def __getitem__(self, key: str) -> RecordType:
+        # get()/__contains__ come from the Mapping mixin, implemented in
+        # terms of this — alias resolution lives in exactly one place.
+        t = self._primary.get(key)
+        if t is not None:
+            return t
+        alias_key = self._bare_alias.get(key)
+        if alias_key is not None:
+            t = self._primary.get(alias_key)
+            if t is not None:
+                return t
+        raise KeyError(key)
+
+    def __len__(self) -> int:
+        return len(self._primary)
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._primary)
+
+    def items(self) -> ItemsView[str, RecordType]:
+        return self._primary.items()
+
+    def values(self) -> ValuesView[RecordType]:
+        return self._primary.values()
+
+
+def build_type_map(types: Iterable[RecordType]) -> TypeMap:
+    return TypeMap(types)

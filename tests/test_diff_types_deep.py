@@ -790,3 +790,134 @@ class TestQualifiedNameMatching:
         r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
 
         assert ChangeKind.TYPE_FIELD_REMOVED in _kinds(r)
+
+    def test_legacy_snapshot_without_qualified_name_still_matches(self):
+        """Codex review, PR #608: an older serialized/header snapshot that
+        predates ``qualified_name`` (so it's unset — ``None``, the dataclass
+        default) must still match against a freshly-dumped snapshot side
+        where the same namespaced type now populates it, instead of
+        manufacturing a false TYPE_REMOVED + TYPE_ADDED pair.
+        """
+        # old side: simulates a pre-qualified_name snapshot — unset even
+        # though the type is genuinely namespaced.
+        t_old = RecordType(name="Handle", qualified_name=None,
+                           kind="class", size_bits=64,
+                           fields=[TypeField("count", "int", 0)])
+        # new side: freshly dumped, qualified_name populated as usual.
+        t_new = RecordType(name="Handle", qualified_name="ns::Handle",
+                           kind="class", size_bits=32, fields=[])
+
+        r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
+
+        kinds = _kinds(r)
+        assert ChangeKind.TYPE_REMOVED not in kinds
+        assert ChangeKind.TYPE_ADDED not in kinds
+        assert ChangeKind.TYPE_FIELD_REMOVED in kinds
+
+    def test_namespaced_type_diff_not_doubled_by_alias(self):
+        """A normal namespaced type (both sides populate ``qualified_name``,
+        the common case, no legacy mismatch at all) must still produce each
+        finding exactly once. The bare-name alias exists purely for
+        cross-schema lookups and must never leak into iteration, or every
+        namespaced-type finding in the codebase would double-report.
+        """
+        t_old = RecordType(name="Widget", qualified_name="ns::Widget",
+                           kind="class", size_bits=64,
+                           fields=[TypeField("count", "int", 0)])
+        t_new = RecordType(name="Widget", qualified_name="ns::Widget",
+                           kind="class", size_bits=32, fields=[])
+
+        r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
+
+        field_removed = [c for c in r.changes if c.kind == ChangeKind.TYPE_FIELD_REMOVED]
+        assert len(field_removed) == 1
+        assert ChangeKind.TYPE_ADDED not in _kinds(r)
+        assert ChangeKind.TYPE_REMOVED not in _kinds(r)
+
+    def test_legacy_alias_does_not_reopen_leaf_name_collision(self):
+        """The bare-name compatibility alias must stay collision-safe: a
+        legacy (``qualified_name=None``) type must not accidentally match an
+        unrelated, differently-scoped type on the other side purely because
+        that side also has an ambiguous/collided bare name.
+        """
+        old_a = RecordType(name="_Impl", qualified_name=None,
+                           kind="class", size_bits=64,
+                           fields=[TypeField("_M_refcount", "int", 0)])
+        new_a = RecordType(name="_Impl", qualified_name="std::locale::_Impl",
+                           kind="class", size_bits=64,
+                           fields=[TypeField("_M_refcount", "int", 0)])
+        new_b = RecordType(name="_Impl", qualified_name="ns::Other::_Impl",
+                           kind="class", size_bits=32,
+                           fields=[TypeField("_M_storage", "int", 0)])
+
+        r = compare(_snap(types=[old_a]), _snap(types=[new_a, new_b]))
+
+        # old_a's bare "_Impl" is ambiguous on the new side (two distinct
+        # qualified identities), so no alias is registered there — old_a
+        # must not cross-match either new_a or new_b.
+        assert ChangeKind.TYPE_FIELD_REMOVED not in _kinds(r)
+        assert ChangeKind.TYPE_FIELD_ADDED not in _kinds(r)
+
+
+class TestHybridProvenanceKeys:
+    """Codex review, PR #608: ``dumper_hybrid`` records per-fact provenance
+    under the bare ``RecordType.name`` (``type_fact_key``/``field_fact_key``),
+    not the namespace-qualified matching key ``_type_map_key`` introduced for
+    FP-1. The type-level detectors that gate on
+    ``fact_provenance.both_castxml_backed_fact`` per declaration must look the
+    provenance key up by the bare name, or a hybrid snapshot's castxml-only
+    facts (``is_abstract``, ``deprecated``, field ``default``) silently stop
+    firing for every namespaced type.
+    """
+
+    def _hybrid_snap(self, version, types):
+        return AbiSnapshot(
+            library="libtest.so.1", version=version, types=types,
+            from_headers=True, ast_producer="hybrid",
+            fact_provenance={"type:Impl:is_abstract": "castxml"},
+        )
+
+    def test_became_abstract_detected_for_namespaced_type_in_hybrid_snapshot(self):
+        t_old = RecordType(name="Impl", qualified_name="ns::Impl", kind="class",
+                           size_bits=64, is_abstract=False)
+        t_new = RecordType(name="Impl", qualified_name="ns::Impl", kind="class",
+                           size_bits=64, is_abstract=True)
+
+        r = compare(self._hybrid_snap("1.0", [t_old]), self._hybrid_snap("2.0", [t_new]))
+
+        assert ChangeKind.TYPE_BECAME_ABSTRACT in _kinds(r)
+
+
+class TestEmittedSymbolStaysBare:
+    """The qualified matching key introduced for FP-1 must stay internal to
+    old/new type matching. Every emitted ``Change.symbol`` for a namespaced
+    type must still be the bare declaration name — the identity every other
+    consumer already keys on: ``diff_filtering._dedup_cross_kind``'s DWARF<->
+    AST redundancy correlation matches a DWARF field symbol's *bare* parent
+    type name against the AST-level type symbol (FIX-F), so a qualified
+    symbol here would silently defeat that correlation for any namespaced
+    type — exactly the regression a real castxml-backed integration test
+    (case187/191 in ``tests/test_header_graph_examples.py``) caught (Codex
+    review, PR #608).
+    """
+
+    def test_field_type_changed_symbol_is_bare_for_namespaced_type(self):
+        t_old = RecordType(name="Public", qualified_name="demo::Public", kind="struct",
+                           size_bits=96, fields=[TypeField("reserved", "void *", 64)])
+        t_new = RecordType(name="Public", qualified_name="demo::Public", kind="struct",
+                           size_bits=96, fields=[TypeField("reserved", "detail::PrivateType *", 64)])
+
+        r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
+
+        field_changes = [c for c in r.changes if c.kind == ChangeKind.TYPE_FIELD_TYPE_CHANGED]
+        assert len(field_changes) == 1
+        assert field_changes[0].symbol == "Public"
+
+    def test_type_added_symbol_is_bare_for_namespaced_type(self):
+        t_new = RecordType(name="Widget", qualified_name="ns::Widget", kind="class", size_bits=32)
+
+        r = compare(_snap(types=[]), _snap(types=[t_new]))
+
+        added = [c for c in r.changes if c.kind == ChangeKind.TYPE_ADDED]
+        assert len(added) == 1
+        assert added[0].symbol == "Widget"

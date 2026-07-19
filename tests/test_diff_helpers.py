@@ -17,7 +17,13 @@ from __future__ import annotations
 
 from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change
-from abicheck.diff_helpers import bool_transition, diff_by_key
+from abicheck.diff_helpers import (
+    bool_transition,
+    build_type_map,
+    diff_by_key,
+    type_map_key,
+)
+from abicheck.model import RecordType
 
 ADDED = (ChangeKind.FUNC_VIRTUAL_ADDED, "added")
 REMOVED = (ChangeKind.FUNC_VIRTUAL_REMOVED, "removed")
@@ -133,3 +139,64 @@ class TestDiffByKey:
             on_common=lambda k, o, n: [self._change(f"common:{k}")],
         )
         assert [c.symbol for c in out] == ["common:a"]
+
+
+class TestTypeMapKey:
+    def test_prefers_qualified_name(self) -> None:
+        t = RecordType(name="Foo", qualified_name="ns::Foo", kind="class")
+        assert type_map_key(t) == "ns::Foo"
+
+    def test_falls_back_to_bare_name(self) -> None:
+        t = RecordType(name="Foo", qualified_name=None, kind="class")
+        assert type_map_key(t) == "Foo"
+
+
+class TestTypeMap:
+    def test_lookup_by_qualified_key(self) -> None:
+        t = RecordType(name="Foo", qualified_name="ns::Foo", kind="class")
+        m = build_type_map([t])
+        assert m["ns::Foo"] is t
+        assert m.get("ns::Foo") is t
+
+    def test_bare_alias_resolves_when_unambiguous(self) -> None:
+        t = RecordType(name="Foo", qualified_name="ns::Foo", kind="class")
+        m = build_type_map([t])
+        assert m.get("Foo") is t
+        assert "Foo" in m
+
+    def test_bare_alias_not_added_when_ambiguous(self) -> None:
+        a = RecordType(name="Impl", qualified_name="ns1::Impl", kind="class")
+        b = RecordType(name="Impl", qualified_name="ns2::Impl", kind="class")
+        m = build_type_map([a, b])
+        assert m.get("Impl") is None
+        assert "Impl" not in m
+        assert m["ns1::Impl"] is a
+        assert m["ns2::Impl"] is b
+
+    def test_global_scope_type_has_no_redundant_alias_entry(self) -> None:
+        t = RecordType(name="Foo", qualified_name=None, kind="class")
+        m = build_type_map([t])
+        assert list(m.items()) == [("Foo", t)]
+
+    def test_items_yields_each_type_exactly_once(self) -> None:
+        # A namespaced type's bare-name alias must never leak into iteration
+        # (items/values/__iter__) -- only used for get()/__contains__ lookups
+        # -- or every detector loop over old_map.items() would double-process
+        # (and double-report) every namespaced type (Codex review, PR #608).
+        t = RecordType(name="Foo", qualified_name="ns::Foo", kind="class")
+        m = build_type_map([t])
+        assert list(m.items()) == [("ns::Foo", t)]
+        assert list(m.values()) == [t]
+        assert list(m) == ["ns::Foo"]
+        assert len(m) == 1
+
+    def test_missing_key_raises_and_get_returns_default(self) -> None:
+        m = build_type_map([])
+        assert m.get("Foo") is None
+        assert m.get("Foo", "default") == "default"
+        try:
+            m["Foo"]
+        except KeyError:
+            pass
+        else:
+            raise AssertionError("expected KeyError")

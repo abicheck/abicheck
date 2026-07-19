@@ -21,7 +21,7 @@ Kept as a leaf module (depending only on the data model and result types) so
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 from .checker_policy import ChangeKind
 from .checker_types import Change
@@ -294,7 +294,7 @@ def owner_class_of(f: Function) -> str | None:
 
 
 def _resolve_owner_type(
-    owner: str, types: dict[str, RecordType], known_owners: set[str]
+    owner: str, types: Mapping[str, RecordType], known_owners: set[str]
 ) -> RecordType | None:
     """Look up the owner's record, tolerating qualified-vs-leaf naming.
 
@@ -331,7 +331,7 @@ def virtual_signature_key(f: Function) -> str:
     return f"{leaf}({params}){quals}"
 
 
-def _owner_descends_from(owner: str, ancestor: str, types: dict[str, RecordType]) -> bool:
+def _owner_descends_from(owner: str, ancestor: str, types: Mapping[str, RecordType]) -> bool:
     """True if *owner* names *ancestor* itself, or a transitive base of it in *types*.
 
     Tolerant of qualified-vs-leaf naming the same way ``_transitive_bases``
@@ -448,8 +448,8 @@ def vtable_slot_is_override_reuse(
     new_entry: str,
     old_funcs: dict[str, Function],
     new_funcs: dict[str, Function],
-    old_types: dict[str, RecordType],
-    new_types: dict[str, RecordType],
+    old_types: Mapping[str, RecordType],
+    new_types: Mapping[str, RecordType],
 ) -> bool:
     """True if a vtable slot's mangled entry changed only because a derived
     class overrode the inherited virtual that occupied it, reusing the same
@@ -519,7 +519,7 @@ def old_virtual_signatures(functions: Iterable[Function]) -> dict[str, set[str]]
     return sigs
 
 
-def _transitive_bases(start: RecordType | None, types: dict[str, RecordType]) -> set[str]:
+def _transitive_bases(start: RecordType | None, types: Mapping[str, RecordType]) -> set[str]:
     """All (transitive) base-class names reachable from record ``start``.
 
     Walks ``bases`` / ``virtual_bases``, resolving each base name through the
@@ -544,8 +544,8 @@ def _transitive_bases(start: RecordType | None, types: dict[str, RecordType]) ->
 def virtual_method_addition(
     f_new: Function,
     old_owner_classes: set[str],
-    old_types: dict[str, RecordType],
-    new_types: dict[str, RecordType],
+    old_types: Mapping[str, RecordType],
+    new_types: Mapping[str, RecordType],
     old_virtual_sigs: dict[str, set[str]],
 ) -> Change | None:
     """A new *virtual* method on a class that already exists across versions.
