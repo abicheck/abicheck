@@ -267,6 +267,20 @@ PVXS) mismatches too (report says `target_id: "libpvxs"`, manifest expects
 hard-errors on a duplicate, so this identity must be exact and consistent
 for every check, with no conditional branch.
 
+**Depth-qualified `check_id`, flagged in a further review round — this task
+must track the corrected §7 identity, not the pre-correction three-part
+form above.** ADR-045 §7 was further corrected so `check_id` includes
+`requested_depth` (`target@profile#baseline_channel@depth`) whenever a
+project runs the same target/profile/channel at more than one evidence
+depth — e.g. a required header-depth gate plus a source-depth advisory
+shadow check (S26). `check-target`'s `target_id`-writing logic (this task)
+must implement that depth-suffix rule, not just the plain
+`target@profile#baseline_channel` form quoted earlier in this item, or the
+same duplicate-`target_id` collision this whole fix exists to prevent
+recurs for exactly the multi-depth case. Add a fixture case: two checks on
+one target/profile/channel at different `requested_depth`s must produce
+two distinct, non-colliding `target_id`s.
+
 **Second required sub-task, flagged by review:** `check-target`'s report
 must populate `aggregate`'s *existing* verdict/gate fields, not only the new
 ADR-045 §7 ones. `abicheck/aggregate.py`'s `parse_report_verdict` reads
