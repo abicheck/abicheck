@@ -85,6 +85,27 @@ class TestCanonicalizeTypeName:
     def test_empty_string(self):
         assert canonicalize_type_name("") == ""
 
+    def test_anonymous_enum_location_stripped(self):
+        """clang's embedded 'at <path>:<line>:<col>' must not affect identity
+        (pvxs acceptance spike FP: old/new checkout roots differ, same decl)."""
+        old = "enum (unnamed enum at /tmp/old/include/pvxs/unittest.h:56:5)"
+        new = "enum (unnamed enum at /tmp/new/include/pvxs/unittest.h:56:5)"
+        assert canonicalize_type_name(old) == canonicalize_type_name(new)
+        assert canonicalize_type_name(old) == "(unnamed enum)"
+
+    def test_anonymous_struct_location_stripped(self):
+        old = "struct (unnamed struct at /a/foo.h:10:3)"
+        new = "struct (unnamed struct at /b/foo.h:10:3)"
+        assert canonicalize_type_name(old) == canonicalize_type_name(new)
+
+    def test_anonymous_location_different_line_still_differs_only_by_marker(self):
+        """A genuinely different line/col still canonicalizes to the same bare
+        marker — same-file line renumbering from an unrelated edit shouldn't
+        trip a field-type-changed finding on its own."""
+        a = "enum (unnamed enum at /x/foo.h:56:5)"
+        b = "enum (unnamed enum at /x/foo.h:60:2)"
+        assert canonicalize_type_name(a) == canonicalize_type_name(b)
+
 
 # ─── Parameter type canonicalization (C1) ────────────────────────────────────
 

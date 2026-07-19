@@ -1001,6 +1001,11 @@ class _ClangAstParser:
                     members=members,
                     underlying_type=_enum_underlying(node),
                     source_location=self._source_location(entry),
+                    # See RecordType.qualified_name (_build_record) for why
+                    # this is only set when it differs from the bare name.
+                    qualified_name=(
+                        "::".join([*entry.scope, name]) if entry.scope else None
+                    ),
                 )
             )
         return enums

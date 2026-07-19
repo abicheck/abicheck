@@ -415,6 +415,43 @@ def test_parse_types_sets_qualified_name_for_namespaced_record() -> None:
     assert types["Global"].qualified_name is None
 
 
+def test_parse_enums_sets_qualified_name_for_namespaced_enum() -> None:
+    # Mirrors test_parse_types_sets_qualified_name_for_namespaced_record --
+    # EnumType.qualified_name (PR #608 follow-up) uses the same scope-derived
+    # population so old/new enum matching can key on namespace-qualified
+    # identity instead of the bare, collidable EnumType.name.
+    root = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "ns",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "inner": [
+                {
+                    "kind": "EnumDecl",
+                    "name": "Status",
+                    "loc": {"line": 2},
+                    "inner": [
+                        {"kind": "EnumConstantDecl", "name": "OK"},
+                    ],
+                },
+            ],
+        },
+        {
+            "kind": "EnumDecl",
+            "name": "Global",
+            "loc": {"file": "include/foo.h", "line": 20},
+            "inner": [
+                {"kind": "EnumConstantDecl", "name": "A"},
+            ],
+        },
+    )
+    enums = {e.name: e for e in _ClangAstParser(root, set(), set()).parse_enums()}
+    assert enums["Status"].qualified_name == "ns::Status"
+    # A global-scope enum's qualified spelling is identical to its bare name,
+    # so qualified_name stays None (matches castxml's own convention).
+    assert enums["Global"].qualified_name is None
+
+
 def test_parse_types_anonymous_aggregate_flattening_sets_flag() -> None:
     """A record whose members come from an anonymous struct/union gets
     those members flattened into `fields` (clang emits an IndirectFieldDecl

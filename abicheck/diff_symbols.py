@@ -29,7 +29,15 @@ from .diff_cxx_rules import (
     owner_class_of,
     virtual_method_addition,
 )
-from .diff_helpers import bool_transition, diff_by_key, make_change
+from .diff_helpers import (
+    TypeMap,
+    bool_transition,
+    build_type_map,
+    diff_by_key,
+    lookup_matched_type,
+    make_change,
+    type_map_key,
+)
 from .diff_symbols_renames import (  # noqa: F401  (public-surface re-exports)
     _CTOR_DTOR_CODE_RE as _CTOR_DTOR_CODE_RE,
     _FUNC_LIKE_TYPES as _FUNC_LIKE_TYPES,
@@ -63,7 +71,11 @@ from .diff_symbols_scalar import (  # noqa: F401  (public-surface re-exports)
     _scalar_repr as _scalar_repr,
 )
 from .diff_symbols_variables import _check_variable_alignment, _without_top_level_const
-from .dumper_castxml import is_synthetic_ctor_key, is_synthetic_dtor_key
+from .dumper_castxml import (
+    SYNTHETIC_CTOR_KEY_PREFIX,
+    is_synthetic_ctor_key,
+    is_synthetic_dtor_key,
+)
 from .elf_symbol_filter import (
     FUNCTION_SYMBOL_TYPES,
     exported_symbol_names,
@@ -80,6 +92,7 @@ from .model import (
     AccessLevel,
     Function,
     Param,
+    RecordType,
     Variable,
     Visibility,
     canonicalize_type_name,
@@ -902,12 +915,12 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     old_map = _public_functions(old)
     new_map = _public_functions(new)
 
-    # Lookups for the virtual-method-addition check below: type records, the
-    # old surface's scope-qualified owner classes (disambiguates same-leaf
-    # classes across namespaces), and per-class virtual signatures (to skip
-    # inherited overrides). See ``virtual_method_addition``.
-    old_types = {t.name: t for t in old.types}
-    new_types = {t.name: t for t in new.types}
+    # Lookups for the virtual-method-addition check below: type records
+    # (via ambiguity-safe TypeMap, not a naive bare-name dict — PR #608), the
+    # old surface's scope-qualified owner classes, and per-class virtual
+    # signatures (to skip inherited overrides). See ``virtual_method_addition``.
+    old_types = build_type_map(old.types)
+    new_types = build_type_map(new.types)
     old_owner_classes = {
         owner for f in old_map.values() if (owner := owner_class_of(f)) is not None
     }
@@ -978,41 +991,37 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 _CV_QUALIFIER_RE = re.compile(r"\b(?:const|volatile)\b")
 
 
+def _synthetic_ctor_scope(mangled: str) -> str | None:
+    """Qualified scope in a castxml synthetic-ctor key (``SYNTHETIC_CTOR_KEY_PREFIX
+    + "scope(params)"``), or ``None`` (Codex review, PR #608 follow-up).
+    """
+    if not is_synthetic_ctor_key(mangled):
+        return None
+    body = mangled[len(SYNTHETIC_CTOR_KEY_PREFIX):]
+    paren = body.find("(")
+    return body[:paren] if paren != -1 else None
+
+
 def _converting_ctors_by_class(
-    snap: AbiSnapshot, class_names: set[str]
+    snap: AbiSnapshot, class_aliases: dict[str, str]
 ) -> dict[str, dict[tuple[str, ...], Function]]:
     """Group each class's non-explicit, single-required-argument constructors.
 
-    A castxml/DWARF Constructor's demangled ``name`` is the bare class name
-    (C++ forbids any other member from sharing it), so ``f.name in
-    class_names`` reliably identifies constructors without needing a real
-    Itanium mangled name — public overloaded constructors that castxml never
-    ODR-uses may have none (see ``dumper_castxml.SYNTHETIC_CTOR_KEY_PREFIX``).
+    Grouped by ``class_aliases``' normalized canonical identity, not the raw
+    spelling (Codex review, PR #608 follow-up) -- see ``_class_identity_aliases``.
 
-    "Converting constructor" here means: public (a private/protected
-    constructor isn't callable at an ordinary consumer call site, so it
-    cannot create the implicit-conversion collision this heuristic looks
-    for), not deleted, definitively non-explicit (``is_explicit is False`` —
-    ``None`` is unknown evidence and skipped, same tri-state convention as
-    ``_check_explicit_change``), and callable with exactly one argument — at
-    most one *required* parameter (everything after it defaulted), and at
-    least one parameter total (excludes the zero-arg default constructor). A
-    leading defaulted parameter still makes the constructor
-    single-argument-callable (``Widget(int x = 0)`` accepts ``Widget w =
-    5;`` the same as ``Widget(int x)`` would), so the exclusion check below
-    binds to the *first* parameter regardless of whether it has a default,
-    not to the (possibly empty) required-parameter list. That first
-    parameter's type is checked against the class's own type to exclude
-    copy/move constructors. Keyed by the full parameter-type tuple so two
-    overloads are distinguished even when both qualify.
-
-    Caveat shared with ``diff_cxx_rules._resolve_owner_type``: ``class_names``
-    is unqualified/leaf, so two distinct classes sharing a bare name in
-    different namespaces are not disambiguated here.
+    "Converting constructor": public, not deleted, definitively non-explicit
+    (``is_explicit is False``; ``None`` is unknown and skipped), callable
+    with exactly one argument. First parameter's type excludes copy/move
+    constructors. Keyed by param-type tuple.
     """
     by_class: dict[str, dict[tuple[str, ...], Function]] = {}
     for f in snap.functions:
-        if f.name not in class_names or f.is_deleted or f.is_explicit is not False:
+        owner = owner_class_of(f) or _synthetic_ctor_scope(f.mangled) or f.name
+        canonical = class_aliases.get(owner) or class_aliases.get(owner.rsplit("::", 1)[-1])
+        if canonical is None:
+            continue
+        if f.is_deleted or f.is_explicit is not False:
             continue
         if f.access != AccessLevel.PUBLIC:
             continue
@@ -1027,8 +1036,33 @@ def _converting_ctors_by_class(
         if arg_type == f.name:
             continue
         sig = tuple(p.type for p in f.params)
-        by_class.setdefault(f.name, {})[sig] = f
+        by_class.setdefault(canonical, {})[sig] = f
     return by_class
+
+
+def _class_identity_aliases(old_map: TypeMap[RecordType], new_map: TypeMap[RecordType]) -> dict[str, str]:
+    """Map every raw spelling ``owner_class_of``/synthetic-ctor-scope might
+    produce for a matched class, on either side, to ONE shared canonical
+    identity -- so old/new agree on a grouping key even when they spell the
+    SAME class differently (e.g. a persisted snapshot predating namespace-
+    qualified synthetic ctor keys vs. a fresh one), instead of every
+    unchanged overload looking new on one side (Codex review, PR #608
+    follow-up).
+    """
+    aliases: dict[str, str] = {}
+    for t_old in old_map.values():
+        t_new = lookup_matched_type(old_map, new_map, t_old)
+        if t_new is None:
+            continue
+        canonical = t_old.qualified_name or t_new.qualified_name or t_old.name
+        aliases[type_map_key(t_old)] = canonical
+        aliases[type_map_key(t_new)] = canonical
+        # Bare-name alias only when unambiguous on both sides (mirrors
+        # TypeMap's alias-safety rule) -- an unrelated class mustn't steal it.
+        bare = t_old.name
+        if old_map.bare_name_is_unambiguous(bare) and new_map.bare_name_is_unambiguous(bare):
+            aliases[bare] = canonical
+    return aliases
 
 
 @registry.detector("ctor_overload_ambiguity")
@@ -1038,17 +1072,19 @@ def _diff_ctor_overload_ambiguity(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
     Best-effort RISK heuristic (case111): a real ambiguity depends on the
     consumer's actual call-site argument types, which no snapshot-level
     detector can see — only *count crossing from at most one converting
-    constructor to two or more* is checked here, on classes present on both
-    sides (a brand-new class starting with 2+ is a fresh API decision, not a
-    regression). This is deliberately conservative: it will miss ambiguities
-    that don't cross this threshold and, rarely, flag an addition that never
+    constructor to two or more* is checked, on classes present on both sides
+    (a brand-new class starting with 2+ is a fresh API decision, not a
+    regression). Deliberately conservative: it will miss ambiguities that
+    don't cross this threshold and, rarely, flag an addition that never
     collides with a real call site — see ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK.
     """
-    common_classes = {t.name for t in old.types} & {t.name for t in new.types}
-    if not common_classes:
+    # Ambiguity-safe, spelling-normalized matching (Codex review, PR #608
+    # follow-up) — see _class_identity_aliases.
+    aliases = _class_identity_aliases(build_type_map(old.types), build_type_map(new.types))
+    if not aliases:
         return []
-    old_ctors = _converting_ctors_by_class(old, common_classes)
-    new_ctors = _converting_ctors_by_class(new, common_classes)
+    old_ctors = _converting_ctors_by_class(old, aliases)
+    new_ctors = _converting_ctors_by_class(new, aliases)
     changes: list[Change] = []
     for cls in sorted(new_ctors):
         old_sigs = old_ctors.get(cls, {})
@@ -1457,15 +1493,18 @@ def _check_method_access_changes(
 
 
 def _check_field_access_changes(
-    old_types: dict[str, Any],
-    new_types: dict[str, Any],
+    old_types: Any,
+    new_types: Any,
 ) -> list[Change]:
     """Emit FIELD_ACCESS_CHANGED for narrowing field access transitions."""
     changes: list[Change] = []
-    for name, t_old in old_types.items():
-        t_new = new_types.get(name)
+    for t_old in old_types.values():
+        t_new = lookup_matched_type(old_types, new_types, t_old)
         if t_new is None:
             continue
+        # Bare, not the qualified matching key -- matches the identity
+        # diff_types.py detectors report field-level findings under.
+        name = t_old.name
         old_fields = {f.name: f for f in t_old.fields}
         new_fields = {f.name: f for f in t_new.fields}
         for fname, f_old_f in old_fields.items():
@@ -1500,16 +1539,14 @@ def _diff_access_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         _check_method_access_changes(_public_functions(old), _public_functions(new))
     )
     excl = stdlib_namespaces_excluded(old, new)
-    old_types = {
-        t.name: t
-        for t in old.types
+    old_types = build_type_map(
+        t for t in old.types
         if not t.is_union and is_abi_surface_type_name(t.name, exclude_stdlib=excl)
-    }
-    new_types = {
-        t.name: t
-        for t in new.types
+    )
+    new_types = build_type_map(
+        t for t in new.types
         if not t.is_union and is_abi_surface_type_name(t.name, exclude_stdlib=excl)
-    }
+    )
     changes.extend(_check_field_access_changes(old_types, new_types))
     return changes
 
@@ -1575,21 +1612,19 @@ def _diff_anon_fields(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect changes in anonymous struct/union members."""
     changes: list[Change] = []
     excl = stdlib_namespaces_excluded(old, new)
-    old_map = {
-        t.name: t
-        for t in old.types
-        if is_abi_surface_type_name(t.name, exclude_stdlib=excl)
-    }
-    new_map = {
-        t.name: t
-        for t in new.types
-        if is_abi_surface_type_name(t.name, exclude_stdlib=excl)
-    }
+    old_map = build_type_map(
+        t for t in old.types if is_abi_surface_type_name(t.name, exclude_stdlib=excl)
+    )
+    new_map = build_type_map(
+        t for t in new.types if is_abi_surface_type_name(t.name, exclude_stdlib=excl)
+    )
 
-    for name, t_old in old_map.items():
-        t_new = new_map.get(name)
+    for t_old in old_map.values():
+        t_new = lookup_matched_type(old_map, new_map, t_old)
         if t_new is None:
             continue
+        # Bare, not the qualified matching key.
+        name = t_old.name
         changes.extend(_check_anon_fields_for_type(name, t_old, t_new))
 
     return changes

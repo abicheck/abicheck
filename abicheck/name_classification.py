@@ -298,12 +298,26 @@ _MULTI_SPACE_RE = re.compile(r"\s{2,}")
 
 _PTR_REF_SIGIL_RE = re.compile(r"\s*([*&])\s*")
 
+# clang's ``-ast-dump=json`` spells an anonymous struct/union/enum field's type
+# as e.g. "enum (unnamed enum at /abs/path/to/header.h:56:5)" — the absolute
+# source path is an artifact of *where the tool ran*, not the type's ABI
+# identity. Comparing an old-tree checkout against a new-tree checkout of the
+# identical declaration (e.g. ".../old/include/foo.h" vs ".../new/include/foo.h")
+# then falsely reports a type change purely from the differing root, even
+# though both spellings denote the same anonymous type at the same line/column
+# within the (unchanged) header. Stripping the location leaves just the
+# "this is anonymous" marker, which is what should actually be compared.
+_ANON_TYPE_LOCATION_RE = re.compile(r"\bat\s+\S+:\d+:\d+(?=\s*\))")
+
 
 def canonicalize_type_name(name: str) -> str:
     """Normalise a C/C++ type name for comparison.
 
     Transformations (in order):
     0. Strip leading/trailing whitespace and collapse internal whitespace.
+    0b. Strip an anonymous struct/union/enum's embedded ``at <path>:<line>:<col>``
+        location (clang's ``-ast-dump=json`` spelling), which otherwise makes
+        two build trees of the identical declaration compare as different.
     1. Strip leading ``struct ``/``class ``/``union ``/``enum `` elaborated-type-specifier.
     2. Normalise leading ``const T`` → ``T const`` (east-const canonical form),
        but only when the base type contains no angle brackets (templates).
@@ -337,9 +351,18 @@ def canonicalize_type_name(name: str) -> str:
     'char const *'
     >>> canonicalize_type_name("int*")
     'int *'
+    >>> canonicalize_type_name("enum (unnamed enum at /a/old/foo.h:56:5)")
+    '(unnamed enum)'
+    >>> canonicalize_type_name("enum (unnamed enum at /b/new/foo.h:56:5)")
+    '(unnamed enum)'
     """
     # 0. Normalise whitespace early so anchored regexes work consistently.
     result = _MULTI_SPACE_RE.sub(" ", name.strip())
+    # 0b. Strip the absolute-path/line/col clang embeds in an anonymous
+    #     struct/union/enum spelling — it identifies "where the tool ran", not
+    #     the type. See _ANON_TYPE_LOCATION_RE above.
+    result = _ANON_TYPE_LOCATION_RE.sub("", result)
+    result = _MULTI_SPACE_RE.sub(" ", result).replace(" )", ")").strip()
     # 1. Strip elaborated type specifier prefix (handles leading whitespace).
     result = _STRUCT_PREFIX_RE.sub("", result)
     # 2. East-const normalisation: move leading "const" after the full base

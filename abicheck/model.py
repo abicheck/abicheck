@@ -408,6 +408,12 @@ class EnumType:
     is_scoped: bool | None = None
     # See Function.deprecated for the message-string convention.
     deprecated: str | None = None
+    # Namespace/enclosing-class-qualified spelling, mirroring
+    # ``RecordType.qualified_name`` (same bare-``name``-collision motivation:
+    # PR #608 follow-up). ``name`` stays bare for the same DWARF-parity and
+    # type-map-key reasons documented on ``RecordType.qualified_name``. None
+    # when the enum is at global scope or the dumper couldn't determine it.
+    qualified_name: str | None = None
 
 
 @dataclass

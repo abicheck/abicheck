@@ -83,3 +83,4 @@ against the code as unverified, regardless of how confident it reads.
 | [042](042-compatibility-and-gate-decision-separation.md) | Formal separation of CompatibilityDecision and GateDecision | Accepted — implemented for JSON/SARIF/compare-release gate summaries |
 | [043](043-cli-pre-1.0-surface-reset.md) | Pre-1.0 CLI Surface Reset — Root Command Collapse, Depth Ladder Narrowing, and Dry-Run Unification | Accepted — implemented |
 | [044](044-reachability-aware-suppression.md) | Reachability-Aware Suppression and the Effective Public ABI | Accepted — P0 slice implemented |
+| [045](045-identity-based-old-new-entity-matching.md) | Identity-Based Old/New Entity Matching | Accepted — implemented for `RecordType` and `EnumType` |

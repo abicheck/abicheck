@@ -228,6 +228,7 @@ def _enum_type_from_dict(e: dict[str, Any]) -> EnumType:
         origin=_scope_origin_or_unknown(e.get("origin")),
         is_scoped=e.get("is_scoped"),
         deprecated=e.get("deprecated"),
+        qualified_name=e.get("qualified_name"),
     )
 
 

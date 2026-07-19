@@ -34,8 +34,8 @@ new policy.
 """
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
-from typing import Any, TypeVar, cast
+from collections.abc import Callable, ItemsView, Iterable, Iterator, Mapping, ValuesView
+from typing import Any, Protocol, TypeVar, cast
 
 from .change_registry import REGISTRY
 from .checker_policy import ChangeKind
@@ -182,3 +182,162 @@ def diff_by_key(
         if key not in old_map and on_added is not None:
             changes.extend(on_added(key, new_val))
     return changes
+
+
+# ── Type-level old/new matching (moved out of diff_types.py, PR #608) ──────
+#
+# Generalized (PR #608 follow-up) over any entity kind that has the same
+# bare-``name`` / optional-``qualified_name`` split — ``RecordType`` was the
+# original motivating case, ``EnumType`` shares the identical ambiguity
+# (two distinct enums sharing a bare leaf name in different namespaces) and
+# the identical fix, so both are expressed as one generic implementation
+# via the ``_QualifiedNamed`` structural protocol rather than duplicating
+# ``TypeMap`` per entity kind.
+
+
+class _QualifiedNamed(Protocol):
+    name: str
+    qualified_name: str | None
+
+
+Q = TypeVar("Q", bound=_QualifiedNamed)
+
+
+def type_map_key(t: _QualifiedNamed) -> str:
+    """Key a ``RecordType``/``EnumType`` for old/new matching by its
+    namespace-qualified identity, not its bare declaration name.
+
+    The header-mode dumpers (castxml, clang) deliberately keep ``t.name``
+    bare (see its docstring in model.py) and carry the real namespace path in
+    ``t.qualified_name`` instead; the DWARF backend has no such split and
+    already stores the qualified spelling directly in ``name``. Matching
+    old/new maps by bare ``t.name`` alone lets two unrelated types that only
+    share a short/leaf spelling (e.g. two distinct ``std::*::_Impl`` template
+    internals pulled in transitively) collide and diff against each other,
+    producing spurious field/base-class findings. Falling back to ``t.name``
+    when ``qualified_name`` is unset (global-scope types, DWARF-only
+    snapshots) keeps existing behaviour unchanged there.
+    """
+    return t.qualified_name or t.name
+
+
+class TypeMap(Mapping[str, Q]):
+    """An old/new matching map (``RecordType`` or ``EnumType``) keyed by
+    :func:`type_map_key`, with a collision-safe bare-``name`` alias used
+    only for lookups.
+
+    The alias exists for schema-evolution compatibility: an older serialized/
+    header snapshot that predates ``qualified_name`` (or a producer that
+    never populates it) keys its own map entries by the bare name alone.
+    Without an alias, matching that against a freshly-dumped snapshot side
+    where the same namespaced type *does* carry ``qualified_name`` would key
+    the two sides differently (``Foo`` vs. ``ns::Foo``) and manufacture a
+    false ``TYPE_REMOVED``/``TYPE_ADDED`` pair for an unchanged type (Codex
+    review, PR #608).
+
+    The alias is only used for ``get``/``in`` — deliberately kept OUT of
+    ``items``/``values``/iteration, which stay one entry per type under its
+    canonical key. A dict literally containing both the qualified key and a
+    bare-name alias for the same object would make every ``for name, t in
+    old_map.items()``-style detector loop process that type (and emit its
+    finding) twice. It is also only added when the bare name is unambiguous
+    within *this* snapshot — not already claimed by a distinct qualified
+    identity — so it cannot reopen the short/leaf-name collision
+    :func:`type_map_key` itself was introduced to fix.
+    """
+
+    def __init__(self, types: Iterable[Q]) -> None:
+        self._primary: dict[str, Q] = {}
+        self._bare_owner: dict[str, str | None] = {}
+        for t in types:
+            key = type_map_key(t)
+            self._primary[key] = t
+            bare = t.name
+            if bare in self._bare_owner:
+                if self._bare_owner[bare] != key:
+                    self._bare_owner[bare] = None  # ambiguous: >1 distinct qualified identity
+            else:
+                self._bare_owner[bare] = key
+        self._bare_alias: dict[str, str] = {
+            bare: key
+            for bare, key in self._bare_owner.items()
+            if key is not None and bare not in self._primary
+        }
+
+    def bare_name_is_unambiguous(self, bare: str) -> bool:
+        """True if exactly one distinct qualified identity in this map
+        shares the bare declaration name *bare* (including the trivial case
+        of a single global-scope type whose own key already equals its bare
+        name). False for "no type has this bare name" and "two-or-more
+        *distinct* qualified identities share it" alike — both are unsafe to
+        treat as a single unambiguous target.
+        """
+        return self._bare_owner.get(bare) is not None
+
+    def __getitem__(self, key: str) -> Q:
+        # get()/__contains__ come from the Mapping mixin, implemented in
+        # terms of this — alias resolution lives in exactly one place.
+        t = self._primary.get(key)
+        if t is not None:
+            return t
+        alias_key = self._bare_alias.get(key)
+        if alias_key is not None:
+            # _bare_alias values are always keys already present in
+            # _primary (built from it, see __init__) -- a plain indexing
+            # KeyError here would indicate a construction bug, not a normal
+            # "key absent" case.
+            return self._primary[alias_key]
+        raise KeyError(key)
+
+    def __len__(self) -> int:
+        return len(self._primary)
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._primary)
+
+    def items(self) -> ItemsView[str, Q]:
+        return self._primary.items()
+
+    def values(self) -> ValuesView[Q]:
+        return self._primary.values()
+
+
+def build_type_map(types: Iterable[Q]) -> TypeMap[Q]:
+    return TypeMap(types)
+
+
+def lookup_matched_type(own: TypeMap[Q], other: TypeMap[Q], t: Q) -> Q | None:
+    """Look up *t*'s counterpart in *other* (the opposite old/new ``TypeMap``
+    from the one *t* itself came from, ``own``), trying both *t*'s own
+    qualified matching key and its bare declaration name.
+
+    ``TypeMap``'s bare-name alias only maps bare -> qualified (see its
+    docstring): a legacy snapshot keyed by the bare name resolves fine
+    against a *fresh* qualified-keyed counterpart, because the fresh side's
+    map carries that alias. But there is no reverse qualified -> bare
+    mapping, so when *t* itself comes from the *fresh* (qualified-keyed) side
+    and *other* is the *legacy* one, looking ``other`` up by ``type_map_key(t)``
+    alone misses — ``other`` only has the bare key, never learns the
+    qualified spelling. Retrying with the bare name makes the schema-
+    evolution compatibility symmetric regardless of which side is legacy
+    (Codex review, PR #608).
+
+    That bare-name retry is only safe when *t*'s own bare name is itself
+    unambiguous within ``own`` — i.e. *t* is the one and only type in its own
+    snapshot with that bare spelling. Without this check, a genuine
+    same-leaf-name collision on the probing side (e.g. old ``ns1::Impl`` +
+    ``ns2::Impl`` vs. a new side that only kept ``ns2::Impl``) would retry
+    ``ns1::Impl``'s failed qualified lookup with the bare name ``Impl``,
+    hit ``other``'s alias for the *unrelated* surviving ``ns2::Impl``, and
+    diff two distinct types against each other — reopening the exact
+    short/leaf-name collision ``type_map_key`` was introduced to fix, this
+    time through the compatibility fallback instead of naive bare matching
+    (Codex review, PR #608, second round).
+    """
+    key = type_map_key(t)
+    found = other.get(key)
+    if found is not None:
+        return found
+    if t.name != key and own.bare_name_is_unambiguous(t.name):
+        return other.get(t.name)
+    return None

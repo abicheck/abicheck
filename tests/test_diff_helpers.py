@@ -17,7 +17,14 @@ from __future__ import annotations
 
 from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change
-from abicheck.diff_helpers import bool_transition, diff_by_key
+from abicheck.diff_helpers import (
+    bool_transition,
+    build_type_map,
+    diff_by_key,
+    lookup_matched_type,
+    type_map_key,
+)
+from abicheck.model import RecordType
 
 ADDED = (ChangeKind.FUNC_VIRTUAL_ADDED, "added")
 REMOVED = (ChangeKind.FUNC_VIRTUAL_REMOVED, "removed")
@@ -133,3 +140,148 @@ class TestDiffByKey:
             on_common=lambda k, o, n: [self._change(f"common:{k}")],
         )
         assert [c.symbol for c in out] == ["common:a"]
+
+
+class TestTypeMapKey:
+    def test_prefers_qualified_name(self) -> None:
+        t = RecordType(name="Foo", qualified_name="ns::Foo", kind="class")
+        assert type_map_key(t) == "ns::Foo"
+
+    def test_falls_back_to_bare_name(self) -> None:
+        t = RecordType(name="Foo", qualified_name=None, kind="class")
+        assert type_map_key(t) == "Foo"
+
+
+class TestTypeMap:
+    def test_lookup_by_qualified_key(self) -> None:
+        t = RecordType(name="Foo", qualified_name="ns::Foo", kind="class")
+        m = build_type_map([t])
+        assert m["ns::Foo"] is t
+        assert m.get("ns::Foo") is t
+
+    def test_bare_alias_resolves_when_unambiguous(self) -> None:
+        t = RecordType(name="Foo", qualified_name="ns::Foo", kind="class")
+        m = build_type_map([t])
+        assert m.get("Foo") is t
+        assert "Foo" in m
+
+    def test_bare_alias_not_added_when_ambiguous(self) -> None:
+        a = RecordType(name="Impl", qualified_name="ns1::Impl", kind="class")
+        b = RecordType(name="Impl", qualified_name="ns2::Impl", kind="class")
+        m = build_type_map([a, b])
+        assert m.get("Impl") is None
+        assert "Impl" not in m
+        assert m["ns1::Impl"] is a
+        assert m["ns2::Impl"] is b
+
+    def test_duplicate_same_qualified_identity_does_not_mark_ambiguous(self) -> None:
+        # Two entries sharing both the same bare name AND the same qualified
+        # key (e.g. an ODR-duplicate re-parse of the identical declaration)
+        # is not an ambiguous collision -- the bare alias must still resolve.
+        a = RecordType(name="Foo", qualified_name="ns::Foo", kind="class")
+        b = RecordType(name="Foo", qualified_name="ns::Foo", kind="class")
+        m = build_type_map([a, b])
+        assert m.get("Foo") is b  # second entry wins the primary slot
+        assert "Foo" in m
+
+    def test_global_scope_type_has_no_redundant_alias_entry(self) -> None:
+        t = RecordType(name="Foo", qualified_name=None, kind="class")
+        m = build_type_map([t])
+        assert list(m.items()) == [("Foo", t)]
+
+    def test_items_yields_each_type_exactly_once(self) -> None:
+        # A namespaced type's bare-name alias must never leak into iteration
+        # (items/values/__iter__) -- only used for get()/__contains__ lookups
+        # -- or every detector loop over old_map.items() would double-process
+        # (and double-report) every namespaced type (Codex review, PR #608).
+        t = RecordType(name="Foo", qualified_name="ns::Foo", kind="class")
+        m = build_type_map([t])
+        assert list(m.items()) == [("ns::Foo", t)]
+        assert list(m.values()) == [t]
+        assert list(m) == ["ns::Foo"]
+        assert len(m) == 1
+
+    def test_missing_key_raises_and_get_returns_default(self) -> None:
+        m = build_type_map([])
+        assert m.get("Foo") is None
+        assert m.get("Foo", "default") == "default"
+        try:
+            m["Foo"]
+        except KeyError:
+            pass
+        else:
+            raise AssertionError("expected KeyError")
+
+    def test_bare_name_is_unambiguous(self) -> None:
+        unique = RecordType(name="Foo", qualified_name="ns::Foo", kind="class")
+        m = build_type_map([unique])
+        assert m.bare_name_is_unambiguous("Foo") is True
+        assert m.bare_name_is_unambiguous("Bar") is False  # no such bare name at all
+
+    def test_bare_name_is_ambiguous_when_shared_by_distinct_types(self) -> None:
+        a = RecordType(name="Impl", qualified_name="ns1::Impl", kind="class")
+        b = RecordType(name="Impl", qualified_name="ns2::Impl", kind="class")
+        m = build_type_map([a, b])
+        assert m.bare_name_is_unambiguous("Impl") is False
+
+
+class TestLookupMatchedType:
+    """Codex review, PR #608 (second round): a plain ``other.get(type_map_key(t))``
+    lookup only resolves the legacy-old/fresh-new direction (via the fresh
+    side's bare-name alias). The reverse -- fresh old, legacy new -- has no
+    alias to hit, since aliases only map bare -> qualified, never qualified ->
+    bare. ``lookup_matched_type`` retries with the bare name to cover both --
+    but ONLY when ``t``'s own bare name is unambiguous in its own map
+    (``own``), or a genuine same-leaf-name collision on the probing side
+    would retry into an unrelated survivor on the other side (Codex review,
+    PR #608, third round).
+    """
+
+    def test_fresh_side_against_legacy_other_falls_back_to_bare(self) -> None:
+        t = RecordType(name="Handle", qualified_name="ns::Handle", kind="class")
+        own = build_type_map([t])
+        legacy_counterpart = RecordType(name="Handle", qualified_name=None, kind="class")
+        other = build_type_map([legacy_counterpart])
+
+        assert lookup_matched_type(own, other, t) is legacy_counterpart
+
+    def test_direct_qualified_hit_needs_no_fallback(self) -> None:
+        t = RecordType(name="Handle", qualified_name="ns::Handle", kind="class")
+        own = build_type_map([t])
+        counterpart = RecordType(name="Handle", qualified_name="ns::Handle", kind="class")
+        other = build_type_map([counterpart])
+
+        assert lookup_matched_type(own, other, t) is counterpart
+
+    def test_global_scope_type_key_equals_bare_no_redundant_lookup(self) -> None:
+        t = RecordType(name="Foo", qualified_name=None, kind="class")
+        own = build_type_map([t])
+        counterpart = RecordType(name="Foo", qualified_name=None, kind="class")
+        other = build_type_map([counterpart])
+
+        assert lookup_matched_type(own, other, t) is counterpart
+
+    def test_genuinely_absent_returns_none(self) -> None:
+        t = RecordType(name="Handle", qualified_name="ns::Handle", kind="class")
+        own = build_type_map([t])
+        other = build_type_map([])
+
+        assert lookup_matched_type(own, other, t) is None
+
+    def test_ambiguous_probing_side_does_not_fall_back_to_survivor(self) -> None:
+        """The exact scenario Codex flagged: old side has two distinct
+        namespaced types sharing the bare name 'Impl'; the new side kept
+        only one of them. Probing the REMOVED one must not retry into the
+        unrelated SURVIVING one just because it also happens to be the
+        other map's sole 'Impl'.
+        """
+        removed = RecordType(name="Impl", qualified_name="ns1::Impl", kind="class")
+        survivor_old = RecordType(name="Impl", qualified_name="ns2::Impl", kind="class")
+        own = build_type_map([removed, survivor_old])  # ambiguous bare "Impl" in own
+        survivor_new = RecordType(name="Impl", qualified_name="ns2::Impl", kind="class")
+        other = build_type_map([survivor_new])
+
+        assert lookup_matched_type(own, other, removed) is None
+        # The genuinely-unchanged type still matches fine via its own
+        # qualified key -- ambiguity in `own` doesn't block direct hits.
+        assert lookup_matched_type(own, other, survivor_old) is survivor_new
