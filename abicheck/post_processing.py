@@ -919,12 +919,33 @@ class MarkReachability:
                 # has no "::" segments for is_internal_type to see — check
                 # the demangled c.qualified_name too, same fallback pattern
                 # used elsewhere in this walk.
-                layout_domain = root in known_type_names or (
-                    enum_owner is not None and enum_owner in known_type_names
-                )
+                #
+                # Restricted the same way for the layout walk itself
+                # (Codex review, seventh pass): compute_leak_paths only ever
+                # records *internal* types it finds reached from the public
+                # surface — it never records the public seed types
+                # themselves (see _public_header_names's own docstring
+                # above). A genuinely public declared type absent from
+                # reachable_types was therefore never examined by this walk
+                # at all, not proven unreachable by it — treating any known
+                # declared type as "layout domain" let a broad
+                # `namespace: ns::*` rule suppress a real public-type
+                # layout break with no diagnostic. root already having been
+                # a key in reachable_types (even if later demoted to
+                # pointer-only/non-value) is real positive evidence
+                # regardless of naming; absence from it is only conclusive
+                # for a type the walk's internal-only domain could have
+                # classified in the first place.
                 subject_is_internal = is_internal_type(root, namespaces) or (
                     c.qualified_name is not None
                     and is_internal_type(c.qualified_name, namespaces)
+                )
+                layout_domain = root in reachable_types or (
+                    subject_is_internal
+                    and (
+                        root in known_type_names
+                        or (enum_owner is not None and enum_owner in known_type_names)
+                    )
                 )
                 if layout_domain or (
                     subject_is_internal and _relevant_call_graph_trusted(c)

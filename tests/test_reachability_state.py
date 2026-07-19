@@ -438,6 +438,43 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
         assert raw_change in ctx.suppressed
         assert ChangeKind.SUPPRESSION_REACHABILITY_UNKNOWN not in [c.kind for c in ctx.kept]
 
+    def test_public_type_absent_from_internal_only_walk_stays_unknown(self) -> None:
+        """Codex review, seventh pass: compute_leak_paths only ever records
+        *internal* types it finds reached from the public surface — it
+        never records the public seed types themselves. A genuinely public
+        declared type (no ScopeOrigin.PUBLIC_HEADER tag, so the direct
+        public-symbol check can't catch it either) that is absent from
+        reachable_types was therefore never examined by this walk at all,
+        not proven unreachable by it — treating it as layout-walk domain
+        just because it's some known declared type would let a broad
+        `namespace: ns::*` rule suppress a real public-type layout break
+        with no diagnostic."""
+        old = _snap(
+            functions=[_public_fn("make", "ns::Widget*")],
+            types=[RecordType(name="ns::Widget", kind="class", size_bits=64)],
+        )
+        new = _snap(
+            functions=[_public_fn("make", "ns::Widget*")],
+            types=[RecordType(name="ns::Widget", kind="class", size_bits=128)],
+        )
+        raw_change = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="ns::Widget",
+            description="size changed",
+        )
+        suppression = SuppressionList([
+            Suppression(
+                namespace="ns::*",
+                reachability="proven-unreachable-only",
+                reason="would wrongly suppress a real public-type break",
+            )
+        ])
+        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        found = [c for c in ctx.kept if c.kind == ChangeKind.TYPE_SIZE_CHANGED]
+        assert len(found) == 1
+        assert found[0].reachability_state == ReachabilityState.UNKNOWN
+        assert raw_change not in ctx.suppressed
+
     def test_func_removed_with_present_untrusted_call_graph_is_unknown(self) -> None:
         """A call graph that IS present but flagged degraded/narrowed must
         not count as trustworthy negative evidence either."""
