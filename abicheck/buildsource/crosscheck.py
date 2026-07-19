@@ -1344,15 +1344,24 @@ def _check_compile_context_conflict(
             continue
         label = target_id or "(unscoped compile units)"
         for pos, neg in _ABI_FLAG_FAMILIES:
-            has_pos = any(pos in cu.abi_relevant_flags for cu in units)
-            has_neg = any(neg in cu.abi_relevant_flags for cu in units)
-            if has_pos and has_neg:
+            # Compare *effective* per-TU modes, not just explicit positive tokens.
+            # These families (RTTI, exceptions, thread-safe statics) are all ON by
+            # default, so a unit that carries neither spelling is in the positive
+            # mode — and mixing it with a `-fno-*` unit in the same link target is
+            # the exact AC-008 umbrella case (most TUs default-on, one built
+            # `-fno-rtti`). Requiring an explicit `-frtti` somewhere would miss it
+            # (Codex review). A unit is negative iff it carries the `-fno-*` token;
+            # every other unit (explicit positive or language default) is positive.
+            neg_units = [cu for cu in units if neg in cu.abi_relevant_flags]
+            pos_units = [cu for cu in units if neg not in cu.abi_relevant_flags]
+            if neg_units and pos_units:
                 findings.append(
                     _change(
                         ChangeKind.COMPILE_CONTEXT_CONFLICT,
                         label,
                         f"Build target {label} has compile units that disagree on "
-                        f"{pos}/{neg}; aggregating them into one build context "
+                        f"{pos}/{neg} (some built {neg}, others {pos} or the "
+                        "language default); aggregating them into one build context "
                         "silently picks one ABI. Scope the evidence to a single "
                         "link unit or pass a compile-DB filter.",
                         old_value=pos,
@@ -1428,7 +1437,28 @@ def _check_source_surface_dso_mismatch(
         return _CheckOutput(
             [], "skipped", "no binary export table on the snapshot", providers
         )
-    matched = int((surface.coverage or {}).get("matched_symbols", 0) or 0)
+    # Count exports the surface attributed to this DSO by *any* tier, not just
+    # direct decl matches: a C++ surface can match a library entirely through
+    # compiler-synthesized (RTTI/vtable/thunk), template-instantiation, or
+    # allocator-interposer attributions while `matched_symbols` (decl matches)
+    # stays 0 (Codex review). ``link_source_abi`` records
+    # ``unmatched_symbols = exported - all_matched``, so the total attributed
+    # count is ``exported - unmatched``; fall back to summing the per-tier
+    # counters when the surface predates ``unmatched_symbols``.
+    cov = surface.coverage or {}
+    exported_cov = int(cov.get("exported_symbols", 0) or 0)
+    if "unmatched_symbols" in cov and exported_cov:
+        matched = exported_cov - int(cov.get("unmatched_symbols", 0) or 0)
+    else:
+        matched = sum(
+            int(cov.get(k, 0) or 0)
+            for k in (
+                "matched_symbols",
+                "synthesized_symbols_matched",
+                "template_instantiation_symbols_matched",
+                "allocator_interposer_symbols_matched",
+            )
+        )
     if matched > 0:
         return _CheckOutput(
             [],

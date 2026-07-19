@@ -2314,6 +2314,36 @@ def test_compile_context_conflict_flags_rtti_disagreement():
     assert ChangeKind.COMPILE_CONTEXT_CONFLICT not in _api_break_kinds()
 
 
+def test_compile_context_conflict_flags_default_vs_negative():
+    # AC-008 (Codex): the common umbrella case — most TUs compiled with the
+    # language default (RTTI on, no flag) and one built -fno-rtti. The default
+    # unit carries no explicit -frtti, so an explicit-positive-only check would
+    # miss it; effective-mode comparison must still flag the conflict.
+    snap = _snap(
+        build_source=_pack_with_units(
+            _cu("a", "target://libtbb.so"),  # default RTTI (no flag)
+            _cu("b", "target://libtbb.so", flags=["-fno-rtti"]),
+        )
+    )
+    res = run_crosschecks(snap)
+    hits = _findings_of(res, ChangeKind.COMPILE_CONTEXT_CONFLICT)
+    assert len(hits) == 1
+    assert hits[0].old_value == "-frtti" and hits[0].new_value == "-fno-rtti"
+
+
+def test_compile_context_conflict_clean_when_all_negative():
+    # All units share the same -fno-rtti mode → coherent, no conflict (the
+    # effective-mode fix must not fire when every unit is negative).
+    snap = _snap(
+        build_source=_pack_with_units(
+            _cu("a", "target://libtbb.so", flags=["-fno-rtti"]),
+            _cu("b", "target://libtbb.so", flags=["-fno-rtti"]),
+        )
+    )
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.COMPILE_CONTEXT_CONFLICT) == []
+
+
 def test_compile_context_conflict_flags_define_value_disagreement():
     snap = _snap(
         build_source=_pack_with_units(
@@ -2415,6 +2445,55 @@ def test_source_surface_dso_mismatch_clean_when_surface_matches():
     res = run_crosschecks(snap)
     assert _findings_of(res, ChangeKind.SOURCE_SURFACE_DSO_MISMATCH) == []
     assert _coverage(res, CHECK_SOURCE_SURFACE_DSO_MISMATCH)["status"] == "present"
+
+
+def test_source_surface_dso_mismatch_clean_when_matched_via_synthesized():
+    # AC-009 (Codex): a C++ surface whose exports are attributed entirely through
+    # synthesized (RTTI/vtable) / template / allocator counters — with decl
+    # `matched_symbols` still 0 — DID match this DSO, so it must NOT be flagged.
+    from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
+
+    surface = SourceAbiSurface(
+        library="libfoo.so",
+        reachable_declarations=[
+            SourceEntity(id="d0", kind="record", qualified_name="Widget")
+        ],
+        coverage={
+            "matched_symbols": 0,
+            "synthesized_symbols_matched": 2,  # RTTI/vtable attributed to Widget
+            "exported_symbols": 2,
+            "unmatched_symbols": 0,  # all exports attributed
+        },
+    )
+    snap = _snap(elf=_elf("_ZTV6Widget", "_ZTI6Widget"))
+    snap.build_source = BuildSourcePack(root="", source_abi=surface)
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.SOURCE_SURFACE_DSO_MISMATCH) == []
+    assert _coverage(res, CHECK_SOURCE_SURFACE_DSO_MISMATCH)["status"] == "present"
+
+
+def test_source_surface_dso_mismatch_uses_unmatched_symbols_counter():
+    # When unmatched_symbols == exported_symbols (nothing attributed by any tier)
+    # the surface truly matched nothing → fire, even though matched_symbols alone
+    # is not the signal used.
+    from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
+
+    surface = SourceAbiSurface(
+        library="libfoo.so",
+        reachable_declarations=[
+            SourceEntity(id="d0", kind="function", qualified_name="f")
+        ],
+        coverage={
+            "matched_symbols": 0,
+            "synthesized_symbols_matched": 0,
+            "exported_symbols": 3,
+            "unmatched_symbols": 3,  # nothing attributed
+        },
+    )
+    snap = _snap(elf=_elf("_Z3barv", "_Z3bazv", "_Z3quxv"))
+    snap.build_source = BuildSourcePack(root="", source_abi=surface)
+    res = run_crosschecks(snap)
+    assert len(_findings_of(res, ChangeKind.SOURCE_SURFACE_DSO_MISMATCH)) == 1
 
 
 def test_source_surface_dso_mismatch_skipped_without_binary_exports():
