@@ -251,8 +251,9 @@ class Suppression:
     to be internal must not be suppressible by a rule aimed at hiding
     internal-namespace churn on the *symbol itself*."""
     reachability: str | None = None
-    """``"unreachable-only" | "any" | "public-only"`` — gates whether this
-    rule may match a change flagged ``Change.public_reachable`` (ADR-044 D1,
+    """``"unreachable-only" | "any" | "public-only" | "proven-unreachable-only"``
+    — gates whether this rule may match a change flagged
+    ``Change.public_reachable``/``Change.reachability_state`` (ADR-044 D1,
     set by the ``MarkReachability`` pipeline step before suppression runs).
 
     Default depends on the selector shape: a rule using only broad selectors

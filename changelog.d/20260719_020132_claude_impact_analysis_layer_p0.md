@@ -19,5 +19,5 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   diagnostic when withheld. The existing `unreachable-only` default keeps
   its original boolean semantics unchanged — no behavior change for
   existing suppression files. See
-  [Suppressions § Proven vs. unknown reachability](../docs/user-guide/suppressions.md)
-  and [Graph Coverage & Negative Evidence](../docs/concepts/graph-coverage.md).
+  [Suppressions § Proven vs. unknown reachability](docs/user-guide/suppressions.md)
+  and [Graph Coverage & Negative Evidence](docs/concepts/graph-coverage.md).

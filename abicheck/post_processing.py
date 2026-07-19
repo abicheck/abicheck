@@ -761,19 +761,36 @@ class MarkReachability:
         old_call_graph_trusted = _call_graph_fully_trusted(ctx.old)
         new_call_graph_trusted = _call_graph_fully_trusted(ctx.new)
 
-        def _relevant_call_graph_trusted(change: Change) -> bool:
-            """Only require trust from the side(s) *change*'s target can
-            actually exist on (Codex review, fifth pass): a REMOVED decl
+        # Codex review, eighth pass: a ``kind.value.endswith("_removed"/"_added")``
+        # heuristic also matches changed-in-place attribute toggles on a decl
+        # that exists on *both* sides — e.g. FUNC_VIRTUAL_ADDED,
+        # FUNC_NOEXCEPT_REMOVED, CTOR_EXPLICIT_ADDED, *_DEPRECATED_ADDED/REMOVED.
+        # For those, requiring trust from only the suffix-selected side would
+        # let a change on the untrusted/never-examined side slip through as
+        # PROVEN_UNREACHABLE. Check the decl's *actual* presence on each
+        # snapshot instead of pattern-matching the kind name, which is immune
+        # to new one-sided or attribute-toggle kinds being added later.
+        old_decl_names = {f.mangled for f in ctx.old.functions} | {f.name for f in ctx.old.functions}
+        old_decl_names |= {v.mangled for v in ctx.old.variables} | {v.name for v in ctx.old.variables}
+        new_decl_names = {f.mangled for f in ctx.new.functions} | {f.name for f in ctx.new.functions}
+        new_decl_names |= {v.mangled for v in ctx.new.variables} | {v.name for v in ctx.new.variables}
+
+        def _relevant_call_graph_trusted(change: Change, root: str) -> bool:
+            """Only require trust from the side(s) *change*'s target actually
+            exists on. A decl removed entirely (gone from the new snapshot)
             only ever existed on the old side, so only the old graph's
-            coverage speaks to whether some old public entry called it —
-            an untrusted/absent *new*-side graph (unsurprising, since the
-            decl is gone there) must not turn a real old-side proof into
-            UNKNOWN. Symmetric for ADDED; a changed-in-place decl exists on
-            both sides, so both must be trusted for a symmetric proof."""
-            kind_value = change.kind.value
-            if kind_value.endswith("_removed"):
+            coverage speaks to whether some old public entry called it — an
+            untrusted/absent *new*-side graph (unsurprising, since the decl
+            is gone there) must not turn a real old-side proof into UNKNOWN.
+            Symmetric for a decl that's newly added. A decl present on both
+            sides (a genuine changed-in-place attribute toggle) needs both
+            sides trusted for a symmetric proof."""
+            names = (root, change.qualified_name)
+            existed_before = any(n is not None and n in old_decl_names for n in names)
+            existed_after = any(n is not None and n in new_decl_names for n in names)
+            if existed_before and not existed_after:
                 return old_call_graph_trusted
-            if kind_value.endswith("_added"):
+            if existed_after and not existed_before:
                 return new_call_graph_trusted
             return old_call_graph_trusted and new_call_graph_trusted
 
@@ -825,9 +842,24 @@ class MarkReachability:
                 c.reachability_state = ReachabilityState.PROVEN_REACHABLE
                 continue
             tagged = False
-            if root in reachable_types:
-                old_pl = old_paths.get(root, [])
-                new_pl = new_paths.get(root, [])
+            # An enum-member finding's root still carries the "::member"
+            # suffix here (only stripped into enum_owner just above), so it
+            # never matches a reachable_types key by itself even when the
+            # owning enum genuinely was walked and found reachable —
+            # compute_leak_paths records leaf types like enums under their
+            # bare name (CodeRabbit review). Fall back to enum_owner so a
+            # reachable enum's member change is tagged from this same walk
+            # instead of only being caught by the coarser known_type_names
+            # fallback below (which cannot distinguish reachable from
+            # merely-declared).
+            layout_key = (
+                root
+                if root in reachable_types
+                else (enum_owner if enum_owner in reachable_types else None)
+            )
+            if layout_key is not None:
+                old_pl = old_paths.get(layout_key, [])
+                new_pl = new_paths.get(layout_key, [])
                 paths = old_pl + [p for p in new_pl if p not in old_pl]
                 # Mirror DetectInternalLeaks's own value/indirection judgment
                 # (Codex review): a pure-layout change reached *only* through
@@ -948,7 +980,7 @@ class MarkReachability:
                     )
                 )
                 if layout_domain or (
-                    subject_is_internal and _relevant_call_graph_trusted(c)
+                    subject_is_internal and _relevant_call_graph_trusted(c, root)
                 ):
                     c.reachability_state = ReachabilityState.PROVEN_UNREACHABLE
                 else:

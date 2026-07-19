@@ -40,12 +40,13 @@ from abicheck.post_processing import DEFAULT_PIPELINE
 from abicheck.suppression import Suppression, SuppressionList
 
 
-def _snap(*, functions=None, types=None, build_source=None) -> AbiSnapshot:
+def _snap(*, functions=None, types=None, enums=None, build_source=None) -> AbiSnapshot:
     return AbiSnapshot(
         library="libtest.so",
         version="1.0",
         functions=list(functions or []),
         types=list(types or []),
+        enums=list(enums or []),
         build_source=build_source,
     )
 
@@ -149,6 +150,62 @@ class TestMarkReachabilityTriState:
         )
         assert raw_change.public_reachable is False
         assert raw_change.reachability_state == ReachabilityState.PROVEN_UNREACHABLE
+
+    def test_reachable_enum_member_change_is_proven_reachable(self) -> None:
+        """CodeRabbit review: an enum-member finding's ``root`` still carries
+        the "EnumName::member" suffix at the point the layout-walk tag check
+        runs, so a bare ``root in reachable_types`` lookup never matches even
+        when the *owning* enum genuinely was walked and found reachable
+        (compute_leak_paths records a value-embedded internal enum field
+        under its own bare name). Falling back to ``enum_owner`` there — not
+        just in the coarser known-types fallback — must tag this as
+        PROVEN_REACHABLE, not misclassify it via the fallback path."""
+        from abicheck.model import EnumMember, EnumType, TypeField
+
+        old = _snap(
+            functions=[_public_fn("make", "ns::Widget")],
+            types=[
+                RecordType(
+                    name="ns::Widget",
+                    kind="struct",
+                    fields=[TypeField(name="status", type="ns::detail::Status")],
+                ),
+            ],
+            enums=[
+                EnumType(
+                    name="ns::detail::Status",
+                    members=[EnumMember(name="OK", value=0), EnumMember(name="ERR", value=1)],
+                ),
+            ],
+        )
+        new = _snap(
+            functions=[_public_fn("make", "ns::Widget")],
+            types=[
+                RecordType(
+                    name="ns::Widget",
+                    kind="struct",
+                    fields=[TypeField(name="status", type="ns::detail::Status")],
+                ),
+            ],
+            enums=[
+                EnumType(
+                    name="ns::detail::Status",
+                    members=[EnumMember(name="OK", value=0)],
+                ),
+            ],
+        )
+        raw_change = Change(
+            kind=ChangeKind.ENUM_MEMBER_REMOVED,
+            symbol="ns::detail::Status::ERR",
+            description="member removed",
+        )
+        ctx = DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        found = [c for c in ctx.kept if c.kind == ChangeKind.ENUM_MEMBER_REMOVED]
+        assert len(found) == 1
+        assert found[0].public_reachable is True
+        assert found[0].reachability_state == ReachabilityState.PROVEN_REACHABLE
 
     def test_declared_type_never_reachable_anywhere_is_still_proven_unreachable(
         self,
@@ -606,7 +663,10 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
         from abicheck.buildsource.source_graph import GraphEdge
 
         old = _graph_snap(
-            [_public_fn("pubFn")],
+            [
+                _public_fn("pubFn"),
+                _public_fn("ns::detail::unrelated_and_never_called"),
+            ],
             nodes=[
                 _decl_node("decl://pub", "pubFn", "public_header"),
                 _decl_node("decl://other", "ns::detail::other", "source"),
@@ -635,7 +695,10 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
 
         old = _snap(functions=[_public_fn("pubFn")])
         new = _graph_snap(
-            [_public_fn("pubFn")],
+            [
+                _public_fn("pubFn"),
+                _public_fn("ns::detail::unrelated_and_never_called"),
+            ],
             nodes=[
                 _decl_node("decl://pub", "pubFn", "public_header"),
                 _decl_node("decl://other", "ns::detail::other", "source"),
@@ -688,6 +751,48 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
             [raw_change], old, new, suppression=_needs_evidence_suppression()
         )
         found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_RETURN_CHANGED]
+        assert len(found) == 1
+        assert found[0].reachability_state == ReachabilityState.UNKNOWN
+
+    def test_attribute_toggle_kind_ending_in_added_still_needs_both_sides_trusted(
+        self,
+    ) -> None:
+        """Codex review, eighth pass: a suffix check on the kind name
+        (``kind.value.endswith("_added")``) wrongly matches an
+        attribute-toggle kind like FUNC_VIRTUAL_ADDED too — the decl exists
+        on *both* snapshots there (only whether it's virtual changed), not
+        just the new one. Requiring trust from only the new-side graph would
+        let an untrusted/never-examined old side silently pass as
+        call-graph-proven, misclassifying a real ambiguity as
+        PROVEN_UNREACHABLE. The fix checks the decl's actual presence on
+        each side instead of the kind name's suffix."""
+        from abicheck.buildsource.source_graph import GraphEdge
+
+        old = _snap(functions=[
+            _public_fn("pubFn"),
+            _public_fn("ns::detail::Thing::unrelated_and_never_called"),
+        ])
+        new = _graph_snap(
+            [
+                _public_fn("pubFn"),
+                _public_fn("ns::detail::Thing::unrelated_and_never_called"),
+            ],
+            nodes=[
+                _decl_node("decl://pub", "pubFn", "public_header"),
+                _decl_node("decl://other", "ns::detail::other", "source"),
+            ],
+            edges=[GraphEdge(src="decl://pub", dst="decl://other", kind="DECL_CALLS_DECL")],
+            extractor_passes={"call_graph": True, "type_graph": True},
+        )
+        raw_change = Change(
+            kind=ChangeKind.FUNC_VIRTUAL_ADDED,
+            symbol="ns::detail::Thing::unrelated_and_never_called",
+            description="became virtual",
+        )
+        ctx = DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_VIRTUAL_ADDED]
         assert len(found) == 1
         assert found[0].reachability_state == ReachabilityState.UNKNOWN
 

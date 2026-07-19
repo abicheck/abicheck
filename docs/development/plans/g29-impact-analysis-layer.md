@@ -325,7 +325,7 @@ validation, consumer/use-case attribution checks.
 ## Files & surfaces
 
 New:
-```
+```text
 abicheck/impact/
     model.py           # ImpactAssessment, GraphProofPath, FindingDecision (Phase 3)
     engine.py           # ImpactEngine.assess(...) (Phase 3)
