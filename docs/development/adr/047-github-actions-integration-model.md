@@ -926,7 +926,7 @@ in `check-target`, `check-single.yml`, or `check-project.yml`.
 
 ```json
 {
-  "report_schema_version": "2.10",
+  "report_schema_version": "2.11",
   "check_id": "libpvxs@linux-x86_64-gcc13-release#accepted-main@source",
   "target_id": "libpvxs@linux-x86_64-gcc13-release#accepted-main@source",
   "project": "epics-base/pvxs",
@@ -995,11 +995,13 @@ for additive changes, not introducing a parallel field). **The example
 value must also be schema-valid, not a placeholder — a follow-up review
 catch:** `compare_report.schema.json` requires `report_schema_version` to
 match `^[0-9]+\.[0-9]+$` (a real `MAJOR.MINOR` pair), and the live value
-today is `abicheck/schemas/__init__.py`'s `REPORT_SCHEMA_VERSION = "2.9"` —
-an earlier draft's placeholder `"1.x.y"` would itself fail schema
-validation. Set to `"2.10"` (the next MINOR bump from the current `2.9`,
-matching this section's own "additive changes bump MINOR" convention) as a
-concrete, schema-valid example value.
+today is `abicheck/schemas/__init__.py`'s `REPORT_SCHEMA_VERSION = "2.10"`
+(bumped from `2.9` by an unrelated `reachability_kind` addition that landed
+on `main` independently of this ADR) — an earlier draft's placeholder
+`"1.x.y"` would itself fail schema validation. Set to `"2.11"` (the next
+free MINOR bump from the current `2.10`, matching this section's own
+"additive changes bump MINOR" convention) as a concrete, schema-valid
+example value that doesn't collide with the already-shipped `2.10`.
 
 The last two fields, `verdict` and `severity`, are **not optional
 decoration** — they are the exact legacy fields `abicheck/aggregate.py`
@@ -1205,8 +1207,13 @@ acceptance criteria) to
 `docs/development/plans/g30-github-actions-integration-model.md` §Scenario
 backlog, where each scenario becomes a tracked, independently
 implementable/testable unit. Table below maps each scenario to the primary
-workflow/primitive from §4 and its baseline requirement, confirming no
-scenario requires `aggregate` except S28.
+workflow/primitive from §4 and its baseline requirement. `abicheck aggregate`
+is the *entry point* for S28 alone (the only scenario whose primary command
+is `aggregate`), but per §4/§7's correction it is also *invoked* as a
+trailing job by any `check-project.yml` run containing a `gate-mode:
+deferred` cell — including single-cell S3/S25 runs after filtering — so
+"only S28 touches aggregate" is not the same claim as "only S28 needs the
+aggregate job to run."
 
 | # | Scenario | Primary entry point | Baseline | Notes |
 |---|---|---|---|---|
