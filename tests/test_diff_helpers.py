@@ -21,6 +21,7 @@ from abicheck.diff_helpers import (
     bool_transition,
     build_type_map,
     diff_by_key,
+    lookup_matched_type,
     type_map_key,
 )
 from abicheck.model import RecordType
@@ -210,3 +211,39 @@ class TestTypeMap:
             pass
         else:
             raise AssertionError("expected KeyError")
+
+
+class TestLookupMatchedType:
+    """Codex review, PR #608 (second round): a plain ``other.get(type_map_key(t))``
+    lookup only resolves the legacy-old/fresh-new direction (via the fresh
+    side's bare-name alias). The reverse -- fresh old, legacy new -- has no
+    alias to hit, since aliases only map bare -> qualified, never qualified ->
+    bare. ``lookup_matched_type`` retries with the bare name to cover both.
+    """
+
+    def test_fresh_side_against_legacy_other_falls_back_to_bare(self) -> None:
+        t = RecordType(name="Handle", qualified_name="ns::Handle", kind="class")
+        legacy_counterpart = RecordType(name="Handle", qualified_name=None, kind="class")
+        other = build_type_map([legacy_counterpart])
+
+        assert lookup_matched_type(other, t) is legacy_counterpart
+
+    def test_direct_qualified_hit_needs_no_fallback(self) -> None:
+        t = RecordType(name="Handle", qualified_name="ns::Handle", kind="class")
+        counterpart = RecordType(name="Handle", qualified_name="ns::Handle", kind="class")
+        other = build_type_map([counterpart])
+
+        assert lookup_matched_type(other, t) is counterpart
+
+    def test_global_scope_type_key_equals_bare_no_redundant_lookup(self) -> None:
+        t = RecordType(name="Foo", qualified_name=None, kind="class")
+        counterpart = RecordType(name="Foo", qualified_name=None, kind="class")
+        other = build_type_map([counterpart])
+
+        assert lookup_matched_type(other, t) is counterpart
+
+    def test_genuinely_absent_returns_none(self) -> None:
+        t = RecordType(name="Handle", qualified_name="ns::Handle", kind="class")
+        other = build_type_map([])
+
+        assert lookup_matched_type(other, t) is None

@@ -278,3 +278,32 @@ class TypeMap(Mapping[str, RecordType]):
 
 def build_type_map(types: Iterable[RecordType]) -> TypeMap:
     return TypeMap(types)
+
+
+def lookup_matched_type(other: TypeMap, t: RecordType) -> RecordType | None:
+    """Look up *t*'s counterpart in *other* (the opposite old/new ``TypeMap``),
+    trying both *t*'s own qualified matching key and its bare declaration
+    name.
+
+    ``TypeMap``'s bare-name alias only maps bare -> qualified (see its
+    docstring): a legacy snapshot keyed by the bare name resolves fine
+    against a *fresh* qualified-keyed counterpart, because the fresh side's
+    map carries that alias. But there is no reverse qualified -> bare
+    mapping, so when *t* itself comes from the *fresh* (qualified-keyed) side
+    and *other* is the *legacy* one, looking ``other`` up by ``type_map_key(t)``
+    alone misses — ``other`` only has the bare key, never learns the
+    qualified spelling. A plain ``old_map.items()`` iteration only ever
+    tries the qualified key when the *old* side is legacy-vs-fresh-new is
+    the one direction that already worked; the reverse (fresh old,
+    legacy new) manufactured a phantom ``TYPE_REMOVED``/``TYPE_ADDED``
+    (Codex review, PR #608). Retrying with the bare name makes the
+    schema-evolution compatibility symmetric regardless of which side is
+    legacy.
+    """
+    key = type_map_key(t)
+    found = other.get(key)
+    if found is not None:
+        return found
+    if t.name != key:
+        return other.get(t.name)
+    return None

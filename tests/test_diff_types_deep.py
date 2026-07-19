@@ -814,6 +814,29 @@ class TestQualifiedNameMatching:
         assert ChangeKind.TYPE_ADDED not in kinds
         assert ChangeKind.TYPE_FIELD_REMOVED in kinds
 
+    def test_legacy_snapshot_on_new_side_still_matches(self):
+        """Codex review, PR #608 (second round): the mirror of the case
+        above — a FRESH old side (qualified_name populated) compared against
+        a LEGACY new side (qualified_name unset) — must also match, not just
+        the legacy-old/fresh-new direction. ``TypeMap``'s bare-name alias
+        only maps bare -> qualified, so a naive ``new_map.get(old_side's_own_
+        qualified_key)`` lookup misses when the *new* side is the legacy one;
+        ``diff_helpers.lookup_matched_type`` retries with the bare name to
+        make this symmetric.
+        """
+        t_old = RecordType(name="Handle", qualified_name="ns::Handle",
+                           kind="class", size_bits=64,
+                           fields=[TypeField("count", "int", 0)])
+        t_new = RecordType(name="Handle", qualified_name=None,
+                           kind="class", size_bits=32, fields=[])
+
+        r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
+
+        kinds = _kinds(r)
+        assert ChangeKind.TYPE_REMOVED not in kinds
+        assert ChangeKind.TYPE_ADDED not in kinds
+        assert ChangeKind.TYPE_FIELD_REMOVED in kinds
+
     def test_namespaced_type_diff_not_doubled_by_alias(self):
         """A normal namespaced type (both sides populate ``qualified_name``,
         the common case, no legacy mismatch at all) must still produce each

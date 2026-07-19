@@ -23,7 +23,11 @@ from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
 from .diff_cxx_rules import itanium_qualified_name, vtable_slot_is_override_reuse
-from .diff_helpers import build_type_map as _build_type_map, make_change
+from .diff_helpers import (
+    build_type_map as _build_type_map,
+    lookup_matched_type as _lookup_matched_type,
+    make_change,
+)
 from .diff_symbols import (
     _PUBLIC_VIS,
     _public_functions,
@@ -217,16 +221,15 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # no match and manufacture a phantom TYPE_ADDED (Codex review, PR #608).
     matched_new_ids: set[int] = set()
 
-    for match_key, t_old in old_map.items():
-        t_new = new_map.get(match_key)
+    for t_old in old_map.values():
+        t_new = _lookup_matched_type(new_map, t_old)
         # Emitted Change objects (symbol=/description=) and fact-provenance
-        # lookups use the bare declaration name, not `match_key` (which is
-        # qualified whenever the dumper populated RecordType.qualified_name,
-        # purely to fix old/new *matching* -- see diff_helpers.type_map_key). Keeping
-        # emitted symbols bare preserves the identity every other consumer
-        # already keys on: dumper_hybrid's per-fact provenance dict
-        # (type_fact_key/field_fact_key, Codex review PR #608) and
-        # diff_filtering._dedup_cross_kind's DWARF<->AST redundancy
+        # lookups use the bare declaration name, not the qualified matching
+        # key (diff_helpers.type_map_key) that lookup_matched_type/build_type_map
+        # use internally. Keeping emitted symbols bare preserves the identity
+        # every other consumer already keys on: dumper_hybrid's per-fact
+        # provenance dict (type_fact_key/field_fact_key, Codex review PR #608)
+        # and diff_filtering._dedup_cross_kind's DWARF<->AST redundancy
         # correlation, which matches a DWARF field symbol's *bare* parent
         # type name against the AST-level type symbol (FIX-F) -- a qualified
         # symbol here would silently stop that correlation from firing for
@@ -256,7 +259,7 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             )
         )
 
-    for match_key, t_new in new_map.items():
+    for t_new in new_map.values():
         if id(t_new) not in matched_new_ids:
             changes.append(make_change(
                 ChangeKind.TYPE_ADDED,
@@ -1234,11 +1237,11 @@ def _diff_unions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # review, PR #582).
     cv_facts_reliable = old.header_cv_facts_reliable and new.header_cv_facts_reliable
 
-    for match_key, t_old in old_unions.items():
-        t_new = new_unions.get(match_key)
+    for t_old in old_unions.values():
+        t_new = _lookup_matched_type(new_unions, t_old)
         if t_new is None:
             continue  # covered by TYPE_REMOVED
-        # Bare, not the qualified match_key — see _diff_types's comment.
+        # Bare, not the qualified matching key — see _diff_types's comment.
         name = t_old.name
         old_fields = {f.name: f for f in t_old.fields}
         new_fields = {f.name: f for f in t_new.fields}
@@ -1491,11 +1494,11 @@ def _diff_field_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     old_map = _build_type_map(t for t in old.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl))
     new_map = _build_type_map(t for t in new.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl))
 
-    for match_key, t_old in old_map.items():
-        t_new = new_map.get(match_key)
+    for t_old in old_map.values():
+        t_new = _lookup_matched_type(new_map, t_old)
         if t_new is None:
             continue
-        # Bare, not the qualified match_key — see _diff_types's comment.
+        # Bare, not the qualified matching key — see _diff_types's comment.
         name = t_old.name
         old_fields = {f.name: f for f in t_old.fields}
         new_fields = {f.name: f for f in t_new.fields}
@@ -1542,11 +1545,11 @@ def _diff_field_default_initializer(old: AbiSnapshot, new: AbiSnapshot) -> list[
     old_map = _build_type_map(t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl))
     new_map = _build_type_map(t for t in new.types if _is_abi_surface_type(t, exclude_stdlib=excl))
 
-    for match_key, t_old in old_map.items():
-        t_new = new_map.get(match_key)
+    for t_old in old_map.values():
+        t_new = _lookup_matched_type(new_map, t_old)
         if t_new is None:
             continue
-        # Bare, not the qualified match_key — see _diff_types's comment.
+        # Bare, not the qualified matching key — see _diff_types's comment.
         name = t_old.name
         old_fields = {f.name: f for f in t_old.fields}
         new_fields = {f.name: f for f in t_new.fields}
@@ -1606,11 +1609,11 @@ def _diff_field_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     old_map = _build_type_map(t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl))
     new_map = _build_type_map(t for t in new.types if _is_abi_surface_type(t, exclude_stdlib=excl))
 
-    for match_key, t_old in old_map.items():
-        t_new = new_map.get(match_key)
+    for t_old in old_map.values():
+        t_new = _lookup_matched_type(new_map, t_old)
         if t_new is None:
             continue
-        # Bare, not the qualified match_key — see _diff_types's comment.
+        # Bare, not the qualified matching key — see _diff_types's comment.
         name = t_old.name
         old_fields = {f.name: f for f in t_old.fields}
         new_fields = {f.name: f for f in t_new.fields}
@@ -1658,11 +1661,11 @@ def _diff_type_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     old_map = _build_type_map(t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl))
     new_map = _build_type_map(t for t in new.types if _is_abi_surface_type(t, exclude_stdlib=excl))
 
-    for match_key, t_old in old_map.items():
-        t_new = new_map.get(match_key)
+    for t_old in old_map.values():
+        t_new = _lookup_matched_type(new_map, t_old)
         if t_new is None:
             continue
-        # Bare, not the qualified match_key — see _diff_types's comment.
+        # Bare, not the qualified matching key — see _diff_types's comment.
         name = t_old.name
         if not both_castxml_backed_fact(old, new, type_fact_key(name, "deprecated")):
             continue
@@ -1734,11 +1737,11 @@ def _diff_field_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     old_map = _build_type_map(t for t in old.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl))
     new_map = _build_type_map(t for t in new.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl))
 
-    for match_key, t_old in old_map.items():
-        t_new = new_map.get(match_key)
+    for t_old in old_map.values():
+        t_new = _lookup_matched_type(new_map, t_old)
         if t_new is None or t_new.is_opaque:
             continue
-        # Bare, not the qualified match_key — see _diff_types's comment.
+        # Bare, not the qualified matching key — see _diff_types's comment.
         name = t_old.name
         old_names = {f.name for f in t_old.fields}
         new_names = {f.name for f in t_new.fields}
@@ -1829,11 +1832,11 @@ def _diff_type_kind_changes(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     old_map = _build_type_map(t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl))
     new_map = _build_type_map(t for t in new.types if _is_abi_surface_type(t, exclude_stdlib=excl))
 
-    for match_key, t_old in old_map.items():
-        t_new = new_map.get(match_key)
+    for t_old in old_map.values():
+        t_new = _lookup_matched_type(new_map, t_old)
         if t_new is None:
             continue
-        # Bare, not the qualified match_key — see _diff_types's comment.
+        # Bare, not the qualified matching key — see _diff_types's comment.
         name = t_old.name
         if t_old.kind != t_new.kind:
             # Union-involving transitions are binary-breaking (layout changes);
@@ -1864,11 +1867,11 @@ def _diff_reserved_fields(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     old_map = _build_type_map(t for t in old.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl))
     new_map = _build_type_map(t for t in new.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl))
 
-    for match_key, t_old in old_map.items():
-        t_new = new_map.get(match_key)
+    for t_old in old_map.values():
+        t_new = _lookup_matched_type(new_map, t_old)
         if t_new is None or t_new.is_opaque:
             continue
-        # Bare, not the qualified match_key — see _diff_types's comment.
+        # Bare, not the qualified matching key — see _diff_types's comment.
         name = t_old.name
 
         old_names = {f.name for f in t_old.fields}
