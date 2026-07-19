@@ -43,6 +43,7 @@ from abicheck.dumper_clang import (
     _ClangAstParser,
     _Decl,
     _function_qualifiers,
+    _is_clang_family_binary,
     _pointer_depth,
     _return_type,
 )
@@ -2100,6 +2101,32 @@ def test_clang_header_dump_nonzero_exit_raises(
     monkeypatch.setattr(dumper.deadline, "run_bounded", lambda *a, **k: _P())
     with pytest.raises(SnapshotError, match="failed to parse"):
         _clang_header_dump([header], [])
+
+
+@pytest.mark.parametrize(
+    "path,expected",
+    [
+        ("/usr/bin/clang", True),
+        ("/usr/bin/clang++-18", True),
+        ("clang-cl.exe", True),  # extension stripped via .stem, still matches
+        ("/opt/intel/oneapi/compiler/2026.1/bin/icx", True),
+        ("/opt/intel/oneapi/compiler/2026.1/bin/icpx", True),
+        ("/opt/intel/oneapi/compiler/2026.1/bin/dpcpp", True),
+        ("/opt/intel/oneapi/compiler/2026.1/bin/dpcpp-cl", True),
+        ("ICPX", True),  # case-insensitive
+        ("icpx.exe", True),  # extension stripped, still matches the alias set
+        ("/usr/bin/g++-13", False),
+        ("/usr/bin/x86_64-linux-gnu-gcc-13", False),
+        ("cl.exe", False),  # MSVC's own cl.exe is not clang-family
+        ("icc", False),  # Intel's older, non-clang-based Classic compiler
+    ],
+)
+def test_is_clang_family_binary(path: str, expected: bool) -> None:
+    """Pure-function unit test for the --gcc-path clang-family classifier,
+    directly exercising both the "clang" substring branch and the vendor
+    alias-set branch (icx/icpx/dpcpp/dpcpp-cl) in isolation from the larger
+    _clang_header_dump/_resolve_clang_bin call chain the tests below cover."""
+    assert _is_clang_family_binary(path) is expected
 
 
 def test_clang_header_dump_gcc_path_not_used_as_clang(
