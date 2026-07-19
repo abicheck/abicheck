@@ -539,6 +539,17 @@ _PUBLIC_SOURCE_ABI_KINDS = frozenset({
     ChangeKind.PUBLIC_MACRO_VALUE_CHANGED,
     ChangeKind.INLINE_FUNCTION_REMOVED,
     ChangeKind.UNINSTANTIATED_TEMPLATE_REMOVED,
+    # Codex review, second pass: the rest of source_diff.py's findings are
+    # built from the same reachable_declarations/reachable_types/
+    # reachable_templates buckets as the six kinds above -- equally public
+    # by construction, not just the typedef/macro/inline-function/template
+    # subset first covered here.
+    ChangeKind.CONCEPT_TIGHTENED,
+    ChangeKind.CONSTEXPR_VALUE_CHANGED,
+    ChangeKind.DEFAULT_ARGUMENT_CHANGED,
+    ChangeKind.INLINE_BODY_CHANGED,
+    ChangeKind.TEMPLATE_BODY_CHANGED,
+    ChangeKind.GENERATED_HEADER_CHANGED,
 })
 
 

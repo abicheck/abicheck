@@ -247,6 +247,46 @@ class TestMarkReachabilityTriState:
         # The break survives — the broad rule could not prove it unreachable.
         assert raw_change not in ctx.suppressed
 
+    @pytest.mark.parametrize(
+        "kind",
+        [
+            ChangeKind.CONCEPT_TIGHTENED,
+            ChangeKind.CONSTEXPR_VALUE_CHANGED,
+            ChangeKind.DEFAULT_ARGUMENT_CHANGED,
+            ChangeKind.INLINE_BODY_CHANGED,
+            ChangeKind.TEMPLATE_BODY_CHANGED,
+            ChangeKind.GENERATED_HEADER_CHANGED,
+        ],
+    )
+    def test_other_public_source_abi_kinds_are_reachable_despite_internal_looking_name(
+        self, kind
+    ) -> None:
+        """Codex review, second pass: the same public-by-construction gap
+        applies to every other source_diff.py finding built from
+        reachable_declarations/reachable_types/reachable_templates, not just
+        the typedef/macro/inline-function/template-removal subset covered
+        first — CONCEPT_TIGHTENED, CONSTEXPR_VALUE_CHANGED,
+        DEFAULT_ARGUMENT_CHANGED, INLINE_BODY_CHANGED, TEMPLATE_BODY_CHANGED,
+        and GENERATED_HEADER_CHANGED."""
+        old = _snap(functions=[_public_fn("foo", "int")])
+        new = _snap(functions=[_public_fn("foo", "int")])
+        raw_change = Change(
+            kind=kind, symbol="ns::detail::PublicThing", description="changed"
+        )
+        suppression = SuppressionList([
+            Suppression(
+                namespace="ns::detail::*",
+                reachability="proven-unreachable-only",
+                reason="would wrongly suppress a real public source/API break",
+            )
+        ])
+        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        found = [c for c in ctx.kept if c.kind == kind]
+        assert len(found) == 1
+        assert found[0].public_reachable is True
+        assert found[0].reachability_state == ReachabilityState.PROVEN_REACHABLE
+        assert raw_change not in ctx.suppressed
+
     def test_declared_type_never_reachable_anywhere_is_still_proven_unreachable(
         self,
     ) -> None:
