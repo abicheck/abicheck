@@ -199,9 +199,20 @@ file — extend it, don't create a parallel test harness).
 ### P1.4 — `check-single.yml` / `check-project.yml` reusable workflows
 
 Implements ADR-045 §4/§5 (`run-plan.json` generation + matrix + trailing
-`aggregate` job for `check-project.yml`).
+`aggregate` job for `check-project.yml`). **Includes a required sub-task
+flagged by review**: `run-plan.json`'s `checks[]` schema is not
+wire-compatible with `abicheck aggregate --manifest`'s existing
+`{"targets": [{"id", "required"}]}` shape (`abicheck/aggregate.py:753-769`
+hard-errors on anything else). The `check-project.yml` aggregate step must
+project `run-plan.json` down to that shape before invoking `aggregate
+--manifest` — either as an inline `jq`/Python step in the workflow, or as a
+small `abicheck run-plan to-aggregate-manifest` CLI helper if the projection
+turns out to need real validation logic (e.g. `required` derivation) beyond
+a flat field rename. Decide which during implementation; do not skip this
+and assume `run-plan.json` can be passed straight through.
 
-**Files:** `.github/workflows/check-single.yml`, `.github/workflows/check-project.yml`.
+**Files:** `.github/workflows/check-single.yml`, `.github/workflows/check-project.yml`,
+possibly a new small CLI helper per the sub-task above.
 
 **Dependencies:** P1.3.
 

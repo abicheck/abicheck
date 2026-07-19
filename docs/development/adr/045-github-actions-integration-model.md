@@ -366,11 +366,24 @@ the matrix and by `aggregate`'s `--manifest`:
 }
 ```
 
-This is the artifact `check-project.yml`'s matrix step reads to fan out, and
-what `aggregate --manifest` consumes as the expected-target set — closing the
-"missing required report silently becomes compatible" gap the task calls
-out, since coverage is checked against an explicit plan rather than an
-implicit job list.
+This is the artifact `check-project.yml`'s matrix step reads to fan out.
+**Correction from an earlier draft:** `run-plan.json`'s `checks[]` schema is
+*not* wire-compatible with `abicheck aggregate --manifest` as it exists
+today — confirmed by reading `abicheck/aggregate.py:753-769`
+(`ExpectedTargets.from_manifest_data`), which requires a top-level
+`{"targets": [{"id", "required"}]}` shape and raises `AggregateError`
+("manifest 'targets' must be a non-empty list") on anything else, including
+a `checks[]`-shaped document. `run-plan.json` is deliberately richer than
+that format (it carries `profile`/`baseline_channel`/`evidence_depth` per
+check, which `aggregate` has no use for — it only needs to know which
+target IDs are required). So `check-project.yml`'s aggregate step must
+*project* `run-plan.json` down to the existing `{"targets": [...]}` shape
+(one line of `jq`/Python, not a CLI change) rather than pass `run-plan.json`
+straight through as `--manifest`. This is tracked as an explicit P1.4
+sub-task in the companion plan so it isn't lost between "run plan exists"
+and "aggregate consumes it." Coverage is still checked against the same
+explicit plan, not an implicit job list — the fix is in how the two
+artifacts connect, not in the coverage guarantee itself.
 
 ---
 
