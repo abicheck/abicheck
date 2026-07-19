@@ -443,7 +443,10 @@ this must be a tested behavior (a fixture asserting two consecutive
 `update-main-baseline.yml` runs produce two distinct baselines resolvable
 by `resolve-baseline`), not an assumption.
 
-**Dependencies:** P1.1, P1.5.
+**Dependencies:** P1.1, P1.2, P1.5 — P1.2 added per review: this item's own
+cache-refresh test requires `resolve-baseline` to be available to verify
+consecutive `update-main-baseline.yml` runs produce distinct, resolvable
+baselines.
 
 ### P1.7 — Scenario-first documentation IA
 
