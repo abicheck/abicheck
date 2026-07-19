@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 388,
+  "count": 390,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -324,6 +324,15 @@
       "severity": "error",
       "min_evidence": "unspecified",
       "doc_slug": "compat_version_changed",
+      "examples": ""
+    },
+    {
+      "kind": "compile_context_conflict",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L3",
+      "doc_slug": "compile_context_conflict",
       "examples": ""
     },
     {
@@ -2367,6 +2376,15 @@
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "source_level_kind_changed",
+      "examples": ""
+    },
+    {
+      "kind": "source_surface_dso_mismatch",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L4",
+      "doc_slug": "source_surface_dso_mismatch",
       "examples": ""
     },
     {

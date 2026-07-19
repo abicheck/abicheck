@@ -2554,6 +2554,44 @@ def test_compare_explicit_build_info_overrides_embedded_l4_l5():
     assert combined.source_abi.library == "from_build_info_pack"
 
 
+def test_compare_explicit_empty_pack_overrides_embedded_l4_l5():
+    """Codex #11: on the `compare` path (`prefer_nonempty=False`) an explicit
+    ``--build-info``/``--sources`` pack must override the snapshot's embedded
+    payload **even when the explicit layer is intentionally empty** (a
+    failed/absent replay). The dump-path non-empty preference would otherwise
+    fall through to stale embedded facts, silently reviving a surface the
+    operator explicitly replaced with an empty one."""
+    from pathlib import Path
+
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
+    from abicheck.cli_buildsource import _combine_packs
+
+    # Explicit pack: a present-but-empty L4 surface (replay ran, found nothing).
+    empty = BuildSourcePack(
+        root=Path(""), source_abi=SourceAbiSurface(library="explicit_empty")
+    )
+    # Embedded snapshot payload: stale real facts from an earlier dump.
+    stale = SourceAbiSurface(library="stale_embedded")
+    stale.reachable_declarations.append(
+        SourceEntity(id="decl://gone", kind="function", qualified_name="gone")
+    )
+    embedded = BuildSourcePack(root=Path(""), source_abi=stale)
+
+    # Dump/merge default (prefer_nonempty=True) skips the empty explicit layer
+    # and falls through to the embedded facts — correct for backfill.
+    dump_fold = _combine_packs(empty, None, embedded)
+    assert dump_fold is not None and dump_fold.source_abi is not None
+    assert dump_fold.source_abi.library == "stale_embedded"
+
+    # Compare path (prefer_nonempty=False) honors the explicit empty pack,
+    # discarding the stale embedded surface.
+    compare_fold = _combine_packs(empty, None, embedded, prefer_nonempty=False)
+    assert compare_fold is not None and compare_fold.source_abi is not None
+    assert compare_fold.source_abi.library == "explicit_empty"
+    assert not compare_fold.source_abi.reachable_declarations
+
+
 def test_l5_coverage_partial_when_call_type_passes_degraded():
     """AC-006: structural/plugin edges make ``graph.edges`` non-empty, but if a
     call/type pass is degraded (its live replay never completed) L5 must read

@@ -68,17 +68,26 @@ def _payload_empty(attr: str, payload: Any) -> bool:
 
 
 def _first_attr_with_supplier(
-    attr: str, *packs: BuildSourcePack | None
+    attr: str, *packs: BuildSourcePack | None, prefer_nonempty: bool = True
 ) -> tuple[Any, BuildSourcePack | None]:
-    """Return ``(value, supplying_pack)`` for the first pack with real *attr* facts.
+    """Return ``(value, supplying_pack)`` for the pack that supplies *attr*.
 
-    Prefers the first pack whose payload is **non-empty**, so a non-``None`` but
-    empty placeholder (e.g. an empty ``SourceAbiSurface()`` from a clang-less
-    inline replay routed into the L4 slot) never masks a lower-priority pack's
-    real facts (Codex review). Falls back to the first non-``None`` payload — so a
-    genuinely empty layer is still embedded with its coverage row — only when no
-    candidate carries real facts. The *supplier* is the pack whose facts we embed,
-    so its coverage row — and only its row — describes what landed (AC-002)."""
+    With ``prefer_nonempty`` (the default, the dump/merge fold): prefer the first
+    pack whose payload is **non-empty**, so a non-``None`` but empty placeholder
+    (e.g. an empty ``SourceAbiSurface()`` from a clang-less inline replay routed
+    into the L4 slot) never masks a lower-priority pack's real facts (Codex
+    review); fall back to the first non-``None`` payload only when no candidate
+    carries real facts, so a genuinely empty layer still embeds with its row.
+
+    With ``prefer_nonempty=False`` (``compare``'s ``_resolve_side_pack``): plain
+    first-non-``None``, so an explicit ``--*-build-info``/``--*-sources`` pack
+    overrides the snapshot's embedded payload **even when the explicit layer is
+    intentionally empty** (a failed/absent replay) — the documented "explicit
+    flags override embedded" contract, which the non-empty preference would
+    otherwise break by falling through to stale embedded facts (Codex review).
+
+    The *supplier* is the pack whose facts we embed, so its coverage row — and
+    only its row — describes what landed (AC-002)."""
     first_present: tuple[Any, BuildSourcePack | None] | None = None
     for cand in packs:
         if cand is None:
@@ -86,7 +95,7 @@ def _first_attr_with_supplier(
         val = getattr(cand, attr)
         if val is None:
             continue
-        if not _payload_empty(attr, val):
+        if not prefer_nonempty or not _payload_empty(attr, val):
             return val, cand
         if first_present is None:
             first_present = (val, cand)
@@ -330,6 +339,8 @@ def _combine_packs(
     bi_pack: BuildSourcePack | None,
     src_pack: BuildSourcePack | None,
     embedded: BuildSourcePack | None = None,
+    *,
+    prefer_nonempty: bool = True,
 ) -> BuildSourcePack | None:
     """Combine a build-info pack and a sources pack into one embeddable pack.
 
@@ -341,6 +352,14 @@ def _combine_packs(
     This keeps a later compare's coverage/capability report honest when the two
     flags point at different packs (Codex review). Returns ``None`` when no pack
     contributes any facts.
+
+    ``prefer_nonempty`` (default True — the dump/merge fold) skips a non-``None``
+    but *empty* layer placeholder so a lower-priority pack's real facts still win
+    (see ``_first_attr_with_supplier``). ``compare``'s ``_resolve_side_pack``
+    passes ``prefer_nonempty=False`` so an explicit ``--*-build-info``/
+    ``--*-sources`` pack overrides the snapshot's embedded payload **even when the
+    explicit layer is intentionally empty** — the documented "explicit flags
+    override embedded" contract (Codex review).
     """
     # L3 comes from --build-info (bi_pack) first, then --sources, then the
     # embedded/backfill pack. L4/L5 come from --sources (src_pack) first, then
@@ -353,13 +372,13 @@ def _combine_packs(
     # (which would wrongly let a snapshot's embedded facts beat an explicit
     # `--build-info` pack, Codex review).
     build_evidence, l3_supplier = _first_attr_with_supplier(
-        "build_evidence", bi_pack, src_pack, embedded
+        "build_evidence", bi_pack, src_pack, embedded, prefer_nonempty=prefer_nonempty
     )
     source_abi, l4_supplier = _first_attr_with_supplier(
-        "source_abi", src_pack, bi_pack, embedded
+        "source_abi", src_pack, bi_pack, embedded, prefer_nonempty=prefer_nonempty
     )
     source_graph, l5_supplier = _first_attr_with_supplier(
-        "source_graph", src_pack, bi_pack, embedded
+        "source_graph", src_pack, bi_pack, embedded, prefer_nonempty=prefer_nonempty
     )
 
     base = bi_pack or src_pack or embedded

@@ -101,7 +101,13 @@ def _resolve_side_pack(
     # hold build + source + graph together). --build-info wins for
     # L3, --sources wins for L4/L5, the embedded payload backfills, and the
     # coverage manifest is rebuilt per-layer from the supplying pack.
-    return _combine_packs(bi_pack, src_pack, embedded)
+    # `prefer_nonempty=False`: an explicit `--*-build-info`/`--*-sources` pack
+    # overrides the snapshot's embedded payload even when its layer is
+    # intentionally empty (a failed/absent replay) — the documented "explicit
+    # flags override embedded" contract, which the dump-path non-empty
+    # preference would otherwise break by falling through to stale embedded
+    # facts (Codex review).
+    return _combine_packs(bi_pack, src_pack, embedded, prefer_nonempty=False)
 
 
 def diff_embedded_build_source(

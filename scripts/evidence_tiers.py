@@ -414,6 +414,14 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     # identity_collision_detected reads the L4 surface's recorded USR collisions
     # (ADR-041 P1 #5) — same evidence source as odr_type_variant.
     "identity_collision_detected": "L4",
+    # ── Evidence-coherence cross-checks (AC-008/AC-009) ──
+    # compile_context_conflict groups the L3 compile units of one build target
+    # and flags conflicting ABI-relevant flags/defines — pure L3 build evidence.
+    "compile_context_conflict": "L3",
+    # source_surface_dso_mismatch compares the L4 source surface's decl->export
+    # linking against the binary's own export table (L0); it needs the surface,
+    # so the weakest tier that can produce it is L4.
+    "source_surface_dso_mismatch": "L4",
     # ── Coverage extension: dynamic-loader / platform metadata (all read from
     # the binary's headers, dynamic section, notes, or symbol tables alone). ──
     "imported_symbol_added": "L0",

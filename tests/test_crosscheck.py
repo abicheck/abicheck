@@ -28,6 +28,7 @@ import pytest
 from abicheck.buildsource.build_evidence import BuildEvidence, BuildOption
 from abicheck.buildsource.crosscheck import (
     ALL_CHECKS,
+    CHECK_COMPILE_CONTEXT_CONFLICT,
     CHECK_EXPORTED_NOT_PUBLIC,
     CHECK_HEADER_BUILD_CONTEXT_MISMATCH,
     CHECK_IDENTITY_COLLISION,
@@ -36,9 +37,11 @@ from abicheck.buildsource.crosscheck import (
     CHECK_PUBLIC_NOT_EXPORTED,
     CHECK_PUBLIC_TO_INTERNAL_DEPENDENCY,
     CHECK_RTTI_FOR_INTERNAL_TYPE,
+    CHECK_SOURCE_SURFACE_DSO_MISMATCH,
     CHECK_UNVERSIONED_EXPORTED_SYMBOL,
     CROSSCHECK_VERSION,
     PROVIDER_BINARY_EXPORTS,
+    PROVIDER_BUILD_CONFIG,
     PROVIDER_PUBLIC_HEADER_AST,
     PROVIDER_SOURCE_INDEX,
     CrosscheckConfig,
@@ -2267,3 +2270,174 @@ def test_odr_type_variant_present_with_parsed_tu_coverage():
     snap = _snap(build_source=BuildSourcePack(root="", source_abi=surface))
     res = run_crosschecks(snap)
     assert _coverage(res, CHECK_ODR_TYPE_VARIANT)["status"] == "present"
+
+
+# --------------------------------------------------------------------------- #
+# compile_context_conflict (AC-008)
+# --------------------------------------------------------------------------- #
+
+
+def _pack_with_units(*units) -> BuildSourcePack:
+    from abicheck.buildsource.build_evidence import CompileUnit  # noqa: F401
+
+    be = BuildEvidence(compile_units=list(units))
+    return BuildSourcePack(root="", build_evidence=be)
+
+
+def _cu(uid: str, target: str, *, flags=(), defines=None):
+    from abicheck.buildsource.build_evidence import CompileUnit
+
+    return CompileUnit(
+        id=uid,
+        target_id=target,
+        abi_relevant_flags=list(flags),
+        defines=dict(defines or {}),
+    )
+
+
+def test_compile_context_conflict_flags_rtti_disagreement():
+    # AC-008: one build target compiled part of itself -frtti and part -fno-rtti
+    # (oneTBB umbrella case) — aggregating hides it, so flag it as RISK.
+    snap = _snap(
+        build_source=_pack_with_units(
+            _cu("a", "target://libtbb.so", flags=["-frtti"]),
+            _cu("b", "target://libtbb.so", flags=["-fno-rtti"]),
+        )
+    )
+    res = run_crosschecks(snap)
+    hits = _findings_of(res, ChangeKind.COMPILE_CONTEXT_CONFLICT)
+    assert len(hits) == 1
+    assert hits[0].old_value == "-frtti" and hits[0].new_value == "-fno-rtti"
+    assert "target://libtbb.so" in hits[0].symbol
+    assert res.providers[CHECK_COMPILE_CONTEXT_CONFLICT] == [PROVIDER_BUILD_CONFIG]
+    # RISK partition, never an artifact break.
+    assert ChangeKind.COMPILE_CONTEXT_CONFLICT not in _api_break_kinds()
+
+
+def test_compile_context_conflict_flags_define_value_disagreement():
+    snap = _snap(
+        build_source=_pack_with_units(
+            _cu("a", "target://libdal.so", defines={"DAL_VARIANT": "avx2"}),
+            _cu("b", "target://libdal.so", defines={"DAL_VARIANT": "avx512"}),
+        )
+    )
+    res = run_crosschecks(snap)
+    hits = _findings_of(res, ChangeKind.COMPILE_CONTEXT_CONFLICT)
+    assert len(hits) == 1
+    assert "DAL_VARIANT" in hits[0].description
+    assert "avx2" in hits[0].new_value and "avx512" in hits[0].new_value
+
+
+def test_compile_context_conflict_clean_when_units_agree():
+    snap = _snap(
+        build_source=_pack_with_units(
+            _cu("a", "target://libtbb.so", flags=["-fno-rtti"]),
+            _cu("b", "target://libtbb.so", flags=["-fno-rtti"], defines={"X": "1"}),
+        )
+    )
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.COMPILE_CONTEXT_CONFLICT) == []
+    assert _coverage(res, CHECK_COMPILE_CONTEXT_CONFLICT)["status"] == "present"
+
+
+def test_compile_context_conflict_does_not_cross_targets():
+    # Two DIFFERENT targets legitimately differ on -frtti — not a conflict.
+    snap = _snap(
+        build_source=_pack_with_units(
+            _cu("a", "target://libone.so", flags=["-frtti"]),
+            _cu("b", "target://libtwo.so", flags=["-fno-rtti"]),
+        )
+    )
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.COMPILE_CONTEXT_CONFLICT) == []
+
+
+def test_compile_context_conflict_bare_define_no_value_is_not_conflict():
+    # A bare -DFOO (no value) on one unit and -DFOO=1 on another: only value-
+    # carrying binds are compared, so a bare/valued mix is not flagged as a
+    # two-value conflict.
+    snap = _snap(
+        build_source=_pack_with_units(
+            _cu("a", "target://lib.so", defines={"FOO": ""}),
+            _cu("b", "target://lib.so", defines={"FOO": "1"}),
+        )
+    )
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.COMPILE_CONTEXT_CONFLICT) == []
+
+
+def test_compile_context_conflict_skipped_without_l3():
+    snap = _snap()
+    res = run_crosschecks(snap)
+    assert _coverage(res, CHECK_COMPILE_CONTEXT_CONFLICT)["status"] == "skipped"
+    assert _findings_of(res, ChangeKind.COMPILE_CONTEXT_CONFLICT) == []
+
+
+# --------------------------------------------------------------------------- #
+# source_surface_dso_mismatch (AC-009)
+# --------------------------------------------------------------------------- #
+
+
+def _surface_with_decls(n: int, *, matched: int) -> SourceAbiSurface:
+    from abicheck.buildsource.source_abi import SourceEntity
+
+    return SourceAbiSurface(
+        library="libfoo.so",
+        reachable_declarations=[
+            SourceEntity(id=f"d{i}", kind="function", qualified_name=f"f{i}")
+            for i in range(n)
+        ],
+        coverage={"matched_symbols": matched},
+    )
+
+
+def test_source_surface_dso_mismatch_flags_zero_match_surface():
+    # AC-009: one source surface reused across DSOs maps to none of THIS binary's
+    # exports — likely a different/shared DSO, RISK.
+    surface = _surface_with_decls(3, matched=0)
+    snap = _snap(elf=_elf("_Z3foov", "_Z3barv"))
+    snap.build_source = BuildSourcePack(root="", source_abi=surface)
+    res = run_crosschecks(snap)
+    hits = _findings_of(res, ChangeKind.SOURCE_SURFACE_DSO_MISMATCH)
+    assert len(hits) == 1
+    assert hits[0].symbol == "libfoo.so"
+    assert res.providers[CHECK_SOURCE_SURFACE_DSO_MISMATCH] == [
+        PROVIDER_SOURCE_INDEX,
+        PROVIDER_BINARY_EXPORTS,
+    ]
+    assert ChangeKind.SOURCE_SURFACE_DSO_MISMATCH not in _api_break_kinds()
+
+
+def test_source_surface_dso_mismatch_clean_when_surface_matches():
+    surface = _surface_with_decls(3, matched=2)
+    snap = _snap(elf=_elf("_Z3foov", "_Z3barv"))
+    snap.build_source = BuildSourcePack(root="", source_abi=surface)
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.SOURCE_SURFACE_DSO_MISMATCH) == []
+    assert _coverage(res, CHECK_SOURCE_SURFACE_DSO_MISMATCH)["status"] == "present"
+
+
+def test_source_surface_dso_mismatch_skipped_without_binary_exports():
+    # A source-only snapshot (no export table) must skip, never false-positive.
+    surface = _surface_with_decls(3, matched=0)
+    snap = _snap(build_source=BuildSourcePack(root="", source_abi=surface))
+    res = run_crosschecks(snap)
+    assert _coverage(res, CHECK_SOURCE_SURFACE_DSO_MISMATCH)["status"] == "skipped"
+    assert _findings_of(res, ChangeKind.SOURCE_SURFACE_DSO_MISMATCH) == []
+
+
+def test_source_surface_dso_mismatch_skipped_without_l4_surface():
+    snap = _snap(elf=_elf("_Z3foov"))
+    res = run_crosschecks(snap)
+    assert _coverage(res, CHECK_SOURCE_SURFACE_DSO_MISMATCH)["status"] == "skipped"
+
+
+def test_source_surface_dso_mismatch_present_empty_surface_no_findings():
+    # Surface with an export table on the binary but no reachable decls: present,
+    # no finding (nothing to mis-scope).
+    surface = SourceAbiSurface(library="libfoo.so", coverage={"matched_symbols": 0})
+    snap = _snap(elf=_elf("_Z3foov"))
+    snap.build_source = BuildSourcePack(root="", source_abi=surface)
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.SOURCE_SURFACE_DSO_MISMATCH) == []
+    assert _coverage(res, CHECK_SOURCE_SURFACE_DSO_MISMATCH)["status"] == "present"

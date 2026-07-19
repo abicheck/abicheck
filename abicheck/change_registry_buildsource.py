@@ -45,4 +45,25 @@ BUILDSOURCE_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
               "ABI break — no action is required unless a finding under that name "
               "looks wrong, in which case treat it as ambiguous between the two USRs "
               "named in the finding detail."),
+    _E("compile_context_conflict", _R,
+       impact="Two or more L3 compile units attributed to the same build target "
+              "carry conflicting ABI-relevant compile contexts — e.g. one unit "
+              "built -frtti and another -fno-rtti (or -fexceptions vs "
+              "-fno-exceptions), or the same preprocessor define bound to two "
+              "different values. Aggregating them into one build context (as a "
+              "synthetic public-consumer TU, or by first-match wins) silently "
+              "picks one and drops the other, so the recorded L3/L4 facts may "
+              "describe a build the shipped library never used (AC-008). A "
+              "source-tooling risk, never an artifact-proven ABI break: scope the "
+              "evidence to a single build target / link unit (or pass an explicit "
+              "compile-DB filter) so one coherent context feeds the analysis."),
+    _E("source_surface_dso_mismatch", _R,
+       impact="The linked L4 source surface carries reachable declarations but its "
+              "decl->export linking matched none of the analyzed binary's exported "
+              "symbols. The surface almost certainly describes a different or "
+              "shared DSO (e.g. one surface folded from every target's sources and "
+              "reused across libraries), so any L4/L5 finding attributed to this "
+              "binary may be mis-scoped (AC-009). A source-tooling risk, never an "
+              "artifact-proven ABI break: relink/rebuild the source surface "
+              "per-DSO against this binary's own exports."),
 ]
