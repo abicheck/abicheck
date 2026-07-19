@@ -836,16 +836,21 @@ class MarkReachability:
             | {t.name for t in ctx.new.types} | {e.name for e in ctx.new.enums}
             | set(ctx.old.typedefs) | set(ctx.new.typedefs)
         )
-        # RecordType.qualified_name (model.py) is set only in the DWARF-backend
-        # case, where .name stays bare (matching castxml's type-map key) but
-        # the real namespace path lives only here -- a type-shaped change's
-        # root is always the bare name, so is_internal_type(root, ...) alone
-        # misses a bare name like "Hidden" for "ns::detail::Hidden" (Codex
-        # review).
+        # RecordType.qualified_name (DWARF-backend only, model.py) resolves a
+        # bare type name like "Hidden" ("ns::detail::Hidden") for
+        # is_internal_type below -- but only when unambiguous: a colliding
+        # public ns::api::Hidden and internal ns::detail::Hidden must not let
+        # the internal one's namespace leak onto a change about the public
+        # one (Codex review, two passes); an ambiguous bare name contributes
+        # no signal at all.
+        qualified_names_by_bare: dict[str, set[str]] = {}
+        for t in (*ctx.old.types, *ctx.new.types):
+            if t.qualified_name:
+                qualified_names_by_bare.setdefault(t.name, set()).add(t.qualified_name)
         qualified_name_by_bare = {
-            t.name: t.qualified_name
-            for t in (*ctx.old.types, *ctx.new.types)
-            if t.qualified_name
+            bare: next(iter(names))
+            for bare, names in qualified_names_by_bare.items()
+            if len(names) == 1
         }
 
         for c in changes:
@@ -1016,15 +1021,10 @@ class MarkReachability:
                 # regardless of naming; absence from it is only conclusive
                 # for a type the walk's internal-only domain could have
                 # classified in the first place.
-                # An enum-member finding's root keeps its "::member" suffix
-                # (Codex review): is_internal_type is segment-based, so an
-                # enumerator whose own name happens to match an internal
-                # namespace segment (e.g. `enum class Status { ok, detail
-                # };`) would make a fully public `ns::Status::detail` read as
-                # internal-namespaced purely from the *member name*, letting
-                # a broad `namespace: ns::*` rule wrongly prove a public
-                # enum's ABI break unreachable. Test enum_owner (the bare
-                # enum name) instead of root for that case.
+                # An enum-member root keeps its "::member" suffix, and a
+                # member literally named e.g. "detail" would otherwise read
+                # as internal-namespaced from the member name alone (Codex
+                # review) -- use enum_owner (the bare enum name) instead.
                 internal_check_subject = enum_owner if enum_owner is not None else root
                 type_qualified_name = qualified_name_by_bare.get(internal_check_subject)
                 subject_is_internal = is_internal_type(

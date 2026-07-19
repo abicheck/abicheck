@@ -420,6 +420,50 @@ class TestMarkReachabilityTriState:
         )
         assert raw_change.reachability_state == ReachabilityState.PROVEN_UNREACHABLE
 
+    def test_ambiguous_bare_name_qualified_lookup_contributes_no_signal(self) -> None:
+        """Codex review, second pass: the bare-name -> qualified-name index
+        must not resolve an *ambiguous* bare name — a public
+        ``ns::api::Hidden`` and an internal ``ns::detail::Hidden`` colliding
+        on the bare name "Hidden" must not let the internal one's namespace
+        leak onto a change that could equally be about the public one. An
+        ambiguous bare name contributes no signal, so this change (which the
+        layout walk never examined either — neither type is embedded/
+        referenced anywhere) stays honestly UNKNOWN, not misclassified either
+        way."""
+        old = _snap(
+            functions=[_public_fn("foo", "int")],
+            types=[
+                RecordType(
+                    name="Hidden", kind="class", size_bits=64,
+                    qualified_name="ns::api::Hidden",
+                ),
+                RecordType(
+                    name="Hidden", kind="class", size_bits=8,
+                    qualified_name="ns::detail::Hidden",
+                ),
+            ],
+        )
+        new = _snap(
+            functions=[_public_fn("foo", "int")],
+            types=[
+                RecordType(
+                    name="Hidden", kind="class", size_bits=128,
+                    qualified_name="ns::api::Hidden",
+                ),
+                RecordType(
+                    name="Hidden", kind="class", size_bits=8,
+                    qualified_name="ns::detail::Hidden",
+                ),
+            ],
+        )
+        raw_change = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Hidden", description="size changed"
+        )
+        DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        assert raw_change.reachability_state == ReachabilityState.UNKNOWN
+
     def test_degraded_call_graph_leaves_unexamined_change_unknown(self) -> None:
         """A change the layout walk never examines at all (a function-shaped
         FUNC_REMOVED with no field/base/signature evidence) whose only
