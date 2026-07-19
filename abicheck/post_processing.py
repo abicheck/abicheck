@@ -703,24 +703,42 @@ class MarkReachability:
 
         # impact-analysis-layer P0: whether the *only* signal that could still
         # speak to a not-otherwise-tagged change (the optional L5 call/type
-        # graph) is itself flagged narrowed/degraded — i.e. its absence of an
-        # edge is not trustworthy negative evidence. The layout/type-graph
-        # walk above (compute_leak_paths) is a complete closure over the
-        # snapshot's own declared types, not subject to this caveat, so it
-        # alone never downgrades the verdict to UNKNOWN.
-        def _call_graph_untrusted(snap: AbiSnapshot) -> bool:
+        # graph) is itself flagged narrowed/degraded, or absent entirely — in
+        # either case its absence of an edge is not trustworthy negative
+        # evidence. The layout/type-graph walk above (compute_leak_paths) is
+        # a complete closure over the snapshot's own *declared types*, so it
+        # alone never downgrades the verdict to UNKNOWN — but only for a
+        # change whose root actually names a declared type (Codex review):
+        # a function/variable-shaped change's root is never a key in that
+        # walk's domain at all, so treating its absence from reachable_types
+        # as the walk's own "examined, not found" proof is wrong — that
+        # walk never had the chance to examine a function/variable in the
+        # first place, and only the call graph could ever speak to it.
+        def _call_graph_status(snap: AbiSnapshot) -> tuple[bool, bool]:
+            """Return (present, untrusted) for snap's embedded call graph."""
             build_source = getattr(snap, "build_source", None)
             graph = getattr(build_source, "source_graph", None) if build_source is not None else None
-            if graph is None:
-                return False
-            return bool(
+            if graph is None or not getattr(graph, "nodes", None):
+                return False, False
+            edge_kinds = frozenset({"DECL_CALLS_DECL", "DECL_REFERENCES_DECL"})
+            present = any(e.kind in edge_kinds for e in graph.edges)
+            untrusted = bool(
                 graph.degraded_passes.get("call_graph")
                 or graph.degraded_passes.get("type_graph")
                 or graph.narrowed_passes.get("call_graph")
                 or graph.narrowed_passes.get("type_graph")
             )
+            return present, untrusted
 
-        call_graph_untrusted = _call_graph_untrusted(ctx.old) or _call_graph_untrusted(ctx.new)
+        old_call_graph_present, old_call_graph_untrusted = _call_graph_status(ctx.old)
+        new_call_graph_present, new_call_graph_untrusted = _call_graph_status(ctx.new)
+        call_graph_present = old_call_graph_present or new_call_graph_present
+        call_graph_untrusted = old_call_graph_untrusted or new_call_graph_untrusted
+
+        known_type_names = (
+            {t.name for t in ctx.old.types} | {e.name for e in ctx.old.enums}
+            | {t.name for t in ctx.new.types} | {e.name for e in ctx.new.enums}
+        )
 
         for c in changes:
             root = _root_type_name_for_change(c)
@@ -818,20 +836,31 @@ class MarkReachability:
                     c.reachability_state = ReachabilityState.PROVEN_REACHABLE
                     tagged = True
             if not tagged:
-                # Not proven reachable. The layout/type-graph walk is always
-                # a trustworthy complete signal (it enumerates every root the
-                # snapshot itself declares), so a change it examined and
-                # found not-reachable is conclusively PROVEN_UNREACHABLE.
-                # When the *only* remaining possible signal was the call
-                # graph and that graph's coverage is itself untrusted
-                # (narrowed/degraded), the honest verdict is UNKNOWN rather
-                # than a false "proven" — an absent edge there does not
-                # prove an absent dependency.
-                layout_examined = root in reachable_types or root in public_header_names
-                if call_graph_untrusted and not layout_examined:
-                    c.reachability_state = ReachabilityState.UNKNOWN
-                else:
+                # Not proven reachable. A change whose root names a declared
+                # type is squarely in the layout/type-graph walk's domain —
+                # that walk is a complete closure over every internal type
+                # reachable from the public surface, so its absence there is
+                # conclusive proof regardless of call-graph coverage
+                # (PROVEN_UNREACHABLE either way: whether the walk found no
+                # path at all, or found only a demoted pointer-only path).
+                #
+                # A change whose root is *not* a declared type (a function/
+                # variable-shaped change — e.g. func_removed on an internal
+                # decl) was never in that walk's domain to begin with; only
+                # the call graph could speak to it, so its verdict is
+                # conclusive only when a call graph is actually present and
+                # not itself flagged narrowed/degraded (Codex review — an
+                # *absent* call graph must not silently read the same as a
+                # trustworthy graph that looked and found nothing).
+                layout_domain = root in known_type_names or (
+                    enum_owner is not None and enum_owner in known_type_names
+                )
+                if layout_domain:
                     c.reachability_state = ReachabilityState.PROVEN_UNREACHABLE
+                elif call_graph_present and not call_graph_untrusted:
+                    c.reachability_state = ReachabilityState.PROVEN_UNREACHABLE
+                else:
+                    c.reachability_state = ReachabilityState.UNKNOWN
         return changes
 
 

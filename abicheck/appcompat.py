@@ -981,19 +981,15 @@ def scope_diff_to_app(
             suppressed_missing.add(sym)
             continue
         breaking_for_app.append(overlay_change)
+        # outcome.withheld_unknown_rule is never set here: overlay_change is
+        # always constructed with reachability_state=PROVEN_REACHABLE above
+        # (it is by construction consumer-proven), and
+        # would_withhold_unknown_reachability only ever fires on UNKNOWN.
         if outcome.withheld_rule is not None:
             from .post_processing import _build_suppression_overreach_change
 
             breaking_for_app.append(
                 _build_suppression_overreach_change(overlay_change, outcome.withheld_rule)
-            )
-        if outcome.withheld_unknown_rule is not None:
-            from .post_processing import _build_suppression_unknown_reachability_change
-
-            breaking_for_app.append(
-                _build_suppression_unknown_reachability_change(
-                    overlay_change, outcome.withheld_unknown_rule
-                )
             )
     if suppressed_missing:
         missing_symbols = [s for s in missing_symbols if s not in suppressed_missing]

@@ -749,22 +749,18 @@ def _apply_used_by_scoping(
                 if suppression is not None:
                     outcome = suppression.evaluate(runtime_change)
                     add_finding = not outcome.suppressed
+                    # outcome.withheld_unknown_rule is never set here:
+                    # runtime_change is always constructed with
+                    # reachability_state=PROVEN_REACHABLE above (it is by
+                    # construction consumer-proven), and
+                    # would_withhold_unknown_reachability only ever fires on
+                    # UNKNOWN.
                     if add_finding and outcome.withheld_rule is not None:
                         from .post_processing import _build_suppression_overreach_change
 
                         scoped.breaking_for_app.append(
                             _build_suppression_overreach_change(
                                 runtime_change, outcome.withheld_rule
-                            )
-                        )
-                    if add_finding and outcome.withheld_unknown_rule is not None:
-                        from .post_processing import (
-                            _build_suppression_unknown_reachability_change,
-                        )
-
-                        scoped.breaking_for_app.append(
-                            _build_suppression_unknown_reachability_change(
-                                runtime_change, outcome.withheld_unknown_rule
                             )
                         )
                 if add_finding:
