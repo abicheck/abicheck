@@ -93,17 +93,39 @@ def _clang_available(clang_bin: str = "clang") -> bool:
     return shutil.which(clang_bin) is not None
 
 
+#: Non-"clang"-spelled binary names that are still clang-driver-compatible (accept
+#: ``-Xclang``/``-ast-dump=json`` directly): Intel's oneAPI DPC++/C++ compiler
+#: (``icx``/``icpx``, and its older ``dpcpp``/``dpcpp-cl`` aliases — all four are
+#: the same clang-based binary under different names/symlinks in Intel's package,
+#: confirmed via ``__clang_major__``/``-Xclang -ast-dump=json`` against a real
+#: install). Without this, ``--gcc-path .../icpx`` is silently ignored (the
+#: substring check below only matches "clang") and falls back to plain "clang" on
+#: PATH — a *different* compiler than the one the real build used, so the wrong
+#: toolchain's headers/predefined macros get parsed. This does not attempt
+#: general vendor-fork detection (e.g. Apple clang already spells "clang"); it is
+#: narrowly the known non-"clang"-named forks that are otherwise indistinguishable
+#: from a real GCC binary by name alone.
+_CLANG_FAMILY_ALIAS_NAMES = frozenset({"icx", "icpx", "dpcpp", "dpcpp-cl"})
+
+
+def _is_clang_family_binary(path: str) -> bool:
+    stem = Path(path).stem.lower()
+    return "clang" in stem or stem in _CLANG_FAMILY_ALIAS_NAMES
+
+
 def _resolve_clang_bin(
-    compiler: str, gcc_path: str | None, gcc_prefix: str | None,
+    compiler: str,
+    gcc_path: str | None,
+    gcc_prefix: str | None,
 ) -> str:
     """Resolve the clang executable to run, raising if it is not on ``PATH``.
 
-    ``--gcc-path`` is honored only when it points at a clang (castxml emulates a
-    GCC/G++ binary, which can't take clang-only flags); ``--gcc-prefix`` maps to
-    the prefixed clang driver.
+    ``--gcc-path`` is honored only when it points at a clang(-family) binary
+    (castxml emulates a GCC/G++ binary, which can't take clang-only flags);
+    ``--gcc-prefix`` maps to the prefixed clang driver.
     """
     clang_bin: str | None = None
-    if gcc_path and "clang" in Path(gcc_path).name.lower():
+    if gcc_path and _is_clang_family_binary(gcc_path):
         clang_bin = gcc_path
     elif gcc_prefix:
         clang_bin = (
@@ -164,7 +186,9 @@ _WRAPPER_EXPR_KINDS = frozenset(
     }
 )
 #: Pseudo-files clang attributes builtin / command-line declarations to.
-_BUILTIN_FILES = frozenset({"<built-in>", "<builtin>", "<command line>", "<scratch space>"})
+_BUILTIN_FILES = frozenset(
+    {"<built-in>", "<builtin>", "<command line>", "<scratch space>"}
+)
 
 
 def _pointer_depth(type_str: str) -> int:
@@ -427,7 +451,14 @@ class _ClangAstParser:
         self._records: list[_Decl] = []
         self._enums: list[_Decl] = []
         self._typedefs: list[_Decl] = []
-        self._walk(root, scope=(), current_file="", access="public", extern_c=False, in_friend=False)
+        self._walk(
+            root,
+            scope=(),
+            current_file="",
+            access="public",
+            extern_c=False,
+            in_friend=False,
+        )
 
     # ── traversal ────────────────────────────────────────────────────────────
 
@@ -456,7 +487,9 @@ class _ClangAstParser:
         name = node.get("name") or ""
 
         if not node.get("isImplicit"):
-            self._categorize(node, kind, name, scope, file, access, extern_c, in_friend, in_template)
+            self._categorize(
+                node, kind, name, scope, file, access, extern_c, in_friend, in_template
+            )
 
         # A function/method body is not an ABI declaration surface: its
         # parameters and defaults are read straight off the function node in
@@ -472,7 +505,11 @@ class _ClangAstParser:
             kind == "LinkageSpecDecl" and node.get("language") == "C"
         )
         child_scope = (*scope, name) if kind in _SCOPE_NODE_KINDS and name else scope
-        running = _default_record_access(node) if kind in ("CXXRecordDecl", "RecordDecl") else "public"
+        running = (
+            _default_record_access(node)
+            if kind in ("CXXRecordDecl", "RecordDecl")
+            else "public"
+        )
         # A ``friend`` declaration injects its function into the enclosing
         # namespace but reachable only via ADL ("hidden friend"); mark the
         # subtree so parse_functions can flag it (matches castxml's
@@ -490,7 +527,8 @@ class _ClangAstParser:
         # (Codex review). Mark the whole subtree so RecordType.is_template_pattern
         # is set and the backfill matcher can skip it specifically.
         child_in_template = in_template or kind in (
-            "ClassTemplateDecl", "ClassTemplatePartialSpecializationDecl",
+            "ClassTemplateDecl",
+            "ClassTemplatePartialSpecializationDecl",
         )
         for child in node.get("inner", []) or []:
             if not isinstance(child, dict):
@@ -522,8 +560,13 @@ class _ClangAstParser:
         in_template: bool = False,
     ) -> None:
         entry = _Decl(
-            node=node, scope=scope, file=file, access=access, extern_c=extern_c,
-            in_friend=in_friend, in_template=in_template,
+            node=node,
+            scope=scope,
+            file=file,
+            access=access,
+            extern_c=extern_c,
+            in_friend=in_friend,
+            in_template=in_template,
         )
         if kind in _FUNCTION_NODE_KINDS and name:
             self._functions.append(entry)
@@ -631,7 +674,9 @@ class _ClangAstParser:
                     # Preserve the actual default-argument value (so a changed
                     # default fires PARAM_DEFAULT_VALUE_CHANGED); fall back to a
                     # bare presence marker when the value can't be evaluated.
-                    default=(_initializer_value(p) or "default") if _param_has_default(p) else None,
+                    default=(_initializer_value(p) or "default")
+                    if _param_has_default(p)
+                    else None,
                 )
                 for p in node.get("inner", []) or []
                 if isinstance(p, dict) and p.get("kind") == "ParmVarDecl"
@@ -799,8 +844,10 @@ class _ClangAstParser:
 
     def _build_record(self, entry: _Decl, override_name: str = "") -> RecordType:
         node = entry.node
-        kind = "union" if node.get("tagUsed") == "union" else (
-            "struct" if node.get("tagUsed") == "struct" else "class"
+        kind = (
+            "union"
+            if node.get("tagUsed") == "union"
+            else ("struct" if node.get("tagUsed") == "struct" else "class")
         )
         fields = self._parse_fields(node)
         bases, virtual_bases, base_access = _parse_bases(node)
@@ -853,7 +900,12 @@ class _ClangAstParser:
         return self._collect_fields(node, _default_record_access(node), injected)
 
     def _collect_fields(
-        self, node: dict[str, Any], running: str, injected: set[str], *, nested: bool = False
+        self,
+        node: dict[str, Any],
+        running: str,
+        injected: set[str],
+        *,
+        nested: bool = False,
     ) -> list[TypeField]:
         fields: list[TypeField] = []
         for child in node.get("inner", []) or []:
@@ -868,7 +920,9 @@ class _ClangAstParser:
                 # in the enclosing record's namespace, so flatten them here. Keep
                 # only the injected names to avoid pulling in a typedef'd
                 # anonymous record's fields.
-                fields.extend(self._collect_fields(child, running, injected, nested=True))
+                fields.extend(
+                    self._collect_fields(child, running, injected, nested=True)
+                )
                 continue
             if kind != "FieldDecl":
                 continue
@@ -920,7 +974,9 @@ class _ClangAstParser:
             node = entry.node
             if _is_builtin_file(entry.file):
                 continue
-            name = str(node.get("name", "")) or typedef_names_by_enum_id.get(str(node.get("id", "")), "")
+            name = str(node.get("name", "")) or typedef_names_by_enum_id.get(
+                str(node.get("id", "")), ""
+            )
             if not name or name.startswith("__"):
                 continue
             members: list[EnumMember] = []
@@ -930,7 +986,10 @@ class _ClangAstParser:
             # reconstruct the implicit ones here.
             next_value = 0
             for child in node.get("inner", []) or []:
-                if not isinstance(child, dict) or child.get("kind") != "EnumConstantDecl":
+                if (
+                    not isinstance(child, dict)
+                    or child.get("kind") != "EnumConstantDecl"
+                ):
                     continue
                 explicit = _enum_constant_value(child)
                 value = explicit if explicit is not None else next_value
@@ -969,7 +1028,15 @@ class _Decl:
     ``__slots__`` keeps the per-decl overhead low on large headers.
     """
 
-    __slots__ = ("node", "scope", "file", "access", "extern_c", "in_friend", "in_template")
+    __slots__ = (
+        "node",
+        "scope",
+        "file",
+        "access",
+        "extern_c",
+        "in_friend",
+        "in_template",
+    )
 
     def __init__(
         self,
@@ -1136,8 +1203,7 @@ def _param_has_default(param: dict[str, Any]) -> bool:
     if param.get("init"):
         return True
     return any(
-        isinstance(c, dict)
-        and not str(c.get("kind", "")).endswith(("Attr", "Comment"))
+        isinstance(c, dict) and not str(c.get("kind", "")).endswith(("Attr", "Comment"))
         for c in param.get("inner", []) or []
     )
 
@@ -1307,6 +1373,7 @@ def _owned_tag_id(typedef_node: dict[str, Any]) -> str:
     that holds the fields. Returns that record's ``id`` so parse_types can emit
     the otherwise-anonymous record under the typedef name.
     """
+
     def _scan(node: Any) -> str:
         if not isinstance(node, dict):
             return ""

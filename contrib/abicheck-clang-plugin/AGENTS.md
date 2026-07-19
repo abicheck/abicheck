@@ -24,13 +24,31 @@ A build of this plugin only loads into the exact clang it was built against
 
 - Don't assume a locally-built `.so` from one LLVM version is reusable
   against another — `.github/workflows/clang-plugin.yml` validates a
-  **matrix** of LLVM/Clang majors (16/17/18 as of this writing; check the
+  **matrix** of LLVM/Clang majors (16-22 as of this writing; check the
   workflow for the current set) precisely because there is no single
   portable artifact.
 - If you add code that depends on a Clang/LLVM API that changed shape across
   those majors, either guard it with a version check or confirm the whole
   matrix still builds — a change that only compiles against the newest
-  major silently breaks the older legs.
+  major silently breaks the older legs. `clang::FileEntry::getName()` is one
+  concrete example: it exists on 16/17 (where `SourceManager::fileinfo_*`
+  iterates `const FileEntry *`) but was removed upstream by the time LLVM
+  reached 22 — `AbicheckFactsPlugin.cpp`'s `fileEntryKeyName` overload for
+  that type is now guarded `#if CLANG_VERSION_MAJOR < 18` (18 is where the
+  iteration key itself switched to `FileEntryRef`, which still has
+  `getName()`), instead of relying on overload resolution alone to make the
+  now-uncompilable overload unreachable dead code.
+- **A vendor/downstream LLVM fork (Intel's icpx, Apple's clang, etc.)
+  reporting the same `__clang_major__` as an apt.llvm.org major does not mean
+  the plugin builds or loads against it.** This CI matrix only proves parity
+  against vanilla apt.llvm.org majors; a fork can diverge in API (its own
+  patches) or ABI (struct/vtable layout) independently of that number, and
+  most forks don't ship the LLVM/Clang CMake devel package needed to build
+  against them at all (confirmed for Intel's icpx/icx: its apt packages
+  carry `IntelSYCL`/`IntelDPCPP` CMake helpers, never `LLVMConfig.cmake`/
+  `ClangConfig.cmake`). Building against that fork's *own* source at the
+  matching release commit is the only reliable path if support is ever
+  wanted; a green matrix leg here is not evidence toward that.
 - This asymmetry is *why* the plugin is optional infrastructure: Full source
   scan and the `abicheck-cc` wrapper remain the portable, always-supported
   producers. Don't propose making the plugin required without addressing

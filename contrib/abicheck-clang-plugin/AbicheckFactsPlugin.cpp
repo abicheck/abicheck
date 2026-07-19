@@ -2967,12 +2967,19 @@ private:
   // changed across the LLVM majors this plugin supports (C.5): `FileEntryRef`
   // from LLVM 18, `const FileEntry *` on LLVM 16/17 (confirmed by the C.6 CI
   // matrix — a `FileEntryRef fe = it->first;` here fails to compile on 17).
-  // The two overloads below dispatch on whichever key type the installed
-  // clang headers actually declare, so this file builds unmodified against
-  // every matrix leg without an `#if CLANG_VERSION_MAJOR` guard.
+  // Originally this dispatched via overload resolution alone (no version
+  // guard needed, since only one overload is ever reachable per major) --
+  // but `clang::FileEntry::getName()` was itself removed upstream by LLVM 22
+  // (`FileEntry` is no longer name-bearing at all; only `FileEntryRef`,
+  // which wraps the owning map entry, exposes a name), so the `const
+  // FileEntry *` overload's *body* now fails to compile even though nothing
+  // calls it on 18+. Guard it out by version instead of relying on it being
+  // unreachable dead code.
+#if CLANG_VERSION_MAJOR < 18
   static llvm::StringRef fileEntryKeyName(const FileEntry *fe) {
     return fe->getName();
   }
+#endif
   static llvm::StringRef fileEntryKeyName(FileEntryRef fe) {
     return fe.getName();
   }

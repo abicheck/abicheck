@@ -46,7 +46,13 @@ abicheck compare libv1.so libv2.so -H include/foo.h \
 ```
 
 Available compile-context flags (on `dump`, `compare`, and `scan`):
-- `--gcc-path` — path to the cross-compiler binary
+- `--gcc-path` — path to the cross-compiler binary. For the `clang`
+  `--ast-frontend`, this is honored only when the binary is clang-family
+  (basename contains `clang`, or is a known non-`clang`-named clang-based
+  fork — currently Intel's `icx`/`icpx`/`dpcpp`/`dpcpp-cl`); a path to a real
+  GCC binary is ignored here and the frontend falls back to plain `clang` on
+  `PATH` instead (castxml can't take clang-only flags, so this guards against
+  a GCC path being misread as a clang toolchain)
 - `--gcc-prefix` — toolchain prefix (e.g. `aarch64-linux-gnu-`)
 - `--gcc-options` — extra compiler flags passed to the header frontend
 - `--sysroot` — alternative system root directory

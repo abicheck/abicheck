@@ -51,17 +51,34 @@ jobs:
       #  * LLVM major — the plugin is ABI-locked to its LLVM (C.5), so parity is
       #    validated per-version. Each major is pinned to a runner whose
       #    apt.llvm.org channel publishes it (16 is jammy-only; noble-16 does not
-      #    exist; 17/18 are on noble).
+      #    exist; 17-22 are on noble).
       #  * Host C++ compiler — the plugin is a plain LLVM shared module, so it
       #    must build with either GCC or Clang as the *host* compiler. LLVM 18
-      #    is built both ways (g++ and clang++) to prove that; 16/17 use the
-      #    distro default (g++) to keep the matrix small.
+      #    (the lowest major whose fileinfo_iterator key is FileEntryRef) and 22
+      #    (the newest major tested, currently the highest apt.llvm.org
+      #    publishes) are each built both ways (g++ and clang++) to prove that
+      #    across the FileEntry-API split; 16/17/19/20/21 use the distro default
+      #    (g++) to keep the matrix from growing on every dimension at once.
+      #
+      # 19-22 exist to catch upstream Clang AST-JSON/API churn as soon as it
+      # lands, not because oneDAL/Intel's icpx needs them: icpx is a separate
+      # downstream LLVM fork, not vanilla apt.llvm.org, so passing here does
+      # NOT mean the plugin builds against icpx's own bundled toolchain (which
+      # ships no LLVM/Clang CMake package at all, vendor or not -- see
+      # actions/collect-facts/run.sh's $CMPLR_ROOT handling). This matrix
+      # covers "does the plugin still build clean against the current LLVM
+      # majors a distro/apt.llvm.org actually ships."
       matrix:
         include:
           - { llvm: "16", runner: "ubuntu-22.04", host_cc: "gcc",   host_cxx: "g++" }
           - { llvm: "17", runner: "ubuntu-24.04", host_cc: "gcc",   host_cxx: "g++" }
           - { llvm: "18", runner: "ubuntu-24.04", host_cc: "gcc",   host_cxx: "g++" }
           - { llvm: "18", runner: "ubuntu-24.04", host_cc: "clang", host_cxx: "clang++" }
+          - { llvm: "19", runner: "ubuntu-24.04", host_cc: "gcc",   host_cxx: "g++" }
+          - { llvm: "20", runner: "ubuntu-24.04", host_cc: "gcc",   host_cxx: "g++" }
+          - { llvm: "21", runner: "ubuntu-24.04", host_cc: "gcc",   host_cxx: "g++" }
+          - { llvm: "22", runner: "ubuntu-24.04", host_cc: "gcc",   host_cxx: "g++" }
+          - { llvm: "22", runner: "ubuntu-24.04", host_cc: "clang", host_cxx: "clang++" }
     steps:
       - uses: actions/checkout@v4
         with:
