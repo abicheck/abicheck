@@ -349,7 +349,7 @@ flags — each keeps one unambiguous name, none is called bare `manifest.json`:
 | Action | Responsibility | Status |
 |---|---|---|
 | `actions/collect-facts` | Prepare/verify source evidence for one producer (replay/wrapper/clang-plugin). Does not decide project topology. | Existing — kept as-is; `phase: auto`'s two-producer partial-completion (finding 3 above) gets a fail-loud diagnostic, not silent truncation (P0 item). |
-| `actions/baseline` | Produce one baseline set (snapshot + `baseline-set.json`) from resolved targets. Read-only: never commits/pushes (already true — `actions/baseline/action.yml:6-8`). | Existing — kept as-is; consumes the new `targets:` block from `.abicheck.yml` instead of a flat `libraries:` list where available. |
+| `actions/baseline` | Produce one baseline set (snapshot + `baseline-set.json`) from resolved targets. Read-only: never commits/pushes (already true — `actions/baseline/action.yml:6-8`). | **Existing, but not kept as-is — corrected across two review passes.** Today it accepts only a flat `libraries:` input and writes `.abicheck.json` snapshots + `manifest.json` (`actions/baseline/run.sh`, `build_manifest.py`); this model requires it to also (a) consume the new `targets:` block from `.abicheck.yml` where available, and (b) — the change P1.6's correction made explicit — copy each bundle member's source **ELF binary** into a `binaries/` directory and record its path/digest in `baseline-set.json`, since bundle-scoped `resolve-baseline` has no other producer for the inputs S14's baseline correction requires. Listing this as "kept as-is" in an earlier draft risked an implementer skipping both changes. |
 | `actions/resolve-baseline` | Resolve `channel × target × profile` → one baseline snapshot path, checking schema/digest/config-identity/evidence-producer compatibility; distinguishes not-found / ambiguous / wrong-profile / stale-schema / incompatible-evidence and never turns any of those into a compatibility verdict. | **New** — see rationale below. |
 | root `action.yml` | Execute one `compare`/`dump`/`scan`/`deps-tree`/`deps-compare` invocation. | Existing, unchanged surface; input-scoping documentation fixed per finding 2 (P0), not restructured. |
 | `actions/check-target` | Compose `resolve-baseline` + root action + `collect-facts` (if evidence required, **`phase: verify`/`auto`-for-replay only** — see note below) for **one resolved target**; always emits the report envelope (§7); accepts `gate-mode: local\|deferred\|advisory`. | **New** — the single high-level primitive the task's "smaller surface" option asks to evaluate; adopted (see decision D6). |
@@ -581,7 +581,7 @@ update to also read the new field names, must ship before P1.4's
   "publication": {"state": "published", "channels": ["job_summary", "pr_comment"]},
   "tool_version": "abicheck 0.x.y",
   "action_version": "abicheck/abicheck@v1",
-  "verdict": "breaking",
+  "verdict": "BREAKING",
   "severity": {"exit_code": 4, "blocking": true, "blocking_categories": ["abi_breaking"]}
 }
 ```
@@ -592,7 +592,19 @@ already parses (`parse_report_verdict`'s top-level `verdict`;
 `GateInfo.from_report_data`'s `severity` block, shape matching
 `GateInfo.to_dict()`), included here in the canonical example precisely so
 an implementer copying this schema for P0.3/P1.3 doesn't reproduce the
-verdictless/ungated bug the dual-write paragraph above describes. A
+verdictless/ungated bug the dual-write paragraph above describes.
+**`verdict` must use the real `Verdict` enum's exact casing — a bug in a
+follow-up review pass caught this too:** `abicheck.change_registry_types.Verdict`
+is `str, Enum` with uppercase values (`NO_CHANGE`, `COMPATIBLE`,
+`COMPATIBLE_WITH_RISK`, `API_BREAK`, `BREAKING`), and
+`parse_report_verdict()` calls `Verdict(raw)` directly — a lower-case
+`"breaking"` (this example's value until this fix) raises `ValueError`
+inside that constructor, is swallowed by `parse_report_verdict`'s
+`except ValueError: return None`, and produces exactly the
+"verdictless"/`report carried no ABI verdict` outcome the dual-write was
+meant to prevent, even with a syntactically-present `severity` block sitting
+right next to it. The lower-case value earlier in this same fix was itself
+wrong — corrected to the real enum casing above. A
 `scan`-mode report's equivalent legacy field is a top-level `exit_code` plus
 `scan_schema_version` instead of a `severity` block — omitted from this
 `compare`-shaped example for space, but required the same way.
