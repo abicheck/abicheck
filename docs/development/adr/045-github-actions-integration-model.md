@@ -135,7 +135,7 @@ project configuration
     → baseline resolution
     → scan/compare/audit          (per resolved target — this is "check")
     → reporting
-    → optional fan-in             (aggregate — only when >1 target)
+    → fan-in                      (aggregate — required for any `deferred`-gate check, §7's correction; optional otherwise)
     → baseline publication/refresh
 ```
 
@@ -566,7 +566,7 @@ filename.
 |---|---|---|
 | `actions/collect-facts` | Prepare/verify source evidence for one producer (replay/wrapper/clang-plugin). Does not decide project topology. | Existing — kept as-is; `phase: auto`'s two-producer partial-completion (finding 3 above) gets a fail-loud diagnostic, not silent truncation (P0 item). |
 | `actions/baseline` | Produce one baseline set (snapshot + `baseline-set.json`) from resolved targets. Read-only: never commits/pushes (already true — `actions/baseline/action.yml:6-8`). | **Existing, but not kept as-is — corrected across two review passes.** Today it accepts only a flat `libraries:` input and writes `.abicheck.json` snapshots + `manifest.json` (`actions/baseline/run.sh`, `build_manifest.py`); this model requires it to also (a) consume the new `targets:` block from `.abicheck.yml` where available, and (b) — the change P1.6's correction made explicit — copy each bundle member's source **ELF binary** into a `binaries/` directory and record its path/digest in `baseline-set.json`, since bundle-scoped `resolve-baseline` has no other producer for the inputs S14's baseline correction requires. Listing this as "kept as-is" in an earlier draft risked an implementer skipping both changes. |
-| `actions/resolve-baseline` | Resolve `channel × target × profile` → one baseline snapshot path, checking schema/digest/config-identity/evidence-producer compatibility; distinguishes not-found / ambiguous / wrong-profile / stale-schema / incompatible-evidence and never turns any of those into a compatibility verdict. | **New** — see rationale below. |
+| `actions/resolve-baseline` | Resolve `channel × target × profile` → a *kind-dependent* result (**corrected below**: one baseline snapshot path for `kind: library`/`app-consumer`/`plugin-contract` targets, but a **set of staged member binaries** for `kind: bundle` — never a single scalar snapshot path for every case), checking schema/digest/config-identity/evidence-producer compatibility; distinguishes not-found / ambiguous / wrong-profile / stale-schema / incompatible-evidence and never turns any of those into a compatibility verdict. | **New** — see rationale below. |
 | root `action.yml` | Execute one `compare`/`dump`/`scan`/`deps-tree`/`deps-compare` invocation. | Existing, unchanged surface; input-scoping documentation fixed per finding 2 (P0), not restructured. |
 | `actions/check-target` | Compose `resolve-baseline` + root action + `collect-facts` (if evidence required, **`phase: verify`/`auto`-for-replay only** — see note below) for **one resolved target**; always emits the report envelope (§7); accepts `gate-mode: local\|deferred\|advisory`. | **New** — the single high-level primitive the task's "smaller surface" option asks to evaluate; adopted (see decision D6). |
 | — (no dedicated Action) | Fan-in. | `abicheck aggregate` stays a plain CLI step invoked from the `check-project` reusable workflow (§ below) — a dedicated `actions/aggregate` composite adds no value over one `run:` line, since aggregate's job is a single CLI call with no shell orchestration to hide. |
