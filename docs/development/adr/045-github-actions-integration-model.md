@@ -517,7 +517,7 @@ two-phase `collect-facts` contract's boundary actually falls relative to
 | Workflow | Composes | Primary scenarios |
 |---|---|---|
 | `check-single.yml` | a single `check-target` call (one target, one profile) — `check-target` owns baseline resolution internally, see below | S1, S2, S5, S6 |
-| `check-project.yml` | consumes a `build-output.json` artifact → dynamic matrix over `targets[]`/`profiles[]` → `check-target` per cell → optional `aggregate` job if `>1` cell | S3, S14 (via one `check-target` call per bundle), S15, S17, S25, S28 |
+| `check-project.yml` | consumes a `build-output.json` artifact → dynamic matrix over `targets[]`/`profiles[]` **and, separately, `bundles[]`/`profiles[]`** → `check-target` per cell → optional `aggregate` job if `>1` cell | S3, S14 (via one `check-target` call per bundle), S15, S17, S25, S28 |
 | `publish-baseline.yml` | build/consume `build-output.json` → `actions/baseline` → upload as release asset (atomic archive, §10) | S19 |
 | `update-main-baseline.yml` | same as above, targeting the `accepted-main` channel storage backend, triggered on default-branch push | S20 |
 
@@ -532,6 +532,27 @@ of that one call. A caller who needs the resolved baseline path *outside*
 `check-target` (e.g. to display it in a workflow-level summary before the
 check runs) reads it back from `check-target`'s own output, not by invoking
 `resolve-baseline` separately.
+
+**`check-project.yml`'s matrix has two independent sources, not one — a gap
+in an earlier draft, flagged by review.** `.abicheck.yml`/`build-output.json`
+keep `bundles[]` as a separate map from `targets[]` (§2/§3) precisely
+because S14 (release bundle) and S15 (independent targets) are deliberately
+distinct scopes (§1). A run-plan generator that only iterates `targets[]`
+therefore emits per-target cells for every bundle *member* (e.g. `libpvxs`,
+`libpvxsIoc` individually) but never the promised bundle-scoped
+`pvxs-release` cell itself — silently dropping S14's cross-library
+`--manifest` findings, since nothing else in `check-project.yml`'s
+described matrix generates that check. **Fix: `run-plan.json`'s generator
+(P1.4) iterates two independent sources — `targets[]` (minus any target
+whose *only* required check is bundle-scoped, to avoid double-checking a
+member both individually and as part of its bundle unless the project
+config explicitly wants both) crossed with `profiles[]` for S15-class
+checks, and `bundles[]` crossed with `profiles[]` for one S14-class
+bundle-scoped check per bundle per profile.** Both produce `checks[]`
+entries in the same `run-plan.json` (§5), just with different `target`/
+`bundle` identity and different `check_id` shape (§8's S14 correction);
+`check-project.yml`'s matrix has one cell per resulting entry regardless of
+which source it came from.
 
 `check-packages.yml` was considered and **rejected as a fifth workflow**
 (decision D7): a package/prebuilt-artifact target (S13) is just another
