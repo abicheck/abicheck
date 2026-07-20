@@ -75,7 +75,16 @@ its own baseline-channel/depth/gate policy just like a target's does; see
 mapping against :data:`~.inline.KNOWN_TOP_LEVEL_KEYS` — the *full*
 ``.abicheck.yml`` key set, not just this module's four owned keys — so a
 misspelled block (``tagrets:``) is a hard error rather than silently
-parsing as an empty, all-default config.
+parsing as an empty, all-default config. Every ``targets:``/``bundles:``/
+``profiles:``/``baseline.channels:`` mapping key must itself be a real YAML
+string (PyYAML's default resolver reads a bare ``on``/``off``/``yes``/``no``
+key as a bool and a bare digit key as an int; silently ``str()``-coercing
+either would mint an id the user never actually wrote). ``"none"`` is
+reserved and cannot be declared as a real ``baseline.channels`` id — it is
+:data:`NO_BASELINE_CHANNEL`, the sentinel a ``checks[].channel`` uses to
+bypass ``resolve-baseline`` entirely (ADR-047 §6 S5); allowing a real
+channel of that name would make the sentinel ambiguous with an actual
+baseline lookup.
 """
 
 from __future__ import annotations
@@ -159,6 +168,13 @@ def _require_mapping(data: object, block: str) -> dict[str, Any]:
         raise ValueError(
             f"{block} must be a mapping, got {type(data).__name__}: {data!r}"
         )
+    bad_keys = [k for k in data if not isinstance(k, str)]
+    if bad_keys:
+        # PyYAML's default (YAML 1.1) resolver reads a bare `on`/`off`/`yes`/`no`
+        # mapping key as a bool, and a bare digit key as an int -- silently
+        # stringifying either here (e.g. `str(True)` -> "True") would mint a
+        # target/bundle/profile/channel id the user never actually wrote.
+        raise ValueError(f"{block}: key(s) must be strings, got {bad_keys!r}")
     return data
 
 
@@ -522,19 +538,16 @@ class ProjectTargetsConfig:
         )
 
         targets = {
-            str(name): TargetSpec.from_dict(str(name), t)
-            for name, t in targets_raw.items()
+            name: TargetSpec.from_dict(name, t) for name, t in targets_raw.items()
         }
         bundles = {
-            str(name): BundleSpec.from_dict(str(name), b)
-            for name, b in bundles_raw.items()
+            name: BundleSpec.from_dict(name, b) for name, b in bundles_raw.items()
         }
         profiles = {
-            str(name): ProfileSpec.from_dict(str(name), p)
-            for name, p in profiles_raw.items()
+            name: ProfileSpec.from_dict(name, p) for name, p in profiles_raw.items()
         }
         baseline_channels = {
-            str(name): BaselineChannelSpec.from_dict(str(name), c)
+            name: BaselineChannelSpec.from_dict(name, c)
             for name, c in channels_raw.items()
         }
         return cls(
@@ -760,6 +773,14 @@ def _profile_issues(profile: ProfileSpec) -> list[str]:
 
 def _baseline_channel_issues(channel: BaselineChannelSpec) -> list[str]:
     issues = _identifier_issues("baseline channel", channel.id)
+    if channel.id == NO_BASELINE_CHANNEL:
+        issues.append(
+            f"baseline channel {channel.id!r} is reserved as the no-baseline "
+            "sentinel (ADR-047 §6 S5) and cannot be declared as a real "
+            "channel — a checks[].channel: 'none' entry would then be "
+            "ambiguous between 'skip resolve-baseline' and 'resolve this "
+            "declared channel', and check-target always takes the former."
+        )
     if channel.source == "github-release" and not channel.asset_pattern:
         issues.append(
             f"baseline channel {channel.id!r}: source: github-release requires "

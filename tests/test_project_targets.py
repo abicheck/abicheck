@@ -891,6 +891,37 @@ def test_other_abicheck_yml_blocks_are_accepted_and_ignored() -> None:
     assert set(config.targets) == {"foo"}
 
 
+# ── Non-string mapping keys are rejected, not silently str()-coerced ───────
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {"targets": {123: {"kind": "library", "binary_pattern": "x"}}},
+        {"bundles": {123: {"targets": ["a"]}}},
+        {"profiles": {123: {"contract": True}}},
+        {"baseline": {"channels": {123: {"source": "git"}}}},
+        # PyYAML's default (YAML 1.1) resolver reads a bare `on` key as `True`.
+        {"targets": {True: {"kind": "library", "binary_pattern": "x"}}},
+    ],
+)
+def test_non_string_mapping_keys_are_rejected(raw: dict) -> None:
+    with pytest.raises(ValueError, match="key.*must be strings"):
+        ProjectTargetsConfig.from_dict(raw)
+
+
+# ── "none" is reserved as the no-baseline sentinel ──────────────────────────
+
+
+def test_none_cannot_be_declared_as_a_real_baseline_channel() -> None:
+    config = ProjectTargetsConfig.from_dict(
+        {"baseline": {"channels": {"none": {"source": "git"}}}}
+    )
+    report = validate_project_targets(config)
+    assert not report.ok
+    assert any("is reserved as the no-baseline sentinel" in e for e in report.errors)
+
+
 def test_profile_not_a_mapping_raises() -> None:
     with pytest.raises(ValueError, match="must be a mapping"):
         ProjectTargetsConfig.from_dict({"profiles": {"linux": "not-a-mapping"}})
