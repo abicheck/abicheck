@@ -251,6 +251,44 @@ def _neighbor_identity(node: GraphNode) -> str:
     return node.kind
 
 
+def _is_unqualified_identity(ident: CanonicalIdentity) -> bool:
+    """True when *ident* carries no more disambiguating evidence than a
+    bare short name: no scope-qualified name (no ``::``) and no
+    arity-distinguishing param types (the normalized-signature arity
+    segment is ``"0"``). Used to decide whether the "qualified:"/plain
+    signature aliases are trustworthy Tier-2 evidence or are, in
+    substance, exactly as weak as a "name:" alias (see
+    :func:`_strong_aliases`).
+    """
+    if "::" in ident.qualified_name:
+        return False
+    sig_parts = ident.normalized_signature.split("\x1f")
+    return len(sig_parts) < 3 or sig_parts[2] == "0"
+
+
+def _strong_aliases(ident: CanonicalIdentity) -> set[str]:
+    """The subset of *ident*'s aliases trustworthy for Tier-2 alias
+    matching in :func:`reconcile_added_removed`.
+
+    A bare "name:<short>" alias is always excluded (ADR-045: an ambiguous
+    fallback key must resolve to no match). When the identity itself is
+    unqualified (see :func:`_is_unqualified_identity`) -- e.g. a
+    header-only-graph ``source_decl`` node seeded with only a bare
+    label/name and no explicit ``qualified_name`` attr -- the
+    "qualified:"/plain signature aliases carry that exact same weak
+    evidence (``resolve_identity_for_node`` silently derives
+    ``qualified_name`` from the bare label), so they are excluded too
+    (Codex review, fresh evidence).
+    """
+    if _is_unqualified_identity(ident):
+        return {
+            a
+            for a in ident.aliases
+            if not a.startswith(("name:", "qualified:", "sig:"))
+        }
+    return {a for a in ident.aliases if not a.startswith("name:")}
+
+
 def _all_structural_contexts(
     graph: SourceGraphSummary,
 ) -> dict[str, frozenset[tuple[str, str, str]]]:
@@ -286,16 +324,54 @@ def _all_structural_contexts(
     return {nid: frozenset(c) for nid, c in ctx.items()}
 
 
+def _declaring_files(graph: SourceGraphSummary) -> dict[str, str]:
+    """Every node's declaring-file project-relative path, resolved via an
+    incoming ``SOURCE_DECLARES`` edge.
+
+    ``resolve_identity_for_node``'s ``source_relative`` alias needs a
+    ``def_file``/``file`` attr on the declaration node itself, but real
+    header-only-graph ``source_decl`` nodes (``header_graph.py``'s
+    ``seed_decl``) carry no such attr -- the declaring header is only
+    recorded as the source end of a ``SOURCE_DECLARES`` edge. Without this,
+    :func:`_classify_outcome` never sees a declaring file for those nodes
+    and a real cross-header move is misclassified as
+    ``declaration_identity_reconciled`` instead of ``OUTCOME_MOVED``
+    (Codex review, fresh evidence).
+    """
+    label_by_id = {n.id: n.label for n in graph.nodes}
+    result: dict[str, str] = {}
+    for e in graph.edges:
+        if e.kind != "SOURCE_DECLARES":
+            continue
+        label = label_by_id.get(e.src)
+        if label:
+            result[e.dst] = _project_relative_path(str(label))
+    return result
+
+
 def _classify_outcome(
-    old_identity: CanonicalIdentity, new_identity: CanonicalIdentity
+    old_identity: CanonicalIdentity,
+    new_identity: CanonicalIdentity,
+    *,
+    old_declaring_file: str = "",
+    new_declaring_file: str = "",
 ) -> str:
     old_qn = old_identity.qualified_name
     new_qn = new_identity.qualified_name
     # source_relative encodes file#scope#name — compare just the file prefix
     # (before the first separator) to ask "did the declaring file change",
     # after normalizing each side's path (see _project_relative_path).
-    old_file = _project_relative_path(old_identity.source_relative.split("\x1f", 1)[0])
-    new_file = _project_relative_path(new_identity.source_relative.split("\x1f", 1)[0])
+    # Falls back to the SOURCE_DECLARES-edge-derived declaring file (see
+    # _declaring_files) when the node carries no def_file/file attr of its
+    # own.
+    old_file = (
+        _project_relative_path(old_identity.source_relative.split("\x1f", 1)[0])
+        or old_declaring_file
+    )
+    new_file = (
+        _project_relative_path(new_identity.source_relative.split("\x1f", 1)[0])
+        or new_declaring_file
+    )
     renamed = bool(old_qn) and bool(new_qn) and old_qn != new_qn
     moved = bool(old_file) and bool(new_file) and old_file != new_file
     if renamed and not moved:
@@ -342,6 +418,8 @@ def reconcile_added_removed(
     # docstring for why the latter mattered on a large graph).
     old_contexts = _all_structural_contexts(old_graph)
     new_contexts = _all_structural_contexts(new_graph)
+    old_declaring_files = _declaring_files(old_graph)
+    new_declaring_files = _declaring_files(new_graph)
 
     for kind in sorted(set(removed_by_kind) | set(added_by_kind)):
         old_list = removed_by_kind.get(kind, [])
@@ -374,7 +452,12 @@ def reconcile_added_removed(
             ]
             if len(candidates) == 1:
                 new_node = next(n for n in new_list if n.id == candidates[0])
-                outcome = _classify_outcome(old_ident[oid], new_ident[candidates[0]])
+                outcome = _classify_outcome(
+                    old_ident[oid],
+                    new_ident[candidates[0]],
+                    old_declaring_file=old_declaring_files.get(oid, ""),
+                    new_declaring_file=new_declaring_files.get(candidates[0], ""),
+                )
                 result.reconciled.append(
                     ReconciledPair(
                         old_node,
@@ -397,22 +480,31 @@ def reconcile_added_removed(
         # declarations that merely share a short name (e.g. old `a::foo`
         # removed, unrelated new `b::foo` added) must not reconcile just
         # because "foo" is their only common alias (Codex review).
+        #
+        # That principle is silently defeated when the entity has no real
+        # qualified_name fact at all: resolve_identity_for_node() falls
+        # back to node.label for `qualified_name`, so a header-only-graph
+        # source_decl node seeded with only a bare label (the common
+        # production shape -- no explicit qualified_name attr) launders
+        # that same bare name into "qualified:<label>" and the plain
+        # signature alias, both exempt from the name: filter above. Two
+        # unrelated such nodes sharing a label then reconcile on evidence
+        # no stronger than a bare name (Codex review, fresh evidence).
+        # _strong_aliases() treats those two aliases as equally weak
+        # whenever the identity carries no scope-qualification ("::") and
+        # no arity-distinguishing param types.
         strong_new_by_alias: dict[str, list[str]] = {}
         for nid, ident in new_ident.items():
             if nid in matched_new:
                 continue
-            for alias in ident.aliases:
-                if alias.startswith("name:"):
-                    continue
+            for alias in _strong_aliases(ident):
                 strong_new_by_alias.setdefault(alias, []).append(nid)
         for old_node in old_list:
             oid = old_node.id
             if oid in matched_old:
                 continue
             candidate_ids: set[str] = set()
-            for alias in old_ident[oid].aliases:
-                if alias.startswith("name:"):
-                    continue
+            for alias in _strong_aliases(old_ident[oid]):
                 for nid in strong_new_by_alias.get(alias, []):
                     if nid not in matched_new:
                         candidate_ids.add(nid)
@@ -425,12 +517,16 @@ def reconcile_added_removed(
                     n.id
                     for n in old_list
                     if n.id not in matched_old
-                    and {a for a in old_ident[n.id].aliases if not a.startswith("name:")}
-                    & {a for a in cand_ident.aliases if not a.startswith("name:")}
+                    and _strong_aliases(old_ident[n.id]) & _strong_aliases(cand_ident)
                 }
                 if len(reverse_candidates) == 1:
                     new_node = next(n for n in new_list if n.id == cand)
-                    outcome = _classify_outcome(old_ident[oid], cand_ident)
+                    outcome = _classify_outcome(
+                        old_ident[oid],
+                        cand_ident,
+                        old_declaring_file=old_declaring_files.get(oid, ""),
+                        new_declaring_file=new_declaring_files.get(cand, ""),
+                    )
                     result.reconciled.append(
                         ReconciledPair(
                             old_node,
@@ -484,7 +580,12 @@ def reconcile_added_removed(
                 ]
                 if not sibling_old_matches:
                     new_node = next(n for n in new_list if n.id == cand)
-                    outcome = _classify_outcome(old_ident[oid], new_ident[cand])
+                    outcome = _classify_outcome(
+                        old_ident[oid],
+                        new_ident[cand],
+                        old_declaring_file=old_declaring_files.get(oid, ""),
+                        new_declaring_file=new_declaring_files.get(cand, ""),
+                    )
                     result.reconciled.append(
                         ReconciledPair(
                             old_node,

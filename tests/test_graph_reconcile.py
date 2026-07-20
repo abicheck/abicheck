@@ -319,6 +319,44 @@ def test_move_reconciles_when_file_changes_but_name_does_not() -> None:
     assert result.reconciled[0].outcome == OUTCOME_MOVED
 
 
+def test_move_detected_via_source_declares_edge_when_no_def_file_attr() -> None:
+    """Codex review, fresh evidence: real header-only-graph source_decl
+    nodes (header_graph.py's seed_decl) carry no def_file/file attr at
+    all -- the declaring header is only recorded as a SOURCE_DECLARES
+    edge from the header node. _classify_outcome must fall back to that
+    edge, or a real cross-header move is reported as
+    declaration_identity_reconciled instead of OUTCOME_MOVED."""
+    old_header = GraphNode(id="header://a", kind="header", label="include/a.h")
+    new_header = GraphNode(id="header://b", kind="header", label="include/b.h")
+    old_node = GraphNode(
+        id="decl://ns::foo::old",
+        kind="source_decl",
+        label="ns::foo",
+        attrs={"qualified_name": "ns::foo"},
+    )
+    new_node = GraphNode(
+        id="decl://ns::foo::new",
+        kind="source_decl",
+        label="ns::foo",
+        attrs={"qualified_name": "ns::foo"},
+    )
+    old_g = SourceGraphSummary()
+    old_g.add_node(old_header)
+    old_g.add_node(old_node)
+    old_g.add_edge(
+        GraphEdge(src=old_header.id, dst=old_node.id, kind="SOURCE_DECLARES")
+    )
+    new_g = SourceGraphSummary()
+    new_g.add_node(new_header)
+    new_g.add_node(new_node)
+    new_g.add_edge(
+        GraphEdge(src=new_header.id, dst=new_node.id, kind="SOURCE_DECLARES")
+    )
+    result = reconcile_added_removed([old_node], [new_node], old_g, new_g)
+    assert len(result.reconciled) == 1
+    assert result.reconciled[0].outcome == OUTCOME_MOVED
+
+
 def test_different_checkout_roots_not_misclassified_as_moved() -> None:
     """Codex review: old/new graphs collected from two independently-rooted
     checkouts (separate temp dirs, or separate CI job workspaces) never share
@@ -432,6 +470,37 @@ def test_bare_short_name_alone_does_not_reconcile() -> None:
         kind="record_type",
         label="b::foo",
         attrs={"name": "foo", "qualified_name": "b::foo", "def_file": "b.h"},
+    )
+    old_g = _graph([old_node], [])
+    new_g = _graph([new_node], [])
+    result = reconcile_added_removed([old_node], [new_node], old_g, new_g)
+    assert result.reconciled == []
+    assert [n.id for n in result.true_removed] == [old_node.id]
+    assert [n.id for n in result.true_added] == [new_node.id]
+
+
+def test_label_only_bare_name_does_not_reconcile_via_qualified_alias() -> None:
+    """Codex review, fresh evidence: the bare-short-name guard above only
+    exercised nodes with an explicit qualified_name attr differing between
+    old/new. Real header-only-graph source_decl nodes are commonly seeded
+    with *no* name/qualified_name attr at all -- only a bare label (see
+    header_graph.py's seed_decl) -- and resolve_identity_for_node() then
+    silently derives `qualified_name` from that label, laundering the bare
+    name into "qualified:<label>" and the plain signature alias, both
+    exempt from the "name:" filter. Two totally unrelated declarations
+    that merely share a label must not reconcile on that evidence any more
+    than they would via a bare "name:" alias."""
+    old_node = GraphNode(
+        id="decl://a::foo",
+        kind="source_decl",
+        label="foo",
+        attrs={"visibility": "public"},
+    )
+    new_node = GraphNode(
+        id="decl://b::foo",
+        kind="source_decl",
+        label="foo",
+        attrs={"visibility": "public"},
     )
     old_g = _graph([old_node], [])
     new_g = _graph([new_node], [])
