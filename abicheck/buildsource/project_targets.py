@@ -204,6 +204,10 @@ class CheckSpec:
     channel: str = ""
     depth: str = ""
     required: bool = True
+    #: Direct-construction default is ``"local"`` (matching this field's own
+    #: default); ``from_dict`` instead derives an unset ``gate_mode`` from
+    #: ``channel`` — ``"advisory"`` for the ``NO_BASELINE_CHANNEL`` sentinel,
+    #: ``"local"`` otherwise (ADR-047 §8 S5: "Advisory by default").
     gate_mode: str = "local"
     #: Explicit profile-id selector (see module docstring). Empty = every
     #: ``contract: true`` profile, filtered against ``build-output.json`` by
@@ -239,12 +243,20 @@ class CheckSpec:
                 f"{where}.required must be a boolean, got "
                 f"{type(required).__name__}: {required!r}"
             )
-        gate_mode = d.get("gate_mode", "local")
-        if not isinstance(gate_mode, str):
-            raise ValueError(
-                f"{where}.gate_mode must be a string, got "
-                f"{type(gate_mode).__name__}: {gate_mode!r}"
-            )
+        if "gate_mode" in d:
+            gate_mode = d["gate_mode"]
+            if not isinstance(gate_mode, str):
+                raise ValueError(
+                    f"{where}.gate_mode must be a string, got "
+                    f"{type(gate_mode).__name__}: {gate_mode!r}"
+                )
+        else:
+            # ADR-047 §8: a channel: "none" no-baseline audit (S5) defaults
+            # to advisory, not local -- unlike a real-channel check, it has
+            # no baseline-drift verdict to gate CI on in the first place, so
+            # defaulting it to a blocking gate would surprise a minimal
+            # `{channel: none, depth: ...}` entry into failing CI.
+            gate_mode = "advisory" if channel == NO_BASELINE_CHANNEL else "local"
         profiles = _require_str_list(d, "profiles", where=where)
         return cls(
             channel=channel,

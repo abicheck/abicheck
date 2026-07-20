@@ -774,6 +774,32 @@ def test_check_spec_gate_mode_wrong_type_raises() -> None:
         )
 
 
+# ── gate_mode default depends on channel (ADR-047 §8 S5: advisory) ─────────
+
+
+def test_check_spec_none_channel_defaults_gate_mode_to_advisory() -> None:
+    """A `channel: "none"` (S5 no-baseline audit) check has no baseline-drift
+    verdict to gate CI on, so it must default to advisory, not local -- a
+    minimal `{channel: none, depth: ...}` entry must not unexpectedly block
+    CI (ADR-047 §8's S5 row: "Advisory by default")."""
+    check = CheckSpec.from_dict({"channel": "none", "depth": "headers"}, where="x")
+    assert check.gate_mode == "advisory"
+
+
+def test_check_spec_real_channel_defaults_gate_mode_to_local() -> None:
+    check = CheckSpec.from_dict(
+        {"channel": "accepted-main", "depth": "headers"}, where="x"
+    )
+    assert check.gate_mode == "local"
+
+
+def test_check_spec_explicit_gate_mode_overrides_none_channel_default() -> None:
+    check = CheckSpec.from_dict(
+        {"channel": "none", "depth": "headers", "gate_mode": "local"}, where="x"
+    )
+    assert check.gate_mode == "local"
+
+
 def test_check_spec_to_dict_includes_profiles_when_set() -> None:
     check = CheckSpec(
         channel="accepted-main", depth="headers", profiles=["linux-x86_64"]
@@ -909,9 +935,16 @@ def test_bundle_checks_round_trip_and_validate() -> None:
             },
         }
     )
-    assert config.bundles["rel"].checks == [CheckSpec(channel="none", depth="headers")]
+    assert config.bundles["rel"].checks == [
+        CheckSpec(channel="none", depth="headers", gate_mode="advisory")
+    ]
     assert config.bundles["rel"].to_dict()["checks"] == [
-        {"channel": "none", "depth": "headers", "required": True, "gate_mode": "local"}
+        {
+            "channel": "none",
+            "depth": "headers",
+            "required": True,
+            "gate_mode": "advisory",
+        }
     ]
     round_tripped = ProjectTargetsConfig.from_dict(config.to_dict())
     assert round_tripped == config
@@ -993,7 +1026,7 @@ def test_other_abicheck_yml_blocks_are_accepted_and_ignored() -> None:
     ],
 )
 def test_non_string_mapping_keys_are_rejected(raw: dict) -> None:
-    with pytest.raises(ValueError, match="key.*must be strings"):
+    with pytest.raises(ValueError, match=r"key.*must be strings"):
         ProjectTargetsConfig.from_dict(raw)
 
 
