@@ -157,14 +157,24 @@ def _structural_context(
     trusted when the resulting position is unique among same-kind candidates
     (see the module docstring's "structural-context match" tier).
     """
+    # Codex review: this must key on the neighbor's *kind*, matching the
+    # docstring above -- not its raw node id. A raw id (e.src/e.dst) is
+    # checkout-root-dependent for file/header-backed neighbors (e.g.
+    # "header:///tmp/old/include/detail.h" vs
+    # "header:///tmp/new/include/detail.h" for the identical project header),
+    # and is by-construction different across old/new for a genuinely
+    # renamed neighbor too -- either way, using the raw id here would make an
+    # otherwise-unique structural position compare as different contexts and
+    # silently fail to reconcile a real rename/move.
+    kind_by_id = {n.id: n.kind for n in graph.nodes}
     ctx: set[tuple[str, str, str]] = set()
     for e in graph.edges:
         role = str(e.attrs.get("role", ""))
         tag = f"{e.kind}:{role}" if role else e.kind
         if e.dst == node_id:
-            ctx.add(("in", tag, e.src))
+            ctx.add(("in", tag, kind_by_id.get(e.src, "")))
         if e.src == node_id:
-            ctx.add(("out", tag, e.dst))
+            ctx.add(("out", tag, kind_by_id.get(e.dst, "")))
     return frozenset(ctx)
 
 

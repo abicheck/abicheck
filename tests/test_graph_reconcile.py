@@ -129,6 +129,57 @@ def test_rename_reconciles_via_structural_context() -> None:
     assert pair.outcome == OUTCOME_RENAMED
 
 
+def test_structural_context_uses_neighbor_kind_not_raw_id() -> None:
+    """Codex review: when old/new header graphs are collected from separate
+    checkout roots, a declaring-parent neighbor (e.g. a header node) gets a
+    different raw node id on each side even though nothing about it actually
+    changed (same kind, same role). Keying the structural-context tuple on
+    the neighbor's raw id -- instead of its kind, as the function's own
+    docstring says it should -- would make an otherwise-unique rename
+    compare as a different context and silently fail to reconcile."""
+    old_parent = GraphNode(
+        id="header:///tmp/checkout_old/include/api.h",
+        kind="header",
+        label="api.h",
+    )
+    new_parent = GraphNode(
+        id="header:///tmp/checkout_new/include/api.h",
+        kind="header",
+        label="api.h",
+    )
+    old_internal = GraphNode(
+        id="type://demo::detail::RawConfig",
+        kind="record_type",
+        label="demo::detail::RawConfig",
+        attrs={"qualified_name": "demo::detail::RawConfig", "def_file": "detail.h"},
+    )
+    new_internal = GraphNode(
+        id="type://demo::detail::RawConfigV2",
+        kind="record_type",
+        label="demo::detail::RawConfigV2",
+        attrs={"qualified_name": "demo::detail::RawConfigV2", "def_file": "detail.h"},
+    )
+    old_edge = GraphEdge(
+        src=old_parent.id,
+        dst=old_internal.id,
+        kind="SOURCE_DECLARES",
+        attrs={"role": "declares"},
+    )
+    new_edge = GraphEdge(
+        src=new_parent.id,
+        dst=new_internal.id,
+        kind="SOURCE_DECLARES",
+        attrs={"role": "declares"},
+    )
+    old_g = _graph([old_parent, old_internal], [old_edge])
+    new_g = _graph([new_parent, new_internal], [new_edge])
+    result = reconcile_added_removed([old_internal], [new_internal], old_g, new_g)
+    assert len(result.reconciled) == 1
+    pair = result.reconciled[0]
+    assert pair.match_kind == "structural_context"
+    assert pair.outcome == OUTCOME_RENAMED
+
+
 def test_move_reconciles_when_file_changes_but_name_does_not() -> None:
     old_node = GraphNode(
         id="type://old",
