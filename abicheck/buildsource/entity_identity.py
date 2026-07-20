@@ -182,8 +182,9 @@ def resolve_canonical_identity(
     rel = source_relative_identity(file, scope, name or qn)
 
     aliases: list[str] = []
-    if mangled_name:
-        aliases.append(f"mangled:{mangled_name}")
+    real_mangled = normalize_mangled_name(mangled_name, name)
+    if real_mangled:
+        aliases.append(f"mangled:{real_mangled}")
     if name:
         aliases.append(f"name:{name}")
     if qn:
@@ -198,7 +199,6 @@ def resolve_canonical_identity(
             primary, IDENTITY_TIER_CANONICAL, tuple(aliases), qn, sig, rel, kind
         )
 
-    real_mangled = normalize_mangled_name(mangled_name, name)
     if real_mangled:
         primary = f"mangled:{real_mangled}"
         return CanonicalIdentity(

@@ -64,6 +64,19 @@ def test_extern_c_bare_name_in_mangled_field_is_not_real_mangling() -> None:
     assert ident.tier != IDENTITY_TIER_CANONICAL
 
 
+def test_extern_c_bare_mangled_field_does_not_leak_a_mangled_alias() -> None:
+    """Codex review: a producer reporting mangled_name == name (extern "C"
+    linkage) is explicitly not a real mangling (is_real_mangled_name),
+    but the alias list previously added "mangled:<bare>" anyway -- unlike
+    the "name:" alias, "mangled:" isn't excluded by the Tier-2 bare-name
+    filter, so two unrelated old/new declarations sharing only a bare
+    C-linkage name could reconcile as the same entity."""
+    ident = resolve_canonical_identity(
+        mangled_name="foo", name="foo", qualified_name="foo"
+    )
+    assert not any(a.startswith("mangled:") for a in ident.aliases)
+
+
 def test_itanium_name_that_does_not_demangle_is_rejected() -> None:
     # Starts with _Z but is not a valid mangled name; demangle() should
     # return None or the same string, so normalize_mangled_name refuses it.
