@@ -147,10 +147,21 @@ class GraphReconciliation:
 
 
 def _path_segments(path: str) -> tuple[str, ...]:
-    """Plain-path split into segments, ignoring the root/self markers."""
+    """Plain-path split into segments, ignoring the root/self markers.
+
+    Normalizes ``\\`` to ``/`` first (same as
+    ``source_graph_findings._path_segments``/``source_graph.py``'s own
+    caller-file normalization): ``PurePosixPath`` treats a backslash as an
+    ordinary filename character, not a separator, so a Windows-style
+    declaring path (``C:\\old\\include\\api.h``) would never be split at
+    all -- silently defeating the project-root-marker search in
+    :func:`_project_relative_path` and comparing raw checkout roots
+    (Codex review).
+    """
     from pathlib import PurePosixPath
 
-    return tuple(p for p in PurePosixPath(path).parts if p not in ("/", ".", ""))
+    posix = path.replace("\\", "/")
+    return tuple(p for p in PurePosixPath(posix).parts if p not in ("/", ".", ""))
 
 
 #: Conventional project-root directory names — a superset of
@@ -197,51 +208,77 @@ def _project_relative_path(path: str) -> str:
     return "/".join(segs)
 
 
+#: Node kinds whose ``label``/declaring-path fields are a filesystem path,
+#: not a semantic name. :func:`resolve_identity_for_node` falls back to
+#: ``node.label`` for ``qualified_name`` when no explicit ``qualified_name``
+#: attr is present -- for these kinds that fallback silently hands back the
+#: raw (checkout-root-dependent) path, so :func:`_neighbor_identity` must
+#: route them to the path-normalization branch directly rather than trust
+#: that fallback (Codex review: real header_graph/source_graph header nodes
+#: use full path labels).
+_FILE_LIKE_KINDS: frozenset[str] = frozenset({"header", "file"})
+
+
 def _neighbor_identity(node: GraphNode) -> str:
     """A checkout-root-independent, kind-disambiguated identity for a graph
-    node used as a *neighbor* in :func:`_structural_context`.
+    node used as a *neighbor* in :func:`_all_structural_contexts`.
 
     Neither the neighbor's raw node id (checkout-root/rename-dependent) nor
     its bare kind alone (collides two genuinely different parents of the
     same kind, e.g. two different structs each losing/gaining an unrelated
-    field — Codex review) is safe here. Prefers the neighbor's own resolved
-    qualified name (stable, not path-based — covers declaration/type
-    neighbors); falls back to a project-relative form of its declaring
-    path/label (covers header/file neighbors, which have no qualified
-    name); falls back to bare kind only when neither fact is available, so
-    the tuple this feeds is never actually empty.
+    field — Codex review) is safe here. For a file-like neighbor (see
+    :data:`_FILE_LIKE_KINDS`), always uses a project-relative form of its
+    declaring path/label -- never its resolved "qualified name", which for
+    these kinds is only ever the raw path via label fallback. For every
+    other kind, prefers the neighbor's own resolved qualified name (stable,
+    not path-based); falls back to bare kind only when neither fact is
+    available, so the tuple this feeds is never actually empty.
     """
+    if node.kind in _FILE_LIKE_KINDS:
+        path = str(node.attrs.get("def_file") or node.attrs.get("file") or node.label or "")
+        return f"{node.kind}:{_project_relative_path(path)}" if path else node.kind
     ident = resolve_identity_for_node(node)
     if ident.qualified_name:
         return f"{node.kind}:{ident.qualified_name}"
-    path = str(node.attrs.get("def_file") or node.attrs.get("file") or node.label or "")
+    path = str(node.attrs.get("def_file") or node.attrs.get("file") or "")
     if path:
         return f"{node.kind}:{_project_relative_path(path)}"
     return node.kind
 
 
-def _structural_context(
-    node_id: str, graph: SourceGraphSummary
-) -> frozenset[tuple[str, str, str]]:
-    """The set of (direction, edge_kind+role, neighbor_identity) tuples this
-    node participates in — its "position" in the graph, independent of its
-    own id/name. ``neighbor_identity`` (see :func:`_neighbor_identity` —
-    not the neighbor's own raw node id, which is checkout-root-dependent,
-    and not bare kind alone, which collides unrelated same-kind parents) is
-    a last-resort, weakest-tier signal, only trusted when the resulting
-    position is unique among same-kind candidates (see the module
-    docstring's "structural-context match" tier).
+def _all_structural_contexts(
+    graph: SourceGraphSummary,
+) -> dict[str, frozenset[tuple[str, str, str]]]:
+    """Every node's structural "position" in *graph* — the set of
+    (direction, edge_kind+role, neighbor_identity) tuples it participates
+    in, independent of its own id/name. ``neighbor_identity`` (see
+    :func:`_neighbor_identity` — not the neighbor's own raw node id, which
+    is checkout-root-dependent, and not bare kind alone, which collides
+    unrelated same-kind parents) is a last-resort, weakest-tier signal,
+    only trusted when the resulting position is unique among same-kind
+    candidates (see the module docstring's "structural-context match"
+    tier).
+
+    Computed for every node in one pass (a single scan over ``graph.edges``,
+    with each node's own identity resolved exactly once) rather than
+    per-node-per-call: Tier 3 below calls this once per side per kind group,
+    but each of those calls previously recomputed every node's identity
+    AND rescanned every edge from scratch for every single node it probed
+    (including the O(candidates²) sibling-uniqueness check) — on a large
+    graph (e.g. a template/SYCL-heavy header closure) that blew up into a
+    real CI timeout (Codex review round; caught by CI, not a review
+    comment).
     """
     identity_by_id = {n.id: _neighbor_identity(n) for n in graph.nodes}
-    ctx: set[tuple[str, str, str]] = set()
+    ctx: dict[str, set[tuple[str, str, str]]] = {n.id: set() for n in graph.nodes}
     for e in graph.edges:
         role = str(e.attrs.get("role", ""))
         tag = f"{e.kind}:{role}" if role else e.kind
-        if e.dst == node_id:
-            ctx.add(("in", tag, identity_by_id.get(e.src, "")))
-        if e.src == node_id:
-            ctx.add(("out", tag, identity_by_id.get(e.dst, "")))
-    return frozenset(ctx)
+        if e.dst in ctx:
+            ctx[e.dst].add(("in", tag, identity_by_id.get(e.src, "")))
+        if e.src in ctx:
+            ctx[e.src].add(("out", tag, identity_by_id.get(e.dst, "")))
+    return {nid: frozenset(c) for nid, c in ctx.items()}
 
 
 def _classify_outcome(
@@ -294,6 +331,12 @@ def reconcile_added_removed(
 
     matched_old: set[str] = set()
     matched_new: set[str] = set()
+
+    # Computed once per side, for the whole graph -- not per kind, and not
+    # per node-probed-in-Tier-3 (see _all_structural_contexts' own
+    # docstring for why the latter mattered on a large graph).
+    old_contexts = _all_structural_contexts(old_graph)
+    new_contexts = _all_structural_contexts(new_graph)
 
     for kind in sorted(set(removed_by_kind) | set(added_by_kind)):
         old_list = removed_by_kind.get(kind, [])
@@ -411,14 +454,14 @@ def reconcile_added_removed(
         for n in remaining_new:
             if n.id in matched_new:
                 continue
-            ctx = _structural_context(n.id, new_graph)
+            ctx = new_contexts.get(n.id, frozenset())
             if ctx:
                 ctx_new.setdefault(ctx, []).append(n.id)
         for old_node in remaining_old:
             oid = old_node.id
             if oid in matched_old:
                 continue
-            ctx = _structural_context(oid, old_graph)
+            ctx = old_contexts.get(oid, frozenset())
             if not ctx:
                 continue
             candidates = [c for c in ctx_new.get(ctx, []) if c not in matched_new]
@@ -432,7 +475,7 @@ def reconcile_added_removed(
                     for n in remaining_old
                     if n.id != oid
                     and n.id not in matched_old
-                    and _structural_context(n.id, old_graph) == ctx
+                    and old_contexts.get(n.id, frozenset()) == ctx
                 ]
                 if not sibling_old_matches:
                     new_node = next(n for n in new_list if n.id == cand)
@@ -466,7 +509,7 @@ def reconcile_added_removed(
         for new_node in new_list:
             if new_node.id in matched_new:
                 continue
-            ctx = _structural_context(new_node.id, new_graph)
+            ctx = new_contexts.get(new_node.id, frozenset())
             is_ambiguous_new = ctx in ctx_new and len(ctx_new.get(ctx, [])) > 1
             if is_ambiguous_new and new_node not in result.ambiguous_new:
                 result.ambiguous_new.append(new_node)

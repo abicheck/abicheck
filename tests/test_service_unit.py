@@ -2353,6 +2353,33 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
         # final merged-snapshot attach must also be off since dwarf_only=True.
         assert all(not h and not i for h, i in calls)
 
+    def test_elf_symbols_only_does_not_attach_header_graph(self, tmp_path):
+        """Codex review: symbols_only=True also means "ignore headers
+        entirely" -- dumper.dump()'s own `if symbols_only or not headers:`
+        gate skips header-based type expansion for that case, same as
+        dwarf_only skips header parsing. The header-graph attach must not
+        silently re-parse headers into L2 build_source evidence for a
+        snapshot the caller explicitly requested as symbols-only."""
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        header = tmp_path / "api.h"
+        header.write_text("void f();\n")
+        snap = AbiSnapshot(library="lib", version="1.0", from_headers=False)
+        calls: list[tuple[bool, bool]] = []
+
+        def _fake_attach(_snap, header_graph, header_graph_includes, *_args, **_kwargs):
+            calls.append((header_graph, header_graph_includes))
+            return _snap
+
+        with (
+            patch("abicheck.service._dump_elf", return_value=snap),
+            patch("abicheck.service._attach_header_graph", side_effect=_fake_attach),
+            patch("abicheck.service.attach_clang_layout", side_effect=lambda s, *a, **k: s),
+        ):
+            run_dump(p, "elf", [header], [], "1.0", "c++", symbols_only=True)
+
+        assert calls == [(False, False)]
+
 
 class TestCliNativeBinaryHeaderWiring:
     """CLI _dump_native_binary must forward headers to service._dump_pe/_dump_macho."""

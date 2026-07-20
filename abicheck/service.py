@@ -587,12 +587,13 @@ def run_dump(
         # function's ELF/PE/Mach-O tail below calls it unconditionally), so
         # re-running it on merged would just re-invoke the external tool for
         # nothing left to backfill (review finding).
-        # dwarf_only means "ignore headers entirely" -- same rationale as the
-        # ELF tail's own _attach_header_graph call below (Codex review).
+        # dwarf_only/symbols_only both mean "ignore headers entirely" -- same
+        # rationale as the ELF tail's own _attach_header_graph call below
+        # (Codex review).
         return _attach_header_graph(
             merged,
-            _HEADER_GRAPH_ENABLED and not dwarf_only,
-            _HEADER_GRAPH_INCLUDES_ENABLED and not dwarf_only,
+            _HEADER_GRAPH_ENABLED and not dwarf_only and not symbols_only,
+            _HEADER_GRAPH_INCLUDES_ENABLED and not dwarf_only and not symbols_only,
             _headers,
             _includes,
             lang,
@@ -625,18 +626,25 @@ def run_dump(
         _try_attach_python_ext_metadata(snap)
         _try_attach_python_api_surface(snap)
         _try_attach_numpy_capi_surface(snap, path)
-        # dwarf_only means "ignore headers entirely" -- _dump_elf above
-        # already honors that (it skips header-root inference/include
-        # validation and warns when headers are supplied alongside it), so
-        # the header-graph attach must not silently re-parse those same
-        # headers and attach L2 build_source evidence to what the caller
-        # explicitly requested as a DWARF-only snapshot (Codex review).
+        # dwarf_only/symbols_only both mean "ignore headers entirely" --
+        # _dump_elf above already honors that for both (dwarf_only skips
+        # header-root inference/include validation and warns when headers
+        # are supplied alongside it; symbols_only skips the header-based
+        # type-expansion pass in dumper.dump() -- see its own
+        # `if symbols_only or not headers:` gate), so the header-graph
+        # attach must not silently re-parse those same headers and attach
+        # L2 build_source evidence to what the caller explicitly requested
+        # as a DWARF-only or symbols-only snapshot (Codex review).
         snap = _attach_header_graph(
             snap,
-            _HEADER_GRAPH_ENABLED and not _skip_header_graph_attach and not dwarf_only,
+            _HEADER_GRAPH_ENABLED
+            and not _skip_header_graph_attach
+            and not dwarf_only
+            and not symbols_only,
             _HEADER_GRAPH_INCLUDES_ENABLED
             and not _skip_header_graph_attach
-            and not dwarf_only,
+            and not dwarf_only
+            and not symbols_only,
             _headers,
             _includes,
             lang,

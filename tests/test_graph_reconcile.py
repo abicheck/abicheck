@@ -180,6 +180,71 @@ def test_structural_context_uses_neighbor_kind_not_raw_id() -> None:
     assert pair.outcome == OUTCOME_RENAMED
 
 
+def test_structural_context_normalizes_real_header_node_labels() -> None:
+    """Codex review, fresh evidence: real header_graph/source_graph header
+    nodes set ``label=path`` (the full declaring path), not a basename --
+    resolve_identity_for_node() falls back to that label for
+    ``qualified_name`` when no explicit qualified_name attr exists, so
+    naively trusting that fallback in _neighbor_identity would hand back
+    the raw, checkout-root-dependent path instead of a normalized one. A
+    unique rename under the same public header (different checkout roots on
+    each side) must still reconcile via the structural-context tier."""
+    old_parent = GraphNode(
+        id="header:///tmp/checkout_old/include/api.h",
+        kind="header",
+        label="/tmp/checkout_old/include/api.h",
+    )
+    new_parent = GraphNode(
+        id="header:///tmp/checkout_new/include/api.h",
+        kind="header",
+        label="/tmp/checkout_new/include/api.h",
+    )
+    old_internal = GraphNode(
+        id="type://demo::detail::RawConfig",
+        kind="record_type",
+        label="demo::detail::RawConfig",
+        attrs={"qualified_name": "demo::detail::RawConfig", "def_file": "detail.h"},
+    )
+    new_internal = GraphNode(
+        id="type://demo::detail::RawConfigV2",
+        kind="record_type",
+        label="demo::detail::RawConfigV2",
+        attrs={"qualified_name": "demo::detail::RawConfigV2", "def_file": "detail.h"},
+    )
+    old_edge = GraphEdge(
+        src=old_parent.id,
+        dst=old_internal.id,
+        kind="SOURCE_DECLARES",
+        attrs={"role": "declares"},
+    )
+    new_edge = GraphEdge(
+        src=new_parent.id,
+        dst=new_internal.id,
+        kind="SOURCE_DECLARES",
+        attrs={"role": "declares"},
+    )
+    old_g = _graph([old_parent, old_internal], [old_edge])
+    new_g = _graph([new_parent, new_internal], [new_edge])
+    result = reconcile_added_removed([old_internal], [new_internal], old_g, new_g)
+    assert len(result.reconciled) == 1
+    pair = result.reconciled[0]
+    assert pair.match_kind == "structural_context"
+    assert pair.outcome == OUTCOME_RENAMED
+
+
+def test_project_relative_path_normalizes_windows_separators() -> None:
+    """Codex review: PurePosixPath treats a backslash as an ordinary
+    filename character, not a separator, so a Windows-style declaring path
+    would never be split at all -- the project-root-marker search would
+    never find "include" and would compare the raw (checkout-root-
+    dependent) path instead."""
+    from abicheck.buildsource.graph_reconcile import _project_relative_path
+
+    old = _project_relative_path(r"C:\old\include\api.h")
+    new = _project_relative_path(r"D:\new\include\api.h")
+    assert old == new == "include/api.h"
+
+
 def test_move_reconciles_when_file_changes_but_name_does_not() -> None:
     old_node = GraphNode(
         id="type://old",
@@ -716,3 +781,69 @@ def test_reconciliation_never_deletes_or_downgrades_artifact_finding() -> None:
     assert len(enriched.changes) == len(baseline.changes) + len(graph_findings)
     for c in reconciled_in_result:
         assert c not in enriched.breaking
+
+
+def test_reconcile_added_removed_stays_fast_on_a_large_graph() -> None:
+    """Perf regression guard (Codex review round -> real CI timeout on
+    case126_sycl_device_impl_ptr, a template/SYCL-heavy header closure):
+    an earlier version of the structural-context tier recomputed every
+    node's identity AND rescanned every edge from scratch on every single
+    probe (including an O(candidates^2) sibling-uniqueness check), which
+    was fine on the small graphs every other test here uses but blew up
+    into a multi-minute hang on a graph with a few hundred nodes. This
+    builds a graph of that rough shape (many same-kind siblings under a
+    shared parent, each independently renamed) and asserts reconciliation
+    completes well within a generous bound."""
+    import time
+
+    n = 300
+    parent = GraphNode(id="type://ns::Parent", kind="record_type", label="ns::Parent")
+    old_nodes = [parent]
+    new_nodes = [parent]
+    old_edges = []
+    new_edges = []
+    for i in range(n):
+        old_field = GraphNode(
+            id=f"type://ns::Field{i}",
+            kind="record_type",
+            label=f"ns::Field{i}",
+            attrs={"qualified_name": f"ns::Field{i}", "def_file": "detail.h"},
+        )
+        new_field = GraphNode(
+            id=f"type://ns::FieldRenamed{i}",
+            kind="record_type",
+            label=f"ns::FieldRenamed{i}",
+            attrs={"qualified_name": f"ns::FieldRenamed{i}", "def_file": "detail.h"},
+        )
+        old_nodes.append(old_field)
+        new_nodes.append(new_field)
+        old_edges.append(
+            GraphEdge(
+                src=parent.id,
+                dst=old_field.id,
+                kind="TYPE_HAS_FIELD_TYPE",
+                attrs={"role": f"field{i}"},
+            )
+        )
+        new_edges.append(
+            GraphEdge(
+                src=parent.id,
+                dst=new_field.id,
+                kind="TYPE_HAS_FIELD_TYPE",
+                attrs={"role": f"field{i}"},
+            )
+        )
+
+    old_g = _graph(old_nodes, old_edges)
+    new_g = _graph(new_nodes, new_edges)
+    old_fields = old_nodes[1:]
+    new_fields = new_nodes[1:]
+
+    start = time.monotonic()
+    result = reconcile_added_removed(old_fields, new_fields, old_g, new_g)
+    elapsed = time.monotonic() - start
+
+    # Distinct roles keep every position unique, so every pair reconciles
+    # via structural context -- correctness check alongside the perf one.
+    assert len(result.reconciled) == n
+    assert elapsed < 10.0, f"reconciliation took {elapsed:.2f}s for {n} nodes"
