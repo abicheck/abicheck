@@ -161,6 +161,20 @@ def _require_str_list(d: dict[str, Any], key: str, *, where: str) -> list[str]:
     return list(raw)
 
 
+def _parse_checks_list(d: dict[str, Any], *, where: str) -> list[CheckSpec]:
+    """Parse an optional ``checks:`` list, shared by ``TargetSpec``/
+    ``BundleSpec`` (both accept the identical shape — review finding)."""
+    checks_raw = d.get("checks")
+    if checks_raw is not None and not isinstance(checks_raw, list):
+        raise ValueError(f"{where}.checks must be a list")
+    checks: list[CheckSpec] = []
+    for i, c in enumerate(checks_raw or []):
+        if not isinstance(c, dict):
+            raise ValueError(f"{where}.checks[{i}] must be a mapping")
+        checks.append(CheckSpec.from_dict(c, where=f"{where}.checks[{i}]"))
+    return checks
+
+
 def _require_mapping(data: object, block: str) -> dict[str, Any]:
     if data is None:
         return {}
@@ -311,14 +325,7 @@ class TargetSpec:
         bundle_only = d.get("bundle_only", False)
         if not isinstance(bundle_only, bool):
             raise ValueError(f"{where}.bundle_only must be a boolean")
-        checks_raw = d.get("checks")
-        if checks_raw is not None and not isinstance(checks_raw, list):
-            raise ValueError(f"{where}.checks must be a list")
-        checks: list[CheckSpec] = []
-        for i, c in enumerate(checks_raw or []):
-            if not isinstance(c, dict):
-                raise ValueError(f"{where}.checks[{i}] must be a mapping")
-            checks.append(CheckSpec.from_dict(c, where=f"{where}.checks[{i}]"))
+        checks = _parse_checks_list(d, where=where)
         return cls(
             id=name,
             kind=kind,
@@ -374,14 +381,7 @@ class BundleSpec:
         bad = [t for t in targets if not isinstance(t, str)]
         if bad:
             raise ValueError(f"{where}.targets must be a list of strings, got {bad!r}")
-        checks_raw = d.get("checks")
-        if checks_raw is not None and not isinstance(checks_raw, list):
-            raise ValueError(f"{where}.checks must be a list")
-        checks: list[CheckSpec] = []
-        for i, c in enumerate(checks_raw or []):
-            if not isinstance(c, dict):
-                raise ValueError(f"{where}.checks[{i}] must be a mapping")
-            checks.append(CheckSpec.from_dict(c, where=f"{where}.checks[{i}]"))
+        checks = _parse_checks_list(d, where=where)
         return cls(id=name, targets=[str(t) for t in targets], checks=checks)
 
 
@@ -513,6 +513,17 @@ class ProjectTargetsConfig:
         fields, identifier charset) are **not** raised here — see
         :func:`validate_project_targets`, which needs the fully-assembled
         config to check references across blocks.
+
+        **A clean parse from this method alone does not mean the config is
+        usable.** ``CheckSpec.from_dict`` only checks ``depth``/``gate_mode``/
+        ``channel`` are non-empty strings here; it does *not* check ``depth``
+        is one of :data:`CHECK_DEPTHS`, ``gate_mode`` is one of
+        :data:`GATE_MODES`, or ``channel`` resolves to a declared baseline
+        channel — those (and every other cross-reference rule) are
+        :func:`validate_project_targets`'s job. Every real caller (today,
+        only ``abicheck project-targets validate``) must call both in
+        sequence; treating a successful ``from_dict`` alone as "this config
+        is valid" will let e.g. ``depth: "banana"`` through unnoticed.
 
         Every key in *data* is checked against the *full* ``.abicheck.yml``
         top-level key set (:data:`~.inline.KNOWN_TOP_LEVEL_KEYS`), not just
