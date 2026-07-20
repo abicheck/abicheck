@@ -35,7 +35,7 @@ doc PRs need `mkdocs build --strict` + `check_ai_readiness.py`).
 These fix real defects the audit (ADR-047 §"What the audit found")
 identified in the *existing* surface. None require the new primitives.
 
-### P0.1 — Runtime warning when a mode-scoped input is set on an incompatible mode
+### P0.1 — Runtime warning when a mode-scoped input is set on an incompatible mode — **done**
 
 **Problem:** `debug-info1/2`, `devel-pkg1/2`, `dso-only`,
 `include-private-dso`, `keep-extracted`, `fail-on-removed-library`, `jobs`,
@@ -71,6 +71,16 @@ column.
 
 **PR boundary:** one PR — shell + input descriptions + tests together (small
 enough not to split further).
+
+**Status:** implemented. `action/validate-inputs.sh` now warns
+(`::warning::`, exit 0) when `debug-info1`/`debug-info2`, `devel-pkg1`/
+`devel-pkg2`, `dso-only`, `include-private-dso`, `keep-extracted`,
+`fail-on-removed-library`, or `jobs` are set on a mode/operand combination
+outside "compare mode, directory/package operands only", when `abi-baseline`
+is set outside `compare`/`scan` mode, or when the deprecated `estimate`/
+`audit` scan-only aliases are set outside `scan` mode. `action.yml` forwards
+the new inputs to the validation step; `tests/test_action_validate_inputs.py`
+covers each case (warn and silent) via `TestModeScopedInputWarnings`.
 
 ### P0.2 — `collect-facts` `phase: auto` fail-loud for wrapper/plugin
 

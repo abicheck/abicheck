@@ -60,6 +60,10 @@ _fail() {
   exit 1
 }
 
+_warn() {
+  echo "::warning::$1"
+}
+
 case "$MODE" in
   dump)
     if [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; then
@@ -123,6 +127,69 @@ case "$MODE" in
     _fail "Unknown mode '$MODE'. Use 'compare', 'dump', 'scan', 'deps-tree', or 'deps-compare'."
     ;;
 esac
+
+# Mode-scoped inputs: each of these is only forwarded/consumed in a subset
+# of modes (per-input scope is already documented inline in action.yml's
+# `description:` text), but setting one on an incompatible mode previously
+# produced no feedback at all -- a silent no-op. These are legal-but-inert
+# combinations, not errors, so warn (job-summary annotation) rather than
+# fail the step outright.
+_RELEASE_STYLE_OPERAND=false
+if { [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; } \
+   || { [[ -n "$OLD_LIBRARY" ]] && _is_release_style_operand "$OLD_LIBRARY"; }; then
+  _RELEASE_STYLE_OPERAND=true
+fi
+
+# debug-info1/2, devel-pkg1/2, dso-only, include-private-dso, keep-extracted,
+# fail-on-removed-library, jobs: compare mode, directory/package operands only
+# (action/run.sh's `_is_release_style_operand()` guard). Name/value kept as
+# separate parallel arrays (not a single colon-joined string) since these
+# values are often paths and may legitimately contain a colon themselves.
+_pkg_input_names=(debug-info1 debug-info2 devel-pkg1 devel-pkg2)
+_pkg_input_values=(
+  "${INPUT_DEBUG_INFO1:-}"
+  "${INPUT_DEBUG_INFO2:-}"
+  "${INPUT_DEVEL_PKG1:-}"
+  "${INPUT_DEVEL_PKG2:-}"
+)
+for _i in "${!_pkg_input_names[@]}"; do
+  if [[ -n "${_pkg_input_values[$_i]}" ]] && { [[ "$MODE" != "compare" ]] || [[ "$_RELEASE_STYLE_OPERAND" != "true" ]]; }; then
+    _warn "${_pkg_input_names[$_i]} is set but has no effect: it only applies to mode: compare with a directory/package old-library/new-library operand (mode is '$MODE')."
+  fi
+done
+
+_bool_input_names=(dso-only include-private-dso keep-extracted fail-on-removed-library)
+_bool_input_values=(
+  "${INPUT_DSO_ONLY:-false}"
+  "${INPUT_INCLUDE_PRIVATE_DSO:-false}"
+  "${INPUT_KEEP_EXTRACTED:-false}"
+  "${INPUT_FAIL_ON_REMOVED_LIBRARY:-false}"
+)
+for _i in "${!_bool_input_names[@]}"; do
+  if [[ "${_bool_input_values[$_i]}" == "true" ]] && { [[ "$MODE" != "compare" ]] || [[ "$_RELEASE_STYLE_OPERAND" != "true" ]]; }; then
+    _warn "${_bool_input_names[$_i]} is set but has no effect: it only applies to mode: compare with a directory/package old-library/new-library operand (mode is '$MODE')."
+  fi
+done
+
+_JOBS="${INPUT_JOBS:-0}"
+if [[ "$_JOBS" != "0" ]] && { [[ "$MODE" != "compare" ]] || [[ "$_RELEASE_STYLE_OPERAND" != "true" ]]; }; then
+  _warn "jobs is set but has no effect: it only applies to mode: compare with a directory/package old-library/new-library operand (mode is '$MODE')."
+fi
+
+# abi-baseline: compare mode (used as old-library) or scan mode (used as the
+# scan baseline) only.
+_ABI_BASELINE="${INPUT_ABI_BASELINE:-}"
+if [[ -n "$_ABI_BASELINE" && "$MODE" != "compare" && "$MODE" != "scan" ]]; then
+  _warn "abi-baseline is set but has no effect: it only applies to mode: compare or mode: scan (mode is '$MODE')."
+fi
+
+# estimate, audit: deprecated scan-mode-only aliases.
+if [[ "${INPUT_ESTIMATE:-false}" == "true" && "$MODE" != "scan" ]]; then
+  _warn "estimate is set but has no effect: it only applies to mode: scan (mode is '$MODE')."
+fi
+if [[ "${INPUT_AUDIT:-false}" == "true" && "$MODE" != "scan" ]]; then
+  _warn "audit is set but has no effect: it only applies to mode: scan (mode is '$MODE')."
+fi
 
 if [[ "$UPLOAD_SARIF" == "true" && "$MODE" != "compare" ]]; then
   _fail "upload-sarif is only meaningful with mode: compare (single-pair operands) — mode: $MODE never produces a SARIF report to upload. Remove upload-sarif, or switch to mode: compare."
