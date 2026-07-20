@@ -91,10 +91,43 @@ class TestDumpCacheExtraKey:
         k2 = _dump_cache_extra_key("pe", "auto", None, None)
         assert k1 != k2
 
+    def test_binary_only_key_does_not_fingerprint_path_tools(self):
+        with patch("abicheck.dumper._tool_identity") as identity:
+            key = _dump_cache_extra_key(
+                "elf", "auto", None, None, uses_ast=False
+            )
+        assert "\x00no-ast\x00" in key
+        identity.assert_not_called()
+
+    def test_binary_only_key_includes_public_scope(self, tmp_path):
+        first = _dump_cache_extra_key(
+            "elf", "auto", [tmp_path / "public" / "api.h"], None,
+            uses_ast=False,
+        )
+        second = _dump_cache_extra_key(
+            "elf", "auto", [tmp_path / "private" / "api.h"], None,
+            uses_ast=False,
+        )
+        assert first != second
+
     def test_differs_by_header_backend(self):
         k1 = _dump_cache_extra_key("elf", "auto", None, None)
         k2 = _dump_cache_extra_key("elf", "clang", None, None)
         assert k1 != k2
+
+    def test_c_and_cpp_fingerprint_their_actual_compilers(self):
+        def compiler_bin(name, _path, _prefix):  # noqa: ANN001
+            return ("/toolchain/gcc" if name == "cc" else "/toolchain/g++", name)
+
+        with (
+            patch("abicheck.dumper._resolve_compiler_binary", side_effect=compiler_bin),
+            patch("abicheck.dumper._tool_identity", side_effect=lambda value: value),
+        ):
+            c_key = _dump_cache_extra_key("elf", "castxml", None, None, "c")
+            cpp_key = _dump_cache_extra_key("elf", "castxml", None, None, "c++")
+        assert c_key != cpp_key
+        assert "/toolchain/gcc" in c_key
+        assert "/toolchain/g++" in cpp_key
 
     def test_differs_by_public_headers(self, tmp_path):
         k1 = _dump_cache_extra_key("elf", "auto", None, None)
@@ -144,6 +177,7 @@ class TestDumpCacheExtraKey:
         # hashes the RESOLVED backend, not merely "make every raw string
         # distinct".
         monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
+        monkeypatch.delenv("ABICHECK_ALLOW_AST_FALLBACK", raising=False)
         k_auto = _dump_cache_extra_key("elf", "auto", None, None)
         k_castxml = _dump_cache_extra_key("elf", "castxml", None, None)
         assert k_auto == k_castxml
@@ -202,12 +236,52 @@ class TestDumpCacheExtraKey:
         # the layout tool's identity must be hashed for this case too, even
         # though resolved_backend here is "castxml".
         monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
+        monkeypatch.setenv("ABICHECK_ALLOW_AST_FALLBACK", "1")
         monkeypatch.delenv("ABICHECK_CLANG_LAYOUT_TOOL", raising=False)
         with patch(
             "abicheck.clang_layout_tool.shutil.which", return_value=None
         ):
             k_before = _dump_cache_extra_key("elf", "auto", None, None)
         monkeypatch.setenv("ABICHECK_CLANG_LAYOUT_TOOL", "/opt/abicheck-clang-layout-tool")
+        k_after = _dump_cache_extra_key("elf", "auto", None, None)
+        assert k_before != k_after
+
+    def test_layout_tool_irrelevant_when_auto_fallback_is_disabled(
+        self, monkeypatch
+    ):
+        monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
+        monkeypatch.delenv("ABICHECK_ALLOW_AST_FALLBACK", raising=False)
+        monkeypatch.delenv("ABICHECK_CLANG_LAYOUT_TOOL", raising=False)
+        k_before = _dump_cache_extra_key("elf", "auto", None, None)
+        monkeypatch.setenv(
+            "ABICHECK_CLANG_LAYOUT_TOOL", "/opt/abicheck-clang-layout-tool"
+        )
+        k_after = _dump_cache_extra_key("elf", "auto", None, None)
+        assert k_before == k_after
+
+    def test_invalid_frontend_pin_uses_same_fallback_cache_identity(
+        self, monkeypatch
+    ):
+        monkeypatch.setenv("ABICHECK_AST_FRONTEND", "invalid-value")
+        monkeypatch.setenv("ABICHECK_ALLOW_AST_FALLBACK", "1")
+        monkeypatch.delenv("ABICHECK_CLANG_LAYOUT_TOOL", raising=False)
+        with patch("abicheck.clang_layout_tool.shutil.which", return_value=None):
+            k_before = _dump_cache_extra_key("elf", "auto", None, None)
+        monkeypatch.setenv(
+            "ABICHECK_CLANG_LAYOUT_TOOL", "/opt/abicheck-clang-layout-tool"
+        )
+        k_after = _dump_cache_extra_key("elf", "auto", None, None)
+        assert k_before != k_after
+
+    def test_auto_frontend_env_remains_fallback_eligible(self, monkeypatch):
+        monkeypatch.setenv("ABICHECK_AST_FRONTEND", "auto")
+        monkeypatch.setenv("ABICHECK_ALLOW_AST_FALLBACK", "1")
+        monkeypatch.delenv("ABICHECK_CLANG_LAYOUT_TOOL", raising=False)
+        with patch("abicheck.clang_layout_tool.shutil.which", return_value=None):
+            k_before = _dump_cache_extra_key("elf", "auto", None, None)
+        monkeypatch.setenv(
+            "ABICHECK_CLANG_LAYOUT_TOOL", "/opt/abicheck-clang-layout-tool"
+        )
         k_after = _dump_cache_extra_key("elf", "auto", None, None)
         assert k_before != k_after
 
@@ -303,6 +377,30 @@ class TestCachedRunDump:
 
         assert len(calls) == 1
         assert snap1.functions[0].name == snap2.functions[0].name == "foo"
+
+    def test_input_change_during_dump_is_not_cached_under_new_key(self, tmp_path):
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF fake content")
+        header = tmp_path / "api.h"
+        header.write_text("OLD", encoding="utf-8")
+        calls: list[str] = []
+
+        def fake_run_dump(path, binary_fmt, headers, includes, version, lang, **kwargs):
+            value = header.read_text(encoding="utf-8")
+            calls.append(value)
+            if value == "OLD":
+                header.write_text("NEW", encoding="utf-8")
+            return _sample_snap(name=value)
+
+        first = cached_run_dump(
+            fake_run_dump, binary, "elf", [header], [], "1.0", "c++"
+        )
+        second = cached_run_dump(
+            fake_run_dump, binary, "elf", [header], [], "1.0", "c++"
+        )
+        assert first.functions[0].name == "OLD"
+        assert second.functions[0].name == "NEW"
+        assert calls == ["OLD", "NEW"]
 
     def test_binary_content_change_invalidates_cache(self, tmp_path):
         binary = tmp_path / "lib.so"

@@ -11,4 +11,3 @@
   `-isystem`. `_resolve_probe_compiler` now reuses `dumper_clang`'s
   `_is_clang_family_binary` (already used elsewhere for the same alias list)
   so these aliases correctly fall through to a real `g++`/`gcc` on `PATH`.
-

@@ -524,6 +524,7 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
     "compare": (
         "--annotate",
         "--annotate-additions",
+        "--allow-ast-frontend-fallback",
         "--ast-frontend",
         "--btf",
         "--bundle-cohort",

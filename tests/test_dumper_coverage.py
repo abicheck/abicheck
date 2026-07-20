@@ -6,9 +6,9 @@ dump() elf_meta symbol filtering and lang parameter,
 _CastxmlParser edge cases (builtin elements, anonymous fields,
 members-attribute parsing, _pointer_depth, _underlying_type_name).
 """
+
 from __future__ import annotations
 
-import shutil
 import warnings
 from pathlib import Path
 from types import SimpleNamespace
@@ -58,7 +58,10 @@ def test_cheap_debug_presence_honors_forced_dwarf(monkeypatch, tmp_path):
     so_path.write_bytes(b"\x7fELF")
     monkeypatch.setattr(
         "abicheck.dwarf_presence.cheap_dwarf_presence_metadata",
-        lambda _p: (DwarfMetadata(has_dwarf=True), AdvancedDwarfMetadata(has_dwarf=True)),
+        lambda _p: (
+            DwarfMetadata(has_dwarf=True),
+            AdvancedDwarfMetadata(has_dwarf=True),
+        ),
     )
 
     dwarf_meta, dwarf_adv = cheap_debug_presence_metadata(
@@ -125,9 +128,14 @@ def test_cheap_debug_presence_auto_prefers_dwarf_when_present(monkeypatch, tmp_p
     monkeypatch.setattr("abicheck.dwarf_presence._is_kernel_binary", lambda _p: False)
     monkeypatch.setattr(
         "abicheck.dwarf_presence.cheap_dwarf_presence_metadata",
-        lambda _p: (DwarfMetadata(has_dwarf=True), AdvancedDwarfMetadata(has_dwarf=True)),
+        lambda _p: (
+            DwarfMetadata(has_dwarf=True),
+            AdvancedDwarfMetadata(has_dwarf=True),
+        ),
     )
-    monkeypatch.setattr("abicheck.dwarf_presence._has_btf", lambda _p: pytest.fail("DWARF wins"))
+    monkeypatch.setattr(
+        "abicheck.dwarf_presence._has_btf", lambda _p: pytest.fail("DWARF wins")
+    )
 
     dwarf_meta, dwarf_adv = cheap_debug_presence_metadata(so_path)
 
@@ -145,10 +153,15 @@ def test_cheap_debug_presence_auto_falls_back_to_btf(monkeypatch, tmp_path):
     monkeypatch.setattr("abicheck.dwarf_presence._is_kernel_binary", lambda _p: False)
     monkeypatch.setattr(
         "abicheck.dwarf_presence.cheap_dwarf_presence_metadata",
-        lambda _p: (DwarfMetadata(has_dwarf=False), AdvancedDwarfMetadata(has_dwarf=False)),
+        lambda _p: (
+            DwarfMetadata(has_dwarf=False),
+            AdvancedDwarfMetadata(has_dwarf=False),
+        ),
     )
     monkeypatch.setattr("abicheck.dwarf_presence._has_btf", lambda _p: True)
-    monkeypatch.setattr("abicheck.dwarf_presence._has_ctf", lambda _p: pytest.fail("BTF wins"))
+    monkeypatch.setattr(
+        "abicheck.dwarf_presence._has_ctf", lambda _p: pytest.fail("BTF wins")
+    )
 
     dwarf_meta, dwarf_adv = cheap_debug_presence_metadata(so_path)
 
@@ -166,7 +179,10 @@ def test_cheap_debug_presence_auto_falls_back_to_ctf(monkeypatch, tmp_path):
     monkeypatch.setattr("abicheck.dwarf_presence._is_kernel_binary", lambda _p: False)
     monkeypatch.setattr(
         "abicheck.dwarf_presence.cheap_dwarf_presence_metadata",
-        lambda _p: (DwarfMetadata(has_dwarf=False), AdvancedDwarfMetadata(has_dwarf=False)),
+        lambda _p: (
+            DwarfMetadata(has_dwarf=False),
+            AdvancedDwarfMetadata(has_dwarf=False),
+        ),
     )
     monkeypatch.setattr("abicheck.dwarf_presence._has_btf", lambda _p: False)
     monkeypatch.setattr("abicheck.dwarf_presence._has_ctf", lambda _p: True)
@@ -187,7 +203,10 @@ def test_cheap_debug_presence_returns_empty_when_no_debug(monkeypatch, tmp_path)
     monkeypatch.setattr("abicheck.dwarf_presence._is_kernel_binary", lambda _p: False)
     monkeypatch.setattr(
         "abicheck.dwarf_presence.cheap_dwarf_presence_metadata",
-        lambda _p: (DwarfMetadata(has_dwarf=False), AdvancedDwarfMetadata(has_dwarf=False)),
+        lambda _p: (
+            DwarfMetadata(has_dwarf=False),
+            AdvancedDwarfMetadata(has_dwarf=False),
+        ),
     )
     monkeypatch.setattr("abicheck.dwarf_presence._has_btf", lambda _p: False)
     monkeypatch.setattr("abicheck.dwarf_presence._has_ctf", lambda _p: False)
@@ -198,7 +217,9 @@ def test_cheap_debug_presence_returns_empty_when_no_debug(monkeypatch, tmp_path)
     assert dwarf_adv.has_dwarf is False
 
 
-def test_cheap_debug_presence_helpers_treat_probe_errors_as_absent(monkeypatch, tmp_path):
+def test_cheap_debug_presence_helpers_treat_probe_errors_as_absent(
+    monkeypatch, tmp_path
+):
     import abicheck.btf_metadata as btf_metadata
     import abicheck.ctf_metadata as ctf_metadata
     from abicheck import dwarf_presence
@@ -225,7 +246,9 @@ def test_cheap_debug_presence_helpers_treat_probe_errors_as_absent(monkeypatch, 
 class TestCastxmlDumpBranches:
     def _setup(self, monkeypatch, tmp_path):
         """Common setup: castxml available, cache miss."""
-        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/castxml")
+        monkeypatch.setattr(
+            "abicheck.dumper._resolve_selected_tool", lambda _: "/mock/castxml"
+        )
         monkeypatch.setattr("abicheck.dumper._cache_key", lambda *a, **kw: "test_key")
 
         # Cache path that doesn't exist yet
@@ -342,6 +365,7 @@ class TestCastxmlDumpBranches:
 
 # ── dump() elf_meta symbol filtering and lang ──────────────────────────
 
+
 class TestDumpSymbolFiltering:
     def test_elf_meta_symbol_type_filtering(self, tmp_path, monkeypatch):
         """When elf_meta has symbols, they are split by type."""
@@ -362,9 +386,15 @@ class TestDumpSymbolFiltering:
                 ElfSymbol(name="obj_sym", sym_type=SymbolType.OBJECT, version=""),
             ],
         )
-        monkeypatch.setattr("abicheck.elf_metadata.parse_elf_metadata", lambda _p: elf_meta)
-        monkeypatch.setattr("abicheck.dwarf_metadata.parse_dwarf_metadata", lambda _p: None)
-        monkeypatch.setattr("abicheck.dwarf_advanced.parse_advanced_dwarf", lambda _p: None)
+        monkeypatch.setattr(
+            "abicheck.elf_metadata.parse_elf_metadata", lambda _p: elf_meta
+        )
+        monkeypatch.setattr(
+            "abicheck.dwarf_metadata.parse_dwarf_metadata", lambda _p: None
+        )
+        monkeypatch.setattr(
+            "abicheck.dwarf_advanced.parse_advanced_dwarf", lambda _p: None
+        )
 
         with warnings.catch_warnings(record=True):
             warnings.simplefilter("always")
@@ -385,9 +415,15 @@ class TestDumpSymbolFiltering:
             "abicheck.dumper._pyelftools_exported_symbols",
             lambda _p: (set(), set()),
         )
-        monkeypatch.setattr("abicheck.elf_metadata.parse_elf_metadata", lambda _p: ElfMetadata())
-        monkeypatch.setattr("abicheck.dwarf_metadata.parse_dwarf_metadata", lambda _p: None)
-        monkeypatch.setattr("abicheck.dwarf_advanced.parse_advanced_dwarf", lambda _p: None)
+        monkeypatch.setattr(
+            "abicheck.elf_metadata.parse_elf_metadata", lambda _p: ElfMetadata()
+        )
+        monkeypatch.setattr(
+            "abicheck.dwarf_metadata.parse_dwarf_metadata", lambda _p: None
+        )
+        monkeypatch.setattr(
+            "abicheck.dwarf_advanced.parse_advanced_dwarf", lambda _p: None
+        )
 
         with warnings.catch_warnings(record=True):
             warnings.simplefilter("always")
@@ -404,9 +440,15 @@ class TestDumpSymbolFiltering:
             "abicheck.dumper._pyelftools_exported_symbols",
             lambda _p: (set(), set()),
         )
-        monkeypatch.setattr("abicheck.elf_metadata.parse_elf_metadata", lambda _p: ElfMetadata())
-        monkeypatch.setattr("abicheck.dwarf_metadata.parse_dwarf_metadata", lambda _p: None)
-        monkeypatch.setattr("abicheck.dwarf_advanced.parse_advanced_dwarf", lambda _p: None)
+        monkeypatch.setattr(
+            "abicheck.elf_metadata.parse_elf_metadata", lambda _p: ElfMetadata()
+        )
+        monkeypatch.setattr(
+            "abicheck.dwarf_metadata.parse_dwarf_metadata", lambda _p: None
+        )
+        monkeypatch.setattr(
+            "abicheck.dwarf_advanced.parse_advanced_dwarf", lambda _p: None
+        )
 
         with warnings.catch_warnings(record=True):
             warnings.simplefilter("always")
@@ -440,7 +482,9 @@ class TestDumpSymbolFiltering:
         assert [f.mangled for f in snap.functions] == ["_Z3foov"]
         assert snap.elf_only_mode is True
 
-    def test_symbols_only_skips_header_ast_even_with_headers(self, tmp_path, monkeypatch):
+    def test_symbols_only_skips_header_ast_even_with_headers(
+        self, tmp_path, monkeypatch
+    ):
         """symbols_only is an exported-symbol surface even if callers pass headers."""
         from abicheck.dwarf_advanced import AdvancedDwarfMetadata
         from abicheck.dwarf_metadata import DwarfMetadata
@@ -482,6 +526,7 @@ class TestDumpSymbolFiltering:
 
 # ── _CastxmlParser edge cases ─────────────────────────────────────────
 
+
 def _xml_root(*children: Element) -> Element:
     root = Element("GCC_XML")
     for c in children:
@@ -498,8 +543,14 @@ class TestCastxmlParserBuiltinSkip:
         """Functions from <builtin> file are skipped."""
         builtin_file = Element("File", id="f_builtin", name="<builtin>")
         ft = _fund_type("t1", "void")
-        fn = Element("Function", id="fn1", name="__builtin_trap", mangled="__builtin_trap",
-                      returns="t1", file="f_builtin")
+        fn = Element(
+            "Function",
+            id="fn1",
+            name="__builtin_trap",
+            mangled="__builtin_trap",
+            returns="t1",
+            file="f_builtin",
+        )
         root = _xml_root(builtin_file, ft, fn)
         p = _CastxmlParser(root, {"__builtin_trap"}, set())
         assert p.parse_functions() == []
@@ -507,8 +558,14 @@ class TestCastxmlParserBuiltinSkip:
     def test_builtin_variable_skipped(self):
         builtin_file = Element("File", id="f_builtin", name="<built-in>")
         ft = _fund_type("t1", "int")
-        v = Element("Variable", id="v1", name="__builtin_var", mangled="__builtin_var",
-                     type="t1", file="f_builtin")
+        v = Element(
+            "Variable",
+            id="v1",
+            name="__builtin_var",
+            mangled="__builtin_var",
+            type="t1",
+            file="f_builtin",
+        )
         root = _xml_root(builtin_file, ft, v)
         p = _CastxmlParser(root, set(), set())
         assert p.parse_variables() == []
@@ -530,7 +587,9 @@ class TestCastxmlParserBuiltinSkip:
     def test_builtin_typedef_skipped(self):
         builtin_file = Element("File", id="f_builtin", name="<builtin>")
         ft = _fund_type("t1", "int")
-        td = Element("Typedef", id="td1", name="__builtin_td", type="t1", file="f_builtin")
+        td = Element(
+            "Typedef", id="td1", name="__builtin_td", type="t1", file="f_builtin"
+        )
         root = _xml_root(builtin_file, ft, td)
         p = _CastxmlParser(root, set(), set())
         assert p.parse_typedefs() == {}
@@ -637,7 +696,7 @@ class TestCastxmlParserUnderlyingType:
         ft = _fund_type("t0", "int")
         elements = [ft]
         for i in range(1, 25):
-            td = Element("Typedef", id=f"t{i}", name=f"td{i}", type=f"t{i-1}")
+            td = Element("Typedef", id=f"t{i}", name=f"td{i}", type=f"t{i - 1}")
             elements.append(td)
         root = _xml_root(*elements)
         p = _CastxmlParser(root, set(), set())
@@ -650,8 +709,14 @@ class TestCastxmlParserFunctionSourceLoc:
         file_el = Element("File", id="f1", name="test.hpp")
         loc = Element("Location", id="loc1", file="f1", line="42")
         ft = _fund_type("t1", "void")
-        fn = Element("Function", id="fn1", name="test_func", mangled="_Z9test_funcv",
-                      returns="t1", location="loc1")
+        fn = Element(
+            "Function",
+            id="fn1",
+            name="test_func",
+            mangled="_Z9test_funcv",
+            returns="t1",
+            location="loc1",
+        )
         root = _xml_root(file_el, loc, ft, fn)
         p = _CastxmlParser(root, set(), set())
         funcs = p.parse_functions()
@@ -659,8 +724,14 @@ class TestCastxmlParserFunctionSourceLoc:
 
     def test_function_inline(self):
         ft = _fund_type("t1", "void")
-        fn = Element("Function", id="fn1", name="inlined", mangled="_Z7inlinedv",
-                      returns="t1", inline="1")
+        fn = Element(
+            "Function",
+            id="fn1",
+            name="inlined",
+            mangled="_Z7inlinedv",
+            returns="t1",
+            inline="1",
+        )
         root = _xml_root(ft, fn)
         p = _CastxmlParser(root, set(), set())
         funcs = p.parse_functions()
@@ -691,6 +762,7 @@ class TestCastxmlParserAccessLevel:
         p = _CastxmlParser(root, set(), set())
         types = p.parse_types()
         from abicheck.model import AccessLevel
+
         assert types[0].fields[0].access == AccessLevel.PROTECTED
 
     def test_private_access(self):
@@ -701,58 +773,68 @@ class TestCastxmlParserAccessLevel:
         p = _CastxmlParser(root, set(), set())
         types = p.parse_types()
         from abicheck.model import AccessLevel
+
         assert types[0].fields[0].access == AccessLevel.PRIVATE
 
 
 # ── _detect_format ──────────────────────────────────────────────────────────
+
 
 class TestDetectFormat:
     """Test magic-byte format detection."""
 
     def test_elf(self, tmp_path: Path) -> None:
         from abicheck.dumper import _detect_format
+
         f = tmp_path / "lib.so"
         f.write_bytes(b"\x7fELF\x00\x00")
         assert _detect_format(f) == "elf"
 
     def test_macho_le64(self, tmp_path: Path) -> None:
         from abicheck.dumper import _detect_format
+
         f = tmp_path / "lib.dylib"
         f.write_bytes(b"\xcf\xfa\xed\xfe")
         assert _detect_format(f) == "macho"
 
     def test_macho_be32(self, tmp_path: Path) -> None:
         from abicheck.dumper import _detect_format
+
         f = tmp_path / "lib.dylib"
         f.write_bytes(b"\xfe\xed\xfa\xce")
         assert _detect_format(f) == "macho"
 
     def test_macho_fat(self, tmp_path: Path) -> None:
         from abicheck.dumper import _detect_format
+
         f = tmp_path / "lib.dylib"
         f.write_bytes(b"\xca\xfe\xba\xbe")
         assert _detect_format(f) == "macho"
 
     def test_pe(self, tmp_path: Path) -> None:
         from abicheck.dumper import _detect_format
+
         f = tmp_path / "lib.dll"
         f.write_bytes(b"MZ\x90\x00")
         assert _detect_format(f) == "pe"
 
     def test_unknown(self, tmp_path: Path) -> None:
         from abicheck.dumper import _detect_format
+
         f = tmp_path / "lib.bin"
         f.write_bytes(b"\x00\x01\x02\x03")
         assert _detect_format(f) == "unknown"
 
     def test_oserror(self, tmp_path: Path) -> None:
         from abicheck.dumper import _detect_format
+
         assert _detect_format(tmp_path / "nonexistent.so") == "unknown"
 
     def test_ar_archive_is_unknown(self, tmp_path: Path) -> None:
         # ar archives are not a single linkable image; _detect_format does not
         # classify them (dump() rejects them separately with guidance — G8).
         from abicheck.dumper import _detect_format
+
         f = tmp_path / "libfoo.a"
         f.write_bytes(b"!<arch>\n" + b"\x00" * 16)
         assert _detect_format(f) == "unknown"
@@ -764,6 +846,7 @@ class TestDumpRejectsArchive:
     def test_static_archive_raises(self, tmp_path: Path) -> None:
         from abicheck.dumper import dump
         from abicheck.errors import ValidationError
+
         f = tmp_path / "libfoo.a"
         f.write_bytes(b"!<arch>\n" + b"\x00" * 16)
         with pytest.raises(ValidationError, match="static/import library archive"):
@@ -771,6 +854,7 @@ class TestDumpRejectsArchive:
 
 
 # ── _dump_macho / _dump_pe via dump() routing ───────────────────────────────
+
 
 class TestDumpRoutingMachoPe:
     """Test that dump() routes to _dump_macho / _dump_pe correctly (mocked)."""
@@ -793,9 +877,12 @@ class TestDumpRoutingMachoPe:
         mock_meta.dependent_libs = []
 
         import abicheck.macho_metadata as _macho_mod
-        with patch.object(dumper, "_detect_format", return_value="macho"), \
-             patch.object(_macho_mod, "parse_macho_metadata", return_value=mock_meta), \
-             patch.object(dumper, "_castxml_dump", return_value=([], [], None, [])):
+
+        with (
+            patch.object(dumper, "_detect_format", return_value="macho"),
+            patch.object(_macho_mod, "parse_macho_metadata", return_value=mock_meta),
+            patch.object(dumper, "_castxml_dump", return_value=([], [], None, [])),
+        ):
             snap = dump(dylib, headers=[], version="1.0")
 
         assert isinstance(snap, AbiSnapshot)
@@ -819,9 +906,12 @@ class TestDumpRoutingMachoPe:
         mock_meta.machine = "x86_64"
 
         import abicheck.pe_metadata as _pe_mod
-        with patch.object(dumper, "_detect_format", return_value="pe"), \
-             patch.object(_pe_mod, "parse_pe_metadata", return_value=mock_meta), \
-             patch.object(dumper, "_castxml_dump", return_value=([], [], None, [])):
+
+        with (
+            patch.object(dumper, "_detect_format", return_value="pe"),
+            patch.object(_pe_mod, "parse_pe_metadata", return_value=mock_meta),
+            patch.object(dumper, "_castxml_dump", return_value=([], [], None, [])),
+        ):
             snap = dump(dll, headers=[], version="1.0")
 
         assert isinstance(snap, AbiSnapshot)
@@ -843,6 +933,7 @@ class TestDumpRoutingMachoPe:
 
 # ── from_headers provenance flag ─────────────────────────────────────────────
 
+
 class TestFromHeadersProvenance:
     """The format-specific builders (_dump_elf / _dump_pe / _dump_macho) set
     AbiSnapshot.from_headers=True only when castxml actually parses headers.
@@ -855,6 +946,7 @@ class TestFromHeadersProvenance:
     @staticmethod
     def _mock_parser():
         from unittest.mock import MagicMock
+
         p = MagicMock()
         p.parse_functions.return_value = []
         p.parse_variables.return_value = []
@@ -872,10 +964,14 @@ class TestFromHeadersProvenance:
         dll = tmp_path / "foo.dll"
         dll.write_bytes(b"MZ\x90\x00")
         meta = MagicMock(exports=[MagicMock(name="Foo", ordinal=1)])
-        with patch.object(_pe, "parse_pe_metadata", return_value=meta), \
-             patch.object(dumper, "_castxml_dump", return_value=object()), \
-             patch.object(dumper, "_CastxmlParser", return_value=self._mock_parser()):
-            snap = dumper._dump_pe(dll, [tmp_path / "h.h"], [], "1.0", "c++", header_backend="castxml")
+        with (
+            patch.object(_pe, "parse_pe_metadata", return_value=meta),
+            patch.object(dumper, "_castxml_dump", return_value=object()),
+            patch.object(dumper, "_CastxmlParser", return_value=self._mock_parser()),
+        ):
+            snap = dumper._dump_pe(
+                dll, [tmp_path / "h.h"], [], "1.0", "c++", header_backend="castxml"
+            )
         assert snap.from_headers is True
 
     def test_pe_without_headers_is_not_header_parsed(self, tmp_path: Path) -> None:
@@ -900,10 +996,14 @@ class TestFromHeadersProvenance:
         dylib = tmp_path / "foo.dylib"
         dylib.write_bytes(b"\xcf\xfa\xed\xfe")
         meta = MagicMock(exports=[])
-        with patch.object(_macho, "parse_macho_metadata", return_value=meta), \
-             patch.object(dumper, "_castxml_dump", return_value=object()), \
-             patch.object(dumper, "_CastxmlParser", return_value=self._mock_parser()):
-            snap = dumper._dump_macho(dylib, [tmp_path / "h.h"], [], "1.0", "c++", header_backend="castxml")
+        with (
+            patch.object(_macho, "parse_macho_metadata", return_value=meta),
+            patch.object(dumper, "_castxml_dump", return_value=object()),
+            patch.object(dumper, "_CastxmlParser", return_value=self._mock_parser()),
+        ):
+            snap = dumper._dump_macho(
+                dylib, [tmp_path / "h.h"], [], "1.0", "c++", header_backend="castxml"
+            )
         assert snap.from_headers is True
 
     def test_macho_without_headers_is_not_header_parsed(self, tmp_path: Path) -> None:
@@ -929,16 +1029,30 @@ class TestFromHeadersProvenance:
 
         so = tmp_path / "lib.so"
         so.write_bytes(b"\x7fELF")
-        with patch.object(dumper, "_pyelftools_exported_symbols", return_value=({"foo"}, set())), \
-             patch.object(_elfmod, "parse_elf_metadata", return_value=_elfmod.ElfMetadata()), \
-             patch.object(dumper, "_elf_classify_symbols",
-                          return_value=({"foo"}, {"foo"}, set(), set())), \
-             patch.object(dumper, "_resolve_debug_metadata",
-                          return_value=(DwarfMetadata(), AdvancedDwarfMetadata())), \
-             patch.object(dumper, "_castxml_dump", return_value=object()), \
-             patch.object(dumper, "_CastxmlParser", return_value=self._mock_parser()), \
-             patch.object(dumper, "_populate_elf_visibility", lambda snap: None):
-            snap = dumper._dump_elf(so, [tmp_path / "h.h"], [], "1.0", "c++", header_backend="castxml")
+        with (
+            patch.object(
+                dumper, "_pyelftools_exported_symbols", return_value=({"foo"}, set())
+            ),
+            patch.object(
+                _elfmod, "parse_elf_metadata", return_value=_elfmod.ElfMetadata()
+            ),
+            patch.object(
+                dumper,
+                "_elf_classify_symbols",
+                return_value=({"foo"}, {"foo"}, set(), set()),
+            ),
+            patch.object(
+                dumper,
+                "_resolve_debug_metadata",
+                return_value=(DwarfMetadata(), AdvancedDwarfMetadata()),
+            ),
+            patch.object(dumper, "_castxml_dump", return_value=object()),
+            patch.object(dumper, "_CastxmlParser", return_value=self._mock_parser()),
+            patch.object(dumper, "_populate_elf_visibility", lambda snap: None),
+        ):
+            snap = dumper._dump_elf(
+                so, [tmp_path / "h.h"], [], "1.0", "c++", header_backend="castxml"
+            )
         assert snap.from_headers is True
 
     def test_elf_dwarf_only_is_not_header_parsed(self, tmp_path: Path) -> None:
@@ -955,22 +1069,48 @@ class TestFromHeadersProvenance:
         so = tmp_path / "lib.so"
         so.write_bytes(b"\x7fELF")
 
-        def _fake_resolve(_so_path, _debug_format, *, _session_out=None, _format_out=None, dwarf_source=None):
+        def _fake_resolve(
+            _so_path,
+            _debug_format,
+            *,
+            _session_out=None,
+            _format_out=None,
+            dwarf_source=None,
+        ):
             if _format_out is not None:
                 _format_out.append("dwarf")
             return DwarfMetadata(has_dwarf=True), AdvancedDwarfMetadata(has_dwarf=True)
 
-        with patch.object(dumper, "_pyelftools_exported_symbols", return_value=({"foo"}, set())), \
-             patch.object(_elfmod, "parse_elf_metadata", return_value=_elfmod.ElfMetadata()), \
-             patch.object(dumper, "_elf_classify_symbols",
-                          return_value=({"foo"}, {"foo"}, set(), set())), \
-             patch.object(dumper, "_resolve_debug_metadata", side_effect=_fake_resolve), \
-             patch.object(dumper, "_try_dwarf_snapshot",
-                          return_value=(AbiSnapshot(library="lib", version="1.0", elf_only_mode=True), [])):
-            snap = dumper._dump_elf(so, [tmp_path / "h.h"], [], "1.0", "c++", dwarf_only=True)
+        with (
+            patch.object(
+                dumper, "_pyelftools_exported_symbols", return_value=({"foo"}, set())
+            ),
+            patch.object(
+                _elfmod, "parse_elf_metadata", return_value=_elfmod.ElfMetadata()
+            ),
+            patch.object(
+                dumper,
+                "_elf_classify_symbols",
+                return_value=({"foo"}, {"foo"}, set(), set()),
+            ),
+            patch.object(dumper, "_resolve_debug_metadata", side_effect=_fake_resolve),
+            patch.object(
+                dumper,
+                "_try_dwarf_snapshot",
+                return_value=(
+                    AbiSnapshot(library="lib", version="1.0", elf_only_mode=True),
+                    [],
+                ),
+            ),
+        ):
+            snap = dumper._dump_elf(
+                so, [tmp_path / "h.h"], [], "1.0", "c++", dwarf_only=True
+            )
         assert snap.from_headers is False
 
-    def test_elf_no_headers_auto_btf_does_not_trigger_dwarf_snapshot(self, tmp_path: Path) -> None:
+    def test_elf_no_headers_auto_btf_does_not_trigger_dwarf_snapshot(
+        self, tmp_path: Path
+    ) -> None:
         """Auto-detect resolving to BTF (debug_format stays None; has_dwarf
         mirrors BTF presence for checker compatibility) must not take the
         no-headers DWARF-primary-snapshot path: that would call
@@ -988,22 +1128,39 @@ class TestFromHeadersProvenance:
         so = tmp_path / "lib.so"
         so.write_bytes(b"\x7fELF")
 
-        def _fake_resolve(_so_path, _debug_format, *, _session_out=None, _format_out=None, dwarf_source=None):
+        def _fake_resolve(
+            _so_path,
+            _debug_format,
+            *,
+            _session_out=None,
+            _format_out=None,
+            dwarf_source=None,
+        ):
             if _format_out is not None:
                 _format_out.append("btf")
             return DwarfMetadata(has_dwarf=True), AdvancedDwarfMetadata()
 
-        with patch.object(dumper, "_pyelftools_exported_symbols", return_value=({"foo"}, set())), \
-             patch.object(_elfmod, "parse_elf_metadata", return_value=_elfmod.ElfMetadata()), \
-             patch.object(dumper, "_elf_classify_symbols",
-                          return_value=({"foo"}, {"foo"}, set(), set())), \
-             patch.object(dumper, "_resolve_debug_metadata", side_effect=_fake_resolve), \
-             patch.object(dumper, "_try_dwarf_snapshot") as mock_try_dwarf:
+        with (
+            patch.object(
+                dumper, "_pyelftools_exported_symbols", return_value=({"foo"}, set())
+            ),
+            patch.object(
+                _elfmod, "parse_elf_metadata", return_value=_elfmod.ElfMetadata()
+            ),
+            patch.object(
+                dumper,
+                "_elf_classify_symbols",
+                return_value=({"foo"}, {"foo"}, set(), set()),
+            ),
+            patch.object(dumper, "_resolve_debug_metadata", side_effect=_fake_resolve),
+            patch.object(dumper, "_try_dwarf_snapshot") as mock_try_dwarf,
+        ):
             dumper._dump_elf(so, [], [], "1.0", "c++")
         mock_try_dwarf.assert_not_called()
 
     def test_dwarf_only_with_resolved_btf_does_not_trigger_dwarf_snapshot(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """Regression (Codex review, second finding): --dwarf-only combined
         with --debug-format=btf/ctf (or auto resolving to BTF on a kernel
@@ -1024,19 +1181,37 @@ class TestFromHeadersProvenance:
         so = tmp_path / "lib.so"
         so.write_bytes(b"\x7fELF")
 
-        def _fake_resolve(_so_path, _debug_format, *, _session_out=None, _format_out=None, dwarf_source=None):
+        def _fake_resolve(
+            _so_path,
+            _debug_format,
+            *,
+            _session_out=None,
+            _format_out=None,
+            dwarf_source=None,
+        ):
             if _format_out is not None:
                 _format_out.append("btf")
             return DwarfMetadata(has_dwarf=True), AdvancedDwarfMetadata()
 
-        with patch.object(dumper, "_pyelftools_exported_symbols", return_value=({"foo"}, set())), \
-             patch.object(_elfmod, "parse_elf_metadata", return_value=_elfmod.ElfMetadata()), \
-             patch.object(dumper, "_elf_classify_symbols",
-                          return_value=({"foo"}, {"foo"}, set(), set())), \
-             patch.object(dumper, "_resolve_debug_metadata", side_effect=_fake_resolve), \
-             patch.object(dumper, "_try_dwarf_snapshot") as mock_try_dwarf, \
-             pytest.warns(UserWarning, match="dwarf-only"):
-            dumper._dump_elf(so, [], [], "1.0", "c++", debug_format="btf", dwarf_only=True)
+        with (
+            patch.object(
+                dumper, "_pyelftools_exported_symbols", return_value=({"foo"}, set())
+            ),
+            patch.object(
+                _elfmod, "parse_elf_metadata", return_value=_elfmod.ElfMetadata()
+            ),
+            patch.object(
+                dumper,
+                "_elf_classify_symbols",
+                return_value=({"foo"}, {"foo"}, set(), set()),
+            ),
+            patch.object(dumper, "_resolve_debug_metadata", side_effect=_fake_resolve),
+            patch.object(dumper, "_try_dwarf_snapshot") as mock_try_dwarf,
+            pytest.warns(UserWarning, match="dwarf-only"),
+        ):
+            dumper._dump_elf(
+                so, [], [], "1.0", "c++", debug_format="btf", dwarf_only=True
+            )
         mock_try_dwarf.assert_not_called()
 
 
@@ -1065,7 +1240,9 @@ class TestFormatHandlerRegistry:
         for handler in dumper._FORMAT_HANDLERS:
             params = set(inspect.signature(handler.builder).parameters)
             assert handler.accepts_dwarf_only == ("dwarf_only" in params), handler.name
-            assert handler.accepts_debug_format == ("debug_format" in params), handler.name
+            assert handler.accepts_debug_format == ("debug_format" in params), (
+                handler.name
+            )
 
     def test_per_format_kwarg_acceptance(self):
         from abicheck import dumper

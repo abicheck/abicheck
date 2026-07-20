@@ -485,6 +485,7 @@ def run_clang_to_ast_file(
 
 def _parse_clang_ast_result(
     result: subprocess.CompletedProcess[str], cached: Path, ast_path: Path,
+    *, cache_write: bool = True,
 ) -> dict[str, Any]:
     """Validate a completed clang AST-dump, parse its JSON, and cache the tree.
 
@@ -535,9 +536,10 @@ def _parse_clang_ast_result(
     # copy so an expired deadline doesn't still complete it and hand the
     # caller a result for downstream AST walking (CodeRabbit review, PR #591).
     deadline.check()
-    try:
-        _atomic_copy(ast_path, cached)
-    except OSError:
-        pass
+    if cache_write:
+        try:
+            _atomic_copy(ast_path, cached)
+        except OSError:
+            pass
     deadline.check()
     return cast("dict[str, Any]", root)

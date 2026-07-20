@@ -24,9 +24,12 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import stat
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from .header_utils import iter_cache_header_files
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
@@ -149,29 +152,43 @@ def _cache_key(
                 h.update(chunk)
     except OSError:
         return ""  # uncacheable
-    # Header mtimes (sorted for determinism). A `headers` entry can itself be
-    # a directory (`-H include/`) -- `_attach_header_graph`/the header-AST
-    # parser expand that into every header file found under it, so the
-    # directory's own mtime alone (which most filesystems only bump when an
-    # entry is added/removed, not when an existing file's contents change)
-    # is not enough to invalidate the cache on an in-place edit; walk it the
-    # same way an `includes` directory is walked below (Codex review).
+    # Hash contents, not only mtimes: restored timestamps must not resurrect a
+    # stale snapshot. Directory-valued ``-H`` inputs and explicit include roots
+    # contribute every header-like descendant reachable by the parser.
+    hash_files: set[Path] = set()
     for hdr in sorted(headers):
+        h.update(str(hdr).encode())
         try:
-            h.update(str(hdr).encode())
-            h.update(str(hdr.stat().st_mtime_ns).encode())
             if hdr.is_dir():
-                _hash_include_dir_headers(h, hdr)
+                hash_files.update(iter_cache_header_files(hdr))
+            else:
+                hash_files.add(hdr)
         except OSError:
-            h.update(b"MISSING")
-    # Include dirs: the directory's own path, plus the (relative path, mtime)
-    # of every header-like file found under it -- a transitively included
-    # header never passed as an explicit `headers` entry must still
-    # invalidate the cache when it changes (Codex review, see the v3 note
-    # on _SNAPSHOT_CACHE_VERSION above).
+            h.update(b"UNREADABLE_HEADER_INPUT")
     for inc in sorted(includes):
         h.update(str(inc).encode())
-        _hash_include_dir_headers(h, inc)
+        try:
+            hash_files.update(iter_cache_header_files(inc))
+        except OSError:
+            h.update(b"UNREADABLE_INCLUDE_DIR")
+    for hdr in sorted(hash_files):
+        h.update(str(hdr).encode())
+        try:
+            fd = os.open(hdr, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+            file_stat = os.fstat(fd)
+            if not stat.S_ISREG(file_stat.st_mode):
+                os.close(fd)
+                h.update(b"NONREGULAR")
+                continue
+            # Preserve the existing mtime invalidation contract as well as
+            # hashing contents. The latter catches restored/coarse timestamps;
+            # the former also treats a touched header as a changed input.
+            h.update(str(file_stat.st_mtime_ns).encode())
+            with os.fdopen(fd, "rb") as f:
+                for chunk in iter(lambda: f.read(65536), b""):
+                    h.update(chunk)
+        except OSError:
+            h.update(b"MISSING")
     # Compiler params
     h.update(version.encode())
     h.update(lang.encode())
@@ -191,6 +208,11 @@ def lookup(
 ) -> AbiSnapshot | None:
     """Look up a cached snapshot. Returns None on miss."""
     key = _cache_key(binary_path, headers, includes, version, lang, extra=extra)
+    return lookup_key(key, binary_path)
+
+
+def lookup_key(key: str, binary_path: Path) -> AbiSnapshot | None:
+    """Look up an entry using a key already bound to validated inputs."""
     if not key:
         return None
     cache_file = _CACHE_DIR / f"{key}.json"
@@ -219,6 +241,11 @@ def store(
 ) -> None:
     """Store a snapshot in the cache (atomic write via rename)."""
     key = _cache_key(binary_path, headers, includes, version, lang, extra=extra)
+    store_key(snap, key, binary_path)
+
+
+def store_key(snap: AbiSnapshot, key: str, binary_path: Path) -> None:
+    """Store under a previously computed, post-execution-validated key."""
     if not key:
         return
     try:

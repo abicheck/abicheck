@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from unittest import mock
 
@@ -117,7 +118,6 @@ class TestCacheKey:
         on PR #612: before G31 Phase A this was moot because a header-graph
         dump was always uncacheable; it is not moot now that it's cacheable
         by default)."""
-        import os
         import time
 
         binary = tmp_path / "lib.so"
@@ -164,7 +164,6 @@ class TestCacheKey:
 
         key1 = _cache_key(binary, [], [inc], "1.0", "c++")
 
-        import os
         import time
 
         os.utime(impl, (time.time() + 10, time.time() + 10))
@@ -188,7 +187,6 @@ class TestCacheKey:
 
         key1 = _cache_key(binary, [hdr_dir], [], "1.0", "c++")
 
-        import os
         import time
 
         os.utime(nested, (time.time() + 10, time.time() + 10))
@@ -252,6 +250,16 @@ class TestCacheKey:
         assert h1.digest() == h2.digest()  # deterministic MISSING marker
         assert h1.digest() != hashlib.sha256().digest()  # path was still hashed
 
+    def test_header_content_change_different_key(self, tmp_path):
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF content")
+        hdr = tmp_path / "foo.h"
+        hdr.write_text("#pragma once\n")
+        key1 = _cache_key(binary, [hdr], [], "1.0", "c++")
+        hdr.write_text("#define ABI_SIZE 8\n")
+        key2 = _cache_key(binary, [hdr], [], "1.0", "c++")
+        assert key1 != key2
+
     def test_header_mtime_change_different_key(self, tmp_path):
         import time
 
@@ -261,11 +269,17 @@ class TestCacheKey:
         hdr.write_text("#pragma once\n")
         key1 = _cache_key(binary, [hdr], [], "1.0", "c++")
         # Change header mtime
-        import os
-
         os.utime(hdr, (time.time() + 10, time.time() + 10))
         key2 = _cache_key(binary, [hdr], [], "1.0", "c++")
         assert key1 != key2
+
+    @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFO requires POSIX")
+    def test_special_header_file_does_not_block(self, tmp_path):
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF content")
+        fifo = tmp_path / "special.h"
+        getattr(os, "mkfifo")(fifo)
+        assert _cache_key(binary, [fifo], [], "1.0", "c++")
 
 
 class TestLookupStore:

@@ -555,7 +555,7 @@ class TestCastxmlDump:
 
     def test_cache_hit_returns_cached(self, tmp_path, monkeypatch):
         """When cache file exists, castxml is not invoked."""
-        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/castxml")
+        monkeypatch.setattr("abicheck.dumper._resolve_selected_tool", lambda _: "/mock/castxml")
         # Create a valid XML cache file
         cache_xml = tmp_path / "cached.xml"
         root = Element("GCC_XML")
@@ -574,7 +574,7 @@ class TestCastxmlDump:
         """Codex review (PR #591): a warm XML cache hit still costs real time
         parsing a potentially large cached AST — deadline.check() must fire
         on that path too, not just once before castxml would be spawned."""
-        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/castxml")
+        monkeypatch.setattr("abicheck.dumper._resolve_selected_tool", lambda _: "/mock/castxml")
         cache_xml = tmp_path / "cached.xml"
         from xml.etree.ElementTree import ElementTree
 
@@ -595,7 +595,7 @@ class TestCastxmlDump:
         must re-check again after the parse before handing the root off."""
         import time
 
-        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/castxml")
+        monkeypatch.setattr("abicheck.dumper._resolve_selected_tool", lambda _: "/mock/castxml")
         cache_xml = tmp_path / "cached.xml"
         from xml.etree.ElementTree import ElementTree
 
@@ -629,7 +629,7 @@ class TestCastxmlDump:
         import time
         from xml.etree.ElementTree import Element as _Element, ElementTree
 
-        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/castxml")
+        monkeypatch.setattr("abicheck.dumper._resolve_selected_tool", lambda _: "/mock/castxml")
         monkeypatch.setattr("abicheck.dumper._cache_key", lambda *a, **kw: "k")
         monkeypatch.setattr("abicheck.dumper._cache_path", lambda k: tmp_path / "c.xml")
 
@@ -662,7 +662,7 @@ class TestCastxmlDump:
         """Corrupt cache entry is removed before castxml is re-invoked."""
         import subprocess
 
-        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/castxml")
+        monkeypatch.setattr("abicheck.dumper._resolve_selected_tool", lambda _: "/mock/castxml")
         # Write an unparseable (empty) XML cache file
         cache_xml = tmp_path / "cached.xml"
         cache_xml.write_text("")
@@ -697,7 +697,7 @@ class TestCastxmlDump:
         """castxml exits 0 but writes no output file → RuntimeError."""
         import subprocess
 
-        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/castxml")
+        monkeypatch.setattr("abicheck.dumper._resolve_selected_tool", lambda _: "/mock/castxml")
         monkeypatch.setattr("abicheck.dumper._cache_key", lambda *a, **kw: "k")
         monkeypatch.setattr("abicheck.dumper._cache_path", lambda k: tmp_path / "c.xml")
 
@@ -715,7 +715,7 @@ class TestCastxmlDump:
         """castxml exits 0 but writes invalid XML → RuntimeError."""
         import subprocess
 
-        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/castxml")
+        monkeypatch.setattr("abicheck.dumper._resolve_selected_tool", lambda _: "/mock/castxml")
         monkeypatch.setattr("abicheck.dumper._cache_key", lambda *a, **kw: "k")
         monkeypatch.setattr("abicheck.dumper._cache_path", lambda k: tmp_path / "c.xml")
 
@@ -739,7 +739,7 @@ class TestCastxmlDump:
         import subprocess
         from xml.etree.ElementTree import ElementTree
 
-        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/castxml")
+        monkeypatch.setattr("abicheck.dumper._resolve_selected_tool", lambda _: "/mock/castxml")
         monkeypatch.setattr("abicheck.dumper._cache_key", lambda *a, **kw: "k")
         monkeypatch.setattr("abicheck.dumper._cache_path", lambda k: tmp_path / "c.xml")
 

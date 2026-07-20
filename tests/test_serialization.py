@@ -50,6 +50,34 @@ class TestSerialization:
         finally:
             tmp.unlink(missing_ok=True)
 
+    def test_ast_toolchain_and_fallback_reason_roundtrip(self):
+        snap = AbiSnapshot(
+            library="libsample.so.2",
+            version="2.3.1",
+            ast_producer="clang",
+            ast_toolchain={
+                "producer": "clang",
+                "realpath": "/opt/llvm/bin/clang++",
+                "version": "clang version 21.1.8",
+            },
+            ast_fallback_reason="castxml-toolchain-version-mismatch",
+        )
+        snap2 = snapshot_from_dict(snapshot_to_dict(snap))
+        assert snap2.ast_toolchain == snap.ast_toolchain
+        assert snap2.ast_fallback_reason == snap.ast_fallback_reason
+
+    def test_malformed_ast_toolchain_metadata_is_ignored(self):
+        payload = snapshot_to_dict(_sample_snap())
+        payload["ast_toolchain"] = None
+        payload["ast_fallback_reason"] = 42
+        snap = snapshot_from_dict(payload)
+        assert snap.ast_toolchain == {}
+        assert snap.ast_fallback_reason is None
+
+        payload["ast_toolchain"] = "not-a-mapping"
+        snap = snapshot_from_dict(payload)
+        assert snap.ast_toolchain == {}
+
     def test_private_index_fields_not_serialized(self):
         snap = _sample_snap()
         d = snapshot_to_dict(snap)

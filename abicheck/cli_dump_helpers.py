@@ -549,6 +549,8 @@ def fold_dump_provenance_into_json(
             and _DEPTH_RANK.get(effective, 0) < _DEPTH_RANK.get(depth, 0)
         ),
         "frontend": frontend,
+        "ast_toolchain": snap.ast_toolchain or None,
+        "ast_fallback_reason": snap.ast_fallback_reason,
         "source_scope": source_scope,
     }
     return json.dumps(payload, indent=2), effective

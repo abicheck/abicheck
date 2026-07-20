@@ -16,6 +16,7 @@ Requires: abi-compliance-checker, gcc/g++, castxml.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -166,7 +167,10 @@ def _run_abicheck_compat(
         cmd.extend(["-report-path", str(report_path)])
     if extra_args:
         cmd.extend(extra_args)
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    env = {**os.environ, "ABICHECK_ALLOW_AST_FALLBACK": "1"}
+    return subprocess.run(
+        cmd, capture_output=True, text=True, timeout=60, env=env
+    )
 
 
 # ============================================================================

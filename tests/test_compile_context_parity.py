@@ -26,12 +26,15 @@ sides while the per-side ``--old/new-ast-frontend`` override still wins.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
+import click
 import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import compare_cmd, dump_cmd, main
+from abicheck.cli_options import compile_context_options
 from abicheck.cli_scan import scan_cmd
 from abicheck.service_scan import CompileContext, ScanRequest
 
@@ -905,3 +908,24 @@ def test_dump_pe_explicit_gcc_options_no_longer_warns(
     assert result.exit_code == 0, result.output
     assert "will be ignored" not in result.output
     assert getattr(captured["compile_context"], "gcc_options") == "-DPE=1"
+
+
+def test_fallback_flag_is_scoped_to_one_cli_invocation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("ABICHECK_ALLOW_AST_FALLBACK", raising=False)
+
+    @click.command()
+    @compile_context_options
+    def probe(**_kwargs: object) -> None:
+        click.echo(os.environ.get("ABICHECK_ALLOW_AST_FALLBACK", "unset"))
+
+    runner = CliRunner()
+    enabled = runner.invoke(probe, ["--allow-ast-frontend-fallback"])
+    disabled = runner.invoke(probe, [])
+
+    assert enabled.exit_code == 0
+    assert enabled.output.strip() == "1"
+    assert disabled.exit_code == 0
+    assert disabled.output.strip() == "unset"
+    assert "ABICHECK_ALLOW_AST_FALLBACK" not in os.environ

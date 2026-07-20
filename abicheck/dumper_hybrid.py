@@ -588,6 +588,11 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
         types=merged_types,
         enums=merged_enums,
         ast_producer="hybrid",
+        ast_toolchain={
+            **{f"castxml_{key}": value for key, value in castxml_snap.ast_toolchain.items()},
+            **{f"clang_{key}": value for key, value in clang_snap.ast_toolchain.items()},
+        },
+        ast_fallback_reason=None,
         fact_provenance=provenance,
         # from_headers/from_headers_inferred are inherited from castxml_snap
         # as-is via replace() (both already True/False here — the early

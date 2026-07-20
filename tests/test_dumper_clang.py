@@ -1263,8 +1263,10 @@ def test_header_ast_parser_clang_branch(monkeypatch: pytest.MonkeyPatch) -> None
 
 def test_header_ast_parser_castxml_branch(monkeypatch: pytest.MonkeyPatch) -> None:
     sentinel = object()
+    parser_cls = dumper._CastxmlParser
+    parser_sentinel = parser_cls.__new__(parser_cls)
     monkeypatch.setattr(dumper, "_castxml_dump", lambda *a, **k: sentinel)
-    monkeypatch.setattr(dumper, "_CastxmlParser", lambda *a, **k: "castxml-parser")
+    monkeypatch.setattr(dumper, "_CastxmlParser", lambda *a, **k: parser_sentinel)
     parser = _header_ast_parser(
         [],
         [],
@@ -1281,7 +1283,8 @@ def test_header_ast_parser_castxml_branch(monkeypatch: pytest.MonkeyPatch) -> No
         public_header_paths=[],
         public_dir_paths=[],
     )
-    assert parser == "castxml-parser"
+    assert parser is parser_sentinel
+    assert parser._abicheck_ast_toolchain["producer"] == "castxml"
 
 
 def test_clang_header_dump_success_and_cache(
@@ -1313,6 +1316,32 @@ def test_clang_header_dump_success_and_cache(
     root2 = _clang_header_dump([header], [])
     assert root2 == root
     assert calls["n"] == 1
+
+
+def test_clang_only_dump_does_not_require_gxx_identity(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    cache = tmp_path / "cache.json"
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+    monkeypatch.setattr(
+        dumper,
+        "_resolve_compiler_binary",
+        lambda *_a, **_k: pytest.fail("clang-only dump resolved g++"),
+    )
+
+    def _run(cmd, **kwargs):
+        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
+        return _fake_proc()
+
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
+    assert _clang_header_dump([header], []) == {
+        "kind": "TranslationUnitDecl",
+        "inner": [],
+    }
 
 
 def test_clang_header_dump_rechecks_deadline_on_cache_hit(

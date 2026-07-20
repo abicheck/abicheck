@@ -94,6 +94,8 @@ def _dump_cache_extra_key(
     public_headers: list[Path] | None,
     public_header_dirs: list[Path] | None,
     lang: str = "c++",
+    *,
+    uses_ast: bool = True,
 ) -> str:
     """Build the ``extra`` cache-key material for a cacheable dump — every
     input to ``run_dump`` that affects its output besides the binary content
@@ -135,14 +137,15 @@ def _dump_cache_extra_key(
     layout facts — into the merged result (Codex review).
 
     Also hashed for a genuinely-unpinned ``"auto"`` request (raw
-    ``header_backend == "auto"`` AND ``ABICHECK_AST_FRONTEND`` unset), even
-    though :func:`_resolve_header_backend` optimistically resolves that to
-    ``"castxml"``: ``dumper._header_ast_parser``'s G16 logic can silently
+    ``header_backend == "auto"`` AND ``ABICHECK_AST_FRONTEND`` unset) when
+    ``ABICHECK_ALLOW_AST_FALLBACK`` explicitly enables fallback, even though
+    :func:`_resolve_header_backend` optimistically resolves that to
+    ``"castxml"``: ``dumper._header_ast_parser``'s G16 logic may then
     runtime-fallback such a request from castxml to clang (a toolchain-
     version mismatch or a direct-include ``#error`` guard) — invisible to
     this static, content-blind resolution, which can't know in advance
     whether castxml will actually succeed for these specific headers. That
-    fallback's resulting snapshot is clang-sourced and gets the identical
+    opted-in fallback's resulting snapshot is clang-sourced and gets the identical
     ``attach_clang_layout`` enrichment an explicit ``--ast-frontend clang``
     dump would, so its cache key must depend on the layout tool's identity
     too (Codex review). An EXPLICIT ``castxml`` request (or an
@@ -153,15 +156,57 @@ def _dump_cache_extra_key(
     from .dumper import _resolve_header_backend
 
     resolved_backend = _resolve_header_backend(header_backend)
-    env_pin = os.environ.get("ABICHECK_AST_FRONTEND", "").strip().lower()
+    if not uses_ast:
+        # A binary-only dump never invokes an AST frontend or compiler. Do not
+        # execute PATH-selected tools merely to construct an irrelevant cache key.
+        sep = "\x00"
+        return sep.join(
+            [
+                binary_fmt,
+                resolved_backend,
+                "no-ast",
+                sep.join(sorted(str(p) for p in (public_headers or []))),
+                sep.join(sorted(str(p) for p in (public_header_dirs or []))),
+            ]
+        )
+
+    from .dumper import (
+        _ast_fallback_enabled,
+        _auto_ast_fallback_eligible,
+        _resolve_compiler_binary,
+        _tool_identity,
+    )
+    from .dumper_clang import _resolve_clang_bin
+
     auto_may_fallback_to_clang = (
-        (header_backend or "auto").strip().lower() == "auto" and not env_pin
+        _auto_ast_fallback_eligible(header_backend) and _ast_fallback_enabled()
     )
     layout_tool = ""
     if resolved_backend in ("clang", "hybrid") or auto_may_fallback_to_clang:
         from .clang_layout_tool import find_layout_tool_bin
 
-        layout_tool = find_layout_tool_bin() or ""
+        layout_tool_bin = find_layout_tool_bin()
+        layout_tool = _tool_identity(layout_tool_bin) if layout_tool_bin else ""
+
+    compiler = "cc" if lang == "c" else "c++"
+
+    frontend_tools: list[str] = []
+    if resolved_backend in ("castxml", "hybrid"):
+        frontend_tools.append(_tool_identity("castxml"))
+    if resolved_backend in ("clang", "hybrid") or auto_may_fallback_to_clang:
+        try:
+            frontend_tools.append(
+                _tool_identity(_resolve_clang_bin(compiler, None, None))
+            )
+        except Exception as exc:  # missing optional backend remains key material
+            frontend_tools.append(f"clang-unavailable:{type(exc).__name__}:{exc}")
+    compiler_identity = ""
+    if resolved_backend in ("castxml", "hybrid"):
+        try:
+            compiler_bin, _ = _resolve_compiler_binary(compiler, None, None)
+            compiler_identity = _tool_identity(compiler_bin)
+        except Exception as exc:
+            compiler_identity = f"compiler-unavailable:{type(exc).__name__}:{exc}"
 
     # G29 Phase A's header-graph attach (service._attach_header_graph) always
     # runs its own internal clang AST pass (_clang_header_dump) to build the
@@ -204,6 +249,8 @@ def _dump_cache_extra_key(
         [
             binary_fmt,
             resolved_backend,
+            *frontend_tools,
+            compiler_identity,
             layout_tool,
             header_graph_clang,
             sep.join(sorted(str(p) for p in (public_headers or []))),
@@ -282,31 +329,24 @@ def cached_run_dump(
 
     from . import snapshot_cache
 
-    extra = _dump_cache_extra_key(
-        binary_fmt, header_backend, public_headers, public_header_dirs, lang
-    )
-    # dumper.dump()/service._dump_elf independently call
-    # header_utils.resolve_inferred_header_roots(headers, includes) to add an
-    # `-H include/api.h`-style umbrella's own include root to the search path
-    # even when the caller passed no explicit -I (see that function's
-    # docstring). A cacheable call always has no build context (gcc_options/
-    # gcc_option_tokens empty, since `compile is None`), so this always
-    # resolves to plain extra-include dirs, never deferred tokens -- but
-    # those inferred dirs still are not part of `_includes` above, so an edit
-    # to a header reached only through one of them (e.g. `include/detail.h`
-    # pulled in by `include/api.h`) would not change the cache key even
-    # though it changes the parsed snapshot/header graph (Codex review).
-    # Folded in for cache-key purposes only -- the real `run_dump` calls
-    # below still pass the original, unmodified `headers`/`includes`, since
-    # they (or their own recursive `_dump_elf` call) re-derive the same
-    # inferred roots independently.
+    # The dump pipeline independently infers an umbrella header's include root;
+    # fold the same roots into the whole-snapshot key so transitive edits bust it.
     from .header_utils import resolve_inferred_header_roots
 
     _inferred_roots, _ = resolve_inferred_header_roots(_headers, _includes)
     _cache_includes = _includes + _inferred_roots
-    cached = snapshot_cache.lookup(
+    extra = _dump_cache_extra_key(
+        binary_fmt,
+        header_backend,
+        public_headers,
+        public_header_dirs,
+        lang,
+        uses_ast=bool(_headers),
+    )
+    initial_key = snapshot_cache._cache_key(
         path, _headers, _cache_includes, version, lang, extra=extra
     )
+    cached = snapshot_cache.lookup_key(initial_key, path)
     if cached is not None:
         return cached
     snap = run_dump(
@@ -330,7 +370,17 @@ def cached_run_dump(
         compile=compile,
         notify=notify,
     )
-    snapshot_cache.store(
-        snap, path, _headers, _cache_includes, version, lang, extra=extra
+    final_extra = _dump_cache_extra_key(
+        binary_fmt,
+        header_backend,
+        public_headers,
+        public_header_dirs,
+        lang,
+        uses_ast=bool(_headers),
     )
+    final_key = snapshot_cache._cache_key(
+        path, _headers, _cache_includes, version, lang, extra=final_extra
+    )
+    if initial_key and initial_key == final_key:
+        snapshot_cache.store_key(snap, initial_key, path)
     return snap
