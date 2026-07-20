@@ -62,7 +62,9 @@ _requires_jsonschema = pytest.mark.skipif(
 
 
 def _fn(name: str, mangled: str, ret: str = "int") -> Function:
-    return Function(name=name, mangled=mangled, return_type=ret, visibility=Visibility.PUBLIC)
+    return Function(
+        name=name, mangled=mangled, return_type=ret, visibility=Visibility.PUBLIC
+    )
 
 
 def _breaking_pair() -> tuple[AbiSnapshot, AbiSnapshot]:
@@ -73,7 +75,9 @@ def _breaking_pair() -> tuple[AbiSnapshot, AbiSnapshot]:
         functions=[_fn("api_a", "_Z5api_av"), _fn("api_b", "_Z5api_bv")],
         types=[
             RecordType(
-                name="Cfg", kind="struct", size_bits=32,
+                name="Cfg",
+                kind="struct",
+                size_bits=32,
                 fields=[TypeField(name="x", type="int", offset_bits=0)],
             )
         ],
@@ -85,7 +89,9 @@ def _breaking_pair() -> tuple[AbiSnapshot, AbiSnapshot]:
         functions=[_fn("api_a", "_Z5api_av"), _fn("api_c", "_Z5api_cv")],
         types=[
             RecordType(
-                name="Cfg", kind="struct", size_bits=64,
+                name="Cfg",
+                kind="struct",
+                size_bits=64,
                 fields=[
                     TypeField(name="x", type="int", offset_bits=0),
                     TypeField(name="y", type="int", offset_bits=32),
@@ -95,7 +101,10 @@ def _breaking_pair() -> tuple[AbiSnapshot, AbiSnapshot]:
         enums=[
             EnumType(
                 name="Color",
-                members=[EnumMember(name="RED", value=0), EnumMember(name="BLUE", value=1)],
+                members=[
+                    EnumMember(name="RED", value=0),
+                    EnumMember(name="BLUE", value=1),
+                ],
             )
         ],
     )
@@ -116,6 +125,22 @@ class TestSchemaFile:
         schema = load_compare_report_schema()
         assert "report_schema_version" in schema["required"]
 
+    def test_docs_mirror_matches_packaged_schema(self):
+        # Regression guard (code review, PR #611): the docs/schemas/v1 copy
+        # previously drifted from the packaged schema (PR #595) without any
+        # test catching it, since jsonschema.validate's additionalProperties
+        # tolerance doesn't flag a stale docs copy. scripts/publish_schemas.py
+        # keeps the two byte-identical; assert that invariant directly.
+        docs_copy = (
+            COMPARE_REPORT_SCHEMA_PATH.parent.parent.parent
+            / "docs"
+            / "schemas"
+            / "v1"
+            / "compare_report.schema.json"
+        )
+        assert docs_copy.is_file()
+        assert docs_copy.read_text() == COMPARE_REPORT_SCHEMA_PATH.read_text()
+
 
 @_requires_jsonschema
 class TestReportValidatesAgainstSchema:
@@ -134,7 +159,11 @@ class TestReportValidatesAgainstSchema:
         payload = json.loads(reporter.to_json(compare(old, new)))
         self._validate(payload)
         assert payload["verdict"] in {
-            "NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING",
+            "NO_CHANGE",
+            "COMPATIBLE",
+            "COMPATIBLE_WITH_RISK",
+            "API_BREAK",
+            "BREAKING",
         }
 
     def test_show_only_report_validates(self):
@@ -162,13 +191,229 @@ class TestReportValidatesAgainstSchema:
         payload = json.loads(reporter.to_json(compare(old, new)))
         self._validate(payload)
         additions = [
-            c for c in payload["changes"] if c.get("recommended_action") == "no_action_required"
+            c
+            for c in payload["changes"]
+            if c.get("recommended_action") == "no_action_required"
         ]
         assert additions, "fixture must produce at least one addition finding"
         schema = load_compare_report_schema()
-        declared_enum = schema["$defs"]["change"]["properties"]["reviewer_action"]["enum"]
+        declared_enum = schema["$defs"]["change"]["properties"]["reviewer_action"][
+            "enum"
+        ]
         for c in additions:
             assert c["reviewer_action"] in declared_enum
+
+
+class TestEvidenceDepthValidator:
+    """Direct unit coverage for checker_types.validate_evidence_depth/
+    EVIDENCE_DEPTH_VALUES -- the shared depth-spelling guard both
+    reporter._add_check_identity (compare) and ScanOutcome.to_dict (scan)
+    delegate to."""
+
+    def test_accepts_every_public_depth(self):
+        from abicheck.checker_types import (
+            EVIDENCE_DEPTH_VALUES,
+            validate_evidence_depth,
+        )
+
+        for depth in EVIDENCE_DEPTH_VALUES:
+            validate_evidence_depth("requested_depth", depth)  # must not raise
+
+    def test_rejects_unknown_depth_with_field_name_in_message(self):
+        from abicheck.checker_types import validate_evidence_depth
+
+        with pytest.raises(ValueError, match="effective_depth"):
+            validate_evidence_depth("effective_depth", "bogus")
+
+    def test_public_depth_set_matches_mcp_server(self):
+        # Deliberately kept as a separate copy (mcp_server sits above
+        # checker_types in the dependency graph) -- this pins both stay in
+        # sync rather than silently drifting. mcp_server.py raises
+        # ImportError at import time without the optional `mcp` package
+        # (abicheck[mcp]) installed -- skip cleanly rather than failing when
+        # that extra isn't present, matching how the rest of the suite
+        # treats this same optional dependency.
+        pytest.importorskip("mcp")
+        from abicheck.checker_types import EVIDENCE_DEPTH_VALUES
+        from abicheck.mcp_server import _PUBLIC_DEPTHS
+
+        assert EVIDENCE_DEPTH_VALUES == _PUBLIC_DEPTHS
+
+
+@_requires_jsonschema
+class TestReportIdentityEnvelope:
+    """ADR-047 §7 report-identity envelope subset (G30 P0.3): check_id,
+    profile_id, requested_depth, effective_depth, baseline_channel are
+    additive, optional fields nothing populates yet -- this only pins the
+    schema/round-trip contract so G30 P1's primitives have somewhere to
+    write."""
+
+    def test_unset_by_default(self):
+        f = _fn("api", "_Z3apiv")
+        snap = AbiSnapshot(library="libfoo.so.1", version="1.0", functions=[f])
+        payload = json.loads(reporter.to_json(compare(snap, snap)))
+        for key in (
+            "check_id",
+            "profile_id",
+            "requested_depth",
+            "effective_depth",
+            "baseline_channel",
+        ):
+            assert key not in payload
+
+    def test_set_fields_round_trip_and_validate(self):
+        old, new = _breaking_pair()
+        result = compare(old, new)
+        result.check_id = "libfoo@linux-x86_64-gcc13#accepted-main@source"
+        result.profile_id = "linux-x86_64-gcc13"
+        result.requested_depth = "source"
+        result.effective_depth = "headers"
+        result.baseline_channel = "accepted-main"
+        payload = json.loads(reporter.to_json(result))
+        jsonschema.validate(instance=payload, schema=load_compare_report_schema())
+        assert payload["check_id"] == "libfoo@linux-x86_64-gcc13#accepted-main@source"
+        assert payload["profile_id"] == "linux-x86_64-gcc13"
+        assert payload["requested_depth"] == "source"
+        assert payload["effective_depth"] == "headers"
+        assert payload["baseline_channel"] == "accepted-main"
+
+    def test_malformed_check_id_fails_schema_validation(self):
+        # ADR-047 §7's delimiter-joined check_id form
+        # ("target@profile#baseline_channel@requested_depth") is only
+        # unambiguous if each component avoids '@'/'#' itself -- a value
+        # missing the depth suffix, or with the wrong delimiter order,
+        # must fail the schema's pattern. Code review on PR #611 also added
+        # eager validation at the point check_id is set (matching
+        # requested_depth/effective_depth's validate_evidence_depth), so
+        # to_json now raises ValueError immediately rather than only
+        # failing the opt-in JSON Schema check.
+        old, new = _breaking_pair()
+        result = compare(old, new)
+        result.check_id = "libfoo-missing-the-rest-of-the-shape"
+        with pytest.raises(ValueError, match="check_id"):
+            reporter.to_json(result)
+
+    def test_stat_mode_carries_identity_fields_too(self):
+        old, new = _breaking_pair()
+        result = compare(old, new)
+        result.check_id = "libfoo@profile#channel@binary"
+        payload = json.loads(reporter.to_json(result, stat=True))
+        assert payload["check_id"] == "libfoo@profile#channel@binary"
+
+    def test_leaf_mode_carries_identity_fields_too(self):
+        # Regression guard: --report-mode leaf builds its own top-level dict
+        # independently of _build_json_base/to_stat_json (a separate code
+        # path, _to_json_leaf), so it needs its own _add_check_identity call
+        # -- code review on PR #611 caught this gap between the PR's own
+        # description ("full/--stat/leaf JSON via a shared helper") and what
+        # _to_json_leaf actually did (nothing, until this fix).
+        old, new = _breaking_pair()
+        result = compare(old, new)
+        result.check_id = "libfoo@profile#channel@source"
+        result.profile_id = "linux-x86_64-gcc13"
+        result.requested_depth = "source"
+        result.effective_depth = "build"
+        result.baseline_channel = "accepted-main"
+        payload = json.loads(reporter.to_json(result, report_mode="leaf"))
+        assert payload["check_id"] == "libfoo@profile#channel@source"
+        assert payload["profile_id"] == "linux-x86_64-gcc13"
+        assert payload["requested_depth"] == "source"
+        assert payload["effective_depth"] == "build"
+        assert payload["baseline_channel"] == "accepted-main"
+
+    def test_leaf_mode_unset_by_default(self):
+        old, new = _breaking_pair()
+        payload = json.loads(reporter.to_json(compare(old, new), report_mode="leaf"))
+        for key in (
+            "check_id",
+            "profile_id",
+            "requested_depth",
+            "effective_depth",
+            "baseline_channel",
+        ):
+            assert key not in payload
+
+    def test_invalid_requested_depth_rejected_before_json_is_built(self):
+        # reporter.to_json validates requested_depth/effective_depth itself
+        # (matching mcp_server._validate_public_depth's same check) rather
+        # than relying solely on JSON Schema validation, which production
+        # code never runs -- only opt-in tests do. Catches a bad value at
+        # the point it's set, not only when a test happens to schema-check
+        # the output.
+        old, new = _breaking_pair()
+        result = compare(old, new)
+        result.requested_depth = "not-a-real-depth"
+        with pytest.raises(ValueError, match="requested_depth"):
+            reporter.to_json(result)
+
+    def test_invalid_effective_depth_rejected_before_json_is_built(self):
+        old, new = _breaking_pair()
+        result = compare(old, new)
+        result.effective_depth = "not-a-real-depth"
+        with pytest.raises(ValueError, match="effective_depth"):
+            reporter.to_json(result)
+
+
+class TestScanReportIdentityEnvelope:
+    """Same ADR-047 §7 fields (G30 P0.3), mirrored on the scan side --
+    ScanOutcome.to_dict() rather than a compare_report.schema.json (scan's
+    JSON output has no packaged JSON Schema to validate against)."""
+
+    def _outcome(self, **identity: str) -> object:
+        from abicheck.buildsource.risk import RiskScore
+        from abicheck.scan_engine import ScanOutcome
+
+        return ScanOutcome(
+            mode="scan",
+            resolved_method="auto",
+            depth="headers",
+            collect_mode="off",
+            risk=RiskScore(total=0),
+            auto=True,
+            changed_path_count=0,
+            changed_path_source="none",
+            **identity,
+        )
+
+    def test_unset_by_default(self):
+        payload = self._outcome().to_dict()
+        for key in (
+            "check_id",
+            "profile_id",
+            "requested_depth",
+            "effective_depth",
+            "baseline_channel",
+        ):
+            assert key not in payload
+
+    def test_set_fields_round_trip(self):
+        payload = self._outcome(
+            check_id="libfoo@profile#channel@source",
+            profile_id="linux-x86_64-gcc13",
+            requested_depth="source",
+            effective_depth="build",
+            baseline_channel="accepted-main",
+        ).to_dict()
+        assert payload["check_id"] == "libfoo@profile#channel@source"
+        assert payload["profile_id"] == "linux-x86_64-gcc13"
+        assert payload["requested_depth"] == "source"
+        assert payload["effective_depth"] == "build"
+        assert payload["baseline_channel"] == "accepted-main"
+
+    def test_scan_schema_version_bumped_for_the_new_fields(self):
+        from abicheck.schemas import SCAN_SCHEMA_VERSION
+
+        payload = self._outcome().to_dict()
+        assert payload["scan_schema_version"] == SCAN_SCHEMA_VERSION
+        assert SCAN_SCHEMA_VERSION != "1.0"
+
+    def test_invalid_requested_depth_rejected_before_dict_is_built(self):
+        with pytest.raises(ValueError, match="requested_depth"):
+            self._outcome(requested_depth="not-a-real-depth").to_dict()
+
+    def test_invalid_effective_depth_rejected_before_dict_is_built(self):
+        with pytest.raises(ValueError, match="effective_depth"):
+            self._outcome(effective_depth="not-a-real-depth").to_dict()
 
 
 class TestSchemaVersion:

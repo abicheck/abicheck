@@ -40,6 +40,29 @@
       "description": "Schema 2.9. The full-library verdict, present alongside verdict only when a --used-by/--required-symbol(s) scoped compare's gating verdict differs from the unscoped library-wide result (verdict becomes the scoped, gate-relevant one; full_verdict preserves the original).",
       "enum": ["NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING"]
     },
+    "check_id": {
+      "type": "string",
+      "description": "Schema 2.12 (ADR-047 report-identity envelope, G30 P0.3). This check's full identity: \"target@profile#baseline_channel@requested_depth\". Nothing in abicheck's CLI/service layer sets this yet -- reserved for the GitHub Actions integration-model primitives planned in G30 P1 (resolve-baseline, check-target). Each of the four components is constrained to ADR-047 §7's safe identifier charset (no further '@'/'#' inside a component) so the delimiter-joined form stays unambiguous.",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9._-]*#[A-Za-z0-9][A-Za-z0-9._-]*@(binary|headers|build|source)$"
+    },
+    "profile_id": {
+      "type": "string",
+      "description": "Schema 2.12 (ADR-047 §7). The build/environment profile identifier this check ran under, e.g. \"linux-x86_64-gcc13-release\". Reserved for G30 P1; not yet populated."
+    },
+    "requested_depth": {
+      "type": "string",
+      "description": "Schema 2.12 (ADR-047 §7). The evidence depth the caller asked for. Reserved for G30 P1; not yet populated.",
+      "enum": ["binary", "headers", "build", "source"]
+    },
+    "effective_depth": {
+      "type": "string",
+      "description": "Schema 2.12 (ADR-047 §7). The evidence depth actually achieved -- may be shallower than requested_depth when the requested evidence wasn't available. Reserved for G30 P1; not yet populated.",
+      "enum": ["binary", "headers", "build", "source"]
+    },
+    "baseline_channel": {
+      "type": "string",
+      "description": "Schema 2.12 (ADR-047 §7). Which baseline channel (e.g. \"accepted-main\", a release tag) old_file/old_version was resolved from. Reserved for G30 P1; not yet populated."
+    },
     "old_file": { "$ref": "#/$defs/fileMetadata" },
     "new_file": { "$ref": "#/$defs/fileMetadata" },
     "summary": { "$ref": "#/$defs/summary" },

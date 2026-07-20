@@ -20,6 +20,7 @@ Extracted from ``checker.py`` to break the circular dependency between
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -43,6 +44,60 @@ from .policy_file import PolicyFile
 # alias-change into a co-reported node-move in this not-retained case — when the
 # old alias IS retained the alias-change is compatible and must survive.
 SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER = "old version NOT retained as alias"
+
+# The public evidence-depth ladder (ADR-043 D2/ADR-047 §7): exactly the four
+# user-facing rungs, matching the public CLI's ``--depth`` and
+# ``abicheck/mcp_server.py``'s own ``_PUBLIC_DEPTHS`` (kept as a separate,
+# self-contained copy here rather than importing mcp_server — that module
+# sits above this one in the dependency graph). Shared by
+# DiffResult.requested_depth/effective_depth and ScanOutcome's matching
+# fields (G30 P0.3) so both validate against the same set.
+EVIDENCE_DEPTH_VALUES = frozenset({"binary", "headers", "build", "source"})
+
+
+def validate_evidence_depth(field_name: str, value: str) -> None:
+    """Reject a depth spelling outside EVIDENCE_DEPTH_VALUES (G30 P0.3).
+
+    Nothing populates ``requested_depth``/``effective_depth`` yet, but a
+    future caller (G30 P1.3) setting a typo'd value would otherwise only be
+    caught by the JSON Schema — which production code never runs against
+    (only opt-in tests do). Fail fast here instead, at the point the caller
+    actually sets the field, matching
+    ``mcp_server._validate_public_depth``'s same check on the same set.
+    Shared by ``reporter._add_check_identity`` (compare) and
+    ``ScanOutcome.to_dict`` (scan) so both validate identically.
+    """
+    if value not in EVIDENCE_DEPTH_VALUES:
+        raise ValueError(
+            f"{field_name}: unknown depth {value!r}. "
+            f"Valid depths: {sorted(EVIDENCE_DEPTH_VALUES)}"
+        )
+
+
+# A check's full identity (ADR-047 §7): "target@profile#baseline_channel@requested_depth".
+# Each of the four components is constrained to a safe identifier charset (no
+# further '@'/'#' inside a component) so the delimiter-joined form stays
+# unambiguous. Mirrors the ``pattern`` in compare_report.schema.json's
+# ``check_id`` property.
+CHECK_ID_PATTERN = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9._-]*"
+    r"#[A-Za-z0-9][A-Za-z0-9._-]*@(binary|headers|build|source)$"
+)
+
+
+def validate_check_id(value: str) -> None:
+    """Reject a check_id that doesn't match CHECK_ID_PATTERN (G30 P0.3).
+
+    Same rationale as ``validate_evidence_depth``: a future caller (G30 P1.3)
+    setting a malformed ``check_id`` would otherwise only be caught by the
+    JSON Schema, which production code never runs against. Fail fast here
+    instead, at the point ``reporter._add_check_identity`` sets the field.
+    """
+    if not CHECK_ID_PATTERN.match(value):
+        raise ValueError(
+            f"check_id: malformed value {value!r}. Expected shape "
+            "'target@profile#baseline_channel@requested_depth'."
+        )
 
 
 @dataclass
@@ -259,6 +314,18 @@ class DiffResult:
     # ``extractor.duration_seconds``, ``findings.source_only.count``); surfaced
     # in the JSON report so CI can tune mode selection. Empty otherwise.
     evidence_metrics: dict[str, object] = field(default_factory=dict)
+    # ADR-047 §7 report-identity envelope (G30 P0.3) — optional, additive.
+    # Nothing in the CLI/service layer populates these yet; they exist so the
+    # GitHub Actions integration-model primitives planned in G30 P1
+    # (``resolve-baseline``, ``check-target``) have a report-level place to
+    # record a check's identity once they're built. None means "not set by
+    # this caller" and the field is omitted from the JSON report entirely —
+    # never emitted as a null/empty placeholder.
+    check_id: str | None = None  # "target@profile#baseline_channel@requested_depth"
+    profile_id: str | None = None  # e.g. "linux-x86_64-gcc13-release"
+    requested_depth: str | None = None  # one of EVIDENCE_DEPTH_VALUES
+    effective_depth: str | None = None  # one of EVIDENCE_DEPTH_VALUES
+    baseline_channel: str | None = None  # e.g. "accepted-main", a release tag
 
     def _effective_kind_sets(
         self,
@@ -307,7 +374,8 @@ class DiffResult:
     def breaking(self) -> list[Change]:
         """Changes classified as BREAKING under the active policy."""
         return [
-            c for c in self.changes
+            c
+            for c in self.changes
             if self._effective_verdict_for_change(c) == Verdict.BREAKING
         ]
 
@@ -315,7 +383,8 @@ class DiffResult:
     def source_breaks(self) -> list[Change]:
         """Changes classified as API_BREAK under the active policy."""
         return [
-            c for c in self.changes
+            c
+            for c in self.changes
             if self._effective_verdict_for_change(c) == Verdict.API_BREAK
         ]
 
@@ -323,7 +392,8 @@ class DiffResult:
     def compatible(self) -> list[Change]:
         """Changes classified as COMPATIBLE under the active policy."""
         return [
-            c for c in self.changes
+            c
+            for c in self.changes
             if self._effective_verdict_for_change(c) == Verdict.COMPATIBLE
         ]
 
@@ -331,7 +401,8 @@ class DiffResult:
     def risk(self) -> list[Change]:
         """Changes classified as COMPATIBLE_WITH_RISK under the active policy."""
         return [
-            c for c in self.changes
+            c
+            for c in self.changes
             if self._effective_verdict_for_change(c) == Verdict.COMPATIBLE_WITH_RISK
         ]
 

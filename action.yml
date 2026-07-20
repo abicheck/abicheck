@@ -457,7 +457,9 @@ runs:
     # Fails fast on an unsupported mode/input combination (e.g. a directory
     # passed to dump/scan, or format: sarif on a non-compare mode) before
     # Python setup, system-dependency installation, or any build/analysis
-    # work runs — see action/validate-inputs.sh for the rationale.
+    # work runs — see action/validate-inputs.sh for the rationale. It also
+    # warns (not fails) when a mode-scoped input is set on a mode it has no
+    # effect on — a legal-but-inert combination, not an error.
     - name: Validate mode/input combination
       shell: bash
       env:
@@ -466,6 +468,18 @@ runs:
         INPUT_OLD_LIBRARY: ${{ inputs.old-library }}
         INPUT_FORMAT: ${{ inputs.format }}
         INPUT_UPLOAD_SARIF: ${{ inputs.upload-sarif }}
+        INPUT_DEBUG_INFO1: ${{ inputs.debug-info1 }}
+        INPUT_DEBUG_INFO2: ${{ inputs.debug-info2 }}
+        INPUT_DEVEL_PKG1: ${{ inputs.devel-pkg1 }}
+        INPUT_DEVEL_PKG2: ${{ inputs.devel-pkg2 }}
+        INPUT_DSO_ONLY: ${{ inputs.dso-only }}
+        INPUT_INCLUDE_PRIVATE_DSO: ${{ inputs.include-private-dso }}
+        INPUT_KEEP_EXTRACTED: ${{ inputs.keep-extracted }}
+        INPUT_FAIL_ON_REMOVED_LIBRARY: ${{ inputs.fail-on-removed-library }}
+        INPUT_JOBS: ${{ inputs.jobs }}
+        INPUT_ABI_BASELINE: ${{ inputs.abi-baseline }}
+        INPUT_ESTIMATE: ${{ inputs.estimate }}
+        INPUT_AUDIT: ${{ inputs.audit }}
       run: bash "${{ github.action_path }}/action/validate-inputs.sh"
 
     # ── 1. Python ─────────────────────────────────────────────────────────────

@@ -35,7 +35,7 @@ doc PRs need `mkdocs build --strict` + `check_ai_readiness.py`).
 These fix real defects the audit (ADR-047 §"What the audit found")
 identified in the *existing* surface. None require the new primitives.
 
-### P0.1 — Runtime warning when a mode-scoped input is set on an incompatible mode
+### P0.1 — Runtime warning when a mode-scoped input is set on an incompatible mode — **done**
 
 **Problem:** `debug-info1/2`, `devel-pkg1/2`, `dso-only`,
 `include-private-dso`, `keep-extracted`, `fail-on-removed-library`, `jobs`,
@@ -72,7 +72,17 @@ column.
 **PR boundary:** one PR — shell + input descriptions + tests together (small
 enough not to split further).
 
-### P0.2 — `collect-facts` `phase: auto` fail-loud for wrapper/plugin
+**Status:** implemented. `action/validate-inputs.sh` now warns
+(`::warning::`, exit 0) when `debug-info1`/`debug-info2`, `devel-pkg1`/
+`devel-pkg2`, `dso-only`, `include-private-dso`, `keep-extracted`,
+`fail-on-removed-library`, or `jobs` are set on a mode/operand combination
+outside "compare mode, directory/package operands only", when `abi-baseline`
+is set outside `compare`/`scan` mode, or when the deprecated `estimate`/
+`audit` scan-only aliases are set outside `scan` mode. `action.yml` forwards
+the new inputs to the validation step; `tests/test_action_validate_inputs.py`
+covers each case (warn and silent) via `TestModeScopedInputWarnings`.
+
+### P0.2 — `collect-facts` `phase: auto` fail-loud for wrapper/plugin — **done**
 
 **Problem:** `phase: auto` silently only runs `prepare` for
 `producer: wrapper`/`clang-plugin` (`actions/collect-facts/run.sh:714-716`)
@@ -94,7 +104,21 @@ the new output value per producer.
 
 **PR boundary:** one PR.
 
-### P0.3 — Report identity envelope (subset of ADR-047 §7)
+**Status:** implemented. `actions/collect-facts/run.sh` now writes a new
+`auto-completed` output (`'true'`/`'false'`) alongside a `::warning::`
+job annotation (upgraded from the print-only `::notice::`) when
+`phase: auto` resolves to `producer: wrapper`/`clang-plugin` and therefore
+only completes `prepare`. `actions/collect-facts/action.yml` documents the
+new output; `docs/user-guide/producing-source-facts.md` spells out the
+two-step choreography explicitly instead of only implying it, with a
+sample `if: steps.facts.outputs.auto-completed != 'true'` guard.
+`tests/test_action_collect_facts.py`'s new `TestAutoCompletedOutput` covers
+replay (`auto-completed: true`, no warning), wrapper under `phase: auto`
+(`auto-completed: false`, warning fires), wrapper under explicit
+`phase: prepare` (`auto-completed: true`, no warning — not flagged like
+`auto` is), and `phase: verify` (`auto-completed: true`).
+
+### P0.3 — Report identity envelope (subset of ADR-047 §7) — **done** (schema/model half; CLI-population half still open)
 
 **Problem:** JSON reports don't carry `check_id`/`profile_id`/
 `requested_depth`/`effective_depth`/`baseline_channel` today — a P1
@@ -123,7 +147,32 @@ PR #601's `DumpDepthNotSatisfiedError` work landing first per ADR-047 §11.2
 and the repo's existing Known Gaps entry — do not duplicate that
 enforcement, extend it).
 
-### P0.4 — Canonical single-library and multi-DSO doc pages
+**Status:** the schema/model half is implemented — `DiffResult`
+(`abicheck/checker_types.py`) and `ScanOutcome`
+(`abicheck/scan_engine.py`) each gained five optional fields (`check_id`,
+`profile_id`, `requested_depth`, `effective_depth`, `baseline_channel`,
+all `None` by default and omitted from JSON — never emitted as null — when
+unset). `abicheck/reporter.py` writes them into the full/`--stat`/leaf
+JSON via a shared `_add_check_identity` helper when a caller sets them.
+`abicheck/schemas/compare_report.schema.json` (and its published
+`docs/schemas/v1/` mirror, kept in sync via
+`scripts/publish_schemas.py`) declares the five properties (`report_schema_version`
+bumped `2.10` → `2.11` → `2.12` — `2.11` landed independently via #612's
+G31 Phase B3/ADR-048 `affected_public_roots`/etc. fields while this branch
+was in flight, so this work's own bump moved to `2.12` on rebase);
+`abicheck/schemas/__init__.py` documents both this bump and
+`SCAN_SCHEMA_VERSION`'s matching `1.0` → `1.1` bump for the scan
+side (no packaged JSON Schema file for scan output to update). Nothing
+populates these fields yet — that's still P1.3's job, and the
+`requested_depth`/`effective_depth` CLI-wiring PR remains blocked on
+PR #601 per the note above.
+`tests/test_report_schema.py`'s new `TestReportIdentityEnvelope`/
+`TestScanReportIdentityEnvelope` classes cover: unset-by-default (omitted,
+not null), round-trip + schema validation when set, `--stat` mode carrying
+the fields too, and an invalid `requested_depth` enum value failing schema
+validation.
+
+### P0.4 — Canonical single-library and multi-DSO doc pages — **done**
 
 **Problem:** multi-DSO guidance is split three ways with no single canonical
 page (ADR-047 finding 4).
@@ -160,11 +209,23 @@ pages yet).
 
 **PR boundary:** one PR, docs-only.
 
+**Status:** implemented. `github-action.md` and `github-action-recipes.md`
+already linked to `github-action-source-scans.md`'s "Recommended flow: a
+multi-library release with one shared facts pack" section rather than
+restating it — that de-duplication predates this item. What was missing is
+now added: the section is explicitly marked as the canonical multi-DSO
+recipe, and the required scope caveat is in place (shared-pack recipe
+supports build-wide source audits and per-target header-depth checks;
+per-target source-depth coverage needs P1.1's projection validator, not yet
+implemented). `mkdocs build --strict` passes (pre-existing anchor-mismatch
+`INFO` lines in that same section predate this change and are unrelated);
+`check_ai_readiness.py` shows the same warning count as before this item.
+
 ---
 
 ## P1 — Integration model (ADR-047's new primitives)
 
-### P1.1 — `build-output.json` schema + validator
+### P1.1 — `build-output.json` schema + validator — **done**
 
 Implements ADR-047 §2/§11.1. New schema module (e.g.
 `abicheck/buildsource/build_output.py` or a sibling of `inputs_pack.py`,
@@ -207,6 +268,26 @@ specific target referencing it must fail, (3) a single-target,
 `manifest.library`-matched pack with untagged TUs must **pass** (regression
 guard against over-rejecting the legitimate legacy case). (1) and (2) are
 currently unenforced; (3) guards the fix from over-correcting.
+
+**Status:** implemented. `abicheck/buildsource/build_output.py` defines the
+schema (`BuildOutput`/`BuildOutputTarget`/`BuildOutputEvidence`/etc., all
+optional/defaulted per the `buildsource`-wide forward-compat convention) and
+`validate_build_output()`, which implements every §11.1 rule: non-empty
+declared header roots (including the S10 `generated_header_roots` hard-error
+case), binary-exists + digest-matches, `evidence.projection` must be
+`"declared"` (`"inferred"` and any other value hard-fail), and the corrected
+shared-pack/manifest-mismatch scope — implemented as an equivalent
+comparison in the new validator (the second option the plan offered) rather
+than extending `inputs_validate.py`'s existing signature, so no existing
+caller of `validate_inputs_pack` changed. `abicheck/cli_build_output.py`
+registers `abicheck build-output validate DIRECTORY` (`--format text|json`,
+exit `0`/`1`/`64`) — a new top-level command group, since `cli_buildsource.py`
+registers no commands of its own. `docs/reference/build-output-schema.md`
+(new, linked from mkdocs nav) documents the schema + validation rules.
+`tests/test_build_output.py` covers the schema round-trip and the full
+failure taxonomy, including all three of the plan's required shared-pack
+test cases (verified against a hand-authored example directory manually as
+well as in the test suite).
 
 ### P1.2 — `actions/resolve-baseline`
 

@@ -68,6 +68,18 @@ _VALIDATOR_INPUT_VARS = (
     "INPUT_OLD_LIBRARY",
     "INPUT_FORMAT",
     "INPUT_UPLOAD_SARIF",
+    "INPUT_DEBUG_INFO1",
+    "INPUT_DEBUG_INFO2",
+    "INPUT_DEVEL_PKG1",
+    "INPUT_DEVEL_PKG2",
+    "INPUT_DSO_ONLY",
+    "INPUT_INCLUDE_PRIVATE_DSO",
+    "INPUT_KEEP_EXTRACTED",
+    "INPUT_FAIL_ON_REMOVED_LIBRARY",
+    "INPUT_JOBS",
+    "INPUT_ABI_BASELINE",
+    "INPUT_ESTIMATE",
+    "INPUT_AUDIT",
 )
 
 
@@ -480,6 +492,160 @@ class TestUploadSarif:
     def test_upload_sarif_false_default_never_triggers_the_check(self) -> None:
         result = _run_validate({"INPUT_MODE": "scan", "INPUT_FORMAT": "json"})
         assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(
+    not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"
+)
+class TestModeScopedInputWarnings:
+    """P0.1: setting a mode-scoped input on an incompatible mode used to be
+    a silent no-op. These inputs are legal-but-inert on the wrong mode, not
+    errors, so the validator warns (exit 0, `::warning::` annotation)
+    instead of failing the step."""
+
+    @pytest.mark.parametrize(
+        "env_name",
+        [
+            "INPUT_DEBUG_INFO1",
+            "INPUT_DEBUG_INFO2",
+            "INPUT_DEVEL_PKG1",
+            "INPUT_DEVEL_PKG2",
+        ],
+    )
+    def test_package_input_warns_on_non_compare_mode(self, env_name: str) -> None:
+        result = _run_validate({"INPUT_MODE": "scan", env_name: "some-package.rpm"})
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" in result.stdout
+        assert "has no effect" in result.stdout
+
+    def test_package_input_warns_on_compare_single_pair(self) -> None:
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": "old.so",
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_DEBUG_INFO1": "old-debuginfo.rpm",
+            }
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" in result.stdout
+
+    def test_package_input_silent_on_compare_directory_operand(
+        self, tmp_path: Path
+    ) -> None:
+        lib_dir = tmp_path / "release"
+        lib_dir.mkdir()
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": str(lib_dir),
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_DEBUG_INFO1": "old-debuginfo.rpm",
+            }
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" not in result.stdout
+
+    @pytest.mark.parametrize(
+        "env_name",
+        [
+            "INPUT_DSO_ONLY",
+            "INPUT_INCLUDE_PRIVATE_DSO",
+            "INPUT_KEEP_EXTRACTED",
+            "INPUT_FAIL_ON_REMOVED_LIBRARY",
+        ],
+    )
+    def test_bool_input_warns_when_true_on_non_compare_mode(
+        self, env_name: str
+    ) -> None:
+        result = _run_validate({"INPUT_MODE": "dump", env_name: "true"})
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" in result.stdout
+
+    @pytest.mark.parametrize(
+        "env_name",
+        [
+            "INPUT_DSO_ONLY",
+            "INPUT_INCLUDE_PRIVATE_DSO",
+            "INPUT_KEEP_EXTRACTED",
+            "INPUT_FAIL_ON_REMOVED_LIBRARY",
+        ],
+    )
+    def test_bool_input_silent_when_false_default(self, env_name: str) -> None:
+        result = _run_validate({"INPUT_MODE": "dump", env_name: "false"})
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" not in result.stdout
+
+    def test_jobs_warns_on_scan_mode(self) -> None:
+        result = _run_validate({"INPUT_MODE": "scan", "INPUT_JOBS": "8"})
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" in result.stdout
+        assert "jobs" in result.stdout
+
+    def test_jobs_warns_on_compare_single_pair(self) -> None:
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": "old.so",
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_JOBS": "8",
+            }
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" in result.stdout
+
+    def test_jobs_default_value_never_warns(self) -> None:
+        result = _run_validate({"INPUT_MODE": "scan"})
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" not in result.stdout
+
+    def test_jobs_silent_on_compare_directory_operand(self, tmp_path: Path) -> None:
+        lib_dir = tmp_path / "release"
+        lib_dir.mkdir()
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": str(lib_dir),
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_JOBS": "8",
+            }
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" not in result.stdout
+
+    @pytest.mark.parametrize("mode", ["dump", "deps-tree", "deps-compare"])
+    def test_abi_baseline_warns_outside_compare_and_scan(self, mode: str) -> None:
+        result = _run_validate(
+            {"INPUT_MODE": mode, "INPUT_ABI_BASELINE": "latest-release"}
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" in result.stdout
+        assert "abi-baseline" in result.stdout
+
+    @pytest.mark.parametrize("mode", ["compare", "scan"])
+    def test_abi_baseline_silent_on_compare_and_scan(self, mode: str) -> None:
+        result = _run_validate(
+            {"INPUT_MODE": mode, "INPUT_ABI_BASELINE": "latest-release"}
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" not in result.stdout
+
+    @pytest.mark.parametrize("env_name", ["INPUT_ESTIMATE", "INPUT_AUDIT"])
+    def test_deprecated_scan_alias_warns_outside_scan(self, env_name: str) -> None:
+        result = _run_validate({"INPUT_MODE": "compare", env_name: "true"})
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" in result.stdout
+
+    @pytest.mark.parametrize("env_name", ["INPUT_ESTIMATE", "INPUT_AUDIT"])
+    def test_deprecated_scan_alias_silent_on_scan(self, env_name: str) -> None:
+        result = _run_validate({"INPUT_MODE": "scan", env_name: "true"})
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" not in result.stdout
+
+    def test_no_mode_scoped_inputs_set_produces_no_warnings(self) -> None:
+        result = _run_validate({"INPUT_MODE": "compare"})
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" not in result.stdout
 
 
 # ─────────────────────────────────────────────────────────────────────────

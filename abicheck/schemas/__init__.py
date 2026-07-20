@@ -135,7 +135,15 @@ from typing import Any
 #:       a single hop). Enrichment on an existing finding, never a
 #:       standalone new finding; present only when the embedded L5 graph
 #:       has relevant reachability data for that finding (Codex review).
-REPORT_SCHEMA_VERSION = "2.11"
+#:   2.12: added five additive optional top-level keys -- ``check_id``,
+#:       ``profile_id``, ``requested_depth``, ``effective_depth``,
+#:       ``baseline_channel`` -- the report-identity envelope subset of
+#:       ADR-047 §7 (G30 P0.3). Nothing in the CLI/service layer populates
+#:       them yet; they exist so the GitHub Actions integration-model
+#:       primitives G30 P1 will add (``resolve-baseline``, ``check-target``)
+#:       have a report-level place to record a check's identity. Omitted
+#:       entirely (never emitted as null) when unset.
+REPORT_SCHEMA_VERSION = "2.12"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:
@@ -147,7 +155,12 @@ REPORT_SCHEMA_VERSION = "2.11"
 #: bump policy as :data:`REPORT_SCHEMA_VERSION` above; independent of it (scan
 #: and compare are separate contracts that evolve on their own schedules).
 #: 1.0 — initial versioned envelope.
-SCAN_SCHEMA_VERSION = "1.0"
+#: 1.1 — added five additive optional top-level keys — ``check_id``,
+#:       ``profile_id``, ``requested_depth``, ``effective_depth``,
+#:       ``baseline_channel`` — mirroring compare's 2.12 report-identity
+#:       envelope (ADR-047 §7, G30 P0.3). Reserved for G30 P1; not yet
+#:       populated. Omitted entirely (never emitted as null) when unset.
+SCAN_SCHEMA_VERSION = "1.1"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"

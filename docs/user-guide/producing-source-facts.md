@@ -290,6 +290,33 @@ ahead of time; pass `sources:` straight to the next abicheck step and skip
 `collect-facts` for that producer entirely if you already know you're on the
 replay path.
 
+**`phase: auto` is only ever one step for `producer: replay`.** For
+`producer: wrapper`/`clang-plugin` it cannot run your build for you either,
+so it silently resolves to running `prepare` only — the same two-step
+choreography above still applies, `phase: auto` just doesn't make that
+obvious by itself. Don't assume a single `phase: auto` step is enough
+without checking: the Action sets an `auto-completed` output (`'true'` when
+the pack from this one step is actually ready to consume, `'false'` when
+`phase: auto` only ran `prepare` and a build step + a second `phase: verify`
+call are still needed) and prints a `::warning::` job annotation in the
+`'false'` case. A workflow that always wants an explicit two-step shape for
+wrapper/clang-plugin should just pass `phase: prepare`/`phase: verify`
+directly instead of relying on `auto`'s resolution:
+
+```yaml
+- id: facts
+  uses: abicheck/abicheck/actions/collect-facts@<sha>
+  with:
+    producer: wrapper
+    phase: auto
+    sources: .
+- name: Check the pack is actually ready
+  if: steps.facts.outputs.auto-completed != 'true'
+  run: |
+    echo "phase: auto only ran prepare for producer: ${{ steps.facts.outputs.producer }} -- add your build step, then a phase: verify call." >&2
+    exit 1
+```
+
 **`producer: auto`** inspects `sources` for an existing compile database or a
 CMake/Bazel project (→ `replay`) and falls back to `wrapper` otherwise. It
 never auto-selects `clang-plugin` — "you own the toolchain image and the

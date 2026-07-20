@@ -57,7 +57,10 @@ F = TypeVar("F", bound=Callable[..., object])
 # into a default panel), so a new command never silently vanishes.
 _ROOT_COMMAND_PANELS: list[dict[str, object]] = [
     {"name": "Core analysis", "commands": ["dump", "compare", "scan", "deps"]},
-    {"name": "Workflow composition", "commands": ["aggregate"]},
+    {
+        "name": "Workflow composition",
+        "commands": ["aggregate", "build-output"],
+    },
     {"name": "Legacy compatibility", "commands": ["compat"]},
 ]
 COMMAND_GROUPS: dict[str, list[dict[str, object]]] = {
