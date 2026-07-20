@@ -146,38 +146,6 @@ class GraphReconciliation:
         }
 
 
-def _structural_context(
-    node_id: str, graph: SourceGraphSummary
-) -> frozenset[tuple[str, str, str]]:
-    """The set of (direction, edge_kind+role, neighbor_kind) tuples this node
-    participates in — its "position" in the graph, independent of its own
-    id/name. ``neighbor_kind`` (not the neighbor's own id, which differs
-    across old/new by construction for a genuinely renamed neighbor too) is
-    deliberately coarse — this is a last-resort, weakest-tier signal, only
-    trusted when the resulting position is unique among same-kind candidates
-    (see the module docstring's "structural-context match" tier).
-    """
-    # Codex review: this must key on the neighbor's *kind*, matching the
-    # docstring above -- not its raw node id. A raw id (e.src/e.dst) is
-    # checkout-root-dependent for file/header-backed neighbors (e.g.
-    # "header:///tmp/old/include/detail.h" vs
-    # "header:///tmp/new/include/detail.h" for the identical project header),
-    # and is by-construction different across old/new for a genuinely
-    # renamed neighbor too -- either way, using the raw id here would make an
-    # otherwise-unique structural position compare as different contexts and
-    # silently fail to reconcile a real rename/move.
-    kind_by_id = {n.id: n.kind for n in graph.nodes}
-    ctx: set[tuple[str, str, str]] = set()
-    for e in graph.edges:
-        role = str(e.attrs.get("role", ""))
-        tag = f"{e.kind}:{role}" if role else e.kind
-        if e.dst == node_id:
-            ctx.add(("in", tag, kind_by_id.get(e.src, "")))
-        if e.src == node_id:
-            ctx.add(("out", tag, kind_by_id.get(e.dst, "")))
-    return frozenset(ctx)
-
-
 def _path_segments(path: str) -> tuple[str, ...]:
     """Plain-path split into segments, ignoring the root/self markers."""
     from pathlib import PurePosixPath
@@ -185,62 +153,107 @@ def _path_segments(path: str) -> tuple[str, ...]:
     return tuple(p for p in PurePosixPath(path).parts if p not in ("/", ".", ""))
 
 
-def _common_root_len(paths: list[str]) -> int:
-    """Length (in path segments) of the longest common leading prefix shared
-    by every declaring-file path on one side of a reconciliation pass.
+#: Conventional project-root directory names — a superset of
+#: :data:`abicheck.header_utils._INCLUDE_ROOT_NAMES` (which only needs
+#: ``include``/``inc`` for its narrower include-root-inference purpose;
+#: this also covers ``src``/``source``/``sources`` layouts). Used here as an
+#: anchor for stripping a checkout-root prefix from a single declaring-file
+#: path with no sibling to derive a shared prefix from (Codex review — see
+#: :func:`_project_relative_path`).
+_CONVENTIONAL_ROOT_MARKERS: frozenset[str] = frozenset(
+    {"include", "inc", "src", "source", "sources"}
+)
 
-    Old/new graphs collected from two independently-rooted checkouts (e.g.
-    separate temp dirs in a benchmark harness, or two CI job workspaces)
-    share no absolute root, so comparing raw absolute paths would classify
-    every unmoved file as "moved". Stripping each side's own common root
-    before comparing lets an unmoved file be recognised as unmoved
-    regardless of where its tree happened to be checked out -- the same
-    normalization :func:`source_graph_findings._common_prefix_len` applies
-    for the sibling ``EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED`` family, adapted
-    here for plain filesystem paths rather than ``scheme://``-prefixed node
-    ids (Codex review).
+
+def _project_relative_path(path: str) -> str:
+    """Best-effort project-relative form of a declaring-file/header path.
+
+    Two independently-rooted checkouts of the same tree (separate temp dirs
+    in a benchmark harness, or two CI job workspaces) share no absolute
+    root, so comparing raw absolute paths would misclassify an unmoved file
+    as "moved" purely because of where its tree happened to be checked out.
+
+    With more than one declaring file on a side, the shared checkout-root
+    prefix could in principle be derived structurally (comparing multiple
+    paths against each other) — but a single sample gives no such baseline,
+    and blindly reserving "everything but the basename" as an assumed
+    checkout root (an earlier version of this function did that) silently
+    hides a real cross-directory move that happens to keep the same
+    filename (Codex review: ``/tmp/old/src/foo.h`` -> ``/tmp/new/include/foo.h``
+    must not read as unmoved). Anchoring on the last conventional root-marker
+    segment instead (``include``/``inc``/``src``/``source``/``sources`` — the
+    same vocabulary :data:`abicheck.header_utils._INCLUDE_ROOT_NAMES` already
+    uses for a similar purpose) gets both cases right without needing a
+    second sample: it strips the checkout-root prefix when a recognizable
+    project-layout marker is present, and falls back to comparing the full
+    path (never silently "unmoved") when it isn't.
     """
-    seg_lists = [_path_segments(p) for p in paths if p]
-    if not seg_lists:
-        return 0
-    if len(seg_lists) == 1:
-        return max(0, len(seg_lists[0]) - 1)
-    shortest = max(0, min(len(s) for s in seg_lists) - 1)
-    n = 0
-    for i in range(shortest):
-        if len({s[i] for s in seg_lists}) == 1:
-            n += 1
-        else:
-            break
-    return n
-
-
-def _root_relative_path(path: str, prefix_len: int) -> str:
-    """Strip the first *prefix_len* segments from a plain filesystem path."""
-    if prefix_len <= 0:
+    if not path:
         return path
     segs = _path_segments(path)
-    return "/".join(segs[prefix_len:])
+    for i in range(len(segs) - 1, -1, -1):
+        if segs[i].lower() in _CONVENTIONAL_ROOT_MARKERS:
+            return "/".join(segs[i:])
+    return "/".join(segs)
+
+
+def _neighbor_identity(node: GraphNode) -> str:
+    """A checkout-root-independent, kind-disambiguated identity for a graph
+    node used as a *neighbor* in :func:`_structural_context`.
+
+    Neither the neighbor's raw node id (checkout-root/rename-dependent) nor
+    its bare kind alone (collides two genuinely different parents of the
+    same kind, e.g. two different structs each losing/gaining an unrelated
+    field — Codex review) is safe here. Prefers the neighbor's own resolved
+    qualified name (stable, not path-based — covers declaration/type
+    neighbors); falls back to a project-relative form of its declaring
+    path/label (covers header/file neighbors, which have no qualified
+    name); falls back to bare kind only when neither fact is available, so
+    the tuple this feeds is never actually empty.
+    """
+    ident = resolve_identity_for_node(node)
+    if ident.qualified_name:
+        return f"{node.kind}:{ident.qualified_name}"
+    path = str(node.attrs.get("def_file") or node.attrs.get("file") or node.label or "")
+    if path:
+        return f"{node.kind}:{_project_relative_path(path)}"
+    return node.kind
+
+
+def _structural_context(
+    node_id: str, graph: SourceGraphSummary
+) -> frozenset[tuple[str, str, str]]:
+    """The set of (direction, edge_kind+role, neighbor_identity) tuples this
+    node participates in — its "position" in the graph, independent of its
+    own id/name. ``neighbor_identity`` (see :func:`_neighbor_identity` —
+    not the neighbor's own raw node id, which is checkout-root-dependent,
+    and not bare kind alone, which collides unrelated same-kind parents) is
+    a last-resort, weakest-tier signal, only trusted when the resulting
+    position is unique among same-kind candidates (see the module
+    docstring's "structural-context match" tier).
+    """
+    identity_by_id = {n.id: _neighbor_identity(n) for n in graph.nodes}
+    ctx: set[tuple[str, str, str]] = set()
+    for e in graph.edges:
+        role = str(e.attrs.get("role", ""))
+        tag = f"{e.kind}:{role}" if role else e.kind
+        if e.dst == node_id:
+            ctx.add(("in", tag, identity_by_id.get(e.src, "")))
+        if e.src == node_id:
+            ctx.add(("out", tag, identity_by_id.get(e.dst, "")))
+    return frozenset(ctx)
 
 
 def _classify_outcome(
-    old_identity: CanonicalIdentity,
-    new_identity: CanonicalIdentity,
-    old_prefix_len: int,
-    new_prefix_len: int,
+    old_identity: CanonicalIdentity, new_identity: CanonicalIdentity
 ) -> str:
     old_qn = old_identity.qualified_name
     new_qn = new_identity.qualified_name
     # source_relative encodes file#scope#name — compare just the file prefix
     # (before the first separator) to ask "did the declaring file change",
-    # after stripping each side's own checkout-root prefix (see
-    # _common_root_len).
-    old_file = _root_relative_path(
-        old_identity.source_relative.split("\x1f", 1)[0], old_prefix_len
-    )
-    new_file = _root_relative_path(
-        new_identity.source_relative.split("\x1f", 1)[0], new_prefix_len
-    )
+    # after normalizing each side's path (see _project_relative_path).
+    old_file = _project_relative_path(old_identity.source_relative.split("\x1f", 1)[0])
+    new_file = _project_relative_path(new_identity.source_relative.split("\x1f", 1)[0])
     renamed = bool(old_qn) and bool(new_qn) and old_qn != new_qn
     moved = bool(old_file) and bool(new_file) and old_file != new_file
     if renamed and not moved:
@@ -282,25 +295,6 @@ def reconcile_added_removed(
     matched_old: set[str] = set()
     matched_new: set[str] = set()
 
-    # Checkout-root normalization (see _common_root_len): computed once, up
-    # front, over every reconcilable node's declaring file on each side --
-    # not per-kind, since "which checkout root was this side collected
-    # from" is a whole-graph property, not a per-node-kind one.
-    old_prefix_len = _common_root_len(
-        [
-            str(n.attrs.get("def_file") or n.attrs.get("file") or "")
-            for n in removed_nodes
-            if n.kind in _RECONCILABLE_KINDS
-        ]
-    )
-    new_prefix_len = _common_root_len(
-        [
-            str(n.attrs.get("def_file") or n.attrs.get("file") or "")
-            for n in added_nodes
-            if n.kind in _RECONCILABLE_KINDS
-        ]
-    )
-
     for kind in sorted(set(removed_by_kind) | set(added_by_kind)):
         old_list = removed_by_kind.get(kind, [])
         new_list = added_by_kind.get(kind, [])
@@ -332,12 +326,7 @@ def reconcile_added_removed(
             ]
             if len(candidates) == 1:
                 new_node = next(n for n in new_list if n.id == candidates[0])
-                outcome = _classify_outcome(
-                    old_ident[oid],
-                    new_ident[candidates[0]],
-                    old_prefix_len,
-                    new_prefix_len,
-                )
+                outcome = _classify_outcome(old_ident[oid], new_ident[candidates[0]])
                 result.reconciled.append(
                     ReconciledPair(
                         old_node,
@@ -352,19 +341,31 @@ def reconcile_added_removed(
                 matched_new.add(candidates[0])
 
         # -- Tier 2: alias match (unambiguous both directions) ----------
-        new_by_alias: dict[str, list[str]] = {}
+        # A bare "name:<short>" alias (resolve_canonical_identity() adds one
+        # for every entity that has a name at all) must never be sufficient
+        # evidence on its own -- that is exactly the "ambiguous fallback key
+        # must resolve to no match" principle this module's own docstring
+        # cites (ADR-045), generalized to aliases: two unrelated
+        # declarations that merely share a short name (e.g. old `a::foo`
+        # removed, unrelated new `b::foo` added) must not reconcile just
+        # because "foo" is their only common alias (Codex review).
+        strong_new_by_alias: dict[str, list[str]] = {}
         for nid, ident in new_ident.items():
             if nid in matched_new:
                 continue
             for alias in ident.aliases:
-                new_by_alias.setdefault(alias, []).append(nid)
+                if alias.startswith("name:"):
+                    continue
+                strong_new_by_alias.setdefault(alias, []).append(nid)
         for old_node in old_list:
             oid = old_node.id
             if oid in matched_old:
                 continue
             candidate_ids: set[str] = set()
             for alias in old_ident[oid].aliases:
-                for nid in new_by_alias.get(alias, []):
+                if alias.startswith("name:"):
+                    continue
+                for nid in strong_new_by_alias.get(alias, []):
                     if nid not in matched_new:
                         candidate_ids.add(nid)
             if len(candidate_ids) == 1:
@@ -376,13 +377,12 @@ def reconcile_added_removed(
                     n.id
                     for n in old_list
                     if n.id not in matched_old
-                    and set(old_ident[n.id].aliases) & set(cand_ident.aliases)
+                    and {a for a in old_ident[n.id].aliases if not a.startswith("name:")}
+                    & {a for a in cand_ident.aliases if not a.startswith("name:")}
                 }
                 if len(reverse_candidates) == 1:
                     new_node = next(n for n in new_list if n.id == cand)
-                    outcome = _classify_outcome(
-                        old_ident[oid], cand_ident, old_prefix_len, new_prefix_len
-                    )
+                    outcome = _classify_outcome(old_ident[oid], cand_ident)
                     result.reconciled.append(
                         ReconciledPair(
                             old_node,
@@ -436,9 +436,7 @@ def reconcile_added_removed(
                 ]
                 if not sibling_old_matches:
                     new_node = next(n for n in new_list if n.id == cand)
-                    outcome = _classify_outcome(
-                        old_ident[oid], new_ident[cand], old_prefix_len, new_prefix_len
-                    )
+                    outcome = _classify_outcome(old_ident[oid], new_ident[cand])
                     result.reconciled.append(
                         ReconciledPair(
                             old_node,

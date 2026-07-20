@@ -262,6 +262,119 @@ def test_real_move_still_detected_across_different_checkout_roots() -> None:
     assert result.reconciled[0].outcome == OUTCOME_MOVED
 
 
+def test_single_sample_cross_directory_move_same_basename_detected() -> None:
+    """Codex review: a single declaring file per side gives no sibling to
+    derive a real shared checkout-root prefix from. An earlier version of
+    the normalization handled this by reserving "everything but the
+    basename" as an assumed checkout root -- which silently hid a genuine
+    cross-directory move that happens to keep the same filename
+    (src/foo.h -> include/foo.h). Anchoring on the last conventional
+    project-root marker instead must still catch this as a real move."""
+    old_node = GraphNode(
+        id="type://old",
+        kind="record_type",
+        label="ns::Widget",
+        attrs={
+            "qualified_name": "ns::Widget",
+            "def_file": "/tmp/old/src/foo.h",
+        },
+    )
+    new_node = GraphNode(
+        id="type://new",
+        kind="record_type",
+        label="ns::Widget",
+        attrs={
+            "qualified_name": "ns::Widget",
+            "def_file": "/tmp/new/include/foo.h",
+        },
+    )
+    old_g = _graph([old_node], [])
+    new_g = _graph([new_node], [])
+    result = reconcile_added_removed([old_node], [new_node], old_g, new_g)
+    assert len(result.reconciled) == 1
+    assert result.reconciled[0].outcome == OUTCOME_MOVED
+
+
+def test_bare_short_name_alone_does_not_reconcile() -> None:
+    """Codex review: resolve_canonical_identity() adds a bare `name:<short>`
+    alias for every named entity. Two unrelated declarations that merely
+    share a short name (different namespaces, otherwise unrelated) must not
+    reconcile just because that bare name is their only common alias --
+    this module's own docstring says a bare short name must never resolve a
+    match (ADR-045 principle), and the alias tier was not honoring it."""
+    old_node = GraphNode(
+        id="type://a::foo",
+        kind="record_type",
+        label="a::foo",
+        attrs={"name": "foo", "qualified_name": "a::foo", "def_file": "a.h"},
+    )
+    new_node = GraphNode(
+        id="type://b::foo",
+        kind="record_type",
+        label="b::foo",
+        attrs={"name": "foo", "qualified_name": "b::foo", "def_file": "b.h"},
+    )
+    old_g = _graph([old_node], [])
+    new_g = _graph([new_node], [])
+    result = reconcile_added_removed([old_node], [new_node], old_g, new_g)
+    assert result.reconciled == []
+    assert [n.id for n in result.true_removed] == [old_node.id]
+    assert [n.id for n in result.true_added] == [new_node.id]
+
+
+def test_structural_context_distinguishes_different_same_kind_parents() -> None:
+    """Codex review: reducing a neighbor to only its *kind* makes unrelated
+    graph positions look identical when there are exactly one removed and
+    one added node of a kind -- a field-type change under OldParent and an
+    unrelated field-type change under NewParent both reduce to
+    ("in", "TYPE_HAS_FIELD_TYPE:field", "record_type"), which would
+    incorrectly reconcile them as a rename. The neighbor's own qualified
+    name (OldParent vs NewParent) must disambiguate this -- true add/remove
+    on both sides, not a false rename."""
+    old_parent = GraphNode(
+        id="type://ns::OldParent",
+        kind="record_type",
+        label="ns::OldParent",
+        attrs={"qualified_name": "ns::OldParent"},
+    )
+    new_parent = GraphNode(
+        id="type://ns::NewParent",
+        kind="record_type",
+        label="ns::NewParent",
+        attrs={"qualified_name": "ns::NewParent"},
+    )
+    old_field = GraphNode(
+        id="type://ns::OldField",
+        kind="record_type",
+        label="ns::OldField",
+        attrs={"qualified_name": "ns::OldField", "def_file": "detail.h"},
+    )
+    new_field = GraphNode(
+        id="type://ns::NewField",
+        kind="record_type",
+        label="ns::NewField",
+        attrs={"qualified_name": "ns::NewField", "def_file": "detail.h"},
+    )
+    old_edge = GraphEdge(
+        src=old_parent.id,
+        dst=old_field.id,
+        kind="TYPE_HAS_FIELD_TYPE",
+        attrs={"role": "field"},
+    )
+    new_edge = GraphEdge(
+        src=new_parent.id,
+        dst=new_field.id,
+        kind="TYPE_HAS_FIELD_TYPE",
+        attrs={"role": "field"},
+    )
+    old_g = _graph([old_parent, old_field], [old_edge])
+    new_g = _graph([new_parent, new_field], [new_edge])
+    result = reconcile_added_removed([old_field], [new_field], old_g, new_g)
+    assert result.reconciled == []
+    assert [n.id for n in result.true_removed] == [old_field.id]
+    assert [n.id for n in result.true_added] == [new_field.id]
+
+
 def test_multi_file_common_root_stripped_preserves_real_subdirectory_move() -> None:
     """With more than one declaring file on each side, the checkout-root
     normalization must derive the actual shared root from all of them (not
