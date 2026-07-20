@@ -1,7 +1,7 @@
 # ABI Scenario Catalog
 
 <!-- BEGIN GENERATED: catalog-headline (keep counts in sync with examples/ground_truth.json) -->
-This directory contains **193 cases** (188 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Most cases are a minimal, compilable C/C++ example with:
+This directory contains **195 cases** (190 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Most cases are a minimal, compilable C/C++ example with:
 <!-- END GENERATED: catalog-headline -->
 
 - Paired `v1/` and `v2/` source + headers.
@@ -33,7 +33,7 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 |---------|-------|-------------------------|------|
 | BREAKING | 107 | `BREAKING_KINDS` | 🔴 |
 | API_BREAK | 17 | `API_BREAK_KINDS` | 🟠 |
-| COMPATIBLE_WITH_RISK | 27 | `RISK_KINDS` | 🟡 |
+| COMPATIBLE_WITH_RISK | 29 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 9 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 21 | `QUALITY_KINDS` | 🟡 |
 | NO_CHANGE | 7 | — | ✅ |
@@ -452,6 +452,8 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [191](case191_header_only_graph_field_type/README.md) | _header_only_graph_field_type — Same finding, proven with a genuine confirmed-zero (no coverage trick) | Breaking | 🔴 BREAKING (bad practice) |
 | [192](case192_call_graph_break_survives_suppression/README.md) | Call-graph-reachable break survives a broad internal-namespace suppression | Breaking | 🔴 BREAKING |
 | [193](case193_ordinary_exported_fn_call_not_reachable/README.md) | An ordinary exported function's internal call is not public-reachable | Breaking | 🔴 BREAKING |
+| [194](case194_header_graph_rename_reconciled/README.md) | _header_graph_rename_reconciled — Internal dependency target renamed, safely reconciled | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [195](case195_header_graph_ambiguous_rename_not_reconciled/README.md) | _header_graph_ambiguous_rename_not_reconciled — Ambiguous simultaneous rename, correctly NOT reconciled | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 <!-- END GENERATED: case-index -->
 
 ---

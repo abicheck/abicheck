@@ -42,6 +42,7 @@ import re
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
+from .buildsource.entity_identity import candidate_lookup_keys
 from .checker_policy import ChangeKind, ReachabilityState
 from .checker_types import Change
 
@@ -1343,8 +1344,13 @@ def detect_call_graph_leaks(
         # header-only path (header_graph.py) never does. Each trigger's own
         # c.qualified_name (set by EnrichSourceLocations from Function.name,
         # independent of graph provenance) is a reliable fallback key that
-        # works in both modes.
-        keys = {dname, *(t.qualified_name for t in triggers if t.qualified_name)}
+        # works in both modes. Built via the shared candidate-key helper
+        # (G31 Phase B B1: generalizes what used to be an ad hoc
+        # per-call-site {dname, qualified_name, ...} set literal — see
+        # entity_identity.candidate_lookup_keys).
+        keys = candidate_lookup_keys(
+            dname, *(t.qualified_name for t in triggers if t.qualified_name)
+        )
         old_pp: list[str] = []
         new_pp: list[str] = []
         for key in keys:

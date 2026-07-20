@@ -139,6 +139,20 @@ class Change:
     # `allow_unknown_reachability: true`. Defaults to UNKNOWN, the honest
     # "no evidence" state.
     reachability_state: ReachabilityState = ReachabilityState.UNKNOWN
+    # G31 Phase B B3 (ADR-048) — structured graph impact/proof-path data,
+    # attached (not duplicated) alongside a finding the L5 graph has relevant
+    # reachability evidence for. ``affected_public_roots``: the labels of the
+    # public entry node(s) a "graph explain"-style walk found reaching this
+    # change's subject. ``impact_proof_path``: the shortest such path as a
+    # list of node/edge reference dicts (see
+    # ``buildsource.graph_impact.structured_proof_path``) — the structured
+    # counterpart of ``reachability_proof_path`` above, not a replacement for
+    # it (that field stays the human-readable prose rendering).
+    # ``impact_is_direct``: True when the path is a single hop, False when
+    # transitive, None when no graph impact data applies to this finding.
+    affected_public_roots: list[str] | None = None
+    impact_proof_path: list[dict[str, object]] | None = None
+    impact_is_direct: bool | None = None
 
 
 @dataclass

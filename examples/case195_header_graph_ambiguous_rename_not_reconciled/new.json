@@ -1,0 +1,91 @@
+{
+  "coverage": {},
+  "degraded_passes": {},
+  "edges": [
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "dst": "type:demo::Config2",
+      "edge": "SOURCE_DECLARES",
+      "provenance": "",
+      "src": "hdr:include/demo/config2.h"
+    },
+    {
+      "attrs": {
+        "role": "field"
+      },
+      "confidence": "unknown",
+      "dst": "type:demo::detail::RawX",
+      "edge": "TYPE_HAS_FIELD_TYPE",
+      "provenance": "",
+      "src": "type:demo::Config2"
+    },
+    {
+      "attrs": {
+        "role": "field"
+      },
+      "confidence": "unknown",
+      "dst": "type:demo::detail::RawY",
+      "edge": "TYPE_HAS_FIELD_TYPE",
+      "provenance": "",
+      "src": "type:demo::Config2"
+    }
+  ],
+  "external_graph_refs": [],
+  "extractor_passes": {},
+  "graph_id": "sha256:3c26c31dfa18d6d945297e9bbf7a0df38f0727db2f9ab551b69a55bcc99f62fd",
+  "indexes": {
+    "by_binary_symbol": {},
+    "by_file": {},
+    "by_source_decl": {},
+    "by_target": {}
+  },
+  "narrowed_passes": {},
+  "narrowed_scope": {},
+  "nodes": [
+    {
+      "attrs": {
+        "qualified_name": "demo::Config2",
+        "visibility": "public_header"
+      },
+      "confidence": "unknown",
+      "id": "type:demo::Config2",
+      "kind": "record_type",
+      "label": "demo::Config2",
+      "provenance": ""
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "id": "hdr:include/demo/config2.h",
+      "kind": "header",
+      "label": "include/demo/config2.h",
+      "provenance": ""
+    },
+    {
+      "attrs": {
+        "def_file": "include/demo/detail2.h",
+        "qualified_name": "demo::detail::RawX",
+        "visibility": "private_header"
+      },
+      "confidence": "unknown",
+      "id": "type:demo::detail::RawX",
+      "kind": "record_type",
+      "label": "demo::detail::RawX",
+      "provenance": ""
+    },
+    {
+      "attrs": {
+        "def_file": "include/demo/detail2.h",
+        "qualified_name": "demo::detail::RawY",
+        "visibility": "private_header"
+      },
+      "confidence": "unknown",
+      "id": "type:demo::detail::RawY",
+      "kind": "record_type",
+      "label": "demo::detail::RawY",
+      "provenance": ""
+    }
+  ],
+  "schema_version": 1
+}

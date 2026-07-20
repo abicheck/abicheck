@@ -95,3 +95,42 @@ whether a flag was passed. A header-only collection degrades the same way
 it always did (declarations and signatures only, no function bodies) — it
 is just no longer possible to accidentally run *without* it when depth
 `headers` or deeper evidence is available.
+
+## Canonical entity identity and rename/move reconciliation (G31 Phase B)
+
+The header-only graph and a build-integrated graph can identify the same
+declaration differently depending on which pass saw it first. Without any
+reconciliation, an old/new comparison sees a renamed internal declaration as
+an unrelated node removal plus an unrelated node addition — a reader has to
+notice the two facts independently and infer by hand that they describe the
+same entity.
+
+`abicheck.buildsource.entity_identity` computes a **canonical identity** for
+every graph declaration/type node, in preference order:
+
+1. **canonical** — a compiler-provided stable identity (a clang USR, when a
+   producer supplies one) or a real Itanium/MSVC mangled name.
+2. **normalized** — a fully-qualified semantic signature (qualified name +
+   kind + arity/parameter types) when no mangling is available.
+3. **reduced** — a source-relative identity (file + enclosing scope + name,
+   always an alias, never the primary key) or, when nothing else is
+   available at all, a clearly-marked `synthetic:sha256:...` fallback.
+
+`abicheck.buildsource.graph_reconcile` then reconciles an old/new graph
+diff's added/removed nodes using that identity: an exact canonical-id match,
+an exact (bidirectionally-unambiguous) alias match, or — as a last resort —
+a match on unique structural position when even the qualified name changed.
+**Ambiguous evidence never resolves to a guess**: if two candidates share
+the same alias or structural position, neither is reconciled — both stay a
+plain add/remove, exactly as before Phase B. A match produces a
+`declaration_renamed`, `declaration_moved`, or
+`declaration_identity_reconciled` finding — pure enrichment, RISK-tier,
+never overriding or suppressing an artifact-proven finding elsewhere in the
+comparison (the same authority rule as everywhere else on this page).
+
+See [ADR-048](../development/adr/048-canonical-entity-identity-and-graph-reconciliation.md)
+for the full design, and
+[`examples/case194_header_graph_rename_reconciled`](../examples/case194_header_graph_rename_reconciled.md)/
+[`examples/case195_header_graph_ambiguous_rename_not_reconciled`](../examples/case195_header_graph_ambiguous_rename_not_reconciled.md)
+for a reconciled rename and its deliberately-unreconciled ambiguous
+counterpart.

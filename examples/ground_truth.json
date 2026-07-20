@@ -3816,6 +3816,45 @@
     "macos",
     "windows"
    ]
+  },
+  "case194_header_graph_rename_reconciled": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": true,
+   "category": "risk",
+   "description": "A public struct (demo::Config) private field-type target (demo::detail::RawConfig) is renamed to demo::detail::RawConfigV2 in the same declaring file, in the derived L5 source graph. G31 Phase B's canonical-identity/graph-reconciliation step (ADR-048) recognizes the two as the same declaration via unique structural context (both sit at the identical, unique TYPE_HAS_FIELD_TYPE:field position from demo::Config), and reports one declaration_renamed finding instead of leaving a reader to infer it from an unrelated add+remove node pair. The public_api_internal_dependency_added risk finding still fires independently on its own evidence (raw node-id reachability), since reconciliation only explains/localizes -- it never suppresses an existing finding (ADR-028 D3).",
+   "expected": "COMPATIBLE_WITH_RISK",
+   "expected_kinds": [
+    "declaration_renamed",
+    "public_api_internal_dependency_added"
+   ],
+   "fixtures": [
+    "old.json",
+    "new.json"
+   ],
+   "min_evidence": "L5",
+   "platforms": [
+    "linux"
+   ]
+  },
+  "case195_header_graph_ambiguous_rename_not_reconciled": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": true,
+   "category": "risk",
+   "description": "A public struct (demo::Config2) has TWO sibling private field-type targets renamed simultaneously (RawA/RawB -> RawX/RawY). Neither B1 alias evidence (the qualified names all changed) nor structural context (both old nodes -- and both new nodes -- occupy the identical TYPE_HAS_FIELD_TYPE:field position from the same parent) can safely tell which old name maps to which new one, so G31 Phase B's graph reconciliation (ADR-048) correctly refuses to guess: no declaration_renamed finding is produced for either pair. The raw diff still (correctly, conservatively) reports both as newly-added internal dependencies rather than silently collapsing them into a wrong rename pairing -- soundness over recall, the same principle ADR-045 established for flat old/new type matching.",
+   "expected": "COMPATIBLE_WITH_RISK",
+   "expected_kinds": [
+    "public_api_internal_dependency_added"
+   ],
+   "fixtures": [
+    "old.json",
+    "new.json"
+   ],
+   "min_evidence": "L5",
+   "platforms": [
+    "linux"
+   ]
   }
  },
  "version": "4",

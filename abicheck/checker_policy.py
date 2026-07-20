@@ -632,6 +632,18 @@ class ChangeKind(str, Enum):
     TARGET_DEPENDENCY_ADDED = "target_dependency_added"  # the library gained an inter-target build/link dependency → RISK
     EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED = "exported_symbol_source_owner_changed"  # an exported symbol's owning source/TU changed (implementation relocated) → RISK
 
+    # G31 Phase B (ADR-048): graph-node reconciliation outcomes, distinct
+    # from a plain add+remove pair in the L5 graph diff. Emitted only when
+    # buildsource.graph_reconcile.reconcile_graph_diff finds an unambiguous
+    # (canonical-id, alias, or unique-structural-context) old/new match for
+    # a declaration/type that the raw node-id diff would otherwise report as
+    # an unrelated removal + addition. Pure enrichment/classification
+    # metadata — never overrides or suppresses an artifact-proven finding
+    # (ADR-028 D3); all default to RISK (COMPATIBLE_WITH_RISK).
+    DECLARATION_RENAMED = "declaration_renamed"  # graph-reconciled: same entity, new qualified name → RISK
+    DECLARATION_MOVED = "declaration_moved"  # graph-reconciled: same entity, new declaring file → RISK
+    DECLARATION_IDENTITY_RECONCILED = "declaration_identity_reconciled"  # graph-reconciled: both name and location evidence changed → RISK
+
     # ── Cross-source validation (ADR-035 D4 / G19.2) ────────────────────────
     # Emitted by the intra-version cross-source engine (buildsource/crosscheck.py)
     # which diffs ONE merged snapshot's evidence sources against each other

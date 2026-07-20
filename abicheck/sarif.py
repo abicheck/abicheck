@@ -286,6 +286,18 @@ def _result_for(
             properties["reachabilityKind"] = change.reachability_kind
         if change.reachability_proof_path:
             properties["reachabilityProofPath"] = change.reachability_proof_path
+    # G31 Phase B B3 (ADR-048) — structured graph impact data. SARIF's own
+    # relatedLocations/codeFlows model source-file locations, not abstract
+    # graph node/edge references, so surfacing this as typed `properties`
+    # (matching every other graph-derived field on this object) is the
+    # pragmatic fit here rather than forcing an artificial codeFlow —
+    # documented as a deliberate scope decision in ADR-048.
+    if change.affected_public_roots:
+        properties["affectedPublicRoots"] = change.affected_public_roots
+    if change.impact_proof_path:
+        properties["impactProofPath"] = change.impact_proof_path
+    if change.impact_is_direct is not None:
+        properties["impactIsDirect"] = change.impact_is_direct
     evidence_status = evidence_status_override or evidence_status_for_change(change)
     if evidence_status is not None:
         properties["evidenceStatus"] = evidence_status.value
