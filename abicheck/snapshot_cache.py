@@ -151,11 +151,19 @@ def _cache_key(
                 h.update(chunk)
     except OSError:
         return ""  # uncacheable
-    # Header mtimes (sorted for determinism)
+    # Header mtimes (sorted for determinism). A `headers` entry can itself be
+    # a directory (`-H include/`) -- `_attach_header_graph`/the header-AST
+    # parser expand that into every header file found under it, so the
+    # directory's own mtime alone (which most filesystems only bump when an
+    # entry is added/removed, not when an existing file's contents change)
+    # is not enough to invalidate the cache on an in-place edit; walk it the
+    # same way an `includes` directory is walked below (Codex review).
     for hdr in sorted(headers):
         try:
             h.update(str(hdr).encode())
             h.update(str(hdr.stat().st_mtime_ns).encode())
+            if hdr.is_dir():
+                _hash_include_dir_headers(h, hdr)
         except OSError:
             h.update(b"MISSING")
     # Include dirs: the directory's own path, plus the (relative path, mtime)

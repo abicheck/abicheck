@@ -9,6 +9,7 @@ from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.snapshot_cache import (
     _cache_key,
     _get_cache_dir,
+    _hash_include_dir_headers,
     _safe_mtime,
     lookup,
     store,
@@ -144,6 +145,86 @@ class TestCacheKey:
         key2 = _cache_key(binary, [], [inc], "1.0", "c++")
 
         assert key1 != key2
+
+    def test_edit_inside_header_directory_input_changes_key(self, tmp_path):
+        """A `headers` entry can itself be a directory (`-H include/`); the
+        header-AST parse expands it to every header file underneath, so
+        editing one of those files must invalidate the cache even though the
+        directory's own mtime doesn't necessarily change on a same-size
+        in-place edit (Codex review on PR #612 -- the same transitive-header
+        staleness class already fixed for `includes` directories above)."""
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF content")
+        hdr_dir = tmp_path / "include"
+        hdr_dir.mkdir()
+        nested = hdr_dir / "api.h"
+        nested.write_text("struct api { int x; };\n")
+
+        key1 = _cache_key(binary, [hdr_dir], [], "1.0", "c++")
+
+        import os
+        import time
+
+        os.utime(nested, (time.time() + 10, time.time() + 10))
+        key2 = _cache_key(binary, [hdr_dir], [], "1.0", "c++")
+
+        assert key1 != key2
+
+    def test_hash_include_dir_headers_unreadable_dir_is_a_noop(
+        self, tmp_path, monkeypatch
+    ):
+        """An include directory that raises OSError while being walked (e.g.
+        a permission error) degrades to hashing nothing extra, matching this
+        module's "any read problem is cache-safe, never a crash" stance --
+        it must not propagate and abort cache-key computation."""
+        import hashlib
+
+        inc = tmp_path / "inc"
+        inc.mkdir()
+
+        def _boom(self, pattern):
+            raise OSError("permission denied")
+            yield  # pragma: no cover - makes this a generator function
+
+        monkeypatch.setattr(Path, "rglob", _boom)
+
+        h = hashlib.sha256()
+        _hash_include_dir_headers(h, inc)  # must not raise
+        assert h.digest() == hashlib.sha256().digest()  # nothing was hashed
+
+    def test_hash_include_dir_headers_stat_failure_hashes_missing_marker(
+        self, tmp_path, monkeypatch
+    ):
+        """A header that disappears (or otherwise fails to stat) between being
+        listed and being hashed still contributes a deterministic MISSING
+        marker rather than crashing or silently skipping the entry. Only the
+        specific file's ``stat()`` is made to fail -- ``Path.rglob``'s own
+        internal directory traversal also calls ``stat()`` under the hood, so
+        patching it unconditionally would break listing itself rather than
+        exercising the explicit per-entry ``except OSError`` branch this test
+        targets."""
+        import hashlib
+
+        inc = tmp_path / "inc"
+        inc.mkdir()
+        gone = inc / "gone.h"
+        gone.write_text("struct gone {};\n")
+
+        real_stat = Path.stat
+
+        def _selective_boom(self, *args, **kwargs):
+            if self == gone:
+                raise OSError("vanished")
+            return real_stat(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "stat", _selective_boom)
+
+        h1 = hashlib.sha256()
+        _hash_include_dir_headers(h1, inc)
+        h2 = hashlib.sha256()
+        _hash_include_dir_headers(h2, inc)
+        assert h1.digest() == h2.digest()  # deterministic MISSING marker
+        assert h1.digest() != hashlib.sha256().digest()  # path was still hashed
 
     def test_header_mtime_change_different_key(self, tmp_path):
         import time
