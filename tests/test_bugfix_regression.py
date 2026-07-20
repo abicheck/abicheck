@@ -410,7 +410,7 @@ class TestBug8CppHintOnCFailure:
 
     def test_lang_c_with_cpp_header_shows_hint(self, tmp_path: Path):
         with (
-            patch("abicheck.dumper._castxml_available", return_value=True),
+            patch("abicheck.dumper._resolve_selected_tool", return_value="/mock/castxml"),
             patch("abicheck.dumper.deadline.run_bounded",
                   return_value=self._failed_process("error: use of undeclared identifier 'class'")),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"),
@@ -424,7 +424,7 @@ class TestBug8CppHintOnCFailure:
 
     def test_lang_c_with_pure_c_header_no_hint(self, tmp_path: Path):
         with (
-            patch("abicheck.dumper._castxml_available", return_value=True),
+            patch("abicheck.dumper._resolve_selected_tool", return_value="/mock/castxml"),
             patch("abicheck.dumper.deadline.run_bounded",
                   return_value=self._failed_process("error: something else")),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"),
@@ -455,7 +455,7 @@ class TestBug9CastxmlTimeout:
     def test_timeout_raises_runtime_error(self, tmp_path: Path):
         timeout_exc = subprocess.TimeoutExpired(cmd=["castxml"], timeout=120)
         with (
-            patch("abicheck.dumper._castxml_available", return_value=True),
+            patch("abicheck.dumper._resolve_selected_tool", return_value="/mock/castxml"),
             patch("abicheck.dumper.deadline.run_bounded", side_effect=timeout_exc),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"),
         ):
@@ -468,7 +468,7 @@ class TestBug9CastxmlTimeout:
     def test_timeout_message_mentions_120_seconds(self, tmp_path: Path):
         timeout_exc = subprocess.TimeoutExpired(cmd=["castxml"], timeout=120)
         with (
-            patch("abicheck.dumper._castxml_available", return_value=True),
+            patch("abicheck.dumper._resolve_selected_tool", return_value="/mock/castxml"),
             patch("abicheck.dumper.deadline.run_bounded", side_effect=timeout_exc),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"),
         ):
@@ -483,7 +483,7 @@ class TestBug9CastxmlTimeout:
             cmd=["castxml"], timeout=120, stderr=b"partial output here",
         )
         with (
-            patch("abicheck.dumper._castxml_available", return_value=True),
+            patch("abicheck.dumper._resolve_selected_tool", return_value="/mock/castxml"),
             patch("abicheck.dumper.deadline.run_bounded", side_effect=timeout_exc),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"),
         ):
@@ -497,7 +497,7 @@ class TestBug9CastxmlTimeout:
         """Temp files are cleaned up even after timeout."""
         timeout_exc = subprocess.TimeoutExpired(cmd=["castxml"], timeout=120)
         with (
-            patch("abicheck.dumper._castxml_available", return_value=True),
+            patch("abicheck.dumper._resolve_selected_tool", return_value="/mock/castxml"),
             patch("abicheck.dumper.deadline.run_bounded", side_effect=timeout_exc),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"),
         ):
@@ -532,7 +532,7 @@ def test_castxml_rechecks_deadline_before_parsing_xml(tmp_path: Path) -> None:
         return proc
 
     with (
-        patch("abicheck.dumper._castxml_available", return_value=True),
+        patch("abicheck.dumper._resolve_selected_tool", return_value="/mock/castxml"),
         patch("abicheck.dumper.deadline.run_bounded", side_effect=_fake_run),
         patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"),
     ):

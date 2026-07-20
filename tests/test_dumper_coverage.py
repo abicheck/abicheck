@@ -9,7 +9,6 @@ members-attribute parsing, _pointer_depth, _underlying_type_name).
 
 from __future__ import annotations
 
-import shutil
 import warnings
 from pathlib import Path
 from types import SimpleNamespace
@@ -248,9 +247,7 @@ class TestCastxmlDumpBranches:
     def _setup(self, monkeypatch, tmp_path):
         """Common setup: castxml available, cache miss."""
         monkeypatch.setattr(
-            shutil,
-            "which",
-            lambda name: "/usr/bin/castxml" if name == "castxml" else None,
+            "abicheck.dumper._resolve_selected_tool", lambda _: "/mock/castxml"
         )
         monkeypatch.setattr("abicheck.dumper._cache_key", lambda *a, **kw: "test_key")
 
