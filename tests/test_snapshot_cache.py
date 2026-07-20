@@ -81,17 +81,38 @@ class TestCacheKey:
         key2 = _cache_key(binary, [], [inc2], "1.0", "c++")
         assert key1 != key2
 
-    def test_header_mtime_change_different_key(self, tmp_path):
-        import time
+    def test_header_content_change_different_key(self, tmp_path):
         binary = tmp_path / "lib.so"
         binary.write_bytes(b"ELF content")
         hdr = tmp_path / "foo.h"
         hdr.write_text("#pragma once\n")
         key1 = _cache_key(binary, [hdr], [], "1.0", "c++")
-        # Change header mtime
-        import os
-        os.utime(hdr, (time.time() + 10, time.time() + 10))
+        hdr.write_text("#define ABI_SIZE 8\n")
         key2 = _cache_key(binary, [hdr], [], "1.0", "c++")
+        assert key1 != key2
+
+    def test_special_header_file_does_not_block(self, tmp_path):
+        import os
+
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF content")
+        fifo = tmp_path / "fifo.h"
+        os.mkfifo(fifo)
+        key = _cache_key(binary, [], [tmp_path], "1.0", "c++")
+        assert len(key) == 64
+
+    def test_transitive_include_content_change_different_key(self, tmp_path):
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF content")
+        inc = tmp_path / "include"
+        inc.mkdir()
+        umbrella = inc / "api.h"
+        dependency = inc / "detail.h"
+        umbrella.write_text('#include "detail.h"\n')
+        dependency.write_text("#define ABI_SIZE 4\n")
+        key1 = _cache_key(binary, [umbrella], [inc], "1.0", "c++")
+        dependency.write_text("#define ABI_SIZE 8\n")
+        key2 = _cache_key(binary, [umbrella], [inc], "1.0", "c++")
         assert key1 != key2
 
 

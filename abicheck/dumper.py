@@ -94,6 +94,7 @@ from .dumper_toolchain import (
     _castxml_available as _castxml_available,
     _parser_ast_fallback_reason as _parser_ast_fallback_reason,
     _parser_ast_toolchain as _parser_ast_toolchain,
+    _resolved_tool as _resolved_tool,
     _safe_mtime as _safe_mtime,
     _safe_size as _safe_size,
     _tool_identity as _tool_identity,
@@ -277,6 +278,8 @@ def _clang_header_dump(
     out, or emits no usable AST.
     """
     clang_bin = _resolve_clang_bin(compiler, gcc_path, gcc_prefix)
+    _selected, clang_path, _clang_stat, _clang_digest = _resolved_tool(clang_bin)
+    clang_bin = str(clang_path)
     force_cpp, force_cpp20, explicit_c_request, cc_id = _resolve_clang_langmode(
         lang, headers, clang_bin, gcc_options, gcc_option_tokens,
     )
@@ -308,6 +311,10 @@ def _clang_header_dump(
     host_cc_bin, _host_cc_id = _resolve_compiler_binary(
         compiler, gcc_path, gcc_prefix
     )
+    _selected, host_cc_path, _host_stat, _host_digest = _resolved_tool(host_cc_bin)
+    host_cc_bin = str(host_cc_path)
+    frontend_identity = _tool_identity(clang_bin)
+    compiler_identity = _tool_identity(host_cc_bin)
 
     key = _cache_key(
         headers, extra_includes, clang_bin,
@@ -321,8 +328,8 @@ def _clang_header_dump(
         if force_cpp
         else (*system_includes, *cpp_system_includes),
         extra_hash_dirs=extra_hash_dirs,
-        frontend_identity=_tool_identity(clang_bin),
-        compiler_identity=_tool_identity(host_cc_bin),
+        frontend_identity=frontend_identity,
+        compiler_identity=compiler_identity,
     )
     cached = _cache_path(key, backend="clang")
     if cached.exists():
@@ -405,7 +412,15 @@ def _clang_header_dump(
             agg_path=agg_path,
             active_headers=active_headers,
         )
-        return _parse_clang_ast_result(result, cached, _ast_paths[-1])
+        identities_stable = (
+            _tool_identity(clang_bin) == frontend_identity
+            and _tool_identity(host_cc_bin) == compiler_identity
+        )
+        if not identities_stable:
+            log.warning("AST toolchain changed during clang execution; skipping cache write")
+        return _parse_clang_ast_result(
+            result, cached, _ast_paths[-1], cache_write=identities_stable
+        )
     finally:
         agg_path.unlink(missing_ok=True)
         for _p in _ast_paths:
@@ -841,9 +856,10 @@ def _build_castxml_command(
     gcc_option_tokens: tuple[str, ...] = (),
     force_cpp: bool = False,
     force_cpp20: bool = False,
+    castxml_bin: str = "castxml",
 ) -> list[str]:
     """Build the castxml command line."""
-    cmd = ["castxml", "--castxml-output=1",
+    cmd = [castxml_bin, "--castxml-output=1",
            f"--castxml-cc-{cc_id}", cc_bin]
     for inc in extra_includes:
         cmd += ["-I", str(inc)]
@@ -1037,6 +1053,12 @@ def _castxml_dump(
         )
 
     cc_bin, cc_id = _resolve_compiler_binary(compiler, gcc_path, gcc_prefix)
+    _selected, cc_path, _cc_stat, _cc_digest = _resolved_tool(cc_bin)
+    cc_bin = str(cc_path)
+    _selected, castxml_path, _castxml_stat, _castxml_digest = _resolved_tool("castxml")
+    castxml_bin = str(castxml_path)
+    frontend_identity = _tool_identity(castxml_bin)
+    compiler_identity = _tool_identity(cc_bin)
 
     # Check disk cache
     key = _cache_key(
@@ -1045,8 +1067,8 @@ def _castxml_dump(
         gcc_option_tokens=gcc_option_tokens,
         sysroot=sysroot, nostdinc=nostdinc, lang=lang,
         extra_hash_dirs=extra_hash_dirs,
-        frontend_identity=_tool_identity("castxml"),
-        compiler_identity=_tool_identity(cc_bin),
+        frontend_identity=frontend_identity,
+        compiler_identity=compiler_identity,
     )
     cached = _cache_path(key)
     if cached.exists():
@@ -1082,6 +1104,7 @@ def _castxml_dump(
                 sysroot=sysroot, nostdinc=nostdinc, gcc_options=gcc_options,
                 gcc_option_tokens=gcc_option_tokens,
                 force_cpp=force_cpp,
+                castxml_bin=castxml_bin,
             )
         except SnapshotError as primary:
             # G16/A3: an explicit ``--lang c`` on a header that actually requires
@@ -1111,16 +1134,23 @@ def _castxml_dump(
                     sysroot=sysroot, nostdinc=nostdinc, gcc_options=gcc_options,
                     gcc_option_tokens=gcc_option_tokens,
                     force_cpp=True,
+                    castxml_bin=castxml_bin,
                 )
             except SnapshotError:
                 # Both modes failed — surface the originally requested C-mode
                 # error (and its hint), not the fallback's, so the diagnostic
                 # matches what the user asked for.
                 raise primary from None
-        try:
-            _atomic_write(cached, out_xml.read_bytes())
-        except OSError as exc:
-            log.warning("Could not write castxml AST cache %s: %s", cached, exc)
+        if (
+            _tool_identity(castxml_bin) != frontend_identity
+            or _tool_identity(cc_bin) != compiler_identity
+        ):
+            log.warning("AST toolchain changed during CastXML execution; skipping cache write")
+        else:
+            try:
+                _atomic_write(cached, out_xml.read_bytes())
+            except OSError as exc:
+                log.warning("Could not write castxml AST cache %s: %s", cached, exc)
         # Re-reading the whole XML file (read_bytes) and writing the cache copy
         # can itself consume real time on a huge fresh tree; re-check before
         # handing the already-parsed root back to the caller, mirroring the
@@ -1143,6 +1173,7 @@ def _run_castxml_attempt(
     gcc_options: str | None,
     gcc_option_tokens: tuple[str, ...] = (),
     force_cpp: bool,
+    castxml_bin: str = "castxml",
 ) -> Element:
     """Run one castxml invocation in a fixed language mode and parse its output.
 
@@ -1170,6 +1201,7 @@ def _run_castxml_attempt(
         gcc_option_tokens=gcc_option_tokens,
         force_cpp=force_cpp,
         force_cpp20=force_cpp20,
+        castxml_bin=castxml_bin,
     )
 
     try:

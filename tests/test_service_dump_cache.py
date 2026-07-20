@@ -94,6 +94,25 @@ class TestDumpCacheExtraKey:
         k2 = _dump_cache_extra_key("pe", "auto", None, None)
         assert k1 != k2
 
+    def test_binary_only_key_does_not_fingerprint_path_tools(self):
+        with patch("abicheck.dumper._tool_identity") as identity:
+            key = _dump_cache_extra_key(
+                "elf", "auto", None, None, uses_ast=False
+            )
+        assert "\x00no-ast\x00" in key
+        identity.assert_not_called()
+
+    def test_binary_only_key_includes_public_scope(self, tmp_path):
+        first = _dump_cache_extra_key(
+            "elf", "auto", [tmp_path / "public" / "api.h"], None,
+            uses_ast=False,
+        )
+        second = _dump_cache_extra_key(
+            "elf", "auto", [tmp_path / "private" / "api.h"], None,
+            uses_ast=False,
+        )
+        assert first != second
+
     def test_differs_by_header_backend(self):
         k1 = _dump_cache_extra_key("elf", "auto", None, None)
         k2 = _dump_cache_extra_key("elf", "clang", None, None)
@@ -300,6 +319,30 @@ class TestCachedRunDump:
 
         assert len(calls) == 1
         assert snap1.functions[0].name == snap2.functions[0].name == "foo"
+
+    def test_input_change_during_dump_is_not_cached_under_new_key(self, tmp_path):
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF fake content")
+        header = tmp_path / "api.h"
+        header.write_text("OLD", encoding="utf-8")
+        calls: list[str] = []
+
+        def fake_run_dump(path, binary_fmt, headers, includes, version, lang, **kwargs):
+            value = header.read_text(encoding="utf-8")
+            calls.append(value)
+            if value == "OLD":
+                header.write_text("NEW", encoding="utf-8")
+            return _sample_snap(name=value)
+
+        first = cached_run_dump(
+            fake_run_dump, binary, "elf", [header], [], "1.0", "c++"
+        )
+        second = cached_run_dump(
+            fake_run_dump, binary, "elf", [header], [], "1.0", "c++"
+        )
+        assert first.functions[0].name == "OLD"
+        assert second.functions[0].name == "NEW"
+        assert calls == ["OLD", "NEW"]
 
     def test_binary_content_change_invalidates_cache(self, tmp_path):
         binary = tmp_path / "lib.so"

@@ -83,6 +83,8 @@ def _dump_cache_extra_key(
     public_headers: list[Path] | None,
     public_header_dirs: list[Path] | None,
     lang: str = "c++",
+    *,
+    uses_ast: bool = True,
 ) -> str:
     """Build the ``extra`` cache-key material for a cacheable dump — every
     input to ``run_dump`` that affects its output besides the binary content
@@ -140,16 +142,29 @@ def _dump_cache_extra_key(
     (the castxml failure surfaces verbatim instead), so it's correctly
     excluded — the tool truly never runs for those.
     """
+    from .dumper import _resolve_header_backend
+
+    resolved_backend = _resolve_header_backend(header_backend)
+    if not uses_ast:
+        # A binary-only dump never invokes an AST frontend or compiler. Do not
+        # execute PATH-selected tools merely to construct an irrelevant cache key.
+        sep = "\x00"
+        return sep.join([
+            binary_fmt,
+            resolved_backend,
+            "no-ast",
+            sep.join(sorted(str(p) for p in (public_headers or []))),
+            sep.join(sorted(str(p) for p in (public_header_dirs or []))),
+        ])
+
     from .dumper import (
         _ast_fallback_enabled,
         _auto_ast_fallback_eligible,
         _resolve_compiler_binary,
-        _resolve_header_backend,
         _tool_identity,
     )
     from .dumper_clang import _resolve_clang_bin
 
-    resolved_backend = _resolve_header_backend(header_backend)
     auto_may_fallback_to_clang = (
         _auto_ast_fallback_eligible(header_backend)
         and _ast_fallback_enabled()
@@ -270,9 +285,13 @@ def cached_run_dump(
     from . import snapshot_cache
 
     extra = _dump_cache_extra_key(
-        binary_fmt, header_backend, public_headers, public_header_dirs, lang
+        binary_fmt, header_backend, public_headers, public_header_dirs, lang,
+        uses_ast=bool(_headers),
     )
-    cached = snapshot_cache.lookup(path, _headers, _includes, version, lang, extra=extra)
+    initial_key = snapshot_cache._cache_key(
+        path, _headers, _includes, version, lang, extra=extra
+    )
+    cached = snapshot_cache.lookup_key(initial_key, path)
     if cached is not None:
         return cached
     snap = run_dump(
@@ -298,5 +317,13 @@ def cached_run_dump(
         header_graph_includes=header_graph_includes,
         notify=notify,
     )
-    snapshot_cache.store(snap, path, _headers, _includes, version, lang, extra=extra)
+    final_extra = _dump_cache_extra_key(
+        binary_fmt, header_backend, public_headers, public_header_dirs, lang,
+        uses_ast=bool(_headers),
+    )
+    final_key = snapshot_cache._cache_key(
+        path, _headers, _includes, version, lang, extra=final_extra
+    )
+    if initial_key and initial_key == final_key:
+        snapshot_cache.store_key(snap, initial_key, path)
     return snap

@@ -24,9 +24,12 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import stat
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from .header_utils import iter_cache_header_files
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
@@ -98,16 +101,31 @@ def _cache_key(
                 h.update(chunk)
     except OSError:
         return ""  # uncacheable
-    # Header mtimes (sorted for determinism)
-    for hdr in sorted(headers):
+    # Header content and header-like files under explicitly supplied include
+    # roots.  A top-level umbrella commonly includes private siblings, so an
+    # mtime-only top-level key can otherwise return a stale whole snapshot.
+    # Hashing this bounded source surface is deliberately stricter than the
+    # inner AST cache and also resists an edit with a restored timestamp.
+    hash_files: set[Path] = set(headers)
+    for inc in includes:
+        h.update(str(inc).encode())
+        try:
+            hash_files.update(iter_cache_header_files(inc))
+        except OSError:
+            h.update(b"UNREADABLE_INCLUDE_DIR")
+    for hdr in sorted(hash_files):
         try:
             h.update(str(hdr).encode())
-            h.update(str(hdr.stat().st_mtime_ns).encode())
+            fd = os.open(hdr, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                os.close(fd)
+                h.update(b"NONREGULAR")
+                continue
+            with os.fdopen(fd, "rb") as f:
+                for chunk in iter(lambda: f.read(65536), b""):
+                    h.update(chunk)
         except OSError:
             h.update(b"MISSING")
-    # Include dirs (just their paths, not contents)
-    for inc in sorted(includes):
-        h.update(str(inc).encode())
     # Compiler params
     h.update(version.encode())
     h.update(lang.encode())
@@ -127,6 +145,11 @@ def lookup(
 ) -> AbiSnapshot | None:
     """Look up a cached snapshot. Returns None on miss."""
     key = _cache_key(binary_path, headers, includes, version, lang, extra=extra)
+    return lookup_key(key, binary_path)
+
+
+def lookup_key(key: str, binary_path: Path) -> AbiSnapshot | None:
+    """Look up an entry using a key already bound to validated inputs."""
     if not key:
         return None
     cache_file = _CACHE_DIR / f"{key}.json"
@@ -154,6 +177,11 @@ def store(
 ) -> None:
     """Store a snapshot in the cache (atomic write via rename)."""
     key = _cache_key(binary_path, headers, includes, version, lang, extra=extra)
+    store_key(snap, key, binary_path)
+
+
+def store_key(snap: AbiSnapshot, key: str, binary_path: Path) -> None:
+    """Store under a previously computed, post-execution-validated key."""
     if not key:
         return
     try:

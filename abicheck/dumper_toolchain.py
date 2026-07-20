@@ -10,7 +10,10 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import signal
+import stat as stat_module
 import subprocess
+import tempfile
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -65,18 +68,44 @@ def _tool_version_output(real_path: str, digest: str) -> str:
     """Return stable ``--version`` output for one exact executable revision."""
     del digest
     try:
-        result = subprocess.run(
-            [real_path, "--version"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
+        # Keep hostile/broken tools from filling memory and tolerate arbitrary
+        # bytes in diagnostics.  The file also combines stdout/stderr in actual
+        # emission order, unlike concatenating two independently captured pipes.
+        with tempfile.TemporaryFile() as output:
+            popen_kwargs: dict[str, Any] = {}
+            if os.name == "posix":
+                import resource
+
+                def _limit_output() -> None:
+                    resource.setrlimit(resource.RLIMIT_FSIZE, (128 * 1024, 128 * 1024))
+
+                popen_kwargs.update(start_new_session=True, preexec_fn=_limit_output)
+            process = subprocess.Popen(
+                [real_path, "--version"],
+                stdout=output,
+                stderr=subprocess.STDOUT,
+                **popen_kwargs,
+            )
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                if os.name == "posix":
+                    os.killpg(process.pid, signal.SIGKILL)
+                else:
+                    process.kill()
+                process.wait()
+                raise
+            output.seek(0)
+            raw = output.read(64 * 1024 + 1)
     except (OSError, subprocess.TimeoutExpired) as exc:
         return f"unavailable:{type(exc).__name__}:{exc}"
+    truncated = len(raw) > 64 * 1024
+    text = raw[: 64 * 1024].decode("utf-8", errors="replace")
+    if truncated:
+        text += "\n[truncated]"
     return "\n".join(
         line.rstrip()
-        for line in (result.stdout + result.stderr).splitlines()
+        for line in text.splitlines()
         if line.strip()
     )
 
@@ -85,6 +114,8 @@ def _resolved_tool(executable: str) -> tuple[str, Path, os.stat_result, str]:
     selected = shutil.which(executable) or executable
     real = Path(selected).resolve(strict=True)
     stat = real.stat()
+    if not stat_module.S_ISREG(stat.st_mode):
+        raise OSError(f"resolved tool is not a regular file: {real}")
     digest = _executable_sha256(
         str(real),
         stat.st_dev,
