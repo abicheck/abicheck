@@ -820,6 +820,57 @@ def test_diff_graph_reconciliation_findings_emits_expected_kind() -> None:
         )
 
 
+def test_diff_graph_reconciliation_findings_stamps_source_location() -> None:
+    """Codex review: every other L5 finding (source_graph_findings.py) is
+    stamped with either a real declaring file or the generic
+    "[L5_SOURCE_GRAPH]" evidence-tier boundary as source_location, so
+    report/suppression flows that match by location can target it. These
+    reconciliation findings previously had no source_location at all."""
+    real_file_old = GraphNode(
+        id="type://old",
+        kind="record_type",
+        label="ns::Widget",
+        attrs={"qualified_name": "ns::Widget", "def_file": "a.h"},
+    )
+    real_file_new = GraphNode(
+        id="type://new",
+        kind="record_type",
+        label="ns::Widget",
+        attrs={"qualified_name": "ns::Widget", "def_file": "b.h"},
+    )
+    old_g = _graph([real_file_old], [])
+    new_g = _graph([real_file_new], [])
+    result = reconcile_added_removed([real_file_old], [real_file_new], old_g, new_g)
+    assert len(result.reconciled) == 1
+    assert result.reconciled[0].outcome == OUTCOME_MOVED
+    findings = diff_graph_reconciliation_findings(result)
+    assert len(findings) == 1
+    assert findings[0].source_location == "b.h"
+
+    # No def_file/file attr on either side (the real header-only-graph
+    # source_decl shape) -- must still fall back to the generic boundary
+    # tag, never None.
+    no_file_old = GraphNode(
+        id="decl://old",
+        kind="source_decl",
+        label="ns::foo (old copy)",
+        attrs={"qualified_name": "ns::foo"},
+    )
+    no_file_new = GraphNode(
+        id="decl://new",
+        kind="source_decl",
+        label="ns::foo (new copy)",
+        attrs={"qualified_name": "ns::foo"},
+    )
+    old_g2 = _graph([no_file_old], [])
+    new_g2 = _graph([no_file_new], [])
+    result2 = reconcile_added_removed([no_file_old], [no_file_new], old_g2, new_g2)
+    assert len(result2.reconciled) == 1
+    findings2 = diff_graph_reconciliation_findings(result2)
+    assert len(findings2) == 1
+    assert findings2[0].source_location == "[L5_SOURCE_GRAPH]"
+
+
 def test_reconciliation_never_deletes_or_downgrades_artifact_finding() -> None:
     """THE authority-rule regression test (ADR-028 D3 / ADR-031 D6 / ADR-048).
 

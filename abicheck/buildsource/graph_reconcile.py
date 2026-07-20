@@ -664,17 +664,29 @@ def diff_graph_reconciliation_findings(
     """
     from ..checker_policy import ChangeKind
     from ..checker_types import Change
+    from .source_graph import EVIDENCE_TIER_L5
 
     kind_by_outcome = {
         OUTCOME_RENAMED: ChangeKind.DECLARATION_RENAMED,
         OUTCOME_MOVED: ChangeKind.DECLARATION_MOVED,
         OUTCOME_RECONCILED: ChangeKind.DECLARATION_IDENTITY_RECONCILED,
     }
+    boundary = f"[{EVIDENCE_TIER_L5}]"
     findings: list[Any] = []
     for pair in reconciliation.reconciled:
         old_label = pair.old_node.label or pair.old_node.id
         new_label = pair.new_node.label or pair.new_node.id
         prose = _OUTCOME_PROSE.get(pair.outcome, "identity-reconciled")
+        # Prefer the new side's declaring file (matches the rest of the L5
+        # findings' [L5_SOURCE_GRAPH]-boundary convention in
+        # source_graph_findings.py); fall back to the old side, then to the
+        # generic boundary tag when neither node carries a real path
+        # (Codex review: this Change previously had no source_location at
+        # all, unlike every other L5 finding, so suppression/report flows
+        # that match by location couldn't target it).
+        new_file = pair.new_identity.source_relative.split("\x1f", 1)[0]
+        old_file = pair.old_identity.source_relative.split("\x1f", 1)[0]
+        location = new_file or old_file or boundary
         findings.append(
             Change(
                 kind=kind_by_outcome.get(
@@ -694,6 +706,7 @@ def diff_graph_reconciliation_findings(
                 old_value=old_label,
                 new_value=new_label,
                 qualified_name=pair.new_identity.qualified_name or None,
+                source_location=location,
             )
         )
     return findings
