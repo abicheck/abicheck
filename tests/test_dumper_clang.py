@@ -2459,6 +2459,20 @@ def test_resolve_probe_compiler_prefers_gnu_gcc_path(
     assert _resolve_probe_compiler("cc", None, None) == "gcc"
 
 
+def test_resolve_probe_compiler_skips_clang_family_aliases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A --gcc-path icx/icpx/dpcpp/dpcpp-cl is clang-family, not GNU — probing it
+    (instead of a real g++/gcc on PATH) yields incomplete system include dirs
+    (e.g. missing /usr/include with stdlib.h), since these are the same clang
+    binary under a different name, not real gcc/g++."""
+    from abicheck import dumper_sysinc
+
+    monkeypatch.setattr(dumper_sysinc.shutil, "which", lambda c: c)
+    for alias in ("icx", "icpx", "dpcpp", "dpcpp-cl"):
+        assert _resolve_probe_compiler("c++", f"/opt/intel/bin/{alias}", None) == "g++"
+
+
 def test_resolve_probe_compiler_none_when_no_compiler(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
