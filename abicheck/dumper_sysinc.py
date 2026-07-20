@@ -38,6 +38,7 @@ import subprocess
 from pathlib import Path
 
 from . import deadline
+from .dumper_clang import _is_clang_family_binary
 
 #: Env knob to disable the castxml↔clang system-include auto-detection. On by
 #: default; set to a falsey value to suppress the host-compiler probe (e.g. for a
@@ -164,16 +165,19 @@ def _resolve_probe_compiler(
 ) -> str | None:
     """Pick a GNU ``gcc``/``g++`` driver to probe for system includes, or None.
 
-    Prefers an explicit GNU ``--gcc-path`` (a clang there is useless for
-    discovering the host libstdc++, so it is skipped), then the cross
-    ``--gcc-prefix`` driver, then ``g++``/``gcc`` on PATH. Returns the first that
-    resolves, or ``None`` when no GNU compiler is available (then clang falls
-    back to its own detection).
+    Prefers an explicit GNU ``--gcc-path`` (a clang-family binary there is
+    useless for discovering the host libstdc++, so it is skipped — this
+    includes the non-"clang"-spelled aliases in
+    :data:`abicheck.dumper_clang._CLANG_FAMILY_ALIAS_NAMES`, e.g.
+    ``icx``/``icpx``/``dpcpp``/``dpcpp-cl``, not just names containing
+    "clang"), then the cross ``--gcc-prefix`` driver, then ``g++``/``gcc`` on
+    PATH. Returns the first that resolves, or ``None`` when no GNU compiler is
+    available (then clang falls back to its own detection).
     """
     cpp = compiler in ("c++", "g++", "clang++")
     primary = "g++" if cpp else "gcc"
     candidates: list[str] = []
-    if gcc_path and "clang" not in Path(gcc_path).name.lower():
+    if gcc_path and not _is_clang_family_binary(gcc_path):
         candidates.append(gcc_path)
     if gcc_prefix:
         candidates.append(f"{gcc_prefix}{primary}")
