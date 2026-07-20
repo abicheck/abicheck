@@ -3,8 +3,8 @@
 > Updated: 2026-03-09; content reviewed 2026-06-07. The ABICC rule mapping is a historical parity snapshot; the current ChangeKind total is **394**, see the [Change Kind Reference](../reference/change-kinds.md).
 > Source: ABICC `RulesBin.xml` (196 rules), `RulesSrc.xml` (100 rules + `Removed_Const_Overload`), `RegTests.pm` (~153 C++ + ~102 C named scenarios)
 > Target: abicheck's three coverage surfaces —
-> `examples/` (193 ground-truth entries today: 159 binary shared-library
-> competitor lanes plus 34 dedicated non-.so lanes, including
+> `examples/` (195 ground-truth entries today: 159 binary shared-library
+> competitor lanes plus 36 dedicated non-.so lanes, including
 > fixture/source-only L2/L5/source cases; the original 74-case subset is the
 > release-pinned cross-tool benchmark — see [Tool Comparison](../reference/tool-comparison.md)
 > for how the split is derived and kept in sync), `tests/` (large

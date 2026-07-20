@@ -251,6 +251,32 @@ class TestDumpCacheExtraKey:
                 k2 = _dump_cache_extra_key("elf", "castxml", None, None)
         assert k1 != k2
 
+    def test_differs_when_clang_binary_swapped_in_place_at_same_path(
+        self, tmp_path
+    ):
+        # Codex review: the resolved PATH string alone survives an in-place
+        # binary swap at the same path (a package upgrade, or a symlink
+        # retargeted to a different clang install) -- an mtime+size
+        # fingerprint of the resolved binary must be folded in too, or a
+        # cache entry from before the swap gets replayed with stale
+        # header-graph coverage from the old compiler.
+        clang_path = tmp_path / "clang++"
+        clang_path.write_bytes(b"fake clang v1")
+        with (
+            patch("abicheck.dumper_clang._clang_available", return_value=True),
+            patch("shutil.which", return_value=str(clang_path)),
+        ):
+            k1 = _dump_cache_extra_key("elf", "castxml", None, None)
+
+            clang_path.write_bytes(b"fake clang v2 - different size")
+            import os
+            import time
+
+            os.utime(clang_path, (time.time() + 10, time.time() + 10))
+            k2 = _dump_cache_extra_key("elf", "castxml", None, None)
+
+        assert k1 != k2
+
     def test_header_graph_clang_key_respects_lang(self):
         # `cc`/`c++` resolve to different driver names -- fold `lang` in so a
         # C vs C++ dump (which can genuinely have only one of the two

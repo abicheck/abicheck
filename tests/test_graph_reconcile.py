@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from abicheck.buildsource.graph_reconcile import (
     OUTCOME_MOVED,
+    OUTCOME_RECONCILED,
     OUTCOME_RENAMED,
     diff_graph_reconciliation_findings,
     reconcile_added_removed,
@@ -146,6 +147,123 @@ def test_move_reconciles_when_file_changes_but_name_does_not() -> None:
     result = reconcile_added_removed([old_node], [new_node], old_g, new_g)
     assert len(result.reconciled) == 1
     assert result.reconciled[0].outcome == OUTCOME_MOVED
+
+
+def test_different_checkout_roots_not_misclassified_as_moved() -> None:
+    """Codex review: old/new graphs collected from two independently-rooted
+    checkouts (separate temp dirs, or separate CI job workspaces) never share
+    an absolute root. Comparing raw def_file prefixes would classify a node
+    whose declaring file didn't actually change project-relatively as
+    "moved" just because the checkout root differs -- root-relative
+    normalization must strip that before classifying."""
+    old_node = GraphNode(
+        id="type://old",
+        kind="record_type",
+        label="ns::Widget",
+        attrs={
+            "qualified_name": "ns::Widget",
+            "def_file": "/tmp/checkout_old/include/api.h",
+        },
+    )
+    new_node = GraphNode(
+        id="type://new",
+        kind="record_type",
+        label="ns::Widget",
+        attrs={
+            "qualified_name": "ns::Widget",
+            "def_file": "/tmp/checkout_new/include/api.h",
+        },
+    )
+    old_g = _graph([old_node], [])
+    new_g = _graph([new_node], [])
+    result = reconcile_added_removed([old_node], [new_node], old_g, new_g)
+    assert len(result.reconciled) == 1
+    # Same qualified name, same project-relative file -- neither renamed nor
+    # moved once the checkout root is stripped.
+    assert result.reconciled[0].outcome == OUTCOME_RECONCILED
+
+
+def test_real_move_still_detected_across_different_checkout_roots() -> None:
+    """The root-relative normalization must not mask a genuine move -- only
+    strip the checkout-root prefix, not the real project-relative path."""
+    old_node = GraphNode(
+        id="type://old",
+        kind="record_type",
+        label="ns::Widget",
+        attrs={
+            "qualified_name": "ns::Widget",
+            "def_file": "/tmp/checkout_old/include/a.h",
+        },
+    )
+    new_node = GraphNode(
+        id="type://new",
+        kind="record_type",
+        label="ns::Widget",
+        attrs={
+            "qualified_name": "ns::Widget",
+            "def_file": "/tmp/checkout_new/include/b.h",
+        },
+    )
+    old_g = _graph([old_node], [])
+    new_g = _graph([new_node], [])
+    result = reconcile_added_removed([old_node], [new_node], old_g, new_g)
+    assert len(result.reconciled) == 1
+    assert result.reconciled[0].outcome == OUTCOME_MOVED
+
+
+def test_multi_file_common_root_stripped_preserves_real_subdirectory_move() -> None:
+    """With more than one declaring file on each side, the checkout-root
+    normalization must derive the actual shared root from all of them (not
+    fall back to reserving just a basename), so a real move to a different
+    project subdirectory is still detected -- not masked by, and not
+    confused with, the checkout-root difference."""
+    old_stable = GraphNode(
+        id="type://old_stable",
+        kind="record_type",
+        label="ns::Stable",
+        attrs={
+            "qualified_name": "ns::Stable",
+            "def_file": "/tmp/checkout_old/project/include/stable.h",
+        },
+    )
+    old_moved = GraphNode(
+        id="type://old_moved",
+        kind="record_type",
+        label="ns::Moved",
+        attrs={
+            "qualified_name": "ns::Moved",
+            "def_file": "/tmp/checkout_old/project/include/detail/moved.h",
+        },
+    )
+    new_stable = GraphNode(
+        id="type://new_stable",
+        kind="record_type",
+        label="ns::Stable",
+        attrs={
+            "qualified_name": "ns::Stable",
+            "def_file": "/tmp/checkout_new/project/include/stable.h",
+        },
+    )
+    new_moved = GraphNode(
+        id="type://new_moved",
+        kind="record_type",
+        label="ns::Moved",
+        attrs={
+            "qualified_name": "ns::Moved",
+            "def_file": "/tmp/checkout_new/project/include/public/moved.h",
+        },
+    )
+    old_g = _graph([old_stable, old_moved], [])
+    new_g = _graph([new_stable, new_moved], [])
+    result = reconcile_added_removed(
+        [old_stable, old_moved], [new_stable, new_moved], old_g, new_g
+    )
+    outcomes = {p.old_node.id: p.outcome for p in result.reconciled}
+    assert len(result.reconciled) == 2
+    # Same project-relative file across checkout roots -- not moved.
+    assert outcomes["type://old_stable"] == OUTCOME_RECONCILED
+    # Genuinely moved to a different project subdirectory (detail/ -> public/).
+    assert outcomes["type://old_moved"] == OUTCOME_MOVED
 
 
 def test_ambiguous_rename_does_not_reconcile() -> None:

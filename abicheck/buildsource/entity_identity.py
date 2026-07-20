@@ -188,7 +188,7 @@ def resolve_canonical_identity(
         aliases.append(f"name:{name}")
     if qn:
         aliases.append(f"qualified:{qn}")
-    aliases.append(f"sig:{sig}")
+    aliases.append(sig)
     if file:
         aliases.append(f"relsrc:{rel}")
 

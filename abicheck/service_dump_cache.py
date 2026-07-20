@@ -182,7 +182,20 @@ def _dump_cache_extra_key(
     header_graph_clang = ""
     try:
         clang_driver = _resolve_clang_bin("cc" if lang == "c" else "c++", None, None)
-        header_graph_clang = shutil.which(clang_driver) or clang_driver
+        resolved_path = shutil.which(clang_driver) or clang_driver
+        # The resolved PATH string alone survives an in-place binary swap at
+        # the same path (an apt/package upgrade, or a symlink retargeted to a
+        # different clang install) -- fold in an mtime+size fingerprint too
+        # (Codex review), matching this codebase's existing mtime-based
+        # invalidation style (snapshot_cache._cache_key's header walk) rather
+        # than shelling out to `clang --version` on every cacheable dump's
+        # lookup, which would add real latency to the hot path this cache
+        # exists to avoid.
+        try:
+            st = os.stat(resolved_path)
+            header_graph_clang = f"{resolved_path}:{st.st_mtime_ns}:{st.st_size}"
+        except OSError:
+            header_graph_clang = resolved_path
     except SnapshotError:
         header_graph_clang = ""
 

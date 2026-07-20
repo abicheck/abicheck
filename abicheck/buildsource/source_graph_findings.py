@@ -1269,9 +1269,7 @@ def _internal_dependency_findings(
         # shortest of the per-target paths already computed — enrichment on
         # the finding this function was already emitting, not a duplicate.
         if target_paths:
-            shortest_target, shortest_path = min(
-                target_paths, key=lambda tp: len(tp[1])
-            )
+            _, shortest_path = min(target_paths, key=lambda tp: len(tp[1]))
             from .graph_impact import attach_impact_metadata
 
             attach_impact_metadata(

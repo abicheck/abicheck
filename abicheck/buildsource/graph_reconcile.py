@@ -168,15 +168,69 @@ def _structural_context(
     return frozenset(ctx)
 
 
+def _path_segments(path: str) -> tuple[str, ...]:
+    """Plain-path split into segments, ignoring the root/self markers."""
+    from pathlib import PurePosixPath
+
+    return tuple(p for p in PurePosixPath(path).parts if p not in ("/", ".", ""))
+
+
+def _common_root_len(paths: list[str]) -> int:
+    """Length (in path segments) of the longest common leading prefix shared
+    by every declaring-file path on one side of a reconciliation pass.
+
+    Old/new graphs collected from two independently-rooted checkouts (e.g.
+    separate temp dirs in a benchmark harness, or two CI job workspaces)
+    share no absolute root, so comparing raw absolute paths would classify
+    every unmoved file as "moved". Stripping each side's own common root
+    before comparing lets an unmoved file be recognised as unmoved
+    regardless of where its tree happened to be checked out -- the same
+    normalization :func:`source_graph_findings._common_prefix_len` applies
+    for the sibling ``EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED`` family, adapted
+    here for plain filesystem paths rather than ``scheme://``-prefixed node
+    ids (Codex review).
+    """
+    seg_lists = [_path_segments(p) for p in paths if p]
+    if not seg_lists:
+        return 0
+    if len(seg_lists) == 1:
+        return max(0, len(seg_lists[0]) - 1)
+    shortest = max(0, min(len(s) for s in seg_lists) - 1)
+    n = 0
+    for i in range(shortest):
+        if len({s[i] for s in seg_lists}) == 1:
+            n += 1
+        else:
+            break
+    return n
+
+
+def _root_relative_path(path: str, prefix_len: int) -> str:
+    """Strip the first *prefix_len* segments from a plain filesystem path."""
+    if prefix_len <= 0:
+        return path
+    segs = _path_segments(path)
+    return "/".join(segs[prefix_len:])
+
+
 def _classify_outcome(
-    old_identity: CanonicalIdentity, new_identity: CanonicalIdentity
+    old_identity: CanonicalIdentity,
+    new_identity: CanonicalIdentity,
+    old_prefix_len: int,
+    new_prefix_len: int,
 ) -> str:
     old_qn = old_identity.qualified_name
     new_qn = new_identity.qualified_name
     # source_relative encodes file#scope#name — compare just the file prefix
-    # (before the first separator) to ask "did the declaring file change".
-    old_file = old_identity.source_relative.split("\x1f", 1)[0]
-    new_file = new_identity.source_relative.split("\x1f", 1)[0]
+    # (before the first separator) to ask "did the declaring file change",
+    # after stripping each side's own checkout-root prefix (see
+    # _common_root_len).
+    old_file = _root_relative_path(
+        old_identity.source_relative.split("\x1f", 1)[0], old_prefix_len
+    )
+    new_file = _root_relative_path(
+        new_identity.source_relative.split("\x1f", 1)[0], new_prefix_len
+    )
     renamed = bool(old_qn) and bool(new_qn) and old_qn != new_qn
     moved = bool(old_file) and bool(new_file) and old_file != new_file
     if renamed and not moved:
@@ -218,6 +272,25 @@ def reconcile_added_removed(
     matched_old: set[str] = set()
     matched_new: set[str] = set()
 
+    # Checkout-root normalization (see _common_root_len): computed once, up
+    # front, over every reconcilable node's declaring file on each side --
+    # not per-kind, since "which checkout root was this side collected
+    # from" is a whole-graph property, not a per-node-kind one.
+    old_prefix_len = _common_root_len(
+        [
+            str(n.attrs.get("def_file") or n.attrs.get("file") or "")
+            for n in removed_nodes
+            if n.kind in _RECONCILABLE_KINDS
+        ]
+    )
+    new_prefix_len = _common_root_len(
+        [
+            str(n.attrs.get("def_file") or n.attrs.get("file") or "")
+            for n in added_nodes
+            if n.kind in _RECONCILABLE_KINDS
+        ]
+    )
+
     for kind in sorted(set(removed_by_kind) | set(added_by_kind)):
         old_list = removed_by_kind.get(kind, [])
         new_list = added_by_kind.get(kind, [])
@@ -249,7 +322,12 @@ def reconcile_added_removed(
             ]
             if len(candidates) == 1:
                 new_node = next(n for n in new_list if n.id == candidates[0])
-                outcome = _classify_outcome(old_ident[oid], new_ident[candidates[0]])
+                outcome = _classify_outcome(
+                    old_ident[oid],
+                    new_ident[candidates[0]],
+                    old_prefix_len,
+                    new_prefix_len,
+                )
                 result.reconciled.append(
                     ReconciledPair(
                         old_node,
@@ -292,7 +370,9 @@ def reconcile_added_removed(
                 }
                 if len(reverse_candidates) == 1:
                     new_node = next(n for n in new_list if n.id == cand)
-                    outcome = _classify_outcome(old_ident[oid], cand_ident)
+                    outcome = _classify_outcome(
+                        old_ident[oid], cand_ident, old_prefix_len, new_prefix_len
+                    )
                     result.reconciled.append(
                         ReconciledPair(
                             old_node,
@@ -346,7 +426,9 @@ def reconcile_added_removed(
                 ]
                 if not sibling_old_matches:
                     new_node = next(n for n in new_list if n.id == cand)
-                    outcome = _classify_outcome(old_ident[oid], new_ident[cand])
+                    outcome = _classify_outcome(
+                        old_ident[oid], new_ident[cand], old_prefix_len, new_prefix_len
+                    )
                     result.reconciled.append(
                         ReconciledPair(
                             old_node,
