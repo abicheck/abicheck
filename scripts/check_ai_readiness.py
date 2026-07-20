@@ -1060,6 +1060,15 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 "cli_plugin",
                 "cli_pr_comment",
                 "cli_probe",
+                # `cli_project_targets` (G30 P1.5) joins this SCC exactly like
+                # `cli_build_output`/`cli_aggregate`: its `project-targets
+                # validate` command reuses the shared `-o/--format` pair via
+                # `cli_options.output_options` (module-load import), and
+                # `cli_options` is already a member — so `cli ->
+                # cli_project_targets -> cli_options -> ... -> cli` closes
+                # through already-member modules, not a new dependency
+                # direction. No init deadlock.
+                "cli_project_targets",
                 "cli_resolve",
                 "cli_scan",
                 "cli_scan_baseline",

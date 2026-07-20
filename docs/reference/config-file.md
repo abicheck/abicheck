@@ -67,6 +67,10 @@ an unknown-key error.
 | [`version:`](#version) | integer | `0` | Config schema version (forward-compat) |
 | [`risk_rules:`](#risk_rules-and-crosschecks) | mapping | — | Path-glob risk profile (loaded via `--risk-rules`) |
 | [`crosschecks:`](#risk_rules-and-crosschecks) | mapping | — | Reserved (recognized so it does not trip the unknown-key error) |
+| [`targets:`](#targets-bundles-profiles-and-baseline) | mapping | — | CI-integration target/consumer/plugin-contract topology (G30 P1.5) |
+| [`bundles:`](#targets-bundles-profiles-and-baseline) | mapping | — | Release groups of `targets:` (G30 P1.5) |
+| [`profiles:`](#targets-bundles-profiles-and-baseline) | mapping | — | Which build lanes are ABI contracts (G30 P1.5) |
+| [`baseline:`](#targets-bundles-profiles-and-baseline) | mapping | — | Baseline-channel declarations (G30 P1.5) |
 
 Recognized keys and defaults live in `BuildConfig` (`buildsource/inline.py`).
 
@@ -230,6 +234,20 @@ error), but they are handled outside the `compare` config merge:
 - **`crosschecks:`** — reserved. The active mechanism for tuning cross-checks is
   `scan`'s repeatable `--crosscheck KEY=LEVEL` flag; the current code does not
   read a `crosschecks:` block from the file.
+
+---
+
+### `targets:`, `bundles:`, `profiles:`, and `baseline:`
+
+Recognized top-level keys (so they do not trigger the unknown-key error),
+but — like `risk_rules:`/`crosschecks:` above — not parsed by `BuildConfig`
+itself. `dump`/`compare`/`scan` never read this block; it exists solely for
+G30's GitHub Actions CI-integration primitives (a run-plan generator that
+consumes it is planned but not built yet). Parsed and validated by
+`buildsource/project_targets.py`; see the
+**[Project Targets Schema reference](project-targets-schema.md)** for the
+full field-by-field schema, the `checks:` list, and the
+`abicheck project-targets validate` command.
 
 ---
 

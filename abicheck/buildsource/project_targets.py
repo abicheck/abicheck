@@ -1,0 +1,700 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""``.abicheck.yml`` ``targets:``/``bundles:``/``profiles:``/``baseline:``
+block (ADR-047 §3, G30 P1.5).
+
+Extends the project config with the portable, project-owned surface
+``check-project.yml``'s run-plan generator (G30 P1.4, not built yet) will
+consume: which libraries/consumers/plugin-contracts exist, how they group
+into release bundles, which build profiles are ABI contracts, which baseline
+channels exist, and — the schema gap ADR-047 §3 flags and this module
+resolves — exactly which ``{channel, depth, required, gate_mode, profiles}``
+checks run against each target/bundle.
+
+This module only defines the contract and validates a hand-authored
+``targets:``/``bundles:``/``profiles:``/``baseline:`` block — there is no
+run-plan generator here yet (that's G30 P1.4, which *consumes* this) and no
+``abicheck project-targets init`` scaffolding either. Pure: parses a dict,
+never touches the filesystem beyond reading the one YAML file.
+
+``BuildConfig`` (:mod:`abicheck.buildsource.inline`) recognizes
+``targets``/``bundles``/``profiles``/``baseline`` as known top-level
+``.abicheck.yml`` keys (so their presence doesn't trip its own strict
+unknown-key error) but does not parse them itself — the same
+recognized-but-not-parsed treatment it already gives ``risk_rules``/
+``crosschecks``, which are likewise owned by a sibling module. This module's
+own loader (:func:`load_project_targets_config`) re-reads the same YAML file
+and is the sole owner of this block's schema.
+
+Two design choices this module makes, where ADR-047 §3 flagged an open gap
+and deliberately left the choice to P1.5:
+
+- **Profile scoping for ``checks:`` entries.** Rather than assume the naive
+  "cross every check with every ``contract: true`` profile" product is safe
+  (ADR-047 §3 explicitly warns this produces impossible cells for a target
+  that doesn't exist on every profile), each ``checks:`` entry carries an
+  *optional* explicit ``profiles:`` selector. When set, the check runs only
+  on the listed profile ids (validated against ``profiles:`` block). When
+  omitted, this module does not resolve it to a profile list at all — G30
+  P1.4's run-plan generator is responsible for deriving the actual
+  ``(target, profile)`` cells from each profile's own ``build-output.json``
+  ``targets[]`` list (the ADR's second, safer option), never from a blind
+  cross-product. This module's validator does not and cannot enforce that
+  downstream behaviour; it only validates that an *explicit* ``profiles:``
+  selector, when present, names real declared profile ids.
+- **``app-consumer``/``plugin-contract`` redirection.** Per ADR-047 §3's
+  two "unstated rule" corrections, both the baseline-lookup key and the
+  candidate-artifact lookup for these two ``kind``s resolve through their
+  ``library`` field, while the check's own reporting identity stays the
+  contract target's own name. This module validates that ``library`` names
+  a real ``kind: library`` target (not an app-consumer/plugin-contract
+  target, which cannot itself be resolved further) but does not perform the
+  redirection itself — that is G30 P1.2 (``resolve-baseline``)/P1.3
+  (``check-target``)'s job at run time.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from .scan_levels import USER_DEPTHS
+
+#: The identifier charset every target/bundle/profile/channel id must satisfy
+#: — matches the per-component pattern the report-identity envelope (ADR-047
+#: §7, ``compare_report.schema.json``'s ``check_id``) already enforces for
+#: ``target@profile#baseline_channel@depth``, so a name valid here can never
+#: produce an ambiguous/unparseable check_id downstream.
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+#: ADR-047 §3 ``targets:`` ``kind`` discriminator.
+TARGET_KIND_LIBRARY = "library"
+TARGET_KIND_APP_CONSUMER = "app-consumer"
+TARGET_KIND_PLUGIN_CONTRACT = "plugin-contract"
+TARGET_KINDS = frozenset(
+    {TARGET_KIND_LIBRARY, TARGET_KIND_APP_CONSUMER, TARGET_KIND_PLUGIN_CONTRACT}
+)
+
+#: ADR-047 §4/§7 ``check-target`` gate-mode values.
+GATE_MODES = frozenset({"local", "deferred", "advisory"})
+
+#: ADR-047 §10 baseline storage backends (external object store is P2, out of
+#: scope here).
+BASELINE_SOURCES = frozenset({"github-release", "actions-cache", "git"})
+
+#: The evidence-depth ladder a ``checks:`` entry's ``depth`` must be one of —
+#: the same four public rungs ``requested_depth``/``effective_depth`` accept
+#: in the report schema (ADR-047 §7).
+CHECK_DEPTHS = frozenset(d.value for d in USER_DEPTHS)
+
+#: Sentinel ``channel`` value for a ``baseline: none`` check (ADR-047 §6 S5
+#: correction) — ``check-target`` (P1.3) must skip ``resolve-baseline``
+#: entirely for a check carrying this value, never look it up as a declared
+#: channel name.
+NO_BASELINE_CHANNEL = "none"
+
+
+def _str_list(d: dict[str, Any], key: str) -> list[str]:
+    raw = d.get(key)
+    return [str(x) for x in raw if isinstance(x, str)] if isinstance(raw, list) else []
+
+
+def _require_mapping(data: object, block: str) -> dict[str, Any]:
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"{block} must be a mapping, got {type(data).__name__}: {data!r}"
+        )
+    return data
+
+
+@dataclass
+class CheckSpec:
+    """One ``{channel, depth, required, gate_mode, profiles}`` tuple (ADR-047 §3).
+
+    Closes the gap ADR-047 §3 flags: ``baseline: channels:`` alone declares
+    which channels *exist*, not which channel/depth/policy a given target
+    actually runs — this is the per-check assignment that does.
+    """
+
+    channel: str = ""
+    depth: str = ""
+    required: bool = True
+    gate_mode: str = "local"
+    #: Explicit profile-id selector (see module docstring). Empty = every
+    #: ``contract: true`` profile, filtered against ``build-output.json`` by
+    #: G30 P1.4's run-plan generator — not resolved here.
+    profiles: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {
+            "channel": self.channel,
+            "depth": self.depth,
+            "required": self.required,
+            "gate_mode": self.gate_mode,
+        }
+        if self.profiles:
+            d["profiles"] = list(self.profiles)
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any], *, where: str) -> CheckSpec:
+        known = {"channel", "depth", "required", "gate_mode", "profiles"}
+        unknown = sorted(set(d) - known)
+        if unknown:
+            raise ValueError(f"{where}: unknown key(s) {unknown}")
+        channel = d.get("channel")
+        if not isinstance(channel, str) or not channel:
+            raise ValueError(f"{where}.channel must be a non-empty string")
+        depth = d.get("depth")
+        if not isinstance(depth, str) or not depth:
+            raise ValueError(f"{where}.depth must be a non-empty string")
+        required = d.get("required", True)
+        if not isinstance(required, bool):
+            raise ValueError(
+                f"{where}.required must be a boolean, got "
+                f"{type(required).__name__}: {required!r}"
+            )
+        gate_mode = d.get("gate_mode", "local")
+        if not isinstance(gate_mode, str):
+            raise ValueError(
+                f"{where}.gate_mode must be a string, got "
+                f"{type(gate_mode).__name__}: {gate_mode!r}"
+            )
+        profiles_raw = d.get("profiles")
+        if profiles_raw is not None and not isinstance(profiles_raw, list):
+            raise ValueError(f"{where}.profiles must be a list of strings")
+        profiles = _str_list(d, "profiles")
+        if profiles_raw is not None:
+            bad = [p for p in profiles_raw if not isinstance(p, str)]
+            if bad:
+                raise ValueError(
+                    f"{where}.profiles must be a list of strings, got {bad!r}"
+                )
+        return cls(
+            channel=channel,
+            depth=depth,
+            required=required,
+            gate_mode=gate_mode,
+            profiles=profiles,
+        )
+
+
+@dataclass
+class TargetSpec:
+    """One ``targets:`` entry (ADR-047 §3)."""
+
+    id: str = ""
+    kind: str = TARGET_KIND_LIBRARY
+    binary_pattern: str = ""
+    public_headers: list[str] = field(default_factory=list)
+    bundle: str = ""
+    bundle_only: bool = False
+    #: ``app-consumer`` only.
+    consumer_binary_pattern: str = ""
+    #: ``app-consumer``/``plugin-contract`` only — the ``kind: library``
+    #: target this one resolves its baseline/candidate lookup through.
+    library: str = ""
+    #: ``plugin-contract`` only — a ``.syms`` file (one required linker
+    #: symbol per line, ``#`` comments allowed), not YAML.
+    contract_file: str = ""
+    checks: list[CheckSpec] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"kind": self.kind}
+        if self.kind == TARGET_KIND_LIBRARY:
+            if self.binary_pattern:
+                d["binary_pattern"] = self.binary_pattern
+            if self.public_headers:
+                d["public_headers"] = list(self.public_headers)
+            if self.bundle:
+                d["bundle"] = self.bundle
+            if self.bundle_only:
+                d["bundle_only"] = self.bundle_only
+        elif self.kind == TARGET_KIND_APP_CONSUMER:
+            d["consumer_binary_pattern"] = self.consumer_binary_pattern
+            d["library"] = self.library
+        elif self.kind == TARGET_KIND_PLUGIN_CONTRACT:
+            d["contract_file"] = self.contract_file
+            d["library"] = self.library
+        if self.checks:
+            d["checks"] = [c.to_dict() for c in self.checks]
+        return d
+
+    @classmethod
+    def from_dict(cls, name: str, d: dict[str, Any]) -> TargetSpec:
+        where = f"targets.{name}"
+        if not isinstance(d, dict):
+            raise ValueError(
+                f"{where} must be a mapping, got {type(d).__name__}: {d!r}"
+            )
+        known = {
+            "kind",
+            "binary_pattern",
+            "public_headers",
+            "bundle",
+            "bundle_only",
+            "consumer_binary_pattern",
+            "library",
+            "contract_file",
+            "checks",
+        }
+        unknown = sorted(set(d) - known)
+        if unknown:
+            raise ValueError(f"{where}: unknown key(s) {unknown}")
+        kind = d.get("kind", TARGET_KIND_LIBRARY)
+        if not isinstance(kind, str) or kind not in TARGET_KINDS:
+            raise ValueError(
+                f"{where}.kind must be one of {sorted(TARGET_KINDS)}, got {kind!r}"
+            )
+        bundle_only = d.get("bundle_only", False)
+        if not isinstance(bundle_only, bool):
+            raise ValueError(f"{where}.bundle_only must be a boolean")
+        checks_raw = d.get("checks")
+        if checks_raw is not None and not isinstance(checks_raw, list):
+            raise ValueError(f"{where}.checks must be a list")
+        checks: list[CheckSpec] = []
+        for i, c in enumerate(checks_raw or []):
+            if not isinstance(c, dict):
+                raise ValueError(f"{where}.checks[{i}] must be a mapping")
+            checks.append(CheckSpec.from_dict(c, where=f"{where}.checks[{i}]"))
+        return cls(
+            id=name,
+            kind=kind,
+            binary_pattern=str(d.get("binary_pattern", "") or ""),
+            public_headers=_str_list(d, "public_headers"),
+            bundle=str(d.get("bundle", "") or ""),
+            bundle_only=bundle_only,
+            consumer_binary_pattern=str(d.get("consumer_binary_pattern", "") or ""),
+            library=str(d.get("library", "") or ""),
+            contract_file=str(d.get("contract_file", "") or ""),
+            checks=checks,
+        )
+
+
+@dataclass
+class BundleSpec:
+    """One ``bundles:`` entry (ADR-047 §3) — a release group of library targets."""
+
+    id: str = ""
+    targets: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"targets": list(self.targets)}
+
+    @classmethod
+    def from_dict(cls, name: str, d: dict[str, Any]) -> BundleSpec:
+        where = f"bundles.{name}"
+        if not isinstance(d, dict):
+            raise ValueError(
+                f"{where} must be a mapping, got {type(d).__name__}: {d!r}"
+            )
+        unknown = sorted(set(d) - {"targets"})
+        if unknown:
+            raise ValueError(f"{where}: unknown key(s) {unknown}")
+        targets = d.get("targets")
+        if not isinstance(targets, list) or not targets:
+            raise ValueError(f"{where}.targets must be a non-empty list of target ids")
+        bad = [t for t in targets if not isinstance(t, str)]
+        if bad:
+            raise ValueError(f"{where}.targets must be a list of strings, got {bad!r}")
+        return cls(id=name, targets=[str(t) for t in targets])
+
+
+@dataclass
+class ProfileSpec:
+    """One ``profiles:`` entry (ADR-047 §3) — a build-lane identity.
+
+    ``contract: true`` (default) means this profile is an ABI contract (gets
+    a baseline, gates CI); ``contract: false`` marks a test-only CI lane that
+    never gets a baseline (S17's point).
+    """
+
+    id: str = ""
+    contract: bool = True
+    os: str = ""
+    arch: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"contract": self.contract}
+        if self.os:
+            d["os"] = self.os
+        if self.arch:
+            d["arch"] = self.arch
+        return d
+
+    @classmethod
+    def from_dict(cls, name: str, d: dict[str, Any]) -> ProfileSpec:
+        where = f"profiles.{name}"
+        if not isinstance(d, dict):
+            raise ValueError(
+                f"{where} must be a mapping, got {type(d).__name__}: {d!r}"
+            )
+        unknown = sorted(set(d) - {"contract", "os", "arch"})
+        if unknown:
+            raise ValueError(f"{where}: unknown key(s) {unknown}")
+        contract = d.get("contract", True)
+        if not isinstance(contract, bool):
+            raise ValueError(f"{where}.contract must be a boolean")
+        for key in ("os", "arch"):
+            if key in d and not isinstance(d[key], str):
+                raise ValueError(f"{where}.{key} must be a string")
+        return cls(
+            id=name,
+            contract=contract,
+            os=str(d.get("os", "") or ""),
+            arch=str(d.get("arch", "") or ""),
+        )
+
+
+@dataclass
+class BaselineChannelSpec:
+    """One ``baseline: channels:`` entry (ADR-047 §3/§10)."""
+
+    id: str = ""
+    source: str = ""
+    asset_pattern: str = ""
+    key_prefix: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"source": self.source}
+        if self.asset_pattern:
+            d["asset_pattern"] = self.asset_pattern
+        if self.key_prefix:
+            d["key_prefix"] = self.key_prefix
+        return d
+
+    @classmethod
+    def from_dict(cls, name: str, d: dict[str, Any]) -> BaselineChannelSpec:
+        where = f"baseline.channels.{name}"
+        if not isinstance(d, dict):
+            raise ValueError(
+                f"{where} must be a mapping, got {type(d).__name__}: {d!r}"
+            )
+        unknown = sorted(set(d) - {"source", "asset_pattern", "key_prefix"})
+        if unknown:
+            raise ValueError(f"{where}: unknown key(s) {unknown}")
+        source = d.get("source")
+        if not isinstance(source, str) or source not in BASELINE_SOURCES:
+            raise ValueError(
+                f"{where}.source must be one of {sorted(BASELINE_SOURCES)}, got {source!r}"
+            )
+        for key in ("asset_pattern", "key_prefix"):
+            if key in d and not isinstance(d[key], str):
+                raise ValueError(f"{where}.{key} must be a string")
+        return cls(
+            id=name,
+            source=source,
+            asset_pattern=str(d.get("asset_pattern", "") or ""),
+            key_prefix=str(d.get("key_prefix", "") or ""),
+        )
+
+
+@dataclass
+class ProjectTargetsConfig:
+    """Parsed ``targets:``/``bundles:``/``profiles:``/``baseline:`` block.
+
+    All four sub-blocks are optional; an absent block yields an empty dict,
+    matching the ``buildsource``-wide convention that a project not yet
+    using G30's CI-integration primitives sees no behavior change at all.
+    """
+
+    targets: dict[str, TargetSpec] = field(default_factory=dict)
+    bundles: dict[str, BundleSpec] = field(default_factory=dict)
+    profiles: dict[str, ProfileSpec] = field(default_factory=dict)
+    baseline_channels: dict[str, BaselineChannelSpec] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        if self.targets:
+            out["targets"] = {k: v.to_dict() for k, v in self.targets.items()}
+        if self.bundles:
+            out["bundles"] = {k: v.to_dict() for k, v in self.bundles.items()}
+        if self.profiles:
+            out["profiles"] = {k: v.to_dict() for k, v in self.profiles.items()}
+        if self.baseline_channels:
+            out["baseline"] = {
+                "channels": {k: v.to_dict() for k, v in self.baseline_channels.items()}
+            }
+        return out
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ProjectTargetsConfig:
+        """Parse the four top-level blocks out of a raw ``.abicheck.yml`` mapping.
+
+        Structural/type errors raise ``ValueError`` immediately (ADR-043
+        strict-config convention — the same treatment ``BuildConfig`` gives
+        the rest of ``.abicheck.yml``). Cross-reference/semantic issues
+        (unknown ``library``/``bundle`` reference, kind-specific required
+        fields, identifier charset) are **not** raised here — see
+        :func:`validate_project_targets`, which needs the fully-assembled
+        config to check references across blocks.
+        """
+        targets_raw = _require_mapping(data.get("targets"), "targets")
+        bundles_raw = _require_mapping(data.get("bundles"), "bundles")
+        profiles_raw = _require_mapping(data.get("profiles"), "profiles")
+        baseline_raw = _require_mapping(data.get("baseline"), "baseline")
+        unknown_baseline = sorted(set(baseline_raw) - {"channels"})
+        if unknown_baseline:
+            raise ValueError(f"baseline: unknown key(s) {unknown_baseline}")
+        channels_raw = _require_mapping(
+            baseline_raw.get("channels"), "baseline.channels"
+        )
+
+        targets = {
+            str(name): TargetSpec.from_dict(str(name), t)
+            for name, t in targets_raw.items()
+        }
+        bundles = {
+            str(name): BundleSpec.from_dict(str(name), b)
+            for name, b in bundles_raw.items()
+        }
+        profiles = {
+            str(name): ProfileSpec.from_dict(str(name), p)
+            for name, p in profiles_raw.items()
+        }
+        baseline_channels = {
+            str(name): BaselineChannelSpec.from_dict(str(name), c)
+            for name, c in channels_raw.items()
+        }
+        return cls(
+            targets=targets,
+            bundles=bundles,
+            profiles=profiles,
+            baseline_channels=baseline_channels,
+        )
+
+
+def load_project_targets_config(path: Path) -> ProjectTargetsConfig:
+    """Load the ``targets:``/``bundles:``/``profiles:``/``baseline:`` block from
+    a ``.abicheck.yml`` at *path*.
+
+    Tolerant of a missing/empty file (yields an all-empty config), matching
+    :func:`abicheck.buildsource.inline.load_build_config`'s same contract.
+    """
+    if not path.is_file():
+        return ProjectTargetsConfig()
+    import yaml
+
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        raise ValueError(f"cannot read project config {path}: {exc}") from exc
+    if not isinstance(raw, dict):
+        return ProjectTargetsConfig()
+    return ProjectTargetsConfig.from_dict(raw)
+
+
+@dataclass
+class ProjectTargetsValidationReport:
+    """Result of :func:`validate_project_targets` (mirrors
+    :class:`~.build_output.BuildOutputValidationReport`'s shape)."""
+
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        return not self.errors
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ok": self.ok,
+            "errors": list(self.errors),
+            "warnings": list(self.warnings),
+        }
+
+
+def _identifier_issues(kind: str, name: str) -> list[str]:
+    if not _IDENTIFIER_RE.match(name):
+        return [
+            f"{kind} id {name!r} is not a valid identifier — must match "
+            f"{_IDENTIFIER_RE.pattern!r} (the same charset ADR-047 §7's "
+            "check_id components require, so every id stays embeddable in a "
+            "target@profile#baseline_channel@depth string without ambiguity)."
+        ]
+    return []
+
+
+def _target_issues(config: ProjectTargetsConfig, target: TargetSpec) -> list[str]:
+    issues = _identifier_issues("target", target.id)
+    if target.kind == TARGET_KIND_LIBRARY:
+        if not target.binary_pattern:
+            issues.append(
+                f"target {target.id!r}: kind: library requires binary_pattern."
+            )
+        for forbidden in ("consumer_binary_pattern", "contract_file"):
+            if getattr(target, forbidden):
+                issues.append(
+                    f"target {target.id!r}: kind: library must not set {forbidden}."
+                )
+        if target.bundle_only and not target.bundle:
+            issues.append(
+                f"target {target.id!r}: bundle_only requires bundle to be set."
+            )
+        if target.bundle and target.bundle not in config.bundles:
+            issues.append(
+                f"target {target.id!r}: bundle {target.bundle!r} is not declared "
+                "under bundles:."
+            )
+    elif target.kind == TARGET_KIND_APP_CONSUMER:
+        if not target.consumer_binary_pattern:
+            issues.append(
+                f"target {target.id!r}: kind: app-consumer requires "
+                "consumer_binary_pattern."
+            )
+        issues.extend(_library_reference_issues(config, target))
+        for forbidden in ("binary_pattern", "contract_file"):
+            if getattr(target, forbidden):
+                issues.append(
+                    f"target {target.id!r}: kind: app-consumer must not set {forbidden}."
+                )
+    elif target.kind == TARGET_KIND_PLUGIN_CONTRACT:
+        if not target.contract_file:
+            issues.append(
+                f"target {target.id!r}: kind: plugin-contract requires contract_file."
+            )
+        issues.extend(_library_reference_issues(config, target))
+        for forbidden in ("binary_pattern", "consumer_binary_pattern"):
+            if getattr(target, forbidden):
+                issues.append(
+                    f"target {target.id!r}: kind: plugin-contract must not set {forbidden}."
+                )
+    for i, check in enumerate(target.checks):
+        issues.extend(_check_issues(config, target.id, i, check))
+    return issues
+
+
+def _library_reference_issues(
+    config: ProjectTargetsConfig, target: TargetSpec
+) -> list[str]:
+    if not target.library:
+        return [f"target {target.id!r}: kind: {target.kind} requires library."]
+    referenced = config.targets.get(target.library)
+    if referenced is None:
+        return [
+            f"target {target.id!r}: library {target.library!r} is not declared "
+            "under targets:."
+        ]
+    if referenced.kind != TARGET_KIND_LIBRARY:
+        return [
+            f"target {target.id!r}: library {target.library!r} must be a "
+            f"kind: library target, not kind: {referenced.kind!r} — "
+            "app-consumer/plugin-contract targets resolve their baseline/"
+            "candidate lookup through a real library target only (ADR-047 §3)."
+        ]
+    return []
+
+
+def _check_issues(
+    config: ProjectTargetsConfig, target_id: str, index: int, check: CheckSpec
+) -> list[str]:
+    where = f"target {target_id!r}.checks[{index}]"
+    issues: list[str] = []
+    if (
+        check.channel != NO_BASELINE_CHANNEL
+        and check.channel not in config.baseline_channels
+    ):
+        issues.append(
+            f"{where}: channel {check.channel!r} is not declared under "
+            f"baseline.channels: (use {NO_BASELINE_CHANNEL!r} for a no-baseline "
+            "audit check, ADR-047 §6 S5)."
+        )
+    if check.depth not in CHECK_DEPTHS:
+        issues.append(
+            f"{where}: depth must be one of {sorted(CHECK_DEPTHS)}, got {check.depth!r}."
+        )
+    if check.gate_mode not in GATE_MODES:
+        issues.append(
+            f"{where}: gate_mode must be one of {sorted(GATE_MODES)}, got {check.gate_mode!r}."
+        )
+    for profile_id in check.profiles:
+        if profile_id not in config.profiles:
+            issues.append(
+                f"{where}: profiles entry {profile_id!r} is not declared under profiles:."
+            )
+    return issues
+
+
+def _bundle_issues(config: ProjectTargetsConfig, bundle: BundleSpec) -> list[str]:
+    issues = _identifier_issues("bundle", bundle.id)
+    for member in bundle.targets:
+        referenced = config.targets.get(member)
+        if referenced is None:
+            issues.append(
+                f"bundle {bundle.id!r}: target {member!r} is not declared under targets:."
+            )
+        elif referenced.kind != TARGET_KIND_LIBRARY:
+            issues.append(
+                f"bundle {bundle.id!r}: target {member!r} must be kind: library, "
+                f"not kind: {referenced.kind!r}."
+            )
+        elif referenced.bundle and referenced.bundle != bundle.id:
+            issues.append(
+                f"bundle {bundle.id!r}: target {member!r} declares bundle: "
+                f"{referenced.bundle!r}, not {bundle.id!r} — a target's own "
+                "bundle: field and its membership here must agree."
+            )
+    return issues
+
+
+def _profile_issues(profile: ProfileSpec) -> list[str]:
+    return _identifier_issues("profile", profile.id)
+
+
+def _baseline_channel_issues(channel: BaselineChannelSpec) -> list[str]:
+    issues = _identifier_issues("baseline channel", channel.id)
+    if channel.source == "github-release" and not channel.asset_pattern:
+        issues.append(
+            f"baseline channel {channel.id!r}: source: github-release requires "
+            "asset_pattern (ADR-047 §10)."
+        )
+    if channel.source == "actions-cache" and not channel.key_prefix:
+        issues.append(
+            f"baseline channel {channel.id!r}: source: actions-cache requires "
+            "key_prefix (ADR-047 §10)."
+        )
+    return issues
+
+
+def validate_project_targets(
+    config: ProjectTargetsConfig,
+) -> ProjectTargetsValidationReport:
+    """Validate cross-references and kind-specific rules across the whole block.
+
+    Never raises for a structurally-parsed :class:`ProjectTargetsConfig` —
+    problems are reported, not thrown, matching
+    :func:`~.build_output.validate_build_output`'s same contract. Structural/
+    type errors already raised during :meth:`ProjectTargetsConfig.from_dict`.
+    """
+    report = ProjectTargetsValidationReport()
+    if not config.targets and not config.bundles and not config.profiles:
+        report.warnings.append(
+            "no targets:/bundles:/profiles: declared — nothing for a G30 "
+            "run-plan generator to act on yet."
+        )
+    for target in config.targets.values():
+        report.errors.extend(_target_issues(config, target))
+    for bundle in config.bundles.values():
+        report.errors.extend(_bundle_issues(config, bundle))
+    for profile in config.profiles.values():
+        report.errors.extend(_profile_issues(profile))
+    for channel in config.baseline_channels.values():
+        report.errors.extend(_baseline_channel_issues(channel))
+    return report

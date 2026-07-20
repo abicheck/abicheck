@@ -17,9 +17,11 @@
 
 The pre-1.0 CLI reset requires the public root surface to show *exactly*
 ``dump``, ``compare``, ``scan``, ``deps``, ``compat`` — plus ``aggregate``
-(the multi-target CI fan-in gate) and ``build-output`` (the G30 P1.1
-``build-output.json`` validator group), both added afterward — with no
-hidden aliases, and no deprecated shims for the deleted commands
+(the multi-target CI fan-in gate), ``build-output`` (the G30 P1.1
+``build-output.json`` validator group), and ``project-targets`` (the G30
+P1.5 ``targets:``/``bundles:``/``profiles:``/``baseline:`` validator group),
+all added afterward — with no hidden aliases, and no deprecated shims for
+the deleted commands
 (``appcompat``, ``plugin-check``, ``baseline``, ``collect``, ``merge``,
 ``recommend-collect-mode``, ``debian-symbols``, ``doctor``, ``config``,
 ``init``, ``surface-report``, ``pr-comment``, ``suggest-suppressions``,
@@ -40,7 +42,16 @@ from click.testing import CliRunner
 from abicheck.cli import main
 
 _PUBLIC_COMMANDS = frozenset(
-    {"dump", "compare", "scan", "deps", "compat", "aggregate", "build-output"}
+    {
+        "dump",
+        "compare",
+        "scan",
+        "deps",
+        "compat",
+        "aggregate",
+        "build-output",
+        "project-targets",
+    }
 )
 
 _REMOVED_COMMANDS = (
