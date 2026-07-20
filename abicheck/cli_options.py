@@ -1390,6 +1390,11 @@ COMPARE_FLAG_BUDGET_BASE = 57
 #: ``compare`` option, so demoting one to hidden/config means removing its entry
 #: (and lowering ``BASE`` if it belonged to the base surface).
 COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
+    "--allow-ast-frontend-fallback": (
+        "Explicitly permits a per-run semantic fallback from CastXML to Clang "
+        "when the selected CastXML toolchain cannot parse the headers. This is "
+        "an invocation-specific risk decision, not a stable project default."
+    ),
     "--post-manifest": (
         "G23 / #492: scopes the comparison to a POST Python export manifest's "
         "committed ABI surface. A per-run scoping input (which manifest to hold "

@@ -1,5 +1,7 @@
 {
+  "ast_fallback_reason": null,
   "ast_producer": null,
+  "ast_toolchain": {},
   "build_context_defines": [],
   "build_id": null,
   "build_mode": null,
@@ -164,7 +166,7 @@
   "platform": null,
   "python_api": null,
   "python_ext": null,
-  "schema_version": 10,
+  "schema_version": 11,
   "scope_fallback": null,
   "source_mtime": null,
   "source_mtime_epoch": false,

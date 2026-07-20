@@ -1263,8 +1263,10 @@ def test_header_ast_parser_clang_branch(monkeypatch: pytest.MonkeyPatch) -> None
 
 def test_header_ast_parser_castxml_branch(monkeypatch: pytest.MonkeyPatch) -> None:
     sentinel = object()
+    parser_cls = dumper._CastxmlParser
+    parser_sentinel = parser_cls.__new__(parser_cls)
     monkeypatch.setattr(dumper, "_castxml_dump", lambda *a, **k: sentinel)
-    monkeypatch.setattr(dumper, "_CastxmlParser", lambda *a, **k: "castxml-parser")
+    monkeypatch.setattr(dumper, "_CastxmlParser", lambda *a, **k: parser_sentinel)
     parser = _header_ast_parser(
         [],
         [],
@@ -1281,7 +1283,8 @@ def test_header_ast_parser_castxml_branch(monkeypatch: pytest.MonkeyPatch) -> No
         public_header_paths=[],
         public_dir_paths=[],
     )
-    assert parser == "castxml-parser"
+    assert parser is parser_sentinel
+    assert parser._abicheck_ast_toolchain["producer"] == "castxml"
 
 
 def test_clang_header_dump_success_and_cache(

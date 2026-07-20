@@ -371,6 +371,8 @@ def test_dump_json_records_depth_provenance(tmp_path) -> None:  # type: ignore[n
         "effective_depth": "build",
         "degraded": False,
         "frontend": None,
+        "ast_toolchain": None,
+        "ast_fallback_reason": None,
         # --depth build only reaches L3 (no L4 source replay), so there is
         # no source_abi coverage to read a replay scope from -- None, not a
         # fabricated "target" (external review; see

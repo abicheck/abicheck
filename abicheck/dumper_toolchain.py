@@ -141,12 +141,7 @@ def _auto_ast_fallback_eligible(backend: str) -> bool:
     """Whether this request is genuinely unpinned ``auto`` selection."""
     choice = (backend or "auto").strip().lower()
     env_pin = os.environ.get("ABICHECK_AST_FRONTEND", "").strip().lower()
-    return choice == "auto" and env_pin not in {
-        "auto",
-        "castxml",
-        "clang",
-        "hybrid",
-    }
+    return choice == "auto" and env_pin not in {"castxml", "clang", "hybrid"}
 
 
 def _parser_ast_toolchain(parser: Any) -> dict[str, str]:

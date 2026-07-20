@@ -257,6 +257,18 @@ class TestDumpCacheExtraKey:
         k_after = _dump_cache_extra_key("elf", "auto", None, None)
         assert k_before != k_after
 
+    def test_auto_frontend_env_remains_fallback_eligible(self, monkeypatch):
+        monkeypatch.setenv("ABICHECK_AST_FRONTEND", "auto")
+        monkeypatch.setenv("ABICHECK_ALLOW_AST_FALLBACK", "1")
+        monkeypatch.delenv("ABICHECK_CLANG_LAYOUT_TOOL", raising=False)
+        with patch("abicheck.clang_layout_tool.shutil.which", return_value=None):
+            k_before = _dump_cache_extra_key("elf", "auto", None, None)
+        monkeypatch.setenv(
+            "ABICHECK_CLANG_LAYOUT_TOOL", "/opt/abicheck-clang-layout-tool"
+        )
+        k_after = _dump_cache_extra_key("elf", "auto", None, None)
+        assert k_before != k_after
+
     def test_layout_tool_identity_irrelevant_for_explicit_castxml_pin(
         self, monkeypatch
     ):
