@@ -79,7 +79,10 @@ from .model import (
 #     to prevent. Bumping bumps the version-mismatch `UserWarning` in
 #     `snapshot_from_dict` for such a reader, giving a visible "upgrade
 #     abicheck" signal instead of silence (Codex review).
-SCHEMA_VERSION: int = 10
+# v11: persist the resolved header-AST executable/compiler identity and an
+#     explicit CastXML→Clang fallback reason.  This makes producer changes
+#     observable in saved baselines instead of only in transient logs.
+SCHEMA_VERSION: int = 11
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
@@ -811,6 +814,20 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         from_headers_inferred = from_headers
 
     ast_producer_value = d.get("ast_producer")
+    raw_ast_toolchain = d.get("ast_toolchain")
+    ast_toolchain = (
+        {
+            str(key): str(value)
+            for key, value in raw_ast_toolchain.items()
+            if isinstance(key, str) and isinstance(value, str)
+        }
+        if isinstance(raw_ast_toolchain, dict)
+        else {}
+    )
+    raw_fallback_reason = d.get("ast_fallback_reason")
+    ast_fallback_reason = (
+        raw_fallback_reason if isinstance(raw_fallback_reason, str) else None
+    )
     if "header_cv_facts_reliable" in d:
         # Trust an explicit marker over re-deriving from schema_version: a
         # load -> snapshot_to_dict -> (save) -> load round-trip always
@@ -862,6 +879,8 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         # castxml snapshot silently lost the tag and permanently disabled
         # all 8 detectors gated on it).
         ast_producer=ast_producer_value,
+        ast_toolchain=ast_toolchain,
+        ast_fallback_reason=ast_fallback_reason,
         # See header_cv_facts_reliable_value's computation above: prefers an
         # explicit dict key (round-trip stability) and otherwise derives
         # from schema_version scoped to the CastXML header path specifically

@@ -21,6 +21,7 @@ import subprocess
 import textwrap
 import warnings
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -428,7 +429,13 @@ def _run_abicheck(
         else:
             headers_v2 = []
 
-        with warnings.catch_warnings():
+        # Parity CI intentionally remains portable to older distro CastXML
+        # builds; opt in explicitly now that production auto-fallback is
+        # fail-closed by default.
+        with (
+            patch.dict("os.environ", {"ABICHECK_ALLOW_AST_FALLBACK": "1"}),
+            warnings.catch_warnings(),
+        ):
             warnings.simplefilter("ignore")
             old_snap = dump(old, headers=headers_v1, version="v1", compiler=compiler, lang=lang)
             new_snap = dump(new, headers=headers_v2, version="v2", compiler=compiler, lang=lang)

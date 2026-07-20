@@ -24,7 +24,6 @@ end result as a lazy import without the indirection.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -83,6 +82,7 @@ def _dump_cache_extra_key(
     header_backend: str,
     public_headers: list[Path] | None,
     public_header_dirs: list[Path] | None,
+    lang: str = "c++",
 ) -> str:
     """Build the ``extra`` cache-key material for a cacheable dump — every
     input to ``run_dump`` that affects its output besides the binary content
@@ -124,14 +124,15 @@ def _dump_cache_extra_key(
     layout facts — into the merged result (Codex review).
 
     Also hashed for a genuinely-unpinned ``"auto"`` request (raw
-    ``header_backend == "auto"`` AND ``ABICHECK_AST_FRONTEND`` unset), even
-    though :func:`_resolve_header_backend` optimistically resolves that to
-    ``"castxml"``: ``dumper._header_ast_parser``'s G16 logic can silently
+    ``header_backend == "auto"`` AND ``ABICHECK_AST_FRONTEND`` unset) when
+    ``ABICHECK_ALLOW_AST_FALLBACK`` explicitly enables fallback, even though
+    :func:`_resolve_header_backend` optimistically resolves that to
+    ``"castxml"``: ``dumper._header_ast_parser``'s G16 logic may then
     runtime-fallback such a request from castxml to clang (a toolchain-
     version mismatch or a direct-include ``#error`` guard) — invisible to
     this static, content-blind resolution, which can't know in advance
     whether castxml will actually succeed for these specific headers. That
-    fallback's resulting snapshot is clang-sourced and gets the identical
+    opted-in fallback's resulting snapshot is clang-sourced and gets the identical
     ``attach_clang_layout`` enrichment an explicit ``--ast-frontend clang``
     dump would, so its cache key must depend on the layout tool's identity
     too (Codex review). An EXPLICIT ``castxml`` request (or an
@@ -139,24 +140,52 @@ def _dump_cache_extra_key(
     (the castxml failure surfaces verbatim instead), so it's correctly
     excluded — the tool truly never runs for those.
     """
-    from .dumper import _resolve_header_backend
+    from .dumper import (
+        _ast_fallback_enabled,
+        _auto_ast_fallback_eligible,
+        _resolve_compiler_binary,
+        _resolve_header_backend,
+        _tool_identity,
+    )
+    from .dumper_clang import _resolve_clang_bin
 
     resolved_backend = _resolve_header_backend(header_backend)
-    env_pin = os.environ.get("ABICHECK_AST_FRONTEND", "").strip().lower()
     auto_may_fallback_to_clang = (
-        (header_backend or "auto").strip().lower() == "auto" and not env_pin
+        _auto_ast_fallback_eligible(header_backend)
+        and _ast_fallback_enabled()
     )
     layout_tool = ""
     if resolved_backend in ("clang", "hybrid") or auto_may_fallback_to_clang:
         from .clang_layout_tool import find_layout_tool_bin
 
-        layout_tool = find_layout_tool_bin() or ""
+        layout_tool_bin = find_layout_tool_bin()
+        layout_tool = _tool_identity(layout_tool_bin) if layout_tool_bin else ""
+
+    compiler = "cc" if lang == "c" else "c++"
+
+    frontend_tools: list[str] = []
+    if resolved_backend in ("castxml", "hybrid"):
+        frontend_tools.append(_tool_identity("castxml"))
+    if resolved_backend in ("clang", "hybrid") or auto_may_fallback_to_clang:
+        try:
+            frontend_tools.append(
+                _tool_identity(_resolve_clang_bin(compiler, None, None))
+            )
+        except Exception as exc:  # missing optional backend remains key material
+            frontend_tools.append(f"clang-unavailable:{type(exc).__name__}:{exc}")
+    try:
+        compiler_bin, _ = _resolve_compiler_binary(compiler, None, None)
+        compiler_identity = _tool_identity(compiler_bin)
+    except Exception as exc:
+        compiler_identity = f"compiler-unavailable:{type(exc).__name__}:{exc}"
 
     sep = "\x00"
     return sep.join(
         [
             binary_fmt,
             resolved_backend,
+            *frontend_tools,
+            compiler_identity,
             layout_tool,
             sep.join(sorted(str(p) for p in (public_headers or []))),
             sep.join(sorted(str(p) for p in (public_header_dirs or []))),
@@ -241,7 +270,7 @@ def cached_run_dump(
     from . import snapshot_cache
 
     extra = _dump_cache_extra_key(
-        binary_fmt, header_backend, public_headers, public_header_dirs
+        binary_fmt, header_backend, public_headers, public_header_dirs, lang
     )
     cached = snapshot_cache.lookup(path, _headers, _includes, version, lang, extra=extra)
     if cached is not None:

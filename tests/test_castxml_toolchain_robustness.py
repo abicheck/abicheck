@@ -35,6 +35,7 @@ mocked, so they run in the default fast lane with no castxml present.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -603,6 +604,7 @@ class TestG16ClangFallbackRespectsConfiguredDriver:
 
         sentinel = MagicMock()
         with (
+            patch.dict(os.environ, {"ABICHECK_ALLOW_AST_FALLBACK": "1"}),
             patch(
                 "abicheck.dumper._castxml_dump",
                 side_effect=SnapshotError(_ASSUME_STDERR),
@@ -620,6 +622,29 @@ class TestG16ClangFallbackRespectsConfiguredDriver:
                 **self._KWARGS,
             )
         assert result is sentinel
+        assert result._abicheck_ast_fallback_reason == (
+            "castxml-toolchain-version-mismatch"
+        )
+
+    def test_auto_fallback_is_fail_closed_by_default(self, tmp_path: Path) -> None:
+        from abicheck.dumper import _header_ast_parser
+
+        header = tmp_path / "api.h"
+        header.write_text("int f(void);\n", encoding="utf-8")
+        with (
+            patch.dict(os.environ, {}, clear=False),
+            patch(
+                "abicheck.dumper._castxml_dump",
+                side_effect=SnapshotError(_ASSUME_STDERR),
+            ),
+            patch("abicheck.dumper.shutil.which", return_value="/usr/bin/clang++"),
+            pytest.raises(SnapshotError, match="fallback is disabled"),
+        ):
+            os.environ.pop("ABICHECK_ALLOW_AST_FALLBACK", None)
+            _header_ast_parser(
+                [header], [], compiler="c++", gcc_path=None, gcc_prefix=None,
+                **self._KWARGS,
+            )
 
     def test_no_fallback_when_no_clang_driver_is_available(
         self, tmp_path: Path

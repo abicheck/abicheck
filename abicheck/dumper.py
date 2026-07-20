@@ -22,9 +22,11 @@ with ``header_backend=`` (``auto``/``castxml``/``clang``; CLI ``--ast-frontend``
 or the ``ABICHECK_AST_FRONTEND`` env var. ``auto`` resolves to castxml and never
 silently falls back to clang on castxml-less hosts (clang's JSON AST lacks
 computed record layout, so an implicit fallback could miss layout-only breaks).
-The one exception is a runtime castxml *toolchain-version* failure (bundled
-Clang too old for the host libstdc++/GCC), which falls back to the clang backend
-automatically (G16); an explicit selection is honored verbatim. See ADR-003.
+Recognized runtime castxml failures remain fail-closed by default. Callers may
+explicitly allow the narrow CastXML→Clang fallback with the CLI flag
+``--allow-ast-frontend-fallback`` or ``ABICHECK_ALLOW_AST_FALLBACK=1`` (G16);
+the effective producer/toolchain and reason are recorded in the snapshot. An
+explicit frontend selection is always honored verbatim. See ADR-003.
 """
 from __future__ import annotations
 
@@ -40,6 +42,7 @@ import tempfile
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from xml.etree.ElementTree import (
@@ -154,6 +157,111 @@ def _safe_size(path: Path) -> int | None:
 
 def _castxml_available() -> bool:
     return shutil.which("castxml") is not None
+
+
+@lru_cache(maxsize=64)
+def _executable_sha256(
+    real_path: str,
+    device: int,
+    inode: int,
+    mtime_ns: int,
+    ctime_ns: int,
+    size: int,
+) -> str:
+    """Hash one exact executable revision (stat fields invalidate memoization)."""
+    del device, inode, mtime_ns, ctime_ns, size
+    h = hashlib.sha256()
+    with Path(real_path).open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+@lru_cache(maxsize=64)
+def _tool_version_output(real_path: str, digest: str) -> str:
+    """Return stable ``--version`` output for one exact executable revision.
+
+    The executable digest is deliberately part of the memoization key: replacing
+    a binary in place must invalidate the version within a long-lived process.
+    """
+    del digest
+    try:
+        result = subprocess.run(
+            [real_path, "--version"], capture_output=True, text=True,
+            timeout=10, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"unavailable:{type(exc).__name__}:{exc}"
+    return "\n".join(
+        line.rstrip() for line in (result.stdout + result.stderr).splitlines()
+        if line.strip()
+    )
+
+
+def _tool_identity(executable: str) -> str:
+    """Identify the executable actually selected by PATH, including version.
+
+    Resolving the symlink before memoization means changing ``~/.local/bin`` (or
+    a CI shim) to another CastXML/Clang build changes every dependent cache key.
+    """
+    selected = shutil.which(executable) or executable
+    try:
+        real = Path(selected).resolve(strict=True)
+        stat = real.stat()
+        digest = _executable_sha256(
+            str(real), stat.st_dev, stat.st_ino, stat.st_mtime_ns,
+            stat.st_ctime_ns, stat.st_size,
+        )
+    except OSError as exc:
+        return f"selected={selected};unavailable={type(exc).__name__}:{exc}"
+    version = _tool_version_output(str(real), digest)
+    return (
+        f"selected={selected};realpath={real};mtime_ns={stat.st_mtime_ns};"
+        f"size={stat.st_size};sha256={digest};version={version}"
+    )
+
+
+def _tool_identity_metadata(executable: str) -> dict[str, str]:
+    """Machine-readable subset of :func:`_tool_identity` for provenance."""
+    selected = shutil.which(executable) or executable
+    try:
+        real = Path(selected).resolve(strict=True)
+        stat = real.stat()
+        digest = _executable_sha256(
+            str(real), stat.st_dev, stat.st_ino, stat.st_mtime_ns,
+            stat.st_ctime_ns, stat.st_size,
+        )
+        version = _tool_version_output(str(real), digest)
+    except OSError as exc:
+        return {
+            "selected": selected,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    return {
+        "selected": selected,
+        "realpath": str(real),
+        "mtime_ns": str(stat.st_mtime_ns),
+        "size": str(stat.st_size),
+        "sha256": digest,
+        "version": version,
+    }
+
+
+def _ast_fallback_enabled() -> bool:
+    return os.environ.get("ABICHECK_ALLOW_AST_FALLBACK", "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
+
+def _auto_ast_fallback_eligible(backend: str) -> bool:
+    """Whether this request is genuinely unpinned ``auto`` selection.
+
+    Invalid environment pins are ignored by :func:`_resolve_header_backend`, so
+    they must be treated exactly like an unset pin here and in whole-cache keys.
+    """
+    choice = (backend or "auto").strip().lower()
+    env_pin = os.environ.get("ABICHECK_AST_FRONTEND", "").strip().lower()
+    return choice == "auto" and env_pin not in HEADER_BACKENDS
 
 
 #: Header-AST backend identifiers (the L2 producers). castxml is the default and
@@ -352,6 +460,9 @@ def _clang_header_dump(
     cpp_system_includes = (
         system_includes if force_cpp else _resolve_sysinc(force_cpp=True)
     )
+    host_cc_bin, _host_cc_id = _resolve_compiler_binary(
+        compiler, gcc_path, gcc_prefix
+    )
 
     key = _cache_key(
         headers, extra_includes, clang_bin,
@@ -365,6 +476,8 @@ def _clang_header_dump(
         if force_cpp
         else (*system_includes, *cpp_system_includes),
         extra_hash_dirs=extra_hash_dirs,
+        frontend_identity=_tool_identity(clang_bin),
+        compiler_identity=_tool_identity(host_cc_bin),
     )
     cached = _cache_path(key, backend="clang")
     if cached.exists():
@@ -489,7 +602,26 @@ def _header_ast_parser(
             "(see dumper_hybrid.run_hybrid_dump)."
         )
 
-    def _run_clang() -> _ClangAstParser:
+    def _stamp_parser(
+        parser: _CastxmlParser | _ClangAstParser,
+        *,
+        producer: str,
+        executable: str,
+        fallback_reason: str | None = None,
+    ) -> _CastxmlParser | _ClangAstParser:
+        metadata = {"producer": producer, **_tool_identity_metadata(executable)}
+        try:
+            host_cc, _ = _resolve_compiler_binary(compiler, gcc_path, gcc_prefix)
+            host_meta = _tool_identity_metadata(host_cc)
+            metadata.update({f"compiler_{key}": value for key, value in host_meta.items()})
+        except SnapshotError as exc:
+            metadata["compiler_error"] = str(exc)
+        setattr(parser, "_abicheck_ast_toolchain", metadata)
+        setattr(parser, "_abicheck_ast_fallback_reason", fallback_reason)
+        return parser
+
+    def _run_clang(*, fallback_reason: str | None = None) -> _ClangAstParser:
+        clang_bin = _resolve_clang_bin(compiler, gcc_path, gcc_prefix)
         ast_root = _clang_header_dump(
             headers, extra_includes, compiler=compiler,
             gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
@@ -497,28 +629,34 @@ def _header_ast_parser(
             sysroot=sysroot, nostdinc=nostdinc, lang=lang,
             extra_hash_dirs=extra_hash_dirs,
         )
-        return _ClangAstParser(
+        parser = _ClangAstParser(
             ast_root, exported_dynamic, exported_static,
             public_header_paths=public_header_paths,
             public_dir_paths=public_dir_paths,
+        )
+        return cast(
+            _ClangAstParser,
+            _stamp_parser(
+                parser, producer="clang", executable=clang_bin,
+                fallback_reason=fallback_reason,
+            ),
         )
 
     if resolved == "clang":
         return _run_clang()
 
     # G16: when the frontend was selected automatically (no explicit --ast-frontend
-    # and no ABICHECK_AST_FRONTEND pin), two castxml failures are recoverable by
-    # falling back to the clang backend rather than aborting: a *toolchain-version*
+    # and no ABICHECK_AST_FRONTEND pin), two castxml failures are eligible for an
+    # explicitly opted-in clang fallback: a *toolchain-version*
     # failure (bundled Clang too old for the host libstdc++/GCC — clang parses
     # against the host toolchain directly), and a *direct-inclusion #error guard*
     # (a `-H <include-dir>` swept in a preview/internal header that #errors on
     # direct inclusion — only the clang path can granularly exclude the offending
     # headers via retry_excluding_error_headers, so the headline include-dir scan
-    # works on the default frontend, not just --ast-frontend clang). An explicit
+    # works when fallback is enabled, not just --ast-frontend clang). The default
+    # remains fail-closed because switching producer can change findings. An explicit
     # castxml request is honored verbatim (the error surfaces unchanged).
-    choice = (backend or "auto").lower()
-    env_pin = os.environ.get("ABICHECK_AST_FRONTEND", "").strip().lower()
-    auto_selected = choice == "auto" and env_pin not in ("castxml", "clang")
+    auto_selected = _auto_ast_fallback_eligible(backend)
     try:
         xml_root = _castxml_dump(
             headers, extra_includes, compiler=compiler,
@@ -540,6 +678,7 @@ def _header_ast_parser(
 
         if (
             auto_selected
+            and _ast_fallback_enabled()
             and _clang_fallback_ready()
             and (
                 _is_toolchain_version_failure(str(exc))
@@ -553,13 +692,47 @@ def _header_ast_parser(
                 "exclude direct-include #error guard headers. Set --ast-frontend "
                 "castxml to force castxml and see the original error."
             )
-            return _run_clang()
+            fallback_reason = (
+                "castxml-toolchain-version-mismatch"
+                if _is_toolchain_version_failure(str(exc))
+                else "castxml-direct-include-guard"
+            )
+            return _run_clang(fallback_reason=fallback_reason)
+        if auto_selected and (
+            _is_toolchain_version_failure(str(exc))
+            or _is_direct_include_guard_failure(str(exc))
+        ):
+            message = (
+                f"{exc}\n\nAutomatic CastXML-to-Clang fallback is disabled because "
+                "the two frontends can produce materially different findings. "
+                "Install a compatible CastXML, select --ast-frontend clang "
+                "explicitly, or opt in with --allow-ast-frontend-fallback "
+                "(ABICHECK_ALLOW_AST_FALLBACK=1)."
+            )
+            raise type(exc)(message) from exc
         raise
-    return _CastxmlParser(
+    parser = _CastxmlParser(
         xml_root, exported_dynamic, exported_static,
         public_header_paths=public_header_paths,
         public_dir_paths=public_dir_paths,
     )
+    return cast(
+        _CastxmlParser,
+        _stamp_parser(parser, producer="castxml", executable="castxml"),
+    )
+
+
+def _parser_ast_toolchain(
+    parser: _CastxmlParser | _ClangAstParser,
+) -> dict[str, str]:
+    return dict(getattr(parser, "_abicheck_ast_toolchain", {}))
+
+
+def _parser_ast_fallback_reason(
+    parser: _CastxmlParser | _ClangAstParser,
+) -> str | None:
+    value = getattr(parser, "_abicheck_ast_fallback_reason", None)
+    return str(value) if value else None
 
 
 _HIDDEN_VIS = frozenset({"STV_HIDDEN", "STV_INTERNAL"})
@@ -637,11 +810,18 @@ def _cache_key(
     backend: str = "castxml",
     system_includes: tuple[str, ...] = (),
     extra_hash_dirs: tuple[Path, ...] = (),
+    frontend_identity: str = "",
+    compiler_identity: str = "",
 ) -> str:
     h = hashlib.sha256()
     # The header-AST backend is part of the key: a castxml-XML cache entry and a
     # clang-JSON one are different artifacts that must never collide.
     h.update(f"backend={backend}".encode())
+    # The producer binary is part of the artifact identity.  A PATH/symlink
+    # change from one CastXML/Clang build to another must never reuse the old
+    # AST merely because the headers and command-line flags are unchanged.
+    h.update(f"frontend_identity={frontend_identity}".encode())
+    h.update(f"compiler_identity={compiler_identity}".encode())
     for p in sorted(str(x.resolve()) for x in headers):
         h.update(p.encode())
         try:
@@ -1024,6 +1204,8 @@ def _castxml_dump(
             "layout, so layout-only breaks need castxml or debug info (L1)."
         )
 
+    cc_bin, cc_id = _resolve_compiler_binary(compiler, gcc_path, gcc_prefix)
+
     # Check disk cache
     key = _cache_key(
         headers, extra_includes, compiler,
@@ -1031,6 +1213,8 @@ def _castxml_dump(
         gcc_option_tokens=gcc_option_tokens,
         sysroot=sysroot, nostdinc=nostdinc, lang=lang,
         extra_hash_dirs=extra_hash_dirs,
+        frontend_identity=_tool_identity("castxml"),
+        compiler_identity=_tool_identity(cc_bin),
     )
     cached = _cache_path(key)
     if cached.exists():
@@ -1048,8 +1232,6 @@ def _castxml_dump(
             # PR #591, round 3).
             deadline.check()
             return cast(Element, _cached_root)
-
-    cc_bin, cc_id = _resolve_compiler_binary(compiler, gcc_path, gcc_prefix)
 
     with tempfile.NamedTemporaryFile(suffix=".xml", delete=False) as tmp:
         out_xml = Path(tmp.name)
@@ -1701,6 +1883,8 @@ def _dump_elf(
         # and DWARF-only branches return earlier): this surface is header-parsed.
         from_headers=True,
         ast_producer="clang" if isinstance(parser, _ClangAstParser) else "castxml",
+        ast_toolchain=_parser_ast_toolchain(parser),
+        ast_fallback_reason=_parser_ast_fallback_reason(parser),
         platform="elf",
         language_profile=profile_hint,
     )
@@ -1845,6 +2029,8 @@ def _dump_macho(
         # branch returns earlier): this surface is header-parsed.
         from_headers=True,
         ast_producer="clang" if isinstance(parser, _ClangAstParser) else "castxml",
+        ast_toolchain=_parser_ast_toolchain(parser),
+        ast_fallback_reason=_parser_ast_fallback_reason(parser),
         platform="macho",
         language_profile=profile_hint,
     )
@@ -1939,6 +2125,8 @@ def _dump_pe(
         # branch returns earlier): this surface is header-parsed.
         from_headers=True,
         ast_producer="clang" if isinstance(parser, _ClangAstParser) else "castxml",
+        ast_toolchain=_parser_ast_toolchain(parser),
+        ast_fallback_reason=_parser_ast_fallback_reason(parser),
         platform="pe",
         language_profile=profile_hint,
     )

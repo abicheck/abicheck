@@ -22,6 +22,7 @@ Stacked-decorator helpers that bundle related ``compare`` options so the large
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar, overload
@@ -455,6 +456,25 @@ def lang_option(
     return deco if func is None else deco(func)
 
 
+def _enable_ast_fallback_for_command(
+    ctx: click.Context, _param: click.Parameter, value: bool,
+) -> None:
+    """Scope the explicit fallback opt-in to one Click command invocation."""
+    if not value:
+        return None
+    previous = os.environ.get("ABICHECK_ALLOW_AST_FALLBACK")
+    os.environ["ABICHECK_ALLOW_AST_FALLBACK"] = "1"
+
+    def _restore() -> None:
+        if previous is None:
+            os.environ.pop("ABICHECK_ALLOW_AST_FALLBACK", None)
+        else:
+            os.environ["ABICHECK_ALLOW_AST_FALLBACK"] = previous
+
+    ctx.call_on_close(_restore)
+    return None
+
+
 def compile_context_options(func: F) -> F:
     """L2 header-AST compile context — the cross-toolchain + frontend family.
 
@@ -512,6 +532,16 @@ def compile_context_options(func: F) -> F:
         help="Path to a GCC/G++ (or clang) cross-compiler binary.",
     )(func)
     func = click.option(
+        "--allow-ast-frontend-fallback",
+        is_flag=True,
+        expose_value=False,
+        envvar="ABICHECK_ALLOW_AST_FALLBACK",
+        callback=_enable_ast_fallback_for_command,
+        help="Allow auto-selected CastXML to fall back to Clang for a recognized "
+        "toolchain mismatch or direct-include guard. Disabled by default because "
+        "the frontends can produce materially different findings.",
+    )(func)
+    func = click.option(
         "--ast-frontend",
         "header_backend",
         default="auto",
@@ -522,10 +552,10 @@ def compile_context_options(func: F) -> F:
         "bundled frontend chokes). hybrid (G28 Phase 3) runs BOTH and merges "
         "them (dumper_hybrid.merge_snapshots) — needs both tools installed and "
         "costs roughly 2x a single-backend dump; never selected by auto. auto "
-        "resolves to castxml (or the ABICHECK_AST_FRONTEND pin) and does NOT "
-        "fall back merely because castxml is absent; it only falls back to "
-        "clang for two narrow castxml runtime failures (a toolchain-version "
-        "mismatch or a direct-include #error guard). Env: ABICHECK_AST_FRONTEND.",
+        "resolves to castxml (or the ABICHECK_AST_FRONTEND pin) and never "
+        "changes producer unless --allow-ast-frontend-fallback (or "
+        "ABICHECK_ALLOW_AST_FALLBACK=1) is explicitly set. "
+        "Env: ABICHECK_AST_FRONTEND.",
     )(func)
     return func
 

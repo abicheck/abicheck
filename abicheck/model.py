@@ -506,6 +506,15 @@ class AbiSnapshot:
     # platform, corrupting provenance rather than failing loudly.
     ast_producer: str | None = field(default=None, kw_only=True)
 
+    # Resolved L2 executable/compiler identity used to create the header AST.
+    # Kept as string metadata so older readers can ignore it and newer tools can
+    # add fields without another model migration.  Empty on snapshots predating
+    # schema v11 and on binary/debug-only snapshots.
+    ast_toolchain: dict[str, str] = field(default_factory=dict, kw_only=True)
+    # Set only when the user explicitly opted into an auto CastXML→Clang
+    # fallback.  The reason remains visible after snapshot serialization.
+    ast_fallback_reason: str | None = field(default=None, kw_only=True)
+
     # G28 Phase 3 — per-fact producer provenance for a "hybrid" snapshot only
     # (empty for every ordinary single-backend snapshot; ``ast_producer`` alone
     # already answers the question there). Keyed by the stable strings built by

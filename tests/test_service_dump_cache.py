@@ -99,6 +99,20 @@ class TestDumpCacheExtraKey:
         k2 = _dump_cache_extra_key("elf", "clang", None, None)
         assert k1 != k2
 
+    def test_c_and_cpp_fingerprint_their_actual_compilers(self):
+        def compiler_bin(name, _path, _prefix):  # noqa: ANN001
+            return ("/toolchain/gcc" if name == "cc" else "/toolchain/g++", name)
+
+        with (
+            patch("abicheck.dumper._resolve_compiler_binary", side_effect=compiler_bin),
+            patch("abicheck.dumper._tool_identity", side_effect=lambda value: value),
+        ):
+            c_key = _dump_cache_extra_key("elf", "castxml", None, None, "c")
+            cpp_key = _dump_cache_extra_key("elf", "castxml", None, None, "c++")
+        assert c_key != cpp_key
+        assert "/toolchain/gcc" in c_key
+        assert "/toolchain/g++" in cpp_key
+
     def test_differs_by_public_headers(self, tmp_path):
         k1 = _dump_cache_extra_key("elf", "auto", None, None)
         k2 = _dump_cache_extra_key("elf", "auto", [tmp_path / "pub.h"], None)
@@ -147,6 +161,7 @@ class TestDumpCacheExtraKey:
         # hashes the RESOLVED backend, not merely "make every raw string
         # distinct".
         monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
+        monkeypatch.delenv("ABICHECK_ALLOW_AST_FALLBACK", raising=False)
         k_auto = _dump_cache_extra_key("elf", "auto", None, None)
         k_castxml = _dump_cache_extra_key("elf", "castxml", None, None)
         assert k_auto == k_castxml
@@ -205,12 +220,40 @@ class TestDumpCacheExtraKey:
         # the layout tool's identity must be hashed for this case too, even
         # though resolved_backend here is "castxml".
         monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
+        monkeypatch.setenv("ABICHECK_ALLOW_AST_FALLBACK", "1")
         monkeypatch.delenv("ABICHECK_CLANG_LAYOUT_TOOL", raising=False)
         with patch(
             "abicheck.clang_layout_tool.shutil.which", return_value=None
         ):
             k_before = _dump_cache_extra_key("elf", "auto", None, None)
         monkeypatch.setenv("ABICHECK_CLANG_LAYOUT_TOOL", "/opt/abicheck-clang-layout-tool")
+        k_after = _dump_cache_extra_key("elf", "auto", None, None)
+        assert k_before != k_after
+
+    def test_layout_tool_irrelevant_when_auto_fallback_is_disabled(
+        self, monkeypatch
+    ):
+        monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
+        monkeypatch.delenv("ABICHECK_ALLOW_AST_FALLBACK", raising=False)
+        monkeypatch.delenv("ABICHECK_CLANG_LAYOUT_TOOL", raising=False)
+        k_before = _dump_cache_extra_key("elf", "auto", None, None)
+        monkeypatch.setenv(
+            "ABICHECK_CLANG_LAYOUT_TOOL", "/opt/abicheck-clang-layout-tool"
+        )
+        k_after = _dump_cache_extra_key("elf", "auto", None, None)
+        assert k_before == k_after
+
+    def test_invalid_frontend_pin_uses_same_fallback_cache_identity(
+        self, monkeypatch
+    ):
+        monkeypatch.setenv("ABICHECK_AST_FRONTEND", "invalid-value")
+        monkeypatch.setenv("ABICHECK_ALLOW_AST_FALLBACK", "1")
+        monkeypatch.delenv("ABICHECK_CLANG_LAYOUT_TOOL", raising=False)
+        with patch("abicheck.clang_layout_tool.shutil.which", return_value=None):
+            k_before = _dump_cache_extra_key("elf", "auto", None, None)
+        monkeypatch.setenv(
+            "ABICHECK_CLANG_LAYOUT_TOOL", "/opt/abicheck-clang-layout-tool"
+        )
         k_after = _dump_cache_extra_key("elf", "auto", None, None)
         assert k_before != k_after
 

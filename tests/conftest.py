@@ -31,6 +31,12 @@ def _isolate_snapshot_cache(tmp_path_factory: pytest.TempPathFactory, monkeypatc
     """
     from abicheck import snapshot_cache
 
+    # Test infrastructure intentionally supports distro CastXML builds whose
+    # bundled Clang cannot parse the host headers. Keep that portability opt-in
+    # explicit; dedicated fallback-policy tests remove this variable and prove
+    # the production default remains fail-closed.
+    monkeypatch.setenv("ABICHECK_ALLOW_AST_FALLBACK", "1")
+
     monkeypatch.setattr(
         snapshot_cache, "_CACHE_DIR", tmp_path_factory.mktemp("snapshot_cache")
     )
