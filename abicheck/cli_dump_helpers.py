@@ -1484,10 +1484,16 @@ def perform_elf_dump(
             _attach_header_graph,
         )
 
+        # dwarf_only means "ignore headers entirely" -- dump() above already
+        # honors that (returns a DWARF-only snapshot without parsing headers),
+        # so this attach must not silently re-parse those same headers via
+        # clang and embed L2 build_source evidence the caller explicitly
+        # asked not to have (Codex review; same fix as service.py's
+        # run_dump()).
         snap = _attach_header_graph(
             snap,
-            _HEADER_GRAPH_ENABLED,
-            _HEADER_GRAPH_INCLUDES_ENABLED,
+            _HEADER_GRAPH_ENABLED and not dwarf_only,
+            _HEADER_GRAPH_INCLUDES_ENABLED and not dwarf_only,
             list(headers),
             list(eff_includes),
             lang,

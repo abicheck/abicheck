@@ -91,14 +91,6 @@ def _get_cache_dir() -> Path:
 # Module-level reference (can be monkeypatched in tests).
 _CACHE_DIR: Path = _get_cache_dir()
 
-#: Extensions treated as headers when walking an include directory for cache
-#: invalidation (:func:`_cache_key`) -- deliberately the same "looks like a
-#: header" set other extractors in this codebase already use, not an attempt
-#: at a fully general build-system-aware header classifier.
-_HEADER_EXTENSIONS: frozenset[str] = frozenset(
-    {".h", ".hh", ".hpp", ".hxx", ".h++", ".inl", ".ipp", ".tcc"}
-)
-
 
 def _hash_include_dir_headers(h: hashlib._Hash, inc: Path) -> None:
     """Fold the (relative path, mtime) of every header-like file under
@@ -106,16 +98,22 @@ def _hash_include_dir_headers(h: hashlib._Hash, inc: Path) -> None:
     through an ``-I``/``--include`` directory (never itself passed as an
     explicit ``headers`` entry) still invalidates the whole-snapshot cache.
 
+    Reuses :func:`abicheck.header_utils.iter_cache_header_files` (the same
+    ``CACHE_HEADER_SUFFIXES`` set ``dumper._cache_key``'s own AST-level cache
+    already walks) rather than a second, independently-maintained suffix
+    list -- an earlier ad hoc set here was missing ``.tpp``/``.inc`` (Codex
+    review), which the shared set already accounted for.
+
     Best-effort and bounded by whatever is actually on disk under ``inc`` --
     a missing/unreadable directory degrades to hashing nothing extra (same
     as before this function existed) rather than raising, matching this
     module's existing "any read problem is cache-safe, never a crash"
     stance (see ``lookup``/``store``).
     """
+    from .header_utils import iter_cache_header_files
+
     try:
-        entries = sorted(
-            p for p in inc.rglob("*") if p.suffix.lower() in _HEADER_EXTENSIONS
-        )
+        entries = iter_cache_header_files(inc)
     except OSError:
         return
     for p in entries:

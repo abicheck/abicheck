@@ -867,6 +867,87 @@ def test_perform_elf_dump_attaches_header_graph_by_default(
     assert captured["written_snap"] is graphed_snap
 
 
+def test_perform_elf_dump_dwarf_only_does_not_attach_header_graph(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Codex review: dwarf_only=True means "ignore headers entirely" -- dump()
+    already returns a DWARF-only snapshot without parsing headers for that
+    case, so this direct-ELF-dump CLI path (which calls _attach_header_graph
+    itself rather than going through service.run_dump) must not silently
+    re-parse the same headers via clang and embed L2 build_source evidence
+    the caller explicitly asked not to have."""
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "h.h"
+    hdr.write_text("struct S { int x; };\n", encoding="utf-8")
+
+    plain_snap = AbiSnapshot(library="lib.so", version="1.0")
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", lambda **_kw: plain_snap)
+
+    captured: dict[str, object] = {}
+
+    def fake_attach(
+        snap,
+        header_graph,
+        header_graph_includes,
+        headers,
+        includes,
+        lang,
+        compile_context,
+        public_headers,
+        public_header_dirs,
+    ):
+        captured["header_graph"] = header_graph
+        captured["header_graph_includes"] = header_graph_includes
+        return snap
+
+    monkeypatch.setattr("abicheck.service._attach_header_graph", fake_attach)
+
+    events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+
+    from abicheck.service_scan import CompileContext
+
+    sentinel_cc = CompileContext()
+
+    perform_elf_dump(
+        so,
+        (hdr,),
+        (),
+        "1.0",
+        "c++",
+        None,
+        None,
+        None,
+        (),
+        None,
+        True,
+        True,  # dwarf_only
+        None,
+        (),
+        (),
+        None,
+        False,
+        (),
+        "",
+        None,
+        None,
+        False,
+        None,
+        None,
+        None,
+        None,
+        False,
+        "off",
+        _expand,
+        _populate,
+        _stamp,
+        _write,
+        compile_context=sentinel_cc,
+    )
+
+    assert captured["header_graph"] is False
+    assert captured["header_graph_includes"] is False
+
+
 def test_perform_elf_dump_header_graph_receives_seeded_includes(
     tmp_path: Path, monkeypatch
 ) -> None:

@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.snapshot_cache import (
     _cache_key,
@@ -142,6 +144,30 @@ class TestCacheKey:
 
         key1 = _cache_key(binary, [], [inc], "1.0", "c++")
         (inc / "new.h").write_text("struct added {};\n")
+        key2 = _cache_key(binary, [], [inc], "1.0", "c++")
+
+        assert key1 != key2
+
+    @pytest.mark.parametrize("suffix", [".tpp", ".inc", ".inl", ".tcc"])
+    def test_template_implementation_suffixes_bust_the_key(self, tmp_path, suffix):
+        """Codex review: an earlier ad hoc suffix set here was missing
+        ``.tpp``/``.inc`` (present in the shared ``header_utils.
+        CACHE_HEADER_SUFFIXES`` other cache-invalidation code already uses).
+        Editing a template-implementation file pulled in by a parsed header
+        must invalidate the cache just like editing a plain ``.h`` does."""
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF content")
+        inc = tmp_path / "inc"
+        inc.mkdir()
+        impl = inc / f"detail{suffix}"
+        impl.write_text("// template body\n")
+
+        key1 = _cache_key(binary, [], [inc], "1.0", "c++")
+
+        import os
+        import time
+
+        os.utime(impl, (time.time() + 10, time.time() + 10))
         key2 = _cache_key(binary, [], [inc], "1.0", "c++")
 
         assert key1 != key2

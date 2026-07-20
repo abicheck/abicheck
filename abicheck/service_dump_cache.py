@@ -272,7 +272,28 @@ def cached_run_dump(
     extra = _dump_cache_extra_key(
         binary_fmt, header_backend, public_headers, public_header_dirs, lang
     )
-    cached = snapshot_cache.lookup(path, _headers, _includes, version, lang, extra=extra)
+    # dumper.dump()/service._dump_elf independently call
+    # header_utils.resolve_inferred_header_roots(headers, includes) to add an
+    # `-H include/api.h`-style umbrella's own include root to the search path
+    # even when the caller passed no explicit -I (see that function's
+    # docstring). A cacheable call always has no build context (gcc_options/
+    # gcc_option_tokens empty, since `compile is None`), so this always
+    # resolves to plain extra-include dirs, never deferred tokens -- but
+    # those inferred dirs still are not part of `_includes` above, so an edit
+    # to a header reached only through one of them (e.g. `include/detail.h`
+    # pulled in by `include/api.h`) would not change the cache key even
+    # though it changes the parsed snapshot/header graph (Codex review).
+    # Folded in for cache-key purposes only -- the real `run_dump` calls
+    # below still pass the original, unmodified `headers`/`includes`, since
+    # they (or their own recursive `_dump_elf` call) re-derive the same
+    # inferred roots independently.
+    from .header_utils import resolve_inferred_header_roots
+
+    _inferred_roots, _ = resolve_inferred_header_roots(_headers, _includes)
+    _cache_includes = _includes + _inferred_roots
+    cached = snapshot_cache.lookup(
+        path, _headers, _cache_includes, version, lang, extra=extra
+    )
     if cached is not None:
         return cached
     snap = run_dump(
@@ -296,5 +317,7 @@ def cached_run_dump(
         compile=compile,
         notify=notify,
     )
-    snapshot_cache.store(snap, path, _headers, _includes, version, lang, extra=extra)
+    snapshot_cache.store(
+        snap, path, _headers, _cache_includes, version, lang, extra=extra
+    )
     return snap

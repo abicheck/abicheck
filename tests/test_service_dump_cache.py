@@ -314,6 +314,36 @@ class TestCachedRunDump:
         assert snap_elf.functions[0].name == "elf"
         assert snap_pe.functions[0].name == "pe"
 
+    def test_inferred_header_root_sibling_edit_invalidates_cache(self, tmp_path):
+        # Codex review: header_utils.resolve_inferred_header_roots() adds a
+        # -H header's own parent directory to the search path even when no
+        # explicit -I was given (dumper.dump()/service._dump_elf both call
+        # it). A sibling header reached only through that inferred root
+        # (never itself passed as an explicit `headers` entry, and not under
+        # any explicit `includes` dir either since none was given) must still
+        # invalidate the cache when it changes.
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF fake content")
+        api_h = tmp_path / "api.h"
+        api_h.write_text("void f();\n")
+        detail_h = tmp_path / "detail.h"
+        detail_h.write_text("struct detail {};\n")
+        calls: list[int] = []
+
+        def fake_run_dump(path, binary_fmt, headers, includes, version, lang, **kwargs):
+            calls.append(1)
+            return _sample_snap(name=f"foo{len(calls)}")
+
+        cached_run_dump(fake_run_dump, binary, "elf", [api_h], [], "1.0", "c++")
+
+        import os
+        import time
+
+        os.utime(detail_h, (time.time() + 10, time.time() + 10))
+        cached_run_dump(fake_run_dump, binary, "elf", [api_h], [], "1.0", "c++")
+
+        assert len(calls) == 2
+
     def test_uncacheable_shape_always_calls_run_dump(self, tmp_path):
         binary = tmp_path / "lib.so"
         binary.write_bytes(b"ELF fake content")
