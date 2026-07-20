@@ -58,6 +58,21 @@ _logger = logging.getLogger(__name__)
 # Magic-byte length for format detection
 _SNIFF_BYTES = 256
 
+# G29 Phase A: the L2 header-only semantic graph (ADR-041 addendum) and its
+# include-file extension used to be strictly opt-in via ``--header-graph``/
+# ``--header-graph-includes``. They are now always attempted whenever headers
+# are available (``_attach_header_graph`` itself still no-ops without parsed
+# headers, and degrades to a declaration-only graph when clang is
+# unavailable) — no public flag controls this anymore; see
+# ``docs/development/plans/g31-header-graph-default-on-followup.md``.
+# TODO(header-graph-phase-D): ``header_graph_includes`` runs one extra
+# ``clang -M`` pass per top-level header on every dump/compare with no
+# caching of its own (only the aggregate AST pass is disk-cached via
+# ``_clang_header_dump``) — bounded by header count, fails soft when clang is
+# unavailable, but not yet cheap. Caching this pass is deferred to Phase D.
+_HEADER_GRAPH_ENABLED = True
+_HEADER_GRAPH_INCLUDES_ENABLED = True
+
 
 # ── Input resolution ────────────────────────────────────────────────────────
 
@@ -238,8 +253,6 @@ def resolve_input(
     follow_linker_scripts: bool = True,
     header_backend: str = "auto",
     compile: CompileContext | None = None,
-    header_graph: bool = False,
-    header_graph_includes: bool = False,
     notify: Callable[[str], None] | None = None,
 ) -> AbiSnapshot:
     """Auto-detect input type and return an ABI snapshot.
@@ -257,6 +270,11 @@ def resolve_input(
     4. JSON snapshot (``{`` prefix) → :func:`load_snapshot`
     5. GNU ld linker script (``INPUT()``/``GROUP()``) → follow to its target
 
+    For binary inputs (ELF/PE/Mach-O), the L2 header-only semantic graph
+    (:func:`run_dump`'s ``_attach_header_graph`` step) is always attempted
+    when headers are parsed — no flag required (G29 Phase A); it is a no-op
+    for non-binary inputs (BTF/CTF, snapshots, ABICC dumps).
+
     Args:
         debug_format: Force the ELF debug format ("dwarf", "btf", "ctf") or
             *None* for auto-detection.
@@ -268,13 +286,6 @@ def resolve_input(
         follow_linker_scripts: When True (default), a GNU ld linker script is
             followed to the shared library named in its ``INPUT()``/``GROUP()``
             directive.
-        header_graph / header_graph_includes: Forwarded to :func:`run_dump`
-            for binary inputs (ELF/PE/Mach-O) — builds and embeds the L2
-            header-only semantic graph so ``compare``'s existing
-            build-source-pack graph diff (which already handles any
-            ``SourceGraphSummary`` uniformly, L3-L5 or this L2 one) picks it
-            up on both sides. A no-op for non-binary inputs (BTF/CTF,
-            snapshots, ABICC dumps).
         notify: Optional callback for user-facing progress notes (e.g. "following
             a linker script", "no headers provided"). When *None*, such notes go
             to the module logger. The CLI passes a ``click.echo(..., err=True)``
@@ -308,8 +319,6 @@ def resolve_input(
             public_header_dirs=public_header_dirs,
             header_backend=header_backend,
             compile=compile,
-            header_graph=header_graph,
-            header_graph_includes=header_graph_includes,
             notify=notify,
         )
 
@@ -336,8 +345,6 @@ def resolve_input(
             public_header_dirs=public_header_dirs,
             header_backend=header_backend,
             compile=compile,
-            header_graph=header_graph,
-            header_graph_includes=header_graph_includes,
             notify=notify,
         )
 
@@ -413,8 +420,6 @@ def resolve_input(
                     follow_linker_scripts=follow_linker_scripts,
                     header_backend=header_backend,
                     compile=compile,
-                    header_graph=header_graph,
-                    header_graph_includes=header_graph_includes,
                     notify=notify,
                 )
             raise ValidationError(
@@ -466,11 +471,19 @@ def run_dump(
     public_header_dirs: list[Path] | None = None,
     header_backend: str = "auto",
     compile: CompileContext | None = None,
-    header_graph: bool = False,
-    header_graph_includes: bool = False,
     notify: Callable[[str], None] | None = None,
+    _skip_header_graph_attach: bool = False,
 ) -> AbiSnapshot:
     """Extract an ABI snapshot from a native binary (ELF, PE, or Mach-O).
+
+    ``_skip_header_graph_attach`` is a private, internal-only knob (not
+    public API, not CLI-reachable) used solely by this function's own
+    ``header_backend="hybrid"`` recursion below: each single-backend
+    sub-dump would otherwise redundantly attach its own header-only graph
+    (seeded from only that one backend's declarations) before the merge
+    throws it away, wasting a whole extra clang AST pass per sub-dump. The
+    graph is instead attached exactly once, after the merge, to the union of
+    both backends' declarations.
 
     ``public_headers`` / ``public_header_dirs`` tag declaration provenance
     (ADR-024 Phase 1) on all three formats: ELF threads them into
@@ -479,19 +492,16 @@ def run_dump(
     ``debug_format`` forces the ELF debug format. ``notify`` receives
     user-facing progress notes (see :func:`resolve_input`).
 
-    ``header_graph`` builds and embeds the header-only (L2) semantic graph
+    The header-only (L2) semantic graph
     (:func:`abicheck.buildsource.header_graph.build_header_only_graph`, ADR-041
     addendum) — a smaller, build-free alternative to the L4/L5 build-integrated
-    graph, available uniformly across all three binary formats. A no-op when no
-    headers were parsed; degrades to a graph with declaration-visibility nodes
-    only (no type/call edges) when clang is unavailable. ``header_graph_includes``
-    additionally runs a per-header ``clang -M`` pass
-    (:class:`abicheck.buildsource.header_graph.ClangHeaderIncludeExtractor`) to
-    add ``COMPILE_UNIT_INCLUDES_FILE`` edges from each top-level header to
-    everything it transitively includes — a separate opt-in from
-    ``header_graph`` alone since it costs one extra clang invocation per
-    top-level header, not just one for the whole aggregate; ignored when
-    ``header_graph`` is not also set.
+    graph, available uniformly across all three binary formats — is always
+    attempted (G29 Phase A: no longer flag-gated). A no-op when no headers were
+    parsed; degrades to a graph with declaration-visibility nodes only (no
+    type/call edges) when clang is unavailable. The include-file extension
+    (:class:`abicheck.buildsource.header_graph.ClangHeaderIncludeExtractor`,
+    adding ``COMPILE_UNIT_INCLUDES_FILE`` edges from each top-level header to
+    everything it transitively includes) is also always attempted.
 
     Raises:
         SnapshotError: If the binary cannot be parsed.
@@ -545,12 +555,17 @@ def run_dump(
             debug_presence_only=debug_presence_only,
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
-            # header_graph is deliberately NOT forwarded to either recursive
-            # sub-dump below (each would attach its OWN graph, seeded from
-            # only ITS OWN backend's declarations) — attached once, after the
-            # merge, to the union of both backends' declarations instead (see
-            # the _attach_header_graph call below; Codex review).
+            # The header-graph attach is deliberately SKIPPED on either
+            # recursive sub-dump below (each would otherwise attach its OWN
+            # graph, seeded from only ITS OWN backend's declarations, before
+            # the merge throws it away) — attached once, after the merge, to
+            # the union of both backends' declarations instead (see the
+            # _attach_header_graph call below; Codex review; G29 Phase A:
+            # ``_skip_header_graph_attach`` replaces the old "just don't
+            # forward header_graph=True" mechanism now that the attach is
+            # unconditional rather than flag-gated).
             notify=notify,
+            _skip_header_graph_attach=True,
         )
         castxml_snap = run_dump(
             path,
@@ -574,8 +589,8 @@ def run_dump(
         # nothing left to backfill (review finding).
         return _attach_header_graph(
             merged,
-            header_graph,
-            header_graph_includes,
+            _HEADER_GRAPH_ENABLED,
+            _HEADER_GRAPH_INCLUDES_ENABLED,
             _headers,
             _includes,
             lang,
@@ -610,8 +625,8 @@ def run_dump(
         _try_attach_numpy_capi_surface(snap, path)
         snap = _attach_header_graph(
             snap,
-            header_graph,
-            header_graph_includes,
+            _HEADER_GRAPH_ENABLED and not _skip_header_graph_attach,
+            _HEADER_GRAPH_INCLUDES_ENABLED and not _skip_header_graph_attach,
             _headers,
             _includes,
             lang,
@@ -639,8 +654,8 @@ def run_dump(
         _try_attach_numpy_capi_surface(snap, path)
         snap = _attach_header_graph(
             snap,
-            header_graph,
-            header_graph_includes,
+            _HEADER_GRAPH_ENABLED and not _skip_header_graph_attach,
+            _HEADER_GRAPH_INCLUDES_ENABLED and not _skip_header_graph_attach,
             _headers,
             _includes,
             lang,
@@ -667,8 +682,8 @@ def run_dump(
         _try_attach_numpy_capi_surface(snap, path)
         snap = _attach_header_graph(
             snap,
-            header_graph,
-            header_graph_includes,
+            _HEADER_GRAPH_ENABLED and not _skip_header_graph_attach,
+            _HEADER_GRAPH_INCLUDES_ENABLED and not _skip_header_graph_attach,
             _headers,
             _includes,
             lang,

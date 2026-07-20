@@ -851,7 +851,9 @@ semantics) is closed to the extent described under its own entry.
   evidence source: a change untouched by the layout walk (no field/base/
   signature evidence at all) can still be tagged `public_reachable=True` via
   a pure call/reference edge. Requires an embedded L5 graph
-  (`--sources`/`--build-info`/`--header-graph`); returns `{}` and changes no
+  (`--sources`/`--build-info`, or the L2 header-only graph built
+  automatically for `--depth headers` and above since G29 Phase A); returns
+  `{}` and changes no
   behavior otherwise, mirroring `poi.resolve_changed_paths_public_impact`'s
   own degrade contract.
 - **Item 2 (overlay `ChangeKind`).** New `internal_symbol_required_by_public_api`
@@ -964,7 +966,7 @@ semantics) is closed to the extent described under its own entry.
   (1) The mangled-symbol-key fix above only helps when the L5 graph carries a
   `SOURCE_DECL_MAPS_TO_SYMBOL` edge — the build-integrated L4/L5 path
   (`source_graph.py`) creates one, but the header-only path (`header_graph.py`,
-  `--header-graph`/the implicit dump path, no real build at all) never does,
+  built automatically at `--depth headers` and above, no real build at all) never does,
   so the mismatch this review round already fixed once still applied for
   header-graph-only snapshots. Fixed by also trying each trigger's own
   `Change.qualified_name` (set by `EnrichSourceLocations` from `Function.name`

@@ -88,12 +88,19 @@ class TestDumpNativeBinary:
                 "--follow-deps on PE should emit a warning"
             )
 
-    def test_dump_pe_header_graph_flag_reaches_native_dump(self, tmp_path: Path) -> None:
-        """--header-graph/--header-graph-includes on a PE `dump` reach
-        _dump_native_binary (-> service.run_dump), which is the single place
-        that attaches the header-only graph uniformly across ELF/PE/Mach-O.
-        Regression for a bug where only the ELF dump path forwarded these
-        flags and PE/Mach-O silently ignored --header-graph (Codex review)."""
+    def test_dump_pe_header_graph_always_attempted_uniformly(
+        self, tmp_path: Path
+    ) -> None:
+        """G29 Phase A: the L2 header-only semantic graph attach is now
+        unconditional inside ``service.run_dump``/``_dump_native_binary`` for
+        every binary format (ELF/PE/Mach-O uniformly) — no flag threads it
+        through the CLI any more. Regression for the pre-Phase-A bug where
+        only the ELF dump path forwarded the opt-in flag and PE/Mach-O
+        silently ignored ``--header-graph`` (Codex review); that class of bug
+        can no longer occur since there is nothing left to forward
+        selectively. This also confirms ``_dump_native_binary`` is no longer
+        called with ``header_graph``/``header_graph_includes`` kwargs at
+        all."""
         from abicheck.model import AbiSnapshot
 
         pe_file = tmp_path / "test.dll"
@@ -111,11 +118,33 @@ class TestDumpNativeBinary:
             runner = CliRunner()
             result = runner.invoke(main, [
                 "dump", str(pe_file), "--version", "1.0",
+            ])
+            assert result.exit_code == 0, result.output
+            assert "header_graph" not in captured
+            assert "header_graph_includes" not in captured
+
+    def test_dump_pe_header_graph_deprecated_flags_are_inert(
+        self, tmp_path: Path
+    ) -> None:
+        """The hidden --header-graph/--header-graph-includes shim still
+        parses (doesn't error as an unknown option) and just warns, on PE
+        dump the same as ELF."""
+        from abicheck.model import AbiSnapshot
+
+        pe_file = tmp_path / "test.dll"
+        pe_file.write_bytes(_make_pe_bytes())
+        mock_snap = AbiSnapshot(library="test.dll", version="1.0", platform="pe")
+
+        with patch("abicheck.cli._detect_binary_format", return_value="pe"), \
+             patch("abicheck.cli._dump_native_binary", return_value=mock_snap):
+            runner = CliRunner()
+            result = runner.invoke(main, [
+                "dump", str(pe_file), "--version", "1.0",
                 "--header-graph", "--header-graph-includes",
             ])
             assert result.exit_code == 0, result.output
-            assert captured.get("header_graph") is True
-            assert captured.get("header_graph_includes") is True
+            combined = (result.output + (result.stderr or "")).lower()
+            assert "deprecated" in combined
 
     def test_dump_pe_to_file(self, tmp_path: Path) -> None:
         """PE dump with --output writes JSON file."""

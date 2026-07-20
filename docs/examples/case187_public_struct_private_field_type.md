@@ -11,7 +11,7 @@
 | **Source files** | `examples/case187_public_struct_private_field_type/` |
 | **Known kind gap** | `public_api_internal_dependency_added` — verdict is correct; see note below |
 
-**Verdict:** 🔴 BREAKING · **Findings:** `struct_field_type_changed` (artifact-proven) + `public_api_internal_dependency_added` (L5, correlated) · **Evidence tier:** L1 for the verdict; L5 (`--header-graph`) for the risk finding
+**Verdict:** 🔴 BREAKING · **Findings:** `struct_field_type_changed` (artifact-proven) + `public_api_internal_dependency_added` (L5, correlated) · **Evidence tier:** L1 for the verdict; L5 (the L2 header-only graph, built automatically for `--depth headers` and above) for the risk finding
 
 This is a real, compiled `v1`/`v2` example, verified end-to-end against gcc
 and clang.
@@ -28,7 +28,7 @@ correctly reports it as BREAKING via `struct_field_type_changed` (DWARF) and
 `type_field_type_changed` (headers) — no build integration needed, the
 default `debug-headers` lane catches this.
 
-Layered on top, `dump --header-graph` additionally proves, via the L5 source
+Layered on top, the L2 header-only graph (built automatically) additionally proves, via the L5 source
 graph, that `demo::Public` newly carries a `TYPE_HAS_FIELD_TYPE` edge to
 `demo::detail::PrivateType` — a dependency it did not have in v1 — and
 reports `public_api_internal_dependency_added`. This is *correlated context*
@@ -61,9 +61,10 @@ python3 -m abicheck.cli dump libv2.so --header v2.h -o v2.json
 python3 -m abicheck.cli compare v1.json v2.json
 # → BREAKING: struct_field_type_changed, type_field_type_changed
 
-# With --header-graph: the same BREAKING verdict, plus the L5 risk finding.
-python3 -m abicheck.cli dump libv1.so --header v1.h --public-header v1.h --header-graph -o v1.json
-python3 -m abicheck.cli dump libv2.so --header v2.h --public-header v2.h --header-graph -o v2.json
+# With --public-header set: the same BREAKING verdict, plus the L5 risk
+# finding — the L2 header-only graph builds automatically, no flag needed.
+python3 -m abicheck.cli dump libv1.so --header v1.h --public-header v1.h -o v1.json
+python3 -m abicheck.cli dump libv2.so --header v2.h --public-header v2.h -o v2.json
 python3 -m abicheck.cli compare v1.json v2.json
 # → BREAKING: struct_field_type_changed, public_api_internal_dependency_added
 #   Proof path: use_public --[DECL_HAS_TYPE]--> demo::Public
@@ -106,7 +107,7 @@ of embedding the internal type directly).
 
 ## Ground-truth provenance
 
-**Known kind gap:** public_api_internal_dependency_added is only emitted by `dump --header-graph`, an opt-in flag tests/validate_examples.py's default gcc/clang debug-headers lane does not pass (see tests/validate_examples.py's _kinds_strict_signal call site). The BREAKING verdict is still correct via struct_field_type_changed alone; --header-graph is exercised for real, separately, by tests/test_header_graph_examples.py (wired into the full-matrix proof gate via the header_graph OWNER_PROOFS/SPECIAL_PROOFS entry in validation/scripts/run_example_owner_proofs.py and collect_full_example_matrix.py).
+**Known kind gap:** public_api_internal_dependency_added needs `--public-header` set (declarations must be classified as internal); tests/validate_examples.py's default gcc/clang debug-headers lane does not set --public-header in this fixture (see tests/validate_examples.py's _kinds_strict_signal call site). The BREAKING verdict is still correct via struct_field_type_changed alone; the L2 header-only graph is exercised for real, separately, by tests/test_header_graph_examples.py (wired into the full-matrix proof gate via the header_graph OWNER_PROOFS/SPECIAL_PROOFS entry in validation/scripts/run_example_owner_proofs.py and collect_full_example_matrix.py).
 
 ## Source files
 

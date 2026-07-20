@@ -37,8 +37,6 @@ def _cacheable_kwargs(**overrides):
         symbols_only=False,
         debug_presence_only=False,
         compile=None,
-        header_graph=False,
-        header_graph_includes=False,
     )
     base.update(overrides)
     return base
@@ -79,13 +77,12 @@ class TestDumpIsCacheable:
         kwargs = _cacheable_kwargs(compile=object())
         assert _dump_is_cacheable(**kwargs) is False
 
-    def test_header_graph_not_cacheable(self):
-        kwargs = _cacheable_kwargs(header_graph=True)
-        assert _dump_is_cacheable(**kwargs) is False
-
-    def test_header_graph_includes_not_cacheable(self):
-        kwargs = _cacheable_kwargs(header_graph_includes=True)
-        assert _dump_is_cacheable(**kwargs) is False
+    def test_header_graph_no_longer_a_cacheability_parameter(self):
+        """G29 Phase A: header_graph/header_graph_includes are no longer
+        run_dump parameters at all (the graph is unconditional), so
+        _dump_is_cacheable no longer takes them — the plain shape stays
+        cacheable, which is what actually matters here now."""
+        assert _dump_is_cacheable(**_cacheable_kwargs()) is True
 
 
 class TestDumpCacheExtraKey:

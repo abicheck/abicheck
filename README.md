@@ -188,7 +188,7 @@ for AI-agent workflows.
 
 The [`examples/`](examples/README.md) directory contains **193 real-world ABI/API scenarios** (188 single-library cases plus 5 multi-library bundle cases) with ground-truth verdicts:
 
-- Most are single-library `v1`/`v2` examples with a consumer app, including cases 187–189 and 191 (a public struct/class/function gaining a dependency on an internal type, proven both as a real artifact-level break and via `--header-graph`).
+- Most are single-library `v1`/`v2` examples with a consumer app, including cases 187–189 and 191 (a public struct/class/function gaining a dependency on an internal type, proven both as a real artifact-level break and via the L2 header-only semantic graph, built automatically at `--depth headers` and above).
 - The G20 audit/cross-source cases (143–151) are single-build snapshots demonstrating intra-version cross-checks.
 - A handful of L3/L4/L5 build/source-only cases (152–158, 160–162, 190, 192–193) ship hand-built evidence-model fixture pairs demonstrating failures no artifact layer can see.
 - Case 164 ships a guard-annotated fixture pair demonstrating a build-context-cleared header false positive (ADR-039).

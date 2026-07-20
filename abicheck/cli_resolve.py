@@ -203,8 +203,6 @@ def _dump_native_binary(
     public_header_dirs: list[Path] | None = None,
     header_backend: str = "auto",
     compile: CompileContext | None = None,
-    header_graph: bool = False,
-    header_graph_includes: bool = False,
 ) -> AbiSnapshot:
     """Dump an ABI snapshot from a native binary (ELF, PE, or Mach-O).
 
@@ -220,10 +218,10 @@ def _dump_native_binary(
     (ADR-024 Phase 1) on PE/Mach-O snapshots; a no-op for ELF and when empty.
     ``compile`` carries the L2 cross-toolchain context (ADR-037 D3); ``run_dump``
     threads it into the PE/Mach-O header-scoping path (``_try_header_scoped_dump``).
-    ``header_graph``/``header_graph_includes`` (ADR-041 addendum) forward to
-    ``run_dump``'s own header-only-graph attach, which applies uniformly across
-    ELF/PE/Mach-O — the sole reason this wrapper exists is to route through
-    ``run_dump`` rather than duplicate its per-format dispatch.
+    ``run_dump``'s header-only-graph attach (G29 Phase A: always attempted, no
+    longer flag-gated) applies uniformly across ELF/PE/Mach-O — the sole reason
+    this wrapper exists is to route through ``run_dump`` rather than duplicate
+    its per-format dispatch.
     """
     from . import service
     from .errors import SnapshotError, ValidationError
@@ -243,8 +241,6 @@ def _dump_native_binary(
             public_header_dirs=public_header_dirs,
             header_backend=header_backend,
             compile=compile,
-            header_graph=header_graph,
-            header_graph_includes=header_graph_includes,
             notify=_click_notify,
         )
     except ValidationError as exc:
@@ -271,8 +267,6 @@ def _resolve_input(
     compile: CompileContext | None = None,
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
-    header_graph: bool = False,
-    header_graph_includes: bool = False,
 ) -> AbiSnapshot:
     """Auto-detect input type and return an AbiSnapshot.
 
@@ -308,9 +302,9 @@ def _resolve_input(
             treat *headers* as the public contract (e.g. ``compare``'s
             ``--header``, which is documented as "Public header file or
             directory") should pass the same paths here too.
-        header_graph / header_graph_includes: Forwarded to
-            ``service.resolve_input`` — build and embed the L2 header-only
-            semantic graph (ADR-041 addendum) for a binary input.
+
+    ``service.resolve_input`` always attempts the L2 header-only semantic
+    graph for a binary input (G29 Phase A: no longer flag-gated).
     """
     from . import service
     from .errors import SnapshotError, ValidationError
@@ -333,8 +327,6 @@ def _resolve_input(
             compile=compile,
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
-            header_graph=header_graph,
-            header_graph_includes=header_graph_includes,
             notify=_click_notify,
         )
     except ValidationError as exc:
@@ -514,8 +506,6 @@ def _resolve_compare_snapshots(
     new_debug_roots: list[Path] | None = None,
     enable_debuginfod: bool = False,
     debuginfod_url: str | None = None,
-    header_graph: bool = False,
-    header_graph_includes: bool = False,
 ) -> tuple[AbiSnapshot, AbiSnapshot]:
     """Load both ABI snapshots and (optionally) populate ELF dependency info.
 
@@ -539,12 +529,11 @@ def _resolve_compare_snapshots(
     debuginfod server must reach the actual fetch, not just the (log-only)
     resolution probe elsewhere.
 
-    ``header_graph`` / ``header_graph_includes`` (ADR-041 addendum): both
-    sides opt into the L2 header-only semantic graph — the existing
-    build-source-pack graph diff already handles a ``SourceGraphSummary``
-    from any evidence tier uniformly, so populating it here from headers
-    alone (no build system required) makes it reachable from plain
-    ``compare`` for the first time.
+    Both sides always attempt the L2 header-only semantic graph (G29 Phase A:
+    no longer flag-gated) — the existing build-source-pack graph diff already
+    handles a ``SourceGraphSummary`` from any evidence tier uniformly, so
+    populating it here from headers alone (no build system required) makes it
+    reachable from plain ``compare``.
     """
     old_backend = old_header_backend or header_backend
     new_backend = new_header_backend or header_backend
@@ -568,8 +557,6 @@ def _resolve_compare_snapshots(
         header_backend=old_backend,
         compile=compile_context,
         public_headers=old_h,
-        header_graph=header_graph,
-        header_graph_includes=header_graph_includes,
     )
     new = _resolve_input(
         new_input,
@@ -586,8 +573,6 @@ def _resolve_compare_snapshots(
         debuginfod_url=debuginfod_url,
         header_backend=new_backend,
         compile=compile_context,
-        header_graph=header_graph,
-        header_graph_includes=header_graph_includes,
         public_headers=new_h,
     )
     if follow_deps:
@@ -634,8 +619,6 @@ _EVIDENCE_SET_INPUT_FLAGS: dict[str, str] = {
     "depth": "--depth",
     "sources": "--sources",
     "build_info": "--build-info",
-    "header_graph": "--header-graph",
-    "header_graph_includes": "--header-graph-includes",
 }
 
 
@@ -643,11 +626,19 @@ def _reject_evidence_flags_for_set_inputs(ctx: click.Context) -> None:
     """Reject inline build/source evidence flags for directory/package compares.
 
     The release fan-out forwards only release-comparison kwargs, so
-    ``--depth``, the per-side ``--old/new-sources`` / ``--old/new-build-info``,
-    and ``--header-graph``/``--header-graph-includes`` would be accepted and
-    silently dropped (no L3-L5 collected, no L2 header graph built). Fail
-    loudly so the user knows to compare libraries individually to collect
-    deep evidence (Codex review)."""
+    ``--depth`` and the per-side ``--old/new-sources`` / ``--old/new-build-info``
+    would be accepted and silently dropped (no L3-L5 collected). Fail loudly
+    so the user knows to compare libraries individually to collect deep
+    evidence (Codex review).
+
+    G29 Phase A: the L2 header-only semantic graph no longer has a CLI flag
+    to reject here — it is structurally skipped for directory/package
+    (set-input) compares instead, since the per-library fan-out never calls
+    ``resolve_input``/``run_dump`` with a graph-attaching single-pair path in
+    the first place (unchanged from before this change); see
+    ``docs/development/plans/g31-header-graph-default-on-followup.md`` for
+    the Phase B+ plan to extend graph coverage to set inputs.
+    """
     used = [
         flag
         for dest, flag in _EVIDENCE_SET_INPUT_FLAGS.items()

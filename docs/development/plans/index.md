@@ -32,6 +32,7 @@ Initiative plans (cross-cutting, not tied to a single registry gap):
 | **G28** | [CastXML/Clang L2 parity: hardening & remaining phases](g28-castxml-clang-l2-parity-hardening.md) | [ADR-001](../adr/001-technology-stack.md), [ADR-003](../adr/003-data-source-architecture.md) D8/D9, [ADR-037](../adr/037-cli-interface-contract.md) D8 · Phase 0–4 done; Phase 5 M (overlaps [G4](g4-header-ast-extractor.md)) |
 | **G29** | [Impact-analysis layer: unified graph-driven impact model](g29-impact-analysis-layer.md) | [ADR-044](../adr/044-reachability-aware-suppression.md), [ADR-031](../adr/031-source-implementation-graph-augmentation.md), [ADR-046](../adr/046-source-graph-identity-v2-and-evidence-merge.md) · XL (phased: Phase 1 done — tri-state reachability, [PR #607](https://github.com/abicheck/abicheck/pull/607); Phase 2 ADR drafted (ADR-046, Proposed), implementation not started; Phases 3–6 open) |
 | **G30** | [GitHub Actions integration model: project lifecycle backlog](g30-github-actions-integration-model.md) | [ADR-047](../adr/047-github-actions-integration-model.md) · XL (phased P0/P1/P2, not started) |
+| **G31** | [Header-graph default-on: follow-up phases B–D](g31-header-graph-default-on-followup.md) — independent of G29 above; drafted as "G29" before that letter was found taken, see its own naming note | [ADR-041](../adr/041-compiler-facts-semantic-impact-graph.md) · Phase A done (header-graph/header-graph-includes flipped default-on); Phases B–D open |
 
 Completed or decided plans are retained for implementation history:
 

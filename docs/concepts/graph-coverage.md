@@ -28,13 +28,13 @@ records, per extractor pass, whether its own coverage was complete:
 
 Two collection strategies commonly produce exactly this shape:
 
-- **Header-only collection** (`--header-graph`, the implicit no-real-build
-  path) sees declarations and signatures but never a function body, so it
-  cannot see a `DECL_CALLS_DECL` edge a public inline function's *body*
-  creates into an internal specialization — the graph is real, just
-  structurally unable to answer that question.
-- **A collector-upgrade** (old snapshot dumped with `--header-graph`, new
-  snapshot with a real `--build-info` compile database) is not a "new
+- **Header-only collection** (the L2 header-only graph, built automatically
+  whenever there is no real build) sees declarations and signatures but
+  never a function body, so it cannot see a `DECL_CALLS_DECL` edge a public
+  inline function's *body* creates into an internal specialization — the
+  graph is real, just structurally unable to answer that question.
+- **A collector-upgrade** (old snapshot dumped header-only, new snapshot
+  with a real `--build-info` compile database) is not a "new
   dependency appeared" signal — it is the same project seen through two
   different lenses. abicheck's [source-graph
   diff](build-source-data.md) findings account for this asymmetry rather
@@ -73,3 +73,22 @@ rule to require actual proof, opt into the stricter gate with
 unknown reachability](../user-guide/suppressions.md#proven-vs-unknown-reachability)
 for the rule syntax and the `suppression_reachability_unknown` diagnostic it
 produces when coverage isn't good enough to prove a match.
+
+## Migration: header-graph is now default-on
+
+Before G29 Phase A, the L2 header-only graph (and its
+`COMPILE_UNIT_INCLUDES_FILE` include-file extension) only got built if you
+explicitly passed `--header-graph`/`--header-graph-includes` to `dump` or
+`compare`. As of G29 Phase A, `--depth headers` (the default depth) always
+builds it automatically — there is no flag to remember and nothing to opt
+into. The two flags still exist but are hidden, deprecated no-ops kept only
+for a transition window before removal.
+
+This doesn't change how you should reason about completeness: whether the
+graph saw everything it needed to is still reported through the coverage
+fields described above (`extractor_passes`/`degraded_passes`/
+`narrowed_passes` and the tri-state `reachability` status), never through
+whether a flag was passed. A header-only collection degrades the same way
+it always did (declarations and signatures only, no function bodies) — it
+is just no longer possible to accidentally run *without* it when depth
+`headers` or deeper evidence is available.

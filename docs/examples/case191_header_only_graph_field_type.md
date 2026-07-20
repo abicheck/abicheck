@@ -11,7 +11,7 @@
 | **Source files** | `examples/case191_header_only_graph_field_type/` |
 | **Known kind gap** | `public_api_internal_dependency_added` — verdict is correct; see note below |
 
-**Verdict:** 🔴 BREAKING · **Findings:** `struct_size_changed`/`type_size_changed`/`type_alignment_changed` (artifact-proven) + `public_api_internal_dependency_added` ×2 (L5, correlated) · **Evidence tier:** L1 for the verdict; L5 (`--header-graph`) for the risk finding
+**Verdict:** 🔴 BREAKING · **Findings:** `struct_size_changed`/`type_size_changed`/`type_alignment_changed` (artifact-proven) + `public_api_internal_dependency_added` ×2 (L5, correlated) · **Evidence tier:** L1 for the verdict; L5 (the L2 header-only graph, built automatically for `--depth headers` and above) for the risk finding
 
 This is a real, compiled `v1`/`v2` example, verified end-to-end against gcc
 and clang.
@@ -22,14 +22,15 @@ This case demonstrates the same public-struct-gains-a-private-field-type
 scenario as `case187`
 (`demo::Config` gains a `TYPE_HAS_FIELD_TYPE` edge to the internal
 `detail::RawConfig`) — but through a deliberately different coverage-trust
-mechanism, proven live against `dump --header-graph`.
+mechanism, proven live against the L2 header-only graph (built
+automatically since G29 Phase A).
 
 `demo::Config` starts with a single plain `int` field: zero
 `TYPE_HAS_FIELD_TYPE` edges of any `demo::`-related kind on the old side, on
 purpose — unlike case187, whose `Public` struct carries a sibling `Meta`
 field specifically so the L5 type-graph pass has a same-kind edge to confirm
 on *both* sides. Here there is no such edge to point to at all. The finding
-still fires correctly because `dump --header-graph` stamps
+still fires correctly because the L2 header-only graph stamps
 `extractor_passes.header_type_graph: true` on the old-side graph, and
 `type_graph._pass_trusted_kinds` grants a header-only pass genuine
 project-wide trust for exactly the three *structural* kinds it can fully see
@@ -75,10 +76,12 @@ auditing a prebuilt SDK — still gets the non-call type-dependency check, at
 the cost of weaker resolution than a full per-TU Clang replay would give
 (bare unqualified type names when falling back to the flat `AbiSnapshot`
 model; full qualified-name resolution when a `clang -ast-dump=json` header
-AST is available). It is reachable via the Python API
-(`service.run_dump(header_graph=True)`) and the standalone `dump --header-graph`
-CLI (`--header-graph-includes` additionally folds the include graph), uniformly
-across ELF, PE, and Mach-O input; not yet `scan`.
+AST is available). Since G29 Phase A it is built automatically (no flag
+needed) whenever `--depth headers` or deeper evidence is available, for
+both `dump` and `compare`, uniformly across ELF, PE, and Mach-O input; not
+yet `scan`. (The legacy `--header-graph`/`--header-graph-includes` flags
+still exist but are hidden, deprecated no-ops kept only for a transition
+window.)
 
 ## How to reproduce
 
@@ -92,10 +95,11 @@ python3 -m abicheck.cli dump libv2.so --header v2.h -o v2.json
 python3 -m abicheck.cli compare v1.json v2.json
 # → BREAKING: type_size_changed, type_alignment_changed, struct_size_changed
 
-# With --header-graph: the same BREAKING verdict, plus the L5 risk finding —
-# fired from a genuine confirmed-zero on the old side, no sibling edge needed.
-python3 -m abicheck.cli dump libv1.so --header v1.h --public-header v1.h --header-graph -o v1.json
-python3 -m abicheck.cli dump libv2.so --header v2.h --public-header v2.h --header-graph -o v2.json
+# With --public-header set: the same BREAKING verdict, plus the L5 risk
+# finding — fired from a genuine confirmed-zero on the old side, no sibling
+# edge needed. The L2 header-only graph builds automatically, no flag needed.
+python3 -m abicheck.cli dump libv1.so --header v1.h --public-header v1.h -o v1.json
+python3 -m abicheck.cli dump libv2.so --header v2.h --public-header v2.h -o v2.json
 python3 -m abicheck.cli compare v1.json v2.json
 # → BREAKING: type_size_changed, public_api_internal_dependency_added (x2)
 #   Proof paths: use_config --[DECL_HAS_TYPE]--> demo::Config
@@ -141,7 +145,7 @@ of embedding the internal type directly).
 
 ## Ground-truth provenance
 
-**Known kind gap:** public_api_internal_dependency_added is only emitted by `dump --header-graph`, an opt-in flag tests/validate_examples.py's default gcc/clang debug-headers lane does not pass (see tests/validate_examples.py's _kinds_strict_signal call site). The BREAKING verdict is still correct via struct_size_changed alone; --header-graph is exercised for real, separately, by tests/test_header_graph_examples.py (wired into the full-matrix proof gate via the header_graph OWNER_PROOFS/SPECIAL_PROOFS entry in validation/scripts/run_example_owner_proofs.py and collect_full_example_matrix.py).
+**Known kind gap:** public_api_internal_dependency_added needs `--public-header` set (declarations must be classified as internal); tests/validate_examples.py's default gcc/clang debug-headers lane does not set --public-header in this fixture (see tests/validate_examples.py's _kinds_strict_signal call site). The BREAKING verdict is still correct via struct_size_changed alone; the L2 header-only graph is exercised for real, separately, by tests/test_header_graph_examples.py (wired into the full-matrix proof gate via the header_graph OWNER_PROOFS/SPECIAL_PROOFS entry in validation/scripts/run_example_owner_proofs.py and collect_full_example_matrix.py).
 
 ## Source files
 

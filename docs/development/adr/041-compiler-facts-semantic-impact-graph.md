@@ -16,6 +16,25 @@ any timeline.
 
 ---
 
+## G29 Phase A update (2026-07-20)
+
+The `--header-graph`/`--header-graph-includes` flags this ADR introduced
+(see the header-only-graph addendum below) have been flipped to default-on:
+the L2 header-only semantic graph, and its include-file extension, are now
+always built whenever `--depth headers` or deeper evidence is available for
+a single-library `dump`/`compare` — no flag required. The two flags remain
+as hidden, deprecated no-op shims on `compare` and `dump` (printing a
+one-line deprecation note to stderr, absent from `--help`) for a transition
+window before removal; `service.resolve_input()`/`service.run_dump()` no
+longer accept `header_graph`/`header_graph_includes` keyword arguments at
+all (a breaking Python-API change for direct callers). Directory/package
+`compare` and the raw `--old-sources`/`--new-sources` inline-embed path
+still do not attach the graph — same structural gap as before, just no
+longer flag-gated. This was "Phase A" of a larger initiative; see
+[`docs/development/plans/g31-header-graph-default-on-followup.md`](../plans/g31-header-graph-default-on-followup.md)
+for the planned Phases B–D (canonical entity identity, CastXML/clang
+backend unification, new ChangeKinds/examples/perf gating).
+
 ## Context
 
 ADR-031 gave the L5 source graph (`source_graph.py`) a node/edge schema wide

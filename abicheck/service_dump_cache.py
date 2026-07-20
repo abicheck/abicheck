@@ -48,8 +48,6 @@ def _dump_is_cacheable(
     # cycle back through service.py/scan_engine.py. Only ever compared to
     # `None` below, so no real type-safety is lost.
     compile: object | None,
-    header_graph: bool,
-    header_graph_includes: bool,
 ) -> bool:
     """Whether a ``run_dump`` call is safe to serve from the whole-snapshot
     cache (:mod:`abicheck.snapshot_cache`).
@@ -58,11 +56,25 @@ def _dump_is_cacheable(
     — the dominant release-baseline/CI comparison case a repeated pipeline
     re-extracts identically on every run — is cached. A PDB path, a DWARF
     debug-info root, debuginfod resolution (network-dependent), a forced
-    debug format, a symbols-only/debug-presence-only dump, a custom
-    ``CompileContext``, or the header-only semantic graph all change what
-    ``run_dump`` produces in ways not folded into the cache key below, so
-    those combinations always fall through to a live dump rather than risk
-    serving a stale/mismatched snapshot.
+    debug format, a symbols-only/debug-presence-only dump, or a custom
+    ``CompileContext`` all change what ``run_dump`` produces in ways not
+    folded into the cache key below, so those combinations always fall
+    through to a live dump rather than risk serving a stale/mismatched
+    snapshot.
+
+    G29 Phase A: the L2 header-only semantic graph (and its include-file
+    extension) used to disable caching outright (an opt-in flag meant a cache
+    hit from a plain prior run could silently omit the graph a later
+    graph-requesting call expected). It is no longer flag-gated — every
+    ``run_dump`` call attempts it identically — so that toggle-mismatch risk
+    is gone; the graph is a deterministic function of the same
+    headers/includes/public-header inputs already covered by the cache key,
+    and ``snapshot_cache.store``/``lookup`` round-trip the full snapshot
+    (including ``build_source``) through JSON, so a cache hit still carries
+    the graph. TODO(header-graph-phase-D): the graph's build inputs (e.g.
+    ``--gcc-*``/``--sysroot`` reaching the second internal clang AST pass via
+    ``compile``) are still excluded from caching by the ``compile is None``
+    check above, same as before this change — no new gap introduced.
     """
     return (
         pdb_path is None
@@ -73,8 +85,6 @@ def _dump_is_cacheable(
         and not symbols_only
         and not debug_presence_only
         and compile is None
-        and not header_graph
-        and not header_graph_includes
     )
 
 
@@ -185,8 +195,6 @@ def cached_run_dump(
     public_header_dirs: list[Path] | None = None,
     header_backend: str = "auto",
     compile: object | None = None,
-    header_graph: bool = False,
-    header_graph_includes: bool = False,
     notify: Callable[[str], None] | None = None,
 ) -> AbiSnapshot:
     """``run_dump(...)``, transparently served from the whole-snapshot cache
@@ -210,8 +218,6 @@ def cached_run_dump(
         symbols_only=symbols_only,
         debug_presence_only=debug_presence_only,
         compile=compile,
-        header_graph=header_graph,
-        header_graph_includes=header_graph_includes,
     )
     if not cacheable:
         return run_dump(
@@ -233,8 +239,6 @@ def cached_run_dump(
             public_header_dirs=public_header_dirs,
             header_backend=header_backend,
             compile=compile,
-            header_graph=header_graph,
-            header_graph_includes=header_graph_includes,
             notify=notify,
         )
 
@@ -265,8 +269,6 @@ def cached_run_dump(
         public_header_dirs=public_header_dirs,
         header_backend=header_backend,
         compile=compile,
-        header_graph=header_graph,
-        header_graph_includes=header_graph_includes,
         notify=notify,
     )
     snapshot_cache.store(snap, path, _headers, _includes, version, lang, extra=extra)

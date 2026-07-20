@@ -1111,45 +1111,66 @@ def build_source_dump_options(func: F) -> F:
 
 
 def header_graph_options(func: F) -> F:
-    """The shared ``--header-graph``/``--header-graph-includes`` pair.
+    """The shared, deprecated ``--header-graph``/``--header-graph-includes`` pair.
 
-    ADR-041 addendum: opts into the L2 header-only semantic graph
-    (:func:`~abicheck.buildsource.header_graph.build_header_only_graph`) for a
-    run — no build system needed, just the parsed header AST — so the
-    build-source-pack graph diff (declaration reachability / internal-
-    dependency risk findings, previously only reachable from L3-L5
-    build-integrated evidence) fires on a plain binary+headers run. Shared by
-    ``compare`` (embeds the graph on both sides internally, via
-    :func:`~abicheck.service.resolve_input`) and ``dump`` (embeds it in the
-    written snapshot, ADR-028's single-artifact UX) so the two flags and their
-    help text can never drift (CLAUDE.md "canonical primary spelling"; enforced
-    by ``tests/test_cli_contract.py``). Applied bottom-up, so listed in reverse
-    of display.
+    G29 Phase A: the L2 header-only semantic graph
+    (:func:`~abicheck.buildsource.header_graph.build_header_only_graph`) — and
+    its include-file extension — is now always built whenever headers are
+    available (``--depth headers`` or deeper), for both ``compare`` and
+    ``dump``. These two flags are no longer opt-in toggles; they are kept as
+    *hidden*, inert no-op shims (``hidden=True`` — absent from ``--help`` and
+    from ``tests/test_cli_contract.py``'s ``_OPTION_SET_SNAPSHOT``) purely so
+    an existing script/CI invocation that still passes ``--header-graph``
+    doesn't hard-fail with "no such option". Passing either flag prints a
+    one-line deprecation note to stderr and otherwise changes nothing — the
+    graph is built identically whether or not the flag is given. Planned
+    removal: two minor releases after this change ships (track in
+    CHANGELOG.md). Shared by ``compare`` and ``dump`` so the two flags' spelling
+    can never drift between them. Applied bottom-up, so listed in reverse of
+    display.
     """
     func = click.option(
         "--header-graph-includes",
-        "header_graph_includes",
+        "header_graph_includes_deprecated",
         is_flag=True,
         default=False,
-        help="With --header-graph, additionally run a per-header 'clang -M' pass to "
-        "add include-file edges from each top-level header to everything it "
-        "transitively includes. One extra clang invocation per top-level header, "
-        "so opt-in separately from --header-graph. Ignored without --header-graph.",
+        hidden=True,
+        help="Deprecated, no-op: the include-file graph pass is now always run "
+        "alongside --header-graph's replacement (always-on L2 header graph). "
+        "Planned removal: two minor releases out.",
     )(func)
     func = click.option(
         "--header-graph",
-        "header_graph",
+        "header_graph_deprecated",
         is_flag=True,
         default=False,
-        help="Build and embed a header-only semantic graph (ADR-041 addendum) "
-        "for both sides from the parsed header AST alone (no build system "
-        "needed); the existing build-source-pack graph diff picks it up "
-        "automatically, so declaration reachability / internal-dependency "
-        "risk findings become available on an ordinary binary+headers compare, "
-        "not just --depth build/source runs. Degrades to declaration-visibility "
-        "nodes only (no type/call edges) when clang is unavailable.",
+        hidden=True,
+        help="Deprecated, no-op: the L2 header-only semantic graph (ADR-041 "
+        "addendum) is now always built for --depth headers and above. Planned "
+        "removal: two minor releases out.",
     )(func)
     return func
+
+
+def warn_deprecated_header_graph_flags(
+    header_graph_deprecated: bool, header_graph_includes_deprecated: bool
+) -> None:
+    """Emit a deprecation note for the inert ``--header-graph``/``-includes`` shim.
+
+    Called from ``compare``/``dump_cmd`` bodies (not the Click callback
+    itself, so it runs after Click has finished parsing) whenever either
+    flag was passed on the command line. Behavior is identical either way —
+    this is purely a stderr note, per the "hidden shim must not control
+    behavior" policy (AGENTS.md deprecation convention).
+    """
+    if header_graph_deprecated or header_graph_includes_deprecated:
+        click.echo(
+            "Note: --header-graph/--header-graph-includes are deprecated "
+            "no-ops — the L2 header-only semantic graph is now always built "
+            "for --depth headers and above. Planned removal: two minor "
+            "releases out.",
+            err=True,
+        )
 
 
 def evidence_options(func: F) -> F:
@@ -1381,20 +1402,6 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "(ci-gate/release/quick) that explicit flags always override. One visible "
         "flag replaces the habit of typing 4-6; the reductions in ADR-040 Levers "
         "1-2 lower BASE to bring the net well below today."
-    ),
-    "--header-graph": (
-        "ADR-041 addendum: opts into the L2 header-only semantic graph for a "
-        "run, letting the existing build-source-pack graph diff (source_graph, "
-        "previously only reachable from L3-L5 build-integrated evidence) fire "
-        "on a plain binary+headers compare. A per-run analysis-depth toggle "
-        "like --pattern-verdicts/--reconcile-build-context, not a stable "
-        "project setting."
-    ),
-    "--header-graph-includes": (
-        "ADR-041 addendum: with --header-graph, additionally collects "
-        "per-header include-file edges (one extra clang -M invocation per "
-        "top-level header) — opt-in separately since it costs more than "
-        "--header-graph alone. Same per-run analysis-depth rationale."
     ),
     "--secondary-format": (
         "Emits a second output format from the same comparison run (e.g. a "

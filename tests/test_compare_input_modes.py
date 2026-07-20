@@ -602,7 +602,12 @@ class TestCompareSoOutputFormats:
     def test_json_format(self, tmp_path, monkeypatch):
         result = self._run_with_format(tmp_path, monkeypatch, "json")
         assert result.exit_code == 0
-        parsed = json.loads(result.output)
+        # G29 Phase A: the L2 header-graph attach now runs by default for
+        # this headers-present compare, so an "Evidence coverage:" stderr
+        # note (cli_buildsource_helpers._echo_coverage) now accompanies
+        # every such run — use .stdout (JSON only) rather than .output
+        # (which CliRunner mixes stdout+stderr into) to isolate it.
+        parsed = json.loads(result.stdout)
         assert "verdict" in parsed
 
     def test_sarif_format(self, tmp_path, monkeypatch):

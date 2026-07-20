@@ -2,7 +2,7 @@
 // TYPE_HAS_FIELD_TYPE edges of any demo:: kind, on purpose. Unlike case187
 // (which gives Public a sibling Meta field so the L5 type-graph pass has a
 // same-kind edge to confirm on *both* sides), this case relies on
-// --header-graph's own confirmed-pass marker (extractor_passes.header_type_graph)
+// the L2 header-only graph's own confirmed-pass marker (extractor_passes.header_type_graph)
 // to trust that "zero edges" really means "the pass ran and found none", not
 // "the pass never ran" — see the README for why that distinction is safe here.
 #pragma once

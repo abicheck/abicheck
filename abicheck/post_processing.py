@@ -713,7 +713,7 @@ class MarkReachability:
         reachable_types = set(old_paths) | set(new_paths)
         # ADR-044 P1 item 1: a second, independent reachability signal — the
         # optional L5 call graph's DECL_CALLS_DECL/DECL_REFERENCES_DECL edges
-        # (--sources/--build-info/--header-graph). compute_leak_paths only
+        # (--sources/--build-info, or the now-always-on L2 header-only graph). compute_leak_paths only
         # ever sees layout/type-graph reachability (inheritance, by-value
         # fields, signatures); a public inline function's *body* calling into
         # a removed/changed internal template specialization has none of
@@ -942,8 +942,8 @@ class MarkReachability:
             # mangled-symbol key only exists when the graph carries a
             # SOURCE_DECL_MAPS_TO_SYMBOL edge for the target decl — the
             # build-integrated L4/L5 path (source_graph.py) creates one, but
-            # the header-only path (header_graph.py, --header-graph/the
-            # implicit dump path, no real build) never does. c.qualified_name
+            # the header-only path (header_graph.py, always-on since G29
+            # Phase A / the implicit dump path, no real build) never does. c.qualified_name
             # (EnrichSourceLocations, runs before this step) is set from
             # Function.name — the same demangled name a graph node's own
             # label carries in EITHER mode — so it is a reliable fallback key

@@ -154,55 +154,62 @@ class TestResolveInput:
         assert result is snap
         mock.assert_called_once()
 
-    def test_header_graph_forwarded_to_run_dump_elf_fast_path(self, tmp_path):
-        # ADR-041 addendum wiring: header_graph/header_graph_includes must
-        # reach run_dump on the is_elf=True fast path, not just the
-        # binary-format-detection path below it.
+    def test_resolve_input_no_longer_accepts_header_graph_kwargs(self, tmp_path):
+        # G29 Phase A: header_graph/header_graph_includes are no longer
+        # public parameters of resolve_input at all — the L2 graph attach is
+        # unconditional inside run_dump now (module constants, not a
+        # threaded flag), so passing either kwarg is a genuine TypeError,
+        # not a silently-accepted opt-in.
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
-        snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.run_dump", return_value=snap) as mock:
-            resolve_input(p, is_elf=True, header_graph=True, header_graph_includes=True)
-        _, kwargs = mock.call_args
-        assert kwargs["header_graph"] is True
-        assert kwargs["header_graph_includes"] is True
+        with pytest.raises(TypeError):
+            resolve_input(p, is_elf=True, header_graph=True)
+        with pytest.raises(TypeError):
+            resolve_input(p, is_elf=True, header_graph_includes=True)
 
-    def test_header_graph_forwarded_to_run_dump_detected_format_path(self, tmp_path):
-        p = tmp_path / "lib.so"
-        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
-        snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service.run_dump", return_value=snap) as mock:
-            resolve_input(p, header_graph=True, header_graph_includes=True)
-        _, kwargs = mock.call_args
-        assert kwargs["header_graph"] is True
-        assert kwargs["header_graph_includes"] is True
-
-    def test_header_graph_defaults_false(self, tmp_path):
+    def test_header_graph_not_forwarded_as_run_dump_kwarg_elf_fast_path(self, tmp_path):
+        # G29 Phase A: run_dump no longer takes header_graph/
+        # header_graph_includes kwargs at all on the is_elf=True fast path
+        # either — the graph attach is unconditional inside run_dump.
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
         with patch("abicheck.service.run_dump", return_value=snap) as mock:
             resolve_input(p, is_elf=True)
         _, kwargs = mock.call_args
-        assert kwargs["header_graph"] is False
-        assert kwargs["header_graph_includes"] is False
+        assert "header_graph" not in kwargs
+        assert "header_graph_includes" not in kwargs
 
-    def test_header_graph_forwarded_through_linker_script(self, tmp_path):
+    def test_header_graph_not_forwarded_as_run_dump_kwarg_detected_format_path(
+        self, tmp_path
+    ):
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        snap = AbiSnapshot(library="test", version="1.0")
+        with patch("abicheck.service.run_dump", return_value=snap) as mock:
+            resolve_input(p)
+        _, kwargs = mock.call_args
+        assert "header_graph" not in kwargs
+        assert "header_graph_includes" not in kwargs
+
+    def test_header_graph_attach_reached_through_linker_script(self, tmp_path):
         # A caller resolving `libfoo.so` (the dev-symlink-shaped GNU ld
-        # script) with header_graph=True must still get the L2 graph on the
-        # real target it follows to — the recursive resolve_input() call
-        # used to drop header_graph/header_graph_includes back to False
-        # (Codex review).
+        # script) must still get the L2 graph attach on the real target it
+        # follows to — the recursive resolve_input() call used to need
+        # explicit header_graph/header_graph_includes forwarding to avoid
+        # dropping them back to False (Codex review); now that the attach is
+        # unconditional inside run_dump, there is nothing to drop.
         target = tmp_path / "libfoo.so.1"
         target.write_bytes(b"\x7fELF" + b"\x00" * 100)
         script = tmp_path / "libfoo.so"
         script.write_text("INPUT(libfoo.so.1)\n", encoding="utf-8")
         snap = AbiSnapshot(library="test", version="1.0")
         with patch("abicheck.service.run_dump", return_value=snap) as mock:
-            resolve_input(script, header_graph=True, header_graph_includes=True)
+            resolve_input(script)
+        assert mock.call_count == 1
         _, kwargs = mock.call_args
-        assert kwargs["header_graph"] is True
-        assert kwargs["header_graph_includes"] is True
+        assert "header_graph" not in kwargs
+        assert "header_graph_includes" not in kwargs
 
     def test_binary_detection_elf(self, tmp_path):
         p = tmp_path / "lib.so"
@@ -417,12 +424,16 @@ class TestRunDumpHybridNormalization:
 
 
 class TestRunDumpHybridHeaderGraphAttachedOnce:
-    """Codex review: ``header_graph=True`` must not be forwarded to either
-    hybrid sub-dump -- each would independently attach its OWN graph seeded
-    from only that one backend's declarations, so the FINAL merged
+    """Codex review / G29 Phase A: the header-graph attach must not run on
+    either hybrid sub-dump -- each would independently attach its OWN graph
+    seeded from only that one backend's declarations, so the FINAL merged
     snapshot's embedded graph would miss any clang-only declaration the
-    merge appended (castxml never produced). Attach it exactly once, after
-    the merge, to the union of both backends' declarations instead."""
+    merge appended (castxml never produced), and it would waste a whole
+    extra clang AST pass per sub-dump for a graph immediately thrown away.
+    Now that the attach is unconditional (no longer flag-gated), this is
+    enforced via ``run_dump``'s private ``_skip_header_graph_attach`` knob on
+    the recursive hybrid sub-calls, verified here by asserting it is only
+    ever invoked with the graph *enabled* once, on the merged snapshot."""
 
     def _fake_dump_elf(self, castxml_snap, clang_snap):
         def _fake(*args, **kwargs):
@@ -452,17 +463,22 @@ class TestRunDumpHybridHeaderGraphAttachedOnce:
             "abicheck.service._dump_elf",
             side_effect=self._fake_dump_elf(castxml_snap, clang_snap),
         ), patch("abicheck.service._attach_header_graph", side_effect=_fake_attach):
-            result = run_dump(p, "elf", header_backend="hybrid", header_graph=True)
+            result = run_dump(p, "elf", header_backend="hybrid")
 
-        # _attach_header_graph is also invoked (as a fast no-op, header_graph
-        # defaulting False) inside each recursive sub-dump's OWN elf path --
-        # only the call with header_graph=True matters here, and it must run
-        # exactly once, on the already-merged (ast_producer="hybrid")
-        # snapshot, not on either single-backend sub-dump.
+        # _attach_header_graph is invoked on each recursive sub-dump's OWN
+        # elf path too, but with the graph disabled (header_graph=False, via
+        # _skip_header_graph_attach) -- only the call with header_graph=True
+        # matters here, and it must run exactly once, on the already-merged
+        # (ast_producer="hybrid") snapshot, not on either single-backend
+        # sub-dump.
         true_calls = [c for c in calls if c[1] is True]
         assert len(true_calls) == 1
         assert true_calls[0][0].ast_producer == "hybrid"
         assert result.ast_producer == "hybrid"
+        # And the two sub-dump attaches ran with the graph explicitly
+        # disabled, not simply omitted.
+        false_calls = [c for c in calls if c[1] is False]
+        assert len(false_calls) == 2
 
 
 class TestRunDumpHybridDoesNotDoubleEnrichLayout:
@@ -1978,23 +1994,30 @@ class TestRunDumpHeaderWiring:
 
 
 class TestRunDumpHeaderGraph:
-    """``header_graph=True`` embeds the header-only (L2) semantic graph
-    (ADR-041 addendum) uniformly across all three binary formats."""
+    """The header-only (L2) semantic graph (ADR-041 addendum) is always
+    embedded uniformly across all three binary formats when headers are
+    parsed (G29 Phase A: no longer flag-gated)."""
 
-    def test_noop_when_not_requested(self, tmp_path):
+    def test_embeds_by_default_when_headers_given(self, tmp_path):
+        # G29 Phase A regression: no flag needed any more — a plain run_dump
+        # call with headers present attempts the graph attach by default.
+        # api.h is a relative, nonexistent path here (this test only cares
+        # about the no-op-vs-attempted gate, not clang-parse success), so the
+        # attach degrades gracefully to a declaration-only graph rather than
+        # crashing — same contract as test_degrades_gracefully_when_clang_unavailable.
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
         snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
         with patch("abicheck.service._dump_pe", return_value=snap):
             result = run_dump(p, "pe", [Path("api.h")], [], "1.0", "c++")
-        assert result.build_source is None
+        assert result.build_source is not None
 
     def test_noop_when_no_headers_parsed(self, tmp_path):
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
         snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
         with patch("abicheck.service._dump_pe", return_value=snap):
-            result = run_dump(p, "pe", [], [], "1.0", "c++", header_graph=True)
+            result = run_dump(p, "pe", [], [], "1.0", "c++")
         assert result.build_source is None
 
     def test_embeds_graph_from_clang_ast(self, tmp_path):
@@ -2013,7 +2036,7 @@ class TestRunDumpHeaderGraph:
             patch("abicheck.service._dump_pe", return_value=snap),
             patch("abicheck.dumper._clang_header_dump", return_value=ast) as mock_ast,
         ):
-            result = run_dump(p, "pe", [header], [], "1.0", "c++", header_graph=True)
+            result = run_dump(p, "pe", [header], [], "1.0", "c++")
         mock_ast.assert_called_once()
         # The resolved (existing, expanded) header must reach the clang pass —
         # not the raw, unexpanded argument (Codex review).
@@ -2049,7 +2072,7 @@ class TestRunDumpHeaderGraph:
             patch("abicheck.service._dump_pe", return_value=snap),
             patch("abicheck.dumper._clang_header_dump", side_effect=_raise) as mock_ast,
         ):
-            result = run_dump(p, "pe", [header], [], "1.0", "c++", header_graph=True)
+            result = run_dump(p, "pe", [header], [], "1.0", "c++")
         mock_ast.assert_called_once()
         # Never aborts the dump (ADR-028 D3); the graph is embedded but inert.
         assert result.build_source is not None
@@ -2075,7 +2098,7 @@ class TestRunDumpHeaderGraph:
             patch("abicheck.service._dump_pe", return_value=snap),
             patch("abicheck.dumper._clang_header_dump", return_value=ast) as mock_ast,
         ):
-            result = run_dump(p, "pe", [hdr_dir], [], "1.0", "c++", header_graph=True)
+            result = run_dump(p, "pe", [hdr_dir], [], "1.0", "c++")
         mock_ast.assert_called_once()
         assert mock_ast.call_args.args[0] == [header]
         assert result.build_source is not None
@@ -2116,8 +2139,6 @@ class TestRunDumpHeaderGraph:
                 [],
                 "1.0",
                 "c++",
-                header_graph=True,
-                header_graph_includes=True,
             )
         graph = result.build_source.source_graph
         pub_id = f"header://{pub}"
@@ -2162,8 +2183,6 @@ class TestRunDumpHeaderGraph:
                 [],
                 "1.0",
                 "c++",
-                header_graph=True,
-                header_graph_includes=True,
             )
         graph = result.build_source.source_graph
         assert not any(e.kind == "COMPILE_UNIT_INCLUDES_FILE" for e in graph.edges)
@@ -2222,8 +2241,6 @@ class TestRunDumpHeaderGraph:
                 [],
                 "1.0",
                 "c++",
-                header_graph=True,
-                header_graph_includes=True,
             )
         graph = result.build_source.source_graph
         good_id = f"header://{good}"
@@ -2234,17 +2251,22 @@ class TestRunDumpHeaderGraph:
         assert graph.extractor_passes.get("header_include_graph") is not True
         assert graph.degraded_passes.get("header_include_graph") is True
 
-    def test_header_graph_includes_ignored_without_header_graph(self, tmp_path):
+    def test_header_graph_present_by_default_no_flags(self, tmp_path):
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
         header = tmp_path / "api.h"
         header.write_text("void f();\n")
         snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
+        # G29 Phase A: header_graph_includes is no longer a separate opt-in
+        # gated behind header_graph — both are always attempted together
+        # once headers are parsed, so this now asserts the graph IS present
+        # by default (the "ignored without --header-graph" invariant this
+        # test used to check is gone; see
+        # test_header_graph_includes_folds_include_edges above for the
+        # include-edge content check).
         with patch("abicheck.service._dump_pe", return_value=snap):
-            result = run_dump(
-                p, "pe", [header], [], "1.0", "c++", header_graph_includes=True
-            )
-        assert result.build_source is None
+            result = run_dump(p, "pe", [header], [], "1.0", "c++")
+        assert result.build_source is not None
 
 
 class TestCliNativeBinaryHeaderWiring:
