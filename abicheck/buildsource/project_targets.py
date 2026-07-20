@@ -660,6 +660,13 @@ def _target_issues(config: ProjectTargetsConfig, target: TargetSpec) -> list[str
             issues.append(
                 f"target {target.id!r}: bundle_only requires bundle to be set."
             )
+        if target.bundle_only and target.checks:
+            issues.append(
+                f"target {target.id!r}: bundle_only: true target must not set "
+                "its own checks: — it is checked only as a bundle member, "
+                "never standalone, so a target-level check here would never "
+                "run; declare it under bundles:.checks instead."
+            )
         if target.bundle:
             declared_bundle = config.bundles.get(target.bundle)
             if declared_bundle is None:
@@ -736,9 +743,23 @@ def _check_issues(
             f"{where}: gate_mode must be one of {sorted(GATE_MODES)}, got {check.gate_mode!r}."
         )
     for profile_id in check.profiles:
-        if profile_id not in config.profiles:
+        profile = config.profiles.get(profile_id)
+        if profile is None:
             issues.append(
                 f"{where}: profiles entry {profile_id!r} is not declared under profiles:."
+            )
+        elif not profile.contract and check.channel != NO_BASELINE_CHANNEL:
+            # contract: false profiles are documented as test-only lanes that
+            # never get a baseline (S17) -- a real-channel check scoped only
+            # to one can never be satisfied. A channel: "none" audit check has
+            # no baseline to resolve in the first place, so it's exempt (S5
+            # audits on a non-contract lane are a legitimate use case).
+            issues.append(
+                f"{where}: profiles entry {profile_id!r} has contract: false "
+                "(a test-only lane that never gets a baseline) but this check "
+                f"declares a real channel ({check.channel!r}) — only a "
+                f"{NO_BASELINE_CHANNEL!r}-channel audit check may scope to a "
+                "non-contract profile."
             )
     return issues
 

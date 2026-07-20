@@ -91,7 +91,7 @@ Common optional fields for `kind: library`:
 |-------|------|---------|
 | `public_headers` | list of string | Public header roots for this target. |
 | `bundle` | string | The `bundles:` entry this target belongs to. Must be declared under `bundles:`, and that bundle's own `targets:` list must include this target back (the two must agree). |
-| `bundle_only` | boolean, default `false` | When `true`, this target is checked only as a bundle member, never standalone. Requires `bundle` to be set. |
+| `bundle_only` | boolean, default `false` | When `true`, this target is checked only as a bundle member, never standalone. Requires `bundle` to be set, and must **not** declare its own `checks:` — a `bundle_only` target's own checks would never run standalone, so declare the policy under `bundles:<id>.checks` instead. |
 | `checks` | list of check tuple | See [`checks:`](#checks) below. |
 
 `app-consumer`/`plugin-contract` fields:
@@ -116,7 +116,7 @@ target actually runs.
 | `depth` | string | — (required) | One of `binary`, `headers`, `build`, `source` — the same four rungs `--depth`/the report envelope's `requested_depth` accept. |
 | `required` | boolean | `true` | Whether this check gates `aggregate`'s coverage requirement. |
 | `gate_mode` | string | `local` | One of `local`, `deferred`, `advisory` (ADR-047 §4/§7). |
-| `profiles` | list of string | *(unset)* | An **explicit** profile-id selector — see [Profile scoping](#profile-scoping-for-checks) below. |
+| `profiles` | list of string | *(unset)* | An **explicit** profile-id selector — see [Profile scoping](#profile-scoping-for-checks) below. A profile with `contract: false` may only be named here by a `channel: "none"` audit check — a real-channel check can never resolve a baseline on a lane that's documented to never get one (S17). |
 
 ### Profile scoping for `checks:`
 
@@ -186,7 +186,9 @@ scope for P0/P1 and not a valid `source` value here.
 2. `app-consumer`/`plugin-contract` targets' `library` resolves to a real,
    declared `kind: library` target — never to another
    `app-consumer`/`plugin-contract` entry, and never to an undeclared name.
-3. `bundle_only: true` requires `bundle` to be set.
+3. `bundle_only: true` requires `bundle` to be set, and forbids the target
+   from declaring its own `checks:` (it's checked only as a bundle member;
+   a standalone check on it would never run).
 4. Every `bundle:` reference resolves to a declared `bundles:` entry, and
    every `bundles:<id>.targets[]` member resolves to a declared `kind:
    library` target whose own `bundle:` field (if set) agrees.
@@ -194,7 +196,9 @@ scope for P0/P1 and not a valid `source` value here.
    or is the `"none"` no-baseline sentinel.
 6. `checks[].depth` is one of the four valid rungs; `checks[].gate_mode` is
    one of `local`/`deferred`/`advisory`.
-7. Every `checks[].profiles` entry resolves to a declared `profiles:` id.
+7. Every `checks[].profiles` entry resolves to a declared `profiles:` id,
+   and a `contract: false` profile may only be named by a `channel: "none"`
+   audit check.
 8. Every target/bundle/profile/channel id matches the `check_id`-safe
    identifier charset.
 9. Rules 5-7 apply identically to a bundle's own `checks[]`, not just a

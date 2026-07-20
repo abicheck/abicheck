@@ -296,6 +296,29 @@ def test_bundle_only_requires_bundle() -> None:
     assert any("bundle_only requires bundle" in e for e in report.errors)
 
 
+def test_bundle_only_target_must_not_declare_its_own_checks() -> None:
+    """A bundle_only target is checked only as a bundle member, never
+    standalone (per this schema's own docs) -- its own checks: would never
+    run, so it's a validation error, not silently dead config."""
+    config = ProjectTargetsConfig.from_dict(
+        {
+            "targets": {
+                "libfoo": {
+                    "kind": "library",
+                    "binary_pattern": "lib/libfoo.so",
+                    "bundle": "rel",
+                    "bundle_only": True,
+                    "checks": [{"channel": "none", "depth": "headers"}],
+                }
+            },
+            "bundles": {"rel": {"targets": ["libfoo"]}},
+        }
+    )
+    report = validate_project_targets(config)
+    assert not report.ok
+    assert any("must not set its own checks" in e for e in report.errors)
+
+
 def test_bundle_reference_must_be_declared() -> None:
     config = ProjectTargetsConfig.from_dict(
         {
@@ -783,6 +806,70 @@ def test_check_profiles_selector_passes_when_declared() -> None:
                 }
             },
             "profiles": {"linux-x86_64": {"contract": True}},
+        }
+    )
+    report = validate_project_targets(config)
+    assert report.ok, report.errors
+
+
+# ── checks[].profiles scoped to a non-contract (test-only) profile ─────────
+
+
+def test_check_with_real_channel_cannot_scope_to_a_non_contract_profile() -> None:
+    """contract: false profiles never get a baseline (S17) -- a check that
+    names a real channel and scopes only to such a profile can never be
+    satisfied, so it's a validation error."""
+    config = ProjectTargetsConfig.from_dict(
+        {
+            "targets": {
+                "libfoo": {
+                    "kind": "library",
+                    "binary_pattern": "lib/libfoo.so",
+                    "checks": [
+                        {
+                            "channel": "accepted-main",
+                            "depth": "headers",
+                            "profiles": ["test-lane"],
+                        }
+                    ],
+                }
+            },
+            "profiles": {"test-lane": {"contract": False}},
+            "baseline": {
+                "channels": {
+                    "accepted-main": {
+                        "source": "actions-cache",
+                        "key_prefix": "abicheck-baseline-main",
+                    }
+                }
+            },
+        }
+    )
+    report = validate_project_targets(config)
+    assert not report.ok
+    assert any("contract: false" in e for e in report.errors)
+
+
+def test_check_with_none_channel_may_scope_to_a_non_contract_profile() -> None:
+    """The exemption: a channel: "none" audit check has no baseline to
+    resolve in the first place, so scoping it to a test-only lane is a
+    legitimate S5 use case, not an error."""
+    config = ProjectTargetsConfig.from_dict(
+        {
+            "targets": {
+                "libfoo": {
+                    "kind": "library",
+                    "binary_pattern": "lib/libfoo.so",
+                    "checks": [
+                        {
+                            "channel": "none",
+                            "depth": "headers",
+                            "profiles": ["test-lane"],
+                        }
+                    ],
+                }
+            },
+            "profiles": {"test-lane": {"contract": False}},
         }
     )
     report = validate_project_targets(config)
