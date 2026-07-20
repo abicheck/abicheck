@@ -110,6 +110,12 @@ EVIDENCE_CASES: dict[str, EvidenceSpec] = {
     "case190_public_inline_function_references_internal_constant": EvidenceSpec(
         "graph/source_graph_summary.json", "--sources"
     ),
+    "case194_header_graph_rename_reconciled": EvidenceSpec(
+        "graph/source_graph_summary.json", "--sources"
+    ),
+    "case195_header_graph_ambiguous_rename_not_reconciled": EvidenceSpec(
+        "graph/source_graph_summary.json", "--sources"
+    ),
 }
 
 PYTHON_CASE = "case163_python_kwarg_renamed"

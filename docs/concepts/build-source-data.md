@@ -89,11 +89,14 @@ the five, not calls alone. Each kind has a dedicated example:
 
 **Header-only graph, no build integration (ADR-041 addendum).** `header_graph.py`
 builds the same node/edge shapes straight from a header-only dump — no
-`compile_commands.json`, no `--sources` checkout — via `dump --header-graph`
-(embeds the graph in the written snapshot) or `compare --header-graph`
-(embeds it for both sides in-process); `--header-graph-includes` additionally
-adds `COMPILE_UNIT_INCLUDES_FILE` edges (one extra `clang -M` invocation per
-top-level header). Declaration provenance (public vs. internal) still needs
+`compile_commands.json`, no `--sources` checkout. Since G29 Phase A this is
+built automatically by `dump`/`compare` whenever `--depth headers` or deeper
+evidence is available (embedded in the written snapshot for `dump`, or for
+both sides in-process for `compare`) — no flag required; the include-file
+extension (`COMPILE_UNIT_INCLUDES_FILE` edges, one extra `clang -M`
+invocation per top-level header) is likewise always attempted. The legacy
+`--header-graph`/`--header-graph-includes` flags still exist but are hidden,
+deprecated no-ops. Declaration provenance (public vs. internal) still needs
 `--public-header`/`--public-header-dir`, same as any other dump — without it
 every declaration's visibility is `unknown` and the internal-dependency
 findings below have nothing to classify against. Not yet available on `scan`.
@@ -562,6 +565,16 @@ graph-derived **risk** findings (ADR-031 D6):
 | `public_api_internal_dependency_added` | risk | A public entry newly reaches an internal (non-public) declaration/type via a call, a non-call reference, or a field/base/parameter type ([case160](../examples/case160_public_api_internal_dep_added.md): call edge; [case187](../examples/case187_public_struct_private_field_type.md): field type; [case188](../examples/case188_public_class_private_base_class.md): base class; [case189](../examples/case189_public_function_private_parameter_type.md): parameter type; [case190](../examples/case190_public_inline_function_references_internal_constant.md): non-call reference; [case191](../examples/case191_header_only_graph_field_type.md): same finding via the header-only graph, no build integration) |
 | `target_dependency_added` | risk | The library gained an inter-target build/link dependency (new `DT_NEEDED` risk) ([case161](../examples/case161_target_dependency_added.md)) |
 | `exported_symbol_source_owner_changed` | risk | An exported symbol's owning source file/TU moved — implementation relocated behind a stable symbol ([case162](../examples/case162_symbol_source_owner_changed.md)) |
+| `declaration_renamed` | risk | Graph reconciliation (G31 Phase B, ADR-048) safely matched an old and a new declaration/type node as the same entity under a new qualified name, so a rename is reported as one finding instead of an unrelated remove+add pair ([case194](../examples/case194_header_graph_rename_reconciled.md)) |
+| `declaration_moved` | risk | Graph reconciliation matched an old and a new node as the same entity that moved to a different declaring file (same qualified name) |
+| `declaration_identity_reconciled` | risk | Graph reconciliation matched an old and a new node where both the qualified name and declaring-file evidence changed together |
+
+See [Graph Coverage & Negative Evidence § Canonical entity identity and
+rename/move reconciliation](graph-coverage.md#canonical-entity-identity-and-renamemove-reconciliation-g31-phase-b)
+for how the identity/reconciliation model works, and
+[case195](../examples/case195_header_graph_ambiguous_rename_not_reconciled.md)
+for the deliberate counter-example where ambiguous evidence correctly
+prevents a rename from being reconciled at all.
 
 These **explain and prioritize** impact; like the L4 findings they are never
 `breaking` on their own. Each carries the `L5_SOURCE_GRAPH` evidence-tier

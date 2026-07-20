@@ -1231,11 +1231,12 @@ def _internal_dependency_findings(
         label = new_labels.get(entry, entry)
         raw_targets = sorted(reached_by_entry[entry])
         targets = [new_labels.get(t, t) for t in raw_targets]
-        proof_paths = [
-            _format_dependency_path(new, path)
+        target_paths = [
+            (t, path)
             for t in raw_targets
-            if (path := _dependency_path(new, common_kinds, entry, t))
+            if (path := _dependency_path(new, common_kinds, entry, t)) is not None
         ]
+        proof_paths = [_format_dependency_path(new, path) for _, path in target_paths]
         proof = f" Proof path(s): {'; '.join(proof_paths)}." if proof_paths else ""
         own_change = own_changes.get(label)
         correlation = (
@@ -1245,26 +1246,39 @@ def _internal_dependency_findings(
             if own_change is not None
             else ""
         )
-        findings.append(
-            Change(
-                kind=ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED,
-                symbol=label,
-                description=(
-                    f"Public entry {label!r} now reaches internal (non-public) "
-                    f"declaration(s)/type(s) {', '.join(sorted(targets))} that it did not "
-                    "before (via a call, reference, or field/base/parameter type). "
-                    "The public surface has taken on an undeclared dependency; a "
-                    "change to that internal entity becomes a hidden risk. "
-                    "Source-graph evidence to review." + proof + correlation
-                ),
-                old_value="no internal dependency",
-                new_value=f"reaches {len(targets)} internal decl(s)/type(s)",
-                source_location=boundary,
-                correlated_change_kind=(
-                    own_change.kind.value if own_change is not None else None
-                ),
-            )
+        change = Change(
+            kind=ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED,
+            symbol=label,
+            description=(
+                f"Public entry {label!r} now reaches internal (non-public) "
+                f"declaration(s)/type(s) {', '.join(sorted(targets))} that it did not "
+                "before (via a call, reference, or field/base/parameter type). "
+                "The public surface has taken on an undeclared dependency; a "
+                "change to that internal entity becomes a hidden risk. "
+                "Source-graph evidence to review." + proof + correlation
+            ),
+            old_value="no internal dependency",
+            new_value=f"reaches {len(targets)} internal decl(s)/type(s)",
+            source_location=boundary,
+            correlated_change_kind=(
+                own_change.kind.value if own_change is not None else None
+            ),
         )
+        # G31 Phase B B3 (ADR-048): attach the structured (node/edge-list)
+        # counterpart of the prose "Proof path(s)" text above, using the
+        # shortest of the per-target paths already computed — enrichment on
+        # the finding this function was already emitting, not a duplicate.
+        if target_paths:
+            _, shortest_path = min(target_paths, key=lambda tp: len(tp[1]))
+            from .graph_impact import attach_impact_metadata
+
+            attach_impact_metadata(
+                change,
+                affected_public_roots=[label],
+                path=shortest_path,
+                graph=new,
+            )
+        findings.append(change)
     return findings
 
 
@@ -1482,4 +1496,23 @@ def diff_source_graph_findings(
     )
     findings += _target_dependency_findings(old, new, new_labels, boundary)
     findings += _symbol_owner_findings(old, new, old_labels, new_labels, boundary)
+    findings += _reconciliation_findings(old, new)
     return findings
+
+
+def _reconciliation_findings(
+    old: SourceGraphSummary, new: SourceGraphSummary
+) -> list[Change]:
+    """G31 Phase B (ADR-048): rename/move/identity-reconciliation findings.
+
+    Pure enrichment on top of the structural diff already computed above —
+    never touches any other finding this function returns. See
+    ``buildsource.graph_reconcile`` for the matching algorithm.
+    """
+    from .graph_reconcile import (
+        diff_graph_reconciliation_findings,
+        reconcile_graph_diff,
+    )
+
+    reconciliation = reconcile_graph_diff(old, new)
+    return diff_graph_reconciliation_findings(reconciliation, old, new)

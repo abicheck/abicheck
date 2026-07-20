@@ -66,4 +66,32 @@ BUILDSOURCE_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
               "binary may be mis-scoped (AC-009). A source-tooling risk, never an "
               "artifact-proven ABI break: relink/rebuild the source surface "
               "per-DSO against this binary's own exports."),
+    # G31 Phase B (ADR-048) — graph-node reconciliation outcomes. See
+    # buildsource.graph_reconcile for the matching algorithm and
+    # checker_policy.ChangeKind for the authority-rule note.
+    _E("declaration_renamed", _R,
+       impact="The L5 source graph reconciled an old and a new declaration/type "
+              "node as the same real-world entity under a new qualified name "
+              "(same declaring file, unambiguous canonical-id/alias/structural "
+              "evidence — never a bare short-name guess). Without this "
+              "reconciliation the rename would show up as an unrelated "
+              "remove-then-add pair in the graph diff. Informational: does not "
+              "by itself indicate a break — any artifact-level finding for "
+              "either spelling stands on its own evidence."),
+    _E("declaration_moved", _R,
+       impact="The L5 source graph reconciled an old and a new declaration/type "
+              "node as the same real-world entity that moved to a different "
+              "declaring file (same qualified name, unambiguous evidence). "
+              "Without this reconciliation the move would show up as an "
+              "unrelated remove-then-add pair in the graph diff. Informational: "
+              "does not by itself indicate a break."),
+    _E("declaration_identity_reconciled", _R,
+       impact="The L5 source graph reconciled an old and a new declaration/type "
+              "node as the same real-world entity where both the qualified "
+              "name and the declaring-file evidence changed together (a "
+              "combined rename+move, or a canonical-id/alias match with no "
+              "clean rename/move split). Without this reconciliation the "
+              "change would show up as an unrelated remove-then-add pair in "
+              "the graph diff. Informational: does not by itself indicate a "
+              "break."),
 ]

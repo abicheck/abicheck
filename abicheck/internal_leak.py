@@ -42,6 +42,7 @@ import re
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
+from .buildsource.entity_identity import candidate_lookup_keys
 from .checker_policy import ChangeKind, ReachabilityState
 from .checker_types import Change
 
@@ -837,8 +838,9 @@ def compute_call_graph_leak_paths(
     dispatcher gap this ADR's P0 slice explicitly left open (see the ADR's
     "What this ADR does not fix" section).
 
-    Requires an embedded L5 graph (``--sources``/``--build-info``/
-    ``--header-graph``) with at least one relevant edge; returns ``{}``
+    Requires an embedded L5 graph (``--sources``/``--build-info``, or the
+    now-always-on L2 header-only graph) with at least one relevant edge;
+    returns ``{}``
     otherwise — never an error, mirroring
     :func:`~abicheck.buildsource.poi.resolve_changed_paths_public_impact`'s
     degrade contract, so a project with no build-source evidence sees no
@@ -1342,8 +1344,13 @@ def detect_call_graph_leaks(
         # header-only path (header_graph.py) never does. Each trigger's own
         # c.qualified_name (set by EnrichSourceLocations from Function.name,
         # independent of graph provenance) is a reliable fallback key that
-        # works in both modes.
-        keys = {dname, *(t.qualified_name for t in triggers if t.qualified_name)}
+        # works in both modes. Built via the shared candidate-key helper
+        # (G31 Phase B B1: generalizes what used to be an ad hoc
+        # per-call-site {dname, qualified_name, ...} set literal — see
+        # entity_identity.candidate_lookup_keys).
+        keys = candidate_lookup_keys(
+            dname, *(t.qualified_name for t in triggers if t.qualified_name)
+        )
         old_pp: list[str] = []
         new_pp: list[str] = []
         for key in keys:

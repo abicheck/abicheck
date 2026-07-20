@@ -126,7 +126,16 @@ from typing import Any
 #:       whose kind is public by construction, not established by the
 #:       public-surface layout/call-graph walk the other values describe
 #:       (Codex review). Additive.
-REPORT_SCHEMA_VERSION = "2.10"
+#:   2.11: added three additive optional per-finding keys (G31 Phase B3,
+#:       ADR-048): ``affected_public_roots`` (list of public entry labels an
+#:       L5 graph walk proved reach this finding's internal target),
+#:       ``impact_proof_path`` (the structured node/edge-list counterpart of
+#:       the prose "Proof path(s)" text ``graph explain`` already produces),
+#:       and ``impact_is_direct`` (bool — whether the shortest proof path is
+#:       a single hop). Enrichment on an existing finding, never a
+#:       standalone new finding; present only when the embedded L5 graph
+#:       has relevant reachability data for that finding (Codex review).
+REPORT_SCHEMA_VERSION = "2.11"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

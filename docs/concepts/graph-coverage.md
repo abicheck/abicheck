@@ -28,13 +28,16 @@ records, per extractor pass, whether its own coverage was complete:
 
 Two collection strategies commonly produce exactly this shape:
 
-- **Header-only collection** (`--header-graph`, the implicit no-real-build
-  path) sees declarations and signatures but never a function body, so it
-  cannot see a `DECL_CALLS_DECL` edge a public inline function's *body*
-  creates into an internal specialization — the graph is real, just
-  structurally unable to answer that question.
-- **A collector-upgrade** (old snapshot dumped with `--header-graph`, new
-  snapshot with a real `--build-info` compile database) is not a "new
+- **Header-only collection** (the L2 header-only graph, attached
+  automatically whenever a supported `dump`/`compare` run has header
+  evidence at `--depth headers` or deeper — including runs that *also*
+  provide real build/source evidence, not just header-only ones) sees
+  declarations and signatures but never a function body, so it cannot see a
+  `DECL_CALLS_DECL` edge a public inline function's *body* creates into an
+  internal specialization — the graph is real, just structurally unable to
+  answer that question.
+- **A collector-upgrade** (old snapshot dumped header-only, new snapshot
+  with a real `--build-info` compile database) is not a "new
   dependency appeared" signal — it is the same project seen through two
   different lenses. abicheck's [source-graph
   diff](build-source-data.md) findings account for this asymmetry rather
@@ -73,3 +76,61 @@ rule to require actual proof, opt into the stricter gate with
 unknown reachability](../user-guide/suppressions.md#proven-vs-unknown-reachability)
 for the rule syntax and the `suppression_reachability_unknown` diagnostic it
 produces when coverage isn't good enough to prove a match.
+
+## Migration: header-graph is now default-on
+
+Before G29 Phase A, the L2 header-only graph (and its
+`COMPILE_UNIT_INCLUDES_FILE` include-file extension) only got built if you
+explicitly passed `--header-graph`/`--header-graph-includes` to `dump` or
+`compare`. As of G29 Phase A, `--depth headers` (the default depth) always
+builds it automatically — there is no flag to remember and nothing to opt
+into. The two flags still exist but are hidden, deprecated no-ops kept only
+for a transition window before removal.
+
+This doesn't change how you should reason about completeness: whether the
+graph saw everything it needed to is still reported through the coverage
+fields described above (`extractor_passes`/`degraded_passes`/
+`narrowed_passes` and the tri-state `reachability` status), never through
+whether a flag was passed. A header-only collection degrades the same way
+it always did (declarations and signatures only, no function bodies) — it
+is just no longer possible to accidentally run *without* it when depth
+`headers` or deeper evidence is available.
+
+## Canonical entity identity and rename/move reconciliation (G31 Phase B)
+
+The header-only graph and a build-integrated graph can identify the same
+declaration differently depending on which pass saw it first. Without any
+reconciliation, an old/new comparison sees a renamed internal declaration as
+an unrelated node removal plus an unrelated node addition — a reader has to
+notice the two facts independently and infer by hand that they describe the
+same entity.
+
+`abicheck.buildsource.entity_identity` computes a **canonical identity** for
+every graph declaration/type node, in preference order:
+
+1. **canonical** — a compiler-provided stable identity (a clang USR, when a
+   producer supplies one) or a real Itanium/MSVC mangled name.
+2. **normalized** — a fully-qualified semantic signature (qualified name +
+   kind + arity/parameter types) when no mangling is available.
+3. **reduced** — a source-relative identity (file + enclosing scope + name,
+   always an alias, never the primary key) or, when nothing else is
+   available at all, a clearly-marked `synthetic:sha256:...` fallback.
+
+`abicheck.buildsource.graph_reconcile` then reconciles an old/new graph
+diff's added/removed nodes using that identity: an exact canonical-id match,
+an exact (bidirectionally-unambiguous) alias match, or — as a last resort —
+a match on unique structural position when even the qualified name changed.
+**Ambiguous evidence never resolves to a guess**: if two candidates share
+the same alias or structural position, neither is reconciled — both stay a
+plain add/remove, exactly as before Phase B. A match produces a
+`declaration_renamed`, `declaration_moved`, or
+`declaration_identity_reconciled` finding — pure enrichment, RISK-tier,
+never overriding or suppressing an artifact-proven finding elsewhere in the
+comparison (the same authority rule as everywhere else on this page).
+
+See [ADR-048](../development/adr/048-canonical-entity-identity-and-graph-reconciliation.md)
+for the full design, and
+[`examples/case194_header_graph_rename_reconciled`](../examples/case194_header_graph_rename_reconciled.md)/
+[`examples/case195_header_graph_ambiguous_rename_not_reconciled`](../examples/case195_header_graph_ambiguous_rename_not_reconciled.md)
+for a reconciled rename and its deliberately-unreconciled ambiguous
+counterpart.

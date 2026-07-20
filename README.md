@@ -9,7 +9,7 @@
 
 **abicheck** combines binary, debug, header, build, and (optionally) source evidence to detect the widest practical set of mechanical C/C++ ABI/API compatibility breaks — while reporting exactly which finding classes weren't checkable with the evidence you gave it, rather than silently passing. It compares two versions of a shared library — along with their public headers — and reports whether existing binaries will continue to work or break at runtime.
 
-It catches removed or renamed symbols, changed function signatures, struct layout drift, vtable reordering, enum value reassignment, and many more — **391 ABI/API change types** in total — that cause crashes, silent data corruption, or linker failures after a library upgrade.
+It catches removed or renamed symbols, changed function signatures, struct layout drift, vtable reordering, enum value reassignment, and many more — **394 ABI/API change types** in total — that cause crashes, silent data corruption, or linker failures after a library upgrade.
 
 > **Platforms:** Linux (ELF), Windows (PE/COFF), macOS (Mach-O). Binary and header AST analysis on all platforms; debug-info cross-check uses DWARF (Linux, macOS) and PDB (Windows). MinGW-built DLLs are validated end-to-end in CI; native MSVC+PDB verdicts are experimental (the CI lane is non-blocking until proven stable) — see [Platform Support](https://abicheck.github.io/abicheck/reference/platforms/).
 
@@ -20,7 +20,7 @@ It catches removed or renamed symbols, changed function signatures, struct layou
 ## Key features
 
 - **Reads multiple sources of information.** abicheck doesn't rely on a single view of a library. It overlays up to **five independent, additive sources** — the compiled binary, its debug symbols, its public headers, its build-system data, and (optionally) its sources — and lets the strongest evidence win. Each source finds breaks the weaker ones are blind to, and *removes* false positives the weaker ones would raise. See [How it works](#how-it-works--multiple-sources-of-information) below.
-- **Detects most of what causes ABI/API breaks.** **391 change types** across functions, variables, structs/classes, enums, unions, typedefs, templates, and platform/linker metadata — removed or renamed symbols, changed signatures and parameter lists, struct/class layout drift, field-offset shifts, vtable reordering, enum value reassignment, qualifier/`noexcept`/access changes, calling-convention and packing changes, symbol-version and SONAME drift, dependency leaks, and more. Each is classified as `BREAKING`, `API_BREAK`, `COMPATIBLE_WITH_RISK`, or `COMPATIBLE`. See the [Change Kind Reference](https://abicheck.github.io/abicheck/reference/change-kinds/).
+- **Detects most of what causes ABI/API breaks.** **394 change types** across functions, variables, structs/classes, enums, unions, typedefs, templates, and platform/linker metadata — removed or renamed symbols, changed signatures and parameter lists, struct/class layout drift, field-offset shifts, vtable reordering, enum value reassignment, qualifier/`noexcept`/access changes, calling-convention and packing changes, symbol-version and SONAME drift, dependency leaks, and more. Each is classified as `BREAKING`, `API_BREAK`, `COMPATIBLE_WITH_RISK`, or `COMPATIBLE`. See the [Change Kind Reference](https://abicheck.github.io/abicheck/reference/change-kinds/).
 - **Cross-platform.** Linux (ELF), Windows (PE/COFF), and macOS (Mach-O) binaries, with debug-info cross-checks from DWARF, PDB, BTF, and CTF. See [Platform Support](https://abicheck.github.io/abicheck/reference/platforms/) for what's validated in CI per platform (native MSVC+PDB verdicts are experimental).
 - **Built for CI.** Deterministic [exit codes](https://abicheck.github.io/abicheck/reference/exit-codes/), SARIF/JSON/Markdown/HTML/JUnit output, snapshot-based [baselines](https://abicheck.github.io/abicheck/user-guide/baseline-management/), [policy profiles](https://abicheck.github.io/abicheck/user-guide/policies/) and [suppressions](https://abicheck.github.io/abicheck/user-guide/suppressions/), and a first-class [GitHub Action](https://abicheck.github.io/abicheck/user-guide/github-action/).
 - **Public-surface scoping.** Filters findings to the library's *public* ABI surface so internal-only changes don't fail your build — fewer false positives than symbol-only tools.
@@ -186,9 +186,9 @@ for AI-agent workflows.
 
 ## Examples
 
-The [`examples/`](examples/README.md) directory contains **193 real-world ABI/API scenarios** (188 single-library cases plus 5 multi-library bundle cases) with ground-truth verdicts:
+The [`examples/`](examples/README.md) directory contains **195 real-world ABI/API scenarios** (190 single-library cases plus 5 multi-library bundle cases) with ground-truth verdicts:
 
-- Most are single-library `v1`/`v2` examples with a consumer app, including cases 187–189 and 191 (a public struct/class/function gaining a dependency on an internal type, proven both as a real artifact-level break and via `--header-graph`).
+- Most are single-library `v1`/`v2` examples with a consumer app, including cases 187–189 and 191 (a public struct/class/function gaining a dependency on an internal type, proven both as a real artifact-level break and via the L2 header-only semantic graph, built automatically at `--depth headers` and above).
 - The G20 audit/cross-source cases (143–151) are single-build snapshots demonstrating intra-version cross-checks.
 - A handful of L3/L4/L5 build/source-only cases (152–158, 160–162, 190, 192–193) ship hand-built evidence-model fixture pairs demonstrating failures no artifact layer can see.
 - Case 164 ships a guard-annotated fixture pair demonstrating a build-context-cleared header false positive (ADR-039).
@@ -202,7 +202,7 @@ The authoritative completeness gate is the full example matrix: compiler lanes, 
 
 ## Validation snapshot
 
-The main validation target is the full **193-case catalog**. To scan it for the current checkout:
+The main validation target is the full **195-case catalog**. To scan it for the current checkout:
 
 ```bash
 python scripts/benchmark_comparison.py --suite all
@@ -233,7 +233,7 @@ python scripts/benchmark_comparison.py --evidence-tiers
 | + Sources (`L4`) | 172 / 181 (95%) |
 | + Source graph (`L5`) | 181 / 181 (100%) |
 
-More evidence also *removes* false positives (e.g. header scoping correctly dismisses internal-struct changes). This staircase is a **discoverability floor** — the minimum source that reaches every cataloged expected kind for a case, not a blind accuracy score. That's usually also the minimum source for the correct *verdict*, but not always: 4 of the 9 `L5` cases are verdict-detectable much earlier (L1 or L0) and land at `L5` only because one correlated, non-verdict-driving kind in their catalog entry needs the source graph — see the `L5` caveat in [Tool Comparison & Benchmarks](https://abicheck.github.io/abicheck/reference/tool-comparison/#which-source-discovers-what) for the specific cases. For the stricter number that also penalizes false positives across the whole catalog, see the [full-catalog benchmark](https://abicheck.github.io/abicheck/reference/tool-comparison/#full-catalog-benchmark-2026-07-18-all-193-cases) (L3-L5 scores 99.5% there, with 0 false positives). See [Evidence & Detectability](https://abicheck.github.io/abicheck/concepts/evidence-and-detectability/) for what each source reveals and [Benchmarking by evidence tier](https://abicheck.github.io/abicheck/reference/tool-comparison/#benchmarking-by-evidence-tier) for the methodology.
+More evidence also *removes* false positives (e.g. header scoping correctly dismisses internal-struct changes). This staircase is a **discoverability floor** — the minimum source that reaches every cataloged expected kind for a case, not a blind accuracy score. That's usually also the minimum source for the correct *verdict*, but not always: 4 of the 9 `L5` cases are verdict-detectable much earlier (L1 or L0) and land at `L5` only because one correlated, non-verdict-driving kind in their catalog entry needs the source graph — see the `L5` caveat in [Tool Comparison & Benchmarks](https://abicheck.github.io/abicheck/reference/tool-comparison/#which-source-discovers-what) for the specific cases. For the stricter number that also penalizes false positives across the whole catalog, see the [full-catalog benchmark](https://abicheck.github.io/abicheck/reference/tool-comparison/#full-catalog-benchmark-2026-07-18-all-195-cases) (L3-L5 scores 99.5% there, with 0 false positives). See [Evidence & Detectability](https://abicheck.github.io/abicheck/concepts/evidence-and-detectability/) for what each source reveals and [Benchmarking by evidence tier](https://abicheck.github.io/abicheck/reference/tool-comparison/#benchmarking-by-evidence-tier) for the methodology.
 
 Per-case matrix, methodology, full-catalog notes, and the pinned cross-tool comparison table: [Tool Comparison & Benchmarks](https://abicheck.github.io/abicheck/reference/tool-comparison/).
 

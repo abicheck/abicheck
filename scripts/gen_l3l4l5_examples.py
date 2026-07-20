@@ -344,6 +344,119 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
         ),
     )
 
+    # ---- G31 Phase B — canonical identity + graph reconciliation (ADR-048) --
+    # case194: a public struct's private field-type target is renamed (same
+    # declaring file). Without reconciliation the raw node-id diff would show
+    # an unrelated remove(RawConfig) + add(RawConfigV2) pair; with it, the
+    # single declaration_renamed finding explains they are the same entity.
+    l5h_parent = _N(
+        "type:demo::Config",
+        "record_type",
+        "demo::Config",
+        attrs={"qualified_name": "demo::Config", "visibility": "public_header"},
+    )
+    l5h_hdr = _N("hdr:include/demo/config.h", "header", "include/demo/config.h")
+    l5h_old_internal = _N(
+        "type:demo::detail::RawConfig",
+        "record_type",
+        "demo::detail::RawConfig",
+        attrs={
+            "qualified_name": "demo::detail::RawConfig",
+            "def_file": "include/demo/detail.h",
+            "visibility": "private_header",
+        },
+    )
+    l5h_new_internal = _N(
+        "type:demo::detail::RawConfigV2",
+        "record_type",
+        "demo::detail::RawConfigV2",
+        attrs={
+            "qualified_name": "demo::detail::RawConfigV2",
+            "def_file": "include/demo/detail.h",
+            "visibility": "private_header",
+        },
+    )
+    l5h_decl_edge = GraphEdge(
+        src="hdr:include/demo/config.h", dst="type:demo::Config", kind="SOURCE_DECLARES"
+    )
+    l5h_field_edge = GraphEdge(
+        src="type:demo::Config",
+        dst="type:demo::detail::RawConfig",
+        kind="TYPE_HAS_FIELD_TYPE",
+        attrs={"role": "field"},
+    )
+    l5h_field_edge_new = GraphEdge(
+        src="type:demo::Config",
+        dst="type:demo::detail::RawConfigV2",
+        kind="TYPE_HAS_FIELD_TYPE",
+        attrs={"role": "field"},
+    )
+    cases["case194_header_graph_rename_reconciled"] = (
+        "L5",
+        _graph(
+            [l5h_parent, l5h_hdr, l5h_old_internal], [l5h_decl_edge, l5h_field_edge]
+        ),
+        _graph(
+            [l5h_parent, l5h_hdr, l5h_new_internal],
+            [l5h_decl_edge, l5h_field_edge_new],
+        ),
+    )
+
+    # case195: TWO sibling private field-type targets of the SAME public
+    # struct are renamed simultaneously. Neither alias (qualified name
+    # changed) nor structural context (both share the identical
+    # TYPE_HAS_FIELD_TYPE:field position) can safely tell which old name maps
+    # to which new one -- the reconciler correctly refuses to guess, so no
+    # declaration_renamed finding is produced for either. The raw diff still
+    # (correctly, conservatively) reports both as newly-added internal
+    # dependencies rather than silently collapsing them into a wrong rename.
+    l5i_parent = _N(
+        "type:demo::Config2",
+        "record_type",
+        "demo::Config2",
+        attrs={"qualified_name": "demo::Config2", "visibility": "public_header"},
+    )
+    l5i_hdr = _N("hdr:include/demo/config2.h", "header", "include/demo/config2.h")
+    l5i_decl_edge = GraphEdge(
+        src="hdr:include/demo/config2.h",
+        dst="type:demo::Config2",
+        kind="SOURCE_DECLARES",
+    )
+
+    def _sibling(name: str) -> GraphNode:
+        return _N(
+            f"type:demo::detail::{name}",
+            "record_type",
+            f"demo::detail::{name}",
+            attrs={
+                "qualified_name": f"demo::detail::{name}",
+                "def_file": "include/demo/detail2.h",
+                "visibility": "private_header",
+            },
+        )
+
+    def _field_edge(name: str) -> GraphEdge:
+        return GraphEdge(
+            src="type:demo::Config2",
+            dst=f"type:demo::detail::{name}",
+            kind="TYPE_HAS_FIELD_TYPE",
+            attrs={"role": "field"},
+        )
+
+    old_a, old_b = _sibling("RawA"), _sibling("RawB")
+    new_x, new_y = _sibling("RawX"), _sibling("RawY")
+    cases["case195_header_graph_ambiguous_rename_not_reconciled"] = (
+        "L5",
+        _graph(
+            [l5i_parent, l5i_hdr, old_a, old_b],
+            [l5i_decl_edge, _field_edge("RawA"), _field_edge("RawB")],
+        ),
+        _graph(
+            [l5i_parent, l5i_hdr, new_x, new_y],
+            [l5i_decl_edge, _field_edge("RawX"), _field_edge("RawY")],
+        ),
+    )
+
     return cases
 
 

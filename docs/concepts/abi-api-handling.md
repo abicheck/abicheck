@@ -330,8 +330,9 @@ where the L4 surface can tell, `decl_kind` (ordinary declaration vs.
 `inline`/`template`) — the signal that decides whether a declaration's own
 body is compiled into *your* binary or only into the *library's*. Edges are
 built from a real build (`--sources`/`--build-info`, Clang AST calls/refs) or,
-with zero build integration, from a header-only Clang AST tree
-(`--header-graph`) that captures in-header inline/template bodies. Either
+with zero build integration, from a header-only Clang AST tree (built
+automatically for `--depth headers` and above, since G29 Phase A) that
+captures in-header inline/template bodies. Either
 way, evidence *degrades gracefully*: no graph, no compiler, no relevant
 edges — every feature described below simply sees nothing and stays silent,
 per the standing authority rule (L3–L5 evidence explains or corroborates an
@@ -466,7 +467,7 @@ merge step.
 
 ## Detection coverage and roadmap
 
-abicheck detects **391 change kinds** today (see the
+abicheck detects **394 change kinds** today (see the
 [Change Kind Reference](../reference/change-kinds.md)), spanning every family in
 the table above — including the calling-convention, alignment/packing, bit-field,
 dual-ABI (`_GLIBCXX_USE_CXX11_ABI`), ABI-tag, `char8_t`, `_BitInt`, `_Atomic`,

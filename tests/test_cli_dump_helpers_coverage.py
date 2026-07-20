@@ -354,10 +354,14 @@ def test_non_elf_dump_success_stamps_and_writes(tmp_path: Path) -> None:
     assert written[3] == "clang"  # extractor threaded through
 
 
-def test_non_elf_dump_forwards_header_graph_flags(tmp_path: Path) -> None:
-    """--header-graph/--header-graph-includes reach dump_native_binary on the
-    PE/Mach-O path — previously only perform_elf_dump forwarded them, so
-    `dump --header-graph` silently no-opped on non-ELF input (Codex review)."""
+def test_non_elf_dump_no_longer_threads_header_graph_kwargs(tmp_path: Path) -> None:
+    """G29 Phase A: handle_non_elf_dump no longer takes/forwards
+    header_graph/header_graph_includes at all — dump_native_binary
+    (-> service.run_dump) always attaches the header-only graph uniformly
+    across ELF/PE/Mach-O now, so there is nothing left to thread through
+    this call. Regression for the pre-Phase-A bug where only the ELF path
+    forwarded the opt-in flag and PE/Mach-O silently no-opped (Codex
+    review); that class of bug can no longer occur."""
     so = tmp_path / "lib.dylib"
     snap = AbiSnapshot(library="lib.dylib", version="1.0")
 
@@ -383,46 +387,10 @@ def test_non_elf_dump_forwards_header_graph_flags(tmp_path: Path) -> None:
         _dump_native,
         _noop_stamp,
         _record_write,
-        header_graph=True,
-        header_graph_includes=True,
     )
     kwargs = calls["dump_kwargs"]
-    assert kwargs["header_graph"] is True
-    assert kwargs["header_graph_includes"] is True
-
-
-def test_non_elf_dump_defaults_header_graph_off(tmp_path: Path) -> None:
-    """Without --header-graph, dump_native_binary sees the flag as False (default),
-    matching the ELF path's default-off behavior."""
-    so = tmp_path / "lib.dll"
-    snap = AbiSnapshot(library="lib.dll", version="1.0")
-
-    calls: dict[str, object] = {}
-
-    def _dump_native(*a, **k):  # noqa: ANN002, ANN003
-        calls["dump_kwargs"] = k
-        return snap
-
-    handle_non_elf_dump(
-        so,
-        "pe",
-        (),
-        (),
-        "1.0",
-        "c++",
-        None,
-        False,
-        None,
-        None,
-        False,
-        None,
-        _dump_native,
-        _noop_stamp,
-        _record_write,
-    )
-    kwargs = calls["dump_kwargs"]
-    assert kwargs["header_graph"] is False
-    assert kwargs["header_graph_includes"] is False
+    assert "header_graph" not in kwargs
+    assert "header_graph_includes" not in kwargs
 
 
 def test_non_elf_dump_stamps_build_context_when_compile_db_matched(
@@ -795,10 +763,10 @@ def test_perform_elf_dump_does_not_stamp_build_context_when_db_unmatched(
     assert snap.parsed_with_build_context is False
 
 
-def test_perform_elf_dump_attaches_header_graph_when_requested(
+def test_perform_elf_dump_attaches_header_graph_by_default(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """ADR-041 addendum: with header_graph=True, perform_elf_dump calls
+    """ADR-041 addendum / G29 Phase A: perform_elf_dump always calls
     service._attach_header_graph (the same wrapper service.run_dump uses for
     `compare`'s implicit-dump path) with the raw headers, the L2-seeded
     includes (see test_perform_elf_dump_header_graph_receives_seeded_includes
@@ -886,8 +854,6 @@ def test_perform_elf_dump_attaches_header_graph_when_requested(
         _populate,
         _stamp,
         _write_and_capture,
-        header_graph=True,
-        header_graph_includes=True,
         compile_context=sentinel_cc,
     )
 
@@ -899,6 +865,87 @@ def test_perform_elf_dump_attaches_header_graph_when_requested(
     assert captured["snap"] is plain_snap
     # The wrapper's returned snapshot (not the original) is what gets written.
     assert captured["written_snap"] is graphed_snap
+
+
+def test_perform_elf_dump_dwarf_only_does_not_attach_header_graph(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Codex review: dwarf_only=True means "ignore headers entirely" -- dump()
+    already returns a DWARF-only snapshot without parsing headers for that
+    case, so this direct-ELF-dump CLI path (which calls _attach_header_graph
+    itself rather than going through service.run_dump) must not silently
+    re-parse the same headers via clang and embed L2 build_source evidence
+    the caller explicitly asked not to have."""
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "h.h"
+    hdr.write_text("struct S { int x; };\n", encoding="utf-8")
+
+    plain_snap = AbiSnapshot(library="lib.so", version="1.0")
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", lambda **_kw: plain_snap)
+
+    captured: dict[str, object] = {}
+
+    def fake_attach(
+        snap,
+        header_graph,
+        header_graph_includes,
+        headers,
+        includes,
+        lang,
+        compile_context,
+        public_headers,
+        public_header_dirs,
+    ):
+        captured["header_graph"] = header_graph
+        captured["header_graph_includes"] = header_graph_includes
+        return snap
+
+    monkeypatch.setattr("abicheck.service._attach_header_graph", fake_attach)
+
+    events, _stamp, _write, _expand, _populate = _elf_dump_callables()
+
+    from abicheck.service_scan import CompileContext
+
+    sentinel_cc = CompileContext()
+
+    perform_elf_dump(
+        so,
+        (hdr,),
+        (),
+        "1.0",
+        "c++",
+        None,
+        None,
+        None,
+        (),
+        None,
+        True,
+        True,  # dwarf_only
+        None,
+        (),
+        (),
+        None,
+        False,
+        (),
+        "",
+        None,
+        None,
+        False,
+        None,
+        None,
+        None,
+        None,
+        False,
+        "off",
+        _expand,
+        _populate,
+        _stamp,
+        _write,
+        compile_context=sentinel_cc,
+    )
+
+    assert captured["header_graph"] is False
+    assert captured["header_graph_includes"] is False
 
 
 def test_perform_elf_dump_header_graph_receives_seeded_includes(
@@ -942,7 +989,6 @@ def test_perform_elf_dump_header_graph_receives_seeded_includes(
         so, (hdr,), (), "1.0", "c++", None, None, None, (), None, True, False, None,
         (), (), None, False, (), "", None, None, False, None, None, None, None,
         False, "build", _expand, _populate, _stamp, _write,
-        header_graph=True, header_graph_includes=False,
     )
 
     assert seeded in captured["includes"]
@@ -988,7 +1034,6 @@ def test_perform_elf_dump_header_graph_gets_compile_db_flags(
         (), None, True, False, None, (), (), None, False, (), "", None, None,
         False, None, None, None, None, False, "off", _expand, _populate,
         _stamp, _write,
-        header_graph=True, header_graph_includes=False,
         compile_context=original_cc,
     )
 
@@ -1037,7 +1082,6 @@ def test_perform_elf_dump_header_graph_builds_context_when_none_given(
         (), None, True, False, None, (), (), None, False, (), "", None, None,
         False, None, None, None, None, False, "off", _expand, _populate,
         _stamp, _write,
-        header_graph=True, header_graph_includes=False,
         # compile_context defaults to None
     )
 
@@ -1046,23 +1090,26 @@ def test_perform_elf_dump_header_graph_builds_context_when_none_given(
     assert got.gcc_options == "-DFROM_COMPILE_DB"
 
 
-def test_perform_elf_dump_skips_header_graph_by_default(
+def test_perform_elf_dump_attaches_header_graph_by_default_no_flags(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """header_graph defaults to False: _attach_header_graph must not be called
-    at all, and the plain snapshot from dump() is written unmodified."""
+    """G29 Phase A: _attach_header_graph is now always called (no flag
+    controls it any more), so the plain snapshot from dump() is replaced by
+    the wrapper's returned snapshot even with no header-graph-related
+    argument passed at all."""
     so = tmp_path / "lib.so"
     hdr = tmp_path / "h.h"
     hdr.write_text("struct S { int x; };\n", encoding="utf-8")
 
     plain_snap = AbiSnapshot(library="lib.so", version="1.0")
+    graphed_snap = AbiSnapshot(library="lib.so", version="1.0")
     monkeypatch.setattr("abicheck.cli_dump_helpers.dump", lambda **_kw: plain_snap)
 
     called = {"attach": False}
 
     def fake_attach(*a, **k):  # noqa: ANN002, ANN003
         called["attach"] = True
-        raise AssertionError("_attach_header_graph must not be called")
+        return graphed_snap
 
     monkeypatch.setattr("abicheck.service._attach_header_graph", fake_attach)
 
@@ -1079,8 +1126,8 @@ def test_perform_elf_dump_skips_header_graph_by_default(
         False, "off", _expand, _populate, _stamp, _write_and_capture,
     )
 
-    assert called["attach"] is False
-    assert written["snap"] is plain_snap
+    assert called["attach"] is True
+    assert written["snap"] is graphed_snap
 
 
 def test_perform_elf_dump_seeds_l2_includes_and_runs_cleanup(
@@ -1129,13 +1176,14 @@ def test_perform_elf_dump_seeds_l2_includes_and_runs_cleanup(
 def test_perform_elf_dump_defers_l2_cleanup_until_after_header_graph(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """With --header-graph, the seeded temp build dir must survive past the main
-    dump() parse: _attach_header_graph reuses the same seeded include dirs for
-    its own independent clang pass, so cleaning up right after dump() (the
-    plain seeds_l2_includes_and_runs_cleanup ordering above) would hand that
-    second pass a directory that is already gone, silently degrading the
-    graph for inferred-build cases with generated/dependency headers (Codex
-    review). Cleanup must instead run after the header-graph attach."""
+    """The seeded temp build dir must survive past the main dump() parse:
+    _attach_header_graph (always run now, G29 Phase A) reuses the same
+    seeded include dirs for its own independent clang pass, so cleaning up
+    right after dump() (the plain seeds_l2_includes_and_runs_cleanup
+    ordering above) would hand that second pass a directory that is already
+    gone, silently degrading the graph for inferred-build cases with
+    generated/dependency headers (Codex review). Cleanup must instead run
+    after the header-graph attach."""
     so = tmp_path / "lib.so"
     hdr = tmp_path / "h.h"
     hdr.write_text("struct S { int x; };\n", encoding="utf-8")
@@ -1166,7 +1214,6 @@ def test_perform_elf_dump_defers_l2_cleanup_until_after_header_graph(
         so, (hdr,), (), "1.0", "c", None, None, None, (), None, True, False, None,
         (), (), None, False, (), "", None, None, False, None, None, tmp_path, None,
         False, "build", _expand, _populate, _stamp, _write,
-        header_graph=True, header_graph_includes=False,
     )
 
     assert events == ["dump", "attach", "cleanup"]
@@ -1176,7 +1223,7 @@ def test_perform_elf_dump_cleans_up_when_enrichment_raises_before_header_graph(
     tmp_path: Path, monkeypatch
 ) -> None:
     """An exception from a post-dump enrichment step (python_ext/python_api/
-    numpy_capi/build-context) that runs BEFORE the --header-graph attach must
+    numpy_capi/build-context) that runs BEFORE the header-graph attach must
     still release the seeded temp build dir -- deferring cleanup only until
     "right after dump()" isn't enough; nothing between dump() and the
     header-graph attach may leak it either (Codex review)."""
@@ -1215,19 +1262,19 @@ def test_perform_elf_dump_cleans_up_when_enrichment_raises_before_header_graph(
             so, (hdr,), (), "1.0", "c", None, None, None, (), None, True, False, None,
             (), (), None, False, (), "", None, None, False, None, None, tmp_path, None,
             False, "build", _expand, _populate, _stamp, _write,
-            header_graph=True, header_graph_includes=False,
         )
 
     assert events == ["dump", "python_ext", "cleanup"]
 
 
-def test_perform_elf_dump_no_header_graph_cleans_up_right_after_dump(
+def test_perform_elf_dump_cleanup_still_runs_after_header_graph_with_no_flags(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """Without --header-graph there is no second pass to hold the seeded temp
-    build dir open for, so cleanup must run immediately after dump() as
-    before -- confirms the deferral above is conditional, not a blanket
-    delay."""
+    """G29 Phase A: there is no flag left to omit — the header-graph attach
+    always runs, so cleanup always waits for it (superseding the old "without
+    --header-graph, cleanup runs right after dump()" behavior; see
+    test_perform_elf_dump_defers_l2_cleanup_until_after_header_graph for the
+    ordering guarantee itself)."""
     so = tmp_path / "lib.so"
     hdr = tmp_path / "h.h"
     hdr.write_text("struct S { int x; };\n", encoding="utf-8")
@@ -1235,16 +1282,18 @@ def test_perform_elf_dump_no_header_graph_cleans_up_right_after_dump(
     seeded.mkdir()
 
     events: list[str] = []
+    plain_snap = AbiSnapshot(library="lib.so", version="1.0")
 
     def fake_seed(**kwargs):
         return [seeded], [lambda: events.append("cleanup")]
 
     def fake_dump(**kw):
         events.append("dump")
-        return AbiSnapshot(library="lib.so", version="1.0")
+        return plain_snap
 
     def fake_attach(*a, **k):  # noqa: ANN002, ANN003
-        raise AssertionError("_attach_header_graph must not be called")
+        events.append("attach")
+        return plain_snap
 
     monkeypatch.setattr("abicheck.buildsource.l2_seed.seed_l2_includes", fake_seed)
     monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
@@ -1258,7 +1307,7 @@ def test_perform_elf_dump_no_header_graph_cleans_up_right_after_dump(
         False, "build", _expand, _populate, _stamp, _write,
     )
 
-    assert events == ["dump", "cleanup"]
+    assert events == ["dump", "attach", "cleanup"]
 
 
 def test_perform_elf_dump_detects_python_surfaces_and_follow_deps(
@@ -1483,8 +1532,9 @@ def test_perform_elf_dump_wraps_dump_errors_still_cleans_up_seeded_dirs(
             so, (hdr,), (), "1.0", "c", None, None, None, (), None, True, False, None,
             (), (), None, False, (), "", None, None, False, None, None, None, None,
             False, "off", _expand, _populate, _stamp, _write,
-            header_graph=True,  # even with a header-graph request, the failed
-            # parse never reaches the attach, so cleanup must not be deferred.
+            # Even though the always-on header-graph attach (G29 Phase A)
+            # would otherwise run, the failed parse never reaches it, so
+            # cleanup must not be deferred.
         )
 
     assert events == ["dump", "cleanup"]

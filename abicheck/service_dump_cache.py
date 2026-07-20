@@ -48,8 +48,6 @@ def _dump_is_cacheable(
     # cycle back through service.py/scan_engine.py. Only ever compared to
     # `None` below, so no real type-safety is lost.
     compile: object | None,
-    header_graph: bool,
-    header_graph_includes: bool,
 ) -> bool:
     """Whether a ``run_dump`` call is safe to serve from the whole-snapshot
     cache (:mod:`abicheck.snapshot_cache`).
@@ -58,11 +56,25 @@ def _dump_is_cacheable(
     — the dominant release-baseline/CI comparison case a repeated pipeline
     re-extracts identically on every run — is cached. A PDB path, a DWARF
     debug-info root, debuginfod resolution (network-dependent), a forced
-    debug format, a symbols-only/debug-presence-only dump, a custom
-    ``CompileContext``, or the header-only semantic graph all change what
-    ``run_dump`` produces in ways not folded into the cache key below, so
-    those combinations always fall through to a live dump rather than risk
-    serving a stale/mismatched snapshot.
+    debug format, a symbols-only/debug-presence-only dump, or a custom
+    ``CompileContext`` all change what ``run_dump`` produces in ways not
+    folded into the cache key below, so those combinations always fall
+    through to a live dump rather than risk serving a stale/mismatched
+    snapshot.
+
+    G29 Phase A: the L2 header-only semantic graph (and its include-file
+    extension) used to disable caching outright (an opt-in flag meant a cache
+    hit from a plain prior run could silently omit the graph a later
+    graph-requesting call expected). It is no longer flag-gated — every
+    ``run_dump`` call attempts it identically — so that toggle-mismatch risk
+    is gone; the graph is a deterministic function of the same
+    headers/includes/public-header inputs already covered by the cache key,
+    and ``snapshot_cache.store``/``lookup`` round-trip the full snapshot
+    (including ``build_source``) through JSON, so a cache hit still carries
+    the graph. TODO(header-graph-phase-D): the graph's build inputs (e.g.
+    ``--gcc-*``/``--sysroot`` reaching the second internal clang AST pass via
+    ``compile``) are still excluded from caching by the ``compile is None``
+    check above, same as before this change — no new gap introduced.
     """
     return (
         pdb_path is None
@@ -73,8 +85,6 @@ def _dump_is_cacheable(
         and not symbols_only
         and not debug_presence_only
         and compile is None
-        and not header_graph
-        and not header_graph_includes
     )
 
 
@@ -83,6 +93,7 @@ def _dump_cache_extra_key(
     header_backend: str,
     public_headers: list[Path] | None,
     public_header_dirs: list[Path] | None,
+    lang: str = "c++",
 ) -> str:
     """Build the ``extra`` cache-key material for a cacheable dump — every
     input to ``run_dump`` that affects its output besides the binary content
@@ -152,12 +163,49 @@ def _dump_cache_extra_key(
 
         layout_tool = find_layout_tool_bin() or ""
 
+    # G29 Phase A's header-graph attach (service._attach_header_graph) always
+    # runs its own internal clang AST pass (_clang_header_dump) to build the
+    # L2 semantic graph -- unconditionally, regardless of which backend
+    # `resolved_backend` above is (a plain castxml dump still gets one). A
+    # cacheable call always has `compile is None` (_dump_is_cacheable
+    # requires it), so that pass always resolves clang with no gcc_path/
+    # gcc_prefix override -- resolve the same way here and hash the actual
+    # resolved binary path (not just the bare driver name), so a cache
+    # written while clang was missing/at a different PATH entry can't be
+    # replayed once clang becomes available/changes, silently keeping a
+    # snapshot with degraded or stale header-graph coverage (Codex review).
+    import shutil
+
+    from .dumper_clang import _resolve_clang_bin
+    from .errors import SnapshotError
+
+    header_graph_clang = ""
+    try:
+        clang_driver = _resolve_clang_bin("cc" if lang == "c" else "c++", None, None)
+        resolved_path = shutil.which(clang_driver) or clang_driver
+        # The resolved PATH string alone survives an in-place binary swap at
+        # the same path (an apt/package upgrade, or a symlink retargeted to a
+        # different clang install) -- fold in an mtime+size fingerprint too
+        # (Codex review), matching this codebase's existing mtime-based
+        # invalidation style (snapshot_cache._cache_key's header walk) rather
+        # than shelling out to `clang --version` on every cacheable dump's
+        # lookup, which would add real latency to the hot path this cache
+        # exists to avoid.
+        try:
+            st = os.stat(resolved_path)
+            header_graph_clang = f"{resolved_path}:{st.st_mtime_ns}:{st.st_size}"
+        except OSError:
+            header_graph_clang = resolved_path
+    except SnapshotError:
+        header_graph_clang = ""
+
     sep = "\x00"
     return sep.join(
         [
             binary_fmt,
             resolved_backend,
             layout_tool,
+            header_graph_clang,
             sep.join(sorted(str(p) for p in (public_headers or []))),
             sep.join(sorted(str(p) for p in (public_header_dirs or []))),
         ]
@@ -185,8 +233,6 @@ def cached_run_dump(
     public_header_dirs: list[Path] | None = None,
     header_backend: str = "auto",
     compile: object | None = None,
-    header_graph: bool = False,
-    header_graph_includes: bool = False,
     notify: Callable[[str], None] | None = None,
 ) -> AbiSnapshot:
     """``run_dump(...)``, transparently served from the whole-snapshot cache
@@ -210,8 +256,6 @@ def cached_run_dump(
         symbols_only=symbols_only,
         debug_presence_only=debug_presence_only,
         compile=compile,
-        header_graph=header_graph,
-        header_graph_includes=header_graph_includes,
     )
     if not cacheable:
         return run_dump(
@@ -233,17 +277,36 @@ def cached_run_dump(
             public_header_dirs=public_header_dirs,
             header_backend=header_backend,
             compile=compile,
-            header_graph=header_graph,
-            header_graph_includes=header_graph_includes,
             notify=notify,
         )
 
     from . import snapshot_cache
 
     extra = _dump_cache_extra_key(
-        binary_fmt, header_backend, public_headers, public_header_dirs
+        binary_fmt, header_backend, public_headers, public_header_dirs, lang
     )
-    cached = snapshot_cache.lookup(path, _headers, _includes, version, lang, extra=extra)
+    # dumper.dump()/service._dump_elf independently call
+    # header_utils.resolve_inferred_header_roots(headers, includes) to add an
+    # `-H include/api.h`-style umbrella's own include root to the search path
+    # even when the caller passed no explicit -I (see that function's
+    # docstring). A cacheable call always has no build context (gcc_options/
+    # gcc_option_tokens empty, since `compile is None`), so this always
+    # resolves to plain extra-include dirs, never deferred tokens -- but
+    # those inferred dirs still are not part of `_includes` above, so an edit
+    # to a header reached only through one of them (e.g. `include/detail.h`
+    # pulled in by `include/api.h`) would not change the cache key even
+    # though it changes the parsed snapshot/header graph (Codex review).
+    # Folded in for cache-key purposes only -- the real `run_dump` calls
+    # below still pass the original, unmodified `headers`/`includes`, since
+    # they (or their own recursive `_dump_elf` call) re-derive the same
+    # inferred roots independently.
+    from .header_utils import resolve_inferred_header_roots
+
+    _inferred_roots, _ = resolve_inferred_header_roots(_headers, _includes)
+    _cache_includes = _includes + _inferred_roots
+    cached = snapshot_cache.lookup(
+        path, _headers, _cache_includes, version, lang, extra=extra
+    )
     if cached is not None:
         return cached
     snap = run_dump(
@@ -265,9 +328,9 @@ def cached_run_dump(
         public_header_dirs=public_header_dirs,
         header_backend=header_backend,
         compile=compile,
-        header_graph=header_graph,
-        header_graph_includes=header_graph_includes,
         notify=notify,
     )
-    snapshot_cache.store(snap, path, _headers, _includes, version, lang, extra=extra)
+    snapshot_cache.store(
+        snap, path, _headers, _cache_includes, version, lang, extra=extra
+    )
     return snap

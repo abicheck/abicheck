@@ -1,7 +1,7 @@
 # ABI Scenario Catalog
 
 <!-- BEGIN GENERATED: catalog-headline (keep counts in sync with examples/ground_truth.json) -->
-This directory contains **193 cases** (188 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Most cases are a minimal, compilable C/C++ example with:
+This directory contains **195 cases** (190 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Most cases are a minimal, compilable C/C++ example with:
 <!-- END GENERATED: catalog-headline -->
 
 - Paired `v1/` and `v2/` source + headers.
@@ -33,7 +33,7 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 |---------|-------|-------------------------|------|
 | BREAKING | 107 | `BREAKING_KINDS` | 🔴 |
 | API_BREAK | 17 | `API_BREAK_KINDS` | 🟠 |
-| COMPATIBLE_WITH_RISK | 27 | `RISK_KINDS` | 🟡 |
+| COMPATIBLE_WITH_RISK | 29 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 9 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 21 | `QUALITY_KINDS` | 🟡 |
 | NO_CHANGE | 7 | — | ✅ |
@@ -87,10 +87,10 @@ Commands below use `PYTHONPATH=.`.
 | Check | Command | Executed where | Scope | Result | Status |
 |---|---|---|---:|---|---|
 | Build/autodiscovery | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | CI Linux, gcc/clang | 209 integration items | gcc: 149 passed / 55 skipped / 5 xfailed; clang: 149 passed / 54 skipped / 6 xfailed | Green default single-library build lane. `case115_bit_int_width_changed` needs a `_BitInt`-capable CastXML-bundled Clang; a sandbox with an older bundled Clang (unrelated to the fix in this catalog) sees it fail there instead of building — see `docs/development/examples-validation-runbook.md` |
-| Default/debug verdicts | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 193 catalog cases | gcc: 153 PASS / 5 XFAIL / 35 SKIP; clang: 153 PASS / 6 XFAIL / 34 SKIP | Green default/debug verdict lane |
-| Runtime smoke | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 193 catalog cases | 88 DEMONSTRATED / 69 NO_RUNTIME_SIGNAL / 1 BASELINE_SIGNAL / 35 SKIP | Passing; no BUILD_ERROR. The runner now compares each app's baseline exit code against a per-case `runtime_baseline_exit` in `ground_truth.json` (default 0) instead of hardcoding zero, so apps that deliberately return a computed value (e.g. case111's `ets(42).local()` returning `42`) are no longer misread as a broken baseline. `case06_visibility` is the one remaining, intentionally-unwhitelisted case — see "Known validation gaps" below |
-| Release headers | `python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 193 catalog cases | 146 PASS / 5 XFAIL / 42 SKIP | Informational; the false-risk regression on `case61_var_added` (`exported_object_alignment_reduced`) is fixed — CastXML now resolves a variable's natural type alignment as declared-alignment corroboration even without an explicit `alignas` override |
-| Stripped headers | `python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 193 catalog cases | 141 PASS / 5 FAIL / 5 XFAIL / 42 SKIP | Informational; reduced-evidence signal-loss backlog (below) |
+| Default/debug verdicts | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 195 catalog cases | gcc: 153 PASS / 5 XFAIL / 37 SKIP; clang: 153 PASS / 6 XFAIL / 36 SKIP | Green default/debug verdict lane |
+| Runtime smoke | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 195 catalog cases | 88 DEMONSTRATED / 69 NO_RUNTIME_SIGNAL / 1 BASELINE_SIGNAL / 37 SKIP | Passing; no BUILD_ERROR. The runner now compares each app's baseline exit code against a per-case `runtime_baseline_exit` in `ground_truth.json` (default 0) instead of hardcoding zero, so apps that deliberately return a computed value (e.g. case111's `ets(42).local()` returning `42`) are no longer misread as a broken baseline. `case06_visibility` is the one remaining, intentionally-unwhitelisted case — see "Known validation gaps" below |
+| Release headers | `python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 195 catalog cases | 146 PASS / 5 XFAIL / 44 SKIP | Informational; the false-risk regression on `case61_var_added` (`exported_object_alignment_reduced`) is fixed — CastXML now resolves a variable's natural type alignment as declared-alignment corroboration even without an explicit `alignas` override |
+| Stripped headers | `python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 195 catalog cases | 141 PASS / 5 FAIL / 5 XFAIL / 44 SKIP | Informational; reduced-evidence signal-loss backlog (below) |
 | Build/source smoke | `python tests/validate_examples.py case01 case04 case98 case105 case122 case129 case130 case131 case132 case133 --artifact-variant build-source --json` | CI Linux artifact | 10 representative cases | 10 PASS | Informational, clean. Not full L3-L5 coverage — see "Known validation gaps" |
 
 Counts above are from the most recent full catalog run this table was refreshed against; re-run
@@ -452,6 +452,8 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [191](case191_header_only_graph_field_type/README.md) | _header_only_graph_field_type — Same finding, proven with a genuine confirmed-zero (no coverage trick) | Breaking | 🔴 BREAKING (bad practice) |
 | [192](case192_call_graph_break_survives_suppression/README.md) | Call-graph-reachable break survives a broad internal-namespace suppression | Breaking | 🔴 BREAKING |
 | [193](case193_ordinary_exported_fn_call_not_reachable/README.md) | An ordinary exported function's internal call is not public-reachable | Breaking | 🔴 BREAKING |
+| [194](case194_header_graph_rename_reconciled/README.md) | _header_graph_rename_reconciled — Internal dependency target renamed, safely reconciled | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [195](case195_header_graph_ambiguous_rename_not_reconciled/README.md) | _header_graph_ambiguous_rename_not_reconciled — Ambiguous simultaneous rename, correctly NOT reconciled | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 <!-- END GENERATED: case-index -->
 
 ---

@@ -15,7 +15,8 @@
 > both confirmed empirically against this repository's current code (not
 > theoretical):
 >
-> 1. **Header-only-graph path** (`dump --header-graph`, case191's mechanism):
+> 1. **Header-only-graph path** (the L2 header-only graph, built
+>    automatically since G29 Phase A; case191's mechanism):
 >    `source_graph_findings._HEADER_FULL_VISIBILITY_KINDS` deliberately
 >    excludes `DECL_REFERENCES_DECL`/`DECL_CALLS_DECL` from what a header-only
 >    pass's "zero edges" can be trusted to mean — a header-only scan can only

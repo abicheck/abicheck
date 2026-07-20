@@ -341,8 +341,9 @@ gated on `ast_producer in ("clang", "hybrid")` (a `hybrid` merge appends
 clang-only records dumper_clang.py never gives layout, so it needs the
 same backfill; already-enriched castxml-sourced records in the same
 snapshot are left untouched), running once after the snapshot is
-built (and, for a `header_graph=True` request, after that graph attaches
-too — the two enrichments touch disjoint snapshot fields). Every failure
+built (and, since the header-only graph now attaches unconditionally as of
+G29 Phase A, after that graph attaches too — the two enrichments touch
+disjoint snapshot fields). Every failure
 mode (tool missing, a compile the tool can't recover from, a timeout,
 malformed output) degrades to "no enrichment," never raises (ADR-028 D3).
 

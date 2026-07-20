@@ -1,0 +1,69 @@
+{
+  "coverage": {},
+  "degraded_passes": {},
+  "edges": [
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "dst": "type:demo::Config",
+      "edge": "SOURCE_DECLARES",
+      "provenance": "",
+      "src": "hdr:include/demo/config.h"
+    },
+    {
+      "attrs": {
+        "role": "field"
+      },
+      "confidence": "unknown",
+      "dst": "type:demo::detail::RawConfig",
+      "edge": "TYPE_HAS_FIELD_TYPE",
+      "provenance": "",
+      "src": "type:demo::Config"
+    }
+  ],
+  "external_graph_refs": [],
+  "extractor_passes": {},
+  "graph_id": "sha256:e28f17c03215318733eb9ee89ec1d3f36b77d94cd73735f80995d4e35f105db0",
+  "indexes": {
+    "by_binary_symbol": {},
+    "by_file": {},
+    "by_source_decl": {},
+    "by_target": {}
+  },
+  "narrowed_passes": {},
+  "narrowed_scope": {},
+  "nodes": [
+    {
+      "attrs": {
+        "qualified_name": "demo::Config",
+        "visibility": "public_header"
+      },
+      "confidence": "unknown",
+      "id": "type:demo::Config",
+      "kind": "record_type",
+      "label": "demo::Config",
+      "provenance": ""
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "id": "hdr:include/demo/config.h",
+      "kind": "header",
+      "label": "include/demo/config.h",
+      "provenance": ""
+    },
+    {
+      "attrs": {
+        "def_file": "include/demo/detail.h",
+        "qualified_name": "demo::detail::RawConfig",
+        "visibility": "private_header"
+      },
+      "confidence": "unknown",
+      "id": "type:demo::detail::RawConfig",
+      "kind": "record_type",
+      "label": "demo::detail::RawConfig",
+      "provenance": ""
+    }
+  ],
+  "schema_version": 1
+}

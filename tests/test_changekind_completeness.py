@@ -130,6 +130,10 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED,
     ChangeKind.TARGET_DEPENDENCY_ADDED,
     ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED,
+    # G31 Phase B graph reconciliation (ADR-048) — tests/test_graph_reconcile.py.
+    ChangeKind.DECLARATION_RENAMED,
+    ChangeKind.DECLARATION_MOVED,
+    ChangeKind.DECLARATION_IDENTITY_RECONCILED,
     # Intra-version cross-source validation (tests/test_crosscheck.py).
     ChangeKind.EXPORTED_NOT_PUBLIC,
     ChangeKind.PUBLIC_NOT_EXPORTED,
