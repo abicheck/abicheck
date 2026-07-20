@@ -19,9 +19,10 @@ sequence that invokes these scripts in order:
    from `run.sh` — so this step has zero dependency on `run.sh`'s internal
    layout. `tests/test_action_validate_inputs.py` runs both copies against
    the same fixtures to catch drift between them.
-2. `action/install-deps.sh` — installs castxml/gcc/g++/clang/bear (Linux) or
-   castxml via Homebrew (macOS) when `install-deps: true`. Windows install is
-   not automated (warns only).
+2. `action/install-deps.sh` — installs gcc/g++/clang/bear and invokes the
+   checksum-pinned `action/install-castxml.sh` Superbuild installer on Linux,
+   or installs castxml via Homebrew on macOS, when `install-deps: true`.
+   Windows install is not automated (warns only).
 3. `action/run.sh` — assembles the `abicheck` CLI invocation from `INPUT_*`
    environment variables (one per `action.yml` input), runs it, and sets the
    Action's declared outputs from the exit code / report contents.

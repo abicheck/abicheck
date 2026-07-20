@@ -32,7 +32,7 @@ jobs:
   # cannot emit DW_AT_calling_convention for) are gated, not just benchmarked.
   validate-examples:
     name: Validate examples (${{ matrix.toolchain }}, debug-headers)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -54,7 +54,10 @@ jobs:
       - name: Install system deps
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y castxml gcc g++ clang cmake
+          sudo apt-get install -y gcc g++ clang cmake curl ca-certificates
+
+      - name: Set up pinned CastXML
+        run: bash action/install-castxml.sh
 
       - uses: ./.github/actions/cache-ast-dumps
         with:
@@ -127,7 +130,7 @@ jobs:
 
   clang-header-fallback:
     name: Clang header fallback regressions
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v6
@@ -141,7 +144,10 @@ jobs:
       - name: Install system deps
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y castxml gcc g++ clang cmake
+          sudo apt-get install -y gcc g++ clang cmake curl ca-certificates
+
+      - name: Set up pinned CastXML
+        run: bash action/install-castxml.sh
 
       - uses: ./.github/actions/cache-ast-dumps
         with:
@@ -191,7 +197,7 @@ jobs:
   # debug ground truth calls COMPATIBLE/NO_CHANGE must never become BREAKING.
   artifact-modes:
     name: Artifact modes (release / stripped full-catalog / build-source)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v6
@@ -205,7 +211,10 @@ jobs:
       - name: Install system deps
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y castxml gcc g++ clang cmake binutils
+          sudo apt-get install -y gcc g++ clang cmake binutils curl ca-certificates
+
+      - name: Set up pinned CastXML
+        run: bash action/install-castxml.sh
 
       - uses: ./.github/actions/cache-ast-dumps
         with:
@@ -284,7 +293,7 @@ jobs:
 
   full-example-matrix:
     name: Full example matrix
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [validate-examples, artifact-modes, clang-header-fallback]
     if: always()
 
@@ -306,7 +315,10 @@ jobs:
       - name: Install system deps
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y castxml gcc g++ clang cmake binutils
+          sudo apt-get install -y gcc g++ clang cmake binutils curl ca-certificates
+
+      - name: Set up pinned CastXML
+        run: bash action/install-castxml.sh
 
       # The owner-proofs/bundle/special-cli validators below also dump
       # bundle/G20/special-shape example headers through the same castxml/

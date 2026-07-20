@@ -143,18 +143,24 @@ jobs:
   abi-check:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          activate-environment: abicheck
       - name: Install abicheck (source)
-        run: pip install -e .
-      - name: Install castxml (Linux/macOS only)
-        if: runner.os != 'Windows'
+        shell: bash -el {0}
+        run: python -m pip install -e .
+      - name: Install CastXML (Linux/macOS only)
+        shell: bash -el {0}
         run: |
-          # sudo apt-get install -y castxml   # Ubuntu
-          # brew install castxml              # macOS
+          # On Ubuntu, avoid the Clang-17 apt package; use conda-forge or the
+          # checksum-pinned Superbuild installed by the abicheck Action.
+          conda install -y -c conda-forge castxml
       - name: ABI check
+        shell: bash -el {0}
         run: |
           abicheck compare old/libmylib.so new/libmylib.so \
             -H include/

@@ -58,7 +58,7 @@ jobs:
     # (versions, git commit, ground-truth digest, per-tool accuracy) as a
     # read-only artifact so the README accuracy numbers are auditable evidence.
     if: github.event_name == 'release'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -69,9 +69,12 @@ jobs:
       - name: Install system deps (oracles + toolchain)
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y gcc g++ castxml cmake
+          sudo apt-get install -y gcc g++ cmake curl ca-certificates
           sudo apt-get install -y abigail-tools || sudo apt-get install -y libabigail-tools
           sudo apt-get install -y abi-compliance-checker || true
+
+      - name: Set up pinned CastXML
+        run: bash action/install-castxml.sh
 
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6

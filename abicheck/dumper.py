@@ -831,8 +831,14 @@ def _build_castxml_command(
     force_cpp20: bool = False,
 ) -> list[str]:
     """Build the castxml command line."""
-    cmd = ["castxml", "--castxml-output=1",
-           f"--castxml-cc-{cc_id}", cc_bin]
+    # CastXML needs its language-specific compiler-emulation id in C mode.
+    # ``gnu`` + ``-x c`` can inject C++ _Float* approximations into C;
+    # ``gnu-c`` avoids that. Parentheses preserve an explicit g++ path/prefix.
+    castxml_cc_id = "gnu-c" if not force_cpp and cc_id == "gnu" else cc_id
+    compiler_command = (["(", cc_bin, "-x", "c", ")"]
+                        if castxml_cc_id == "gnu-c" else [cc_bin])
+    cmd = ["castxml", "--castxml-output=1", f"--castxml-cc-{castxml_cc_id}",
+           *compiler_command]
     for inc in extra_includes:
         cmd += ["-I", str(inc)]
 
@@ -1049,8 +1055,6 @@ def _castxml_dump(
             deadline.check()
             return cast(Element, _cached_root)
 
-    cc_bin, cc_id = _resolve_compiler_binary(compiler, gcc_path, gcc_prefix)
-
     with tempfile.NamedTemporaryFile(suffix=".xml", delete=False) as tmp:
         out_xml = Path(tmp.name)
 
@@ -1060,6 +1064,22 @@ def _castxml_dump(
         force_cpp = _detect_cpp_headers(headers) or has_explicit_cpp_std(
             gcc_options, gcc_option_tokens
         )
+
+    # Use the host C driver for CastXML's ``gnu-c`` emulation.  Passing g++
+    # makes its compiler probe advertise C++-only _Float* approximations even
+    # though the final frontend arguments contain ``-x c``.  Preserve an
+    # explicit path/prefix selection: callers choosing a C++ cross-driver rely
+    # on ``--gcc-prefix`` resolving to ``<prefix>g++`` even for a C header.
+    resolved_compiler = compiler
+    if not force_cpp and not gcc_path and not gcc_prefix:
+        resolved_compiler = {
+            "c++": "cc",
+            "g++": "gcc",
+            "clang++": "clang",
+        }.get(compiler, compiler)
+    cc_bin, cc_id = _resolve_compiler_binary(
+        resolved_compiler, gcc_path, gcc_prefix
+    )
 
     try:
         try:
