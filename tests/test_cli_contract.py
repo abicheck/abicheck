@@ -632,10 +632,42 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
 
 @pytest.mark.parametrize("cmd_name", sorted(_OPTION_SET_SNAPSHOT))
 def test_option_set_snapshot(cmd_name: str) -> None:
-    """Each command's full option surface matches the frozen snapshot."""
+    """Each command's full option surface matches the frozen snapshot.
+
+    ``--header-graph``/``--header-graph-includes`` stay in this snapshot
+    (G29 Phase A) because they are still real, registered Click options —
+    just hidden (``hidden=True``, deprecated no-op shims; see
+    test_header_graph_flags_are_hidden_but_still_parse below for the
+    ``--help``-visibility/inert-behavior half of this contract, which this
+    raw-registration snapshot doesn't check)."""
     commands = _registered_commands()
     flags = _command_flags(commands[cmd_name])
     assert sorted(flags) == sorted(_OPTION_SET_SNAPSHOT[cmd_name])
+
+
+@pytest.mark.parametrize("cmd_name", ["compare", "dump"])
+def test_header_graph_flags_are_hidden_but_still_parse(cmd_name: str) -> None:
+    """G29 Phase A: --header-graph/--header-graph-includes are deprecated,
+    hidden no-op shims — absent from --help, but still accepted (and
+    otherwise behaviorally inert; see test_compare_dispatch.py /
+    test_cli_coverage_extra.py for end-to-end no-op coverage) rather than
+    erroring as an unrecognized option, so an existing script/CI invocation
+    that still passes them doesn't hard-break."""
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    help_result = CliRunner().invoke(main, [cmd_name, "--help"])
+    assert "--header-graph" not in help_result.output
+
+    commands = _registered_commands()
+    cmd = commands[cmd_name]
+    hidden_flags = {
+        p.opts[0]
+        for p in cmd.params  # type: ignore[attr-defined]
+        if getattr(p, "hidden", False) and "--header-graph" in p.opts[0]
+    }
+    assert hidden_flags == {"--header-graph", "--header-graph-includes"}
 
 
 def _all_leaf_commands() -> list[tuple[str, object]]:

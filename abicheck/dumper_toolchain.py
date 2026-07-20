@@ -2,6 +2,15 @@
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 """Small filesystem and AST-toolchain identity helpers for :mod:`dumper`."""
 
@@ -13,7 +22,7 @@ import shutil
 import signal
 import stat as stat_module
 import subprocess
-import tempfile
+import threading
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -64,54 +73,71 @@ def _executable_sha256(
 
 
 @lru_cache(maxsize=64)
-def _tool_version_output(real_path: str, digest: str) -> str:
-    """Return stable ``--version`` output for one exact executable revision."""
+def _tool_version_output(selected_path: str, digest: str) -> str:
+    """Return bounded ``--version`` output for one exact executable revision."""
     del digest
+    limit = 64 * 1024
+    raw = bytearray()
     try:
-        # Keep hostile/broken tools from filling memory and tolerate arbitrary
-        # bytes in diagnostics.  The file also combines stdout/stderr in actual
-        # emission order, unlike concatenating two independently captured pipes.
-        with tempfile.TemporaryFile() as output:
-            popen_kwargs: dict[str, Any] = {}
-            if os.name == "posix":
-                import resource
+        # Avoid preexec_fn: dumps can originate from threaded service/MCP
+        # paths, where Python documents it as unsafe. A parent-side reader caps
+        # output and kills a noisy process without buffering an unbounded pipe.
+        process = subprocess.Popen(
+            [selected_path, "--version"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            start_new_session=os.name == "posix",
+        )
+        assert process.stdout is not None
+        stdout = process.stdout
 
-                def _limit_output() -> None:
-                    resource.setrlimit(resource.RLIMIT_FSIZE, (128 * 1024, 128 * 1024))
-
-                popen_kwargs.update(start_new_session=True, preexec_fn=_limit_output)
-            process = subprocess.Popen(
-                [real_path, "--version"],
-                stdout=output,
-                stderr=subprocess.STDOUT,
-                **popen_kwargs,
-            )
+        def _kill() -> None:
             try:
-                process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
                 if os.name == "posix":
                     os.killpg(process.pid, signal.SIGKILL)
                 else:
                     process.kill()
-                process.wait()
-                raise
-            output.seek(0)
-            raw = output.read(64 * 1024 + 1)
+            except OSError:
+                pass
+
+        def _read_capped() -> None:
+            while chunk := stdout.read(8192):
+                remaining = limit + 1 - len(raw)
+                if remaining > 0:
+                    raw.extend(chunk[:remaining])
+                if len(raw) > limit:
+                    _kill()
+                    break
+
+        reader = threading.Thread(target=_read_capped, daemon=True)
+        reader.start()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            _kill()
+            process.wait()
+            raise
+        finally:
+            reader.join(timeout=1)
+            stdout.close()
     except (OSError, subprocess.TimeoutExpired) as exc:
         return f"unavailable:{type(exc).__name__}:{exc}"
-    truncated = len(raw) > 64 * 1024
-    text = raw[: 64 * 1024].decode("utf-8", errors="replace")
+    truncated = len(raw) > limit
+    text = raw[:limit].decode("utf-8", errors="replace")
     if truncated:
         text += "\n[truncated]"
-    return "\n".join(
-        line.rstrip()
-        for line in text.splitlines()
-        if line.strip()
-    )
+    return "\n".join(line.rstrip() for line in text.splitlines() if line.strip())
 
 
 def _resolved_tool(executable: str) -> tuple[str, Path, os.stat_result, str]:
-    selected = shutil.which(executable) or executable
+    selected = shutil.which(executable)
+    if selected is None:
+        separators = tuple(sep for sep in (os.sep, os.altsep) if sep)
+        if not Path(executable).is_absolute() and not any(
+            sep in executable for sep in separators
+        ):
+            raise FileNotFoundError(f"tool not found on PATH: {executable}")
+        selected = executable
     real = Path(selected).resolve(strict=True)
     stat = real.stat()
     if not stat_module.S_ISREG(stat.st_mode):
@@ -127,6 +153,11 @@ def _resolved_tool(executable: str) -> tuple[str, Path, os.stat_result, str]:
     return selected, real, stat, digest
 
 
+def _resolve_selected_tool(executable: str) -> str:
+    """Return the exact executable selected now, rejecting missing bare names."""
+    return _resolved_tool(executable)[0]
+
+
 def _tool_identity(executable: str) -> str:
     """Identify the executable selected by PATH, including content SHA256."""
     selected = shutil.which(executable) or executable
@@ -134,7 +165,7 @@ def _tool_identity(executable: str) -> str:
         selected, real, stat, digest = _resolved_tool(executable)
     except OSError as exc:
         return f"selected={selected};unavailable={type(exc).__name__}:{exc}"
-    version = _tool_version_output(str(real), digest)
+    version = _tool_version_output(selected, digest)
     return (
         f"selected={selected};realpath={real};mtime_ns={stat.st_mtime_ns};"
         f"size={stat.st_size};sha256={digest};version={version}"
@@ -146,7 +177,7 @@ def _tool_identity_metadata(executable: str) -> dict[str, str]:
     selected = shutil.which(executable) or executable
     try:
         selected, real, stat, digest = _resolved_tool(executable)
-        version = _tool_version_output(str(real), digest)
+        version = _tool_version_output(selected, digest)
     except OSError as exc:
         return {"selected": selected, "error": f"{type(exc).__name__}: {exc}"}
     return {

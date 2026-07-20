@@ -66,7 +66,7 @@ def _parse_castxml_version(output: str) -> tuple[str | None, tuple[int, int] | N
     return cx_ver, clang
 
 
-def _castxml_version_note() -> str:
+def _castxml_version_note(castxml_bin: str = "castxml") -> str:
     """Probe ``castxml --version`` and, when its bundled Clang predates the
     recommended floor, return a one-line upgrade note (else "").
 
@@ -81,13 +81,18 @@ def _castxml_version_note() -> str:
     """
     probe_timeout = 15.0
     scan_remaining = deadline.remaining()
-    bound_by_scan_deadline = scan_remaining is not None and scan_remaining < probe_timeout
+    bound_by_scan_deadline = (
+        scan_remaining is not None and scan_remaining < probe_timeout
+    )
     if scan_remaining is not None:
         probe_timeout = min(probe_timeout, scan_remaining)
     try:
         with deadline.deadline_scope(probe_timeout):
             proc = deadline.run_bounded(
-                ["castxml", "--version"], capture_output=True, text=True, timeout=probe_timeout
+                [castxml_bin, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=probe_timeout,
             )
     except deadline.DeadlineExceeded:
         if bound_by_scan_deadline:

@@ -14,15 +14,19 @@ so any command that passes headers (`--header` / `-H`) fails with
 this error until `castxml` is on your `PATH`.
 
 ```bash
-# Ubuntu / Debian
-sudo apt-get install -y castxml gcc g++
+# conda (any OS) — bundles castxml + compiler automatically
+conda install -c conda-forge abicheck
 # macOS
 brew install castxml
 # Windows (PowerShell, admin)
 choco install castxml
-# conda (any OS) — bundles castxml + compiler automatically
-conda install -c conda-forge abicheck
 ```
+
+On Ubuntu CI, prefer a checksum-pinned
+[CastXML Superbuild](https://github.com/CastXML/CastXMLSuperbuild/releases)
+over `apt install castxml`. Ubuntu 24.04 currently packages CastXML with bundled
+Clang 17, which is too old for some GCC 13 libstdc++ headers. The abicheck
+GitHub Action installs the pinned `v2026.01.30` Superbuild automatically.
 
 No castxml and can't install it? Run **binary-only mode** by omitting the header flags —
 abicheck falls back to DWARF/symbols analysis (weaker, but catches symbol- and
@@ -68,12 +72,21 @@ errors like:
   by **Clang ≥ 18**.
 
 The fix is a **castxml built against a newer Clang** — the recommended floor is
-**bundled Clang ≥ 18**. The `conda-forge` castxml package bundles a recent Clang
-and a matching compiler, which is the most reliable option:
+**bundled Clang ≥ 18**. Ubuntu 24.04's `castxml` package currently bundles Clang
+17 and is therefore not suitable for GCC 13 C++ header analysis. Use either the
+`conda-forge` package or a release- and checksum-pinned official Superbuild:
 
 ```bash
 conda install -c conda-forge castxml
+
+# Reproducible CI: download the matching asset from this pinned release,
+# verify its published SHA256, extract it, then prepend its bin/ to PATH.
+# https://github.com/CastXML/CastXMLSuperbuild/releases/tag/v2026.01.30
 ```
+
+The pinned abicheck Linux CI release bundles Clang 21.1.8. Always inspect the
+full `castxml --version` output: the CastXML version alone does not identify the
+bundled Clang frontend.
 
 abicheck detects this case and appends your detected `castxml --version` plus the
 recommended floor to the error. As an alternative, point abicheck at a

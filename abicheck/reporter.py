@@ -893,6 +893,19 @@ def _change_to_dict(
         proof_path = getattr(c, "reachability_proof_path", None)
         if proof_path:
             d["reachability_proof_path"] = proof_path
+    # G31 Phase B B3 (ADR-048) — structured graph impact/proof-path data:
+    # the machine-readable counterpart of reachability_proof_path's prose,
+    # as a list of node/edge reference dicts, plus which public root(s) it
+    # traces back to and whether the dependency is direct or transitive.
+    affected_roots = getattr(c, "affected_public_roots", None)
+    if affected_roots:
+        d["affected_public_roots"] = affected_roots
+    impact_path = getattr(c, "impact_proof_path", None)
+    if impact_path:
+        d["impact_proof_path"] = impact_path
+    impact_direct = getattr(c, "impact_is_direct", None)
+    if impact_direct is not None:
+        d["impact_is_direct"] = impact_direct
     return d
 
 

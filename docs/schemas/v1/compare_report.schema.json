@@ -334,6 +334,20 @@
         "reachability_proof_path": {
           "type": "string",
           "description": "ADR-044: human-readable rendering of the shortest matched reachability path (e.g. \"fn:pub → base:detail::Base\", or, for a call-graph path, \"pubFn --[DECL_CALLS_DECL]--> ns::detail::helper\"). Present only when public_reachable is true and a path was found (never set for the 'direct_public_symbol' kind, which has no path to render)."
+        },
+        "affected_public_roots": {
+          "type": "array",
+          "description": "G31 Phase B3 (ADR-048, schema 2.11): labels of the public entry node(s) an embedded L5 graph walk proved reach this finding's internal target. Enrichment on an existing finding (never a standalone new finding); present only when the graph has relevant reachability data for it.",
+          "items": { "type": "string" }
+        },
+        "impact_proof_path": {
+          "type": "array",
+          "description": "G31 Phase B3 (ADR-048, schema 2.11): the structured node/edge-list counterpart of reachability_proof_path's prose rendering — the shortest matched path from a public root to this finding's subject, as an ordered list of {node/edge reference} objects. Present only when affected_public_roots is present.",
+          "items": { "type": "object" }
+        },
+        "impact_is_direct": {
+          "type": "boolean",
+          "description": "G31 Phase B3 (ADR-048, schema 2.11): true when impact_proof_path is a single hop (the public root directly references the finding's subject), false when transitive. Present only when affected_public_roots is present."
         }
       }
     }

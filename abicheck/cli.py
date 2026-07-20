@@ -564,7 +564,7 @@ def main() -> None:
 @click.option("--no-git", "no_git", is_flag=True, default=False,
               help="Do not auto-detect git commit SHA.")
 @build_source_dump_options  # --build-info / --sources (embed inline)
-@header_graph_options  # --header-graph / --header-graph-includes (shared with `compare`)
+@header_graph_options  # hidden deprecated no-op shim (shared with `compare`)
 @compile_context_options  # --ast-frontend + cross-toolchain (shared with `scan`)
 def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Path, ...],
              public_headers: tuple[Path, ...], public_header_dirs: tuple[Path, ...],
@@ -586,7 +586,8 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              build_config: Path | None = None, allow_build_query: bool = False,
              build_query: str | None = None, build_compile_db: str | None = None,
              depth: str | None = None,
-             header_graph: bool = False, header_graph_includes: bool = False,
+             header_graph_deprecated: bool = False,
+             header_graph_includes_deprecated: bool = False,
              _resolved_compile_context: CompileContext | None = None,
              _resolved_collect_mode: str | None = None) -> None:
     """Dump ABI snapshot of a shared library to JSON.
@@ -596,7 +597,12 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
       abicheck dump libfoo.so.1 -H include/foo.h --version 1.2.3 -o snap.json
       abicheck dump --sources ./libfoo-src/ -o libfoo.src.json  # source-only (no binary)
     """
+    from .cli_options import warn_deprecated_header_graph_flags
     from .dry_run import emit_dry_run, reject_dry_run_with_output
+
+    warn_deprecated_header_graph_flags(
+        header_graph_deprecated, header_graph_includes_deprecated
+    )
 
     reject_dry_run_with_output(dry_run, output)
     _setup_verbosity(verbose)
@@ -826,7 +832,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             public_headers, public_header_dirs, build_info, sources, build_config,
             allow_build_query, collect_mode, build_query, build_compile_db,
             header_backend=header_backend, compile_context=native_cc,
-            header_graph=header_graph, header_graph_includes=header_graph_includes,
             depth=depth, compile_db_context_matched=compile_db_matched,
         )
         return
@@ -884,8 +889,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         write_snapshot_output=_write_snapshot_output,
         build_query=build_query,
         build_compile_db=build_compile_db,
-        header_graph=header_graph,
-        header_graph_includes=header_graph_includes,
         compile_context=_cc,
         depth=depth,
         compile_db_context_matched=compile_db_matched,
@@ -1618,7 +1621,7 @@ def _embed_inline_source_side(
               help="Additional directory to search for shared libraries (with --follow-deps).")
 @click.option("--ld-library-path", "ld_library_path", default="",
               help="Simulated LD_LIBRARY_PATH (with --follow-deps).")
-@header_graph_options  # --header-graph / --header-graph-includes (shared with `dump`)
+@header_graph_options  # hidden deprecated no-op shim (shared with `dump`)
 @click.option("--show-redundant/--no-show-redundant", "show_redundant", default=False,
               hidden=True,
               help="Disable redundancy filtering and show all changes including those "
@@ -1770,6 +1773,17 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     # and the exit-code matrix — identical while the single typed signature lives
     # only on run_compare (no duplicated 56-line parameter list; CodeFactor).
     from .cli_compare_helpers import run_compare
+    from .cli_options import warn_deprecated_header_graph_flags
+
+    # G29 Phase A: --header-graph/--header-graph-includes are hidden, inert
+    # no-op shims (header_graph_options) — pop them out of kwargs before
+    # forwarding to run_compare (whose typed signature no longer carries
+    # them; the graph is now unconditional) and just emit the deprecation
+    # note if either was passed.
+    warn_deprecated_header_graph_flags(
+        kwargs.pop("header_graph_deprecated", False),
+        kwargs.pop("header_graph_includes_deprecated", False),
+    )
 
     # ADR-040 Lever 1: translate the side-aware --header/--include/--sources/
     # --build-info tuples back into the per-side kwargs run_compare consumes.

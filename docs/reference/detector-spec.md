@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (391 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (394 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -56,6 +56,9 @@ One row per `ChangeKind` (391 total). Columns fuse the verdict partition (`check
 | `ctor_explicit_removed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `ctor_explicit_removed` | — |
 | `ctor_overload_ambiguity_risk` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `ctor_overload_ambiguity_risk` | — |
 | `cxx_standard_floor_raised` | api_break | `API_BREAK` | `warning` | unspecified | `cxx_standard_floor_raised` | — |
+| `declaration_identity_reconciled` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `declaration_identity_reconciled` | — |
+| `declaration_moved` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `declaration_moved` | — |
+| `declaration_renamed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `declaration_renamed` | [case194](../examples/case194_header_graph_rename_reconciled.md) |
 | `default_argument_changed` | api_break | `API_BREAK` | `warning` | unspecified | `default_argument_changed` | — |
 | `default_template_arg_changed` | breaking | `BREAKING` | `error` | L2 | `default_template_arg_changed` | [case87](../examples/case87_default_template_arg_changed.md) |
 | `dt_relr_introduced` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `dt_relr_introduced` | — |
@@ -217,7 +220,7 @@ One row per `ChangeKind` (391 total). Columns fuse the verdict partition (`check
 | `private_header_leak` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `private_header_leak` | [case144](../examples/case144_audit_private_header_leak.md), [case147](../examples/case147_scan_depth_ladder.md), [case151](../examples/case151_xcheck_provider_matrix.md) |
 | `protected_visibility_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `protected_visibility_changed` | — |
 | `public_api_exposes_stl_by_value` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `public_api_exposes_stl_by_value` | — |
-| `public_api_internal_dependency_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `public_api_internal_dependency_added` | [case160](../examples/case160_public_api_internal_dep_added.md), [case187](../examples/case187_public_struct_private_field_type.md), [case188](../examples/case188_public_class_private_base_class.md), [case189](../examples/case189_public_function_private_parameter_type.md), +2 |
+| `public_api_internal_dependency_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `public_api_internal_dependency_added` | [case160](../examples/case160_public_api_internal_dep_added.md), [case187](../examples/case187_public_struct_private_field_type.md), [case188](../examples/case188_public_class_private_base_class.md), [case189](../examples/case189_public_function_private_parameter_type.md), +4 |
 | `public_macro_removed` | api_break | `API_BREAK` | `warning` | L4 | `public_macro_removed` | [case156](../examples/case156_public_macro_removed.md) |
 | `public_macro_value_changed` | api_break | `API_BREAK` | `warning` | unspecified | `public_macro_value_changed` | — |
 | `public_not_exported` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `public_not_exported` | [case150](../examples/case150_xcheck_export_public_pair.md) |

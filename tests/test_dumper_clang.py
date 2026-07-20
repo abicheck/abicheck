@@ -1318,6 +1318,32 @@ def test_clang_header_dump_success_and_cache(
     assert calls["n"] == 1
 
 
+def test_clang_only_dump_does_not_require_gxx_identity(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    cache = tmp_path / "cache.json"
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+    monkeypatch.setattr(
+        dumper,
+        "_resolve_compiler_binary",
+        lambda *_a, **_k: pytest.fail("clang-only dump resolved g++"),
+    )
+
+    def _run(cmd, **kwargs):
+        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
+        return _fake_proc()
+
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
+    assert _clang_header_dump([header], []) == {
+        "kind": "TranslationUnitDecl",
+        "inner": [],
+    }
+
+
 def test_clang_header_dump_rechecks_deadline_on_cache_hit(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -2460,6 +2486,20 @@ def test_resolve_probe_compiler_prefers_gnu_gcc_path(
     )
     # C mode probes gcc.
     assert _resolve_probe_compiler("cc", None, None) == "gcc"
+
+
+def test_resolve_probe_compiler_skips_clang_family_aliases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A --gcc-path icx/icpx/dpcpp/dpcpp-cl is clang-family, not GNU — probing it
+    (instead of a real g++/gcc on PATH) yields incomplete system include dirs
+    (e.g. missing /usr/include with stdlib.h), since these are the same clang
+    binary under a different name, not real gcc/g++."""
+    from abicheck import dumper_sysinc
+
+    monkeypatch.setattr(dumper_sysinc.shutil, "which", lambda c: c)
+    for alias in ("icx", "icpx", "dpcpp", "dpcpp-cl"):
+        assert _resolve_probe_compiler("c++", f"/opt/intel/bin/{alias}", None) == "g++"
 
 
 def test_resolve_probe_compiler_none_when_no_compiler(

@@ -13,9 +13,9 @@
 # limitations under the License.
 
 """Dump headers and binaries with recorded AST toolchain provenance."""
+
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
@@ -43,6 +43,14 @@ from defusedxml import ElementTree as DefusedET
 
 from . import deadline
 from ._compiler_options import has_explicit_cpp_std, has_explicit_std
+from .dumper_ast_config import (
+    _CPP_ONLY_PATTERNS as _CPP_ONLY_PATTERNS,
+    _build_castxml_command as _build_castxml_command,
+    _cache_key as _cache_key,
+    _detect_cpp20_headers as _detect_cpp20_headers,
+    _detect_cpp_headers as _detect_cpp_headers,
+    _resolve_compiler_binary as _resolve_compiler_binary,
+)
 from .dumper_cache import _atomic_write, _cache_path
 from .dumper_castxml import (
     _CastxmlParser as _CastxmlParser,
@@ -88,6 +96,7 @@ from .dumper_toolchain import (
     _castxml_available as _castxml_available,
     _parser_ast_fallback_reason as _parser_ast_fallback_reason,
     _parser_ast_toolchain as _parser_ast_toolchain,
+    _resolve_selected_tool as _resolve_selected_tool,
     _safe_mtime as _safe_mtime,
     _safe_size as _safe_size,
     _tool_identity as _tool_identity,
@@ -95,7 +104,6 @@ from .dumper_toolchain import (
 )
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .errors import HeaderToolchainError, SnapshotError, ValidationError
-from .header_utils import iter_cache_header_files
 from .model import (
     AbiSnapshot,
     ElfVisibility,
@@ -139,8 +147,10 @@ def _resolve_header_backend(backend: str | None) -> str:
 
 
 def _build_clang_header_command(
-    cc_bin: str, cc_id: str,
-    extra_includes: list[Path], agg_path: Path,
+    cc_bin: str,
+    cc_id: str,
+    extra_includes: list[Path],
+    agg_path: Path,
     *,
     sysroot: Path | None = None,
     nostdinc: bool = False,
@@ -206,7 +216,9 @@ def _build_clang_header_command(
 
 
 def _resolve_clang_langmode(
-    lang: str | None, headers: list[Path], clang_bin: str,
+    lang: str | None,
+    headers: list[Path],
+    clang_bin: str,
     gcc_options: str | None = None,
     gcc_option_tokens: tuple[str, ...] = (),
 ) -> tuple[bool, bool, bool, str]:
@@ -272,7 +284,11 @@ def _clang_header_dump(
     """
     clang_bin = _resolve_clang_bin(compiler, gcc_path, gcc_prefix)
     force_cpp, force_cpp20, explicit_c_request, cc_id = _resolve_clang_langmode(
-        lang, headers, clang_bin, gcc_options, gcc_option_tokens,
+        lang,
+        headers,
+        clang_bin,
+        gcc_options,
+        gcc_option_tokens,
     )
 
     # castxml↔clang parity: probe the host GNU compiler for its ``-isystem`` dirs
@@ -299,17 +315,24 @@ def _clang_header_dump(
     cpp_system_includes = (
         system_includes if force_cpp else _resolve_sysinc(force_cpp=True)
     )
-    host_cc_bin, _host_cc_id = _resolve_compiler_binary(
-        compiler, gcc_path, gcc_prefix
-    )
     frontend_identity = _tool_identity(clang_bin)
-    compiler_identity = _tool_identity(host_cc_bin)
+    # Clang is both frontend and compiler here. A GNU driver is only an
+    # optional include-path probe; clang-only hosts must not acquire a fake
+    # hard dependency on g++ merely for cache identity/provenance.
+    compiler_identity = frontend_identity
 
     key = _cache_key(
-        headers, extra_includes, clang_bin,
-        gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+        headers,
+        extra_includes,
+        clang_bin,
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
+        gcc_options=gcc_options,
         gcc_option_tokens=gcc_option_tokens,
-        sysroot=sysroot, nostdinc=nostdinc, lang=lang, backend="clang",
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+        lang=lang,
+        backend="clang",
         # Both include sets feed the key: whichever the retry settles on, a
         # toolchain change to either invalidates the cached AST. Equal when
         # already in C++ mode — pass once so existing C++ cache keys are stable.
@@ -351,12 +374,20 @@ def _clang_header_dump(
 
     _ast_paths: list[Path] = []  # each attempt's AST, cleaned up in `finally` below
 
-    def _run_clang(fcpp: bool, fcpp20: bool, sysinc: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+    def _run_clang(
+        fcpp: bool, fcpp20: bool, sysinc: tuple[str, ...]
+    ) -> subprocess.CompletedProcess[str]:
         cmd = _build_clang_header_command(
-            clang_bin, cc_id, extra_includes, agg_path,
-            sysroot=sysroot, nostdinc=nostdinc, gcc_options=gcc_options,
+            clang_bin,
+            cc_id,
+            extra_includes,
+            agg_path,
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            gcc_options=gcc_options,
             gcc_option_tokens=gcc_option_tokens,
-            force_cpp=fcpp, force_cpp20=fcpp20,
+            force_cpp=fcpp,
+            force_cpp20=fcpp20,
             system_includes=sysinc,
         )
         # DeadlineExceeded propagates uncaught, mapped by run_scan_core to _BudgetOverflow.
@@ -384,7 +415,9 @@ def _clang_header_dump(
         ):
             _log_c_to_cpp_selfheal(explicit_c_request)
             cur_fcpp, cur_fcpp20, cur_sysinc = (
-                True, _detect_cpp20_headers(headers), cpp_system_includes,
+                True,
+                _detect_cpp20_headers(headers),
+                cpp_system_includes,
             )
             result = _run_clang(cur_fcpp, cur_fcpp20, cur_sysinc)
         else:
@@ -401,12 +434,11 @@ def _clang_header_dump(
             agg_path=agg_path,
             active_headers=active_headers,
         )
-        identities_stable = (
-            _tool_identity(clang_bin) == frontend_identity
-            and _tool_identity(host_cc_bin) == compiler_identity
-        )
+        identities_stable = _tool_identity(clang_bin) == frontend_identity
         if not identities_stable:
-            log.warning("AST toolchain changed during clang execution; skipping cache write")
+            log.warning(
+                "AST toolchain changed during clang execution; skipping cache write"
+            )
         return _parse_clang_ast_result(
             result, cached, _ast_paths[-1], cache_write=identities_stable
         )
@@ -444,7 +476,7 @@ def _header_ast_parser(
         # No single parser exists for "hybrid" — must be resolved by
         # dumper_hybrid.run_hybrid_dump, not silently treated as castxml.
         raise ValidationError(
-            "\"hybrid\" AST frontend has no single parser here "
+            '"hybrid" AST frontend has no single parser here '
             "(see dumper_hybrid.run_hybrid_dump)."
         )
 
@@ -456,12 +488,18 @@ def _header_ast_parser(
         fallback_reason: str | None = None,
     ) -> _CastxmlParser | _ClangAstParser:
         metadata = {"producer": producer, **_tool_identity_metadata(executable)}
-        try:
-            host_cc, _ = _resolve_compiler_binary(compiler, gcc_path, gcc_prefix)
-            host_meta = _tool_identity_metadata(host_cc)
-            metadata.update({f"compiler_{key}": value for key, value in host_meta.items()})
-        except SnapshotError as exc:
-            metadata["compiler_error"] = str(exc)
+        if producer == "clang":
+            compiler_meta = _tool_identity_metadata(executable)
+        else:
+            try:
+                host_cc, _ = _resolve_compiler_binary(compiler, gcc_path, gcc_prefix)
+                compiler_meta = _tool_identity_metadata(host_cc)
+            except SnapshotError as exc:
+                metadata["compiler_error"] = str(exc)
+                compiler_meta = {}
+        metadata.update(
+            {f"compiler_{key}": value for key, value in compiler_meta.items()}
+        )
         setattr(parser, "_abicheck_ast_toolchain", metadata)
         setattr(parser, "_abicheck_ast_fallback_reason", fallback_reason)
         return parser
@@ -469,21 +507,31 @@ def _header_ast_parser(
     def _run_clang(*, fallback_reason: str | None = None) -> _ClangAstParser:
         clang_bin = _resolve_clang_bin(compiler, gcc_path, gcc_prefix)
         ast_root = _clang_header_dump(
-            headers, extra_includes, compiler=compiler,
-            gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+            headers,
+            extra_includes,
+            compiler=compiler,
+            gcc_path=gcc_path,
+            gcc_prefix=gcc_prefix,
+            gcc_options=gcc_options,
             gcc_option_tokens=gcc_option_tokens,
-            sysroot=sysroot, nostdinc=nostdinc, lang=lang,
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            lang=lang,
             extra_hash_dirs=extra_hash_dirs,
         )
         parser = _ClangAstParser(
-            ast_root, exported_dynamic, exported_static,
+            ast_root,
+            exported_dynamic,
+            exported_static,
             public_header_paths=public_header_paths,
             public_dir_paths=public_dir_paths,
         )
         return cast(
             _ClangAstParser,
             _stamp_parser(
-                parser, producer="clang", executable=clang_bin,
+                parser,
+                producer="clang",
+                executable=clang_bin,
                 fallback_reason=fallback_reason,
             ),
         )
@@ -494,13 +542,21 @@ def _header_ast_parser(
     # Auto mode may use the explicit opt-in fallback for known toolchain or
     # direct-inclusion failures. Explicit CastXML remains fail-closed.
     auto_selected = _auto_ast_fallback_eligible(backend)
+    selected_castxml: list[str] = []
     try:
         xml_root = _castxml_dump(
-            headers, extra_includes, compiler=compiler,
-            gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+            headers,
+            extra_includes,
+            compiler=compiler,
+            gcc_path=gcc_path,
+            gcc_prefix=gcc_prefix,
+            gcc_options=gcc_options,
             gcc_option_tokens=gcc_option_tokens,
-            sysroot=sysroot, nostdinc=nostdinc, lang=lang,
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            lang=lang,
             extra_hash_dirs=extra_hash_dirs,
+            _selected_tool_out=selected_castxml,
         )
     except SnapshotError as exc:
         # Probe the driver _run_clang() would actually invoke (honors
@@ -549,13 +605,19 @@ def _header_ast_parser(
             raise type(exc)(message) from exc
         raise
     parser = _CastxmlParser(
-        xml_root, exported_dynamic, exported_static,
+        xml_root,
+        exported_dynamic,
+        exported_static,
         public_header_paths=public_header_paths,
         public_dir_paths=public_dir_paths,
     )
     return cast(
         _CastxmlParser,
-        _stamp_parser(parser, producer="castxml", executable="castxml"),
+        _stamp_parser(
+            parser,
+            producer="castxml",
+            executable=selected_castxml[0] if selected_castxml else "castxml",
+        ),
     )
 
 
@@ -617,257 +679,6 @@ def _pyelftools_exported_symbols(so_path: Path) -> tuple[set[str], set[str]]:
             return exported_dynamic, exported_static
     except (ELFError, OSError) as exc:
         raise SnapshotError(f"Failed to parse ELF file {so_path}: {exc}") from exc
-
-
-def _cache_key(
-    headers: list[Path],
-    extra_includes: list[Path],
-    compiler: str,
-    *,
-    gcc_path: str | None = None,
-    gcc_prefix: str | None = None,
-    gcc_options: str | None = None,
-    gcc_option_tokens: tuple[str, ...] = (),
-    sysroot: Path | None = None,
-    nostdinc: bool = False,
-    lang: str | None = None,
-    backend: str = "castxml",
-    system_includes: tuple[str, ...] = (),
-    extra_hash_dirs: tuple[Path, ...] = (),
-    frontend_identity: str = "",
-    compiler_identity: str = "",
-) -> str:
-    h = hashlib.sha256()
-    h.update(f"backend={backend}".encode())
-    h.update(f"frontend_identity={frontend_identity}".encode())
-    h.update(f"compiler_identity={compiler_identity}".encode())
-    for p in sorted(str(x.resolve()) for x in headers):
-        h.update(p.encode())
-        try:
-            h.update(str(os.path.getmtime(p)).encode())
-        except OSError:
-            pass
-    # Also hash mtimes of files in the include dirs (catches most transitive
-    # changes). extra_hash_dirs are dirs searched via *deferred* -isystem tokens
-    # (the inferred -H roots when a build context is present) rather than -I, so
-    # their contents must be folded in here too — otherwise an edit to a header
-    # transitively included from such a root would reuse a stale AST (Codex).
-    for inc_dir in sorted(str(x) for x in (*extra_includes, *extra_hash_dirs)):
-        inc_path = Path(inc_dir)
-        h.update(inc_dir.encode())
-        if inc_path.is_dir():
-            # Hash every header-like file (incl. .inl/.tcc template bodies, not
-            # just .h/.hpp) so any transitive include edit busts the key (#454).
-            for f in iter_cache_header_files(inc_path):
-                try:
-                    h.update(str(f).encode())
-                    h.update(str(f.stat().st_mtime).encode())
-                except OSError:
-                    pass
-    h.update(compiler.encode())
-    # Include toolchain parameters so different cross-compilation configs
-    # produce distinct cache entries
-    h.update(f"gcc_path={gcc_path or ''}".encode())
-    h.update(f"gcc_prefix={gcc_prefix or ''}".encode())
-    h.update(f"gcc_options={gcc_options or ''}".encode())
-    h.update(f"gcc_option_tokens={chr(0).join(gcc_option_tokens)}".encode())
-    h.update(f"sysroot={sysroot or ''}".encode())
-    h.update(f"nostdinc={nostdinc}".encode())
-    h.update(f"lang={lang or ''}".encode())
-    # Auto-probed system include dirs (castxml↔clang parity): a host-toolchain
-    # change must invalidate a cached clang dump (the resolved libstdc++ moved).
-    h.update(f"system_includes={chr(0).join(system_includes)}".encode())
-    return h.hexdigest()
-
-
-# C++ file extensions that unambiguously indicate C++ content.
-_CPP_EXTENSIONS = frozenset({".hpp", ".hxx", ".hh", ".h++", ".tpp"})
-
-# ``extern "C"`` is special: it appears in *valid C* headers (guarded by
-# ``#ifdef __cplusplus``), so its presence means "castxml parses in C++ mode" but
-# does NOT mean the header *requires* C++. It is kept out of _CPP_ONLY_PATTERNS so
-# the C→C++ retry (G16/A3) is never triggered by it — a guarded ``extern "C"``
-# header that fails in C mode failed for a real reason, and retrying as C++ would
-# skip the ``#ifndef __cplusplus`` branches and mask that error (Codex review).
-_EXTERN_C_PATTERN = re.compile(rb'^\s*extern\s+"C"')
-
-# Genuinely C++-only constructs: a *valid C* header cannot contain these, so they
-# are a reliable signal that ``--lang c`` was mis-specified and a C++ retry is the
-# right degrade. Match actual declarations, not keywords in comments (applied
-# line-by-line to non-comment lines).
-_CPP_ONLY_PATTERNS = [
-    re.compile(rb"^\s*class\s+\w+\s*[:{]"),          # class Foo { / class Foo :
-    re.compile(rb"^\s*namespace\s+\w+"),               # namespace ns
-    re.compile(rb"^\s*template\s*<"),                  # template<...>
-    re.compile(rb"^\s*using\s+\w+\s*="),               # using alias = ...
-    re.compile(rb"^\s*public\s*:"),                     # public:
-    re.compile(rb"^\s*private\s*:"),                    # private:
-    re.compile(rb"^\s*protected\s*:"),                  # protected:
-    # C++ keywords that can appear anywhere in a line (not just at start)
-    re.compile(rb"\bvirtual\s+"),                       # virtual member functions
-    re.compile(rb"(?<!\w)~\w+\s*\("),                     # destructor ~Foo()
-    re.compile(rb":\s*public\s+\w+"),                   # struct Derived : public Base
-    re.compile(rb":\s*private\s+\w+"),                  # : private Base
-    re.compile(rb":\s*protected\s+\w+"),                # : protected Base
-    re.compile(rb"\bclass\s+\w+\s*[{;]"),              # class anywhere (forward decl or def)
-    re.compile(rb"\bconst\s+\w[\w:]*\s*&"),               # const Type& reference (C++ idiom)
-    re.compile(rb"\bstatic_cast\b"),                    # C++ cast
-    re.compile(rb"\bconstexpr\b"),                      # C++ constexpr
-    re.compile(rb"\bnullptr\b"),                        # C++ nullptr
-    re.compile(rb"\bnoexcept\b"),                       # C++ noexcept
-    re.compile(rb"\boverride\b"),                           # C++ override specifier
-]
-
-# Full set used for auto language-mode detection (lang unspecified) and the
-# failure hint: here ``extern "C"`` *does* count, because castxml always parses in
-# a C++-ish mode, so an aggregate including an extern "C" header is built as .hpp.
-_CPP_PATTERNS = [_EXTERN_C_PATTERN, *_CPP_ONLY_PATTERNS]
-
-
-# Structural C++20 patterns — concepts and requires-expressions. When any
-# of these appears in a header, castxml must be invoked with a C++20-aware
-# `-std=` flag or it will fail to parse the file. The patterns target the
-# definition site (`concept X = ...`, `requires(...) {`, `template <Foo T>`-
-# style constrained template parameters) rather than uses, so we don't
-# over-trigger.
-_CPP20_PATTERNS = [
-    re.compile(rb"^\s*concept\s+\w+\s*="),          # concept Addable = ...
-    re.compile(rb"\brequires\s*\("),                # requires(T a, T b) { ... }
-    re.compile(rb"\brequires\s+\w"),                # template<T> requires Foo<T>
-]
-
-
-def _detect_cpp20_headers(header_paths: list[Path]) -> bool:
-    """Return True if any header contains C++20-only syntax (concept/requires).
-
-    Used to decide whether to pass ``-std=gnu++20`` to castxml. castxml's
-    default standard is whatever the underlying compiler defaults to
-    (usually C++17 on modern gcc), which does not accept ``concept``
-    declarations. This detection is conservative: only definition-site
-    syntax counts, not the keyword in arbitrary text.
-    """
-    for p in header_paths:
-        try:
-            content = p.read_bytes()
-        except OSError:
-            continue
-        content = re.sub(rb"/\*.*?\*/", b"", content, flags=re.DOTALL)
-        for line in content.split(b"\n"):
-            stripped = line.split(b"//")[0]
-            if any(pat.search(stripped) for pat in _CPP20_PATTERNS):
-                return True
-    return False
-
-
-def _detect_cpp_headers(
-    header_paths: list[Path], patterns: list[re.Pattern[bytes]] = _CPP_PATTERNS
-) -> bool:
-    """Auto-detect whether headers require C++ compilation mode (FIX-A).
-
-    Returns True if any header has a C++ extension or contains structural
-    C++ syntax (class/namespace/template declarations on non-comment lines).
-
-    With the default *patterns* (``_CPP_PATTERNS``) ``extern "C"`` counts as a
-    C++ indicator, because castxml always parses in a C++-ish mode and the
-    aggregate header must then be built as ``.hpp``. Pass ``_CPP_ONLY_PATTERNS``
-    to require a *genuinely C++-only* construct (excluding ``extern "C"``) — used
-    by the C→C++ retry so a valid C header is never re-parsed as C++ and have its
-    real C-mode error masked (Codex review).
-    """
-    for p in header_paths:
-        if p.suffix.lower() in _CPP_EXTENSIONS:
-            return True
-        try:
-            content = p.read_bytes()
-        except OSError:
-            continue
-        # Strip C-style block comments to reduce false positives
-        content = re.sub(rb"/\*.*?\*/", b"", content, flags=re.DOTALL)
-        for line in content.split(b"\n"):
-            # Skip C++ line comments
-            stripped = line.split(b"//")[0]
-            if any(pat.search(stripped) for pat in patterns):
-                return True
-    return False
-
-
-def _resolve_compiler_binary(
-    compiler: str,
-    gcc_path: str | None,
-    gcc_prefix: str | None,
-) -> tuple[str, str]:
-    """Resolve the compiler binary and dialect (gnu/msvc) for castxml.
-
-    Returns (cc_bin, cc_id) where cc_id is "gnu" or "msvc".
-    """
-    _cc_map = {"c++": "g++", "cc": "gcc", "g++": "g++", "gcc": "gcc",
-               "clang++": "clang++", "clang": "clang"}
-
-    if gcc_path:
-        cc_bin = gcc_path
-    elif gcc_prefix:
-        suffix = "g++" if compiler in ("c++", "g++", "clang++") else "gcc"
-        cc_bin = f"{gcc_prefix}{suffix}"
-    else:
-        cc_bin = _cc_map.get(compiler, compiler)
-
-    exe_name = Path(cc_bin).name.lower()
-    cc_id = "msvc" if exe_name in ("cl", "cl.exe") else "gnu"
-    return cc_bin, cc_id
-
-
-def _build_castxml_command(
-    cc_bin: str, cc_id: str,
-    extra_includes: list[Path],
-    out_xml: Path, agg_path: Path,
-    *,
-    sysroot: Path | None = None,
-    nostdinc: bool = False,
-    gcc_options: str | None = None,
-    gcc_option_tokens: tuple[str, ...] = (),
-    force_cpp: bool = False,
-    force_cpp20: bool = False,
-    castxml_bin: str = "castxml",
-) -> list[str]:
-    """Build the castxml command line."""
-    cmd = [castxml_bin, "--castxml-output=1",
-           f"--castxml-cc-{cc_id}", cc_bin]
-    for inc in extra_includes:
-        cmd += ["-I", str(inc)]
-
-    if sysroot:
-        cmd += [f"--sysroot={sysroot.as_posix()}"]
-    if nostdinc:
-        cmd += ["-nostdinc"]
-    if gcc_options:
-        cmd += shlex.split(gcc_options, posix=os.name != "nt")
-    # Repeatable --gcc-option: each value is one literal compiler argument,
-    # appended verbatim (no shlex split) so a flag whose value contains
-    # whitespace survives intact and identically on POSIX and Windows.
-    cmd += list(gcc_option_tokens)
-
-    explicit_std = has_explicit_std(gcc_options, gcc_option_tokens)
-    # Workaround: castxml with --castxml-cc-gnu gcc auto-injects -std=gnu++17
-    # which is rejected when parsing a .h file in C mode. Force C mode, but only
-    # impose gnu11 when the user did not request a C standard via --gcc-option(s)
-    # — otherwise their -std=gnu17/c99 would be overridden by a later flag.
-    if not force_cpp and cc_id == "gnu":
-        cmd += ["-x", "c"]
-        if not explicit_std:
-            cmd += ["-std=gnu11"]
-    elif force_cpp20 and not explicit_std:
-        # Headers contain C++20-only syntax (concept / requires-expression).
-        # Castxml's default standard is whatever the host compiler picks
-        # (usually C++17 on modern gcc / MSVC), which rejects concepts.
-        # Force C++20 unless the caller already supplied an explicit -std=.
-        # MSVC uses /std:c++20; gcc/clang use -std=gnu++20.
-        if cc_id == "msvc":
-            cmd += ["/std:c++20"]
-        else:
-            cmd += ["-x", "c++", "-std=gnu++20"]
-
-    cmd += ["-o", str(out_xml), str(agg_path)]
-    return cmd
 
 
 # clang's diagnostic for an unrecognised sized-float keyword, e.g.
@@ -941,21 +752,31 @@ def _validate_castxml_output(
     out_xml: Path,
     headers: list[Path],
     force_cpp: bool,
+    castxml_bin: str = "castxml",
 ) -> Element:
     """Validate castxml output and return parsed XML root."""
     if result.returncode != 0:
         # Only probe `castxml --version` when the failure is a frontend-too-old
         # signature — otherwise the upgrade note is irrelevant (and unused).
-        version_note = _castxml_version_note() if _is_toolchain_version_failure(result.stderr) else ""
+        version_note = (
+            _castxml_version_note(castxml_bin)
+            if _is_toolchain_version_failure(result.stderr)
+            else ""
+        )
         hint = _castxml_failure_hint(
-            result.stderr, force_cpp=force_cpp, headers=headers,
+            result.stderr,
+            force_cpp=force_cpp,
+            headers=headers,
             version_note=version_note,
         )
-        message = f"castxml failed (exit {result.returncode}):\n{result.stderr[:2000]}{hint}"
+        message = (
+            f"castxml failed (exit {result.returncode}):\n{result.stderr[:2000]}{hint}"
+        )
         # Must mirror _castxml_failure_hint's case-3 predicate exactly
         # (_CPP_ONLY_PATTERNS) or the class and hint text disagree.
         is_toolchain = _is_toolchain_version_failure(result.stderr) or (
-            not force_cpp and _detect_cpp_headers(headers, _CPP_ONLY_PATTERNS))
+            not force_cpp and _detect_cpp_headers(headers, _CPP_ONLY_PATTERNS)
+        )
         raise (HeaderToolchainError if is_toolchain else SnapshotError)(message)
     if not out_xml.exists() or out_xml.stat().st_size == 0:
         stderr_snippet = result.stderr[:1000].strip()
@@ -1000,6 +821,8 @@ def _castxml_dump(
     nostdinc: bool = False,
     lang: str | None = None,
     extra_hash_dirs: tuple[Path, ...] = (),
+    castxml_bin: str | None = None,
+    _selected_tool_out: list[str] | None = None,
 ) -> Element:
     """Run castxml on headers and return parsed XML root.
 
@@ -1012,7 +835,9 @@ def _castxml_dump(
         nostdinc: If True, do not search standard system include paths.
         lang: Force language ("C" or "C++").  If "C", aggregated header uses .h extension.
     """
-    if not _castxml_available():
+    try:
+        castxml_bin = castxml_bin or _resolve_selected_tool("castxml")
+    except OSError as exc:
         raise SnapshotError(
             "castxml not found in PATH. Install with: apt install castxml, "
             "brew install castxml, conda install -c conda-forge castxml, "
@@ -1021,19 +846,44 @@ def _castxml_dump(
             "ABICHECK_AST_FRONTEND=clang) to use the clang JSON-AST backend "
             "instead — note it does not carry record size/alignment/offset "
             "layout, so layout-only breaks need castxml or debug info (L1)."
-        )
+        ) from exc
+    if _selected_tool_out is not None:
+        _selected_tool_out.append(castxml_bin)
 
-    cc_bin, cc_id = _resolve_compiler_binary(compiler, gcc_path, gcc_prefix)
-    castxml_bin = "castxml"
+    # Determine language before selecting the emulated compiler: C mode uses
+    # gcc/cc, not g++, and both cache identity and execution must describe the
+    # same driver.
+    force_cpp = bool(lang and lang.upper() in ("C++", "CPP"))
+    if not lang:
+        force_cpp = _detect_cpp_headers(headers) or has_explicit_cpp_std(
+            gcc_options, gcc_option_tokens
+        )
+    resolved_compiler = compiler
+    if not force_cpp and not gcc_path and not gcc_prefix:
+        resolved_compiler = {
+            "c++": "cc",
+            "g++": "gcc",
+            "clang++": "clang",
+        }.get(compiler, compiler)
+    cc_bin, cc_id = _resolve_compiler_binary(resolved_compiler, gcc_path, gcc_prefix)
+    # Freeze PATH selection for the actual CastXML invocation. Keep an explicit
+    # unresolved path/name intact so CastXML can provide its native diagnostic.
+    cc_bin = shutil.which(cc_bin) or cc_bin
     frontend_identity = _tool_identity(castxml_bin)
     compiler_identity = _tool_identity(cc_bin)
 
     # Check disk cache
     key = _cache_key(
-        headers, extra_includes, compiler,
-        gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+        headers,
+        extra_includes,
+        compiler,
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
+        gcc_options=gcc_options,
         gcc_option_tokens=gcc_option_tokens,
-        sysroot=sysroot, nostdinc=nostdinc, lang=lang,
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+        lang=lang,
         extra_hash_dirs=extra_hash_dirs,
         frontend_identity=frontend_identity,
         compiler_identity=compiler_identity,
@@ -1058,18 +908,17 @@ def _castxml_dump(
     with tempfile.NamedTemporaryFile(suffix=".xml", delete=False) as tmp:
         out_xml = Path(tmp.name)
 
-    # Determine language mode: .h / C parse for C-only, .hpp / C++ for C++ (FIX-A).
-    force_cpp = bool(lang and lang.upper() in ("C++", "CPP"))
-    if not lang:
-        force_cpp = _detect_cpp_headers(headers) or has_explicit_cpp_std(
-            gcc_options, gcc_option_tokens
-        )
-
     try:
         try:
             root = _run_castxml_attempt(
-                cc_bin, cc_id, headers, extra_includes, out_xml,
-                sysroot=sysroot, nostdinc=nostdinc, gcc_options=gcc_options,
+                cc_bin,
+                cc_id,
+                headers,
+                extra_includes,
+                out_xml,
+                sysroot=sysroot,
+                nostdinc=nostdinc,
+                gcc_options=gcc_options,
                 gcc_option_tokens=gcc_option_tokens,
                 force_cpp=force_cpp,
                 castxml_bin=castxml_bin,
@@ -1098,8 +947,14 @@ def _castxml_dump(
             )
             try:
                 root = _run_castxml_attempt(
-                    cc_bin, cc_id, headers, extra_includes, out_xml,
-                    sysroot=sysroot, nostdinc=nostdinc, gcc_options=gcc_options,
+                    cc_bin,
+                    cc_id,
+                    headers,
+                    extra_includes,
+                    out_xml,
+                    sysroot=sysroot,
+                    nostdinc=nostdinc,
+                    gcc_options=gcc_options,
                     gcc_option_tokens=gcc_option_tokens,
                     force_cpp=True,
                     castxml_bin=castxml_bin,
@@ -1113,7 +968,9 @@ def _castxml_dump(
             _tool_identity(castxml_bin) != frontend_identity
             or _tool_identity(cc_bin) != compiler_identity
         ):
-            log.warning("AST toolchain changed during CastXML execution; skipping cache write")
+            log.warning(
+                "AST toolchain changed during CastXML execution; skipping cache write"
+            )
         else:
             try:
                 _atomic_write(cached, out_xml.read_bytes())
@@ -1131,7 +988,8 @@ def _castxml_dump(
 
 
 def _run_castxml_attempt(
-    cc_bin: str, cc_id: str,
+    cc_bin: str,
+    cc_id: str,
     headers: list[Path],
     extra_includes: list[Path],
     out_xml: Path,
@@ -1164,8 +1022,14 @@ def _run_castxml_attempt(
         agg_path = Path(agg.name)
 
     cmd = _build_castxml_command(
-        cc_bin, cc_id, extra_includes, out_xml, agg_path,
-        sysroot=sysroot, nostdinc=nostdinc, gcc_options=gcc_options,
+        cc_bin,
+        cc_id,
+        extra_includes,
+        out_xml,
+        agg_path,
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+        gcc_options=gcc_options,
         gcc_option_tokens=gcc_option_tokens,
         force_cpp=force_cpp,
         force_cpp20=force_cpp20,
@@ -1175,11 +1039,17 @@ def _run_castxml_attempt(
     try:
         deadline.check()  # propagates uncaught, like _clang_header_dump._run_clang
         try:
-            result = deadline.run_bounded(cmd, capture_output=True, text=True, timeout=120)
+            result = deadline.run_bounded(
+                cmd, capture_output=True, text=True, timeout=120
+            )
         except subprocess.TimeoutExpired as exc:
             stderr_snippet = ""
             if exc.stderr:
-                text = exc.stderr if isinstance(exc.stderr, str) else exc.stderr.decode("utf-8", errors="replace")
+                text = (
+                    exc.stderr
+                    if isinstance(exc.stderr, str)
+                    else exc.stderr.decode("utf-8", errors="replace")
+                )
                 stderr_snippet = f"\nPartial stderr: {text[:1000].strip()}"
             raise SnapshotError(
                 f"castxml timed out after 120 seconds. The header file may contain "
@@ -1187,10 +1057,11 @@ def _run_castxml_attempt(
                 f"is valid and can be compiled with gcc/g++. The castxml process "
                 f"(and any child processes) has been terminated.{stderr_snippet}"
             ) from exc
-        return _validate_castxml_output(result, out_xml, headers, force_cpp)
+        return _validate_castxml_output(
+            result, out_xml, headers, force_cpp, castxml_bin=castxml_bin
+        )
     finally:
         agg_path.unlink(missing_ok=True)
-
 
 
 # castxml parser + helpers moved to dumper_castxml (see top-of-file imports)
@@ -1221,7 +1092,10 @@ class _FormatHandler:
     def matches_magic(self, magic: bytes) -> bool:
         if magic in self.magics:
             return True
-        if self.magic_prefix is not None and magic[: len(self.magic_prefix)] == self.magic_prefix:
+        if (
+            self.magic_prefix is not None
+            and magic[: len(self.magic_prefix)] == self.magic_prefix
+        ):
             return True
         return False
 
@@ -1312,12 +1186,36 @@ def dump(
     """
     if _resolve_header_backend(header_backend) == "hybrid":
         from .dumper_hybrid import run_hybrid_dump
-        return run_hybrid_dump(dump, so_path, headers, extra_includes=extra_includes, version=version, compiler=compiler, gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options, gcc_option_tokens=gcc_option_tokens, sysroot=sysroot, nostdinc=nostdinc, lang=lang, dwarf_only=dwarf_only, debug_format=debug_format, symbols_only=symbols_only, debug_presence_only=debug_presence_only, public_headers=public_headers, public_header_dirs=public_header_dirs, extra_hash_dirs=extra_hash_dirs, debug_info_path=debug_info_path)
+
+        return run_hybrid_dump(
+            dump,
+            so_path,
+            headers,
+            extra_includes=extra_includes,
+            version=version,
+            compiler=compiler,
+            gcc_path=gcc_path,
+            gcc_prefix=gcc_prefix,
+            gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens,
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            lang=lang,
+            dwarf_only=dwarf_only,
+            debug_format=debug_format,
+            symbols_only=symbols_only,
+            debug_presence_only=debug_presence_only,
+            public_headers=public_headers,
+            public_header_dirs=public_header_dirs,
+            extra_hash_dirs=extra_hash_dirs,
+            debug_info_path=debug_info_path,
+        )
 
     fmt = _detect_format(so_path)
     handler = _HANDLERS_BY_NAME.get(fmt)
     if handler is None:
         from .binary_utils import detect_archive
+
         if detect_archive(so_path):
             raise ValidationError(
                 f"'{so_path}' is a static/import library archive (.a/.lib); abicheck compares single linkable images "
@@ -1340,12 +1238,22 @@ def dump(
         extra["debug_presence_only"] = debug_presence_only
         extra["debug_info_path"] = debug_info_path
     snapshot = handler.builder(
-        so_path, headers, extra_includes or [], version, compiler,
-        gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+        so_path,
+        headers,
+        extra_includes or [],
+        version,
+        compiler,
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
+        gcc_options=gcc_options,
         gcc_option_tokens=gcc_option_tokens,
-        sysroot=sysroot, nostdinc=nostdinc, lang=lang,
-        public_headers=public_headers, public_header_dirs=public_header_dirs,
-        header_backend=header_backend, extra_hash_dirs=extra_hash_dirs,
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+        lang=lang,
+        public_headers=public_headers,
+        public_header_dirs=public_header_dirs,
+        header_backend=header_backend,
+        extra_hash_dirs=extra_hash_dirs,
         **extra,
     )
 
@@ -1360,6 +1268,7 @@ def dump(
     # source_header from the parsed source location; origin is only
     # classified when a public-header set is supplied (ADR-015, D4).
     from .provenance import apply_provenance
+
     return apply_provenance(snapshot, public_headers, public_header_dirs)
 
 
@@ -1412,7 +1321,8 @@ def _elf_classify_symbols(
         # would otherwise re-enter the symbol-only ABI surface as ELF_ONLY
         # functions. Keeping it consistent with the DWARF-backed path.
         exported_dynamic_funcs = {
-            sym.name for sym in elf_meta.symbols
+            sym.name
+            for sym in elf_meta.symbols
             if sym.sym_type in (SymbolType.FUNC, SymbolType.IFUNC, SymbolType.NOTYPE)
             and is_abi_relevant_elf_symbol(
                 sym.name,
@@ -1420,7 +1330,8 @@ def _elf_classify_symbols(
             )
         }
         exported_dynamic_objects = {
-            sym.name for sym in elf_meta.symbols
+            sym.name
+            for sym in elf_meta.symbols
             if sym.sym_type == SymbolType.OBJECT
             and is_abi_relevant_elf_symbol(
                 sym.name,
@@ -1428,7 +1339,8 @@ def _elf_classify_symbols(
             )
         }
         exported_dynamic_tls = {
-            sym.name for sym in elf_meta.symbols
+            sym.name
+            for sym in elf_meta.symbols
             if sym.sym_type == SymbolType.TLS
             and is_abi_relevant_elf_symbol(
                 sym.name,
@@ -1436,8 +1348,15 @@ def _elf_classify_symbols(
             )
         }
         # Full set for CastxmlParser: determines PUBLIC vs ELF_ONLY visibility
-        exported_dynamic = exported_dynamic_funcs | exported_dynamic_objects | exported_dynamic_tls
-    return exported_dynamic, exported_dynamic_funcs, exported_dynamic_objects, exported_dynamic_tls
+        exported_dynamic = (
+            exported_dynamic_funcs | exported_dynamic_objects | exported_dynamic_tls
+        )
+    return (
+        exported_dynamic,
+        exported_dynamic_funcs,
+        exported_dynamic_objects,
+        exported_dynamic_tls,
+    )
 
 
 def _lang_to_profile(lang: str | None) -> str | None:
@@ -1630,10 +1549,14 @@ def _dump_elf(
     """ELF-specific dump: pyelftools + debug info (DWARF/BTF/CTF) + header AST."""
     exported_dynamic, exported_static = _pyelftools_exported_symbols(so_path)
     from .elf_metadata import parse_elf_metadata
+
     elf_meta = parse_elf_metadata(so_path)
-    exported_dynamic, exported_dynamic_funcs, exported_dynamic_objects, exported_dynamic_tls = (
-        _elf_classify_symbols(elf_meta, exported_dynamic, library_name=so_path.name)
-    )
+    (
+        exported_dynamic,
+        exported_dynamic_funcs,
+        exported_dynamic_objects,
+        exported_dynamic_tls,
+    ) = _elf_classify_symbols(elf_meta, exported_dynamic, library_name=so_path.name)
     # A DWARF metadata parse that finds real debug info leaves its open
     # DwarfSession in ``_dwarf_session_out`` so the snapshot build below can
     # reuse the same DWARFInfo (and its warm DIE cache) rather than re-parsing
@@ -1649,10 +1572,21 @@ def _dump_elf(
     try:
         if symbols_only or debug_presence_only:
             from .dwarf_presence import cheap_debug_presence_metadata
-            dwarf_meta, dwarf_adv = cheap_debug_presence_metadata(so_path, debug_format=debug_format)
+
+            dwarf_meta, dwarf_adv = cheap_debug_presence_metadata(
+                so_path, debug_format=debug_format
+            )
         else:
-            dwarf_meta, dwarf_adv = _resolve_debug_metadata(so_path, debug_format, _session_out=_dwarf_session_out, _format_out=_dwarf_format_out, dwarf_source=debug_info_path)
-        resolved_debug_format = _dwarf_format_out[0] if _dwarf_format_out else debug_format
+            dwarf_meta, dwarf_adv = _resolve_debug_metadata(
+                so_path,
+                debug_format,
+                _session_out=_dwarf_session_out,
+                _format_out=_dwarf_format_out,
+                dwarf_source=debug_info_path,
+            )
+        resolved_debug_format = (
+            _dwarf_format_out[0] if _dwarf_format_out else debug_format
+        )
         dwarf_session = _dwarf_session_out[0] if _dwarf_session_out else None
         profile_hint = _lang_to_profile(lang)
         # ADR-003 fallback chain: --dwarf-only forces DWARF mode; no headers +
@@ -1661,35 +1595,75 @@ def _dump_elf(
         # mirrors BTF/CTF presence too, and --dwarf-only + --debug-format
         # btf/ctf resolves no real DWARF either — Codex review, twice).
         if dwarf_only and resolved_debug_format != "dwarf":
-            warnings.warn(f"--dwarf-only requested but resolved debug format is {resolved_debug_format!r}; ignoring.", UserWarning, stacklevel=2)
-        if not (symbols_only or debug_presence_only) and resolved_debug_format == "dwarf" and (
-            dwarf_only or (not headers and dwarf_meta.has_dwarf)
+            warnings.warn(
+                f"--dwarf-only requested but resolved debug format is {resolved_debug_format!r}; ignoring.",
+                UserWarning,
+                stacklevel=2,
+            )
+        if (
+            not (symbols_only or debug_presence_only)
+            and resolved_debug_format == "dwarf"
+            and (dwarf_only or (not headers and dwarf_meta.has_dwarf))
         ):
             snap, dwarf_only_types = _try_dwarf_snapshot(
-                so_path, elf_meta, dwarf_meta, dwarf_adv,
-                version, profile_hint, headers, dwarf_only,
+                so_path,
+                elf_meta,
+                dwarf_meta,
+                dwarf_adv,
+                version,
+                profile_hint,
+                headers,
+                dwarf_only,
                 session=dwarf_session,
             )
             if snap is not None:
                 return snap
         if symbols_only or not headers:
             return _build_symbol_only_snapshot(
-                so_path, version, elf_meta, dwarf_meta, dwarf_adv,
-                exported_dynamic_funcs, exported_dynamic_objects, exported_dynamic_tls,
-                dwarf_only_types, profile_hint,
+                so_path,
+                version,
+                elf_meta,
+                dwarf_meta,
+                dwarf_adv,
+                exported_dynamic_funcs,
+                exported_dynamic_objects,
+                exported_dynamic_tls,
+                dwarf_only_types,
+                profile_hint,
             )
         # Built here (session still open): the "auto" frontend can fall back to clang internally (G16) even when _resolve_header_backend guesses castxml, so the actual parser type is the only reliable signal below (Codex review).
         parser = _header_ast_parser(
-            headers, extra_includes, backend=header_backend, compiler=compiler,
-            gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+            headers,
+            extra_includes,
+            backend=header_backend,
+            compiler=compiler,
+            gcc_path=gcc_path,
+            gcc_prefix=gcc_prefix,
+            gcc_options=gcc_options,
             gcc_option_tokens=gcc_option_tokens,
-            sysroot=sysroot, nostdinc=nostdinc, lang=lang,
-            exported_dynamic=exported_dynamic, exported_static=exported_static,
-            public_header_paths=[str(h) for h in headers] + [str(h) for h in (public_headers or [])],
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            lang=lang,
+            exported_dynamic=exported_dynamic,
+            exported_static=exported_static,
+            public_header_paths=[str(h) for h in headers]
+            + [str(h) for h in (public_headers or [])],
             public_dir_paths=[str(d) for d in (public_header_dirs or [])],
             extra_hash_dirs=extra_hash_dirs,
         )
-        dwarf_layout_types = dwarf_layout_types_or_empty(so_path, elf_meta, dwarf_meta, dwarf_adv, isinstance(parser, _ClangAstParser), symbols_only=symbols_only, debug_presence_only=debug_presence_only, debug_format=resolved_debug_format, version=version, language_profile=profile_hint, session=dwarf_session)
+        dwarf_layout_types = dwarf_layout_types_or_empty(
+            so_path,
+            elf_meta,
+            dwarf_meta,
+            dwarf_adv,
+            isinstance(parser, _ClangAstParser),
+            symbols_only=symbols_only,
+            debug_presence_only=debug_presence_only,
+            debug_format=resolved_debug_format,
+            version=version,
+            language_profile=profile_hint,
+            session=dwarf_session,
+        )
     finally:
         for _sess in _dwarf_session_out:
             _sess.close()
@@ -1757,7 +1731,8 @@ def _dump_macho(
     macho_meta = parse_macho_metadata(dylib_path)
     # Build exported symbol set from Mach-O export table
     exported_dynamic: set[str] = {
-        exp.name for exp in macho_meta.exports
+        exp.name
+        for exp in macho_meta.exports
         if exp.name and _is_abi_relevant_symbol(exp.name)
     }
 
@@ -1769,6 +1744,7 @@ def _dump_macho(
             "No headers provided — only Mach-O exported symbols will be captured; "
             "type information will be missing."
         )
+
         # Normalize Mach-O leading underscore: _foo → foo, __Z... → _Z...
         def _normalize_macho_sym(s: str) -> str:
             if s.startswith("_"):
@@ -1778,7 +1754,8 @@ def _dump_macho(
         # Split exports into functions (__TEXT) and variables (__DATA)
         # using section classification from Mach-O nlist entries.
         _relevant = [
-            exp for exp in macho_meta.exports
+            exp
+            for exp in macho_meta.exports
             if exp.name and _is_abi_relevant_symbol(exp.name)
         ]
         macho_funcs = [exp for exp in _relevant if not exp.is_data]
@@ -1832,12 +1809,21 @@ def _dump_macho(
     # falling back to export-table-only mode (observed on macOS CI; the
     # equivalent ELF path never had this double-strip).
     parser = _header_ast_parser(
-        headers, extra_includes, backend=header_backend, compiler=compiler,
-        gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+        headers,
+        extra_includes,
+        backend=header_backend,
+        compiler=compiler,
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
+        gcc_options=gcc_options,
         gcc_option_tokens=gcc_option_tokens,
-        sysroot=sysroot, nostdinc=nostdinc, lang=lang,
-        exported_dynamic=exported_dynamic, exported_static=exported_dynamic,
-        public_header_paths=[str(h) for h in headers] + [str(h) for h in (public_headers or [])],
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+        lang=lang,
+        exported_dynamic=exported_dynamic,
+        exported_static=exported_dynamic,
+        public_header_paths=[str(h) for h in headers]
+        + [str(h) for h in (public_headers or [])],
         public_dir_paths=[str(d) for d in (public_header_dirs or [])],
         extra_hash_dirs=extra_hash_dirs,
     )
@@ -1892,8 +1878,7 @@ def _dump_pe(
 
     pe_meta = parse_pe_metadata(dll_path)
     exported_dynamic: set[str] = {
-        (exp.name or f"ordinal:{exp.ordinal}")
-        for exp in pe_meta.exports
+        (exp.name or f"ordinal:{exp.ordinal}") for exp in pe_meta.exports
     }
     exported_static: set[str] = set(exported_dynamic)
 
@@ -1915,7 +1900,9 @@ def _dump_pe(
             source_size=_safe_size(dll_path),
             functions=[
                 Function(
-                    name=sym, mangled=sym, return_type="?",
+                    name=sym,
+                    mangled=sym,
+                    return_type="?",
                     visibility=Visibility.ELF_ONLY,
                     is_extern_c=not sym.startswith("?"),
                 )
@@ -1928,12 +1915,21 @@ def _dump_pe(
         )
 
     parser = _header_ast_parser(
-        headers, extra_includes, backend=header_backend, compiler=compiler,
-        gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+        headers,
+        extra_includes,
+        backend=header_backend,
+        compiler=compiler,
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
+        gcc_options=gcc_options,
         gcc_option_tokens=gcc_option_tokens,
-        sysroot=sysroot, nostdinc=nostdinc, lang=lang,
-        exported_dynamic=exported_dynamic, exported_static=exported_static,
-        public_header_paths=[str(h) for h in headers] + [str(h) for h in (public_headers or [])],
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+        lang=lang,
+        exported_dynamic=exported_dynamic,
+        exported_static=exported_static,
+        public_header_paths=[str(h) for h in headers]
+        + [str(h) for h in (public_headers or [])],
         public_dir_paths=[str(d) for d in (public_header_dirs or [])],
         extra_hash_dirs=extra_hash_dirs,
     )
@@ -1983,10 +1979,14 @@ _FORMAT_HANDLERS: tuple[_FormatHandler, ...] = (
         name="macho",
         builder=_dump_macho,
         magics=(
-            b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe",
-            b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe",
-            b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca",
-            b"\xca\xfe\xba\xbf", b"\xbf\xba\xfe\xca",
+            b"\xfe\xed\xfa\xce",
+            b"\xce\xfa\xed\xfe",
+            b"\xfe\xed\xfa\xcf",
+            b"\xcf\xfa\xed\xfe",
+            b"\xca\xfe\xba\xbe",
+            b"\xbe\xba\xfe\xca",
+            b"\xca\xfe\xba\xbf",
+            b"\xbf\xba\xfe\xca",
         ),
         accepts_dwarf_only=True,
     ),

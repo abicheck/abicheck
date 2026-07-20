@@ -1,6 +1,6 @@
 # case188_public_class_private_base_class — Public class gains a private base class
 
-**Verdict:** 🔴 BREAKING · **Findings:** `type_base_changed`/`struct_size_changed`/`struct_field_offset_changed` (artifact-proven) + `public_api_internal_dependency_added` (L5, correlated) · **Evidence tier:** L1 for the verdict; L5 (`--header-graph`) for the risk finding
+**Verdict:** 🔴 BREAKING · **Findings:** `type_base_changed`/`struct_size_changed`/`struct_field_offset_changed` (artifact-proven) + `public_api_internal_dependency_added` (L5, correlated) · **Evidence tier:** L1 for the verdict; L5 (the L2 header-only graph, built automatically for `--depth headers` and above) for the risk finding
 
 This is a real, compiled `v1`/`v2` example, verified end-to-end against gcc
 and clang.
@@ -19,7 +19,7 @@ as BREAKING via `type_base_changed`/`type_size_changed`/
 default `debug-headers` lane catches this. The **Real Failure Demo** below
 shows the concrete runtime corruption this causes.
 
-Layered on top, `dump --header-graph` additionally proves, via the L5 source
+Layered on top, the L2 header-only graph (built automatically) additionally proves, via the L5 source
 graph, that `demo::PublicHandle` newly carries a `TYPE_INHERITS` edge to
 `demo::detail::InternalBase` — a dependency it did not have in v1 — and
 reports `public_api_internal_dependency_added`. This is *correlated context*
@@ -51,9 +51,10 @@ python3 -m abicheck.cli dump libv2.so --header v2.h -o v2.json
 python3 -m abicheck.cli compare v1.json v2.json
 # → BREAKING: type_base_changed, struct_size_changed, struct_field_offset_changed
 
-# With --header-graph: the same BREAKING verdict, plus the L5 risk finding.
-python3 -m abicheck.cli dump libv1.so --header v1.h --public-header v1.h --header-graph -o v1.json
-python3 -m abicheck.cli dump libv2.so --header v2.h --public-header v2.h --header-graph -o v2.json
+# With --public-header set: the same BREAKING verdict, plus the L5 risk
+# finding — the L2 header-only graph builds automatically, no flag needed.
+python3 -m abicheck.cli dump libv1.so --header v1.h --public-header v1.h -o v1.json
+python3 -m abicheck.cli dump libv2.so --header v2.h --public-header v2.h -o v2.json
 python3 -m abicheck.cli compare v1.json v2.json
 # → BREAKING: type_base_changed, public_api_internal_dependency_added
 #   Proof path: use_handle --[DECL_HAS_TYPE]--> demo::PublicHandle

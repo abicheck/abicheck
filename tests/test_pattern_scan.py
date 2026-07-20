@@ -21,6 +21,7 @@ walk are covered. Pure-Python, no external tools — runs in the default lane.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -690,15 +691,12 @@ def test_scan_files_parallel_counts_unreadable_as_skipped(
     assert result.files_skipped == 1
 
 
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFO requires POSIX")
 def test_iter_source_files_skips_fifo(tmp_path: Path) -> None:
     # A FIFO with a header-like name must not be enqueued — opening it would
     # block the pre-scan (Codex review). Skip on platforms without os.mkfifo.
-    import os
-
-    if not hasattr(os, "mkfifo"):
-        pytest.skip("no os.mkfifo on this platform")
     (tmp_path / "real.hpp").write_text("struct S { virtual void f(); };")
-    os.mkfifo(tmp_path / "pipe.hpp")
+    getattr(os, "mkfifo")(tmp_path / "pipe.hpp")
     names = {p.name for p in iter_source_files([tmp_path])}
     assert "real.hpp" in names
     assert "pipe.hpp" not in names

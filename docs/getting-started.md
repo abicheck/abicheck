@@ -52,12 +52,22 @@ All Python dependencies (`pyelftools`, `pefile`, `macholib`) come with the `abic
 > automatically). If you have no `castxml`, run **binary-only mode** by omitting the
 > header flags — abicheck falls back to DWARF/symbols analysis (weaker, but works).
 
-#### Option A: system packages
+#### Option A: conda-forge (recommended)
+
+Conda-forge supplies CastXML together with a compatible compiler toolchain:
 
 ```bash
-# Ubuntu / Debian
-sudo apt-get update && sudo apt-get install -y castxml gcc g++
+conda install -c conda-forge castxml
 ```
+
+#### Option B: pinned CastXML Superbuild (Ubuntu CI/reproducers)
+
+Ubuntu 24.04's `apt` package currently bundles Clang 17, which cannot parse
+some GCC 13 libstdc++ headers. For reproducible Ubuntu runs, use a
+[CastXML Superbuild release](https://github.com/CastXML/CastXMLSuperbuild/releases),
+pin its tag and SHA256, extract it to a versioned directory, and prepend its
+`bin` directory to `PATH`. The abicheck GitHub Action does this automatically.
+The current CI pin is `v2026.01.30` (bundled Clang 21.1.8).
 
 ```bash
 # macOS
@@ -71,7 +81,7 @@ choco install castxml
 # plus MSVC Build Tools (cl.exe) for PE/PDB debug-info analysis
 ```
 
-#### Option B: conda-forge (recommended for reproducible envs)
+#### Option C: conda-forge abicheck environment
 
 ```bash
 # create env and install abicheck (recipe includes required analysis deps)
@@ -98,7 +108,7 @@ pip install -e .
 gives abicheck the most evidence to work with (see the
 [input-quality ladder](#input-quality-the-five-evidence-layers-l0l4) below).
 
-The repo includes 193 ABI scenario examples. Most are single-library cases with
+The repo includes 195 ABI scenario examples. Most are single-library cases with
 paired `v1`/`v2` sources and headers; the L3/L4/L5 build/source-only cases
 (152–164) ship hand-built evidence-model fixture pairs; bundle/release-level
 cases use release-style layouts.

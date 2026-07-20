@@ -267,15 +267,16 @@ def embed_build_source(
     merged = _combine_packs(bi_pack, sources_supplier, inline_backfill)
     if merged is None:
         return
-    # ADR-041 addendum: a `dump --header-graph` pass already attached a
-    # header-only L5 pack to `snap.build_source` before this function ran
-    # (see service._attach_header_graph, called from cli_dump_helpers before
-    # write_snapshot_output). `_combine_packs` above only sees bi_pack/
-    # src_pack/inline_pack, so a plain `snap.build_source = merged` would
-    # silently drop that graph whenever this embed step supplies any L3/L4/L5
-    # facts of its own (even build-only facts with no graph) — a `dump
-    # --header-graph --build-info ...` snapshot would then serialize without
-    # the very graph the user asked for (Codex review). Backfill only: a
+    # ADR-041 addendum / G29 Phase A: the always-on header-only-graph attach
+    # already ran and attached a header-only L5 pack to `snap.build_source`
+    # before this function ran (see service._attach_header_graph, called from
+    # cli_dump_helpers before write_snapshot_output). `_combine_packs` above
+    # only sees bi_pack/src_pack/inline_pack, so a plain
+    # `snap.build_source = merged` would silently drop that graph whenever
+    # this embed step supplies any L3/L4/L5 facts of its own (even
+    # build-only facts with no graph) — a `dump --build-info ...` snapshot
+    # would then serialize without the graph that is now always built
+    # (Codex review). Backfill only: a
     # genuine --sources L5 collection in `merged` always wins; the header-only
     # graph fills the gap only when `merged` carries none. Patched in field-by-
     # field (not via a chained _combine_packs(merged, None, existing) call)

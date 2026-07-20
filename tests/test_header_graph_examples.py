@@ -12,19 +12,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Live proof that ``dump --header-graph`` runs against real compiled headers
-for case187/188/189/191, and reproduces the ``public_api_internal_dependency_added``
+"""Live proof that ``dump`` (with ``--depth headers`` evidence) builds the L2
+header-only semantic graph against real compiled headers for
+case187/188/189/191, and reproduces the ``public_api_internal_dependency_added``
 finding each case's README documents.
+
+G29 Phase A: the graph is now always attempted whenever headers are parsed —
+no ``--header-graph`` flag is passed below any more (the flag still exists as
+a hidden, deprecated no-op shim; see ``test_cli_coverage_extra.py`` /
+``test_compare_dispatch.py`` for shim-specific coverage).
 
 These four cases ship real ``v1``/``v2`` sources (not hand-built graph
 fixtures): a real field/base/parameter-type change to an internal type is
 never invisible to the plain binary+header lane (that lane alone already
 proves BREAKING via a structural ``ChangeKind`` — see
 ``tests/test_example_autodiscovery.py``), so the L5 risk finding these cases
-are named after needs its own dedicated live check that actually passes
-``--header-graph`` — the exact reproduction commands documented in each
-README's "How to reproduce" section, executed for real rather than only
-described. See ``validation/scripts/collect_full_example_matrix.py``'s
+are named after needs its own dedicated live check that actually reproduces
+it — the exact reproduction commands documented in each README's "How to
+reproduce" section, executed for real rather than only described. See
+``validation/scripts/collect_full_example_matrix.py``'s
 ``HEADER_GRAPH_PROOF_CASES`` for how these are excluded from the
 build-integrated (``--sources``/``--build-info``) proof lane, which this
 family deliberately does not use.
@@ -107,7 +113,7 @@ pytestmark = [
         shutil.which("clang") is None,
         reason="clang required for the header-only type-graph pass",
     ),
-    # The `dump --header-graph` call below never passes --ast-frontend clang
+    # The `dump` call below never passes --ast-frontend clang
     # (nor sets ABICHECK_AST_FRONTEND), so the L2 header parse resolves to
     # "auto" -> castxml (dumper.py: "auto resolves to castxml and never
     # silently falls back to clang on castxml-less hosts" -- the automatic
@@ -188,7 +194,6 @@ def test_header_graph_reproduces_documented_finding(
                 str(case_dir / header),
                 "--public-header",
                 str(case_dir / header),
-                "--header-graph",
                 "-o",
                 str(out),
             ],

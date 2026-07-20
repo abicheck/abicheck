@@ -45,7 +45,7 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "2"
+_SNAPSHOT_CACHE_VERSION: str = "3"
 # v2: castxml's CvQualifiedType type-name spelling changed for a
 # volatile-qualified pointer/reference VALUE (now a suffix, "T * volatile",
 # matching clang's own convention, rather than always a prefix) -- an
@@ -56,6 +56,24 @@ _SNAPSHOT_CACHE_VERSION: str = "2"
 # constant is specifically for the separate whole-snapshot disk cache
 # (snapshot_cache.py), which persists across process invocations and isn't
 # gated by that schema version at all.
+#
+# v3 (G29 Phase A): the L2 header-only semantic graph became unconditional
+# (previously gated behind the now-removed --header-graph/--header-graph-includes
+# flags). service_dump_cache._dump_is_cacheable() allows the same plain
+# "binary + public headers" shape onto this cache that a pre-upgrade,
+# no-graph dump would already have stored under v2 -- without this bump, a
+# warm cache from before the upgrade would be replayed verbatim and silently
+# omit the new default-on graph until manually cleared (Codex review).
+#
+# Also folded into v3's key computation (_cache_key below): before G31 Phase
+# A, a header-graph-enabled dump was *always* uncacheable, so a transitively
+# included header changing under one of the ``-I``/``includes`` directories
+# (e.g. a public header pulling in ``inc/detail.h``) always forced a live
+# re-dump. Now that the same plain shape is cacheable, ``_cache_key`` walks
+# each include directory and folds in the (path, mtime) of every header-like
+# file found there -- not just the directory's own path -- so a transitive
+# header edit invalidates the cache the same way editing an explicitly
+# passed header already does (Codex review).
 
 
 def _get_cache_dir() -> Path:
@@ -68,12 +86,45 @@ def _get_cache_dir() -> Path:
             base = Path.home() / ".cache"
         except RuntimeError:
             import tempfile
+
             base = Path(tempfile.gettempdir())
     return base / "abi_check" / "snapshots"
 
 
 # Module-level reference (can be monkeypatched in tests).
 _CACHE_DIR: Path = _get_cache_dir()
+
+
+def _hash_include_dir_headers(h: hashlib._Hash, inc: Path) -> None:
+    """Fold the (relative path, mtime) of every header-like file under
+    ``inc`` into ``h``, so an edit to a header reached only transitively
+    through an ``-I``/``--include`` directory (never itself passed as an
+    explicit ``headers`` entry) still invalidates the whole-snapshot cache.
+
+    Reuses :func:`abicheck.header_utils.iter_cache_header_files` (the same
+    ``CACHE_HEADER_SUFFIXES`` set ``dumper._cache_key``'s own AST-level cache
+    already walks) rather than a second, independently-maintained suffix
+    list -- an earlier ad hoc set here was missing ``.tpp``/``.inc`` (Codex
+    review), which the shared set already accounted for.
+
+    Best-effort and bounded by whatever is actually on disk under ``inc`` --
+    a missing/unreadable directory degrades to hashing nothing extra (same
+    as before this function existed) rather than raising, matching this
+    module's existing "any read problem is cache-safe, never a crash"
+    stance (see ``lookup``/``store``).
+    """
+    from .header_utils import iter_cache_header_files
+
+    try:
+        entries = iter_cache_header_files(inc)
+    except OSError:
+        return
+    for p in entries:
+        try:
+            h.update(str(p.relative_to(inc)).encode())
+            h.update(str(p.stat().st_mtime_ns).encode())
+        except OSError:
+            h.update(b"MISSING")
 
 
 def _cache_key(
@@ -101,26 +152,38 @@ def _cache_key(
                 h.update(chunk)
     except OSError:
         return ""  # uncacheable
-    # Header content and header-like files under explicitly supplied include
-    # roots.  A top-level umbrella commonly includes private siblings, so an
-    # mtime-only top-level key can otherwise return a stale whole snapshot.
-    # Hashing this bounded source surface is deliberately stricter than the
-    # inner AST cache and also resists an edit with a restored timestamp.
-    hash_files: set[Path] = set(headers)
-    for inc in includes:
+    # Hash contents, not only mtimes: restored timestamps must not resurrect a
+    # stale snapshot. Directory-valued ``-H`` inputs and explicit include roots
+    # contribute every header-like descendant reachable by the parser.
+    hash_files: set[Path] = set()
+    for hdr in sorted(headers):
+        h.update(str(hdr).encode())
+        try:
+            if hdr.is_dir():
+                hash_files.update(iter_cache_header_files(hdr))
+            else:
+                hash_files.add(hdr)
+        except OSError:
+            h.update(b"UNREADABLE_HEADER_INPUT")
+    for inc in sorted(includes):
         h.update(str(inc).encode())
         try:
             hash_files.update(iter_cache_header_files(inc))
         except OSError:
             h.update(b"UNREADABLE_INCLUDE_DIR")
     for hdr in sorted(hash_files):
+        h.update(str(hdr).encode())
         try:
-            h.update(str(hdr).encode())
             fd = os.open(hdr, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
-            if not stat.S_ISREG(os.fstat(fd).st_mode):
+            file_stat = os.fstat(fd)
+            if not stat.S_ISREG(file_stat.st_mode):
                 os.close(fd)
                 h.update(b"NONREGULAR")
                 continue
+            # Preserve the existing mtime invalidation contract as well as
+            # hashing contents. The latter catches restored/coarse timestamps;
+            # the former also treats a touched header as a changed input.
+            h.update(str(file_stat.st_mtime_ns).encode())
             with os.fdopen(fd, "rb") as f:
                 for chunk in iter(lambda: f.read(65536), b""):
                     h.update(chunk)
@@ -155,6 +218,7 @@ def lookup_key(key: str, binary_path: Path) -> AbiSnapshot | None:
     cache_file = _CACHE_DIR / f"{key}.json"
     try:
         from .serialization import load_snapshot
+
         snap = load_snapshot(cache_file)
         # Touch mtime for LRU
         cache_file.touch()
@@ -188,6 +252,7 @@ def store_key(snap: AbiSnapshot, key: str, binary_path: Path) -> None:
         _CACHE_DIR.mkdir(parents=True, exist_ok=True)
         cache_file = _CACHE_DIR / f"{key}.json"
         from .serialization import snapshot_to_json
+
         # Write to temp file then atomic rename to avoid corruption
         fd, tmp_path = tempfile.mkstemp(dir=_CACHE_DIR, suffix=".tmp")
         try:

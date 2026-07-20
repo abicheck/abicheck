@@ -95,6 +95,14 @@ class TestParseCastxmlVersion:
 
 
 class TestVersionNote:
+    def test_probes_the_selected_castxml_path(self) -> None:
+        with patch(
+            "abicheck.dumper.deadline.run_bounded",
+            return_value=_completed(stdout="castxml version 0.6.8\n"),
+        ) as run:
+            _castxml_version_note("/selected/wrapper/castxml")
+        assert run.call_args.args[0] == ["/selected/wrapper/castxml", "--version"]
+
     def test_old_clang_recommends_upgrade(self) -> None:
         with patch(
             "abicheck.dumper.deadline.run_bounded",
@@ -294,7 +302,7 @@ class TestProbeGating:
             return _completed(returncode=1, stderr=_FLOATN_STDERR)
 
         with (
-            patch("abicheck.dumper._castxml_available", return_value=True),
+            patch("abicheck.dumper._resolve_selected_tool", return_value="castxml"),
             # Both the main castxml dump and the `castxml --version` probe
             # (_castxml_version_note) now go through deadline.run_bounded
             # (Codex review, PR #591) — patched to the same fake so either
@@ -328,7 +336,7 @@ class TestProbeGating:
             return _completed(returncode=1, stderr=_FLOATN_STDERR)
 
         with (
-            patch("abicheck.dumper._castxml_available", return_value=True),
+            patch("abicheck.dumper._resolve_selected_tool", return_value="castxml"),
             patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
             # Round-3 note: propagation requires the *outer scan* deadline to
@@ -351,7 +359,7 @@ class TestProbeGating:
             )
 
         with (
-            patch("abicheck.dumper._castxml_available", return_value=True),
+            patch("abicheck.dumper._resolve_selected_tool", return_value="castxml"),
             patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
         ):
@@ -398,7 +406,7 @@ class TestLangCFallsBackToCpp:
         header = tmp_path / "api.h"
         header.write_text("namespace ns { int f(int); }\n", encoding="utf-8")
         with (
-            patch("abicheck.dumper._castxml_available", return_value=True),
+            patch("abicheck.dumper._resolve_selected_tool", return_value="castxml"),
             patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
             caplog.at_level("WARNING"),
@@ -431,7 +439,7 @@ class TestLangCFallsBackToCpp:
             encoding="utf-8",
         )
         with (
-            patch("abicheck.dumper._castxml_available", return_value=True),
+            patch("abicheck.dumper._resolve_selected_tool", return_value="castxml"),
             patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
             pytest.raises(SnapshotError) as exc,
@@ -461,7 +469,7 @@ class TestLangCFallsBackToCpp:
         header = tmp_path / "api.h"
         header.write_text("class Widget { int x; };\n", encoding="utf-8")
         with (
-            patch("abicheck.dumper._castxml_available", return_value=True),
+            patch("abicheck.dumper._resolve_selected_tool", return_value="castxml"),
             patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
             pytest.raises(SnapshotError) as exc,
@@ -484,7 +492,7 @@ class TestLangCFallsBackToCpp:
         header = tmp_path / "api.h"
         header.write_text("int plain_c(void);\n", encoding="utf-8")
         with (
-            patch("abicheck.dumper._castxml_available", return_value=True),
+            patch("abicheck.dumper._resolve_selected_tool", return_value="castxml"),
             patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
             pytest.raises(SnapshotError),
@@ -512,7 +520,7 @@ class TestHeaderToolchainErrorClass:
         header = tmp_path / "api.h"
         header.write_text("int f(void);\n", encoding="utf-8")
         with (
-            patch("abicheck.dumper._castxml_available", return_value=True),
+            patch("abicheck.dumper._resolve_selected_tool", return_value="castxml"),
             patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
             pytest.raises(HeaderToolchainError) as exc,
@@ -531,7 +539,7 @@ class TestHeaderToolchainErrorClass:
         header = tmp_path / "api.h"
         header.write_text("int f(void);\n", encoding="utf-8")
         with (
-            patch("abicheck.dumper._castxml_available", return_value=True),
+            patch("abicheck.dumper._resolve_selected_tool", return_value="castxml"),
             patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
             pytest.raises(SnapshotError) as exc,
@@ -558,7 +566,7 @@ class TestHeaderToolchainErrorClass:
         header = tmp_path / "api.h"
         header.write_text("int f(void);\n", encoding="utf-8")
         with (
-            patch("abicheck.dumper._castxml_available", return_value=True),
+            patch("abicheck.dumper._resolve_selected_tool", return_value="castxml"),
             patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
             pytest.raises(SnapshotError) as exc,
@@ -642,7 +650,11 @@ class TestG16ClangFallbackRespectsConfiguredDriver:
         ):
             os.environ.pop("ABICHECK_ALLOW_AST_FALLBACK", None)
             _header_ast_parser(
-                [header], [], compiler="c++", gcc_path=None, gcc_prefix=None,
+                [header],
+                [],
+                compiler="c++",
+                gcc_path=None,
+                gcc_prefix=None,
                 **self._KWARGS,
             )
 

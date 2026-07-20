@@ -37,8 +37,6 @@ def _cacheable_kwargs(**overrides):
         symbols_only=False,
         debug_presence_only=False,
         compile=None,
-        header_graph=False,
-        header_graph_includes=False,
     )
     base.update(overrides)
     return base
@@ -79,13 +77,12 @@ class TestDumpIsCacheable:
         kwargs = _cacheable_kwargs(compile=object())
         assert _dump_is_cacheable(**kwargs) is False
 
-    def test_header_graph_not_cacheable(self):
-        kwargs = _cacheable_kwargs(header_graph=True)
-        assert _dump_is_cacheable(**kwargs) is False
-
-    def test_header_graph_includes_not_cacheable(self):
-        kwargs = _cacheable_kwargs(header_graph_includes=True)
-        assert _dump_is_cacheable(**kwargs) is False
+    def test_header_graph_no_longer_a_cacheability_parameter(self):
+        """G29 Phase A: header_graph/header_graph_includes are no longer
+        run_dump parameters at all (the graph is unconditional), so
+        _dump_is_cacheable no longer takes them — the plain shape stays
+        cacheable, which is what actually matters here now."""
+        assert _dump_is_cacheable(**_cacheable_kwargs()) is True
 
 
 class TestDumpCacheExtraKey:
@@ -303,6 +300,67 @@ class TestDumpCacheExtraKey:
         k2 = _dump_cache_extra_key("elf", "auto", None, None)
         assert k1 == k2
 
+    def test_differs_by_header_graph_clang_availability_even_for_castxml(self):
+        # Codex review: G29 Phase A's header-graph attach always runs its own
+        # internal clang AST pass (service._attach_header_graph ->
+        # dumper._clang_header_dump) regardless of `resolved_backend` -- a
+        # plain "castxml" dump still gets one. A cache entry written while
+        # clang was unavailable must not be replayed once clang becomes
+        # available (or vice versa), or the header graph silently keeps
+        # whatever degraded/absent coverage the first run saw.
+        with patch("abicheck.dumper_clang._clang_available", return_value=False):
+            k_missing = _dump_cache_extra_key("elf", "castxml", None, None)
+        with patch("abicheck.dumper_clang._clang_available", return_value=True):
+            with patch("shutil.which", return_value="/usr/bin/clang++"):
+                k_present = _dump_cache_extra_key("elf", "castxml", None, None)
+        assert k_missing != k_present
+
+    def test_differs_by_header_graph_clang_resolved_path(self):
+        # Two different clang installs on PATH (e.g. a system upgrade) must
+        # produce different keys even though both "are available".
+        with patch("abicheck.dumper_clang._clang_available", return_value=True):
+            with patch("shutil.which", return_value="/usr/bin/clang++"):
+                k1 = _dump_cache_extra_key("elf", "castxml", None, None)
+            with patch("shutil.which", return_value="/opt/llvm-18/bin/clang++"):
+                k2 = _dump_cache_extra_key("elf", "castxml", None, None)
+        assert k1 != k2
+
+    def test_differs_when_clang_binary_swapped_in_place_at_same_path(
+        self, tmp_path
+    ):
+        # Codex review: the resolved PATH string alone survives an in-place
+        # binary swap at the same path (a package upgrade, or a symlink
+        # retargeted to a different clang install) -- an mtime+size
+        # fingerprint of the resolved binary must be folded in too, or a
+        # cache entry from before the swap gets replayed with stale
+        # header-graph coverage from the old compiler.
+        clang_path = tmp_path / "clang++"
+        clang_path.write_bytes(b"fake clang v1")
+        with (
+            patch("abicheck.dumper_clang._clang_available", return_value=True),
+            patch("shutil.which", return_value=str(clang_path)),
+        ):
+            k1 = _dump_cache_extra_key("elf", "castxml", None, None)
+
+            clang_path.write_bytes(b"fake clang v2 - different size")
+            import os
+            import time
+
+            os.utime(clang_path, (time.time() + 10, time.time() + 10))
+            k2 = _dump_cache_extra_key("elf", "castxml", None, None)
+
+        assert k1 != k2
+
+    def test_header_graph_clang_key_respects_lang(self):
+        # `cc`/`c++` resolve to different driver names -- fold `lang` in so a
+        # C vs C++ dump (which can genuinely have only one of the two
+        # installed) gets a distinct key.
+        with patch("abicheck.dumper_clang._clang_available", return_value=True):
+            with patch("shutil.which", side_effect=lambda name: f"/usr/bin/{name}"):
+                k_cpp = _dump_cache_extra_key("elf", "castxml", None, None, "c++")
+                k_c = _dump_cache_extra_key("elf", "castxml", None, None, "c")
+        assert k_cpp != k_c
+
 
 class TestCachedRunDump:
     def test_cache_hit_skips_run_dump(self, tmp_path):
@@ -379,6 +437,36 @@ class TestCachedRunDump:
         assert calls == ["elf", "pe"]
         assert snap_elf.functions[0].name == "elf"
         assert snap_pe.functions[0].name == "pe"
+
+    def test_inferred_header_root_sibling_edit_invalidates_cache(self, tmp_path):
+        # Codex review: header_utils.resolve_inferred_header_roots() adds a
+        # -H header's own parent directory to the search path even when no
+        # explicit -I was given (dumper.dump()/service._dump_elf both call
+        # it). A sibling header reached only through that inferred root
+        # (never itself passed as an explicit `headers` entry, and not under
+        # any explicit `includes` dir either since none was given) must still
+        # invalidate the cache when it changes.
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF fake content")
+        api_h = tmp_path / "api.h"
+        api_h.write_text("void f();\n")
+        detail_h = tmp_path / "detail.h"
+        detail_h.write_text("struct detail {};\n")
+        calls: list[int] = []
+
+        def fake_run_dump(path, binary_fmt, headers, includes, version, lang, **kwargs):
+            calls.append(1)
+            return _sample_snap(name=f"foo{len(calls)}")
+
+        cached_run_dump(fake_run_dump, binary, "elf", [api_h], [], "1.0", "c++")
+
+        import os
+        import time
+
+        os.utime(detail_h, (time.time() + 10, time.time() + 10))
+        cached_run_dump(fake_run_dump, binary, "elf", [api_h], [], "1.0", "c++")
+
+        assert len(calls) == 2
 
     def test_uncacheable_shape_always_calls_run_dump(self, tmp_path):
         binary = tmp_path / "lib.so"

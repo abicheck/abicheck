@@ -14,7 +14,7 @@
 
 """Fast-lane validation of the L3/L4/L5 build/source-only example corpus.
 
-Cases 152-162 (see ``scripts/gen_l3l4l5_examples.py``) demonstrate ABI/API
+Cases 152-162 and 194-195 (see ``scripts/gen_l3l4l5_examples.py``) demonstrate ABI/API
 failures that *only* build context (L3), source-replay surfaces (L4), or the
 derived source graph (L5) can see. They do not fit the ``v1``/``v2`` binary-diff
 shape: each ships a hand-built pair of evidence-model fixtures
@@ -83,7 +83,7 @@ def _emitted_kinds(case_name: str) -> list[str]:
 def test_corpus_is_non_empty() -> None:
     # Guards against the discovery query silently matching nothing (which would
     # turn every parametrized assertion below into a vacuous pass).
-    assert len(_CASES) == 11, f"expected the 11 L3/L4/L5 cases, found {_CASES}"
+    assert len(_CASES) == 13, f"expected the 13 L3/L4/L5 cases, found {_CASES}"
 
 
 @pytest.mark.parametrize("case_name", _CASES)

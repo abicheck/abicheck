@@ -383,8 +383,9 @@ def _gated_source_label(build_source: BuildSourcePack | None, snap: AbiSnapshot)
     nothing. But that L4-or-L5 rule is too permissive for a *gate*: a
     non-empty L5 can also come from a header-only (L2) declaration graph
     that never ran any L4/L5 source-tier replay at all —
-    ``service._attach_header_graph`` (``--header-graph`` with no
-    ``--sources``/``--build-info``) attaches one directly, and
+    ``service._attach_header_graph`` (always attempted since G29 Phase A when
+    headers are available and no ``--sources``/``--build-info`` triggered a
+    deeper collection) attaches one directly, and
     ``cli_buildsource.embed_build_source``'s backfill step (see its own
     comment: "a genuine --sources L5 collection in merged always wins; the
     header-only graph fills the gap only when merged carries none") can
@@ -1000,8 +1001,6 @@ def handle_non_elf_dump(
     header_backend: str = "auto",
     compile_context: Any = None,
     inputs_pack: Path | None = None,
-    header_graph: bool = False,
-    header_graph_includes: bool = False,
     depth: str | None = None,
     compile_db_context_matched: bool = False,
 ) -> None:
@@ -1015,12 +1014,12 @@ def handle_non_elf_dump(
     cycle. ``compile_context`` is typed ``Any`` for the same reason (its concrete
     ``CompileContext`` lives in ``service_scan``).
 
-    ``header_graph``/``header_graph_includes`` (ADR-041 addendum) forward
-    straight into ``dump_native_binary`` (``_dump_native_binary`` →
-    ``service.run_dump``), which attaches the header-only graph uniformly
-    across ELF/PE/Mach-O — previously only the ELF ``perform_elf_dump`` path
-    forwarded these, so ``dump --header-graph`` silently no-opped on PE/Mach-O
-    input (Codex review).
+    ``dump_native_binary`` (``_dump_native_binary`` → ``service.run_dump``)
+    always attaches the header-only graph uniformly across ELF/PE/Mach-O
+    (G29 Phase A: no longer flag-gated) — previously only the ELF
+    ``perform_elf_dump`` path forwarded the opt-in flag, so ``dump
+    --header-graph`` silently no-opped on PE/Mach-O input (Codex review);
+    that gap can no longer occur now that the graph is unconditional.
 
     ``compile_db_context_matched`` (Codex review): whether cli.py's
     ``_resolve_build_context_flags(effective_compile_db, headers,
@@ -1066,8 +1065,6 @@ def handle_non_elf_dump(
             public_header_dirs=list(public_header_dirs),
             header_backend=header_backend,
             compile=compile_context,
-            header_graph=header_graph,
-            header_graph_includes=header_graph_includes,
         )
     except click.ClickException:
         raise
@@ -1247,8 +1244,6 @@ def perform_elf_dump(
     compile_db_filter: str | None = None,
     inputs_pack: Path | None = None,
     debug_info_path: Path | None = None,
-    header_graph: bool = False,
-    header_graph_includes: bool = False,
     compile_context: CompileContext | None = None,
     depth: str | None = None,
     compile_db_context_matched: bool = False,
@@ -1259,14 +1254,13 @@ def perform_elf_dump(
     (``--debug-root``/``--debuginfod``) to read DWARF sections from instead of
     ``so_path`` itself — threaded straight into :func:`dumper.dump`.
 
-    ``header_graph``/``header_graph_includes`` (ADR-041 addendum): builds and
-    embeds the header-only (L2) semantic graph via
-    :func:`~abicheck.service._attach_header_graph` — the same post-processing
-    step ``service.run_dump`` already applies for `compare`'s implicit-dump
-    path, reused here rather than duplicated (``dumper.py`` sits at its
-    2000-line hard cap, so this stays a wrapper around the already-built
-    snapshot instead of a new parameter on :func:`dumper.dump` itself). A
-    no-op when ``header_graph`` was not requested or no headers were parsed.
+    The header-only (L2) semantic graph is always built and embedded via
+    :func:`~abicheck.service._attach_header_graph` (G29 Phase A: no longer
+    flag-gated) — the same post-processing step ``service.run_dump`` already
+    applies for `compare`'s implicit-dump path, reused here rather than
+    duplicated (``dumper.py`` sits at its 2000-line hard cap, so this stays a
+    wrapper around the already-built snapshot instead of a new parameter on
+    :func:`dumper.dump` itself). A no-op when no headers were parsed.
 
     All helper callables (expand_header_inputs, populate_dependency_info,
     stamp_provenance, write_snapshot_output) are passed in from cli.py to avoid
@@ -1444,12 +1438,13 @@ def perform_elf_dump(
 
             snap.numpy_capi = extract_numpy_capi_surface(so_path)
 
-        # ADR-041 addendum: same "this ELF dump CLI path reaches dumper.dump
-        # directly, not service.run_dump" attach point as G14/G23/G26 above —
-        # service._attach_header_graph is the exact wrapper service.run_dump uses
-        # for `compare`'s implicit-dump path, reused verbatim so a written
-        # snapshot's embedded graph is identical either way. A no-op unless
-        # --header-graph was passed and headers were parsed. Pass eff_includes
+        # ADR-041 addendum / G29 Phase A: same "this ELF dump CLI path reaches
+        # dumper.dump directly, not service.run_dump" attach point as
+        # G14/G23/G26 above — service._attach_header_graph is the exact
+        # wrapper service.run_dump uses for `compare`'s implicit-dump path,
+        # reused verbatim so a written snapshot's embedded graph is identical
+        # either way. Always attempted now (no longer flag-gated); a no-op
+        # when no headers were parsed. Pass eff_includes
         # (seed_l2_includes' output), not the raw includes argument: when
         # --sources/--build-info seeded build-derived include dirs above (no
         # explicit -I given) the main dump() call already sees them via
@@ -1485,23 +1480,33 @@ def perform_elf_dump(
                     gcc_options=effective_gcc_options
                 )
 
-        if header_graph:
-            from .service import _attach_header_graph
+        from .service import (
+            _HEADER_GRAPH_ENABLED,
+            _HEADER_GRAPH_INCLUDES_ENABLED,
+            _attach_header_graph,
+        )
 
-            snap = _attach_header_graph(
-                snap,
-                header_graph,
-                header_graph_includes,
-                list(headers),
-                list(eff_includes),
-                lang,
-                effective_compile_context,
-                list(public_headers),
-                list(public_header_dirs),
-            )
+        # dwarf_only means "ignore headers entirely" -- dump() above already
+        # honors that (returns a DWARF-only snapshot without parsing headers),
+        # so this attach must not silently re-parse those same headers via
+        # clang and embed L2 build_source evidence the caller explicitly
+        # asked not to have (Codex review; same fix as service.py's
+        # run_dump()).
+        snap = _attach_header_graph(
+            snap,
+            _HEADER_GRAPH_ENABLED and not dwarf_only,
+            _HEADER_GRAPH_INCLUDES_ENABLED and not dwarf_only,
+            list(headers),
+            list(eff_includes),
+            lang,
+            effective_compile_context,
+            list(public_headers),
+            list(public_header_dirs),
+        )
 
         # G28 Phase 4: same "this ELF dump CLI path reaches dumper.dump
-        # directly, not service.run_dump" attach point as header_graph above.
+        # directly, not service.run_dump" attach point as the header-graph
+        # attach above.
         # attach_clang_layout is a no-op unless the snapshot's L2 backend was
         # actually "clang" AND the optional companion tool is resolvable
         # (ABICHECK_CLANG_LAYOUT_TOOL / a bare abicheck-clang-layout-tool on
