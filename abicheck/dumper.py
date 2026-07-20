@@ -12,21 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Dumper — headers + .so → AbiSnapshot via a pluggable L2 header backend.
+"""Dump headers and binaries to :class:`AbiSnapshot`.
 
-The header AST (L2) is produced by one of two interchangeable frontends behind
-``_header_ast_parser``: **castxml** (the default / schema reference, parsed by
-``dumper_castxml._CastxmlParser``) or **clang** (``clang -ast-dump=json``, parsed
-by ``dumper_clang._ClangAstParser``) when explicitly requested. Select
-with ``header_backend=`` (``auto``/``castxml``/``clang``; CLI ``--ast-frontend``)
-or the ``ABICHECK_AST_FRONTEND`` env var. ``auto`` resolves to castxml and never
-silently falls back to clang on castxml-less hosts (clang's JSON AST lacks
-computed record layout, so an implicit fallback could miss layout-only breaks).
-Recognized runtime castxml failures remain fail-closed by default. Callers may
-explicitly allow the narrow CastXML→Clang fallback with the CLI flag
-``--allow-ast-frontend-fallback`` or ``ABICHECK_ALLOW_AST_FALLBACK=1`` (G16);
-the effective producer/toolchain and reason are recorded in the snapshot. An
-explicit frontend selection is always honored verbatim. See ADR-003.
+L2 supports explicit CastXML, Clang, or hybrid producers. ``auto`` selects
+CastXML; its narrow runtime fallback to Clang is fail-closed unless callers opt
+in. Snapshots record the effective producer, exact toolchain, and fallback
+reason. See ADR-003 and ``docs/user-guide/tool-modes.md``.
 """
 from __future__ import annotations
 
@@ -36,13 +27,12 @@ import logging
 import os
 import re
 import shlex
-import shutil
+import shutil as shutil  # noqa: F401  # legacy test patch target
 import subprocess
 import tempfile
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from xml.etree.ElementTree import (
@@ -98,6 +88,17 @@ from .dumper_sysinc import (
     _resolve_clang_system_includes as _resolve_clang_system_includes,
     _resolve_probe_compiler as _resolve_probe_compiler,
 )
+from .dumper_toolchain import (
+    _ast_fallback_enabled as _ast_fallback_enabled,
+    _auto_ast_fallback_eligible as _auto_ast_fallback_eligible,
+    _castxml_available as _castxml_available,
+    _parser_ast_fallback_reason as _parser_ast_fallback_reason,
+    _parser_ast_toolchain as _parser_ast_toolchain,
+    _safe_mtime as _safe_mtime,
+    _safe_size as _safe_size,
+    _tool_identity as _tool_identity,
+    _tool_identity_metadata as _tool_identity_metadata,
+)
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .errors import HeaderToolchainError, SnapshotError, ValidationError
 from .header_utils import iter_cache_header_files
@@ -114,163 +115,7 @@ from .model import (
 log = logging.getLogger(__name__)
 
 
-def _safe_mtime(path: Path) -> tuple[float | None, bool]:
-    """Return (path's mtime, was_epoch_substituted), or (None, False).
-
-    Honours ``SOURCE_DATE_EPOCH`` (reproducible-builds spec) when set and
-    valid, like ``created_at`` (``cli_helpers_compare._provenance_timestamp``)
-    — two dumps of identical content must stay byte-identical (Codex review).
-    The second element records the substitution so it can be persisted
-    (``AbiSnapshot.source_mtime_epoch``): ``fold_l0_hard_removals`` needs to
-    know a recorded mtime is a fixed epoch even when its own compare-time
-    environment has no ``SOURCE_DATE_EPOCH`` (a dump under a pinned epoch,
-    compared later with none set — Codex review).
-    """
-    source_date_epoch = os.environ.get("SOURCE_DATE_EPOCH")
-    if source_date_epoch:
-        try:
-            return float(int(source_date_epoch.strip())), True
-        except (ValueError, OverflowError):
-            pass
-    try:
-        return path.stat().st_mtime, False
-    except OSError:
-        return None, False
-
-
-def _safe_size(path: Path) -> int | None:
-    """Return path's byte size, or None if it can't be stat'd right now.
-
-    Unlike ``_safe_mtime``, this needs no ``SOURCE_DATE_EPOCH`` gating: two
-    reproducible builds of identical binary content have identical size by
-    definition, so recording the real size never threatens the
-    byte-identical-dump guarantee. A second, cheap identity signal alongside
-    mtime for ``fold_l0_hard_removals``'s re-check (Codex review) — mtime
-    alone can't catch a content-preserving-timestamp rebuild (``cp -p``,
-    ``touch -r``, a coarse-mtime filesystem).
-    """
-    try:
-        return path.stat().st_size
-    except OSError:
-        return None
-
-
-def _castxml_available() -> bool:
-    return shutil.which("castxml") is not None
-
-
-@lru_cache(maxsize=64)
-def _executable_sha256(
-    real_path: str,
-    device: int,
-    inode: int,
-    mtime_ns: int,
-    ctime_ns: int,
-    size: int,
-) -> str:
-    """Hash one exact executable revision (stat fields invalidate memoization)."""
-    del device, inode, mtime_ns, ctime_ns, size
-    h = hashlib.sha256()
-    with Path(real_path).open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
-@lru_cache(maxsize=64)
-def _tool_version_output(real_path: str, digest: str) -> str:
-    """Return stable ``--version`` output for one exact executable revision.
-
-    The executable digest is deliberately part of the memoization key: replacing
-    a binary in place must invalidate the version within a long-lived process.
-    """
-    del digest
-    try:
-        result = subprocess.run(
-            [real_path, "--version"], capture_output=True, text=True,
-            timeout=10, check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return f"unavailable:{type(exc).__name__}:{exc}"
-    return "\n".join(
-        line.rstrip() for line in (result.stdout + result.stderr).splitlines()
-        if line.strip()
-    )
-
-
-def _tool_identity(executable: str) -> str:
-    """Identify the executable actually selected by PATH, including version.
-
-    Resolving the symlink before memoization means changing ``~/.local/bin`` (or
-    a CI shim) to another CastXML/Clang build changes every dependent cache key.
-    """
-    selected = shutil.which(executable) or executable
-    try:
-        real = Path(selected).resolve(strict=True)
-        stat = real.stat()
-        digest = _executable_sha256(
-            str(real), stat.st_dev, stat.st_ino, stat.st_mtime_ns,
-            stat.st_ctime_ns, stat.st_size,
-        )
-    except OSError as exc:
-        return f"selected={selected};unavailable={type(exc).__name__}:{exc}"
-    version = _tool_version_output(str(real), digest)
-    return (
-        f"selected={selected};realpath={real};mtime_ns={stat.st_mtime_ns};"
-        f"size={stat.st_size};sha256={digest};version={version}"
-    )
-
-
-def _tool_identity_metadata(executable: str) -> dict[str, str]:
-    """Machine-readable subset of :func:`_tool_identity` for provenance."""
-    selected = shutil.which(executable) or executable
-    try:
-        real = Path(selected).resolve(strict=True)
-        stat = real.stat()
-        digest = _executable_sha256(
-            str(real), stat.st_dev, stat.st_ino, stat.st_mtime_ns,
-            stat.st_ctime_ns, stat.st_size,
-        )
-        version = _tool_version_output(str(real), digest)
-    except OSError as exc:
-        return {
-            "selected": selected,
-            "error": f"{type(exc).__name__}: {exc}",
-        }
-    return {
-        "selected": selected,
-        "realpath": str(real),
-        "mtime_ns": str(stat.st_mtime_ns),
-        "size": str(stat.st_size),
-        "sha256": digest,
-        "version": version,
-    }
-
-
-def _ast_fallback_enabled() -> bool:
-    return os.environ.get("ABICHECK_ALLOW_AST_FALLBACK", "").strip().lower() in {
-        "1", "true", "yes", "on",
-    }
-
-
-def _auto_ast_fallback_eligible(backend: str) -> bool:
-    """Whether this request is genuinely unpinned ``auto`` selection.
-
-    Invalid environment pins are ignored by :func:`_resolve_header_backend`, so
-    they must be treated exactly like an unset pin here and in whole-cache keys.
-    """
-    choice = (backend or "auto").strip().lower()
-    env_pin = os.environ.get("ABICHECK_AST_FRONTEND", "").strip().lower()
-    return choice == "auto" and env_pin not in HEADER_BACKENDS
-
-
-#: Header-AST backend identifiers (the L2 producers). castxml is the default and
-#: the schema reference; clang is the alternative for hosts where castxml is
-#: absent or its bundled frontend chokes (ADR-003, "clang as an alternative L2
-#: frontend"). ``hybrid`` (G28 Phase 3, ``dumper_hybrid.py``) runs BOTH and
-#: merges them — never selected by ``auto`` (needs both tools, ~2x cost).
-#: ``auto`` resolves to castxml unless the environment explicitly selects
-#: clang; the clang backend lacks computed record layout evidence.
+# L2 producers; hybrid is explicit because it runs both tools (~2x cost).
 HEADER_BACKENDS = ("auto", "castxml", "clang", "hybrid")
 
 
@@ -720,19 +565,6 @@ def _header_ast_parser(
         _CastxmlParser,
         _stamp_parser(parser, producer="castxml", executable="castxml"),
     )
-
-
-def _parser_ast_toolchain(
-    parser: _CastxmlParser | _ClangAstParser,
-) -> dict[str, str]:
-    return dict(getattr(parser, "_abicheck_ast_toolchain", {}))
-
-
-def _parser_ast_fallback_reason(
-    parser: _CastxmlParser | _ClangAstParser,
-) -> str | None:
-    value = getattr(parser, "_abicheck_ast_fallback_reason", None)
-    return str(value) if value else None
 
 
 _HIDDEN_VIS = frozenset({"STV_HIDDEN", "STV_INTERNAL"})
