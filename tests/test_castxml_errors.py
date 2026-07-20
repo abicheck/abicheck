@@ -407,7 +407,24 @@ def test_castxml_c_mode_user_std_token_not_overridden():
     assert "-std=gnu17" in cmd
     assert "-std=gnu11" not in cmd
     assert "-x" in cmd and "c" in cmd  # C language mode still forced
-    assert "--castxml-cc-gnu-c" in cmd
+    cc_index = cmd.index("--castxml-cc-gnu-c")
+    assert cmd[cc_index + 1:cc_index + 6] == ["(", "gcc", "-x", "c", ")"]
+
+
+def test_castxml_c_mode_forces_explicit_cpp_driver_probe_to_c():
+    """Keep an explicit g++ executable while probing its builtins as C."""
+    from pathlib import Path
+
+    from abicheck.dumper import _build_castxml_command
+
+    cmd = _build_castxml_command(
+        "/opt/cross/bin/g++", "gnu", [], Path("o.xml"), Path("a.h"),
+        force_cpp=False,
+    )
+    cc_index = cmd.index("--castxml-cc-gnu-c")
+    assert cmd[cc_index + 1:cc_index + 6] == [
+        "(", "/opt/cross/bin/g++", "-x", "c", ")",
+    ]
 
 
 def test_castxml_cpp_mode_keeps_gnu_emulation_id():

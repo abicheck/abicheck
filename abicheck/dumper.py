@@ -835,9 +835,12 @@ def _build_castxml_command(
     # Using ``gnu`` together with ``-x c`` makes modern CastXML inject C++
     # approximations for GCC's _Float* builtins (including ``operator``), then
     # asks Clang to parse them as C.  ``gnu-c`` supplies the C approximations.
+    # Parentheses force an explicit g++ path/prefix to probe its builtins as C.
     castxml_cc_id = "gnu-c" if not force_cpp and cc_id == "gnu" else cc_id
-    cmd = ["castxml", "--castxml-output=1",
-           f"--castxml-cc-{castxml_cc_id}", cc_bin]
+    compiler_command = (["(", cc_bin, "-x", "c", ")"]
+                        if castxml_cc_id == "gnu-c" else [cc_bin])
+    cmd = ["castxml", "--castxml-output=1", f"--castxml-cc-{castxml_cc_id}",
+           *compiler_command]
     for inc in extra_includes:
         cmd += ["-I", str(inc)]
 

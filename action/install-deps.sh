@@ -26,9 +26,17 @@ case "$OS" in
     if ! command -v apt-get &> /dev/null; then
       echo "::warning::apt-get not found. Skipping automatic dependency installation on Linux."
       echo "Please ensure castxml, clang, and a C++ compiler are installed manually."
+      # Preserve the historical warning-only path on minimal/self-hosted
+      # runners. Use the pin only if all installer prerequisites already exist.
+      for prerequisite in curl sha256sum tar; do
+        command -v "$prerequisite" &> /dev/null || pinned_castxml=false
+      done
     elif ! command -v sudo &> /dev/null; then
       echo "::warning::sudo not found. Skipping automatic dependency installation."
       echo "Please ensure castxml, clang, and a C++ compiler are installed manually."
+      for prerequisite in curl sha256sum tar; do
+        command -v "$prerequisite" &> /dev/null || pinned_castxml=false
+      done
     else
       sudo apt-get update -qq
       # clang enables L4 source-ABI replay + L5 graphs for `scan --sources`;
