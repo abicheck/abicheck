@@ -587,13 +587,23 @@ on: [pull_request]
 
 jobs:
   abi-check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash -el {0}
     steps:
       - uses: actions/checkout@v4
 
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          activate-environment: abicheck
+
       - name: Install abicheck
         run: |
-          sudo apt-get update && sudo apt-get install -y castxml g++
+          # Avoid Ubuntu's Clang-17 CastXML build; conda-forge supplies a
+          # compatible toolchain. The abicheck Action uses a checksum-pinned
+          # official Superbuild instead.
+          conda install -y -c conda-forge castxml
           pip install abicheck
 
       - name: Dump ABI (baseline)

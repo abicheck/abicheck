@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Install system dependencies for abicheck:
-#   - castxml + gcc/g++  → L2 public-header analysis (always)
+#   - pinned CastXML Superbuild + gcc/g++ → L2 public-header analysis (always)
 #   - clang/clang++      → L4 source-ABI replay, the S2 preprocessor pre-scan,
 #                          and L5 call/include graphs used by `scan --sources`
 # Called by the composite action when install-deps=true.
@@ -11,6 +11,14 @@ echo "::group::Install system dependencies for abicheck"
 OS="$(uname -s)"
 case "$OS" in
   Linux)
+    pinned_castxml=false
+    if [ -r /etc/os-release ]; then
+      # shellcheck disable=SC1091
+      . /etc/os-release
+      case "${ID:-}:${VERSION_ID:-}" in
+        ubuntu:22.04|ubuntu:24.04) pinned_castxml=true ;;
+      esac
+    fi
     if ! command -v apt-get &> /dev/null; then
       echo "::warning::apt-get not found. Skipping automatic dependency installation on Linux."
       echo "Please ensure castxml, clang, and a C++ compiler are installed manually."
@@ -20,10 +28,25 @@ case "$OS" in
     else
       sudo apt-get update -qq
       # clang enables L4 source-ABI replay + L5 graphs for `scan --sources`;
-      # castxml/gcc remain the L2 header path and the L4 declaration fallback;
+      # gcc/g++ provide compiler emulation for the pinned CastXML frontend;
       # bear generates a compile_commands.json for Make/Autotools projects that
       # do not emit one (`bear -- make …`), which is what unlocks L3/L4/L5 there.
-      sudo apt-get install -y -qq castxml gcc g++ clang bear > /dev/null
+      packages=(gcc g++ clang bear curl ca-certificates)
+      if [ "$pinned_castxml" != true ]; then
+        # Preserve the Action's previous best-effort behavior on unsupported
+        # Linux distributions instead of making the Ubuntu-only pin a new hard
+        # failure. The exact pin remains the authoritative CI path.
+        packages+=(castxml)
+      fi
+      sudo apt-get install -y -qq "${packages[@]}" > /dev/null
+    fi
+    if [ "$pinned_castxml" = true ]; then
+      # Source it so this step's verification sees the new PATH too;
+      # GITHUB_PATH still persists it for subsequent Action steps.
+      # shellcheck source=action/install-castxml.sh
+      . "$(dirname "$0")/install-castxml.sh"
+    else
+      echo "::warning::No pinned CastXML Superbuild for ${ID:-unknown} ${VERSION_ID:-unknown}; using the distribution/existing castxml."
     fi
     ;;
   Darwin)
