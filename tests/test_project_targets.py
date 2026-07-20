@@ -146,7 +146,7 @@ def test_build_config_does_not_reject_the_new_top_level_keys() -> None:
 
 
 def test_build_config_still_rejects_unknown_top_level_keys() -> None:
-    with pytest.raises(ValueError, match="unknown .abicheck.yml key"):
+    with pytest.raises(ValueError, match=r"unknown \.abicheck\.yml key"):
         BuildConfig.from_dict({"totally_bogus_key": {}})
 
 
@@ -585,3 +585,445 @@ def test_bundle_profile_baseline_channel_round_trip() -> None:
         "source": "github-release",
         "asset_pattern": "*.tar.zst",
     }
+
+
+# ── Bidirectional bundle membership (code-review finding) ──────────────────
+
+
+def test_one_way_bundle_declaration_is_rejected() -> None:
+    """A target claiming `bundle: rel` that `bundles.rel.targets` doesn't list
+    back must fail — both directions must agree (review finding)."""
+    config = ProjectTargetsConfig.from_dict(
+        {
+            "targets": {
+                "foo": {
+                    "kind": "library",
+                    "binary_pattern": "lib/foo.so",
+                    "bundle": "rel",
+                },
+                "bar": {
+                    "kind": "library",
+                    "binary_pattern": "lib/bar.so",
+                    "bundle": "rel",
+                },
+            },
+            "bundles": {"rel": {"targets": ["bar"]}},
+        }
+    )
+    report = validate_project_targets(config)
+    assert not report.ok
+    assert any(
+        "does not list 'foo' back" in e and "must agree in both directions" in e
+        for e in report.errors
+    )
+
+
+# ── Kind-specific forbidden fields, derived exhaustively (review finding) ──
+
+
+def test_library_must_not_set_library_field() -> None:
+    """A `kind: library` target setting `library:` (meaningless for this
+    kind) must fail, not silently pass and get dropped by to_dict()."""
+    config = ProjectTargetsConfig.from_dict(
+        {
+            "targets": {
+                "foo": {"kind": "library", "binary_pattern": "x", "library": "bar"},
+                "bar": {"kind": "library", "binary_pattern": "y"},
+            }
+        }
+    )
+    report = validate_project_targets(config)
+    assert not report.ok
+    assert any("must not set library" in e for e in report.errors)
+
+
+@pytest.mark.parametrize("kind", ["app-consumer", "plugin-contract"])
+def test_consumer_kinds_must_not_set_bundle_fields(kind: str) -> None:
+    raw = {
+        "kind": kind,
+        "library": "bar",
+        "bundle": "rel",
+        "bundle_only": True,
+    }
+    if kind == "app-consumer":
+        raw["consumer_binary_pattern"] = "bin/app"
+    else:
+        raw["contract_file"] = "x.syms"
+    config = ProjectTargetsConfig.from_dict(
+        {
+            "targets": {
+                "foo": raw,
+                "bar": {"kind": "library", "binary_pattern": "y"},
+            }
+        }
+    )
+    report = validate_project_targets(config)
+    assert not report.ok
+    assert any("must not set bundle." in e for e in report.errors)
+    assert any("must not set bundle_only." in e for e in report.errors)
+
+
+# ── Strict type-checking on scalar/list target fields ───────────────────────
+
+
+@pytest.mark.parametrize(
+    "raw,match",
+    [
+        ({"binary_pattern": ["lib/foo.so"]}, r"binary_pattern must be a string"),
+        ({"bundle": 123}, r"bundle must be a string"),
+        ({"consumer_binary_pattern": []}, r"consumer_binary_pattern must be a string"),
+        ({"library": 1.5}, r"library must be a string"),
+        ({"contract_file": True}, r"contract_file must be a string"),
+        ({"public_headers": "not-a-list"}, r"public_headers must be a list"),
+        ({"public_headers": [1, 2]}, r"public_headers must be a list of strings"),
+    ],
+)
+def test_target_scalar_and_list_fields_reject_wrong_types(
+    raw: dict, match: str
+) -> None:
+    with pytest.raises(ValueError, match=match):
+        ProjectTargetsConfig.from_dict({"targets": {"foo": {"kind": "library", **raw}}})
+
+
+def test_target_not_a_mapping_raises() -> None:
+    with pytest.raises(ValueError, match="must be a mapping"):
+        ProjectTargetsConfig.from_dict({"targets": {"foo": "not-a-mapping"}})
+
+
+def test_target_bundle_only_wrong_type_raises() -> None:
+    with pytest.raises(ValueError, match="bundle_only must be a boolean"):
+        ProjectTargetsConfig.from_dict(
+            {"targets": {"foo": {"kind": "library", "bundle_only": "yes"}}}
+        )
+
+
+def test_target_checks_not_a_list_raises() -> None:
+    with pytest.raises(ValueError, match=r"\.checks must be a list"):
+        ProjectTargetsConfig.from_dict(
+            {"targets": {"foo": {"kind": "library", "checks": "not-a-list"}}}
+        )
+
+
+# ── CheckSpec.from_dict structural errors ───────────────────────────────────
+
+
+def test_check_spec_unknown_key_raises() -> None:
+    with pytest.raises(ValueError, match="unknown key"):
+        ProjectTargetsConfig.from_dict(
+            {
+                "targets": {
+                    "foo": {
+                        "kind": "library",
+                        "checks": [{"channel": "none", "depth": "headers", "bogus": 1}],
+                    }
+                }
+            }
+        )
+
+
+def test_check_spec_empty_depth_raises() -> None:
+    with pytest.raises(ValueError, match="depth must be a non-empty string"):
+        ProjectTargetsConfig.from_dict(
+            {
+                "targets": {
+                    "foo": {
+                        "kind": "library",
+                        "checks": [{"channel": "none", "depth": ""}],
+                    }
+                }
+            }
+        )
+
+
+def test_check_spec_gate_mode_wrong_type_raises() -> None:
+    with pytest.raises(ValueError, match="gate_mode must be a string"):
+        ProjectTargetsConfig.from_dict(
+            {
+                "targets": {
+                    "foo": {
+                        "kind": "library",
+                        "checks": [
+                            {"channel": "none", "depth": "headers", "gate_mode": 1}
+                        ],
+                    }
+                }
+            }
+        )
+
+
+def test_check_spec_to_dict_includes_profiles_when_set() -> None:
+    check = CheckSpec(
+        channel="accepted-main", depth="headers", profiles=["linux-x86_64"]
+    )
+    assert check.to_dict() == {
+        "channel": "accepted-main",
+        "depth": "headers",
+        "required": True,
+        "gate_mode": "local",
+        "profiles": ["linux-x86_64"],
+    }
+
+
+def test_check_profiles_selector_passes_when_declared() -> None:
+    """The positive counterpart of test_check_profiles_selector_must_resolve:
+    a profiles[] entry that *does* resolve must not be flagged."""
+    config = ProjectTargetsConfig.from_dict(
+        {
+            "targets": {
+                "libfoo": {
+                    "kind": "library",
+                    "binary_pattern": "lib/libfoo.so",
+                    "checks": [
+                        {
+                            "channel": "none",
+                            "depth": "headers",
+                            "profiles": ["linux-x86_64"],
+                        }
+                    ],
+                }
+            },
+            "profiles": {"linux-x86_64": {"contract": True}},
+        }
+    )
+    report = validate_project_targets(config)
+    assert report.ok, report.errors
+
+
+# ── BundleSpec/ProfileSpec/BaselineChannelSpec structural errors ───────────
+
+
+def test_bundle_not_a_mapping_raises() -> None:
+    with pytest.raises(ValueError, match="must be a mapping"):
+        ProjectTargetsConfig.from_dict({"bundles": {"rel": "not-a-mapping"}})
+
+
+def test_bundle_unknown_key_raises() -> None:
+    with pytest.raises(ValueError, match="unknown key"):
+        ProjectTargetsConfig.from_dict(
+            {"bundles": {"rel": {"targets": ["a"], "bogus": 1}}}
+        )
+
+
+def test_profile_not_a_mapping_raises() -> None:
+    with pytest.raises(ValueError, match="must be a mapping"):
+        ProjectTargetsConfig.from_dict({"profiles": {"linux": "not-a-mapping"}})
+
+
+def test_profile_unknown_key_raises() -> None:
+    with pytest.raises(ValueError, match="unknown key"):
+        ProjectTargetsConfig.from_dict({"profiles": {"linux": {"bogus": 1}}})
+
+
+@pytest.mark.parametrize("key", ["os", "arch"])
+def test_profile_os_arch_wrong_type_raises(key: str) -> None:
+    with pytest.raises(ValueError, match=f"{key} must be a string"):
+        ProjectTargetsConfig.from_dict({"profiles": {"linux": {key: 1}}})
+
+
+def test_baseline_channel_not_a_mapping_raises() -> None:
+    with pytest.raises(ValueError, match="must be a mapping"):
+        ProjectTargetsConfig.from_dict(
+            {"baseline": {"channels": {"c": "not-a-mapping"}}}
+        )
+
+
+def test_baseline_channel_unknown_key_raises() -> None:
+    with pytest.raises(ValueError, match="unknown key"):
+        ProjectTargetsConfig.from_dict(
+            {"baseline": {"channels": {"c": {"source": "git", "bogus": 1}}}}
+        )
+
+
+@pytest.mark.parametrize("key", ["asset_pattern", "key_prefix"])
+def test_baseline_channel_pattern_fields_wrong_type_raises(key: str) -> None:
+    with pytest.raises(ValueError, match=f"{key} must be a string"):
+        ProjectTargetsConfig.from_dict(
+            {"baseline": {"channels": {"c": {"source": "git", key: 1}}}}
+        )
+
+
+def test_baseline_channel_github_release_requires_asset_pattern() -> None:
+    config = ProjectTargetsConfig.from_dict(
+        {"baseline": {"channels": {"release-contract": {"source": "github-release"}}}}
+    )
+    report = validate_project_targets(config)
+    assert not report.ok
+    assert any("requires asset_pattern" in e for e in report.errors)
+
+
+def test_baseline_channel_actions_cache_requires_key_prefix() -> None:
+    config = ProjectTargetsConfig.from_dict(
+        {"baseline": {"channels": {"accepted-main": {"source": "actions-cache"}}}}
+    )
+    report = validate_project_targets(config)
+    assert not report.ok
+    assert any("requires key_prefix" in e for e in report.errors)
+
+
+# ── ProjectTargetsConfig.to_dict() partial-block branches ──────────────────
+
+
+def test_to_dict_targets_only() -> None:
+    config = ProjectTargetsConfig(
+        targets={"foo": TargetSpec(id="foo", kind="library", binary_pattern="x")}
+    )
+    d = config.to_dict()
+    assert set(d) == {"targets"}
+
+
+def test_to_dict_bundles_only() -> None:
+    config = ProjectTargetsConfig(bundles={"rel": BundleSpec(id="rel", targets=["a"])})
+    d = config.to_dict()
+    assert set(d) == {"bundles"}
+
+
+def test_to_dict_profiles_only() -> None:
+    config = ProjectTargetsConfig(profiles={"linux": ProfileSpec(id="linux")})
+    d = config.to_dict()
+    assert set(d) == {"profiles"}
+
+
+def test_to_dict_baseline_only() -> None:
+    config = ProjectTargetsConfig(
+        baseline_channels={
+            "c": BaselineChannelSpec(id="c", source="git"),
+        }
+    )
+    d = config.to_dict()
+    assert set(d) == {"baseline"}
+    assert d["baseline"] == {"channels": {"c": {"source": "git"}}}
+
+
+# ── TargetSpec.to_dict() per-kind field combinations ────────────────────────
+
+
+def test_target_spec_to_dict_library_with_all_optional_fields() -> None:
+    target = TargetSpec(
+        id="libfoo",
+        kind="library",
+        binary_pattern="lib/libfoo.so",
+        public_headers=["headers/foo"],
+        bundle="rel",
+        bundle_only=True,
+        checks=[CheckSpec(channel="none", depth="headers")],
+    )
+    d = target.to_dict()
+    assert d["binary_pattern"] == "lib/libfoo.so"
+    assert d["public_headers"] == ["headers/foo"]
+    assert d["bundle"] == "rel"
+    assert d["bundle_only"] is True
+    assert d["checks"] == [
+        {"channel": "none", "depth": "headers", "required": True, "gate_mode": "local"}
+    ]
+
+
+def test_target_spec_to_dict_plugin_contract() -> None:
+    target = TargetSpec(
+        id="plugin",
+        kind="plugin-contract",
+        contract_file="x.syms",
+        library="libfoo",
+        checks=[CheckSpec(channel="none", depth="headers")],
+    )
+    d = target.to_dict()
+    assert d["kind"] == "plugin-contract"
+    assert d["contract_file"] == "x.syms"
+    assert d["library"] == "libfoo"
+    assert d["checks"]
+
+
+def test_target_spec_to_dict_library_with_no_optional_fields_set() -> None:
+    target = TargetSpec(id="libfoo", kind="library")
+    assert target.to_dict() == {"kind": "library"}
+
+
+def test_target_spec_to_dict_on_a_kind_that_bypasses_from_dict_validation() -> None:
+    """Same direct-construction scenario as the validator test below, for
+    `to_dict()`: an unrecognized `kind` emits no kind-specific fields."""
+    target = TargetSpec(id="foo", kind="totally-unknown-kind", binary_pattern="x")
+    assert target.to_dict() == {"kind": "totally-unknown-kind"}
+
+
+def test_target_issues_on_a_kind_that_bypasses_from_dict_validation() -> None:
+    """`TargetSpec` is a plain dataclass — direct construction (bypassing
+    `from_dict`'s `kind` enum check) with an unrecognized `kind` must not
+    crash `validate_project_targets`; it simply gets no kind-specific
+    required/forbidden-field checks (only the identifier check applies)."""
+    config = ProjectTargetsConfig(
+        targets={"foo": TargetSpec(id="foo", kind="totally-unknown-kind")}
+    )
+    report = validate_project_targets(config)
+    assert report.ok, report.errors
+
+
+# ── loader error paths ──────────────────────────────────────────────────────
+
+
+def test_load_project_targets_config_malformed_yaml_raises(tmp_path: Path) -> None:
+    config_path = tmp_path / ".abicheck.yml"
+    config_path.write_text("targets: [this is not: valid: yaml: at: all\n")
+    with pytest.raises(ValueError, match="cannot read project config"):
+        load_project_targets_config(config_path)
+
+
+def test_load_project_targets_config_non_mapping_yaml_is_all_defaults(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / ".abicheck.yml"
+    config_path.write_text("- just\n- a\n- list\n")
+    config = load_project_targets_config(config_path)
+    assert config == ProjectTargetsConfig()
+
+
+# ── CLI error paths ──────────────────────────────────────────────────────
+
+
+def test_cli_validate_empty_file_is_ok(tmp_path: Path) -> None:
+    config_path = tmp_path / ".abicheck.yml"
+    config_path.write_text("")
+    result = CliRunner().invoke(main, ["project-targets", "validate", str(config_path)])
+    assert result.exit_code == 0, result.output
+
+
+def test_cli_validate_non_mapping_yaml_is_usage_error(tmp_path: Path) -> None:
+    config_path = tmp_path / ".abicheck.yml"
+    config_path.write_text("- just\n- a\n- list\n")
+    result = CliRunner().invoke(main, ["project-targets", "validate", str(config_path)])
+    assert result.exit_code == 64, result.output
+    assert "must contain a yaml mapping" in result.output.lower()
+
+
+def test_cli_validate_with_warnings_shown_in_text_output(tmp_path: Path) -> None:
+    config_path = tmp_path / ".abicheck.yml"
+    config_path.write_text("")
+    result = CliRunner().invoke(main, ["project-targets", "validate", str(config_path)])
+    assert result.exit_code == 0, result.output
+    assert "warning(s)" in result.output
+
+
+def test_cli_validate_malformed_yaml_raises_usage_error(tmp_path: Path) -> None:
+    config_path = tmp_path / ".abicheck.yml"
+    config_path.write_text("targets: [this is not: valid: yaml: at: all\n")
+    result = CliRunner().invoke(main, ["project-targets", "validate", str(config_path)])
+    assert result.exit_code == 64, result.output
+    assert "cannot read" in result.output.lower()
+
+
+def test_cli_validate_writes_to_output_file(tmp_path: Path) -> None:
+    config_path = tmp_path / ".abicheck.yml"
+    config_path.write_text(
+        "targets:\n  libfoo:\n    kind: library\n    binary_pattern: lib/libfoo.so\n"
+    )
+    out_path = tmp_path / "report.txt"
+    result = CliRunner().invoke(
+        main,
+        [
+            "project-targets",
+            "validate",
+            str(config_path),
+            "-o",
+            str(out_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "OK" in out_path.read_text()

@@ -109,9 +109,34 @@ CHECK_DEPTHS = frozenset(d.value for d in USER_DEPTHS)
 NO_BASELINE_CHANNEL = "none"
 
 
-def _str_list(d: dict[str, Any], key: str) -> list[str]:
+def _opt_str_field(d: dict[str, Any], key: str, *, where: str) -> str:
+    """A strictly-typed optional string field: absent/``None`` -> ``""``, any
+    non-string present value is a hard error (ADR-043 strict-config
+    convention — never silently coerced via ``str(...)``, unlike a bare
+    ``str(d.get(key, "") or "")`` which would turn e.g. a YAML list into the
+    synthetic string ``"['x']"``)."""
+    value = d.get(key)
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise ValueError(
+            f"{where}.{key} must be a string, got {type(value).__name__}: {value!r}"
+        )
+    return value
+
+
+def _require_str_list(d: dict[str, Any], key: str, *, where: str) -> list[str]:
+    """A strictly-typed optional list-of-strings field: absent -> ``[]``, a
+    non-list or a list containing a non-string element is a hard error."""
     raw = d.get(key)
-    return [str(x) for x in raw if isinstance(x, str)] if isinstance(raw, list) else []
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError(f"{where}.{key} must be a list of strings, got {raw!r}")
+    bad = [x for x in raw if not isinstance(x, str)]
+    if bad:
+        raise ValueError(f"{where}.{key} must be a list of strings, got {bad!r}")
+    return list(raw)
 
 
 def _require_mapping(data: object, block: str) -> dict[str, Any]:
@@ -177,16 +202,7 @@ class CheckSpec:
                 f"{where}.gate_mode must be a string, got "
                 f"{type(gate_mode).__name__}: {gate_mode!r}"
             )
-        profiles_raw = d.get("profiles")
-        if profiles_raw is not None and not isinstance(profiles_raw, list):
-            raise ValueError(f"{where}.profiles must be a list of strings")
-        profiles = _str_list(d, "profiles")
-        if profiles_raw is not None:
-            bad = [p for p in profiles_raw if not isinstance(p, str)]
-            if bad:
-                raise ValueError(
-                    f"{where}.profiles must be a list of strings, got {bad!r}"
-                )
+        profiles = _require_str_list(d, "profiles", where=where)
         return cls(
             channel=channel,
             depth=depth,
@@ -277,13 +293,15 @@ class TargetSpec:
         return cls(
             id=name,
             kind=kind,
-            binary_pattern=str(d.get("binary_pattern", "") or ""),
-            public_headers=_str_list(d, "public_headers"),
-            bundle=str(d.get("bundle", "") or ""),
+            binary_pattern=_opt_str_field(d, "binary_pattern", where=where),
+            public_headers=_require_str_list(d, "public_headers", where=where),
+            bundle=_opt_str_field(d, "bundle", where=where),
             bundle_only=bundle_only,
-            consumer_binary_pattern=str(d.get("consumer_binary_pattern", "") or ""),
-            library=str(d.get("library", "") or ""),
-            contract_file=str(d.get("contract_file", "") or ""),
+            consumer_binary_pattern=_opt_str_field(
+                d, "consumer_binary_pattern", where=where
+            ),
+            library=_opt_str_field(d, "library", where=where),
+            contract_file=_opt_str_field(d, "contract_file", where=where),
             checks=checks,
         )
 
@@ -532,27 +550,72 @@ def _identifier_issues(kind: str, name: str) -> list[str]:
     return []
 
 
+#: Every kind-specific "content" field a ``targets:`` entry can carry
+#: (excludes ``kind``/``checks``, which every kind allows).
+_ALL_KIND_FIELDS = frozenset(
+    {
+        "binary_pattern",
+        "public_headers",
+        "bundle",
+        "bundle_only",
+        "consumer_binary_pattern",
+        "library",
+        "contract_file",
+    }
+)
+#: Which of `_ALL_KIND_FIELDS` each ``kind`` allows — the complement is each
+#: kind's forbidden set, so a newly-added field is automatically forbidden
+#: everywhere it isn't explicitly allowed (CodeRabbit review: a partial,
+#: hand-maintained forbidden list previously let e.g. a `kind: library`
+#: target silently set `library:`, or an `app-consumer` silently set
+#: `bundle:`/`bundle_only:`, neither of which means anything for those kinds).
+_KIND_ALLOWED_FIELDS: dict[str, frozenset[str]] = {
+    TARGET_KIND_LIBRARY: frozenset(
+        {"binary_pattern", "public_headers", "bundle", "bundle_only"}
+    ),
+    TARGET_KIND_APP_CONSUMER: frozenset({"consumer_binary_pattern", "library"}),
+    TARGET_KIND_PLUGIN_CONTRACT: frozenset({"contract_file", "library"}),
+}
+
+
+def _forbidden_field_issues(target: TargetSpec) -> list[str]:
+    allowed = _KIND_ALLOWED_FIELDS.get(target.kind, frozenset())
+    issues: list[str] = []
+    for name in sorted(_ALL_KIND_FIELDS - allowed):
+        if getattr(target, name):
+            issues.append(
+                f"target {target.id!r}: kind: {target.kind} must not set {name}."
+            )
+    return issues
+
+
 def _target_issues(config: ProjectTargetsConfig, target: TargetSpec) -> list[str]:
     issues = _identifier_issues("target", target.id)
+    issues.extend(_forbidden_field_issues(target))
     if target.kind == TARGET_KIND_LIBRARY:
         if not target.binary_pattern:
             issues.append(
                 f"target {target.id!r}: kind: library requires binary_pattern."
             )
-        for forbidden in ("consumer_binary_pattern", "contract_file"):
-            if getattr(target, forbidden):
-                issues.append(
-                    f"target {target.id!r}: kind: library must not set {forbidden}."
-                )
         if target.bundle_only and not target.bundle:
             issues.append(
                 f"target {target.id!r}: bundle_only requires bundle to be set."
             )
-        if target.bundle and target.bundle not in config.bundles:
-            issues.append(
-                f"target {target.id!r}: bundle {target.bundle!r} is not declared "
-                "under bundles:."
-            )
+        if target.bundle:
+            declared_bundle = config.bundles.get(target.bundle)
+            if declared_bundle is None:
+                issues.append(
+                    f"target {target.id!r}: bundle {target.bundle!r} is not "
+                    "declared under bundles:."
+                )
+            elif target.id not in declared_bundle.targets:
+                issues.append(
+                    f"target {target.id!r}: declares bundle: {target.bundle!r} "
+                    f"but bundles.{target.bundle}.targets does not list "
+                    f"{target.id!r} back — a target's own bundle: field and its "
+                    "membership in that bundle's targets: list must agree in "
+                    "both directions."
+                )
     elif target.kind == TARGET_KIND_APP_CONSUMER:
         if not target.consumer_binary_pattern:
             issues.append(
@@ -560,22 +623,12 @@ def _target_issues(config: ProjectTargetsConfig, target: TargetSpec) -> list[str
                 "consumer_binary_pattern."
             )
         issues.extend(_library_reference_issues(config, target))
-        for forbidden in ("binary_pattern", "contract_file"):
-            if getattr(target, forbidden):
-                issues.append(
-                    f"target {target.id!r}: kind: app-consumer must not set {forbidden}."
-                )
     elif target.kind == TARGET_KIND_PLUGIN_CONTRACT:
         if not target.contract_file:
             issues.append(
                 f"target {target.id!r}: kind: plugin-contract requires contract_file."
             )
         issues.extend(_library_reference_issues(config, target))
-        for forbidden in ("binary_pattern", "consumer_binary_pattern"):
-            if getattr(target, forbidden):
-                issues.append(
-                    f"target {target.id!r}: kind: plugin-contract must not set {forbidden}."
-                )
     for i, check in enumerate(target.checks):
         issues.extend(_check_issues(config, target.id, i, check))
     return issues
