@@ -145,6 +145,7 @@ module = [
     "abicheck.cli_resolve",
     "abicheck.cli_aggregate",
     "abicheck.cli_appcompat",
+    "abicheck.cli_build_output",
     "abicheck.cli_compare_release",
     "abicheck.cli_debian_symbols",
     "abicheck.cli_baseline",

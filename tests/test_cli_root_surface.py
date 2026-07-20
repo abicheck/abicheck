@@ -16,15 +16,17 @@
 """Root command-surface behavior tests (ADR-043).
 
 The pre-1.0 CLI reset requires the public root surface to show *exactly*
-``dump``, ``compare``, ``scan``, ``deps``, ``compat`` — plus ``aggregate``, the
-multi-target CI fan-in gate added afterward — with no hidden aliases, and no
-deprecated shims for the deleted commands (``appcompat``, ``plugin-check``,
-``baseline``, ``collect``, ``merge``, ``recommend-collect-mode``,
-``debian-symbols``, ``doctor``, ``config``, ``init``, ``surface-report``,
-``pr-comment``, ``suggest-suppressions``, ``probe``). This module pins that
-contract as an executable behavior test, distinct from
-``test_cli_surface_diff.py`` (which exercises the CLI-surface-dump scripts
-used by the CI gate) and ``test_cli_contract.py`` (the Tier-2 chokepoint gate).
+``dump``, ``compare``, ``scan``, ``deps``, ``compat`` — plus ``aggregate``
+(the multi-target CI fan-in gate) and ``build-output`` (the G30 P1.1
+``build-output.json`` validator group), both added afterward — with no
+hidden aliases, and no deprecated shims for the deleted commands
+(``appcompat``, ``plugin-check``, ``baseline``, ``collect``, ``merge``,
+``recommend-collect-mode``, ``debian-symbols``, ``doctor``, ``config``,
+``init``, ``surface-report``, ``pr-comment``, ``suggest-suppressions``,
+``probe``). This module pins that contract as an executable behavior test,
+distinct from ``test_cli_surface_diff.py`` (which exercises the
+CLI-surface-dump scripts used by the CI gate) and ``test_cli_contract.py``
+(the Tier-2 chokepoint gate).
 """
 
 from __future__ import annotations
@@ -37,7 +39,9 @@ from click.testing import CliRunner
 
 from abicheck.cli import main
 
-_PUBLIC_COMMANDS = frozenset({"dump", "compare", "scan", "deps", "compat", "aggregate"})
+_PUBLIC_COMMANDS = frozenset(
+    {"dump", "compare", "scan", "deps", "compat", "aggregate", "build-output"}
+)
 
 _REMOVED_COMMANDS = (
     "appcompat",

@@ -50,7 +50,9 @@ def diff_mod():  # type: ignore[no-untyped-def]
 
 def test_dump_surface_covers_root_commands(dump_mod) -> None:  # type: ignore[no-untyped-def]
     """The dumped surface exposes exactly the public root commands (ADR-043,
-    plus ``aggregate`` — the multi-target CI fan-in gate added afterward).
+    plus ``aggregate`` — the multi-target CI fan-in gate — and
+    ``build-output`` — the G30 P1.1 ``build-output.json`` validator group —
+    both added afterward).
 
     `pr-comment` is deliberately NOT here: it is Action/library-only tooling
     (`python -m abicheck.cli_pr_comment`), never a public `abicheck` subcommand.
@@ -58,6 +60,7 @@ def test_dump_surface_covers_root_commands(dump_mod) -> None:  # type: ignore[no
     surface = dump_mod.dump_surface()
     assert set(surface) == {
         "aggregate",
+        "build-output",
         "compare",
         "compat",
         "deps",
@@ -86,11 +89,21 @@ def test_diff_identical_surface_is_empty(dump_mod, diff_mod) -> None:  # type: i
 def test_diff_detects_removed_and_added_command(diff_mod) -> None:  # type: ignore[no-untyped-def]
     base = {
         "dump": {"path": "dump", "kind": "command", "hidden": False, "params": []},
-        "old-cmd": {"path": "old-cmd", "kind": "command", "hidden": False, "params": []},
+        "old-cmd": {
+            "path": "old-cmd",
+            "kind": "command",
+            "hidden": False,
+            "params": [],
+        },
     }
     head = {
         "dump": {"path": "dump", "kind": "command", "hidden": False, "params": []},
-        "new-cmd": {"path": "new-cmd", "kind": "command", "hidden": False, "params": []},
+        "new-cmd": {
+            "path": "new-cmd",
+            "kind": "command",
+            "hidden": False,
+            "params": [],
+        },
     }
     lines = diff_mod.diff_surfaces(base, head)
     assert any("removed command `old-cmd`" in ln for ln in lines)
@@ -104,9 +117,27 @@ def test_diff_detects_option_added_removed_and_changed(diff_mod) -> None:  # typ
             "kind": "command",
             "hidden": False,
             "params": [
-                {"name": "output", "kind": "option", "opts": ["-o", "--output"], "required": False, "default": None},
-                {"name": "gone", "kind": "option", "opts": ["--gone"], "required": False, "default": None},
-                {"name": "depth", "kind": "option", "opts": ["--depth"], "required": False, "default": "auto"},
+                {
+                    "name": "output",
+                    "kind": "option",
+                    "opts": ["-o", "--output"],
+                    "required": False,
+                    "default": None,
+                },
+                {
+                    "name": "gone",
+                    "kind": "option",
+                    "opts": ["--gone"],
+                    "required": False,
+                    "default": None,
+                },
+                {
+                    "name": "depth",
+                    "kind": "option",
+                    "opts": ["--depth"],
+                    "required": False,
+                    "default": "auto",
+                },
             ],
         },
     }
@@ -116,9 +147,27 @@ def test_diff_detects_option_added_removed_and_changed(diff_mod) -> None:  # typ
             "kind": "command",
             "hidden": False,
             "params": [
-                {"name": "output", "kind": "option", "opts": ["-o", "--output"], "required": False, "default": None},
-                {"name": "new", "kind": "option", "opts": ["--new"], "required": False, "default": None},
-                {"name": "depth", "kind": "option", "opts": ["--depth"], "required": False, "default": "binary"},
+                {
+                    "name": "output",
+                    "kind": "option",
+                    "opts": ["-o", "--output"],
+                    "required": False,
+                    "default": None,
+                },
+                {
+                    "name": "new",
+                    "kind": "option",
+                    "opts": ["--new"],
+                    "required": False,
+                    "default": None,
+                },
+                {
+                    "name": "depth",
+                    "kind": "option",
+                    "opts": ["--depth"],
+                    "required": False,
+                    "default": "binary",
+                },
             ],
         },
     }
@@ -143,4 +192,7 @@ def test_render_report_markdown_header(diff_mod) -> None:  # type: ignore[no-unt
     text = diff_mod.render_report(lines, markdown=True)
     assert "## CLI interface change detected" in text
     assert "- removed command `foo`" in text
-    assert diff_mod.render_report([], markdown=True) == "No user-facing CLI surface changes detected."
+    assert (
+        diff_mod.render_report([], markdown=True)
+        == "No user-facing CLI surface changes detected."
+    )

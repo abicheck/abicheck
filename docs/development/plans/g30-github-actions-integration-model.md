@@ -222,7 +222,7 @@ implemented). `mkdocs build --strict` passes (pre-existing anchor-mismatch
 
 ## P1 — Integration model (ADR-047's new primitives)
 
-### P1.1 — `build-output.json` schema + validator
+### P1.1 — `build-output.json` schema + validator — **done**
 
 Implements ADR-047 §2/§11.1. New schema module (e.g.
 `abicheck/buildsource/build_output.py` or a sibling of `inputs_pack.py`,
@@ -265,6 +265,26 @@ specific target referencing it must fail, (3) a single-target,
 `manifest.library`-matched pack with untagged TUs must **pass** (regression
 guard against over-rejecting the legitimate legacy case). (1) and (2) are
 currently unenforced; (3) guards the fix from over-correcting.
+
+**Status:** implemented. `abicheck/buildsource/build_output.py` defines the
+schema (`BuildOutput`/`BuildOutputTarget`/`BuildOutputEvidence`/etc., all
+optional/defaulted per the `buildsource`-wide forward-compat convention) and
+`validate_build_output()`, which implements every §11.1 rule: non-empty
+declared header roots (including the S10 `generated_header_roots` hard-error
+case), binary-exists + digest-matches, `evidence.projection` must be
+`"declared"` (`"inferred"` and any other value hard-fail), and the corrected
+shared-pack/manifest-mismatch scope — implemented as an equivalent
+comparison in the new validator (the second option the plan offered) rather
+than extending `inputs_validate.py`'s existing signature, so no existing
+caller of `validate_inputs_pack` changed. `abicheck/cli_build_output.py`
+registers `abicheck build-output validate DIRECTORY` (`--format text|json`,
+exit `0`/`1`/`64`) — a new top-level command group, since `cli_buildsource.py`
+registers no commands of its own. `docs/reference/build-output-schema.md`
+(new, linked from mkdocs nav) documents the schema + validation rules.
+`tests/test_build_output.py` covers the schema round-trip and the full
+failure taxonomy, including all three of the plan's required shared-pack
+test cases (verified against a hand-authored example directory manually as
+well as in the test suite).
 
 ### P1.2 — `actions/resolve-baseline`
 

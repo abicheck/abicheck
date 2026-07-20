@@ -1037,6 +1037,14 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 "cli_aggregate",
                 "cli_appcompat",
                 "cli_baseline",
+                # `cli_build_output` (G30 P1.1) joins this SCC exactly like
+                # `cli_aggregate`: its `build-output validate` command reuses
+                # the shared `-o/--format` pair via `cli_options.output_options`
+                # (module-load import), and `cli_options` is already a member —
+                # so `cli -> cli_build_output -> cli_options -> ... -> cli`
+                # closes through already-member modules, not a new dependency
+                # direction. No init deadlock.
+                "cli_build_output",
                 "cli_buildsource",
                 "cli_buildsource_helpers",
                 "cli_compare_helpers",
