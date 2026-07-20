@@ -164,8 +164,8 @@ was in flight, so this work's own bump moved to `2.12` on rebase);
 `SCAN_SCHEMA_VERSION`'s matching `1.0` → `1.1` bump for the scan
 side (no packaged JSON Schema file for scan output to update). Nothing
 populates these fields yet — that's still P1.3's job, and the
-`requested_depth`/`effective_depth` CLI-wiring PR remains blocked on PR
-#601 per the note above.
+`requested_depth`/`effective_depth` CLI-wiring PR remains blocked on
+PR #601 per the note above.
 `tests/test_report_schema.py`'s new `TestReportIdentityEnvelope`/
 `TestScanReportIdentityEnvelope` classes cover: unset-by-default (omitted,
 not null), round-trip + schema validation when set, `--stat` mode carrying

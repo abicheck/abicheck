@@ -448,7 +448,7 @@ def _header_root_issues(
                 f"(expected a directory at {resolved})."
             )
             continue
-        if not any(resolved.rglob("*")):
+        if not any(p.is_file() for p in resolved.rglob("*")):
             issues.append(
                 f"target {target_id!r}: {label} root {rel!r} exists but is "
                 "empty — an empty declared header root is a hard failure, "

@@ -337,6 +337,33 @@ class TestHeaderRootValidation:
         assert not report.ok
         assert any("empty" in e for e in report.errors)
 
+    def test_header_root_with_only_empty_subdirectory_fails(
+        self, tmp_path: Path
+    ) -> None:
+        root = tmp_path / "abicheck-build"
+        root.mkdir()
+        digest = _binary(root, "artifacts/lib/libfoo.so")
+        _header_root(root, "headers/foo", populated=False)
+        (root / "headers/foo/nested").mkdir()
+        (root / "build-output.json").write_text(
+            json.dumps(
+                {
+                    "schema": BUILD_OUTPUT_SCHEMA,
+                    "targets": [
+                        {
+                            "id": "libfoo",
+                            "binary": "artifacts/lib/libfoo.so",
+                            "public_header_roots": ["headers/foo"],
+                        }
+                    ],
+                    "digests": {"artifacts/lib/libfoo.so": f"sha256:{digest}"},
+                }
+            )
+        )
+        report = validate_build_output(root)
+        assert not report.ok
+        assert any("empty" in e for e in report.errors)
+
     def test_empty_generated_header_root_is_hard_failure_not_warning(
         self, tmp_path: Path
     ) -> None:

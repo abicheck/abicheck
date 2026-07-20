@@ -36,7 +36,7 @@ from .checker_policy import (
     impact_for,
     policy_kind_sets as _policy_kind_sets,
 )
-from .checker_types import validate_evidence_depth
+from .checker_types import validate_check_id, validate_evidence_depth
 from .report_model import VERDICT_TO_SEVERITY_LABEL as _VERDICT_TO_SEVERITY_LABEL
 from .report_summary import build_summary, surface_breakdown
 
@@ -452,6 +452,7 @@ def _add_check_identity(d: dict[str, object], result: DiffResult) -> None:
     identical to one from before this schema version.
     """
     if result.check_id is not None:
+        validate_check_id(result.check_id)
         d["check_id"] = result.check_id
     if result.profile_id is not None:
         d["profile_id"] = result.profile_id

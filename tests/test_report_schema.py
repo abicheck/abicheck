@@ -125,6 +125,22 @@ class TestSchemaFile:
         schema = load_compare_report_schema()
         assert "report_schema_version" in schema["required"]
 
+    def test_docs_mirror_matches_packaged_schema(self):
+        # Regression guard (code review, PR #611): the docs/schemas/v1 copy
+        # previously drifted from the packaged schema (PR #595) without any
+        # test catching it, since jsonschema.validate's additionalProperties
+        # tolerance doesn't flag a stale docs copy. scripts/publish_schemas.py
+        # keeps the two byte-identical; assert that invariant directly.
+        docs_copy = (
+            COMPARE_REPORT_SCHEMA_PATH.parent.parent.parent
+            / "docs"
+            / "schemas"
+            / "v1"
+            / "compare_report.schema.json"
+        )
+        assert docs_copy.is_file()
+        assert docs_copy.read_text() == COMPARE_REPORT_SCHEMA_PATH.read_text()
+
 
 @_requires_jsonschema
 class TestReportValidatesAgainstSchema:
@@ -266,13 +282,16 @@ class TestReportIdentityEnvelope:
         # ("target@profile#baseline_channel@requested_depth") is only
         # unambiguous if each component avoids '@'/'#' itself -- a value
         # missing the depth suffix, or with the wrong delimiter order,
-        # must fail the schema's pattern.
+        # must fail the schema's pattern. Code review on PR #611 also added
+        # eager validation at the point check_id is set (matching
+        # requested_depth/effective_depth's validate_evidence_depth), so
+        # to_json now raises ValueError immediately rather than only
+        # failing the opt-in JSON Schema check.
         old, new = _breaking_pair()
         result = compare(old, new)
         result.check_id = "libfoo-missing-the-rest-of-the-shape"
-        payload = json.loads(reporter.to_json(result))
-        with pytest.raises(jsonschema.ValidationError):
-            jsonschema.validate(instance=payload, schema=load_compare_report_schema())
+        with pytest.raises(ValueError, match="check_id"):
+            reporter.to_json(result)
 
     def test_stat_mode_carries_identity_fields_too(self):
         old, new = _breaking_pair()
