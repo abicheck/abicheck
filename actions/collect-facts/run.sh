@@ -705,6 +705,9 @@ if [[ "$PHASE" == "verify" ]]; then
   else
     _verify_pack
   fi
+  # phase: verify is itself the second half of a two-step choreography (or
+  # the whole story for producer: replay) -- it always completes.
+  _write_output "auto-completed" "true"
 else
   case "$PRODUCER" in
     replay) _prepare_replay ;;
@@ -712,6 +715,19 @@ else
     clang-plugin) _prepare_clang_plugin ;;
   esac
   if [[ "$PHASE" == "auto" ]] && _phase_needs_external_build_step "$PHASE" "$PRODUCER"; then
-    echo "::notice::phase: auto only completes both phases for producer: replay. For producer: $PRODUCER, add a build step here, then a second 'uses: .../collect-facts' step with phase: verify."
+    # phase: auto structurally cannot run the caller's build, so for
+    # wrapper/clang-plugin it only ever completes `prepare` here -- a
+    # caller relying on phase: auto to mean "one step, done" would
+    # otherwise get an unverified pack with no error (ADR-047 P0.2).
+    # Fail loud with a job-summary notice *and* a machine-readable output
+    # a caller can branch on, instead of a print-only notice.
+    echo "::warning::phase: auto only completes both phases for producer: replay. For producer: $PRODUCER, phase: auto has only run 'prepare' -- add your build step here, then a second 'uses: .../collect-facts' step with phase: verify to check the collected pack. Downstream steps must check this Action's auto-completed output before assuming the pack is ready."
+    _write_output "auto-completed" "false"
+  else
+    # phase: prepare (explicit, non-auto) is always the deliberate first
+    # half of a two-step choreography the caller already knows about; and
+    # phase: auto for producer: replay completes both phases in this one
+    # step (_prepare_replay's own `ready: true` output already says so).
+    _write_output "auto-completed" "true"
   fi
 fi

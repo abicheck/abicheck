@@ -82,7 +82,7 @@ is set outside `compare`/`scan` mode, or when the deprecated `estimate`/
 the new inputs to the validation step; `tests/test_action_validate_inputs.py`
 covers each case (warn and silent) via `TestModeScopedInputWarnings`.
 
-### P0.2 — `collect-facts` `phase: auto` fail-loud for wrapper/plugin
+### P0.2 — `collect-facts` `phase: auto` fail-loud for wrapper/plugin — **done**
 
 **Problem:** `phase: auto` silently only runs `prepare` for
 `producer: wrapper`/`clang-plugin` (`actions/collect-facts/run.sh:714-716`)
@@ -103,6 +103,20 @@ implying `auto` is always one step.
 the new output value per producer.
 
 **PR boundary:** one PR.
+
+**Status:** implemented. `actions/collect-facts/run.sh` now writes a new
+`auto-completed` output (`'true'`/`'false'`) alongside a `::warning::`
+job annotation (upgraded from the print-only `::notice::`) when
+`phase: auto` resolves to `producer: wrapper`/`clang-plugin` and therefore
+only completes `prepare`. `actions/collect-facts/action.yml` documents the
+new output; `docs/user-guide/producing-source-facts.md` spells out the
+two-step choreography explicitly instead of only implying it, with a
+sample `if: steps.facts.outputs.auto-completed != 'true'` guard.
+`tests/test_action_collect_facts.py`'s new `TestAutoCompletedOutput` covers
+replay (`auto-completed: true`, no warning), wrapper under `phase: auto`
+(`auto-completed: false`, warning fires), wrapper under explicit
+`phase: prepare` (`auto-completed: true`, no warning — not flagged like
+`auto` is), and `phase: verify` (`auto-completed: true`).
 
 ### P0.3 — Report identity envelope (subset of ADR-047 §7)
 

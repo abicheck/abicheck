@@ -162,6 +162,20 @@ outputs:
       (the plugin's identity is fixed the moment it's built, before your
       build even runs) and re-emitted unchanged at phase: verify.
     value: ${{ steps.run-collect-facts.outputs.producer-version }}
+  auto-completed:
+    description: >
+      'true' when `phase: auto` collected a ready-to-consume pack in this
+      one step (producer: replay always; producer: wrapper/clang-plugin
+      only ever resolve to 'false' here -- `phase: auto` structurally
+      cannot run your build, so it only completes `prepare` for those two
+      producers and a caller must follow up with your build step, then a
+      second call to this Action with `phase: verify`). Always 'true' for
+      `phase: prepare`/`phase: verify` calls (each already reports its own
+      readiness via the `ready` output; this output exists specifically so
+      a `phase: auto` caller can branch on whether the one-step shortcut
+      actually completed, instead of relying on reading the job-summary
+      notice).
+    value: ${{ steps.run-collect-facts.outputs.auto-completed }}
 
 runs:
   using: 'composite'

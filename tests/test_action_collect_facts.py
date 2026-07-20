@@ -740,6 +740,82 @@ class TestPhaseNeedsExternalBuildStep:
 @pytest.mark.skipif(
     not RUN_SH.is_file(), reason="actions/collect-facts/run.sh not found"
 )
+class TestAutoCompletedOutput:
+    """ADR-047 P0.2: `phase: auto` silently only ran `prepare` for
+    producer: wrapper/clang-plugin, leaving a caller with an unverified pack
+    and no error. The Action now sets a machine-readable `auto-completed`
+    output (plus a `::warning::` job annotation) so a caller can branch on
+    whether the one-step shortcut actually completed."""
+
+    def test_auto_with_replay_completes(self, tmp_path: Path) -> None:
+        sources = tmp_path / "src"
+        sources.mkdir()
+        (sources / "compile_commands.json").write_text("[]")
+        result, _, github_output = _run_action(
+            {
+                "INPUT_PHASE": "auto",
+                "INPUT_PRODUCER": "replay",
+                "INPUT_SOURCES": str(sources),
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert _parse_kv_file(github_output)["auto-completed"] == "true"
+        assert "::warning::" not in result.stdout
+
+    def test_auto_with_wrapper_does_not_complete(self, tmp_path: Path) -> None:
+        result, _, github_output = _run_action(
+            {
+                "INPUT_PHASE": "auto",
+                "INPUT_PRODUCER": "wrapper",
+                "INPUT_OUTPUT": str(tmp_path / "abicheck_inputs"),
+                "INPUT_INSTALL_DEPS": "false",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert _parse_kv_file(github_output)["auto-completed"] == "false"
+        assert "::warning::" in result.stdout
+        assert (
+            "phase: auto only completes both phases for producer: replay"
+            in result.stdout
+        )
+
+    def test_explicit_prepare_with_wrapper_completes(self, tmp_path: Path) -> None:
+        # phase: prepare (not auto) is the deliberate first half of a
+        # two-step choreography the caller already knows about -- it must
+        # not be flagged the same way auto is.
+        result, _, github_output = _run_action(
+            {
+                "INPUT_PHASE": "prepare",
+                "INPUT_PRODUCER": "wrapper",
+                "INPUT_OUTPUT": str(tmp_path / "abicheck_inputs"),
+                "INPUT_INSTALL_DEPS": "false",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert _parse_kv_file(github_output)["auto-completed"] == "true"
+        assert "::warning::" not in result.stdout
+
+    def test_verify_completes(self, tmp_path: Path) -> None:
+        sources = tmp_path / "src"
+        sources.mkdir()
+        result, _, github_output = _run_action(
+            {
+                "INPUT_PHASE": "verify",
+                "INPUT_PRODUCER": "replay",
+                "INPUT_SOURCES": str(sources),
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert _parse_kv_file(github_output)["auto-completed"] == "true"
+
+
+@pytest.mark.skipif(
+    not RUN_SH.is_file(), reason="actions/collect-facts/run.sh not found"
+)
 class TestInvalidInputsRejected:
     def test_unknown_producer_fails(self, tmp_path: Path) -> None:
         result, _, _ = _run_action({"INPUT_PRODUCER": "bogus"}, tmp_path)
