@@ -93,6 +93,7 @@ def _dump_cache_extra_key(
     header_backend: str,
     public_headers: list[Path] | None,
     public_header_dirs: list[Path] | None,
+    lang: str = "c++",
 ) -> str:
     """Build the ``extra`` cache-key material for a cacheable dump — every
     input to ``run_dump`` that affects its output besides the binary content
@@ -162,12 +163,36 @@ def _dump_cache_extra_key(
 
         layout_tool = find_layout_tool_bin() or ""
 
+    # G29 Phase A's header-graph attach (service._attach_header_graph) always
+    # runs its own internal clang AST pass (_clang_header_dump) to build the
+    # L2 semantic graph -- unconditionally, regardless of which backend
+    # `resolved_backend` above is (a plain castxml dump still gets one). A
+    # cacheable call always has `compile is None` (_dump_is_cacheable
+    # requires it), so that pass always resolves clang with no gcc_path/
+    # gcc_prefix override -- resolve the same way here and hash the actual
+    # resolved binary path (not just the bare driver name), so a cache
+    # written while clang was missing/at a different PATH entry can't be
+    # replayed once clang becomes available/changes, silently keeping a
+    # snapshot with degraded or stale header-graph coverage (Codex review).
+    import shutil
+
+    from .dumper_clang import _resolve_clang_bin
+    from .errors import SnapshotError
+
+    header_graph_clang = ""
+    try:
+        clang_driver = _resolve_clang_bin("cc" if lang == "c" else "c++", None, None)
+        header_graph_clang = shutil.which(clang_driver) or clang_driver
+    except SnapshotError:
+        header_graph_clang = ""
+
     sep = "\x00"
     return sep.join(
         [
             binary_fmt,
             resolved_backend,
             layout_tool,
+            header_graph_clang,
             sep.join(sorted(str(p) for p in (public_headers or []))),
             sep.join(sorted(str(p) for p in (public_header_dirs or []))),
         ]
@@ -245,7 +270,7 @@ def cached_run_dump(
     from . import snapshot_cache
 
     extra = _dump_cache_extra_key(
-        binary_fmt, header_backend, public_headers, public_header_dirs
+        binary_fmt, header_backend, public_headers, public_header_dirs, lang
     )
     cached = snapshot_cache.lookup(path, _headers, _includes, version, lang, extra=extra)
     if cached is not None:

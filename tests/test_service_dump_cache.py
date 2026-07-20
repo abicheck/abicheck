@@ -226,6 +226,41 @@ class TestDumpCacheExtraKey:
         k2 = _dump_cache_extra_key("elf", "auto", None, None)
         assert k1 == k2
 
+    def test_differs_by_header_graph_clang_availability_even_for_castxml(self):
+        # Codex review: G29 Phase A's header-graph attach always runs its own
+        # internal clang AST pass (service._attach_header_graph ->
+        # dumper._clang_header_dump) regardless of `resolved_backend` -- a
+        # plain "castxml" dump still gets one. A cache entry written while
+        # clang was unavailable must not be replayed once clang becomes
+        # available (or vice versa), or the header graph silently keeps
+        # whatever degraded/absent coverage the first run saw.
+        with patch("abicheck.dumper_clang._clang_available", return_value=False):
+            k_missing = _dump_cache_extra_key("elf", "castxml", None, None)
+        with patch("abicheck.dumper_clang._clang_available", return_value=True):
+            with patch("shutil.which", return_value="/usr/bin/clang++"):
+                k_present = _dump_cache_extra_key("elf", "castxml", None, None)
+        assert k_missing != k_present
+
+    def test_differs_by_header_graph_clang_resolved_path(self):
+        # Two different clang installs on PATH (e.g. a system upgrade) must
+        # produce different keys even though both "are available".
+        with patch("abicheck.dumper_clang._clang_available", return_value=True):
+            with patch("shutil.which", return_value="/usr/bin/clang++"):
+                k1 = _dump_cache_extra_key("elf", "castxml", None, None)
+            with patch("shutil.which", return_value="/opt/llvm-18/bin/clang++"):
+                k2 = _dump_cache_extra_key("elf", "castxml", None, None)
+        assert k1 != k2
+
+    def test_header_graph_clang_key_respects_lang(self):
+        # `cc`/`c++` resolve to different driver names -- fold `lang` in so a
+        # C vs C++ dump (which can genuinely have only one of the two
+        # installed) gets a distinct key.
+        with patch("abicheck.dumper_clang._clang_available", return_value=True):
+            with patch("shutil.which", side_effect=lambda name: f"/usr/bin/{name}"):
+                k_cpp = _dump_cache_extra_key("elf", "castxml", None, None, "c++")
+                k_c = _dump_cache_extra_key("elf", "castxml", None, None, "c")
+        assert k_cpp != k_c
+
 
 class TestCachedRunDump:
     def test_cache_hit_skips_run_dump(self, tmp_path):

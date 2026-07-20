@@ -2269,6 +2269,91 @@ class TestRunDumpHeaderGraph:
         assert result.build_source is not None
 
 
+class TestRunDumpHeaderGraphSkippedForDwarfOnly:
+    """Codex review: dwarf_only=True means "ignore headers entirely" --
+    _dump_elf already honors that (it skips header-root inference/include
+    validation and warns if headers are supplied alongside it). Before this
+    fix, the header-graph attach ran unconditionally regardless of
+    dwarf_only, so a `--dwarf-only -H ...` request could still silently
+    re-parse those headers via clang and attach L2 build_source evidence to
+    what the caller explicitly asked to be a DWARF-only snapshot."""
+
+    def test_elf_dwarf_only_does_not_attach_header_graph(self, tmp_path):
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        header = tmp_path / "api.h"
+        header.write_text("void f();\n")
+        snap = AbiSnapshot(library="lib", version="1.0", from_headers=False)
+        calls: list[tuple[bool, bool]] = []
+
+        def _fake_attach(_snap, header_graph, header_graph_includes, *_args, **_kwargs):
+            calls.append((header_graph, header_graph_includes))
+            return _snap
+
+        with (
+            patch("abicheck.service._dump_elf", return_value=snap),
+            patch("abicheck.service._attach_header_graph", side_effect=_fake_attach),
+            patch("abicheck.service.attach_clang_layout", side_effect=lambda s, *a, **k: s),
+        ):
+            result = run_dump(p, "elf", [header], [], "1.0", "c++", dwarf_only=True)
+
+        assert calls == [(False, False)]
+        assert result.build_source is None
+
+    def test_elf_without_dwarf_only_still_attaches_header_graph(self, tmp_path):
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        header = tmp_path / "api.h"
+        header.write_text("void f();\n")
+        snap = AbiSnapshot(library="lib", version="1.0", from_headers=True)
+        calls: list[tuple[bool, bool]] = []
+
+        def _fake_attach(_snap, header_graph, header_graph_includes, *_args, **_kwargs):
+            calls.append((header_graph, header_graph_includes))
+            return _snap
+
+        with (
+            patch("abicheck.service._dump_elf", return_value=snap),
+            patch("abicheck.service._attach_header_graph", side_effect=_fake_attach),
+            patch("abicheck.service.attach_clang_layout", side_effect=lambda s, *a, **k: s),
+        ):
+            run_dump(p, "elf", [header], [], "1.0", "c++", dwarf_only=False)
+
+        assert calls == [(True, True)]
+
+    def test_hybrid_dwarf_only_does_not_attach_header_graph(self, tmp_path):
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        castxml_snap = AbiSnapshot(
+            library="test", version="1.0", from_headers=False, ast_producer="castxml"
+        )
+        clang_snap = AbiSnapshot(
+            library="test", version="1.0", from_headers=False, ast_producer="clang"
+        )
+        calls: list[tuple[bool, bool]] = []
+
+        def _fake_dump_elf(*args, **kwargs):
+            compile_ctx = kwargs.get("compile")
+            if compile_ctx is not None and compile_ctx.frontend == "clang":
+                return clang_snap
+            return castxml_snap
+
+        def _fake_attach(_snap, header_graph, header_graph_includes, *_args, **_kwargs):
+            calls.append((header_graph, header_graph_includes))
+            return _snap
+
+        with (
+            patch("abicheck.service._dump_elf", side_effect=_fake_dump_elf),
+            patch("abicheck.service._attach_header_graph", side_effect=_fake_attach),
+        ):
+            run_dump(p, "elf", header_backend="hybrid", dwarf_only=True)
+
+        # Both recursive sub-dumps attach with the graph forced off
+        # (_skip_header_graph_attach) regardless of dwarf_only, plus the
+        # final merged-snapshot attach must also be off since dwarf_only=True.
+        assert all(not h and not i for h, i in calls)
+
+
 class TestCliNativeBinaryHeaderWiring:
     """CLI _dump_native_binary must forward headers to service._dump_pe/_dump_macho."""
 
