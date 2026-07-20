@@ -188,6 +188,42 @@ class TestReportValidatesAgainstSchema:
             assert c["reviewer_action"] in declared_enum
 
 
+class TestEvidenceDepthValidator:
+    """Direct unit coverage for checker_types.validate_evidence_depth/
+    EVIDENCE_DEPTH_VALUES -- the shared depth-spelling guard both
+    reporter._add_check_identity (compare) and ScanOutcome.to_dict (scan)
+    delegate to."""
+
+    def test_accepts_every_public_depth(self):
+        from abicheck.checker_types import (
+            EVIDENCE_DEPTH_VALUES,
+            validate_evidence_depth,
+        )
+
+        for depth in EVIDENCE_DEPTH_VALUES:
+            validate_evidence_depth("requested_depth", depth)  # must not raise
+
+    def test_rejects_unknown_depth_with_field_name_in_message(self):
+        from abicheck.checker_types import validate_evidence_depth
+
+        with pytest.raises(ValueError, match="effective_depth"):
+            validate_evidence_depth("effective_depth", "bogus")
+
+    def test_public_depth_set_matches_mcp_server(self):
+        # Deliberately kept as a separate copy (mcp_server sits above
+        # checker_types in the dependency graph) -- this pins both stay in
+        # sync rather than silently drifting. mcp_server.py raises
+        # ImportError at import time without the optional `mcp` package
+        # (abicheck[mcp]) installed -- skip cleanly rather than failing when
+        # that extra isn't present, matching how the rest of the suite
+        # treats this same optional dependency.
+        pytest.importorskip("mcp")
+        from abicheck.checker_types import EVIDENCE_DEPTH_VALUES
+        from abicheck.mcp_server import _PUBLIC_DEPTHS
+
+        assert EVIDENCE_DEPTH_VALUES == _PUBLIC_DEPTHS
+
+
 @_requires_jsonschema
 class TestReportIdentityEnvelope:
     """ADR-047 §7 report-identity envelope subset (G30 P0.3): check_id,
@@ -225,6 +261,19 @@ class TestReportIdentityEnvelope:
         assert payload["effective_depth"] == "headers"
         assert payload["baseline_channel"] == "accepted-main"
 
+    def test_malformed_check_id_fails_schema_validation(self):
+        # ADR-047 §7's delimiter-joined check_id form
+        # ("target@profile#baseline_channel@requested_depth") is only
+        # unambiguous if each component avoids '@'/'#' itself -- a value
+        # missing the depth suffix, or with the wrong delimiter order,
+        # must fail the schema's pattern.
+        old, new = _breaking_pair()
+        result = compare(old, new)
+        result.check_id = "libfoo-missing-the-rest-of-the-shape"
+        payload = json.loads(reporter.to_json(result))
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(instance=payload, schema=load_compare_report_schema())
+
     def test_stat_mode_carries_identity_fields_too(self):
         old, new = _breaking_pair()
         result = compare(old, new)
@@ -232,13 +281,58 @@ class TestReportIdentityEnvelope:
         payload = json.loads(reporter.to_json(result, stat=True))
         assert payload["check_id"] == "libfoo@profile#channel@binary"
 
-    def test_invalid_depth_enum_fails_schema_validation(self):
+    def test_leaf_mode_carries_identity_fields_too(self):
+        # Regression guard: --report-mode leaf builds its own top-level dict
+        # independently of _build_json_base/to_stat_json (a separate code
+        # path, _to_json_leaf), so it needs its own _add_check_identity call
+        # -- code review on PR #611 caught this gap between the PR's own
+        # description ("full/--stat/leaf JSON via a shared helper") and what
+        # _to_json_leaf actually did (nothing, until this fix).
+        old, new = _breaking_pair()
+        result = compare(old, new)
+        result.check_id = "libfoo@profile#channel@source"
+        result.profile_id = "linux-x86_64-gcc13"
+        result.requested_depth = "source"
+        result.effective_depth = "build"
+        result.baseline_channel = "accepted-main"
+        payload = json.loads(reporter.to_json(result, report_mode="leaf"))
+        assert payload["check_id"] == "libfoo@profile#channel@source"
+        assert payload["profile_id"] == "linux-x86_64-gcc13"
+        assert payload["requested_depth"] == "source"
+        assert payload["effective_depth"] == "build"
+        assert payload["baseline_channel"] == "accepted-main"
+
+    def test_leaf_mode_unset_by_default(self):
+        old, new = _breaking_pair()
+        payload = json.loads(reporter.to_json(compare(old, new), report_mode="leaf"))
+        for key in (
+            "check_id",
+            "profile_id",
+            "requested_depth",
+            "effective_depth",
+            "baseline_channel",
+        ):
+            assert key not in payload
+
+    def test_invalid_requested_depth_rejected_before_json_is_built(self):
+        # reporter.to_json validates requested_depth/effective_depth itself
+        # (matching mcp_server._validate_public_depth's same check) rather
+        # than relying solely on JSON Schema validation, which production
+        # code never runs -- only opt-in tests do. Catches a bad value at
+        # the point it's set, not only when a test happens to schema-check
+        # the output.
         old, new = _breaking_pair()
         result = compare(old, new)
         result.requested_depth = "not-a-real-depth"
-        payload = json.loads(reporter.to_json(result))
-        with pytest.raises(jsonschema.ValidationError):
-            jsonschema.validate(instance=payload, schema=load_compare_report_schema())
+        with pytest.raises(ValueError, match="requested_depth"):
+            reporter.to_json(result)
+
+    def test_invalid_effective_depth_rejected_before_json_is_built(self):
+        old, new = _breaking_pair()
+        result = compare(old, new)
+        result.effective_depth = "not-a-real-depth"
+        with pytest.raises(ValueError, match="effective_depth"):
+            reporter.to_json(result)
 
 
 class TestScanReportIdentityEnvelope:
@@ -293,6 +387,14 @@ class TestScanReportIdentityEnvelope:
         payload = self._outcome().to_dict()
         assert payload["scan_schema_version"] == SCAN_SCHEMA_VERSION
         assert SCAN_SCHEMA_VERSION != "1.0"
+
+    def test_invalid_requested_depth_rejected_before_dict_is_built(self):
+        with pytest.raises(ValueError, match="requested_depth"):
+            self._outcome(requested_depth="not-a-real-depth").to_dict()
+
+    def test_invalid_effective_depth_rejected_before_dict_is_built(self):
+        with pytest.raises(ValueError, match="effective_depth"):
+            self._outcome(effective_depth="not-a-real-depth").to_dict()
 
 
 class TestSchemaVersion:

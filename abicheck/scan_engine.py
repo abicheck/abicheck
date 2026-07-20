@@ -62,6 +62,7 @@ from .buildsource.preprocessor_scan import run_preprocessor_scan
 from .buildsource.risk import RiskScore
 from .buildsource.scan_levels import EvidenceDepth, ScanMode, SourceMethod
 from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS
+from .checker_types import validate_evidence_depth
 from .cli_scan_baseline import _expand_public_headers, _run_baseline_compare
 from .cli_scan_helpers import (
     _intrinsic_coverage,
@@ -155,8 +156,10 @@ class ScanOutcome:
         if self.profile_id is not None:
             d["profile_id"] = self.profile_id
         if self.requested_depth is not None:
+            validate_evidence_depth("requested_depth", self.requested_depth)
             d["requested_depth"] = self.requested_depth
         if self.effective_depth is not None:
+            validate_evidence_depth("effective_depth", self.effective_depth)
             d["effective_depth"] = self.effective_depth
         if self.baseline_channel is not None:
             d["baseline_channel"] = self.baseline_channel
@@ -274,7 +277,8 @@ def _build_new_snapshot(
             collect_mode=collect_mode,
             changed_paths=changed_paths,
             public_headers=tuple(
-                str(p) for p in _expand_public_headers(
+                str(p)
+                for p in _expand_public_headers(
                     [*list(public_headers or ()), *list(public_header_dirs or ())]
                 )
             ),
@@ -533,7 +537,10 @@ def _build_scan_poi(
 
 
 def _append_replay_scope_advisory(
-    advisories: list[str], seeded: bool, collect_mode: str, sources: Path | None,
+    advisories: list[str],
+    seeded: bool,
+    collect_mode: str,
+    sources: Path | None,
 ) -> None:
     """Advise (ADR-035 P3) when an unseeded run falls back to headers-only replay.
 
@@ -604,7 +611,9 @@ def _remaining_budget_s(start: float, budget_s: float | None) -> float | None:
 
 
 def _check_scan_budget(
-    budget: str | None, budget_s: float | None, elapsed: float,
+    budget: str | None,
+    budget_s: float | None,
+    elapsed: float,
 ) -> None:
     """Budget overflow FAILS, never shrinks scope (ADR-035 D3)."""
     if budget_s is not None and elapsed > budget_s:
@@ -773,8 +782,14 @@ def run_scan_core(
     # A deep depth (build/source/full → collect_mode != "off") needs an L3 compile
     # database; without one the L3/L4/L5 layers cannot be collected.
     _check_scan_evidence_contract(
-        advisories, new_snap, collect_mode, pinned_explicit,
-        sources, effective_build_info, eff_depth_enum, resolved,
+        advisories,
+        new_snap,
+        collect_mode,
+        pinned_explicit,
+        sources,
+        effective_build_info,
+        eff_depth_enum,
+        resolved,
     )
 
     # --- conditional tier: S2 preprocessor pre-scan (D2) ----------------------

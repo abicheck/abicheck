@@ -42,7 +42,8 @@
     },
     "check_id": {
       "type": "string",
-      "description": "Schema 2.12 (ADR-047 report-identity envelope, G30 P0.3). This check's full identity: \"target@profile#baseline_channel@requested_depth\". Nothing in abicheck's CLI/service layer sets this yet -- reserved for the GitHub Actions integration-model primitives planned in G30 P1 (resolve-baseline, check-target)."
+      "description": "Schema 2.12 (ADR-047 report-identity envelope, G30 P0.3). This check's full identity: \"target@profile#baseline_channel@requested_depth\". Nothing in abicheck's CLI/service layer sets this yet -- reserved for the GitHub Actions integration-model primitives planned in G30 P1 (resolve-baseline, check-target). Each of the four components is constrained to ADR-047 §7's safe identifier charset (no further '@'/'#' inside a component) so the delimiter-joined form stays unambiguous.",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9._-]*#[A-Za-z0-9][A-Za-z0-9._-]*@(binary|headers|build|source)$"
     },
     "profile_id": {
       "type": "string",

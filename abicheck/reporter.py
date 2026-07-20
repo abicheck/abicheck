@@ -36,6 +36,7 @@ from .checker_policy import (
     impact_for,
     policy_kind_sets as _policy_kind_sets,
 )
+from .checker_types import validate_evidence_depth
 from .report_model import VERDICT_TO_SEVERITY_LABEL as _VERDICT_TO_SEVERITY_LABEL
 from .report_summary import build_summary, surface_breakdown
 
@@ -112,7 +113,10 @@ def _effective_severity_label(
     from .severity import effective_verdict_for_change
 
     verdict = effective_verdict_for_change(
-        cast(HasKind, c), policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+        cast(HasKind, c),
+        policy=policy,
+        kind_sets=kind_sets,
+        policy_file=policy_file,
     )
     return _VERDICT_TO_SEVERITY_LABEL.get(verdict, "unknown")
 
@@ -132,7 +136,10 @@ def _kind_to_severity(kind: ChangeKind, policy: str) -> str:
 
 
 def to_stat_json(
-    result: DiffResult, indent: int = 2, *, severity_config: SeverityConfig | None = None,
+    result: DiffResult,
+    indent: int = 2,
+    *,
+    severity_config: SeverityConfig | None = None,
 ) -> str:
     """JSON output for --stat mode: summary only, no changes array.
 
@@ -277,7 +284,10 @@ def _to_json_leaf(
             "symbol": c.symbol,
             "description": c.description,
             "severity": _effective_severity_label(
-                c, eff_sets, policy=result.policy, policy_file=result.policy_file,
+                c,
+                eff_sets,
+                policy=result.policy,
+                policy_file=result.policy_file,
             ),
             # Schema 2.3/2.4 fields (Codex review on #557): _leaf_entry builds
             # its own dict rather than routing through _change_to_dict, so
@@ -289,7 +299,10 @@ def _to_json_leaf(
             "operation": operation_for_kind(c.kind.value),
             "finding_id": _finding_id(c),
             "recommended_action": _recommended_action_for_change(
-                c, policy=result.policy, kind_sets=eff_sets, policy_file=result.policy_file,
+                c,
+                policy=result.policy,
+                kind_sets=eff_sets,
+                policy_file=result.policy_file,
             ),
             "affected_count": len(c.affected_symbols) if c.affected_symbols else 0,
             "affected_symbols": c.affected_symbols or [],
@@ -298,7 +311,10 @@ def _to_json_leaf(
             "new_value": getattr(c, "new_value", None),
         }
         reviewer_action = _reviewer_action_for_change(
-            c, policy=result.policy, kind_sets=eff_sets, policy_file=result.policy_file,
+            c,
+            policy=result.policy,
+            kind_sets=eff_sets,
+            policy_file=result.policy_file,
         )
         if reviewer_action is not None:
             entry["reviewer_action"] = reviewer_action
@@ -330,7 +346,10 @@ def _to_json_leaf(
     leaf_changes_list = [_leaf_entry(c) for c in type_changes]
     non_type_list = [
         _change_to_dict(
-            c, policy=effective_policy, kind_sets=eff_sets, policy_file=result.policy_file,
+            c,
+            policy=effective_policy,
+            kind_sets=eff_sets,
+            policy_file=result.policy_file,
         )
         for c in non_type_changes
     ]
@@ -354,6 +373,7 @@ def _to_json_leaf(
         # FIX-H: populate changes with union for backward-compat consumers
         "changes": leaf_changes_list + non_type_list,
     }
+    _add_check_identity(d, result)
     if severity_config is not None:
         d["severity"] = _build_severity_json(
             changes,
@@ -436,8 +456,10 @@ def _add_check_identity(d: dict[str, object], result: DiffResult) -> None:
     if result.profile_id is not None:
         d["profile_id"] = result.profile_id
     if result.requested_depth is not None:
+        validate_evidence_depth("requested_depth", result.requested_depth)
         d["requested_depth"] = result.requested_depth
     if result.effective_depth is not None:
+        validate_evidence_depth("effective_depth", result.effective_depth)
         d["effective_depth"] = result.effective_depth
     if result.baseline_channel is not None:
         d["baseline_channel"] = result.baseline_channel
@@ -632,7 +654,10 @@ def to_json(
 
     if report_mode == "leaf":
         return _to_json_leaf(
-            result, indent=indent, show_only=show_only, severity_config=severity_config,
+            result,
+            indent=indent,
+            show_only=show_only,
+            severity_config=severity_config,
         )
 
     changes = list(result.changes)
@@ -746,7 +771,10 @@ def _recommended_action_for_change(
     )
 
     verdict = effective_verdict_for_change(
-        cast(HasKind, c), policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+        cast(HasKind, c),
+        policy=policy,
+        kind_sets=kind_sets,
+        policy_file=policy_file,
     )
     action = _VERDICT_TO_RECOMMENDED_ACTION.get(verdict)
     if action is not None:
@@ -755,9 +783,16 @@ def _recommended_action_for_change(
     # quality issue (compatible, but worth a look) via the same category
     # classification the severity JSON block uses.
     category = classify_effective_change(
-        cast(HasKind, c), policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+        cast(HasKind, c),
+        policy=policy,
+        kind_sets=kind_sets,
+        policy_file=policy_file,
     )
-    return "no_action_required" if category == IssueCategory.ADDITION else "review_recommended"
+    return (
+        "no_action_required"
+        if category == IssueCategory.ADDITION
+        else "review_recommended"
+    )
 
 
 #: Per-kind reviewer guidance for a COMPATIBLE addition, keyed by
@@ -797,7 +832,10 @@ def _reviewer_action_for_change(
     from .severity import IssueCategory, classify_effective_change
 
     category = classify_effective_change(
-        cast(HasKind, c), policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+        cast(HasKind, c),
+        policy=policy,
+        kind_sets=kind_sets,
+        policy_file=policy_file,
     )
     if category != IssueCategory.ADDITION:
         return None
@@ -858,10 +896,16 @@ def _change_to_dict(
         d["operation"] = operation_for_kind(kind.value)
         d["finding_id"] = _finding_id(c)
         d["recommended_action"] = _recommended_action_for_change(
-            c, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+            c,
+            policy=policy,
+            kind_sets=kind_sets,
+            policy_file=policy_file,
         )
         reviewer_action = _reviewer_action_for_change(
-            c, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+            c,
+            policy=policy,
+            kind_sets=kind_sets,
+            policy_file=policy_file,
         )
         if reviewer_action is not None:
             d["reviewer_action"] = reviewer_action
