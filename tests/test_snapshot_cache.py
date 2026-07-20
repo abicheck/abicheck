@@ -1,4 +1,5 @@
 """Tests for snapshot caching layer (5c)."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -63,6 +64,29 @@ class TestCacheKey:
         key = _cache_key(tmp_path / "nonexistent.so", [], [], "1.0", "c++")
         assert key == ""
 
+    def test_stale_pre_header_graph_cache_version_invalidated(
+        self, tmp_path, monkeypatch
+    ):
+        """A snapshot cached under the pre-G31 cache version ("2", before the
+        L2 header graph became unconditional) must not be served as a hit for
+        the identical binary/headers/includes/version/lang/extra under the
+        current version — otherwise a warm cache from before this upgrade
+        would silently replay a no-graph snapshot forever (Codex review on
+        PR #612, service_dump_cache._dump_is_cacheable now allows the plain
+        cacheable shape onto this same cache)."""
+        import abicheck.snapshot_cache as snapshot_cache_mod
+
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF content")
+
+        monkeypatch.setattr(snapshot_cache_mod, "_SNAPSHOT_CACHE_VERSION", "2")
+        old_key = _cache_key(binary, [], [], "1.0", "c++")
+
+        monkeypatch.undo()
+        current_key = _cache_key(binary, [], [], "1.0", "c++")
+
+        assert old_key != current_key
+
     def test_different_lang_different_key(self, tmp_path):
         binary = tmp_path / "lib.so"
         binary.write_bytes(b"ELF content")
@@ -83,6 +107,7 @@ class TestCacheKey:
 
     def test_header_mtime_change_different_key(self, tmp_path):
         import time
+
         binary = tmp_path / "lib.so"
         binary.write_bytes(b"ELF content")
         hdr = tmp_path / "foo.h"
@@ -90,6 +115,7 @@ class TestCacheKey:
         key1 = _cache_key(binary, [hdr], [], "1.0", "c++")
         # Change header mtime
         import os
+
         os.utime(hdr, (time.time() + 10, time.time() + 10))
         key2 = _cache_key(binary, [hdr], [], "1.0", "c++")
         assert key1 != key2
@@ -98,6 +124,7 @@ class TestCacheKey:
 class TestLookupStore:
     def test_miss_returns_none(self, tmp_path, monkeypatch):
         import abicheck.snapshot_cache as sc
+
         monkeypatch.setattr(sc, "_CACHE_DIR", tmp_path / "empty_cache")
         binary = tmp_path / "lib.so"
         binary.write_bytes(b"content")
@@ -108,6 +135,7 @@ class TestLookupStore:
         # Use a temp cache dir
         cache_dir = tmp_path / "cache"
         import abicheck.snapshot_cache as sc
+
         monkeypatch.setattr(sc, "_CACHE_DIR", cache_dir)
 
         binary = tmp_path / "lib.so"
@@ -126,6 +154,7 @@ class TestLookupStore:
     def test_invalidation_on_content_change(self, tmp_path, monkeypatch):
         cache_dir = tmp_path / "cache"
         import abicheck.snapshot_cache as sc
+
         monkeypatch.setattr(sc, "_CACHE_DIR", cache_dir)
 
         binary = tmp_path / "lib.so"
@@ -143,6 +172,7 @@ class TestLookupStore:
         """store/lookup with missing binary should be no-ops, not crash."""
         cache_dir = tmp_path / "cache"
         import abicheck.snapshot_cache as sc
+
         monkeypatch.setattr(sc, "_CACHE_DIR", cache_dir)
 
         snap = _sample_snap()
@@ -155,6 +185,7 @@ class TestLookupStore:
         """Corrupted JSON in cache should be treated as a miss."""
         cache_dir = tmp_path / "cache"
         import abicheck.snapshot_cache as sc
+
         monkeypatch.setattr(sc, "_CACHE_DIR", cache_dir)
 
         binary = tmp_path / "lib.so"
@@ -176,6 +207,7 @@ class TestEviction:
     def test_evicts_oldest_entries(self, tmp_path, monkeypatch):
         cache_dir = tmp_path / "cache"
         import abicheck.snapshot_cache as sc
+
         monkeypatch.setattr(sc, "_CACHE_DIR", cache_dir)
         monkeypatch.setattr(sc, "MAX_ENTRIES", 3)
 
@@ -195,6 +227,7 @@ class TestGetCacheDir:
     def test_fallback_on_runtime_error(self, monkeypatch):
         """When Path.home() raises RuntimeError, fall back to tempdir."""
         import tempfile
+
         monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
         with mock.patch("pathlib.Path.home", side_effect=RuntimeError("no home")):
             result = _get_cache_dir()
@@ -223,6 +256,7 @@ class TestStoreErrorPaths:
     def test_store_oserror_on_mkdir(self, tmp_path, monkeypatch):
         """Store gracefully handles OSError on mkdir."""
         import abicheck.snapshot_cache as sc
+
         cache_dir = tmp_path / "cache"
         monkeypatch.setattr(sc, "_CACHE_DIR", cache_dir)
 
@@ -243,13 +277,16 @@ class TestStoreErrorPaths:
         of a dump that already succeeded, so a write-time failure here can
         only ever cost a cache miss next time, never break the caller."""
         import abicheck.snapshot_cache as sc
+
         cache_dir = tmp_path / "cache"
         monkeypatch.setattr(sc, "_CACHE_DIR", cache_dir)
 
         def _raise_type_error(*args, **kwargs):
             raise TypeError("Object of type MagicMock is not JSON serializable")
 
-        monkeypatch.setattr("abicheck.serialization.snapshot_to_json", _raise_type_error)
+        monkeypatch.setattr(
+            "abicheck.serialization.snapshot_to_json", _raise_type_error
+        )
         binary = tmp_path / "lib.so"
         binary.write_bytes(b"ELF content")
         snap = _sample_snap()
@@ -278,6 +315,7 @@ class TestExtraKeyMaterial:
 
     def test_store_lookup_roundtrip_with_extra(self, tmp_path, monkeypatch):
         import abicheck.snapshot_cache as sc
+
         cache_dir = tmp_path / "cache"
         monkeypatch.setattr(sc, "_CACHE_DIR", cache_dir)
 

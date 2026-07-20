@@ -42,7 +42,7 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "2"
+_SNAPSHOT_CACHE_VERSION: str = "3"
 # v2: castxml's CvQualifiedType type-name spelling changed for a
 # volatile-qualified pointer/reference VALUE (now a suffix, "T * volatile",
 # matching clang's own convention, rather than always a prefix) -- an
@@ -53,6 +53,14 @@ _SNAPSHOT_CACHE_VERSION: str = "2"
 # constant is specifically for the separate whole-snapshot disk cache
 # (snapshot_cache.py), which persists across process invocations and isn't
 # gated by that schema version at all.
+#
+# v3 (G31 Phase A): the L2 header-only semantic graph became unconditional
+# (previously gated behind the now-removed --header-graph/--header-graph-includes
+# flags). service_dump_cache._dump_is_cacheable() allows the same plain
+# "binary + public headers" shape onto this cache that a pre-upgrade,
+# no-graph dump would already have stored under v2 -- without this bump, a
+# warm cache from before the upgrade would be replayed verbatim and silently
+# omit the new default-on graph until manually cleared (Codex review).
 
 
 def _get_cache_dir() -> Path:
@@ -65,6 +73,7 @@ def _get_cache_dir() -> Path:
             base = Path.home() / ".cache"
         except RuntimeError:
             import tempfile
+
             base = Path(tempfile.gettempdir())
     return base / "abi_check" / "snapshots"
 
@@ -132,6 +141,7 @@ def lookup(
     cache_file = _CACHE_DIR / f"{key}.json"
     try:
         from .serialization import load_snapshot
+
         snap = load_snapshot(cache_file)
         # Touch mtime for LRU
         cache_file.touch()
@@ -160,6 +170,7 @@ def store(
         _CACHE_DIR.mkdir(parents=True, exist_ok=True)
         cache_file = _CACHE_DIR / f"{key}.json"
         from .serialization import snapshot_to_json
+
         # Write to temp file then atomic rename to avoid corruption
         fd, tmp_path = tempfile.mkstemp(dir=_CACHE_DIR, suffix=".tmp")
         try:
