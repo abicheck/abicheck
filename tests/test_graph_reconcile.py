@@ -22,6 +22,8 @@ reconciliation never deletes or downgrades an artifact-proven finding.
 
 from __future__ import annotations
 
+import pytest
+
 from abicheck.buildsource.graph_reconcile import (
     OUTCOME_MOVED,
     OUTCOME_RECONCILED,
@@ -210,6 +212,58 @@ def test_structural_context_normalizes_real_header_node_labels() -> None:
         kind="record_type",
         label="demo::detail::RawConfigV2",
         attrs={"qualified_name": "demo::detail::RawConfigV2", "def_file": "detail.h"},
+    )
+    old_edge = GraphEdge(
+        src=old_parent.id,
+        dst=old_internal.id,
+        kind="SOURCE_DECLARES",
+        attrs={"role": "declares"},
+    )
+    new_edge = GraphEdge(
+        src=new_parent.id,
+        dst=new_internal.id,
+        kind="SOURCE_DECLARES",
+        attrs={"role": "declares"},
+    )
+    old_g = _graph([old_parent, old_internal], [old_edge])
+    new_g = _graph([new_parent, new_internal], [new_edge])
+    result = reconcile_added_removed([old_internal], [new_internal], old_g, new_g)
+    assert len(result.reconciled) == 1
+    pair = result.reconciled[0]
+    assert pair.match_kind == "structural_context"
+    assert pair.outcome == OUTCOME_RENAMED
+
+
+@pytest.mark.parametrize("parent_kind", ["source", "generated_file"])
+def test_structural_context_normalizes_source_and_generated_file_labels(
+    parent_kind: str,
+) -> None:
+    """CodeRabbit review: SourceGraphSummary.indexes()/file_node() group
+    header/file/source/generated_file together as file-like, but
+    _FILE_LIKE_KINDS previously only listed header/file -- a source.cpp or
+    generated_file parent's raw label would leak into the structural-context
+    tuple, exactly like the header case above."""
+    old_parent = GraphNode(
+        id=f"{parent_kind}:///tmp/checkout_old/src/impl.cpp",
+        kind=parent_kind,
+        label="/tmp/checkout_old/src/impl.cpp",
+    )
+    new_parent = GraphNode(
+        id=f"{parent_kind}:///tmp/checkout_new/src/impl.cpp",
+        kind=parent_kind,
+        label="/tmp/checkout_new/src/impl.cpp",
+    )
+    old_internal = GraphNode(
+        id="type://demo::detail::RawConfig",
+        kind="record_type",
+        label="demo::detail::RawConfig",
+        attrs={"qualified_name": "demo::detail::RawConfig", "def_file": "impl.cpp"},
+    )
+    new_internal = GraphNode(
+        id="type://demo::detail::RawConfigV2",
+        kind="record_type",
+        label="demo::detail::RawConfigV2",
+        attrs={"qualified_name": "demo::detail::RawConfigV2", "def_file": "impl.cpp"},
     )
     old_edge = GraphEdge(
         src=old_parent.id,

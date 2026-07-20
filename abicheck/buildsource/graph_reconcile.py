@@ -215,8 +215,13 @@ def _project_relative_path(path: str) -> str:
 #: raw (checkout-root-dependent) path, so :func:`_neighbor_identity` must
 #: route them to the path-normalization branch directly rather than trust
 #: that fallback (Codex review: real header_graph/source_graph header nodes
-#: use full path labels).
-_FILE_LIKE_KINDS: frozenset[str] = frozenset({"header", "file"})
+#: use full path labels). ``source``/``generated_file`` are the same
+#: filesystem-path-as-label shape (``SourceGraphSummary.indexes()``/
+#: ``file_node()`` already group all four kinds together) so they need the
+#: same routing (CodeRabbit review).
+_FILE_LIKE_KINDS: frozenset[str] = frozenset(
+    {"header", "file", "source", "generated_file"}
+)
 
 
 def _neighbor_identity(node: GraphNode) -> str:
