@@ -88,6 +88,38 @@ def test_composite_installer_keeps_unsupported_linux_best_effort() -> None:
     assert "No pinned CastXML Superbuild" in text
 
 
+def test_composite_installer_uses_distro_castxml_on_unsupported_arch(
+    tmp_path: Path,
+) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    log = tmp_path / "sudo.log"
+    (fake_bin / "uname").write_text(
+        "#!/bin/sh\n"
+        "case \"$1\" in -s) echo Linux ;; -m) echo ppc64le ;; esac\n",
+        encoding="utf-8",
+    )
+    (fake_bin / "apt-get").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    (fake_bin / "sudo").write_text(
+        f"#!/bin/sh\nprintf '%s\\n' \"$*\" >> {log!s}\n",
+        encoding="utf-8",
+    )
+    for command in ("uname", "apt-get", "sudo"):
+        (fake_bin / command).chmod(0o755)
+
+    result = subprocess.run(
+        ["bash", str(ROOT / "action/install-deps.sh")],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PATH": f"{fake_bin}:/usr/bin:/bin"},
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "castxml" in log.read_text(encoding="utf-8")
+    assert "No pinned CastXML Superbuild" in result.stdout
+    assert "ppc64le" in result.stdout
+
+
 def test_cached_install_validates_versions_and_persists_path(tmp_path: Path) -> None:
     asset = _host_asset()
     if asset is None:

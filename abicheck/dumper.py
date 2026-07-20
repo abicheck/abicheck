@@ -831,8 +831,13 @@ def _build_castxml_command(
     force_cpp20: bool = False,
 ) -> list[str]:
     """Build the castxml command line."""
+    # CastXML needs its language-specific compiler-emulation id in C mode.
+    # Using ``gnu`` together with ``-x c`` makes modern CastXML inject C++
+    # approximations for GCC's _Float* builtins (including ``operator``), then
+    # asks Clang to parse them as C.  ``gnu-c`` supplies the C approximations.
+    castxml_cc_id = "gnu-c" if not force_cpp and cc_id == "gnu" else cc_id
     cmd = ["castxml", "--castxml-output=1",
-           f"--castxml-cc-{cc_id}", cc_bin]
+           f"--castxml-cc-{castxml_cc_id}", cc_bin]
     for inc in extra_includes:
         cmd += ["-I", str(inc)]
 
@@ -1049,8 +1054,6 @@ def _castxml_dump(
             deadline.check()
             return cast(Element, _cached_root)
 
-    cc_bin, cc_id = _resolve_compiler_binary(compiler, gcc_path, gcc_prefix)
-
     with tempfile.NamedTemporaryFile(suffix=".xml", delete=False) as tmp:
         out_xml = Path(tmp.name)
 
@@ -1060,6 +1063,20 @@ def _castxml_dump(
         force_cpp = _detect_cpp_headers(headers) or has_explicit_cpp_std(
             gcc_options, gcc_option_tokens
         )
+
+    # Use the host C driver for CastXML's ``gnu-c`` emulation.  Passing g++
+    # makes its compiler probe advertise C++-only _Float* approximations even
+    # though the final frontend arguments contain ``-x c``.
+    resolved_compiler = compiler
+    if not force_cpp and not gcc_path:
+        resolved_compiler = {
+            "c++": "cc",
+            "g++": "gcc",
+            "clang++": "clang",
+        }.get(compiler, compiler)
+    cc_bin, cc_id = _resolve_compiler_binary(
+        resolved_compiler, gcc_path, gcc_prefix
+    )
 
     try:
         try:

@@ -12,11 +12,15 @@ OS="$(uname -s)"
 case "$OS" in
   Linux)
     pinned_castxml=false
+    machine="$(uname -m)"
     if [ -r /etc/os-release ]; then
       # shellcheck disable=SC1091
       . /etc/os-release
-      case "${ID:-}:${VERSION_ID:-}" in
-        ubuntu:22.04|ubuntu:24.04) pinned_castxml=true ;;
+      case "${ID:-}:${VERSION_ID:-}:${machine}" in
+        ubuntu:22.04:x86_64|ubuntu:22.04:aarch64|ubuntu:22.04:arm64|\
+        ubuntu:24.04:x86_64|ubuntu:24.04:aarch64|ubuntu:24.04:arm64)
+          pinned_castxml=true
+          ;;
       esac
     fi
     if ! command -v apt-get &> /dev/null; then
@@ -46,7 +50,7 @@ case "$OS" in
       # shellcheck source=action/install-castxml.sh
       . "$(dirname "$0")/install-castxml.sh"
     else
-      echo "::warning::No pinned CastXML Superbuild for ${ID:-unknown} ${VERSION_ID:-unknown}; using the distribution/existing castxml."
+      echo "::warning::No pinned CastXML Superbuild for ${ID:-unknown} ${VERSION_ID:-unknown} ${machine}; using the distribution/existing castxml."
     fi
     ;;
   Darwin)
