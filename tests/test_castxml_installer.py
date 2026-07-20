@@ -88,6 +88,7 @@ def test_composite_installer_keeps_unsupported_linux_best_effort() -> None:
     assert "No pinned CastXML Superbuild" in text
 
 
+@pytest.mark.skipif(os.name == "nt", reason="exercises a Linux shell installer")
 def test_composite_installer_uses_distro_castxml_on_unsupported_arch(
     tmp_path: Path,
 ) -> None:
@@ -120,6 +121,7 @@ def test_composite_installer_uses_distro_castxml_on_unsupported_arch(
     assert "ppc64le" in result.stdout
 
 
+@pytest.mark.skipif(os.name == "nt", reason="exercises a Linux shell installer")
 def test_composite_installer_minimal_ubuntu_remains_warning_only(
     tmp_path: Path,
 ) -> None:
