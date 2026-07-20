@@ -195,6 +195,10 @@ CLI-level flows.
 
 ## Recommended flow: a multi-library release with one shared facts pack
 
+**This is the canonical multi-DSO recipe** — [Action Reference](github-action.md)
+and [More Recipes](github-action-recipes.md) link here rather than restating
+it, so update this section (not a copy) when the recipe changes.
+
 This is the concrete, Action-supported answer to a specific, recurring shape
 of project: several libraries built from one source tree, one facts pack
 collected **once** for the whole build (via [source
@@ -205,6 +209,22 @@ and no single ".so that represents the release" to hand `scan`/`dump` — which,
 per [Mode/input compatibility](github-action.md#modeinput-compatibility), only
 accept **one** artifact each; there is no `scan`/`dump` equivalent of
 `compare`'s directory/package fan-out.
+
+**Scope caveat:** every library in the recipe below points at the *same*
+shared `abicheck_inputs/` pack, with no per-target projection check that the
+pack's facts actually belong to that specific library rather than another
+one built from the same tree. That's fine for what this recipe supports
+today — a build-wide source audit, and a per-target *header*-depth check
+(`-H`/`header` scopes each matrix row's L2 declared surface correctly, which
+is independent of the shared pack). It is **not** enough to claim per-target
+*source*-depth coverage: nothing here proves library A's embedded L3/L4/L5
+facts didn't actually come from library B's translation units. Recording
+that distinction (a `build-output.json` `evidence.projection: "declared"` vs.
+`"inferred"` tag, per [ADR-047 §9](../development/adr/047-github-actions-integration-model.md))
+needs the per-target projection validator tracked as G30 plan item P1.1,
+not yet implemented — until then, treat this recipe's `depth: source` dumps
+as build-wide source evidence applied uniformly, not as independently-proven
+per-library source coverage.
 
 The fix is not a new Action feature — it's composing three recipes this page
 and [More Recipes](github-action-recipes.md) already document individually,

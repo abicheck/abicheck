@@ -118,7 +118,7 @@ replay (`auto-completed: true`, no warning), wrapper under `phase: auto`
 `phase: prepare` (`auto-completed: true`, no warning — not flagged like
 `auto` is), and `phase: verify` (`auto-completed: true`).
 
-### P0.3 — Report identity envelope (subset of ADR-047 §7)
+### P0.3 — Report identity envelope (subset of ADR-047 §7) — **done** (schema/model half; CLI-population half still open)
 
 **Problem:** JSON reports don't carry `check_id`/`profile_id`/
 `requested_depth`/`effective_depth`/`baseline_channel` today — a P1
@@ -147,7 +147,29 @@ PR #601's `DumpDepthNotSatisfiedError` work landing first per ADR-047 §11.2
 and the repo's existing Known Gaps entry — do not duplicate that
 enforcement, extend it).
 
-### P0.4 — Canonical single-library and multi-DSO doc pages
+**Status:** the schema/model half is implemented — `DiffResult`
+(`abicheck/checker_types.py`) and `ScanOutcome`
+(`abicheck/scan_engine.py`) each gained five optional fields (`check_id`,
+`profile_id`, `requested_depth`, `effective_depth`, `baseline_channel`,
+all `None` by default and omitted from JSON — never emitted as null — when
+unset). `abicheck/reporter.py` writes them into the full/`--stat`/leaf
+JSON via a shared `_add_check_identity` helper when a caller sets them.
+`abicheck/schemas/compare_report.schema.json` (and its published
+`docs/schemas/v1/` mirror, kept in sync via
+`scripts/publish_schemas.py`) declares the five properties (`report_schema_version`
+bumped `2.10` → `2.11`); `abicheck/schemas/__init__.py` documents both this
+bump and `SCAN_SCHEMA_VERSION`'s matching `1.0` → `1.1` bump for the scan
+side (no packaged JSON Schema file for scan output to update). Nothing
+populates these fields yet — that's still P1.3's job, and the
+`requested_depth`/`effective_depth` CLI-wiring PR remains blocked on PR
+#601 per the note above.
+`tests/test_report_schema.py`'s new `TestReportIdentityEnvelope`/
+`TestScanReportIdentityEnvelope` classes cover: unset-by-default (omitted,
+not null), round-trip + schema validation when set, `--stat` mode carrying
+the fields too, and an invalid `requested_depth` enum value failing schema
+validation.
+
+### P0.4 — Canonical single-library and multi-DSO doc pages — **done**
 
 **Problem:** multi-DSO guidance is split three ways with no single canonical
 page (ADR-047 finding 4).
@@ -183,6 +205,18 @@ pages yet).
 `mkdocs-nav-coverage` and `doc-count-sync` checks.
 
 **PR boundary:** one PR, docs-only.
+
+**Status:** implemented. `github-action.md` and `github-action-recipes.md`
+already linked to `github-action-source-scans.md`'s "Recommended flow: a
+multi-library release with one shared facts pack" section rather than
+restating it — that de-duplication predates this item. What was missing is
+now added: the section is explicitly marked as the canonical multi-DSO
+recipe, and the required scope caveat is in place (shared-pack recipe
+supports build-wide source audits and per-target header-depth checks;
+per-target source-depth coverage needs P1.1's projection validator, not yet
+implemented). `mkdocs build --strict` passes (pre-existing anchor-mismatch
+`INFO` lines in that same section predate this change and are unrelated);
+`check_ai_readiness.py` shows the same warning count as before this item.
 
 ---
 
