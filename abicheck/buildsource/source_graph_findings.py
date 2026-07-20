@@ -1515,4 +1515,4 @@ def _reconciliation_findings(
     )
 
     reconciliation = reconcile_graph_diff(old, new)
-    return diff_graph_reconciliation_findings(reconciliation)
+    return diff_graph_reconciliation_findings(reconciliation, old, new)

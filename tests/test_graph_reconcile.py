@@ -871,6 +871,108 @@ def test_diff_graph_reconciliation_findings_stamps_source_location() -> None:
     assert findings2[0].source_location == "[L5_SOURCE_GRAPH]"
 
 
+def test_diff_graph_reconciliation_findings_skips_unreachable_private_pair() -> None:
+    """Codex review, fresh evidence: a rename/move reconciled entirely
+    within a private header, with no public entry reaching it (never
+    called out by any public struct/function), must not turn an
+    otherwise-clean comparison into COMPATIBLE_WITH_RISK -- these findings
+    default to a RISK verdict (change_registry_buildsource.py), and this is
+    a purely internal implementation-detail refactor. When old_graph/
+    new_graph are omitted (the module's own lower-level call shape), the
+    gate does not apply -- only the real production caller
+    (source_graph_findings._reconciliation_findings) supplies them."""
+    parent = GraphNode(
+        id="type://parent",
+        kind="record_type",
+        label="detail::Unrelated",
+        attrs={"qualified_name": "detail::Unrelated", "visibility": "private_header"},
+    )
+    old_node = GraphNode(
+        id="type://old",
+        kind="record_type",
+        label="detail::Impl",
+        attrs={
+            "qualified_name": "detail::Impl",
+            "def_file": "src/detail.h",
+            "visibility": "private_header",
+        },
+    )
+    new_node = GraphNode(
+        id="type://new",
+        kind="record_type",
+        label="detail::Impl2",
+        attrs={
+            "qualified_name": "detail::Impl2",
+            "def_file": "src/detail.h",
+            "visibility": "private_header",
+        },
+    )
+    edge_kwargs = {"kind": "TYPE_HAS_FIELD_TYPE", "attrs": {"role": "field"}}
+    old_g = _graph(
+        [parent, old_node], [GraphEdge(src=parent.id, dst=old_node.id, **edge_kwargs)]
+    )
+    new_g = _graph(
+        [parent, new_node], [GraphEdge(src=parent.id, dst=new_node.id, **edge_kwargs)]
+    )
+    result = reconcile_added_removed([old_node], [new_node], old_g, new_g)
+    assert len(result.reconciled) == 1
+    assert result.reconciled[0].outcome == OUTCOME_RENAMED
+
+    # No graphs -> gate does not apply -> finding still fires.
+    assert len(diff_graph_reconciliation_findings(result)) == 1
+
+    # Graphs supplied, neither side reachable from any public entry
+    # (parent itself is private_header, no exported symbol) -> suppressed.
+    assert diff_graph_reconciliation_findings(result, old_g, new_g) == []
+
+
+def test_diff_graph_reconciliation_findings_keeps_reachable_private_pair() -> None:
+    """The counterpart to the test above: a private rename that IS reached
+    by a public entry (case194's exact shape -- a public struct's private
+    field-type target renamed in place) must still fire even when
+    old_graph/new_graph are supplied, since suppressing it would hide a
+    real public-surface-adjacent risk."""
+    public_parent = GraphNode(
+        id="type://parent",
+        kind="record_type",
+        label="ns::Config",
+        attrs={"qualified_name": "ns::Config", "visibility": "public_header"},
+    )
+    old_node = GraphNode(
+        id="type://old",
+        kind="record_type",
+        label="detail::Impl",
+        attrs={
+            "qualified_name": "detail::Impl",
+            "def_file": "src/detail.h",
+            "visibility": "private_header",
+        },
+    )
+    new_node = GraphNode(
+        id="type://new",
+        kind="record_type",
+        label="detail::Impl2",
+        attrs={
+            "qualified_name": "detail::Impl2",
+            "def_file": "src/detail.h",
+            "visibility": "private_header",
+        },
+    )
+    edge_kwargs = {"kind": "TYPE_HAS_FIELD_TYPE", "attrs": {"role": "field"}}
+    old_g = _graph(
+        [public_parent, old_node],
+        [GraphEdge(src=public_parent.id, dst=old_node.id, **edge_kwargs)],
+    )
+    new_g = _graph(
+        [public_parent, new_node],
+        [GraphEdge(src=public_parent.id, dst=new_node.id, **edge_kwargs)],
+    )
+    result = reconcile_added_removed([old_node], [new_node], old_g, new_g)
+    assert len(result.reconciled) == 1
+    assert result.reconciled[0].outcome == OUTCOME_RENAMED
+    assert len(diff_graph_reconciliation_findings(result, old_g, new_g)) == 1
+
+
 def test_reconciliation_never_deletes_or_downgrades_artifact_finding() -> None:
     """THE authority-rule regression test (ADR-028 D3 / ADR-031 D6 / ADR-048).
 

@@ -647,8 +647,48 @@ _OUTCOME_PROSE: dict[str, str] = {
 }
 
 
+def _public_reachable_ids(graph: SourceGraphSummary) -> frozenset[str]:
+    """Every node id reachable from a public-API entry in *graph*, via the
+    identical dependency-edge closure ``PUBLIC_API_INTERNAL_DEPENDENCY_ADDED``
+    already uses (``source_graph_findings._dependency_reachability``) —
+    exported-symbol-mapped or public-header-visible entries, walked over
+    :data:`~.source_graph.DEPENDENCY_EDGE_KINDS`. Includes the entries
+    themselves. A node declared in a private header can still appear here
+    if a public entry reaches it (e.g. as a private field type of a public
+    struct) — "declared privately" and "not part of the public surface"
+    are different questions; only the latter matters for gating a finding's
+    verdict impact.
+    """
+    from .source_graph import DEPENDENCY_EDGE_KINDS, is_public_dependency_node
+
+    adjacency: dict[str, list[str]] = {}
+    for e in graph.edges:
+        if e.kind in DEPENDENCY_EDGE_KINDS:
+            adjacency.setdefault(e.src, []).append(e.dst)
+    exported_decls = {
+        e.src for e in graph.edges if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL"
+    }
+    node_by_id = {n.id: n for n in graph.nodes}
+    entries = [
+        n.id
+        for n in graph.nodes
+        if is_public_dependency_node(n.id, node_by_id, exported_decls)
+    ]
+    reachable: set[str] = set(entries)
+    stack = list(entries)
+    while stack:
+        cur = stack.pop()
+        for nxt in adjacency.get(cur, []):
+            if nxt not in reachable:
+                reachable.add(nxt)
+                stack.append(nxt)
+    return frozenset(reachable)
+
+
 def diff_graph_reconciliation_findings(
     reconciliation: GraphReconciliation,
+    old_graph: SourceGraphSummary | None = None,
+    new_graph: SourceGraphSummary | None = None,
 ) -> list[Any]:
     """Turn a :class:`GraphReconciliation` into ordinary, RISK-tier
     ``Change`` findings (ADR-048 D2) — enrichment/classification metadata,
@@ -661,6 +701,20 @@ def diff_graph_reconciliation_findings(
     or reclassifies any other ``Change`` the rest of the pipeline produced;
     see ``tests/test_graph_reconcile.py``'s
     ``test_reconciliation_never_deletes_or_downgrades_artifact_finding``.
+
+    *old_graph*/*new_graph* (optional; the real production caller,
+    ``source_graph_findings._reconciliation_findings``, always supplies
+    them) gate a pair's RISK verdict impact on public reachability (Codex
+    review, fresh evidence): a rename/move reconciled entirely within
+    private, never-publicly-reached declarations must not turn an
+    otherwise-clean comparison into ``COMPATIBLE_WITH_RISK`` on its own --
+    that would penalize a purely internal implementation-detail refactor.
+    A *declared*-private node that a public entry still transitively
+    reaches (e.g. a private field type of a public struct,
+    :func:`_public_reachable_ids`) is genuinely part of the public surface
+    and is never suppressed here. Omitting the graphs (as the module's own
+    lower-level unit tests do) skips this gate entirely, matching the
+    pre-existing behavior.
     """
     from ..checker_policy import ChangeKind
     from ..checker_types import Change
@@ -672,8 +726,15 @@ def diff_graph_reconciliation_findings(
         OUTCOME_RECONCILED: ChangeKind.DECLARATION_IDENTITY_RECONCILED,
     }
     boundary = f"[{EVIDENCE_TIER_L5}]"
+    old_reachable = _public_reachable_ids(old_graph) if old_graph is not None else None
+    new_reachable = _public_reachable_ids(new_graph) if new_graph is not None else None
     findings: list[Any] = []
     for pair in reconciliation.reconciled:
+        if old_reachable is not None and new_reachable is not None:
+            old_reached = pair.old_node.id in old_reachable
+            new_reached = pair.new_node.id in new_reachable
+            if not old_reached and not new_reached:
+                continue
         old_label = pair.old_node.label or pair.old_node.id
         new_label = pair.new_node.label or pair.new_node.id
         prose = _OUTCOME_PROSE.get(pair.outcome, "identity-reconciled")
