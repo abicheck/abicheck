@@ -110,9 +110,17 @@ class ScanOutcome:
     exit_code: int = 0
     elapsed_s: float = 0.0
     budget_s: float | None = None
+    # ADR-047 §7 report-identity envelope (G30 P0.3) — optional, additive.
+    # Nothing populates these yet; see DiffResult's matching fields in
+    # checker_types.py for the full rationale (shared across compare/scan).
+    check_id: str | None = None
+    profile_id: str | None = None
+    requested_depth: str | None = None
+    effective_depth: str | None = None
+    baseline_channel: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "scan_schema_version": SCAN_SCHEMA_VERSION,
             "mode": self.mode,
             "level": {
@@ -142,6 +150,17 @@ class ScanOutcome:
             "elapsed_s": round(self.elapsed_s, 3),
             "budget_s": self.budget_s,
         }
+        if self.check_id is not None:
+            d["check_id"] = self.check_id
+        if self.profile_id is not None:
+            d["profile_id"] = self.profile_id
+        if self.requested_depth is not None:
+            d["requested_depth"] = self.requested_depth
+        if self.effective_depth is not None:
+            d["effective_depth"] = self.effective_depth
+        if self.baseline_channel is not None:
+            d["baseline_channel"] = self.baseline_channel
+        return d
 
 
 def _build_new_snapshot(

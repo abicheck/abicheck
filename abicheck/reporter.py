@@ -162,6 +162,7 @@ def to_stat_json(
             "affected_pct": round(summary.affected_pct, 1),
         },
     }
+    _add_check_identity(d, result)
     if severity_config is not None:
         d["severity"] = _build_severity_json(
             result.changes,
@@ -422,6 +423,26 @@ def _scope_dict(result: DiffResult) -> dict[str, object] | None:
     }
 
 
+def _add_check_identity(d: dict[str, object], result: DiffResult) -> None:
+    """Add the ADR-047 §7 report-identity envelope fields (G30 P0.3).
+
+    Each field is omitted entirely when unset — additive, and nothing
+    populates these yet (the GitHub Actions integration-model primitives
+    that will are G30 P1 work), so a report with none of them set looks
+    identical to one from before this schema version.
+    """
+    if result.check_id is not None:
+        d["check_id"] = result.check_id
+    if result.profile_id is not None:
+        d["profile_id"] = result.profile_id
+    if result.requested_depth is not None:
+        d["requested_depth"] = result.requested_depth
+    if result.effective_depth is not None:
+        d["effective_depth"] = result.effective_depth
+    if result.baseline_channel is not None:
+        d["baseline_channel"] = result.baseline_channel
+
+
 def _build_json_base(result: DiffResult) -> dict[str, object]:
     """Build the opening header + summary block of the JSON report dict."""
     summary = build_summary(result)
@@ -432,6 +453,7 @@ def _build_json_base(result: DiffResult) -> dict[str, object]:
         "new_version": result.new_version,
         "verdict": result.verdict.value,
     }
+    _add_check_identity(d, result)
     # Library file metadata (path, SHA-256, size) — always present for schema consistency
     d["old_file"] = _metadata_dict(getattr(result, "old_metadata", None))
     d["new_file"] = _metadata_dict(getattr(result, "new_metadata", None))

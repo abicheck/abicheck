@@ -259,6 +259,18 @@ class DiffResult:
     # ``extractor.duration_seconds``, ``findings.source_only.count``); surfaced
     # in the JSON report so CI can tune mode selection. Empty otherwise.
     evidence_metrics: dict[str, object] = field(default_factory=dict)
+    # ADR-047 §7 report-identity envelope (G30 P0.3) — optional, additive.
+    # Nothing in the CLI/service layer populates these yet; they exist so the
+    # GitHub Actions integration-model primitives planned in G30 P1
+    # (``resolve-baseline``, ``check-target``) have a report-level place to
+    # record a check's identity once they're built. None means "not set by
+    # this caller" and the field is omitted from the JSON report entirely —
+    # never emitted as a null/empty placeholder.
+    check_id: str | None = None  # "target@profile#baseline_channel@requested_depth"
+    profile_id: str | None = None  # e.g. "linux-x86_64-gcc13-release"
+    requested_depth: str | None = None  # one of: binary, headers, build, source
+    effective_depth: str | None = None  # one of: binary, headers, build, source
+    baseline_channel: str | None = None  # e.g. "accepted-main", a release tag
 
     def _effective_kind_sets(
         self,
