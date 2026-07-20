@@ -8,7 +8,7 @@ it should read in CHANGELOG.md. Delete the other sections.
 
 ### Added
 
-- **Report identity envelope fields (schema 2.11 / scan schema 1.1)** — the
+- **Report identity envelope fields (schema 2.12 / scan schema 1.1)** — the
   `compare` and `scan` JSON reports can now carry five additive, optional
   identity fields: `check_id`, `profile_id`, `requested_depth`,
   `effective_depth`, `baseline_channel` (ADR-047 §7's report-identity

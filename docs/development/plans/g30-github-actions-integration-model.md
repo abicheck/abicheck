@@ -157,8 +157,11 @@ JSON via a shared `_add_check_identity` helper when a caller sets them.
 `abicheck/schemas/compare_report.schema.json` (and its published
 `docs/schemas/v1/` mirror, kept in sync via
 `scripts/publish_schemas.py`) declares the five properties (`report_schema_version`
-bumped `2.10` → `2.11`); `abicheck/schemas/__init__.py` documents both this
-bump and `SCAN_SCHEMA_VERSION`'s matching `1.0` → `1.1` bump for the scan
+bumped `2.10` → `2.11` → `2.12` — `2.11` landed independently via #612's
+G31 Phase B3/ADR-048 `affected_public_roots`/etc. fields while this branch
+was in flight, so this work's own bump moved to `2.12` on rebase);
+`abicheck/schemas/__init__.py` documents both this bump and
+`SCAN_SCHEMA_VERSION`'s matching `1.0` → `1.1` bump for the scan
 side (no packaged JSON Schema file for scan output to update). Nothing
 populates these fields yet — that's still P1.3's job, and the
 `requested_depth`/`effective_depth` CLI-wiring PR remains blocked on PR

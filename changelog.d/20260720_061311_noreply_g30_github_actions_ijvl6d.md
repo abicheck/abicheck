@@ -10,7 +10,7 @@ it should read in CHANGELOG.md. Delete the other sections.
 
 - **`--report-mode leaf` now carries the report-identity envelope fields
   too** — `check_id`/`profile_id`/`requested_depth`/`effective_depth`/
-  `baseline_channel` (schema 2.11) were wired into the full and `--stat`
+  `baseline_channel` (schema 2.12) were wired into the full and `--stat`
   JSON paths but not leaf mode's separate code path; code review on the
   introducing PR caught the gap.
 - **`requested_depth`/`effective_depth` are now validated at the point
