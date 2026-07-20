@@ -61,6 +61,16 @@ _SNAPSHOT_CACHE_VERSION: str = "3"
 # no-graph dump would already have stored under v2 -- without this bump, a
 # warm cache from before the upgrade would be replayed verbatim and silently
 # omit the new default-on graph until manually cleared (Codex review).
+#
+# Also folded into v3's key computation (_cache_key below): before G31 Phase
+# A, a header-graph-enabled dump was *always* uncacheable, so a transitively
+# included header changing under one of the ``-I``/``includes`` directories
+# (e.g. a public header pulling in ``inc/detail.h``) always forced a live
+# re-dump. Now that the same plain shape is cacheable, ``_cache_key`` walks
+# each include directory and folds in the (path, mtime) of every header-like
+# file found there -- not just the directory's own path -- so a transitive
+# header edit invalidates the cache the same way editing an explicitly
+# passed header already does (Codex review).
 
 
 def _get_cache_dir() -> Path:
@@ -80,6 +90,40 @@ def _get_cache_dir() -> Path:
 
 # Module-level reference (can be monkeypatched in tests).
 _CACHE_DIR: Path = _get_cache_dir()
+
+#: Extensions treated as headers when walking an include directory for cache
+#: invalidation (:func:`_cache_key`) -- deliberately the same "looks like a
+#: header" set other extractors in this codebase already use, not an attempt
+#: at a fully general build-system-aware header classifier.
+_HEADER_EXTENSIONS: frozenset[str] = frozenset(
+    {".h", ".hh", ".hpp", ".hxx", ".h++", ".inl", ".ipp", ".tcc"}
+)
+
+
+def _hash_include_dir_headers(h: hashlib._Hash, inc: Path) -> None:
+    """Fold the (relative path, mtime) of every header-like file under
+    ``inc`` into ``h``, so an edit to a header reached only transitively
+    through an ``-I``/``--include`` directory (never itself passed as an
+    explicit ``headers`` entry) still invalidates the whole-snapshot cache.
+
+    Best-effort and bounded by whatever is actually on disk under ``inc`` --
+    a missing/unreadable directory degrades to hashing nothing extra (same
+    as before this function existed) rather than raising, matching this
+    module's existing "any read problem is cache-safe, never a crash"
+    stance (see ``lookup``/``store``).
+    """
+    try:
+        entries = sorted(
+            p for p in inc.rglob("*") if p.suffix.lower() in _HEADER_EXTENSIONS
+        )
+    except OSError:
+        return
+    for p in entries:
+        try:
+            h.update(str(p.relative_to(inc)).encode())
+            h.update(str(p.stat().st_mtime_ns).encode())
+        except OSError:
+            h.update(b"MISSING")
 
 
 def _cache_key(
@@ -114,9 +158,14 @@ def _cache_key(
             h.update(str(hdr.stat().st_mtime_ns).encode())
         except OSError:
             h.update(b"MISSING")
-    # Include dirs (just their paths, not contents)
+    # Include dirs: the directory's own path, plus the (relative path, mtime)
+    # of every header-like file found under it -- a transitively included
+    # header never passed as an explicit `headers` entry must still
+    # invalidate the cache when it changes (Codex review, see the v3 note
+    # on _SNAPSHOT_CACHE_VERSION above).
     for inc in sorted(includes):
         h.update(str(inc).encode())
+        _hash_include_dir_headers(h, inc)
     # Compiler params
     h.update(version.encode())
     h.update(lang.encode())

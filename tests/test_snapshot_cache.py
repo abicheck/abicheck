@@ -105,6 +105,46 @@ class TestCacheKey:
         key2 = _cache_key(binary, [], [inc2], "1.0", "c++")
         assert key1 != key2
 
+    def test_transitive_header_under_include_dir_changes_key(self, tmp_path):
+        """A header only reachable transitively through an ``-I`` directory
+        (never itself passed as an explicit ``headers`` entry) must still
+        invalidate the cache when it changes -- otherwise a change to e.g.
+        ``inc/detail.h`` pulled in by a public header would silently serve
+        a stale snapshot (and stale header-graph data) forever (Codex review
+        on PR #612: before G31 Phase A this was moot because a header-graph
+        dump was always uncacheable; it is not moot now that it's cacheable
+        by default)."""
+        import os
+        import time
+
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF content")
+        inc = tmp_path / "inc"
+        inc.mkdir()
+        transitive_hdr = inc / "detail.h"
+        transitive_hdr.write_text("struct detail { int x; };\n")
+
+        key1 = _cache_key(binary, [], [inc], "1.0", "c++")
+
+        os.utime(transitive_hdr, (time.time() + 10, time.time() + 10))
+        key2 = _cache_key(binary, [], [inc], "1.0", "c++")
+
+        assert key1 != key2
+
+    def test_new_transitive_header_under_include_dir_changes_key(self, tmp_path):
+        """Adding a new header under an include directory also invalidates
+        the cache, not just editing an existing one."""
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF content")
+        inc = tmp_path / "inc"
+        inc.mkdir()
+
+        key1 = _cache_key(binary, [], [inc], "1.0", "c++")
+        (inc / "new.h").write_text("struct added {};\n")
+        key2 = _cache_key(binary, [], [inc], "1.0", "c++")
+
+        assert key1 != key2
+
     def test_header_mtime_change_different_key(self, tmp_path):
         import time
 
