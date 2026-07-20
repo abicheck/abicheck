@@ -1006,6 +1006,43 @@ def test_mixed_type_top_level_keys_raise_value_error_not_type_error() -> None:
         ProjectTargetsConfig.from_dict({True: {}, "tagrets": {}})
 
 
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {"targets": {"foo": {True: 1, "unknown_field": 2, "kind": "library"}}},
+        {"bundles": {"b": {True: 1, "unknown_field": 2, "targets": ["x"]}}},
+        {"profiles": {"p": {True: 1, "unknown_field": 2}}},
+        {
+            "baseline": {
+                "channels": {"c": {True: 1, "unknown_field": 2, "source": "git"}}
+            }
+        },
+        {
+            "targets": {
+                "foo": {
+                    "kind": "library",
+                    "checks": [
+                        {
+                            True: 1,
+                            "unknown_field": 2,
+                            "channel": "c",
+                            "depth": "headers",
+                        }
+                    ],
+                }
+            }
+        },
+    ],
+)
+def test_mixed_type_nested_keys_raise_value_error_not_type_error(raw: dict) -> None:
+    """Same PyYAML 1.1 boolean-key pitfall as the top-level check, but inside
+    a target/bundle/profile/baseline-channel/check entry's own unknown-key
+    check (Codex finding — the top-level fix didn't cover these nested
+    ``sorted(set(d) - known)`` call sites)."""
+    with pytest.raises(ValueError, match="unknown key"):
+        ProjectTargetsConfig.from_dict(raw)
+
+
 def test_other_abicheck_yml_blocks_are_accepted_and_ignored() -> None:
     """A real `.abicheck.yml` legitimately carries blocks this module doesn't
     own (severity, scope, ...) alongside targets/bundles/profiles/baseline —

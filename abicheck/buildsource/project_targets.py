@@ -175,6 +175,15 @@ def _parse_checks_list(d: dict[str, Any], *, where: str) -> list[CheckSpec]:
     return checks
 
 
+def _unknown_keys(d: dict[str, Any], known: set[str]) -> list[Any]:
+    """``sorted(set(d) - known)``, but safe when *d* carries a non-string key
+    (a bare PyYAML 1.1 ``on``/``off``/``yes``/``no`` mapping key parses as a
+    bool) alongside a string one -- plain ``sorted()`` would raise ``TypeError``
+    comparing ``bool``/``str`` instead of surfacing the documented ``ValueError``
+    usage error (Codex finding, mirrors the top-level key check's own fix)."""
+    return sorted(set(d) - known, key=repr)
+
+
 def _require_mapping(data: object, block: str) -> dict[str, Any]:
     if data is None:
         return {}
@@ -228,7 +237,7 @@ class CheckSpec:
     @classmethod
     def from_dict(cls, d: dict[str, Any], *, where: str) -> CheckSpec:
         known = {"channel", "depth", "required", "gate_mode", "profiles"}
-        unknown = sorted(set(d) - known)
+        unknown = _unknown_keys(d, known)
         if unknown:
             raise ValueError(f"{where}: unknown key(s) {unknown}")
         channel = d.get("channel")
@@ -326,7 +335,7 @@ class TargetSpec:
             "contract_file",
             "checks",
         }
-        unknown = sorted(set(d) - known)
+        unknown = _unknown_keys(d, known)
         if unknown:
             raise ValueError(f"{where}: unknown key(s) {unknown}")
         kind = d.get("kind", TARGET_KIND_LIBRARY)
@@ -384,7 +393,7 @@ class BundleSpec:
             raise ValueError(
                 f"{where} must be a mapping, got {type(d).__name__}: {d!r}"
             )
-        unknown = sorted(set(d) - {"targets", "checks"})
+        unknown = _unknown_keys(d, {"targets", "checks"})
         if unknown:
             raise ValueError(f"{where}: unknown key(s) {unknown}")
         targets = d.get("targets")
@@ -426,7 +435,7 @@ class ProfileSpec:
             raise ValueError(
                 f"{where} must be a mapping, got {type(d).__name__}: {d!r}"
             )
-        unknown = sorted(set(d) - {"contract", "os", "arch"})
+        unknown = _unknown_keys(d, {"contract", "os", "arch"})
         if unknown:
             raise ValueError(f"{where}: unknown key(s) {unknown}")
         contract = d.get("contract", True)
@@ -467,7 +476,7 @@ class BaselineChannelSpec:
             raise ValueError(
                 f"{where} must be a mapping, got {type(d).__name__}: {d!r}"
             )
-        unknown = sorted(set(d) - {"source", "asset_pattern", "key_prefix"})
+        unknown = _unknown_keys(d, {"source", "asset_pattern", "key_prefix"})
         if unknown:
             raise ValueError(f"{where}: unknown key(s) {unknown}")
         source = d.get("source")
