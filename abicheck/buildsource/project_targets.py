@@ -546,9 +546,9 @@ class ProjectTargetsConfig:
         are still accepted here and simply ignored, since a real
         ``.abicheck.yml`` legitimately carries those alongside this block.
         """
-        unknown_top = sorted(set(data) - KNOWN_TOP_LEVEL_KEYS)
+        unknown_top = sorted((set(data) - KNOWN_TOP_LEVEL_KEYS), key=repr)
         if unknown_top:
-            raise ValueError(f"unknown .abicheck.yml key(s) {unknown_top}")
+            raise ValueError(f"unknown .abicheck.yml key(s) {unknown_top!r}")
         targets_raw = _require_mapping(data.get("targets"), "targets")
         bundles_raw = _require_mapping(data.get("bundles"), "bundles")
         profiles_raw = _require_mapping(data.get("profiles"), "profiles")

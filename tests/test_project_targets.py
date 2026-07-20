@@ -997,6 +997,15 @@ def test_misspelled_top_level_key_is_rejected() -> None:
         )
 
 
+def test_mixed_type_top_level_keys_raise_value_error_not_type_error() -> None:
+    """A bare PyYAML 1.1 boolean-like top-level key (``on:``/``off:``/``yes:``/
+    ``no:``) alongside another unknown string key must still be reported as
+    the documented ``ValueError`` usage error, not crash with ``TypeError``
+    from comparing ``bool`` and ``str`` inside ``sorted()`` (Codex finding)."""
+    with pytest.raises(ValueError, match=r"unknown \.abicheck\.yml key"):
+        ProjectTargetsConfig.from_dict({True: {}, "tagrets": {}})
+
+
 def test_other_abicheck_yml_blocks_are_accepted_and_ignored() -> None:
     """A real `.abicheck.yml` legitimately carries blocks this module doesn't
     own (severity, scope, ...) alongside targets/bundles/profiles/baseline —
