@@ -804,6 +804,93 @@ def test_bundle_unknown_key_raises() -> None:
         )
 
 
+# ── Bundle-level checks: (review finding — ADR-047 §5 needs bundle cells) ──
+
+
+def test_bundle_checks_round_trip_and_validate() -> None:
+    config = ProjectTargetsConfig.from_dict(
+        {
+            "targets": {
+                "a": {"kind": "library", "binary_pattern": "a.so", "bundle": "rel"},
+                "b": {"kind": "library", "binary_pattern": "b.so", "bundle": "rel"},
+            },
+            "bundles": {
+                "rel": {
+                    "targets": ["a", "b"],
+                    "checks": [{"channel": "none", "depth": "headers"}],
+                }
+            },
+        }
+    )
+    assert config.bundles["rel"].checks == [CheckSpec(channel="none", depth="headers")]
+    assert config.bundles["rel"].to_dict()["checks"] == [
+        {"channel": "none", "depth": "headers", "required": True, "gate_mode": "local"}
+    ]
+    round_tripped = ProjectTargetsConfig.from_dict(config.to_dict())
+    assert round_tripped == config
+    report = validate_project_targets(config)
+    assert report.ok, report.errors
+
+
+def test_bundle_checks_not_a_list_raises() -> None:
+    with pytest.raises(ValueError, match=r"\.checks must be a list"):
+        ProjectTargetsConfig.from_dict(
+            {"bundles": {"rel": {"targets": ["a"], "checks": "not-a-list"}}}
+        )
+
+
+def test_bundle_checks_item_not_a_mapping_raises() -> None:
+    with pytest.raises(ValueError, match=r"\.checks\[0\] must be a mapping"):
+        ProjectTargetsConfig.from_dict(
+            {"bundles": {"rel": {"targets": ["a"], "checks": ["not-a-mapping"]}}}
+        )
+
+
+def test_bundle_checks_invalid_entry_is_flagged_by_validator() -> None:
+    config = ProjectTargetsConfig.from_dict(
+        {
+            "targets": {"a": {"kind": "library", "binary_pattern": "a.so"}},
+            "bundles": {
+                "rel": {
+                    "targets": ["a"],
+                    "checks": [{"channel": "none", "depth": "not-a-real-depth"}],
+                }
+            },
+        }
+    )
+    report = validate_project_targets(config)
+    assert not report.ok
+    assert any(
+        "bundle 'rel'.checks[0]" in e and "depth must be one of" in e
+        for e in report.errors
+    )
+
+
+# ── Top-level key strictness (review finding — a typo'd block was silently
+# ── ignored instead of caught) ──────────────────────────────────────────────
+
+
+def test_misspelled_top_level_key_is_rejected() -> None:
+    with pytest.raises(ValueError, match=r"unknown \.abicheck\.yml key"):
+        ProjectTargetsConfig.from_dict(
+            {"tagrets": {"foo": {"kind": "library", "binary_pattern": "x"}}}
+        )
+
+
+def test_other_abicheck_yml_blocks_are_accepted_and_ignored() -> None:
+    """A real `.abicheck.yml` legitimately carries blocks this module doesn't
+    own (severity, scope, ...) alongside targets/bundles/profiles/baseline —
+    those must not be rejected as unknown."""
+    config = ProjectTargetsConfig.from_dict(
+        {
+            "severity": {"preset": "strict_abi"},
+            "scope": {"public": True},
+            "targets": {"foo": {"kind": "library", "binary_pattern": "x"}},
+        }
+    )
+    assert set(config.targets) == {"foo"}
+
+
 def test_profile_not_a_mapping_raises() -> None:
     with pytest.raises(ValueError, match="must be a mapping"):
         ProjectTargetsConfig.from_dict({"profiles": {"linux": "not-a-mapping"}})

@@ -64,6 +64,18 @@ and deliberately left the choice to P1.5:
   target, which cannot itself be resolved further) but does not perform the
   redirection itself — that is G30 P1.2 (``resolve-baseline``)/P1.3
   (``check-target``)'s job at run time.
+
+``bundles:`` entries also carry their own ``checks:`` (same shape as a
+target's) — the ADR-047 §5 run-plan emits a ``kind: "bundle"`` check
+alongside per-target ones (S14 bundle-scoped analysis), and that cell needs
+its own baseline-channel/depth/gate policy just like a target's does; see
+:class:`BundleSpec`.
+
+``ProjectTargetsConfig.from_dict`` validates every top-level key in the raw
+mapping against :data:`~.inline.KNOWN_TOP_LEVEL_KEYS` — the *full*
+``.abicheck.yml`` key set, not just this module's four owned keys — so a
+misspelled block (``tagrets:``) is a hard error rather than silently
+parsing as an empty, all-default config.
 """
 
 from __future__ import annotations
@@ -73,6 +85,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .inline import KNOWN_TOP_LEVEL_KEYS
 from .scan_levels import USER_DEPTHS
 
 #: The identifier charset every target/bundle/profile/channel id must satisfy
@@ -308,13 +321,26 @@ class TargetSpec:
 
 @dataclass
 class BundleSpec:
-    """One ``bundles:`` entry (ADR-047 §3) — a release group of library targets."""
+    """One ``bundles:`` entry (ADR-047 §3) — a release group of library targets.
+
+    ``checks:`` (same ``{channel, depth, required, gate_mode, profiles}``
+    shape as a target's — review finding, ADR-047 §5): the run-plan example
+    emits a ``kind: "bundle"`` check entry alongside per-target ones (S14
+    bundle-scoped analysis), and that cell needs its own baseline-channel/
+    depth/gate policy just like a target's checks do — this plan's own
+    ``checks:`` design note says "per target, **or per bundle**", which an
+    earlier draft of this schema only implemented the target half of.
+    """
 
     id: str = ""
     targets: list[str] = field(default_factory=list)
+    checks: list[CheckSpec] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"targets": list(self.targets)}
+        d: dict[str, Any] = {"targets": list(self.targets)}
+        if self.checks:
+            d["checks"] = [c.to_dict() for c in self.checks]
+        return d
 
     @classmethod
     def from_dict(cls, name: str, d: dict[str, Any]) -> BundleSpec:
@@ -323,7 +349,7 @@ class BundleSpec:
             raise ValueError(
                 f"{where} must be a mapping, got {type(d).__name__}: {d!r}"
             )
-        unknown = sorted(set(d) - {"targets"})
+        unknown = sorted(set(d) - {"targets", "checks"})
         if unknown:
             raise ValueError(f"{where}: unknown key(s) {unknown}")
         targets = d.get("targets")
@@ -332,7 +358,15 @@ class BundleSpec:
         bad = [t for t in targets if not isinstance(t, str)]
         if bad:
             raise ValueError(f"{where}.targets must be a list of strings, got {bad!r}")
-        return cls(id=name, targets=[str(t) for t in targets])
+        checks_raw = d.get("checks")
+        if checks_raw is not None and not isinstance(checks_raw, list):
+            raise ValueError(f"{where}.checks must be a list")
+        checks: list[CheckSpec] = []
+        for i, c in enumerate(checks_raw or []):
+            if not isinstance(c, dict):
+                raise ValueError(f"{where}.checks[{i}] must be a mapping")
+            checks.append(CheckSpec.from_dict(c, where=f"{where}.checks[{i}]"))
+        return cls(id=name, targets=[str(t) for t in targets], checks=checks)
 
 
 @dataclass
@@ -463,7 +497,19 @@ class ProjectTargetsConfig:
         fields, identifier charset) are **not** raised here — see
         :func:`validate_project_targets`, which needs the fully-assembled
         config to check references across blocks.
+
+        Every key in *data* is checked against the *full* ``.abicheck.yml``
+        top-level key set (:data:`~.inline.KNOWN_TOP_LEVEL_KEYS`), not just
+        this module's own four owned keys — a misspelled block (e.g.
+        ``tagrets:``) would otherwise be silently ignored as an unrecognized,
+        unrelated key rather than caught as the typo it is (review finding).
+        Keys this module doesn't itself parse (``build``, ``severity``, ...)
+        are still accepted here and simply ignored, since a real
+        ``.abicheck.yml`` legitimately carries those alongside this block.
         """
+        unknown_top = sorted(set(data) - KNOWN_TOP_LEVEL_KEYS)
+        if unknown_top:
+            raise ValueError(f"unknown .abicheck.yml key(s) {unknown_top}")
         targets_raw = _require_mapping(data.get("targets"), "targets")
         bundles_raw = _require_mapping(data.get("bundles"), "bundles")
         profiles_raw = _require_mapping(data.get("profiles"), "profiles")
@@ -630,7 +676,7 @@ def _target_issues(config: ProjectTargetsConfig, target: TargetSpec) -> list[str
             )
         issues.extend(_library_reference_issues(config, target))
     for i, check in enumerate(target.checks):
-        issues.extend(_check_issues(config, target.id, i, check))
+        issues.extend(_check_issues(config, f"target {target.id!r}.checks[{i}]", check))
     return issues
 
 
@@ -656,9 +702,8 @@ def _library_reference_issues(
 
 
 def _check_issues(
-    config: ProjectTargetsConfig, target_id: str, index: int, check: CheckSpec
+    config: ProjectTargetsConfig, where: str, check: CheckSpec
 ) -> list[str]:
-    where = f"target {target_id!r}.checks[{index}]"
     issues: list[str] = []
     if (
         check.channel != NO_BASELINE_CHANNEL
@@ -704,6 +749,8 @@ def _bundle_issues(config: ProjectTargetsConfig, bundle: BundleSpec) -> list[str
                 f"{referenced.bundle!r}, not {bundle.id!r} — a target's own "
                 "bundle: field and its membership here must agree."
             )
+    for i, check in enumerate(bundle.checks):
+        issues.extend(_check_issues(config, f"bundle {bundle.id!r}.checks[{i}]", check))
     return issues
 
 

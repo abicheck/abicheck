@@ -139,11 +139,19 @@ This schema resolves it with two complementary mechanisms:
 
 ## `bundles:`
 
-A mapping of bundle id → `{targets: [...]}`. Every listed target must be a
-declared `kind: library` target, and if that target itself sets a `bundle:`
-field, it must name this same bundle back — the validator flags a
-mismatch (e.g. a target claims `bundle: bundle-a` but only `bundle-b` lists
-it as a member) as an integrity error, not a silent inconsistency.
+A mapping of bundle id → `{targets: [...], checks: [...]}`. Every listed
+target must be a declared `kind: library` target, and if that target itself
+sets a `bundle:` field, it must name this same bundle back — the validator
+flags a mismatch (e.g. a target claims `bundle: bundle-a` but only
+`bundle-b` lists it as a member) as an integrity error, not a silent
+inconsistency.
+
+`checks:` on a bundle uses the exact same `{channel, depth, required,
+gate_mode, profiles}` shape [described above](#checks) for a target — the
+ADR-047 §5 run-plan emits a `kind: "bundle"` check entry alongside
+per-target ones (S14 bundle-scoped analysis, e.g. soname/provider-set
+checks across the whole release), and that cell needs its own
+baseline-channel/depth/gate policy independent of its member targets'.
 
 ## `profiles:`
 
@@ -189,12 +197,16 @@ scope for P0/P1 and not a valid `source` value here.
 7. Every `checks[].profiles` entry resolves to a declared `profiles:` id.
 8. Every target/bundle/profile/channel id matches the `check_id`-safe
    identifier charset.
+9. Rules 5-7 apply identically to a bundle's own `checks[]`, not just a
+   target's.
 
-Structural/type errors in the YAML itself (an unknown key, a value of the
-wrong type — e.g. `contract: "yes"` instead of a boolean) fail immediately,
-as a usage error, matching `.abicheck.yml`'s existing strict-parsing
-convention (ADR-043) — the validation report above only covers
-cross-reference/semantic issues on an already-well-formed block.
+Structural/type errors in the YAML itself (an unknown key at any level —
+including a misspelled top-level block like `tagrets:`, checked against the
+*full* `.abicheck.yml` key set, not just this block's four keys — or a
+value of the wrong type, e.g. `contract: "yes"` instead of a boolean) fail
+immediately, as a usage error, matching `.abicheck.yml`'s existing
+strict-parsing convention (ADR-043) — the validation report above only
+covers cross-reference/semantic issues on an already-well-formed block.
 
 ### CLI
 
