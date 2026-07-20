@@ -832,10 +832,8 @@ def _build_castxml_command(
 ) -> list[str]:
     """Build the castxml command line."""
     # CastXML needs its language-specific compiler-emulation id in C mode.
-    # Using ``gnu`` together with ``-x c`` makes modern CastXML inject C++
-    # approximations for GCC's _Float* builtins (including ``operator``), then
-    # asks Clang to parse them as C.  ``gnu-c`` supplies the C approximations.
-    # Parentheses force an explicit g++ path/prefix to probe its builtins as C.
+    # ``gnu`` + ``-x c`` can inject C++ _Float* approximations into C;
+    # ``gnu-c`` avoids that. Parentheses preserve an explicit g++ path/prefix.
     castxml_cc_id = "gnu-c" if not force_cpp and cc_id == "gnu" else cc_id
     compiler_command = (["(", cc_bin, "-x", "c", ")"]
                         if castxml_cc_id == "gnu-c" else [cc_bin])
