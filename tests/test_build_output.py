@@ -167,6 +167,27 @@ class TestSchemaRoundTrip:
         assert bo.digests == {}
         assert bo.profile == BuildOutputProfile()
 
+    def test_target_to_dict_omits_evidence_key_when_unset(self) -> None:
+        target = BuildOutputTarget(id="libfoo", binary="artifacts/libfoo.so")
+        assert "evidence" not in target.to_dict()
+
+    def test_diagnostics_round_trip(self) -> None:
+        bo = BuildOutput.from_dict(
+            {
+                "schema": BUILD_OUTPUT_SCHEMA,
+                "diagnostics": {
+                    "warnings": ["w1"],
+                    "skipped_targets": ["libbar"],
+                    "not_a_list": "ignored",
+                },
+            }
+        )
+        assert bo.diagnostics == {
+            "warnings": ["w1"],
+            "skipped_targets": ["libbar"],
+        }
+        assert bo.to_dict()["diagnostics"] == bo.diagnostics
+
 
 class TestIsBuildOutputDir:
     def test_true_for_real_manifest(self, tmp_path: Path) -> None:
@@ -176,6 +197,12 @@ class TestIsBuildOutputDir:
     def test_false_for_plain_dir(self, tmp_path: Path) -> None:
         d = tmp_path / "plain"
         d.mkdir()
+        assert is_build_output_dir(d) is False
+
+    def test_false_for_malformed_json(self, tmp_path: Path) -> None:
+        d = tmp_path / "abicheck-build"
+        d.mkdir()
+        (d / "build-output.json").write_text("{not valid json")
         assert is_build_output_dir(d) is False
 
     def test_false_for_inputs_pack_dir(self, tmp_path: Path) -> None:
@@ -422,6 +449,14 @@ class TestBinaryValidation:
         assert not report.ok
         assert any("does not exist" in e for e in report.errors)
 
+    def test_absolute_binary_path_is_rejected(self, tmp_path: Path) -> None:
+        root = _build_output_dir(
+            tmp_path, targets=[{"id": "libfoo", "binary": "/etc/passwd"}]
+        )
+        report = validate_build_output(root)
+        assert not report.ok
+        assert any("absolute or escapes" in e for e in report.errors)
+
     def test_digest_mismatch_fails(self, tmp_path: Path) -> None:
         root = tmp_path / "abicheck-build"
         root.mkdir()
@@ -535,6 +570,35 @@ class TestDeclaredEvidenceSharingScope:
     per-TU tags, (2) a manifest/target mismatch must fail, (3) a
     single-target, matched, untagged-TU pack must still pass (regression
     guard against over-rejecting the legitimate legacy case)."""
+
+    def test_absolute_evidence_path_is_rejected(self, tmp_path: Path) -> None:
+        root = tmp_path / "abicheck-build"
+        root.mkdir()
+        digest = _binary(root, "artifacts/lib/liba.so")
+        (root / "build-output.json").write_text(
+            json.dumps(
+                {
+                    "schema": BUILD_OUTPUT_SCHEMA,
+                    "targets": [
+                        {
+                            "id": "liba",
+                            "binary": "artifacts/lib/liba.so",
+                            "evidence": {
+                                "kind": "source-facts",
+                                "path": "/etc/passwd",
+                                "projection": "declared",
+                            },
+                        }
+                    ],
+                    "digests": {"artifacts/lib/liba.so": f"sha256:{digest}"},
+                }
+            )
+        )
+        report = validate_build_output(root)
+        assert not report.ok
+        assert any(
+            "evidence.path" in e and "absolute or escapes" in e for e in report.errors
+        )
 
     def _two_target_setup(
         self,
@@ -735,6 +799,15 @@ class TestBuildOutputCLI:
         res = self._run([str(root)])
         assert res.exit_code == 0, res.output
         assert "OK" in res.output
+
+    def test_text_format_shows_warnings(self, tmp_path: Path) -> None:
+        # No targets[] is valid (ok) but produces a warning -- exercises the
+        # text-format warnings branch, distinct from the errors branch.
+        root = _build_output_dir(tmp_path, targets=[])
+        res = self._run([str(root)])
+        assert res.exit_code == 0, res.output
+        assert "warning(s)" in res.output
+        assert "no targets" in res.output
 
     def test_invalid_dir_exits_1(self, tmp_path: Path) -> None:
         root = _build_output_dir(
