@@ -528,7 +528,7 @@ a dependency while P1.5's own entry said it "should land before P1.4" —
 inconsistent instructions that would leave an implementer with no real
 config schema to generate the matrix from. P1.5 must land first.
 
-### P1.5 — `.abicheck.yml` `targets:`/`profiles:`/`baseline:` block
+### P1.5 — `.abicheck.yml` `targets:`/`profiles:`/`baseline:` block — **done**
 
 Implements ADR-047 §3. Config schema extension + `abicheck/policy_file.py`
 (or wherever `.abicheck.yml` is parsed) support; `docs/reference/config-file.md`
@@ -548,6 +548,67 @@ this new `checks:` shape is the missing piece P1.4 actually consumes.
 not merely "should" — since P1.4 depends on this item (corrected above);
 sequence P1.5 ahead of P1.4 in the actual PR order, not just in ordinal
 numbering.
+
+**Status:** implemented. New `abicheck/buildsource/project_targets.py`
+defines `TargetSpec`/`BundleSpec`/`ProfileSpec`/`BaselineChannelSpec`/
+`CheckSpec` (the `{channel, depth, required, gate_mode, profiles}` tuple
+that closes the gap above) plus `ProjectTargetsConfig.from_dict()` (strict
+structural/type validation, ADR-043 convention — raises immediately on an
+unknown key or wrong-typed value, matching `BuildConfig`'s own strict
+`.abicheck.yml` parsing) and `validate_project_targets()` (cross-reference/
+semantic validation: kind-specific required/forbidden fields per §3's
+`library`/`app-consumer`/`plugin-contract` discriminator, the
+`app-consumer`/`plugin-contract` → `library` redirect rule resolving both
+of §3's "unstated rule" corrections, bundle membership agreement, and every
+`checks[].channel`/`profiles[]` reference resolving — or the `channel:
+"none"` sentinel for a §6 S5 no-baseline audit check). Every
+target/bundle/profile/channel id is validated against the same
+`[A-Za-z0-9][A-Za-z0-9._-]*` charset the report-identity envelope (§7)
+already requires for `check_id` components, so no id produced here can
+later become an unparseable `check_id`.
+
+`targets`/`bundles`/`profiles`/`baseline` are registered as recognized
+`.abicheck.yml` top-level keys in `BuildConfig._KNOWN_TOP_KEYS`
+(`abicheck/buildsource/inline.py`) — the same recognized-but-not-parsed
+treatment already given `risk_rules`/`crosschecks` — so their presence
+never trips `BuildConfig`'s own strict unknown-key error, but `BuildConfig`
+does not parse them itself; `project_targets.py`'s own loader
+(`load_project_targets_config`) re-reads the same file. This keeps
+`inline.py` (already at the file-size soft-limit warning) unchanged in
+size and matches the existing sibling-module-owns-its-block precedent.
+
+**Profile-scoping gap resolution, per the module's own docstring:** rather
+than assume the naive cross-product of every `checks:` entry with every
+`contract: true` profile is safe (§3 explicitly warns this produces
+impossible cells for a target that doesn't exist on every profile), each
+`checks:` entry carries an *optional* explicit `profiles:` selector
+(validated against declared `profiles:` ids when set); when omitted, this
+schema deliberately does not resolve a profile list itself — G30 P1.4's
+run-plan generator is the one responsible for deriving the actual
+`(target, profile)` cells from each profile's own `build-output.json`
+`targets[]` list (the ADR's second, safer option), never from a blind
+cross-product. This module's validator cannot enforce that downstream
+behavior; it documents the split explicitly rather than silently picking
+the unsafe default.
+
+New `abicheck project-targets validate [CONFIG]` CLI command
+(`abicheck/cli_project_targets.py`, registered as a new top-level command
+group exactly like P1.1's `build-output validate` — `tests/
+test_cli_root_surface.py`/`test_cli_surface_diff.py` updated to include it
+in the public command set, and `scripts/check_ai_readiness.py`'s
+`IMPORT_CYCLE_ALLOWLIST` documents it joining the existing by-design
+CLI-registration SCC the same way `cli_build_output`/`cli_aggregate`
+already do). No producer/run-plan-generator tooling yet — `dump`/
+`compare`/`scan` do not read this block at all, matching P1.1's same
+"defines the contract, no consumer yet" scope. `docs/reference/
+project-targets-schema.md` (new, linked from mkdocs nav) documents the
+full schema; `docs/reference/config-file.md`'s top-level key table and
+`risk_rules:`/`crosschecks:` section gain the four new keys, pointing at
+the new page rather than duplicating it. `tests/test_project_targets.py`
+covers the schema round-trip, `BuildConfig`'s recognition of the new keys,
+the from_dict structural-error taxonomy, every cross-reference validation
+rule (including the exact ADR-047 §3 PVXS two-target-one-bundle shape as a
+positive case), the loader, and the CLI command.
 
 ### P1.6 — `publish-baseline.yml` / `update-main-baseline.yml`
 

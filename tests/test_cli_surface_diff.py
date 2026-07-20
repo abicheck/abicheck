@@ -50,9 +50,11 @@ def diff_mod():  # type: ignore[no-untyped-def]
 
 def test_dump_surface_covers_root_commands(dump_mod) -> None:  # type: ignore[no-untyped-def]
     """The dumped surface exposes exactly the public root commands (ADR-043,
-    plus ``aggregate`` — the multi-target CI fan-in gate — and
-    ``build-output`` — the G30 P1.1 ``build-output.json`` validator group —
-    both added afterward).
+    plus ``aggregate`` — the multi-target CI fan-in gate —,
+    ``build-output`` — the G30 P1.1 ``build-output.json`` validator group —,
+    and ``project-targets`` — the G30 P1.5
+    ``targets:``/``bundles:``/``profiles:``/``baseline:`` validator group —
+    all added afterward).
 
     `pr-comment` is deliberately NOT here: it is Action/library-only tooling
     (`python -m abicheck.cli_pr_comment`), never a public `abicheck` subcommand.
@@ -65,6 +67,7 @@ def test_dump_surface_covers_root_commands(dump_mod) -> None:  # type: ignore[no
         "compat",
         "deps",
         "dump",
+        "project-targets",
         "scan",
     }
 

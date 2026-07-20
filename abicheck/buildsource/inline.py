@@ -226,7 +226,9 @@ class BuildConfig:
     #: newer schema read by an older abicheck) **warns**, never errors, so a
     #: project can adopt a future key without breaking older installs. Keys parsed
     #: by sibling modules (``risk_rules`` → ``risk.py``, ``crosschecks`` →
-    #: ``crosscheck.py``) are listed so they don't trip the warning.
+    #: ``crosscheck.py``, ``targets``/``bundles``/``profiles``/``baseline`` →
+    #: ``project_targets.py``, ADR-047 §3/G30 P1.5) are listed so they don't trip
+    #: the warning.
     _KNOWN_TOP_KEYS: ClassVar[frozenset[str]] = frozenset(
         {
             "build",
@@ -241,6 +243,10 @@ class BuildConfig:
             "version",
             "risk_rules",
             "crosschecks",
+            "targets",
+            "bundles",
+            "profiles",
+            "baseline",
         }
     )
     _KNOWN_BLOCK_KEYS: ClassVar[dict[str, frozenset[str]]] = {
@@ -633,6 +639,16 @@ class BuildConfig:
         if self.version:
             out["version"] = self.version
         return out
+
+
+#: Public re-export of every recognized ``.abicheck.yml`` top-level key —
+#: including the four ``project_targets.py``-owned ones. That sibling module
+#: reuses this (rather than its own partial guess) to reject a misspelled
+#: top-level key (e.g. ``tagrets:``) even though it only *parses* four of
+#: these keys itself — a key outside this whole set is unknown to every
+#: ``.abicheck.yml`` consumer, not just this one, so the strictness belongs
+#: to one shared source of truth.
+KNOWN_TOP_LEVEL_KEYS: frozenset[str] = BuildConfig._KNOWN_TOP_KEYS
 
 
 def load_build_config(path: Path) -> BuildConfig:

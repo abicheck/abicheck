@@ -93,6 +93,7 @@ nav:
     - Exit Codes: reference/exit-codes.md
     - Snapshot Format: reference/snapshot-format.md
     - Build Output Schema: reference/build-output-schema.md
+    - Project Targets Schema: reference/project-targets-schema.md
     - Configuration File: reference/config-file.md
     - Environment Variables: reference/environment.md
     - Platforms: reference/platforms.md
