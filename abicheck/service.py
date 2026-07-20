@@ -672,8 +672,12 @@ def run_dump(
         _try_attach_numpy_capi_surface(snap, path)
         snap = _attach_header_graph(
             snap,
-            _HEADER_GRAPH_ENABLED and not _skip_header_graph_attach,
-            _HEADER_GRAPH_INCLUDES_ENABLED and not _skip_header_graph_attach,
+            _HEADER_GRAPH_ENABLED
+            and not _skip_header_graph_attach
+            and not symbols_only,
+            _HEADER_GRAPH_INCLUDES_ENABLED
+            and not _skip_header_graph_attach
+            and not symbols_only,
             _headers,
             _includes,
             lang,
@@ -700,8 +704,12 @@ def run_dump(
         _try_attach_numpy_capi_surface(snap, path)
         snap = _attach_header_graph(
             snap,
-            _HEADER_GRAPH_ENABLED and not _skip_header_graph_attach,
-            _HEADER_GRAPH_INCLUDES_ENABLED and not _skip_header_graph_attach,
+            _HEADER_GRAPH_ENABLED
+            and not _skip_header_graph_attach
+            and not symbols_only,
+            _HEADER_GRAPH_INCLUDES_ENABLED
+            and not _skip_header_graph_attach
+            and not symbols_only,
             _headers,
             _includes,
             lang,

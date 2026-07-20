@@ -2380,6 +2380,54 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
 
         assert calls == [(False, False)]
 
+    def test_pe_symbols_only_does_not_attach_header_graph(self, tmp_path):
+        """Codex review, fresh evidence: the ELF fix above added
+        `not symbols_only` to the ELF/hybrid attach predicates, but the PE
+        branch omitted it -- a symbols-only PE dump could still grow
+        header-graph findings."""
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        header = tmp_path / "api.h"
+        header.write_text("void f();\n")
+        snap = AbiSnapshot(library="lib", version="1.0", from_headers=False)
+        calls: list[tuple[bool, bool]] = []
+
+        def _fake_attach(_snap, header_graph, header_graph_includes, *_args, **_kwargs):
+            calls.append((header_graph, header_graph_includes))
+            return _snap
+
+        with (
+            patch("abicheck.service._dump_pe", return_value=snap),
+            patch("abicheck.service._attach_header_graph", side_effect=_fake_attach),
+            patch("abicheck.service.attach_clang_layout", side_effect=lambda s, *a, **k: s),
+        ):
+            run_dump(p, "pe", [header], [], "1.0", "c++", symbols_only=True)
+
+        assert calls == [(False, False)]
+
+    def test_macho_symbols_only_does_not_attach_header_graph(self, tmp_path):
+        """Codex review, fresh evidence: same gap as the PE case above, on
+        the Mach-O branch."""
+        p = tmp_path / "lib.dylib"
+        p.write_bytes(b"\xcf\xfa\xed\xfe" + b"\x00" * 100)
+        header = tmp_path / "api.h"
+        header.write_text("void f();\n")
+        snap = AbiSnapshot(library="lib", version="1.0", from_headers=False)
+        calls: list[tuple[bool, bool]] = []
+
+        def _fake_attach(_snap, header_graph, header_graph_includes, *_args, **_kwargs):
+            calls.append((header_graph, header_graph_includes))
+            return _snap
+
+        with (
+            patch("abicheck.service._dump_macho", return_value=snap),
+            patch("abicheck.service._attach_header_graph", side_effect=_fake_attach),
+            patch("abicheck.service.attach_clang_layout", side_effect=lambda s, *a, **k: s),
+        ):
+            run_dump(p, "macho", [header], [], "1.0", "c++", symbols_only=True)
+
+        assert calls == [(False, False)]
+
 
 class TestCliNativeBinaryHeaderWiring:
     """CLI _dump_native_binary must forward headers to service._dump_pe/_dump_macho."""
