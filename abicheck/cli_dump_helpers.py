@@ -1478,12 +1478,16 @@ def perform_elf_dump(
                     gcc_options=effective_gcc_options
                 )
 
-        from .service import _attach_header_graph
+        from .service import (
+            _HEADER_GRAPH_ENABLED,
+            _HEADER_GRAPH_INCLUDES_ENABLED,
+            _attach_header_graph,
+        )
 
         snap = _attach_header_graph(
             snap,
-            True,  # header_graph: always on (G29 Phase A)
-            True,  # header_graph_includes: always on (G29 Phase A)
+            _HEADER_GRAPH_ENABLED,
+            _HEADER_GRAPH_INCLUDES_ENABLED,
             list(headers),
             list(eff_includes),
             lang,

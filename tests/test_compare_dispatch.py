@@ -878,7 +878,7 @@ class TestCompareDispatch:
         new_dir.mkdir()
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
-        code, out, err = _invoke(
+        _code, out, err = _invoke(
             "compare", str(old_dir), str(new_dir),
             "--header-graph", "--header-graph-includes",
         )

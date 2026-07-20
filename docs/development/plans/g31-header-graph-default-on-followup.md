@@ -79,10 +79,14 @@ exists).
 
 **Not fixed in this pass** (tracked as the `# TODO(header-graph-phase-D)`
 comment in `service.py`): `header_graph_includes`'s per-header `clang -M`
-pass has no caching of its own beyond the aggregate AST cache — it fails
-soft (degrades to not_collected/partial coverage) when clang is unavailable,
-but re-runs on every dump/compare even when the whole-snapshot cache above
-is a hit for everything else. See Phase C's sequencing note.
+pass has no caching of its own independent of the whole-snapshot cache. A
+whole-snapshot cache *hit* restores the previously-computed `build_source`
+(including the include-graph edges) without rerunning anything — the pass
+only actually executes on a cache *miss* or for an uncacheable call shape
+(see `service_dump_cache._dump_is_cacheable`). On a miss, though, it
+re-runs unconditionally and fails soft (degrades to not_collected/partial
+coverage) when clang is unavailable, with no cheaper incremental path of
+its own. See Phase C's sequencing note.
 
 ## Phase B — Unify graph/public-surface vocabulary + canonical entity identity
 

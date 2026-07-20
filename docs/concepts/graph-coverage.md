@@ -28,11 +28,14 @@ records, per extractor pass, whether its own coverage was complete:
 
 Two collection strategies commonly produce exactly this shape:
 
-- **Header-only collection** (the L2 header-only graph, built automatically
-  whenever there is no real build) sees declarations and signatures but
-  never a function body, so it cannot see a `DECL_CALLS_DECL` edge a public
-  inline function's *body* creates into an internal specialization — the
-  graph is real, just structurally unable to answer that question.
+- **Header-only collection** (the L2 header-only graph, attached
+  automatically whenever a supported `dump`/`compare` run has header
+  evidence at `--depth headers` or deeper — including runs that *also*
+  provide real build/source evidence, not just header-only ones) sees
+  declarations and signatures but never a function body, so it cannot see a
+  `DECL_CALLS_DECL` edge a public inline function's *body* creates into an
+  internal specialization — the graph is real, just structurally unable to
+  answer that question.
 - **A collector-upgrade** (old snapshot dumped header-only, new snapshot
   with a real `--build-info` compile database) is not a "new
   dependency appeared" signal — it is the same project seen through two

@@ -54,7 +54,7 @@ _SNAPSHOT_CACHE_VERSION: str = "3"
 # (snapshot_cache.py), which persists across process invocations and isn't
 # gated by that schema version at all.
 #
-# v3 (G31 Phase A): the L2 header-only semantic graph became unconditional
+# v3 (G29 Phase A): the L2 header-only semantic graph became unconditional
 # (previously gated behind the now-removed --header-graph/--header-graph-includes
 # flags). service_dump_cache._dump_is_cacheable() allows the same plain
 # "binary + public headers" shape onto this cache that a pre-upgrade,
