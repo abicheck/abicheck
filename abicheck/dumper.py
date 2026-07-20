@@ -1066,9 +1066,11 @@ def _castxml_dump(
 
     # Use the host C driver for CastXML's ``gnu-c`` emulation.  Passing g++
     # makes its compiler probe advertise C++-only _Float* approximations even
-    # though the final frontend arguments contain ``-x c``.
+    # though the final frontend arguments contain ``-x c``.  Preserve an
+    # explicit path/prefix selection: callers choosing a C++ cross-driver rely
+    # on ``--gcc-prefix`` resolving to ``<prefix>g++`` even for a C header.
     resolved_compiler = compiler
-    if not force_cpp and not gcc_path:
+    if not force_cpp and not gcc_path and not gcc_prefix:
         resolved_compiler = {
             "c++": "cc",
             "g++": "gcc",
