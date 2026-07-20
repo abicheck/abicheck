@@ -12,13 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Dump headers and binaries to :class:`AbiSnapshot`.
-
-L2 supports explicit CastXML, Clang, or hybrid producers. ``auto`` selects
-CastXML; its narrow runtime fallback to Clang is fail-closed unless callers opt
-in. Snapshots record the effective producer, exact toolchain, and fallback
-reason. See ADR-003 and ``docs/user-guide/tool-modes.md``.
-"""
+"""Dump headers and binaries with recorded AST toolchain provenance."""
 from __future__ import annotations
 
 import hashlib
@@ -94,7 +88,6 @@ from .dumper_toolchain import (
     _castxml_available as _castxml_available,
     _parser_ast_fallback_reason as _parser_ast_fallback_reason,
     _parser_ast_toolchain as _parser_ast_toolchain,
-    _resolved_tool as _resolved_tool,
     _safe_mtime as _safe_mtime,
     _safe_size as _safe_size,
     _tool_identity as _tool_identity,
@@ -278,8 +271,6 @@ def _clang_header_dump(
     out, or emits no usable AST.
     """
     clang_bin = _resolve_clang_bin(compiler, gcc_path, gcc_prefix)
-    _selected, clang_path, _clang_stat, _clang_digest = _resolved_tool(clang_bin)
-    clang_bin = str(clang_path)
     force_cpp, force_cpp20, explicit_c_request, cc_id = _resolve_clang_langmode(
         lang, headers, clang_bin, gcc_options, gcc_option_tokens,
     )
@@ -311,8 +302,6 @@ def _clang_header_dump(
     host_cc_bin, _host_cc_id = _resolve_compiler_binary(
         compiler, gcc_path, gcc_prefix
     )
-    _selected, host_cc_path, _host_stat, _host_digest = _resolved_tool(host_cc_bin)
-    host_cc_bin = str(host_cc_path)
     frontend_identity = _tool_identity(clang_bin)
     compiler_identity = _tool_identity(host_cc_bin)
 
@@ -446,12 +435,9 @@ def _header_ast_parser(
     public_dir_paths: list[str],
     extra_hash_dirs: tuple[Path, ...] = (),
 ) -> _CastxmlParser | _ClangAstParser:
-    """Run the resolved L2 backend and return its parser (castxml or clang).
+    """Run the resolved L2 backend and return its CastXML/Clang parser.
 
-    Both parsers expose the identical ``parse_functions``/``parse_variables``/
-    ``parse_types``/``parse_enums``/``parse_typedefs``/``parse_constants``
-    surface, so the format-specific ``_dump_*`` builders consume either one
-    uniformly — the only difference is which frontend produced the AST.
+    Both parser implementations expose the same format-builder interface.
     """
     resolved = _resolve_header_backend(backend)
     if resolved == "hybrid":
@@ -505,17 +491,8 @@ def _header_ast_parser(
     if resolved == "clang":
         return _run_clang()
 
-    # G16: when the frontend was selected automatically (no explicit --ast-frontend
-    # and no ABICHECK_AST_FRONTEND pin), two castxml failures are eligible for an
-    # explicitly opted-in clang fallback: a *toolchain-version*
-    # failure (bundled Clang too old for the host libstdc++/GCC — clang parses
-    # against the host toolchain directly), and a *direct-inclusion #error guard*
-    # (a `-H <include-dir>` swept in a preview/internal header that #errors on
-    # direct inclusion — only the clang path can granularly exclude the offending
-    # headers via retry_excluding_error_headers, so the headline include-dir scan
-    # works when fallback is enabled, not just --ast-frontend clang). The default
-    # remains fail-closed because switching producer can change findings. An explicit
-    # castxml request is honored verbatim (the error surfaces unchanged).
+    # Auto mode may use the explicit opt-in fallback for known toolchain or
+    # direct-inclusion failures. Explicit CastXML remains fail-closed.
     auto_selected = _auto_ast_fallback_eligible(backend)
     try:
         xml_root = _castxml_dump(
@@ -661,12 +638,7 @@ def _cache_key(
     compiler_identity: str = "",
 ) -> str:
     h = hashlib.sha256()
-    # The header-AST backend is part of the key: a castxml-XML cache entry and a
-    # clang-JSON one are different artifacts that must never collide.
     h.update(f"backend={backend}".encode())
-    # The producer binary is part of the artifact identity.  A PATH/symlink
-    # change from one CastXML/Clang build to another must never reuse the old
-    # AST merely because the headers and command-line flags are unchanged.
     h.update(f"frontend_identity={frontend_identity}".encode())
     h.update(f"compiler_identity={compiler_identity}".encode())
     for p in sorted(str(x.resolve()) for x in headers):
@@ -706,7 +678,6 @@ def _cache_key(
     # change must invalidate a cached clang dump (the resolved libstdc++ moved).
     h.update(f"system_includes={chr(0).join(system_includes)}".encode())
     return h.hexdigest()
-
 
 
 # C++ file extensions that unambiguously indicate C++ content.
@@ -1053,10 +1024,7 @@ def _castxml_dump(
         )
 
     cc_bin, cc_id = _resolve_compiler_binary(compiler, gcc_path, gcc_prefix)
-    _selected, cc_path, _cc_stat, _cc_digest = _resolved_tool(cc_bin)
-    cc_bin = str(cc_path)
-    _selected, castxml_path, _castxml_stat, _castxml_digest = _resolved_tool("castxml")
-    castxml_bin = str(castxml_path)
+    castxml_bin = "castxml"
     frontend_identity = _tool_identity(castxml_bin)
     compiler_identity = _tool_identity(cc_bin)
 
