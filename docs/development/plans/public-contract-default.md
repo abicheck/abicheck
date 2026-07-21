@@ -83,11 +83,12 @@ contract plan records a terminal, complete search. The evaluator must consume a
 provider ledger rather than infer completeness from an empty result:
 
 ```text
-EvidenceSearchRecord := id + provider + side + requirement
+EvidenceSearchRecord := id + provider + side + requirement + entity_scope
                         + requested_scope + searched_scope + status
                         + completeness + reason_code + input_identity
 
 requirement  := required | optional
+entity_scope := all | stable entity identities affected by this search
 status       := available | unavailable | failed | unsupported | stale
 completeness := complete | partial | not_started
 ```
@@ -110,8 +111,11 @@ Examples:
 The resolved plan defines which providers are **required** versus optional.
 Failure of an optional enrichment provider does not make a result unresolved if
 the required domain was searched completely; the report still discloses the
-failure. Each record persists its resolved `requirement`, plus searched scope
-and input digests, so snapshot replay never has to reconstruct requiredness from
+failure. Required-provider failures affect only findings intersecting the
+record's persisted `entity_scope`; an unrelated failed provider cannot poison a
+completed search for another entity. Each record persists its resolved
+`requirement` and entity scope, plus searched scope and input digests, so
+snapshot replay never has to reconstruct requiredness or applicability from
 current configuration or implementation defaults and can reproduce the
 completeness decision.
 
@@ -366,20 +370,20 @@ report:
     "evidence": [
       {"id": "old-public-headers", "side": "old",
        "provider": "public_header", "requirement": "required",
-       "status": "available",
+       "entity_scope": "all", "status": "available",
        "completeness": "complete", "requested_scope": ["include/"],
        "searched_scope": ["include/"], "reason_code": "search-complete",
        "input_identity": {"uri": "include/", "sha256": "<digest>"}},
       {"id": "old-guarded-index", "side": "old",
        "provider": "guarded_declaration_index", "requirement": "optional",
-       "status": "available",
+       "entity_scope": "all", "status": "available",
        "completeness": "complete", "requested_scope": ["include/"],
        "searched_scope": ["include/"], "reason_code": "search-complete",
        "input_identity": {"uri": "snapshot://old/guarded-index",
                           "sha256": "<digest>"}},
       {"id": "old-contract-manifest", "side": "old",
        "provider": "contract_manifest", "requirement": "required",
-       "status": "failed",
+       "entity_scope": ["symbol:legacy_helper"], "status": "failed",
        "completeness": "partial", "requested_scope": ["abi-contract.json"],
        "searched_scope": [], "reason_code": "manifest-parse-failed",
        "input_identity": {"uri": "abi-contract.json", "sha256": "<digest>"}}
@@ -548,10 +552,11 @@ No existing `--policy` value changes meaning.
 - provider ledger outcomes: complete-empty, unavailable adapter, unsupported
   format, parse failure, timeout, stale input, partial traversal, one-of-many
   provider failure, optional-provider failure, and contradictory identity;
-- for every outcome assert persisted `requirement`, requested/searched scope,
-  status, completeness, stable reason, assurance, relevance, and exit
-  contribution; replay the same ledger under changed current defaults and prove
-  that its classification does not change.
+- for every outcome assert persisted `requirement` and `entity_scope`,
+  requested/searched scope, status, completeness, stable reason, assurance,
+  relevance, and exit contribution; prove a required failure affects only its
+  scoped entities, then replay the same ledger under changed current defaults
+  and prove that its classification does not change.
 
 **Classifier**
 
@@ -603,8 +608,10 @@ invocations and compare each shared finding field, not only the top-level
 verdict. Add explicit combinations for contract coverage exit 1 with severity
 1/2/4, scan budget 5, invalid config 64, and both release schemes: legacy
 break/API-break plus removed library exits 4/2, legacy pass plus removed library
-exits 8, severity-aware removed library wins with exit 8, and operational error
-without a removed-library override floors at 4. Exercise text, JSON, SARIF,
+exits 8, legacy operational `ERROR` plus removed library exits 4,
+severity-aware removed library wins with exit 8 even alongside an operational
+error, and operational error without a removed-library override floors at 4.
+Exercise text, JSON, SARIF,
 JUnit, markdown/GitHub output, and aggregate ingestion from the same canonical
 fixtures.
 
