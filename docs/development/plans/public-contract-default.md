@@ -468,13 +468,15 @@ The concrete CLI spelling is `--contract public|exports` plus
 `not_checkable` because existing YAML keys use underscores. `public_contract`
 is the named composition/preset, not a third contract-mode enum value. Reports
 always record the effective mode, unresolved behavior, severity policy, and the
-source of each value (`default`, profile, config, legacy alias, or explicit
-CLI).
+source of each value. The machine-value enum is `built_in_default`, `config`,
+`profile`, `preset`, `legacy_alias`, or `explicit_cli`; `preset` is used when
+the `public_contract` composition supplied the value, matching the report
+example above.
 
-Precedence is: explicit new CLI option > explicit legacy scope flag > profile >
-config > built-in default. Supplying contradictory explicit new/legacy options
-is a usage error (64), not last-option-wins. Config parsing rejects unknown
-values and contradictory shapes. During migration,
+Precedence is: explicit new CLI option > explicit legacy scope flag > selected
+preset/profile composition > config > built-in default. Supplying contradictory
+explicit new/legacy options is a usage error (64), not last-option-wins. Config
+parsing rejects unknown values and contradictory shapes. During migration,
 `--scope-public-headers` resolves to `--contract public` and
 `--no-scope-public-headers` to `--contract exports`; help and deprecation text
 must describe the semantic change and the effective configuration is visible in
@@ -573,6 +575,9 @@ Add a table-driven CLI/config resolution suite that separately proves:
   `legacy_alias`;
 - profile overrides config/default and config overrides the built-in default,
   with the effective value and source serialized in every case;
+- selecting the `public_contract` preset resolves mode `public` with source
+  `preset`, and overrides config/default without being serialized as mode
+  `public_contract`;
 - contradictory explicit new/legacy options and contradictory legacy aliases
   fail with exit 64;
 - equivalent values supplied through multiple layers remain deterministic and
