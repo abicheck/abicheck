@@ -76,6 +76,42 @@ A complete result may be `NO_CHANGE`/exit 0 while disclosing `UNKNOWN_UNPROVEN` 
 
 `partial`/`unavailable` sets an orthogonal top-level `analysis_status=NOT_CHECKABLE` and contributes exit 1. The compatibility `verdict` remains the verdict over proven findings, avoiding an incompatible expansion of the existing `Verdict` enum. Proven `API_BREAK`/`BREAKING` exits 2/4 still win. Uncertainty never uses 2 or 4 because it is not proof of a break. `unresolved_contract=warn` may be offered as an explicit permissive override; `unresolved_contract=exports` is an explicit fail-conservative migration mode that promotes unknown exports to `PUBLIC` and reproduces all-export gating.
 
+### 3.2 Evidence-search completeness
+
+`UNKNOWN_UNPROVEN` is legal only when every provider required by the resolved
+contract plan records a terminal, complete search. The evaluator must consume a
+provider ledger rather than infer completeness from an empty result:
+
+```text
+EvidenceSearchRecord := provider + side + requested_scope + searched_scope
+                        + status + completeness + reason_code + input_identity
+
+status       := available | unavailable | failed | unsupported | stale
+completeness := complete | partial | not_started
+```
+
+Examples:
+
+- a parser that successfully searched all requested public headers and found no
+  matching declaration records `available/complete`; the entity may be
+  `UNKNOWN_UNPROVEN`;
+- an unavailable adapter, unsupported object format, timeout, parse failure, or
+  stale input records a non-available status and makes affected entities
+  `UNKNOWN_UNRESOLVED`;
+- partial package/directory traversal and a provider that returned some facts
+  before failing record `partial`, never `complete`;
+- when several providers are required, one complete empty search does not hide
+  another provider's failure; affected entities remain unresolved;
+- contradictory identity joins record both candidates and a stable ambiguity
+  reason instead of selecting one by iteration order.
+
+The resolved plan defines which providers are **required** versus optional.
+Failure of an optional enrichment provider does not make a result unresolved if
+the required domain was searched completely; the report still discloses the
+failure. Required-provider selection, searched scope, and input digests are part
+of the persisted evidence so snapshot replay can reproduce the completeness
+decision.
+
 ## 4. Evidence and precedence
 
 Evidence is evaluated per entity. Stronger positive public evidence wins over private evidence. Contradiction yields `PUBLIC` plus a diagnostic when the public evidence is authoritative; otherwise it yields `UNKNOWN_UNRESOLVED`.
@@ -163,6 +199,32 @@ Under `public_contract` it should:
 
 Exit behavior extends the current scan contract: 0 for advisory-only or completely searched unproven exports, 1 for `NOT_CHECKABLE` contract evidence, 2 for policy-promoted source/API findings, 5 for budget overflow, and 64 for usage errors. Proven ABI breaks from a baseline comparison remain exit 4. An explicit permissive `unresolved_contract=warn` can downgrade the coverage-only exit 1 to a warning.
 
+#### Exit-code composition
+
+The feature does not create a new exit-code scheme. It adds a contract-coverage
+contribution to the existing command result:
+
+- invalid invocation/configuration is rejected before analysis with exit 64;
+- a scan budget overflow short-circuits with the existing exit 5; no completed
+  compatibility result is claimed;
+- for a completed single-target analysis, semantic precedence is
+  `BREAKING/4 > API_BREAK/2 > NOT_CHECKABLE-or-severity-low/1 > pass/0`;
+- under the severity-aware scheme, the existing category mapping remains the
+  source of 1/2/4 and the contract-coverage contribution is combined by the
+  same numeric worst-of rule; report fields distinguish
+  `contract_coverage` from `addition`/`quality_issues`, which may also produce
+  exit 1;
+- in release comparison, existing operational `ERROR` still floors the result
+  at 4, and `--fail-on-removed-library` exit 8 still takes precedence over all
+  per-library 0/1/2/4 results;
+- output serialization/write failures are command failures, not contract
+  classifications; they use the command's existing operational error path and
+  must not emit a successful result with a substituted semantic exit.
+
+Thus 5, 8, and 64 are command-specific short-circuit/aggregation states, not
+severity levels. Tests must cover each legal combination rather than sorting all
+integers globally.
+
 ### 6.2 `scan ARTIFACT --against BASELINE`
 
 This must use the same contract evaluator and comparison core as raw `compare`; `scan` may add source intelligence but must not implement a second surface policy.
@@ -175,6 +237,12 @@ Pipeline:
 4. Annotate every remaining finding with contract relevance.
 5. Gate only `PUBLIC`/`NOT_APPLICABLE`; ledger `PRIVATE`; disclose both unknown classes and set `NOT_CHECKABLE` for unresolved evidence.
 6. Add scan-only source/cross-check findings and aggregate the final verdict/exit.
+
+For the comparison-derived portion, `scan ARTIFACT --against BASELINE` and
+`compare BASELINE ARTIFACT` must produce identical normalized finding identity,
+contract relevance, reason, evidence side, gated bit, and compatibility
+contribution when given equivalent inputs and options. Scan-only findings may be
+additional, but cannot rewrite those shared decisions.
 
 The current unconditional fold of every L0 `func_removed_elf_only` must be removed. The L0 pass still supplies an authoritative **removal fact**, but contract relevance is decided separately.
 
@@ -205,6 +273,13 @@ Comparison must be reproducible from persisted evidence.
 - Do not silently read current files from `source_path` to change the verdict.
 - If an optional live re-probe is retained, its result is enrichment only, must pass strong identity checks (prefer digest over mtime/size), and must be disclosed. Failure leaves required evidence `UNKNOWN_UNRESOLVED`.
 - Older snapshots without contract metadata remain readable; their export-only entities become `UNKNOWN_UNRESOLVED` in `public_contract`, or public in `contract=exports`.
+- A write→read→compare round trip must preserve the evidence-search ledger,
+  provider requirements, declaration/manifest identities, assurance, and every
+  per-finding contract decision.
+- Schema readers branch on an explicit contract-evidence schema version.
+  Unknown future versions fail closed as unsupported evidence; mixed old/new
+  snapshots expose side-specific coverage rather than silently dropping the
+  newer block.
 
 ### 6.5 Mixed snapshot/binary inputs
 
@@ -267,8 +342,12 @@ Add an additive `contract_scope` block to compare JSON/SARIF/JUnit and the scan 
     "counts": {"public": 3, "private": 8, "unknown_unproven": 1,
                "unknown_unresolved": 1, "not_applicable": 2},
     "evidence": [
-      {"side": "old", "kind": "public_header", "status": "available"},
-      {"side": "old", "kind": "guarded_declaration_index", "status": "available"}
+      {"side": "old", "kind": "public_header", "status": "available",
+       "completeness": "complete", "requested_scope": ["include/"],
+       "searched_scope": ["include/"], "reason_code": "search-complete"},
+      {"side": "old", "kind": "guarded_declaration_index",
+       "status": "available", "completeness": "complete",
+       "reason_code": "search-complete"}
     ],
     "unresolved": [
       {"kind": "func_removed_elf_only", "symbol": "helper", "side": "old",
@@ -293,6 +372,16 @@ Compatibility/migration:
 - `--show-filtered` shows both sections, clearly labeled “proven private” and “unresolved”.
 - Text output always prints an assurance warning when partial/unavailable, even when the unresolved list is truncated.
 - Report ordering and reason codes are deterministic.
+- SARIF carries contract relevance/reason/evidence side as result properties;
+  unresolved coverage also emits a deterministic tool-level notification.
+- JUnit represents `NOT_CHECKABLE` as a skipped/error-style coverage case
+  according to the existing JUnit contract, never as a passed compatibility
+  testcase; the exact mapping is schema-tested.
+- `aggregate` consumes the report's gate/coverage contribution and preserves
+  the orthogonality defined by ADR-042: unresolved contract evidence contributes
+  coverage exit 1, while compatibility remains the proven verdict.
+- Every renderer is tested from the same canonical result object; display
+  filtering and truncation cannot alter counts, gate state, or exit code.
 
 ## 9. Implementation design
 
@@ -363,6 +452,23 @@ contract:
 policy: strict_abi
 ```
 
+The concrete CLI spelling is `--contract public|exports` plus
+`--unresolved-contract not-checkable|warn|exports`; the config values use
+`not_checkable` because existing YAML keys use underscores. `public_contract`
+is the named composition/preset, not a third contract-mode enum value. Reports
+always record the effective mode, unresolved behavior, severity policy, and the
+source of each value (`default`, profile, config, legacy alias, or explicit
+CLI).
+
+Precedence is: explicit new CLI option > explicit legacy scope flag > profile >
+config > built-in default. Supplying contradictory explicit new/legacy options
+is a usage error (64), not last-option-wins. Config parsing rejects unknown
+values and contradictory shapes. During migration,
+`--scope-public-headers` resolves to `--contract public` and
+`--no-scope-public-headers` to `--contract exports`; help and deprecation text
+must describe the semantic change and the effective configuration is visible in
+text/JSON output. No existing `--policy` or severity option changes meaning.
+
 Migration stages:
 
 1. Ship evaluator/reporting behind explicit `contract.mode: public-v2`; compare old/new decisions in CI telemetry.
@@ -387,6 +493,11 @@ No existing `--policy` value changes meaning.
 - contradictory evidence precedence;
 - ambiguous identity produces unknown, never private;
 - public type reachability and leak guard.
+- provider ledger outcomes: complete-empty, unavailable adapter, unsupported
+  format, parse failure, timeout, stale input, partial traversal, one-of-many
+  provider failure, optional-provider failure, and contradictory identity;
+- for every outcome assert requested/searched scope, status, completeness,
+  stable reason, assurance, relevance, and exit contribution.
 
 **Classifier**
 
@@ -399,6 +510,8 @@ Cross-product of operation (`add/remove/modify/visibility/type`) × old relevanc
 - versioned symbols do not collapse incorrectly;
 - stale/missing source path yields disclosed unknown/no enrichment;
 - collector never assigns gate severity itself.
+- rich+L0 reconciliation retains one logical finding with both provenance
+  records; conservation assertions fail if either detector fact is dropped.
 
 ### 10.2 Integration/CLI tests
 
@@ -425,15 +538,36 @@ Run each with text and JSON, checking verdict, exit, counts, finding identity, l
 19. Python extension surface oracle;
 20. loader/SONAME findings unaffected by contract mode.
 
+For the comparison cases, run equivalent `compare` and `scan --against`
+invocations and compare each shared finding field, not only the top-level
+verdict. Add explicit combinations for contract coverage exit 1 with severity
+1/2/4, scan budget 5, invalid config 64, release operational error 4, and
+removed-library 8. Exercise text, JSON, SARIF, JUnit, markdown/GitHub output,
+and aggregate ingestion from the same canonical fixtures.
+
 ### 10.3 Regression tests
 
 - Rewrite `tests/test_pr494_scan_regressions.py` to assert both invariants:
   1. case97 L0 removal remains present and blocking due to old public evidence;
-  2. a proven-private L0 removal remains present only in the private ledger and does not block.
-- Add a pvxs-derived minimal fixture to the examples corpus.
+  2. deleting/mutating only new-side metadata does not change that result;
+  3. removing old-side proof changes the outcome to the appropriate unknown,
+     rather than continuing to block all L0 removals;
+  4. with rich extraction disabled, L0 alone still blocks from old evidence;
+  5. rich+L0 yields one finding carrying both provenance records;
+  6. reversing the comparison produces an addition governed by new-side
+     evidence;
+  7. a proven-private L0 removal remains present only in the private ledger and
+     does not block.
+- Add a pvxs-derived minimal fixture with authoritative private provenance, not
+  merely an internal-looking symbol name. Run the same bytes with private proof
+  present, absent, contradicted by consumer evidence, and under
+  `contract=exports`; assert exact relevance, reason, ledger, verdict, and exit.
 - Update case182: either provide explicit public/consumer evidence if it is expected to stay blocking, or reclassify it as unresolved under `public_contract`; retain its current result under `contract=exports`.
 - Preserve ADR-024 property and FP-rate suites.
 - Add schema compatibility tests for reports lacking `contract_scope` and snapshots from pre-feature schema versions.
+- Add snapshot round-trip and mixed-version tests: current/current,
+  legacy/current in both directions, unknown future evidence schema, and
+  snapshot/binary with asymmetric old/new coverage.
 
 ### 10.4 Property-based tests
 
@@ -444,7 +578,13 @@ Run each with text and JSON, checking verdict, exit, counts, finding identity, l
 - **Side symmetry:** reversing snapshots maps add/remove rules correctly without reusing the wrong side's evidence.
 - **Idempotence/order independence:** evidence and finding order do not change classification/report order.
 - **Deduplication:** rich+L0 reconciliation preserves one logical break.
+- **Conservation:** reconciliation output references every input detector fact;
+  no fact disappears merely because another detector found the same change.
 - **Anti-hiding:** loader, leak, explicit required-symbol, and consumer-proven findings cannot become private.
+- **Cross-command equivalence:** shared comparison findings from `compare` and
+  `scan --against` are field-for-field equal for equivalent evidence.
+- **Snapshot reproducibility:** serialize/deserialize and evidence-record order
+  permutations do not change contract decisions.
 
 ### 10.5 Real-world and rollout gates
 
@@ -456,6 +596,10 @@ Before flipping the default:
 - require zero unexplained public-break losses;
 - measure unresolved rate separately from false positives;
 - test Linux ELF, Mach-O, PE/COFF, stripped binaries, symbol versions, C and C++;
+- include at least one executable fixture and expected oracle per supported
+  object format: ELF visibility/versioning and stripped fallback, Mach-O export
+  list, PE/COFF `.def`/ordinal or decorated-name identity; unsupported provider
+  paths must assert unresolved coverage rather than being silently skipped;
 - validate JSON schema, SARIF, JUnit, markdown, aggregate, and GitHub Action consumers;
 - document rollback as `contract=exports` / `--no-scope-public-headers`.
 
