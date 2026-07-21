@@ -4,6 +4,25 @@
 
 **Why they differ:** `compare` is the native interface — `0/2/4` by verdict (or `0/1/2/4` severity-aware), with invalid invocations exiting `64` so a usage error is never mistaken for an ABI verdict. `compat` mirrors `abi-compliance-checker` exit codes (0/1/2) so existing ABICC CI scripts work without changes. `scan` and `deps` have their own narrower contracts, documented below.
 
+> **Proposed contract-aware extension (not implemented):**
+> [ADR-049](../development/adr/049-contract-relevance-and-compatibility-configuration.md)
+> reserves an orthogonal contract-coverage contribution for future contract
+> evaluation. Complete coverage of the mode-selected evidence domain contributes
+> `0`; missing, partial, stale, failed, contradictory, or identity-incomplete
+> **required domain evidence** produces `UNKNOWN_UNRESOLVED`,
+> `analysis_status=NOT_CHECKABLE`, and contributes `1` by default. Unrelated
+> provider failures are advisory. The configured `GateDecision` independently
+> contributes `0/1/2/4`: a compatible addition can block, and a breaking finding
+> can be demoted. Only legacy output without a gate block falls back from
+> compatibility verdict to `2`/`4`. Command aggregation folds gate and coverage
+> contributions using its existing rules. Ordinary change suppressions cannot
+> clear provider/domain coverage; the explicit proposed
+> `unresolved_behavior=warn` control is the permissive override. Existing
+> command-specific `5`, `8`, and `64` behavior remains as documented below.
+> Reports will distinguish contract coverage exit `1` from severity or
+> aggregate required-target coverage. Until ADR-049 is implemented, the tables
+> below describe the actual released command behavior.
+
 ## Commands removed in the ADR-043 CLI reset
 
 `appcompat` and `plugin-check` are gone as standalone commands; their scoping

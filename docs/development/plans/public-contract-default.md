@@ -1,723 +1,965 @@
-# Public-contract default: contract-aware compatibility gates
+# Public-contract default: implementation and rollout plan
 
-**Status:** Proposed
-**Scope:** `scan`, `compare`, service API, reports, and compatibility migration
-**Related:** ADR-010 (severity policy), ADR-024 (public-header surface), ADR-028/033 (evidence and coverage), ADR-037/043 (CLI contract), PR #494 / case97
+**Status:** Proposed — specification only; no implementation in this PR
+**Normative decision:** [ADR-049](../adr/049-contract-relevance-and-compatibility-configuration.md)
+**Related:** ADR-010, ADR-013, ADR-015, ADR-024, ADR-028/033, ADR-037/040/043, ADR-042, ADR-048, PR #494 / case97
+**Scope:** `compare`, the comparison portion of `scan --against`, service/API
+adapters, release fan-out, snapshots, reports, configuration, and migration
 
-## 1. Problem
+This document is an implementation plan. ADR-049 owns the durable public
+enums, mode semantics, configuration precedence, snapshot separation, pipeline
+order, and exit contract.
 
-The current default mixes two independent questions:
+## 1. Problem and target behavior
 
-1. **Contract relevance:** is the changed entity part of the ABI/API promised to consumers?
-2. **Severity:** if it is relevant, is the change compatible, risky, an API break, or an ABI break?
+Current policy profiles answer only “how severe is this `ChangeKind`?” They do
+not answer “is this entity part of the contract promised to consumers?” The L0
+reconciliation path currently performs an unscoped symbols-only compare and
+folds `func_removed_elf_only` directly from a breaking bucket. That keeps the
+case97 removal visible, but also blocks a pvxs-style removal even when evidence
+proves the export is outside the declared public contract.
 
-`strict_abi`, `sdk_vendor`, and `plugin_abi` answer only question 2. ADR-024's public-header filter partially answers question 1, but the CLI orchestration can bypass it: `fold_l0_hard_removals()` and `scan --against` perform an unscoped symbols-only comparison and fold every `func_removed_elf_only` back as `BREAKING`.
-
-That protects case97, where a macro-conditioned declaration disappears from the parsed header AST, but it also makes an undocumented private export a release blocker. Libraries such as pvxs intentionally export implementation symbols; removing one must not fail a public-contract gate unless some evidence says consumers were promised it.
-
-The new default must therefore preserve artifact facts without equating every exported symbol with the public contract.
-
-## 2. Proposed default
-
-`public_contract` is a user-facing preset composed from two orthogonal settings:
-
-```text
-public_contract := contract = public
-                   policy   = strict_abi
-                   unresolved_contract = not_checkable
-```
-
-- `contract=public` decides which findings participate in the compatibility gate.
-- `policy=strict_abi` classifies the severity of participating findings.
-- `unresolved_contract=not_checkable` distinguishes a complete search with no proof from missing/failed evidence; the latter exits 1 rather than silently treating all exports as public or returning a false-green compatibility result.
-
-This is **not** another `policy_kind_sets()` profile. A `ChangeKind` such as `func_removed_elf_only` can be blocking, audited as private, or unresolved depending on evidence for that particular symbol.
-
-For forensic/all-export analysis, users can select:
+The implementation must preserve this flow:
 
 ```text
-contract = exports
+detected fact
+→ normalized identity
+→ contract relevance
+→ compatibility policy
+→ explicit change suppression
+→ gate severity
+→ command exit
 ```
 
-This preserves the current conservative behavior: every exported symbol is considered contract-relevant. The existing `--no-scope-public-headers` option remains as a compatibility alias for `contract=exports`; `--scope-public-headers` maps to `contract=public`.
+A detector fact never disappears and its `ChangeKind` is never rewritten merely
+to obtain a desired gate result.
 
-## 3. Core model
+### Acceptance outcomes
 
-Every finding receives a contract classification before severity is aggregated:
+- case97: old-side macro-conditioned public declaration removal remains a real,
+  blocking break when guarded/configuration-complete evidence proves it public;
+  incomplete macro coverage is `UNKNOWN_UNRESOLVED`, never a green absence.
+- pvxs: a removal with authoritative out-of-contract provenance is retained in
+  an audit ledger and does not block in `contract=public`.
+- bare export with no complete declared contract evidence is
+  `UNKNOWN_UNRESOLVED`/`NOT_CHECKABLE`, not silently public or private.
+- complete closed-domain search with no commitment is `UNKNOWN_UNPROVEN` and
+  contributes exit 0 while remaining visible.
+- all comparison-derived findings are field-for-field equal between
+  `compare OLD NEW` and `scan NEW --against OLD` for equivalent inputs and
+  effective configuration.
 
-```text
-ContractRelevance := PUBLIC | PRIVATE | UNKNOWN_UNPROVEN |
-                     UNKNOWN_UNRESOLVED | NOT_APPLICABLE
-```
+## 2. Public vocabulary
 
-| Value | Meaning | Default gate behavior |
+### 2.1 Contract modes
+
+Implement exactly three modes:
+
+| Mode | Contract roots and closure | Primary use |
 |---|---|---|
-| `PUBLIC` | Positive evidence ties the entity to the supported consumer contract. | Apply the selected severity policy; may fail. |
-| `PRIVATE` | Positive evidence proves the entity is implementation-only, and no stronger public evidence contradicts it. | Do not gate; retain in the audit ledger. |
-| `UNKNOWN_UNPROVEN` | The configured evidence search completed, but found neither public nor private proof for the entity. | Do not gate; retain in an unresolved ledger. Exit contribution is 0. |
-| `UNKNOWN_UNRESOLVED` | Required evidence is missing, stale, failed, contradictory, or the entity cannot be identified reliably. | Analysis state is `NOT_CHECKABLE`; retain in the unresolved ledger and contribute exit 1 unless a proven break already contributes 2/4. |
-| `NOT_APPLICABLE` | The finding is not entity-surface scoped, e.g. SONAME, `DT_NEEDED`, architecture, loader, security, or an always-public leak finding. | Keep in the normal gate and apply policy. |
+| `public` | Selected declared-public providers/overlays supply roots; evaluate their closure from the raw type graph. Only capabilities required to close that domain are required. | Normal library/API gate. |
+| `exports` | Export extraction supplies every function/variable root; evaluate their ABI closure from the raw type graph. Other surface providers are unrelated and advisory. | Binary-only/distro or projects declaring exports as contract. |
+| `all` | The normalized detector-fact set is the domain: every finding is gate-eligible and no surface evidence is required. | Forensics, detector debugging, legacy unscoped behavior. |
 
-`PRIVATE` and both unknown states are intentionally different. “Not found in a successfully parsed public contract” is absence of proof (`UNKNOWN_UNPROVEN`), not proof of privacy. Failure to parse or obtain the required contract is `UNKNOWN_UNRESOLVED`, not a greener form of the same result.
-
-### 3.1 Contract assurance
-
-The compatibility verdict and the completeness of contract resolution are separate outputs:
+Legacy aliases have asymmetric guarantees:
 
 ```text
-contract_assurance := complete | partial | unavailable
+--no-scope-public-headers  → --contract all     # exact alias
+--scope-public-headers     → --contract public  # stricter migration alias
 ```
 
-- `complete`: every surface-scoped finding was classified `PUBLIC`, `PRIVATE`, or `UNKNOWN_UNPROVEN` after a complete evidence search.
-- `partial`: at least one finding is `UNKNOWN_UNRESOLVED`, but enough evidence exists to classify other findings.
-- `unavailable`: no usable public-contract evidence exists for the side required by the operation.
+The positive legacy flag did not enforce the new fail-closed completeness
+contract, so its mapping is intentionally stricter. Do not map
+`--no-scope-public-headers` to `exports`: the old unscoped behavior also gates
+findings with no exported root, such as a debug/header-only private type layout
+change.
 
-A complete result may be `NO_CHANGE`/exit 0 while disclosing `UNKNOWN_UNPROVEN` exports: the tool searched the declared contract successfully and found no proof that they were promised. Reports must say **“no proven public-contract break; N unproven exports retained for audit”**, not silently call them private.
-
-`partial`/`unavailable` sets an orthogonal top-level `analysis_status=NOT_CHECKABLE` and contributes exit 1. The compatibility `verdict` remains the verdict over proven findings, avoiding an incompatible expansion of the existing `Verdict` enum. Proven `API_BREAK`/`BREAKING` exits 2/4 still win. Uncertainty never uses 2 or 4 because it is not proof of a break. `unresolved_contract=warn` may be offered as an explicit permissive override; `unresolved_contract=exports` is only a fail-conservative **unknown-evidence fallback** that promotes unknown exports to `PUBLIC`. It does not reclassify proven-private exports. Full backward-compatible all-export gating, including proven-private exports, is reserved for `contract=exports`.
-
-### 3.2 Evidence-search completeness
-
-`UNKNOWN_UNPROVEN` is legal only when every provider required by the resolved
-contract plan records a terminal, complete search. The evaluator must consume a
-provider ledger rather than infer completeness from an empty result:
+### 2.2 Contract relevance
 
 ```text
-EvidenceSearchRecord := id + provider + side + requirement + entity_scope
-                        + requested_scope + searched_scope + status
-                        + completeness + reason_code + input_identity
-
-requirement  := required | optional
-entity_scope := all | stable entity identities affected by this search
-status       := available | unavailable | failed | unsupported | stale
-completeness := complete | partial | not_started
+IN_CONTRACT
+PROVEN_OUT_OF_CONTRACT
+UNKNOWN_UNPROVEN
+UNKNOWN_UNRESOLVED
+NOT_APPLICABLE
 ```
 
-Examples:
+The machine value is `PROVEN_OUT_OF_CONTRACT`, not `PRIVATE`. UI text may say
+“private under the declared contract,” but the tool does not claim that an
+unknown consumer cannot use an accidental export.
 
-- a parser that successfully searched all requested public headers and found no
-  matching declaration records `available/complete`; the entity may be
-  `UNKNOWN_UNPROVEN`;
-- an unavailable adapter, unsupported object format, timeout, parse failure, or
-  stale input records a non-available status and makes affected entities
-  `UNKNOWN_UNRESOLVED`;
-- partial package/directory traversal and a provider that returned some facts
-  before failing record `partial`, never `complete`;
-- when several providers are required, one complete empty search does not hide
-  another provider's failure; affected entities remain unresolved;
-- contradictory identity joins record both candidates and a stable ambiguity
-  reason instead of selecting one by iteration order.
+### 2.3 No new profile axis
 
-The resolved plan defines which providers are **required** versus optional.
-Failure of an optional enrichment provider does not make a result unresolved if
-the required domain was searched completely; the report still discloses the
-failure. Required-provider failures affect only findings intersecting the
-record's persisted `entity_scope`; an unrelated failed provider cannot poison a
-completed search for another entity. Each record persists its resolved
-`requirement` and entity scope, plus searched scope and input digests, so
-snapshot replay never has to reconstruct requiredness or applicability from
-current configuration or implementation defaults and can reproduce the
-completeness decision.
+There is no persistent `public_contract` profile or preset. The intended
+effective default is simply:
 
-## 4. Evidence and precedence
+```text
+contract.mode       = public
+policy.base         = strict_abi
+contract.unresolved = not_checkable
+```
 
-Evidence is evaluated per entity. Stronger positive public evidence wins over private evidence. Contradiction yields `PUBLIC` plus a diagnostic when the public evidence is authoritative; otherwise it yields `UNKNOWN_UNRESOLVED`.
+If rollout temporarily exposes a one-token alias, it is a transparent,
+time-limited recipe that expands into those values and is reported field by
+field. It never serializes as a contract mode or policy name.
 
-### 4.1 Positive public evidence
+Use **run profile** for the existing execution bundles (`ci-gate`,
+`release-cut`, `quick`). Documentation should call the current `--profile` a
+run profile. A later CLI cleanup may add `--run-profile` and retain
+`--profile` as a deprecated alias; implementation of that rename is not a
+prerequisite for the contract evaluator.
 
-From strongest to weaker:
+User-facing recipes are documented compositions, for example
+`public-library`, `exported-library`, `source-sdk`, `stable-plugin`,
+`co-built-plugin`, `ffi-boundary`, and `forensic`. Reports expand recipes into
+effective fields and provenance; recipe names are never hidden semantics.
 
-1. **Explicit consumer/contract input**
-   - `--required-symbol`, required-symbol file;
-   - an exact entry in an explicitly supplied ABI/export manifest;
-   - a `--used-by` consumer that imports or resolves the symbol;
-   - package contract metadata such as an exact Debian symbols entry.
-2. **Side-authoritative public declaration**
-   - old-side declarations are positive evidence for removals and existing
-     compatibility obligations;
-   - new-side declarations are positive evidence for additions and new public
-     commitments, including `PRIVATE`/`UNKNOWN_UNPROVEN`→`PUBLIC` transitions;
-   - declaration physically originating in an explicitly supplied public header;
-   - declaration found in a public header's guarded/token declaration index even when the active header AST omitted it because of a consumer-controlled macro;
-   - an exported function/variable reachable through the applicable side's public declaration graph.
-3. **Public type closure**
-   - records, enums, typedefs, fields, bases, template arguments, vtables, and ABI artifacts transitively reachable from a public symbol/type;
-   - private-header types leaked through public signatures remain public-contract findings; leak diagnostics are never filtered.
-4. **Deliberate exact export commitment**
-   - exact names in a version script/export map/`.def` file when that file is supplied or discovered as the project's contract input;
-   - wildcard exports alone are not enough: they prove linkage policy, not intentional commitment to every matching name.
-5. **Consumer-proven runtime evidence**
-   - import table, relocation, symbol-version requirement, or recorded `dlsym`/plugin entrypoint evidence tied to a concrete consumer.
+## 3. Effective configuration
 
-### 4.2 Positive private evidence
+### 3.1 One typed object
 
-A finding may be `PRIVATE` only when all applicable identities are resolved and at least one positive private proof exists:
+Add a leaf-layer immutable object (exact module name may vary):
 
-- declaration origin is `PRIVATE_HEADER` or `SYSTEM_HEADER`, is not reachable from the public closure, and has no public/consumer/manifest evidence;
-- symbol is marked local/private by an authoritative project contract manifest;
-- a framework-specific surface oracle proves the native entity is implementation detail (for example, the existing CPython extension surface rule);
-- an exact public allowlist/POST manifest excludes a concrete export and is explicitly authoritative for that library.
+```python
+@dataclass(frozen=True)
+class CompatibilityEvaluationConfig:
+    contract: ContractConfig          # mode, unresolved behavior, overlays
+    evidence: EvidenceConfig          # providers, requirements, variants
+    surface: SurfaceConfig            # explicit scope and surface hints
+    assurance: AssuranceConfig        # evidence/coverage requirements
+    policy: CompatibilityPolicyConfig # immutable base/packs/overrides
+    gate: GateConfig                  # exit scheme, preset/packs/severity overrides
+    suppressions: SuppressionConfig   # immutable rules and digest
+    provenance: Mapping[str, ValueProvenance]
+```
 
-Naming conventions (`_internal`, `detail::`), missing documentation, or absence from the active header AST are hints only and cannot produce `PRIVATE` without another authoritative fact.
+Resolve it once at the Tier-2 service boundary. The same object goes to:
 
-### 4.3 Unknown causes
+- direct `compare`;
+- the baseline-comparison portion of `scan --against`;
+- service/Python API;
+- release/directory/package fan-out;
+- MCP and other adapters.
 
-`UNKNOWN_UNPROVEN` means the declared evidence domain was searched successfully but did not commit the entity. Examples: an export absent from a successfully parsed public-header/manifest surface, or matched only by a wildcard export rule.
+`scan` need not copy every compare flag. It does need a small shared
+compatibility-options family and/or one shared config input that can represent
+all semantic fields. Front ends normalize into the same typed object instead of
+reimplementing defaults.
 
-`UNKNOWN_UNRESOLVED` means the search itself was not authoritative. Examples:
+### 3.2 Field-level precedence and provenance
 
-- no headers, manifest, or consumer evidence was supplied/discovered;
-- public headers were requested but the parser/backend failed;
-- mangled/demangled identity cannot be joined reliably;
-- the old snapshot lacks old-side contract evidence required for a removal;
-- contradictory public/private declarations cannot be resolved;
-- a source path needed for an explicitly required enrichment probe is missing or stale;
-- one side resolves but the side required for the operation does not.
-
-Each unknown row must include a stable reason code, resolution class, evidence examined, side, and symbol/type identity.
-
-## 5. Side-aware rules
-
-Contract membership is temporal. The relevant side depends on the operation:
-
-| Finding shape | Authority rule |
-|---|---|
-| Removal | Old-side evidence is authoritative. A symbol public in v1 remains a contract removal even if absent from v2 headers. |
-| Addition | New-side evidence is authoritative. A new public entity is a public compatible/addition finding. |
-| Modification | The old side is authoritative for an existing obligation. An old-public entity remains gated even if new evidence says private/unknown. A `PRIVATE`/`UNKNOWN_UNPROVEN`→`PUBLIC` transition is modeled as a new public commitment/addition rather than retroactively making its prior modification breaking. If old-side authority is `UNKNOWN_UNRESOLVED`, retain the modification as unresolved/`NOT_CHECKABLE`; a separate new-side addition may be reported, but cannot clear the old-side coverage failure. |
-| Visibility/version removal | Old-side public/consumer evidence gates. |
-| Type/layout change | For an existing type, old-side reachability is authoritative. New-side public reachability creates a new commitment/addition; it does not retroactively turn an old-private layout modification into a break. |
-| Private on both sides | `PRIVATE` when both applicable identities are confidently private. |
-| Private on one side, unknown on the other | Use the operation's authoritative side. If that side is incomplete, `UNKNOWN_UNRESOLVED`; do not let evidence from the non-authoritative side manufacture confidence. |
-
-Public evidence always wins: an entity declared in a private header but imported by a real consumer is `PUBLIC` for that consumer-scoped check.
-
-## 6. Behavior by command
-
-### 6.1 `scan ARTIFACT` without `--against`
-
-This is a one-build audit, not a compatibility comparison. It cannot report that an ABI was removed because there is no old side.
-
-Under `public_contract` it should:
-
-- build and report the candidate's public-contract evidence index;
-- run existing pattern, preprocessor, cross-source, leak, accidental-export, and quality checks;
-- apply contract relevance only to findings whose meaning is surface-dependent;
-- keep loader/security/build-integrity findings in the normal gate (`NOT_APPLICABLE`);
-- report exported-but-uncommitted symbols as audit findings, not ABI breaks;
-- report unresolved contract coverage explicitly;
-- never synthesize `func_removed*` from a single artifact.
-
-Exit behavior extends the current scan contract: 0 for advisory-only or completely searched unproven exports, 1 for `NOT_CHECKABLE` contract evidence, 2 for policy-promoted source/API findings, 5 for budget overflow, and 64 for usage errors. Proven ABI breaks from a baseline comparison remain exit 4. An explicit permissive `unresolved_contract=warn` can downgrade the coverage-only exit 1 to a warning.
-
-#### Exit-code composition
-
-The feature does not create a new exit-code scheme. It adds a contract-coverage
-contribution to the existing command result:
-
-- invalid invocation/configuration is rejected before analysis with exit 64;
-- a scan budget overflow short-circuits with the existing exit 5; no completed
-  compatibility result is claimed;
-- for a completed single-target analysis, semantic precedence is
-  `BREAKING/4 > API_BREAK/2 > NOT_CHECKABLE-or-severity-low/1 > pass/0`;
-- under the severity-aware scheme, the existing category mapping remains the
-  source of 1/2/4 and the contract-coverage contribution is combined by the
-  same numeric worst-of rule; report fields distinguish
-  `contract_coverage` from `addition`/`quality_issues`, which may also produce
-  exit 1;
-- release comparison preserves both existing schemes: in legacy mode an
-  operational `ERROR` exits 4 and a nonzero verdict exit 2/4 wins before the
-  removed-library check, so exit 8 is used only when the legacy verdict would
-  pass; in severity-aware mode `--fail-on-removed-library` exit 8 takes
-  precedence over the aggregated severity 0/1/2/4 (and over the operational
-  floor), while an operational `ERROR` without a removed-library exit still
-  floors the result at 4;
-- output serialization/write failures are command failures, not contract
-  classifications; they use the command's existing operational error path and
-  must not emit a successful result with a substituted semantic exit.
-
-Thus 5, 8, and 64 are command-specific short-circuit/aggregation states, not
-severity levels. Tests must cover each legal combination rather than sorting all
-integers globally.
-
-### 6.2 `scan ARTIFACT --against BASELINE`
-
-This must use the same contract evaluator and comparison core as raw `compare`; `scan` may add source intelligence but must not implement a second surface policy.
-
-Pipeline:
-
-1. Resolve old and new snapshots with side-specific evidence.
-2. Run all detectors, including a symbols-only L0 pass when richer extraction can omit exports.
-3. Deduplicate L0 and rich findings by stable entity/change identity.
-4. Annotate every remaining finding with contract relevance.
-5. Gate only `PUBLIC`/`NOT_APPLICABLE`; ledger `PRIVATE`; disclose both unknown classes and set `NOT_CHECKABLE` for unresolved evidence.
-6. Add scan-only source/cross-check findings and aggregate the final verdict/exit.
-
-For the comparison-derived portion, `scan ARTIFACT --against BASELINE` and
-`compare BASELINE ARTIFACT` must produce identical normalized finding identity,
-contract relevance, reason, evidence side, gated bit, and compatibility
-contribution when given equivalent inputs and options. Scan-only findings may be
-additional, but cannot rewrite those shared decisions.
-
-The current unconditional fold of every L0 `func_removed_elf_only` must be removed. The L0 pass still supplies an authoritative **removal fact**, but contract relevance is decided separately.
-
-#### By effective scan depth
-
-| Depth/mode | Expected behavior |
-|---|---|
-| `binary` / symbols-only | Explicit manifests, exact export contracts, package metadata, and consumer imports can prove public membership. A bare export removal is `UNKNOWN_UNPROVEN` only if the configured contract domain was completely searched; with no contract source it is `UNKNOWN_UNRESOLVED`/exit 1. `contract=exports` gates it. |
-| DWARF/debug-aware | Declaration location and type reachability may prove public/private. Missing or ambiguous provenance stays unknown. |
-| Header/source | Public-header origin, guarded declaration index, preprocessor/build context, and source graph enrich classification. This is the preferred `public_contract` mode. |
-| Full/graph | Same gate semantics; more evidence may move an unknown to `PUBLIC` or `PRIVATE`, never change policy meaning. |
-| Budget overflow | Exit 5; never silently fall back to a shallower all-export or public-only conclusion. |
-
-### 6.3 `compare OLD NEW` on binaries
-
-- Resolve side-specific evidence exactly as today.
-- Run the L0 export delta even when headers are present, but send its findings through contract classification.
-- If headers prove an old removed symbol public, gate it.
-- If provenance proves it private, audit it.
-- If only the export fact exists, mark it unresolved under `public_contract`.
-- `contract=exports` gates all exported removals and reproduces forensic behavior.
-
-### 6.4 `compare OLD.json NEW.json` on snapshots
-
-Comparison must be reproducible from persisted evidence.
-
-- Use public/private provenance, declaration indexes, manifests, and evidence coverage embedded in snapshots.
-- Do not silently read current files from `source_path` to change the verdict.
-- If an optional live re-probe is retained, its result is enrichment only, must
-  pass strong identity checks (prefer digest over mtime/size), and must be
-  disclosed. Its failure does not alter a classification reproduced from
-  complete persisted evidence. Only when the resolved plan marks the re-probe
-  required because persisted evidence is incomplete does failure leave affected
-  evidence `UNKNOWN_UNRESOLVED`.
-- Older snapshots without contract metadata remain readable; their export-only entities become `UNKNOWN_UNRESOLVED` in `public_contract`, or public in `contract=exports`.
-- A write→read→compare round trip must preserve the evidence-search ledger,
-  provider requirements, declaration/manifest identities, assurance, and every
-  per-finding contract decision.
-- Schema readers branch on an explicit contract-evidence schema version.
-  Unknown future versions fail closed as unsupported evidence; mixed old/new
-  snapshots expose side-specific coverage rather than silently dropping the
-  newer block.
-
-### 6.5 Mixed snapshot/binary inputs
-
-Use persisted evidence for the snapshot side and freshly resolved evidence for the binary side. Side asymmetry must be shown in coverage. For a removal, lack of old-side evidence cannot be repaired merely by new-side headers.
-
-### 6.6 Directory/package/release compare
-
-Apply contract resolution per library before release aggregation. Aggregate three independent axes:
-
-- worst gated compatibility verdict;
-- contract coverage (`complete`/`partial`/`unavailable` per required library);
-- operational availability.
-
-A removed whole library remains a release-level contract event under the existing `--fail-on-removed-library` rules; it must not be hidden because entity-level evidence is unavailable.
-
-### 6.7 Consumer- and manifest-scoped compare
-
-Explicit scope is stronger than inferred public headers:
-
-- `--used-by`: imported/required entities are `PUBLIC`; unrelated findings are out of that consumer's gate but remain auditable.
-- `--required-symbol`: named entrypoints are `PUBLIC`, including missing-contract synthetic findings.
-- `--post-manifest`: the committed set is authoritative for concrete exports; type, loader, and leak findings remain conservative as today.
-- Do not apply `public_contract` a second time in a way that can remove a finding already proven relevant by explicit scope.
-
-## 7. Required scenario matrix
-
-| Scenario | `public_contract` | `contract=exports` | Why |
-|---|---|---|---|
-| Public header function removed | Gate `BREAKING` | Gate `BREAKING` | Old public declaration. |
-| Macro-gated public declaration removed (case97) | Gate `BREAKING` | Gate `BREAKING` | Old guarded public declaration index recovers evidence even if active AST omits it. |
-| Private-header exported helper removed (pvxs shape) | Audit as `PRIVATE`; exit unaffected | Gate `BREAKING` | Positive private provenance, no public/consumer evidence. |
-| Export absent from a successfully searched public contract | `UNKNOWN_UNPROVEN`; audit, exit 0 | Gate `BREAKING` | Complete search found no promise, but absence is still not proof of privacy. |
-| Export removed with no usable contract source/provenance | `UNKNOWN_UNRESOLVED`; `NOT_CHECKABLE`/exit 1 | Gate `BREAKING` | The contract could not be checked. |
-| Undocumented export imported by `--used-by` consumer | Gate `BREAKING` | Gate `BREAKING` | Consumer proof wins. |
-| Exact version-script symbol removed | Gate `BREAKING` | Gate `BREAKING` | Deliberate exact contract entry. |
-| Symbol matched only by `global: *` removed | `UNKNOWN_UNPROVEN` unless other evidence | Gate `BREAKING` | Wildcard does not prove intentional commitment. |
-| Private type layout changes, unreachable from public API | Audit as `PRIVATE` | Gate per strict policy | Proven implementation detail. |
-| Private-header type appears in public signature | Gate leak/layout finding | Gate | Public reachability wins; anti-hiding. |
-| Public type private field changes layout | Gate `BREAKING` | Gate | Layout is consumer-observable. |
-| Public symbol becomes private/hidden | Gate as removal/visibility break | Gate | Old side defines the promise. |
-| Private symbol becomes public | Public compatible/addition finding | Same | New side defines the added promise. |
-| No headers/evidence on either side | `UNKNOWN_UNRESOLVED`, assurance `unavailable`, `NOT_CHECKABLE`/exit 1 | Gate all exports | No silent fallback or false-green compatibility claim. |
-| Header backend failure | `UNKNOWN_UNRESOLVED`, assurance `partial/unavailable`, exit 1 unless a proven 2/4 exists | Gate all exports | Failure is disclosed, not converted to all-export public evidence. |
-| SONAME/NEEDED/architecture break | Gate | Gate | Not entity-surface scoped. |
-| Explicit required symbol missing | Gate | Gate | Explicit contract always wins. |
-| Python extension internal C++ churn with Python surface oracle | Audit as private | Gate in forensic mode | Existing framework-specific contract proof. |
-
-## 8. Reporting and schema
-
-Add an additive `contract_scope` metadata block and a canonical sibling
-`unresolved_contract_changes` ledger to compare JSON/SARIF/JUnit and the scan
-report:
+Each field is resolved independently. A manifest is selected by a layer; it is
+not itself a precedence layer. Store enough provenance for exact replay:
 
 ```json
 {
-  "contract_scope": {
-    "mode": "public",
-    "preset": "public_contract",
-    "mode_source": "preset",
-    "policy": "strict_abi",
-    "policy_source": "preset",
-    "assurance": "partial",
-    "analysis_status": "NOT_CHECKABLE",
-    "unresolved_behavior": "not_checkable",
-    "unresolved_behavior_source": "preset",
-    "counts": {"public": 3, "private": 8, "unknown_unproven": 1,
-               "unknown_unresolved": 1, "not_applicable": 2},
-    "evidence": [
-      {"id": "old-public-headers", "side": "old",
-       "provider": "public_header", "requirement": "required",
-       "entity_scope": "all", "status": "available",
-       "completeness": "complete", "requested_scope": ["include/"],
-       "searched_scope": ["include/"], "reason_code": "search-complete",
-       "input_identity": {"uri": "include/", "sha256": "<digest>"}},
-      {"id": "old-guarded-index", "side": "old",
-       "provider": "guarded_declaration_index", "requirement": "optional",
-       "entity_scope": "all", "status": "available",
-       "completeness": "complete", "requested_scope": ["include/"],
-       "searched_scope": ["include/"], "reason_code": "search-complete",
-       "input_identity": {"uri": "snapshot://old/guarded-index",
-                          "sha256": "<digest>"}},
-      {"id": "old-contract-manifest", "side": "old",
-       "provider": "contract_manifest", "requirement": "required",
-       "entity_scope": ["symbol:legacy_helper"], "status": "failed",
-       "completeness": "partial", "requested_scope": ["abi-contract.json"],
-       "searched_scope": [], "reason_code": "manifest-parse-failed",
-       "input_identity": {"uri": "abi-contract.json", "sha256": "<digest>"}}
-    ]
-  },
-  "unresolved_contract_changes": [
-    {"kind": "func_removed_elf_only", "symbol": "helper", "side": "old",
-     "contract_relevance": "UNKNOWN_UNPROVEN",
-     "contract_reason": "unknown-unproven-export-only",
-     "resolution_class": "complete-no-commitment",
-     "contract_evidence": ["old-public-headers", "old-guarded-index"],
-     "gated": false},
-    {"kind": "func_removed_elf_only", "symbol": "legacy_helper",
-     "side": "old", "contract_relevance": "UNKNOWN_UNRESOLVED",
-     "contract_reason": "required-manifest-parse-failed",
-     "resolution_class": "required-evidence-failed",
-     "contract_evidence": ["old-contract-manifest"], "gated": false}
+  "layer": "explicit_cli",
+  "source_kind": "policy_manifest",
+  "reference": "security",
+  "path": "/project/abi-policy.yml",
+  "sha256": "...",
+  "field_location": "gate.packs[0]",
+  "selected_by": [
+    {"layer": "explicit_cli", "option": "--policy-file", "argument_index": 4}
   ]
 }
 ```
 
-Per-finding machine fields:
-
-- `contract_relevance`;
-- `contract_reason` (stable code);
-- `contract_evidence` (ordered references to evidence records preserving source,
-  side, input identity, and confidence/completeness);
-- `gated` boolean.
-
-Compatibility/migration:
-
-- Existing `surface_scope` remains during transition and can be derived from the new block for header-only consumers.
-- Existing `out_of_surface_changes` holds proven-private findings.
-- `unresolved_contract_changes` is the single canonical machine ledger for both
-  unknown classes; `contract_scope.counts` summarizes it. Do not introduce a
-  second `contract_scope.unresolved` alias, and never mix unknowns into the
-  private ledger.
-- `--show-filtered` shows both sections, clearly labeled “proven private” and “unresolved”.
-- Text output always prints an assurance warning when partial/unavailable, even when the unresolved list is truncated.
-- Report ordering and reason codes are deterministic.
-- SARIF carries contract relevance/reason/evidence side as result properties;
-  unresolved coverage also emits a deterministic tool-level notification.
-- JUnit represents `NOT_CHECKABLE` as a skipped/error-style coverage case
-  according to the existing JUnit contract, never as a passed compatibility
-  testcase; the exact mapping is schema-tested.
-- `aggregate` consumes the report's gate/coverage contribution and preserves
-  the orthogonality defined by ADR-042: only `UNKNOWN_UNRESOLVED` findings and
-  their partial/unavailable evidence contribute coverage exit 1;
-  `UNKNOWN_UNPROVEN` after a complete search contributes exit 0. Compatibility
-  remains the verdict over proven findings.
-- Every renderer is tested from the same canonical result object; display
-  filtering and truncation cannot alter counts, gate state, or exit code.
-
-## 9. Implementation design
-
-### 9.1 Shared contract evaluator
-
-Introduce a leaf module such as `abicheck/contract_surface.py` containing:
-
-- `ContractMode`, `ContractRelevance`, `ContractAssurance`, `AnalysisStatus`;
-- side-specific `ContractEvidenceIndex`;
-- `classify_change_contract(change, old_index, new_index, explicit_scope)`;
-- stable evidence/reason records;
-- aggregation helpers.
-
-It should consume facts from `surface.py`, manifests, package metadata, and consumer scoping without importing CLI modules.
-
-### 9.2 Pipeline order
-
-Required order:
+Required selector layers include:
 
 ```text
-resolve evidence
-→ detect rich + L0 facts
-→ normalize/deduplicate facts
-→ explicit consumer/manifest scope
-→ contract relevance classification
-→ private/unresolved ledgers
-→ policy/severity classification
-→ verdict and exit aggregation
-→ render
+explicit_cli
+api_request
+legacy_alias
+run_recipe
+run_profile
+project_config
+built_in_default
 ```
 
-Severity must not decide relevance, and relevance must not rewrite `ChangeKind`.
+Field precedence follows the selector:
 
-### 9.3 Replace L0 hard-removal fold
+```text
+explicit CLI / explicit API request for the field or manifest
+> legacy CLI alias for that field
+> selected run recipe
+> selected run profile (execution fields only)
+> project config, including a manifest selected there
+> built-in default
+```
 
-Refactor `fold_l0_hard_removals()` into an evidence-preserving collector, for example `collect_l0_export_delta()`:
+Thus a manifest selected by CLI `--policy-file` has `explicit_cli` precedence,
+while the same manifest referenced by `.abicheck.yml` has `project_config`
+precedence. `selected_by` records the complete selection chain. Provenance also
+records immutable manifest/pack identity and version, path, digest, and field
+location.
 
-- return normalized removal facts, not pre-gated breaking changes;
-- preserve source identity and evidence coverage;
-- deduplicate against rich `func_removed`/versioned removals;
-- pass every L0 fact through the shared contract evaluator;
-- use the same helper from `cli_compare_helpers.py` and `cli_scan_baseline.py`;
-- never call an unscoped compare and then inject its `breaking` bucket after surface filtering.
+Rules:
 
-PR #494's invariant becomes: **a real L0 removal fact must not disappear**. It no longer implies that every L0 removal must block. Case97 remains blocking because the old public header/guarded declaration supplies contract evidence.
+- conflicting values in the same selector layer are usage error 64;
+- a legacy alias conflicting with an explicit new option is usage error 64;
+- equivalent duplicates are accepted and report the winning selected-by chain;
+- unknown config keys/enum values fail at load time;
+- `.abicheck.yml` does not gain an ad hoc top-level `policy: strict_abi`
+  scalar unless its strict schema is deliberately migrated;
+- `--policy-file` is a selector for a composite manifest and must never
+  disappear from provenance.
 
-### 9.4 Persist enough evidence
+Implement resolution as table-driven per-field code and test the cross-product
+of layers rather than relying on Click callback order.
 
-Snapshots need an additive contract-evidence section containing:
+### 3.3 Configuration namespaces and packs
 
-- resolved public-header identities/digests;
-- declaration provenance;
-- a lightweight guarded declaration index for exported names omitted from the active AST;
-- exact manifest/export-contract entries and their origin;
-- public type-closure identities;
-- evidence coverage/fallback reason codes.
-
-Do not store only the final `PUBLIC/PRIVATE` label: consumers need facts to re-evaluate old snapshots under newer policy while preserving reproducibility.
-
-### 9.5 CLI/config migration
-
-Recommended configuration shape:
+A composite manifest should converge on explicit namespaces:
 
 ```yaml
 contract:
-  mode: public          # public | exports
-  unresolved: not_checkable  # not_checkable | warn | exports
-policy: strict_abi
+  mode: public
+  unresolved: not_checkable
+  packs: [rust_c_ffi]
+
+policy:
+  base: strict_abi
+  packs: [qt_kde_cpp, glibc_symbol_versioned]
+  overrides:
+    soname_bump_recommended: break
+
+gate:
+  preset: default
+  packs: [security_hardening]
+
+surface_hints:
+  internal_namespaces: [detail]
+
+assurance:
+  require_evidence: true
+
+run:
+  profile: ci-gate
 ```
 
-The concrete CLI spelling is `--contract public|exports` plus
-`--unresolved-contract not-checkable|warn|exports`; the config values use
-`not_checkable` because existing YAML keys use underscores. `public_contract`
-is the named composition/preset, not a third contract-mode enum value. Reports
-always record the effective mode, unresolved behavior, severity policy, and the
-source of each value. The machine-value enum is `built_in_default`, `config`,
-`profile`, `preset`, `legacy_alias`, or `explicit_cli`; `preset` is used when
-the `public_contract` composition supplied the value, matching the report
-example above.
+Separate concepts:
 
-Precedence is: explicit new CLI option > explicit legacy scope flag > selected
-preset/profile composition > config > built-in default. Supplying contradictory
-explicit new/legacy options is a usage error (64), not last-option-wins. Config
-parsing rejects unknown values and contradictory shapes. During migration,
-`--scope-public-headers` resolves to `--contract public` and
-`--no-scope-public-headers` to `--contract exports`; help and deprecation text
-must describe the semantic change and the effective configuration is visible in
-text/JSON output. No existing `--policy` or severity option changes meaning.
+- contract/language packs define roots, providers, and ABI closure (for example
+  Rust `extern "C"`/`repr(C)` boundaries);
+- compatibility base policy maps in-contract changes to `Verdict`;
+- rule packs add ecosystem release-governance rules;
+- gate packs affect `GateDecision` and compose with any compatibility policy;
+- surface hints inform provenance/reachability and cannot themselves silently
+  demote a public fact;
+- assurance controls required evidence/unresolved behavior;
+- run profiles control execution depth, format, budget, and workflow.
 
-Migration stages:
+Object-format truths belong in core behavior when evidence exists: Mach-O load
+compatibility, PE/MSVC calling convention semantics, ELF symbol-version node
+removal, and universal native layout/calling rules must not require an optional
+profile. GNOME parallel-install and project-specific SONAME rules remain
+optional rule packs. Security hardening is a gate pack and `NOT_APPLICABLE` to
+entity contract membership.
 
-1. Ship evaluator/reporting behind an internal rollout feature flag and compare
-   old/new decisions in CI telemetry. The flag must not introduce or serialize a
-   third `contract.mode`; effective mode remains `public` or `exports`.
-2. Make `public_contract` available as a preset; retain current default.
-3. Validate real-world false-negative/false-positive corpus, especially case97 and pvxs.
-4. Flip default after release notes and one deprecation cycle.
-5. Keep `contract=exports` and `--no-scope-public-headers` as permanent forensic escape hatches.
+Migration map for current ecosystem files:
 
-No existing `--policy` value changes meaning.
+| Existing file/name | Target |
+|---|---|
+| `qt_kde_cpp` | Optional compatibility/rule pack. |
+| `glibc_symbol_versioned` | Core ELF symbol-version semantics plus optional project governance rules. |
+| `gnome_parallel_install` | Optional release-governance rule pack. |
+| `mach_o_dylib` | Core Mach-O semantics plus optional project governance rules. |
+| `msvc_pe` | Core PE/MSVC semantics plus optional project governance rules. |
+| `rust_c_ffi` | Contract/language pack defining exact C/FFI roots and closure. |
+| `security` | Gate pack composable with every ABI policy. |
 
-## 10. Test strategy
+Canonical compatibility bases:
+
+- `strict_abi` retained;
+- `binary_compat`, with `sdk_vendor` as a compatibility alias;
+- `co_built_plugin_bundle`, with the current `plugin_abi` as a legacy alias.
+
+`stable-plugin` is a recipe using exact entrypoints/consumers plus
+`strict_abi`; independently distributed plugins must not inherit the current
+co-build relaxations from an ambiguous `plugin_abi` label.
+
+Composition:
+
+```text
+explicit per-kind override > selected packs > base policy
+```
+
+Conflicting packs are a usage error until an explicit final override resolves
+the field. File order never resolves conflicts. Unknown `ChangeKind` slugs in
+custom policy are hard errors; replace the current warning-and-skip behavior in
+the implementation phase so a renamed kind cannot silently disable policy.
+
+## 4. Evidence model and completeness
+
+### 4.1 Observed provider ledger
+
+Add policy-independent provider records such as:
+
+```text
+EvidenceSearchRecord :=
+  id + provider + side + entity_class + entity_scope
+  + domain_kind + domain_identity
+  + requested_scope + searched_scope
+  + status + completeness
+  + identity_coverage + configuration_coverage
+  + reason_code + input_identity
+
+status       := available | unavailable | failed | unsupported | stale
+completeness := complete | partial | not_started
+```
+
+A resolved evaluation plan separately says which **capabilities** are required
+for a declared domain. Do not persist “this provider was required under one
+policy” as if it were an observed fact.
+
+Provider failures are scoped to the affected domain/entity class. An unrelated
+failed provider does not poison a completed exact-manifest search for another
+entity. Contradictory identity joins preserve every candidate and a stable
+ambiguity reason; never select by iteration order.
+
+### 4.2 Closed-world rule for `UNKNOWN_UNPROVEN`
+
+`UNKNOWN_UNPROVEN` is legal only if the authoritative side satisfies:
+
+```text
+declared domain is closed and enumerable
+AND every capability required to close that domain completed
+AND requested scope equals searched scope
+AND affected entity identity coverage is complete
+AND every declared compile/generated-header variant completed
+AND no unresolved contradiction remains
+```
+
+Provider-specific contracts:
+
+- exact manifests and exact export maps can be closed enumerable domains;
+- wildcard export rules do not prove an intentional per-symbol commitment;
+- active AST alone does not close a header domain that permits conditional
+  declarations;
+- guarded/token declaration indexing is required when needed to enumerate
+  macro-conditioned declarations (case97);
+- generated headers are complete only after known generation and digest/scope
+  capture;
+- projects with configuration-dependent declarations must declare the variant
+  set and complete every required variant;
+- parse success with missing macro/index/variant coverage is `partial`;
+- ambiguous mangled/demangled/type identity is partial for affected entities.
+
+A provider can be optional only if no capability it supplies is needed to close
+the selected domain. “Optional globally” must not become a loophole that lets
+case97 fall to `UNKNOWN_UNPROVEN`.
+
+### 4.3 Public and out-of-contract proofs
+
+Public evidence, strongest first:
+
+1. explicit required symbol, exact contract/ABI manifest, package symbols
+   metadata, or concrete consumer import/relocation/recorded entrypoint;
+2. side-authoritative declaration physically originating in a declared public
+   header, including guarded declarations omitted from the active AST;
+3. transitive public ABI type closure and leak paths;
+4. exact project export-map/`.def` commitment;
+5. concrete runtime consumer evidence.
+
+`PROVEN_OUT_OF_CONTRACT` requires resolved identity and authoritative positive
+proof, for example private/system-header provenance outside every public
+closure, an exact authoritative exclusion, or a framework-specific oracle. An
+internal-looking name, missing docs, wildcard export, or absence from active AST
+is only a hint. Any authoritative in-contract evidence wins.
+
+### 4.4 Side authority
+
+- removals and modifications of existing obligations: old side;
+- additions/new commitments: new side;
+- public→private visibility: old side remains blocking;
+- out-of-contract/unknown→public: model as a new commitment, not a retroactive
+  old break;
+- unresolved authoritative side cannot be repaired by non-authoritative-side
+  evidence.
+
+## 5. Snapshot and report schemas
+
+### 5.1 Snapshot blocks
+
+Persist observations separately from a decision context:
+
+```yaml
+contract_evidence:
+  schema_version: 1
+  identity_algorithm_version: 1
+  providers:
+    - provider: public_header
+      observed_status: available
+      domain_kind: public_headers
+      requested_scope: [include/]
+      searched_scope: [include/]
+      input_identity: {sha256: "..."}
+      declarations: []
+      manifests: []
+      type_graph:
+        nodes: []
+        edges: []
+      completeness: complete
+
+evaluation_context:
+  schema_version: 1
+  evaluator_version: 1
+  identity_algorithm_version: 1
+  resolved_config:
+    contract: {mode: public, unresolved: not_checkable, overlays: []}
+    evidence:
+      providers:
+        - capability: active_ast
+          required: true
+          implementation: {id: clang_ast, version: 1, sha256: "..."}
+        - capability: guarded_declaration_index
+          required: true
+          implementation: {id: guarded_index, version: 1, sha256: "..."}
+      variants: {items: [], sha256: "..."}
+    surface:
+      explicit_scope: {items: [], sha256: "..."}
+      hints: {internal_namespaces: []}
+    assurance: {require_evidence: true}
+    policy:
+      base: {id: strict_abi, version: 1, sha256: "..."}
+      packs: []
+      overrides: {}
+    gate:
+      exit_code_scheme: severity
+      preset: {id: default, version: 1, sha256: "..."}
+      packs: []
+      severity_overrides: {}
+    suppressions: {rules: [], sha256: "..."}
+  field_provenance:
+    contract.mode:
+      layer: run_recipe
+      reference: public-library
+      selected_by: [{layer: explicit_cli, option: --recipe}]
+    policy.base:
+      layer: run_recipe
+      reference: public-library
+      selected_by: [{layer: explicit_cli, option: --recipe}]
+    gate.exit_code_scheme:
+      layer: project_config
+      reference: .abicheck.yml
+      selected_by: [{layer: project_config, path: .abicheck.yml}]
+
+decision_receipt:
+  evaluated_contract_roots: []
+  evaluated_type_closure: []
+  relevance_by_finding: {}
+```
+
+`contract_evidence` stores raw policy-independent type nodes/edges. The
+mode/root-dependent closure is computed by the evaluator and stored in the
+decision receipt, not as observed evidence. `evaluation_context` must serialize
+the complete immutable resolved `CompatibilityEvaluationConfig`, including all
+contract/evidence/surface/assurance fields, provider requirements and variants,
+explicit scope and hints, policy/gate bases, packs and overrides with identities
+and digests, the resolved gate/exit scheme, suppressions, and field provenance
+with selected-by chains. The
+illustrative provenance map is abbreviated; persisted output has one entry for
+every resolved leaf, and every selected provider/base/preset/pack or rule set
+carries an immutable identity/version/digest.
+
+Behavior:
+
+- original-decision replay uses both blocks and exact versions;
+- re-evaluation uses old observations with a newly resolved context;
+- current required-provider defaults cannot alter the recorded original
+  decision;
+- evaluator and identity/join algorithm versions are explicit because the same
+  raw facts can classify differently under a new matcher;
+- unknown future versions fail closed;
+- legacy snapshots remain readable but become unresolved where old-side facts
+  needed by `public` are absent;
+- no silent live-file re-probe changes a replayed verdict; disclosed enrichment
+  may be allowed only with strong input identity.
+
+The final relevance can be stored as a decision receipt, but observations must
+remain available for new-policy evaluation.
+
+### 5.2 Canonical result/report shape
+
+Add one canonical block used by JSON, text, SARIF, JUnit, Markdown, GitHub, and
+aggregate ingestion. Illustrative shape:
+
+```json
+{
+  "effective_evaluation": {
+    "recipe": "public-library",
+    "contract": {
+      "mode": "public",
+      "mode_source": {"layer": "run_recipe", "reference": "public-library"},
+      "unresolved": "not_checkable",
+      "unresolved_source": {"layer": "run_recipe", "reference": "public-library"},
+      "assurance": "partial"
+    },
+    "policy": {
+      "base": "strict_abi",
+      "base_source": {"layer": "run_recipe", "reference": "public-library"},
+      "packs": []
+    },
+    "gate": {"preset": "default", "packs": []},
+    "run": {"profile": "ci-gate"}
+  },
+  "contract_counts": {
+    "in_contract": 3,
+    "proven_out_of_contract": 8,
+    "unknown_unproven": 1,
+    "unknown_unresolved": 1,
+    "not_applicable": 2
+  },
+  "unresolved_contract_changes": [],
+  "contract_coverage_failures": []
+}
+```
+
+Per finding:
+
+- canonical finding/entity identity;
+- `contract_relevance`;
+- stable `contract_reason`;
+- evidence references with side and input identity;
+- compatibility decision;
+- suppression decision/reference;
+- gate category/contribution.
+
+Keep proven-out-of-contract and unresolved ledgers separate. Provider/domain
+coverage failures are a sibling canonical ledger, not synthetic change rows
+that ordinary suppression can erase. Existing `surface_scope` and
+`out_of_surface_changes` may be derived during a compatibility window, but no
+new `PRIVATE` machine value is emitted.
+
+Display filtering and truncation cannot affect counts, assurance, gate state,
+or exit. SARIF emits deterministic properties and a tool-level coverage
+notification. JUnit represents `NOT_CHECKABLE` according to its coverage/error
+contract, never as a passed compatibility test. Aggregate preserves the three
+orthogonal axes from ADR-042: compatibility, gate, and required coverage.
+
+## 6. Pipeline implementation
+
+### 6.1 Canonical order
+
+```text
+resolve CompatibilityEvaluationConfig
+→ resolve and persist observed evidence
+→ detect rich + L0 facts
+→ normalize/reconcile canonical identity
+→ apply explicit consumer/manifest scope
+→ classify contract relevance
+→ apply compatibility base/packs/overrides
+→ apply explicit change suppressions
+→ compute gate preset/packs/severity
+→ aggregate command exit
+→ render every ledger
+```
+
+### 6.2 Suppression semantics
+
+Ordinary change suppressions can suppress an in-contract finding after
+compatibility policy classification. They remain visible in the ADR-013 audit
+ledger. They may hide a proven-out-of-contract/unresolved row from a selected
+view only if the canonical ledger/counts remain intact.
+
+They cannot:
+
+- alter contract relevance;
+- suppress a provider/domain coverage failure;
+- turn `UNKNOWN_UNRESOLVED` into `UNKNOWN_UNPROVEN`;
+- clear `analysis_status=NOT_CHECKABLE`;
+- make a failed required aggregate target green.
+
+`unresolved_behavior=warn` is the explicit mechanism to accept incomplete
+contract assurance. It changes only the orthogonal contract-coverage
+contribution, not `GateDecision`, evidence, or labels.
+
+### 6.3 L0/rich reconciliation
+
+Replace `fold_l0_hard_removals()` with a collector such as
+`collect_l0_export_delta()`:
+
+- returns normalized facts, never a preclassified breaking bucket;
+- retains L0 detector provenance and coverage;
+- deduplicates rich/L0 changes by canonical entity + change identity;
+- records references to every reconciled input fact;
+- sends the result through contract, policy, suppression, and gate stages;
+- is shared by direct compare and scan baseline compare.
+
+PR #494's invariant becomes: a real L0 removal fact must not disappear. It
+does not mean every L0 removal blocks. Case97 blocks because complete old-side
+public evidence says it is in contract.
+
+### 6.4 Cross-command parity
+
+For equivalent inputs and effective config, compare the baseline-derived result
+from both commands field by field:
+
+```text
+compare OLD NEW
+scan NEW --against OLD
+```
+
+Equal fields include canonical identity, `ChangeKind`, detector provenance,
+contract relevance/reason/evidence side, compatibility decision, suppression,
+and gate contribution. Scan-only source/cross-check findings may be appended;
+they cannot rewrite the shared comparison findings.
+
+## 7. Command behavior and exit composition
+
+### `scan ARTIFACT` without baseline
+
+A one-build audit cannot synthesize removals. It builds the candidate contract
+index, runs quality/security/source checks, audits uncommitted exports, and
+reports coverage. Complete unproven entities contribute coverage 0; unresolved
+required evidence contributes coverage 1. The independent configured gate
+contributes `0/1/2/4` (and may block compatible additions or demote breaks);
+budget overflow is 5 and usage is 64.
+
+### `compare` and `scan --against`
+
+- `public`: its evidence domain is the selected declared-public
+  providers/overlays. Gate-evaluate `IN_CONTRACT` and `NOT_APPLICABLE`; audit
+  `PROVEN_OUT_OF_CONTRACT`; ledger unknowns. Only failures needed to close this
+  domain contribute coverage `1`; unrelated provider failures are advisory.
+- `exports`: its domain is only exported function/variable roots and closure
+  computed from the raw type graph. Export-root/type-graph failures are
+  required; public-header/manifest/consumer and other surface-provider failures
+  are unrelated and advisory.
+- `all`: its domain is all normalized detector facts. Every finding enters
+  compatibility and gate evaluation and no surface evidence is required;
+  surface-provider failures are advisory. Detector-production coverage remains
+  independently enforceable.
+
+### Snapshot/binary and package/release
+
+Use persisted evidence on snapshot sides and fresh evidence on binary sides.
+Report side asymmetry. Resolve contract and coverage per library before release
+aggregation. Whole-library removal continues to use existing
+`--fail-on-removed-library` exit 8 rules; entity evidence does not hide it.
+
+### Exit aggregation
+
+No new global integer ordering is introduced. Preserve ADR-042's orthogonal
+axes:
+
+- the configured `GateDecision` contributes `0/1/2/4`, independent of the
+  compatibility verdict; a compatible addition may block and a breaking
+  finding may be demoted;
+- selected-domain contract coverage contributes `0` or `1` independently;
+- only a legacy result with no gate block derives `2/4` from API/ABI verdict;
+- command aggregation folds gate and coverage contributions using the existing
+  command-specific rules;
+- invalid invocation is 64 before analysis;
+- scan budget overflow short-circuits with 5;
+- release removed-library 8 retains the legacy/severity-aware precedence
+  documented in `docs/reference/exit-codes.md`;
+- output serialization failures use the existing operational path.
+
+Reports identify whether exit 1 comes from contract coverage, gate severity,
+or aggregate required-target coverage.
+
+## 8. Scenario matrix
+
+| Scenario | `public` | `exports` | `all` |
+|---|---|---|---|
+| Public header function removed | `IN_CONTRACT`; evaluate policy/gate | Evaluate if exported/rooted | Evaluate |
+| Macro-conditioned public declaration removed (case97) | `IN_CONTRACT` when guarded/config matrix is complete; otherwise unresolved coverage/1 | Evaluate if exported; header-provider failure advisory | Evaluate; header-provider failure advisory |
+| Proven private-header exported helper removed (pvxs) | Audit `PROVEN_OUT_OF_CONTRACT` | `IN_CONTRACT`; evaluate policy/gate | Evaluate |
+| Export absent from a complete exact declared contract | `UNKNOWN_UNPROVEN`, audit/0 | `IN_CONTRACT`; evaluate policy/gate | Evaluate |
+| Export with no usable public-contract source | `UNKNOWN_UNRESOLVED`, `NOT_CHECKABLE`/1 | Evaluate if export/type evidence complete; unrelated public-provider failure advisory | Evaluate; surface-provider failure advisory |
+| Undocumented export imported by `--used-by` | `IN_CONTRACT`; evaluate policy/gate | `IN_CONTRACT`; evaluate policy/gate | Evaluate |
+| Exact manifest/version-script symbol removed | `IN_CONTRACT`; evaluate policy/gate | Evaluate if exported/rooted | Evaluate |
+| Wildcard-only export rule | Unknown unless other evidence | Evaluate exported root | Evaluate |
+| Private unreachable type layout change | Audit/out of contract | Audit/out of exported closure | Evaluate |
+| Private-header type leaked through public/exported signature | Evaluate public closure | Evaluate exported closure | Evaluate |
+| Public symbol becomes hidden | Evaluate from old side | Evaluate exported old-side root | Evaluate |
+| Private symbol becomes public | New public commitment/addition; gate may block | Export addition; gate may block | Addition; gate may block |
+| Active AST complete, guarded index required but failed | `UNKNOWN_UNRESOLVED`, coverage/1 | Export domain remains checkable; header failure advisory | Evaluate all detector facts; header failure advisory |
+| SONAME/loader/security regression | `NOT_APPLICABLE`, policy/gate applies | Same | Same |
+| Explicit required symbol missing | `IN_CONTRACT`; evaluate policy/gate | Evaluate only when represented by an old exported root | Evaluate |
+
+## 9. Work breakdown
+
+### Phase 0 — terminology and schema contracts
+
+- Accept ADR-049.
+- Reserve `public|exports|all` and relevance enums.
+- Define report/snapshot schema version strategy and stable reason-code
+  registry.
+- Document run-profile vocabulary and aliases.
+
+**Gate:** docs and schemas have no `exports == all`, `PRIVATE`, hidden
+`public_contract` preset, or policy/contract conflation.
+
+### Phase 1 — effective resolver
+
+Likely surfaces:
+
+- a new leaf config module;
+- `cli_options.py` shared compatibility family;
+- `.abicheck.yml` strict schema/reference docs;
+- `policy_file.py` composite namespacing/migration;
+- service/API request models and release fan-out.
+
+Implement field-level provenance, conflicts, aliases, pack conflict detection,
+and hard errors for unknown `ChangeKind` slugs.
+
+**Gate:** every front end resolves equivalent semantic input to an equal
+`CompatibilityEvaluationConfig` and provenance receipt.
+
+### Phase 2 — canonical identity and fact conservation
+
+Build finding identity on ADR-048 principles: most specific available identity,
+ambiguity-safe fallback, deterministic joins. Refactor L0 collection before any
+contract evaluator changes the gate.
+
+**Gate:** rich+L0 conservation and dedup properties; no detector fact loss.
+
+### Phase 3 — shadow contract evaluator
+
+Implement a leaf `contract_surface`/`contract_evaluation` module with no CLI
+imports. Produce relevance, assurance, reasons, and provider ledgers in reports,
+but leave the old gate authoritative.
+
+Measure:
+
+- delta by old/new decision;
+- unresolved rate by provider/domain/platform;
+- proven public-break losses;
+- proven false-positive reductions.
+
+**Gate:** every shadow delta has evidence and stable identity; zero unexplained
+fact loss.
+
+### Phase 4 — snapshot evidence/context split
+
+Persist policy-independent `contract_evidence` and separate
+`evaluation_context`, each versioned; add evaluator and identity algorithm
+versions. Implement original replay, new-policy re-evaluation, legacy and
+unknown-future handling.
+
+**Gate:** byte/order-independent round-trip decisions and explicit mixed-version
+failure behavior.
+
+### Phase 5 — shared authoritative comparison
+
+Route both direct compare and scan baseline compare through the same core and
+same typed config. Add suppression and unsuppressible coverage ledgers in the
+normative stage order.
+
+**Gate:** field-for-field parity tests across binaries, snapshots, mixed inputs,
+policies, packs, suppressions, and explicit scope.
+
+### Phase 6 — opt-in public mode and corpus validation
+
+Expose `--contract public|exports|all`. Preserve
+`--no-scope-public-headers` as the exact alias for `all`; migrate
+`--scope-public-headers` to intentionally stricter `public` semantics. Keep the
+old default while running case97, pvxs, real-world corpus, ELF/Mach-O/PE,
+stripped, versioned, C/C++, snapshot, package, and downstream
+renderer/aggregate lanes.
+
+**Gate:** zero unexplained public-break losses; reviewed FP reductions; measured
+and accepted unresolved rate; all downstream consumers understand new schema.
+
+### Phase 7 — default flip
+
+After release notes and a migration window, set the three independent defaults
+to `public`, `strict_abi`, and `not_checkable`. Keep `contract=all` and
+`--no-scope-public-headers` as the exact forensic rollback. Do not make a
+`public_contract` enum/preset permanent.
+
+## 10. Test plan
 
 ### 10.1 Unit tests
 
-**Evidence index**
+**Resolver**
 
-- exact public/private/system origins;
-- old/new side authority;
-- mangled/demangled aliases and symbol versions;
-- guarded declaration recovery;
-- exact versus wildcard version scripts;
-- contradictory evidence precedence;
-- ambiguous identity produces unknown, never private;
-- public type reachability and leak guard.
-- provider ledger outcomes: complete-empty, unavailable adapter, unsupported
-  format, parse failure, timeout, stale input, partial traversal, one-of-many
-  provider failure, optional-provider failure, and contradictory identity;
-- for every outcome assert persisted `requirement` and `entity_scope`,
-  requested/searched scope, status, completeness, stable reason, assurance,
-  relevance, and exit contribution; prove a required failure affects only its
-  scoped entities, then replay the same ledger under changed current defaults
-  and prove that its classification does not change.
+- every precedence pair and equivalent duplicate;
+- explicit CLI/API, policy file, legacy alias, recipe, run profile, project
+  config, and built-in provenance;
+- field-by-field policy-file interactions;
+- conflicting packs and explicit conflict resolution;
+- unknown `ChangeKind` hard failure;
+- canonical aliases for `sdk_vendor` and `plugin_abi`.
 
-**Classifier**
+**Provider completeness**
 
-Cross-product of operation (`add/remove/modify/visibility/type`) × old relevance × new relevance × explicit consumer evidence. Assert classification, reason, gate bit, assurance, and stable serialization. Include the asymmetric modification case `old=UNKNOWN_UNRESOLVED, new=PUBLIC`: the existing modification remains unresolved/`NOT_CHECKABLE`, even if a separate public addition is emitted.
+- exact complete-empty manifest;
+- active AST with complete guarded index;
+- active AST with guarded index failed/missing;
+- generated header present/missing/stale;
+- complete and incomplete compile-variant matrix;
+- partial traversal, timeout, unsupported provider, stale input;
+- required capability supplied by alternative provider;
+- optional enrichment failure that is not needed to close the domain;
+- identity ambiguity and contradictory evidence;
+- scope-local failure that does not poison unrelated entities.
+
+Assert requested/searched scope, input identity, provider status, closed-domain
+reason, relevance, assurance, and exit contribution.
+
+**Classifier and side authority**
+
+Cross product of add/remove/modify/visibility/type × old/new relevance ×
+explicit consumer/manifest evidence. Include old unresolved/new public
+modification: old obligation remains unresolved while a separate new commitment
+may be emitted.
 
 **L0 normalization**
 
-- L0-only removal survives detection;
-- duplicate rich/L0 removal becomes one finding;
-- versioned symbols do not collapse incorrectly;
-- stale/missing source path yields disclosed unknown/no enrichment;
-- collector never assigns gate severity itself.
-- rich+L0 reconciliation retains one logical finding with both provenance
-  records; conservation assertions fail if either detector fact is dropped.
+- L0-only removal survives;
+- rich+L0 gives one logical finding referencing both facts;
+- symbol versions do not collapse incorrectly;
+- collector never assigns gate severity;
+- ordering is deterministic.
 
-### 10.2 Integration/CLI tests
+**Suppressions**
 
-Run each with text and JSON, checking verdict, exit, counts, finding identity, ledger, assurance, and warning text:
+- public change can be explicitly suppressed and remains in audit trail;
+- suppression cannot alter relevance;
+- suppressing every affected change does not clear provider coverage failure;
+- `unresolved_behavior=warn` changes only gate contribution.
+
+### 10.2 Integration and CLI tests
+
+For text and JSON, assert verdict, exit, canonical identity, evidence side,
+relevance, reason, compatibility decision, suppression, gate, assurance,
+coverage, and provenance for:
 
 1. public function removal;
-2. case97 macro-gated public removal;
-3. pvxs-style private exported removal;
-4. export-only unknown removal;
-5. the same unknown under `unresolved_contract=exports`, proving that unknowns
-   gate while proven-private exports remain audit-only;
-6. the same unknown and a proven-private export under `contract=exports`,
-   proving both gate;
-7. `--used-by` proving an undocumented export public;
-8. `--required-symbol` proving it public;
-9. exact manifest/version-script entry;
-10. wildcard-only export script;
-11. private type churn;
-12. public-reachable private type/leak;
-13. no headers;
-14. old headers missing but new present, and reverse;
-15. a new export declared only in new-side public headers is a public addition;
-16. old-unresolved modification with new public evidence remains
-    `NOT_CHECKABLE`, with any new commitment emitted separately;
-17. parser fallback/mangling failure;
-18. snapshot/snapshot, binary/binary, and mixed inputs;
-19. source/full scan and symbols-only scan;
-20. scan without baseline (no synthetic removals);
-21. directory/package aggregation;
-22. Python extension surface oracle;
-23. loader/SONAME findings unaffected by contract mode.
+2. case97 guarded declaration;
+3. pvxs authoritative out-of-contract export;
+4. complete-domain unknown export;
+5. no-evidence unresolved export;
+6. `--used-by` and required-symbol proof;
+7. exact vs wildcard export manifests;
+8. private unreachable type and public leak closure;
+9. old/new side asymmetry and public→private/new-public transitions;
+10. generated headers and variant matrix failures;
+11. binary, DWARF, header, source/full depth;
+12. binary/binary, snapshot/snapshot, and mixed inputs;
+13. one-build scan (no synthetic removal);
+14. directory/package/release aggregation;
+15. framework oracle and Rust/C FFI contract pack;
+16. loader/SONAME/security `NOT_APPLICABLE` behavior;
+17. policy/rule/gate/contract pack composition and conflicts;
+18. suppressions plus unresolved coverage;
+19. all three contract modes and both legacy aliases;
+20. all output formats and aggregate ingestion.
 
-For the comparison cases, run equivalent `compare` and `scan --against`
-invocations and compare each shared finding field, not only the top-level
-verdict. Add explicit combinations for contract coverage exit 1 with severity
-1/2/4, scan budget 5, invalid config 64, and both release schemes: legacy
-break/API-break plus removed library exits 4/2, legacy pass plus removed library
-exits 8, legacy operational `ERROR` plus removed library exits 4,
-severity-aware removed library wins with exit 8 even alongside an operational
-error, and operational error without a removed-library override floors at 4.
-Exercise text, JSON, SARIF,
-JUnit, markdown/GitHub output, and aggregate ingestion from the same canonical
-fixtures.
+Run equivalent `compare` and `scan --against` invocations and compare every
+shared field, not only top-level verdict.
 
-Add a table-driven CLI/config resolution suite that separately proves:
-
-- explicit `--contract` overrides profile, config, and default while recording
-  source `explicit_cli`; an equivalent legacy scope flag may coexist and still
-  records `explicit_cli`, while an opposite legacy value is a contradiction and
-  fails with exit 64;
-- `--scope-public-headers` resolves to `public` and
-  `--no-scope-public-headers` resolves to `exports`; when no explicit new option
-  is present, each overrides profile, config, and default while recording source
-  `legacy_alias`;
-- profile overrides config/default and config overrides the built-in default,
-  with the effective value and source serialized in every case;
-- selecting the `public_contract` preset resolves mode `public` with source
-  `preset`, and overrides config/default without being serialized as mode
-  `public_contract`;
-- contradictory explicit new/legacy options and contradictory legacy aliases
-  fail with exit 64;
-- equivalent values supplied through multiple layers remain deterministic and
-  still report the highest-precedence source rather than whichever parser ran
-  last.
+Exit combinations cover contract coverage 1 with gate 1/2/4, scan budget 5,
+usage 64, release removal 8 under legacy and severity schemes, and operational
+errors. Do not sort all integers as one global severity scale.
 
 ### 10.3 Regression tests
 
-- Rewrite `tests/test_pr494_scan_regressions.py` to assert both invariants:
-  1. case97 L0 removal remains present and blocking due to old public evidence;
-  2. deleting/mutating only new-side metadata does not change that result;
-  3. removing old-side proof changes the outcome to the appropriate unknown,
-     rather than continuing to block all L0 removals;
-  4. with rich extraction disabled, L0 alone still blocks from old evidence;
-  5. rich+L0 yields one finding carrying both provenance records;
-  6. reversing the comparison produces an addition governed by new-side
-     evidence;
-  7. a proven-private L0 removal remains present only in the private ledger and
-     does not block.
-- Add a pvxs-derived minimal fixture with authoritative private provenance, not
-  merely an internal-looking symbol name. Run the same bytes with private proof
-  present, absent, contradicted by consumer evidence, and under
-  `contract=exports`; assert exact relevance, reason, ledger, verdict, and exit.
-- Update case182: either provide explicit public/consumer evidence if it is expected to stay blocking, or reclassify it as unresolved under `public_contract`; retain its current result under `contract=exports`.
-- Preserve ADR-024 property and FP-rate suites.
-- Add schema compatibility tests for reports lacking `contract_scope` and snapshots from pre-feature schema versions.
-- Add snapshot round-trip and mixed-version tests: current/current,
-  legacy/current in both directions, unknown future evidence schema, and
-  snapshot/binary with asymmetric old/new coverage.
+Rewrite the PR #494 regression around two independent invariants:
 
-### 10.4 Property-based tests
+1. a real L0 removal is conserved;
+2. it blocks only when contract mode/evidence makes it relevant.
 
-- **No loss:** every detector finding appears exactly once in gated, private, unresolved, suppressed, or reconciled output.
-- **Evidence monotonicity:** adding authoritative public evidence can move either unknown class or `PRIVATE→PUBLIC`, never `PUBLIC→PRIVATE`.
-- **Private-proof monotonicity:** adding authoritative private evidence can move either unknown class to `PRIVATE`, never override public/consumer proof.
-- **Forensic superset:** gated findings under `public_contract` are a subset of gated findings under `contract=exports`, excluding non-surface special rules shared by both.
-- **Side symmetry:** reversing snapshots maps add/remove rules correctly without reusing the wrong side's evidence.
-- **Idempotence/order independence:** evidence and finding order do not change classification/report order.
-- **Deduplication:** rich+L0 reconciliation preserves one logical break.
-- **Conservation:** reconciliation output references every input detector fact;
-  no fact disappears merely because another detector found the same change.
-- **Anti-hiding:** loader, leak, explicit required-symbol, and consumer-proven findings cannot become private.
-- **Cross-command equivalence:** shared comparison findings from `compare` and
-  `scan --against` are field-for-field equal for equivalent evidence.
-- **Snapshot reproducibility:** serialize/deserialize and evidence-record order
-  permutations do not change contract decisions.
+Case97 variants:
 
-### 10.5 Real-world and rollout gates
+- old guarded declaration proves public and blocks;
+- changing only new-side metadata cannot hide it;
+- missing guarded coverage is unresolved, not unproven;
+- L0-only still uses old persisted public evidence;
+- rich+L0 emits one finding with both provenances;
+- reverse comparison is a new-side addition.
 
-Before flipping the default:
+pvxs fixture variants:
 
-- case97 and the full PR #494 regression lane must remain green;
-- pvxs private-export removal must stop blocking and remain visible in audit output;
-- run both modes over the real-world corpus and manually classify every decision delta;
-- require zero unexplained public-break losses;
-- measure unresolved rate separately from false positives;
-- test Linux ELF, Mach-O, PE/COFF, stripped binaries, symbol versions, C and C++;
-- include at least one executable fixture and expected oracle per supported
-  object format: ELF visibility/versioning and stripped fallback, Mach-O export
-  list, PE/COFF `.def`/ordinal or decorated-name identity; unsupported provider
-  paths must assert unresolved coverage rather than being silently skipped;
-- validate JSON schema, SARIF, JUnit, markdown, aggregate, and GitHub Action consumers;
-- document rollback as `contract=exports` / `--no-scope-public-headers`.
+- authoritative out-of-contract proof audits in `public`;
+- proof absent becomes the correct unknown;
+- concrete consumer evidence wins and gates;
+- `exports` gates because it is an export root;
+- `all` gates every finding, including unreachable private type changes.
 
-## 11. Acceptance criteria
+Update case182 by supplying explicit evidence if it is expected to remain
+public or by making it unresolved in `public`; preserve legacy result under
+`all`.
 
-The concept is ready to become default only when all are true:
+### 10.4 Property tests
 
-1. Contract relevance is represented independently from severity policy.
-2. `scan --against` and `compare` use the same classifier and produce equivalent contract decisions for equivalent evidence.
-3. No unscoped L0 result can bypass contract classification.
-4. Case97 remains a named, blocking public break.
-5. A proven-private exported-symbol removal is non-blocking but fully auditable.
-6. An export with insufficient evidence is explicitly unresolved, never silently public or private.
-7. Old-side evidence governs removals; public→private transitions cannot be hidden by new headers.
-8. Explicit manifests/required symbols/real consumers override inferred privacy.
-9. All report formats expose assurance, counts, reasons, and unresolved findings.
-10. `contract=exports` provides deterministic backward-compatible forensic behavior.
-11. Existing policy profiles retain their current severity semantics.
-12. The test/property/real-world rollout gates above pass on every supported platform.
+- **Conservation:** every detector fact is represented by gated,
+  proven-out-of-contract, unresolved, suppressed, or reconciled output.
+- **Public evidence monotonicity:** adding authoritative public evidence can
+  move unknown/out-of-contract to in-contract, never the reverse.
+- **Out-of-contract proof monotonicity:** authoritative exclusion can move an
+  unknown out of contract but cannot override public/consumer proof.
+- **Mode relation:** public and exports each gate a subset of all; neither is
+  generally a subset of the other because public manifests can name a
+  non-exported API obligation and exports roots every actual export.
+- **Side symmetry:** reversing inputs maps add/remove authority correctly.
+- **Order independence:** provider/finding/pack order cannot change semantics.
+- **Deduplication and conservation:** rich+L0 emits one logical finding while
+  retaining both source facts.
+- **Anti-hiding:** explicit scope, leaks, loader/security, and coverage failures
+  cannot become out of contract or vanish through ordinary suppression.
+- **Cross-command parity:** shared findings are field-for-field equal.
+- **Snapshot reproducibility:** serialization and provider order do not alter
+  original replay; a changed policy creates a new evaluation context.
 
-## 12. Non-goals
+### 10.5 Rollout gates
 
-- Proving that no unknown consumer uses an accidental export.
-- Treating documentation absence or naming conventions as authoritative privacy.
-- Replacing severity profiles with contract modes.
-- Silently hiding private or unresolved findings.
-- Changing loader/security/package-level findings into header-scoped findings.
-- Making a one-build `scan` claim cross-version ABI compatibility.
+Before default flip:
+
+- case97 and the complete PR #494 lane pass;
+- pvxs stops blocking in `public` and remains auditable;
+- every real-world old/new delta is manually classified;
+- zero unexplained public-break losses;
+- unresolved rate measured separately from false-positive rate;
+- ELF visibility/versioning/stripped, Mach-O exports/load metadata, and PE
+  `.def`/ordinals/decorated identity are covered;
+- unsupported providers fail closed rather than silently skip;
+- JSON schema, snapshot schema, SARIF, JUnit, Markdown, aggregate, service,
+  MCP, and GitHub Action consumers pass;
+- rollback is documented as `contract=all` /
+  `--no-scope-public-headers`.
+
+## 11. Risks and non-goals
+
+Risks:
+
+- provider completeness can become falsely optimistic unless generated headers,
+  macros, variants, and identity coverage are modeled explicitly;
+- policy-file migration can break existing ecosystem packs if compatibility,
+  gate, contract, and surface namespaces are not bridged deliberately;
+- schema consumers may assume a single “filtered/private” bucket;
+- changing default before corpus review can trade known false positives for
+  public-break false negatives.
+
+Non-goals:
+
+- proving no unknown consumer uses an accidental export;
+- treating naming/documentation absence as authoritative exclusion;
+- changing detector facts to obtain a gate result;
+- making one-build scan claim cross-version compatibility;
+- implementing the evaluator in this specification PR;
+- multiplying base policies for every ecosystem choice when composable packs or
+  transparent recipes suffice.
+
+## 12. Definition of done
+
+Implementation is ready for the default flip only when:
+
+1. ADR-049 vocabulary and three modes are implemented exactly.
+2. Every front end consumes one `CompatibilityEvaluationConfig`.
+3. Snapshot observations and decision context are separate and versioned.
+4. `UNKNOWN_UNPROVEN` is emitted only after provider-specific closed-world
+   completeness.
+5. L0 facts are conserved without bypassing contract evaluation.
+6. Suppression is explicit and coverage failures are unsuppressible.
+7. `compare` and `scan --against` shared findings are field-for-field equal.
+8. Reports expose full effective configuration and structured provenance.
+9. Policy bases, rule packs, gate packs, contract/language packs, and run
+   profiles are distinct and conflicts are deterministic errors.
+10. The regression/property/real-world gates pass on supported object formats.
+11. The default flip has zero unexplained public-break losses and an accepted
+    unresolved rate.
