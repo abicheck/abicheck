@@ -88,6 +88,21 @@ The machine value is `PROVEN_OUT_OF_CONTRACT`, not `PRIVATE`. UI text may say
 “private under the declared contract,” but the tool does not claim that an
 unknown consumer cannot use an accidental export.
 
+Mode-to-relevance mapping:
+
+| Mode | Inside roots/closure | Outside roots/closure | Required evidence incomplete | Non-entity finding |
+|---|---|---|---|---|
+| `public` | `IN_CONTRACT` | `PROVEN_OUT_OF_CONTRACT` only after complete authoritative exclusion; otherwise `UNKNOWN_UNPROVEN` after complete search | `UNKNOWN_UNRESOLVED` | `NOT_APPLICABLE` |
+| `exports` | `IN_CONTRACT` | `PROVEN_OUT_OF_CONTRACT` only after complete export-root/type-graph traversal proves unreachability | `UNKNOWN_UNRESOLVED` | `NOT_APPLICABLE` |
+| `all` | `IN_CONTRACT` for every normalized entity finding, including one with ambiguous identity | Not applicable | Surface evidence is unnecessary; detector-production coverage is separate | `NOT_APPLICABLE` |
+
+For `public` and `exports`, identity ambiguity that prevents root/closure
+membership from being decided is `UNKNOWN_UNRESOLVED`; it cannot prove
+exclusion. For `all`, no membership join is needed, so every entity finding
+that reached normalization is `IN_CONTRACT` and ambiguity remains independent
+detector-production coverage. If ambiguity prevents normalization, there is no
+entity finding to classify and detector-production coverage reports the failure.
+
 ### 2.3 No new profile axis
 
 There is no persistent `public_contract` profile or preset. The intended
@@ -198,6 +213,11 @@ Rules:
 
 - conflicting values in the same selector layer are usage error 64;
 - a legacy alias conflicting with an explicit new option is usage error 64;
+- compatibility exception: when both current `--policy` and `--policy-file`
+  are supplied, `--policy-file` keeps winning as documented and tested today;
+  provenance records the effective file-selected base plus the shadowed
+  `--policy` input. Rejecting this pair requires a separate major-version
+  deprecation;
 - equivalent duplicates are accepted and report the winning selected-by chain;
 - unknown config keys/enum values fail at load time;
 - `.abicheck.yml` does not gain an ad hoc top-level `policy: strict_abi`
@@ -368,6 +388,28 @@ closure, an exact authoritative exclusion, or a framework-specific oracle. An
 internal-looking name, missing docs, wildcard export, or absence from active AST
 is only a hint. Any authoritative in-contract evidence wins.
 
+The negative proof must itself be complete:
+
+```text
+out_of_contract_proof_complete :=
+    identity coverage is complete
+    AND no authoritative in-contract evidence or contradiction exists
+    AND (
+        a terminal exact exclusion directly identifies the entity
+        OR (
+            positive out-of-contract provenance exists
+            AND every provider capable of stronger-or-equal public evidence
+                completed for that entity/domain
+        )
+    )
+```
+
+An exclusion is terminal only if no configured stronger/equal manifest,
+consumer, required-symbol, guarded-declaration, or other overlay can override
+it. Private-header provenance while any such provider is unavailable, failed,
+stale, partial, or identity-ambiguous is `UNKNOWN_UNRESOLVED`. A complete
+search with no commitment and no complete exclusion is `UNKNOWN_UNPROVEN`.
+
 ### 4.4 Side authority
 
 - removals and modifications of existing obligations: old side;
@@ -522,9 +564,24 @@ Per finding:
 - `contract_relevance`;
 - stable `contract_reason`;
 - evidence references with side and input identity;
-- compatibility decision;
+- `compatibility_evaluation_status` (`EVALUATED|NOT_EVALUATED`);
+- `compatibility_decision` (`Verdict` when evaluated, JSON `null` otherwise);
 - suppression decision/reference;
 - gate category/contribution.
+
+Canonical non-evaluated shape:
+
+```json
+{
+  "contract_relevance": "UNKNOWN_UNRESOLVED",
+  "compatibility_evaluation_status": "NOT_EVALUATED",
+  "compatibility_decision": null,
+  "gate_contribution": 0
+}
+```
+
+The sibling contract-coverage ledger may contribute exit `1`; it never rewrites
+the null compatibility decision or the finding's zero gate contribution.
 
 Keep proven-out-of-contract and unresolved ledgers separate. Provider/domain
 coverage failures are a sibling canonical ledger, not synthetic change rows
@@ -620,17 +677,30 @@ budget overflow is 5 and usage is 64.
 ### `compare` and `scan --against`
 
 - `public`: its evidence domain is the selected declared-public
-  providers/overlays. Gate-evaluate `IN_CONTRACT` and `NOT_APPLICABLE`; audit
-  `PROVEN_OUT_OF_CONTRACT`; ledger unknowns. Only failures needed to close this
-  domain contribute coverage `1`; unrelated provider failures are advisory.
+  providers/overlays. Roots/closure are `IN_CONTRACT`; non-entity findings are
+  `NOT_APPLICABLE`. Complete authoritative exclusions are
+  `PROVEN_OUT_OF_CONTRACT`; a complete search with neither commitment nor
+  exclusion is `UNKNOWN_UNPROVEN`; incomplete required evidence is
+  `UNKNOWN_UNRESOLVED`. Only failures needed to close this domain contribute
+  coverage `1`; unrelated provider failures are advisory.
 - `exports`: its domain is only exported function/variable roots and closure
-  computed from the raw type graph. Export-root/type-graph failures are
-  required; public-header/manifest/consumer and other surface-provider failures
-  are unrelated and advisory.
-- `all`: its domain is all normalized detector facts. Every finding enters
-  compatibility and gate evaluation and no surface evidence is required;
+  computed from the raw type graph. Roots/closure are `IN_CONTRACT`; an entity
+  proven unreachable after complete root/graph traversal is
+  `PROVEN_OUT_OF_CONTRACT`; incomplete root/graph or identity evidence is
+  `UNKNOWN_UNRESOLVED`; non-entity findings are `NOT_APPLICABLE`.
+  Public-header/manifest/consumer failures are unrelated and advisory.
+- `all`: its domain is all normalized detector facts. Every entity finding is
+  `IN_CONTRACT`, including a normalized finding with ambiguous identity;
+  non-entity findings are `NOT_APPLICABLE`. If identity ambiguity prevents
+  normalization, detector-production coverage reports it rather than creating
+  an unclassifiable contract finding. No surface evidence is required and
   surface-provider failures are advisory. Detector-production coverage remains
   independently enforceable.
+
+Compatibility policy is evaluated only for `IN_CONTRACT` and `NOT_APPLICABLE`.
+Other relevance states have `compatibility_evaluation_status=NOT_EVALUATED`, a
+JSON `null` compatibility decision, and zero change-gate contribution;
+`UNKNOWN_UNRESOLVED` may still contribute the independent coverage exit `1`.
 
 ### Snapshot/binary and package/release
 
@@ -664,21 +734,21 @@ or aggregate required-target coverage.
 
 | Scenario | `public` | `exports` | `all` |
 |---|---|---|---|
-| Public header function removed | `IN_CONTRACT`; evaluate policy/gate | Evaluate if exported/rooted | Evaluate |
-| Macro-conditioned public declaration removed (case97) | `IN_CONTRACT` when guarded/config matrix is complete; otherwise unresolved coverage/1 | Evaluate if exported; header-provider failure advisory | Evaluate; header-provider failure advisory |
-| Proven private-header exported helper removed (pvxs) | Audit `PROVEN_OUT_OF_CONTRACT` | `IN_CONTRACT`; evaluate policy/gate | Evaluate |
-| Export absent from a complete exact declared contract | `UNKNOWN_UNPROVEN`, audit/0 | `IN_CONTRACT`; evaluate policy/gate | Evaluate |
-| Export with no usable public-contract source | `UNKNOWN_UNRESOLVED`, `NOT_CHECKABLE`/1 | Evaluate if export/type evidence complete; unrelated public-provider failure advisory | Evaluate; surface-provider failure advisory |
-| Undocumented export imported by `--used-by` | `IN_CONTRACT`; evaluate policy/gate | `IN_CONTRACT`; evaluate policy/gate | Evaluate |
-| Exact manifest/version-script symbol removed | `IN_CONTRACT`; evaluate policy/gate | Evaluate if exported/rooted | Evaluate |
-| Wildcard-only export rule | Unknown unless other evidence | Evaluate exported root | Evaluate |
-| Private unreachable type layout change | Audit/out of contract | Audit/out of exported closure | Evaluate |
-| Private-header type leaked through public/exported signature | Evaluate public closure | Evaluate exported closure | Evaluate |
-| Public symbol becomes hidden | Evaluate from old side | Evaluate exported old-side root | Evaluate |
-| Private symbol becomes public | New public commitment/addition; gate may block | Export addition; gate may block | Addition; gate may block |
-| Active AST complete, guarded index required but failed | `UNKNOWN_UNRESOLVED`, coverage/1 | Export domain remains checkable; header failure advisory | Evaluate all detector facts; header failure advisory |
+| Public header function removed | `IN_CONTRACT`; evaluate policy/gate | `IN_CONTRACT` if exported/rooted; otherwise proven out only after complete closure | `IN_CONTRACT`; evaluate |
+| Macro-conditioned public declaration removed (case97) | `IN_CONTRACT` when guarded/config matrix is complete; otherwise `UNKNOWN_UNRESOLVED`/1 | `IN_CONTRACT` if exported; header-provider failure advisory | `IN_CONTRACT`; header-provider failure advisory |
+| Proven private-header exported helper removed (pvxs) | `PROVEN_OUT_OF_CONTRACT` only with complete negative proof; otherwise unresolved | `IN_CONTRACT`; evaluate policy/gate | `IN_CONTRACT`; evaluate |
+| Export absent from a complete exact declared contract | `UNKNOWN_UNPROVEN`, audit/0 | `IN_CONTRACT`; evaluate policy/gate | `IN_CONTRACT`; evaluate |
+| Export with no usable public-contract source | `UNKNOWN_UNRESOLVED`, `NOT_CHECKABLE`/1 | `IN_CONTRACT` if export/type evidence complete; unrelated public-provider failure advisory | `IN_CONTRACT`; surface-provider failure advisory |
+| Undocumented export imported by `--used-by` | `IN_CONTRACT`; evaluate policy/gate | `IN_CONTRACT`; evaluate policy/gate | `IN_CONTRACT`; evaluate |
+| Exact manifest/version-script symbol removed | `IN_CONTRACT`; evaluate policy/gate | `IN_CONTRACT` if exported/rooted; otherwise complete closure decides | `IN_CONTRACT`; evaluate |
+| Wildcard-only export rule | Unknown unless other evidence | `IN_CONTRACT` when observed as export root | `IN_CONTRACT`; evaluate |
+| Private unreachable type layout change | `PROVEN_OUT_OF_CONTRACT` only after complete exclusion proof; otherwise `UNKNOWN_UNPROVEN` after complete search or `UNKNOWN_UNRESOLVED` if incomplete | `PROVEN_OUT_OF_CONTRACT` only after complete root/graph traversal; otherwise `UNKNOWN_UNRESOLVED` | `IN_CONTRACT`; evaluate |
+| Private-header type leaked through public/exported signature | `IN_CONTRACT`; evaluate public closure | `IN_CONTRACT`; evaluate exported closure | `IN_CONTRACT`; evaluate |
+| Public symbol becomes hidden | `IN_CONTRACT`; evaluate from old side | `IN_CONTRACT`; evaluate exported old-side root | `IN_CONTRACT`; evaluate |
+| Private symbol becomes public | New `IN_CONTRACT` commitment/addition; gate may block | New `IN_CONTRACT` export; gate may block | `IN_CONTRACT` addition; gate may block |
+| Active AST complete, guarded index required but failed | `UNKNOWN_UNRESOLVED`, coverage/1 | Export domain remains checkable; header failure advisory | `IN_CONTRACT`; header failure advisory |
 | SONAME/loader/security regression | `NOT_APPLICABLE`, policy/gate applies | Same | Same |
-| Explicit required symbol missing | `IN_CONTRACT`; evaluate policy/gate | Evaluate only when represented by an old exported root | Evaluate |
+| Explicit required symbol missing | `IN_CONTRACT`; evaluate policy/gate | `IN_CONTRACT` only when represented by an old exported root; otherwise complete closure decides | `IN_CONTRACT`; evaluate |
 
 ## 9. Work breakdown
 
@@ -779,7 +849,8 @@ to `public`, `strict_abi`, and `not_checkable`. Keep `contract=all` and
 
 - every precedence pair and equivalent duplicate;
 - explicit CLI/API, policy file, legacy alias, recipe, run profile, project
-  config, and built-in provenance;
+  config, and built-in provenance, including current `--policy-file` wins over
+  `--policy` behavior and its shadowed-input provenance;
 - field-by-field policy-file interactions;
 - conflicting packs and explicit conflict resolution;
 - unknown `ChangeKind` hard failure;
@@ -788,6 +859,10 @@ to `public`, `strict_abi`, and `not_checkable`. Keep `contract=all` and
 **Provider completeness**
 
 - exact complete-empty manifest;
+- private/system provenance plus unavailable stronger public provider is
+  `UNKNOWN_UNRESOLVED`, never `PROVEN_OUT_OF_CONTRACT`;
+- terminal exact exclusion vs non-terminal exclusion, including a stronger
+  manifest/consumer/guarded provider that completes, fails, or is stale;
 - active AST with complete guarded index;
 - active AST with guarded index failed/missing;
 - generated header present/missing/stale;
@@ -804,9 +879,14 @@ reason, relevance, assurance, and exit contribution.
 **Classifier and side authority**
 
 Cross product of add/remove/modify/visibility/type × old/new relevance ×
-explicit consumer/manifest evidence. Include old unresolved/new public
-modification: old obligation remains unresolved while a separate new commitment
-may be emitted.
+explicit consumer/manifest evidence. Cover the complete `public|exports|all`
+mode-to-relevance table: export root/closure membership, proven unreachable
+entities, non-entity `NOT_APPLICABLE`, all-mode entity `IN_CONTRACT`, and
+identity ambiguity. Assert that out-of-contract, unproven, and unresolved
+findings have `compatibility_evaluation_status=NOT_EVALUATED`, JSON-null
+compatibility decision, and no change-gate contribution. Include old
+unresolved/new public modification: old obligation remains unresolved while a
+separate new commitment may be emitted.
 
 **L0 normalization**
 
@@ -821,7 +901,7 @@ may be emitted.
 - public change can be explicitly suppressed and remains in audit trail;
 - suppression cannot alter relevance;
 - suppressing every affected change does not clear provider coverage failure;
-- `unresolved_behavior=warn` changes only gate contribution.
+- `unresolved_behavior=warn` changes only the contract-coverage contribution.
 
 ### 10.2 Integration and CLI tests
 

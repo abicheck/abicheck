@@ -75,7 +75,28 @@ Contract assurance is a separate result:
 ```text
 ContractAssurance := complete | partial | unavailable
 AnalysisStatus     := CHECKABLE | NOT_CHECKABLE
+CompatibilityEvaluationStatus := EVALUATED | NOT_EVALUATED
 ```
+
+`compatibility_decision` contains the existing `Verdict` when
+`compatibility_evaluation_status=EVALUATED`. It is JSON `null` when the status
+is `NOT_EVALUATED`; this is not a new compatibility verdict. `IN_CONTRACT` and
+`NOT_APPLICABLE` findings are evaluated. `PROVEN_OUT_OF_CONTRACT`,
+`UNKNOWN_UNPROVEN`, and `UNKNOWN_UNRESOLVED` findings are not evaluated by
+compatibility policy and have no change-gate contribution. Their canonical
+per-finding report shape includes:
+
+```json
+{
+  "contract_relevance": "UNKNOWN_UNRESOLVED",
+  "compatibility_evaluation_status": "NOT_EVALUATED",
+  "compatibility_decision": null,
+  "gate_contribution": 0
+}
+```
+
+The unresolved coverage ledger still contributes its independent exit `1`
+where required; it does not rewrite `gate_contribution` or the null decision.
 
 Contract relevance and compatibility do not determine the command exit directly.
 The configured gate computes its own `0/1/2/4` contribution, while incomplete
@@ -117,6 +138,21 @@ contract relevance. Surface-provider failures are advisory (while failures
 needed to produce detector facts retain their normal detector-coverage
 semantics). This is the forensic/debugging mode and the exact semantic
 replacement for legacy unscoped behavior.
+
+The mode-to-relevance mapping is normative:
+
+| Mode | Entity finding inside selected roots/closure | Entity finding outside selected roots/closure | Incomplete required domain evidence | Non-entity finding |
+|---|---|---|---|---|
+| `public` | `IN_CONTRACT` | `PROVEN_OUT_OF_CONTRACT` only with complete authoritative exclusion; otherwise `UNKNOWN_UNPROVEN` after complete search | `UNKNOWN_UNRESOLVED` | `NOT_APPLICABLE` |
+| `exports` | `IN_CONTRACT` | `PROVEN_OUT_OF_CONTRACT` only after complete export-root/type-graph traversal proves it unreachable | `UNKNOWN_UNRESOLVED` | `NOT_APPLICABLE` |
+| `all` | `IN_CONTRACT`, including an identity-ambiguous normalized entity finding | Not possible: every normalized entity finding is in the selected domain | Contract-surface evidence is not required; detector-production coverage remains independent | `NOT_APPLICABLE` |
+
+In `public` or `exports`, identity ambiguity that prevents root/closure
+membership from being decided maps to `UNKNOWN_UNRESOLVED`, not exclusion. In
+`all`, membership needs no evidence join: every entity finding that reached
+normalization is `IN_CONTRACT`, while ambiguity remains detector-production
+coverage. If ambiguity prevents normalization entirely, there is no entity
+finding to classify and detector-production coverage reports the failure.
 
 Legacy migration has deliberately asymmetric guarantees:
 
@@ -184,11 +220,12 @@ stronger than inferred header provenance. Authoritative in-contract evidence
 wins over out-of-contract evidence. Unresolvable contradiction yields
 `UNKNOWN_UNRESOLVED` rather than a guess.
 
-### D5. `UNKNOWN_UNPROVEN` requires provider-specific closed-world completeness
+### D5. Negative contract conclusions require provider-specific completeness
 
 A successful parser invocation is not sufficient. The evaluator may emit
 `UNKNOWN_UNPROVEN` only when all of the following hold for the affected entity
-class and authoritative side:
+class and authoritative side. `PROVEN_OUT_OF_CONTRACT` has its own equally
+strict completeness rule:
 
 ```text
 closed_world_complete :=
@@ -198,7 +235,27 @@ closed_world_complete :=
     AND identity_coverage_is_complete
     AND required variant/configuration coverage completed
     AND no unresolved contradiction remains
+
+out_of_contract_proof_complete :=
+    identity_coverage_is_complete
+    AND no authoritative in-contract evidence exists
+    AND no unresolved contradiction remains
+    AND (
+        a terminal authoritative exclusion directly identifies the entity
+        OR (
+            positive out-of-contract provenance exists
+            AND every selected provider capable of stronger-or-equal
+                in-contract evidence completed for that entity/domain
+        )
+    )
 ```
+
+A **terminal authoritative exclusion** is an exact declaration whose contract
+semantics close membership for that entity. If a configured manifest, consumer,
+required-symbol overlay, guarded declaration index, or other stronger/equal
+provider can override the exclusion, that provider must complete before the
+exclusion is terminal. Private-header provenance alone is never terminal while
+such a provider is missing, failed, stale, partial, or identity-ambiguous.
 
 Each provider publishes a completeness contract. The persisted ledger has at
 least:
@@ -238,6 +295,12 @@ A complete required search with no commitment gives `UNKNOWN_UNPROVEN`. Any
 missing condition gives `UNKNOWN_UNRESOLVED`. This preserves case97: an active
 AST that omits a macro-conditioned public declaration cannot produce a green
 unknown when guarded-declaration coverage was required but missing.
+
+Likewise, `PROVEN_OUT_OF_CONTRACT` is legal only after
+`out_of_contract_proof_complete`. Positive private/system provenance plus an
+unavailable public manifest or consumer provider yields `UNKNOWN_UNRESOLVED`,
+not a non-gating result. A complete search with neither commitment nor complete
+exclusion remains `UNKNOWN_UNPROVEN`.
 
 ### D6. Snapshots separate observed facts from evaluation context
 
@@ -415,9 +478,13 @@ explicit CLI or explicit API request for the field/manifest
 ```
 
 Contradictory values at the same selector layer, or a legacy alias that
-disagrees with an explicit new option, are usage errors (64). Equivalent
-duplicate values are accepted and report the winning selected-by chain.
-Project `.abicheck.yml` may refer to policy manifests but does not silently gain
+disagrees with an explicit new option, are usage errors (64), except for the
+existing `--policy` plus `--policy-file` compatibility rule. During migration,
+`--policy-file` continues to win exactly as it does today; provenance records
+the file-selected effective base and the shadowed `--policy` input. A future
+major-version deprecation may reject that pair, but this ADR does not change it.
+Equivalent duplicate values are accepted and report the winning selected-by
+chain. Project `.abicheck.yml` may refer to policy manifests but does not silently gain
 an unrelated top-level `policy:` scalar without schema migration.
 
 ### D8. Configuration separates bases and composable packs
