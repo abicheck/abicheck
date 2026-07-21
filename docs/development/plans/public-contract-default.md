@@ -430,8 +430,10 @@ Compatibility/migration:
   according to the existing JUnit contract, never as a passed compatibility
   testcase; the exact mapping is schema-tested.
 - `aggregate` consumes the report's gate/coverage contribution and preserves
-  the orthogonality defined by ADR-042: unresolved contract evidence contributes
-  coverage exit 1, while compatibility remains the proven verdict.
+  the orthogonality defined by ADR-042: only `UNKNOWN_UNRESOLVED` findings and
+  their partial/unavailable evidence contribute coverage exit 1;
+  `UNKNOWN_UNPROVEN` after a complete search contributes exit 0. Compatibility
+  remains the verdict over proven findings.
 - Every renderer is tested from the same canonical result object; display
   filtering and truncation cannot alter counts, gate state, or exit code.
 
