@@ -117,7 +117,7 @@ below, plus a dedicated code for removed libraries:
 | `0` | All libraries compatible (no API/ABI break) |
 | `2` | Worst verdict is `API_BREAK` |
 | `4` | Worst verdict is `BREAKING`, **or** an operational `ERROR` (a library failed to dump/extract/compare) |
-| `8` | A library was removed between releases and `--fail-on-removed-library` is set — takes precedence over every other code |
+| `8` | A library was removed between releases and `--fail-on-removed-library` is set. In the legacy scheme this is emitted only when no verdict exit 2/4 already applies; in the severity-aware scheme it takes precedence over 0/1/2/4. |
 
 On the release path the severity-aware code (`0/1/2/4`) replaces the
 verdict-based `2/4` mapping only when a severity *map* is actually in effect —
@@ -125,8 +125,11 @@ that is, any `--severity-*` flag is passed **or** `.abicheck.yml` carries a
 `severity:` block (a preset or per-category levels). Setting `exit_code_scheme:
 severity` on its own is **not** enough for directory/package inputs: with no
 severity values to apply, the fan-out has nothing to score against and falls
-back to the legacy verdict mapping. Exit `8` still wins, and an operational
-`ERROR` still floors the exit at `4`. (`--exit-code-scheme` is rejected on
+back to the legacy verdict mapping. Under the legacy mapping, a nonzero verdict
+exit (`2`/`4`) wins before the removed-library check; under an effective
+severity map, removed-library exit `8` wins over the aggregated `0/1/2/4` code.
+An operational `ERROR` without a higher-priority removed-library result still
+floors the severity-aware exit at `4`. (`--exit-code-scheme` is rejected on
 directory/package inputs; pin the legacy scheme in config with
 `exit_code_scheme: legacy` if you want to force it.) One consequence worth
 gating on: with an effective severity map, a release whose worst verdict is

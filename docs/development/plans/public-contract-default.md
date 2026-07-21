@@ -214,9 +214,13 @@ contribution to the existing command result:
   same numeric worst-of rule; report fields distinguish
   `contract_coverage` from `addition`/`quality_issues`, which may also produce
   exit 1;
-- in release comparison, existing operational `ERROR` still floors the result
-  at 4, and `--fail-on-removed-library` exit 8 still takes precedence over all
-  per-library 0/1/2/4 results;
+- release comparison preserves both existing schemes: in legacy mode an
+  operational `ERROR` exits 4 and a nonzero verdict exit 2/4 wins before the
+  removed-library check, so exit 8 is used only when the legacy verdict would
+  pass; in severity-aware mode `--fail-on-removed-library` exit 8 takes
+  precedence over the aggregated severity 0/1/2/4 (and over the operational
+  floor), while an operational `ERROR` without a removed-library exit still
+  floors the result at 4;
 - output serialization/write failures are command failures, not contract
   classifications; they use the command's existing operational error path and
   must not emit a successful result with a substituted semantic exit.
@@ -550,9 +554,12 @@ Run each with text and JSON, checking verdict, exit, counts, finding identity, l
 For the comparison cases, run equivalent `compare` and `scan --against`
 invocations and compare each shared finding field, not only the top-level
 verdict. Add explicit combinations for contract coverage exit 1 with severity
-1/2/4, scan budget 5, invalid config 64, release operational error 4, and
-removed-library 8. Exercise text, JSON, SARIF, JUnit, markdown/GitHub output,
-and aggregate ingestion from the same canonical fixtures.
+1/2/4, scan budget 5, invalid config 64, and both release schemes: legacy
+break/API-break plus removed library exits 4/2, legacy pass plus removed library
+exits 8, severity-aware removed library wins with exit 8, and operational error
+without a removed-library override floors at 4. Exercise text, JSON, SARIF,
+JUnit, markdown/GitHub output, and aggregate ingestion from the same canonical
+fixtures.
 
 Add a table-driven CLI/config resolution suite that separately proves:
 
