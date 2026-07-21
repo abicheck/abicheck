@@ -271,7 +271,12 @@ Comparison must be reproducible from persisted evidence.
 
 - Use public/private provenance, declaration indexes, manifests, and evidence coverage embedded in snapshots.
 - Do not silently read current files from `source_path` to change the verdict.
-- If an optional live re-probe is retained, its result is enrichment only, must pass strong identity checks (prefer digest over mtime/size), and must be disclosed. Failure leaves required evidence `UNKNOWN_UNRESOLVED`.
+- If an optional live re-probe is retained, its result is enrichment only, must
+  pass strong identity checks (prefer digest over mtime/size), and must be
+  disclosed. Its failure does not alter a classification reproduced from
+  complete persisted evidence. Only when the resolved plan marks the re-probe
+  required because persisted evidence is incomplete does failure leave affected
+  evidence `UNKNOWN_UNRESOLVED`.
 - Older snapshots without contract metadata remain readable; their export-only entities become `UNKNOWN_UNRESOLVED` in `public_contract`, or public in `contract=exports`.
 - A write→read→compare round trip must preserve the evidence-search ledger,
   provider requirements, declaration/manifest identities, assurance, and every
@@ -551,11 +556,14 @@ and aggregate ingestion from the same canonical fixtures.
 
 Add a table-driven CLI/config resolution suite that separately proves:
 
-- explicit `--contract` overrides a legacy scope flag, profile, config, and
-  default, while recording source `explicit_cli`;
+- explicit `--contract` overrides profile, config, and default while recording
+  source `explicit_cli`; an equivalent legacy scope flag may coexist and still
+  records `explicit_cli`, while an opposite legacy value is a contradiction and
+  fails with exit 64;
 - `--scope-public-headers` resolves to `public` and
-  `--no-scope-public-headers` resolves to `exports`, each overriding profile,
-  config, and default while recording source `legacy_alias`;
+  `--no-scope-public-headers` resolves to `exports`; when no explicit new option
+  is present, each overrides profile, config, and default while recording source
+  `legacy_alias`;
 - profile overrides config/default and config overrides the built-in default,
   with the effective value and source serialized in every case;
 - contradictory explicit new/legacy options and contradictory legacy aliases
