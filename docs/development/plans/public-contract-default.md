@@ -347,9 +347,11 @@ Add an additive `contract_scope` block to compare JSON/SARIF/JUnit and the scan 
     "preset": "public_contract",
     "mode_source": "preset",
     "policy": "strict_abi",
+    "policy_source": "preset",
     "assurance": "partial",
     "analysis_status": "NOT_CHECKABLE",
     "unresolved_behavior": "not_checkable",
+    "unresolved_behavior_source": "preset",
     "counts": {"public": 3, "private": 8, "unknown_unproven": 1,
                "unknown_unresolved": 1, "not_applicable": 2},
     "evidence": [
@@ -358,11 +360,17 @@ Add an additive `contract_scope` block to compare JSON/SARIF/JUnit and the scan 
        "searched_scope": ["include/"], "reason_code": "search-complete"},
       {"side": "old", "kind": "guarded_declaration_index",
        "status": "available", "completeness": "complete",
-       "reason_code": "search-complete"}
+       "reason_code": "search-complete"},
+      {"side": "old", "kind": "contract_manifest", "status": "failed",
+       "completeness": "partial", "reason_code": "manifest-parse-failed"}
     ],
     "unresolved": [
       {"kind": "func_removed_elf_only", "symbol": "helper", "side": "old",
-       "reason": "unknown-unproven-export-only"}
+       "contract_relevance": "UNKNOWN_UNPROVEN",
+       "reason_code": "unknown-unproven-export-only"},
+      {"kind": "func_removed_elf_only", "symbol": "legacy_helper",
+       "side": "old", "contract_relevance": "UNKNOWN_UNRESOLVED",
+       "reason_code": "required-manifest-parse-failed"}
     ]
   }
 }
