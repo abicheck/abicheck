@@ -83,7 +83,7 @@ contract plan records a terminal, complete search. The evaluator must consume a
 provider ledger rather than infer completeness from an empty result:
 
 ```text
-EvidenceSearchRecord := provider + side + requested_scope + searched_scope
+EvidenceSearchRecord := id + provider + side + requested_scope + searched_scope
                         + status + completeness + reason_code + input_identity
 
 status       := available | unavailable | failed | unsupported | stale
@@ -173,7 +173,7 @@ Contract membership is temporal. The relevant side depends on the operation:
 |---|---|
 | Removal | Old-side evidence is authoritative. A symbol public in v1 remains a contract removal even if absent from v2 headers. |
 | Addition | New-side evidence is authoritative. A new public entity is a public compatible/addition finding. |
-| Modification | The old side is authoritative for an existing obligation. An old-public entity remains gated even if new evidence says private/unknown. A private/unknown→public transition is modeled as a new public commitment/addition rather than retroactively making its prior private modifications breaking. |
+| Modification | The old side is authoritative for an existing obligation. An old-public entity remains gated even if new evidence says private/unknown. A `PRIVATE`/`UNKNOWN_UNPROVEN`→`PUBLIC` transition is modeled as a new public commitment/addition rather than retroactively making its prior modification breaking. If old-side authority is `UNKNOWN_UNRESOLVED`, retain the modification as unresolved/`NOT_CHECKABLE`; a separate new-side addition may be reported, but cannot clear the old-side coverage failure. |
 | Visibility/version removal | Old-side public/consumer evidence gates. |
 | Type/layout change | For an existing type, old-side reachability is authoritative. New-side public reachability creates a new commitment/addition; it does not retroactively turn an old-private layout modification into a break. |
 | Private on both sides | `PRIVATE` when both applicable identities are confidently private. |
@@ -338,7 +338,9 @@ Explicit scope is stronger than inferred public headers:
 
 ## 8. Reporting and schema
 
-Add an additive `contract_scope` block to compare JSON/SARIF/JUnit and the scan report:
+Add an additive `contract_scope` metadata block and a canonical sibling
+`unresolved_contract_changes` ledger to compare JSON/SARIF/JUnit and the scan
+report:
 
 ```json
 {
@@ -355,24 +357,37 @@ Add an additive `contract_scope` block to compare JSON/SARIF/JUnit and the scan 
     "counts": {"public": 3, "private": 8, "unknown_unproven": 1,
                "unknown_unresolved": 1, "not_applicable": 2},
     "evidence": [
-      {"side": "old", "kind": "public_header", "status": "available",
+      {"id": "old-public-headers", "side": "old",
+       "provider": "public_header", "status": "available",
        "completeness": "complete", "requested_scope": ["include/"],
-       "searched_scope": ["include/"], "reason_code": "search-complete"},
-      {"side": "old", "kind": "guarded_declaration_index",
-       "status": "available", "completeness": "complete",
-       "reason_code": "search-complete"},
-      {"side": "old", "kind": "contract_manifest", "status": "failed",
-       "completeness": "partial", "reason_code": "manifest-parse-failed"}
-    ],
-    "unresolved": [
-      {"kind": "func_removed_elf_only", "symbol": "helper", "side": "old",
-       "contract_relevance": "UNKNOWN_UNPROVEN",
-       "reason_code": "unknown-unproven-export-only"},
-      {"kind": "func_removed_elf_only", "symbol": "legacy_helper",
-       "side": "old", "contract_relevance": "UNKNOWN_UNRESOLVED",
-       "reason_code": "required-manifest-parse-failed"}
+       "searched_scope": ["include/"], "reason_code": "search-complete",
+       "input_identity": {"uri": "include/", "sha256": "<digest>"}},
+      {"id": "old-guarded-index", "side": "old",
+       "provider": "guarded_declaration_index", "status": "available",
+       "completeness": "complete", "requested_scope": ["include/"],
+       "searched_scope": ["include/"], "reason_code": "search-complete",
+       "input_identity": {"uri": "snapshot://old/guarded-index",
+                          "sha256": "<digest>"}},
+      {"id": "old-contract-manifest", "side": "old",
+       "provider": "contract_manifest", "status": "failed",
+       "completeness": "partial", "requested_scope": ["abi-contract.json"],
+       "searched_scope": [], "reason_code": "manifest-parse-failed",
+       "input_identity": {"uri": "abi-contract.json", "sha256": "<digest>"}}
     ]
-  }
+  },
+  "unresolved_contract_changes": [
+    {"kind": "func_removed_elf_only", "symbol": "helper", "side": "old",
+     "contract_relevance": "UNKNOWN_UNPROVEN",
+     "contract_reason": "unknown-unproven-export-only",
+     "resolution_class": "complete-no-commitment",
+     "contract_evidence": ["old-public-headers", "old-guarded-index"],
+     "gated": false},
+    {"kind": "func_removed_elf_only", "symbol": "legacy_helper",
+     "side": "old", "contract_relevance": "UNKNOWN_UNRESOLVED",
+     "contract_reason": "required-manifest-parse-failed",
+     "resolution_class": "required-evidence-failed",
+     "contract_evidence": ["old-contract-manifest"], "gated": false}
+  ]
 }
 ```
 
@@ -380,14 +395,18 @@ Per-finding machine fields:
 
 - `contract_relevance`;
 - `contract_reason` (stable code);
-- `contract_evidence` (source, side, identity, confidence);
+- `contract_evidence` (ordered references to evidence records preserving source,
+  side, input identity, and confidence/completeness);
 - `gated` boolean.
 
 Compatibility/migration:
 
 - Existing `surface_scope` remains during transition and can be derived from the new block for header-only consumers.
 - Existing `out_of_surface_changes` holds proven-private findings.
-- Add `unresolved_contract_changes`; never mix unknowns into the private ledger.
+- `unresolved_contract_changes` is the single canonical machine ledger for both
+  unknown classes; `contract_scope.counts` summarizes it. Do not introduce a
+  second `contract_scope.unresolved` alias, and never mix unknowns into the
+  private ledger.
 - `--show-filtered` shows both sections, clearly labeled “proven private” and “unresolved”.
 - Text output always prints an assurance warning when partial/unavailable, even when the unresolved list is truncated.
 - Report ordering and reason codes are deterministic.
@@ -524,7 +543,7 @@ No existing `--policy` value changes meaning.
 
 **Classifier**
 
-Cross-product of operation (`add/remove/modify/visibility/type`) × old relevance × new relevance × explicit consumer evidence. Assert classification, reason, gate bit, assurance, and stable serialization.
+Cross-product of operation (`add/remove/modify/visibility/type`) × old relevance × new relevance × explicit consumer evidence. Assert classification, reason, gate bit, assurance, and stable serialization. Include the asymmetric modification case `old=UNKNOWN_UNRESOLVED, new=PUBLIC`: the existing modification remains unresolved/`NOT_CHECKABLE`, even if a separate public addition is emitted.
 
 **L0 normalization**
 
@@ -553,13 +572,15 @@ Run each with text and JSON, checking verdict, exit, counts, finding identity, l
 11. public-reachable private type/leak;
 12. no headers;
 13. old headers missing but new present, and reverse;
-14. parser fallback/mangling failure;
-15. snapshot/snapshot, binary/binary, and mixed inputs;
-16. source/full scan and symbols-only scan;
-17. scan without baseline (no synthetic removals);
-18. directory/package aggregation;
-19. Python extension surface oracle;
-20. loader/SONAME findings unaffected by contract mode.
+14. old-unresolved modification with new public evidence remains
+    `NOT_CHECKABLE`, with any new commitment emitted separately;
+15. parser fallback/mangling failure;
+16. snapshot/snapshot, binary/binary, and mixed inputs;
+17. source/full scan and symbols-only scan;
+18. scan without baseline (no synthetic removals);
+19. directory/package aggregation;
+20. Python extension surface oracle;
+21. loader/SONAME findings unaffected by contract mode.
 
 For the comparison cases, run equivalent `compare` and `scan --against`
 invocations and compare each shared finding field, not only the top-level
