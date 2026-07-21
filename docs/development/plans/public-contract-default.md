@@ -74,7 +74,7 @@ contract_assurance := complete | partial | unavailable
 
 A complete result may be `NO_CHANGE`/exit 0 while disclosing `UNKNOWN_UNPROVEN` exports: the tool searched the declared contract successfully and found no proof that they were promised. Reports must say **“no proven public-contract break; N unproven exports retained for audit”**, not silently call them private.
 
-`partial`/`unavailable` sets an orthogonal top-level `analysis_status=NOT_CHECKABLE` and contributes exit 1. The compatibility `verdict` remains the verdict over proven findings, avoiding an incompatible expansion of the existing `Verdict` enum. Proven `API_BREAK`/`BREAKING` exits 2/4 still win. Uncertainty never uses 2 or 4 because it is not proof of a break. `unresolved_contract=warn` may be offered as an explicit permissive override; `unresolved_contract=exports` is an explicit fail-conservative migration mode that promotes unknown exports to `PUBLIC` and reproduces all-export gating.
+`partial`/`unavailable` sets an orthogonal top-level `analysis_status=NOT_CHECKABLE` and contributes exit 1. The compatibility `verdict` remains the verdict over proven findings, avoiding an incompatible expansion of the existing `Verdict` enum. Proven `API_BREAK`/`BREAKING` exits 2/4 still win. Uncertainty never uses 2 or 4 because it is not proof of a break. `unresolved_contract=warn` may be offered as an explicit permissive override; `unresolved_contract=exports` is only a fail-conservative **unknown-evidence fallback** that promotes unknown exports to `PUBLIC`. It does not reclassify proven-private exports. Full backward-compatible all-export gating, including proven-private exports, is reserved for `contract=exports`.
 
 ### 3.2 Evidence-search completeness
 
@@ -83,9 +83,11 @@ contract plan records a terminal, complete search. The evaluator must consume a
 provider ledger rather than infer completeness from an empty result:
 
 ```text
-EvidenceSearchRecord := id + provider + side + requested_scope + searched_scope
-                        + status + completeness + reason_code + input_identity
+EvidenceSearchRecord := id + provider + side + requirement
+                        + requested_scope + searched_scope + status
+                        + completeness + reason_code + input_identity
 
+requirement  := required | optional
 status       := available | unavailable | failed | unsupported | stale
 completeness := complete | partial | not_started
 ```
@@ -108,9 +110,10 @@ Examples:
 The resolved plan defines which providers are **required** versus optional.
 Failure of an optional enrichment provider does not make a result unresolved if
 the required domain was searched completely; the report still discloses the
-failure. Required-provider selection, searched scope, and input digests are part
-of the persisted evidence so snapshot replay can reproduce the completeness
-decision.
+failure. Each record persists its resolved `requirement`, plus searched scope
+and input digests, so snapshot replay never has to reconstruct requiredness from
+current configuration or implementation defaults and can reproduce the
+completeness decision.
 
 ## 4. Evidence and precedence
 
@@ -125,10 +128,14 @@ From strongest to weaker:
    - an exact entry in an explicitly supplied ABI/export manifest;
    - a `--used-by` consumer that imports or resolves the symbol;
    - package contract metadata such as an exact Debian symbols entry.
-2. **Old-side public declaration** for removals and compatibility changes
+2. **Side-authoritative public declaration**
+   - old-side declarations are positive evidence for removals and existing
+     compatibility obligations;
+   - new-side declarations are positive evidence for additions and new public
+     commitments, including `PRIVATE`/`UNKNOWN_UNPROVEN`→`PUBLIC` transitions;
    - declaration physically originating in an explicitly supplied public header;
    - declaration found in a public header's guarded/token declaration index even when the active header AST omitted it because of a consumer-controlled macro;
-   - an exported function/variable reachable through the public declaration graph.
+   - an exported function/variable reachable through the applicable side's public declaration graph.
 3. **Public type closure**
    - records, enums, typedefs, fields, bases, template arguments, vtables, and ABI artifacts transitively reachable from a public symbol/type;
    - private-header types leaked through public signatures remain public-contract findings; leak diagnostics are never filtered.
@@ -358,18 +365,21 @@ report:
                "unknown_unresolved": 1, "not_applicable": 2},
     "evidence": [
       {"id": "old-public-headers", "side": "old",
-       "provider": "public_header", "status": "available",
+       "provider": "public_header", "requirement": "required",
+       "status": "available",
        "completeness": "complete", "requested_scope": ["include/"],
        "searched_scope": ["include/"], "reason_code": "search-complete",
        "input_identity": {"uri": "include/", "sha256": "<digest>"}},
       {"id": "old-guarded-index", "side": "old",
-       "provider": "guarded_declaration_index", "status": "available",
+       "provider": "guarded_declaration_index", "requirement": "optional",
+       "status": "available",
        "completeness": "complete", "requested_scope": ["include/"],
        "searched_scope": ["include/"], "reason_code": "search-complete",
        "input_identity": {"uri": "snapshot://old/guarded-index",
                           "sha256": "<digest>"}},
       {"id": "old-contract-manifest", "side": "old",
-       "provider": "contract_manifest", "status": "failed",
+       "provider": "contract_manifest", "requirement": "required",
+       "status": "failed",
        "completeness": "partial", "requested_scope": ["abi-contract.json"],
        "searched_scope": [], "reason_code": "manifest-parse-failed",
        "input_identity": {"uri": "abi-contract.json", "sha256": "<digest>"}}
@@ -538,8 +548,10 @@ No existing `--policy` value changes meaning.
 - provider ledger outcomes: complete-empty, unavailable adapter, unsupported
   format, parse failure, timeout, stale input, partial traversal, one-of-many
   provider failure, optional-provider failure, and contradictory identity;
-- for every outcome assert requested/searched scope, status, completeness,
-  stable reason, assurance, relevance, and exit contribution.
+- for every outcome assert persisted `requirement`, requested/searched scope,
+  status, completeness, stable reason, assurance, relevance, and exit
+  contribution; replay the same ledger under changed current defaults and prove
+  that its classification does not change.
 
 **Classifier**
 
@@ -563,24 +575,28 @@ Run each with text and JSON, checking verdict, exit, counts, finding identity, l
 2. case97 macro-gated public removal;
 3. pvxs-style private exported removal;
 4. export-only unknown removal;
-5. the same unknown under `contract=exports`;
-6. `--used-by` proving an undocumented export public;
-7. `--required-symbol` proving it public;
-8. exact manifest/version-script entry;
-9. wildcard-only export script;
-10. private type churn;
-11. public-reachable private type/leak;
-12. no headers;
-13. old headers missing but new present, and reverse;
-14. old-unresolved modification with new public evidence remains
+5. the same unknown under `unresolved_contract=exports`, proving that unknowns
+   gate while proven-private exports remain audit-only;
+6. the same unknown and a proven-private export under `contract=exports`,
+   proving both gate;
+7. `--used-by` proving an undocumented export public;
+8. `--required-symbol` proving it public;
+9. exact manifest/version-script entry;
+10. wildcard-only export script;
+11. private type churn;
+12. public-reachable private type/leak;
+13. no headers;
+14. old headers missing but new present, and reverse;
+15. a new export declared only in new-side public headers is a public addition;
+16. old-unresolved modification with new public evidence remains
     `NOT_CHECKABLE`, with any new commitment emitted separately;
-15. parser fallback/mangling failure;
-16. snapshot/snapshot, binary/binary, and mixed inputs;
-17. source/full scan and symbols-only scan;
-18. scan without baseline (no synthetic removals);
-19. directory/package aggregation;
-20. Python extension surface oracle;
-21. loader/SONAME findings unaffected by contract mode.
+17. parser fallback/mangling failure;
+18. snapshot/snapshot, binary/binary, and mixed inputs;
+19. source/full scan and symbols-only scan;
+20. scan without baseline (no synthetic removals);
+21. directory/package aggregation;
+22. Python extension surface oracle;
+23. loader/SONAME findings unaffected by contract mode.
 
 For the comparison cases, run equivalent `compare` and `scan --against`
 invocations and compare each shared finding field, not only the top-level
