@@ -334,7 +334,9 @@ Add an additive `contract_scope` block to compare JSON/SARIF/JUnit and the scan 
 ```json
 {
   "contract_scope": {
-    "mode": "public_contract",
+    "mode": "public",
+    "preset": "public_contract",
+    "mode_source": "preset",
     "policy": "strict_abi",
     "assurance": "partial",
     "analysis_status": "NOT_CHECKABLE",
@@ -471,7 +473,9 @@ text/JSON output. No existing `--policy` or severity option changes meaning.
 
 Migration stages:
 
-1. Ship evaluator/reporting behind explicit `contract.mode: public-v2`; compare old/new decisions in CI telemetry.
+1. Ship evaluator/reporting behind an internal rollout feature flag and compare
+   old/new decisions in CI telemetry. The flag must not introduce or serialize a
+   third `contract.mode`; effective mode remains `public` or `exports`.
 2. Make `public_contract` available as a preset; retain current default.
 3. Validate real-world false-negative/false-positive corpus, especially case97 and pvxs.
 4. Flip default after release notes and one deprecation cycle.
@@ -544,6 +548,21 @@ verdict. Add explicit combinations for contract coverage exit 1 with severity
 1/2/4, scan budget 5, invalid config 64, release operational error 4, and
 removed-library 8. Exercise text, JSON, SARIF, JUnit, markdown/GitHub output,
 and aggregate ingestion from the same canonical fixtures.
+
+Add a table-driven CLI/config resolution suite that separately proves:
+
+- explicit `--contract` overrides a legacy scope flag, profile, config, and
+  default, while recording source `explicit_cli`;
+- `--scope-public-headers` resolves to `public` and
+  `--no-scope-public-headers` resolves to `exports`, each overriding profile,
+  config, and default while recording source `legacy_alias`;
+- profile overrides config/default and config overrides the built-in default,
+  with the effective value and source serialized in every case;
+- contradictory explicit new/legacy options and contradictory legacy aliases
+  fail with exit 64;
+- equivalent values supplied through multiple layers remain deterministic and
+  still report the highest-precedence source rather than whichever parser ran
+  last.
 
 ### 10.3 Regression tests
 
