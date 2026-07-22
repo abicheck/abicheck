@@ -133,8 +133,12 @@ _CPP_PATTERNS = [_EXTERN_C_PATTERN, *_CPP_ONLY_PATTERNS]
 # the C++20 keyword (Codex/false-positive report).
 _CPP20_CONCEPT_PATTERN = re.compile(rb"\bconcept\s+\w+\s*=")  # concept Addable = ...
 _CPP20_REQUIRES_EXPR_PATTERN = re.compile(
-    rb"\brequires\s*\("
-)  # requires(T a, T b) { ... }
+    rb"\brequires\s*[(\{]"
+)  # requires(T a, T b) { ... }  OR the parameterless requires { ... } form
+# (Codex review: the parameterless form has no parenthesized parameter list —
+# `requires { typename T::value_type; }` — and was previously missed
+# entirely, since the requires-clause pattern below also requires a \w
+# immediately after "requires", which a bare "{" is not.)
 _CPP20_REQUIRES_CLAUSE_PATTERN = re.compile(
     rb"\brequires\s+\w"
 )  # template<T> requires Foo<T>

@@ -100,6 +100,24 @@ def test_cpp20_detector_accepts_requires_expression(tmp_path):
     assert _detect_cpp20_headers(headers) is True
 
 
+def test_cpp20_detector_accepts_parameterless_requires_expression(tmp_path):
+    """Regression (Codex review): a requires-expression with no parameter
+    list (``requires { ... }``, as opposed to ``requires(T a) { ... }``)
+    matched neither the requires-expression pattern (which required a `(`)
+    nor the requires-clause pattern (which required a `\\w` immediately after
+    "requires", not a bare `{`) — so headers using only this form were never
+    detected as needing ``-std=gnu++20``."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "template<class T>\n"
+        "constexpr bool has_value_type = requires { typename T::value_type; };\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "requires-expression" for r in reqs)
+
+
 def test_cpp20_detector_accepts_inline_concept_declaration(tmp_path):
     headers = _write(
         tmp_path,
