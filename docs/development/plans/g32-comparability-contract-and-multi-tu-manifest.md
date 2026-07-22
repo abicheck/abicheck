@@ -59,16 +59,19 @@ D's parser and `host`-default path don't depend on B, though selecting a
 *non-default* context needs Phase B's `frontend_context` field/flag to
 request it (see Phase D). Phase C starts only after Phase B lands, since
 it operates on the `TuFragment` contract Phase B defines and produces —
-it is not a third parallel branch alongside B and D. E depends on A
-(needs the fingerprints to extend the cache key) and loosely on B (the
-per-TU loop it schedules); the cache-key half of E can land right after A
-without waiting for B if useful on its own.
+it is not a third parallel branch alongside B and D. E depends on B, not
+directly on A: its cache-key half targets the manifest's
+`contributes_to_abi`/`required` flags (Phase B's schema), not
+`profile_fingerprint`/`scope_fingerprint` themselves — those can never be
+pre-dump cache-key inputs (see Phase E) — and its scheduling half schedules
+Phase B's per-TU loop.
 
 ```
-Phase 0 (fixtures) ──┬──▶ Phase A (contract + gate) ──┬──▶ Phase E (scheduling + cache)
-                      │                                │
-                      ├──▶ Phase B (manifest/multi-TU) ─┴─▶ Phase C (compatible merge)
+Phase 0 (fixtures) ──┬──▶ Phase A (contract + gate)
                       │
+                      ├──▶ Phase B (manifest/multi-TU) ─┬─▶ Phase C (compatible merge)
+                      │                                 │
+                      │                                 └─▶ Phase E (scheduling + cache)
                       └──▶ Phase D (SYCL host/device context)
 ```
 
@@ -219,7 +222,21 @@ Implements ADR-050 D1 and D2.
   flag per TU, reusing a proven parser at a new call site, not a second
   compiler invocation or a directory-tree walk. `profile_fingerprint`'s
   `-I` component is the hash of the **ordered** sequence of per-directory
-  digests. This is lossless: byte-identical dependency content at different mount points
+  digests — **after excluding every path `scope_fingerprint` already
+  covers for that side (the explicit `--header`/manifest TU entry points),
+  not the depfile's raw output.** The documented real-world workflow
+  (`docs/user-guide/real-world-example.md:61-63`) passes the project's own
+  include root as *both* `--header` (the headers being compared) and
+  `--include` (so `#include` resolves) — the same directory serves both
+  roles, so a depfile for that TU necessarily lists the very header being
+  compared alongside its support headers. Hashing the depfile's output
+  unfiltered would feed that header's content into `profile_fingerprint`
+  too, and an ordinary, intentional edit to it would flip
+  `profile_fingerprint` and hard-fail `PROFILE_MISMATCH` before the diff
+  ever ran — on the routine case this whole ADR exists to keep working, not
+  an edge case. `scope_fingerprint` owns "what's declared and compared";
+  `profile_fingerprint` owns "what environment resolved it"; a file cannot
+  honestly feed both. This is lossless: byte-identical dependency content at different mount points
   normalizes identically (attempt one's routine case, still correct);
   genuinely different content normalizes differently regardless of naming
   (the `dep-v1`/`dep-v2` case both attempt one and two mishandled); a
@@ -236,7 +253,7 @@ Implements ADR-050 D1 and D2.
   the manifest file's own directory — none of these legacy-CLI cases
   exist there.
 
-  Seven dedicated tests are non-negotiable for this phase to be considered
+  Eight dedicated tests are non-negotiable for this phase to be considered
   done: (1) `--header old=v1/foo.h --header new=v2/foo.h` against logically
   identical trees under different roots asserts the resulting
   **`scope_fingerprint`s** match (not `profile_fingerprint` — headers are a
@@ -263,7 +280,17 @@ Implements ADR-050 D1 and D2.
   the target of any declaration's `source_location`) produce *different*
   `profile_fingerprint`s — proving the digest is sourced from the depfile's
   full resolved-file list, not the narrower per-declaration set, the
-  specific under-counting gap this design's own history exists to close.
+  specific under-counting gap this design's own history exists to close;
+  (8) the documented real-world shape — `--header old=old/include/foo.h
+  --header new=new/include/foo.h --include old=old/include --include
+  new=new/include`, the same directory serving both roles — with an
+  **ordinary content edit to `foo.h` itself** between old and new produces
+  a *different* `scope_fingerprint` (correctly reflecting the compared
+  surface changed) but the *same* `profile_fingerprint` (the environment
+  that resolved it did not) — proving the exclusion actually prevents the
+  routine, intentional-header-edit case from spuriously hard-failing
+  `PROFILE_MISMATCH`, the specific regression this exclusion exists to
+  close.
 - **Modeling `contract` is not the same as populating it — this phase must
   do both.** `dump()` (`dumper.py`) is the one place that already resolves
   every input both fingerprints need; it calls
@@ -283,10 +310,11 @@ Implements ADR-050 D1 and D2.
   `snapshot_cache._SNAPSHOT_CACHE_VERSION` (`:48`, currently `"3"`) is
   bumped in this same phase so every pre-Phase-A cache entry misses once
   and gets rebuilt through the now-`contract`-populating `dump()`. This is
-  separate from Phase E's later `profile_fingerprint`/`scope_fingerprint`-
-  as-cache-key work (a different gap: a pure profile change with identical
-  headers not invalidating) and cannot be deferred to it without leaving
-  the gate inert for every warm-cache user until Phase E ships.
+  separate from Phase E's later manifest-driven `scope_fingerprint`
+  cache-key work (a different gap: pre-dump-knowable manifest fields the
+  existing filesystem-only cache key can't see) and cannot be deferred to
+  it without leaving the gate inert for every warm-cache user until Phase E
+  ships.
 - **A third cache gap, ongoing rather than one-time, also lands here:**
   `_cache_key()` (`snapshot_cache.py:159,168`) hashes `sorted(headers)`/
   `sorted(includes)` — order-*insensitive* — while D1's fingerprints are
@@ -297,10 +325,9 @@ Implements ADR-050 D1 and D2.
   recomputed for the new order, since a cache hit skips `dump()` entirely.
   This phase drops `sorted(...)` for `headers`/`includes` in `_cache_key()`
   and hashes them in caller-supplied order instead; deferring this to
-  Phase E doesn't help, since Phase E's cache-key work addresses a
-  different, narrower gap (identical header *content*, pure profile
-  change) and wouldn't by itself make the existing sorted hashing
-  order-preserving.
+  Phase E doesn't help, since Phase E's cache-key work is scoped to a
+  different, manifest-only gap (see Phase E) and wouldn't by itself make
+  the existing sorted hashing order-preserving.
 - `serialization.SCHEMA_VERSION` is bumped (11 → 12) in the same change
   that starts writing `contract` — **not** treated as a free additive field
   the way ADR-041's advisory `extractor_passes`/`narrowed_passes` were. The
@@ -1022,9 +1049,12 @@ is extraction-layer, not diff-layer; no new `ChangeKind`.
 
 ## Phase E — Resource-aware frontend scheduling and cache-key extension
 
-Implements ADR-050 D6. Depends on Phase A (fingerprints for the cache key);
-the scheduling half loosely depends on Phase B (the per-TU loop it
-schedules) but the cache-key half can land immediately after Phase A.
+Implements ADR-050 D6. The cache-key half targets the manifest's
+`contributes_to_abi`/`required` flags, so it depends on Phase B (the
+manifest schema those flags live on), not on Phase A's fingerprints
+themselves — `profile_fingerprint`/`scope_fingerprint` are never used as
+cache-key inputs (see the acceptance-criteria bullet below for why). The
+scheduling half depends on Phase B too (the per-TU loop it schedules).
 
 **Goal & acceptance criteria.**
 - The RAM-probing/pool-sizing helper in `buildsource/source_replay.py` is
@@ -1035,21 +1065,47 @@ schedules) but the cache-key half can land immediately after Phase A.
 - `dumper.py`'s per-TU castxml/clang invocations (Phase B) run under this
   pool instead of a fully sequential loop; a killed/timed-out TU records
   its exit signal and never silently retries as a clean empty TU.
-- `snapshot_cache.py`'s `_cache_key()` (`:130`) gains
-  `profile_fingerprint`/`scope_fingerprint` as additional key inputs — a
-  pure compile-profile change with identical header content now correctly
-  invalidates the cache, closing the one real gap in an otherwise-already-
-  correct (content-hash-based) cache design.
+- **`profile_fingerprint` itself cannot be a cache-key input — this phase
+  does not attempt it.** `cached_run_dump` looks up `snapshot_cache`
+  *before* calling `dump()` (Phase A); `profile_fingerprint`'s `-I`
+  component is a depfile digest that only exists *after* an L2
+  castxml/clang invocation runs, so using it as a pre-lookup key input
+  would require running the very extraction the cache exists to skip —
+  circular, not merely undesirable. `_cache_key()` already closes the
+  practical gap this phase originally targeted, without either
+  fingerprint: it recurses every `-I`/`-H` directory
+  (`header_utils.iter_cache_header_files`) and hashes each matched file's
+  content and mtime, pre-dump, no compiler invocation needed. This
+  deliberately over-approximates (hashes every header-like file reachable
+  under the directory, not only ones a given compile would resolve) —
+  correct for a cache key, where a false miss just costs a redundant dump
+  and a false hit would serve a stale `contract`, unlike
+  `profile_fingerprint` itself, which must be exact or the gate spuriously
+  fires. Phase A's own order-sensitivity fix (dropping `sorted(...)` for
+  `headers`/`includes`) already closes the remaining gap that mattered for
+  the legacy CLI path. `snapshot_cache.py`'s `_cache_key()` (`:130`)
+  instead gains the manifest-driven `scope_fingerprint` inputs that
+  genuinely are pre-dump-knowable and that `iter_cache_header_files`'s
+  filesystem walk has no way to see, since they aren't file content at
+  all: a TU's `contributes_to_abi`/`required` flags (D3/D4) — flipping
+  either changes which declarations feed the ABI model without necessarily
+  touching any file content, so today's content-hash-only key would miss
+  that class of drift on a manifest-driven dump.
 
 **Files & surfaces.** New `abicheck/process_resources.py`,
 `buildsource/source_replay.py` (import from it instead of its own inline
 implementation), `dumper.py` (per-TU pool), `snapshot_cache.py`
-(`_cache_key` inputs).
+(`_cache_key` gains the manifest's per-TU `contributes_to_abi`/`required`
+flags as additional key inputs — not `profile_fingerprint`/
+`scope_fingerprint` themselves).
 
 **Tests.** `process_resources.py` unit tests migrated from
 `source_replay.py`'s existing RAM-probing tests (same behavior, new import
 path — a refactor test, not new coverage). Cache-key test: identical
-headers, differing `profile_fingerprint` ⇒ cache miss.
+manifest TU includes, differing only a TU's `contributes_to_abi` flag ⇒
+cache miss — the specific pre-dump-knowable gap this phase closes,
+distinct from Phase A's already-completed order-sensitivity and
+whole-snapshot-cache-version fixes.
 
 **Out of scope.** No new scheduling *policy* — this phase ports the
 existing, already-proven `source_replay.py` policy verbatim; a different

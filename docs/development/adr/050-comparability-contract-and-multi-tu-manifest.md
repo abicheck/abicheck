@@ -300,6 +300,31 @@ walk — rather than inventing new file-discovery logic. `profile_fingerprint`'s
 `-I` component is the hash of the **ordered** sequence of per-directory
 digests.
 
+**The digest must exclude every path already claimed by `scope_fingerprint`
+— this is not an optional refinement, it is the difference between a
+working gate and one that hard-fails on every ordinary compare.** The
+documented real-world workflow (`docs/user-guide/real-world-example.md:61-63`)
+passes the project's own include root as *both* `--header` (the declared
+public headers being compared) *and* `--include` (so `#include "foo.h"`
+resolves) — the same directory serves both roles. A depfile for that TU
+necessarily lists `foo.h` itself alongside its supporting headers, since
+`foo.h` is exactly what got compiled. If the naive digest above hashed
+every depfile-listed path unconditionally, `foo.h` — the header the diff
+exists to compare — would feed `profile_fingerprint` too, and an ordinary,
+intentional edit to `foo.h` (changing its content hash) would flip
+`profile_fingerprint` and hard-fail `PROFILE_MISMATCH` *before* the diff
+ever ran, on literally the routine case this whole ADR exists to support.
+Each `-I` directory's digest is therefore built from its depfile-resolved
+file list **minus** the set of paths `scope_fingerprint` already covers for
+that side (the explicit `--header`/manifest TU entry points) — leaving only
+the supporting/dependency files a TU pulls in but never directly declares.
+This is a strict partition, not a heuristic: `scope_fingerprint` owns
+"what's declared and compared"; `profile_fingerprint` owns "what
+environment resolved it," and a file cannot honestly belong to both. A
+header that stops being resolved purely as a support file and becomes a
+directly-declared entry point (or vice versa) moves from one fingerprint's
+input set to the other's, not into both or neither.
+
 This is lossless with respect to every case the three rejected attempts
 traded off against each other, because content, unlike a path, is not
 ambiguous: two checkouts of a byte-identical dependency normalize
@@ -357,12 +382,12 @@ also bumps `snapshot_cache._SNAPSHOT_CACHE_VERSION` (`:48`, currently
 `"3"`) in the same change — folded into `_cache_key()` (`:196`) already, so
 every pre-this-ADR cache entry misses exactly once and gets rebuilt through
 the now-`contract`-populating `dump()`. This is deliberately separate from
-D6's later `profile_fingerprint`/`scope_fingerprint`-as-cache-key-input
-work: that closes a *different* gap (a pure compile-profile change with
-identical header content not invalidating the cache); this one closes
-"the cache doesn't know `contract` exists yet at all," and cannot wait for
-D6's phase without leaving the gate inert for every warm-cache user in the
-interim.
+D6's later manifest-driven `scope_fingerprint` cache-key work (see D6): that
+closes a *different* gap (pre-dump-knowable manifest fields, `contributes_to_abi`/
+`required`, that today's filesystem-only cache key can't see); this one
+closes "the cache doesn't know `contract` exists yet at all," and cannot
+wait for D6's phase without leaving the gate inert for every warm-cache user
+in the interim.
 
 **A third, ongoing cache gap — not a one-time migration issue like the
 two above — also has to land in this phase: `_cache_key()`'s own hashing
@@ -845,12 +870,38 @@ under this pool instead of today's fully sequential loop; a killed/timed-out
 TU is recorded with its exit signal, never silently retried as a clean
 empty TU.
 
-`snapshot_cache.py`'s existing content-hash cache key (`:130`) gains the
-`profile_fingerprint`/`scope_fingerprint` as additional key inputs — the
-cache already invalidates correctly on header-content drift (the review's
-"shadowing header" scenario is not a real gap here, see Context); it does
-not yet invalidate on a pure compile-profile change with identical header
-content, which the two new fingerprints close.
+**Adding `profile_fingerprint` itself as a cache-key input is impossible,
+not merely undesirable — D1's own depfile design rules it out.**
+`service_dump_cache.cached_run_dump` looks up `snapshot_cache` *before*
+calling `dump()` (D1's "whole-snapshot cache is the same bypass" note
+above); `profile_fingerprint`'s `-I` component is a depfile-derived digest
+that only exists *after* an L2 castxml/clang invocation runs. A cache-key
+input computed only by running the extraction the cache exists to skip is
+circular — this was an error in an earlier revision of this paragraph, not
+a deferred detail. `scope_fingerprint`, for the manifest-driven path (D3),
+is different: it is fully determined by the normalized manifest document
+itself, known *before* any TU is dumped, so it genuinely can feed a cache
+key without running anything. `snapshot_cache.py`'s existing content-hash
+cache key (`:130`) already closes the practical gap this section originally
+set out to close for the legacy CLI path, without needing either
+fingerprint: it recurses every `-I`/`-H` directory
+(`header_utils.iter_cache_header_files`, `rglob` over header-suffix files)
+and hashes each matched file's content and mtime — entirely pre-dump, no
+compiler invocation required. This over-approximates deliberately (it hashes
+every header-like file reachable under the directory, not only files a
+given compile would actually resolve), which is the *correct* asymmetry for
+a cache key: a false cache **miss** just costs a redundant dump, while a
+false cache **hit** would serve a stale `contract`, so erring toward "hash
+too much" is the safe direction here — the opposite of `profile_fingerprint`
+itself, which must be exactly right or the gate spuriously fires. This
+existing mechanism, plus D1's own order-sensitivity fix (Phase A, not
+deferred here) already invalidates on the cases that matter; D6 adds no
+further cache-key work for the `-I`/profile side beyond that. D6's cache-key
+extension is instead scoped to what genuinely is pre-dump-knowable and not
+already covered: the manifest-driven `scope_fingerprint` inputs (TU
+`required`/`contributes_to_abi` flags, D3), which the existing
+`iter_cache_header_files` walk has no way to see since they aren't
+filesystem content at all.
 
 ## Non-goals
 
