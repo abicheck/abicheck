@@ -196,31 +196,55 @@ fix exists to close: the header paths then normalize relative to `/`, so
 checkout roots (`work/v1/foo.h` vs. `work/v2/foo.h`) into
 `scope_fingerprint`, hard-failing an otherwise-identical comparison.
 
-For the legacy, non-manifest CLI path: `scope_fingerprint`'s root is the
+For the legacy, non-manifest CLI path, `scope_fingerprint`'s root is the
 common ancestor **directory** of that side's own header paths' *parent*
-directories only (never `-I` directories); `profile_fingerprint`'s root is
-computed the same way but from that side's own `-I` directories only,
-independently. Computing either root from bare paths, rather than parent
-directories, degenerates in the single-entry case that's actually the
-common one: the "common prefix" of a one-element path set is that whole
-path, so `old=v1/foo.h` and `new=v2/bar.h` would both normalize their sole
-header to the same empty/root marker, losing the filename entirely — two
-genuinely different public scopes would then hash identically and wrongly
-pass the gate, the opposite failure from the one this fix exists to close.
-Taking the parent directory first means a lone header's basename survives
-normalization (`v1/foo.h` → root `v1/`, normalized path `foo.h`); for the
-manifest-driven path (D3), both roots are the manifest file's own
+directories only (never `-I` directories). Computing it from the header
+paths directly, rather than their parents, degenerates in the single-entry
+case that's actually the common one: the "common prefix" of a one-element
+path set is that whole path, so `old=v1/foo.h` and `new=v2/bar.h` would
+both normalize their sole header to the same empty/root marker, losing the
+filename entirely — two genuinely different public scopes would then hash
+identically and wrongly pass the gate. Taking the parent directory first
+means a lone header's basename survives normalization (`v1/foo.h` → root
+`v1/`, normalized path `foo.h`).
+
+**`profile_fingerprint`'s `-I` directories do *not* use the same
+parent-directory rule — a lone `-I` directory needs a different fix, not
+the header one applied by analogy.** The header fix's goal is "make the
+filename survive"; for a directory (no filename to preserve), taking its
+own parent as root strips *all* distinguishing structure in the
+single-entry case: `--include old=/opt/dep-v1/include --include
+new=/opt/dep-v2/include` would each normalize to `include` relative to
+their own root (`/opt/dep-v1`, `/opt/dep-v2` respectively) — hashing
+identically and silently erasing a genuine dependency-version difference
+this fingerprint should be able to catch, the same class of bug as the
+header case but with the opposite fix required. Whether a
+differently-rooted `-I` path represents "the same dependency, different
+checkout mount point" (should normalize) or "a genuinely different
+dependency version" (should not) is not decidable from path shape alone —
+unlike headers, where ADR-040's `old=`/`new=` design exists specifically
+for the "same project, two checkouts" case, an external `-I` directory has
+no comparably strong prior. `profile_fingerprint` therefore hashes each
+`-I` directory's **last two path components** (its own basename plus its
+immediate parent's basename) rather than attempting root-relative
+normalization at all: `/opt/dep-v1/include` → `dep-v1/include`,
+`/opt/dep-v2/include` → `dep-v2/include` — correctly distinct. This is a
+bounded, explicitly imperfect compromise, not a general solution: a
+checkout-root difference expressed exactly two segments above the `-I`
+directory (e.g. `--include old=/work/v1/vendor/include --include
+new=/work/v2/vendor/include`, if `vendor/include` is the last two
+segments) still spuriously mismatches, the mirror image of the problem
+this fix is closing. Multiple `-I` directories per side (2+) instead use
+the same common-ancestor-of-parents approach as headers, since real anchor
+points exist there the same way they do for multiple headers.
+
+For the manifest-driven path (D3), both roots are the manifest file's own
 directory (a manifest's `includes`/`forced_includes` and its base
-profile's search paths are declared relative to one document, so no
-external-directory contamination is possible there). Two sides with the
-same logical directory layout (`include/foo.h` under each side's own
-header root, `/opt/dep` identical or side-scoped independently under its
-own `-I` root) normalize to identical relative paths in both fingerprints
-and produce equal results regardless of where each checkout happens to
-live on disk or where its dependency directories are mounted; a side whose
-logical layout actually differs (a header moved to a different relative
-location, or a genuinely different dependency version under a differently
-laid-out path) still changes the corresponding fingerprint, correctly.
+profile's search paths are declared relative to one document, so neither
+the header nor the `-I` degenerate case, nor external-directory
+contamination, is possible there) — the manifest path is the fully
+general fix; the legacy-path heuristics above exist only because the
+legacy CLI has no such document to anchor against.
 
 Both fingerprints live in a new `contract: ExtractionContract | None` field
 on `AbiSnapshot` rather than flattening two more top-level fields onto an
@@ -407,12 +431,21 @@ not raw AST), instead of today's single aggregate-then-parse call. This is
 additive — the existing single-TU code path becomes the manifest path's
 one-TU special case, not a parallel implementation to keep in sync.
 
-A base compile profile (compiler, target, language standard, global flags)
+A base compile profile (compiler, target, language standard, global flags,
+and `frontend_context` — `host` by default, D5's requested AST context)
 is shared across all TUs in one manifest; **different compilers or target
 triples across TUs in the same manifest are rejected at parse time** — that
 is two different ABI contexts, which stay two separate snapshots (and two
 separate `profile_fingerprint`s) rather than one snapshot pretending to
 speak for both. Only forced includes and include order vary per TU.
+`frontend_context` is declared here, in the base profile, precisely
+because D5 needs an accepted input path to request it — a manifest schema
+that only carries `roots`/`translation_units` gives a DPC++ flow needing a
+non-default context nowhere to put the request. The legacy, non-manifest
+CLI path gains a matching `--frontend-context host|device` flag (default
+`host`), threaded the same way `--lang`/other base-profile flags already
+are, so a caller not using a manifest can still opt into the non-default
+context.
 
 ### D4. Compatible merge across translation units
 
@@ -426,8 +459,28 @@ only in an added default argument. Two full declarations disagreeing on
 return type, layout, or calling convention is an `INCONSISTENT_DECLARATION`
 conflict; a heterogeneous-context conflict (should D3's per-manifest
 single-profile rule ever be relaxed later) is
-`HETEROGENEOUS_ABI_CONTEXT`. A snapshot with unresolved conflicts is not a
-`CompleteSnapshot` and cannot feed D2's comparability gate as a clean side.
+`HETEROGENEOUS_ABI_CONTEXT`.
+
+**Both are extraction-time conflict codes on a new `TuMergeError`
+(`errors.py`), not `ChangeKind` enum members — this needs saying
+explicitly, since the all-caps naming otherwise reads exactly like one.**
+The distinction is structural, not stylistic: a `ChangeKind` is something
+`checker.compare`'s diff produces when comparing two already-`Complete`
+snapshots; these two fire *before* a snapshot is ever considered complete
+enough to diff at all — a snapshot with unresolved conflicts is not a
+`CompleteSnapshot` and cannot feed D2's comparability gate as a clean
+side. A merge conflict at TU-fragment level is the D3/D4 layer's own
+extraction-time failure (parallel to `IncompatibleSnapshotSchemaError` from
+D1, or `DumpDepthNotSatisfiedError`'s existing precedent), not a
+comparison finding — so they are correctly *outside* the `ChangeKind`
+registry and its four-step procedure, `changekind-partition`/
+`changekind-detector` completeness gates, and `RISK_KINDS`/`QUALITY_KINDS`
+severity classification entirely. `tu_merge.merge_fragments(...)` raises
+`TuMergeError(code=...)` (`code` one of the two strings above, plus the
+conflicting `entity_key` and both fragments' provenance) when any conflict
+is unresolved; `dumper.py`'s manifest-driven `dump()` lets it propagate,
+producing an `IncompleteAttempt`/extraction failure the same way a
+required TU's compile failure already does (D3).
 
 `entity_key` deliberately excludes return type (keeping it in `abi_facts`,
 not the merge key) — folding return type into identity turns a return-type

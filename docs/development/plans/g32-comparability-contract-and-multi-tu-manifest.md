@@ -50,7 +50,9 @@ and start providing value (as a report-only signal) independently of B–E —
 it does not require multi-TU support to be useful, since even today's
 single-aggregate-TU snapshots have a real, checkable `profile_fingerprint`.
 B, C, and D can proceed in parallel once Phase 0's fixtures exist (C
-depends on B landing first; D does not depend on B or C). E depends on A
+depends on B landing first; D's parser and `host`-default path don't
+depend on B or C, though selecting a *non-default* context needs Phase B's
+`frontend_context` field/flag to request it — see Phase D). E depends on A
 (needs the fingerprints to extend the cache key) and loosely on B (the
 per-TU loop it schedules); the cache-key half of E can land right after A
 without waiting for B if useful on its own.
@@ -143,20 +145,41 @@ Implements ADR-050 D1 and D2.
   (`work/v1/foo.h` vs. `work/v2/foo.h`) and `scope_fingerprint` mismatches
   anyway — the exact bug this whole fix exists to close, reintroduced by
   mixing an unrelated path category into the same root computation.
-  Each root (legacy CLI path: the common ancestor **directory** of that
-  side's own paths in that one category — each header's *parent* directory
-  for `scope_fingerprint`, each `-I` directory itself for
-  `profile_fingerprint`; manifest path: the manifest file's own directory
-  for both) before
-  hashing (ADR-050 D1). Deriving a root from header paths directly instead
-  of their parents breaks the single-header-per-side case — the common
-  ancestor of a one-element path set is that whole path, so `old=v1/foo.h`
-  and `new=v2/bar.h` would both normalize to the same empty marker and hash
-  identically despite being different scopes, the opposite failure from the
-  one this fix exists to close; taking the parent directory first preserves
-  the filename (`v1/foo.h` → root `v1/`, normalized `foo.h`). Three
-  dedicated tests are non-negotiable for this phase to be considered done:
-  (1) `--header old=v1/foo.h --header new=v2/foo.h` against logically
+  For the legacy CLI path, `scope_fingerprint`'s root is the common
+  ancestor **directory** of that side's header paths' *parent* directories
+  only (never `-I` directories). Deriving it from header paths directly
+  instead of their parents breaks the single-header-per-side case — the
+  common ancestor of a one-element path set is that whole path, so
+  `old=v1/foo.h` and `new=v2/bar.h` would both normalize to the same empty
+  marker and hash identically despite being different scopes, the opposite
+  failure from the one this fix exists to close; taking the parent
+  directory first preserves the filename (`v1/foo.h` → root `v1/`,
+  normalized `foo.h`).
+  **`profile_fingerprint`'s `-I` directories do not use that same
+  parent-directory rule.** A lone `-I` directory has no filename to
+  preserve, so taking its parent as root strips all distinguishing
+  structure: `--include old=/opt/dep-v1/include --include
+  new=/opt/dep-v2/include` would both normalize to `include`, silently
+  erasing a genuine dependency-version difference. Whether a
+  differently-rooted `-I` path means "same dependency, different checkout
+  mount point" or "genuinely different dependency version" isn't decidable
+  from path shape alone, unlike headers (where ADR-040's `old=`/`new=`
+  design exists specifically for the same-project-two-checkouts case).
+  `profile_fingerprint` therefore hashes each **single** `-I` directory's
+  last two path components (its own basename plus its immediate parent's
+  basename) instead of attempting root-relative normalization at all —
+  `dep-v1/include` vs. `dep-v2/include`, correctly distinct — a bounded,
+  explicitly imperfect compromise (a checkout-root difference expressed
+  exactly two segments up still spuriously mismatches), not a general fix.
+  Multiple `-I` directories per side (2+) use the same
+  common-ancestor-of-parents approach as headers instead, since real
+  anchor points exist there. For the manifest path (D3), both fingerprints'
+  roots are simply the manifest file's own directory — none of these
+  legacy-path degenerate cases exist there, since every manifest-declared
+  path is already relative to one document.
+
+  Four dedicated tests are non-negotiable for this phase to be considered
+  done: (1) `--header old=v1/foo.h --header new=v2/foo.h` against logically
   identical trees under different roots asserts the resulting
   **`scope_fingerprint`s** match (not `profile_fingerprint` — headers are a
   scope input, and a test that only checks `profile_fingerprint` here can
@@ -166,6 +189,10 @@ Implements ADR-050 D1 and D2.
   `--include old=/opt/dep --include new=/opt/dep` alongside case (1)'s
   headers still leaves `scope_fingerprint` matching — the specific
   external-dependency-directory regression this criterion exists to
+  prevent; (4) `--include old=/opt/dep-v1/include --include
+  new=/opt/dep-v2/include` (a lone, genuinely different `-I` directory per
+  side) produces *different* `profile_fingerprint`s — the specific
+  degenerate-single-`-I`-directory regression this criterion exists to
   prevent.
 - **Modeling `contract` is not the same as populating it — this phase must
   do both.** `dump()` (`dumper.py`) is the one place that already resolves
@@ -398,7 +425,13 @@ Implements ADR-050 D3. The highest-risk phase — see Risk above.
 - New `abicheck/dump_manifest.py`: strict YAML parser (unknown fields
   error), `roots`/`translation_units` schema, `name`-uniqueness,
   `contributes_to_abi=True ⇒ required=True` invariant enforced at parse
-  time (a validation error, not a silent coercion).
+  time (a validation error, not a silent coercion). The base-profile
+  section also accepts `frontend_context` (`host` default) — the field
+  Phase D's context selector needs an accepted input path for; a manifest
+  schema that only carried `roots`/`translation_units` would leave a
+  DPC++ flow needing a non-default context with nowhere to request it
+  (ADR-050 D3). The legacy, non-manifest CLI path gains a matching
+  `--frontend-context host|device` flag (default `host`).
 - `dumper.py` gains a manifest-driven `dump()` path: one castxml/clang
   invocation per TU (shared base profile + that TU's own forced includes),
   each producing a `TuFragment`. The existing single-header CLI path
@@ -434,10 +467,12 @@ command" procedure, steps 3–4) — `cli_dump_helpers.py` (extend
 `resolve_dump_depth`/`check_requested_depth_satisfied` to operate per-TU).
 
 **Tests.** Manifest parser unit tests (the invariant violation, duplicate
-TU names, unknown fields, relative-path resolution). `dumper.py` multi-TU
+TU names, unknown fields, relative-path resolution, `frontend_context`
+accepted/defaulted/rejected-when-invalid). `dumper.py` multi-TU
 integration tests (`@pytest.mark.integration`, needs castxml/clang) using
 Phase 0's fixtures. A `plan --manifest` unit test asserting it never invokes
-a compiler.
+a compiler. A `--frontend-context` CLI-flag unit test for the legacy
+(non-manifest) path, mirroring the manifest-field test.
 
 **Example fixtures.** Phase 0's ODR-safe and external-STL-noise pairs,
 wired through the real manifest path end to end.
@@ -463,6 +498,21 @@ Implements ADR-050 D4. Depends on Phase B.
   convention), or `HETEROGENEOUS_ABI_CONTEXT` (should Phase B's
   single-profile-per-manifest rule ever be relaxed — not expected in this
   phase).
+- **`INCONSISTENT_DECLARATION`/`HETEROGENEOUS_ABI_CONTEXT` are conflict
+  codes on a new `TuMergeError` (`errors.py`), not `ChangeKind` enum
+  members — despite the naming convention looking identical to one.** They
+  fire during extraction/merge, before a snapshot is ever `Complete` enough
+  to diff (see the bullet below) — `checker.compare` never runs on a
+  conflicted merge, so there is no comparison for a `ChangeKind` to
+  describe. Registering them through the four-step `ChangeKind` procedure
+  would be a category error: they'd never fire from a detector during
+  `compare`, so `changekind-detector`'s orphan check would immediately flag
+  them, and severity/`RISK_KINDS`/`QUALITY_KINDS` classification doesn't
+  apply to something that blocks a comparison from happening at all.
+  `tu_merge.merge_fragments(...)` raises `TuMergeError(code=...)` directly;
+  `dumper.py`'s manifest-driven `dump()` lets it propagate as an
+  `IncompleteAttempt`, the same shape a required TU's compile failure
+  already produces (Phase B).
 - `entity_key` excludes return type (kept in `abi_facts`) — reuses the
   ADR-045/048 "prefer specific identity, never fold a mutable fact into the
   key" principle explicitly, not a fresh design.
@@ -474,31 +524,45 @@ Implements ADR-050 D4. Depends on Phase B.
 
 **Files & surfaces.** New `abicheck/tu_merge.py`, reusing
 `buildsource/crosscheck.py`'s existing merge/classify shape (not a new
-algorithm — see ADR-050 D4). `dumper.py`'s manifest path calls this instead
-of Phase B's placeholder concatenation.
+algorithm — see ADR-050 D4), `errors.py` (`TuMergeError`). `dumper.py`'s
+manifest path calls this instead of Phase B's placeholder concatenation.
 
 **Tests.** Phase 0's ODR-safe fixture (must merge cleanly) and
-conflicting-return-type fixture (must produce `INCONSISTENT_DECLARATION`);
-an order-independence property test (`tests/test_detector_properties.py`
-style, per the repo's existing metamorphic-test convention).
+conflicting-return-type fixture (must raise `TuMergeError(code="INCONSISTENT_DECLARATION")`
+— not produce a `Change`/finding); an order-independence property test
+(`tests/test_detector_properties.py` style, per the repo's existing
+metamorphic-test convention); a test confirming `TuMergeError` is never
+registered as a `ChangeKind` (no `checker_policy.ChangeKind` member, no
+`change_registry*.py` entry) — guarding against the exact ambiguity this
+phase's own naming otherwise invites.
 
-**Example fixtures.** `examples/case2xx_multi_tu_compatible_merge/`,
-`examples/case2xx_multi_tu_inconsistent_declaration/`.
+**Example fixtures.** `examples/case2xx_multi_tu_compatible_merge/` only —
+the conflicting-return-type case is an extraction failure, not a
+verdict-producing comparison, so it doesn't fit the example catalog's
+`ground_truth.json` verdict convention; Phase 0's fixture plus the
+`TuMergeError` unit test above are its coverage instead.
 
 ---
 
 ## Phase D — SYCL/DPC++ host vs. device AST context selection
 
-Implements ADR-050 D5. Independent of Phases B/C; depends only on Phase 0's
-captured DPC++ fixture.
+Implements ADR-050 D5. Independent of Phase C's merge work; depends only
+on Phase 0's captured DPC++ fixture for the parser itself. Selecting a
+*non-default* context does have a soft dependency on Phase B, though: the
+`frontend_context` field (manifest base profile) and `--frontend-context`
+CLI flag this phase's selector reads are defined there, not here (Phase B
+"Goal & acceptance criteria"). Everything in this phase can be built and
+tested against the `host` default without Phase B, but a real DPC++
+device-context request has nowhere to come from until Phase B's field/flag
+exist.
 
 **Goal & acceptance criteria.**
 - New `abicheck/sycl_context.py`: decodes a DPC++ frontend's
   (possibly-multi-document) JSON output as a stream of `{kind, target,
   ast}` contexts — real document-boundary streaming, not a bracket/string
   split; rejects trailing garbage and truncated documents.
-- Context selection is explicit: the manifest/CLI's `frontend_context`
-  (`host` default) is matched against the compiler-reported target triple
+- Context selection is explicit: the manifest's/CLI's `frontend_context`
+  (`host` default, Phase B) is matched against the compiler-reported target triple
   of each decoded context; a run producing only a mismatched context
   (e.g. only `spir64` when `host` was requested) is `AST_CONTEXT_MISSING`,
   an extraction failure — never a successful snapshot with the wrong
