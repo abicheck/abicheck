@@ -310,9 +310,31 @@ underlying invocation. Every listed path is attributed to whichever declared
 `-I` directory contains it. This reuses a proven parser at a new call site —
 one additional cheap compiler flag per TU, not a second compiler invocation
 or a directory-tree walk — rather than inventing new file-discovery logic.
-`profile_fingerprint`'s
-`-I` component is the hash of the **ordered** sequence of per-directory
-digests.
+
+**Not every `-MD`-listed path falls under a declared `-I` directory, and
+those paths cannot be silently dropped or mis-attributed.** `dumper.py`
+already introduces header search paths that are never part of the
+user-declared `includes` list: `--sysroot` (`--sysroot=<path>`), the
+GNU-toolchain `-isystem` directories `dumper.py` probes and injects
+automatically (`_probe_gnu_system_includes`), and any `-isystem`/`-I`
+embedded in `--gcc-options`/`--gcc-option` pass-through flags. A depfile
+entry resolved through one of these has no declared `-I` directory to be
+attributed to under the per-directory rule above. Leaving this case
+unspecified would recreate the exact under-counting bug this whole redesign
+exists to close, one layer further out: a toolchain/sysroot/stdlib upgrade
+changing an ABI-relevant system header would never be attributed anywhere,
+so it would never affect `profile_fingerprint`, silently letting a genuine
+environment change through the gate. These paths — everything the depfile
+lists that isn't under any declared `-I` directory — instead feed one
+additional, explicitly-labeled **system/toolchain bucket**: a content
+digest of that unordered set (no path-shape normalization attempted here,
+since these paths aren't tied to any user-declared, order-sensitive `-I`
+sequence to begin with — unlike declared `-I` directories, order doesn't
+carry search-precedence *meaning* the fingerprint needs to preserve for
+this bucket). `profile_fingerprint`'s `-I` component is therefore the hash
+of the **ordered** sequence of per-`-I`-directory digests, **plus** this one
+additional system/toolchain bucket appended last, deterministically
+positioned so its presence or absence never depends on iteration order.
 
 **The digest must exclude every path already claimed by `scope_fingerprint`
 — this is not an optional refinement, it is the difference between a

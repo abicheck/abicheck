@@ -233,9 +233,23 @@ Implements ADR-050 D1 and D2.
   data-source choice. Every listed path is attributed to whichever declared
   `-I` directory contains it — one extra cheap compiler flag per TU,
   reusing a proven parser at a new call site, not a second compiler
-  invocation or a directory-tree walk. `profile_fingerprint`'s
+  invocation or a directory-tree walk.
+  **Not every `-MD`-listed path falls under a declared `-I` directory.**
+  `dumper.py` already introduces search paths outside the user-declared
+  `includes` list: `--sysroot`, the GNU-toolchain `-isystem` dirs it probes
+  and injects automatically (`_probe_gnu_system_includes`), and any
+  `-isystem`/`-I` embedded in `--gcc-options`/`--gcc-option` pass-through
+  flags. Leaving depfile entries resolved through these unattributed would
+  recreate this design's own under-counting bug one layer out — a
+  toolchain/sysroot upgrade changing an ABI-relevant system header would
+  never affect `profile_fingerprint`. Every depfile path not under any
+  declared `-I` directory instead feeds one additional, explicitly-labeled
+  **system/toolchain bucket** — a content digest of that unordered set (no
+  path-shape normalization attempted, since these paths carry no
+  user-declared search-order meaning to preserve). `profile_fingerprint`'s
   `-I` component is the hash of the **ordered** sequence of per-directory
-  digests — **after excluding every path `scope_fingerprint` already
+  digests, **plus this one system/toolchain bucket appended last** —
+  **after excluding every path `scope_fingerprint` already
   covers for that side (the explicit `--header`/manifest TU entry points),
   not the depfile's raw output.** The documented real-world workflow
   (`docs/user-guide/real-world-example.md:61-63`) passes the project's own
@@ -266,7 +280,7 @@ Implements ADR-050 D1 and D2.
   the manifest file's own directory — none of these legacy-CLI cases
   exist there.
 
-  Nine dedicated tests are non-negotiable for this phase to be considered
+  Ten dedicated tests are non-negotiable for this phase to be considered
   done: (1) `--header old=v1/foo.h --header new=v2/foo.h` against logically
   identical trees under different roots asserts the resulting
   **`scope_fingerprint`s** match (not `profile_fingerprint` — headers are a
@@ -316,7 +330,14 @@ Implements ADR-050 D1 and D2.
   output entirely and silently miss this difference, the exact regression
   `include_graph.py:354-356` already had to fix once for the L3 include
   graph and this digest must not reintroduce on its own, separate call
-  site.
+  site; (10) a header reached only via a probed toolchain `-isystem` dir or
+  `--sysroot` — **not under any declared `-I` directory at all** — with
+  genuinely different content between old and new still produces
+  *different* `profile_fingerprint`s, proving the system/toolchain bucket
+  actually attributes and hashes paths outside every declared `-I`
+  directory rather than silently dropping them, the specific gap distinct
+  from test (9)'s (which covers a system-*classified* path still reachable
+  through a declared `-I`).
 - **Modeling `contract` is not the same as populating it — this phase must
   do both.** `dump()` (`dumper.py`) is the one place that already resolves
   every input both fingerprints need; it calls
@@ -529,6 +550,33 @@ Implements ADR-050 D1 and D2.
   independent exit-code schemes; reusing either of those would imply a
   shared numbering `scan` doesn't have. `docs/reference/exit-codes.md`'s
   `scan` table gains this row.
+- **`cli_scan.py`'s `scan_cmd` is not the only front-end wrapping
+  `run_scan_core` — the typed Python API and MCP reach the same
+  `_run_baseline_compare` call through a separate, unfixed path.**
+  `service_scan.run_scan` (`:801-928`) is its own front-end over
+  `run_scan_core`, with its own `try`/`except _BudgetOverflow`/`except
+  _EvidenceContractError` — the identical gap as `scan_cmd`'s, on a
+  different call site: `ProfileMismatchError`/`ScopeMismatchError` would
+  propagate out of `run_scan` uncaught today. This matters beyond the
+  Python API itself because `run_scan_subprocess`'s worker (`:982-985`)
+  calls `run_scan(req).to_dict()` inside `except BaseException as exc:
+  q.put(("err", f"{type(exc).__name__}: {exc}"))` — a fully generic
+  catch-all that cannot distinguish a deliberate `not_comparable` result
+  from any other crash, and `run_scan_subprocess` (`:1108-1135`) turns that
+  into a bare `RuntimeError`. `mcp_server`'s `abi_scan` MCP tool goes
+  through `run_scan_subprocess`, so an AI agent calling `abi_scan(...
+  against=...)` on a mismatched pair would see an opaque worker-crash
+  `RuntimeError`, not a structured not-comparable result — losing the
+  ADR's semantics entirely on the one surface built specifically for
+  agent consumption. `run_scan` gains a fourth `except
+  (ProfileMismatchError, ScopeMismatchError) as exc:` branch alongside its
+  existing two, returning `ScanResult(verdict="NOT_COMPARABLE",
+  exit_code=6, ...)` — reusing `scan`'s own exit `6` rather than inventing
+  a second code for the same command. Fixing `run_scan` alone closes both
+  gaps: `run_scan_subprocess`'s worker calls `run_scan(...)` directly, so
+  a `NOT_COMPARABLE` result now flows through its normal `q.put(("ok",
+  ...))` path — no separate `run_scan_subprocess`/`mcp_server.py` change
+  needed beyond that.
 - **A seventh entry point imports `checker.compare` directly and swallows
   every exception into an undifferentiated `None` today — a different
   failure mode than the previous six, and it needs its own fix.**
@@ -699,7 +747,13 @@ table update), `cli_scan.py` (`scan_cmd`'s new third `except
 its existing `_BudgetOverflow`/`_EvidenceContractError` clauses — no change
 needed in `cli_scan_baseline.py`/`scan_engine.py` themselves, since
 neither catches these exceptions today and both must keep letting them
-propagate), `stack_checker.py` (`StackChange.not_comparable_reason`
+propagate), `service_scan.py` (`run_scan`'s new fourth `except
+(ProfileMismatchError, ScopeMismatchError)` branch returning
+`ScanResult(verdict="NOT_COMPARABLE", exit_code=6, ...)`, alongside its
+existing `_BudgetOverflow`/`_EvidenceContractError` clauses — no separate
+`run_scan_subprocess`/`mcp_server.py` change needed, since the worker
+already calls `run_scan(...)` and forwards whatever `ScanResult` it
+returns), `stack_checker.py` (`StackChange.not_comparable_reason`
 field; `_run_abi_diff` re-raises `ProfileMismatchError`/`ScopeMismatchError`
 instead of swallowing them into its broad `except Exception`; its caller
 gains the dedicated `except` branch that sets `not_comparable_reason`),
@@ -795,7 +849,14 @@ budget-overflow code) for a `ProfileMismatchError`/`ScopeMismatchError`
 raised from the baseline compare, exercised through a real end-to-end
 `scan --against` invocation on a mismatched pair — proving `scan_cmd`'s new
 `except` clause actually catches what `_run_baseline_compare` lets through
-uncaught today; a **deps-compare exit-code** test asserting `abicheck deps
+uncaught today; a **`run_scan` API/MCP** test asserting
+`service_scan.run_scan(ScanRequest(..., baseline=...))` on a mismatched
+pair returns `ScanResult(verdict="NOT_COMPARABLE", exit_code=6)` rather
+than raising, and a second test asserting `run_scan_subprocess` (and, by
+extension, `mcp_server.abi_scan`) surfaces that same structured result
+rather than a generic `RuntimeError` — proving the fix at `run_scan`
+actually reaches the MCP surface without any change needed there; a
+**deps-compare exit-code** test asserting `abicheck deps
 compare` returns exactly `5` (never folded into `4`'s `FAIL`, never a
 silent `None` diff indistinguishable from the pre-existing
 "file unreadable" case) for a `ProfileMismatchError`/`ScopeMismatchError`
