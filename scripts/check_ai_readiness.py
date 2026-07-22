@@ -1510,7 +1510,19 @@ _ADR_FILE_RE = re.compile(r"^\d{3}-.+\.md$")
 _ADR_STATUS_INLINE_RE = re.compile(r"^\*\*Status:\*\*\s*(.+)$", re.MULTILINE)
 _ADR_STATUS_HEADING_RE = re.compile(r"^## Status\s*\n+(.+)$", re.MULTILINE)
 
-_ADR_REPLACEMENT_LINK_RE = re.compile(r"\[[^\]]*\]\([^)]+\)")
+_ADR_REPLACEMENT_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
+
+
+def _links_to_another_adr(status: str) -> bool:
+    """True if `status` contains a Markdown link whose target looks like
+    another ADR file (matches _ADR_FILE_RE), not just any link at all -- a
+    "Superseded" status could otherwise link to unrelated context (e.g. a
+    plan doc explaining why) and still satisfy a bare "has a link" check."""
+    for href in _ADR_REPLACEMENT_LINK_RE.findall(status):
+        basename = href.split("#", 1)[0].split("/")[-1]
+        if _ADR_FILE_RE.match(basename):
+            return True
+    return False
 
 
 def _adr_status_text(text: str) -> str | None:
@@ -1578,9 +1590,7 @@ def check_adr_index_and_nav_sync(f: Findings) -> None:
             )
             continue
         leading_word = re.split(r"[\s—.,;-]", status.strip(), maxsplit=1)[0]
-        if leading_word.lower() == "superseded" and not (
-            _ADR_REPLACEMENT_LINK_RE.search(status)
-        ):
+        if leading_word.lower() == "superseded" and not _links_to_another_adr(status):
             f.err(
                 "adr-index-nav-sync",
                 f"docs/development/adr/{md.name}: status is 'Superseded' "
