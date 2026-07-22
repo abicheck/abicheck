@@ -1014,16 +1014,29 @@ Implements ADR-050 D1 and D2.
   keyword-argument wrapper over `checker.compare`, not a request
   dataclass) gains the same `diagnostic_comparison` keyword.
 - **`compare_snapshots` is not the front-end chokepoint — `api_types.CompareRequest`
-  is, and it needs the field too, or every documented front-end stays
+  is, and it needs the field too, or `CompareRequest`-based front-ends stay
   unable to reach it.** `CompareRequest` (`api_types.py:125`) is, by its
   own docstring, "the single input to `run_compare`" that "every front-end
   (CLI, MCP, `compare-release` fan-out, `appcompat`)" assembles and hands
   to `service.run_compare_request` — the real ADR-037 D1/D2 classification
-  chokepoint, one level above `compare_snapshots`. `run_compare_request`
+  chokepoint, one level above `compare_snapshots`, for the front-ends that
+  actually use it. **That docstring's own "`compare-release` fan-out" and
+  "`appcompat`" claims don't hold up against the actual code, verified
+  directly: `mcp_server.abi_compare` and `appcompat.py`'s
+  `check_appcompat`/`check_plugin_host_contract` call `compare_snapshots`
+  directly, and `cli_compare_release.py`'s `_compare_one_library` →
+  `_run_compare_pair` routes through the legacy `run_compare` keyword shim,
+  not `run_compare_request` — so a `CompareRequest`/`run_compare_request`
+  reachability test proves the flag reaches CLI/MCP `compare`'s own
+  chokepoint only, never compare-release or appcompat.** Each of those
+  three gets its own dedicated `diagnostic_comparison` parameter and test
+  in this same phase (see their respective bullets/tests elsewhere in this
+  plan) — narrowing what this bullet's fix actually covers, not extending
+  it by assertion. `run_compare_request`
   calls `compare_snapshots(...)` today with a fixed keyword list that has
   no slot for this flag; adding `diagnostic_comparison` only to
-  `compare_snapshots` would be unreachable from every documented front-end,
-  since none of them call `compare_snapshots` directly. `CompareRequest`
+  `compare_snapshots` would be unreachable from `CompareRequest`-based
+  front-ends specifically. `CompareRequest`
   therefore gains `diagnostic_comparison: bool = False`, and
   `run_compare_request` passes `request.diagnostic_comparison` through.
   The legacy `run_compare` keyword shim gains the same parameter too,
@@ -1455,9 +1468,26 @@ Implements ADR-050 D3. The highest-risk phase — see Risk above.
   becomes this path's one-TU special case (`legacy-main`) — same code, not
   a parallel implementation.
 - A manifest declaring TUs with different compilers/target triples is
-  rejected at parse time (`HETEROGENEOUS_ABI_CONTEXT` at manifest-validation
-  time, before any extraction runs — cheaper failure than after a wasted
-  compile).
+  rejected at parse time — before any extraction runs, cheaper than
+  failing after a wasted compile — via a new `ManifestValidationError`
+  (`dump_manifest.py`), the same exception type and mechanism as this
+  phase's other parse-time schema violations (unknown fields, the
+  `contributes_to_abi=True ⇒ required=True` invariant above), not a new
+  one invented just for this check. **This is deliberately *not* Phase C's
+  `HETEROGENEOUS_ABI_CONTEXT` — that is a `TuMergeError` conflict code
+  Phase C defines later, and Phase B ships and lands before Phase C.**
+  Reusing that name/type here would force Phase B to either introduce
+  Phase C's `tu_merge.py`/`TuMergeError` contract early (a phase landing
+  out of order) or leave Phase B's own acceptance criterion referencing a
+  type that doesn't exist yet; `ManifestValidationError` is Phase B's own,
+  self-contained mechanism, with no dependency on `tu_merge.py`. The two
+  checks are conceptually related (both concern mixed compile contexts
+  across a manifest's TUs) but fire at different times for different
+  reasons: this one is unconditional and parse-time, over the manifest's
+  own declared fields, before `dump()` even starts; Phase C's
+  `HETEROGENEOUS_ABI_CONTEXT` is merge-time, over what fragments actually
+  extracted to, and — per Phase C's own text — not expected to ever fire
+  in practice given this parse-time rule already holds.
 - A required TU's compile failure is a hard extraction failure for the
   whole snapshot (`IncompleteAttempt`, never silently merged as if it
   succeeded); an optional (`required: false`) TU's failure degrades to a
@@ -1510,7 +1540,12 @@ Implements ADR-050 D3. The highest-risk phase — see Risk above.
   `--dump-manifest old=v1/abi.yml --dump-manifest new=v2/abi.yml` — while
   `dump`'s stays a bare path (it only ever has one side).
 
-**Files & surfaces.** New `abicheck/dump_manifest.py`, `abicheck/dumper.py`
+**Files & surfaces.** New `abicheck/dump_manifest.py` (strict YAML parser,
+and a new `ManifestValidationError` for every parse-time schema violation
+it raises — unknown fields, the `contributes_to_abi=True ⇒ required=True`
+invariant, and the heterogeneous-compiler/target-triple rejection above —
+self-contained to this phase, no dependency on Phase C's later
+`tu_merge.py`/`TuMergeError`), `abicheck/dumper.py`
 (per-TU invocation loop, `TuFragment` type, and the actual `--dump-manifest`
 termination point). `--dump-manifest` is a
 shared-concept option across `dump` and `compare` (side-scoped on `compare`
