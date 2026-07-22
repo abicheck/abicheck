@@ -573,7 +573,22 @@ Implements ADR-050 D1 and D2.
   and hashes them in caller-supplied order instead; deferring this to
   Phase E doesn't help, since Phase E's cache-key work is scoped to a
   different, manifest-only gap (see Phase E) and wouldn't by itself make
-  the existing sorted hashing order-preserving.
+  the existing sorted hashing order-preserving. **The same key must also
+  carry the `--project-include` side/label/path triples, not just
+  `headers`/`includes`.** Both the project-ownership predicate and the
+  per-slot logical token depend on which directories are marked
+  project-owned and under which label — two dumps with identical
+  `headers`/`includes` but a different `--project-include` label on the
+  same directory (or the marker present on one run and absent on the
+  next, the directory otherwise unchanged) would otherwise hit the same
+  cache entry under a key that never saw the label at all, and
+  `cached_run_dump` would serve back a stale `contract.profile_fingerprint`
+  computed under the old labeling — a warm-cache bypass of this whole
+  phase's ownership fix, the identical class of gap already found and
+  fixed above for a cold `contract=None` cache entry. `_cache_key()` folds
+  the normalized `(side, label, path)` triples into its key material
+  alongside `headers`/`includes`, in caller-supplied order for the same
+  reason those two are no longer sorted.
 - `serialization.SCHEMA_VERSION` is bumped (11 → 12) in the same change
   that starts writing `contract` — **not** treated as a free additive field
   the way ADR-041's advisory `extractor_passes`/`narrowed_passes` were. The
@@ -994,7 +1009,33 @@ Implements ADR-050 D1 and D2.
 label at once, see the sibling-support-root acceptance-criteria bullet
 above), `cli_options.py` (new side-scoped, labeled `--project-include`
 option built on it, alongside the existing `--include`/`--header`
-`SIDED_PATH_PARAM` family, ADR-040 — legacy CLI only),
+`SIDED_PATH_PARAM` family, ADR-040 — legacy CLI only).
+**Declaring the option is not enough — `--project-include` needs the same
+per-layer threading already required (and already found missing, twice)
+for `--dump-manifest`/`--diagnostic-comparison`/`--frontend-context` in
+this same phase/plan, and this bullet was the one surface that skipped
+that step on the first pass.** `compare_cmd` forwards `**kwargs` to
+`cli_compare_helpers.run_compare`, whose signature is fixed and explicit
+(no `project_include` slot today); `dump_cmd`/`scan_cmd` are themselves
+fixed Click callbacks Click invokes directly, not `**kwargs` forwarders.
+Each of `run_compare`, `dump_cmd`, and `scan_cmd` gains its own
+`old_project_includes`/`new_project_includes` (or the `scan`/`dump`
+single-side equivalent) parameter carrying the parsed side/label/path
+triples, threaded down through the same chains already established for
+`--dump-manifest` and `--frontend-context` in this phase — `run_compare` →
+`cli_resolve._resolve_compare_snapshots` → `cli_resolve._resolve_input` →
+`service.resolve_input`/`run_dump` for `compare`; `dump_cmd` →
+`cli_dump_helpers` → `service.resolve_input`/`run_dump` for `dump`;
+`scan_cmd` → `service.resolve_input`/`run_dump` for `scan` — terminating
+in `dumper.dump()`, which passes the triples into
+`comparability.compute_extraction_contract(...)` so the project-ownership
+predicate can actually consult them. Without this, the sibling
+support-root acceptance tests (test (14) below) either fail with an
+"unexpected keyword argument" at the Click-callback boundary or silently
+run with `--project-include` accepted and parsed but never reaching the
+predicate — the flag would parse successfully and do nothing, the same
+silent-loss failure mode already caught once for
+`--diagnostic-comparison` on `run_compare` in this phase.
 `model.py` (new `ExtractionContract`), new
 `abicheck/comparability.py` (fingerprint computation, `compute_extraction_contract`
 — its project-ownership predicate takes both ancestor-derived headers and
