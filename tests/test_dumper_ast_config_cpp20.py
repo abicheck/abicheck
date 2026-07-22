@@ -151,6 +151,24 @@ def test_cpp20_detector_accepts_requires_clause_split_across_lines(tmp_path):
     assert any(r.reason == "requires-clause" for r in reqs)
 
 
+def test_cpp20_detector_accepts_parenthesized_requires_clause_on_own_line(tmp_path):
+    """Regression (Codex review, fourth round): a requires-clause with a
+    parenthesized constraint, starting its own line right after a
+    template<...> header (``template<class T>\\nrequires (sizeof(T) > 4)\\n
+    void f(T);``), was misclassified as a pre-C++20 call/declarator — the
+    same-line prefix is empty (nothing precedes "requires" on its own
+    line), which previously always meant "bare call-as-statement" without
+    considering the previous line's template context."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "template<class T>\nrequires (sizeof(T) > 4)\nvoid f(T);\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "requires-expression" for r in reqs)
+
+
 def test_cpp20_detector_ignores_requires_text_in_raw_string(tmp_path):
     """Regression (Codex review): a C++11 raw string literal (``R"(...)"``)
     is not recognized by ``_strip_literals`` (only ordinary ``"..."``), so

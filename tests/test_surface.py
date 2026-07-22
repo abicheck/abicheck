@@ -1363,6 +1363,42 @@ class TestHiddenFriendSurface:
         )
         assert classify_change_surface(c, s_old, s_new) == (True, None)
 
+    def test_qualified_demotion_checks_bare_public_fallback_on_missing_side(self):
+        """Regression (Codex review): when one side has an exact qualified
+        entry (private/system) but the *other* side lacks any qualified
+        entry for the same owner (an older snapshot, or a producer that
+        never populated ``qualified_name`` for this record), the other
+        side's bare-name origin can still prove the owner is public. The
+        qualified path must check that bare-name fallback before demoting,
+        not just the two exact lookups."""
+        old = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[
+                _rec(
+                    "Foo",
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                    qualified_name="ns::Foo",
+                )
+            ],
+        )
+        new = AbiSnapshot(
+            library="l",
+            version="2",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[_rec("Foo", origin=ScopeOrigin.PUBLIC_HEADER)],
+        )
+        s_old = compute_public_surface(old)
+        s_new = compute_public_surface(new)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN2ns3FooeqERKS0_S1_",
+            caused_by_type="ns::Foo",
+            description="",
+        )
+        assert classify_change_surface(c, s_old, s_new) == (True, None)
+
 
 # ── widening overlay (ADR-024 §D6 / Phase 4) ─────────────────────────────────
 

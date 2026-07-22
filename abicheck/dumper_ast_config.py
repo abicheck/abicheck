@@ -167,7 +167,9 @@ _REQUIRES_STATEMENT_BOUNDARY_CHARS = frozenset({b"{", b"}", b";"})
 _TRAILING_IDENTIFIER_PATTERN = re.compile(rb"([A-Za-z_]\w*)\Z")
 
 
-def _looks_like_requires_declarator(code: bytes, match_start: int) -> bool:
+def _looks_like_requires_declarator(
+    code: bytes, match_start: int, prev_nonblank_code: bytes
+) -> bool:
     """True if the requires-expression candidate at *match_start* in *code*
     looks like an ordinary pre-C++20 use of "requires" as a plain
     identifier — either immediately preceded (skipping only whitespace) by
@@ -177,9 +179,18 @@ def _looks_like_requires_declarator(code: bytes, match_start: int) -> bool:
     statement boundary (the bare call-as-statement case), or preceded by
     ``.``/``->``/``::`` (a member/qualified-name access — "requires" the
     C++20 keyword is never looked up that way) — rather than the C++20
-    keyword."""
+    keyword.
+
+    When nothing at all precedes the candidate on its own logical line, a
+    genuine parenthesized requires-clause continuing a ``template<...>``
+    header from the *previous* line (``template<class T>\\nrequires
+    (sizeof(T) > 4)\\nvoid f(T);``) looks identical to a bare call-as-
+    statement at this point, so that case falls back to *prev_nonblank_code*
+    the same way :func:`_looks_like_genuine_concept` does (Codex review)."""
     prefix = code[:match_start].rstrip()
-    if not prefix or prefix[-1:] in _REQUIRES_STATEMENT_BOUNDARY_CHARS:
+    if not prefix:
+        return not prev_nonblank_code.rstrip().endswith(b">")
+    if prefix[-1:] in _REQUIRES_STATEMENT_BOUNDARY_CHARS:
         return True
     if prefix.endswith(b".") or prefix.endswith(b"->") or prefix.endswith(b"::"):
         return True
@@ -391,7 +402,7 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
             ):
                 found.append(Cpp20Requirement("concept-declaration", str(p), start_no))
             elif requires_expr_match and not _looks_like_requires_declarator(
-                lookahead, requires_expr_match.start()
+                lookahead, requires_expr_match.start(), prev_nonblank_code
             ):
                 found.append(Cpp20Requirement("requires-expression", str(p), start_no))
             elif _CPP20_REQUIRES_CLAUSE_PATTERN.search(lookahead):

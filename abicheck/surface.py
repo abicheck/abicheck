@@ -931,7 +931,26 @@ def _classify_hidden_friend_surface(
         q_old = surf_old.origin_by_qualified_key.get(owner)
         q_new = surf_new.origin_by_qualified_key.get(owner)
         if q_old is not None or q_new is not None:
-            if ScopeOrigin.PUBLIC_HEADER in (q_old, q_new):
+            # A side with no exact qualified entry (an older snapshot, or a
+            # producer that never populated qualified_name for this
+            # particular record) can still carry a confident *bare-name*
+            # public origin for the same type. Checking only q_old/q_new
+            # for the public override ignored that side entirely, so an
+            # exact private/system match on one side could demote a friend
+            # even when the OTHER side's bare-name index proves the owner
+            # is public (Codex review).
+            bare = owner.rsplit("::", 1)[-1]
+            bare_old = (
+                surf_old.origin_by_key.get(bare, ScopeOrigin.UNKNOWN)
+                if q_old is None
+                else None
+            )
+            bare_new = (
+                surf_new.origin_by_key.get(bare, ScopeOrigin.UNKNOWN)
+                if q_new is None
+                else None
+            )
+            if ScopeOrigin.PUBLIC_HEADER in (q_old, q_new, bare_old, bare_new):
                 return True, None
             reason = _hidden_friend_owner_reason_qualified(q_old, q_new)
             return (False, reason) if reason is not None else (True, None)
