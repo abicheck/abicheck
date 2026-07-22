@@ -124,7 +124,11 @@ as the `docs-contract` step) enforces, as **hard errors**:
   `canonical_for`, the ids there must round-trip back to that same topic (a
   page can't claim ownership of a topic another page already owns, and a
   topic's registered `canonical_page` can't silently point at a file that
-  disclaims ownership).
+  disclaims ownership);
+- a page's `summarizes` entries must round-trip too: the page itself must be
+  registered as that topic's `worked_example`, `reference_page`, or a
+  `task_pages`/`allowed_summaries` entry — a page can't grant itself
+  permission to restate a topic just by adding the front-matter claim.
 
 As **warnings** (non-blocking; the check that flags likely accidental
 duplication, not a structural ownership conflict):

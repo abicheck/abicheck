@@ -129,7 +129,7 @@ class Findings:
 
 def _rel(p: Path) -> str:
     try:
-        return str(p.relative_to(ROOT))
+        return p.relative_to(ROOT).as_posix()
     except ValueError:
         # Outside ROOT — only reachable when a test monkeypatches DOCS to a
         # tmp_path fixture; real runs always resolve under ROOT.
@@ -233,6 +233,22 @@ def _check_canonical_page_uniqueness(
             )
 
 
+def _permitted_summary_pages(entry: dict[str, object]) -> set[str]:
+    """The set of docs/-relative pages a topic's registry entry permits to
+    reference it via `summarizes` — its worked_example, reference_page, and
+    every task_pages/allowed_summaries entry."""
+    pages: set[str] = set()
+    for key in ("worked_example", "reference_page"):
+        value = entry.get(key)
+        if value is not None:
+            pages.add(str(value))
+    for key in ("task_pages", "allowed_summaries"):
+        values = entry.get(key, [])
+        if isinstance(values, list):
+            pages.update(str(v) for v in values)
+    return pages
+
+
 def _check_front_matter_schema(
     f: Findings, topics: dict[str, dict[str, object]]
 ) -> None:
@@ -241,7 +257,7 @@ def _check_front_matter_schema(
     for path in sorted(DOCS.rglob("*.md")):
         if path.name in _DUPLICATE_SCAN_EXCLUDE_NAMES:
             continue
-        rel_to_docs = str(path.relative_to(DOCS))
+        rel_to_docs = path.relative_to(DOCS).as_posix()
         try:
             fm = load_front_matter(path)
         except yaml.YAMLError as exc:
@@ -297,11 +313,21 @@ def _check_front_matter_schema(
             f.err("front-matter", f"{_rel(path)}: summarizes must be a list")
             summarizes = []
         for topic_id in summarizes:
-            if topic_id not in topics:
+            entry = topics.get(topic_id)
+            if entry is None:
                 f.err(
                     "front-matter",
                     f"{_rel(path)}: summarizes references unknown topic "
                     f"{topic_id!r} (not in {_rel(TOPICS_FILE)})",
+                )
+            elif rel_to_docs not in _permitted_summary_pages(entry):
+                f.err(
+                    "front-matter",
+                    f"{_rel(path)}: claims summarizes {topic_id!r}, but is "
+                    f"not registered as that topic's worked_example/"
+                    f"task_pages/reference_page/allowed_summaries in "
+                    f"{_rel(TOPICS_FILE)} — either add it there or drop the "
+                    "summarizes claim",
                 )
 
 
@@ -370,7 +396,7 @@ def _extract_blocks(text: str) -> list[str]:
 def _iter_duplicate_scan_files() -> list[Path]:
     files = []
     for path in sorted(DOCS.rglob("*.md")):
-        rel = str(path.relative_to(DOCS))
+        rel = path.relative_to(DOCS).as_posix()
         if path.name in _DUPLICATE_SCAN_EXCLUDE_NAMES:
             continue
         if any(rel.startswith(prefix) for prefix in _DUPLICATE_SCAN_EXCLUDE_PREFIXES):

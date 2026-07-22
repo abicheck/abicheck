@@ -174,6 +174,53 @@ def test_front_matter_schema_flags_unknown_summarizes_topic(
     assert any("summarizes" in msg for _, msg in f.errors)
 
 
+def test_front_matter_schema_flags_summarizes_page_not_registered_for_topic(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A page can't grant itself permission to restate a topic just by
+    adding `summarizes` — it must actually be registered as that topic's
+    worked_example/task_pages/reference_page/allowed_summaries (regression
+    test for the gap flagged in PR #619 review)."""
+    (tmp_path / "page.md").write_text(
+        "---\nsummarizes:\n  - topic-a\n---\n\n# Title\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    topics = {
+        "topic-a": {
+            "canonical_page": "owner.md",
+            "task_pages": ["some-other-page.md"],
+        }
+    }
+    f = dc.Findings()
+    dc._check_front_matter_schema(f, topics)
+    assert any("not registered as that topic's" in msg for _, msg in f.errors)
+
+
+@pytest.mark.parametrize(
+    "role_key,role_value",
+    [
+        ("worked_example", "page.md"),
+        ("reference_page", "page.md"),
+        ("task_pages", ["page.md"]),
+        ("allowed_summaries", ["page.md"]),
+    ],
+)
+def test_front_matter_schema_accepts_summarizes_for_each_permitted_role(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    role_key: str,
+    role_value: object,
+) -> None:
+    (tmp_path / "page.md").write_text(
+        "---\nsummarizes:\n  - topic-a\n---\n\n# Title\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    topics = {"topic-a": {"canonical_page": "owner.md", role_key: role_value}}
+    f = dc.Findings()
+    dc._check_front_matter_schema(f, topics)
+    assert f.errors == []
+
+
 def test_front_matter_schema_accepts_valid_page(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
