@@ -1017,3 +1017,29 @@ def test_resolve_bundle_rejects_truncated_elf_binary(
     )
     assert result.outcome == ResolveOutcome.AMBIGUOUS
     assert "essentially empty ELF file" in result.message
+
+
+def test_resolve_bundle_rejects_binary_field_equal_to_binaries_dir_itself(
+    tmp_path: Path,
+) -> None:
+    # Path.is_relative_to() is true for a path relative to *itself*, so a
+    # manifest entry whose "binary" field is exactly "binaries" (equal to
+    # BASELINE_BINARIES_DIRNAME) would otherwise satisfy the containment
+    # check without actually being a child of it. In a corrupted
+    # baseline-set where binaries/ was itself staged as a plain file (not
+    # a directory), this member would then "resolve" to that file --
+    # meaning the advertised binaries-dir output points at a file, not a
+    # directory containing member binaries (Codex review, fourth round).
+    _write_manifest(
+        tmp_path,
+        artifacts=[_target_artifact("libpvxs", extra={"binary": "binaries"})],
+    )
+    (tmp_path / "binaries").write_bytes(b"\x7fELF-fake")
+    result = resolve_bundle(
+        tmp_path,
+        bundle="pvxs-release",
+        members=["libpvxs"],
+        profile=PROFILE,
+        required=True,
+    )
+    assert result.outcome == ResolveOutcome.AMBIGUOUS

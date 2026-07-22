@@ -911,9 +911,17 @@ def resolve_bundle(
         # while the output still claims that directory holds every member,
         # and a downstream bundle compare using binaries-dir directly (as
         # opposed to the per-member binary-paths) would then miss it or
-        # pick up an unrelated file (Codex review).
+        # pick up an unrelated file (Codex review). Path.is_relative_to()
+        # is true for a path relative to *itself* too, so a manifest entry
+        # whose "binary" field is exactly "binaries" (equal to
+        # BASELINE_BINARIES_DIRNAME) would satisfy is_relative_to() against
+        # binaries_dir without actually being a child of it -- reject that
+        # explicitly, not just non-containment, so binaries-dir can never
+        # resolve to something other than a directory of member files
+        # (Codex review, fourth round).
         if (
             resolved is None
+            or resolved.resolve() == binaries_dir.resolve()
             or not resolved.resolve().is_relative_to(binaries_dir.resolve())
             or not resolved.is_file()
         ):
