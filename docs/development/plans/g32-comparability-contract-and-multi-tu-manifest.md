@@ -237,11 +237,17 @@ Implements ADR-050 D1 and D2.
   convention as the existing `_MIN_SCHEMA_VERSION_FOR_CV_FACTS`) and a new
   `IncompatibleSnapshotSchemaError` (`errors.py`), raised by
   `snapshot_from_dict` *before* the existing warn-only branch when the
-  snapshot's `schema_version` is at or above that threshold and the running
-  `SCHEMA_VERSION` is below it. Versions below the threshold keep today's
-  warn-and-continue behavior unchanged — only the specific version that
-  first introduces a verdict-blocking field becomes a hard failure for an
-  older reader (ADR-050 D1).
+  snapshot's `schema_version` is **both greater than the running
+  `SCHEMA_VERSION` and at or above the threshold** — not "the running
+  version is below the threshold" alone, which stops protecting the
+  moment a reader's own `SCHEMA_VERSION` reaches 12 (that reader would
+  then silently warn-and-continue on a hypothetical future schema-13
+  snapshot instead of correctly hard-rejecting it, moving the exact gap
+  this guard closes one bump later rather than eliminating it). Versions
+  below the threshold keep today's
+  warn-and-continue behavior unchanged — only a jump that crosses a
+  hard-rejection threshold, from either direction of the running/
+  snapshot version pair, becomes a hard failure (ADR-050 D1).
 - `comparability.check_contracts_comparable(old, new)` raises
   `ProfileMismatchError`/`ScopeMismatchError` (`errors.py`) **only when
   both sides carry a `contract`** and the fingerprints differ. A **mixed**
@@ -407,9 +413,15 @@ with its includes held identical also changes `scope_fingerprint`); a
 hard-rejection test asserting a pre-bump reader (a stubbed/patched
 `SCHEMA_VERSION` below the threshold) raises `IncompatibleSnapshotSchemaError`
 on a schema-12 `contract`-bearing snapshot instead of the pre-existing
-warn-and-continue path; a regression test pinning that a schema bump
-*below* the threshold still only warns (today's lenient behavior for
-ordinary additive fields must not become accidentally stricter);
+warn-and-continue path; a **second** hard-rejection test asserting a
+reader whose own `SCHEMA_VERSION` is *already* 12 (at the threshold, not
+below it) still raises `IncompatibleSnapshotSchemaError` on a stubbed
+future schema-13 snapshot — the specific case a "running version below
+threshold" condition would silently stop protecting, per the corrected
+`>` running-version comparison above; a regression test pinning that a
+schema bump *below* the threshold still only warns (today's lenient
+behavior for ordinary additive fields must not become accidentally
+stricter);
 `tests/test_report_schema.py` gains a `not_comparable` case validated
 against the updated `compare_report.schema.json`, and its existing
 `test_docs_mirror_matches_packaged_schema` must still pass against the

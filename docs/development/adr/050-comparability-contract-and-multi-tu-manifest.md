@@ -108,10 +108,26 @@ incompatible-reader guard, not just a version bump: a new
 `_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION = 12` constant in
 `serialization.py` (same naming convention as the existing
 `_MIN_SCHEMA_VERSION_FOR_CV_FACTS`, `:88`), checked in `snapshot_from_dict`
-*before* today's warn-only branch: when the snapshot's `schema_version` is
-at or above that threshold and the running `SCHEMA_VERSION` is below it, a
-new `IncompatibleSnapshotSchemaError` (`errors.py`) is raised instead of a
-warning being emitted. Versions below the threshold keep today's
+*before* today's warn-only branch. **The guard is keyed off "the snapshot
+is newer than what this reader supports," not "this reader predates the
+threshold"** — the two are not the same condition, and only the first one
+is actually what "Phase-A-or-later code hard-rejects unsupported schemas"
+requires: `IncompatibleSnapshotSchemaError` (`errors.py`) is raised when
+the snapshot's `schema_version` is both **greater than the running
+`SCHEMA_VERSION`** (genuinely unsupported by this reader) *and* at or
+above the threshold — not merely "the running version is below the
+threshold." Keying it off the running version alone stops protecting the
+moment a reader itself reaches schema 12: that reader would correctly
+reject a schema-12 snapshot (a version *older or equal* to what it
+already knows), but would silently warn-and-continue on a hypothetical
+future schema-13 snapshot carrying its own new comparability-critical
+field, precisely the failure mode this guard exists to close, just moved
+one schema bump later. The `>` running-version comparison generalizes
+correctly to that future bump without any change to this guard's logic:
+a schema-13 bump only needs its own new threshold (or reuses `12` if 13
+doesn't add another hard-rejection-worthy field) — the guard doesn't need
+updating just because the running binary caught up to the current
+threshold. Versions below the threshold keep today's
 warn-and-continue behavior unchanged (the existing, deliberately lenient
 default for ordinary additive fields, per ADR-041's `extractor_passes`
 precedent) — only the specific jump that first introduces a
