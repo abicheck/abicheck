@@ -152,13 +152,14 @@ field alongside `public_reachable`/`reachability_kind`/`reachability_proof_path`
 each producer still sets it independently, and the proof path is still one
 formatted string.
 
-### Phase 2 — Graph core v2 — **ADR drafted, implementation not started**
+### Phase 2 — Graph core v2 — **ADR accepted; D2 slice implemented, D1/D3-D6 open**
 
 [ADR-046](../adr/046-source-graph-identity-v2-and-evidence-merge.md) records
-the D1-D6 decisions below (Proposed, pending sign-off) — the "needs its own
-ADR" gate this phase set for itself. Implementation (schema changes to
-`source_graph.py` and the audit of every module that reads `GraphNode.attrs`/
-`GraphEdge.attrs` directly) has not started.
+the D1-D6 decisions below — the "needs its own ADR" gate this phase set for
+itself. **D2 (the evidence-preserving node/edge merge) is implemented** — see
+ADR-046's "D2 implementation" section, `abicheck/buildsource/graph_facts.py`,
+and `tests/test_source_graph_v2.py`. D1, D3, D4, D5, and D6 below remain
+open follow-up work under the same accepted ADR.
 
 - `abicheck/buildsource/source_graph.py`: split edge identity into a
   `relation_key = (src, dst, kind, semantic_role)` (used for closure/diff) and
@@ -335,6 +336,7 @@ validation, consumer/use-case attribution checks.
 
 New:
 ```text
+abicheck/buildsource/graph_facts.py  # GraphFact/FactConflict/merge (Phase 2 D2, DONE)
 abicheck/impact/
     model.py           # ImpactAssessment, GraphProofPath, FindingDecision (Phase 3)
     engine.py           # ImpactEngine.assess(...) (Phase 3)
@@ -359,8 +361,9 @@ Modified (recurring across phases): `abicheck/buildsource/source_graph.py`,
 ## Tests
 
 - `tests/test_reachability_state.py` — Phase 1, done.
-- New per phase: `tests/test_impact_model.py` (Phase 3), `tests/test_source_graph_v2.py`
-  / `tests/test_entity_resolver.py` (Phase 2), `tests/test_consumer_graph.py`
+- `tests/test_source_graph_v2.py` — Phase 2 D2, done.
+- New per remaining phase: `tests/test_impact_model.py` (Phase 3),
+  `tests/test_entity_resolver.py` (Phase 2 D4), `tests/test_consumer_graph.py`
   / `tests/test_use_cases.py` (Phase 4), one `test_diff_<family>.py` per Phase
   5 graph family, `tests/test_root_cause_correlator.py` (Phase 6).
 - `tests/test_abi_examples.py` picks up `case194`-`case205` automatically once

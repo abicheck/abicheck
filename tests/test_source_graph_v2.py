@@ -1,0 +1,271 @@
+# Copyright 2026 Nikolay Petrov
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Tests for ADR-046 D2: the evidence-preserving node/edge merge (G29 Phase 2,
+slice 1) — ``GraphFact``/``FactConflict``, order-independent ``resolved``
+folding, conflict recording, and v1-pack read-compatibility."""
+
+from __future__ import annotations
+
+from abicheck.buildsource.source_graph import (
+    CONF_HIGH,
+    CONF_REDUCED,
+    CONF_UNKNOWN,
+    FactConflict,
+    GraphEdge,
+    GraphFact,
+    GraphNode,
+    SourceGraphSummary,
+)
+
+
+def _node(provenance: str, confidence: str, **attrs: object) -> GraphNode:
+    return GraphNode(
+        id="decl://foo",
+        kind="source_decl",
+        label="foo",
+        provenance=provenance,
+        confidence=confidence,
+        attrs=dict(attrs),
+    )
+
+
+class TestSingleProducer:
+    def test_single_registration_synthesizes_one_fact(self) -> None:
+        g = SourceGraphSummary()
+        g.add_node(_node("build_evidence", CONF_HIGH, visibility="public_header"))
+        (n,) = g.nodes
+        assert n.attrs == {"visibility": "public_header"}
+        assert n.resolved == {"visibility": "public_header"}
+        assert n.conflicts == []
+        assert [f.producer for f in n.facts] == ["build_evidence"]
+
+    def test_re_registration_by_same_producer_is_idempotent(self) -> None:
+        g = SourceGraphSummary()
+        g.add_node(_node("build_evidence", CONF_HIGH, visibility="public_header"))
+        g.add_node(_node("build_evidence", CONF_HIGH, visibility="public_header"))
+        (n,) = g.nodes
+        assert len(n.facts) == 1
+        assert n.attrs == {"visibility": "public_header"}
+
+
+class TestEvidencePreservingMerge:
+    def test_second_producer_no_longer_silently_dropped(self) -> None:
+        """The v1 bug D2 fixes: a second producer's facts used to vanish."""
+        g = SourceGraphSummary()
+        g.add_node(_node("build_evidence", CONF_REDUCED, visibility="public_header"))
+        g.add_node(_node("clang-header-graph", CONF_HIGH, is_virtual=True))
+        (n,) = g.nodes
+        assert len(n.facts) == 2
+        # Both keys survive the merge — neither producer's attrs vanished.
+        assert n.resolved == {"visibility": "public_header", "is_virtual": True}
+        assert n.attrs == n.resolved
+
+    def test_higher_confidence_wins_a_shared_key(self) -> None:
+        g = SourceGraphSummary()
+        g.add_node(_node("weak-producer", CONF_REDUCED, is_virtual=False))
+        g.add_node(_node("strong-producer", CONF_HIGH, is_virtual=True))
+        (n,) = g.nodes
+        assert n.resolved["is_virtual"] is True
+        assert n.confidence == CONF_HIGH
+        assert n.provenance == "strong-producer"
+
+    def test_merge_is_order_independent(self) -> None:
+        """Same facts, opposite registration order -> identical resolved/conflicts."""
+        forward = SourceGraphSummary()
+        forward.add_node(_node("weak-producer", CONF_REDUCED, is_virtual=False))
+        forward.add_node(_node("strong-producer", CONF_HIGH, is_virtual=True))
+
+        backward = SourceGraphSummary()
+        backward.add_node(_node("strong-producer", CONF_HIGH, is_virtual=True))
+        backward.add_node(_node("weak-producer", CONF_REDUCED, is_virtual=False))
+
+        (fwd_node,) = forward.nodes
+        (bwd_node,) = backward.nodes
+        assert fwd_node.resolved == bwd_node.resolved
+        assert fwd_node.confidence == bwd_node.confidence
+        assert fwd_node.provenance == bwd_node.provenance
+
+    def test_equal_confidence_tie_broken_by_producer_name_not_arrival_order(
+        self,
+    ) -> None:
+        first = SourceGraphSummary()
+        first.add_node(_node("zzz-producer", CONF_HIGH, is_virtual=False))
+        first.add_node(_node("aaa-producer", CONF_HIGH, is_virtual=True))
+
+        second = SourceGraphSummary()
+        second.add_node(_node("aaa-producer", CONF_HIGH, is_virtual=True))
+        second.add_node(_node("zzz-producer", CONF_HIGH, is_virtual=False))
+
+        (n1,) = first.nodes
+        (n2,) = second.nodes
+        # "aaa-producer" sorts first among equal-confidence facts either way.
+        assert n1.resolved["is_virtual"] is True
+        assert n2.resolved["is_virtual"] is True
+        assert n1.provenance == n2.provenance == "aaa-producer"
+
+    def test_genuine_disagreement_is_recorded_as_conflict_not_dropped(self) -> None:
+        g = SourceGraphSummary()
+        g.add_node(_node("producer-a", CONF_HIGH, is_virtual=True))
+        g.add_node(_node("producer-b", CONF_HIGH, is_virtual=False))
+        (n,) = g.nodes
+        assert len(n.conflicts) == 1
+        conflict = n.conflicts[0]
+        assert conflict.key == "is_virtual"
+        # producer-a sorts before producer-b -> producer-a's value wins.
+        assert conflict.winning_producer == "producer-a"
+        assert conflict.winning_value is True
+        assert conflict.losing_producer == "producer-b"
+        assert conflict.losing_value is False
+        # The winning value is still visible in resolved/attrs — advisory,
+        # not authoritative (ADR-028 D3), but not silently lost either.
+        assert n.resolved["is_virtual"] is True
+
+    def test_agreeing_facts_from_different_producers_are_not_a_conflict(self) -> None:
+        g = SourceGraphSummary()
+        g.add_node(_node("producer-a", CONF_HIGH, is_virtual=True))
+        g.add_node(_node("producer-b", CONF_HIGH, is_virtual=True))
+        (n,) = g.nodes
+        assert n.conflicts == []
+        assert n.resolved["is_virtual"] is True
+
+
+class TestEdgeMerge:
+    def test_edge_facts_merge_the_same_way_as_node_facts(self) -> None:
+        g = SourceGraphSummary()
+        g.add_edge(
+            GraphEdge(
+                src="decl://a",
+                dst="decl://b",
+                kind="DECL_CALLS_DECL",
+                provenance="call_graph",
+                confidence=CONF_HIGH,
+                attrs={"call_kind": "direct"},
+            )
+        )
+        g.add_edge(
+            GraphEdge(
+                src="decl://a",
+                dst="decl://b",
+                kind="DECL_CALLS_DECL",
+                provenance="header_call_graph",
+                confidence=CONF_REDUCED,
+                attrs={"resolution": "exact"},
+            )
+        )
+        (e,) = g.edges
+        assert len(e.facts) == 2
+        assert e.resolved == {"call_kind": "direct", "resolution": "exact"}
+        assert e.conflicts == []
+
+    def test_add_edge_still_dedups_on_src_dst_kind(self) -> None:
+        g = SourceGraphSummary()
+        edge = GraphEdge(src="decl://a", dst="decl://b", kind="DECL_CALLS_DECL")
+        g.add_edge(edge)
+        g.add_edge(edge)
+        assert len(g.edges) == 1
+        assert g.has_node("decl://a") is False  # sanity: has_node is node-only
+
+
+class TestConstructorSeededGraphs:
+    """``SourceGraphSummary(nodes=[...], edges=[...])`` bypasses ``add_node``/
+    ``add_edge`` (used throughout the test suite and by some builders) — the
+    D2 facts/resolved fields must still be populated by ``__post_init__``."""
+
+    def test_constructor_seeded_node_gets_synthesized_facts(self) -> None:
+        node = GraphNode(
+            id="decl://foo", kind="source_decl", attrs={"visibility": "public_header"}
+        )
+        g = SourceGraphSummary(nodes=[node])
+        assert node.facts == [
+            GraphFact(
+                producer="",
+                confidence=CONF_UNKNOWN,
+                attrs={"visibility": "public_header"},
+            )
+        ]
+        assert node.resolved == {"visibility": "public_header"}
+        assert g.has_node("decl://foo")
+
+    def test_constructor_seeded_edge_gets_synthesized_facts(self) -> None:
+        edge = GraphEdge(src="decl://a", dst="decl://b", kind="DECL_CALLS_DECL")
+        SourceGraphSummary(edges=[edge])
+        assert len(edge.facts) == 1
+        assert edge.resolved == {}
+
+
+class TestSerializationRoundTrip:
+    def test_v2_pack_round_trips_facts_resolved_conflicts(self) -> None:
+        g = SourceGraphSummary()
+        g.add_node(_node("producer-a", CONF_HIGH, is_virtual=True))
+        g.add_node(_node("producer-b", CONF_HIGH, is_virtual=False))
+        g.finalize()
+        d = g.to_dict()
+        reloaded = SourceGraphSummary.from_dict(d)
+        (orig,) = g.nodes
+        (loaded,) = reloaded.nodes
+        assert loaded.resolved == orig.resolved
+        assert len(loaded.facts) == len(orig.facts) == 2
+        assert len(loaded.conflicts) == len(orig.conflicts) == 1
+        assert loaded.conflicts[0].key == orig.conflicts[0].key
+
+    def test_v1_pack_with_no_facts_key_loads_and_synthesizes_one_fact(self) -> None:
+        """A pack written before ADR-046 D2 has no "facts"/"resolved"/
+        "conflicts" keys at all. A v2 reader must still load it, synthesizing
+        the single fact its attrs/provenance/confidence already imply — no
+        forced re-collection."""
+        v1_node_dict = {
+            "id": "decl://foo",
+            "kind": "source_decl",
+            "label": "foo",
+            "attrs": {"visibility": "public_header"},
+            "provenance": "build_evidence",
+            "confidence": CONF_HIGH,
+        }
+        node = GraphNode.from_dict(v1_node_dict)
+        assert node.resolved == {"visibility": "public_header"}
+        assert len(node.facts) == 1
+        assert node.facts[0].producer == "build_evidence"
+        assert node.facts[0].confidence == CONF_HIGH
+        assert node.conflicts == []
+        # Original v1 fields are untouched.
+        assert node.attrs == {"visibility": "public_header"}
+        assert node.provenance == "build_evidence"
+        assert node.confidence == CONF_HIGH
+
+    def test_v1_pack_edge_with_no_facts_key_loads(self) -> None:
+        v1_edge_dict = {
+            "edge": "DECL_CALLS_DECL",
+            "src": "decl://a",
+            "dst": "decl://b",
+            "provenance": "call_graph",
+            "confidence": CONF_HIGH,
+            "attrs": {"call_kind": "direct"},
+        }
+        edge = GraphEdge.from_dict(v1_edge_dict)
+        assert edge.resolved == {"call_kind": "direct"}
+        assert len(edge.facts) == 1
+        assert edge.facts[0].producer == "call_graph"
+
+    def test_fact_and_conflict_to_dict_from_dict_round_trip(self) -> None:
+        fact = GraphFact(producer="p", confidence=CONF_HIGH, attrs={"k": "v"})
+        assert GraphFact.from_dict(fact.to_dict()) == fact
+        conflict = FactConflict(
+            key="is_virtual",
+            winning_value=True,
+            winning_producer="a",
+            losing_value=False,
+            losing_producer="b",
+        )
+        assert FactConflict.from_dict(conflict.to_dict()) == conflict

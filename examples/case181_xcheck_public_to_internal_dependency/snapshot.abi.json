@@ -27,17 +27,35 @@
         {
           "attrs": {},
           "confidence": "unknown",
+          "conflicts": [],
           "dst": "decl://validate_utf8",
           "edge": "DECL_CALLS_DECL",
+          "facts": [
+            {
+              "attrs": {},
+              "confidence": "unknown",
+              "producer": ""
+            }
+          ],
           "provenance": "",
+          "resolved": {},
           "src": "decl://json_parse"
         },
         {
           "attrs": {},
           "confidence": "unknown",
+          "conflicts": [],
           "dst": "decl://validate_utf8",
           "edge": "SOURCE_DECLARES",
+          "facts": [
+            {
+              "attrs": {},
+              "confidence": "unknown",
+              "producer": ""
+            }
+          ],
           "provenance": "",
+          "resolved": {},
           "src": "header://src/json_internal.cc"
         }
       ],
@@ -63,26 +81,57 @@
             "visibility": "public_header"
           },
           "confidence": "unknown",
+          "conflicts": [],
+          "facts": [
+            {
+              "attrs": {
+                "visibility": "public_header"
+              },
+              "confidence": "unknown",
+              "producer": ""
+            }
+          ],
           "id": "decl://json_parse",
           "kind": "source_decl",
           "label": "json_parse",
-          "provenance": ""
+          "provenance": "",
+          "resolved": {
+            "visibility": "public_header"
+          }
         },
         {
           "attrs": {},
           "confidence": "unknown",
+          "conflicts": [],
+          "facts": [
+            {
+              "attrs": {},
+              "confidence": "unknown",
+              "producer": ""
+            }
+          ],
           "id": "decl://validate_utf8",
           "kind": "source_decl",
           "label": "validate_utf8",
-          "provenance": ""
+          "provenance": "",
+          "resolved": {}
         },
         {
           "attrs": {},
           "confidence": "unknown",
+          "conflicts": [],
+          "facts": [
+            {
+              "attrs": {},
+              "confidence": "unknown",
+              "producer": ""
+            }
+          ],
           "id": "header://src/json_internal.cc",
           "kind": "source",
           "label": "src/json_internal.cc",
-          "provenance": ""
+          "provenance": "",
+          "resolved": {}
         }
       ],
       "schema_version": 1

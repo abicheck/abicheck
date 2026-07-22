@@ -1,8 +1,16 @@
 # ADR-046: Source Graph Identity v2 — USR-Based Entity Resolution and Evidence-Preserving Merge
 
 **Date:** 2026-07-19
-**Status:** Proposed
-**Decision maker:** (pending)
+**Status:** Accepted — D2 slice implemented: the evidence-preserving node/edge
+merge (`GraphFact`/`FactConflict`/`merge_graph_facts`, replacing
+`SourceGraphSummary.add_node`/`add_edge`'s v1 first-writer-wins drop). D1
+(`relation_key`/`occurrence_id` edge-identity split), D3 (per-(kind,role)
+coverage matrix), D4 (`EntityResolver`/`SOURCE_GRAPH_VERSION = 2`), D5
+(`TraversalPolicy`), and D6 (proof-path preference order) remain open — see
+"D2 implementation" below.
+**Decision maker:** (pending — recorded per repository convention, the same
+caveat ADR-048's header carries; a single-maintainer repo where merging the
+implementing PR is the acceptance mechanism.)
 
 ---
 
@@ -246,6 +254,71 @@ The finding keeps `primary_path` (the highest-preference path found) plus
 "how much evidence was there, and how strong was the best of it," not just
 one arbitrary shortest path.
 
+## D2 implementation (G29 Phase 2, slice 1)
+
+Implemented as the first slice of Phase 2, chosen because D2 is the change
+this ADR's own Context section cites the most concrete recurring evidence
+for (PR #607's repeated "which producer wins" bugs), and because it is
+self-contained: no other decision in this ADR needs to land first, and
+downstream consumers (`crosscheck.py`, `internal_leak.py`,
+`source_graph_findings.py`) never read `GraphNode.attrs`/`GraphEdge.attrs`
+differently — they still see one merged dict, now assembled honestly instead
+of by first-writer-wins.
+
+- New `abicheck/buildsource/graph_facts.py`: `GraphFact` (`producer`/
+  `confidence`/`attrs`), `FactConflict`, `merge_graph_facts()` (the
+  order-independent fold described in D2 above — highest confidence wins per
+  key, ties broken by a stable producer-name sort, a genuine value
+  disagreement recorded as a `FactConflict` instead of dropped),
+  `ensure_facts_and_resolve()` and `register_fact()` (the two operations
+  `SourceGraphSummary.add_node`/`add_edge` now delegate to). Deliberately a
+  dependency-free leaf module — `_FactHolder` is a structural `Protocol`
+  describing the `GraphNode`/`GraphEdge` shape it needs, so this module never
+  imports `source_graph.py` (not even under `TYPE_CHECKING`) and cannot form
+  an import cycle with it (CLAUDE.md "M1-3"); `source_graph.py` imports and
+  re-exports its public names (`CONF_HIGH`/`CONF_REDUCED`/`CONF_UNKNOWN`/
+  `GraphFact`/`FactConflict`) so existing `from .source_graph import
+  CONF_HIGH` call sites are unaffected. Also the mechanical reason for the
+  split: `source_graph.py` was already the largest module in `buildsource/`
+  and D2's dataclass/merge code would have pushed it past the AI-readiness
+  2000-line hard cap.
+- `GraphNode`/`GraphEdge` (`source_graph.py`) gain `facts: list[GraphFact]`,
+  `resolved: dict[str, Any]`, `conflicts: list[FactConflict]`. `attrs`/
+  `provenance`/`confidence` remain real fields (v1 read-compatibility, exactly
+  as D2 specified) but are now populated from the merged view at write time
+  instead of frozen at first registration.
+- `SourceGraphSummary.add_node`/`add_edge` replace the v1 silent
+  drop-on-duplicate with `register_fact()`: a second (or third, …) producer's
+  attrs are folded into `resolved`/`conflicts` instead of vanishing.
+  `kind`/`label` (structural identity, not evidence) still keep the first
+  registration's value — only the accumulated `attrs` evidence merges.
+- `GraphNode.from_dict`/`GraphEdge.from_dict` accept a v1 pack with no
+  `facts`/`resolved`/`conflicts` keys unchanged — synthesizing the single
+  fact its `attrs`/`provenance`/`confidence` already imply (D4's compat rule,
+  applied to D2's schema) — and deliberately never trust a *stored*
+  `resolved`/`conflicts` value from any pack: both are always recomputed from
+  `facts`, so a hand-edited or stale pack self-heals to what the facts
+  actually support rather than silently persisting a bad merge.
+  `SourceGraphSummary.__post_init__` runs the same backfill/re-derive step
+  for every node/edge reachable from a constructor-seeded summary (the
+  pattern most of the existing test suite and a few builders use, bypassing
+  `add_node`/`add_edge` entirely) — the invariant "`facts` is never empty,
+  `resolved` is derived from `facts`" holds for every `GraphNode`/`GraphEdge`
+  regardless of how it entered the graph.
+- `tests/test_source_graph_v2.py` (new): order-independence (same facts,
+  opposite registration order → identical `resolved`/`confidence`/
+  `provenance`), the confidence-then-producer-name tie-break, conflict
+  recording vs. silent agreement, edge merge parity with node merge,
+  constructor-seeded backfill, and v1-pack/v2-pack round-trip compatibility.
+
+**Not yet implemented** (D1, D3-D6): `relation_key`/`occurrence_id` edge
+identity splitting, the per-(kind,role) coverage matrix, the USR-based
+`EntityResolver` (`SOURCE_GRAPH_VERSION` therefore stays `1`, not `2` —
+D2 alone does not need the version bump since it changes no on-disk key
+shape a v1 reader couldn't already tolerate additively), `TraversalPolicy`,
+and the six-tier proof-path preference order all remain open follow-up work
+under this same ADR.
+
 ## Non-goals
 
 - **Not** a change to any `ChangeKind`'s default verdict or to
@@ -332,15 +405,18 @@ one arbitrary shortest path.
 ## References
 
 - `abicheck/buildsource/source_graph.py` — v1 schema (`GraphNode`, `GraphEdge`,
-  `SourceGraphSummary`, `SOURCE_GRAPH_VERSION`), `add_node`'s current
-  first-writer-wins behavior.
+  `SourceGraphSummary`, `SOURCE_GRAPH_VERSION`); `add_node`/`add_edge` now
+  delegate to `graph_facts.py` (D2, implemented).
+- `abicheck/buildsource/graph_facts.py` — D2's `GraphFact`/`FactConflict`/
+  `merge_graph_facts`/`ensure_facts_and_resolve`/`register_fact`.
 - `abicheck/internal_leak.py` — `compute_leak_paths`/
   `compute_call_graph_leak_paths`, `is_consumer_compiled_node`/
-  `is_consumer_compiled_public_entry` (D5's starting point).
+  `is_consumer_compiled_public_entry` (D5's starting point, not implemented).
 - `abicheck/post_processing.py` — `MarkReachability` (PR #607), the
   root/qualified_name fallback pattern D4 centralizes, `min(paths, key=len)`
-  proof-path selection D6 replaces.
+  proof-path selection D6 replaces (both not implemented).
+- `tests/test_source_graph_v2.py` — D2 unit tests.
 - PR #607 review history — the concrete, repeated instances of identity/
   coverage-granularity bugs this ADR's Context section draws on.
-- [ADR-031](031-source-implementation-graph-augmentation.md), [ADR-041](041-compiler-facts-semantic-impact-graph.md), [ADR-044](044-reachability-aware-suppression.md)
+- [ADR-031](031-source-implementation-graph-augmentation.md), [ADR-041](041-compiler-facts-semantic-impact-graph.md), [ADR-044](044-reachability-aware-suppression.md), [ADR-048](048-canonical-entity-identity-and-graph-reconciliation.md)
 - `docs/development/plans/g29-impact-analysis-layer.md`

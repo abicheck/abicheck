@@ -47,6 +47,19 @@ from typing import TYPE_CHECKING, Any
 
 from .build_evidence import BuildEvidence, Confidence
 
+# Re-exported for backward compatibility (many modules do
+# ``from .source_graph import CONF_HIGH`` etc.) — the ``as``-aliases make the
+# re-export explicit for mypy's strict ``--no-implicit-reexport``.
+from .graph_facts import (
+    CONF_HIGH as CONF_HIGH,
+    CONF_REDUCED as CONF_REDUCED,
+    CONF_UNKNOWN as CONF_UNKNOWN,
+    FactConflict as FactConflict,
+    GraphFact as GraphFact,
+    ensure_facts_and_resolve,
+    register_fact,
+)
+
 if TYPE_CHECKING:
     from .source_abi import SourceAbiSurface, SourceEntity
 
@@ -140,12 +153,6 @@ EDGE_KINDS: frozenset[str] = frozenset(
     }
 )
 
-#: Confidence labels (ADR-031 D9). Mirrors the evidence-model vocabulary so the
-#: coverage report and graph speak the same language.
-CONF_HIGH = "high"
-CONF_REDUCED = "reduced"
-CONF_UNKNOWN = "unknown"
-
 #: L5 edge kinds that express a decl/type dependency (ADR-041 P0): a call, a
 #: non-call reference to a global/constant, a parameter/field type, or a base
 #: class. ``crosscheck.py``'s intra-version ``public_to_internal_dependency``
@@ -187,7 +194,13 @@ def _conf_from_build(conf: Confidence) -> str:
 
 @dataclass
 class GraphNode:
-    """A single ABI/API-relevant graph node (ADR-031 D2)."""
+    """A single ABI/API-relevant graph node (ADR-031 D2).
+
+    ``facts``/``resolved``/``conflicts`` are the ADR-046 D2 evidence-preserving
+    merge: ``attrs``/``provenance``/``confidence`` stay real fields (v1
+    read-compat), but are (re)populated from the merged facts at write time
+    (``add_node``) instead of frozen at first registration.
+    """
 
     id: str
     kind: str  # one of NODE_KINDS (preserved even if unknown)
@@ -195,6 +208,9 @@ class GraphNode:
     attrs: dict[str, Any] = field(default_factory=dict)
     provenance: str = ""  # how this node was derived, e.g. "build_evidence"
     confidence: str = CONF_UNKNOWN
+    facts: list[GraphFact] = field(default_factory=list)
+    resolved: dict[str, Any] = field(default_factory=dict)
+    conflicts: list[FactConflict] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -204,18 +220,28 @@ class GraphNode:
             "attrs": dict(self.attrs),
             "provenance": self.provenance,
             "confidence": self.confidence,
+            "facts": [f.to_dict() for f in self.facts],
+            "resolved": dict(self.resolved),
+            "conflicts": [c.to_dict() for c in self.conflicts],
         }
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> GraphNode:
-        return cls(
+        # v1 pack has no "facts" key; ensure_facts_and_resolve synthesizes it
+        # from attrs/provenance/confidence (no forced re-collection). A stored
+        # "resolved"/"conflicts" is never trusted — always recomputed, so a
+        # hand-edited pack self-heals instead of persisting a stale merge.
+        node = cls(
             id=str(d["id"]),
             kind=str(d.get("kind", "file")),
             label=str(d.get("label", "")),
             attrs=dict(d.get("attrs", {})),
             provenance=str(d.get("provenance", "")),
             confidence=str(d.get("confidence", CONF_UNKNOWN)),
+            facts=[GraphFact.from_dict(f) for f in d.get("facts", [])],
         )
+        ensure_facts_and_resolve(node)
+        return node
 
 
 @dataclass
@@ -223,8 +249,9 @@ class GraphEdge:
     """A directed edge between two nodes, with provenance + confidence (D2, D9).
 
     ``attrs`` carries edge-kind-specific labels — most importantly the
-    ``call_kind``/``resolution`` pair for ``DECL_CALLS_DECL`` edges (ADR-031 D4),
-    which a future call-graph extractor populates.
+    ``call_kind``/``resolution`` pair for ``DECL_CALLS_DECL`` edges (ADR-031
+    D4). ``facts``/``resolved``/``conflicts`` are the ADR-046 D2
+    evidence-preserving merge — see :class:`GraphNode`.
     """
 
     src: str
@@ -233,9 +260,17 @@ class GraphEdge:
     provenance: str = ""
     confidence: str = CONF_UNKNOWN
     attrs: dict[str, Any] = field(default_factory=dict)
+    facts: list[GraphFact] = field(default_factory=list)
+    resolved: dict[str, Any] = field(default_factory=dict)
+    conflicts: list[FactConflict] = field(default_factory=list)
 
     def key(self) -> tuple[str, str, str]:
-        """Identity of an edge for diffing/de-duplication: (src, dst, kind)."""
+        """Identity of an edge for diffing/de-duplication: (src, dst, kind).
+
+        The ADR-046 D1 *coarsest* (role-blind) projection — the v1 shape
+        every existing caller already keys on; D1's finer ``relation_key``/
+        ``occurrence_id`` split is not implemented by this slice.
+        """
         return (self.src, self.dst, self.kind)
 
     def to_dict(self) -> dict[str, Any]:
@@ -246,18 +281,26 @@ class GraphEdge:
             "provenance": self.provenance,
             "confidence": self.confidence,
             "attrs": dict(self.attrs),
+            "facts": [f.to_dict() for f in self.facts],
+            "resolved": dict(self.resolved),
+            "conflicts": [c.to_dict() for c in self.conflicts],
         }
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> GraphEdge:
-        return cls(
+        # See GraphNode.from_dict: v1-pack compat + always-recompute-from-facts
+        # apply identically here.
+        edge = cls(
             src=str(d["src"]),
             dst=str(d["dst"]),
             kind=str(d.get("edge", d.get("kind", ""))),
             provenance=str(d.get("provenance", "")),
             confidence=str(d.get("confidence", CONF_UNKNOWN)),
             attrs=dict(d.get("attrs", {})),
+            facts=[GraphFact.from_dict(f) for f in d.get("facts", [])],
         )
+        ensure_facts_and_resolve(edge)
+        return edge
 
 
 @dataclass
@@ -334,24 +377,54 @@ class SourceGraphSummary:
     degraded_passes: dict[str, bool] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        # De-dup indexes for O(1) add_node/add_edge. Built from whatever the
-        # constructor (or from_dict) seeded so incremental building stays cheap.
+        # De-dup indexes for O(1) add_node/add_edge, seeded from whatever the
+        # constructor (or from_dict) provided.
         self._node_ids: set[str] = {n.id for n in self.nodes}
         self._edge_keys: set[tuple[str, str, str]] = {e.key() for e in self.edges}
+        self._node_by_id: dict[str, GraphNode] = {n.id: n for n in self.nodes}
+        self._edge_by_key: dict[tuple[str, str, str], GraphEdge] = {
+            e.key(): e for e in self.edges
+        }
+        # ADR-046 D2: backfill/re-derive facts/resolved for anything
+        # constructed directly (bypassing add_node/add_edge), so every node
+        # reachable from this summary satisfies "facts is never empty,
+        # resolved is derived from facts".
+        for n in self.nodes:
+            ensure_facts_and_resolve(n)
+        for e in self.edges:
+            ensure_facts_and_resolve(e)
 
     # -- mutation helpers ---------------------------------------------------
 
     def add_node(self, node: GraphNode) -> None:
-        """Add a node, de-duplicating by id (first writer wins on facts)."""
+        """Add a node, or merge a second registration's facts into it (ADR-046
+        D2 — evidence-preserving, replaces v1 first-writer-wins). ``kind``/
+        ``label`` keep the first registration's value; only ``attrs`` merge.
+        """
         if node.id not in self._node_ids:
+            ensure_facts_and_resolve(node)
             self.nodes.append(node)
             self._node_ids.add(node.id)
+            self._node_by_id[node.id] = node
+            return
+        register_fact(
+            self._node_by_id[node.id], node.provenance, node.confidence, node.attrs
+        )
 
     def add_edge(self, edge: GraphEdge) -> None:
-        """Add an edge, de-duplicating by (src, dst, kind)."""
+        """Add an edge, or merge a second registration's facts into it — same
+        as :meth:`add_node`, keyed on ``(src, dst, kind)`` (see
+        :meth:`GraphEdge.key`).
+        """
         if edge.key() not in self._edge_keys:
+            ensure_facts_and_resolve(edge)
             self.edges.append(edge)
             self._edge_keys.add(edge.key())
+            self._edge_by_key[edge.key()] = edge
+            return
+        register_fact(
+            self._edge_by_key[edge.key()], edge.provenance, edge.confidence, edge.attrs
+        )
 
     def has_node(self, node_id: str) -> bool:
         """Whether a node with ``node_id`` is already in the graph."""
@@ -827,11 +900,13 @@ _CALL_GRAPH_FALLBACK_PROVENANCE = "call_graph"
 #: through one of these backends is exactly as unproven as the call-graph
 #: fallback shape and must not be treated as a safe stopping point by
 #: default either.
-_NO_CONSUMER_COMPILED_SIGNAL_PROVENANCES = frozenset({
-    _CALL_GRAPH_FALLBACK_PROVENANCE,
-    "kythe",
-    "codeql",
-})
+_NO_CONSUMER_COMPILED_SIGNAL_PROVENANCES = frozenset(
+    {
+        _CALL_GRAPH_FALLBACK_PROVENANCE,
+        "kythe",
+        "codeql",
+    }
+)
 
 
 def is_consumer_compiled_node(node_id: str, node_by_id: dict[str, GraphNode]) -> bool:
@@ -1436,7 +1511,8 @@ def _augment_with_source_abi(
                 attrs={
                     "decl_kind": ent.kind,
                     "visibility": ent.visibility,
-                    "consumer_compiled_body": ent.identity() in consumer_compiled_identities,
+                    "consumer_compiled_body": ent.identity()
+                    in consumer_compiled_identities,
                 },
             )
         )
