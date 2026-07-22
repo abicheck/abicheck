@@ -433,17 +433,24 @@ def _evidence_incompatibility(
     mismatch that doesn't actually affect it.
 
     Deliberately does **not** also compare ``evidence_producer.version``
-    against ``fact_set.producer_version``: ADR-047 §2's own example styles
-    ``evidence_producer.version`` as a package release version
-    (``"0.x.y"``), but ``fact_set.producer_version`` is
-    ``CLANG_EXTRACTOR_VERSION`` — an independent internal extractor-recipe
-    version (``"0.7"`` today, per ``source_extractors/clang.py``) with no
-    correspondence to a package release number. Comparing the two directly
-    would reject nearly every real resolution on a coincidental mismatch
-    between two incommensurable version schemes, which is worse than not
-    checking at all — a real version-compatibility check needs a producer-
-    side fix (recording the same identity in both places), not a resolver-
-    side guess.
+    against ``fact_set.producer_version`` — re-raised in later review as a
+    "scanner/recipe version desync" gap; re-verified against **both** real
+    producers before staying with this decision, not just the one checked
+    originally. ADR-047 §2's own example styles ``evidence_producer.version``
+    as a package release version (``"0.x.y"``), but ``fact_set
+    .producer_version`` is an independent internal producer-build version in
+    both cases that exist: ``CLANG_EXTRACTOR_VERSION`` (``"0.7"`` today, per
+    ``source_extractors/clang.py``) for the Python clang extractor, and
+    ``kPluginVersion`` (``contrib/abicheck-clang-plugin/
+    AbicheckFactsPlugin.cpp``) for the C++ plugin — neither corresponds to a
+    package release number. Comparing the two directly would reject nearly
+    every real resolution on a coincidental mismatch between two
+    incommensurable version schemes, which is worse than not checking at all
+    — a real version-compatibility check needs a producer-side fix
+    (recording the same identity in both places, e.g. build-output.json's
+    emitter stamping the real producer-build version instead of the package
+    version), not a resolver-side guess at a mapping that doesn't exist
+    anywhere in the codebase today.
     """
     if not candidate_evidence_producer:
         return None
@@ -754,12 +761,18 @@ def resolve_bundle(
         )
 
     binaries_dir = baseline_dir / BASELINE_BINARIES_DIRNAME
-    missing: list[str] = []
+    # Tracks *why* each problem member was rejected, not just its name --
+    # three genuinely different causes (no manifest entry, an escaping/
+    # missing/mis-located binary, a digest mismatch) previously all
+    # collapsed into one generic "have no staged binary" sentence, pointing
+    # an operator diagnosing e.g. a corrupt-but-present binary at the wrong
+    # fix (CodeRabbit review).
+    problems: dict[str, str] = {}
     binary_paths: dict[str, str] = {}
     for member in members:
         artifact = manifest.artifact_for(member)
         if artifact is None or not artifact.binary:
-            missing.append(member)
+            problems[member] = "no staged binary declared in the manifest"
             continue
         resolved = _resolve_under_baseline_dir(baseline_dir, artifact.binary)
         # The documented bundle contract is that every member's binary lives
@@ -775,21 +788,25 @@ def resolve_bundle(
             or not resolved.resolve().is_relative_to(binaries_dir.resolve())
             or not resolved.is_file()
         ):
-            missing.append(member)
+            problems[member] = (
+                f"binary {artifact.binary!r} is missing, unreadable, or "
+                f"outside {BASELINE_BINARIES_DIRNAME}/"
+            )
             continue
-        if _binary_digest_issue(member, resolved, artifact.sha256):
-            missing.append(member)
+        digest_issue = _binary_digest_issue(member, resolved, artifact.sha256)
+        if digest_issue:
+            problems[member] = digest_issue
             continue
         binary_paths[member] = str(resolved)
 
-    if missing:
+    if problems:
+        detail = "; ".join(f"{m!r}: {problems[m]}" for m in sorted(problems))
         return ResolveResult(
             outcome=ResolveOutcome.AMBIGUOUS,
             message=(
-                f"bundle {bundle!r}'s member(s) {sorted(missing)} have no "
-                f"staged binary in this baseline-set's "
-                f"{BASELINE_BINARIES_DIRNAME}/ directory -- a bundle-scoped "
-                "baseline must stage every member's ELF binary (ADR-047 "
+                f"bundle {bundle!r} could not be resolved -- {detail} -- a "
+                "bundle-scoped baseline must stage every member's ELF "
+                "binary under a validated binaries/ directory (ADR-047 "
                 "section 6/section 8 S14), not just its snapshot."
             ),
             manifest_path=manifest_path,

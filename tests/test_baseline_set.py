@@ -583,7 +583,8 @@ def test_resolve_bundle_ambiguous_when_staged_binary_file_missing(
         required=True,
     )
     assert result.outcome == ResolveOutcome.AMBIGUOUS
-    assert "['libpvxsIoc']" in result.message
+    assert "'libpvxsIoc':" in result.message
+    assert "'libpvxs':" not in result.message
 
 
 def test_resolve_bundle_incompatible_evidence(tmp_path: Path) -> None:
@@ -673,7 +674,8 @@ def test_resolve_bundle_rejects_escaping_binary_path(tmp_path: Path) -> None:
         required=True,
     )
     assert result.outcome == ResolveOutcome.AMBIGUOUS
-    assert "['libpvxs']" in result.message
+    assert "'libpvxs':" in result.message
+    assert "'libpvxsIoc':" not in result.message
 
 
 def test_resolve_bundle_rejects_binary_outside_binaries_dir(tmp_path: Path) -> None:
@@ -746,3 +748,43 @@ def test_resolve_bundle_digest_mismatch_is_ambiguous(tmp_path: Path) -> None:
         required=True,
     )
     assert result.outcome == ResolveOutcome.AMBIGUOUS
+
+
+def test_resolve_bundle_message_reports_distinct_per_member_reasons(
+    tmp_path: Path,
+) -> None:
+    # Three different rejection causes (no manifest entry, digest mismatch,
+    # missing/mis-located binary) must surface as three distinct per-member
+    # reasons in one message, not one generic "have no staged binary"
+    # sentence that points every operator at the same wrong fix
+    # (CodeRabbit review).
+    content = b"\x7fELF-real"
+    real_digest = hashlib.sha256(content).hexdigest()
+    _write_manifest(
+        tmp_path,
+        artifacts=[
+            _target_artifact(
+                "libpvxs",
+                extra={"binary": "binaries/libpvxs.so.1.5", "sha256": real_digest},
+            ),
+            _target_artifact(
+                "libpvxsIoc",
+                extra={"binary": "binaries/libpvxsIoc.so.1.5", "sha256": "0" * 64},
+            ),
+            # libpvxsExtra has no "binary" field at all.
+        ],
+    )
+    (tmp_path / "binaries").mkdir()
+    (tmp_path / "binaries" / "libpvxs.so.1.5").write_bytes(content)
+    (tmp_path / "binaries" / "libpvxsIoc.so.1.5").write_bytes(b"\x7fELF-wrong")
+    result = resolve_bundle(
+        tmp_path,
+        bundle="pvxs-release",
+        members=["libpvxs", "libpvxsIoc", "libpvxsExtra"],
+        profile=PROFILE,
+        required=True,
+    )
+    assert result.outcome == ResolveOutcome.AMBIGUOUS
+    assert "digest does not match" in result.message  # libpvxsIoc
+    assert "no staged binary declared" in result.message  # libpvxsExtra
+    assert "'libpvxs':" not in result.message  # libpvxs itself resolved fine
