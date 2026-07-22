@@ -173,11 +173,15 @@ def _looks_like_requires_declarator(code: bytes, match_start: int) -> bool:
     identifier — either immediately preceded (skipping only whitespace) by
     a bare identifier that isn't one of the few keywords that can
     legitimately introduce a requires-expression as an operand (the
-    declaration/call-with-preceding-name case), or preceded by nothing but
-    a statement boundary (the bare call-as-statement case) — rather than
-    the C++20 keyword."""
+    declaration/call-with-preceding-name case), preceded by nothing but a
+    statement boundary (the bare call-as-statement case), or preceded by
+    ``.``/``->``/``::`` (a member/qualified-name access — "requires" the
+    C++20 keyword is never looked up that way) — rather than the C++20
+    keyword."""
     prefix = code[:match_start].rstrip()
     if not prefix or prefix[-1:] in _REQUIRES_STATEMENT_BOUNDARY_CHARS:
+        return True
+    if prefix.endswith(b".") or prefix.endswith(b"->") or prefix.endswith(b"::"):
         return True
     m = _TRAILING_IDENTIFIER_PATTERN.search(prefix)
     return m is not None and m.group(1) not in _REQUIRES_EXPR_SAFE_PRECEDING_WORDS

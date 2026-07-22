@@ -295,6 +295,41 @@ def test_cpp20_detector_ignores_call_to_pre_cxx20_requires_function(tmp_path):
     assert _detect_cpp20_headers(headers) is False
 
 
+def test_cpp20_detector_ignores_member_call_to_pre_cxx20_requires(tmp_path):
+    """Regression (Codex review, third round): a member call to a pre-C++20
+    method named "requires" (``x.requires(1);``) was still misdetected —
+    "requires" the C++20 keyword is never looked up via member access."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "struct S { void requires(int); };\nvoid f(S x) { x.requires(1); }\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_ignores_pointer_member_call_to_pre_cxx20_requires(tmp_path):
+    """Same as above, via ``->`` instead of ``.``."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "struct S { void requires(int); };\nvoid f(S* x) { x->requires(1); }\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_ignores_qualified_call_to_pre_cxx20_requires(tmp_path):
+    """Regression (Codex review, third round): a qualified call to a
+    pre-C++20 function named "requires" (``ns::requires(1);``) was still
+    misdetected — "requires" the C++20 keyword is never qualified this
+    way."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "namespace ns { void requires(int); }\nvoid f() { ns::requires(1); }\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
 def test_cpp20_detector_still_accepts_return_requires_expression(tmp_path):
     """Non-regression: "return requires(...)" — a requires-expression used
     directly as a return value — must stay detected. "return" is one of the

@@ -202,3 +202,66 @@ class TestHiddenFriendDumper:
         assert len(funcs) == 1
         assert funcs[0].is_hidden_friend is True
         assert funcs[0].hidden_friend_owner == "variant"
+
+    def test_multiple_befriending_classes_public_owner_wins_regardless_of_order(
+        self,
+    ) -> None:
+        """Regression (Codex review): the same free function can legitimately
+        be befriended by more than one class. ``hidden_friend_owner`` holds
+        only a single owner, so a public befriending class must always win
+        over a private one, and once recorded must never be displaced by a
+        later private owner — a public ADL function must not look
+        privately-owned only because processing happened to visit the
+        non-public befriending class last."""
+        for public_first in (True, False):
+            root = Element("CastXML", attrib={"format": "1.4.0"})
+            SubElement(root, "File", attrib={"id": "fpub", "name": "public.h"})
+            SubElement(root, "File", attrib={"id": "fpriv", "name": "private.h"})
+            SubElement(root, "Namespace", attrib={"id": "_1", "name": "::"})
+            SubElement(root, "FundamentalType", attrib={"id": "_b", "name": "bool"})
+
+            pub_cls = Element("Class")
+            pub_cls.set("id", "_pub")
+            pub_cls.set("name", "PublicType")
+            pub_cls.set("context", "_1")
+            pub_cls.set("file", "fpub")
+            pub_cls.set("line", "3")
+            pub_cls.set("befriending", "_34")
+            pub_cls.set("size", "8")
+            pub_cls.set("align", "8")
+
+            priv_cls = Element("Class")
+            priv_cls.set("id", "_priv")
+            priv_cls.set("name", "PrivateType")
+            priv_cls.set("context", "_1")
+            priv_cls.set("file", "fpriv")
+            priv_cls.set("line", "3")
+            priv_cls.set("befriending", "_34")
+            priv_cls.set("size", "8")
+            priv_cls.set("align", "8")
+
+            ordered = [pub_cls, priv_cls] if public_first else [priv_cls, pub_cls]
+            for cls in ordered:
+                root.append(cls)
+
+            op = SubElement(root, "OperatorFunction")
+            op.set("id", "_34")
+            op.set("name", "==")
+            op.set("returns", "_b")
+            op.set("context", "_1")
+            op.set("file", "fpub")
+            op.set("line", "9")
+            op.set("mangled", "_Zeq10PublicTypeS_")
+
+            parser = _CastxmlParser(
+                root,
+                exported_dynamic=set(),
+                exported_static=set(),
+                public_header_paths=["public.h"],
+            )
+            funcs = parser.parse_functions()
+            assert len(funcs) == 1
+            assert funcs[0].is_hidden_friend is True
+            assert funcs[0].hidden_friend_owner == "PublicType", (
+                f"public_first={public_first}: expected public owner to win"
+            )

@@ -783,8 +783,18 @@ class _CastxmlParser:
         so surface classification can key demotion off the owner's header
         origin instead of unconditionally retaining every hidden-friend finding
         regardless of whether the owner lives in a system/private header.
+
+        The same free function can legitimately be befriended by more than
+        one class (e.g. one comparison operator declared as a friend inside
+        two distinct types). ``Function.hidden_friend_owner`` holds only a
+        single owner, so when ids collide, a public owner always wins and,
+        once recorded, is never displaced by a later private/system one —
+        never let a public ADL function look privately-owned only because a
+        different, non-public befriending class happened to be visited last
+        (Codex review).
         """
         owner_by_id: dict[str, str] = {}
+        owner_is_public_by_id: dict[str, bool] = {}
         for el in self._record_els:
             if el.tag not in ("Class", "Struct", "Union"):
                 continue
@@ -792,9 +802,15 @@ class _CastxmlParser:
             if not befriending:
                 continue
             owner_name = self._qualified_name(el)
+            is_public = self._decl_is_public(el)
             for fid in befriending.split():
-                if fid:
+                if not fid:
+                    continue
+                if fid not in owner_by_id or (
+                    is_public and not owner_is_public_by_id[fid]
+                ):
                     owner_by_id[fid] = owner_name
+                    owner_is_public_by_id[fid] = is_public
         return owner_by_id
 
     # castxml emits non-member operator overloads as <OperatorFunction>
