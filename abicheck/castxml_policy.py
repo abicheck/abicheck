@@ -109,18 +109,30 @@ def _parse_pep440(castxml_version: str) -> Version | None:
     of build metadata after a ``+`` local-version separator, not a bare
     ``-``, so a straight ``Version(...)`` call on the Superbuild's own
     version string always raised ``InvalidVersion`` regardless of whether the
-    numeric release itself was in range (Codex review: this meant a future
-    supported >=0.7.0 Superbuild build would still be misreported as
-    unparseable, not just today's below-floor one). Returns ``None`` when
-    neither form parses.
+    numeric release itself was in range. Returns ``None`` when neither form
+    parses.
+
+    The fallback converts only the *last* hyphen to ``+``, not the first
+    (Codex review): the documented CastXML version format also allows an
+    optional ``-rc<n>`` pre-release id before the git suffix, e.g.
+    ``0.7.0-rc1-gabc``, and PEP 440 already parses a hyphen-separated
+    pre-release segment like ``-rc1`` directly (the first ``Version(...)``
+    call below succeeds on ``0.7.0-rc1`` with no git suffix at all).
+    Converting the *first* hyphen instead would fold that ``-rc1`` marker
+    into the opaque local-version string, erasing its pre-release meaning
+    and making the build compare as ``>=`` the final release it precedes.
     """
     try:
         return Version(castxml_version)
     except InvalidVersion:
         pass
-    if "-" in castxml_version:
+    last_hyphen = castxml_version.rfind("-")
+    if last_hyphen != -1:
+        candidate = (
+            castxml_version[:last_hyphen] + "+" + castxml_version[last_hyphen + 1 :]
+        )
         try:
-            return Version(castxml_version.replace("-", "+", 1))
+            return Version(candidate)
         except InvalidVersion:
             pass
     return None

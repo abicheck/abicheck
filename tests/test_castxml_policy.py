@@ -106,10 +106,24 @@ class TestEvaluateCastxmlVersion:
 
     def test_git_describe_style_suffix_with_commit_count_accepted(self):
         """The fuller git-describe form (``<tag>-<n>-g<hash>``) must also
-        parse — only the *first* hyphen is the PEP 440 local-version
-        separator; the rest is the untouched local-version string."""
+        parse — only the *last* hyphen is converted to the PEP 440
+        local-version separator; everything before it is left intact."""
         result = evaluate_castxml_version(_version_text("0.7.0-12-g9864b1e"))
         assert result.supported is True
+
+    def test_rc_prerelease_with_git_suffix_stays_below_final_release(self):
+        """Regression (Codex review): the documented CastXML version format
+        allows an optional ``-rc<n>`` pre-release id before the git suffix
+        (e.g. ``0.7.0-rc1-gabc``). Converting the *first* hyphen to ``+``
+        (an earlier version of this fallback) folded the "-rc1" marker into
+        the opaque local-version string, erasing its pre-release meaning and
+        making the build compare as >= the final 0.7.0 release it precedes
+        — a release candidate must stay below the floor, not be accepted as
+        equivalent to (or newer than) the final release."""
+        result = evaluate_castxml_version(_version_text("0.7.0-rc1-gabc"))
+        assert result.supported is False
+        assert REASON_VERSION_BELOW_MINIMUM in result.reasons
+        assert REASON_VERSION_UNPARSEABLE not in result.reasons
 
     def test_unparseable_version_rejected(self):
         result = evaluate_castxml_version("garbage output, no version here")
