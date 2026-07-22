@@ -34,6 +34,7 @@ as :class:`FactConflict` instead of silently dropped. See ADR-046 D2 and
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -63,6 +64,20 @@ CONF_UNKNOWN = "unknown"
 #: confidence label from a hand-built/future pack) ranks alongside
 #: ``CONF_UNKNOWN`` rather than erroring.
 _CONFIDENCE_RANK: dict[str, int] = {CONF_HIGH: 2, CONF_REDUCED: 1, CONF_UNKNOWN: 0}
+
+
+def _precedence_key(fact: GraphFact) -> tuple[int, str, str]:
+    """Deterministic total order over facts: highest confidence first, tie
+    broken by producer name, and a further tie (the same producer
+    contributing two facts at equal confidence with different attrs) by a
+    JSON-content sort — so arrival/registration order never decides a
+    winner, satisfying ``merge_graph_facts``'s order-independence property.
+    """
+    return (
+        -_CONFIDENCE_RANK.get(fact.confidence, 0),
+        fact.producer,
+        json.dumps(fact.attrs, sort_keys=True, default=str),
+    )
 
 
 @dataclass
@@ -134,18 +149,19 @@ def merge_graph_facts(
 ) -> tuple[dict[str, Any], list[FactConflict]]:
     """Fold ``facts`` into one ``resolved`` attrs dict (ADR-046 D2).
 
-    Order-independent: the result depends only on each fact's confidence and
-    producer name, never on registration order, so the same set of facts
-    always resolves identically regardless of which producer ran first (the
-    property PR #607's review repeatedly needed and had to hand-verify per
-    call site). Per key, the highest-confidence fact wins; a tie is broken by
-    a stable producer-name sort. A genuine value disagreement between two
-    facts that both contribute a key is recorded as a :class:`FactConflict`,
-    not silently dropped.
+    Order-independent: the result depends only on each fact's confidence,
+    producer name, and content, never on registration order, so the same set
+    of facts always resolves identically regardless of which producer ran
+    first (the property PR #607's review repeatedly needed and had to
+    hand-verify per call site). Per key, the highest-confidence fact wins; a
+    tie is broken by a stable producer-name sort, and a further tie (the same
+    producer contributing two facts at equal confidence with different attrs
+    — e.g. an initial registration and a later backfill) by a deterministic
+    JSON-content sort so arrival order still never decides the winner. A
+    genuine value disagreement between two facts that both contribute a key
+    is recorded as a :class:`FactConflict`, not silently dropped.
     """
-    ordered = sorted(
-        facts, key=lambda f: (-_CONFIDENCE_RANK.get(f.confidence, 0), f.producer)
-    )
+    ordered = sorted(facts, key=_precedence_key)
     resolved: dict[str, Any] = {}
     winners: dict[str, GraphFact] = {}
     conflicts: list[FactConflict] = []
@@ -192,10 +208,7 @@ def ensure_facts_and_resolve(entity: _FactHolder) -> None:
         ]
     entity.resolved, entity.conflicts = merge_graph_facts(entity.facts)
     entity.attrs = dict(entity.resolved)
-    top = sorted(
-        entity.facts,
-        key=lambda f: (-_CONFIDENCE_RANK.get(f.confidence, 0), f.producer),
-    )[0]
+    top = min(entity.facts, key=_precedence_key)
     entity.confidence = top.confidence
     entity.provenance = top.producer
 

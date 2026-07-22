@@ -116,6 +116,28 @@ class TestEvidencePreservingMerge:
         assert n2.resolved["is_virtual"] is True
         assert n1.provenance == n2.provenance == "aaa-producer"
 
+    def test_same_producer_same_confidence_tie_broken_by_content_not_arrival(
+        self,
+    ) -> None:
+        # Codex review on PR #620: two facts sharing (producer, confidence)
+        # but differing attrs used to tie on the sort key, so Python's stable
+        # sort fell back to arrival order -- whichever was registered/loaded
+        # first silently won, breaking order-independence for the "same
+        # producer refines its own output" case (e.g. an initial
+        # registration and a later backfill from the same producer string).
+        forward = SourceGraphSummary()
+        forward.add_node(_node("p", CONF_HIGH, is_virtual=False))
+        forward.add_node(_node("p", CONF_HIGH, is_virtual=True))
+
+        backward = SourceGraphSummary()
+        backward.add_node(_node("p", CONF_HIGH, is_virtual=True))
+        backward.add_node(_node("p", CONF_HIGH, is_virtual=False))
+
+        (fwd_node,) = forward.nodes
+        (bwd_node,) = backward.nodes
+        assert len(fwd_node.facts) == len(bwd_node.facts) == 2
+        assert fwd_node.resolved == bwd_node.resolved
+
     def test_genuine_disagreement_is_recorded_as_conflict_not_dropped(self) -> None:
         g = SourceGraphSummary()
         g.add_node(_node("producer-a", CONF_HIGH, is_virtual=True))
