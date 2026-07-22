@@ -480,3 +480,56 @@ class TestArchiveExtraction:
         )
         assert result.returncode == 1
         assert "not a recognized archive" in result.stdout
+
+    def test_archive_with_no_manifest_anywhere_hard_fails_even_when_not_required(
+        self, tmp_path: Path
+    ) -> None:
+        # A malformed archive (no manifest.json at its root or in a single
+        # subdirectory) must never be treated as an ordinary "no baseline
+        # published yet" bootstrap, even under required: false -- the
+        # archive WAS present, just unusable, which is a real extraction
+        # failure distinct from nothing having been staged at all (Codex
+        # review).
+        empty_dir = tmp_path / "empty"
+        empty_dir.mkdir()
+        (empty_dir / "readme.txt").write_text("not a baseline set", encoding="utf-8")
+        archive_path = tmp_path / "malformed.tar.gz"
+        with tarfile.open(archive_path, "w:gz") as tf:
+            tf.add(empty_dir, arcname=".")
+
+        result, outputs = _run_action(
+            {
+                "INPUT_BASELINE_PATH": str(archive_path),
+                "INPUT_CHANNEL": "release-contract",
+                "INPUT_TARGET": "libpvxs",
+                "INPUT_PROFILE": PROFILE,
+                "INPUT_REQUIRED": "false",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert outputs.get("outcome") != "not_found"
+        assert "malformed" in result.stdout
+
+    def test_archive_with_ambiguous_subdirectories_hard_fails(
+        self, tmp_path: Path
+    ) -> None:
+        root = tmp_path / "ambiguous-root"
+        (root / "a").mkdir(parents=True)
+        (root / "b").mkdir(parents=True)
+        archive_path = tmp_path / "ambiguous.tar.gz"
+        with tarfile.open(archive_path, "w:gz") as tf:
+            tf.add(root, arcname=".")
+
+        result, _ = _run_action(
+            {
+                "INPUT_BASELINE_PATH": str(archive_path),
+                "INPUT_CHANNEL": "release-contract",
+                "INPUT_TARGET": "libpvxs",
+                "INPUT_PROFILE": PROFILE,
+                "INPUT_REQUIRED": "false",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "malformed" in result.stdout

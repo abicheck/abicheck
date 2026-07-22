@@ -104,15 +104,24 @@ elif [[ -f "$BASELINE_PATH" ]]; then
   # An archive may itself contain one nested directory (e.g. the
   # profile-named dir the archive was built from) rather than manifest.json
   # at its root -- if there's no manifest.json at the extraction root but
-  # there's exactly one subdirectory, descend into it. 0 or >1 candidates is
-  # left to resolve_baseline.py's own not_found/ambiguous handling rather
-  # than guessed here.
+  # there's exactly one subdirectory, descend into it.
   if [[ ! -f "$BASELINE_DIR/manifest.json" ]]; then
     _SUBDIRS=()
     while IFS= read -r -d '' d; do _SUBDIRS+=("$d"); done \
       < <(find "$BASELINE_DIR" -mindepth 1 -maxdepth 1 -type d -print0)
     if [[ ${#_SUBDIRS[@]} -eq 1 && -f "${_SUBDIRS[0]}/manifest.json" ]]; then
       BASELINE_DIR="${_SUBDIRS[0]}"
+    else
+      # 0 or >1 candidates -- this archive was actually provided but is
+      # malformed/ambiguous, which is a different problem than "no baseline
+      # published yet" (the legitimate not_found/bootstrap case, only ever
+      # reached when baseline-path doesn't exist at all, below). Falling
+      # through here would leave $BASELINE_DIR at the extraction root (no
+      # manifest.json), and resolve_baseline.py would then report
+      # not_found -- silently letting a `required: false` caller treat a
+      # broken archive as an ordinary "nothing published yet" bootstrap
+      # instead of a real extraction failure (Codex review).
+      _fail "baseline-set archive $BASELINE_PATH does not contain a manifest.json at its root or in a single unambiguous subdirectory -- this archive is malformed, not simply an unpublished baseline."
     fi
   fi
 else

@@ -650,3 +650,24 @@ def test_resolve_bundle_rejects_escaping_binary_path(tmp_path: Path) -> None:
     )
     assert result.outcome == ResolveOutcome.AMBIGUOUS
     assert "['libpvxs']" in result.message
+
+
+def test_resolve_bundle_rejects_binary_outside_binaries_dir(tmp_path: Path) -> None:
+    # A "binary" entry that is a valid, non-escaping relative path but sits
+    # outside binaries/ must still be rejected -- the documented bundle
+    # contract is that every member's binary lives under binaries/ (the
+    # same directory the binaries-dir output advertises), not merely
+    # somewhere in the baseline-set (Codex review).
+    _write_manifest(
+        tmp_path,
+        artifacts=[_target_artifact("libpvxs", extra={"binary": "libpvxs.so"})],
+    )
+    (tmp_path / "libpvxs.so").write_bytes(b"\x7fELF-fake")
+    result = resolve_bundle(
+        tmp_path,
+        bundle="pvxs-release",
+        members=["libpvxs"],
+        profile=PROFILE,
+        required=True,
+    )
+    assert result.outcome == ResolveOutcome.AMBIGUOUS

@@ -708,7 +708,19 @@ def resolve_bundle(
             missing.append(member)
             continue
         resolved = _resolve_under_baseline_dir(baseline_dir, artifact.binary)
-        if resolved is None or not resolved.is_file():
+        # The documented bundle contract is that every member's binary lives
+        # under binaries_dir (the same directory the resolved binaries-dir
+        # output advertises) -- accepting any relative path elsewhere in the
+        # baseline-set would let binary-paths point outside binaries-dir
+        # while the output still claims that directory holds every member,
+        # and a downstream bundle compare using binaries-dir directly (as
+        # opposed to the per-member binary-paths) would then miss it or
+        # pick up an unrelated file (Codex review).
+        if (
+            resolved is None
+            or not resolved.resolve().is_relative_to(binaries_dir.resolve())
+            or not resolved.is_file()
+        ):
             missing.append(member)
             continue
         binary_paths[member] = str(resolved)
