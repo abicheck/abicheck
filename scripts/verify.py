@@ -229,6 +229,12 @@ STEPS: tuple[Step, ...] = (
         description="Use-case registry vs. human docs drift gate",
     ),
     Step(
+        "docs-contract",
+        _pyscript("scripts/check_docs_contract.py"),
+        frozenset({PR, FULL}),
+        description="docs/AGENTS.md ownership contract: topics.yaml integrity, front-matter schema, duplicate-block scan",
+    ),
+    Step(
         "repo-facts",
         _pyscript("scripts/gen_repo_facts.py", "--check"),
         frozenset({PR, FULL}),

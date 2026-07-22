@@ -1,3 +1,18 @@
+---
+doc_type: explanation
+audience:
+  - library-maintainer
+  - ci-owner
+level: intermediate
+canonical_for:
+  - evidence-model
+depends_on:
+  - scripts/evidence_tiers.py
+  - abicheck/buildsource/model.py
+lifecycle: active
+generated: false
+---
+
 # Evidence & Detectability: What Each Method Can and Cannot See
 
 > **One idea drives this whole page:** *different methods observe different

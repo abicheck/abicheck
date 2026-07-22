@@ -1,3 +1,18 @@
+---
+doc_type: explanation
+audience:
+  - library-maintainer
+  - ci-owner
+level: beginner
+canonical_for:
+  - verdicts
+depends_on:
+  - abicheck/change_registry.py
+  - abicheck/checker_policy.py
+lifecycle: active
+generated: false
+---
+
 # Verdicts
 
 Every `abicheck compare` run produces one of five core verdicts, ordered from

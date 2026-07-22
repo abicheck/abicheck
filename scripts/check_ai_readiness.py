@@ -1475,8 +1475,9 @@ def check_mkdocs_nav_coverage(f: Findings) -> None:
         rel = md.relative_to(DOCS).as_posix()
         if rel in reachable:
             continue
-        # CLAUDE.md is for AI agents, never published to the site.
-        if md.name == "CLAUDE.md":
+        # CLAUDE.md/AGENTS.md are for AI agents, never published to the site
+        # (both excluded via mkdocs.yml's exclude_docs).
+        if md.name in ("CLAUDE.md", "AGENTS.md"):
             continue
         # index.md sits at a directory root and is implicitly served when
         # the parent section is opened, even if nothing links to it.

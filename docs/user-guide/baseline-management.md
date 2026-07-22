@@ -1,3 +1,18 @@
+---
+doc_type: explanation
+audience:
+  - library-maintainer
+  - ci-owner
+level: intermediate
+canonical_for:
+  - baseline-lifecycle
+depends_on:
+  - abicheck/model.py
+  - abicheck/serialization.py
+lifecycle: active
+generated: false
+---
+
 # Baseline Management
 
 ABI baselines are pre-computed snapshots of a library's ABI surface at a known-good

@@ -214,6 +214,7 @@ nav:
 # Agent instructions are repo-internal context, not published documentation.
 exclude_docs: |
   CLAUDE.md
+  AGENTS.md
 
 plugins:
   - search
