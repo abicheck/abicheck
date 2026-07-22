@@ -108,9 +108,16 @@ without a live DPC++ toolchain in every CI lane.
 Implements ADR-049 D1 and D2.
 
 **Goal & acceptance criteria.**
-- `AbiSnapshot.contract: ExtractionContract | None` (additive field,
-  `model.py`) carries `profile_fingerprint`/`scope_fingerprint` plus the
-  resolved inputs that produced them.
+- `AbiSnapshot.contract: ExtractionContract | None` (`model.py`) carries
+  `profile_fingerprint`/`scope_fingerprint` plus the resolved inputs that
+  produced them.
+- `serialization.SCHEMA_VERSION` is bumped (11 → 12) in the same change
+  that starts writing `contract` — **not** treated as a free additive field
+  the way ADR-041's advisory `extractor_passes`/`narrowed_passes` were (see
+  ADR-049 D1's rationale: the comparability gate is verdict-blocking, so an
+  old reader silently not knowing about `contract` must hit the existing
+  forward-version rejection, `serialization.py:557-567`, instead of
+  producing an ordinary verdict on data it can't check).
 - `comparability.check_contracts_comparable(old, new)` raises
   `ProfileMismatchError`/`ScopeMismatchError` (`errors.py`) when both sides
   carry a `contract` and the fingerprints differ; a snapshot with no
@@ -124,6 +131,15 @@ Implements ADR-049 D1 and D2.
 - Reporting: `reporter.py`/`sarif.py`/`junit_report.py` gain a
   `not_comparable` top-level result distinct from every existing verdict
   value — never coerced into `compatible`/`breaking`.
+- The published JSON contract moves with the reporters, in this phase, not
+  after: `abicheck/schemas/compare_report.schema.json` currently requires
+  `verdict` and restricts it to a fixed string enum with no `null` member.
+  It's updated to allow `verdict: null` alongside the new `not_comparable`
+  state (and a `reason` object), and `tests/test_report_schema.py` — which
+  already validates emitted reports against this exact file — gains a case
+  for a `not_comparable` report. Shipping the reporter change without this
+  either emits JSON that fails its own published schema, or ships a stale
+  schema — not an acceptable outcome for either.
 - `--diagnostic-comparison` opt-in flag: downgrades the hard-fail to a
   tentative diff, every finding stamped `assurance: none`.
 - **Rollout: the hard gate is the default from the first shipped version of
@@ -149,15 +165,23 @@ Implements ADR-049 D1 and D2.
 
 **Files & surfaces.** `model.py` (new `ExtractionContract`), new
 `abicheck/comparability.py` (fingerprint computation + gate), `errors.py`
-(two new exception classes), `checker.py` (gate call at the top of
-`compare`), `service.py`, `mcp_server.py`, `cli.py`/`cli_compare_release.py`
-(flag + `not_comparable` exit-code handling — see `docs/reference/exit-codes.md`,
-which needs a new row), `reporter.py`, `sarif.py`, `junit_report.py`.
+(two new exception classes), `serialization.py` (`SCHEMA_VERSION` bump,
+`contract` round-trip through `snapshot_to_dict`/`snapshot_from_dict`),
+`checker.py` (gate call at the top of `compare`), `service.py`,
+`mcp_server.py`, `cli.py`/`cli_compare_release.py` (flag + `not_comparable`
+exit-code handling — see `docs/reference/exit-codes.md`, which needs a new
+row), `reporter.py`, `sarif.py`, `junit_report.py`,
+`abicheck/schemas/compare_report.schema.json`.
 
 **Tests.** Unit tests for fingerprint stability (same manifest,
 independent-TU reordering unaffected; include-order-within-a-TU changes
-the fingerprint); gate unit tests for all three entry points; a
-`--diagnostic-comparison` end-to-end test; a backward-compat test asserting
+the fingerprint); a `SCHEMA_VERSION`-bump test asserting a pre-bump reader
+(a stubbed/patched `SCHEMA_VERSION`) hits the existing forward-version
+rejection on a `contract`-bearing snapshot rather than silently ignoring
+the field; `tests/test_report_schema.py` gains a `not_comparable` case
+validated against the updated `compare_report.schema.json`; gate unit tests
+for all three entry points; a `--diagnostic-comparison` end-to-end test; a
+backward-compat test asserting
 a contract-less snapshot pair compares unchanged.
 
 **Example fixtures.** The Phase 0 "scope drift" pair, promoted to a real

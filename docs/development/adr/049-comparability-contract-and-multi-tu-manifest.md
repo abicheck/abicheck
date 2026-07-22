@@ -79,9 +79,28 @@ trust in every other finding abicheck reports).
 
 ### D1. `ExtractionContract` — profile fingerprint and scope fingerprint
 
-Two new fields on `AbiSnapshot` (`model.py`), additive — no
-`SCHEMA_VERSION` bump on their own, following the same forward-compatible
-pattern ADR-041's `extractor_passes`/`narrowed_passes` used:
+Two new fields on `AbiSnapshot` (`model.py`), carried under a new
+`contract: ExtractionContract | None` sub-object. Unlike ADR-041's
+`extractor_passes`/`narrowed_passes` — purely advisory fields where an old
+reader silently not recognizing them degrades to the accepted, documented
+"under-call" failure mode (a RISK finding that doesn't fire, never a false
+compatible/breaking verdict) — the comparability gate this ADR adds (D2) is
+a **hard, verdict-blocking** mechanism whose entire purpose is preventing a
+false verdict on incomparable data. An old abicheck binary that predates
+this ADR has no code path that even looks for `contract`, so if the field
+were added the same additive, no-bump way, that old binary would silently
+compare two contract-bearing (and possibly incomparable) snapshots and
+produce an ordinary verdict — exactly the failure mode this ADR exists to
+close, just relocated to the reader-version boundary instead of the
+extraction boundary. `serialization.py` already has the right mechanism for
+this: an old reader rejects a snapshot whose `schema_version` is *newer*
+than it supports (`serialization.py:557-567`,
+`f"Snapshot schema_version {_schema_version} is newer than this abicheck..."`)
+rather than silently misreading it. `SCHEMA_VERSION` (`serialization.py:85`,
+currently 11) is therefore bumped to 12 the same release `contract` starts
+being written, so an old reader hits that existing forward-version error
+instead of silently producing a verdict on data whose comparability it has
+no way to check.
 
 - `profile_fingerprint: str` — a `sha256:`-prefixed digest of the
   **resolved** compile context: compiler family/version, target triple,
@@ -129,6 +148,13 @@ fingerprint field(s) — never coerced into `COMPATIBLE`/`BREAKING`'s existing
 enum values. A `--diagnostic-comparison` opt-in flag (default off) downgrades
 the hard-fail to a tentative diff with `assurance: none` stamped on every
 finding, for exploratory use — never the default, and never silent.
+`verdict: null` is a **published contract change**, not just an internal
+one: `abicheck/schemas/compare_report.schema.json` currently requires
+`verdict` and restricts it to a fixed string enum with no `null` member, and
+`tests/test_report_schema.py` validates emitted reports against exactly
+that file — both must change in the same phase that starts emitting
+`not_comparable`, or JSON output goes invalid (or the published schema goes
+stale) the moment the gate first fires.
 
 A profile/scope fingerprint is only computed (and only gates) when both
 snapshots carry one; a snapshot from before this ADR (no `contract` field)
@@ -285,7 +311,11 @@ explicitly in G32 so it isn't rediscovered the hard way.
 - `abicheck/checker_policy.py:618,1024` — `SOURCE_FACT_COVERAGE_INCOMPLETE`,
   `ReachabilityState`
 - `abicheck/snapshot_cache.py:130` — existing content-hash cache key
-- `abicheck/serialization.py:85,91-103` — `SCHEMA_VERSION`, set-sorting
+- `abicheck/serialization.py:85,91-103,557-567` — `SCHEMA_VERSION`,
+  set-sorting, the existing forward-version rejection D1 relies on
+- `abicheck/schemas/compare_report.schema.json`,
+  `tests/test_report_schema.py` — the published JSON contract D2's
+  `not_comparable` state must update alongside the reporters
 - `abicheck/sycl_metadata.py:234,238` — current binary-only SYCL/PI
   classification
 - `abicheck/buildsource/crosscheck.py:215` — `run_crosschecks`, the merge
