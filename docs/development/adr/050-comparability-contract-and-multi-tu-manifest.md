@@ -269,16 +269,36 @@ correctly on their own.** `profile_fingerprint` therefore does not compute
 a root from `-I` path text at all. Each `-I` directory (per side, in
 declared order — order is already a hashed input, per the note above)
 contributes its own, independent digest: the sorted set of (path relative
-to that `-I` directory, content hash) pairs for every header file
-extraction actually resolved from inside it. This is available at zero
-extra cost — `dumper_castxml.py`/`dumper_clang.py` already record each
-declaration's resolving header path (`_source_location`/
-`header_from_location`) to build `source_location`/`ast_toolchain` today;
-computing this digest only needs grouping those already-collected paths by
-which `-I` directory produced them and hashing their contents, not a new
-compiler invocation or a full directory-tree walk of (frequently huge)
-system/vendor include trees. `profile_fingerprint`'s `-I` component is the
-hash of the **ordered** sequence of per-directory digests.
+to that `-I` directory, content hash) pairs for every header file the
+preprocessor actually opened from inside it.
+
+**The digest's input must be the full transitive include list, not just
+headers that end up owning a declaration.** An earlier revision of this
+paragraph proposed sourcing it from `dumper_castxml.py`/`dumper_clang.py`'s
+existing per-declaration `_source_location`/`header_from_location`
+tracking — cheap, since that data is already collected, but wrong: a
+header pulled in purely for macros/pragmas/other preprocessing state (a
+`abi_config.h` that `#define`s an ABI-affecting layout macro but declares
+nothing itself) never owns a declaration, so it would never appear in that
+per-declaration set. Two dependency versions differing *only* in such a
+header would silently produce the same digest, letting a genuinely
+non-comparable pair back through the gate — reintroducing this section's
+own problem one level deeper, through an under-counted file set instead of
+an ambiguous path. The digest is instead built from each `-I` directory's
+**actual resolved file list** — every file the preprocessor opened from
+inside it, declaration-bearing or not — obtained the same way
+`abicheck/buildsource/include_graph.py`'s existing `-MM`/`-MMD` depfile
+mechanism already does for the L3 include graph (`parse_depfile()`, a pure,
+already-unit-tested parser over standard Make-rule depfile output): the L2
+castxml/clang invocation additionally requests a depfile (`-MMD -MF
+<path>` for clang; castxml already wraps a real compiler, so the same flag
+applies to its underlying invocation) alongside the AST dump, and every
+listed path is attributed to whichever declared `-I` directory contains
+it. This reuses a proven parser at a new call site — one additional cheap
+compiler flag per TU, not a second compiler invocation or a directory-tree
+walk — rather than inventing new file-discovery logic. `profile_fingerprint`'s
+`-I` component is the hash of the **ordered** sequence of per-directory
+digests.
 
 This is lossless with respect to every case the three rejected attempts
 traded off against each other, because content, unlike a path, is not
@@ -443,6 +463,32 @@ the one integer the current 3–11 range documents no meaning for
 (3/4/5/6/7/8/10/11 are all taken; 9 is the sole gap), with `compat/CLAUDE.md`'s
 exit-code table and a changelog fragment updated in the same phase per that
 file's own stated policy.
+
+**A sixth surface calls `compare_snapshots` through a different code path
+than any of the previous five, with yet another independent exit-code
+contract: `abicheck scan --against`.** `cli_scan_baseline.py`'s
+`_run_baseline_compare` (called from `scan_engine.run_scan_core` around
+`:852`) calls `service.compare_snapshots` — which, being a thin wrapper
+over `checker.compare` with no exception handling of its own, lets
+`ProfileMismatchError`/`ScopeMismatchError` through untouched, exactly as
+D2 intends at the `service.py` boundary. But `scan`'s own CLI command
+(`cli_scan.py`'s `scan_cmd`) has an independent, narrower exit-code
+contract (`0`/`2`/`4`/`5`/`64`, `docs/reference/exit-codes.md`) and its own
+`try`/`except` around the `run_scan_core` call that today only catches
+`_BudgetOverflow` and `_EvidenceContractError` — not
+`ProfileMismatchError`/`ScopeMismatchError`, which would propagate
+uncaught out of `scan_cmd` entirely, an unhandled traceback rather than
+any of `scan`'s documented exit codes. Listing only `service.py`'s
+`ScanRequest`/`compare_snapshots` as "the gate reaches `scan`" describes
+where the exception passes through cleanly, not where `scan`'s own CLI
+command classifies it into a deliberate outcome — the same distinction
+already drawn for `compat/cli.py` above. `scan_cmd` gains a dedicated
+`except (ProfileMismatchError, ScopeMismatchError) as exc:` branch
+alongside its existing two, exiting **`6`** — the next integer after
+`scan`'s own highest documented code (`5`, the budget-overflow exit),
+distinct from both native `compare`'s `16` and `compat check`'s `9` since
+all three commands maintain independent, non-overlapping exit-code
+schemes. `docs/reference/exit-codes.md`'s `scan` table gains this row.
 
 On the reporting surface (`reporter.py`,
 `sarif.py`, `junit_report.py`), a `not_comparable` result is a distinct

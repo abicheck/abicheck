@@ -199,14 +199,27 @@ Implements ADR-050 D1 and D2.
   root from `-I` path text at all: each `-I` directory (per side, in
   declared order — order is already a hashed input) contributes its own
   digest — the sorted set of (path relative to that `-I` directory,
-  content hash) pairs for every header file extraction actually resolved
-  from inside it, available at zero extra cost from the per-declaration
-  resolving-header paths `dumper_castxml.py`/`dumper_clang.py` already
-  collect (`_source_location`/`header_from_location`) — grouped by
-  originating `-I` directory and hashed, not a new compiler invocation or
-  a full directory-tree walk. `profile_fingerprint`'s `-I` component is
-  the hash of the **ordered** sequence of per-directory digests. This is
-  lossless: byte-identical dependency content at different mount points
+  content hash) pairs for every file the preprocessor actually opened from
+  inside it. **This must be the full transitive include list, not just
+  headers that end up owning a declaration** — a header pulled in purely
+  for macros/pragmas (an `abi_config.h` defining an ABI-affecting layout
+  macro but declaring nothing itself) never appears in
+  `dumper_castxml.py`/`dumper_clang.py`'s per-declaration
+  `_source_location`/`header_from_location` tracking, so sourcing the
+  digest from that data alone would silently miss a genuine
+  dependency-content difference expressed only through such a header —
+  the same "gap through under-counting" this whole redesign exists to
+  close, reintroduced one level deeper. The digest is instead built the
+  same way `abicheck/buildsource/include_graph.py`'s existing `-MM`/`-MMD`
+  depfile mechanism already builds the L3 include graph (`parse_depfile()`,
+  a pure, already-unit-tested Make-rule-depfile parser): the L2
+  castxml/clang invocation additionally requests a depfile (`-MMD -MF
+  <path>`) alongside the AST dump, and every listed path is attributed to
+  whichever declared `-I` directory contains it — one extra cheap compiler
+  flag per TU, reusing a proven parser at a new call site, not a second
+  compiler invocation or a directory-tree walk. `profile_fingerprint`'s
+  `-I` component is the hash of the **ordered** sequence of per-directory
+  digests. This is lossless: byte-identical dependency content at different mount points
   normalizes identically (attempt one's routine case, still correct);
   genuinely different content normalizes differently regardless of naming
   (the `dep-v1`/`dep-v2` case both attempt one and two mishandled); a
@@ -223,7 +236,7 @@ Implements ADR-050 D1 and D2.
   the manifest file's own directory — none of these legacy-CLI cases
   exist there.
 
-  Six dedicated tests are non-negotiable for this phase to be considered
+  Seven dedicated tests are non-negotiable for this phase to be considered
   done: (1) `--header old=v1/foo.h --header new=v2/foo.h` against logically
   identical trees under different roots asserts the resulting
   **`scope_fingerprint`s** match (not `profile_fingerprint` — headers are a
@@ -244,7 +257,13 @@ Implements ADR-050 D1 and D2.
   external dependency (`old=/work/v1/include` + `old=/opt/dep`,
   `new=/work/v2/include` + `new=/opt/dep`) leaves `profile_fingerprint`
   matching — the specific mixed-roots regression rejected attempt three
-  introduced, now a permanent regression test rather than a live bug.
+  introduced, now a permanent regression test rather than a live bug; (7)
+  two dependency trees identical in every declaration-bearing header but
+  differing in one macro-only header pulled in transitively (never itself
+  the target of any declaration's `source_location`) produce *different*
+  `profile_fingerprint`s — proving the digest is sourced from the depfile's
+  full resolved-file list, not the narrower per-declaration set, the
+  specific under-counting gap this design's own history exists to close.
 - **Modeling `contract` is not the same as populating it — this phase must
   do both.** `dump()` (`dumper.py`) is the one place that already resolves
   every input both fingerprints need; it calls
@@ -372,14 +391,18 @@ Implements ADR-050 D1 and D2.
   makes the release fan-out fix (below) actually surface at the release
   level instead of being computed per-library and then silently
   outranked.
-- The gate is wired at **all five** entry points in one phase, closing the
+- The gate is wired at **all six** entry points in one phase, closing the
   gap AGENTS.md's "Known gaps" section already names for the depth
   contract rather than repeating the CLI-only mistake: `checker.compare`
   (core), `service.py`'s `ScanRequest`/`compare_snapshots`,
   `mcp_server.py`'s MCP compare tools, `cli_compare_release.py`'s
-  directory/package fan-out, **and** `compat/cli.py`'s ABICC-compatible
+  directory/package fan-out, `compat/cli.py`'s ABICC-compatible
   `compat check` (which calls `checker.compare` directly too — see the
-  dedicated bullet below for its own, independent exit-code contract).
+  dedicated bullet below for its own, independent exit-code contract),
+  **and** `cli_scan.py`'s `scan --against` (which reaches
+  `compare_snapshots` through `cli_scan_baseline._run_baseline_compare` —
+  see its own dedicated bullet below for why listing `service.py`'s
+  `compare_snapshots` alone doesn't already cover it).
 - **The release fan-out needs a dedicated fix, not inherited behavior.**
   `_compare_one_library` (`cli_compare_release.py:180-269`) wraps its
   entire per-library flow in `except (click.ClickException,
@@ -428,6 +451,28 @@ Implements ADR-050 D1 and D2.
   `compat/CLAUDE.md`'s exit-code table and a changelog fragment are updated in
   the same phase, per that file's own stated policy that changing the
   exit-code contract "requires a CHANGELOG note and downstream coordination."
+- **A sixth entry point reaches `compare_snapshots` through a different
+  code path than the ones already named, with its own exit-code contract
+  too.** `abicheck scan --against` calls `service.compare_snapshots` from
+  `cli_scan_baseline._run_baseline_compare` (invoked from
+  `scan_engine.run_scan_core` around `:852`) — `compare_snapshots` itself
+  has no exception handling of its own (a thin wrapper over
+  `checker.compare`), so `ProfileMismatchError`/`ScopeMismatchError`
+  propagate through it cleanly, exactly as intended at the `service.py`
+  boundary. The gap is one level up: `cli_scan.py`'s `scan_cmd` wraps its
+  `run_scan_core` call in `try`/`except _BudgetOverflow`/`except
+  _EvidenceContractError` only — verified against the actual code, neither
+  clause catches `ProfileMismatchError`/`ScopeMismatchError`, so today they
+  would propagate uncaught out of `scan_cmd` entirely, an unhandled
+  traceback rather than any of `scan`'s own documented exit codes
+  (`0`/`2`/`4`/`5`/`64`). `scan_cmd` gains a third `except
+  (ProfileMismatchError, ScopeMismatchError) as exc:` branch alongside its
+  existing two, exiting **`6`** — the next integer after `scan`'s own
+  highest documented code (`5`), distinct from both native `compare`'s
+  `16` and `compat check`'s `9` since all three commands maintain
+  independent exit-code schemes; reusing either of those would imply a
+  shared numbering `scan` doesn't have. `docs/reference/exit-codes.md`'s
+  `scan` table gains this row.
 - Reporting: `reporter.py`/`sarif.py`/`junit_report.py` gain a
   `not_comparable` top-level result distinct from every existing verdict
   value — never coerced into `compatible`/`breaking`.
@@ -512,7 +557,13 @@ Implements ADR-050 D1 and D2.
 **Files & surfaces.** `model.py` (new `ExtractionContract`), new
 `abicheck/comparability.py` (fingerprint computation, `compute_extraction_contract`,
 the gate, and `contract_coverage` metadata computation — no detector, since
-`UNKNOWN_PROFILE` is report metadata, not a `Change`), `dumper.py` (`dump()`
+`UNKNOWN_PROFILE` is report metadata, not a `Change`; reuses
+`abicheck/buildsource/include_graph.py`'s existing `parse_depfile()` to turn
+a per-TU `-MMD` depfile into the per-`-I`-directory resolved-file lists
+`profile_fingerprint` hashes — see the acceptance-criteria bullet above),
+`dumper_castxml.py`/`dumper_clang.py` (request a depfile alongside the AST
+dump for every L2 invocation, not only when `buildsource` L3 evidence is
+also being collected), `dumper.py` (`dump()`
 calls `compute_extraction_contract(...)` and attaches it to every returned
 snapshot — see the acceptance-criteria bullet above; this is not optional
 plumbing), `snapshot_cache.py` (`_SNAPSHOT_CACHE_VERSION` bump and the
@@ -540,9 +591,15 @@ routing to the updated `_classify_compat_error_exit_code` via `_compat_fail`),
 `compat/_errors.py`
 (`_classify_compat_error_exit_code`'s new `ProfileMismatchError`/
 `ScopeMismatchError` branch returning `9`), `compat/CLAUDE.md` (exit-code
-table update), `docs/reference/exit-codes.md` (a
-new row in both the legacy and severity-aware tables, **and** the
-multi-library section, **and** the `compat check` table's `9` row), `reporter.py`,
+table update), `cli_scan.py` (`scan_cmd`'s new third `except
+(ProfileMismatchError, ScopeMismatchError)` branch exiting `6`, alongside
+its existing `_BudgetOverflow`/`_EvidenceContractError` clauses — no change
+needed in `cli_scan_baseline.py`/`scan_engine.py` themselves, since
+neither catches these exceptions today and both must keep letting them
+propagate), `docs/reference/exit-codes.md` (a
+new row in both the legacy and severity-aware `compare` tables, the
+multi-library section, the `compat check` table's `9` row, **and** the
+`scan` table's `6` row), `reporter.py`,
 `sarif.py`, `junit_report.py`, `html_report.py` (`generate_html_report`'s
 `contract_coverage` headline card), `service_render.py` (`render_output`'s
 `--format html` branch skips `generate_html_report` on the `not_comparable`
@@ -608,7 +665,7 @@ severity-aware release schemes — proving `not_comparable`'s precedence
 over the removed-library mechanism is unconditional, unlike that
 mechanism's own existing scheme-dependent precedence; gate unit tests
 for all
-five entry points; a **compat-mode exit-code** test asserting
+six entry points; a **compat-mode exit-code** test asserting
 `compat check` returns exactly `9` (never `10`'s generic fallback, never
 `16`, and never an unhandled traceback) for a
 `ProfileMismatchError`/`ScopeMismatchError`, exercised both through
@@ -616,7 +673,13 @@ five entry points; a **compat-mode exit-code** test asserting
 `compat check` invocation on a mismatched pair — the latter is what proves
 the new `try`/`except` around the `compare()` call site actually catches the
 exception, not just that the classifier returns the right code once handed
-one; a `--diagnostic-comparison` end-to-end test asserting the report's
+one; a **scan-mode exit-code** test asserting `abicheck scan --against`
+returns exactly `6` (never an unhandled traceback, never `5`'s
+budget-overflow code) for a `ProfileMismatchError`/`ScopeMismatchError`
+raised from the baseline compare, exercised through a real end-to-end
+`scan --against` invocation on a mismatched pair — proving `scan_cmd`'s new
+`except` clause actually catches what `_run_baseline_compare` lets through
+uncaught today; a `--diagnostic-comparison` end-to-end test asserting the report's
 top-level `assurance` field is `"none"` and that no individual finding
 carries its own `assurance` value; a
 backward-compat test asserting a contract-less snapshot pair compares
