@@ -24,6 +24,7 @@ orchestration this module's logic backs.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -106,6 +107,29 @@ def test_load_baseline_manifest_invalid_utf8_raises_value_error(tmp_path: Path) 
     # just malformed-but-valid-UTF-8 JSON (Codex review).
     (tmp_path / BASELINE_MANIFEST_FILENAME).write_bytes(b"\xff\xfe\x00not valid utf-8")
     with pytest.raises(ValueError, match="not valid JSON"):
+        load_baseline_manifest(tmp_path)
+
+
+def test_load_baseline_manifest_os_error_raises_value_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # OSError (e.g. a permission error, or the file disappearing between the
+    # is_file() check and open() -- a restored archive/cache race) is raised
+    # by open() itself, before JSON decoding even starts -- must be caught
+    # too, or a manifest that exists but can't be read escapes this
+    # function's documented ValueError contract (Codex review). Simulated
+    # via monkeypatch since a real permission error isn't reliably
+    # reproducible when tests run as root.
+    (tmp_path / BASELINE_MANIFEST_FILENAME).write_text("{}", encoding="utf-8")
+    real_open = Path.open
+
+    def _boom(self: Path, *args: object, **kwargs: object) -> object:
+        if self.name == BASELINE_MANIFEST_FILENAME:
+            raise PermissionError("synthetic permission error")
+        return real_open(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "open", _boom)
+    with pytest.raises(ValueError, match="could not be read"):
         load_baseline_manifest(tmp_path)
 
 
@@ -663,6 +687,57 @@ def test_resolve_bundle_rejects_binary_outside_binaries_dir(tmp_path: Path) -> N
         artifacts=[_target_artifact("libpvxs", extra={"binary": "libpvxs.so"})],
     )
     (tmp_path / "libpvxs.so").write_bytes(b"\x7fELF-fake")
+    result = resolve_bundle(
+        tmp_path,
+        bundle="pvxs-release",
+        members=["libpvxs"],
+        profile=PROFILE,
+        required=True,
+    )
+    assert result.outcome == ResolveOutcome.AMBIGUOUS
+
+
+def test_resolve_bundle_digest_match_resolves(tmp_path: Path) -> None:
+    content = b"\x7fELF-fake-binary-contents"
+    real_digest = hashlib.sha256(content).hexdigest()
+    _write_manifest(
+        tmp_path,
+        artifacts=[
+            _target_artifact(
+                "libpvxs",
+                extra={"binary": "binaries/libpvxs.so.1.5", "sha256": real_digest},
+            )
+        ],
+    )
+    (tmp_path / "binaries").mkdir()
+    (tmp_path / "binaries" / "libpvxs.so.1.5").write_bytes(content)
+    result = resolve_bundle(
+        tmp_path,
+        bundle="pvxs-release",
+        members=["libpvxs"],
+        profile=PROFILE,
+        required=True,
+    )
+    assert result.outcome == ResolveOutcome.RESOLVED
+
+
+def test_resolve_bundle_digest_mismatch_is_ambiguous(tmp_path: Path) -> None:
+    # A truncated/replaced staged binary (partial download, stale cache
+    # restore) must never resolve just because a file with the right name
+    # exists under binaries/ -- the manifest's recorded digest is what
+    # actually vouches for its content (Codex review, mirroring the
+    # target-snapshot digest-verification finding).
+    _write_manifest(
+        tmp_path,
+        artifacts=[
+            _target_artifact(
+                "libpvxs",
+                extra={"binary": "binaries/libpvxs.so.1.5", "sha256": "0" * 64},
+            )
+        ],
+    )
+    (tmp_path / "binaries").mkdir()
+    (tmp_path / "binaries" / "libpvxs.so.1.5").write_bytes(b"\x7fELF-fake")
     result = resolve_bundle(
         tmp_path,
         bundle="pvxs-release",

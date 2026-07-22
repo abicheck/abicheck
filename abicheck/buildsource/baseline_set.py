@@ -260,17 +260,25 @@ def load_baseline_manifest(baseline_dir: Path | str) -> BaselineManifest | None:
     path = Path(baseline_dir) / BASELINE_MANIFEST_FILENAME
     if not path.is_file():
         return None
-    with path.open(encoding="utf-8") as fh:
-        try:
+    try:
+        with path.open(encoding="utf-8") as fh:
             data = json.load(fh)
-        # UnicodeDecodeError (raised by the text-mode read itself, e.g. a
-        # truncated/binary-garbage manifest) is a ValueError subclass, not a
-        # json.JSONDecodeError -- must be caught alongside it, or a corrupt
-        # manifest with invalid UTF-8 bytes escapes as an unhandled
-        # exception instead of this function's documented ValueError
-        # contract (Codex review).
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise ValueError(f"{path} is not valid JSON: {exc}") from exc
+    # OSError -- e.g. a permission error, or the file disappearing between
+    # the is_file() check above and open() (a restored archive/cache race)
+    # -- is raised by open() itself, before the inner JSON decode even
+    # starts; must be caught here too, or a manifest that exists but can't
+    # actually be read escapes this function's documented ValueError
+    # contract as an unhandled exception (Codex review).
+    except OSError as exc:
+        raise ValueError(f"{path} could not be read: {exc}") from exc
+    # UnicodeDecodeError (raised by the text-mode read itself, e.g. a
+    # truncated/binary-garbage manifest) is a ValueError subclass, not a
+    # json.JSONDecodeError -- must be caught alongside it, or a corrupt
+    # manifest with invalid UTF-8 bytes escapes as an unhandled
+    # exception instead of this function's documented ValueError
+    # contract (Codex review).
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{path} is not valid JSON: {exc}") from exc
     if not isinstance(data, dict):
         raise ValueError(f"{path} must contain a JSON object.")
 
@@ -538,6 +546,52 @@ def _snapshot_digest_issue(
     return None
 
 
+def _binary_digest_issue(
+    member: str, binary_path: Path, expected_sha256: str
+) -> str | None:
+    """Verify a resolved bundle member's staged binary against the
+    manifest's recorded digest -- ``None`` when it matches (or the manifest
+    recorded no digest to check).
+
+    Reuses the same ``artifacts[].sha256`` field :func:`_snapshot_digest_issue`
+    checks for a target's snapshot -- one manifest row has exactly one
+    primary artifact to vouch for (the snapshot for a plain target row, the
+    staged binary for a bundle-scoped row), so one shared field name is
+    enough; no producer populates this for a staged binary yet (G30 P1.6,
+    not built here), so this is the contract this resolver defines, not one
+    it validates against real output. Unlike a snapshot's content hash, a
+    binary's digest is a plain whole-file SHA-256 -- no volatile-field
+    stripping needed, since dumper.py's timestamp-stamping doesn't apply to
+    an unmodified ELF file. Without this, a truncated/tampered staged
+    binary would still resolve purely because a file with the right name
+    exists under binaries/ (Codex review, mirroring the target-snapshot
+    finding).
+    """
+    if not expected_sha256:
+        return None
+    try:
+        h = hashlib.sha256()
+        with binary_path.open("rb") as fh:
+            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                h.update(chunk)
+    except OSError as exc:
+        return (
+            f"bundle member {member!r}'s staged binary {binary_path.name!r} "
+            f"could not be read to verify its digest: {exc} -- the "
+            "baseline-set is corrupt or was truncated."
+        )
+    actual_sha256 = h.hexdigest()
+    if actual_sha256 != expected_sha256:
+        return (
+            f"bundle member {member!r}'s staged binary {binary_path.name!r} "
+            f"content digest does not match the manifest (expected "
+            f"{expected_sha256!r}, got {actual_sha256!r}) -- the baseline-"
+            "set is corrupt, was tampered with, or was truncated/replaced "
+            "after the manifest was written."
+        )
+    return None
+
+
 def _resolve_under_baseline_dir(baseline_dir: Path, rel: str) -> Path | None:
     """Resolve *rel* under *baseline_dir*, refusing an absolute path or an
     escape (e.g. ``"../../etc/passwd"``) -- ``None`` if refused.
@@ -721,6 +775,9 @@ def resolve_bundle(
             or not resolved.resolve().is_relative_to(binaries_dir.resolve())
             or not resolved.is_file()
         ):
+            missing.append(member)
+            continue
+        if _binary_digest_issue(member, resolved, artifact.sha256):
             missing.append(member)
             continue
         binary_paths[member] = str(resolved)
