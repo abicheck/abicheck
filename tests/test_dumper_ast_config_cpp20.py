@@ -243,6 +243,68 @@ def test_cpp20_detector_accepts_parenthesized_clause_after_return_type(
     assert any(r.reason == "requires-expression" for r in reqs)
 
 
+def test_cpp20_detector_ignores_requires_declaration_after_unrelated_arrow_same_line(
+    tmp_path,
+):
+    """Regression (Codex review, fourth round): a bare trailing-clause
+    candidate (``requires value;``) that follows an *unrelated* earlier
+    statement containing "->" on the same physical line (a member access,
+    not a declarator) must not be classified genuine just because "->"
+    appears somewhere earlier on the line. "requires" here is a pre-C++20
+    two-identifier declaration ("value" of type "requires"), following a
+    statement-terminating ";" — a real trailing clause can never follow a
+    statement boundary."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "struct Foo { int m; };\n"
+        "void g(Foo* p) {\n"
+        "    auto x = p->m; requires value;\n"
+        "}\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_ignores_requires_declaration_after_unrelated_arrow_prev_line(
+    tmp_path,
+):
+    """Companion: the same unrelated "->" sits on the *previous* logical
+    line (with its own trailing statement after it), and "requires" starts
+    fresh with nothing before it on its own line — the fallback to
+    ``prev_nonblank_code`` must apply the same statement-boundary check."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "struct Foo { int m; };\n"
+        "void g(Foo* p) {\n"
+        "    auto x = p->m; foo();\n"
+        "    requires value;\n"
+        "}\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_ignores_requires_call_after_unrelated_arrow_prev_line(
+    tmp_path,
+):
+    """Companion for the requires-*expression*/declarator path
+    (``_looks_like_requires_declarator``): a plain pre-C++20 call to a
+    function literally named "requires" starts fresh on its own line, with
+    an unrelated "->" on the previous line. With no body and no genuine
+    template-header continuation, this must not be classified as a C++20
+    requires-expression."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "struct Foo { int m; };\n"
+        "void g(Foo* p) {\n"
+        "    auto x = p->m;\n"
+        "    requires(1);\n"
+        "}\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
 def test_cpp20_detector_accepts_requires_expression(tmp_path):
     headers = _write(
         tmp_path,

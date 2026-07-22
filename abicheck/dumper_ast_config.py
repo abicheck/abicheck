@@ -391,7 +391,14 @@ def _looks_like_requires_declarator(
     header from the *previous* line (``template<class T>\\nrequires
     (sizeof(T) > 4)\\nvoid f(T);``) looks identical to a bare call-as-
     statement at this point, so that case falls back to *prev_nonblank_code*
-    the same way :func:`_looks_like_genuine_concept` does.
+    the same way :func:`_looks_like_genuine_concept` does — but only after
+    confirming *prev_nonblank_code* is not itself a *different*, unrelated
+    statement (a leading statement-boundary character in it means the
+    genuine-continuation shape above cannot apply at all): otherwise a
+    stray ``->``/``)``/``>`` anywhere earlier in that previous logical
+    line — which can hold more than one statement — was picked up by the
+    same unscoped-substring bug as :func:`_looks_like_genuine_requires_clause`
+    (Codex review, fourth round).
 
     A safe preceding word (return/throw/co_return) is necessary but not
     sufficient: ``return requires(1);`` — a plain call to a pre-C++20
@@ -434,6 +441,8 @@ def _looks_like_requires_declarator(
     prefix = lookahead[: match.start()].rstrip()
     if not prefix:
         prev = _strip_trailing_declarator_specifiers(prev_nonblank_code.rstrip())
+        if prev[-1:] in _REQUIRES_STATEMENT_BOUNDARY_CHARS:
+            return True
         return not (prev.endswith(b">") or prev.endswith(b")") or b"->" in prev)
     if prefix[-1:] in _REQUIRES_STATEMENT_BOUNDARY_CHARS:
         return True
@@ -533,10 +542,24 @@ def _looks_like_genuine_requires_clause(
     the type name — never by a ``->`` (which only ever introduces a
     trailing return type or a member access, neither of which can
     itself be the "type name" half of such a declaration) — Codex
-    review, third round."""
+    review, third round.
+
+    The ``->`` check must stay scoped to the *current* statement: a bare
+    substring search across the whole same-line prefix picks up an
+    unrelated earlier statement's ``->`` too (``auto x = p->m; requires
+    value;`` — an ordinary pre-C++20 declaration of ``value`` with type
+    "requires" — was wrongly classified genuine by an arrow belonging to
+    the *previous* statement, forcing ``-std=gnu++20`` and rejecting the
+    otherwise-valid header). A statement boundary (``;``/``{``/``}``)
+    directly preceding "requires" can never be a genuine clause's
+    continuation, so it is excluded first, mirroring
+    :func:`_looks_like_requires_declarator`'s identical check — Codex
+    review, fourth round."""
     same_line_prefix = _strip_trailing_declarator_specifiers(
         lookahead[:match_start].rstrip()
     )
+    if same_line_prefix[-1:] in _REQUIRES_STATEMENT_BOUNDARY_CHARS:
+        return False
     if (
         same_line_prefix.endswith(b">")
         or same_line_prefix.endswith(b")")
@@ -545,6 +568,8 @@ def _looks_like_genuine_requires_clause(
         return True
     if not same_line_prefix:
         prev = _strip_trailing_declarator_specifiers(prev_nonblank_code.rstrip())
+        if prev[-1:] in _REQUIRES_STATEMENT_BOUNDARY_CHARS:
+            return False
         return prev.endswith(b">") or prev.endswith(b")") or b"->" in prev
     return False
 
