@@ -745,6 +745,29 @@ freshly-produced snapshot, and since D2's gate only ever raises when
 silently take the same code path as the intentionally-lenient mixed-pair
 case (D2) forever — the gate would be fully specified and fully inert.
 
+**Wiring the call site into `dumper.py` is not free real estate — `dumper.py`
+is already at its file-size hard cap with zero headroom, and D1 can ship
+before D3's manifest split exists to absorb the cost.** `dumper.py` is
+exactly `2000` lines today (`wc -l`), the same fact D3/D6's own per-TU-loop
+split (`dumper_manifest.py`, below) is justified by — but D1 lands
+independently of D3 (D1 requires only Phase 0; it does not depend on D3),
+so an implementation following D1 alone cannot rely on D3's later split
+having already created headroom. Any net-positive line addition to
+`dumper.py` — even the few lines this call site and its
+`project_include_labels` parameter need — immediately trips the
+AI-readiness `file-size` gate's `>2000` ERROR threshold. D1 therefore
+requires, in the same change that wires in `compute_extraction_contract`,
+a net-neutral-or-negative line-count delta to `dumper.py`: relocating a
+self-contained, currently-unrelated chunk of `dumper.py`'s own existing
+content to a suitable existing or new sibling module first, reclaiming
+enough headroom before (or alongside) adding the new call site — not
+prose alone, verified by the same `file-size` check in the same PR. This
+is deliberately not deferred to D3's later `dumper_manifest.py` split:
+that module is scoped to the per-TU loop D3 introduces, a different piece
+of work than D1's own attachment glue, and waiting for it would leave D1
+unable to land on its own at all, contradicting D1's own "ships
+independently" property.
+
 **"Every dump" means every dump with at least one resolved input to
 fingerprint — a symbols-only/binary-only dump (no `--header`/`-H`, no
 manifest; native binaries fall back to this mode by design) attaches no

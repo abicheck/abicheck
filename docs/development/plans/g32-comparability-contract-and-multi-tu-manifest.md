@@ -798,6 +798,34 @@ Implements ADR-050 D1 and D2.
   **both** sides carry one, two ordinary dumps would silently take the same
   code path as the intentionally-lenient mixed-pair case forever — a fully
   specified, fully inert gate.
+- **Wiring the call site into `dumper.py` is not free real estate here,
+  and this phase cannot lean on Phase B's later split to make room for
+  it.** `dumper.py` is exactly `2000` lines today (`wc -l`) — the same
+  fact Phase B's own acceptance criteria already cite to justify moving
+  its per-TU loop into a new `dumper_manifest.py` sibling rather than
+  growing `dumper.py` directly (see Phase B, below). But Phase A depends
+  on Phase 0 only, not on Phase B (see Sequencing) — Phase A can land,
+  and per this plan's own ordering is likely to land, *before* Phase B's
+  split exists to absorb any cost. An implementation that follows this
+  phase's own acceptance criteria literally — adding the
+  `compute_extraction_contract(...)` call site plus the new
+  `project_include_labels: dict[Path, str] | None = None` parameter
+  (below) straight into `dumper.py`'s `dump()` — trips the AI-readiness
+  `file-size` gate's `>2000` ERROR the moment it lands, since `dumper.py`
+  has zero lines of headroom to spend, not "headroom Phase B hasn't used
+  yet." This phase therefore requires, in the same PR that wires in
+  `compute_extraction_contract`, a net-neutral-or-negative line-count
+  change to `dumper.py`: relocate a self-contained, currently-unrelated
+  chunk of `dumper.py`'s own existing content to a suitable existing or
+  new sibling module first — reclaiming enough headroom for this phase's
+  own additions — verified by re-running `scripts/check_ai_readiness.py`
+  (or `wc -l abicheck/dumper.py`) in the same change, not asserted by
+  prose alone. This is deliberately not deferred to Phase B's later
+  `dumper_manifest.py` split: that module is scoped to Phase B's own
+  per-TU loop, a different piece of work than this phase's attachment
+  glue, and deferring to it would leave Phase A unable to land on its own
+  at all — contradicting Sequencing's own "Phase A can ship and start
+  providing value independently of B–E" property.
   **"Every dump" means every dump with at least one resolved input to
   fingerprint — a symbols-only/binary-only dump (no `-H`/`--header`, no
   manifest) attaches no `profile_fingerprint`, computed from nothing
@@ -1690,7 +1718,13 @@ distinct not-comparable headline, checked before the existing
 since none of that bucket data is trustworthy when the comparison never
 ran).
 
-**Tests.** A `dump()`-level test asserting a real (non-manifest) dump
+**Tests.** A **file-size headroom** check (not a `pytest` test — the same
+`scripts/check_ai_readiness.py` gate CI already runs) asserting
+`dumper.py` is at or below its pre-Phase-A line count once this phase's
+`dump()` changes land, proving the required offsetting relocation
+actually happened rather than merely being described; this is the
+acceptance gate for the bullet above, not a separate optional check. A
+`dump()`-level test asserting a real (non-manifest) dump
 returns a snapshot with a populated, non-`None` `contract` — the specific
 gap that would otherwise leave the gate permanently inert. A companion
 **symbols-only no-contract** test asserting a symbols-only dump (no
@@ -2309,7 +2343,32 @@ side-effect `from . import (...)` block gains `cli_dump_manifest`, or
 list gains `abicheck.cli_dump_manifest` alongside the existing per-module
 entries, or the typed-decorator mypy lane fails on its `@click` decorators
 (both required steps of the root `CLAUDE.md`'s "Adding a new top-level
-command" procedure, steps 3–4) — `cli_dump_helpers.py` (extend
+command" procedure, steps 3–4). **Step 5 of that same procedure also
+applies, and must not be skipped: `cli_dump_manifest.py` importing `main`
+back from `cli.py` (to register `@main.command("plan")`) forms a new
+`{cli, cli_dump_manifest}` two-module cycle that `scripts/
+check_ai_readiness.py`'s `import-cycle-growth` check does not already
+know about.** Verified against the actual gate: `IMPORT_CYCLE_ALLOWLIST`
+(`check_ai_readiness.py:910`) is a `frozenset` of exact per-module-pair
+entries — `frozenset({"cli", "cli_compare_release"})`,
+`frozenset({"cli", "cli_baseline"})`, and seven more, one per existing
+sibling command module — matched by literal subset comparison, not by
+recognizing "this cycle has the same *shape* as an already-allowed one";
+a brand-new `{cli, cli_dump_manifest}` pair is not a subset of any
+existing entry and *will* be flagged as a new SCC member, failing the
+gate, unless `IMPORT_CYCLE_ALLOWLIST` gains a matching
+`frozenset({"cli", "cli_dump_manifest"})` entry in this same phase.
+**This is squarely the allowlist's own documented, accepted pattern, not
+an exception needing an ADR** — root `AGENTS.md`'s "What NOT to do"
+section reserves the ADR/sign-off bar for a cycle *outside* the
+documented "Click sibling command imports `main` back from `cli.py`,
+`cli.py` imports it at its registration tail" shape; `cli_dump_manifest`
+is that exact shape, identical to all nine existing entries, so adding
+its entry is the same routine step every other sibling command module in
+this list already took, not a new architectural exception. Skipping this
+step leaves an implementer who followed every other instruction in this
+bullet still hitting an unexplained `import-cycle-growth` ERROR. —
+`cli_dump_helpers.py` (extend
 `resolve_dump_depth`/`check_requested_depth_satisfied` to operate per-TU),
 `service_scan.py` (`CompileContext.frontend_context: str = "host"`),
 `cli_options.py` (`resolve_compile_context`'s new `frontend_context`
@@ -2317,7 +2376,13 @@ parameter, threaded into the `CompileContext` it builds — the single
 choke point `compare`/`dump`/`scan` all resolve through, so no
 `scan_engine.py` dump-call-site change is needed beyond this).
 
-**Tests.** A **flag-budget ledger** test (`tests/test_config_rebalance.py::TestFlagBudget`,
+**Tests.** An **import-cycle allowlist** check (the existing
+`scripts/check_ai_readiness.py` `import-cycle-growth` gate, re-run after
+this phase's changes, not a new `pytest` test) asserting the gate stays
+clean with `cli_dump_manifest.py` added — proving
+`IMPORT_CYCLE_ALLOWLIST` gained the `frozenset({"cli",
+"cli_dump_manifest"})` entry described above rather than the new sibling
+module landing as an unaccounted-for SCC member. A **flag-budget ledger** test (`tests/test_config_rebalance.py::TestFlagBudget`,
 already run, not a new test file) asserting `compare`'s visible flag
 count still passes `<= COMPARE_FLAG_BUDGET` once `--dump-manifest` and
 `--frontend-context` are both visible, proving `COMPARE_FLAG_BUDGET_RAISES`
