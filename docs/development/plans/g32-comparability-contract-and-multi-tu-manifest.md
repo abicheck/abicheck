@@ -667,7 +667,11 @@ gains the dedicated `except` branch that sets `not_comparable_reason`),
 existing `0`/`1`/`4`/`64` logic), `docs/reference/exit-codes.md` (a
 new row in both the legacy and severity-aware `compare` tables, the
 multi-library section, the `compat check` table's `9` row, the
-`scan` table's `6` row, **and** the `deps compare` table's `5` row), `reporter.py`,
+`scan` table's `6` row, the `deps compare` table's `5` row, **and** the
+`## Summary table` cross-command matrix — a `not_comparable` row spanning
+all six of its columns, or the per-command detail tables gain their new
+codes while the one table meant to summarize them across commands goes
+stale the same day), `reporter.py`,
 `sarif.py`, `junit_report.py`, `html_report.py` (`generate_html_report`'s
 `contract_coverage` headline card), `service_render.py` (`render_output`'s
 `--format html` branch skips `generate_html_report` on the `not_comparable`
@@ -926,8 +930,17 @@ threads it into the L2 header frontend the same way `dump`/`compare` do,
 proving `compile_context_options` (not a `dump`/`compare`-only decorator) is
 what carries the flag.
 
-**Example fixtures.** Phase 0's ODR-safe and external-STL-noise pairs,
-wired through the real manifest path end to end.
+**Example fixtures.** Phase 0's external-STL-noise pair only, wired through
+the real manifest path end to end — **not** the ODR-safe pair. The
+ODR-safe fixture is a forward-declaration-in-one-TU,
+full-definition-in-another case, which is exactly a duplicate `entity_key`
+across TUs; Phase B's own placeholder merge (below) errors loudly on any
+duplicate `entity_key`, so wiring the ODR-safe pair through Phase B "end to
+end" would either require Phase C's real merge lattice to already exist
+here (collapsing the phase split) or fail outright against the deliberately
+strict placeholder. The ODR-safe pair's real end-to-end wiring belongs to
+Phase C (see its own "Tests" section), where the merge that actually
+handles this trivial-merge case exists.
 
 **Out of scope.** D4 (merge across TUs) is Phase C — Phase B's
 `TuFragment`s are produced but not yet merged into one `AbiSnapshot`
