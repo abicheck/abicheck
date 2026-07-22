@@ -47,6 +47,7 @@ topics:
     allowed_summaries:
       - getting-started.md
       - user-guide/choose-your-workflow.md
+      - user-guide/tool-modes.md
 
   verdicts:
     canonical_page: concepts/verdicts.md
