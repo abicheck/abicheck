@@ -682,11 +682,26 @@ call `compare_snapshots` directly — they all go through
 typed request is the real chokepoint") gains the same parameter too,
 appended after every pre-existing one — matching the precedent already set
 for `debuginfod_url`, so a positional caller's existing argument bindings
-don't shift. `mcp_server`'s compare tools expose the same field on their
-own request shape, so the tentative-diff path is reachable identically
-through the CLI, the Python API's `CompareRequest`/`run_compare`, and MCP —
-not just a direct `compare_snapshots` call nothing in this codebase
-actually makes.
+don't shift.
+
+**`mcp_server.abi_compare` is itself a direct `compare_snapshots` caller —
+the one this ADR previously (wrongly) said nothing in the codebase makes —
+and exposing the parameter there is not enough on its own.** Verified
+against the actual code: `abi_compare`'s inner `_do_compare` calls
+`compare_snapshots(...)` directly, bypassing `CompareRequest`/
+`run_compare_request` entirely; its result is awaited via
+`future.result(timeout=MCP_TIMEOUT)` under a narrow `except
+_futures.TimeoutError`, with a broader `except Exception as exc: ...
+{"status": "error", ...}` catching everything else, including
+`ProfileMismatchError`/`ScopeMismatchError` today — collapsing a
+deliberate not-comparable result into the same generic error shape as any
+other tool failure. Adding `diagnostic_comparison` as an input parameter
+lets a caller opt into the tentative diff, but the *default* hard-fail
+path still needs its own dedicated `except (ProfileMismatchError,
+ScopeMismatchError)` branch in `abi_compare`, rendering a structured
+`{"status": "not_comparable", "reason": ...}` result distinct from
+`{"status": "error"}` — mirroring the CLI/service layers' `verdict: null`
+distinction, not merely exposing the escape-hatch flag.
 
 **`abicheck aggregate` is a consumer of these reports, not just a producer
 of new ones, and it has its own blind spot D2 must close.**

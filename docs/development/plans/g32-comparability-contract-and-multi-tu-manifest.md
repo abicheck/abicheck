@@ -851,7 +851,17 @@ front-end chokepoint, not `compare_snapshots` itself, see the
 acceptance-criteria bullet above; the legacy `run_compare` keyword shim
 gains the same parameter appended last, matching the `debuginfod_url`
 precedent), `api_types.py` (`CompareRequest.diagnostic_comparison: bool =
-False`), `mcp_server.py` (compare tools expose the same parameter), `cli.py`
+False`), `mcp_server.py` (**`abi_compare`'s inner `_do_compare` calls
+`compare_snapshots(...)` directly, bypassing `CompareRequest`/
+`run_compare_request` entirely** — verified against the actual code, its
+`future.result(...)` is awaited under a narrow `except
+_futures.TimeoutError` with a broader `except Exception` catching
+everything else into `{"status": "error", ...}` today; exposing
+`diagnostic_comparison` as an input parameter is not enough on its own —
+`abi_compare` also gains a dedicated `except (ProfileMismatchError,
+ScopeMismatchError)` branch, ordered before that generic catch, rendering
+`{"status": "not_comparable", "reason": ...}` distinct from
+`{"status": "error"}` for the default hard-fail path), `cli.py`
 (the `--diagnostic-comparison` flag definition and the new, distinct
 `not_comparable` exit `16` constant), **`cli_compare_helpers.py`** (the new
 `except (ProfileMismatchError, ScopeMismatchError)` branch around the real
@@ -1013,10 +1023,17 @@ test proving the Python API exposes the identical parameter, not only
 `cli.py`'s flag; a **`CompareRequest` reachability** test asserting
 `service.run_compare_request(CompareRequest(..., diagnostic_comparison=True))`
 on a mismatched pair also returns the tentative `DiffResult` rather than
-raising — proving the flag is reachable through the actual front-end
-chokepoint every documented caller (CLI, MCP, `compare-release`,
-`appcompat`) goes through, not only a direct `compare_snapshots` call
-nothing in the codebase makes; a `--diagnostic-comparison` end-to-end test asserting the report's
+raising — proving the flag is reachable through the front-end chokepoint
+`compare-release`/`appcompat` go through; an **`mcp_server.abi_compare`
+not_comparable** test asserting a mismatched pair through `abi_compare`
+(the default, non-diagnostic path) returns `{"status": "not_comparable",
+"reason": ...}`, never the generic `{"status": "error"}` its existing
+broad `except Exception` would otherwise produce — proving `abi_compare`'s
+own direct `compare_snapshots` call (bypassing `CompareRequest` entirely)
+got its own dedicated catch, not just the `diagnostic_comparison`
+parameter; and a second `abi_compare` test asserting
+`diagnostic_comparison=True` on the same mismatched pair returns a real
+tentative result instead; a `--diagnostic-comparison` end-to-end test asserting the report's
 top-level `assurance` field is `"none"` and that no individual finding
 carries its own `assurance` value; a
 backward-compat test asserting a contract-less snapshot pair compares
