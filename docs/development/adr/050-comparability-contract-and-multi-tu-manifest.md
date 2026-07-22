@@ -630,12 +630,34 @@ diagnostic_comparison: bool = False)` passes the flag to
 diagnostic=diagnostic_comparison)`, which — only when set — returns a
 mismatch descriptor instead of raising, letting `compare()` proceed through
 the normal `diff_*` pipeline and stamp `assurance: "none"` on the resulting
-`DiffResult` afterward. `service.compare_snapshots` (a thin keyword-argument
-wrapper over `checker.compare`, not a request dataclass — unlike
-`service_scan.ScanRequest`) gains the same `diagnostic_comparison` keyword,
-and `mcp_server`'s compare tools expose it too, so the tentative-diff path
-is reachable identically through the Python API and MCP, not just `cli.py`'s
-flag.
+`DiffResult` afterward. `service.compare_snapshots` gains the same
+`diagnostic_comparison` keyword, threaded from `compare()`.
+
+**`compare_snapshots` is not the front-end chokepoint, though — `api_types.CompareRequest`
+is, and it needs the field too, or the documented front-ends can never reach
+it.** `CompareRequest` (`api_types.py:125`) is, by its own docstring, "the
+single input to `run_compare`" that "every front-end (CLI, MCP,
+`compare-release` fan-out, `appcompat`)" assembles and hands to
+`service.run_compare_request` — the actual ADR-037 D1/D2 classification
+chokepoint, one level above `compare_snapshots`. `run_compare_request`
+calls `compare_snapshots(old, new, suppression=..., policy=..., ...,
+env_matrix=...)` today with a fixed keyword list that has no slot for this
+flag; adding `diagnostic_comparison` only to `compare_snapshots` itself
+would be unreachable from every documented front-end, since none of them
+call `compare_snapshots` directly — they all go through
+`CompareRequest`/`run_compare_request`. `CompareRequest` therefore gains
+`diagnostic_comparison: bool = False`, and `run_compare_request` passes
+`diagnostic_comparison=request.diagnostic_comparison` into its
+`compare_snapshots(...)` call. The legacy keyword-argument shim
+`run_compare` (`service.py:1757`, "existing callers keep working while the
+typed request is the real chokepoint") gains the same parameter too,
+appended after every pre-existing one — matching the precedent already set
+for `debuginfod_url`, so a positional caller's existing argument bindings
+don't shift. `mcp_server`'s compare tools expose the same field on their
+own request shape, so the tentative-diff path is reachable identically
+through the CLI, the Python API's `CompareRequest`/`run_compare`, and MCP —
+not just a direct `compare_snapshots` call nothing in this codebase
+actually makes.
 
 **`abicheck aggregate` is a consumer of these reports, not just a producer
 of new ones, and it has its own blind spot D2 must close.**

@@ -724,10 +724,23 @@ Implements ADR-050 D1 and D2.
   normal `diff_*` pipeline and stamp `assurance: "none"` on the resulting
   `DiffResult` afterward. `service.compare_snapshots` (a thin
   keyword-argument wrapper over `checker.compare`, not a request
-  dataclass) gains the same `diagnostic_comparison` keyword, and
-  `mcp_server`'s compare tools expose it too, so the tentative-diff path
-  is reachable through the Python API and MCP identically, not just
-  `cli.py`'s flag.
+  dataclass) gains the same `diagnostic_comparison` keyword.
+- **`compare_snapshots` is not the front-end chokepoint — `api_types.CompareRequest`
+  is, and it needs the field too, or every documented front-end stays
+  unable to reach it.** `CompareRequest` (`api_types.py:125`) is, by its
+  own docstring, "the single input to `run_compare`" that "every front-end
+  (CLI, MCP, `compare-release` fan-out, `appcompat`)" assembles and hands
+  to `service.run_compare_request` — the real ADR-037 D1/D2 classification
+  chokepoint, one level above `compare_snapshots`. `run_compare_request`
+  calls `compare_snapshots(...)` today with a fixed keyword list that has
+  no slot for this flag; adding `diagnostic_comparison` only to
+  `compare_snapshots` would be unreachable from every documented front-end,
+  since none of them call `compare_snapshots` directly. `CompareRequest`
+  therefore gains `diagnostic_comparison: bool = False`, and
+  `run_compare_request` passes `request.diagnostic_comparison` through.
+  The legacy `run_compare` keyword shim gains the same parameter too,
+  appended after every pre-existing one — matching the precedent already
+  set for `debuginfod_url`, so a positional caller's bindings don't shift.
 - **Rollout: the hard gate is the default from the first shipped version of
   this phase — no soft-launch flag, and no second flag with a default that
   contradicts ADR-050 D2.** D2 is explicit that a contract mismatch is a
@@ -777,8 +790,14 @@ when set),
 `checker_types.py` (`DiffResult.contract_coverage: str | None = None` and
 `DiffResult.assurance: str | None = None`),
 `service.py` (`compare_snapshots`'s new `diagnostic_comparison` keyword,
-threaded to `compare()` — not a request dataclass, `compare_snapshots` has
-none), `mcp_server.py` (compare tools expose the same parameter), `cli.py` (flag + the new,
+threaded to `compare()`; `run_compare_request` passes
+`request.diagnostic_comparison` into its `compare_snapshots(...)` call —
+**not optional**, since `CompareRequest`/`run_compare_request` is the real
+front-end chokepoint, not `compare_snapshots` itself, see the
+acceptance-criteria bullet above; the legacy `run_compare` keyword shim
+gains the same parameter appended last, matching the `debuginfod_url`
+precedent), `api_types.py` (`CompareRequest.diagnostic_comparison: bool =
+False`), `mcp_server.py` (compare tools expose the same parameter), `cli.py` (flag + the new,
 distinct `not_comparable` exit code), `cli_compare_release.py`
 (`_compare_one_library`'s dedicated
 `except (ProfileMismatchError, ScopeMismatchError)` branch, ordered before
@@ -920,7 +939,13 @@ reaches the gate check itself, not just a CLI-level catch with nothing to
 recover — plus a CLI end-to-end `--diagnostic-comparison` test asserting
 the same, and a `service.compare_snapshots(..., diagnostic_comparison=True)`
 test proving the Python API exposes the identical parameter, not only
-`cli.py`'s flag; a `--diagnostic-comparison` end-to-end test asserting the report's
+`cli.py`'s flag; a **`CompareRequest` reachability** test asserting
+`service.run_compare_request(CompareRequest(..., diagnostic_comparison=True))`
+on a mismatched pair also returns the tentative `DiffResult` rather than
+raising — proving the flag is reachable through the actual front-end
+chokepoint every documented caller (CLI, MCP, `compare-release`,
+`appcompat`) goes through, not only a direct `compare_snapshots` call
+nothing in the codebase makes; a `--diagnostic-comparison` end-to-end test asserting the report's
 top-level `assurance` field is `"none"` and that no individual finding
 carries its own `assurance` value; a
 backward-compat test asserting a contract-less snapshot pair compares
