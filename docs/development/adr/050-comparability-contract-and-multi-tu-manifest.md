@@ -336,6 +336,29 @@ of the **ordered** sequence of per-`-I`-directory digests, **plus** this one
 additional system/toolchain bucket appended last, deterministically
 positioned so its presence or absence never depends on iteration order.
 
+**The depfile's own generated driver file must be excluded before any of
+this bucketing runs — not swept into the system/toolchain bucket as "just
+another unattributed path."** `dumper.py` writes a synthetic aggregate
+`#include` header via `tempfile.NamedTemporaryFile` (`:364,1019`) and
+compiles *that* as the TU's real source; `parse_depfile`'s own contract
+(`buildsource/include_graph.py:210-235`, confirmed by
+`tests/test_include_graph.py`'s `parse_depfile("foo.o: foo.cpp a.h b.h") ==
+["foo.cpp", "a.h", "b.h"]`) returns the compiled source itself as the first
+prerequisite, not only the headers it pulls in. That generated `/tmp` file
+is under no declared `-I` directory, so the rule above would otherwise
+sweep it straight into the system/toolchain bucket — and its *content*
+embeds the side-specific absolute `#include "..."` paths `dumper.py` wrote
+for that run's own header list, which necessarily differ between old and
+new sides for the ordinary two-checkout case (different checkout roots
+mean different absolute paths), even when the actual compile environment
+is identical. Bucketing it would make `profile_fingerprint` differ on
+*every* routine compare, not an edge case — the single worst-case version
+of the failure mode this whole redesign exists to close. The generated
+driver TU (identified as `dumper.py`'s own synthesized source path, not a
+declared `-I`/`-H` input) is therefore dropped before any bucketing runs,
+never hashed into either the per-`-I` digests or the system/toolchain
+bucket — it is abicheck's own scaffolding, not a dependency.
+
 **The digest must exclude every path already claimed by `scope_fingerprint`
 — this is not an optional refinement, it is the difference between a
 working gate and one that hard-fails on every ordinary compare.** The
@@ -591,6 +614,28 @@ fingerprint field(s) — never coerced into `COMPATIBLE`/`BREAKING`'s existing
 enum values. A `--diagnostic-comparison` opt-in flag (default off) downgrades
 the hard-fail to a tentative diff, the whole result stamped `assurance:
 "none"` for exploratory use — never the default, and never silent.
+
+**This has to be a parameter *into* `compare()`, not a CLI-level catch
+around it — a post-hoc recovery is structurally impossible here.** The
+gate runs "at the top of `checker.compare`, before any `diff_*` module
+runs" (above): once it raises, no `diff_*` module has executed and no
+`DiffResult` — tentative or otherwise — exists for any caller to recover.
+A CLI `except (ProfileMismatchError, ScopeMismatchError)` wrapped around
+`compare()`, the way every other surface in this ADR handles the gate,
+would have nothing left to downgrade; it can only report the failure, not
+resurrect a diff that never ran. `--diagnostic-comparison` therefore
+threads all the way to the gate check itself: `checker.compare(...,
+diagnostic_comparison: bool = False)` passes the flag to
+`comparability.check_contracts_comparable(old, new,
+diagnostic=diagnostic_comparison)`, which — only when set — returns a
+mismatch descriptor instead of raising, letting `compare()` proceed through
+the normal `diff_*` pipeline and stamp `assurance: "none"` on the resulting
+`DiffResult` afterward. `service.compare_snapshots` (a thin keyword-argument
+wrapper over `checker.compare`, not a request dataclass — unlike
+`service_scan.ScanRequest`) gains the same `diagnostic_comparison` keyword,
+and `mcp_server`'s compare tools expose it too, so the tentative-diff path
+is reachable identically through the Python API and MCP, not just `cli.py`'s
+flag.
 
 **`abicheck aggregate` is a consumer of these reports, not just a producer
 of new ones, and it has its own blind spot D2 must close.**

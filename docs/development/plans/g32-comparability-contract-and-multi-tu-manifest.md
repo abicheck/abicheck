@@ -60,11 +60,12 @@ D's parser and `host`-default path don't depend on B, though selecting a
 request it (see Phase D). Phase C starts only after Phase B lands, since
 it operates on the `TuFragment` contract Phase B defines and produces —
 it is not a third parallel branch alongside B and D. E depends on B, not
-directly on A: its cache-key half targets the manifest's
-`contributes_to_abi`/`required` flags (Phase B's schema), not
-`profile_fingerprint`/`scope_fingerprint` themselves — those can never be
-pre-dump cache-key inputs (see Phase E) — and its scheduling half schedules
-Phase B's per-TU loop.
+directly on A: its cache-key half targets the manifest's full computed
+`scope_fingerprint` (TU names, per-TU ordered includes/forced-includes,
+`contributes_to_abi`/`required` flags — Phase B's schema), which genuinely
+is pre-dump-computable for a manifest-driven dump; `profile_fingerprint`
+is the one that can never be a pre-dump cache-key input, on either path
+(see Phase E) — and its scheduling half schedules Phase B's per-TU loop.
 
 ```text
 Phase 0 (fixtures) ──┬──▶ Phase A (contract + gate)
@@ -246,7 +247,25 @@ Implements ADR-050 D1 and D2.
   declared `-I` directory instead feeds one additional, explicitly-labeled
   **system/toolchain bucket** — a content digest of that unordered set (no
   path-shape normalization attempted, since these paths carry no
-  user-declared search-order meaning to preserve). `profile_fingerprint`'s
+  user-declared search-order meaning to preserve).
+  **The depfile's own generated driver TU must be excluded before any of
+  this bucketing runs, not swept into the system/toolchain bucket as "just
+  another unattributed path."** `dumper.py` writes a synthetic aggregate
+  `#include` header via `tempfile.NamedTemporaryFile` (`:364,1019`) and
+  compiles *that* as the TU's real source; `parse_depfile` (reused here)
+  returns the compiled source itself as the first prerequisite, not only
+  the headers it pulls in (`tests/test_include_graph.py`:
+  `parse_depfile("foo.o: foo.cpp a.h b.h") == ["foo.cpp", "a.h", "b.h"]`).
+  That generated `/tmp` file is under no declared `-I` directory, so it
+  would otherwise land in the system/toolchain bucket — and its *content*
+  embeds the side-specific absolute `#include "..."` paths written for that
+  run's own header list, which necessarily differ between old and new sides
+  for the ordinary two-checkout case even when the compile environment is
+  identical, making `profile_fingerprint` differ on *every* routine
+  compare — the worst-case version of the failure mode this whole redesign
+  exists to close. The generated driver TU (identified as `dumper.py`'s own
+  synthesized source path, not a declared `-I`/`-H` input) is dropped
+  before any bucketing runs. `profile_fingerprint`'s
   `-I` component is the hash of the **ordered** sequence of per-directory
   digests, **plus this one system/toolchain bucket appended last** —
   **after excluding every path `scope_fingerprint` already
@@ -280,7 +299,7 @@ Implements ADR-050 D1 and D2.
   the manifest file's own directory — none of these legacy-CLI cases
   exist there.
 
-  Ten dedicated tests are non-negotiable for this phase to be considered
+  Eleven dedicated tests are non-negotiable for this phase to be considered
   done: (1) `--header old=v1/foo.h --header new=v2/foo.h` against logically
   identical trees under different roots asserts the resulting
   **`scope_fingerprint`s** match (not `profile_fingerprint` — headers are a
@@ -337,7 +356,14 @@ Implements ADR-050 D1 and D2.
   actually attributes and hashes paths outside every declared `-I`
   directory rather than silently dropping them, the specific gap distinct
   from test (9)'s (which covers a system-*classified* path still reachable
-  through a declared `-I`).
+  through a declared `-I`); (11) an old/new pair with byte-identical
+  declared headers and `-I` directories, run from two different checkout
+  roots (so `dumper.py`'s generated aggregate driver file necessarily
+  embeds different absolute `#include` paths on each side), leaves
+  `profile_fingerprint` matching — proving the generated driver TU is
+  excluded from bucketing entirely, not swept into the system/toolchain
+  bucket where its run-specific absolute paths would make every routine
+  compare mismatch.
 - **Modeling `contract` is not the same as populating it — this phase must
   do both.** `dump()` (`dumper.py`) is the one place that already resolves
   every input both fingerprints need; it calls
@@ -684,6 +710,24 @@ Implements ADR-050 D1 and D2.
   tentative diff, the whole result stamped `assurance: "none"` — a single
   `DiffResult`-level field (see the dedicated bullet below), never a
   per-finding one.
+- **This must be a parameter into `compare()`, not a CLI-level catch around
+  it — a post-hoc recovery is structurally impossible.** The gate runs at
+  the top of `checker.compare`, before any `diff_*` module runs; once it
+  raises, no `DiffResult` exists yet for anything to recover. A CLI
+  `except (ProfileMismatchError, ScopeMismatchError)` around `compare()`
+  has nothing left to downgrade into a tentative diff — it can only report
+  the failure. `--diagnostic-comparison` therefore threads to the gate
+  check itself: `checker.compare(..., diagnostic_comparison: bool = False)`
+  passes the flag to `comparability.check_contracts_comparable(old, new,
+  diagnostic=diagnostic_comparison)`, which — only when set — returns a
+  mismatch descriptor instead of raising, letting `compare()` run the
+  normal `diff_*` pipeline and stamp `assurance: "none"` on the resulting
+  `DiffResult` afterward. `service.compare_snapshots` (a thin
+  keyword-argument wrapper over `checker.compare`, not a request
+  dataclass) gains the same `diagnostic_comparison` keyword, and
+  `mcp_server`'s compare tools expose it too, so the tentative-diff path
+  is reachable through the Python API and MCP identically, not just
+  `cli.py`'s flag.
 - **Rollout: the hard gate is the default from the first shipped version of
   this phase — no soft-launch flag, and no second flag with a default that
   contradicts ADR-050 D2.** D2 is explicit that a contract mismatch is a
@@ -725,10 +769,16 @@ warm-cache acceptance-criteria bullets above), `errors.py`
 `_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION` threshold + the
 `snapshot_from_dict` hard-rejection branch, `contract` round-trip through
 `snapshot_to_dict`/`snapshot_from_dict`), `checker.py` (gate call at the
-top of `compare`, `contract_coverage` field on the result),
+top of `compare`, new `diagnostic_comparison: bool = False` parameter
+threaded to `comparability.check_contracts_comparable`, `contract_coverage`
+field on the result), `comparability.py` (`check_contracts_comparable`'s
+new `diagnostic` keyword — returns a mismatch descriptor instead of raising
+when set),
 `checker_types.py` (`DiffResult.contract_coverage: str | None = None` and
 `DiffResult.assurance: str | None = None`),
-`service.py`, `mcp_server.py`, `cli.py` (flag + the new,
+`service.py` (`compare_snapshots`'s new `diagnostic_comparison` keyword,
+threaded to `compare()` — not a request dataclass, `compare_snapshots` has
+none), `mcp_server.py` (compare tools expose the same parameter), `cli.py` (flag + the new,
 distinct `not_comparable` exit code), `cli_compare_release.py`
 (`_compare_one_library`'s dedicated
 `except (ProfileMismatchError, ScopeMismatchError)` branch, ordered before
@@ -863,7 +913,14 @@ silent `None` diff indistinguishable from the pre-existing
 raised while diffing a changed dependency DSO, and asserting the resulting
 `StackChange.not_comparable_reason` is populated rather than `abi_diff`
 being left an unexplained `None` — proving `_run_abi_diff`'s caller, not
-`_run_abi_diff` itself, is what classifies the exception; a `--diagnostic-comparison` end-to-end test asserting the report's
+`_run_abi_diff` itself, is what classifies the exception; a **diagnostic-comparison API** test asserting `checker.compare(old, new,
+diagnostic_comparison=True)` on a mismatched pair returns a real
+`DiffResult` (never raises) with `assurance == "none"` — proving the flag
+reaches the gate check itself, not just a CLI-level catch with nothing to
+recover — plus a CLI end-to-end `--diagnostic-comparison` test asserting
+the same, and a `service.compare_snapshots(..., diagnostic_comparison=True)`
+test proving the Python API exposes the identical parameter, not only
+`cli.py`'s flag; a `--diagnostic-comparison` end-to-end test asserting the report's
 top-level `assurance` field is `"none"` and that no individual finding
 carries its own `assurance` value; a
 backward-compat test asserting a contract-less snapshot pair compares
@@ -1199,12 +1256,16 @@ is extraction-layer, not diff-layer; no new `ChangeKind`.
 
 ## Phase E — Resource-aware frontend scheduling and cache-key extension
 
-Implements ADR-050 D6. The cache-key half targets the manifest's
-`contributes_to_abi`/`required` flags, so it depends on Phase B (the
-manifest schema those flags live on), not on Phase A's fingerprints
-themselves — `profile_fingerprint`/`scope_fingerprint` are never used as
-cache-key inputs (see the acceptance-criteria bullet below for why). The
-scheduling half depends on Phase B too (the per-TU loop it schedules).
+Implements ADR-050 D6. The cache-key half targets the manifest's full
+computed `scope_fingerprint` (TU names, per-TU ordered includes/
+forced-includes, and `contributes_to_abi`/`required` flags together), so
+it depends on Phase B (the manifest schema those inputs live on) — not on
+`profile_fingerprint`, which can **never** be a pre-dump cache-key input at
+all, on either path (see the acceptance-criteria bullet below for why).
+`scope_fingerprint` is the one exception: for a manifest-driven dump it's
+fully computable by parsing the normalized manifest, no compiler invocation
+needed, so it genuinely can feed the cache key pre-dump. The scheduling
+half depends on Phase B too (the per-TU loop it schedules).
 
 **Goal & acceptance criteria.**
 - The RAM-probing/pool-sizing helper in `buildsource/source_replay.py` is
