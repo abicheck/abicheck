@@ -98,10 +98,15 @@ real data.
 
 **Files & surfaces.** New fixtures under `tests/fixtures/g32/` (raw AST
 captures, not committed as generated `.abi.json` — those are produced by
-the tests themselves once Phase A/B land) and, once ChangeKinds exist
-(Phase A/C), `examples/case2xx_*/` per the standard example-catalog
-convention (`ground_truth.json` entry, `README.md`, AI-readiness
-`examples-ground-truth`/`examples-readme-sync` checks).
+the tests themselves once Phase A/B land). These stay `tests/`-level
+fixtures throughout, not a future `examples/case2xx_*/` catalog entry:
+`not_comparable` (Phase A), `UNKNOWN_PROFILE`/`contract_coverage` metadata
+(Phase A), and `INCONSISTENT_DECLARATION`/`HETEROGENEOUS_ABI_CONTEXT`
+(Phase C) are all extraction-time outcomes, not `ChangeKind`s or `Verdict`
+values — `tests/test_validate_examples_unit.py`'s `_VALID_VERDICTS`
+frozenset only accepts the five real `Verdict` strings, so none of this
+phase's fixtures ever becomes a catalogued example (see Phase A's and
+Phase C's own "Example fixtures" sections for the same reasoning).
 
 **Tests.** No new production tests yet — this phase is fixture capture and
 a short `tests/test_g32_fixtures.py` asserting the fixtures are non-empty
@@ -162,28 +167,38 @@ Implements ADR-050 D1 and D2.
   failure from the one this fix exists to close; taking the parent
   directory first preserves the filename (`v1/foo.h` → root `v1/`,
   normalized `foo.h`).
-  **`profile_fingerprint`'s `-I` directories do not use that same
-  parent-directory rule.** A lone `-I` directory has no filename to
-  preserve, so taking its parent as root strips all distinguishing
-  structure: `--include old=/opt/dep-v1/include --include
-  new=/opt/dep-v2/include` would both normalize to `include`, silently
-  erasing a genuine dependency-version difference. Whether a
+  **`profile_fingerprint`'s `-I` directories use that same parent-directory
+  rule too, uniformly — this went through two rejected "clever" fixes
+  before landing on the simple one; both are worth recording so neither is
+  rediscovered.** A first attempt applied the header rule unchanged, which
+  is right for the common real-world shape (`--include old=old/include
+  --include new=new/include`, the project's own include root across two
+  checkouts — the exact shape `docs/user-guide/real-world-example.md`
+  documents) but wrong for a lone *external dependency* directory:
+  `--include old=/opt/dep-v1/include --include new=/opt/dep-v2/include`
+  would normalize both to `include` relative to their own root, silently
+  erasing a genuine dependency-version difference. A second attempt tried
+  hashing each `-I` directory's last two path components instead
+  (`/opt/dep-v1/include` → `dep-v1/include`) — this broke the *other*
+  direction, making the ordinary `old/include`/`new/include` project-root
+  case hash as different and hard-fail the routine, documented two-checkout
+  compare. Both attempts fail for the same underlying reason: **whether a
   differently-rooted `-I` path means "same dependency, different checkout
-  mount point" or "genuinely different dependency version" isn't decidable
-  from path shape alone, unlike headers (where ADR-040's `old=`/`new=`
-  design exists specifically for the same-project-two-checkouts case).
-  `profile_fingerprint` therefore hashes each **single** `-I` directory's
-  last two path components (its own basename plus its immediate parent's
-  basename) instead of attempting root-relative normalization at all —
-  `dep-v1/include` vs. `dep-v2/include`, correctly distinct — a bounded,
-  explicitly imperfect compromise (a checkout-root difference expressed
-  exactly two segments up still spuriously mismatches), not a general fix.
-  Multiple `-I` directories per side (2+) use the same
-  common-ancestor-of-parents approach as headers instead, since real
-  anchor points exist there. For the manifest path (D3), both fingerprints'
-  roots are simply the manifest file's own directory — none of these
-  legacy-path degenerate cases exist there, since every manifest-declared
-  path is already relative to one document.
+  mount point" or "genuinely different dependency version" is not decidable
+  from path shape alone, and no heuristic can resolve it** — the two
+  examples above have identical shape (two segments, differing prefix) and
+  opposite correct answers. `profile_fingerprint` therefore uses the header
+  rule as-is, single or multiple `-I` directories, no special case — a
+  **known, accepted limitation, not a solved problem**: it keeps the common
+  project-include-root workflow working (the gate's primary use case), at
+  the cost of not detecting a dependency-version change expressed purely as
+  a differently-named `-I` mount point with the same basename; that class
+  of drift is undetectable by this fingerprint on the legacy CLI path (a
+  user who needs it has `--diagnostic-comparison`, D2, as the sanctioned
+  fallback). For the manifest path (D3), both fingerprints' roots are
+  simply the manifest file's own directory — none of these legacy-path
+  degenerate cases exist there, since every manifest-declared path is
+  already relative to one document.
 
   Four dedicated tests are non-negotiable for this phase to be considered
   done: (1) `--header old=v1/foo.h --header new=v2/foo.h` against logically
@@ -196,11 +211,15 @@ Implements ADR-050 D1 and D2.
   `--include old=/opt/dep --include new=/opt/dep` alongside case (1)'s
   headers still leaves `scope_fingerprint` matching — the specific
   external-dependency-directory regression this criterion exists to
-  prevent; (4) `--include old=/opt/dep-v1/include --include
-  new=/opt/dep-v2/include` (a lone, genuinely different `-I` directory per
-  side) produces *different* `profile_fingerprint`s — the specific
-  degenerate-single-`-I`-directory regression this criterion exists to
-  prevent.
+  prevent; (4) `--include old=old/include --include new=new/include` (the
+  common two-checkout project-include-root shape) leaves `profile_fingerprint`
+  matching, and a documented, deliberately-not-fixed regression test pinning
+  that `--include old=/opt/dep-v1/include --include new=/opt/dep-v2/include`
+  (a lone, genuinely different `-I` directory sharing the same basename)
+  currently produces the *same* `profile_fingerprint` on both sides — the
+  known, accepted limitation above, asserted so a future change doesn't
+  silently start "fixing" it into a heuristic that breaks case (4)'s first
+  half again.
 - **Modeling `contract` is not the same as populating it — this phase must
   do both.** `dump()` (`dumper.py`) is the one place that already resolves
   every input both fingerprints need; it calls
