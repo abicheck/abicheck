@@ -102,6 +102,30 @@ def parse_castxml_version_output(
     return cx_ver, clang
 
 
+def _parse_pep440(castxml_version: str) -> Version | None:
+    """Parse *castxml_version* as PEP 440, tolerating the CastXML
+    Superbuild's git-describe-style ``-g<hash>`` (or ``-<n>-g<hash>``)
+    release suffix — e.g. ``0.7.0-g9864b1e``. PEP 440 only accepts that kind
+    of build metadata after a ``+`` local-version separator, not a bare
+    ``-``, so a straight ``Version(...)`` call on the Superbuild's own
+    version string always raised ``InvalidVersion`` regardless of whether the
+    numeric release itself was in range (Codex review: this meant a future
+    supported >=0.7.0 Superbuild build would still be misreported as
+    unparseable, not just today's below-floor one). Returns ``None`` when
+    neither form parses.
+    """
+    try:
+        return Version(castxml_version)
+    except InvalidVersion:
+        pass
+    if "-" in castxml_version:
+        try:
+            return Version(castxml_version.replace("-", "+", 1))
+        except InvalidVersion:
+            pass
+    return None
+
+
 def evaluate_castxml_version(raw_output: str) -> CastxmlVersionCheck:
     """Check a ``castxml --version`` transcript against the supported range.
 
@@ -114,9 +138,8 @@ def evaluate_castxml_version(raw_output: str) -> CastxmlVersionCheck:
 
     parsed: Version | None = None
     if castxml_version is not None:
-        try:
-            parsed = Version(castxml_version)
-        except InvalidVersion:
+        parsed = _parse_pep440(castxml_version)
+        if parsed is None:
             reasons.append(REASON_VERSION_UNPARSEABLE)
     else:
         reasons.append(REASON_VERSION_UNPARSEABLE)

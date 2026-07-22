@@ -82,6 +82,35 @@ class TestEvaluateCastxmlVersion:
         assert REASON_CLANG_MAJOR_BELOW_MINIMUM in result.reasons
         assert REASON_VERSION_BELOW_MINIMUM not in result.reasons
 
+    def test_git_suffixed_below_min_rejected_on_version_not_unparseable(self):
+        """Regression (Codex review): the CastXML Superbuild's own release
+        format is ``<version>-g<hash>`` (a bare ``-``, e.g. the pinned
+        action/install-castxml.sh build ``0.6.20260105-g9864b1e``) — PEP 440
+        only accepts that kind of suffix after a ``+`` separator, so a naive
+        ``Version(...)`` call always raised ``InvalidVersion`` regardless of
+        whether the numeric release was actually in range. Must be rejected
+        for being below the floor, not for being unparseable."""
+        result = evaluate_castxml_version(_version_text("0.6.20260105-g9864b1e"))
+        assert result.supported is False
+        assert REASON_VERSION_BELOW_MINIMUM in result.reasons
+        assert REASON_VERSION_UNPARSEABLE not in result.reasons
+
+    def test_git_suffixed_in_range_accepted(self):
+        """A future Superbuild release in the supported range must be
+        accepted even with its git-describe suffix intact — this is what
+        lets action/install-castxml.sh's pin be bumped to a real >=0.7.0
+        Superbuild build without also needing a parser change."""
+        result = evaluate_castxml_version(_version_text("0.7.0-g9864b1e"))
+        assert result.supported is True
+        assert result.reasons == []
+
+    def test_git_describe_style_suffix_with_commit_count_accepted(self):
+        """The fuller git-describe form (``<tag>-<n>-g<hash>``) must also
+        parse — only the *first* hyphen is the PEP 440 local-version
+        separator; the rest is the untouched local-version string."""
+        result = evaluate_castxml_version(_version_text("0.7.0-12-g9864b1e"))
+        assert result.supported is True
+
     def test_unparseable_version_rejected(self):
         result = evaluate_castxml_version("garbage output, no version here")
         assert result.supported is False

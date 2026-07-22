@@ -198,15 +198,6 @@ class Function:
     # - None  → dumper/loader could not determine (older snapshots, DWARF-
     #           only path). Diff detectors skip when either side is None.
     is_hidden_friend: bool | None = None
-    # Qualified name of the class whose body declares this friend (the
-    # `befriending` owner in castxml terms), e.g. "ns::Foo". None when the
-    # function is not a hidden friend, or the owner could not be resolved
-    # (older snapshots, DWARF-only path). Surface classification must key
-    # demotion off the *owner's* origin (system/private/public header), not
-    # just the friend function's own — a hidden friend can never produce an
-    # exported symbol by construction, but that is only a reason to skip the
-    # not-exported check, not a reason to skip the header-provenance check.
-    hidden_friend_owner: str | None = None
     # Provenance (ADR-015, schema v6). source_header is the defining header
     # (source_location with the line/col stripped); origin classifies it
     # against the provided public-header set. Both are additive: missing on
@@ -245,6 +236,21 @@ class Function:
     # producers, or a non-virtual/non-method declaration for which the
     # specifier is not applicable).
     is_override: bool | None = None
+    # Qualified name of the class whose body declares this friend (the
+    # `befriending` owner in castxml terms), e.g. "ns::Foo". None when the
+    # function is not a hidden friend, or the owner could not be resolved
+    # (older snapshots, DWARF-only path). Surface classification must key
+    # demotion off the *owner's* origin (system/private/public header), not
+    # just the friend function's own — a hidden friend can never produce an
+    # exported symbol by construction, but that is only a reason to skip the
+    # not-exported check, not a reason to skip the header-provenance check.
+    # Appended after all pre-existing fields (rather than inserted next to
+    # is_hidden_friend) so this additive field cannot shift the positional
+    # slot of any field that came before it (Codex review: Function is a
+    # public, non-keyword-only dataclass, so an insertion mid-list would
+    # silently rebind existing positional-constructor arguments instead of
+    # failing).
+    hidden_friend_owner: str | None = None
 
 
 @dataclass
