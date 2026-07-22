@@ -612,6 +612,42 @@ def _binary_digest_issue(
     return None
 
 
+_ELF_MAGIC = b"\x7fELF"
+
+
+def _not_elf_issue(member: str, binary_path: Path) -> str | None:
+    """Sniff *binary_path*'s ELF magic -- ``None`` when it starts with the
+    4-byte ELF header, a problem string otherwise.
+
+    ``build_bundle_snapshot()`` (``abicheck/bundle.py``) silently skips any
+    staged input that isn't a real ELF file rather than erroring, so a
+    non-ELF file staged under ``binaries/`` (e.g. a JSON snapshot placed at
+    the wrong path, or a truncated/replaced binary that happens to still
+    match its recorded digest) would otherwise resolve as ``resolved`` here
+    and then silently vanish from the bundle-scoped comparison downstream --
+    reported success on a comparison that never actually consulted this
+    member (Codex review).
+    """
+    try:
+        with binary_path.open("rb") as fh:
+            header = fh.read(len(_ELF_MAGIC))
+    except OSError as exc:
+        return (
+            f"bundle member {member!r}'s staged binary {binary_path.name!r} "
+            f"could not be read to verify it is an ELF file: {exc} -- the "
+            "baseline-set is corrupt or was truncated."
+        )
+    if header != _ELF_MAGIC:
+        return (
+            f"bundle member {member!r}'s staged binary {binary_path.name!r} "
+            "is not an ELF file (missing the \\x7fELF magic) -- "
+            "build_bundle_snapshot() silently skips non-ELF inputs, so this "
+            "member would otherwise vanish from the bundle comparison "
+            "despite resolve-baseline reporting success."
+        )
+    return None
+
+
 def _resolve_under_baseline_dir(baseline_dir: Path, rel: str) -> Path | None:
     """Resolve *rel* under *baseline_dir*, refusing an absolute path or an
     escape (e.g. ``"../../etc/passwd"``) -- ``None`` if refused.
@@ -823,6 +859,10 @@ def resolve_bundle(
                 f"binary {artifact.binary!r} is missing, unreadable, or "
                 f"outside {BASELINE_BINARIES_DIRNAME}/"
             )
+            continue
+        elf_issue = _not_elf_issue(member, resolved)
+        if elf_issue:
+            problems[member] = elf_issue
             continue
         digest_issue = _binary_digest_issue(member, resolved, artifact.sha256)
         if digest_issue:

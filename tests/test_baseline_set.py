@@ -831,3 +831,57 @@ def test_resolve_bundle_ambiguous_duplicate_manifest_entries(tmp_path: Path) -> 
     )
     assert result.outcome == ResolveOutcome.AMBIGUOUS
     assert "multiple artifacts" in result.message
+
+
+def test_resolve_bundle_rejects_non_elf_binary_no_digest(tmp_path: Path) -> None:
+    # build_bundle_snapshot() (abicheck/bundle.py) silently skips any staged
+    # input that isn't a real ELF file -- a non-ELF file staged under
+    # binaries/ must not resolve just because a file with the right name
+    # exists and the manifest recorded no digest to catch it (Codex review).
+    _write_manifest(
+        tmp_path,
+        artifacts=[
+            _target_artifact("libpvxs", extra={"binary": "binaries/libpvxs.so"})
+        ],
+    )
+    (tmp_path / "binaries").mkdir()
+    (tmp_path / "binaries" / "libpvxs.so").write_bytes(b"not an elf file at all")
+    result = resolve_bundle(
+        tmp_path,
+        bundle="pvxs-release",
+        members=["libpvxs"],
+        profile=PROFILE,
+        required=True,
+    )
+    assert result.outcome == ResolveOutcome.AMBIGUOUS
+    assert "not an ELF file" in result.message
+
+
+def test_resolve_bundle_rejects_non_elf_binary_matching_digest(tmp_path: Path) -> None:
+    # Even when the recorded digest matches the non-ELF bytes exactly (e.g.
+    # a JSON snapshot was staged at the binary path and the manifest was
+    # built from that same file), the ELF-magic check must still catch it --
+    # a matching digest only proves the staged bytes are what the manifest
+    # expects, not that they're a binary build_bundle_snapshot() can read.
+    content = b"{}"
+    digest = hashlib.sha256(content).hexdigest()
+    _write_manifest(
+        tmp_path,
+        artifacts=[
+            _target_artifact(
+                "libpvxs",
+                extra={"binary": "binaries/libpvxs.so", "sha256": digest},
+            )
+        ],
+    )
+    (tmp_path / "binaries").mkdir()
+    (tmp_path / "binaries" / "libpvxs.so").write_bytes(content)
+    result = resolve_bundle(
+        tmp_path,
+        bundle="pvxs-release",
+        members=["libpvxs"],
+        profile=PROFILE,
+        required=True,
+    )
+    assert result.outcome == ResolveOutcome.AMBIGUOUS
+    assert "not an ELF file" in result.message
