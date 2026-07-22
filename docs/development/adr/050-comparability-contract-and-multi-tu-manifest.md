@@ -195,6 +195,14 @@ not a latent surprise discovered after Phase A ships.
   are mutually exclusive on `dump`, so the manifest document is always the
   complete, sole source of this fingerprint's inputs, never a CLI-flag/
   manifest split that `plan --dump-manifest` (D3) couldn't see half of.
+  **The same exclusivity applies to `-H`/`--header` and `-I`/`--include`
+  themselves** — the legacy path's actual extraction/include inputs, not
+  only the provenance-classification flags; a manifest's declared TUs and
+  their own `includes`/`forced_includes` are the sole equivalent once a
+  manifest is selected, the identical "manifest document is the complete
+  source, never split with a CLI flag" reasoning applied one level
+  earlier, to the inputs that produce a snapshot at all rather than only
+  to how it's classified afterward.
   The `contributes_to_abi` flag is a
   hashed input, not just a manifest-validation detail (D3): flipping a TU
   from `contributes_to_abi: false` to `true` changes which declarations
@@ -1571,7 +1579,14 @@ so `scope_fingerprint` (D1) always has one complete, manifest-only source
 for these inputs rather than a CLI-flag/manifest-field split that D3's
 `plan --dump-manifest` diagnostic (see below) — which reads the manifest
 document only, never invoking a compiler or resolving CLI flags — could
-never fully see.
+never fully see. **`-H`/`--header` and `-I`/`--include` are rejected the
+same way** — they are the legacy path's own extraction/include-search
+inputs, the direct equivalent of a manifest's declared TUs and their
+`includes`/`forced_includes`, not merely a classification overlay like
+the provenance flags; combining either with `--dump-manifest` would leave
+the identical ambiguity (silently folded into the dump, or silently
+dropped) this exclusion exists to rule out at the source, not only for
+provenance.
 
 `dumper.py`'s `dump()` gains a manifest-driven path: **one castxml/clang
 invocation per TU** (base compile profile + that TU's own forced includes),

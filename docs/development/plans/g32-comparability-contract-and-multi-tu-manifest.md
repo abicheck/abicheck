@@ -596,7 +596,27 @@ Implements ADR-050 D1 and D2.
   token is its required user-supplied **`label`** instead (it owns no
   declared header by construction — that's exactly why it needs the label
   form), namespaced separately from the ancestor-derived token space so a
-  label can never collide with a header name. `-I project -I dep` (project
+  label can never collide with a header name. **Labels must also be
+  unique per side, the same `name`-uniqueness invariant a manifest's own
+  TU names already enforce (D3) — otherwise two distinct project-owned
+  roots sharing a label collapse to the same token and lose exactly the
+  order information this mechanism exists to preserve (P2 review).**
+  `--include old:support=old/src --include old:support=old/generated` (two
+  genuinely different directories, same reused label `support`) would
+  hash `[token(support), token(support)]` regardless of which directory
+  was declared first — a new side that swaps their roles (`--include
+  new:support=new/generated --include new:support=new/src`) hashes to the
+  identical `[token(support), token(support)]` sequence, even though
+  which support root now resolves an ambiguous `#include` first genuinely
+  changed — the exact false-match failure mode this whole per-slot-token
+  design exists to close, reintroduced through a non-unique label. Fixed
+  by rejecting a repeated label on the same side at parse time (a
+  `click.UsageError`, the same class of fast-fail this ADR already uses
+  for other declaration conflicts), before any digest is computed —
+  `both:`-scoped and side-scoped (`old:`/`new:`) labels are checked
+  independently per side, since `old:support=...` and `new:support=...`
+  legitimately reuse the same label across the two *different* checkouts
+  being compared, only a same-side repeat is rejected. `-I project -I dep` (project
   ancestor of declared `foo.h`) hashes `[token(foo.h), digest(dep)]`; `-I
   dep -I project` hashes `[digest(dep), token(foo.h)]` — different,
   correctly flagged as non-comparable; `--include both:support=old/src`
@@ -787,7 +807,26 @@ Implements ADR-050 D1 and D2.
   break reusing `SidedIncludePathParam` on `dump` would have introduced
   (P2 review), alongside a companion assertion that `dump --include
   both:support=path` still parses to `(label="support", path=Path("path"))`
-  through the same `dump`-specific type.
+  through the same `dump`-specific type; a sixth assertion (P2 review)
+  parses `compare --include old:support=old/src --include
+  old:support=old/generated` (same side, same label, two different
+  directories) and asserts a `click.UsageError` — the duplicate-label
+  rejection above — while `compare --include old:support=old/src
+  --include new:support=new/generated` (same label, but on *different*
+  sides) parses without error, proving the uniqueness check is
+  per-side, not global. A **`check_appcompat` sibling support-root** test
+  (P2 review — this Python-API entry point bypasses the CLI plumbing
+  above entirely, see the dedicated acceptance-criteria bullet above)
+  asserting `check_appcompat(..., old_includes=[old/src],
+  new_includes=[new/src], old_project_include_labels={old/src:
+  "support"}, new_project_include_labels={new/src: "support"})` leaves
+  `contract.profile_fingerprint` matching across an edit confined to a
+  private header inside `src/` — the same sibling-support-root scenario
+  test (14) proves for the CLI, exercised through `check_appcompat`'s own
+  new parameters instead — plus a companion assertion that calling
+  `check_appcompat` with the same layout but *without* the new
+  parameters still raises `ProfileMismatchError` on that identical edit,
+  confirming the parameters are load-bearing, not a redundant no-op.
 - **Modeling `contract` is not the same as populating it — this phase must
   do both.** `dump()` (`dumper.py`) is the one place that already resolves
   every input both fingerprints need; it calls
@@ -1479,6 +1518,30 @@ Click but never reaching the predicate — the labeled `--include` form
 would parse successfully and do nothing, the same silent-loss failure
 mode already caught once for `--diagnostic-comparison` on `run_compare`
 in this phase.
+**A fourth call chain reaches `dump()` outside all three CLI commands
+above and needs the identical parameter, or its own callers silently
+lose sibling-support-root ownership (P2 review).** `appcompat.py`'s
+`check_appcompat` (`:1056,1065`) is a standalone Python-API entry point —
+not routed through `cli.py`/`cli_resolve.py` at all — that calls
+`dumper.dump()` directly with its own `old_includes`/`new_includes`
+lists; verified against the actual code, neither call passes anything
+resembling a label map today. A Python-API caller with a sibling
+support-root layout (`check_appcompat(..., old_includes=[old/src],
+new_includes=[new/src])`, mirroring the CLI's `old:support=old/src`
+case) would have that support root always classified external — the
+ancestor rule alone doesn't cover a sibling layout, exactly the gap the
+labeled form exists to close — so an ordinary private-header-only edit
+inside it flips `profile_fingerprint` and raises `ProfileMismatchError`
+on every `check_appcompat` call through this path, never comparable.
+`check_appcompat` gains two new keyword-only parameters,
+`old_project_include_labels: dict[Path, str] | None = None` and
+`new_project_include_labels: dict[Path, str] | None = None`, threaded
+straight into its own `old_snap`/`new_snap` `dump(...)` calls'
+`project_include_labels=` argument — the same parameter name `dump()`
+itself already exposes, not a new concept. `check_plugin_host_contract`
+needs no equivalent change: it takes already-built `AbiSnapshot` objects
+as arguments and never calls `dump()` itself, so labeling is entirely the
+caller's responsibility before invoking it.
 `model.py` (new `ExtractionContract`), new
 `abicheck/comparability.py` (fingerprint computation, `compute_extraction_contract`
 — its project-ownership predicate takes both ancestor-derived headers and
@@ -2102,6 +2165,27 @@ that risks drifting from what Phase A's gate actually computes.
   above. A manifest caller who needs provenance classification declares it
   in the manifest; a legacy caller keeps using the CLI flags exactly as
   today.
+  **The same exclusivity extends to `-H`/`--header` and `-I`/`--include`
+  themselves, not only the provenance flags — this was under-scoped in an
+  earlier draft of this bullet (P2 review).** `-H`/`--header` is not a
+  cosmetic input like `--public-header`: it is the legacy single-TU path's
+  actual extraction input, the direct equivalent of a manifest's declared
+  TU — `dumper.dump()`'s `headers` parameter is what a castxml/clang
+  invocation parses at all. `-I`/`--include` is the legacy path's
+  extra-include-search-directory equivalent of a manifest TU's own
+  declared `includes`/`forced_includes`. Leaving either combinable with
+  `--dump-manifest` reopens the identical gap the provenance-flag
+  exclusion above closes: an implementation could either silently fold a
+  CLI-supplied `-H extra.h`/`-I extra/` into the manifest-driven dump (so
+  `plan --dump-manifest`'s printed `scope_fingerprint` no longer describes
+  what `dump` actually did) or silently ignore the flag (dropping
+  user-supplied input without a diagnostic), and this phase's own text
+  never picked between those outcomes. `dump --dump-manifest ... -H
+  extra.h` and `dump --dump-manifest ... -I extra/` both raise the same
+  `UsageError` `--public-header`/`--public-header-dir` already do, for the
+  identical reason: once a manifest is selected, it is the *sole* source
+  of TU/include declarations, full stop, not one of several inputs that
+  might combine.
 - **The per-TU loop and `TuFragment` handling land in a new sibling
   module, not inline in `dumper.py` itself — `dumper.py` has zero lines of
   headroom left before the AI-readiness file-size gate's hard cap.**
@@ -2379,16 +2463,27 @@ a brand-new `{cli, cli_dump_manifest}` pair is not a subset of any
 existing entry and *will* be flagged as a new SCC member, failing the
 gate, unless `IMPORT_CYCLE_ALLOWLIST` gains a matching
 `frozenset({"cli", "cli_dump_manifest"})` entry in this same phase.
-**This is squarely the allowlist's own documented, accepted pattern, not
-an exception needing an ADR** — root `AGENTS.md`'s "What NOT to do"
-section reserves the ADR/sign-off bar for a cycle *outside* the
-documented "Click sibling command imports `main` back from `cli.py`,
-`cli.py` imports it at its registration tail" shape; `cli_dump_manifest`
-is that exact shape, identical to all nine existing entries, so adding
-its entry is the same routine step every other sibling command module in
-this list already took, not a new architectural exception. Skipping this
-step leaves an implementer who followed every other instruction in this
-bullet still hitting an unexplained `import-cycle-growth` ERROR. —
+**This plan does not get to waive that requirement on its own authority
+(P2 review correction of an earlier draft of this bullet).** Root
+`AGENTS.md`'s "What NOT to do" section is explicit and unconditional:
+"extending the allowlist needs an ADR (or explicit maintainer sign-off)
+recorded in the PR, the same bar as any other architectural exception —
+not a comment justifying it inline and moving on." An earlier version of
+this bullet asserted that `cli_dump_manifest` matching the existing
+sibling-registration shape meant no ADR/sign-off was needed — but judging
+"this instance is obviously fine, so the bar doesn't apply here" is
+exactly the inline self-justification that sentence exists to rule out;
+that call belongs to a maintainer reviewing the PR, not to this plan or
+to whoever implements it. The Phase-B PR that adds
+`frozenset({"cli", "cli_dump_manifest"})` must therefore either link an
+ADR covering it or record explicit maintainer sign-off in the PR
+description before merging — a routine-looking shape match is not a
+substitute for that recorded approval, however likely it is that the
+approval concludes this is fine. Skipping the allowlist entry entirely
+(rather than seeking approval for it) is not a fallback either: it just
+leaves an implementer who followed every other instruction in this
+bullet hitting an unexplained `import-cycle-growth` ERROR at the finish
+line. —
 `cli_dump_helpers.py` (extend
 `resolve_dump_depth`/`check_requested_depth_satisfied` to operate per-TU),
 `service_scan.py` (`CompileContext.frontend_context: str = "host"`),
@@ -2449,7 +2544,15 @@ actually used; a companion test asserting a manifest declaring
 `public_header_paths`/`public_header_dirs` in its base profile changes
 `scope_fingerprint` the same way `--public-header`/`--public-header-dir`
 already change it on the legacy path, confirming the manifest fields are
-a genuine replacement, not a no-op. A `--frontend-context` CLI-flag unit test for the legacy
+a genuine replacement, not a no-op. A **manifest-mode header/include
+exclusivity** test (P2 review — the exclusivity above covered only the
+provenance flags, not the extraction inputs themselves) asserting `dump
+--dump-manifest manifest.yml -H extra.h` and `dump --dump-manifest
+manifest.yml -I extra/` each fail fast with the same `UsageError`, proving
+`-H`/`--header` and `-I`/`--include` can't silently combine with an
+explicit manifest either — the extraction-input analogue of the
+public-header test above, closing the same class of gap for the inputs
+that actually produce a snapshot rather than only classify it. A `--frontend-context` CLI-flag unit test for the legacy
 (non-manifest) path, mirroring the manifest-field test. A **side-scoped
 `compare --dump-manifest`** test asserting `compare old.so new.so
 --dump-manifest old=v1/abi.yml --dump-manifest new=v2/abi.yml` dumps each
