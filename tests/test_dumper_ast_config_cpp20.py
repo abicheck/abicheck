@@ -363,6 +363,31 @@ def test_cpp20_detector_still_accepts_return_requires_expression(tmp_path):
     assert any(r.reason == "requires-expression" for r in reqs)
 
 
+def test_cpp20_detector_ignores_return_call_to_pre_cxx20_requires(tmp_path):
+    """Regression (Codex review, fifth round): "return"/"throw"/"co_return"
+    are necessary but not sufficient — ``return requires(1);`` (a plain
+    call to a pre-C++20 "requires" function) is just as syntactically
+    valid there as a genuine ``return requires(T t) { t.foo(); };``. Only
+    the latter carries a requirements body, so the safe-word exception
+    must confirm one before accepting."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "inline bool requires(int);\ninline bool f() { return requires(1); }\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+def test_cpp20_detector_ignores_throw_call_to_pre_cxx20_requires(tmp_path):
+    """Same as above, via "throw" instead of "return"."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "inline bool requires(int);\ninline void f() { throw requires(1); }\n",
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
 def test_cpp20_detector_ignores_qualified_concept_used_as_pre_cxx20_type(tmp_path):
     """Regression (Codex review): "concept" only became a reserved keyword
     in C++20 — a qualified reference to a type literally named "concept"

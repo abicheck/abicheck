@@ -167,10 +167,41 @@ _REQUIRES_STATEMENT_BOUNDARY_CHARS = frozenset({b"{", b"}", b";"})
 _TRAILING_IDENTIFIER_PATTERN = re.compile(rb"([A-Za-z_]\w*)\Z")
 
 
+def _find_matching_close_paren(text: bytes, open_paren_pos: int) -> int | None:
+    """Return the index of the ``)`` matching the ``(`` at *open_paren_pos*
+    in *text* (tracking nesting), or ``None`` if unbalanced/not found."""
+    depth = 0
+    for idx in range(open_paren_pos, len(text)):
+        ch = text[idx : idx + 1]
+        if ch == b"(":
+            depth += 1
+        elif ch == b")":
+            depth -= 1
+            if depth == 0:
+                return idx
+    return None
+
+
+def _requires_match_has_body(lookahead: bytes, match: re.Match[bytes]) -> bool:
+    """True if the requires(...)/requires{ *match* is confirmed to carry a
+    requirements body: the parameterless form always does (the matched
+    ``{`` **is** the body); the parenthesized form only does when its
+    matching ``)`` is immediately followed by ``{``. A plain call to a
+    pre-C++20 "requires" function has no such body — just ``;`` or another
+    token after the closing paren."""
+    matched_char = lookahead[match.end() - 1 : match.end()]
+    if matched_char == b"{":
+        return True
+    close = _find_matching_close_paren(lookahead, match.end() - 1)
+    if close is None:
+        return False
+    return lookahead[close + 1 :].lstrip().startswith(b"{")
+
+
 def _looks_like_requires_declarator(
-    code: bytes, match_start: int, prev_nonblank_code: bytes
+    lookahead: bytes, match: re.Match[bytes], prev_nonblank_code: bytes
 ) -> bool:
-    """True if the requires-expression candidate at *match_start* in *code*
+    """True if the requires-expression candidate at *match* in *lookahead*
     looks like an ordinary pre-C++20 use of "requires" as a plain
     identifier — either immediately preceded (skipping only whitespace) by
     a bare identifier that isn't one of the few keywords that can
@@ -186,8 +217,15 @@ def _looks_like_requires_declarator(
     header from the *previous* line (``template<class T>\\nrequires
     (sizeof(T) > 4)\\nvoid f(T);``) looks identical to a bare call-as-
     statement at this point, so that case falls back to *prev_nonblank_code*
-    the same way :func:`_looks_like_genuine_concept` does (Codex review)."""
-    prefix = code[:match_start].rstrip()
+    the same way :func:`_looks_like_genuine_concept` does.
+
+    A safe preceding word (return/throw/co_return) is necessary but not
+    sufficient: ``return requires(1);`` — a plain call to a pre-C++20
+    "requires" function — is just as syntactically valid there as a real
+    ``return requires(T t) { t.foo(); };``. Only the latter carries a
+    requirements body, so the safe-word branch additionally confirms one
+    before accepting (Codex review)."""
+    prefix = lookahead[: match.start()].rstrip()
     if not prefix:
         return not prev_nonblank_code.rstrip().endswith(b">")
     if prefix[-1:] in _REQUIRES_STATEMENT_BOUNDARY_CHARS:
@@ -195,7 +233,11 @@ def _looks_like_requires_declarator(
     if prefix.endswith(b".") or prefix.endswith(b"->") or prefix.endswith(b"::"):
         return True
     m = _TRAILING_IDENTIFIER_PATTERN.search(prefix)
-    return m is not None and m.group(1) not in _REQUIRES_EXPR_SAFE_PRECEDING_WORDS
+    if m is None:
+        return False
+    if m.group(1) in _REQUIRES_EXPR_SAFE_PRECEDING_WORDS:
+        return not _requires_match_has_body(lookahead, match)
+    return True
 
 
 def _looks_like_genuine_concept(
@@ -402,7 +444,7 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
             ):
                 found.append(Cpp20Requirement("concept-declaration", str(p), start_no))
             elif requires_expr_match and not _looks_like_requires_declarator(
-                lookahead, requires_expr_match.start(), prev_nonblank_code
+                lookahead, requires_expr_match, prev_nonblank_code
             ):
                 found.append(Cpp20Requirement("requires-expression", str(p), start_no))
             elif _CPP20_REQUIRES_CLAUSE_PATTERN.search(lookahead):
