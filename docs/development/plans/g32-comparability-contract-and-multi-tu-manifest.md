@@ -118,11 +118,22 @@ Implements ADR-049 D1 and D2.
   scope drift pass the gate undetected.
 - `serialization.SCHEMA_VERSION` is bumped (11 → 12) in the same change
   that starts writing `contract` — **not** treated as a free additive field
-  the way ADR-041's advisory `extractor_passes`/`narrowed_passes` were (see
-  ADR-049 D1's rationale: the comparability gate is verdict-blocking, so an
-  old reader silently not knowing about `contract` must hit the existing
-  forward-version rejection, `serialization.py:557-567`, instead of
-  producing an ordinary verdict on data it can't check).
+  the way ADR-041's advisory `extractor_passes`/`narrowed_passes` were. The
+  bump alone is not sufficient: `snapshot_from_dict`'s existing
+  newer-than-supported handling (`serialization.py:556-572`) only calls
+  `warnings.warn(...)` and keeps deserializing — it never raises, so an old
+  reader would print an easily-missed warning and still produce an ordinary
+  verdict on a `contract`-bearing snapshot it can't check. This phase adds a
+  real guard alongside the bump: a new
+  `_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION = 12` constant (same naming
+  convention as the existing `_MIN_SCHEMA_VERSION_FOR_CV_FACTS`) and a new
+  `IncompatibleSnapshotSchemaError` (`errors.py`), raised by
+  `snapshot_from_dict` *before* the existing warn-only branch when the
+  snapshot's `schema_version` is at or above that threshold and the running
+  `SCHEMA_VERSION` is below it. Versions below the threshold keep today's
+  warn-and-continue behavior unchanged — only the specific version that
+  first introduces a verdict-blocking field becomes a hard failure for an
+  older reader (ADR-049 D1).
 - `comparability.check_contracts_comparable(old, new)` raises
   `ProfileMismatchError`/`ScopeMismatchError` (`errors.py`) **only when
   both sides carry a `contract`** and the fingerprints differ. A **mixed**
@@ -177,9 +188,12 @@ Implements ADR-049 D1 and D2.
 
 **Files & surfaces.** `model.py` (new `ExtractionContract`), new
 `abicheck/comparability.py` (fingerprint computation + gate), `errors.py`
-(two new exception classes), `serialization.py` (`SCHEMA_VERSION` bump,
-`contract` round-trip through `snapshot_to_dict`/`snapshot_from_dict`),
-`checker.py` (gate call at the top of `compare`), `service.py`,
+(`ProfileMismatchError`/`ScopeMismatchError`/`IncompatibleSnapshotSchemaError`),
+`serialization.py` (`SCHEMA_VERSION` bump,
+`_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION` threshold + the
+`snapshot_from_dict` hard-rejection branch, `contract` round-trip through
+`snapshot_to_dict`/`snapshot_from_dict`), `checker.py` (gate call at the
+top of `compare`), `service.py`,
 `mcp_server.py`, `cli.py`/`cli_compare_release.py` (flag + `not_comparable`
 exit-code handling — see `docs/reference/exit-codes.md`, which needs a new
 row), `reporter.py`, `sarif.py`, `junit_report.py`,
@@ -189,9 +203,12 @@ row), `reporter.py`, `sarif.py`, `junit_report.py`,
 independent-TU reordering unaffected; include-order-within-a-TU changes
 the fingerprint; flipping one TU's `contributes_to_abi` or `required` flag
 with its includes held identical also changes `scope_fingerprint`); a
-`SCHEMA_VERSION`-bump test asserting a pre-bump reader (a stubbed/patched
-`SCHEMA_VERSION`) hits the existing forward-version rejection on a
-`contract`-bearing snapshot rather than silently ignoring the field;
+a hard-rejection test asserting a pre-bump reader (a stubbed/patched
+`SCHEMA_VERSION` below the threshold) raises `IncompatibleSnapshotSchemaError`
+on a schema-12 `contract`-bearing snapshot instead of the pre-existing
+warn-and-continue path; a regression test pinning that a schema bump
+*below* the threshold still only warns (today's lenient behavior for
+ordinary additive fields must not become accidentally stricter);
 `tests/test_report_schema.py` gains a `not_comparable` case validated
 against the updated `compare_report.schema.json`; gate unit tests for all
 three entry points; a `--diagnostic-comparison` end-to-end test; a

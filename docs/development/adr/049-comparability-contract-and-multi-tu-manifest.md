@@ -92,15 +92,30 @@ were added the same additive, no-bump way, that old binary would silently
 compare two contract-bearing (and possibly incomparable) snapshots and
 produce an ordinary verdict — exactly the failure mode this ADR exists to
 close, just relocated to the reader-version boundary instead of the
-extraction boundary. `serialization.py` already has the right mechanism for
-this: an old reader rejects a snapshot whose `schema_version` is *newer*
-than it supports (`serialization.py:557-567`,
-`f"Snapshot schema_version {_schema_version} is newer than this abicheck..."`)
-rather than silently misreading it. `SCHEMA_VERSION` (`serialization.py:85`,
-currently 11) is therefore bumped to 12 the same release `contract` starts
-being written, so an old reader hits that existing forward-version error
-instead of silently producing a verdict on data whose comparability it has
-no way to check.
+extraction boundary.
+
+**`serialization.py`'s existing forward-version handling is not, on its
+own, that mechanism — it only warns.** `snapshot_from_dict` (`:556-572`)
+already inspects `schema_version` against the running `SCHEMA_VERSION` and,
+when the snapshot's is newer, calls `warnings.warn(...)` (a `UserWarning`)
+and then **continues deserializing** — it never raises. A bare
+`SCHEMA_VERSION` bump alone (11 → 12) does not close this ADR's gap: an old
+abicheck reading a schema-12, `contract`-bearing snapshot would print a
+warning most CI setups never surface, ignore the unrecognized `contract`
+key, and still produce an ordinary verdict — the exact silent-incomparable-
+data failure mode this ADR exists to prevent. D1 therefore adds a real
+incompatible-reader guard, not just a version bump: a new
+`_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION = 12` constant in
+`serialization.py` (same naming convention as the existing
+`_MIN_SCHEMA_VERSION_FOR_CV_FACTS`, `:88`), checked in `snapshot_from_dict`
+*before* today's warn-only branch: when the snapshot's `schema_version` is
+at or above that threshold and the running `SCHEMA_VERSION` is below it, a
+new `IncompatibleSnapshotSchemaError` (`errors.py`) is raised instead of a
+warning being emitted. Versions below the threshold keep today's
+warn-and-continue behavior unchanged (the existing, deliberately lenient
+default for ordinary additive fields, per ADR-041's `extractor_passes`
+precedent) — only the specific jump that first introduces a
+verdict-blocking field becomes a hard failure for an older reader.
 
 - `profile_fingerprint: str` — a `sha256:`-prefixed digest of the
   **resolved** compile context: compiler family/version, target triple,
@@ -333,8 +348,10 @@ explicitly in G32 so it isn't rediscovered the hard way.
 - `abicheck/checker_policy.py:618,1024` — `SOURCE_FACT_COVERAGE_INCOMPLETE`,
   `ReachabilityState`
 - `abicheck/snapshot_cache.py:130` — existing content-hash cache key
-- `abicheck/serialization.py:85,91-103,557-567` — `SCHEMA_VERSION`,
-  set-sorting, the existing forward-version rejection D1 relies on
+- `abicheck/serialization.py:85,88,91-103,556-572` — `SCHEMA_VERSION`,
+  `_MIN_SCHEMA_VERSION_FOR_CV_FACTS` (naming precedent), set-sorting, and the
+  existing forward-version handling, which today only warns — D1 adds a
+  real hard-rejection threshold rather than relying on it as-is
 - `abicheck/schemas/compare_report.schema.json`,
   `tests/test_report_schema.py` — the published JSON contract D2's
   `not_comparable` state must update alongside the reporters
