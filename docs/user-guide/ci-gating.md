@@ -1,3 +1,14 @@
+---
+doc_type: how-to
+audience:
+  - ci-owner
+level: intermediate
+summarizes:
+  - verdicts
+lifecycle: active
+generated: false
+---
+
 # CI Gating: How the Pieces Fit Together
 
 Four mechanisms decide what fails your build: **baselines** (what you compare

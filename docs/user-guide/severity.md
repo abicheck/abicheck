@@ -1,3 +1,14 @@
+---
+doc_type: how-to
+audience:
+  - ci-owner
+level: intermediate
+summarizes:
+  - verdicts
+lifecycle: active
+generated: false
+---
+
 # Severity Configuration
 
 abicheck classifies every detected change into one of four **issue categories**,

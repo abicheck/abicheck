@@ -1,3 +1,15 @@
+---
+doc_type: hub
+audience:
+  - library-maintainer
+  - ci-owner
+level: beginner
+summarizes:
+  - evidence-model
+lifecycle: active
+generated: false
+---
+
 # Choose Your Workflow
 
 This is the **decision guide**. It answers a single question:

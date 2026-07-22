@@ -1,3 +1,14 @@
+---
+doc_type: how-to
+audience:
+  - library-maintainer
+level: intermediate
+summarizes:
+  - public-surface
+lifecycle: active
+generated: false
+---
+
 # API Surface Intelligence
 
 abicheck does not only diff symbols one at a time — it also reasons about the
