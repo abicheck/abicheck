@@ -1544,18 +1544,28 @@ codes while the one table meant to summarize them across commands goes
 stale the same day), `reporter.py`,
 `sarif.py`, `junit_report.py`, `html_report.py` (`generate_html_report`'s
 `contract_coverage` headline card). **`service_render.render_output`
-has five branches that require a real `DiffResult` — `sarif`, `html`,
+has five format branches that require a real `DiffResult` — `sarif`, `html`,
 `junit`, `review`, and the default `markdown` — not just `html`; every
 one needs the identical bypass, not only the one this bullet previously
-named.** Verified against the actual code (`service_render.py:36-132`):
+named. `--stat` is a sixth, cross-cutting path with the same
+requirement, checked *before* the format dispatch — `render_output`'s
+`if stat and fmt != "junit":` guard calls `to_stat_json(result, ...)`
+(`--format json --stat`) or `to_stat(result, ...)` (every other `--stat`
+combination), both requiring the identical real `DiffResult` the five
+format renderers do; missing this one specifically would leave `compare
+--stat` on a `not_comparable` pair crashing or fabricating stats even
+after SARIF/HTML/JUnit/review/markdown are all fixed.**
+Verified against the actual code (`service_render.py:36-132`):
 `to_sarif_str(result, ...)`, `generate_html_report(result, ...)`,
-`to_junit_xml(result, ...)`, `to_review_digest(result, ...)`, and the
+`to_junit_xml(result, ...)`, `to_review_digest(result, ...)`,
+`to_stat_json(result, ...)`/`to_stat(result, ...)`, and the
 default `to_markdown(result, ...)` each take `result` as a required,
 non-`Optional` `DiffResult` positional argument — on the `not_comparable`
 path (no `DiffResult` ever constructed), calling any of them the normal
 way crashes or requires inventing a synthetic empty `DiffResult`, neither
 of which is what this ADR intends. The front-end's own exception handler
-therefore renders the not-comparable outcome directly, per format, the
+therefore renders the not-comparable outcome directly, per format (or
+`--stat` mode), the
 same way it already assembles `verdict: null` JSON, instead of calling
 `render_output` at all on this path: **SARIF** gets one `run` with
 `invocations[0].executionSuccessful: false` and a
@@ -1626,10 +1636,15 @@ against the updated `compare_report.schema.json`, and its existing
 regenerated `docs/schemas/v1` copy; a **multi-format not_comparable
 reporting** test suite asserting `render_output(..., fmt=...)` on a
 `not_comparable` path is never reached at all — for **each** of `sarif`,
-`html`, `junit`, `review`, and the default `markdown`, not only `html` —
-proving the front-end's own exception handler owns every one of those
+`html`, `junit`, `review`, and the default `markdown`, not only `html`,
+**plus a dedicated `--stat` assertion** (both `--format json --stat` and
+a non-JSON `--stat` combination) proving `to_stat_json`/`to_stat` are
+never called either, since `render_output`'s `stat` branch is checked
+*before* the format dispatch and has the identical missing-`DiffResult`
+problem — proving the front-end's own exception handler owns every one of those
 paths instead of calling `to_sarif_str`/`generate_html_report`/
-`to_junit_xml`/`to_review_digest`/`to_markdown` with a missing
+`to_junit_xml`/`to_review_digest`/`to_markdown`/`to_stat_json`/`to_stat`
+with a missing
 `DiffResult`; a dedicated **SARIF not-comparable** test asserting the
 emitted SARIF log has `invocations[0].executionSuccessful == false` and a
 `toolExecutionNotifications` entry carrying the not-comparable reason,

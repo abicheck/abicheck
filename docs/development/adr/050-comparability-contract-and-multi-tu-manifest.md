@@ -1218,18 +1218,24 @@ AGENTS.md's own module map lists it alongside
 `service_render.py`'s format dispatch (`:36-132`) routes `--format html` to
 `generate_html_report(result: DiffResult, ...)` exactly like the other three
 route to their renderers. **Verified against the actual code: `render_output`
-has five branches requiring a real `DiffResult` — `sarif` (`to_sarif_str`),
-`html` (`generate_html_report`), `junit` (`to_junit_xml`), `review`
-(`to_review_digest`), and the default `markdown` (`to_markdown`) — not
-`html` alone.** Two distinct gaps follow, for every one of these five, not
+has five format branches requiring a real `DiffResult` — `sarif`
+(`to_sarif_str`), `html` (`generate_html_report`), `junit`
+(`to_junit_xml`), `review` (`to_review_digest`), and the default
+`markdown` (`to_markdown`) — not `html` alone. **`--stat` is a sixth,
+cross-cutting path with the identical requirement, checked *before* any
+of those five format branches — `render_output`'s `if stat and fmt !=
+"junit":` guard calls `to_stat_json(result, ...)` for `--format json
+--stat` or `to_stat(result, ...)` for every other `--stat` combination,
+both requiring the same real `DiffResult` the five format renderers do.**
+Two distinct gaps follow, for every one of these six paths, not
 just HTML: for the hard-gate `not_comparable` case, no
 `DiffResult` exists at all (the gate raises before any diff runs), so
-`service_render.render_output` must not attempt to call any of these five
-renderers on that path — the front-end's exception handler renders (or
+`service_render.render_output` must not attempt to call any of these six
+renderers (or the `--stat` summarizer) on that path — the front-end's exception handler renders (or
 declines to render) each requested format directly, the same way it
-assembles `verdict: null` JSON, rather than any of the five growing an
+assembles `verdict: null` JSON, rather than any of them growing an
 optional-`DiffResult` parameter none was designed to accept. Two of these
-five carry a structured, externally-consumed schema and need a defined
+five format branches carry a structured, externally-consumed schema and need a defined
 not-comparable shape, not just "skip the call": **SARIF** represents it as
 one `run` with `invocations[0].executionSuccessful: false` and a
 `toolExecutionNotifications` entry carrying the reason — SARIF's own
