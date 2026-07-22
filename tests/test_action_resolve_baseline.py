@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -469,6 +470,32 @@ class TestBundleResolution:
 @pytest.mark.skipif(
     not RUN_SH.is_file(), reason="actions/resolve-baseline/run.sh not found"
 )
+def _make_tar_zst(archive_path: Path, src_dir: Path) -> None:
+    """Build a .tar.zst using whichever zstd backend is available."""
+    if shutil.which("zstd") is not None:
+        tar_path = archive_path.with_suffix("")
+        with tarfile.open(tar_path, "w") as tf:
+            tf.add(src_dir, arcname=".")
+        subprocess.run(
+            ["zstd", "-f", "-q", str(tar_path), "-o", str(archive_path)],
+            check=True,
+        )
+        tar_path.unlink()
+        return
+    try:
+        import zstandard
+    except ImportError:
+        pytest.skip("neither zstd nor the zstandard package is available")
+    import io
+
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tf:
+        tf.add(src_dir, arcname=".")
+    cctx = zstandard.ZstdCompressor()
+    with open(archive_path, "wb") as out, cctx.stream_writer(out) as writer:
+        writer.write(buf.getvalue())
+
+
 class TestArchiveExtraction:
     def test_tar_gz_archive_is_extracted_and_resolved(self, tmp_path: Path) -> None:
         baseline_dir = tmp_path / "baseline-src"
@@ -517,6 +544,33 @@ class TestArchiveExtraction:
         )
         assert result.returncode == 0
         assert outputs.get("outcome") == "resolved"
+
+    def test_tar_zst_archive_is_extracted_and_resolved(self, tmp_path: Path) -> None:
+        # .tar.zst is an advertised supported format (action.yml's
+        # baseline-path description) but this composite Action never
+        # installs a 'zstd' binary itself -- run.sh must extract it via
+        # whichever backend (system zstd, or the Python 'zstandard'
+        # package) happens to be available, not just fail outright on a
+        # minimal runner (Codex review, fifth round).
+        baseline_dir = tmp_path / "baseline-src"
+        _write_manifest(baseline_dir, artifacts=[_target_artifact("libpvxs")])
+        (baseline_dir / "libpvxs.abicheck.json").write_text("{}", encoding="utf-8")
+
+        archive_path = tmp_path / "baseline.tar.zst"
+        _make_tar_zst(archive_path, baseline_dir)
+
+        result, outputs = _run_action(
+            {
+                "INPUT_BASELINE_PATH": str(archive_path),
+                "INPUT_CHANNEL": "release-contract",
+                "INPUT_TARGET": "libpvxs",
+                "INPUT_PROFILE": PROFILE,
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0
+        assert outputs.get("outcome") == "resolved"
+        assert Path(outputs["snapshot-path"]).is_file()
 
     def test_unrecognized_archive_extension_fails(self, tmp_path: Path) -> None:
         bogus = tmp_path / "baseline.zip"
@@ -648,6 +702,44 @@ class TestArchiveExtraction:
         assert outputs.get("outcome") == "ambiguous"
         assert outputs.get("bootstrap") == "false"
         assert outputs.get("channel") == "release-contract"
+
+    def test_archive_with_many_symlinks_hard_fails_with_typed_outputs(
+        self, tmp_path: Path
+    ) -> None:
+        # A single symlink may not reliably reproduce a SIGPIPE/pipefail
+        # race in the detection guard (find's small output can complete
+        # before grep -q closes the pipe, timing-dependent) -- with
+        # hundreds of symlinks, find is still writing when grep -q exits
+        # after the first match, SIGPIPEing find. Under `set -o pipefail`,
+        # `if find ... | grep -q .` must still evaluate true in that case
+        # (Codex review, fifth round: reproduced exactly this way, with the
+        # buggy form returning 141 and skipping the guard entirely).
+        baseline_dir = tmp_path / "baseline-src"
+        _write_manifest(baseline_dir, artifacts=[_target_artifact("libpvxs")])
+        (baseline_dir / "libpvxs.abicheck.json").write_text("{}", encoding="utf-8")
+        links_dir = baseline_dir / "links"
+        links_dir.mkdir()
+        for i in range(500):
+            (links_dir / f"link-{i}").symlink_to(baseline_dir / "manifest.json")
+
+        archive_path = tmp_path / "baseline-many-symlinks.tar.gz"
+        with tarfile.open(archive_path, "w:gz") as tf:
+            tf.add(baseline_dir, arcname=".")
+
+        result, outputs = _run_action(
+            {
+                "INPUT_BASELINE_PATH": str(archive_path),
+                "INPUT_CHANNEL": "release-contract",
+                "INPUT_TARGET": "libpvxs",
+                "INPUT_PROFILE": PROFILE,
+                "INPUT_REQUIRED": "false",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 1
+        assert "symlink" in result.stdout
+        assert outputs.get("outcome") == "ambiguous"
+        assert outputs.get("bootstrap") == "false"
         assert "symlink" in outputs.get("message", "")
 
     def test_archive_with_ambiguous_subdirectories_hard_fails(

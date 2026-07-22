@@ -109,8 +109,39 @@ elif [[ -f "$BASELINE_PATH" ]]; then
     || _fail_ambiguous "failed to stage $BASELINE_PATH for extraction -- the archive may be truncated or unreadable."
   case "$BASELINE_PATH" in
     *.tar.zst)
-      tar --zstd -xf "$_ARCHIVE_COPY" -C "$BASELINE_DIR" \
-        || _fail_ambiguous "failed to extract $BASELINE_PATH (tar --zstd) -- the archive is truncated or corrupted."
+      # GNU tar's --zstd filters through an external `zstd` binary this
+      # composite Action never installs (only setup-python + pip install
+      # abicheck) -- on a minimal/self-hosted runner without one, tar fails
+      # before resolution even though the archive itself is perfectly
+      # valid, misreporting a good baseline as corrupt (Codex review, fifth
+      # round). Prefer the system zstd when present (fast, no extra
+      # dependency); fall back to the Python 'zstandard' package when it
+      # happens to be installed (abicheck's own package.py extractor uses
+      # the identical fallback for .conda archives); only then fail, with a
+      # message that names the actual gap instead of a generic "failed to
+      # extract".
+      if command -v zstd >/dev/null 2>&1; then
+        tar --zstd -xf "$_ARCHIVE_COPY" -C "$BASELINE_DIR" \
+          || _fail_ambiguous "failed to extract $BASELINE_PATH (tar --zstd) -- the archive is truncated or corrupted."
+      elif python3 -c "import zstandard" >/dev/null 2>&1; then
+        python3 -c '
+import sys
+import tarfile
+import zstandard
+
+with open(sys.argv[1], "rb") as compressed:
+    dctx = zstandard.ZstdDecompressor()
+    with dctx.stream_reader(compressed) as reader:
+        with tarfile.open(fileobj=reader, mode="r|") as tf:
+            if sys.version_info >= (3, 12):
+                tf.extractall(path=sys.argv[2], filter="data")
+            else:
+                tf.extractall(path=sys.argv[2])
+' "$_ARCHIVE_COPY" "$BASELINE_DIR" \
+          || _fail_ambiguous "failed to extract $BASELINE_PATH (python zstandard) -- the archive is truncated or corrupted."
+      else
+        _fail_ambiguous "baseline-path '$BASELINE_PATH' is a .tar.zst archive, but neither a 'zstd' command-line tool nor the Python 'zstandard' package is available on this runner -- install one of them (e.g. 'apt-get install zstd' or 'pip install zstandard') before calling resolve-baseline with a .tar.zst baseline."
+      fi
       ;;
     *.tar.gz | *.tgz)
       tar -xzf "$_ARCHIVE_COPY" -C "$BASELINE_DIR" \
@@ -138,7 +169,19 @@ elif [[ -f "$BASELINE_PATH" ]]; then
   # reports as ambiguous, not a bare usage error -- a caller inspecting
   # this Action's outputs (or running under continue-on-error) must see the
   # same typed outcome/bootstrap/message shape for it (Codex review).
-  if find "$BASELINE_DIR" -type l | grep -q .; then
+  # Captured via command substitution, not piped into `grep -q`: under
+  # `set -o pipefail`, `grep -q` exits as soon as it sees the first match
+  # without draining find's remaining output, which can SIGPIPE find (exit
+  # 141) -- pipefail then reports the pipeline's exit status as find's 141
+  # (the rightmost *non-zero* exit among the pipeline's commands, since
+  # grep's own exit was 0), so `if find ... | grep -q .` evaluates FALSE
+  # and this guard never fires, letting a symlink-laden archive silently
+  # resolve (Codex review, fifth round -- reproduced with an archive
+  # containing hundreds of symlinks). Command substitution reads find's
+  # full output with no downstream reader racing to close the pipe early,
+  # so there's no SIGPIPE to misreport.
+  _SYMLINKS=$(find "$BASELINE_DIR" -type l)
+  if [[ -n "$_SYMLINKS" ]]; then
     _fail_ambiguous "baseline-set archive $BASELINE_PATH contains a symlink, which is not supported -- baseline-set archives must contain only plain files/directories."
   fi
   # An archive may itself contain one nested directory (e.g. the
