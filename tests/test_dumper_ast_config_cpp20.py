@@ -505,6 +505,49 @@ def test_cpp20_detector_detects_std_ranges_concept_constrained_template_paramete
     assert any(r.reason == "constrained-template-parameter" for r in reqs)
 
 
+def test_cpp20_detector_detects_abbreviated_constrained_parameter(tmp_path):
+    """Regression (Codex review, third round): a constrained parameter can
+    appear directly in a function's parameter list with no
+    ``template<...>`` header at all — ``void f(std::integral auto x);`` is
+    exactly equivalent to ``template<std::integral T> void f(T x);`` — so
+    neither the template-parameter-list pattern (which requires a trailing
+    ","/">") nor any other existing probe matched it."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#include <concepts>\nvoid f(std::integral auto x);\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "constrained-template-parameter" for r in reqs)
+
+
+def test_cpp20_detector_detects_abbreviated_ranges_constrained_parameter(
+    tmp_path,
+):
+    """Companion: the abbreviated form also applies to std::ranges::
+    concepts (``void f(std::ranges::range auto&& r);``)."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        "#include <ranges>\nvoid f(std::ranges::range auto&& r);\n",
+    )
+    assert _detect_cpp20_headers(headers) is True
+    reqs = _find_cpp20_requirements(headers)
+    assert any(r.reason == "constrained-template-parameter" for r in reqs)
+
+
+def test_cpp20_detector_ignores_plain_auto_parameter(tmp_path):
+    """Companion: a plain (unconstrained) ``auto`` parameter — valid,
+    ordinary C++20 syntax on its own, but not what this specific pattern
+    targets — must not be confused with the std::-concept-constrained
+    form. (Bare ``auto`` parameters are C++20-only regardless, but this
+    guards the abbreviated-constraint pattern's specificity.)"""
+    headers = _write(tmp_path, "a.h", "void f(auto x);\n")
+    reqs = _find_cpp20_requirements(headers)
+    assert not any(r.reason == "constrained-template-parameter" for r in reqs)
+
+
 def test_cpp20_detector_ignores_custom_nttp_type_resembling_constrained_param(
     tmp_path,
 ):

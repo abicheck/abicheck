@@ -189,6 +189,24 @@ _CPP20_CONSTRAINED_TEMPLATE_PARAM_RANGES_PATTERN = re.compile(
     + rb")\b\s*(?:<[^<>]*>)?\s+\w+\s*[,>]"
 )  # template <std::ranges::range R>
 
+# Abbreviated function templates (Codex review): a constrained parameter can
+# also appear directly in a function's *parameter list* with no
+# ``template<...>`` header at all — ``void f(std::integral auto x);`` is
+# exactly equivalent to ``template<std::integral T> void f(T x);``. Unlike
+# the template-parameter-list form above (which needs the trailing
+# ","/">" disambiguation since a bare identifier there could be an NTTP
+# name), a concept name directly followed by the literal keyword ``auto``
+# has no other valid pre-C++20 reading at all — "TypeName auto" is not
+# parseable pre-C++20 in any other construct — so no further
+# disambiguation is needed here.
+_CPP20_ABBREVIATED_CONSTRAINED_PARAM_PATTERN = re.compile(
+    rb"\bstd::(?:"
+    + _CPP20_STD_CONCEPT_NAMES
+    + rb"|ranges::(?:"
+    + _CPP20_STD_RANGES_CONCEPT_NAMES
+    + rb"))\b\s*(?:<[^<>]*>)?\s+auto\b"
+)  # void f(std::integral auto x)  /  void f(std::ranges::range auto&& r)
+
 # "requires" only became a reserved keyword in C++20 — any earlier standard
 # allows it as an ordinary identifier, e.g. ``bool requires(int x) { ... }``
 # (a declaration) or ``requires(1);`` (a call), both real uses of a
@@ -549,9 +567,11 @@ def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]
                 lookahead, clause_match.start(), prev_nonblank_code
             ):
                 found.append(Cpp20Requirement("requires-clause", str(p), start_no))
-            elif _CPP20_CONSTRAINED_TEMPLATE_PARAM_PATTERN.search(
-                lookahead
-            ) or _CPP20_CONSTRAINED_TEMPLATE_PARAM_RANGES_PATTERN.search(lookahead):
+            elif (
+                _CPP20_CONSTRAINED_TEMPLATE_PARAM_PATTERN.search(lookahead)
+                or _CPP20_CONSTRAINED_TEMPLATE_PARAM_RANGES_PATTERN.search(lookahead)
+                or _CPP20_ABBREVIATED_CONSTRAINED_PARAM_PATTERN.search(lookahead)
+            ):
                 found.append(
                     Cpp20Requirement("constrained-template-parameter", str(p), start_no)
                 )
