@@ -213,14 +213,27 @@ Implements ADR-050 D1 and D2.
   dependency-content difference expressed only through such a header —
   the same "gap through under-counting" this whole redesign exists to
   close, reintroduced one level deeper. The digest is instead built the
-  same way `abicheck/buildsource/include_graph.py`'s existing `-MM`/`-MMD`
-  depfile mechanism already builds the L3 include graph (`parse_depfile()`,
-  a pure, already-unit-tested Make-rule-depfile parser): the L2
-  castxml/clang invocation additionally requests a depfile (`-MMD -MF
-  <path>`) alongside the AST dump, and every listed path is attributed to
-  whichever declared `-I` directory contains it — one extra cheap compiler
-  flag per TU, reusing a proven parser at a new call site, not a second
-  compiler invocation or a directory-tree walk. `profile_fingerprint`'s
+  same way `abicheck/buildsource/include_graph.py`'s existing depfile
+  mechanism already builds the L3 include graph (`parse_depfile()`, a pure,
+  already-unit-tested Make-rule-depfile parser), **using the same
+  system-inclusive flag that module already had to learn to use, for the
+  same reason:** the L2 castxml/clang invocation additionally requests a
+  depfile via **`-MD -MF <path>`, not `-MMD`** — `-MD` lists
+  system-classified headers (reached via `-isystem`/the sysroot/standard
+  library) alongside user headers, while `-MMD` silently omits them.
+  `include_graph.py:354-356` already documents exactly this precedent ("`-M`
+  (not `-MM`) so depfiles include *system*-classified headers"), added
+  after an earlier review caught the identical omission there. `-MMD` here
+  would reintroduce that same bug on a new path: a header reached only
+  through a system/sysroot include (a libstdc++ upgrade changing an
+  ABI-relevant macro, for instance) would never appear in the depfile, so
+  two dumps that actually parsed different system-resolved headers could
+  still match `profile_fingerprint` — the exact under-counting failure this
+  redesign exists to close, via a flag choice this time instead of a
+  data-source choice. Every listed path is attributed to whichever declared
+  `-I` directory contains it — one extra cheap compiler flag per TU,
+  reusing a proven parser at a new call site, not a second compiler
+  invocation or a directory-tree walk. `profile_fingerprint`'s
   `-I` component is the hash of the **ordered** sequence of per-directory
   digests — **after excluding every path `scope_fingerprint` already
   covers for that side (the explicit `--header`/manifest TU entry points),
@@ -253,7 +266,7 @@ Implements ADR-050 D1 and D2.
   the manifest file's own directory — none of these legacy-CLI cases
   exist there.
 
-  Eight dedicated tests are non-negotiable for this phase to be considered
+  Nine dedicated tests are non-negotiable for this phase to be considered
   done: (1) `--header old=v1/foo.h --header new=v2/foo.h` against logically
   identical trees under different roots asserts the resulting
   **`scope_fingerprint`s** match (not `profile_fingerprint` — headers are a
@@ -295,7 +308,15 @@ Implements ADR-050 D1 and D2.
   the diff reports the parameter addition as an ordinary `Change` —
   `not_comparable` never fires on the routine case of "the thing being
   compared changed," which is this whole tool's primary purpose, not an
-  edge case to special-case around.
+  edge case to special-case around; (9) a header reached only through a
+  system/`-isystem`-classified include path (not a plain user `-I`) with
+  genuinely different content between old and new produces *different*
+  `profile_fingerprint`s — proving the depfile request uses `-MD`, not
+  `-MMD`, since `-MMD` would omit a system-classified header from its
+  output entirely and silently miss this difference, the exact regression
+  `include_graph.py:354-356` already had to fix once for the L3 include
+  graph and this digest must not reintroduce on its own, separate call
+  site.
 - **Modeling `contract` is not the same as populating it — this phase must
   do both.** `dump()` (`dumper.py`) is the one place that already resolves
   every input both fingerprints need; it calls
@@ -539,6 +560,25 @@ Implements ADR-050 D1 and D2.
 - Reporting: `reporter.py`/`sarif.py`/`junit_report.py` gain a
   `not_comparable` top-level result distinct from every existing verdict
   value — never coerced into `compatible`/`breaking`.
+- **`abicheck aggregate` consumes these reports in CI and has its own blind
+  spot this phase must close, not just the commands that produce them.**
+  `aggregate.py:589-596`'s `parse_report_verdict` returns `None` whenever
+  `verdict` isn't a string — true for `verdict: null` by design, but also
+  true for a missing or corrupt report, and today nothing distinguishes
+  the two: both become the same `compatibility_verdict=None`/"unavailable"
+  `TargetReport`. Verified against the actual code: in **discovered-only**
+  mode, `coverage_blocking` is unconditionally `False`
+  (`aggregate.py:406-410`, `and not self.discovered_only`), and an
+  unavailable target's `gate` is `None`, so it contributes nothing to
+  `exit_code()`'s `max(...)` — a `not_comparable` target can silently
+  reduce the whole aggregate run to exit `0`, resurfacing the "missing
+  evidence reads as safe" failure this ADR exists to prevent, at the one
+  consumer surface untouched so far. `aggregate.py` gains a way to tell a
+  deliberate `not_comparable` report (its `reason` object is present) from
+  a genuinely missing/corrupt one, and folds it into `exit_code()` as an
+  unconditionally blocking contribution — regardless of `discovered_only`,
+  matching the same precedence `_RELEASE_VERDICT_ORDER`'s rank-6 entry
+  already gives `not_comparable` in the release rollup.
 - **`html_report.py`/`service_render.py` are the fourth reporting surface,
   not an optional add-on.** AGENTS.md's own module map groups `html_report.py`
   with `reporter.py`/`sarif.py`/`junit_report.py` under "Reporting," and
@@ -622,11 +662,11 @@ Implements ADR-050 D1 and D2.
 the gate, and `contract_coverage` metadata computation — no detector, since
 `UNKNOWN_PROFILE` is report metadata, not a `Change`; reuses
 `abicheck/buildsource/include_graph.py`'s existing `parse_depfile()` to turn
-a per-TU `-MMD` depfile into the per-`-I`-directory resolved-file lists
-`profile_fingerprint` hashes — see the acceptance-criteria bullet above),
-`dumper_castxml.py`/`dumper_clang.py` (request a depfile alongside the AST
-dump for every L2 invocation, not only when `buildsource` L3 evidence is
-also being collected), `dumper.py` (`dump()`
+a per-TU `-MD` depfile (system-inclusive, never `-MMD` — see the
+acceptance-criteria bullet above) into the per-`-I`-directory resolved-file
+lists `profile_fingerprint` hashes), `dumper_castxml.py`/`dumper_clang.py`
+(request a `-MD` depfile alongside the AST dump for every L2 invocation, not
+only when `buildsource` L3 evidence is also being collected), `dumper.py` (`dump()`
 calls `compute_extraction_contract(...)` and attaches it to every returned
 snapshot — see the acceptance-criteria bullet above; this is not optional
 plumbing), `snapshot_cache.py` (`_SNAPSHOT_CACHE_VERSION` bump and the
@@ -678,7 +718,11 @@ stale the same day), `reporter.py`,
 path instead of calling it with no `DiffResult`), `abicheck/schemas/compare_report.schema.json`,
 `abicheck/schemas/__init__.py` (`REPORT_SCHEMA_VERSION` bump),
 `docs/schemas/v1/compare_report.schema.json` (regenerated via
-`scripts/publish_schemas.py`, not hand-edited).
+`scripts/publish_schemas.py`, not hand-edited), `aggregate.py`
+(`parse_report_verdict`/`GateInfo`/`TargetReport` gain a way to
+distinguish a deliberate `not_comparable` report from a missing/corrupt
+one, and `exit_code()`/`coverage_blocking` treat it as unconditionally
+blocking, independent of `discovered_only`).
 
 **Tests.** A `dump()`-level test asserting a real (non-manifest) dump
 returns a snapshot with a populated, non-`None` `contract` — the specific
@@ -771,7 +815,12 @@ comparison run under *every* `--severity-*` flag (`--severity-potential-breaking
 `--severity-quality-issues=error`, and `--severity-preset strict`) still
 exits successfully — proving `contract_coverage` is structurally outside
 the findings list any severity flag scans, not merely untested against the
-one flag checked last time.
+one flag checked last time; an **aggregate not_comparable** test asserting
+`abicheck aggregate` in **discovered-only** mode exits non-zero when one
+target's report is `not_comparable` — never silently `0` — and a second
+test asserting a `not_comparable` report is never conflated with a
+genuinely missing/corrupt one in `aggregate`'s rendered per-target output,
+proving the two "unavailable"-shaped states stay distinguishable.
 
 **Example fixtures.** The Phase 0 "scope drift" pair stays a `tests/`-level
 fixture, not an `examples/case*/` catalog entry: `tests/test_validate_examples_unit.py`'s
@@ -1123,27 +1172,44 @@ scheduling half depends on Phase B too (the per-TU loop it schedules).
   `profile_fingerprint` itself, which must be exact or the gate spuriously
   fires. Phase A's own order-sensitivity fix (dropping `sorted(...)` for
   `headers`/`includes`) already closes the remaining gap that mattered for
-  the legacy CLI path. `snapshot_cache.py`'s `_cache_key()` (`:130`)
-  instead gains the manifest-driven `scope_fingerprint` inputs that
-  genuinely are pre-dump-knowable and that `iter_cache_header_files`'s
-  filesystem walk has no way to see, since they aren't file content at
-  all: a TU's `contributes_to_abi`/`required` flags (D3/D4) — flipping
-  either changes which declarations feed the ABI model without necessarily
-  touching any file content, so today's content-hash-only key would miss
-  that class of drift on a manifest-driven dump.
+  the legacy CLI path.
+  **For the manifest-driven path, the cache key must cover the full
+  normalized manifest scope, not a hand-picked subset of it.** An earlier
+  revision of this bullet keyed only on a TU's `contributes_to_abi`/
+  `required` flags — too narrow: `scope_fingerprint`'s own definition (D1)
+  also covers each TU's *name* and its *ordered* `includes`/
+  `forced_includes`, and reordering a TU's includes, changing its
+  forced-includes, or renaming a TU changes extraction semantics (and
+  `scope_fingerprint` itself) without necessarily touching any flag or any
+  file's content — a gap the flags-only key would miss exactly like the
+  content-hash-only key missed the flags. `scope_fingerprint` is fully
+  determined by parsing and normalizing the manifest document — no
+  compiler invocation needed — so, unlike `profile_fingerprint`, it
+  genuinely is available before `dump()` runs; `snapshot_cache.py`'s
+  `_cache_key()` (`:130`) hashes the **full computed `scope_fingerprint`**
+  for a manifest-driven dump (TU names, per-TU ordered includes/
+  forced-includes, and the `contributes_to_abi`/`required` flags together,
+  not any one piece in isolation), closing the whole class of
+  pre-dump-knowable manifest drift `iter_cache_header_files`'s
+  filesystem-content walk structurally cannot see.
 
 **Files & surfaces.** New `abicheck/process_resources.py`,
 `buildsource/source_replay.py` (import from it instead of its own inline
 implementation), `dumper.py` (per-TU pool), `snapshot_cache.py`
-(`_cache_key` gains the manifest's per-TU `contributes_to_abi`/`required`
-flags as additional key inputs — not `profile_fingerprint`/
-`scope_fingerprint` themselves).
+(`_cache_key` gains the full computed `scope_fingerprint` — TU names,
+per-TU ordered includes/forced-includes, and `contributes_to_abi`/
+`required` flags together — as an additional key input for manifest-driven
+dumps; still never `profile_fingerprint`, which cannot be a pre-dump input
+at all, per the bullet above).
 
 **Tests.** `process_resources.py` unit tests migrated from
 `source_replay.py`'s existing RAM-probing tests (same behavior, new import
-path — a refactor test, not new coverage). Cache-key test: identical
+path — a refactor test, not new coverage). Cache-key tests: identical
 manifest TU includes, differing only a TU's `contributes_to_abi` flag ⇒
-cache miss — the specific pre-dump-knowable gap this phase closes,
+cache miss; identical TUs and flags, differing only one TU's *include
+order* (same files, reordered) ⇒ cache miss; identical TUs and flags,
+differing only one TU's *name* ⇒ cache miss — the three independent
+components of the pre-dump-knowable gap this phase closes,
 distinct from Phase A's already-completed order-sensitivity and
 whole-snapshot-cache-version fixes.
 

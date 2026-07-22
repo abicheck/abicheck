@@ -287,16 +287,30 @@ own problem one level deeper, through an under-counted file set instead of
 an ambiguous path. The digest is instead built from each `-I` directory's
 **actual resolved file list** — every file the preprocessor opened from
 inside it, declaration-bearing or not — obtained the same way
-`abicheck/buildsource/include_graph.py`'s existing `-MM`/`-MMD` depfile
-mechanism already does for the L3 include graph (`parse_depfile()`, a pure,
-already-unit-tested parser over standard Make-rule depfile output): the L2
-castxml/clang invocation additionally requests a depfile (`-MMD -MF
-<path>` for clang; castxml already wraps a real compiler, so the same flag
-applies to its underlying invocation) alongside the AST dump, and every
-listed path is attributed to whichever declared `-I` directory contains
-it. This reuses a proven parser at a new call site — one additional cheap
-compiler flag per TU, not a second compiler invocation or a directory-tree
-walk — rather than inventing new file-discovery logic. `profile_fingerprint`'s
+`abicheck/buildsource/include_graph.py`'s existing depfile mechanism
+already does for the L3 include graph (`parse_depfile()`, a pure,
+already-unit-tested parser over standard Make-rule depfile output), **using
+the same system-inclusive flag that module already had to learn to use for
+the same reason**: the L2 castxml/clang invocation additionally requests a
+depfile via `-MD -MF <path>` (not `-MMD`) alongside the AST dump — `-MD`
+lists system-classified headers (those reached via `-isystem`/the sysroot/
+standard library) as well as user headers, while `-MMD` silently omits them.
+`include_graph.py:354-356` already documents exactly this: it deliberately
+uses `-M`, not `-MM`, "so depfiles include *system*-classified headers,"
+after an earlier review caught the same omission there. Using `-MMD` here
+would reintroduce that identical bug on a new code path: a public header (or
+supporting header) reached only through a system/sysroot include path would
+never appear in the depfile, so two dumps that actually parsed different
+system-resolved headers (a libstdc++ upgrade changing an ABI-relevant macro,
+for instance) could still produce matching `profile_fingerprint`s — the
+exact under-counting failure mode this whole digest redesign exists to
+close, through a flag choice instead of a data-source choice this time.
+castxml already wraps a real compiler, so the same `-MD` flag applies to its
+underlying invocation. Every listed path is attributed to whichever declared
+`-I` directory contains it. This reuses a proven parser at a new call site —
+one additional cheap compiler flag per TU, not a second compiler invocation
+or a directory-tree walk — rather than inventing new file-discovery logic.
+`profile_fingerprint`'s
 `-I` component is the hash of the **ordered** sequence of per-directory
 digests.
 
@@ -555,6 +569,28 @@ fingerprint field(s) — never coerced into `COMPATIBLE`/`BREAKING`'s existing
 enum values. A `--diagnostic-comparison` opt-in flag (default off) downgrades
 the hard-fail to a tentative diff, the whole result stamped `assurance:
 "none"` for exploratory use — never the default, and never silent.
+
+**`abicheck aggregate` is a consumer of these reports, not just a producer
+of new ones, and it has its own blind spot D2 must close.**
+`aggregate.py`'s `parse_report_verdict` returns `None` whenever the
+`verdict` field isn't a string (`:589-596`) — which is exactly what
+`verdict: null` is by design, but it is *also* what a missing or corrupt
+report produces, and `aggregate.py` has no way today to tell these apart:
+both collapse into the same `compatibility_verdict=None`/"unavailable"
+`TargetReport` state. In **discovered-only** mode specifically,
+`coverage_blocking` is unconditionally `False` (`and not
+self.discovered_only`, `:406-410`) and an unavailable target's `gate` is
+`None`, so it contributes nothing to `exit_code()`'s `max(...)` — a
+`not_comparable` target can silently reduce to exit `0`, the exact
+"missing evidence reads as safe" failure this whole ADR exists to prevent,
+resurfacing at the one consumer surface this design hadn't yet reached.
+`aggregate.py` gains a way to distinguish a deliberate `not_comparable`
+report from a genuinely missing/corrupt one (its `reason` object is
+present only for the former), and treats it as an unconditionally blocking
+state — dominating `exit_code()` regardless of `discovered_only`, matching
+the same "a `not_comparable` result must never read as safe" rule D2
+already applies to the native `compare`/`compat check`/`scan`/`deps
+compare` schemes and the release-level rollup's rank-6 precedence.
 **`assurance` is a single field on `DiffResult` (alongside
 `contract_coverage`), not a per-`Change` field.** A forced diagnostic
 comparison is uniformly tentative — the contract gate failed for the pair
