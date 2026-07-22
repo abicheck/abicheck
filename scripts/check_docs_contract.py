@@ -312,8 +312,12 @@ def _check_canonical_page_uniqueness(
             f.err(
                 "ownership",
                 f"{page!r} is claimed as canonical_page by multiple topics: "
-                f"{', '.join(sorted(topic_ids))} — a page can have at most "
-                "one owning topic",
+                # A topic id is a topics.yaml mapping key, so it need not be
+                # a str (a malformed registry could use e.g. `123:`) -- str()
+                # each one before sorted()/join(), which would otherwise
+                # crash on a non-str/non-str comparison or join() input.
+                f"{', '.join(sorted(str(t) for t in topic_ids))} — a page "
+                "can have at most one owning topic",
             )
 
 

@@ -73,6 +73,21 @@ def test_canonical_page_uniqueness_flags_two_topics_claiming_one_page() -> None:
     assert "topic-a" in f.errors[0][1] and "topic-b" in f.errors[0][1]
 
 
+def test_canonical_page_uniqueness_handles_non_string_topic_ids() -> None:
+    """A topics.yaml mapping key need not be a str (e.g. a malformed `123:`
+    entry) -- sorted()/join() on the raw topic ids would crash with a
+    TypeError instead of reporting the duplicate-owner error (regression
+    test for the gap flagged in PR #619 review)."""
+    topics = {
+        123: {"canonical_page": "x.md"},
+        "topic-b": {"canonical_page": "x.md"},
+    }
+    f = dc.Findings()
+    dc._check_canonical_page_uniqueness(f, topics)  # must not raise
+    assert len(f.errors) == 1
+    assert "123" in f.errors[0][1] and "topic-b" in f.errors[0][1]
+
+
 def test_canonical_page_uniqueness_allows_distinct_pages() -> None:
     topics = {
         "topic-a": {"canonical_page": "x.md"},
