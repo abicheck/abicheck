@@ -219,7 +219,21 @@ class BaselineArtifact:
     #: only present for a bundle-scoped baseline (ADR-047 §8 S14). Empty for
     #: an ordinary (non-bundle) baseline-set entry.
     binary: str = ""
+    #: sha256 of the *snapshot's* stable content (``build_manifest.py``'s
+    #: ``compute_snapshot_content_hash(raw)``) -- verified against
+    #: ``snapshot`` by :func:`_snapshot_digest_issue`.
     sha256: str = ""
+    #: sha256 of the staged *binary's* raw bytes -- a separate field from
+    #: ``sha256`` above and verified against ``binary`` by
+    #: :func:`_binary_digest_issue`, deliberately never conflated with it:
+    #: the snapshot and binary are different files with unrelated content,
+    #: so reusing one recorded digest for both would compare a JSON
+    #: snapshot's hash against an ELF file's hash and (mis)report every
+    #: bundle member as a digest mismatch. Empty (the default) for any
+    #: manifest that doesn't record one -- today that's every manifest
+    #: ``build_manifest.py`` produces, since it has no bundle-binary-staging
+    #: step yet (Codex review).
+    binary_sha256: str = ""
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> BaselineArtifact:
@@ -229,6 +243,7 @@ class BaselineArtifact:
             snapshot=str(d.get("snapshot") or ""),
             binary=str(d.get("binary") or ""),
             sha256=str(d.get("sha256") or ""),
+            binary_sha256=str(d.get("binary_sha256") or ""),
         )
 
 
@@ -580,9 +595,11 @@ def _schema_and_profile_check(
 
 def _snapshot_digest_issue(
     target: str, snapshot_path: Path, expected_sha256: str
-) -> str | None:
-    """Verify a resolved snapshot is well-formed, and (when the manifest
-    recorded one) matches its digest -- ``None`` when both checks pass.
+) -> tuple[str, str] | None:
+    """Verify a resolved snapshot is well-formed, not a newer schema than
+    this reader understands, and (when the manifest recorded one) matches
+    its digest -- ``None`` when every check passes, else ``(outcome,
+    message)``.
 
     The JSON-shape check (readable, valid JSON, a JSON object) always runs,
     even when the manifest recorded no ``sha256`` (an older/hand-authored
@@ -594,6 +611,18 @@ def _snapshot_digest_issue(
     outcome (Codex review). The digest comparison itself stays conditional
     on ``expected_sha256`` being present, since older manifests never
     recorded one.
+
+    The schema-version check also always runs, reading the *snapshot's
+    own* ``schema_version`` -- distinct from ``_schema_and_profile_check``,
+    which only looks at the manifest's aggregate ``snapshot_schema`` field.
+    An older/hand-authored manifest with no ``snapshot_schema`` has nothing
+    for that check to compare, but the snapshot file itself always carries
+    its own ``schema_version``; without checking it here too, a
+    forward-schema snapshot would still resolve as ``resolved`` and fail
+    opaquely in the later ``compare`` step instead of returning this
+    resolver's typed ``stale_schema`` outcome (Codex review). Returns the
+    ``stale_schema`` outcome for that case; every other issue here returns
+    ``ambiguous``, matching this function's previous behavior.
     """
     try:
         with snapshot_path.open(encoding="utf-8") as fh:
@@ -605,21 +634,33 @@ def _snapshot_digest_issue(
     # unhandled exception instead of this typed ambiguous outcome (Codex
     # review).
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        return (
+        return ResolveOutcome.AMBIGUOUS, (
             f"target {target!r}'s snapshot {snapshot_path.name!r} could not "
             f"be read to verify its digest: {exc} -- the baseline-set is "
             "corrupt or was truncated."
         )
     if not isinstance(raw, dict):
-        return (
+        return ResolveOutcome.AMBIGUOUS, (
             f"target {target!r}'s snapshot {snapshot_path.name!r} does not "
             "contain a JSON object -- the baseline-set is corrupt."
+        )
+    schema_version = raw.get("schema_version")
+    if (
+        isinstance(schema_version, int)
+        and schema_version > serialization.SCHEMA_VERSION
+    ):
+        return ResolveOutcome.STALE_SCHEMA, (
+            f"target {target!r}'s snapshot {snapshot_path.name!r} has "
+            f"schema_version {schema_version!r}, newer than this resolver "
+            f"understands (up to schema_version "
+            f"{serialization.SCHEMA_VERSION}) -- upgrade abicheck before "
+            "resolving against this baseline-set."
         )
     if not expected_sha256:
         return None
     actual_sha256 = compute_snapshot_content_hash(raw)
     if actual_sha256 != expected_sha256:
-        return (
+        return ResolveOutcome.AMBIGUOUS, (
             f"target {target!r}'s snapshot {snapshot_path.name!r} content "
             f"digest does not match the manifest (expected "
             f"{expected_sha256!r}, got {actual_sha256!r}) -- the baseline-"
@@ -636,19 +677,22 @@ def _binary_digest_issue(
     manifest's recorded digest -- ``None`` when it matches (or the manifest
     recorded no digest to check).
 
-    Reuses the same ``artifacts[].sha256`` field :func:`_snapshot_digest_issue`
-    checks for a target's snapshot -- one manifest row has exactly one
-    primary artifact to vouch for (the snapshot for a plain target row, the
-    staged binary for a bundle-scoped row), so one shared field name is
-    enough; no producer populates this for a staged binary yet (G30 P1.6,
-    not built here), so this is the contract this resolver defines, not one
-    it validates against real output. Unlike a snapshot's content hash, a
-    binary's digest is a plain whole-file SHA-256 -- no volatile-field
-    stripping needed, since dumper.py's timestamp-stamping doesn't apply to
-    an unmodified ELF file. Without this, a truncated/tampered staged
-    binary would still resolve purely because a file with the right name
-    exists under binaries/ (Codex review, mirroring the target-snapshot
-    finding).
+    Takes ``artifacts[].binary_sha256``, a field distinct from
+    ``artifacts[].sha256`` (the one :func:`_snapshot_digest_issue` checks
+    for a target's snapshot): a bundle-scoped manifest row can carry both a
+    ``snapshot`` and a ``binary`` field at once, so the two need separate
+    recorded digests -- reusing one field for both would compare a JSON
+    snapshot's content hash against an ELF binary's raw-byte hash and
+    (mis)report every bundle member as corrupt, since the two will never
+    coincidentally match (Codex review). No producer populates
+    ``binary_sha256`` for a staged binary yet (G30 P1.6, not built here), so
+    this is the contract this resolver defines, not one it validates
+    against real output. Unlike a snapshot's content hash, a binary's
+    digest is a plain whole-file SHA-256 -- no volatile-field stripping
+    needed, since dumper.py's timestamp-stamping doesn't apply to an
+    unmodified ELF file. Without this, a truncated/tampered staged binary
+    would still resolve purely because a file with the right name exists
+    under binaries/.
     """
     if not expected_sha256:
         return None
@@ -854,9 +898,10 @@ def resolve_target(
 
     digest_issue = _snapshot_digest_issue(target, snapshot_path, artifact.sha256)
     if digest_issue:
+        issue_outcome, issue_message = digest_issue
         return ResolveResult(
-            outcome=ResolveOutcome.AMBIGUOUS,
-            message=digest_issue,
+            outcome=issue_outcome,
+            message=issue_message,
             manifest_path=manifest_path,
         )
 
@@ -983,7 +1028,7 @@ def resolve_bundle(
         if elf_issue:
             problems[member] = elf_issue
             continue
-        digest_issue = _binary_digest_issue(member, resolved, artifact.sha256)
+        digest_issue = _binary_digest_issue(member, resolved, artifact.binary_sha256)
         if digest_issue:
             problems[member] = digest_issue
             continue

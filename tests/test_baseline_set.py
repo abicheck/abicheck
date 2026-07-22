@@ -281,6 +281,28 @@ def test_resolve_target_missing_snapshot_schema_is_a_noop(tmp_path: Path) -> Non
     assert result.outcome == ResolveOutcome.RESOLVED
 
 
+def test_resolve_target_snapshot_own_schema_newer_than_reader_is_stale_schema(
+    tmp_path: Path,
+) -> None:
+    # _schema_and_profile_check only looks at the manifest's aggregate
+    # snapshot_schema field, which an older/hand-authored manifest may
+    # omit entirely -- but the snapshot file itself always carries its own
+    # schema_version. Without checking that too, this would previously
+    # resolve as RESOLVED (only JSON-shape validated) and fail opaquely in
+    # the later compare step instead of returning the typed stale_schema
+    # outcome resolve-baseline exists to give callers (Codex review).
+    _write_manifest(
+        tmp_path, snapshot_schema=None, artifacts=[_target_artifact("libpvxs")]
+    )
+    (tmp_path / "libpvxs.abicheck.json").write_text(
+        json.dumps({"schema_version": serialization.SCHEMA_VERSION + 1}),
+        encoding="utf-8",
+    )
+    result = resolve_target(tmp_path, target="libpvxs", profile=PROFILE, required=True)
+    assert result.outcome == ResolveOutcome.STALE_SCHEMA
+    assert "schema_version" in result.message
+
+
 def test_resolve_target_wrong_profile(tmp_path: Path) -> None:
     _write_manifest(
         tmp_path,
@@ -1060,12 +1082,56 @@ def test_resolve_bundle_digest_match_resolves(tmp_path: Path) -> None:
         artifacts=[
             _target_artifact(
                 "libpvxs",
-                extra={"binary": "binaries/libpvxs.so.1.5", "sha256": real_digest},
+                extra={
+                    "binary": "binaries/libpvxs.so.1.5",
+                    "binary_sha256": real_digest,
+                },
             )
         ],
     )
     (tmp_path / "binaries").mkdir()
     (tmp_path / "binaries" / "libpvxs.so.1.5").write_bytes(content)
+    result = resolve_bundle(
+        tmp_path,
+        bundle="pvxs-release",
+        members=["libpvxs"],
+        profile=PROFILE,
+        required=True,
+    )
+    assert result.outcome == ResolveOutcome.RESOLVED
+
+
+def test_resolve_bundle_snapshot_sha256_is_not_used_as_binary_digest(
+    tmp_path: Path,
+) -> None:
+    # A bundle-scoped manifest row can carry a "sha256" left over from the
+    # snapshot it was originally written for (build_manifest.py always sets
+    # it), plus a "binary" path added on top. If binary-digest verification
+    # ever reused that same "sha256" field, it would compare the JSON
+    # snapshot's content hash against the ELF binary's raw-byte hash --
+    # these can never coincidentally match, so the bundle would report
+    # ambiguous for every real baseline. binary_sha256 is a separate field
+    # and, when absent (as here), the binary-digest check must no-op just
+    # like an ordinary missing digest (Codex review).
+    binary_content = b"\x7fELF-fake-binary-contents"
+    snapshot_content = {"library": "libpvxs", "schema_version": 9}
+    snapshot_digest = compute_snapshot_content_hash(snapshot_content)
+    assert snapshot_digest != hashlib.sha256(binary_content).hexdigest()
+    _write_manifest(
+        tmp_path,
+        artifacts=[
+            _target_artifact(
+                "libpvxs",
+                extra={
+                    "binary": "binaries/libpvxs.so.1.5",
+                    "sha256": snapshot_digest,  # leftover snapshot digest
+                    # no binary_sha256 recorded
+                },
+            )
+        ],
+    )
+    (tmp_path / "binaries").mkdir()
+    (tmp_path / "binaries" / "libpvxs.so.1.5").write_bytes(binary_content)
     result = resolve_bundle(
         tmp_path,
         bundle="pvxs-release",
@@ -1087,7 +1153,10 @@ def test_resolve_bundle_digest_mismatch_is_ambiguous(tmp_path: Path) -> None:
         artifacts=[
             _target_artifact(
                 "libpvxs",
-                extra={"binary": "binaries/libpvxs.so.1.5", "sha256": "0" * 64},
+                extra={
+                    "binary": "binaries/libpvxs.so.1.5",
+                    "binary_sha256": "0" * 64,
+                },
             )
         ],
     )
@@ -1118,11 +1187,17 @@ def test_resolve_bundle_message_reports_distinct_per_member_reasons(
         artifacts=[
             _target_artifact(
                 "libpvxs",
-                extra={"binary": "binaries/libpvxs.so.1.5", "sha256": real_digest},
+                extra={
+                    "binary": "binaries/libpvxs.so.1.5",
+                    "binary_sha256": real_digest,
+                },
             ),
             _target_artifact(
                 "libpvxsIoc",
-                extra={"binary": "binaries/libpvxsIoc.so.1.5", "sha256": "0" * 64},
+                extra={
+                    "binary": "binaries/libpvxsIoc.so.1.5",
+                    "binary_sha256": "0" * 64,
+                },
             ),
             # libpvxsExtra has no manifest entry at all.
         ],
@@ -1231,7 +1306,7 @@ def test_resolve_bundle_rejects_non_elf_binary_matching_digest(tmp_path: Path) -
         artifacts=[
             _target_artifact(
                 "libpvxs",
-                extra={"binary": "binaries/libpvxs.so", "sha256": digest},
+                extra={"binary": "binaries/libpvxs.so", "binary_sha256": digest},
             )
         ],
     )
@@ -1297,7 +1372,7 @@ def test_resolve_bundle_binary_digest_os_error_is_ambiguous(
         artifacts=[
             _target_artifact(
                 "libpvxs",
-                extra={"binary": "binaries/libpvxs.so", "sha256": "0" * 64},
+                extra={"binary": "binaries/libpvxs.so", "binary_sha256": "0" * 64},
             )
         ],
     )
