@@ -432,6 +432,41 @@ def test_castxml_cpp_std_selects_cpp_mode_for_c_compatible_dot_h(tmp_path, monke
     assert captured["force_cpp"] is True
 
 
+def test_castxml_cpp20_only_syntax_selects_cpp_mode(tmp_path, monkeypatch):
+    """Regression (Codex review): a header whose *only* C++ signal is
+    abbreviated constrained-parameter syntax (``void f(std::integral auto
+    x);`` — no class/namespace/template keyword at all) must still resolve
+    to C++ mode. ``_detect_cpp_headers`` alone doesn't recognize this as
+    C++, and ``force_cpp20`` was gated on ``force_cpp`` already being
+    True — so without also consulting ``_detect_cpp20_headers`` when
+    deciding ``force_cpp`` itself, castxml was invoked in C mode and
+    failed before producing a snapshot."""
+    from xml.etree.ElementTree import Element
+
+    from abicheck import dumper
+
+    header = tmp_path / "public.h"
+    header.write_text(
+        "#include <concepts>\nvoid f(std::integral auto x);\n", encoding="utf-8"
+    )
+    captured: dict[str, bool] = {}
+
+    def fake_run(*args, force_cpp: bool, **kwargs):
+        captured["force_cpp"] = force_cpp
+        return Element("GCC_XML")
+
+    monkeypatch.setattr(dumper, "_resolve_selected_tool", lambda _name: "castxml")
+    monkeypatch.setattr(dumper, "_cache_path", lambda key: tmp_path / "cache.xml")
+    monkeypatch.setattr(
+        dumper, "_resolve_compiler_binary", lambda *args: ("g++", "gnu")
+    )
+    monkeypatch.setattr(dumper, "_run_castxml_attempt", fake_run)
+
+    dumper._castxml_dump([header], [], lang=None)
+
+    assert captured["force_cpp"] is True
+
+
 def test_explicit_c_language_overrides_forwarded_cpp_standard(tmp_path):
     """An explicit --lang c remains authoritative despite conflicting flags."""
     from abicheck.dumper import _resolve_clang_langmode
@@ -445,6 +480,27 @@ def test_explicit_c_language_overrides_forwarded_cpp_standard(tmp_path):
 
     assert force_cpp is False
     assert explicit_c is True
+
+
+def test_clang_langmode_cpp20_only_syntax_selects_cpp_mode(tmp_path):
+    """Companion to the castxml-path regression above, for the clang
+    frontend's identical auto-detection: abbreviated constrained-parameter
+    syntax alone must select C++ mode (and consequently force_cpp20 too,
+    since it was gated on force_cpp)."""
+    from abicheck.dumper import _resolve_clang_langmode
+
+    header = tmp_path / "public.h"
+    header.write_text(
+        "#include <concepts>\nvoid f(std::integral auto x);\n", encoding="utf-8"
+    )
+
+    force_cpp, force_cpp20, explicit_c, _ = _resolve_clang_langmode(
+        None, [header], "clang"
+    )
+
+    assert force_cpp is True
+    assert force_cpp20 is True
+    assert explicit_c is False
 
 
 def test_castxml_command_user_std_token_not_overridden(tmp_path):

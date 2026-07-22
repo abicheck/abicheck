@@ -235,8 +235,17 @@ def _resolve_clang_langmode(
     """
     force_cpp = bool(lang and lang.upper() in ("C++", "CPP"))
     if not lang:
-        force_cpp = _detect_cpp_headers(headers) or has_explicit_cpp_std(
-            gcc_options, gcc_option_tokens
+        # C++20 concept/requires syntax (including an abbreviated constrained
+        # parameter like ``void f(std::integral auto x);``, which needs no
+        # class/namespace/template keyword at all) is on its own sufficient
+        # proof the header is C++ — without this, a header whose only C++
+        # signal is such syntax stayed auto-detected as C, and force_cpp20
+        # below (gated on force_cpp) never even got a chance to matter
+        # (Codex review).
+        force_cpp = (
+            _detect_cpp_headers(headers)
+            or _detect_cpp20_headers(headers)
+            or has_explicit_cpp_std(gcc_options, gcc_option_tokens)
         )
     force_cpp20 = force_cpp and _detect_cpp20_headers(headers)
     explicit_c_request = bool(lang) and not force_cpp
@@ -753,8 +762,14 @@ def _castxml_dump(
     # same driver.
     force_cpp = bool(lang and lang.upper() in ("C++", "CPP"))
     if not lang:
-        force_cpp = _detect_cpp_headers(headers) or has_explicit_cpp_std(
-            gcc_options, gcc_option_tokens
+        # See the identical comment in _resolve_clang_langmode: C++20
+        # concept/requires syntax alone is sufficient proof the header is
+        # C++, including the abbreviated-constrained-parameter form that
+        # needs no class/namespace/template keyword at all (Codex review).
+        force_cpp = (
+            _detect_cpp_headers(headers)
+            or _detect_cpp20_headers(headers)
+            or has_explicit_cpp_std(gcc_options, gcc_option_tokens)
         )
     resolved_compiler = compiler
     if not force_cpp and not gcc_path and not gcc_prefix:
@@ -823,10 +838,11 @@ def _castxml_dump(
             )
         except SnapshotError as primary:
             # G16/A3: an explicit ``--lang c`` on a header that actually requires
-            # C++ (a stray class/namespace/template) should degrade to a C++ retry
-            # rather than hard-fail. Skip the retry when we are already in C++
-            # mode, when the failure is a frontend-too-old signature (a mode switch
-            # won't help), or when the header has no *genuinely C++-only* construct
+            # C++ (a stray class/namespace/template, or C++20 concept/requires
+            # syntax — Codex review) should degrade to a C++ retry rather than
+            # hard-fail. Skip the retry when we are already in C++ mode, when
+            # the failure is a frontend-too-old signature (a mode switch won't
+            # help), or when the header has no *genuinely C++-only* construct
             # (``_CPP_ONLY_PATTERNS`` excludes ``extern "C"``: a guarded
             # ``extern "C"`` header is valid C, so a C-mode failure there is real
             # and must NOT be masked by re-parsing as C++, which would skip the
@@ -834,7 +850,10 @@ def _castxml_dump(
             if (
                 force_cpp
                 or _is_toolchain_version_failure(str(primary))
-                or not _detect_cpp_headers(headers, _CPP_ONLY_PATTERNS)
+                or not (
+                    _detect_cpp_headers(headers, _CPP_ONLY_PATTERNS)
+                    or _detect_cpp20_headers(headers)
+                )
             ):
                 raise
             log.warning(
