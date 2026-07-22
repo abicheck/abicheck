@@ -27,8 +27,10 @@ top-level modules).
 L. Phase E — M. Total: XL, phased over multiple PRs.
 **Risk:** Phase 0 — low (fixtures only, no production code path changes).
 Phase A — low-medium (new gate at a well-defined entry point, additive
-fields, rollout behind report-only mode before hard-fail default — see
-Phase A below). Phase B — **high** — changes `dumper.py`'s single hottest
+fields; ships as a hard default per ADR-049 D2 from day one — risk is
+mitigated by Phase 0 fixture coverage and a pre-merge dry run, not by a
+runtime soft-default — see Phase A below). Phase B — **high** — changes
+`dumper.py`'s single hottest
 path (every `dump`/`compare` call goes through it) from one frontend
 invocation to N. Phase C — medium (new merge surface, but scoped to
 data `dumper.py` produces, no external-tool dependency). Phase D — medium
@@ -124,17 +126,26 @@ Implements ADR-049 D1 and D2.
   value — never coerced into `compatible`/`breaking`.
 - `--diagnostic-comparison` opt-in flag: downgrades the hard-fail to a
   tentative diff, every finding stamped `assurance: none`.
-- **Rollout, matching this repo's existing default-on-after-validation
-  pattern (ADR-041's `--header-graph` flag flip):** ships behind a
-  `--strict-comparability` flag, default **off**, for one release cycle —
-  a mismatch demotes to a `PROFILE_SCOPE_DRIFT_DETECTED` RISK-tier finding
-  (reusing the existing `SOURCE_FACT_COVERAGE_INCOMPLETE`-style
-  degrade-not-block pattern) rather than hard-failing, so real-world
-  fingerprint false-positives (an overlooked resolved-field gap — see
-  ADR-049 Consequences) surface as a visible warning before the gate can
-  ever block a CI pipeline outright. Flip to default-on is a follow-up PR
-  once the fixture corpus (Phase 0) and a real-world dry run both show
-  zero unexpected mismatches.
+- **Rollout: the hard gate is the default from the first shipped version of
+  this phase — no soft-launch flag, and no second flag with a default that
+  contradicts ADR-049 D2.** D2 is explicit that a contract mismatch is a
+  precondition failure producing `not_comparable`, never an ordinary
+  verdict with a RISK-tier finding attached; a runtime default that quietly
+  downgraded that to "warn, still produce a verdict" would ship exactly the
+  behavior the ADR forbids. The two things that *do* need to be true before
+  this phase merges — real-world fingerprint false positives from an
+  overlooked resolved-field gap must not exist in practice — are handled at
+  merge-review time, not at runtime: Phase 0's fixture corpus must cover the
+  common drift/no-drift cases, and a dry run over a real multi-snapshot
+  corpus using the **already-specified** `--diagnostic-comparison` flag
+  (D2's one sanctioned escape hatch, not a new one) must show zero
+  unexpected mismatches before Phase A is considered done. Backward
+  compatibility for every *existing* baseline is unaffected regardless,
+  since a snapshot with no `contract` field (everything produced before
+  this phase) compares exactly as it does today (see the bullet above) —
+  there is no legacy flow this gate could break on day one, unlike
+  ADR-041's header-graph flag flip, which changed behavior for an
+  already-common default-off-to-on transition.
 
 **Files & surfaces.** `model.py` (new `ExtractionContract`), new
 `abicheck/comparability.py` (fingerprint computation + gate), `errors.py`
