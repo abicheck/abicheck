@@ -329,6 +329,10 @@ elif [[ "$MODE" == "compare" ]]; then
   add_single_flag "--gcc-options" "${INPUT_GCC_OPTIONS:-}"
   add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
 
+  if [[ "${INPUT_NOSTDINC:-false}" == "true" ]]; then
+    CMD+=(--nostdinc)
+  fi
+
   # Build/source evidence (--depth build/source) — new (candidate) side only.
   # The old side's evidence, if any, already lives in whatever
   # old-library/abi-baseline snapshot was resolved (e.g. a baseline archive
@@ -442,11 +446,6 @@ elif [[ "$MODE" == "compare" ]]; then
   fi
   add_flag "--required-symbol" "${INPUT_REQUIRED_SYMBOL:-}"
   add_single_flag "--required-symbols" "${INPUT_REQUIRED_SYMBOLS:-}"
-
-  # Note: --gcc-path, --gcc-prefix, --gcc-options, --sysroot, --nostdinc are
-  # dump-only flags. In compare mode abicheck performs the dump internally
-  # when an input is a binary, but these cross-compilation flags are not
-  # exposed on the compare CLI. They are only passed in dump mode.
 
   # Package-specific options — only meaningful (and only forwarded) when
   # old-library/new-library are directories or packages; gated here rather
@@ -589,6 +588,15 @@ elif [[ "$MODE" == "scan" ]]; then
     add_single_flag "--against" "${INPUT_AGAINST:-}"
   fi
   add_single_flag "--lang" "${INPUT_LANG:-}"
+  add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
+  add_single_flag "--gcc-path" "${INPUT_GCC_PATH:-}"
+  add_single_flag "--gcc-prefix" "${INPUT_GCC_PREFIX:-}"
+  add_single_flag "--gcc-options" "${INPUT_GCC_OPTIONS:-}"
+  add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
+
+  if [[ "${INPUT_NOSTDINC:-false}" == "true" ]]; then
+    CMD+=(--nostdinc)
+  fi
 
   # Level selection — the modern --depth dial (omit for 'auto'). The deprecated
   # --mode/--source-method passthrough was removed; use depth.

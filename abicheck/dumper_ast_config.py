@@ -9,6 +9,7 @@ import hashlib
 import os
 import re
 import shlex
+from dataclasses import dataclass
 from pathlib import Path
 
 from ._compiler_options import has_explicit_std
@@ -125,12 +126,101 @@ _CPP_PATTERNS = [_EXTERN_C_PATTERN, *_CPP_ONLY_PATTERNS]
 # `-std=` flag or it will fail to parse the file. The patterns target the
 # definition site (`concept X = ...`, `requires(...) {`, `template <Foo T>`-
 # style constrained template parameters) rather than uses, so we don't
-# over-trigger.
-_CPP20_PATTERNS = [
-    re.compile(rb"^\s*concept\s+\w+\s*="),  # concept Addable = ...
-    re.compile(rb"\brequires\s*\("),  # requires(T a, T b) { ... }
-    re.compile(rb"\brequires\s+\w"),  # template<T> requires Foo<T>
-]
+# over-trigger. Matching is applied only to *code* text (see
+# ``_find_cpp20_requirements``): preprocessor directive lines, string/char
+# literal contents, and comments are stripped first, so "requires" appearing
+# in a `#error`/`#define` message or a string literal is never mistaken for
+# the C++20 keyword (Codex/false-positive report).
+_CPP20_CONCEPT_PATTERN = re.compile(rb"\bconcept\s+\w+\s*=")  # concept Addable = ...
+_CPP20_REQUIRES_EXPR_PATTERN = re.compile(
+    rb"\brequires\s*\("
+)  # requires(T a, T b) { ... }
+_CPP20_REQUIRES_CLAUSE_PATTERN = re.compile(
+    rb"\brequires\s+\w"
+)  # template<T> requires Foo<T>
+
+_STRING_LITERAL_PATTERN = re.compile(rb'"(?:\\.|[^"\\\n])*"')
+_CHAR_LITERAL_PATTERN = re.compile(rb"'(?:\\.|[^'\\\n])*'")
+
+
+def _strip_literals(line: bytes) -> bytes:
+    """Blank out string/char literal contents.
+
+    Prevents a keyword that only appears *inside* a string (e.g. an error
+    message like ``"Foo requires Base"``) from being mistaken for C++
+    structural syntax.
+    """
+    line = _STRING_LITERAL_PATTERN.sub(b'""', line)
+    line = _CHAR_LITERAL_PATTERN.sub(b"''", line)
+    return line
+
+
+def _iter_logical_lines(content: bytes) -> list[tuple[int, bytes]]:
+    """Split *content* into ``(1-based start line, logical line)`` pairs.
+
+    Backslash-newline continuations are joined into a single logical line so
+    a ``#define``/``#error`` directive spanning multiple physical lines is
+    classified as one directive rather than leaking its continuation lines
+    into ordinary code scanning.
+    """
+    physical = content.split(b"\n")
+    logical: list[tuple[int, bytes]] = []
+    start_no = 1
+    buf: list[bytes] = []
+    for i, raw in enumerate(physical, start=1):
+        line = raw.rstrip(b"\r")
+        if not buf:
+            start_no = i
+        if line.endswith(b"\\"):
+            buf.append(line[:-1])
+            continue
+        buf.append(line)
+        logical.append((start_no, b"\n".join(buf)))
+        buf = []
+    if buf:
+        logical.append((start_no, b"\n".join(buf)))
+    return logical
+
+
+def _is_preprocessor_directive(line: bytes) -> bool:
+    return re.match(rb"^\s*#", line) is not None
+
+
+@dataclass(frozen=True)
+class Cpp20Requirement:
+    """A single structural C++20 construct found while scanning headers."""
+
+    reason: str  # "concept-declaration" | "requires-expression" | "requires-clause"
+    path: str
+    line: int
+
+
+def _find_cpp20_requirements(header_paths: list[Path]) -> list[Cpp20Requirement]:
+    """Scan *header_paths* for structural C++20 syntax, with reasons/locations.
+
+    Conservative and directive/literal/comment-aware: only definition-site
+    syntax in actual code counts, never the same keywords appearing inside a
+    preprocessor diagnostic message, a string/char literal, or a comment.
+    """
+    found: list[Cpp20Requirement] = []
+    for p in header_paths:
+        try:
+            content = p.read_bytes()
+        except OSError:
+            continue
+        content = re.sub(rb"/\*.*?\*/", b"", content, flags=re.DOTALL)
+        for start_no, logical in _iter_logical_lines(content):
+            if _is_preprocessor_directive(logical):
+                continue
+            code = _strip_literals(logical)
+            code = code.split(b"//")[0]
+            if _CPP20_CONCEPT_PATTERN.search(code):
+                found.append(Cpp20Requirement("concept-declaration", str(p), start_no))
+            elif _CPP20_REQUIRES_EXPR_PATTERN.search(code):
+                found.append(Cpp20Requirement("requires-expression", str(p), start_no))
+            elif _CPP20_REQUIRES_CLAUSE_PATTERN.search(code):
+                found.append(Cpp20Requirement("requires-clause", str(p), start_no))
+    return found
 
 
 def _detect_cpp20_headers(header_paths: list[Path]) -> bool:
@@ -140,19 +230,10 @@ def _detect_cpp20_headers(header_paths: list[Path]) -> bool:
     default standard is whatever the underlying compiler defaults to
     (usually C++17 on modern gcc), which does not accept ``concept``
     declarations. This detection is conservative: only definition-site
-    syntax counts, not the keyword in arbitrary text.
+    syntax counts, not the keyword in arbitrary text — see
+    ``_find_cpp20_requirements`` for the directive/literal/comment-aware scan.
     """
-    for p in header_paths:
-        try:
-            content = p.read_bytes()
-        except OSError:
-            continue
-        content = re.sub(rb"/\*.*?\*/", b"", content, flags=re.DOTALL)
-        for line in content.split(b"\n"):
-            stripped = line.split(b"//")[0]
-            if any(pat.search(stripped) for pat in _CPP20_PATTERNS):
-                return True
-    return False
+    return bool(_find_cpp20_requirements(header_paths))
 
 
 def _detect_cpp_headers(

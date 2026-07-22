@@ -198,6 +198,15 @@ class Function:
     # - None  → dumper/loader could not determine (older snapshots, DWARF-
     #           only path). Diff detectors skip when either side is None.
     is_hidden_friend: bool | None = None
+    # Qualified name of the class whose body declares this friend (the
+    # `befriending` owner in castxml terms), e.g. "ns::Foo". None when the
+    # function is not a hidden friend, or the owner could not be resolved
+    # (older snapshots, DWARF-only path). Surface classification must key
+    # demotion off the *owner's* origin (system/private/public header), not
+    # just the friend function's own — a hidden friend can never produce an
+    # exported symbol by construction, but that is only a reason to skip the
+    # not-exported check, not a reason to skip the header-provenance check.
+    hidden_friend_owner: str | None = None
     # Provenance (ADR-015, schema v6). source_header is the defining header
     # (source_location with the line/col stripped); origin classifies it
     # against the provided public-header set. Both are additive: missing on
@@ -514,6 +523,20 @@ class AbiSnapshot:
     # Set only when the user explicitly opted into an auto CastXML→Clang
     # fallback.  The reason remains visible after snapshot serialization.
     ast_fallback_reason: str | None = field(default=None, kw_only=True)
+
+    # CastXML version-gate outcome (schema v13, ``castxml_policy.py``). None on
+    # snapshots not produced by a version-gated CastXML L2 scan (older
+    # snapshots, clang/DWARF/symbols-only snapshots). False means the scan ran
+    # against an out-of-policy CastXML build ONLY because the caller passed the
+    # explicit ``--allow-unsupported-castxml`` override — by default an
+    # unsupported version aborts the scan before headers are parsed, so no
+    # snapshot with ``ast_toolchain_supported=False`` should exist unless that
+    # override was used. A caller must treat such a snapshot as not eligible
+    # to become a new strict baseline without a further explicit acknowledgment.
+    ast_toolchain_supported: bool | None = field(default=None, kw_only=True)
+    ast_toolchain_unsupported_reasons: list[str] = field(
+        default_factory=list, kw_only=True
+    )
 
     # G28 Phase 3 — per-fact producer provenance for a "hybrid" snapshot only
     # (empty for every ordinary single-backend snapshot; ``ast_producer`` alone

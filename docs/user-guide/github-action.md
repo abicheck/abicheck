@@ -126,12 +126,12 @@ carry binary evidence (a `dump` of a real library, not headers-only).
 | Input | Default | Description |
 |-------|---------|-------------|
 | `lang` | `c++` | Language mode for the header backend: `c++` or `c` |
-| `ast-frontend` | `auto` (resolves to castxml when present) | L2 header-AST frontend (compare/dump modes): `auto`, `castxml`, `clang` (`clang -ast-dump=json`, for clang-only hosts), or `hybrid` (runs both and merges them — needs both tools on the runner, never auto-selected). `auto` falls back to clang on a castxml toolchain error. Same as `ABICHECK_AST_FRONTEND`. |
-| `gcc-path` | — | Path to cross-compiler binary (dump mode only) |
-| `gcc-prefix` | — | Cross-toolchain prefix, e.g. `aarch64-linux-gnu-` (dump mode only) |
-| `gcc-options` | — | Extra flags for castxml (dump mode only) |
-| `sysroot` | — | Alternative system root (dump and deps-tree modes) |
-| `nostdinc` | `false` | Skip standard include paths (dump mode only) |
+| `ast-frontend` | `auto` (resolves to castxml when present) | L2 header-AST frontend (dump/compare/scan modes — shared `compile_context_options`, ADR-037 D3): `auto`, `castxml`, `clang` (`clang -ast-dump=json`, for clang-only hosts), or `hybrid` (runs both and merges them — needs both tools on the runner, never auto-selected). `auto` falls back to clang on a castxml toolchain error. Same as `ABICHECK_AST_FRONTEND`. |
+| `gcc-path` | — | Path to cross-compiler binary (dump/compare/scan modes) |
+| `gcc-prefix` | — | Cross-toolchain prefix, e.g. `aarch64-linux-gnu-` (dump/compare/scan modes) |
+| `gcc-options` | — | Extra flags for the header frontend (dump/compare/scan modes) |
+| `sysroot` | — | Alternative system root (dump/compare/scan and deps-tree modes) |
+| `nostdinc` | `false` | Skip standard include paths (dump/compare/scan modes) |
 
 ### Full-stack dependency validation (Linux ELF)
 

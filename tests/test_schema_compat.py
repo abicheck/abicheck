@@ -242,3 +242,22 @@ class TestReserialization:
             assert "newer than this abicheck" in str(w[0].message)
         # But still loads successfully
         assert snap.library == "libcompat.so.1"
+
+
+# ---------------------------------------------------------------------------
+# Documentation/constant sync — a stale docs number silently misleads readers
+# about what "current" means (docs/reference/snapshot-format.md drifted to a
+# hardcoded "8" while SCHEMA_VERSION had moved on to 11; this pins them together).
+# ---------------------------------------------------------------------------
+
+
+def test_docs_snapshot_schema_version_matches_constant():
+    docs_path = (
+        Path(__file__).parent.parent / "docs" / "reference" / "snapshot-format.md"
+    )
+    text = docs_path.read_text()
+    assert f"**`{SCHEMA_VERSION}`**" in text, (
+        f"docs/reference/snapshot-format.md does not mention the current "
+        f"SCHEMA_VERSION ({SCHEMA_VERSION}) — update it alongside any schema bump."
+    )
+    assert f"(currently `{SCHEMA_VERSION}`)" in text

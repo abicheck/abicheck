@@ -719,6 +719,16 @@ class _ClangAstParser:
                     ref_qualifier=ref_qualifier,
                     is_explicit=is_explicit,
                     is_hidden_friend=entry.in_friend,
+                    # ``entry.scope`` is the enclosing-class scope path at the
+                    # point ``in_friend`` first became True (the FriendDecl's
+                    # own scope, since FriendDecl never pushes a scope level) —
+                    # i.e. exactly the befriending class, mirroring castxml's
+                    # ``befriending`` attribute resolution.
+                    hidden_friend_owner=(
+                        "::".join(entry.scope)
+                        if entry.in_friend and entry.scope
+                        else None
+                    ),
                     # clang stamps "variadic": true on FunctionDecl; the
                     # qualtype spelling ("void (int, ...)") is the fallback.
                     is_variadic=bool(node.get("variadic")) or "..." in qualtype,

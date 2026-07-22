@@ -37,8 +37,14 @@ from abicheck.surface import (
 )
 
 
-def _fn(name, ret="void", params=(), vis=Visibility.PUBLIC, mangled=None,
-        origin=ScopeOrigin.UNKNOWN):
+def _fn(
+    name,
+    ret="void",
+    params=(),
+    vis=Visibility.PUBLIC,
+    mangled=None,
+    origin=ScopeOrigin.UNKNOWN,
+):
     return Function(
         name=name,
         mangled=mangled if mangled is not None else f"_Z{len(name)}{name}",
@@ -60,8 +66,9 @@ def _rec(name, fields=(), bases=(), size=64, origin=ScopeOrigin.UNKNOWN):
     )
 
 
-def _enum(name, members=(("A", 0), ("B", 1)), origin=ScopeOrigin.UNKNOWN,
-          source_header=None):
+def _enum(
+    name, members=(("A", 0), ("B", 1)), origin=ScopeOrigin.UNKNOWN, source_header=None
+):
     return EnumType(
         name=name,
         members=[EnumMember(name=n, value=v) for n, v in members],
@@ -218,8 +225,13 @@ class TestComputePublicSurface:
             library="l",
             version="1",
             functions=[_fn("get_result", ret="int")],
-            enums=[_enum("Internal", origin=ScopeOrigin.PRIVATE_HEADER,
-                          source_header="impl.h")],
+            enums=[
+                _enum(
+                    "Internal",
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                    source_header="impl.h",
+                )
+            ],
         )
         surf = compute_public_surface(snap)
         assert "Internal" not in surf.public_types
@@ -374,12 +386,18 @@ class TestChangeClassification:
             library="l",
             version="1",
             functions=[_fn("api", ret="int")],
-            enums=[_enum("Internal", origin=ScopeOrigin.PRIVATE_HEADER,
-                          source_header="impl.h")],
+            enums=[
+                _enum(
+                    "Internal",
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                    source_header="impl.h",
+                )
+            ],
         )
         s = self._surf(snap)
         c = Change(
-            kind=ChangeKind.ENUM_MEMBER_VALUE_CHANGED, symbol="Internal::A",
+            kind=ChangeKind.ENUM_MEMBER_VALUE_CHANGED,
+            symbol="Internal::A",
             description="",
         )
         assert classify_change_surface(c, s, s) == (False, REASON_PRIVATE_HEADER)
@@ -496,12 +514,15 @@ class TestSurfaceExclusionReason:
         # unresolved side means we keep the finding (anti-hiding).
         resolvable = self._surf(
             AbiSnapshot(
-                library="l", version="1",
+                library="l",
+                version="1",
                 functions=[_fn("api"), _fn("internal", vis=Visibility.ELF_ONLY)],
             )
         )
         unresolvable = PublicSurface()  # resolvable defaults to False
-        c = Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="internal", description="")
+        c = Change(
+            kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="internal", description=""
+        )
         assert classify_change_surface(c, resolvable, unresolvable) == (True, None)
         assert classify_change_surface(c, unresolvable, resolvable) == (True, None)
 
@@ -512,7 +533,9 @@ class TestSurfaceExclusionReason:
             functions=[_fn("api"), _fn("internal", vis=Visibility.ELF_ONLY)],
         )
         s = self._surf(snap)
-        c = Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="internal", description="")
+        c = Change(
+            kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="internal", description=""
+        )
         assert classify_change_surface(c, s, s) == (False, REASON_NOT_EXPORTED)
 
     def test_struct_return_convention_symbol_scoped(self):
@@ -526,11 +549,15 @@ class TestSurfaceExclusionReason:
         )
         s = self._surf(snap)
         c = Change(
-            kind=ChangeKind.STRUCT_RETURN_CONVENTION_CHANGED, symbol="internal", description=""
+            kind=ChangeKind.STRUCT_RETURN_CONVENTION_CHANGED,
+            symbol="internal",
+            description="",
         )
         assert classify_change_surface(c, s, s) == (False, REASON_NOT_EXPORTED)
         c_pub = Change(
-            kind=ChangeKind.STRUCT_RETURN_CONVENTION_CHANGED, symbol="api", description=""
+            kind=ChangeKind.STRUCT_RETURN_CONVENTION_CHANGED,
+            symbol="api",
+            description="",
         )
         assert classify_change_surface(c_pub, s, s) == (True, None)
 
@@ -730,9 +757,9 @@ class TestScopedCompareNoFalsePositives:
         old, new = _mk(64), _mk(128)
         scoped = compare(old, new, scope_to_public_surface=True)
         kinds = {c.kind for c in scoped.changes}
-        assert (
-            ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API in kinds
-        ), f"leak hidden by scoping; got kinds={[k.value for k in kinds]}"
+        assert ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API in kinds, (
+            f"leak hidden by scoping; got kinds={[k.value for k in kinds]}"
+        )
         # The internal type's change must not have been silently filtered.
         assert not any(
             "detail::Impl" in c.symbol for c in scoped.out_of_surface_changes
@@ -907,7 +934,8 @@ class TestProvenanceReasons:
         # private header is demoted with the provenance reason — the leaked
         # private-header case scoping targets.
         snap = AbiSnapshot(
-            library="l", version="1",
+            library="l",
+            version="1",
             functions=[
                 _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER),
                 _fn("leaked", origin=ScopeOrigin.PRIVATE_HEADER),
@@ -921,30 +949,37 @@ class TestProvenanceReasons:
 
     def test_system_header_symbol_demoted(self):
         snap = AbiSnapshot(
-            library="l", version="1",
+            library="l",
+            version="1",
             functions=[
                 _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER),
                 _fn("from_libc", origin=ScopeOrigin.SYSTEM_HEADER),
             ],
         )
         s = self._surf(snap)
-        c = Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="from_libc", description="")
+        c = Change(
+            kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="from_libc", description=""
+        )
         assert classify_change_surface(c, s, s) == (False, REASON_SYSTEM_HEADER)
 
     def test_public_header_origin_kept_in_surface(self):
         snap = AbiSnapshot(
-            library="l", version="1",
+            library="l",
+            version="1",
             functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
         )
         s = self._surf(snap)
-        c = Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="public_api", description="")
+        c = Change(
+            kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="public_api", description=""
+        )
         assert classify_change_surface(c, s, s) == (True, None)
 
     def test_unknown_origin_falls_back_to_linkage_reason(self):
         # No public set was used → origin UNKNOWN → provenance never fires;
         # the linkage reason (not-exported) is emitted as before.
         snap = AbiSnapshot(
-            library="l", version="1",
+            library="l",
+            version="1",
             functions=[
                 _fn("public_api"),
                 _fn("hidden", vis=Visibility.ELF_ONLY),
@@ -956,7 +991,8 @@ class TestProvenanceReasons:
 
     def test_private_header_type_finding_demoted(self):
         snap = AbiSnapshot(
-            library="l", version="1",
+            library="l",
+            version="1",
             functions=[_fn("api", ret="Result *")],
             types=[
                 _rec("Result", origin=ScopeOrigin.PUBLIC_HEADER),
@@ -964,20 +1000,24 @@ class TestProvenanceReasons:
             ],
         )
         s = self._surf(snap)
-        c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="InternalCache", description="")
+        c = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="InternalCache", description=""
+        )
         assert classify_change_surface(c, s, s) == (False, REASON_PRIVATE_HEADER)
 
     def test_disagreeing_sides_block_demotion(self):
         # Public-header origin on one side blocks demotion (conservative).
         old = AbiSnapshot(
-            library="l", version="1",
+            library="l",
+            version="1",
             functions=[
                 _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER),
                 _fn("sym", origin=ScopeOrigin.PRIVATE_HEADER),
             ],
         )
         new = AbiSnapshot(
-            library="l", version="2",
+            library="l",
+            version="2",
             functions=[
                 _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER),
                 _fn("sym", origin=ScopeOrigin.PUBLIC_HEADER),
@@ -988,6 +1028,109 @@ class TestProvenanceReasons:
         # sym is in public_symbols on both sides; the public-header side blocks
         # the private-header demotion, so it stays in surface.
         assert classify_change_surface(c, s_old, s_new) == (True, None)
+
+
+# ── hidden-friend surface classification (origin-before-exemption fix) ──────
+#
+# hidden_friend_removed/added used to be unconditionally retained regardless
+# of where the befriending class lived (_NEVER_FILTER_KIND_NAMES). That is
+# right for the not-exported gate (a hidden friend can never have an ELF
+# export) but wrong for header provenance: a hidden friend whose owner class
+# is a system/private-header declaration is exactly as out-of-surface as any
+# other private declaration. These tests exercise the fix.
+
+
+class TestHiddenFriendSurface:
+    def _surf_with_owner(self, owner_origin):
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[_rec("mylib::point", origin=owner_origin)],
+        )
+        return compute_public_surface(snap)
+
+    def test_system_header_hidden_friend_out_of_surface(self):
+        s = self._surf_with_owner(ScopeOrigin.SYSTEM_HEADER)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type="mylib::point",
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (False, REASON_SYSTEM_HEADER)
+
+    def test_private_header_hidden_friend_out_of_surface(self):
+        s = self._surf_with_owner(ScopeOrigin.PRIVATE_HEADER)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type="mylib::point",
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (False, REASON_PRIVATE_HEADER)
+
+    def test_public_project_hidden_friend_retained(self):
+        s = self._surf_with_owner(ScopeOrigin.PUBLIC_HEADER)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type="mylib::point",
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (True, None)
+
+    def test_hidden_friend_added_uses_same_owner_check(self):
+        s = self._surf_with_owner(ScopeOrigin.SYSTEM_HEADER)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_ADDED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type="mylib::point",
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (False, REASON_SYSTEM_HEADER)
+
+    def test_unknown_hidden_friend_owner_stays_retained(self):
+        # No caused_by_type (owner could not be resolved) and no matching
+        # function-level origin either — conservative fallback keeps it.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+        )
+        s = compute_public_surface(snap)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type=None,
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (True, None)
+
+    def test_owner_unresolved_falls_back_to_function_own_origin(self):
+        # No caused_by_type, but the friend function's own recorded origin
+        # (the common in-class-defined case, where function origin == owner
+        # header) is system-header — the fallback still demotes it.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[
+                _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER),
+                _fn(
+                    "mylib::operator==",
+                    mangled="_ZN5mylibeqERKNS_5pointES2_",
+                    origin=ScopeOrigin.SYSTEM_HEADER,
+                ),
+            ],
+        )
+        s = compute_public_surface(snap)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type=None,
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (False, REASON_SYSTEM_HEADER)
 
 
 # ── widening overlay (ADR-024 §D6 / Phase 4) ─────────────────────────────────
@@ -1001,7 +1144,9 @@ class TestWideningOverlay:
         from abicheck.post_processing import FilterNonPublicSurface, PipelineContext
 
         ctx = PipelineContext(
-            old=old, new=new, scope_to_public_surface=True,
+            old=old,
+            new=new,
+            scope_to_public_surface=True,
             force_public_symbols=set(force_public),
         )
         kept = FilterNonPublicSurface().run(list(changes), ctx)
@@ -1009,18 +1154,22 @@ class TestWideningOverlay:
 
     def _pair(self):
         old = AbiSnapshot(
-            library="l", version="1",
+            library="l",
+            version="1",
             functions=[_fn("public_api"), _fn("stub_sym", vis=Visibility.ELF_ONLY)],
         )
         new = AbiSnapshot(
-            library="l", version="2",
+            library="l",
+            version="2",
             functions=[_fn("public_api"), _fn("stub_sym", vis=Visibility.ELF_ONLY)],
         )
         return old, new
 
     def test_forced_symbol_kept_in_surface(self):
         old, new = self._pair()
-        c = Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="stub_sym", description="")
+        c = Change(
+            kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="stub_sym", description=""
+        )
         # Without widening: demoted (not-exported / non-public).
         kept_off, ledger_off = self._run([c], old, new, force_public=set())
         assert kept_off == [] and len(ledger_off) == 1
@@ -1030,13 +1179,17 @@ class TestWideningOverlay:
 
     def test_forced_symbol_matches_qualified_tail(self):
         old, new = self._pair()
-        c = Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="ns::stub_sym", description="")
+        c = Change(
+            kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="ns::stub_sym", description=""
+        )
         kept, ledger = self._run([c], old, new, force_public={"stub_sym"})
         assert kept == [c] and ledger == []
 
     def test_widening_does_not_affect_unlisted_symbols(self):
         old, new = self._pair()
-        c = Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="stub_sym", description="")
+        c = Change(
+            kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="stub_sym", description=""
+        )
         kept, ledger = self._run([c], old, new, force_public={"other"})
         assert kept == [] and len(ledger) == 1
 
@@ -1061,12 +1214,14 @@ class TestWideningCLI:
         # its layout change is demoted under scoping. Widening by its name
         # re-promotes it into the reported surface.
         old = AbiSnapshot(
-            library="lib", version="1",
+            library="lib",
+            version="1",
             functions=[_fn("public_api", ret="Result *")],
             types=[_rec("Result", size=64), _rec("InternalCache", size=64)],
         )
         new = AbiSnapshot(
-            library="lib", version="2",
+            library="lib",
+            version="2",
             functions=[_fn("public_api", ret="Result *")],
             types=[_rec("Result", size=64), _rec("InternalCache", size=128)],
         )
@@ -1090,8 +1245,14 @@ class TestWideningCLI:
         # Scoped + widened: the change is back in the report.
         widened = runner.invoke(
             main,
-            ["compare", str(op), str(np_), "--scope-public-headers",
-             "--public-symbol", "InternalCache"],
+            [
+                "compare",
+                str(op),
+                str(np_),
+                "--scope-public-headers",
+                "--public-symbol",
+                "InternalCache",
+            ],
         )
         assert "InternalCache" in widened.stdout
 
@@ -1106,7 +1267,13 @@ class TestWideningCLI:
         runner = CliRunner()
         result = runner.invoke(
             main,
-            ["compare", str(op), str(np_), "--scope-public-headers",
-             "--public-symbols-list", str(syms)],
+            [
+                "compare",
+                str(op),
+                str(np_),
+                "--scope-public-headers",
+                "--public-symbols-list",
+                str(syms),
+            ],
         )
         assert "InternalCache" in result.stdout

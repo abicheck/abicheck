@@ -32,6 +32,7 @@ These helpers are deliberately small and behavior-preserving: they encode
 the shape that was already duplicated across the ``diff_*`` modules, not
 new policy.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable, ItemsView, Iterable, Iterator, Mapping, ValuesView
@@ -101,6 +102,7 @@ def make_change(
     change_kwargs.setdefault("new_value", new)
     return Change(kind=kind, symbol=symbol, description=description, **change_kwargs)
 
+
 # Sentinel distinguishing "key absent" from "key present with value None".
 # Typed as Any so it can stand in for a ``W`` in the get() default without
 # upsetting the type checker.
@@ -120,6 +122,7 @@ def bool_transition(
     added_values: tuple[str | None, str | None] = (None, None),
     removed_values: tuple[str | None, str | None] = (None, None),
     skip_none: bool = False,
+    caused_by_type: str | None = None,
 ) -> list[Change]:
     """Emit a :class:`Change` for a boolean attribute transition.
 
@@ -137,17 +140,40 @@ def bool_transition(
     ``is_hidden_friend``) where ``None`` means the value was not recorded in
     one snapshot — typically an older snapshot predating the field — and
     must not be mistaken for ``False``.
+
+    ``caused_by_type`` is recorded on the emitted change's ``caused_by_type``
+    field when given — used by hidden-friend transitions to carry the
+    befriending class's qualified name, so surface classification can key
+    demotion off the *owner's* header origin.
     """
     if skip_none and (old_val is None or new_val is None):
         return []
     if not old_val and new_val and added is not None:
         kind, description = added
         ov, nv = added_values
-        return [Change(kind=kind, symbol=symbol, description=description, old_value=ov, new_value=nv)]
+        return [
+            Change(
+                kind=kind,
+                symbol=symbol,
+                description=description,
+                old_value=ov,
+                new_value=nv,
+                caused_by_type=caused_by_type,
+            )
+        ]
     if old_val and not new_val and removed is not None:
         kind, description = removed
         ov, nv = removed_values
-        return [Change(kind=kind, symbol=symbol, description=description, old_value=ov, new_value=nv)]
+        return [
+            Change(
+                kind=kind,
+                symbol=symbol,
+                description=description,
+                old_value=ov,
+                new_value=nv,
+                caused_by_type=caused_by_type,
+            )
+        ]
     return []
 
 
@@ -255,7 +281,9 @@ class TypeMap(Mapping[str, Q]):
             bare = t.name
             if bare in self._bare_owner:
                 if self._bare_owner[bare] != key:
-                    self._bare_owner[bare] = None  # ambiguous: >1 distinct qualified identity
+                    self._bare_owner[bare] = (
+                        None  # ambiguous: >1 distinct qualified identity
+                    )
             else:
                 self._bare_owner[bare] = key
         self._bare_alias: dict[str, str] = {

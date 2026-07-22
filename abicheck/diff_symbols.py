@@ -38,6 +38,7 @@ from .diff_helpers import (
     make_change,
     type_map_key,
 )
+from .diff_hidden_friends import check_hidden_friend_change, diff_inline_hidden_friends
 from .diff_symbols_renames import (  # noqa: F401  (public-surface re-exports)
     _CTOR_DTOR_CODE_RE as _CTOR_DTOR_CODE_RE,
     _FUNC_LIKE_TYPES as _FUNC_LIKE_TYPES,
@@ -472,39 +473,6 @@ def _check_virtual_change(
     )
 
 
-def _check_hidden_friend_change(
-    mangled: str, f_old: Function, f_new: Function
-) -> list[Change]:
-    """Emit a change if the hidden-friend status transitioned.
-
-    Hidden-friend transitions: an in-class ``friend`` declaration was
-    added or removed across versions. Tri-state — skip when either
-    side's snapshot did not record the flag (e.g. DWARF-only path or
-    an older snapshot). The matched-mangled iteration here handles
-    the case where the friend has an out-of-line definition (i.e.
-    a real symbol). Inline-only hidden friends never appear here
-    because they have no symbol on either side; those transitions
-    are picked up by ``_check_hidden_friend_additions_removals``
-    below by matching on (name, params) rather than mangled name.
-    """
-    return bool_transition(
-        f_old.is_hidden_friend,
-        f_new.is_hidden_friend,
-        mangled,
-        skip_none=True,
-        added=(
-            ChangeKind.HIDDEN_FRIEND_ADDED,
-            f"Function became an in-class friend declaration: {f_old.name}",
-        ),
-        added_values=("non-friend", "hidden friend"),
-        removed=(
-            ChangeKind.HIDDEN_FRIEND_REMOVED,
-            f"Function is no longer an in-class friend declaration: {f_old.name}",
-        ),
-        removed_values=("hidden friend", "non-friend"),
-    )
-
-
 def _check_explicit_change(
     mangled: str, f_old: Function, f_new: Function
 ) -> list[Change]:
@@ -717,7 +685,7 @@ def _check_function_signature(
     changes.extend(_check_linkage_change(mangled, f_old, f_new))
     changes.extend(_check_noexcept_change(mangled, f_old, f_new))
     changes.extend(_check_virtual_change(mangled, f_old, f_new))
-    changes.extend(_check_hidden_friend_change(mangled, f_old, f_new))
+    changes.extend(check_hidden_friend_change(mangled, f_old, f_new))
     changes.extend(_check_explicit_change(mangled, f_old, f_new))
     changes.extend(_check_variadic_change(mangled, f_old, f_new))
     changes.extend(_check_contract_attributes_change(mangled, f_old, f_new))
@@ -979,7 +947,7 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # Inline hidden friends have no external symbol (visibility=HIDDEN) so
     # the public-symbol diff above does not see them. Match across versions
     # by mangled name across the FULL function map (not just public).
-    changes.extend(_diff_inline_hidden_friends(old_all, new_all_map))
+    changes.extend(diff_inline_hidden_friends(old_all, new_all_map))
 
     return changes
 
@@ -997,7 +965,7 @@ def _synthetic_ctor_scope(mangled: str) -> str | None:
     """
     if not is_synthetic_ctor_key(mangled):
         return None
-    body = mangled[len(SYNTHETIC_CTOR_KEY_PREFIX):]
+    body = mangled[len(SYNTHETIC_CTOR_KEY_PREFIX) :]
     paren = body.find("(")
     return body[:paren] if paren != -1 else None
 
@@ -1018,7 +986,9 @@ def _converting_ctors_by_class(
     by_class: dict[str, dict[tuple[str, ...], Function]] = {}
     for f in snap.functions:
         owner = owner_class_of(f) or _synthetic_ctor_scope(f.mangled) or f.name
-        canonical = class_aliases.get(owner) or class_aliases.get(owner.rsplit("::", 1)[-1])
+        canonical = class_aliases.get(owner) or class_aliases.get(
+            owner.rsplit("::", 1)[-1]
+        )
         if canonical is None:
             continue
         if f.is_deleted or f.is_explicit is not False:
@@ -1040,7 +1010,9 @@ def _converting_ctors_by_class(
     return by_class
 
 
-def _class_identity_aliases(old_map: TypeMap[RecordType], new_map: TypeMap[RecordType]) -> dict[str, str]:
+def _class_identity_aliases(
+    old_map: TypeMap[RecordType], new_map: TypeMap[RecordType]
+) -> dict[str, str]:
     """Map every raw spelling ``owner_class_of``/synthetic-ctor-scope might
     produce for a matched class, on either side, to ONE shared canonical
     identity -- so old/new agree on a grouping key even when they spell the
@@ -1060,7 +1032,9 @@ def _class_identity_aliases(old_map: TypeMap[RecordType], new_map: TypeMap[Recor
         # Bare-name alias only when unambiguous on both sides (mirrors
         # TypeMap's alias-safety rule) -- an unrelated class mustn't steal it.
         bare = t_old.name
-        if old_map.bare_name_is_unambiguous(bare) and new_map.bare_name_is_unambiguous(bare):
+        if old_map.bare_name_is_unambiguous(bare) and new_map.bare_name_is_unambiguous(
+            bare
+        ):
             aliases[bare] = canonical
     return aliases
 
@@ -1080,7 +1054,9 @@ def _diff_ctor_overload_ambiguity(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
     """
     # Ambiguity-safe, spelling-normalized matching (Codex review, PR #608
     # follow-up) — see _class_identity_aliases.
-    aliases = _class_identity_aliases(build_type_map(old.types), build_type_map(new.types))
+    aliases = _class_identity_aliases(
+        build_type_map(old.types), build_type_map(new.types)
+    )
     if not aliases:
         return []
     old_ctors = _converting_ctors_by_class(old, aliases)
@@ -1101,47 +1077,6 @@ def _diff_ctor_overload_ambiguity(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
                     new=f"{cls}({', '.join(sig)})",
                 )
             )
-    return changes
-
-
-def _diff_inline_hidden_friends(
-    old_all: dict[str, Function],
-    new_all: dict[str, Function],
-) -> list[Change]:
-    """Pick up hidden-friend additions/removals that have no public symbol.
-
-    Inline-defined hidden friends never appear in the .so dynsym (the
-    compiler emits them as `linkonce_odr`, often inlined into callers).
-    They show up in the castxml snapshot with ``visibility=HIDDEN`` and
-    ``is_hidden_friend=True``. The public-symbol diff above skips them.
-    This pass compares across the full function map and only fires for
-    functions that are flagged as hidden friends on one side.
-    """
-    changes: list[Change] = []
-    for mangled, f_old in old_all.items():
-        if not f_old.is_hidden_friend:
-            continue
-        if mangled in new_all:
-            continue
-        changes.append(
-            make_change(
-                ChangeKind.HIDDEN_FRIEND_REMOVED,
-                symbol=mangled,
-                old=f_old.name,
-            )
-        )
-    for mangled, f_new in new_all.items():
-        if not f_new.is_hidden_friend:
-            continue
-        if mangled in old_all:
-            continue
-        changes.append(
-            make_change(
-                ChangeKind.HIDDEN_FRIEND_ADDED,
-                symbol=mangled,
-                new=f_new.name,
-            )
-        )
     return changes
 
 
@@ -1172,10 +1107,13 @@ def _check_variable(
         # VAR_TYPE_CHANGED, since the pointer itself didn't become const.
         is_pure_const_flip = (
             v_old.is_const != v_new.is_const
-            and _without_top_level_const(canon_old) == _without_top_level_const(canon_new)
+            and _without_top_level_const(canon_old)
+            == _without_top_level_const(canon_new)
         )
         if not is_pure_const_flip:
-            if not cv_facts_reliable and func_signature_cv_only_differ(canon_old, canon_new):
+            if not cv_facts_reliable and func_signature_cv_only_differ(
+                canon_old, canon_new
+            ):
                 # Legacy-snapshot cv noise: the type-string difference itself
                 # is untrustworthy (see this function's docstring), so don't
                 # fall through to the const-transition check below either —
@@ -1239,7 +1177,9 @@ def _diff_variables(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         _public_variables(new),
         on_removed=_var_removed,
         on_added=_var_added,
-        on_common=lambda m, o, n: _check_variable(m, o, n, cv_facts_reliable=cv_facts_reliable),
+        on_common=lambda m, o, n: _check_variable(
+            m, o, n, cv_facts_reliable=cv_facts_reliable
+        ),
     )
 
 
@@ -1540,11 +1480,13 @@ def _diff_access_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     )
     excl = stdlib_namespaces_excluded(old, new)
     old_types = build_type_map(
-        t for t in old.types
+        t
+        for t in old.types
         if not t.is_union and is_abi_surface_type_name(t.name, exclude_stdlib=excl)
     )
     new_types = build_type_map(
-        t for t in new.types
+        t
+        for t in new.types
         if not t.is_union and is_abi_surface_type_name(t.name, exclude_stdlib=excl)
     )
     changes.extend(_check_field_access_changes(old_types, new_types))
@@ -1772,19 +1714,24 @@ def _diff_func_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         if not both_castxml_backed_fact(old, new, func_fact_key(mangled, "deprecated")):
             continue
         if f_old.deprecated is None and f_new.deprecated is not None:
-            changes.append(make_change(
-                ChangeKind.FUNC_DEPRECATED_ADDED,
-                symbol=mangled,
-                name=f_old.name, detail=f_new.deprecated,
-                new_value=f_new.deprecated,
-            ))
+            changes.append(
+                make_change(
+                    ChangeKind.FUNC_DEPRECATED_ADDED,
+                    symbol=mangled,
+                    name=f_old.name,
+                    detail=f_new.deprecated,
+                    new_value=f_new.deprecated,
+                )
+            )
         elif f_old.deprecated is not None and f_new.deprecated is None:
-            changes.append(make_change(
-                ChangeKind.FUNC_DEPRECATED_REMOVED,
-                symbol=mangled,
-                name=f_old.name,
-                old_value=f_old.deprecated,
-            ))
+            changes.append(
+                make_change(
+                    ChangeKind.FUNC_DEPRECATED_REMOVED,
+                    symbol=mangled,
+                    name=f_old.name,
+                    old_value=f_old.deprecated,
+                )
+            )
     return changes
 
 
@@ -1814,26 +1761,32 @@ def _diff_func_override_specifier(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
             continue
         if f_old.is_override is None or f_new.is_override is None:
             continue
-        if not both_castxml_backed_fact(old, new, func_fact_key(mangled, "is_override")):
+        if not both_castxml_backed_fact(
+            old, new, func_fact_key(mangled, "is_override")
+        ):
             continue
         if f_old.is_override == f_new.is_override:
             continue
         if f_new.is_override:
-            changes.append(make_change(
-                ChangeKind.FUNC_OVERRIDE_SPECIFIER_ADDED,
-                symbol=mangled,
-                name=f_old.name,
-                old_value="no override",
-                new_value="override",
-            ))
+            changes.append(
+                make_change(
+                    ChangeKind.FUNC_OVERRIDE_SPECIFIER_ADDED,
+                    symbol=mangled,
+                    name=f_old.name,
+                    old_value="no override",
+                    new_value="override",
+                )
+            )
         else:
-            changes.append(make_change(
-                ChangeKind.FUNC_OVERRIDE_SPECIFIER_REMOVED,
-                symbol=mangled,
-                name=f_old.name,
-                old_value="override",
-                new_value="no override",
-            ))
+            changes.append(
+                make_change(
+                    ChangeKind.FUNC_OVERRIDE_SPECIFIER_REMOVED,
+                    symbol=mangled,
+                    name=f_old.name,
+                    old_value="override",
+                    new_value="no override",
+                )
+            )
     return changes
 
 
@@ -1857,19 +1810,24 @@ def _diff_var_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         if not both_castxml_backed_fact(old, new, var_fact_key(mangled, "deprecated")):
             continue
         if v_old.deprecated is None and v_new.deprecated is not None:
-            changes.append(make_change(
-                ChangeKind.VAR_DEPRECATED_ADDED,
-                symbol=mangled,
-                name=v_old.name, detail=v_new.deprecated,
-                new_value=v_new.deprecated,
-            ))
+            changes.append(
+                make_change(
+                    ChangeKind.VAR_DEPRECATED_ADDED,
+                    symbol=mangled,
+                    name=v_old.name,
+                    detail=v_new.deprecated,
+                    new_value=v_new.deprecated,
+                )
+            )
         elif v_old.deprecated is not None and v_new.deprecated is None:
-            changes.append(make_change(
-                ChangeKind.VAR_DEPRECATED_REMOVED,
-                symbol=mangled,
-                name=v_old.name,
-                old_value=v_old.deprecated,
-            ))
+            changes.append(
+                make_change(
+                    ChangeKind.VAR_DEPRECATED_REMOVED,
+                    symbol=mangled,
+                    name=v_old.name,
+                    old_value=v_old.deprecated,
+                )
+            )
     return changes
 
 

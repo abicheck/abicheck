@@ -104,13 +104,22 @@ _NEVER_FILTER_KIND_NAMES: frozenset[str] = frozenset(
         "constant_changed",
         "constant_removed",
         "constant_added",
-        # A hidden friend (an in-class `friend` operator with no namespace-
-        # scope declaration, found only via ADL) can never produce an
-        # exported symbol by construction — it is compiled inline into every
-        # caller. Requiring ELF-export presence for this kind is therefore
-        # never satisfiable, so the reachability classifier would demote
-        # every hidden-friend finding as "not-exported" regardless of how
-        # genuinely public the operator is (examples/case96_hidden_friend_removed).
+    }
+)
+
+# A hidden friend (an in-class `friend` operator with no namespace-scope
+# declaration, found only via ADL) can never produce an exported symbol by
+# construction — it is compiled inline into every caller. Requiring
+# ELF-export presence for this kind is therefore never satisfiable, so the
+# ordinary not-exported gate must never apply to it (examples/
+# case96_hidden_friend_removed). That is a reason to skip *that one* gate,
+# not a reason to skip header-provenance demotion entirely: a hidden friend
+# whose befriending class lives in a system/private header is exactly as
+# out-of-surface as any other declaration from that header. These kinds get
+# their own classification path (``_classify_hidden_friend_surface``) instead
+# of the unconditional keep in ``_NEVER_FILTER_KIND_NAMES`` above.
+_HIDDEN_FRIEND_KIND_NAMES: frozenset[str] = frozenset(
+    {
         "hidden_friend_removed",
         "hidden_friend_added",
     }
@@ -229,6 +238,7 @@ def is_symbol_level_finding(change: Change) -> bool:
     """
     kv = change.kind.value
     return kv not in _NEVER_FILTER_KIND_NAMES and kv not in _TYPE_LEVEL_KIND_NAMES
+
 
 # Tokens that are type qualifiers / keywords, not type names.
 _TYPE_NOISE: frozenset[str] = frozenset(
@@ -731,6 +741,8 @@ def classify_change_surface(
     """
     if change.kind.value in _NEVER_FILTER_KIND_NAMES:
         return True, None
+    if change.kind.value in _HIDDEN_FRIEND_KIND_NAMES:
+        return _classify_hidden_friend_surface(change, surf_old, surf_new)
     # Python-level API and CPython load-contract findings (G23/G14) live on a
     # distinct evidence axis from the C/C++ export surface: their ``symbol`` is a
     # dotted Python name the header-surface classifier cannot place, and demoting
@@ -790,6 +802,43 @@ def classify_change_surface(
         surf_old,
         surf_new,
     )
+
+
+def _classify_hidden_friend_surface(
+    change: Change,
+    surf_old: PublicSurface,
+    surf_new: PublicSurface,
+) -> tuple[bool, str | None]:
+    """Classify a ``hidden_friend_removed``/``hidden_friend_added`` finding.
+
+    A hidden friend can never produce an exported symbol (it is compiled
+    inline into every caller via ADL), so the ordinary not-exported gate must
+    never demote it — but its *origin* still decides surface membership,
+    exactly like any other declaration. Preference order:
+
+    1. The befriending class (``change.caused_by_type``, resolved from
+       castxml's ``befriending`` attribute / clang's friend-scope walk) — if
+       *both* snapshots confidently agree it is a system- or private-header
+       declaration, demote.
+    2. Fall back to the friend function's own recorded origin
+       (``change.symbol``) — covers the common case where the owner could not
+       be resolved (older snapshot, DWARF-only path) but the friend function's
+       own declaration site was still captured (for an in-class-defined
+       hidden friend, the two are the same header).
+    3. Otherwise the origin is unknown/unconfirmed: keep the finding
+       (conservative — never silently hide a hidden-friend break) rather than
+       claim a provenance-confirmed demotion that was never verified.
+    """
+    owner = change.caused_by_type
+    if owner:
+        reason = _origin_reason(surf_old, surf_new, owner)
+        if reason is not None:
+            return False, reason
+    sym = change.symbol or ""
+    reason = _origin_reason(surf_old, surf_new, sym)
+    if reason is not None:
+        return False, reason
+    return True, None
 
 
 def _classify_symbol_level(

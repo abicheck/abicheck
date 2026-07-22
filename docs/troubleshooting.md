@@ -94,6 +94,30 @@ clang-parsable toolchain/sysroot with `--gcc-path` / `--sysroot`. A
 `#ifdef __cplusplus extern "C"` C header that fails only under `--lang c` should
 be scanned **without** `--lang c` (castxml always parses in a C++-aware mode).
 
+### "CastXML \<version\> ... is not a supported default scanner setup"
+
+An authoritative L2 scan runs a version gate (`castxml_policy.py`) before
+parsing any header: it rejects a resolved `castxml` build outside the
+supported range (currently `>=0.7.0,<0.8.0`, bundled/linked Clang `>=18`).
+This most commonly fires against the legacy PyPI `castxml` distribution
+(`pip install castxml`), which is **not** a supported default scanner setup —
+`pip install abicheck` deliberately never installs CastXML for you, and the
+PyPI `castxml` package's own release line predates this floor.
+
+Fix: install a supported CastXML from conda-forge (recommended) or a pinned
+Superbuild release, same as the two sections above:
+
+```bash
+conda install -c conda-forge castxml
+```
+
+Only for deliberate legacy reproduction (never as a normal workflow), the gate
+can be overridden explicitly with `ABICHECK_ALLOW_UNSUPPORTED_CASTXML=1`. The
+resulting snapshot records `ast_toolchain_supported: false` and the specific
+`ast_toolchain_unsupported_reasons`, so it is never silently indistinguishable
+from a normal, policy-compliant scan — treat it as a degraded, non-baseline
+result.
+
 ---
 
 ## 1) "Why did I get API_BREAK/BREAKING unexpectedly?"

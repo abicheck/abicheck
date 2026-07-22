@@ -27,6 +27,7 @@ from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.reporter import to_json, to_markdown
 from abicheck.semver import (
     ReleaseRecommendation,
+    ReleaseRecommendationState,
     SemverBump,
     SonameAction,
     recommend_release,
@@ -130,6 +131,7 @@ def test_to_dict_keys() -> None:
         "version_bump": "major",
         "soname_action": "bump_required",
         "rationale": "because",
+        "state": "actionable",
     }
 
 
@@ -177,10 +179,14 @@ def test_json_output_always_includes_recommendation() -> None:
     assert "release_recommendation" in payload
     rec = payload["release_recommendation"]
     assert rec["version_bump"] == "major"  # b was removed → breaking
+    # This pair is hand-built with no ELF/DWARF/PE/Mach-O metadata at all, so
+    # the SONAME action is correctly "not_determined" (see
+    # TestBinaryEvidenceGating below) — this test only asserts presence/shape.
     assert rec["soname_action"] in {
         "bump_required",
         "bump_missing",
         "bump_performed",
+        "not_determined",
     }
 
 
@@ -220,3 +226,67 @@ def test_leaf_markdown_honors_recommendation_flag() -> None:
     assert "Release Recommendation" in to_markdown(
         result, report_mode="leaf", show_recommendation=True
     )
+
+
+# ── Binary-evidence gating (no SONAME recommendation without a real binary) ─
+
+
+class TestBinaryEvidenceGating:
+    """A BREAKING verdict from a comparison that never examined a real binary
+    (ELF/PE/Mach-O/DWARF) must not produce a confident SONAME action — see
+    AGENTS.md P0 "block release/SONAME recommendation on unattributed evidence"."""
+
+    def test_breaking_without_binary_evidence_is_not_determined(self) -> None:
+        result = _result(Verdict.BREAKING, ChangeKind.FUNC_REMOVED)
+        result.evidence_tiers = ["header"]
+        rec = recommend_release(result)
+        assert rec.soname is SonameAction.NOT_DETERMINED
+        assert rec.state is ReleaseRecommendationState.UNAVAILABLE
+        assert rec.bump is SemverBump.MAJOR  # still a real break, just unproven SONAME
+
+    def test_breaking_with_elf_evidence_stays_actionable(self) -> None:
+        result = _result(Verdict.BREAKING, ChangeKind.FUNC_REMOVED)
+        result.evidence_tiers = ["header", "elf"]
+        rec = recommend_release(result)
+        assert rec.soname is SonameAction.BUMP_REQUIRED
+        assert rec.state is ReleaseRecommendationState.ACTIONABLE
+
+    def test_breaking_with_dwarf_evidence_stays_actionable(self) -> None:
+        result = _result(Verdict.BREAKING, ChangeKind.FUNC_REMOVED)
+        result.evidence_tiers = ["dwarf"]
+        rec = recommend_release(result)
+        assert rec.soname is SonameAction.BUMP_REQUIRED
+        assert rec.state is ReleaseRecommendationState.ACTIONABLE
+
+    def test_breaking_with_unpopulated_evidence_tiers_defaults_actionable(
+        self,
+    ) -> None:
+        """Empty evidence_tiers (a hand-built DiffResult that bypassed
+        checker.compare(), the common unit-test shape) is "unknown", not
+        "absent" — must not regress every pre-existing caller that doesn't
+        populate this field to a new NOT_DETERMINED recommendation."""
+        result = _result(Verdict.BREAKING, ChangeKind.FUNC_REMOVED)
+        assert result.evidence_tiers == []
+        rec = recommend_release(result)
+        assert rec.soname is SonameAction.BUMP_REQUIRED
+        assert rec.state is ReleaseRecommendationState.ACTIONABLE
+
+    def test_api_break_state_is_review(self) -> None:
+        rec = recommend_release(
+            _result(Verdict.API_BREAK, ChangeKind.HIDDEN_FRIEND_REMOVED)
+        )
+        assert rec.soname is SonameAction.NO_BUMP_NEEDED
+        assert rec.state is ReleaseRecommendationState.REVIEW
+
+    def test_end_to_end_synthetic_snapshots_get_not_determined(self) -> None:
+        """The exact real-world shape: compare() on hand-built AbiSnapshot
+        objects with no ELF/DWARF/PE/Mach-O metadata at all."""
+        old = AbiSnapshot(
+            library="libfoo.so", version="1.0", functions=[_fn("a"), _fn("b")]
+        )
+        new = AbiSnapshot(library="libfoo.so", version="2.0", functions=[_fn("a")])
+        result = compare(old, new)
+        assert result.evidence_tiers == ["header"]
+        rec = recommend_release(result)
+        assert rec.soname is SonameAction.NOT_DETERMINED
+        assert rec.state is ReleaseRecommendationState.UNAVAILABLE
