@@ -220,6 +220,32 @@ def _build_clang_header_command(
     return cmd
 
 
+def _resolve_force_cpp(
+    lang: str | None,
+    headers: list[Path],
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...],
+) -> bool:
+    """Decide whether the TU is C++ when no ``lang`` was explicitly given.
+
+    An explicit ``--lang c++``/``cpp`` always wins. Otherwise, C++20
+    concept/requires syntax (including an abbreviated constrained parameter
+    like ``void f(std::integral auto x);``, which needs no
+    class/namespace/template keyword at all) is on its own sufficient proof
+    the header is C++ — without this, a header whose only C++ signal is such
+    syntax stayed auto-detected as C (Codex review). Shared by both the clang
+    and castxml frontends so the auto-detection rule cannot drift between
+    them.
+    """
+    if lang:
+        return bool(lang.upper() in ("C++", "CPP"))
+    return (
+        _detect_cpp_headers(headers)
+        or _detect_cpp20_headers(headers)
+        or has_explicit_cpp_std(gcc_options, gcc_option_tokens)
+    )
+
+
 def _resolve_clang_langmode(
     lang: str | None,
     headers: list[Path],
@@ -233,20 +259,7 @@ def _resolve_clang_langmode(
     (``--lang c``) vs auto-detected — both leave ``force_cpp`` False, but the
     C→C++ self-heal treats them differently (warning vs debug; Codex review).
     """
-    force_cpp = bool(lang and lang.upper() in ("C++", "CPP"))
-    if not lang:
-        # C++20 concept/requires syntax (including an abbreviated constrained
-        # parameter like ``void f(std::integral auto x);``, which needs no
-        # class/namespace/template keyword at all) is on its own sufficient
-        # proof the header is C++ — without this, a header whose only C++
-        # signal is such syntax stayed auto-detected as C, and force_cpp20
-        # below (gated on force_cpp) never even got a chance to matter
-        # (Codex review).
-        force_cpp = (
-            _detect_cpp_headers(headers)
-            or _detect_cpp20_headers(headers)
-            or has_explicit_cpp_std(gcc_options, gcc_option_tokens)
-        )
+    force_cpp = _resolve_force_cpp(lang, headers, gcc_options, gcc_option_tokens)
     force_cpp20 = force_cpp and _detect_cpp20_headers(headers)
     explicit_c_request = bool(lang) and not force_cpp
     cc_id = "msvc" if Path(clang_bin).name.lower() in ("cl", "cl.exe") else "gnu"
@@ -776,17 +789,7 @@ def _castxml_dump(
     # Determine language before selecting the emulated compiler: C mode uses
     # gcc/cc, not g++, and both cache identity and execution must describe the
     # same driver.
-    force_cpp = bool(lang and lang.upper() in ("C++", "CPP"))
-    if not lang:
-        # See the identical comment in _resolve_clang_langmode: C++20
-        # concept/requires syntax alone is sufficient proof the header is
-        # C++, including the abbreviated-constrained-parameter form that
-        # needs no class/namespace/template keyword at all (Codex review).
-        force_cpp = (
-            _detect_cpp_headers(headers)
-            or _detect_cpp20_headers(headers)
-            or has_explicit_cpp_std(gcc_options, gcc_option_tokens)
-        )
+    force_cpp = _resolve_force_cpp(lang, headers, gcc_options, gcc_option_tokens)
     resolved_compiler = compiler
     if not force_cpp and not gcc_path and not gcc_prefix:
         resolved_compiler = {

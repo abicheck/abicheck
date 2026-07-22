@@ -831,42 +831,6 @@ def classify_change_surface(
     )
 
 
-def _hidden_friend_owner_reason(
-    known: set[str],
-    surf_old: PublicSurface,
-    surf_new: PublicSurface,
-) -> str | None:
-    """Like :func:`_confident_header_reason`, but tolerant of an owner type
-    that exists on only one side — the common ``hidden_friend_added``/
-    ``hidden_friend_removed`` case where the owner class itself is
-    introduced or deleted together with the friend. A type present on both
-    sides still needs both to agree (unchanged, conservative); a type
-    present on only one side is classified from that side alone, since the
-    other side cannot disagree about a type it doesn't have (Codex review:
-    the old both-sides-must-agree check treated "absent" identically to
-    "present but unknown", which starved this exact one-sided case of ever
-    demoting)."""
-    reasons: set[str] = set()
-    for c in known:
-        in_old = c in surf_old.all_types
-        in_new = c in surf_new.all_types
-        if in_old and in_new:
-            reason = _origin_reason(surf_old, surf_new, c)
-        else:
-            surf = surf_old if in_old else surf_new
-            reason = _ORIGIN_REASON.get(surf.origin_by_key.get(c, ScopeOrigin.UNKNOWN))
-        if reason is None:
-            return None
-        reasons.add(reason)
-    if not reasons:
-        return None
-    return (
-        REASON_PRIVATE_HEADER
-        if REASON_PRIVATE_HEADER in reasons
-        else REASON_SYSTEM_HEADER
-    )
-
-
 def _hidden_friend_owner_effective_origin(
     surf: PublicSurface, owner: str, bare: str
 ) -> ScopeOrigin | None:
@@ -904,14 +868,14 @@ def _hidden_friend_owner_reason_qualified(
     eff_old: ScopeOrigin | None,
     eff_new: ScopeOrigin | None,
 ) -> str | None:
-    """Like :func:`_hidden_friend_owner_reason`, but resolving from two
-    per-side *effective* origins (see
-    :func:`_hidden_friend_owner_effective_origin`) instead of the ambiguous
-    bare-name candidate set. ``None`` for a side means the owner is
-    genuinely absent from that snapshot (removed/added together with the
-    friend); a present-but-``UNKNOWN`` side blocks the reason exactly like
-    an ordinary origin disagreement would, via ``_ORIGIN_REASON.get``
-    returning ``None`` for it."""
+    """Combine two per-side *effective* origins (see
+    :func:`_hidden_friend_owner_effective_origin`) into a single ledger
+    reason, the way :func:`_origin_reason` combines two ``origin_by_key``
+    lookups. ``None`` for a side means the owner is genuinely absent from
+    that snapshot (removed/added together with the friend); a
+    present-but-``UNKNOWN`` side blocks the reason exactly like an ordinary
+    origin disagreement would, via ``_ORIGIN_REASON.get`` returning
+    ``None`` for it."""
     origins = [o for o in (eff_old, eff_new) if o is not None]
     if not origins:
         return None
@@ -944,66 +908,47 @@ def _classify_hidden_friend_surface(
        most often added/removed *together with* its owner, so the owner
        legitimately exists on only one side — that side alone decides.
     2. Fall back to the friend function's own recorded origin
-       (``change.symbol``) — covers the common case where the owner could not
-       be resolved (older snapshot, DWARF-only path) but the friend function's
-       own declaration site was still captured (for an in-class-defined
-       hidden friend, the two are the same header).
+       (``change.symbol``) — covers both the case where the owner could not
+       be resolved at all (older snapshot, DWARF-only path) *and* the case
+       where the owner was found but its origin was inconclusive (present on
+       only one side with an unknown origin, or the two sides disagree). For
+       an in-class-defined hidden friend the owner and the friend function
+       share the same declaration site, so this is often independent
+       confirmation rather than a weaker signal.
     3. Otherwise the origin is unknown/unconfirmed: keep the finding
        (conservative — never silently hide a hidden-friend break) rather than
        claim a provenance-confirmed demotion that was never verified.
     """
     owner = change.caused_by_type
-    if owner and "::" in owner:
-        # An exact qualified-name match is unambiguous — prefer it over the
-        # bare-name path below, which would otherwise conflate two distinct
-        # same-leaf-name classes in different namespaces (e.g. "pub::Foo"
-        # public, "priv::Foo" private) into one merged, over-conservative
-        # origin (Codex review). Each side's *effective* origin falls back
-        # to its bare-name entry when the type exists there without a
-        # qualified match — genuinely distinct from a side that lacks the
-        # type entirely (added/removed together with the friend) — so an
-        # unclassified-but-present bare owner on one side can neither be
-        # silently ignored (it might disagree) nor mistaken for proof of
-        # anything (Codex review, second round).
-        bare = owner.rsplit("::", 1)[-1]
+    if owner:
+        # RecordType.name stays deliberately bare (model.py) — a namespaced
+        # owner ("ns::Foo", from castxml/clang's qualified-name walk) would
+        # never match origin_by_key's bare-name keys directly, so resolve
+        # both the qualified spelling and its trailing ``::`` segment via
+        # the same tiered lookup regardless of whether the owner itself is
+        # namespaced (a bare owner degenerates to bare == owner). Each
+        # side's *effective* origin falls back to its bare-name entry when
+        # the type exists there without a qualified match — genuinely
+        # distinct from a side that lacks the type entirely (added/removed
+        # together with the friend) — so an unclassified-but-present owner
+        # on one side can neither be silently ignored (it might disagree)
+        # nor mistaken for proof of anything (Codex review).
+        bare = owner.rsplit("::", 1)[-1] if "::" in owner else owner
         eff_old = _hidden_friend_owner_effective_origin(surf_old, owner, bare)
         eff_new = _hidden_friend_owner_effective_origin(surf_new, owner, bare)
         if eff_old is not None or eff_new is not None:
             if ScopeOrigin.PUBLIC_HEADER in (eff_old, eff_new):
+                # Owner confidently public on either side — never let the
+                # friend-function fallback below override that signal
+                # (CodeRabbit review).
                 return True, None
             reason = _hidden_friend_owner_reason_qualified(eff_old, eff_new)
-            return (False, reason) if reason is not None else (True, None)
-    if owner:
-        # RecordType.name stays deliberately bare (model.py) — a namespaced
-        # owner ("ns::Foo", from castxml/clang's qualified-name walk) would
-        # never match origin_by_key's bare-name keys directly. Resolve both
-        # the qualified spelling and its trailing ``::`` segment, exactly
-        # like every other type-name lookup in this module (Codex review),
-        # and filter to identifiers the surface actually knows about before
-        # requiring unanimous agreement — an unindexed candidate must not
-        # poison the "every implicated type agrees" check into never
-        # demoting (mirrors _classify_type_level).
-        known = {
-            c
-            for c in _type_identifiers(owner)
-            if c in surf_old.all_types or c in surf_new.all_types
-        }
-        if any(
-            surf_old.origin_by_key.get(c, ScopeOrigin.UNKNOWN)
-            == ScopeOrigin.PUBLIC_HEADER
-            or surf_new.origin_by_key.get(c, ScopeOrigin.UNKNOWN)
-            == ScopeOrigin.PUBLIC_HEADER
-            for c in known
-        ):
-            # Owner confidently public on either side — never let a
-            # possibly-inconsistent friend-own-origin record (the fallback
-            # below) override that signal (CodeRabbit review).
-            return True, None
-        reason = (
-            _hidden_friend_owner_reason(known, surf_old, surf_new) if known else None
-        )
-        if reason is not None:
-            return False, reason
+            if reason is not None:
+                return False, reason
+            # Owner found but inconclusive (UNKNOWN on the only side that
+            # has it, or the two sides disagree) — fall through to the
+            # friend function's own origin (step 2) instead of returning
+            # (True, None) here, exactly like the owner-not-found case.
     sym = change.symbol or ""
     reason = _origin_reason(surf_old, surf_new, sym)
     if reason is not None:

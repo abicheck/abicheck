@@ -1478,6 +1478,36 @@ class TestHiddenFriendSurface:
         )
         assert classify_change_surface(c, s_old, s_new) == (True, None)
 
+    def test_qualified_owner_ambiguous_falls_back_to_friend_symbol_origin(self):
+        """When a qualified owner is present but its origin is inconclusive
+        (``UNKNOWN``), the classifier must still fall back to the friend
+        function's own recorded origin (step 2 of the docstring's
+        preference order) — the same fallback already applied when the
+        owner cannot be resolved at all. Consolidating the qualified- and
+        bare-owner code paths must not skip this step for a qualified
+        owner."""
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[
+                _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER),
+                _fn(
+                    "ns::operator==",
+                    mangled="_ZN2ns3FooeqERKS0_S1_",
+                    origin=ScopeOrigin.SYSTEM_HEADER,
+                ),
+            ],
+            types=[_rec("Foo", origin=ScopeOrigin.UNKNOWN, qualified_name="ns::Foo")],
+        )
+        s = compute_public_surface(snap)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN2ns3FooeqERKS0_S1_",
+            caused_by_type="ns::Foo",
+            description="",
+        )
+        assert classify_change_surface(c, s, s) == (False, REASON_SYSTEM_HEADER)
+
 
 # ── widening overlay (ADR-024 §D6 / Phase 4) ─────────────────────────────────
 
