@@ -145,18 +145,23 @@ _CPP20_REQUIRES_CLAUSE_PATTERN = re.compile(
 
 _STRING_LITERAL_PATTERN = re.compile(rb'"(?:\\.|[^"\\\n])*"')
 _CHAR_LITERAL_PATTERN = re.compile(rb"'(?:\\.|[^'\\\n])*'")
-# C++11 raw string literal: R"delim(...)delim" — the delimiter charset per
-# the standard excludes parentheses/backslash/whitespace; restricting to
-# identifier characters here covers the overwhelming common case (including
-# the empty delimiter, R"(...)"") without needing the full grammar. Not
-# handled by _STRING_LITERAL_PATTERN (only ordinary "..." literals) or by
-# the plain-comment stripper, so its body was otherwise scanned as ordinary
-# code: text that merely *looks* like a requires-expression/concept inside a
-# raw string would force -std=gnu++20 unnecessarily — worse once a
-# multi-line construct can span into a raw string's later lines too (Codex
-# review). DOTALL so the (non-greedy) body can span newlines.
+# C++11 raw string literal: [prefix]R"delim(...)delim" — the standard
+# permits an optional encoding prefix (u8, u, U, L) directly before the R,
+# e.g. u8R"(...)"; without it, "\bR" never matches after "u8"/"u"/"U"/"L"
+# since both characters are \w (no boundary between them), leaving a
+# prefixed raw string completely unstripped (Codex review). The delimiter
+# charset per the standard excludes parentheses/backslash/whitespace;
+# restricting to identifier characters here covers the overwhelming common
+# case (including the empty delimiter, R"(...)"") without needing the full
+# grammar. Not handled by _STRING_LITERAL_PATTERN (only ordinary "..."
+# literals) or by the plain-comment stripper, so its body was otherwise
+# scanned as ordinary code: text that merely *looks* like a
+# requires-expression/concept inside a raw string would force -std=gnu++20
+# unnecessarily — worse once a multi-line construct can span into a raw
+# string's later lines too. DOTALL so the (non-greedy) body can span
+# newlines.
 _RAW_STRING_LITERAL_PATTERN = re.compile(
-    rb'\bR"([A-Za-z0-9_]{0,16})\((?:.*?)\)\1"', re.DOTALL
+    rb'\b(?:u8|u|U|L)?R"([A-Za-z0-9_]{0,16})\((?:.*?)\)\1"', re.DOTALL
 )
 
 

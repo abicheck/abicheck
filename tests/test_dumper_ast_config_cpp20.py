@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from abicheck.dumper_ast_config import _detect_cpp20_headers, _find_cpp20_requirements
 
 
@@ -169,6 +171,21 @@ def test_cpp20_detector_ignores_requires_text_in_delimited_raw_string(tmp_path):
         tmp_path,
         "a.h",
         'const char* msg = R"tag(this text requires\n{ nothing })tag";\n',
+    )
+    assert _detect_cpp20_headers(headers) is False
+
+
+@pytest.mark.parametrize("prefix", ["u8", "u", "U", "L"])
+def test_cpp20_detector_ignores_requires_text_in_prefixed_raw_string(tmp_path, prefix):
+    """Regression (Codex review): the raw-string pattern's ``\\bR"`` never
+    matched after an encoding prefix (``u8``/``u``/``U``/``L``) since both
+    the prefix's last character and "R" are word characters — no boundary
+    between them — leaving a prefixed raw string like ``u8R"(...)"``
+    completely unstripped."""
+    headers = _write(
+        tmp_path,
+        "a.h",
+        f'const char* msg = {prefix}R"(this text requires\n{{ nothing }})";\n',
     )
     assert _detect_cpp20_headers(headers) is False
 
