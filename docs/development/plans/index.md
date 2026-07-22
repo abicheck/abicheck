@@ -34,6 +34,7 @@ Initiative plans (cross-cutting, not tied to a single registry gap):
 | **G29** | [Impact-analysis layer: unified graph-driven impact model](g29-impact-analysis-layer.md) | [ADR-044](../adr/044-reachability-aware-suppression.md), [ADR-031](../adr/031-source-implementation-graph-augmentation.md), [ADR-046](../adr/046-source-graph-identity-v2-and-evidence-merge.md) · XL (phased: Phase 1 done — tri-state reachability, [PR #607](https://github.com/abicheck/abicheck/pull/607); Phase 2 ADR drafted (ADR-046, Proposed), implementation not started; Phases 3–6 open) |
 | **G30** | [GitHub Actions integration model: project lifecycle backlog](g30-github-actions-integration-model.md) | [ADR-047](../adr/047-github-actions-integration-model.md) · XL (phased P0/P1/P2, not started) |
 | **G31** | [Header-graph default-on: follow-up phases B–D](g31-header-graph-default-on-followup.md) — independent of G29 above; drafted as "G29" before that letter was found taken, see its own naming note | [ADR-041](../adr/041-compiler-facts-semantic-impact-graph.md) · Phase A done (header-graph/header-graph-includes flipped default-on); Phases B–D open |
+| **G32** | [Comparability contract: profile/scope fingerprints and the multi-TU manifest](g32-comparability-contract-and-multi-tu-manifest.md) | [ADR-050](../adr/050-comparability-contract-and-multi-tu-manifest.md) · XL (phased: Phase 0–E, none started) |
 
 Completed or decided plans are retained for implementation history:
 

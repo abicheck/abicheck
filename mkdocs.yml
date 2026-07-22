@@ -212,6 +212,7 @@ nav:
       - "047: GitHub Actions Integration Model": development/adr/047-github-actions-integration-model.md
       - "048: Canonical Entity Identity and Graph Reconciliation": development/adr/048-canonical-entity-identity-and-graph-reconciliation.md
       - "049: Contract Relevance and Compatibility Configuration": development/adr/049-contract-relevance-and-compatibility-configuration.md
+      - "050: Comparability Contract & Multi-TU Manifest": development/adr/050-comparability-contract-and-multi-tu-manifest.md
 
 # Agent instructions are repo-internal context, not published documentation.
 exclude_docs: |
