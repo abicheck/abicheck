@@ -316,7 +316,31 @@ Implements ADR-050 D1 and D2.
   full per-file content digest — a real dependency, where a change
   anywhere in it is meaningful drift. `scope_fingerprint` owns everything
   under a project-owned root; `profile_fingerprint` owns only external
-  roots, in full. **Known, accepted residual gap:** a vendored dependency
+  roots, in full. **Excluding a project-owned directory's content must not
+  also erase its position in the declared `-I` sequence.** `-I` order is
+  search-precedence order — `-I project -I dep` and `-I dep -I project`
+  over identical files can resolve an ambiguous `#include "config.h"`
+  present in both directories to a *different* file depending on which
+  flag came first, a real compiled-content difference, not cosmetic
+  reordering. Dropping an excluded directory's *slot* entirely (rather
+  than just its content) would collapse both orderings to the same
+  single-element sequence, since the project root then contributes
+  nothing — two extractions with genuinely different `#include`-resolution
+  behavior would hash identically, the exact false-match failure mode this
+  digest exists to close, reintroduced through the exclusion mechanism
+  itself. The fix keeps the sequence **positional**: every declared `-I`
+  directory keeps its own slot in declaration order; a project-owned
+  slot's content is replaced with one fixed sentinel constant (not derived
+  from the directory's path, name, or content — so no scope information
+  leaks into `profile_fingerprint`, and two project-owned directories
+  still compare equal to each other) instead of being omitted, so its
+  position relative to every external directory's real digest survives.
+  `-I project -I dep` hashes `[SENTINEL, digest(dep)]`; `-I dep -I
+  project` hashes `[digest(dep), SENTINEL]` — different sequences,
+  correctly flagged as non-comparable. The system/toolchain bucket stays
+  unordered, since its inputs were never part of a declared,
+  precedence-bearing `-I` sequence to begin with. **Known, accepted
+  residual gap:** a vendored dependency
   nested *inside* a project-owned root is swept into that exclusion too,
   so a content change confined there is invisible to `profile_fingerprint`
   on the legacy CLI path — the same "can't disambiguate from directory
@@ -340,7 +364,7 @@ Implements ADR-050 D1 and D2.
   the manifest file's own directory — none of these legacy-CLI cases
   exist there.
 
-  Twelve dedicated tests (numbered 1–11, with 8b alongside 8) are non-negotiable for this phase to be considered
+  Thirteen dedicated tests (numbered 1–12, with 8b alongside 8) are non-negotiable for this phase to be considered
   done: (1) `--header old=v1/foo.h --header new=v2/foo.h` against logically
   identical trees under different roots asserts the resulting
   **`scope_fingerprint`s** match (not `profile_fingerprint` — headers are a
@@ -412,7 +436,18 @@ Implements ADR-050 D1 and D2.
   `profile_fingerprint` matching — proving the generated driver TU is
   excluded from bucketing entirely, not swept into the system/toolchain
   bucket where its run-specific absolute paths would make every routine
-  compare mismatch.
+  compare mismatch; (12) two declared `-I` lists with byte-identical
+  directory contents but **swapped order** between a project-owned root
+  and an external root — `old` declares `--include old=/work/include
+  --include old=/opt/dep`, `new` declares the same two directories as
+  `--include new=/opt/dep --include new=/work/include` (`/work/include`
+  project-owned on both sides via a shared `--header`, `/opt/dep`
+  byte-identical on both sides) — produce *different* `profile_fingerprint`s,
+  proving the project-owned slot is replaced with a positional sentinel
+  rather than dropped: if the slot were simply omitted, both sides would
+  degrade to the same single-element `[digest(/opt/dep)]` sequence and
+  spuriously match despite the order swap being a genuine, ambiguity-
+  affecting difference in `#include` search precedence.
 - **Modeling `contract` is not the same as populating it — this phase must
   do both.** `dump()` (`dumper.py`) is the one place that already resolves
   every input both fingerprints need; it calls
@@ -919,7 +954,25 @@ actual code: `cli.py`'s `compare_cmd` is a thin `**kwargs` forwarder to
 is actually called (`:1464`) and where the output/exit-code rendering
 (`_finalize_compare_result` etc.) lives; a bare exception there today would
 propagate as an unhandled traceback, not the planned `verdict: null`
-report + exit `16` — `cli.py` alone has nothing to catch), `cli_compare_release.py`
+report + exit `16` — `cli.py` alone has nothing to catch). **The exception
+branch alone does not make `--diagnostic-comparison` reachable — `run_compare`
+must also accept and forward the flag itself, the same gap already found
+and fixed once for `--dump-manifest` on this exact function.** `run_compare`
+(`:992-1057`) has its own large, explicit, fixed keyword-argument signature
+with no `diagnostic_comparison` slot today; `compare_cmd` forwards `**kwargs`,
+so Click happily passes the new dest through, but `run_compare`'s own
+`compare_snapshots(...)` call (`:1464`) only passes what its signature
+already names — a `--diagnostic-comparison` value that reaches `run_compare`
+via `**kwargs` and is never read by name inside the function body is silently
+dropped before it ever reaches `compare_snapshots`, not rejected (there is no
+`**kwargs`-passthrough to `compare_snapshots` to raise on an unused key), so
+this is a silent-loss bug, not a crash — harder to notice than the
+`--dump-manifest` version of this same mistake, which at least raised
+"unexpected keyword argument." `run_compare` therefore gains a
+`diagnostic_comparison: bool = False` parameter, passed by name into the
+`compare_snapshots(diagnostic_comparison=diagnostic_comparison, ...)` call
+at `:1464`, mirroring how `old_dump_manifest`/`new_dump_manifest` are
+threaded through this same function. `cli_compare_release.py`
 (`_compare_one_library`'s dedicated
 `except (ProfileMismatchError, ScopeMismatchError)` branch, ordered before
 `except Exception` — see the release-fan-out acceptance-criteria bullet
@@ -1267,19 +1320,47 @@ SYCL/DPC++ target a `scan`-driven audit can already reach via that command's
 side-aware `-H`/`-I` options.
 **The decorator alone only makes Click accept the flag — it does not by
 itself thread the value anywhere, and this phase must not stop at the
-decorator.** Verified against the actual code: `cli_options.resolve_compile_context`
-(the single function the `@compile_context_options` family resolves to for
+decorator, and it does not stop at `resolve_compile_context` either.**
+Verified against the actual code: `dump_cmd` (`cli.py:569-592`) and
+`scan_cmd` (`cli_scan.py:634-663`) each have their own fixed, explicit
+callback parameter list — every other flag `compile_context_options` adds
+(`gcc_path`, `gcc_prefix`, `gcc_options`, `gcc_option_tokens`, `sysroot`,
+`nostdinc`, `header_backend`) is already listed there individually, not
+gathered via `**kwargs`. Click invokes these callbacks directly with one
+keyword per registered option, so adding `--frontend-context` to the shared
+decorator without adding a matching `frontend_context` parameter to
+*both* callback signatures is what actually raises "got an unexpected
+keyword argument" at the Click-callback boundary — `resolve_compile_context`
+is never in that call path; it is invoked manually from inside each
+callback's body, not by Click. `dump_cmd` gains `frontend_context: str =
+"host"`; `scan_cmd` gains the same (with its own existing defaulted-flags
+group, since `compile_context_options`' compile-context params already
+carry defaults there per `:657-663`). Native `compare`'s path is a third,
+separate instance of the identical gap: `compare_cmd` is a thin `**kwargs`
+forwarder (so it needs no change itself), but `cli_compare_helpers.run_compare`
+— the function Click's kwargs actually land in — has the same kind of
+fixed, explicit signature and gains its own `frontend_context: str = "host"`
+parameter too. Each of these three callback/helper layers then passes its
+new parameter into its own `resolve_compile_context(...)` call
+(`cli_dump_helpers.resolve_dump_compile_context` for `dump`, `cli_scan.py:722`
+for `scan`, `cli_compare_helpers.py:1258` for `compare`) — which is where
+`cli_options.resolve_compile_context`'s own signature and
+`CompileContext` construction come in: that function (the single function
+the `@compile_context_options` family ultimately resolves to for
 `compare`/`dump`/`scan` alike) has a fixed, explicit keyword-argument list
 and builds a `service_scan.CompileContext` from exactly those fields —
-neither has a slot for a host/device context today. Adding
-`--frontend-context` to the decorator without also extending
-`resolve_compile_context`'s signature and `CompileContext` would either
-raise a "got an unexpected keyword argument" error at the Click-callback
-boundary, or (if the new option is simply left unread) silently accept the
-flag and drop it before it ever reaches a dump. This phase therefore also
-adds `CompileContext.frontend_context: str = "host"` and a matching
+neither has a slot for a host/device context today. This phase therefore
+also adds `CompileContext.frontend_context: str = "host"` and a matching
 `frontend_context` parameter to `resolve_compile_context`, threaded into
-the `CompileContext(...)` it constructs. Because `scan_engine.run_scan_core`
+the `CompileContext(...)` it constructs — necessary, but (per the
+callback-layer paragraph above) not sufficient on its own; `dump_cmd`,
+`scan_cmd`, and `run_compare` each need the parameter in their own
+signature too, or the value never survives the trip from Click's callback
+invocation down to this function call. `cli_dump_helpers.resolve_dump_compile_context`
+(`:1168-1181`) sits between `dump_cmd` and `resolve_compile_context` and
+has the identical fixed-signature gap — it gains the same
+`frontend_context` parameter, threaded from `dump_cmd` into its own
+`resolve_compile_context(...)` call (`:1198`). Because `scan_engine.run_scan_core`
 already passes the *whole* `CompileContext` object through to
 `service.resolve_input` (`compile=compile_context`, not individual
 unpacked fields — verified at `scan_engine.py:243-254`) the same way

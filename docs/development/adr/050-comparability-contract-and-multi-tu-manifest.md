@@ -424,6 +424,38 @@ where a change anywhere in it *is* meaningful profile drift. This is a
 strict partition on `-I` *directories*, not individual files:
 `scope_fingerprint` owns everything under a project-owned root (declared
 or not); `profile_fingerprint` owns only external roots, in full.
+
+**Excluding a project-owned directory's *content* must not also erase its
+*position* in the declared `-I` sequence — flag order changes which root
+wins an ambiguous `#include`, and the fingerprint has to keep tracking
+that even though it stops tracking the directory's content.** `-I` order is
+search-precedence order: given `-I project -I dep` and `-I dep -I project`
+over otherwise-identical files, an `#include "config.h"` present in both
+`project/` and `dep/` resolves to a *different* file depending on which
+flag came first — a real difference in what got compiled, not a
+cosmetic reordering. If the project-owned exclusion above simply dropped
+that directory's slot from the per-`-I`-directory sequence, both orderings
+would degrade to the same single-element sequence (`dep`'s digest alone),
+since the project root contributes nothing once excluded — collapsing two
+extractions with genuinely different, ambiguity-resolving `#include`
+behavior into one identical `profile_fingerprint`, exactly the false-match
+failure mode this whole digest exists to close, reintroduced through the
+exclusion mechanism itself. The fix keeps the sequence positional: each
+declared `-I` directory still occupies its own slot in the ordered
+sequence, in declaration order; a project-owned slot's *content* is
+replaced with a single fixed sentinel value (a constant, not derived from
+the directory's path, name, or content) rather than being omitted, so two
+project-owned directories still compare equal to each other (no scope
+information leaks into `profile_fingerprint` through the sentinel) while
+their position relative to every external directory's real content digest
+is preserved. `-I project -I dep` therefore hashes
+`[SENTINEL, digest(dep)]` and `-I dep -I project` hashes
+`[digest(dep), SENTINEL]` — different sequences, different
+`profile_fingerprint`s, correctly flagging that the two extractions are not
+comparable, even though neither ordering's project-owned content
+individually affects the hash. The system/toolchain bucket is unaffected —
+it is explicitly unordered (see above) because its inputs were never part
+of a user-declared, precedence-bearing `-I` sequence to begin with.
 A known, accepted residual gap: a vendored dependency nested *inside* a
 project-owned root (e.g. `include/thirdparty/foo.h` under the project's
 own `include/`) is swept into the project-owned exclusion along with
