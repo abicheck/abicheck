@@ -621,6 +621,30 @@ def test_page_links_to_ignores_links_inside_inline_code_spans(
     assert dc._page_links_to(page, "owner.md") is False
 
 
+def test_page_links_to_ignores_links_inside_double_backtick_code_spans(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A double-backtick (or longer) delimited code span -- used specifically
+    when the span's content itself contains a literal single backtick, per
+    CommonMark -- must be stripped as a whole, not just up to the first
+    single backtick inside it (regression test for the gap flagged in PR
+    #619 review: the single-backtick-only stripper left the link exposed in
+    exactly this case)."""
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "owner.md").write_text("x", encoding="utf-8")
+    page = tmp_path / "page.md"
+    page.write_text(
+        "Example: ``code with a ` backtick and [owner](owner.md)``\n",
+        encoding="utf-8",
+    )
+    assert dc._page_links_to(page, "owner.md") is False
+
+
+def test_strip_inline_code_leaves_unmatched_backtick_as_text() -> None:
+    text = "Unmatched ` backtick stays as text with [real](./real-link.md)"
+    assert dc._strip_inline_code(text) == text
+
+
 def test_page_links_to_ignores_links_inside_tilde_fenced_code_blocks(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

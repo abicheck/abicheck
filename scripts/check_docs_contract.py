@@ -377,9 +377,47 @@ def _permitted_summary_pages(entry: dict[str, object]) -> set[str]:
 
 
 _MD_LINK_TARGET_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
-_INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
+_BACKTICK_RUN_RE = re.compile(r"`+")
 _MD_REF_LINK_RE = re.compile(r"\[([^\]]*)\]\[([^\]]*)\]")
 _MD_REF_DEF_RE = re.compile(r"^\[([^\]]+)\]:\s*(\S+)", re.MULTILINE)
+
+
+def _strip_inline_code(text: str) -> str:
+    """Remove CommonMark inline code spans, whose delimiter is a run of one
+    or more backticks -- not just a single backtick. A span's content ends
+    at the *next run of the same length*, which is why `` ``code with a `
+    backtick`` `` uses a double-backtick delimiter: it lets the content
+    contain a literal single backtick. Stripping only single-backtick spans
+    (the previous implementation) left a link exposed as scannable "prose"
+    when shown inside a longer-delimiter span (PR #619 review). An opening
+    run with no matching same-length closer is left as literal text, per
+    CommonMark."""
+    out: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        m = _BACKTICK_RUN_RE.match(text, i)
+        if m is None:
+            out.append(text[i])
+            i += 1
+            continue
+        run_len = m.end() - i
+        j = m.end()
+        closer = None
+        while j < n:
+            m2 = _BACKTICK_RUN_RE.match(text, j)
+            if m2 is None:
+                j += 1
+                continue
+            if m2.end() - j == run_len:
+                closer = m2
+                break
+            j = m2.end()
+        if closer is None:
+            out.append(text[i : m.end()])
+            i = m.end()
+        else:
+            i = closer.end()
+    return "".join(out)
 
 
 def _resolve_href(path: Path, href: str) -> str | None:
@@ -409,7 +447,7 @@ def _page_links_to(path: Path, target_rel_to_docs: str) -> bool:
     real link) is example text, not a navigable link -- MkDocs renders both
     as code, not as a backlink."""
     text = _strip_fenced_code(_strip_front_matter(path.read_text(encoding="utf-8")))
-    text = _INLINE_CODE_RE.sub("", text)
+    text = _strip_inline_code(text)
     for m in _MD_LINK_TARGET_RE.finditer(text):
         if _resolve_href(path, m.group(1)) == target_rel_to_docs:
             return True
