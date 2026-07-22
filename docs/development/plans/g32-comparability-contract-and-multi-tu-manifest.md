@@ -2327,7 +2327,10 @@ error.
   string alone can't see but the actually-resolved `kind` can.
 - `dumper_clang.py`'s existing single-context assumption is generalized to
   call this module when the detected frontend is DPC++-capable; a plain
-  (non-SYCL) clang/castxml invocation is unaffected.
+  (non-SYCL) clang/castxml invocation is unaffected **when the requested
+  `frontend_context` is `host` — see the dedicated bullet below for why a
+  non-`host` request on a plain invocation cannot take this same silent
+  path.**
 - **The legacy single-context fallback is gated on positive non-SYCL
   identification, never on the decoded context count.** "Zero contexts
   with the requested `kind`" (above, → `AST_CONTEXT_MISSING`) and "this
@@ -2346,6 +2349,30 @@ error.
   degradation is reserved for output that was never a context stream to
   begin with, so missing or malformed DPC++ context data can never result
   in silently selecting the wrong (or an arbitrary) AST.
+- **The non-SYCL fallback is only a valid "unaffected" outcome when the
+  requested `frontend_context` is `host` — a non-`host` request on a
+  positively-non-SYCL invocation must fail, not silently return the
+  ordinary host AST as if it satisfied the request.** Once Phase D lifts
+  Phase B's blanket `device` rejection (above), `--frontend-context
+  device` becomes reachable on *any* invocation, including a plain
+  clang/castxml one with no DPC++/multi-document capability at all. If
+  the "positively identified as non-SYCL" fallback (previous bullet)
+  fires unconditionally regardless of what was actually requested, a
+  `device` request on such an invocation would silently produce the
+  existing single/default-context AST — the ordinary host extraction —
+  while the user explicitly asked for `device`. This is exactly the
+  "accepted but silently doing the wrong thing" failure mode this whole
+  plan has already had to close for `--dump-manifest` on release inputs
+  and for `frontend_context` before Phase D existed at all, now
+  recurring one layer deeper, inside Phase D itself. The fallback
+  therefore checks the *requested* `frontend_context` first: `host` (the
+  default) on a positively-non-SYCL invocation is the ordinary,
+  unaffected case above; any other requested value on a
+  positively-non-SYCL invocation is a hard failure —
+  `AST_CONTEXT_MISSING` (there is no device context stream to select at
+  all, the same code a DPC++ invocation with zero matching contexts
+  already uses) rather than a distinct new error, since the underlying
+  condition is identical: the requested `kind` has nothing to select from.
 
 **Files & surfaces.** New `abicheck/sycl_context.py`, `dumper_clang.py`
 (wiring), `sycl_metadata.py` (unaffected — this phase adds frontend-level
@@ -2368,7 +2395,16 @@ asserting a DPC++-capable invocation whose decoded stream comes back empty
 `AST_CONTEXT_MISSING`, never silently falling back to the single-context
 path — proving the fallback distinguishes "genuinely not a multi-document
 invocation" from "was one, but decoded to nothing," the specific
-conflation this criterion exists to prevent. A **host/device
+conflation this criterion exists to prevent. A **non-host request on a
+plain frontend** test asserting `--frontend-context device` against a
+positively-non-SYCL, plain clang/castxml invocation (no DPC++/
+multi-document toolchain flag, no document-boundary markers) raises
+`AST_CONTEXT_MISSING` rather than silently returning the ordinary
+single-context host AST — proving a user who explicitly requests
+`device` on a frontend that can't produce one gets a clear failure, not a
+snapshot they'd reasonably mistake for device-derived; a companion
+assertion confirms `--frontend-context host` (the default) on the same
+plain invocation is still the unaffected, unchanged legacy path. A **host/device
 profile-fingerprint mismatch** test asserting an old/new pair extracted
 with `frontend_context=host` on one side and `frontend_context=device` on
 the other, otherwise identical compiler/target/macros/includes, produces
@@ -2432,6 +2468,44 @@ half depends on Phase B too (the per-TU loop it schedules).
 - `dumper_manifest.py`'s per-TU castxml/clang invocations (Phase B) run under this
   pool instead of a fully sequential loop; a killed/timed-out TU records
   its exit signal and never silently retries as a clean empty TU.
+- **A single manifest-driven `compare` can launch two full-sized per-TU
+  pools at once, each independently sized off *total* system
+  `MemAvailable` — this doubles the intended budget and must be closed,
+  not merely noted.** Verified against the actual code:
+  `service.run_compare_request` (`:1724`) already resolves the old and
+  new sides concurrently via `ThreadPoolExecutor(max_workers=2)` (opt-out
+  only via `ABICHECK_PARALLEL_EXTRACTION=0`), pre-dating this phase. If
+  either side's dump is manifest-driven, `process_resources.py`'s
+  pool-sizing helper computes its process cap from the *system-wide*
+  `MemAvailable` at call time, implicitly assuming it is the only such
+  pool active — but with both sides resolved concurrently, old's and
+  new's pool-sizing calls run at nearly the same instant, each seeing
+  roughly the same total `MemAvailable` and each sizing up to that same
+  budget independently. Both pools then launch concurrently, together
+  claiming up to twice the memory either sizing calculation actually
+  accounted for — precisely the OOM risk this phase's RAM-aware cap
+  exists to prevent, worst on exactly the large multi-TU workload this
+  phase targets. This phase does not introduce a new cross-process
+  budget-sharing mechanism to fix it (out of scope, per the bullet
+  below) — instead, `run_compare_request` (and the legacy `run_compare`
+  keyword shim `cli_compare_release.py`'s `_run_compare_pair` calls,
+  which reaches the same manifest-driven dump path) skips the old/new
+  `ThreadPoolExecutor` and resolves sequentially whenever either
+  resolved input is manifest-driven, so only one per-TU pool is ever
+  active system-wide for a manifest-driven compare and its own sizing
+  call sees an accurate, uncontended `MemAvailable`. Non-manifest
+  (legacy single-TU) dumps are entirely unaffected — they never spawn a
+  Phase E per-TU pool in the first place, so the existing old/new
+  concurrency stays exactly as it is today for the routine case.
+  **`compare-release`'s own cross-library fan-out (`ThreadPoolExecutor` in
+  `cli_compare_release.py`, `:500-503`) is a known, accepted residual gap
+  at this same granularity, not fixed by this bullet**: N libraries
+  compared in parallel, each manifest-driven, could still launch N
+  independently-sized pools concurrently. Serializing *that* layer too is
+  a coarser, separate tradeoff (release-level throughput vs. per-compare
+  memory safety) this phase does not resolve; closing it is deferred to
+  whoever revisits release-level scheduling policy, not silently assumed
+  fixed here.
 - **`profile_fingerprint` itself cannot be a cache-key input — this phase
   does not attempt it.** `cached_run_dump` looks up `snapshot_cache`
   *before* calling `dump()` (Phase A); `profile_fingerprint`'s `-I`
@@ -2533,12 +2607,28 @@ only one `includes` entry's `project_owned` bit (`true` on one call,
 `false`/absent on the next, same unchanged path) ⇒ cache miss — proving
 the bit is its own key material, not silently absorbed into content/mtime
 hashing (which can't see it) or any of the three fields above (none of
-which change when only this bit does).
+which change when only this bit does). A **pool-doubling** regression
+test asserting a manifest-driven `compare` (both sides manifest-driven,
+enough TUs to trigger the RAM-aware pool) resolves old and new
+*sequentially*, not concurrently — patch/spy on
+`process_resources`'s sizing helper and assert it is never called twice
+with overlapping wall-clock windows for the same `compare` invocation —
+proving `run_compare_request` actually disables its old/new
+`ThreadPoolExecutor` for this case rather than leaving both pools free to
+size off the same total `MemAvailable` at once; a companion assertion
+confirms a **non**-manifest-driven `compare` still resolves old/new
+concurrently exactly as it does today, proving the fix is scoped to
+manifest-driven dumps and doesn't regress the routine case's existing
+parallelism.
 
 **Out of scope.** No new scheduling *policy* — this phase ports the
 existing, already-proven `source_replay.py` policy verbatim; a different
 policy (e.g. per-manifest-declared memory budget) is future work, not
-scoped here.
+scoped here. `compare-release`'s own cross-library fan-out concurrency
+(a known, accepted residual gap at this same granularity — see the
+pool-doubling acceptance-criteria bullet above) is also not addressed by
+this phase; a coarser release-level scheduling policy is future work,
+not silently assumed fixed here.
 
 ---
 
