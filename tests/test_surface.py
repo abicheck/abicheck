@@ -1191,6 +1191,88 @@ class TestHiddenFriendSurface:
         )
         assert classify_change_surface(c, s, s) == (False, REASON_SYSTEM_HEADER)
 
+    def test_owner_added_together_with_friend_demotes_from_one_sided_private(self):
+        """Regression (Codex review): a hidden friend is most often added or
+        removed *together with* its owner class, so the owner legitimately
+        exists in only ONE snapshot's ``all_types``. The previous
+        both-sides-must-agree check treated the absent side identically to
+        "present but unknown" and so never demoted this common case, even
+        though the one side that has the owner confidently says
+        private-header."""
+        old = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+        )
+        new = AbiSnapshot(
+            library="l",
+            version="2",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[_rec("point", origin=ScopeOrigin.PRIVATE_HEADER)],
+        )
+        s_old = compute_public_surface(old)
+        s_new = compute_public_surface(new)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_ADDED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type="mylib::point",
+            description="",
+        )
+        assert classify_change_surface(c, s_old, s_new) == (
+            False,
+            REASON_PRIVATE_HEADER,
+        )
+
+    def test_owner_removed_together_with_friend_demotes_from_one_sided_system(self):
+        """Symmetric case: the owner existed only in the *old* snapshot
+        (removed together with the friend), and confidently originated from
+        a system header there."""
+        old = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[_rec("point", origin=ScopeOrigin.SYSTEM_HEADER)],
+        )
+        new = AbiSnapshot(
+            library="l",
+            version="2",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+        )
+        s_old = compute_public_surface(old)
+        s_new = compute_public_surface(new)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type="mylib::point",
+            description="",
+        )
+        assert classify_change_surface(c, s_old, s_new) == (False, REASON_SYSTEM_HEADER)
+
+    def test_owner_added_together_with_unknown_origin_stays_retained(self):
+        """The one-sided-presence relaxation must still be conservative: an
+        owner added together with the friend but recorded with an UNKNOWN
+        origin (not confidently private/system) must not demote."""
+        old = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+        )
+        new = AbiSnapshot(
+            library="l",
+            version="2",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[_rec("point", origin=ScopeOrigin.UNKNOWN)],
+        )
+        s_old = compute_public_surface(old)
+        s_new = compute_public_surface(new)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_ADDED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type="mylib::point",
+            description="",
+        )
+        assert classify_change_surface(c, s_old, s_new) == (True, None)
+
 
 # ── widening overlay (ADR-024 §D6 / Phase 4) ─────────────────────────────────
 

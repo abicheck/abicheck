@@ -804,6 +804,42 @@ def classify_change_surface(
     )
 
 
+def _hidden_friend_owner_reason(
+    known: set[str],
+    surf_old: PublicSurface,
+    surf_new: PublicSurface,
+) -> str | None:
+    """Like :func:`_confident_header_reason`, but tolerant of an owner type
+    that exists on only one side — the common ``hidden_friend_added``/
+    ``hidden_friend_removed`` case where the owner class itself is
+    introduced or deleted together with the friend. A type present on both
+    sides still needs both to agree (unchanged, conservative); a type
+    present on only one side is classified from that side alone, since the
+    other side cannot disagree about a type it doesn't have (Codex review:
+    the old both-sides-must-agree check treated "absent" identically to
+    "present but unknown", which starved this exact one-sided case of ever
+    demoting)."""
+    reasons: set[str] = set()
+    for c in known:
+        in_old = c in surf_old.all_types
+        in_new = c in surf_new.all_types
+        if in_old and in_new:
+            reason = _origin_reason(surf_old, surf_new, c)
+        else:
+            surf = surf_old if in_old else surf_new
+            reason = _ORIGIN_REASON.get(surf.origin_by_key.get(c, ScopeOrigin.UNKNOWN))
+        if reason is None:
+            return None
+        reasons.add(reason)
+    if not reasons:
+        return None
+    return (
+        REASON_PRIVATE_HEADER
+        if REASON_PRIVATE_HEADER in reasons
+        else REASON_SYSTEM_HEADER
+    )
+
+
 def _classify_hidden_friend_surface(
     change: Change,
     surf_old: PublicSurface,
@@ -818,8 +854,10 @@ def _classify_hidden_friend_surface(
 
     1. The befriending class (``change.caused_by_type``, resolved from
        castxml's ``befriending`` attribute / clang's friend-scope walk) — if
-       *both* snapshots confidently agree it is a system- or private-header
-       declaration, demote.
+       every snapshot that actually contains the owner confidently agrees it
+       is a system- or private-header declaration, demote. A hidden friend is
+       most often added/removed *together with* its owner, so the owner
+       legitimately exists on only one side — that side alone decides.
     2. Fall back to the friend function's own recorded origin
        (``change.symbol``) — covers the common case where the owner could not
        be resolved (older snapshot, DWARF-only path) but the friend function's
@@ -838,8 +876,8 @@ def _classify_hidden_friend_surface(
         # like every other type-name lookup in this module (Codex review),
         # and filter to identifiers the surface actually knows about before
         # requiring unanimous agreement — an unindexed candidate must not
-        # poison _confident_header_reason's "every implicated type agrees"
-        # check into never demoting (mirrors _classify_type_level).
+        # poison the "every implicated type agrees" check into never
+        # demoting (mirrors _classify_type_level).
         known = {
             c
             for c in _type_identifiers(owner)
@@ -856,7 +894,9 @@ def _classify_hidden_friend_surface(
             # possibly-inconsistent friend-own-origin record (the fallback
             # below) override that signal (CodeRabbit review).
             return True, None
-        reason = _confident_header_reason(known, surf_old, surf_new) if known else None
+        reason = (
+            _hidden_friend_owner_reason(known, surf_old, surf_new) if known else None
+        )
         if reason is not None:
             return False, reason
     sym = change.symbol or ""
