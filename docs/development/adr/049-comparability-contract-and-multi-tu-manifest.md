@@ -248,7 +248,32 @@ subclass at the CLI boundary (`cli.py`), a plain exception at the
 "Known gaps" section already names for the depth contract — this ADR's gate
 must not repeat that CLI-only mistake; D2 lands in `service.py`'s
 `ScanRequest`/`compare_snapshots` and `mcp_server.py`'s MCP tools from the
-start, not as a follow-up). On the reporting surface (`reporter.py`,
+start, not as a follow-up).
+
+**A fourth surface reaches `checker.compare` besides the three named
+above: `cli_compare_release.py`'s directory/package fan-out, and it needs
+its own explicit fix, not just inherited behavior.**
+`_compare_one_library` (`cli_compare_release.py:180-269`) wraps its entire
+per-library flow in `except (click.ClickException, click.UsageError):` /
+`except Exception:`, both returning `{"verdict": "ERROR", ...}` —
+documented at `:1142` as flooring the release's exit code at 4 "regardless
+of severity settings." `ProfileMismatchError`/`ScopeMismatchError` are
+plain exceptions (not `click.ClickException`), so today's broad
+`except Exception` would swallow them into the exact same `"ERROR"`/exit-4
+bucket as a genuine crash — meaning one incomparable library inside a
+release comparison would silently report as the *worst possible*
+classification (an ABI break) instead of `not_comparable`, precisely
+inverting this ADR's purpose on its one multi-library entry point.
+`_compare_one_library` therefore gains a dedicated
+`except (ProfileMismatchError, ScopeMismatchError) as exc:` branch, ordered
+before the generic `except Exception`, returning a distinct
+`{"verdict": "not_comparable", "reason": ...}` entry; the release-level
+aggregator and exit-code computation (`docs/reference/exit-codes.md`'s
+multi-library section) are extended to recognize that verdict value the
+same way the single-library path does, rather than folding it into
+`"ERROR"`.
+
+On the reporting surface (`reporter.py`,
 `sarif.py`, `junit_report.py`), a `not_comparable` result is a distinct
 top-level state — `verdict: null`, a `reason` object naming the mismatched
 fingerprint field(s) — never coerced into `COMPATIBLE`/`BREAKING`'s existing
@@ -301,34 +326,41 @@ an otherwise-ordinary verdict, surfaced only for a mixed pair, to tell the
 reader "this comparison ran without being able to check profile/scope
 drift on one side," without withholding the verdict itself.
 
-**`UNKNOWN_PROFILE` is `COMPATIBLE_KINDS`/`QUALITY_KINDS`-tier, deliberately
-not `RISK_KINDS`, even though it is registered the same way and reported
-the same way as the existing `SOURCE_FACT_COVERAGE_INCOMPLETE`
-(`checker_policy.py:618`).** The two differ in what they mean, not just in
-name: `SOURCE_FACT_COVERAGE_INCOMPLETE` reports genuine *per-comparison*
-evidence uncertainty (a fact family that happened to fail or come back
-partial *this run*) — a `--severity-potential-breaking=error`/
-`--severity-preset strict` user reasonably wants that to fail their build,
-since it means this specific comparison can't be trusted. `UNKNOWN_PROFILE`
-is different in kind: it fires purely because one side predates this ADR,
-which is a one-time rollout artifact untied to any change in the library
-being compared, and will recur on *every* comparison against *every*
-not-yet-regenerated baseline until that baseline is refreshed. Classifying
-it `RISK_KINDS` would mean `potential_breaking` promotion turns it into a
-mass, abicheck-version-triggered CI failure the instant a team with strict
-severity settings upgrades — exactly the "upgrading abicheck breaks an
-unrelated, unchanged CI pipeline" regression this section's backward-
-compatibility promise exists to rule out, just relocated from the
-`not_comparable` layer to the severity-exit-code layer. `UNKNOWN_PROFILE`
-is therefore registered through the repository's standard four-step
-procedure (`ChangeKind` enum entry in `checker_policy.py`, one
-`ChangeKindMeta` entry in a `change_registry*.py` module with
-`default_verdict` placing it in `COMPATIBLE_KINDS`'s `QUALITY_KINDS`
-subset, a detector in `comparability.py` wired via
-`@registry.detector(...)`, and a unit test) — a real `ChangeKind`, not an
-ad-hoc string (avoiding the AI-readiness `changekind-partition`/
-`changekind-detector` gates), but one that never contributes to
-`potential_breaking` severity promotion under any `--severity-*` flag.
+**`UNKNOWN_PROFILE` is report-level metadata, not a `ChangeKind`/`Change`
+finding at all — this went through two wrong designs before landing here,
+worth recording so it isn't rediscovered.** The first attempt classified it
+`RISK_KINDS`, matching `SOURCE_FACT_COVERAGE_INCOMPLETE`
+(`checker_policy.py:618`)'s shape; that broke under
+`--severity-potential-breaking=error`/`--severity-preset strict`, which
+promotes any `RISK_KINDS` finding to a build failure (exit 2) — turning
+every comparison against a pre-this-ADR baseline into a mass,
+abicheck-version-triggered CI failure the instant a strict-severity team
+upgrades, exactly the "upgrading abicheck breaks an unrelated, unchanged
+pipeline" regression the backward-compatibility promise above exists to
+rule out. The second attempt reclassified it `COMPATIBLE_KINDS`'s
+`QUALITY_KINDS` subset instead, reasoning that `SOURCE_FACT_COVERAGE_INCOMPLETE`'s
+`RISK_KINDS` tier is justified by reporting genuine *per-comparison*
+evidence uncertainty (a fact family that failed or came back partial *this
+run*) — a "fair game to fail strict CI on" property `UNKNOWN_PROFILE`
+doesn't share, since it fires purely from being compared against a
+pre-ADR baseline, a one-time rollout artifact untied to any real change.
+That reclassification only relocated the same collision:
+`--severity-quality-issues=error`/`--severity-preset strict` promotes
+`QUALITY_KINDS` findings too (exit 1, "quality-only error") — proving the
+underlying problem was never "which `ChangeKind` category," it's that
+**every** category is reachable by *some* `--severity-*` flag, by design
+(that's the whole point of severity gating existing). No `ChangeKind`
+classification can be permanently severity-immune. `UNKNOWN_PROFILE`
+therefore isn't one: it's a new field on the comparison result (alongside
+the existing `assurance` field D2 already introduced for
+`--diagnostic-comparison`) — e.g. `contract_coverage: "partial"` — set
+whenever exactly one side carries a `contract`. It never enters the
+`changes`/findings list any `--severity-*` flag scans, so it is
+structurally, not just by convention, unreachable by severity promotion —
+true under every current and future severity flag, not merely the ones
+checked so far. `reporter.py`/`sarif.py`/`junit_report.py` surface it the
+same way they already surface `assurance` — a plain report field, not a
+finding.
 
 ### D3. Manifest and real multi-TU dump
 

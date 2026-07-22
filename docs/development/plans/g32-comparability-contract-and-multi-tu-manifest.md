@@ -95,9 +95,15 @@ convention (`ground_truth.json` entry, `README.md`, AI-readiness
 `examples-ground-truth`/`examples-readme-sync` checks).
 
 **Tests.** No new production tests yet — this phase is fixture capture and
-a short `tests/test_g32_fixtures.py` asserting the fixtures parse as valid
-JSON / are non-empty, so a later phase's tests have something real to load
-without a live DPC++ toolchain in every CI lane.
+a short `tests/test_g32_fixtures.py` asserting the fixtures are non-empty
+and readable, so a later phase's tests have something real to load without
+a live DPC++ toolchain in every CI lane. The multi-document DPC++ capture
+is **not** asserted to parse as one JSON value — by design it's a stream
+of concatenated documents, the exact shape Phase D's stream parser exists
+to handle; requiring single-document JSON-parseability here would reject
+the real capture and push Phase 0 toward synthesizing a fake one,
+undermining the fixture-first point of this phase. It's validated only for
+non-emptiness now, and by the real stream parser once Phase D exists.
 
 **Out of scope.** No production code changes.
 
@@ -192,31 +198,23 @@ Implements ADR-049 D1 and D2.
   `not_comparable` — so comparing a freshly-produced snapshot against a
   pre-ADR stored CI baseline (a common real workflow) never regresses on
   upgrade — **including under strict severity settings, not only the
-  default ones.** It surfaces `UNKNOWN_PROFILE` as a non-authoritative
-  annotation on the ordinary verdict that still gets produced, but
-  classified `COMPATIBLE_KINDS`/`QUALITY_KINDS`-tier, **not** `RISK_KINDS`
-  — deliberately different from the existing `SOURCE_FACT_COVERAGE_INCOMPLETE`
-  (`checker_policy.py:618`) it otherwise resembles. `SOURCE_FACT_COVERAGE_INCOMPLETE`
-  reports genuine per-comparison evidence uncertainty, which a
-  `--severity-potential-breaking=error`/`--severity-preset strict` user
-  reasonably wants to fail their build on. `UNKNOWN_PROFILE` fires purely
-  from comparing against a pre-this-ADR baseline — a one-time rollout
-  artifact untied to any real library change, recurring on every
-  comparison until that baseline is regenerated. Classifying it
-  `RISK_KINDS` would let `potential_breaking` promotion turn it into a
-  mass CI failure the moment a team with strict severity settings upgrades
-  abicheck — exactly the regression the "never regresses on upgrade"
-  promise above exists to rule out, just at the severity-exit-code layer
-  instead of `not_comparable`. `UNKNOWN_PROFILE` is registered as a real
-  `ChangeKind` via the repo's standard four-step procedure (AGENTS.md
-  "Adding a new ChangeKind") — enum entry (`checker_policy.py`), one
-  `ChangeKindMeta` entry with `default_verdict` placing it in
-  `COMPATIBLE_KINDS`'s `QUALITY_KINDS` subset (a `change_registry*.py`
-  module), a detector in `comparability.py` wired via
-  `@registry.detector(...)`, and a unit test. Not an ad-hoc report string:
-  that would trip the AI-readiness `changekind-partition`/
-  `changekind-detector` gates or bypass the registry's own import-time
-  completeness assertion.
+  default ones.**
+- **`UNKNOWN_PROFILE` is report-level metadata, not a `ChangeKind`/`Change`
+  finding — this took two wrong designs to converge on, worth getting
+  right the first time here.** Classifying it `RISK_KINDS` (matching
+  `SOURCE_FACT_COVERAGE_INCOMPLETE`'s shape) broke under
+  `--severity-potential-breaking=error`/`--severity-preset strict`
+  (promotes to exit 2). Reclassifying it `COMPATIBLE_KINDS`'s
+  `QUALITY_KINDS` instead only relocated the same collision:
+  `--severity-quality-issues=error`/`--severity-preset strict` promotes
+  `QUALITY_KINDS` too (exit 1) — proving no `ChangeKind` category is
+  permanently severity-immune, since severity gating can reach any of them
+  by design. `UNKNOWN_PROFILE` is instead a new field on the comparison
+  result (e.g. `contract_coverage: "partial"`), alongside the existing
+  `assurance` field this same phase adds for `--diagnostic-comparison` —
+  never entering the `changes`/findings list any `--severity-*` flag scans,
+  so it's structurally unreachable by severity promotion rather than
+  merely unreachable by the flags checked so far.
 - **The exit code is part of the published contract too, not an
   afterthought.** `docs/reference/exit-codes.md` documents two co-existing
   `compare` schemes (legacy: 0/2/4; severity-aware: 0/1/2/4) where `0`
@@ -227,11 +225,29 @@ Implements ADR-049 D1 and D2.
   distinct nonzero code and adds it as its own row to both tables in
   `docs/reference/exit-codes.md`, not folded into either scheme's existing
   numbering.
-- The gate is wired at **all three** entry points in one phase, closing the
+- The gate is wired at **all four** entry points in one phase, closing the
   gap AGENTS.md's "Known gaps" section already names for the depth
   contract rather than repeating the CLI-only mistake: `checker.compare`
-  (core), `service.py`'s `ScanRequest`/`compare_snapshots`, and
-  `mcp_server.py`'s MCP compare tools.
+  (core), `service.py`'s `ScanRequest`/`compare_snapshots`,
+  `mcp_server.py`'s MCP compare tools, **and** `cli_compare_release.py`'s
+  directory/package fan-out.
+- **The release fan-out needs a dedicated fix, not inherited behavior.**
+  `_compare_one_library` (`cli_compare_release.py:180-269`) wraps its
+  entire per-library flow in `except (click.ClickException,
+  click.UsageError):` / `except Exception:`, both returning
+  `{"verdict": "ERROR", ...}` — documented at `:1142` as flooring the
+  release's exit code at 4 regardless of severity settings.
+  `ProfileMismatchError`/`ScopeMismatchError` are plain exceptions, so
+  today's broad `except Exception` would swallow them into that same
+  `"ERROR"`/exit-4 bucket — one incomparable library in a release would
+  silently report as the *worst possible* classification (an ABI break)
+  instead of `not_comparable`, inverting this ADR's purpose on its one
+  multi-library surface. `_compare_one_library` gains a dedicated
+  `except (ProfileMismatchError, ScopeMismatchError) as exc:` branch,
+  ordered before the generic `except Exception`, returning
+  `{"verdict": "not_comparable", "reason": ...}`; the release aggregator
+  and `docs/reference/exit-codes.md`'s multi-library section recognize
+  that verdict value distinctly, not folded into `"ERROR"`.
 - Reporting: `reporter.py`/`sarif.py`/`junit_report.py` gain a
   `not_comparable` top-level result distinct from every existing verdict
   value — never coerced into `compatible`/`breaking`.
@@ -276,8 +292,9 @@ Implements ADR-049 D1 and D2.
 
 **Files & surfaces.** `model.py` (new `ExtractionContract`), new
 `abicheck/comparability.py` (fingerprint computation, `compute_extraction_contract`,
-the gate, and the `UNKNOWN_PROFILE` detector), `dumper.py` (`dump()` calls
-`compute_extraction_contract(...)` and attaches it to every returned
+the gate, and `contract_coverage` metadata computation — no detector, since
+`UNKNOWN_PROFILE` is report metadata, not a `Change`), `dumper.py` (`dump()`
+calls `compute_extraction_contract(...)` and attaches it to every returned
 snapshot — see the acceptance-criteria bullet above; this is not optional
 plumbing), `snapshot_cache.py` (`_SNAPSHOT_CACHE_VERSION` bump — see the
 warm-cache acceptance-criteria bullet above), `errors.py`
@@ -285,13 +302,17 @@ warm-cache acceptance-criteria bullet above), `errors.py`
 `serialization.py` (`SCHEMA_VERSION` bump,
 `_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION` threshold + the
 `snapshot_from_dict` hard-rejection branch, `contract` round-trip through
-`snapshot_to_dict`/`snapshot_from_dict`), `checker_policy.py`
-(`UNKNOWN_PROFILE` enum entry) and a `change_registry*.py` module (its
-`ChangeKindMeta` entry), `checker.py` (gate call at the
-top of `compare`), `service.py`,
-`mcp_server.py`, `cli.py`/`cli_compare_release.py` (flag + the new,
-distinct `not_comparable` exit code), `docs/reference/exit-codes.md` (a
-new row in both the legacy and severity-aware tables), `reporter.py`,
+`snapshot_to_dict`/`snapshot_from_dict`), `checker.py` (gate call at the
+top of `compare`, `contract_coverage` field on the result), `service.py`,
+`mcp_server.py`, `cli.py` (flag + the new,
+distinct `not_comparable` exit code), `cli_compare_release.py`
+(`_compare_one_library`'s dedicated
+`except (ProfileMismatchError, ScopeMismatchError)` branch, ordered before
+`except Exception` — see the release-fan-out acceptance-criteria bullet
+above; this is not covered by the CLI's own exit-code handling, it is a
+separate call path), `docs/reference/exit-codes.md` (a
+new row in both the legacy and severity-aware tables, **and** the
+multi-library section), `reporter.py`,
 `sarif.py`, `junit_report.py`, `abicheck/schemas/compare_report.schema.json`,
 `abicheck/schemas/__init__.py` (`REPORT_SCHEMA_VERSION` bump),
 `docs/schemas/v1/compare_report.schema.json` (regenerated via
@@ -322,22 +343,24 @@ regenerated `docs/schemas/v1` copy; a root-relative-path fingerprint test
 (the acceptance-criteria bullet above — same-tree-different-root compare
 must not fingerprint-mismatch); an exit-code test
 asserting `not_comparable` returns the new dedicated code, never `0`, from
-both the legacy and severity-aware `compare` invocations; a
-`changekind-partition`/`changekind-detector`-gate-compliant unit test for
-the `UNKNOWN_PROFILE` detector, matching the existing test pattern for
-`SOURCE_FACT_COVERAGE_INCOMPLETE`; gate unit tests for all
-three entry points; a `--diagnostic-comparison` end-to-end test; a
+both the legacy and severity-aware `compare` invocations; a **release
+fan-out** test asserting a `not_comparable`-triggering library inside a
+directory/package `compare` reports `verdict: "not_comparable"` in its
+release-level entry, not `"ERROR"` — the specific inversion (incomparable
+reported as the worst-possible classification) this phase must close on
+its fourth entry point; gate unit tests for all
+four entry points; a `--diagnostic-comparison` end-to-end test; a
 backward-compat test asserting a contract-less snapshot pair compares
 unchanged; a **mixed-pair** test (one side `contract`, one side none)
 asserting the comparison never hard-fails and instead carries a
-`UNKNOWN_PROFILE` `QUALITY_KINDS` finding alongside an otherwise-ordinary
+`contract_coverage: "partial"` report field alongside an otherwise-ordinary
 verdict — the specific case the ADR calls out as unambiguous, not left to
 interpretation; a **severity-neutrality** test asserting a mixed-pair
-comparison run with `--severity-potential-breaking=error` (or
-`--severity-preset strict`) still exits successfully — `UNKNOWN_PROFILE`
-must never itself trigger `potential_breaking` promotion, or the "never
-regresses on upgrade" promise breaks for exactly the users who opted into
-strict severity gating.
+comparison run under *every* `--severity-*` flag (`--severity-potential-breaking=error`,
+`--severity-quality-issues=error`, and `--severity-preset strict`) still
+exits successfully — proving `contract_coverage` is structurally outside
+the findings list any severity flag scans, not merely untested against the
+one flag checked last time.
 
 **Example fixtures.** The Phase 0 "scope drift" pair, promoted to a real
 `examples/case2xx_profile_scope_mismatch_gate/` once the gate exists.
