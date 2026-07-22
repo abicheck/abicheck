@@ -798,20 +798,42 @@ Implements ADR-050 D1 and D2.
   **both** sides carry one, two ordinary dumps would silently take the same
   code path as the intentionally-lenient mixed-pair case forever — a fully
   specified, fully inert gate.
-  **"Every dump" means every dump that actually ran an L2 header-AST
-  frontend — a symbols-only/binary-only dump (no `-H`/`--header`, no
-  manifest) attaches no `contract` at all, computed from nothing rather
-  than computed from unused inputs.** `profile_fingerprint` hashes the
-  resolved compiler/macros/`-I` inputs an actual castxml/clang invocation
-  used; a symbols-only dump never runs one, so those fields would describe
-  nothing the snapshot depends on. Attaching a fingerprint anyway (from
-  whatever compile-context flags happen to be set, used or not) would make
-  two genuinely comparable L0/binary-only snapshots spuriously mismatch on
-  compile-context differences that never affected either one — an
-  over-counting regression, not the under-counting bug this design
-  otherwise guards against. `contract` staying `None` here is not a gap in
-  the leniency rule below; it's that same rule correctly applying to the
-  one case where no L2 extraction ran on either side to disagree about.
+  **"Every dump" means every dump with at least one resolved input to
+  fingerprint — a symbols-only/binary-only dump (no `-H`/`--header`, no
+  manifest) attaches no `profile_fingerprint`, computed from nothing
+  rather than computed from unused inputs.** `profile_fingerprint` hashes
+  the resolved compiler/macros/`-I` inputs an actual castxml/clang
+  invocation used; a symbols-only dump never runs one, so those fields
+  would describe nothing the snapshot depends on. Attaching a fingerprint
+  anyway (from whatever compile-context flags happen to be set, used or
+  not) would make two genuinely comparable L0/binary-only snapshots
+  spuriously mismatch on compile-context differences that never affected
+  either one — an over-counting regression, not the under-counting bug
+  this design otherwise guards against.
+  **But `--public-header`/`--public-header-dir` are still real, active
+  inputs on a symbols-only dump — `dump()` calls
+  `apply_provenance(snapshot, public_headers, public_header_dirs)`
+  unconditionally at the end of every dump (`dumper.py:1267-1272`),
+  regardless of whether an L2 frontend ran, feeding the `ScopeOrigin`
+  tags `--scope-public-headers` filtering (ADR-024) reads at diff time.**
+  Two symbols-only dumps of otherwise-identical DWARF data but different
+  `--public-header-dir` sets can produce genuinely different *filtered*
+  diffs — exactly the scope drift D1/D2 exist to catch — so the two
+  fingerprints are independently optional, not an all-or-nothing pair: a
+  symbols-only dump attaches a `contract` with `profile_fingerprint: None`
+  but a real `scope_fingerprint` (computed from
+  `public_header_paths`/`public_header_dirs` alone) whenever either is
+  non-empty. Only a symbols-only dump with *neither* `-H` nor
+  `--public-header`/`--public-header-dir` attaches no `contract` at all —
+  that narrower case is not a gap in the leniency rule below; it's that
+  same rule correctly applying to the one case where no scope-affecting
+  input ran on either side to disagree about. `check_contracts_comparable`
+  compares each fingerprint independently (below), so a symbols-only side
+  with only a `scope_fingerprint` compared against a full L2 side (which
+  has both) still gets its scope checked without spuriously hard-failing
+  on `profile_fingerprint` alone — an ordinary depth difference (e.g.
+  `scan --depth binary` against a fuller stored baseline), not scope
+  drift.
 - **The whole-snapshot cache is the same bypass by a different route — this
   phase closes it too, not just Phase E's later cache-key work.**
   `service_dump_cache.cached_run_dump` looks up `snapshot_cache` *before*
@@ -881,15 +903,24 @@ Implements ADR-050 D1 and D2.
   hard-rejection threshold, from either direction of the running/
   snapshot version pair, becomes a hard failure (ADR-050 D1).
 - `comparability.check_contracts_comparable(old, new)` raises
-  `ProfileMismatchError`/`ScopeMismatchError` (`errors.py`) **only when
-  both sides carry a `contract`** and the fingerprints differ. A **mixed**
-  pair (one side has a `contract`, the other doesn't) is unambiguous, not
-  an implementer's judgment call: it takes the exact same code path as a
-  pair where neither side has one — never hard-fails, never becomes
-  `not_comparable` — so comparing a freshly-produced snapshot against a
-  pre-ADR stored CI baseline (a common real workflow) never regresses on
-  upgrade — **including under strict severity settings, not only the
-  default ones.**
+  `ProfileMismatchError` **only when both sides have a non-`None`
+  `profile_fingerprint`** and it differs, and raises `ScopeMismatchError`
+  **only when both sides have a non-`None` `scope_fingerprint`** and it
+  differs — each fingerprint gated independently, not `contract` treated
+  as one opaque all-or-nothing unit (D1's symbols-only-with-provenance
+  case attaches a `contract` with `profile_fingerprint: None` but a real
+  `scope_fingerprint`, so the two genuinely need independent gating, not
+  just a `contract is None` check). A **mixed** pair on a given
+  fingerprint (one side has it, the other doesn't — whether because it
+  lacks `contract` entirely, or because that one field is unset) is
+  unambiguous, not an implementer's judgment call: it takes the exact same
+  code path as a pair where neither side has that fingerprint — never
+  hard-fails on it, never becomes `not_comparable` because of it — so
+  comparing a freshly-produced snapshot against a pre-ADR stored CI
+  baseline, or a symbols-only side against a full-header-AST side, never
+  regresses into an unexpected `not_comparable` result on a fingerprint
+  neither side (or only one side) ever had — **including under strict
+  severity settings, not only the default ones.**
 - **`UNKNOWN_PROFILE` is report-level metadata, not a `ChangeKind`/`Change`
   finding — this took two wrong designs to converge on, worth getting
   right the first time here.** Classifying it `RISK_KINDS` (matching
@@ -1663,14 +1694,28 @@ ran).
 returns a snapshot with a populated, non-`None` `contract` — the specific
 gap that would otherwise leave the gate permanently inert. A companion
 **symbols-only no-contract** test asserting a symbols-only dump (no
-`-H`/`--header`, no manifest) returns a snapshot with `contract is None`,
+`-H`/`--header`, no manifest, **and no `--public-header`/
+`--public-header-dir`**) returns a snapshot with `contract is None`,
 and that comparing two such symbols-only snapshots produced under
 genuinely *different*, but entirely unused, compile-context flags
 (different `--gcc-path`/`--gcc-options`, neither ever invoking an L2
 frontend) leaves the pair comparable — never raising
 `ProfileMismatchError` on compile-context differences that never affected
 either snapshot, the specific over-counting regression this exemption
-exists to prevent. A **warm-cache**
+exists to prevent. A **symbols-only scope-fingerprint** test asserting a
+symbols-only dump given `--public-header-dir` (still no `-H`/manifest)
+returns a snapshot with `contract.profile_fingerprint is None` but a real,
+non-`None` `contract.scope_fingerprint`, and that comparing two such
+symbols-only snapshots built from otherwise-identical DWARF data but
+*different* `--public-header-dir` sets raises `ScopeMismatchError` — the
+specific under-counting gap this fix closes, `apply_provenance` running
+unconditionally even with no L2 frontend (`dumper.py:1267-1272`) — plus a
+companion assertion that comparing that same symbols-only-with-
+`--public-header-dir` snapshot against a full `-H` header-AST snapshot of
+the identical library does **not** raise `ProfileMismatchError` (only one
+side has a `profile_fingerprint` to compare), proving the per-fingerprint
+gate stays lenient on an ordinary depth difference while still checking
+scope. A **warm-cache**
 regression test: seed `snapshot_cache` with a pre-bump-version entry (no
 `contract`), call `cached_run_dump` for the same inputs post-bump, and
 assert it misses and rebuilds with `contract` populated rather than

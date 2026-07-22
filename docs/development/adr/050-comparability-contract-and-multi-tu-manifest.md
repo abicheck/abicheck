@@ -745,10 +745,10 @@ freshly-produced snapshot, and since D2's gate only ever raises when
 silently take the same code path as the intentionally-lenient mixed-pair
 case (D2) forever — the gate would be fully specified and fully inert.
 
-**"Every dump" means every dump that actually invoked an L2 header-AST
-frontend — a symbols-only/binary-only dump (no `--header`/`-H`, no
+**"Every dump" means every dump with at least one resolved input to
+fingerprint — a symbols-only/binary-only dump (no `--header`/`-H`, no
 manifest; native binaries fall back to this mode by design) attaches no
-`contract` at all, not a contract computed from unused inputs.**
+`profile_fingerprint`, not a fingerprint computed from unused inputs.**
 `profile_fingerprint` hashes the resolved compiler/macros/`-I` inputs a
 castxml/clang invocation actually used — for a symbols-only dump, no such
 invocation ever runs, so those fields describe nothing the snapshot
@@ -758,11 +758,48 @@ invocation, unused or not) would make two snapshots that are genuinely
 comparable at the L0/binary evidence tier spuriously mismatch on
 compile-context differences that never affected either snapshot — the
 opposite failure mode from the one D1/D2 exist to close, this time an
-*over*-counting bug instead of an under-counting one. `contract` staying
-`None` for a symbols-only dump is not a gap in D2's leniency rule; it is
-the existing "both sides `None` → gate doesn't fire" case (above) applying
-correctly to the one case where no L2 extraction happened on either side
-to disagree about in the first place.
+*over*-counting bug instead of an under-counting one.
+
+**But `--public-header`/`--public-header-dir` are still real, active
+inputs on a symbols-only dump, even with no `-H`/manifest at all — `dump()`
+calls `apply_provenance(snapshot, public_headers, public_header_dirs)`
+unconditionally at the end of every dump (`dumper.py:1267-1272`),
+regardless of whether an L2 frontend ran, and public-surface filtering
+(`--scope-public-headers`, ADR-024) reads the `ScopeOrigin` that call
+produces.** Two symbols-only dumps of otherwise-identical DWARF data but
+different `--public-header-dir` sets can therefore produce genuinely
+different *filtered* diffs — exactly the silent scope drift D1/D2 exist to
+catch — yet the blanket "no contract at all for a symbols-only dump" rule
+above would leave the gate blind to it, since neither side would carry
+anything to compare. `contract`'s two fingerprints are therefore
+independently optional, not an all-or-nothing pair: a symbols-only dump
+attaches a `contract` with `profile_fingerprint: None` (nothing to
+compute — no L2 invocation ran) but a real `scope_fingerprint`, computed
+from `public_header_paths`/`public_header_dirs`/the filtering policy
+alone, **whenever either is non-empty**; a symbols-only dump with *neither*
+`-H` nor `--public-header`/`--public-header-dir` still attaches no
+`contract` at all (both fingerprints would be computed from nothing), the
+original rule applying correctly to the one case where genuinely no
+scope-affecting input was used on either side.
+
+`check_contracts_comparable` (D2) compares each fingerprint
+independently rather than treating `contract` as one opaque all-or-nothing
+unit: `scope_fingerprint` is compared whenever both sides have one
+(regardless of whether either side's `profile_fingerprint` is present),
+and `profile_fingerprint` is compared whenever both sides have one. A
+symbols-only side with only a `scope_fingerprint` compared against a full
+L2 header-AST side (which has both) therefore still gets its scope
+checked — the real risk this fix closes — without spuriously hard-failing
+on `profile_fingerprint` alone just because one side never ran an L2
+frontend at all, which is an ordinary, intentional depth difference (e.g.
+`scan --depth binary` against a fuller stored baseline), not scope drift,
+and must stay lenient exactly like today's "mixed pair" case (D2) — this
+is a refinement of that leniency rule to per-fingerprint granularity, not
+a narrowing of it. `contract` staying entirely `None` for a symbols-only
+dump with no provenance inputs either is not a gap in D2's leniency rule;
+it is that same rule applying correctly to the one case where no
+scope-affecting input was used on either side to disagree about in the
+first place.
 
 **The whole-snapshot cache is the same bypass by a different route, and it
 matters from day one, not just at D6's later cache-key extension.**
@@ -1402,22 +1439,33 @@ be trusted to have correctly detected a removal either — an apparent
 of unproven inference this ADR exists to block, not a real removal
 finding entitled to its own exit code.
 
-**Mixed pairs (one side has a `contract`, the other doesn't) never hard-fail
-— this is unambiguous, not left to implementer discretion.** The backward-
-compatibility promise ("a snapshot from before this ADR compares exactly as
-it does today") is not a soft goal to reconcile with the gate; a
-contract-less snapshot's *absence* of evidence is exactly the "missing
+**Mixed pairs (one side lacks a given fingerprint, the other has it) never
+hard-fail on that fingerprint — this is unambiguous, not left to
+implementer discretion, and applies per-fingerprint (D1's independently-
+optional `profile_fingerprint`/`scope_fingerprint`), not only to a
+side missing `contract` entirely.** The backward-compatibility promise
+("a snapshot from before this ADR compares exactly as it does today") is
+not a soft goal to reconcile with the gate; a side's *absence* of a given
+fingerprint's evidence — whether because it carries no `contract` at all,
+or because it carries a `contract` with that one field unset (D1's
+symbols-only-with-provenance-inputs case) — is exactly the "missing
 evidence must never manufacture a block" situation ADR-028 D3's authority
-rule already covers, extended here to the comparability contract instead of
-symbol facts. `check_contracts_comparable` therefore only ever raises
-`ProfileMismatchError`/`ScopeMismatchError` when **both** sides carry a
-`contract` and it mismatches — a mixed pair takes the exact same code path
-as a pair where neither side carries one, and comparing a newly-produced
-snapshot against a pre-ADR baseline (the common "upgrade abicheck, keep the
-stored CI baseline" workflow) never regresses into an unexpected
-`not_comparable` result. `UNKNOWN_PROFILE` is **not** a `not_comparable`
+rule already covers, extended here to the comparability contract instead
+of symbol facts. `check_contracts_comparable` therefore only ever raises
+`ProfileMismatchError` when **both** sides have a non-`None`
+`profile_fingerprint` and it mismatches, and only ever raises
+`ScopeMismatchError` when **both** sides have a non-`None`
+`scope_fingerprint` and it mismatches — a side missing one fingerprint (or
+`contract` itself) takes the exact same lenient code path for *that*
+fingerprint as a pair where neither side carries one, so comparing a
+newly-produced snapshot against a pre-ADR baseline (the common "upgrade
+abicheck, keep the stored CI baseline" workflow), or a symbols-only side
+against a full-header-AST side, never regresses into an unexpected
+`not_comparable` result on the fingerprint that side never had to begin
+with. `UNKNOWN_PROFILE` is **not** a `not_comparable`
 reason and never blocks: it is a non-authoritative annotation on
-an otherwise-ordinary verdict, surfaced only for a mixed pair, to tell the
+an otherwise-ordinary verdict, surfaced whenever at least one side is
+missing a fingerprint the other side has, to tell the
 reader "this comparison ran without being able to check profile/scope
 drift on one side," without withholding the verdict itself.
 
